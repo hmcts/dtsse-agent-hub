@@ -16,6 +16,7 @@ import type { AssistantFiles } from "@/components/assistant/FileSettings";
 import { besideSidebar, SIDEBAR_DRAWER_MAX_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_WIDTH } from "@/components/assistant/layout";
 import type { AssistantModelSetting } from "@/components/assistant/ModelSettings";
 import { type AssistantConnect, type AssistantPlugins, AssistantSettings } from "@/components/assistant/SettingsDialog";
+import type { AssistantSharing } from "@/components/assistant/SharingSettings";
 import type { AssistantSize } from "@/components/assistant/SizeSettings";
 import type { AssistantTemplates } from "@/components/assistant/TemplateSettings";
 import { useResizableWidth } from "@/components/assistant/useResizableWidth";
@@ -107,6 +108,8 @@ export function AssistantShell({
   files,
   size,
   exports,
+  sharing,
+  settings,
   actions,
   children
 }: {
@@ -134,6 +137,10 @@ export function AssistantShell({
   size?: AssistantSize;
   /** Where the person's documents go by default, which the footer's settings shows and edits. */
   exports?: AssistantExportDefaults;
+  /** The person's shared chats and the actions that change who they are shared with, for the footer's settings. */
+  sharing?: AssistantSharing;
+  /** The settings section the page's `?settings=` names, which the footer's settings opens on. */
+  settings?: string;
   /** Given, every row offers an options menu; left out, the rows are links alone. */
   actions?: ConversationActions;
   children: React.ReactNode;
@@ -339,6 +346,8 @@ export function AssistantShell({
               files={files}
               size={size}
               exports={exports}
+              sharing={sharing}
+              section={settings}
             />
           </div>
           {/* Dragging stops at the narrowest the titles stay readable at; collapsing the sidebar is the button's job,

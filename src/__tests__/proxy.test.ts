@@ -220,13 +220,30 @@ describe("proxy hub address redirect", () => {
     }
   );
 
-  it.each(["/access", "/hub/access"])("should redirect the retired %s to the shared chats, ahead of the sign-in check", async (from) => {
+  it.each(["/access", "/hub/access", "/assistant/shared"])(
+    "should redirect the retired %s to the settings' Sharing section, ahead of the sign-in check",
+    async (from) => {
+      vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "true");
+
+      const response = await proxy(askWith("GET", from));
+
+      expect(response.status).toBe(308);
+      expect(response.headers.get("location")).toBe("https://agent-hub.example/assistant?settings=sharing");
+    }
+  );
+
+  it("should add a query to the one the Sharing section's address already has when the retired address carries one", async () => {
     vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "true");
 
-    const response = await proxy(askWith("GET", from));
+    const response = await proxy(askWith("GET", "/assistant/shared?from=ticket"));
 
-    expect(response.status).toBe(308);
-    expect(response.headers.get("location")).toBe("https://agent-hub.example/assistant/shared");
+    expect(response.headers.get("location")).toBe("https://agent-hub.example/assistant?settings=sharing&from=ticket");
+  });
+
+  it("should leave a shared chat's own page alone when the list it sat under is retired", async () => {
+    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "true");
+
+    expect((await proxy(askWith("GET", "/assistant/shared/33333333-3333-3333-3333-333333333333"))).status).toBe(200);
   });
 
   it("should redirect before the sign-in check, so the login's redirect= carries the new address", async () => {

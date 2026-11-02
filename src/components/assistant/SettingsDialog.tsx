@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Fragment, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -22,11 +22,13 @@ import { type AssistantExportDefaults, ExportSettings } from "@/components/assis
 import { type AssistantFiles, Files } from "@/components/assistant/FileSettings";
 import { SETTINGS_TWO_PANE_MIN_WIDTH } from "@/components/assistant/layout";
 import { type AssistantModelSetting, ModelSettings } from "@/components/assistant/ModelSettings";
+import { type AssistantSharing, Sharing } from "@/components/assistant/SharingSettings";
 import { type AssistantSize, Size } from "@/components/assistant/SizeSettings";
 import { type AssistantTemplates, Templates } from "@/components/assistant/TemplateSettings";
 import { ThemeSwitch } from "@/components/assistant/ThemeSwitch";
 import { checklistState } from "@/components/virtual-agents/OnboardingChecklist";
 import { pluginChoices } from "@/components/virtual-agents/PluginsField";
+import { SETTINGS_PARAM } from "@/web/home";
 
 /**
  * What a row needs to connect a sign-in the assistant makes only on request: the assistant it restarts and the action
@@ -57,6 +59,7 @@ interface SettingsView {
   files: AssistantFiles | undefined;
   size: AssistantSize | undefined;
   exports: AssistantExportDefaults | undefined;
+  sharing: AssistantSharing | undefined;
 }
 
 /**
@@ -224,20 +227,6 @@ function Appearance({ theme }: { theme: Theme }) {
   );
 }
 
-function SharedChats() {
-  return (
-    <section aria-labelledby="assistant-settings-sharing" className="flex flex-col gap-2.5">
-      <h3 id="assistant-settings-sharing" className="text-sm font-semibold">
-        Shared chats
-      </h3>
-      <p className="text-[13px] text-asst-muted">Chats that others have shared with you, and the ones you have shared.</p>
-      <Link href="/assistant/shared" className="self-start rounded-[10px] border border-asst-strong px-3 py-2 text-[13px] hover:bg-asst-hover">
-        View shared chats
-      </Link>
-    </section>
-  );
-}
-
 function Connections({ list, access, connect, unavailable, warning }: Pick<SettingsView, "list" | "access" | "connect" | "unavailable" | "warning">) {
   return (
     <section aria-labelledby="assistant-settings-connections" className="flex flex-col gap-2.5">
@@ -370,7 +359,13 @@ const SECTIONS: readonly SettingsSection[] = [
     shown: (view) => view.exports !== undefined,
     panel: (view) => (view.exports === undefined ? null : <ExportSettings exports={view.exports} />)
   },
-  { id: "sharing", label: "Sharing", group: "General", shown: () => true, panel: () => <SharedChats /> },
+  {
+    id: "sharing",
+    label: "Sharing",
+    group: "General",
+    shown: (view) => view.sharing !== undefined,
+    panel: (view) => (view.sharing === undefined ? null : <Sharing sharing={view.sharing} />)
+  },
   {
     id: "model",
     label: "Model",
@@ -607,14 +602,15 @@ function focusNavigation(dialog: HTMLElement | null): void {
  * into it as it opens and stays in it while it is open; closing it, by Escape, the close button or the page behind
  * it, puts focus back on the cog, which is what `onClose` is for.
  */
-function Dialog({ view, onClose }: { view: SettingsView; onClose: () => void }) {
+function Dialog({ view, initial, onClose }: { view: SettingsView; initial: string | undefined; onClose: () => void }) {
   const panel = useRef<HTMLDivElement>(null);
   const prefix = useId();
   const wide = useTwoPane();
   const items = SECTIONS.filter((item) => item.shown(view));
   // Nothing open is the narrow interface showing its list. Wide has no such state: it always has a section beside the
   // navigation, so a chosen section that the page has stopped passing anything for falls back to the first offered one.
-  const [chosen, setChosen] = useState<string | null>(wide ? (items[0]?.id ?? null) : null);
+  // A section the address names is open from the start at either width, which on the narrow one is drilled into.
+  const [chosen, setChosen] = useState<string | null>(initial ?? (wide ? (items[0]?.id ?? null) : null));
   const section = items.some((item) => item.id === chosen) ? chosen : wide ? (items[0]?.id ?? null) : null;
   const tabId = (id: string) => `${prefix}-tab-${id}`;
   const panelId = `${prefix}-panel`;
@@ -748,7 +744,9 @@ export function AssistantSettings({
   templates,
   files,
   size,
-  exports
+  exports,
+  sharing,
+  section
 }: {
   theme?: Theme;
   connections?: ConnectionsData;
@@ -763,9 +761,14 @@ export function AssistantSettings({
   files?: AssistantFiles;
   size?: AssistantSize;
   exports?: AssistantExportDefaults;
+  sharing?: AssistantSharing;
+  /** The section `?settings=` names, which opens the dialog on it; closing the dialog takes the parameter off. */
+  section?: string;
 }) {
+  const router = useRouter();
   const cog = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
+  const fromAddress = useRef(false);
   // The page's own clock to begin with, then the browser's as it takes over and again whenever the dialog opens. A
   // sign-in's deadline moves slowly and a timer on every page to watch it would cost more than it is worth, but the
   // first read has to be the page's: `Date.now()` here would be the server's clock in the HTML and the browser's in
@@ -805,9 +808,34 @@ export function AssistantSettings({
     return live === undefined ? theme : themeOf(live);
   }
 
+  function show(): void {
+    setNow(Date.now());
+    setShownTheme(shownNow());
+    setOpen(true);
+  }
+
+  // Opened by the address after the first render rather than in it, because the dialog is portalled into the theme
+  // root and the server has no document to find one in. Shut by the address too, so the back button closes a dialog
+  // the address opened; one the cog opened is left alone.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the address alone, since `show` reads the page as it stands when the address changes
+  useEffect(() => {
+    if (section !== undefined) {
+      fromAddress.current = true;
+      show();
+    } else if (fromAddress.current) {
+      fromAddress.current = false;
+      setOpen(false);
+    }
+  }, [section]);
+
   function close(): void {
     setOpen(false);
     cog.current?.focus();
+    if (section !== undefined) {
+      const address = new URL(window.location.href);
+      address.searchParams.delete(SETTINGS_PARAM);
+      router.replace(`${address.pathname}${address.search}`);
+    }
   }
 
   return (
@@ -819,11 +847,7 @@ export function AssistantSettings({
         aria-expanded={open}
         aria-label={attention.length === 0 ? "Settings" : `Settings. ${attention.join(". ")}`}
         title="Settings"
-        onClick={() => {
-          setNow(Date.now());
-          setShownTheme(shownNow());
-          setOpen(true);
-        }}
+        onClick={show}
         // 36px, the size of the composer's own buttons, with the two extra pixels each way taken out of the margin
         // again so the footer row stays the height the 32px avatar beside it sets.
         className="relative -my-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-asst-muted hover:bg-asst-hover hover:text-asst-text"
@@ -854,8 +878,12 @@ export function AssistantSettings({
                 templates,
                 files,
                 size,
-                exports
+                exports,
+                sharing
               }}
+              // Remounted for a section the address names while the dialog is already open, so it opens on that one.
+              key={section ?? ""}
+              initial={section}
               onClose={close}
             />,
             themeRoot()

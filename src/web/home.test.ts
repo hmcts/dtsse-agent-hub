@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultUi, homeFor, movedHubPath, retiredHubPath } from "./home.ts";
+import { defaultUi, homeFor, movedHubPath, retiredPath, SHARED_CHATS } from "./home.ts";
 
 describe("homeFor", () => {
   it.each(["/hub", "/hub/topics", "/hub/agents/0f8a", "/hub/nonsense"])("should send someone back into the hub from %s", (pathname) => {
@@ -66,26 +66,30 @@ describe("movedHubPath", () => {
     expect(movedHubPath("/cx")).toBeUndefined();
   });
 
-  it("should leave the retired access page to `retiredHubPath`, which answers for both of its addresses", () => {
+  it("should leave the retired access page to `retiredPath`, which answers for both of its addresses", () => {
     expect(movedHubPath("/access")).toBeUndefined();
     expect(movedHubPath("/hub/access")).toBeUndefined();
   });
 });
 
-describe("retiredHubPath", () => {
-  it.each(["/access", "/hub/access"])("should send %s to the shared chats", (pathname) => {
-    expect(retiredHubPath(pathname, true)).toBe("/assistant/shared");
+describe("retiredPath", () => {
+  it.each(["/access", "/hub/access", "/assistant/shared"])("should send %s to the settings' Sharing section when virtual agents are on", (pathname) => {
+    expect(retiredPath(pathname, true)).toBe("/assistant?settings=sharing");
+  });
+
+  it("should name the Sharing section in the address it sends people to", () => {
+    expect(SHARED_CHATS).toBe("/assistant?settings=sharing");
   });
 
   // There are no conversations to share with virtual agents off, and the Assistant's pages are not found at all.
-  it.each(["/access", "/hub/access"])("should send %s to the hub instead when virtual agents are off", (pathname) => {
-    expect(retiredHubPath(pathname, false)).toBe("/hub");
+  it.each(["/access", "/hub/access", "/assistant/shared"])("should send %s to the hub instead when virtual agents are off", (pathname) => {
+    expect(retiredPath(pathname, false)).toBe("/hub");
   });
 
-  it.each(["/", "/hub", "/accessible", "/hub/accessible", "/hub/topics", "/assistant/shared"])(
-    "should leave %s alone, which is not the page that went",
+  it.each(["/", "/hub", "/accessible", "/hub/accessible", "/hub/topics", "/assistant", "/assistant/shared/abc", "/assistant/sharedfoo"])(
+    "should leave %s alone when it is not an address that went",
     (pathname) => {
-      expect(retiredHubPath(pathname, true)).toBeUndefined();
+      expect(retiredPath(pathname, true)).toBeUndefined();
     }
   );
 });

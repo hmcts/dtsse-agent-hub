@@ -40,8 +40,10 @@ import {
   chatForks,
   chatShares,
   claudeMdSettings,
-  openAssistant
+  openAssistant,
+  sharedChats
 } from "@/web/data";
+import { SETTINGS_PARAM } from "@/web/home";
 
 export const dynamic = "force-dynamic";
 
@@ -57,6 +59,9 @@ const ACTIONS: ChatActions = {
   exportToJira: exportArtefactToJira,
   exportToConfluence: exportArtefactToConfluence
 };
+
+/** How the settings' Sharing section changes who a chat is shared with or offered to. */
+const SHARING_ACTIONS = { share: shareChat, unshare: unshareChat, offer: offerChatFork, withdraw: withdrawChatFork };
 
 /** One of the viewer's conversations. Anyone else's, or one deleted, is not found. */
 export default async function ConversationPage({
@@ -75,7 +80,8 @@ export default async function ConversationPage({
   // queries to fill a dialog, and this is the page that loads most often.
   const sharing = query.share === "1";
   const forking = !sharing && query.fork === "1";
-  const [home, view, claudeMd, mine, shares, forks, files, size, defaults, model] = await Promise.all([
+  const settings = query[SETTINGS_PARAM];
+  const [home, view, claudeMd, mine, shares, forks, files, size, defaults, model, shared] = await Promise.all([
     openAssistant(viewer),
     assistantConversation(viewer, conversationId),
     claudeMdSettings(viewer),
@@ -85,7 +91,8 @@ export default async function ConversationPage({
     assistantFiles(viewer),
     assistantSize(viewer),
     assistantExportDefaults(viewer),
-    assistantModel(viewer)
+    assistantModel(viewer),
+    sharedChats(viewer)
   ]);
   if (view === undefined) {
     notFound();
@@ -113,6 +120,8 @@ export default async function ConversationPage({
       size={size === undefined ? undefined : { view: size, assistantId: home.assistant.id, save: resizeVirtualAgent }}
       model={model === undefined ? undefined : { ...model, save: saveAssistantModel }}
       exports={{ defaults, save: saveExportDefaults, access: jira }}
+      sharing={{ chats: shared, ...SHARING_ACTIONS }}
+      settings={typeof settings === "string" ? settings : undefined}
     >
       {/* `local` so a chat on the person's own computer is not held behind credentials only a pod needs. */}
       <AssistantGate home={home} waiting={jar.get(WAITING_COOKIE)?.value} theme={theme} local={view.local}>

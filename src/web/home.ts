@@ -9,8 +9,17 @@ const HUB = "/hub";
 
 const ASSISTANT = "/assistant";
 
-/** Where a person manages who may read or fork their conversations, the only access one person gives another. */
-const SHARED_CHATS = `${ASSISTANT}/shared`;
+/**
+ * The query parameter that opens the Assistant's settings dialog on the section it names, on any Assistant page.
+ * Closing the dialog takes it off again, as closing the share dialog takes `?share=1` off.
+ */
+export const SETTINGS_PARAM = "settings";
+
+/**
+ * Where a person manages who may read or fork their conversations, the only access one person gives another: the
+ * settings' Sharing section, whose id in `SECTIONS` this names.
+ */
+export const SHARED_CHATS = `${ASSISTANT}?${SETTINGS_PARAM}=sharing`;
 
 /**
  * The HMCTS Assistant is the default UI, so `/` is the Assistant wherever it runs. It runs on a virtual agent, and
@@ -37,18 +46,21 @@ export function movedHubPath(pathname: string): string | undefined {
 }
 
 /**
- * Where a retired hub address goes now, or `undefined` when the path is not one.
+ * Where a retired address goes now, or `undefined` when the path is not one.
  *
  * `/hub/access` goes to `SHARED_CHATS`: an agent is its owner's, somebody else's is reached by tagging it in a post,
  * and the only access one person gives another is a share or fork of one conversation at a time, which is managed
- * there. Where virtual agents are off there are no conversations to share and the Assistant's pages are not found, so
- * it goes to the hub's home instead.
+ * there. Both the bare address and the `/hub` one, because the page existed under both and both were pasted into
+ * tickets. Checked ahead of `movedHubPath`, which would otherwise send the bare one to a page that is no longer there.
  *
- * Both the bare address and the `/hub` one, because the page existed under both and both were pasted into tickets.
- * Checked ahead of `movedHubPath`, which would otherwise send the bare one to a page that is no longer there.
+ * `/assistant/shared` goes there too, an address bookmarked and pasted for the list of shared chats. The
+ * `/assistant/shared/{id}` pages under it are a recipient's view of one chat, and are not retired.
+ *
+ * Where virtual agents are off there are no conversations to share and the Assistant's pages are not found, so all
+ * three go to the hub's home instead.
  */
-export function retiredHubPath(pathname: string, virtualAgents: boolean): string | undefined {
-  if (pathname !== "/access" && pathname !== `${HUB}/access`) {
+export function retiredPath(pathname: string, virtualAgents: boolean): string | undefined {
+  if (pathname !== "/access" && pathname !== `${HUB}/access` && pathname !== `${ASSISTANT}/shared`) {
     return undefined;
   }
   return virtualAgents ? SHARED_CHATS : HUB;

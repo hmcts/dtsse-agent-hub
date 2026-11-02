@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET as agentsRoster } from "../../src/app/api/agent/agents/route.ts";
+import { GET as chatPeople } from "../../src/app/api/ui/assistant/shares/[conversationId]/route.ts";
 import { GET as people } from "../../src/app/api/ui/people/route.ts";
 import { GET as stream } from "../../src/app/api/ui/stream/route.ts";
 import { GET as attachmentContent } from "../../src/app/api/ui/uploads/[uploadId]/content/route.ts";
@@ -33,6 +34,7 @@ vi.mock("next/cache", async () => {
 const { actAs } = await import("./web-session.ts");
 const assistantActions = await import("../../src/app/_actions/assistant.ts");
 const shareActions = await import("../../src/app/_actions/shares.ts");
+const forkActions = await import("../../src/app/_actions/forks.ts");
 const { assistantConversation, chatShares, sharedChat, sharedChats } = await import("../../src/web/data.ts");
 
 function persona(name: string): Person {
@@ -53,6 +55,11 @@ function settle(): Promise<void> {
 
 function request(as: string, path: string): NextRequest {
   return new NextRequest(`http://localhost:3000${path}`, { headers: { cookie: `ah_dev_persona=${as}` } });
+}
+
+/** One person asking `GET /api/ui/assistant/shares/{id}` who a chat is shared with, or offered to with `?mode=fork`. */
+function readers(conversationId: string, as: string, query = ""): Promise<Response> {
+  return chatPeople(request(as, `/api/ui/assistant/shares/${conversationId}${query}`), { params: Promise.resolve({ conversationId }) });
 }
 
 /** One person asking `GET /api/ui/uploads/{id}/content` for an attachment's bytes. */
@@ -491,5 +498,37 @@ describe("/api/ui/people", () => {
 
   it("should treat a typed wildcard as text, so it matches nobody", async () => {
     expect(await jsonOf<{ people: unknown[] }>(await people(request("alice", "/api/ui/people?q=%25e")))).toEqual({ people: [] });
+  });
+});
+
+describe("/api/ui/assistant/shares/{id}", () => {
+  it("should answer the owner with who their chat is shared with, oldest first", async () => {
+    const { id } = await chat();
+    await shareActions.shareChat({ conversationId: id, recipientOid: BOB.oid });
+    await shareActions.shareChat({ conversationId: id, recipientOid: CAROL.oid });
+
+    const response = await readers(id, "alice");
+
+    expect(response.status).toBe(200);
+    expect((await jsonOf<{ people: { oid: string }[] }>(response)).people.map((person) => person.oid)).toEqual([BOB.oid, CAROL.oid]);
+  });
+
+  it("should answer the owner with who their chat is offered to when the mode is fork", async () => {
+    const { id } = await chat();
+    await shareActions.shareChat({ conversationId: id, recipientOid: BOB.oid });
+    await forkActions.offerChatFork({ conversationId: id, recipientOid: CAROL.oid });
+
+    const answered = await jsonOf<{ people: { oid: string }[] }>(await readers(id, "alice", "?mode=fork"));
+
+    expect(answered.people.map((person) => person.oid)).toEqual([CAROL.oid]);
+  });
+
+  it("should answer 404 to a recipient of the share, as it does for a chat that does not exist", async () => {
+    const { id } = await chat();
+    await shareActions.shareChat({ conversationId: id, recipientOid: BOB.oid });
+
+    expect((await readers(id, "bob")).status).toBe(404);
+    expect((await readers(id, "carol", "?mode=fork")).status).toBe(404);
+    expect((await readers("not-a-chat", "alice")).status).toBe(404);
   });
 });

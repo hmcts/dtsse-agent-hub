@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SharePerson } from "@/assistant/shares";
 import type { SharedConversationView } from "@/assistant/sharing";
-import { ShareDialog } from "@/components/assistant/ShareDialog";
+import { ShareDialog, ShareEditor } from "@/components/assistant/ShareDialog";
 import { SharedChat } from "@/components/assistant/SharedChat";
 import { ShareGate } from "@/components/assistant/ShareGate";
 
@@ -136,10 +136,10 @@ describe("ShareDialog", () => {
     expect(screen.getByText(/Anyone else who is sent it sees nothing/)).toBeTruthy();
   });
 
-  it("should link to every shared chat when the dialog is open", () => {
+  it("should link to every shared chat, in the settings' Sharing section, when the dialog is open", () => {
     render(dialog());
 
-    expect(screen.getByRole("link", { name: "See all your shared chats" }).getAttribute("href")).toBe("/assistant/shared");
+    expect(screen.getByRole("link", { name: "See all your shared chats" }).getAttribute("href")).toBe("/assistant?settings=sharing");
   });
 
   it("should not display the empty list as a box under the name box when nobody is offered", async () => {
@@ -359,6 +359,58 @@ describe("ShareDialog", () => {
   });
 });
 
+describe("ShareDialog as a frame round the editor", () => {
+  it("should put focus in the name box when the dialog opens", () => {
+    render(dialog());
+
+    expect(document.activeElement).toBe(box());
+  });
+});
+
+// The same body, without the modal: the settings' Sharing section shows it under a row of its own list.
+describe("ShareEditor", () => {
+  function editor(props: Partial<React.ComponentProps<typeof ShareEditor>> = {}) {
+    return <ShareEditor conversationId={CONVERSATION} people={[]} share={ok([])} unshare={ok([])} {...props} />;
+  }
+
+  it("should be no dialog and take no focus when it is shown on its own", () => {
+    render(editor());
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(document.body);
+    expect(screen.queryByRole("button", { name: "Done" })).toBeNull();
+  });
+
+  it("should keep the combobox semantics of the dialog's name box when it is shown on its own", async () => {
+    people([{ oid: "bob", name: "Bob Tester", email: "bob@example.com" }]);
+    render(editor());
+
+    await type("bob");
+
+    expect(box().getAttribute("role")).toBe("combobox");
+    expect(box().getAttribute("aria-expanded")).toBe("true");
+    expect(box().getAttribute("aria-controls")).toBe(screen.getByRole("listbox").id);
+    expect(box().getAttribute("aria-activedescendant")).toBe(screen.getByRole("option").id);
+  });
+
+  it("should offer the chat to be forked, with the fork wording, when its mode is fork", async () => {
+    const share = ok([person("bob", "Bob Tester")]);
+    people([{ oid: "bob", name: "Bob Tester", email: "bob@example.com" }]);
+    render(editor({ mode: "fork", share }));
+    fireEvent.change(screen.getByLabelText("Who can fork it"), { target: { value: "bob" } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("option", { name: /Bob Tester/ }));
+    });
+
+    expect(share).toHaveBeenCalledWith({ conversationId: CONVERSATION, recipientOid: "bob" });
+    expect(within(screen.getByRole("list", { name: "Offered to" })).getByText("can fork")).toBeTruthy();
+  });
+});
+
 function view(overrides: Partial<SharedConversationView> = {}): SharedConversationView {
   return {
     id: CONVERSATION,
@@ -398,13 +450,13 @@ describe("SharedChat", () => {
   it("should link a reader to the other chats shared with them when the chat is not their own", () => {
     render(<SharedChat view={view()} />);
 
-    expect(screen.getByRole("link", { name: "See other chats shared with you" }).getAttribute("href")).toBe("/assistant/shared");
+    expect(screen.getByRole("link", { name: "See other chats shared with you" }).getAttribute("href")).toBe("/assistant?settings=sharing");
   });
 
   it("should link the owner to every chat they have shared when the chat is their own", () => {
     render(<SharedChat view={view({ access: "owner" })} />);
 
-    expect(screen.getByRole("link", { name: "See all your shared chats" }).getAttribute("href")).toBe("/assistant/shared");
+    expect(screen.getByRole("link", { name: "See all your shared chats" }).getAttribute("href")).toBe("/assistant?settings=sharing");
   });
 
   it("should count a message's files without naming them", () => {

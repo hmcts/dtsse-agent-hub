@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConnectionsData } from "@/assistant/connections";
 import type { AssistantMemory } from "@/assistant/memory";
 import { CONVERSATION_MEMORY_BYTES, type MemoryUse } from "@/assistant/memory-report";
+import type { SharedChatLink, SharePerson } from "@/assistant/shares";
 import { TEMPLATES, type Template } from "@/assistant/starters";
 import { checkTemplate, MAX_TEMPLATE_BODY, MAX_TEMPLATES, type SavedTemplate, TEMPLATES_FULL } from "@/assistant/templates";
 import type { UploadsOnDisk } from "@/assistant/upload-disk";
@@ -20,6 +21,7 @@ import type { AssistantFiles } from "@/components/assistant/FileSettings";
 import { SETTINGS_TWO_PANE_MIN_WIDTH } from "@/components/assistant/layout";
 import type { AssistantModelSetting } from "@/components/assistant/ModelSettings";
 import { type AssistantPlugins, AssistantSettings, FOCUSABLE } from "@/components/assistant/SettingsDialog";
+import type { AssistantSharing } from "@/components/assistant/SharingSettings";
 import type { AssistantSize } from "@/components/assistant/SizeSettings";
 import { type AssistantTemplates, copyName } from "@/components/assistant/TemplateSettings";
 import { DEFAULT_CLAUDE_MD, MAX_CLAUDE_MD_CHARACTERS } from "@/credentials/claude-md";
@@ -30,7 +32,8 @@ import type { LoginState, LoginView } from "@/virtual-agents/logins";
 import { neededCredentials, optionalCredentials } from "@/virtual-agents/views";
 
 const refresh = vi.fn();
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }), usePathname: () => "/assistant" }));
+const replaced: string[] = [];
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh, replace: (to: string) => void replaced.push(to) }), usePathname: () => "/assistant" }));
 vi.mock("@/components/live/HubStream", () => ({
   useHubEvent: () => undefined,
   useEndSession: () => () => undefined
@@ -39,6 +42,7 @@ vi.mock("@/components/live/HubStream", () => ({
 afterEach(() => {
   cleanup();
   refresh.mockReset();
+  replaced.length = 0;
   // biome-ignore lint/suspicious/noDocumentCookie: clears what the appearance switch under test wrote, the way it wrote it
   document.cookie = "asst_theme=; Path=/; Max-Age=0";
 });
@@ -76,6 +80,12 @@ function data(stored: CredentialKind[], logins: LoginView[] = [], unavailable: s
   return { route: "own-licence", kinds: KINDS, statuses: stored.map((kind) => status(kind)), logins, unavailable };
 }
 
+/** The four lists the Sharing section shows, empty unless a test says otherwise, and its four actions. */
+function sharingSettings(overrides: Partial<AssistantSharing> = {}): AssistantSharing {
+  const none = vi.fn(async () => ({ ok: true as const, people: [] as SharePerson[] }));
+  return { chats: { given: [], received: [], offered: [], forkable: [] }, share: none, unshare: none, offer: none, withdraw: none, ...overrides };
+}
+
 function cog(): HTMLElement {
   return screen.getByRole("button", { name: /^Settings/ });
 }
@@ -102,7 +112,7 @@ function go(label: string): void {
  * a test of any other one says which it is about.
  */
 function open(props: Partial<Parameters<typeof AssistantSettings>[0]> = {}, section?: string): void {
-  render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} {...props} />);
+  render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} sharing={sharingSettings()} {...props} />);
   fireEvent.click(cog());
   if (section !== undefined) {
     go(section);
@@ -118,7 +128,7 @@ function themed(props: Partial<Parameters<typeof AssistantSettings>[0]> = {}, th
   root.className = "asst-theme";
   root.dataset.theme = theme;
   document.body.append(root);
-  render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} {...props} />, { container: root });
+  render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} sharing={sharingSettings()} {...props} />, { container: root });
   return root;
 }
 
@@ -1433,7 +1443,15 @@ describe("the Assistant's CLAUDE.md", () => {
 
 /** The whole dialog, which is what a person has when they open it: the navigation and every section it offers. */
 function everything(): Partial<Parameters<typeof AssistantSettings>[0]> {
-  return { plugins: plugins(), model: modelSetting(), claudeMd: claudeMd(), templates: templates({ mine: [row("Stand-up")] }), files: files(), size: size() };
+  return {
+    plugins: plugins(),
+    model: modelSetting(),
+    claudeMd: claudeMd(),
+    templates: templates({ mine: [row("Stand-up")] }),
+    files: files(),
+    size: size(),
+    sharing: sharingSettings()
+  };
 }
 
 function tabs(): HTMLElement[] {
@@ -2037,12 +2055,6 @@ describe("the Assistant's Jira and Confluence defaults", () => {
     expect(sections()).toContain("Jira & Confluence");
   });
 
-  it("should link to the shared chats from the Sharing section", () => {
-    open({}, "Sharing");
-
-    expect(screen.getByRole("link", { name: "View shared chats" }).getAttribute("href")).toBe("/assistant/shared");
-  });
-
   it("should save a Jira project the person found by searching their own Jira", async () => {
     vi.useFakeTimers();
     const exports = exportsSettings();
@@ -2414,5 +2426,351 @@ describe("the Assistant's size", () => {
 
   it("should raise no WCAG A or AA violations with Size open", async () => {
     await auditOpenDialog("Size");
+  }, 20_000);
+});
+
+describe("the Assistant's Sharing section", () => {
+  const MINE = "11111111-1111-1111-1111-111111111111";
+  const THEIRS = "22222222-2222-2222-2222-222222222222";
+  const OFFERED = "33333333-3333-3333-3333-333333333333";
+  const FORKABLE = "44444444-4444-4444-4444-444444444444";
+
+  afterEach(() => {
+    wideAgain();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    window.history.replaceState(null, "", "/");
+  });
+
+  function chat(id: string, title: string, withWhom: string): SharedChatLink {
+    return { id, title, productLabel: "Possession", lastActiveAt: "2026-10-25T09:00:00.000Z", withWhom };
+  }
+
+  function person(oid: string, name: string): SharePerson {
+    return { oid, name, email: `${oid}@example.com`, sharedAt: "2026-10-25T09:00:00.000Z" };
+  }
+
+  function everyList(overrides: Partial<AssistantSharing> = {}): AssistantSharing {
+    return sharingSettings({
+      chats: {
+        given: [chat(MINE, "Writing a possession order", "1 person")],
+        received: [chat(THEIRS, "Bob's research", "Bob Tester")],
+        offered: [chat(OFFERED, "A claim to carry on", "2 people")],
+        forkable: [chat(FORKABLE, "Carol's prototype", "Carol Tester")]
+      },
+      ...overrides
+    });
+  }
+
+  /**
+   * `fetch` answering the section's read of who a chat is shared with, and the people search, and the addresses it
+   * was asked for. `shares` is `null` for a read the route refuses.
+   */
+  function answering(shares: SharePerson[] | null, candidates: { oid: string; name: string; email: string | null }[] = []): string[] {
+    const asked: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        asked.push(url);
+        if (url.startsWith("/api/ui/people")) {
+          return new Response(JSON.stringify({ people: candidates }));
+        }
+        return shares === null ? new Response(JSON.stringify({ error: "not found" }), { status: 404 }) : new Response(JSON.stringify({ people: shares }));
+      })
+    );
+    return asked;
+  }
+
+  function list(name: string): HTMLElement {
+    return screen.getByRole("list", { name });
+  }
+
+  async function change(name: RegExp): Promise<void> {
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name }));
+    });
+  }
+
+  it("should list the chats shared and offered both ways, each linking to its read-only page", () => {
+    open({ sharing: everyList() }, "Sharing");
+
+    const given = within(list("Chats you have shared"));
+    expect(given.getByRole("link", { name: "Writing a possession order" }).getAttribute("href")).toBe(`/assistant/shared/${MINE}`);
+    expect(given.getByText("Possession")).toBeTruthy();
+    expect(given.getByText("1 person")).toBeTruthy();
+    expect(within(list("Chats shared with you")).getByRole("link", { name: "Bob's research" }).getAttribute("href")).toBe(`/assistant/shared/${THEIRS}`);
+    expect(within(list("Chats shared with you")).getByText("Bob Tester")).toBeTruthy();
+    expect(within(list("Chats you have let people fork")).getByText("2 people")).toBeTruthy();
+    expect(within(list("Chats you can fork")).getByRole("link", { name: "Carol's prototype" }).getAttribute("href")).toBe(`/assistant/shared/${FORKABLE}`);
+  });
+
+  it("should say what a share lets someone do, under the same headings as each list", () => {
+    open({ sharing: everyList() }, "Sharing");
+    const panel = screen.getByRole("tabpanel");
+
+    expect(within(panel).getByRole("heading", { name: "Shared chats" })).toBeTruthy();
+    expect(within(panel).getByText(/Only the people you share a chat with can open it/)).toBeTruthy();
+    expect(within(panel).getByText(/Your original stays yours/)).toBeTruthy();
+    expect(
+      within(panel)
+        .getAllByRole("heading", { level: 4 })
+        .map((heading) => heading.textContent)
+    ).toEqual(["Chats you have shared", "Chats shared with you", "Chats you have let people fork", "Chats you can fork"]);
+  });
+
+  it("should say so in each list when nothing has been shared either way", () => {
+    open({}, "Sharing");
+
+    expect(screen.getByText("You have not shared any of your chats.")).toBeTruthy();
+    expect(screen.getByText("Nobody has shared a chat with you.")).toBeTruthy();
+    expect(screen.getByText("You have not offered any of your chats to be forked.")).toBeTruthy();
+    expect(screen.getByText("Nobody has offered you a chat to fork.")).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Chats you have shared" })).toBeNull();
+  });
+
+  it("should offer to change who can read or fork only the person's own chats", () => {
+    open({ sharing: everyList() }, "Sharing");
+
+    expect(within(list("Chats you have shared")).getByRole("button", { name: /^Change who can read it/ })).toBeTruthy();
+    expect(within(list("Chats you have let people fork")).getByRole("button", { name: /^Change who can fork it/ })).toBeTruthy();
+    expect(within(list("Chats shared with you")).queryByRole("button")).toBeNull();
+    expect(within(list("Chats you can fork")).queryByRole("button")).toBeNull();
+  });
+
+  it("should offer no Sharing section when the page passes no shared chats", () => {
+    open({ sharing: undefined });
+
+    expect(sections()).not.toContain("Sharing");
+  });
+
+  it("should open an editor under the row, in the settings rather than over them, with who it is shared with", async () => {
+    const asked = answering([person("bob", "Bob Tester")]);
+    open({ sharing: everyList() }, "Sharing");
+
+    await change(/^Change who can read it/);
+
+    expect(asked).toEqual([`/api/ui/assistant/shares/${MINE}`]);
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    const button = screen.getByRole("button", { name: /^Change who can read it/ });
+    expect(button.getAttribute("aria-expanded")).toBe("true");
+    const editor = document.getElementById(button.getAttribute("aria-controls") ?? "");
+    expect(editor).not.toBeNull();
+    expect(within(editor as HTMLElement).getByRole("list", { name: "Shared with" }).textContent).toContain("Bob Tester");
+    expect((within(editor as HTMLElement).getByLabelText("Their link") as HTMLInputElement).value).toContain(`/assistant/shared/${MINE}`);
+    expect(within(editor as HTMLElement).getByRole("combobox", { name: "Who can read it" })).toBeTruthy();
+  });
+
+  it("should read who a chat is offered to when the row is one the person has let people fork", async () => {
+    const asked = answering([person("carol", "Carol Tester")]);
+    open({ sharing: everyList() }, "Sharing");
+
+    await change(/^Change who can fork it/);
+
+    expect(asked).toEqual([`/api/ui/assistant/shares/${OFFERED}?mode=fork`]);
+    expect(within(screen.getByRole("list", { name: "Offered to" })).getByText("can fork")).toBeTruthy();
+  });
+
+  it("should close the editor again when its button is pressed a second time", async () => {
+    answering([]);
+    open({ sharing: everyList() }, "Sharing");
+
+    await change(/^Change who can read it/);
+    await change(/^Change who can read it/);
+
+    expect(screen.getByRole("button", { name: /^Change who can read it/ }).getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("combobox")).toBeNull();
+  });
+
+  it("should say so when who a chat is shared with cannot be read", async () => {
+    answering(null);
+    open({ sharing: everyList() }, "Sharing");
+
+    await change(/^Change who can read it/);
+
+    expect(screen.getByRole("alert").textContent).toContain("could not be loaded");
+    expect(screen.queryByRole("combobox")).toBeNull();
+  });
+
+  it("should share the chat with the person picked, through the share action, and read the page again", async () => {
+    answering([], [{ oid: "carol", name: "Carol Tester", email: "carol@example.com" }]);
+    const share = vi.fn(async () => ({ ok: true as const, people: [person("carol", "Carol Tester")] }));
+    open({ sharing: everyList({ share }) }, "Sharing");
+    await change(/^Change who can read it/);
+    vi.useFakeTimers();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Who can read it" }), { target: { value: "carol" } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("option", { name: /Carol Tester/ }));
+    });
+
+    expect(share).toHaveBeenCalledWith({ conversationId: MINE, recipientOid: "carol" });
+    expect(within(screen.getByRole("list", { name: "Shared with" })).getByText(/Carol Tester/)).toBeTruthy();
+    expect(refresh).toHaveBeenCalled();
+  });
+
+  it("should offer the chat to fork through the offer action when the row is one the person has let people fork", async () => {
+    answering([], [{ oid: "carol", name: "Carol Tester", email: null }]);
+    const offer = vi.fn(async () => ({ ok: true as const, people: [person("carol", "Carol Tester")] }));
+    open({ sharing: everyList({ offer }) }, "Sharing");
+    await change(/^Change who can fork it/);
+    vi.useFakeTimers();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Who can fork it" }), { target: { value: "carol" } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    await act(async () => {
+      fireEvent.keyDown(screen.getByRole("combobox", { name: "Who can fork it" }), { key: "Enter" });
+    });
+
+    expect(offer).toHaveBeenCalledWith({ conversationId: OFFERED, recipientOid: "carol" });
+  });
+
+  it("should take a person off through the unshare action when their share is removed", async () => {
+    answering([person("bob", "Bob Tester")]);
+    const unshare = vi.fn(async () => ({ ok: true as const, people: [] as SharePerson[] }));
+    open({ sharing: everyList({ unshare }) }, "Sharing");
+    await change(/^Change who can read it/);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    });
+
+    expect(unshare).toHaveBeenCalledWith({ conversationId: MINE, recipientOid: "bob" });
+    expect(screen.getByText("This chat is not shared with anyone.")).toBeTruthy();
+    expect(refresh).toHaveBeenCalled();
+  });
+
+  it("should drop the row and its editor when the page is read again without it, as it is once the last person is removed", async () => {
+    answering([person("bob", "Bob Tester")]);
+    const sharing = everyList();
+    const { rerender } = render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} sharing={sharing} section="sharing" />);
+    await act(async () => undefined);
+    await change(/^Change who can read it/);
+
+    rerender(
+      <AssistantSettings
+        now={Date.now()}
+        connections={data(ALL_SIGNED_IN)}
+        sharing={{ ...sharing, chats: { ...sharing.chats, given: [] } }}
+        section="sharing"
+      />
+    );
+
+    expect(screen.getByText("You have not shared any of your chats.")).toBeTruthy();
+    expect(screen.queryByRole("combobox")).toBeNull();
+  });
+
+  it("should shut the list of people on Escape without closing the settings", async () => {
+    answering([], [{ oid: "carol", name: "Carol Tester", email: null }]);
+    open({ sharing: everyList() }, "Sharing");
+    await change(/^Change who can read it/);
+    vi.useFakeTimers();
+    const box = screen.getByRole("combobox", { name: "Who can read it" });
+    fireEvent.change(box, { target: { value: "carol" } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+
+    fireEvent.keyDown(box, { key: "Escape" });
+
+    expect(box.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy();
+  });
+
+  it("should keep the editor's controls inside the dialog's focus trap", async () => {
+    answering([person("bob", "Bob Tester")]);
+    open({ sharing: everyList() }, "Sharing");
+
+    await change(/^Change who can read it/);
+
+    const reachable = stops();
+    expect(reachable).toContain(screen.getByRole("combobox", { name: "Who can read it" }));
+    expect(reachable).toContain(screen.getByRole("button", { name: "Copy" }));
+    expect(reachable).not.toContain(screen.getByRole("listbox", { hidden: true }));
+  });
+
+  it("should open on the section the address names, without the cog being pressed", async () => {
+    render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} sharing={everyList()} section="sharing" />);
+    await act(async () => undefined);
+
+    expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy();
+    expect(selected()).toBe("Sharing");
+    expect(screen.getByRole("heading", { name: "Shared chats" })).toBeTruthy();
+  });
+
+  it("should open on the first section when the address names one the dialog does not have", async () => {
+    render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} sharing={everyList()} section="nowhere" />);
+    await act(async () => undefined);
+
+    expect(selected()).toBe("Appearance");
+  });
+
+  it("should drill into the section the address names on a narrow screen", async () => {
+    narrow();
+    render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} sharing={everyList()} section="sharing" />);
+    await act(async () => undefined);
+
+    expect(screen.queryByRole("list", { name: "Settings sections" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Back to settings" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Shared chats" })).toBeTruthy();
+  });
+
+  it("should render nothing of the dialog in the page's HTML when the address names a section", () => {
+    const html = renderToString(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} sharing={everyList()} section="sharing" />);
+
+    expect(html).not.toContain('role="dialog"');
+  });
+
+  it("should take the parameter off the address, and keep the rest of it, when the dialog it opened is closed", async () => {
+    window.history.replaceState(null, "", `/assistant/${MINE}?settings=sharing&share=1`);
+    render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} sharing={everyList()} section="sharing" />);
+    await act(async () => undefined);
+
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Close settings" }));
+
+    expect(replaced).toEqual([`/assistant/${MINE}?share=1`]);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(cog());
+  });
+
+  it("should leave the address alone when the dialog the cog opened is closed", () => {
+    open({ sharing: everyList() }, "Sharing");
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(replaced).toEqual([]);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("should close the dialog the address opened when the parameter goes, which is what the back button does", async () => {
+    const { rerender } = render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} sharing={everyList()} section="sharing" />);
+    await act(async () => undefined);
+    expect(screen.getByRole("dialog")).toBeTruthy();
+
+    rerender(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} sharing={everyList()} />);
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("should raise no WCAG A or AA violations with Sharing open and an editor showing", async () => {
+    answering([person("bob", "Bob Tester")]);
+    const root = document.createElement("div");
+    root.className = "asst-theme";
+    document.body.append(root);
+    render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} sharing={everyList()} section="sharing" />, { container: root });
+    await act(async () => undefined);
+    await change(/^Change who can read it/);
+
+    const results = await axe.run(root, {
+      runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"] },
+      rules: { "color-contrast": { enabled: false } }
+    });
+
+    expect(results.violations.map((violation) => `${violation.id}: ${violation.nodes.map((node) => node.html).join(" ")}`)).toEqual([]);
+    root.remove();
   }, 20_000);
 });

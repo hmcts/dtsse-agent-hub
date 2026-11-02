@@ -4,7 +4,7 @@ import { readSession, SESSION_COOKIE } from "@/auth/session";
 import { authRequired, sessionSecret } from "@/auth/settings";
 import { requestHost, VIEWER_ROUTE, VIEWER_URL_HEADER, viewerRouteHost, viewerSettings } from "@/port-viewer/settings";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
-import { movedHubPath, retiredHubPath } from "@/web/home";
+import { movedHubPath, retiredPath } from "@/web/home";
 
 /**
  * Sends a person with no session to sign in, before anything renders. Named `proxy`: Next 16 replaced the
@@ -51,13 +51,15 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   if (pathname.length > 1 && pathname.endsWith("/")) {
     return NextResponse.redirect(new URL(`${ownPath(pathname).replace(/\/+$/, "") || "/"}${search}`, request.nextUrl.origin), 308);
   }
-  // The hub's bare addresses are sent to `/hub` from here, and its retired ones to what replaced them, and never
+  // The hub's bare addresses are sent to `/hub` from here, and retired addresses to what replaced them, and never
   // from `redirects()` in next.config.mjs, which Next checks ahead of the proxy: a 308 from there repeats the query
   // into its own `Location`, and Traefik's access log keeps it. Below `carriesSecret`, so a pasted secret is already
   // stripped by the time either builds a URL. Retired first, since a bare retired address is both.
-  const moved = retiredHubPath(request.nextUrl.pathname, virtualAgentsEnabled()) ?? movedHubPath(request.nextUrl.pathname);
+  const moved = retiredPath(request.nextUrl.pathname, virtualAgentsEnabled()) ?? movedHubPath(request.nextUrl.pathname);
   if (moved !== undefined) {
-    return NextResponse.redirect(new URL(`${moved}${request.nextUrl.search}`, request.nextUrl.origin), 308);
+    // Joined as text rather than through `searchParams`, which would re-encode a query such as a channel view's commas.
+    const query = moved.includes("?") ? request.nextUrl.search.replace(/^\?/, "&") : request.nextUrl.search;
+    return NextResponse.redirect(new URL(`${moved}${query}`, request.nextUrl.origin), 308);
   }
   if (!authRequired() || exempt(request.nextUrl.pathname)) {
     return NextResponse.next();
