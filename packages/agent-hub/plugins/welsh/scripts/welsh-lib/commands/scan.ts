@@ -119,7 +119,7 @@ export function resolveRepos(service: string, repoArg: string | undefined, adapt
     return [{ ...(known ?? { path: rel }), ...(adapters?.length ? { adapters } : {}) }];
   }
   if (!config.repos.length) {
-    fail(`no repos in apps/${service}/welsh/config.yaml — add them, or pass --repo`);
+    fail(`no repos in ${service}'s welsh/config.yaml — add them, or pass --repo`);
   }
   return config.repos;
 }

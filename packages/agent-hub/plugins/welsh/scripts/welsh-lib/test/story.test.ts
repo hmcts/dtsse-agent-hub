@@ -1,12 +1,18 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
 const ws = mkdtempSync(join(tmpdir(), "welsh-story-"));
 process.env.CFT_WELSH_WORKSPACE = ws;
-mkdirSync(join(ws, "apps", "demo", "welsh"), { recursive: true });
+mkdirSync(join(ws, "apps", "demo", "demo-app", "welsh"), { recursive: true });
+// Each service's Welsh is in its home repo, the one workspace.yaml marks `welsh: true`.
+writeFileSync(
+  join(ws, "workspace.yaml"),
+  "repos:\n  apps/demo/demo-app: { url: hmcts/demo-app, welsh: true }\n  apps/other/other-app: { url: hmcts/other-app, welsh: true }\n"
+);
+mkdirSync(join(ws, "apps", "other", "other-app", "welsh"), { recursive: true });
 
 const { loadCatalogue } = await import("../catalogue.ts");
 const { buildRows, candidates, existingRows, notInStory, withSection } = await import("../story.ts");

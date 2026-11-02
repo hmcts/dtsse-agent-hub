@@ -7,7 +7,9 @@ description: Manage Welsh translations for any CFT service without machine trans
 
 Drive `${CLAUDE_PLUGIN_ROOT}/scripts/welsh`, written `welsh` below. It works on every service, and finds the
 cft-workspace from `$CLAUDE_PROJECT_DIR` (or `$CFT_WELSH_WORKSPACE`). Each service keeps its catalogue, config and
-WLU spreadsheets in `apps/<product>/welsh/`. There is no shared catalogue: the right Welsh depends on where it is used.
+WLU returns in a `welsh/` folder in its home repo, the one `workspace.yaml` marks `welsh: true` (for CaTH,
+`apps/cath/cath-service`). Reads come from that repo's default branch; every change is a branch and, with `--pr`, a
+draft PR there. There is no shared catalogue: the right Welsh depends on where it is used.
 Full guide: `docs/how-to/manage-welsh-translations.md` in the workspace.
 
 ## The rule that overrides everything else
@@ -27,12 +29,12 @@ each one appears in the source word for word.
 |---|---|
 | look up an approved Welsh phrase | `welsh search "<text>" --service <p>` (`--exact`, `--fuzzy`, `--all`) |
 | know what Welsh is missing in a repo | `welsh scan --service <p> [--repo apps/<p>/<repo>]` |
-| send the missing strings to the WLU | the same, plus `--request` → `apps/<p>/welsh/requests/<date>-….xlsx` |
-| add a WLU return to the catalogue | `welsh import <file.xlsx> --service <p>` (`--dry-run` first, `--pr` to raise the workspace PR) |
+| send the missing strings to the WLU | the same, plus `--request` → `apps/<p>/.welsh-work/requests/<date>-….xlsx` |
+| add a WLU return to the catalogue | `welsh import <file.xlsx> --service <p>` (`--dry-run` first, `--pr` to raise the PR in the home repo) |
 | put approved Welsh into a repo | `welsh apply --service <p> --from catalogue\|<return.xlsx> --dry-run`, then without `--dry-run`, `--test --pr` |
 | add Welsh content to a Jira story | `welsh story <KEY> --service <p>` (see below) |
 | prove a branch's Welsh came from the WLU | `welsh verify --service <p> --repo <clone>` |
-| set up a service for the first time | `welsh init --service <p>`, then fill `repos:` in `config.yaml` |
+| set up a service for the first time | mark its home repo `welsh: true` in `workspace.yaml`, then `welsh init --service <p> --pr` and fill `repos:` in its `welsh/config.yaml` |
 
 `--service` is the product directory under `apps/` (`cath`, `pcs`, `nfdiv`, …). Results are JSON
 on stdout and the human summary is on stderr. Relay the summary and the table, not the JSON.

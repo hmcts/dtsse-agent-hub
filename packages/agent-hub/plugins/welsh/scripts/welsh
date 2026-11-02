@@ -2,7 +2,7 @@
 # Welsh translation tooling for BAs, for every CFT service.
 #
 # Subcommands (run with --help for options):
-#   init           set up apps/<product>/welsh/ (catalogue, config, request/return folders)
+#   init           set up welsh/ (catalogue, config, returns) in the service's home repo
 #   info           what a service has set up: its repos and its catalogue's counts
 #   search         search a service's catalogue, English or Welsh side
 #   import-legacy  seed a catalogue from an existing WLU spreadsheet and/or JSON map

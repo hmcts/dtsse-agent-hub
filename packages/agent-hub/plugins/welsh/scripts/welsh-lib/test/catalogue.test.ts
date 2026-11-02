@@ -7,7 +7,13 @@ import { test } from "node:test";
 // Point the library at a scratch workspace before it loads.
 const ws = mkdtempSync(join(tmpdir(), "welsh-cat-"));
 process.env.CFT_WELSH_WORKSPACE = ws;
-mkdirSync(join(ws, "apps", "demo", "welsh"), { recursive: true });
+mkdirSync(join(ws, "apps", "demo", "demo-app", "welsh"), { recursive: true });
+// Each service's Welsh is in its home repo, the one workspace.yaml marks `welsh: true`.
+writeFileSync(
+  join(ws, "workspace.yaml"),
+  "repos:\n  apps/demo/demo-app: { url: hmcts/demo-app, welsh: true }\n  apps/other/other-app: { url: hmcts/other-app, welsh: true }\n"
+);
+mkdirSync(join(ws, "apps", "other", "other-app", "welsh"), { recursive: true });
 
 const { cataloguePath, loadCatalogue, lookup, search } = await import("../catalogue.ts");
 const { parseCsv, toCsv } = await import("../csv.ts");
@@ -46,7 +52,7 @@ test("add supersedes a changed rendering and ignores a repeat", () => {
 });
 
 test("a WLU return confirms a needs-review row rather than adding a second one", () => {
-  writeFileSync(join(ws, "apps", "demo", "welsh", "catalogue.csv"), "");
+  writeFileSync(join(ws, "apps", "demo", "demo-app", "welsh", "catalogue.csv"), "");
   const cat = loadCatalogue("demo");
   cat.add({ english: "Back", welsh: "Yn ôl", source: "legacy", status: "needs-review" });
   assert.equal(cat.add({ english: "Back", welsh: "Yn ôl", source: "WLU:batch-1" }), "added");
@@ -60,7 +66,7 @@ test("a WLU return confirms a needs-review row rather than adding a second one",
 });
 
 test("going back to an earlier rendering restores its row, so row ids stay unique", () => {
-  writeFileSync(join(ws, "apps", "demo", "welsh", "catalogue.csv"), "");
+  writeFileSync(join(ws, "apps", "demo", "demo-app", "welsh", "catalogue.csv"), "");
   const cat = loadCatalogue("demo");
   cat.add({ english: "Continue", welsh: "Parhau", source: "WLU-1" });
   cat.add({ english: "Continue", welsh: "Ymlaen", source: "WLU-2" });
@@ -76,14 +82,14 @@ test("going back to an earlier rendering restores its row, so row ids stay uniqu
 });
 
 test("a catalogue belongs to one service, with nothing shared between services", () => {
-  assert.equal(cataloguePath("demo"), join(ws, "apps", "demo", "welsh", "catalogue.csv"));
+  assert.equal(cataloguePath("demo"), join(ws, "apps", "demo", "demo-app", "welsh", "catalogue.csv"));
   const other = loadCatalogue("other");
   other.add({ english: "Back", welsh: "Yn ôl", source: "WLU-other" });
   assert.equal(lookup("Back", loadCatalogue("demo")).kind, "miss");
 });
 
 test("lookup: ambiguity and variants go to a human, needs-review never fills", () => {
-  writeFileSync(join(ws, "apps", "demo", "welsh", "catalogue.csv"), "");
+  writeFileSync(join(ws, "apps", "demo", "demo-app", "welsh", "catalogue.csv"), "");
   const svc = loadCatalogue("demo");
   svc.add({ english: "Back", welsh: "Yn ôl", source: "WLU" });
   svc.add({ english: "Before Hon", welsh: "Gerbron Ei Anrhydedd [male] / Gerbron Ei Hanrhydedd [female]", source: "WLU" });

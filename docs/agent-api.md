@@ -548,7 +548,7 @@ Picking a Jira project or a Confluence page means searching the person's own Jir
 
 ## Welsh translation jobs
 
-The Assistant's Welsh page (`/assistant/welsh`) lets a business analyst look after a service's Welsh: search the service's approved catalogue, find English in its code that has no Welsh, send that to the Welsh Language Unit (WLU) as a spreadsheet, add the WLU's returned spreadsheet to the catalogue, open a pull request putting approved Welsh into the code, and add a Welsh content table to a Jira story. All of it is done by the `welsh` plugin's `scripts/welsh`, which the pod client carries (see Plugins below), in the person's own pod, against the service's catalogue in cft-workspace, with their own GitHub and `twg` sign-ins: the hub holds neither, and makes no outbound calls. No job goes through a model turn. **No Welsh is ever generated**: every Welsh string comes from the catalogue or a WLU return, and `scripts/welsh verify` refuses anything else before it is written (see cft-workspace's `docs/explanation/welsh-translation-model.md`).
+The Assistant's Welsh page (`/assistant/welsh`) lets a business analyst look after a service's Welsh: search the service's approved catalogue, find English in its code that has no Welsh, send that to the Welsh Language Unit (WLU) as a spreadsheet, add the WLU's returned spreadsheet to the catalogue, open a pull request putting approved Welsh into the code, and add a Welsh content table to a Jira story. All of it is done by the `welsh` plugin's `scripts/welsh`, which the pod client carries (see Plugins below), in the person's own pod, against the service's catalogue, a `welsh/` folder in its own repo (the one cft-workspace's `workspace.yaml` marks `welsh: true`), with their own GitHub and `twg` sign-ins: the hub holds neither, and makes no outbound calls. No job goes through a model turn. **No Welsh is ever generated**: every Welsh string comes from the catalogue or a WLU return, and `scripts/welsh verify` refuses anything else before it is written (see cft-workspace's `docs/explanation/welsh-translation-model.md`).
 
 The page is for people whose assistant has the `welsh` plugin ticked (`WELSH_PLUGIN`, `src/assistant/welsh.ts`; see Plugins below), since a pod loads only the plugins its owner ticked. For anyone else the sidebar has no way to it, the page says how to turn it on, and a job or an upload is refused with `409 {error}` and nothing recorded.
 
@@ -560,7 +560,7 @@ The page is for people whose assistant has the `welsh` plugin ticked (`WELSH_PLU
 | `search` | `{query, mode}`, `mode` being `contains`, `exact` or `fuzzy` | `welsh search` |
 | `scan` | `{repo?}` | `welsh scan --out <file>`; the request spreadsheet comes back as a file |
 | `import_check` | `{file_id}` | `welsh import <file> --dry-run` |
-| `import` | `{file_id}` | `welsh import <file> --pr --queries-out <file>`; a draft PR in cft-workspace, and the queries spreadsheet as a file |
+| `import` | `{file_id}` | `welsh import <file> --pr --queries-out <file>`; a draft PR in the service's own repo with the catalogue change and the return itself, and the queries spreadsheet as a file |
 | `apply_preview` | `{repo?, file_id?, choices?}` | `welsh apply --from catalogue` (or the file) `--dry-run` |
 | `apply` | `{repo?, file_id?, choices?}` | `welsh apply --from catalogue` (or the file) `--pr`; a draft PR in the service's repo |
 | `story_candidates` | `{key}` | `welsh story <key>` |

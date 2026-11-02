@@ -1,5 +1,5 @@
 /**
- * What the Welsh page shows of a job's result. Pure. The result is whatever cft-workspace's `scripts/welsh` printed,
+ * What the Welsh page shows of a job's result. Pure. The result is whatever the welsh plugin's `scripts/welsh` printed,
  * which is released separately from this app, so every field is read defensively: a missing or mistyped one shows as
  * nothing rather than breaking the page. Welsh is only ever displayed here, exactly as the result carries it.
  */

@@ -50,8 +50,8 @@ export function WelshScan({
       <Step n={2} title="Repo">
         <p className="text-[13px] text-asst-warn">
           <span>No repos are set up for this service yet. A developer adds them to </span>
-          <span className="font-plex-mono">{`apps/${product}/welsh/config.yaml`}</span>
-          <span> in cft-workspace.</span>
+          <span className="font-plex-mono">welsh/config.yaml</span>
+          <span> in the service's own repo.</span>
         </p>
       </Step>
     );

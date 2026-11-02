@@ -1,5 +1,5 @@
 /**
- * Translation catalogues: one per service at apps/<product>/welsh/catalogue.csv,
+ * Translation catalogues: one per service, at welsh/catalogue.csv in its home repo (see home.ts),
  * and nothing shared between services, because the right Welsh depends on where
  * it is used. Every row is Welsh supplied by the Welsh Language Unit — nothing in
  * this module creates Welsh text.
@@ -9,8 +9,8 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseRecords, toCsv } from "./csv.ts";
+import { welshDir } from "./home.ts";
 import { hasVariants, looseKey, matchKey } from "./normalise.ts";
-import { WORKSPACE } from "./paths.ts";
 
 export const COLUMNS = ["id", "english", "welsh", "context", "notes", "source", "received", "status"] as const;
 
@@ -24,7 +24,7 @@ const CONTEXT_SENSITIVE = ["Yes", "No"];
 export const STATUSES = ["approved", "superseded", "needs-review"] as const;
 
 export function cataloguePath(service: string): string {
-  return join(WORKSPACE, "apps", service, "welsh", "catalogue.csv");
+  return join(welshDir(service), "catalogue.csv");
 }
 
 export function rowId(english: string, context: string, welsh: string): string {

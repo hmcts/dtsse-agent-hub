@@ -1,15 +1,15 @@
 /**
  * Requests sent to the Welsh Language Unit: the Ref that ties a request row
  * to its answer, and where request spreadsheets are written — the service's
- * requests/ folder by default, or a path the caller chooses (an HMCTS
- * Assistant pod writes to a scratch file and uploads it for download).
+ * working folder in the workspace by default, or a path the caller chooses (a
+ * CFT Workspace pod writes to a scratch file and uploads it for download).
  */
 
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { cataloguePath } from "./catalogue.ts";
 import { matchKey } from "./normalise.ts";
+import { WORKSPACE } from "./paths.ts";
 import { type RequestRow, writeRequest } from "./xlsx.ts";
 
 /**
@@ -24,12 +24,12 @@ export function contentRef(service: string, english: string): string {
     .toUpperCase()}`;
 }
 
-export function welshDir(service: string): string {
-  return dirname(cataloguePath(service));
-}
-
+/**
+ * Scan results, story previews and request spreadsheets: the person's own working files, in the workspace beside the
+ * service's other scaffolding and ignored there, since the catalogue itself is in the service's home repo.
+ */
 export function workDir(service: string, ...sub: string[]): string {
-  const dir = join(welshDir(service), ".work", ...sub);
+  const dir = join(WORKSPACE, "apps", service, ".welsh-work", ...sub);
   mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -42,8 +42,7 @@ export async function saveRequest(service: string, label: string, rows: RequestR
     await writeRequest(out, rows, { batch, service, created });
     return out;
   }
-  const dir = join(welshDir(service), "requests");
-  mkdirSync(dir, { recursive: true });
+  const dir = workDir(service, "requests");
   let path = join(dir, `${batch}.xlsx`);
   for (let n = 2; existsSync(path); n++) {
     path = join(dir, `${batch}-${n}.xlsx`);

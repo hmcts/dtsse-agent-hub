@@ -48,7 +48,7 @@ export async function applyCmd(argv: string[]): Promise<unknown> {
   }
   const repos = resolveRepos(service, values.repo, undefined);
   if (repos.length > 1 && !values["dry-run"]) {
-    fail(`apps/${service}/welsh/config.yaml lists ${repos.length} repos — pick one with --repo`);
+    fail(`${service}'s welsh/config.yaml lists ${repos.length} repos — pick one with --repo`);
   }
   const repo = repos[0];
   const clone = isAbsolute(repo.path) || repo.path.startsWith("..") ? resolve(WORKSPACE, repo.path) : ensureClone(repo.path);
@@ -277,7 +277,7 @@ function prBody(service: string, batch: string, edits: Applied[], skipped: { whe
   return (
     `Welsh translations for **${service}** from \`${batch}\`.\n\n` +
     "Every Welsh value below was supplied by the Welsh Language Unit, either in this batch or earlier via the service's approved " +
-    "catalogue in cft-workspace. None was machine-translated. Each passed a placeholder check against its English and the " +
+    "catalogue, `welsh/catalogue.csv` in its home repo. None was machine-translated. Each passed a placeholder check against its English and the " +
     "`welsh verify` provenance check.\n\n" +
     "| Ref | Where | English | Welsh | Source |\n|---|---|---|---|---|\n" +
     rows.join("\n") +
