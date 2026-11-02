@@ -1,8 +1,8 @@
 "use server";
 
 import { isOwner } from "@/access/rules";
+import { findConversation } from "@/assistant/conversation-store";
 import { sendToConversation } from "@/assistant/send";
-import { findConversation } from "@/assistant/store";
 import { directAsPerson } from "@/messages/send";
 import { answerMessage, checkAnswer, offerExpired, storedQuestions } from "@/questions/questions";
 import { findQuestion, recordAnswer } from "@/questions/store";

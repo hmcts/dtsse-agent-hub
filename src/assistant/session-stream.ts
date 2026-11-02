@@ -1,7 +1,7 @@
 import type { EventHub } from "../realtime/hub.ts";
 import { type OnOpen, sseEvent } from "../realtime/sse.ts";
 import type { LookupFrame } from "./lookup-store.ts";
-import type { Wake } from "./store.ts";
+import type { Wake } from "./session-store.ts";
 import type { UploadDeletion } from "./upload-disk.ts";
 import type { WelshFrame } from "./welsh-store.ts";
 

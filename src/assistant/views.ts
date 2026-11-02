@@ -12,8 +12,11 @@ import type { VirtualAgentDesired, VirtualAgentStatus } from "../virtual-agents/
 import { type LoginView, loginViews } from "../virtual-agents/logins.ts";
 import type { VirtualAgentRow } from "../virtual-agents/store.ts";
 import { neededCredentials, optionalCredentials } from "../virtual-agents/views.ts";
+import { type Artefact, readArtefact } from "./artefact-store.ts";
 import type { ConfluenceExportView } from "./confluence.ts";
 import { readConfluenceExport } from "./confluence-store.ts";
+import type { ConversationRow, ProductChange, SessionState, StopMark } from "./conversation-row.ts";
+import { type ConversationListRow, hasLocalConversation, listConversations, unsentConversation } from "./conversation-store.ts";
 import { FORKED_SELECT, type ForkedView, forkedView } from "./forks.ts";
 import { type DateGroup, groupByDate } from "./grouping.ts";
 import type { JiraExportView } from "./jira.ts";
@@ -22,17 +25,7 @@ import { chatCredentials, onboarded, type Readiness, readiness } from "./onboard
 import { hasPod } from "./pods.ts";
 import { productLabel } from "./products.ts";
 import { snippetOf } from "./search.ts";
-import {
-  type Artefact,
-  type ConversationListRow,
-  type ConversationRow,
-  hasLocalConversation,
-  listConversations,
-  readArtefact,
-  type SessionState,
-  searchConversations,
-  unsentConversation
-} from "./store.ts";
+import { searchConversations } from "./search-store.ts";
 import { type MessageAttachment, unsentAttachments } from "./upload-store.ts";
 
 /** The HMCTS Assistant as its pages show it. Only ever the viewer's own: nobody sees anyone else's assistant. */
@@ -240,9 +233,9 @@ export interface ConversationView {
   title: string;
   product: string;
   productLabel: string;
-  productHistory: { product: string; at: string }[];
+  productHistory: ProductChange[];
   /** Every answer the person stopped, so the thread shows where each one was cut off. */
-  stopHistory: { at: string }[];
+  stopHistory: StopMark[];
   /**
    * Whether the chat has no pod (`!hasPod`). The one thing the chat's own screen reads it for is which of
    * its controls make sense: everything a pod does for a conversation — carrying a file to its session, interrupting

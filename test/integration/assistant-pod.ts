@@ -1,4 +1,4 @@
-import { ensureAssistant } from "../../src/assistant/store.ts";
+import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
 import { devIdentity, type Viewer } from "../../src/viewer/identity.ts";
 import { insertUser, type Person, prisma } from "./database.ts";
 

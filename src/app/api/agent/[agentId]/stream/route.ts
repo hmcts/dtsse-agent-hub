@@ -1,6 +1,6 @@
 import { HttpError } from "@/agent-api/http";
 import { ownedAgentRoute } from "@/agent-api/route";
-import { assistantFrame } from "@/assistant/store";
+import { assistantFrame } from "@/assistant/frame";
 import type { StreamedDirect } from "@/messages/shape";
 import { queuedDeliveries, queuedDelivery } from "@/messages/store";
 import { agentStream, RECONNECT_FRAME } from "@/realtime/agent-stream";

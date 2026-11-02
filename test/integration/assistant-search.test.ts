@@ -1,16 +1,10 @@
 import { NextRequest } from "next/server";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { GET as searchRoute } from "../../src/app/api/ui/assistant/search/route.ts";
-import {
-  type ConversationRow,
-  conversationAgent,
-  createConversation,
-  ensureAssistant,
-  listConversations,
-  renameConversation,
-  searchConversations,
-  touchConversation
-} from "../../src/assistant/store.ts";
+import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
+import type { ConversationRow } from "../../src/assistant/conversation-row.ts";
+import { conversationAgent, createConversation, listConversations, renameConversation, touchConversation } from "../../src/assistant/conversation-store.ts";
+import { searchConversations } from "../../src/assistant/search-store.ts";
 import { type ConversationMark, type ConversationMatch, conversationGroups, conversationMatches } from "../../src/assistant/views.ts";
 import { directAsPerson } from "../../src/messages/send.ts";
 import { byCodePoint } from "../../src/topics/slug.ts";

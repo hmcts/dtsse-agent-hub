@@ -5,8 +5,9 @@ import { GET as chatPeople } from "../../src/app/api/ui/assistant/shares/[conver
 import { GET as people } from "../../src/app/api/ui/people/route.ts";
 import { GET as stream } from "../../src/app/api/ui/stream/route.ts";
 import { GET as attachmentContent } from "../../src/app/api/ui/uploads/[uploadId]/content/route.ts";
+import { readArtefact, writeArtefact } from "../../src/assistant/artefact-store.ts";
+import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
 import { shareRecipients } from "../../src/assistant/shares.ts";
-import { ensureAssistant, readArtefact, writeArtefact } from "../../src/assistant/store.ts";
 import { conversationMatches } from "../../src/assistant/views.ts";
 import { realtime } from "../../src/realtime/process.ts";
 import { devIdentity } from "../../src/viewer/identity.ts";
