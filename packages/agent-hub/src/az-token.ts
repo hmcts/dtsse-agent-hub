@@ -60,16 +60,14 @@ export function createTokenProvider({ scope = DEFAULT_SCOPE, run = runAz, now = 
     if (cached && cached.expiresAt - REFRESH_MARGIN_MS > now()) {
       return cached.token;
     }
-    if (!pending) {
-      pending = run(["account", "get-access-token", "--scope", scope, "-o", "json"])
-        .then((out) => {
-          cached = parseAzToken(out, now());
-          return cached.token;
-        })
-        .finally(() => {
-          pending = null;
-        });
-    }
+    pending ??= run(["account", "get-access-token", "--scope", scope, "-o", "json"])
+      .then((out) => {
+        cached = parseAzToken(out, now());
+        return cached.token;
+      })
+      .finally(() => {
+        pending = null;
+      });
     return pending;
   };
 }

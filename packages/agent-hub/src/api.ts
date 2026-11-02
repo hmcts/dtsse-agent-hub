@@ -104,6 +104,18 @@ export class ApiError extends Error {
  */
 export const isMissingRoute = (error: unknown): boolean => error instanceof ApiError && error.status === 404 && isErrorPage(error.body);
 
+/**
+ * A URL without the slashes it ends with. Walked back by hand rather than with `/\/+$/`, which retries from every
+ * slash in a run that does not reach the end and so takes quadratic time over a long one.
+ */
+export function trimTrailingSlashes(url: string): string {
+  let end = url.length;
+  while (end > 0 && url[end - 1] === "/") {
+    end--;
+  }
+  return url.slice(0, end);
+}
+
 export type RequestOptions = {
   timeoutMs?: number;
 };
@@ -199,7 +211,7 @@ export function createApi({
   getToken = launchToken ? async () => launchToken : devUser ? null : createTokenProvider({ scope: env.AGENT_HUB_SCOPE || DEFAULT_SCOPE }),
   fetchImpl = globalThis.fetch
 }: CreateApiOptions = {}): Api {
-  const base = baseUrl.replace(/\/+$/, "");
+  const base = trimTrailingSlashes(baseUrl);
 
   async function headers(extra: Record<string, string> = {}): Promise<Record<string, string>> {
     const h: Record<string, string> = { ...extra };

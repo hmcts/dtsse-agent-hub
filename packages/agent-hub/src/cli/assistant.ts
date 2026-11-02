@@ -7,10 +7,13 @@ import { EXPORT_ID_RE, JIRA_BROWSE_URL, JIRA_KEY_RE, MAX_JIRA_ERROR, runJiraExpo
 import { requireSessionId } from "../session.ts";
 import { atlassianLogin, run } from "../virtual/index.ts";
 import { virtualAgent } from "../virtual-agent.ts";
-import type { ArtefactBody, ConfluenceExportReport, JiraExportReport } from "../wire.ts";
+import type { Artefact, ArtefactBody, ConfluenceExportReport, JiraExportReport } from "../wire.ts";
 import { type Cli, type Command, parseFlags, refuseSecrets, requireAgent, UsageError } from "./command.ts";
 
-export const artefact: Command = async (cli, argv) => {
+type ArtefactAction = "get" | "put";
+
+/** The `artefact` arguments, refused before anything is asked of the hub. */
+function artefactArgs(argv: string[]): { action: ArtefactAction; json: boolean; flags: Record<string, string> } {
   const json = argv.includes("--json");
   const { flags, rest } = parseFlags(
     argv.filter((a) => a !== "--json"),
@@ -32,56 +35,71 @@ export const artefact: Command = async (cli, argv) => {
   if (flags.base !== undefined && !/^\d+$/.test(flags.base)) {
     throw new UsageError("--base must be a version number");
   }
-  const agent = requireAgent(requireSessionId(cli.env));
-  const api = cli.api();
-  // Only a conversation's agent has a document, so a 404 here is the session, not a missing agent.
-  const notConversation = (e: unknown): never => {
-    if (e instanceof ApiError && e.status === 404) {
-      throw new Error("this session is not an HMCTS Assistant conversation, so it has no document");
-    }
-    throw e;
-  };
+  return { action, json, flags };
+}
 
-  if (action === "get") {
-    const doc = await api.getArtefact(agent.agent_id).catch(notConversation);
-    if (json) {
-      cli.print(JSON.stringify(doc));
-      return 0;
-    }
-    if (!doc.markdown) {
-      cli.printError(`agent-hub: the conversation's document is empty (version ${doc.version})`);
-      return 0;
-    }
-    cli.stdout.write(doc.markdown.endsWith("\n") ? doc.markdown : `${doc.markdown}\n`);
+// Only a conversation's agent has a document, so a 404 here is the session, not a missing agent.
+function notConversation(e: unknown): never {
+  if (e instanceof ApiError && e.status === 404) {
+    throw new Error("this session is not an HMCTS Assistant conversation, so it has no document");
+  }
+  throw e;
+}
+
+async function getArtefact(cli: Cli, agentId: string, json: boolean): Promise<number> {
+  const doc = await cli.api().getArtefact(agentId).catch(notConversation);
+  if (json) {
+    cli.print(JSON.stringify(doc));
     return 0;
   }
+  if (!doc.markdown) {
+    cli.printError(`agent-hub: the conversation's document is empty (version ${doc.version})`);
+    return 0;
+  }
+  cli.stdout.write(doc.markdown.endsWith("\n") ? doc.markdown : `${doc.markdown}\n`);
+  return 0;
+}
 
+/** Says why a put was refused for a newer version, and how to put the change again on top of it. */
+function printConflict(cli: Cli, base: number, current: Artefact | undefined): void {
+  let by = "";
+  if (current?.updated_by) {
+    by = `, last written by ${current.updated_by === "user" ? "the user" : "this conversation"}`;
+  }
+  const again = current?.version === undefined ? "" : ` with --base ${current.version}`;
+  cli.printError(`agent-hub artefact: the document has changed since version ${base}: it is now version ${current?.version ?? "?"}${by}. Nothing was saved.`);
+  cli.printError(`Read it with ${CLI} artefact get, merge your change into it, and put it again${again}.`);
+}
+
+async function putArtefact(cli: Cli, agentId: string, flags: Record<string, string>): Promise<number> {
   const markdown = cli.readStdin();
   if (!markdown.trim()) {
     throw new UsageError("artefact put reads the markdown from stdin, and it was empty");
   }
   refuseSecrets(`${flags.title ?? ""}\n${markdown}`);
-  const base = flags.base !== undefined ? Number(flags.base) : (await api.getArtefact(agent.agent_id).catch(notConversation)).version;
+  const api = cli.api();
+  const base = flags.base === undefined ? (await api.getArtefact(agentId).catch(notConversation)).version : Number(flags.base);
   const body: ArtefactBody = { markdown, base_version: base };
   if (flags.title?.trim()) {
     body.title = flags.title.trim();
   }
   try {
-    const res = await api.putArtefact(agent.agent_id, body);
+    const res = await api.putArtefact(agentId, body);
     cli.print(`agent-hub: saved the conversation's document as version ${res.version}`);
   } catch (e) {
     if (!(e instanceof ApiError && e.status === 409)) {
       return notConversation(e);
     }
-    const current = e.body?.current;
-    const by = current?.updated_by ? `, last written by ${current.updated_by === "user" ? "the user" : "this conversation"}` : "";
-    cli.printError(`agent-hub artefact: the document has changed since version ${base}: it is now version ${current?.version ?? "?"}${by}. Nothing was saved.`);
-    cli.printError(
-      `Read it with ${CLI} artefact get, merge your change into it, and put it again${current?.version !== undefined ? ` with --base ${current.version}` : ""}.`
-    );
+    printConflict(cli, base, e.body?.current);
     return 1;
   }
   return 0;
+}
+
+export const artefact: Command = async (cli, argv) => {
+  const { action, json, flags } = artefactArgs(argv);
+  const agent = requireAgent(requireSessionId(cli.env));
+  return action === "get" ? getArtefact(cli, agent.agent_id, json) : putArtefact(cli, agent.agent_id, flags);
 };
 
 const PROJECT_RE = /^[A-Z][A-Z0-9_]{1,9}$/;

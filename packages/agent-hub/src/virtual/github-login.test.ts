@@ -2,50 +2,16 @@
 // sign-in is ever started, and every assertion that a secret stays off stderr is kept from the workspace suite.
 import fs from "node:fs";
 import path from "node:path";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { createMockHub, type MockHub } from "../__fixtures__/mock-hub.ts";
-import { captureStderr, captureStderrOfFailure, createPodShims, type PodShims, podSecrets, usePodEnv } from "../__fixtures__/pod-shims.ts";
-import { type Api, ApiError, createApi } from "../api.ts";
+import { describe, expect, it } from "vitest";
+import { captureStderr, captureStderrOfFailure, podSecrets } from "../__fixtures__/pod-shims.ts";
+import { useSignInHub } from "../__fixtures__/sign-in-hub.ts";
+import { type Api, ApiError } from "../api.ts";
 import { MAX_DETAIL_CHARS, MAX_URI_CHARS, MAX_USER_CODE_CHARS, RELAY_WORDING_CHARS } from "./github-device-flow.ts";
 import { GITHUB_SIGN_IN_CODES, GITHUB_SIGN_IN_GAP_MS, type GithubLoginOptions, githubLogin, githubLoginStatus, githubSignInGapMs } from "./github-login.ts";
 
-const VID = "va-sign-in";
-const OWNER = { oid: "oid-owner", name: "Olive Owner", email: "olive@example.com" };
-const LAUNCH = podSecrets.launchToken;
 const GH_TOKEN = podSecrets.githubToken;
 
-let hub: MockHub;
-let url: string;
-let pod: PodShims;
-let restoreEnv: () => void;
-
-beforeAll(async () => {
-  hub = createMockHub({ pingMs: 5000, launchTokens: { [LAUNCH]: { virtualId: VID, owner: OWNER } } });
-  url = await hub.listen();
-  pod = createPodShims({ virtualId: VID, hubUrl: url });
-  restoreEnv = usePodEnv(pod.home);
-});
-
-afterEach(() => {
-  const v = virtual();
-  v.status.length = 0;
-  v.prompts.length = 0;
-  v.completes.length = 0;
-  v.loginFailures.length = 0;
-  v.signInRequests.clear();
-  v.credentials.clear();
-  v.codes.clear();
-  pod.reset();
-});
-
-afterAll(async () => {
-  await hub.close();
-  restoreEnv();
-  pod.cleanup();
-});
-
-const virtual = () => hub.virtuals.get(VID) as NonNullable<ReturnType<MockHub["virtuals"]["get"]>>;
-const api = () => createApi({ baseUrl: url, launchToken: LAUNCH });
+const { hub, pod, virtual, api } = await useSignInHub();
 
 describe("githubSignInGapMs", () => {
   it("should take a whole number of milliseconds in range when one is asked for", () => {

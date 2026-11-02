@@ -11,7 +11,10 @@ import { type Cli, type Command, errorMessage, parseFlags, refuseSecrets, requir
 /** Message ids are decimal strings the hub counts up, and are past 2^53 in no time; never a bare `.sort()`. */
 const byId = (a: Message, b: Message): number => {
   const [x, y] = [BigInt(a.id), BigInt(b.id)];
-  return x < y ? -1 : x > y ? 1 : 0;
+  if (x === y) {
+    return 0;
+  }
+  return x < y ? -1 : 1;
 };
 
 export type TopicPostsOptions = {
@@ -92,36 +95,43 @@ export const topics: Command = async (cli, args) => {
   return 0;
 };
 
-export const read: Command = async (cli, argv) => {
-  const { flags, rest } = parseFlags(argv, ["since", "limit"]);
-  const api = cli.api();
+// The feed is oldest first, so page forward and keep the newest.
+async function feedPosts(cli: Cli, api: Api, since: string | undefined, limit: number): Promise<Message[]> {
+  const agent = requireAgent(requireSessionId(cli.env));
+  let after = since;
+  let matches: Message[] = [];
+  for (let page = 0; page < 10; page++) {
+    const res = await api.feed(agent.agent_id, { since: after, limit: 100 });
+    const batch = res.messages || [];
+    matches = [...matches, ...batch].slice(-limit);
+    if (batch.length < 100 || res.cursor === after) {
+      break;
+    }
+    after = res.cursor;
+  }
+  return matches;
+}
+
+/** What `read` prints: the messages it was given the ids of, the latest posts on the topics it named, or the feed. */
+async function readMessages(cli: Cli, api: Api, flags: Record<string, string>, rest: string[]): Promise<Message[]> {
   if (rest.length && rest.every((a) => /^#?\d+$/.test(a))) {
     const messages: Message[] = [];
     for (const id of rest) {
       messages.push((await api.message(id.replace(/^#/, ""))).message);
     }
-    await printMessages(cli, api, messages);
-    return 0;
+    return messages;
   }
   const limit = Math.max(1, Math.min(100, Number(flags.limit) || 20));
   if (rest.length) {
-    await printMessages(cli, api, await topicPosts(api, topicsOrDie(rest), { since: flags.since, limit }));
-    return 0;
+    return topicPosts(api, topicsOrDie(rest), { since: flags.since, limit });
   }
-  const agent = requireAgent(requireSessionId(cli.env));
-  // The feed is oldest first, so page forward and keep the newest.
-  let since = flags.since;
-  let matches: Message[] = [];
-  for (let page = 0; page < 10; page++) {
-    const res = await api.feed(agent.agent_id, { since, limit: 100 });
-    const batch = res.messages || [];
-    matches = [...matches, ...batch].slice(-limit);
-    if (batch.length < 100 || res.cursor === since) {
-      break;
-    }
-    since = res.cursor;
-  }
-  await printMessages(cli, api, matches);
+  return feedPosts(cli, api, flags.since, limit);
+}
+
+export const read: Command = async (cli, argv) => {
+  const { flags, rest } = parseFlags(argv, ["since", "limit"]);
+  const api = cli.api();
+  await printMessages(cli, api, await readMessages(cli, api, flags, rest));
   return 0;
 };
 
@@ -157,7 +167,8 @@ export const post: Command = async (cli, argv) => {
     payload.tag_agents = tagged;
   }
   const res = await cli.api().post(agent.agent_id, payload);
-  const to = tagged.length ? `${topicList.join(", ")}, tagging ${tagged.map((entry) => `@${entry}`).join(", ")}` : topicList.join(", ");
+  const tags = tagged.map((entry) => `@${entry}`).join(", ");
+  const to = tagged.length ? `${topicList.join(", ")}, tagging ${tags}` : topicList.join(", ");
   cli.print(`posted #${res.message.id} to ${to}`);
   return 0;
 };

@@ -39,7 +39,10 @@ function asOptionalString(value: unknown): string | undefined {
 }
 
 function asNullableString(value: unknown): string | null | undefined {
-  return typeof value === "string" ? value : value === null ? null : undefined;
+  if (typeof value === "string" || value === null) {
+    return value;
+  }
+  return undefined;
 }
 
 function parseAuthor(value: unknown): DirectEventAuthor | undefined {
@@ -66,7 +69,12 @@ export function parseDirectEventMessage(value: unknown): DirectEventMessage | nu
   if (!raw) {
     return null;
   }
-  const id = typeof raw.id === "string" ? raw.id : typeof raw.id === "number" ? String(raw.id) : "";
+  let id = "";
+  if (typeof raw.id === "string") {
+    id = raw.id;
+  } else if (typeof raw.id === "number") {
+    id = String(raw.id);
+  }
   if (!id) {
     return null;
   }
@@ -133,7 +141,7 @@ export function parseJiraExportFrame(value: unknown): JiraExportFrame | null {
   return { export_id: raw.export_id, project: raw.project, issue_type: raw.issue_type, labels: raw.labels as string[] };
 }
 
-const NUMERIC_ID_RE = /^[0-9]{1,20}$/;
+const NUMERIC_ID_RE = /^\d{1,20}$/;
 
 /**
  * A pending Confluence export on the frame, or null. Its values go into the `confluence export` command the session is

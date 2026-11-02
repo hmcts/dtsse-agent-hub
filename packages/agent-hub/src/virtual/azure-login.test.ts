@@ -2,60 +2,17 @@
 // sign-in is ever started, and every assertion that a secret stays off stderr is kept from the workspace suite.
 import fs from "node:fs";
 import path from "node:path";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { createMockHub, type MockHub } from "../__fixtures__/mock-hub.ts";
-import {
-  AZ_OUTPUT,
-  captureStderr,
-  captureStderrOfFailure,
-  createPodShims,
-  msalCache,
-  type PodShims,
-  podSecrets,
-  usePodEnv
-} from "../__fixtures__/pod-shims.ts";
-import { type Api, ApiError, createApi } from "../api.ts";
+import { describe, expect, it } from "vitest";
+import { AZ_OUTPUT, captureStderr, captureStderrOfFailure, msalCache, podSecrets } from "../__fixtures__/pod-shims.ts";
+import { SIGN_IN_LAUNCH as LAUNCH, SIGN_IN_OWNER as OWNER, useSignInHub, SIGN_IN_VID as VID } from "../__fixtures__/sign-in-hub.ts";
+import { type Api, ApiError } from "../api.ts";
 import { packAzureCache, pruneMsalCache, unpackAzureCache } from "./azure-cache.ts";
 import { azureLogin, parseAzDeviceCode } from "./azure-login.ts";
 import { FatalError } from "./phases.ts";
 
-const VID = "va-sign-in";
-const OWNER = { oid: "oid-owner", name: "Olive Owner", email: "olive@example.com" };
-const LAUNCH = podSecrets.launchToken;
 const REFRESH = podSecrets.azureRefresh;
 
-let hub: MockHub;
-let url: string;
-let pod: PodShims;
-let restoreEnv: () => void;
-
-beforeAll(async () => {
-  hub = createMockHub({ pingMs: 5000, launchTokens: { [LAUNCH]: { virtualId: VID, owner: OWNER } } });
-  url = await hub.listen();
-  pod = createPodShims({ virtualId: VID, hubUrl: url });
-  restoreEnv = usePodEnv(pod.home);
-});
-
-afterEach(() => {
-  const v = virtual();
-  v.status.length = 0;
-  v.prompts.length = 0;
-  v.completes.length = 0;
-  v.loginFailures.length = 0;
-  v.signInRequests.clear();
-  v.credentials.clear();
-  v.codes.clear();
-  pod.reset();
-});
-
-afterAll(async () => {
-  await hub.close();
-  restoreEnv();
-  pod.cleanup();
-});
-
-const virtual = () => hub.virtuals.get(VID) as NonNullable<ReturnType<MockHub["virtuals"]["get"]>>;
-const api = () => createApi({ baseUrl: url, launchToken: LAUNCH });
+const { hub, pod, virtual, api } = await useSignInHub();
 const azurePuts = () => hub.calls.filter((c) => c.method === "PUT" && c.path.endsWith("/credentials/azure")).length;
 
 describe("parseAzDeviceCode", () => {

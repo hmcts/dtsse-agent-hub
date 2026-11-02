@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createMockHub, type MockHub } from "./__fixtures__/mock-hub.ts";
-import { type Api, ApiError, createApi, DEFAULT_URL, isMissingRoute } from "./api.ts";
+import { type Api, ApiError, createApi, DEFAULT_URL, isMissingRoute, trimTrailingSlashes } from "./api.ts";
 import { createTokenProvider, DEFAULT_SCOPE, parseAzToken, type RunAz, requireAzureLogin } from "./az-token.ts";
 import { CLIENT_FEATURES } from "./features.ts";
 
@@ -132,6 +132,28 @@ describe("isMissingRoute", () => {
     // Act and assert
     expect(isMissingRoute(new ApiError(500, { error: ERROR_PAGE }, "POST", "/api/virtual/x/login/atlassian/failed"))).toBe(false);
     expect(isMissingRoute(new Error("fetch failed"))).toBe(false);
+  });
+});
+
+describe("trimTrailingSlashes", () => {
+  it("should drop every slash the URL ends with and keep the ones inside it", () => {
+    // Act & Assert
+    expect(trimTrailingSlashes("https://hub.example/api///")).toBe("https://hub.example/api");
+    expect(trimTrailingSlashes("https://hub.example")).toBe("https://hub.example");
+    expect(trimTrailingSlashes("///")).toBe("");
+  });
+
+  it("should finish in linear time when a long run of slashes does not reach the end", () => {
+    // Arrange: the input that makes `/\/+$/` retry from every slash in the run.
+    const hostile = `https://hub.example${"/".repeat(200_000)}x`;
+    const started = performance.now();
+
+    // Act
+    const trimmed = trimTrailingSlashes(hostile);
+
+    // Assert
+    expect(trimmed).toBe(hostile);
+    expect(performance.now() - started).toBeLessThan(500);
   });
 });
 

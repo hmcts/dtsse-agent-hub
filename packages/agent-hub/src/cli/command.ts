@@ -20,7 +20,8 @@ export type Cli = {
   cwd: () => string;
 };
 
-export type Command = (cli: Cli, args: string[]) => Promise<number>;
+/** A command's exit code, returned straight or once whatever it awaits has settled. */
+export type Command = (cli: Cli, args: string[]) => number | Promise<number>;
 
 /** A command the caller got wrong, which exits 2; anything else that fails exits 1. */
 export class UsageError extends Error {}

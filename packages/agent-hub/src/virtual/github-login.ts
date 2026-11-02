@@ -290,7 +290,7 @@ export async function githubLogin({
       // relaying anything — and the pending row it leaves meanwhile is bounded by the `awaiting_owner` sweep.
       const login = (await run("gh", ["api", "user", "--jq", ".login"], { env: ghEnv })).stdout.trim();
       await withRetry(() => api.loginComplete(id, "github", login ? { account_label: login } : {}), { wait });
-      say(`github: signed in${login ? ` as ${login}` : ""}`);
+      say(login ? `github: signed in as ${login}` : "github: signed in");
       return "signed-in";
     }
     // Whichever failed says so in full in the pod's log; the hub gets the wording the owner can act on.

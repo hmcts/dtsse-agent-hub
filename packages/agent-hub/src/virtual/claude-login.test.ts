@@ -1,55 +1,14 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { createMockHub, type MockHub } from "../__fixtures__/mock-hub.ts";
-import {
-  AUTHORIZE_URL,
-  CLAUDE_OUTPUT,
-  captureStderr,
-  captureStderrOfFailure,
-  createPodShims,
-  type PodShims,
-  podSecrets,
-  usePodEnv
-} from "../__fixtures__/pod-shims.ts";
-import { createApi } from "../api.ts";
+// The pod's Claude sign-in, against the mock hub with fake claude and script(1) on PATH that print what the real ones
+// print. No real sign-in is ever started, and every assertion that a secret stays off stderr is kept from the
+// workspace suite.
+import { describe, expect, it } from "vitest";
+import { AUTHORIZE_URL, CLAUDE_OUTPUT, captureStderr, captureStderrOfFailure, podSecrets } from "../__fixtures__/pod-shims.ts";
+import { useSignInHub } from "../__fixtures__/sign-in-hub.ts";
 import { claudeLogin, findClaudeToken, parseClaudeAuthorizeUrl } from "./claude-login.ts";
 
-const VID = "va-sign-in";
-const OWNER = { oid: "oid-owner", name: "Olive Owner", email: "olive@example.com" };
-const LAUNCH = podSecrets.launchToken;
 const CLAUDE_TOKEN = podSecrets.claudeToken;
 
-let hub: MockHub;
-let url: string;
-let pod: PodShims;
-let restoreEnv: () => void;
-
-beforeAll(async () => {
-  hub = createMockHub({ pingMs: 5000, launchTokens: { [LAUNCH]: { virtualId: VID, owner: OWNER } } });
-  url = await hub.listen();
-  pod = createPodShims({ virtualId: VID, hubUrl: url });
-  restoreEnv = usePodEnv(pod.home);
-});
-
-afterEach(() => {
-  const v = virtual();
-  v.status.length = 0;
-  v.prompts.length = 0;
-  v.completes.length = 0;
-  v.loginFailures.length = 0;
-  v.signInRequests.clear();
-  v.credentials.clear();
-  v.codes.clear();
-  pod.reset();
-});
-
-afterAll(async () => {
-  await hub.close();
-  restoreEnv();
-  pod.cleanup();
-});
-
-const virtual = () => hub.virtuals.get(VID) as NonNullable<ReturnType<MockHub["virtuals"]["get"]>>;
-const api = () => createApi({ baseUrl: url, launchToken: LAUNCH });
+const { pod, virtual, api } = await useSignInHub();
 
 describe("parseClaudeAuthorizeUrl", () => {
   it("should take the URL from the OSC 8 hyperlink when setup-token draws its TUI", () => {
