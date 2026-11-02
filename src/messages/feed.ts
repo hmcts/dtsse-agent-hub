@@ -165,12 +165,3 @@ export async function recentPosts(db: Database, query: { before?: bigint; limit:
     rows.map((row) => row.id)
   );
 }
-
-/** An agent's latest posts, oldest first. */
-export async function agentPosts(db: Database, agentId: string, limit: number): Promise<ApiMessage[]> {
-  const rows = await db.message.findMany({ where: { kind: "post", authorAgentId: agentId }, select: { id: true }, orderBy: { id: "desc" }, take: limit });
-  return await loadMessages(
-    db,
-    rows.map((row) => row.id)
-  );
-}

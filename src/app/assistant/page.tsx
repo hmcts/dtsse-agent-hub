@@ -9,11 +9,13 @@ import {
   startConversation
 } from "@/app/_actions/assistant";
 import { deleteAllAssistantFiles, deleteAssistantFile } from "@/app/_actions/assistant-files";
-import { resetClaudeMd, saveClaudeMd } from "@/app/_actions/credentials";
+import { readAssistantAgent, readGitIdentity } from "@/app/_actions/assistant-settings";
+import { clearGitIdentity, removeCredential, resetClaudeMd, saveClaudeMd, saveCredential, saveGitIdentity } from "@/app/_actions/credentials";
 import { saveExportDefaults } from "@/app/_actions/export-defaults";
 import { deleteTemplate, saveTemplate } from "@/app/_actions/templates";
-import { reconnectSignIn, resizeVirtualAgent, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
+import { reconnectSignIn, renameVirtualAgent, resizeVirtualAgent, restartVirtualAgent, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
 import { connectionsData } from "@/assistant/connections";
+import { savedCredentialsData } from "@/assistant/saved-credentials";
 import { assistantPluginsData } from "@/assistant/settings";
 import { STARTERS } from "@/assistant/starters";
 import { offeredTemplates } from "@/assistant/templates";
@@ -86,6 +88,9 @@ export default async function AssistantPage() {
       size={size === undefined ? undefined : { view: size, assistantId: home.assistant.id, save: resizeVirtualAgent }}
       model={model === undefined ? undefined : { ...model, save: saveAssistantModel }}
       exports={{ defaults, save: saveExportDefaults, access: atlassian }}
+      agent={{ load: readAssistantAgent, rename: renameVirtualAgent, restart: restartVirtualAgent }}
+      git={{ load: readGitIdentity, save: saveGitIdentity, clear: clearGitIdentity }}
+      tokens={{ ...savedCredentialsData(home.credentials, home.assistant.modelRoute), save: saveCredential, remove: removeCredential }}
     >
       {/* No `local` here: this screen is about to start a chat on a pod, so it needs what a pod needs. */}
       <AssistantGate home={home} waiting={jar.get(WAITING_COOKIE)?.value} theme={theme}>

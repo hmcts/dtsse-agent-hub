@@ -1,111 +1,131 @@
-import { expect, test } from "@playwright/test";
-import { asPersona, unique } from "./hub";
+import { expect, type Page, test } from "@playwright/test";
+import { asPersona, chatPersona, connectForChat, dismissGettingReady, openLocalChat, registerAgent, unique } from "./hub";
+
+const ASSISTANT_OFF = "the Assistant runs on a virtual agent, which is off on this deployment";
+const CANNOT_REGISTER = "this deployment checks real agent tokens, so the suite cannot register an agent";
+
+/** Opens the Assistant's settings at the section the navigation calls `section`. */
+async function settings(page: Page, section: string): Promise<void> {
+  await page.getByRole("button", { name: /^Settings/ }).click();
+  await page.getByRole("tablist", { name: "Settings sections" }).getByRole("tab", { name: section }).click();
+}
 
 test.describe("virtual agents @regression", () => {
-  test("should offer the create form when the person has no virtual agents @regression", async ({ browser, baseURL }) => {
-    const context = await asPersona(browser, unique("va-none"), baseURL!);
-    try {
-      const page = await context.newPage();
-      const response = await page.goto("/hub/virtual");
-      test.skip(response?.status() === 404, "virtual agents are off on this deployment");
-
-      expect(response?.status()).toBe(200);
-      await expect(page.getByText("You have no virtual agents.")).toBeVisible();
-      const form = page.getByRole("form", { name: "Create a virtual agent" });
-      await expect(form.getByLabel("Name")).toBeVisible();
-      await expect(form.getByRole("button", { name: "Create" })).toBeEnabled();
-    } finally {
-      await context.close();
-    }
-  });
-
-  test("should create a virtual agent, show a sign-in its pod relays, rename it and delete it @regression", async ({ browser, baseURL, request }) => {
-    const persona = unique("va");
+  test("should open the Assistant section of its settings when an old virtual agents address is visited @regression", async ({ browser, baseURL, request }) => {
+    const persona = chatPersona("va-old");
+    await connectForChat(request, persona);
     const context = await asPersona(browser, persona, baseURL!);
     try {
       const page = await context.newPage();
-      const response = await page.goto("/hub/virtual");
-      test.skip(response?.status() === 404, "virtual agents are off on this deployment");
-
-      await expect(page.getByRole("heading", { level: 1, name: "Virtual agents" })).toBeVisible();
-      await expect(page.getByText("A virtual agent acts with your GitHub access, and with your Azure access if you connect Azure.")).toBeVisible();
-      const name = unique("e2e").toLowerCase();
-      await page.getByLabel("Name").fill(name);
-      await page.getByRole("button", { name: "Create" }).click();
-      await page.waitForURL(/\/hub\/agents\/[0-9a-f-]{36}$/);
-      const id = new URL(page.url()).pathname.split("/").at(-1)!;
-      await expect(page.getByText("Starting…")).toBeVisible();
-
-      await page.goto("/hub/virtual");
-      expect(await page.getByRole("link", { name }).getAttribute("href")).toBe(`/hub/agents/${id}`);
-      await page.goto(`/hub/virtual/${id}`);
-      await page.waitForURL(new RegExp(`/hub/agents/${id}$`));
-      await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
-      await expect(page.getByRole("list", { name: "Sign-ins" }).getByRole("heading", { name: "GitHub" })).toBeVisible();
-      await expect(page.getByText("No web servers running")).toBeVisible();
-
-      // Only a development build accepts X-Dev-Orchestrator; anywhere else the orchestrator's own token is needed.
-      const claim = await request.post("/api/orchestrator/claim", { headers: { "x-dev-orchestrator": "e2e" }, data: { cluster: "e2e" } });
-      if (claim.status() === 200) {
-        const claimed = ((await claim.json()) as { virtual_agents: { id: string; launch_token?: string }[] }).virtual_agents.find((entry) => entry.id === id);
-        expect(claimed?.launch_token).toBeDefined();
-        const login = await request.post(`/api/virtual/${id}/login/github`, {
-          headers: { authorization: `Bearer ${claimed!.launch_token}` },
-          data: { prompt: "device_code", verification_uri: "https://github.com/login/device", user_code: "WXYZ-9876", expires_in: 600 }
-        });
-        expect(login.status()).toBe(204);
-        await expect(page.getByText("WXYZ-9876")).toBeVisible({ timeout: 15_000 });
-        await expect(page.getByRole("link", { name: "https://github.com/login/device" })).toBeVisible();
-
-        const ports = await request.put(`/api/virtual/${id}/ports`, {
-          headers: { authorization: `Bearer ${claimed!.launch_token}` },
-          data: { ports: [3000], local_only: [5173] }
-        });
-        expect(ports.status()).toBe(204);
-        await expect(page.getByRole("list", { name: "Web server URLs" }).getByRole("link", { name: /^https:\/\/va-[0-9a-f]{8}-3000\./ })).toBeVisible({
-          timeout: 15_000
-        });
-        await expect(page.getByText("port 5173 is listening on 127.0.0.1 only — start it on 0.0.0.0 to open it here")).toBeVisible();
+      for (const old of ["/hub/virtual", "/hub/virtual/0f8a6a1e-0000-4000-8000-000000000001"]) {
+        await page.goto(old);
+        test.skip(new URL(page.url()).pathname === "/hub", ASSISTANT_OFF);
+        await expect(page.getByRole("dialog", { name: "Settings" }).getByRole("heading", { name: "Your assistant" })).toBeVisible();
+        expect(`${new URL(page.url()).pathname}${new URL(page.url()).search}`).toBe("/assistant");
       }
-
-      const renamed = `${name}-renamed`;
-      const rename = page.getByRole("form", { name: `Rename ${name}` });
-      await rename.getByLabel("New name").fill(renamed);
-      await rename.getByRole("button", { name: "Rename" }).click();
-      await expect(page.getByRole("heading", { level: 1, name: renamed })).toBeVisible();
-
-      await page.getByRole("button", { name: "Delete" }).click();
-      await page
-        .getByRole("group", { name: `Confirm deleting ${renamed}` })
-        .getByRole("button", { name: `Delete ${renamed}` })
-        .click();
-      await expect(page.getByText("This virtual agent and its disk are being deleted.")).toBeVisible();
     } finally {
       await context.close();
     }
   });
 
-  test("should keep one person's virtual agent from another @regression", async ({ browser, baseURL }) => {
-    const owner = await asPersona(browser, unique("va-owner"), baseURL!);
-    const other = await asPersona(browser, unique("va-other"), baseURL!);
+  /**
+   * The Assistant's own agent through its settings: made on the first visit, a sign-in its pod relays, the web
+   * servers it reports, a rename and a restart. The pod is stood in for with the orchestrator's development header,
+   * which only a development build accepts; anywhere else the parts that need a pod are left out.
+   */
+  test("should show the Assistant's agent, a sign-in and web servers its pod relays, and rename and restart it, when its settings are opened @regression", async ({
+    browser,
+    baseURL,
+    request
+  }) => {
+    const persona = chatPersona("va");
+    await connectForChat(request, persona);
+    const context = await asPersona(browser, persona, baseURL!);
+    try {
+      const page = await context.newPage();
+      const response = await page.goto("/assistant");
+      test.skip(response?.status() === 404, ASSISTANT_OFF);
+      await dismissGettingReady(page);
+
+      await settings(page, "Assistant");
+      await expect(page.getByRole("heading", { name: "Your assistant" })).toBeVisible();
+      await expect(page.getByLabel("Name")).toHaveValue("assistant");
+
+      const claim = await request.post("/api/orchestrator/claim", { headers: { "x-dev-orchestrator": "e2e" }, data: { cluster: "e2e" } });
+      if (claim.status() === 200) {
+        const claimed = ((await claim.json()) as { virtual_agents: { id: string; owner: { oid: string }; launch_token?: string }[] }).virtual_agents.find(
+          (entry) => entry.owner.oid === `dev-${persona}`
+        );
+        expect(claimed?.launch_token).toBeDefined();
+        const id = claimed!.id;
+        const token = { authorization: `Bearer ${claimed!.launch_token}` };
+
+        const login = await request.post(`/api/virtual/${id}/login/atlassian`, {
+          headers: token,
+          data: { prompt: "device_code", verification_uri: "https://id.atlassian.com/login/device", user_code: "WXYZ-9876", expires_in: 600 }
+        });
+        expect(login.status()).toBe(204);
+        const ports = await request.put(`/api/virtual/${id}/ports`, { headers: token, data: { ports: [3000], local_only: [5173] } });
+        expect(ports.status()).toBe(204);
+
+        await page.reload();
+        await dismissGettingReady(page);
+        await settings(page, "Connections");
+        await expect(page.getByRole("list", { name: "Connections" }).getByText("Waiting for you")).toBeVisible({ timeout: 15_000 });
+        await page.getByRole("tablist", { name: "Settings sections" }).getByRole("tab", { name: "Web servers" }).click();
+        const link = page.getByRole("list", { name: "Web server URLs" }).getByRole("link").first();
+        await expect(link).toHaveAttribute("href", /\/3000\/$|-3000\./);
+        await expect(page.getByText("Port 5173 is listening on 127.0.0.1 only. Start it on 0.0.0.0 to open it here.")).toBeVisible();
+        await page.getByRole("tablist", { name: "Settings sections" }).getByRole("tab", { name: "Assistant" }).click();
+      }
+
+      const renamed = unique("mine").toLowerCase();
+      await page.getByLabel("Name").fill(renamed);
+      await page.getByRole("button", { name: "Rename" }).click();
+      await expect(page.getByRole("form", { name: "Rename your assistant" }).getByRole("status")).toHaveText(`Renamed to ${renamed}`);
+
+      const restart = page.getByRole("button", { name: "Restart your assistant" });
+      if ((await restart.count()) > 0) {
+        await restart.click();
+        await expect(page.getByText(/Anything a chat is working on right now stops/)).toBeVisible();
+        await page.getByRole("button", { name: "Restart", exact: true }).click();
+        await expect(page.getByRole("dialog", { name: "Settings" }).getByText("Restarting. Your chats are kept.")).toBeVisible();
+      }
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("should keep one person's assistant and chats from another when both use the Assistant @regression", async ({ browser, baseURL, request }) => {
+    const ownerPersona = chatPersona("va-owner");
+    const name = unique("laptop");
+    const agent = await registerAgent(request, ownerPersona, name);
+    test.skip(agent === undefined, CANNOT_REGISTER);
+    await connectForChat(request, ownerPersona);
+    const otherPersona = chatPersona("va-other");
+    await connectForChat(request, otherPersona);
+    const owner = await asPersona(browser, ownerPersona, baseURL!);
+    const other = await asPersona(browser, otherPersona, baseURL!);
     try {
       const page = await owner.newPage();
-      const response = await page.goto("/hub/virtual");
-      test.skip(response?.status() === 404, "virtual agents are off on this deployment");
-      const name = unique("mine").toLowerCase();
-      await page.getByLabel("Name").fill(name);
-      await page.getByRole("button", { name: "Create" }).click();
-      await page.waitForURL(/\/hub\/agents\/[0-9a-f-]{36}$/);
-      const path = new URL(page.url()).pathname;
+      const response = await page.goto("/assistant");
+      test.skip(response?.status() === 404, ASSISTANT_OFF);
+      await dismissGettingReady(page);
+      const path = await openLocalChat(page, name);
+      const renamed = unique("owners").toLowerCase();
+      await settings(page, "Assistant");
+      await page.getByLabel("Name").fill(renamed);
+      await page.getByRole("button", { name: "Rename" }).click();
+      await expect(page.getByRole("form", { name: "Rename your assistant" }).getByRole("status")).toHaveText(`Renamed to ${renamed}`);
 
       const theirs = await other.newPage();
       expect((await theirs.goto(path))?.status()).toBe(404);
-      await theirs.goto("/hub/virtual");
-      await expect(theirs.getByRole("link", { name })).toHaveCount(0);
-
-      await page.getByRole("button", { name: "Delete" }).click();
-      await page.getByRole("button", { name: `Delete ${name}` }).click();
-      await expect(page.getByText("This virtual agent and its disk are being deleted.")).toBeVisible();
+      await theirs.goto(`/hub/agents/${agent}`);
+      expect(new URL(theirs.url()).pathname).toBe("/hub");
+      await theirs.goto("/assistant");
+      await dismissGettingReady(theirs);
+      await settings(theirs, "Assistant");
+      await expect(theirs.getByLabel("Name")).not.toHaveValue(renamed);
     } finally {
       await owner.close();
       await other.close();

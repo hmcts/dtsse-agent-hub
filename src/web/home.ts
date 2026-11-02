@@ -22,8 +22,7 @@ export function defaultUi(virtualAgents: boolean): string {
 
 /**
  * Every first segment the hub answers on besides `/hub` itself. These are the addresses people paste into chats and
- * tickets — `/agents/{id}` is the one URL for any agent, local or virtual — so a 404 on one is a regression even
- * though no code links to them.
+ * tickets, so a 404 on one is a regression even though no code links to them.
  */
 const MOVED_SEGMENTS = new Set(["agents", "c", "channels", "m", "settings", "topics", "virtual"]);
 
@@ -37,21 +36,70 @@ export function movedHubPath(pathname: string): string | undefined {
 }
 
 /**
- * Where a retired hub address goes now, or `undefined` when the path is not one.
+ * The section of the Assistant's settings `?settings=` opens. The settings dialog reads the same parameter, so a link
+ * made here and the section it opens cannot be spelled two ways.
+ */
+export const SETTINGS_PARAMETER = "settings";
+
+export function assistantSettingsPath(section: string): string {
+  return `${ASSISTANT}?${new URLSearchParams({ [SETTINGS_PARAMETER]: section })}`;
+}
+
+/** `/virtual/{id}` with nothing after the id; the port ticket route under it is still served. */
+const VIRTUAL_AGENT_PAGE = /^\/virtual\/[^/]+$/;
+
+/**
+ * Where a retired hub address goes now, or `undefined` when the path is not one. Each goes where virtual agents are
+ * managed now, and to the hub's home where virtual agents are off and the Assistant's pages are not found.
  *
- * `/hub/access` goes to `SHARED_CHATS`: an agent is its owner's, somebody else's is reached by tagging it in a post,
- * and the only access one person gives another is a share or fork of one conversation at a time, which is managed
- * there. Where virtual agents are off there are no conversations to share and the Assistant's pages are not found, so
- * it goes to the hub's home instead.
+ * - `/access` goes to `SHARED_CHATS`: an agent is its owner's, somebody else's is reached by tagging it in a post, and
+ *   the only access one person gives another is a share or fork of one conversation at a time, which is managed there.
+ * - `/virtual` and `/virtual/{id}` go to the Assistant section of its settings: the Assistant's agent is the one
+ *   virtual agent a person has, and its settings are where it is renamed, restarted and its web servers opened.
+ *   `/virtual/{id}/ports/{port}` is not one of these: it is the viewer's ticket route, and is still served.
+ * - `/settings/credentials` goes to Credentials, where a token is pasted: the published client's pod boot messages still
+ *   send people there to paste their GitHub token.
  *
- * Both the bare address and the `/hub` one, because the page existed under both and both were pasted into tickets.
+ * Both the bare address and the `/hub` one, because each page existed under both and both were pasted into tickets.
  * Checked ahead of `movedHubPath`, which would otherwise send the bare one to a page that is no longer there.
  */
 export function retiredHubPath(pathname: string, virtualAgents: boolean): string | undefined {
-  if (pathname !== "/access" && pathname !== `${HUB}/access`) {
-    return undefined;
+  const path = pathname.startsWith(`${HUB}/`) ? pathname.slice(HUB.length) : pathname;
+  const to =
+    path === "/access"
+      ? SHARED_CHATS
+      : path === "/virtual" || VIRTUAL_AGENT_PAGE.test(path)
+        ? assistantSettingsPath("assistant")
+        : path === "/settings/credentials"
+          ? assistantSettingsPath("credentials")
+          : undefined;
+  return to === undefined ? undefined : virtualAgents ? to : HUB;
+}
+
+/**
+ * What an agent's address names, as far as where it goes now: one of the viewer's own chats in the Assistant, one of
+ * their virtual agents or a session of one, or anything else. Somebody else's agent is anything else, so where the
+ * address goes says nothing about whether it exists.
+ */
+export type AgentAddress = { kind: "chat"; conversationId: string } | { kind: "virtual"; assistant: boolean } | { kind: "none" };
+
+export const NO_AGENT: AgentAddress = { kind: "none" };
+
+/**
+ * Where `/hub/agents/{id}` goes. The hub shows no agents: a chat's agent is that chat in the Assistant, and a virtual
+ * agent, or a session of one, goes to the Assistant: to the Assistant section of its settings when it is the agent the
+ * Assistant runs on, which is the one that section shows and restarts, and to the Assistant itself for any other, which
+ * nothing there manages. Anything else goes to the hub's home, and so does everything where virtual agents are off,
+ * since the Assistant's pages are not found there.
+ */
+export function retiredAgentPath(address: AgentAddress, virtualAgents: boolean): string {
+  if (!virtualAgents || address.kind === "none") {
+    return HUB;
   }
-  return virtualAgents ? SHARED_CHATS : HUB;
+  if (address.kind === "chat") {
+    return `${ASSISTANT}/${encodeURIComponent(address.conversationId)}`;
+  }
+  return address.assistant ? assistantSettingsPath("assistant") : ASSISTANT;
 }
 
 /**

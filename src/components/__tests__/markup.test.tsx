@@ -1,6 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import type { AgentCard } from "@/agents/views";
 import { DevBadge } from "@/components/DevBadge";
 import { EmptyState } from "@/components/EmptyState";
 import { ChannelHeader } from "@/components/feed/ChannelHeader";
@@ -10,7 +9,6 @@ import { Section } from "@/components/Section";
 import { Sidebar } from "@/components/Sidebar";
 import { SignInBanner } from "@/components/SignInBanner";
 import { SkeletonFeed, SkeletonList, SkeletonRows } from "@/components/Skeleton";
-import { StatusDot } from "@/components/StatusDot";
 import type { ApiMessage } from "@/messages/shape";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => undefined }), usePathname: () => "/hub/topics/pcs-api" }));
@@ -33,20 +31,6 @@ function post(id: string, overrides: Partial<ApiMessage> = {}): ApiMessage {
   };
 }
 
-function agent(id: string, ownerOid: string, overrides: Partial<AgentCard> = {}): AgentCard {
-  return {
-    id,
-    name: `agent-${id}`,
-    status: "idle",
-    repo: null,
-    branch: null,
-    lastHeartbeatAt: "2026-09-29T09:00:00.000Z",
-    owner: { oid: ownerOid, name: "Bob Owner", email: null, tid: "dev" },
-    virtualAgentId: null,
-    ...overrides
-  };
-}
-
 describe("SignInBanner", () => {
   it("should say sign-in is disabled and name the dev identity when there is a viewer", () => {
     const html = renderToStaticMarkup(<SignInBanner viewer={{ oid: "dev-anonymous", tid: "dev", name: "Anonymous (sign-in disabled)" }} />);
@@ -61,11 +45,10 @@ describe("SignInBanner", () => {
 });
 
 describe("Sidebar", () => {
-  it("should list the viewer's agents with status, channels and topics when there are some", () => {
+  it("should list the viewer's channels and the busiest topics, and no agents, when there are some", () => {
     const html = renderToStaticMarkup(
       <Sidebar
         data={{
-          agents: [agent("1", "me", { status: "busy" }), agent("2", "me")],
           channels: {
             mine: [{ id: "c1", name: "Mine", topics: ["a"], match: "any", shared: false, owner: { oid: "me", name: "Me" } }],
             shared: [{ id: "c2", name: "Theirs", topics: ["b"], match: "all", shared: true, owner: { oid: "bob", name: "Bob" } }]
@@ -77,19 +60,17 @@ describe("Sidebar", () => {
       />
     );
 
-    expect(html).toContain('href="/hub/agents/1"');
-    expect(html).toContain('data-status="busy"');
     expect(html).toContain('href="/hub/channels/c2"');
     expect(html).toContain('href="/hub/topics/pcs-api"');
     expect(html).toContain('aria-current="page"');
-    expect(html).toContain("2 connected");
+    expect(html).not.toContain("/hub/agents/");
+    expect(html).not.toContain('aria-label="Agents"');
   });
 
-  it("should list channels, then topics, then agents, and offer sign-out when sign-in is on", () => {
+  it("should list channels, then topics, and offer sign-out when sign-in is on", () => {
     const html = renderToStaticMarkup(
       <Sidebar
         data={{
-          agents: [agent("1", "me")],
           channels: { mine: [{ id: "c1", name: "Mine", topics: ["a"], match: "any", shared: false, owner: { oid: "me", name: "Me" } }], shared: [] },
           topics: [{ slug: "pcs-api", message_count: 4, last_message_at: null }]
         }}
@@ -99,7 +80,6 @@ describe("Sidebar", () => {
     );
 
     expect(html.indexOf("/hub/channels/c1")).toBeLessThan(html.indexOf("/hub/topics/pcs-api"));
-    expect(html.indexOf("/hub/topics/pcs-api")).toBeLessThan(html.indexOf("/hub/agents/1"));
     expect(html).toContain("Real Person");
     expect(html).toContain("Sign out");
   });
@@ -107,7 +87,7 @@ describe("Sidebar", () => {
   it("should put the topic search under the Topics heading and above its topics when there are some", () => {
     const html = renderToStaticMarkup(
       <Sidebar
-        data={{ agents: [], channels: { mine: [], shared: [] }, topics: [{ slug: "pcs-api", message_count: 4, last_message_at: null }] }}
+        data={{ channels: { mine: [], shared: [] }, topics: [{ slug: "pcs-api", message_count: 4, last_message_at: null }] }}
         viewer={VIEWER}
         signInDisabled
       />
@@ -119,46 +99,12 @@ describe("Sidebar", () => {
     expect(search).toBeLessThan(html.indexOf('aria-label="Most active topics"'));
   });
 
-  it("should scroll the agent list itself, capped at seven rows, when there are more agents than fit", () => {
-    const html = renderToStaticMarkup(
-      <Sidebar
-        data={{
-          agents: Array.from({ length: 8 }, (_, index) => agent(String(index), "me")),
-          channels: { mine: [], shared: [] },
-          topics: []
-        }}
-        viewer={VIEWER}
-        signInDisabled
-      />
-    );
+  it("should say what is missing, and offer no sign-out, when the viewer has nothing and sign-in is off", () => {
+    const html = renderToStaticMarkup(<Sidebar data={{ channels: { mine: [], shared: [] }, topics: [] }} viewer={VIEWER} signInDisabled />);
 
-    expect(html).toMatch(/<ul aria-label="Agents" class="[^"]*\bmax-h-\[12\.25rem\][^"]*\boverflow-y-auto\b/);
-    expect(html).toMatch(/<a (?=[^>]*href="\/hub\/agents\/0")[^>]*class="[^"]*\bh-7\b/);
-  });
-
-  it("should list connected agents above offline ones", () => {
-    const html = renderToStaticMarkup(
-      <Sidebar
-        data={{
-          agents: [agent("1", "me", { status: "offline" }), agent("2", "me", { status: "idle" })],
-          channels: { mine: [], shared: [] },
-          topics: []
-        }}
-        viewer={VIEWER}
-        signInDisabled
-      />
-    );
-
-    expect(html.indexOf("/hub/agents/2")).toBeLessThan(html.indexOf("/hub/agents/1"));
-    expect(html).not.toContain("Sign out");
-  });
-
-  it("should say what is missing when the viewer has nothing", () => {
-    const html = renderToStaticMarkup(<Sidebar data={{ agents: [], channels: { mine: [], shared: [] }, topics: [] }} viewer={VIEWER} signInDisabled />);
-
-    expect(html).toContain("/enable-comms");
     expect(html).toContain("No saved channels.");
     expect(html).toContain("No posts this week.");
+    expect(html).not.toContain("Sign out");
   });
 });
 
@@ -237,10 +183,6 @@ describe("ChannelHeader", () => {
 });
 
 describe("small components", () => {
-  it("should render a status as a dot with its word for screen readers", () => {
-    expect(renderToStaticMarkup(<StatusDot status="offline" />)).toContain('<span class="sr-only">offline</span>');
-  });
-
   it("should mark a dev owner and nobody else", () => {
     expect(renderToStaticMarkup(<DevBadge tid="dev" />)).toContain("dev");
     expect(renderToStaticMarkup(<DevBadge tid="real-tenant" />)).toBe("");
