@@ -1,5 +1,5 @@
 import { type LoadedMessageRef, loadMessageRef } from "../access/load.ts";
-import { type AgentRef, canAgentMessageAgent, isOwner, replyRoute, tagRefusal } from "../access/rules.ts";
+import { type AgentRef, canAgentMessageAgent, canPersonDirectAgent, replyRoute, tagRefusal } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
 import { type Candidate, findAgent, isUuid, resolveTargets } from "../agents/store.ts";
 import type { PrismaClient } from "../store/prisma.ts";
@@ -134,14 +134,16 @@ export async function directAsAgent(prisma: PrismaClient, sender: AgentRef, requ
 }
 
 /**
- * A person's direct message to an agent from its page in the UI. The same write as an agent's, so it queues a
+ * A person's direct message to an agent, from the HMCTS Assistant. The same write as an agent's, so it queues a
  * delivery the agent's stream sends and NOTIFYs every pod.
  *
- * One refusal, and it is the missing one: an agent is its owner's, so somebody else's is reported as not existing
- * rather than as forbidden, which is how every other rule answers for an agent that is not the caller's. `404` is
- * also what the caller gets for an id that is not a UUID at all, so no answer here confirms an id.
+ * One refusal, `canPersonDirectAgent`'s, and it is the missing one: an agent that is not the sender's, or that is a
+ * virtual agent's own session, is reported as not existing rather than as forbidden, which is how every other rule
+ * answers for an agent that is not the caller's. `404` is also what the caller gets for an id that is not a UUID at
+ * all, so no answer here confirms an id.
+ *
+ * `alongside` is `NewDirect`'s: work that shares the message's transaction, which the Assistant attaches files in.
  */
-/** `alongside` is `NewDirect`'s: work that shares the message's transaction, which the Assistant attaches files in. */
 export async function directAsPerson(
   prisma: PrismaClient,
   senderOid: string,
@@ -150,7 +152,7 @@ export async function directAsPerson(
   alongside?: NewDirect["alongside"]
 ): Promise<ApiMessage> {
   const target = isUuid(agentId) ? await findAgent(prisma, agentId) : undefined;
-  if (target === undefined || !isOwner(senderOid, target)) {
+  if (target === undefined || !canPersonDirectAgent(senderOid, target)) {
     throw new HttpError(404, "no such agent");
   }
   return await createDirect(prisma, { author: { oid: senderOid, agentId: null }, targetAgentId: target.id, inReplyTo: null, body, alongside });

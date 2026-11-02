@@ -1173,7 +1173,7 @@ describe("claudeLogin", () => {
       // Assert
       expect(result).toBe("stored");
       expect(virtual().status.at(-1)?.phase).toBe("awaiting_credentials");
-      expect(virtual().status.at(-1)?.detail).toMatch(/settings\/credentials/);
+      expect(virtual().status.at(-1)?.detail).toMatch(/\/assistant\?settings=credentials$/);
     } finally {
       pod.scriptShim();
     }

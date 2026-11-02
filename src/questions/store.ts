@@ -17,13 +17,16 @@ async function announce(db: Database, agent: Pick<AgentRow, "id" | "ownerOid">):
 }
 
 /**
- * Records a question for the person to answer. Three outcomes, and the caller has to be able to tell them apart,
+ * Records a question for the person to answer. Four outcomes, and the caller has to be able to tell them apart,
  * because the hook turns this answer into what the model is told and it must never claim a card that is not there.
  *
  * - **A fresh question** is written. The model is told it is on screen.
  * - **The same question again** — the same `tool_use_id`, whose unique index is what makes this idempotent —
  *   writes nothing and is still success: the client denies the tool whether or not its POST was answered, so a
  *   retry after a lost response finds the card it already put up. The model is told the same thing, truthfully.
+ * - **A question from an agent with no chat** — a virtual agent's own session, or a laptop session whose chat the
+ *   person removed — is refused, because the card is drawn only in a chat and nobody could answer it. The model is
+ *   told to ask in words.
  * - **A different question while one is still offered** is refused, because writing it would put two live cards
  *   in one blocked turn and answering either would send a message contradicting the other. Nothing is written, so
  *   the model must be told to ask in words instead — telling it the question is on screen would leave it waiting
@@ -50,11 +53,23 @@ class QuestionNotRecorded extends HttpError {
   }
 }
 
+/** The card is drawn only in its agent's chat in the Assistant, so a question from an agent with none could never be answered. */
+class NoChatForQuestion extends HttpError {
+  constructor() {
+    super(409, "this session has no chat in the HMCTS Assistant to show a question in");
+  }
+}
+
 export async function recordQuestion(prisma: PrismaClient, agent: Pick<AgentRow, "id" | "ownerOid">, post: QuestionPost): Promise<QuestionRecorded> {
   return await prisma.$transaction(async (tx) => {
     // The agent row, so that two questions arriving at once are serialised: the question rows themselves cannot be
     // locked, since the one that matters is usually the one that does not exist yet.
-    await tx.$queryRaw`SELECT 1 FROM agent WHERE id = ${agent.id}::uuid FOR UPDATE`;
+    const [row] = await tx.$queryRaw<{ chat: boolean }[]>`
+      SELECT assistant_conversation_id IS NOT NULL AS chat FROM agent WHERE id = ${agent.id}::uuid FOR UPDATE
+    `;
+    if (row?.chat !== true) {
+      throw new NoChatForQuestion();
+    }
     // This very question, answered or not. Read before the open-question check below, so a retry of the question
     // already on screen is the success it is rather than the refusal a *different* question would get.
     const same = await tx.agentQuestion.findFirst({ where: { agentId: agent.id, toolUseId: post.tool_use_id }, select: { id: true } });

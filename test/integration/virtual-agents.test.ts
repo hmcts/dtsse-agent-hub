@@ -1507,7 +1507,7 @@ describe("a launch token reading messages", () => {
     const laptop = await insertAgent(ALICE, "laptop");
     await insertUser(BOB);
     const post = await postAs(prisma, { oid: BOB.oid, agentId: null }, { topics: ["e2e"], title: null, body: "a post", inReplyTo: null });
-    const toMine = await directAsPerson(prisma, ALICE.oid, mine, "for the virtual agent");
+    const toMine = await directAsAgent(prisma, { id: laptop, ownerOid: ALICE.oid }, { toAgent: mine, body: "for the virtual agent" });
     const fromMine = await directAsAgent(prisma, { id: mine, ownerOid: ALICE.oid }, { toAgent: laptop, body: "from the virtual agent" });
     const toLaptop = await directAsPerson(prisma, ALICE.oid, laptop, "for the laptop only");
 
@@ -1531,7 +1531,7 @@ describe("a launch token reading messages", () => {
     const mine = (await jsonOf(await register(token, "va-session-1"))).agent_id;
     const laptop = await insertAgent(ALICE, "laptop");
     const toLaptop = await directAsPerson(prisma, ALICE.oid, laptop, "for the laptop only");
-    const toMine = await directAsPerson(prisma, ALICE.oid, mine, "for the virtual agent");
+    const toMine = await directAsAgent(prisma, { id: laptop, ownerOid: ALICE.oid }, { toAgent: mine, body: "for the virtual agent" });
 
     const hidden = await pod(directRoute.POST, token, `/api/agent/${mine}/direct`, { agentId: mine }, "POST", { reply_to_message: toLaptop.id, body: "x" });
     const own = await pod(directRoute.POST, token, `/api/agent/${mine}/direct`, { agentId: mine }, "POST", { reply_to_message: toMine.id, body: "on it" });
@@ -1544,12 +1544,12 @@ describe("a launch token reading messages", () => {
 describe("from_owner on an agent's stream", () => {
   it("should be true only for a message its owner wrote from the UI", async () => {
     const { token } = await started(ALICE, "pcs-api");
-    const target = (await jsonOf(await register(token, "va-session-1"))).agent_id;
-    const aliceLaptop = await insertAgent(ALICE, "laptop");
+    const pod = (await jsonOf(await register(token, "va-session-1"))).agent_id;
+    const target = await insertAgent(ALICE, "laptop");
 
     const fromOwner = await directAsPerson(prisma, ALICE.oid, target, "please run the tests");
     // Its owner's own other session, which is the one thing besides the person that can send it a direct message.
-    const fromAgent = await directAsAgent(prisma, { id: aliceLaptop, ownerOid: ALICE.oid }, { toAgent: target, body: "from the laptop" });
+    const fromAgent = await directAsAgent(prisma, { id: pod, ownerOid: ALICE.oid }, { toAgent: target, body: "from the pod" });
 
     const streamed = await queuedDeliveries(prisma, target);
     expect(streamed.map((entry) => [entry.message.id, entry.from_owner])).toEqual([
@@ -1557,6 +1557,14 @@ describe("from_owner on an agent's stream", () => {
       [fromAgent.id, false]
     ]);
     expect(await queuedDelivery(prisma, target, BigInt(fromOwner.id))).toMatchObject({ from_owner: true });
+  });
+
+  it("should refuse the owner a direct message to their virtual agent's own session, and write nothing", async () => {
+    const { token } = await started(ALICE, "pcs-api");
+    const pod = (await jsonOf(await register(token, "va-session-1"))).agent_id;
+
+    await expect(directAsPerson(prisma, ALICE.oid, pod, "please run the tests")).rejects.toMatchObject({ status: 404, message: "no such agent" });
+    expect(await prisma.message.count({ where: { targetAgentId: pod } })).toBe(0);
   });
 });
 

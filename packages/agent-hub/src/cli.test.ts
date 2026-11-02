@@ -1315,7 +1315,7 @@ printf '{"accessToken": "%s", "expires_on": "%s"}\\n' "${AZ_TOKEN}" "$(( $(date 
       expect(virtual().credentials.get("github")).toBe(GH_TOKEN);
       expect(credHub.personCredentials.size).toBe(0);
       expect(del.code).toBe(2);
-      expect(del.errors.join("\n")).toMatch(/a virtual agent cannot delete its credentials; its owner removes them on agent-hub/);
+      expect(del.errors.join("\n")).toMatch(/a virtual agent cannot delete its credentials; its owner removes them in the HMCTS Assistant's settings/);
       expect(virtual().credentials.get("jenkins")).toBe(JENKINS_TOKEN);
       assertNoSecrets(missing, got, set, del);
       virtual().credentials.clear();
@@ -1966,7 +1966,7 @@ process.stdout.write(JSON.stringify({ type: 'result', is_error: false, result: J
     expect(lines[1]?.type).toBe("user");
     const message = lines[1]?.message as { role: string; content: string };
     expect(message.role).toBe("user");
-    expect(message.content).toMatch(new RegExp(`^\\[agent-hub\\] Direct message #${msg.id} from your user, Me Tester, typed into agent-hub`));
+    expect(message.content).toMatch(new RegExp(`^\\[agent-hub\\] Direct message #${msg.id} from your user, Me Tester, typed into the HMCTS Assistant`));
     expect(message.content).toMatch(/This IS your user/);
     expect(message.content.endsWith("Please check the claim migration.")).toBe(true);
     await hub.waitFor((c) => c.method === "POST" && c.path === `/api/agent/${agentId}/deliveries/${msg.id}/ack`);
