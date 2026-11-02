@@ -28,6 +28,11 @@ export interface ClaimedAgent {
   size?: VirtualAgentSize;
   /** The ports the pod reports listening on beyond loopback, ascending; treated as none when absent. */
   exposed_ports?: number[];
+  /**
+   * The host the hub serves each port at off the VPN, which the pod is told so that it can say where its web servers
+   * are; absent when the hub's viewer is off, or a hub that does not send it.
+   */
+  viewer_host?: string;
   /** The workspace plugins the pod loads; treated as none when absent. */
   plugins?: string[];
   owner: { oid: string };

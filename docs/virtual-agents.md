@@ -187,7 +187,7 @@ chooses them. Each one bound beyond loopback is served at `https://<statefulset_
 to anyone on the HMCTS VPN; one bound to loopback only cannot be reached from outside the pod. The Assistant's settings list them under Web servers. A
 change never restarts the pod: it bumps `generation` but not the `pod_generation` the pod template is stamped with.
 
-**The viewer.** With `AGENT_HUB_VIEWER_HOST` set, each port is also served at
+**The viewer.** With `AGENT_HUB_VIEWER_HOST` set, every claim carries it as `viewer_host`, the orchestrator gives it to the pod as `VIRTUAL_AGENT_VIEWER_HOST`, and the pod's start-up note tells its agent to give out the viewer URL below rather than the VPN-only ingress one. Turning the viewer on or off therefore replaces each running agent once. Each port is also served at
 `https://<AGENT_HUB_VIEWER_HOST>/<virtual agent id>/<port>/` — the link the Assistant's settings give first — which works off the VPN for its owner alone. The hub
 forwards each request to the port's VPN URL. A browser without the port's cookie is sent through the hub's `/assistant/ports/<id>/<port>`, which signs
 it in if need be and hands back a ticket lasting a minute, swapped for an 8-hour cookie scoped to that port's path.
