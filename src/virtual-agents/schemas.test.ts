@@ -11,9 +11,19 @@ describe("statusBody", () => {
     expect(statusBody.parse({ phase: "running", detail: "  " })).toEqual({ phase: "running", detail: null });
   });
 
+  it("should sort the client features and drop a bad name when a pod reports its claim", () => {
+    expect(statusBody.parse({ phase: "running", client_features: ["welsh", "files", "Bad Name", "files"] }).client_features).toEqual(["files", "welsh"]);
+  });
+
+  it("should read client features that are not a list as none when an older or hand-rolled pod sends them", () => {
+    expect(statusBody.parse({ phase: "running" }).client_features).toBeUndefined();
+    expect(statusBody.parse({ phase: "running", client_features: null }).client_features).toBeUndefined();
+  });
+
   it.each([
     ["a phase only the orchestrator decides", { phase: "stopped" }],
-    ["a detail over 500 characters", { phase: "running", detail: "x".repeat(501) }]
+    ["a detail over 500 characters", { phase: "running", detail: "x".repeat(501) }],
+    ["more than 50 client features", { phase: "running", client_features: Array.from({ length: 51 }, (_, index) => `f${index}`) }]
   ])("should refuse %s", (_label, body) => {
     expect(statusBody.safeParse(body).success).toBe(false);
   });

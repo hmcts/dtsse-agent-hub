@@ -21,7 +21,8 @@ export async function announce(db: Database, virtualAgentId: string, ownerOid: s
  * stop the sweep decided on.
  *
  * An agent not yet stopped becomes `stopping` and loses its `status_detail`, which described the pod being stopped;
- * one already `stopped` keeps its status, its detail and when its status last changed.
+ * one already `stopped` keeps its status, its detail and when its status last changed. The pod's client-features
+ * claim goes either way, since the next boot may run another client.
  */
 export async function stopVirtualAgents(db: Database, ids: readonly string[], reason: StopReason, now: Date): Promise<{ id: string; ownerOid: string }[]> {
   if (ids.length === 0) {
@@ -30,7 +31,7 @@ export async function stopVirtualAgents(db: Database, ids: readonly string[], re
   const stopped = await db.$queryRaw<{ id: string; owner_oid: string }[]>`
     UPDATE virtual_agent
        SET desired = 'stopped', stop_reason = ${reason}::virtual_agent_stop_reason, generation = generation + 1, pod_generation = pod_generation + 1,
-           exposed_ports = '{}', local_only_ports = '{}',
+           exposed_ports = '{}', local_only_ports = '{}', client_features = NULL,
            launch_token_hash = NULL, launch_token_issued_at = NULL, apply_failures = 0,
            status = CASE WHEN status = 'stopped' THEN status ELSE 'stopping' END,
            status_detail = CASE WHEN status = 'stopped' THEN status_detail ELSE NULL END,

@@ -1,6 +1,7 @@
 /**
- * What this build of the client understands of the hub's optional wire fields, reported on every register so the hub
- * can leave out a field this build would ignore. See the Client features section of `docs/agent-api.md`.
+ * What this build of the client understands of the hub's optional wire fields, reported on every register, and on every
+ * pod status report, so the hub can leave out a field this build would ignore. See the
+ * Client features section of `docs/agent-api.md`.
  *
  * The hub and the clients talking to it are released separately, and a field a client has never heard of is not an
  * error it reports: it is dropped on the floor, and the person who caused the hub to send it reads that as success.

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { boundedArray } from "../agent-api/bounded-array.ts";
+import { clientFeatures } from "../agent-api/schemas.ts";
 import { POD_PHASES } from "./lifecycle.ts";
 import { MAX_EXPOSED_PORT, MAX_REPORTED_PORTS, MIN_EXPOSED_PORT } from "./ports.ts";
 
@@ -23,9 +24,11 @@ const optionalText = (max: number) =>
     .nullish()
     .transform((value) => (value === undefined || value === null || value === "" ? null : value));
 
+/** `client_features` is validated as a registration's is, so a pod and its sessions are held to one rule. */
 export const statusBody = z.object({
   phase: z.enum(POD_PHASES),
-  detail: optionalText(MAX_DETAIL)
+  detail: optionalText(MAX_DETAIL),
+  client_features: clientFeatures
 });
 
 export const credentialValueBody = z.object({ value: z.string() });

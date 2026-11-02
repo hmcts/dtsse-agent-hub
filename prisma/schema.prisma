@@ -440,6 +440,8 @@ model VirtualAgent {
   diskDeletedAt       DateTime?               @map("disk_deleted_at") @db.Timestamptz(6)
   /// When the owner asked it to sign in to Azure, until its pod relays that sign-in. See src/virtual-agents/logins.ts.
   azureSignInRequestedAt DateTime?            @map("azure_sign_in_requested_at") @db.Timestamptz(6)
+  /// What the client its pod booted on claimed, as `agent.clientFeatures`; null when the pod reports no claim. See `podSupports`.
+  clientFeatures      Json?                   @map("client_features")
   createdAt           DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt           DateTime                @default(now()) @map("updated_at") @db.Timestamptz(6)
 
