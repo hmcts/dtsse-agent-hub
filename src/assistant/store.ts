@@ -1,3 +1,4 @@
+import { isOwner } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
 import { clientSupports } from "../agents/client-features.ts";
 import { nameSourceOf } from "../agents/name-source.ts";
@@ -207,7 +208,7 @@ export async function findConversation(db: Database, ownerOid: string, id: strin
     return undefined;
   }
   const row = await db.assistantConversation.findUnique({ where: { id }, select: SELECT });
-  return row === null || row.ownerOid !== ownerOid ? undefined : toRow(row);
+  return row === null || !isOwner(ownerOid, row) ? undefined : toRow(row);
 }
 
 /**

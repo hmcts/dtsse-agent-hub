@@ -7,6 +7,7 @@ import { notify } from "../realtime/notify.ts";
 import { likeLiteral } from "../store/like.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { upsertUser } from "../users/store.ts";
+import { isUuid } from "./ids.ts";
 import { type NameSource, nameSourceOf } from "./name-source.ts";
 import { normaliseSkills, type Skill, skillsChanged, storedSkills } from "./skills.ts";
 
@@ -350,11 +351,7 @@ export async function searchTaggableAgents(db: Database, query: string, limit: n
   return rows.map((row) => ({ id: row.id, ownerOid: row.owner_oid, name: row.name, ownerName: row.owner_name }));
 }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-export function isUuid(value: string): boolean {
-  return UUID.test(value);
-}
+export { isUuid };
 
 export interface Candidate {
   id: string;

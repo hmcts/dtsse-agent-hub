@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { checklistState } from "@/components/virtual-agents/OnboardingChecklist";
 import { CREDENTIAL_KINDS, type CredentialKind } from "../credentials/names.ts";
 import type { CredentialStatus } from "../credentials/store.ts";
 import { type ModelRoute, modelRouteFor } from "../viewer/identity.ts";
@@ -12,6 +11,7 @@ import {
   type Connection,
   type ConnectionState,
   canSignInAgain,
+  checklistState,
   codeCollectable,
   connectionState,
   connections,

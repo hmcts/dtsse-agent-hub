@@ -25,7 +25,7 @@ import { byCodePoint } from "../../src/topics/slug.ts";
 import { dueEveningStop } from "../../src/virtual-agents/cleanup.ts";
 import { APPLY_FAILURES_BEFORE_FAILED } from "../../src/virtual-agents/lifecycle.ts";
 import { MAX_VIRTUAL_AGENTS_PER_USER } from "../../src/virtual-agents/limits.ts";
-import { completeLogin, startLogin, storePastedCode } from "../../src/virtual-agents/logins.ts";
+import { completeLogin, loginViews, startLogin, storePastedCode } from "../../src/virtual-agents/logins.ts";
 import { stopVirtualAgents } from "../../src/virtual-agents/stop.ts";
 import {
   type ClaimedVirtualAgent,
@@ -44,7 +44,7 @@ import {
   type VirtualAgentRow
 } from "../../src/virtual-agents/store.ts";
 import { startVirtualAgentSweep, sweepVirtualAgents } from "../../src/virtual-agents/sweep.ts";
-import { virtualAgentDetail } from "../../src/virtual-agents/views.ts";
+import { neededCredentials, optionalCredentials } from "../../src/virtual-agents/views.ts";
 import { connect, insertAgent, insertUser, type Person, person, prisma, resetDatabase } from "./database.ts";
 import { call, jsonOf } from "./routes.ts";
 
@@ -59,11 +59,8 @@ vi.mock("next/cache", async () => {
 
 const { actAs, revalidated } = await import("./web-session.ts");
 const actions = await import("../../src/app/_actions/virtual-agents.ts");
-const { agentActivity, agentRoute, virtualAgentPage, virtualAgentsPage } = await import("../../src/web/data.ts");
-const credentialsPage = await import("../../src/app/hub/settings/credentials/page.tsx");
+const { agentAddress, assistantAgent } = await import("../../src/web/data.ts");
 const agentsPage = await import("../../src/app/hub/agents/[id]/page.tsx");
-const oldVirtualAgentPage = await import("../../src/app/hub/virtual/[id]/page.tsx");
-const virtualHubPage = await import("../../src/app/hub/virtual/page.tsx");
 
 const SECRET = "a-test-session-secret-long-enough-to-be-plausible";
 
@@ -924,7 +921,7 @@ describe("/api/virtual/{id}/credentials/{kind}", () => {
     const found = await pod(credentialRoute.GET, token, `/api/virtual/${id}/credentials/jenkins`, { virtualAgentId: id, kind: "jenkins" });
 
     expect(await jsonOf(found)).toEqual({ value: jenkins });
-    expect((await virtualAgentDetail(prisma, ALICE.oid, id))?.optional).toEqual(["azure", "jenkins", "atlassian"]);
+    expect(optionalCredentials((await row(id)).modelRoute)).toEqual(["azure", "jenkins", "atlassian"]);
   });
 
   it("should give the pod its owner's stored credential, and 404 when there is none", async () => {
@@ -1224,10 +1221,9 @@ describe("logins", () => {
       await listener.end();
     }
     expect((await row(id)).status).toBe("awaiting_login");
-    expect((await virtualAgentDetail(prisma, ALICE.oid, id))?.logins).toEqual([
+    expect(await loginViews(prisma, id)).toEqual([
       expect.objectContaining({ kind: "github", prompt: "device_code", userCode: "ABCD-1234", state: "pending", codeWaitingUntil: null })
     ]);
-    expect(await virtualAgentDetail(prisma, BOB.oid, id)).toBeUndefined();
   });
 
   it("should hand a pasted code to the pod exactly once, keeping it sealed until then", async () => {
@@ -1242,7 +1238,7 @@ describe("logins", () => {
     });
     const sealed = await prisma.virtualAgentLogin.findFirstOrThrow();
     expect(Buffer.from(sealed.pastedCodeCiphertext!).toString("utf8")).not.toContain("pasted#code-123");
-    expect((await virtualAgentDetail(prisma, ALICE.oid, id))?.logins[0]?.codeWaitingUntil).not.toBeNull();
+    expect((await loginViews(prisma, id))[0]?.codeWaitingUntil).not.toBeNull();
 
     const first = await fetchCode(id, token, "claude");
     expect(first.status).toBe(200);
@@ -1444,7 +1440,7 @@ describe("logins", () => {
     await relayAtlassian(id, token);
     await failed(id, token, "atlassian", { state: "expired", detail: "atlassian: the sign-in code ran out before it was used" });
 
-    expect((await virtualAgentDetail(prisma, ALICE.oid, id))?.logins).toEqual([expect.objectContaining({ kind: "atlassian", state: "expired" })]);
+    expect(await loginViews(prisma, id)).toEqual([expect.objectContaining({ kind: "atlassian", state: "expired" })]);
   });
 
   it("should tell the owner's UI about a sign-in the pod gave up on", async () => {
@@ -1792,7 +1788,6 @@ describe("sweepVirtualAgents", () => {
     // The stop clears status_detail and the orchestrator's observation of the stopped set would too, so the owner
     // reads the failure off stop_detail from here on.
     expect(stopped.statusDetail).toBeNull();
-    expect((await virtualAgentDetail(prisma, ALICE.oid, agent.id))?.card).toMatchObject({ stopDetail: detail });
   });
 
   it("should leave a failed agent alone while its owner still has time to read the failure", async () => {
@@ -1884,75 +1879,116 @@ describe("sweepVirtualAgents", () => {
 });
 
 describe("the web UI's reads and actions", () => {
-  it("should create, stop, start and delete the viewer's own virtual agent through the actions", async () => {
-    actAs("alice");
-    await insertUser(ALICE);
-
-    const created = await actions.createVirtualAgent(form({ name: "pcs-api" }));
-    expect(created).toMatchObject({ ok: true, confirmation: "pcs-api is starting" });
-    const id = (created as { id: string }).id;
-
-    expect(await actions.stopVirtualAgent(form({ id }))).toEqual({ ok: true });
-    expect((await row(id)).desired).toBe("stopped");
-    expect(await actions.startVirtualAgent(form({ id }))).toEqual({ ok: true });
-    expect((await row(id)).desired).toBe("running");
-    expect(await actions.deleteVirtualAgent(form({ id }))).toEqual({ ok: true });
-    expect((await row(id)).desired).toBe("deleted");
-    expect(await actions.startVirtualAgent(form({ id }))).toMatchObject({ ok: false, error: expect.stringContaining("being deleted") });
-    expect(await actions.stopVirtualAgent(form({ id: "" }))).toEqual({ ok: false, error: "no virtual agent was named" });
+  // The Assistant's `ensureAssistant` is the one thing that creates a virtual agent, and it makes one only when the
+  // person has none, so nobody can reach the per-person limit by a path they cannot undo.
+  it("should offer the web UI no action that creates a virtual agent", () => {
+    expect(Object.keys(actions).filter((name) => /create/i.test(name))).toEqual([]);
   });
 
-  it("should refuse a create with a sentence the page shows when the viewer is at the limit", async () => {
-    actAs("alice");
-    await insertUser(ALICE);
+  it("should refuse a create with a sentence when the owner is at the limit", async () => {
     for (let index = 0; index < MAX_VIRTUAL_AGENTS_PER_USER; index += 1) {
-      await actions.createVirtualAgent(form({ name: `agent-${index}` }));
+      await create(ALICE, `agent-${index}`);
     }
 
-    expect(await actions.createVirtualAgent(form({ name: "one-more" }))).toMatchObject({
-      ok: false,
-      error: expect.stringContaining(`${MAX_VIRTUAL_AGENTS_PER_USER} virtual agents`)
-    });
-  });
-
-  it("should capture the viewer's model route when the agent is created", async () => {
-    actAs("own-licence");
-    await insertUser({ oid: "dev-own-licence", name: "Dev own-licence (sign-in disabled)", email: "own-licence@dev.invalid" });
-
-    const created = (await actions.createVirtualAgent(form({ name: "pcs-api" }))) as { id: string };
-
-    expect((await row(created.id)).modelRoute).toBe("own-licence");
-  });
-
-  it("should list the viewer only their own virtual agents, and show one with its linked agent once there is one", async () => {
-    const { id, token } = await started(ALICE, "pcs-api");
-    await create(BOB, "bobs");
-    const agentId = (await jsonOf(await register(token, "va-session-1"))).agent_id;
-    await directAsPerson(prisma, ALICE.oid, agentId, "hello");
-    const viewer = { ...ALICE, tid: "dev", modelRoute: "gateway" as const };
-
-    const list = await virtualAgentsPage(viewer);
-    const page = await virtualAgentPage(viewer, id);
-
-    expect(list.agents.map((agent) => agent.name)).toEqual(["pcs-api"]);
-    expect(page?.manage?.detail.needed).toEqual(["github", "azure"]);
-    expect(page?.manage?.detail.optional).toEqual(["jenkins", "atlassian"]);
-    expect(page?.linked?.agent.id).toBe(agentId);
-    expect((await agentActivity(viewer, page!.linked!)).conversation.messages.map((message) => message.body)).toEqual(["hello"]);
-    expect(await virtualAgentPage({ ...BOB, tid: "dev", modelRoute: "gateway" }, id)).toBeUndefined();
-    expect(await virtualAgentPage(viewer, "not-a-uuid")).toBeUndefined();
+    await expect(create(ALICE, "one-more")).rejects.toMatchObject({ message: expect.stringContaining(`${MAX_VIRTUAL_AGENTS_PER_USER} virtual agents`) });
   });
 
   it("should need the owner's Azure sign-in and no Claude token when the agent is on the gateway route", async () => {
     const agent = await create(ALICE, "pcs-api", "gateway");
 
-    expect((await virtualAgentDetail(prisma, ALICE.oid, agent.id))?.needed).toEqual(["github", "azure"]);
+    expect(neededCredentials(agent.modelRoute)).toEqual(["github", "azure"]);
   });
 
   it("should need a Claude token and no Azure sign-in when the agent is on its owner's own licence", async () => {
     const agent = await create(ALICE, "pcs-api", "own-licence");
 
-    expect((await virtualAgentDetail(prisma, ALICE.oid, agent.id))?.needed).toEqual(["github", "claude"]);
+    expect(neededCredentials(agent.modelRoute)).toEqual(["github", "claude"]);
+  });
+});
+
+/** What the Assistant's settings read and post to for the virtual agent the Assistant runs on. */
+describe("the Assistant's settings for its agent", () => {
+  const ALICE_VIEWER = { ...ALICE, tid: "dev", modelRoute: "gateway" as const };
+
+  it("should give the owner their assistant's name, state and ports, linked on the viewer under the port's prefix", async () => {
+    vi.stubEnv("AGENT_HUB_VIEWER_HOST", "agent-hub-viewer.example");
+    vi.stubEnv("ENTRA_REDIRECT_URI", "https://agent-hub.example/auth/callback");
+    const { id } = await started(ALICE, "assistant");
+    await reportPorts(prisma, id, { ports: [3000], localOnly: [5173] });
+
+    const agent = await assistantAgent(ALICE_VIEWER);
+
+    expect(agent).toMatchObject({ id, name: "assistant", desired: "running", localOnlyPorts: [5173] });
+    expect(agent?.exposedPorts).toEqual([
+      { port: 3000, url: expect.stringMatching(/^https:\/\/va-[0-9a-f]{8}-3000\./), viewerUrl: `https://agent-hub-viewer.example/${id}/3000/` }
+    ]);
+  });
+
+  it("should give nobody else anything, and the owner nothing before they have an assistant", async () => {
+    await insertUser(BOB);
+    expect(await assistantAgent({ ...BOB, tid: "dev", modelRoute: "gateway" })).toBeUndefined();
+    await started(ALICE, "assistant");
+
+    expect(await assistantAgent({ ...BOB, tid: "dev", modelRoute: "gateway" })).toBeUndefined();
+  });
+
+  it("should rename the owner's agent through the action, and answer as for no such agent when someone else tries", async () => {
+    const agent = await create(ALICE, "assistant");
+    actAs("alice");
+
+    expect(await actions.renameVirtualAgent(form({ id: agent.id, name: "mine" }))).toEqual({ ok: true, confirmation: "Renamed to mine" });
+    expect((await row(agent.id)).name).toBe("mine");
+    expect(await actions.renameVirtualAgent(form({ id: "", name: "x" }))).toEqual({ ok: false, error: "no virtual agent was named" });
+    actAs("bob");
+    expect(await actions.renameVirtualAgent(form({ id: agent.id, name: "bobs" }))).toEqual({ ok: false, error: "no such virtual agent" });
+    expect((await row(agent.id)).name).toBe("mine");
+  });
+
+  it("should clear the old pod's reported ports and its run of apply errors when the owner restarts it", async () => {
+    const { id, token } = await started(ALICE, "assistant");
+    expect((await ports(id, token, { ports: [3000], local_only: [5173] })).status).toBe(204);
+    await prisma.virtualAgent.update({ where: { id }, data: { applyFailures: APPLY_FAILURES_BEFORE_FAILED - 1 } });
+    actAs("alice");
+
+    await actions.restartVirtualAgent(form({ id }));
+
+    expect(await row(id)).toMatchObject({ exposedPorts: [], localOnlyPorts: [], applyFailures: 0 });
+    expect((await assistantAgent({ ...ALICE, tid: "dev", modelRoute: "gateway" }))?.exposedPorts).toEqual([]);
+  });
+
+  it("should replace a running agent's pod when the owner restarts it, and leave one that is not running alone", async () => {
+    const { id } = await started(ALICE, "assistant");
+    const before = await row(id);
+    actAs("alice");
+
+    expect(await actions.restartVirtualAgent(form({ id }))).toEqual({ ok: true, confirmation: "Restarting. Your chats are kept." });
+    const after = await row(id);
+    expect(after.podGeneration).toBeGreaterThan(before.podGeneration);
+    expect((await prisma.virtualAgent.findUniqueOrThrow({ where: { id }, select: { launchTokenHash: true } })).launchTokenHash).toBeNull();
+
+    await setDesired(prisma, ALICE.oid, id, "stopped");
+    const stopped = await row(id);
+    expect(await actions.restartVirtualAgent(form({ id }))).toMatchObject({ ok: true });
+    expect((await row(id)).podGeneration).toBe(stopped.podGeneration);
+  });
+
+  it("should refuse a restart of somebody else's agent as for no such agent, and change nothing", async () => {
+    const { id } = await started(ALICE, "assistant");
+    const before = await row(id);
+    await insertUser(BOB);
+    actAs("bob");
+
+    expect(await actions.restartVirtualAgent(form({ id }))).toEqual({ ok: false, error: "no such virtual agent" });
+    expect((await row(id)).podGeneration).toBe(before.podGeneration);
+  });
+
+  it("should refuse a rename and a restart with a sentence when virtual agents are off", async () => {
+    const agent = await create(ALICE, "assistant");
+    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "");
+    actAs("alice");
+
+    expect(await actions.renameVirtualAgent(form({ id: agent.id, name: "x" }))).toMatchObject({ ok: false, error: expect.stringContaining("not available") });
+    expect(await actions.restartVirtualAgent(form({ id: agent.id }))).toMatchObject({ ok: false, error: expect.stringContaining("not available") });
   });
 });
 
@@ -1980,8 +2016,7 @@ describe("with virtual agents off", () => {
   it("should refuse every action with a sentence saying so", async () => {
     actAs("alice");
 
-    expect(await actions.createVirtualAgent(form({ name: "x" }))).toMatchObject({ ok: false, error: expect.stringContaining("not available") });
-    expect(await actions.stopVirtualAgent(form({ id: "x" }))).toMatchObject({ ok: false });
+    expect(await actions.resizeVirtualAgent(form({ id: "x", size: "medium" }))).toMatchObject({ ok: false, error: expect.stringContaining("not available") });
     expect(await actions.pasteLoginCode(form({ id: "x", kind: "claude", code: "c" }))).toMatchObject({ ok: false });
   });
 
@@ -2010,14 +2045,13 @@ describe("renaming a virtual agent", () => {
     const { id, token } = await started(ALICE, "pcs-api");
     const { agent_id } = await jsonOf(await register(token, "va-session-1"));
     const before = await row(id);
-    actAs("alice");
     const listener = await connect();
     try {
       const payloads: string[] = [];
       listener.on("notification", (message) => payloads.push(message.payload ?? ""));
       await listener.query("LISTEN hub_events");
 
-      expect(await actions.renameVirtualAgent(form({ id, name: " PCS-Frontend " }))).toEqual({ ok: true, confirmation: "Renamed to pcs-frontend" });
+      await expect(renameVirtualAgent(prisma, ALICE.oid, id, " PCS-Frontend ")).resolves.toMatchObject({ name: "pcs-frontend" });
 
       await expect
         .poll(() => payloads.map((payload) => JSON.parse(payload)))
@@ -2046,11 +2080,10 @@ describe("renaming a virtual agent", () => {
 
   it("should refuse with the name rule's sentence and change nothing when the name is invalid", async () => {
     const agent = await create(ALICE, "pcs-api");
-    actAs("alice");
 
-    expect(await actions.renameVirtualAgent(form({ id: agent.id, name: "not_a name" }))).toEqual({
-      ok: false,
-      error: "a name is lowercase letters, digits and hyphens, starting and ending with a letter or digit"
+    await expect(renameVirtualAgent(prisma, ALICE.oid, agent.id, "not_a name")).rejects.toMatchObject({
+      status: 400,
+      message: "a name is lowercase letters, digits and hyphens, starting and ending with a letter or digit"
     });
     await expect(renameVirtualAgent(prisma, ALICE.oid, agent.id, "")).rejects.toMatchObject({ status: 400 });
     expect((await row(agent.id)).name).toBe("pcs-api");
@@ -2059,12 +2092,8 @@ describe("renaming a virtual agent", () => {
   it("should refuse with a sentence naming the clash when the owner already has a virtual agent of that name", async () => {
     const agent = await create(ALICE, "pcs-api");
     await create(ALICE, "jerry");
-    actAs("alice");
 
-    expect(await actions.renameVirtualAgent(form({ id: agent.id, name: "jerry" }))).toEqual({
-      ok: false,
-      error: "you already have a virtual agent called jerry"
-    });
+    await expect(renameVirtualAgent(prisma, ALICE.oid, agent.id, "jerry")).rejects.toMatchObject({ message: "you already have a virtual agent called jerry" });
     expect((await row(agent.id)).name).toBe("pcs-api");
   });
 
@@ -2077,10 +2106,8 @@ describe("renaming a virtual agent", () => {
 
   it("should answer as for no such agent and change nothing when someone other than the owner renames it", async () => {
     const agent = await create(ALICE, "pcs-api");
-    actAs("bob");
 
-    expect(await actions.renameVirtualAgent(form({ id: agent.id, name: "bobs" }))).toEqual({ ok: false, error: "no such virtual agent" });
-    expect(await actions.renameVirtualAgent(form({ id: "", name: "bobs" }))).toEqual({ ok: false, error: "no virtual agent was named" });
+    await expect(renameVirtualAgent(prisma, BOB.oid, agent.id, "bobs")).rejects.toMatchObject({ status: 404, message: "no such virtual agent" });
     expect((await row(agent.id)).name).toBe("pcs-api");
   });
 
@@ -2096,45 +2123,18 @@ describe("renaming a virtual agent", () => {
 
     await expect(renameVirtualAgent(prisma, ALICE.oid, agent.id, "PCS-API")).resolves.toMatchObject({ name: "pcs-api" });
   });
-
-  it("should refuse a rename when virtual agents are off", async () => {
-    const agent = await create(ALICE, "pcs-api");
-    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "");
-    actAs("alice");
-
-    expect(await actions.renameVirtualAgent(form({ id: agent.id, name: "jerry" }))).toMatchObject({
-      ok: false,
-      error: expect.stringContaining("not available")
-    });
-  });
-});
-
-describe("/hub/settings/credentials", () => {
-  it("should send the viewer to the credentials section of the virtual agents page when virtual agents are on", async () => {
-    actAs("alice");
-
-    await expect(credentialsPage.default()).rejects.toMatchObject({ digest: expect.stringContaining(";/hub/virtual#credentials;") });
-  });
-
-  it("should render the standalone page when virtual agents are off", async () => {
-    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "");
-    actAs("alice");
-
-    await expect(credentialsPage.default()).resolves.toBeDefined();
-  });
 });
 
 describe("a virtual agent's size", () => {
   it("should create a small agent unless another size is chosen, and refuse one that is not a size", async () => {
     await insertUser(ALICE);
-    actAs("alice");
+    const small = await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "gateway", name: "small-one" });
+    const large = await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "gateway", name: "large-one", size: "large" });
 
-    const small = (await actions.createVirtualAgent(form({ name: "small-one" }))) as { id: string };
-    const large = (await actions.createVirtualAgent(form({ name: "large-one", size: "large" }))) as { id: string };
-
-    expect((await row(small.id)).size).toBe("small");
-    expect((await row(large.id)).size).toBe("large");
-    expect(await actions.createVirtualAgent(form({ name: "huge-one", size: "huge" }))).toEqual({ ok: false, error: "a size is one of small, medium, large" });
+    expect([small.size, large.size]).toEqual(["small", "large"]);
+    await expect(createVirtualAgent(prisma, { owner: ALICE, modelRoute: "gateway", name: "huge-one", size: "huge" })).rejects.toMatchObject({
+      message: "a size is one of small, medium, large"
+    });
   });
 
   it("should change the size of an agent the orchestrator has not claimed yet, bump its generation and claim it with the new size", async () => {
@@ -2213,22 +2213,14 @@ describe("a virtual agent's plugins", () => {
   });
 
   it("should create an agent with the ticked plugins, sorted, and claim it with them", async () => {
-    await insertUser(ALICE);
-    actAs("alice");
+    const created = await createWith(["wa", "pcs"]);
 
-    const created = (await actions.createVirtualAgent(ticked({ name: "pcs-api" }, ["wa", "pcs"]))) as { id: string };
-
-    expect((await row(created.id)).plugins).toEqual(["pcs", "wa"]);
+    expect(created.plugins).toEqual(["pcs", "wa"]);
     expect((await claim()).find((entry) => entry.id === created.id)).toMatchObject({ plugins: ["pcs", "wa"] });
   });
 
   it("should create an agent with no plugins when none are ticked", async () => {
-    await insertUser(ALICE);
-    actAs("alice");
-
-    const created = (await actions.createVirtualAgent(form({ name: "pcs-api" }))) as { id: string };
-
-    expect((await row(created.id)).plugins).toEqual([]);
+    expect((await createWith([])).plugins).toEqual([]);
   });
 
   // The offer list is only read once a name is ticked, so a hub whose configuration is malformed can still create the
@@ -2248,13 +2240,7 @@ describe("a virtual agent's plugins", () => {
   });
 
   it("should refuse to create an agent with a plugin the hub does not offer, and create nothing", async () => {
-    await insertUser(ALICE);
-    actAs("alice");
-
-    expect(await actions.createVirtualAgent(ticked({ name: "pcs-api" }, ["pcs", "civil"]))).toEqual({
-      ok: false,
-      error: "civil is not a plugin this hub offers"
-    });
+    await expect(createWith(["pcs", "civil"])).rejects.toMatchObject({ message: "civil is not a plugin this hub offers" });
     expect(await prisma.virtualAgent.count()).toBe(0);
   });
 
@@ -2362,28 +2348,6 @@ describe("a virtual agent's plugins", () => {
       prisma.virtualAgent.update({ where: { id: agent.id }, data: { plugins: Array.from({ length: 21 }, (_unused, index) => `p-${index}`) } })
     ).rejects.toThrow(/virtual_agent_plugins_check/);
     await expect(prisma.virtualAgent.update({ where: { id: agent.id }, data: { plugins: { pcs: true } } })).rejects.toThrow(/virtual_agent_plugins_check/);
-  });
-
-  /*
-   * `/hub/virtual` calls `pluginOffer()` in the body of its async default export, so awaiting the page function runs
-   * it: this rejected with `PluginConfigurationError` before the offer was caught, and resolves now. Awaiting the
-   * function is the whole of what this suite can do with a page — it gets the element tree back unrendered, because
-   * rendering one would need SSR of a tree holding client components and server actions, which nothing here does.
-   *
-   * That is why `/hub/agents/{id}` has no twin of this test rather than being an omission. There `pluginOffer()` sits
-   * inside a nested, non-async `VirtualAgent` component, so an awaited page call returns a tree with it unrendered
-   * and never calls it; only a real render would reach a throw in it.
-   *
-   * The type guarantee is narrower than it looks, so it is no substitute. `plugins` being required stops the prop
-   * being left off, and `PluginOffer` being a union stops `plugins={availablePlugins()}`, but
-   * `plugins={{ ok: true, available: availablePlugins() }}` typechecks, throws, and 500s the page.
-   */
-  it("should answer /hub/virtual with the plugin fault rather than throw when the hub's plugin configuration is malformed", async () => {
-    await insertUser(ALICE);
-    actAs("alice");
-    vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "Not A Plugin Name");
-
-    await expect(virtualHubPage.default()).resolves.toBeDefined();
   });
 });
 
@@ -2510,11 +2474,12 @@ describe("PUT /api/virtual/{id}/ports", () => {
     const agent = await row(id);
     expect((await ports(id, token, { ports: [5173], local_only: [9229] })).status).toBe(204);
 
-    expect((await virtualAgentDetail(prisma, ALICE.oid, id))?.card).toMatchObject({
+    expect(await assistantAgent({ ...ALICE, tid: "dev", modelRoute: "gateway" })).toMatchObject({
       exposedPorts: [{ port: 5173, url: `https://${agent.statefulsetName}-5173.example.net` }],
       localOnlyPorts: [9229]
     });
-    expect(await virtualAgentDetail(prisma, BOB.oid, id)).toBeUndefined();
+    await insertUser(BOB);
+    expect(await assistantAgent({ ...BOB, tid: "dev", modelRoute: "gateway" })).toBeUndefined();
   });
 
   it("should refuse an unservable port list in the database too, whatever writes it", async () => {
@@ -2546,88 +2511,87 @@ describe("PUT /api/virtual/{id}/ports", () => {
   });
 });
 
+/** The hub shows no agents, so `/hub/agents/{id}` only sends the viewer on, as `retiredAgentPath` says. */
 describe("/hub/agents/{id}", () => {
-  const ALICE_VIEWER = { ...ALICE, tid: "dev", modelRoute: "gateway" as const };
-  const BOB_VIEWER = { ...BOB, tid: "dev", modelRoute: "gateway" as const };
-
   function visit(id: string): Promise<unknown> {
     return agentsPage.default({ params: Promise.resolve({ id }) });
   }
 
-  it("should show the virtual agent with its owner's controls and no session when its id is visited before a session registers", async () => {
-    const agent = await create(ALICE, "pcs-api");
+  function redirectedTo(path: string) {
+    return { digest: expect.stringContaining(`;${path};`) };
+  }
 
-    const route = await agentRoute(ALICE_VIEWER, agent.id);
-
-    expect(route).toMatchObject({ variant: "virtual", page: { summary: { id: agent.id, name: "pcs-api", agentId: null }, linked: null } });
-    expect(route?.variant === "virtual" ? route.page.manage?.detail.card.id : undefined).toBe(agent.id);
+  it("should send the owner to the Assistant's settings when a virtual agent's id is visited, before or after a session registers", async () => {
+    const { id, token } = await started(ALICE, "pcs-api");
     actAs("alice");
-    await expect(visit(agent.id)).resolves.toBeDefined();
+
+    await expect(visit(id)).rejects.toMatchObject(redirectedTo("/assistant?settings=assistant"));
+    await jsonOf(await register(token, "va-session-1"));
+    await expect(visit(id)).rejects.toMatchObject(redirectedTo("/assistant?settings=assistant"));
   });
 
-  it("should show the virtual agent's current session when a session has registered", async () => {
-    const { id, token } = await started(ALICE, "pcs-api");
-    const agentId = (await jsonOf(await register(token, "va-session-1"))).agent_id;
+  // The settings show and restart `findAssistant`'s agent, the person's oldest. Sending a later agent's address there
+  // would put the oldest agent's Restart under it, and pressing it would replace the wrong pod.
+  it("should send the owner to the Assistant itself, not its settings, when a later virtual agent of theirs or its session is visited", async () => {
+    const first = await started(ALICE, "assistant");
+    const later = await started(ALICE, "other");
+    const session = (await jsonOf(await register(later.token, "va-session-later"))).agent_id;
+    actAs("alice");
 
-    expect(await agentRoute(ALICE_VIEWER, id)).toMatchObject({ variant: "virtual", page: { linked: { agent: { id: agentId } } } });
+    await expect(visit(later.id)).rejects.toMatchObject(redirectedTo("/assistant"));
+    await expect(visit(session)).rejects.toMatchObject(redirectedTo("/assistant"));
+    await expect(visit(first.id)).rejects.toMatchObject(redirectedTo("/assistant?settings=assistant"));
+    expect(await agentAddress({ ...ALICE, tid: "dev" }, later.id)).toEqual({ kind: "virtual", assistant: false });
+    expect((await assistantAgent({ ...ALICE, tid: "dev", modelRoute: "gateway" }))?.id).toBe(first.id);
   });
 
-  it("should redirect to the virtual agent when a session it registered is visited, including one a /clear superseded", async () => {
-    const { id, token } = await started(ALICE, "pcs-api");
+  it("should send the owner to the Assistant's settings when a session a virtual agent registered is visited, including one a /clear superseded", async () => {
+    const { token } = await started(ALICE, "pcs-api");
     const first = (await jsonOf(await register(token, "va-session-1"))).agent_id;
     const second = (await jsonOf(await register(token, "va-session-2"))).agent_id;
     actAs("alice");
 
-    expect(await agentRoute(ALICE_VIEWER, first)).toEqual({ variant: "moved", to: `/hub/agents/${id}` });
-    await expect(visit(first)).rejects.toMatchObject({ digest: expect.stringContaining(`;/hub/agents/${id};`) });
-    await expect(visit(second)).rejects.toMatchObject({ digest: expect.stringContaining(`;/hub/agents/${id};`) });
-    expect(await agentRoute(ALICE_VIEWER, id)).toMatchObject({ variant: "virtual", page: { linked: { agent: { id: second } } } });
+    await expect(visit(first)).rejects.toMatchObject(redirectedTo("/assistant?settings=assistant"));
+    await expect(visit(second)).rejects.toMatchObject(redirectedTo("/assistant?settings=assistant"));
   });
 
-  it("should show an agent as itself when no virtual agent registered it", async () => {
+  it("should send the owner to the hub's home when a laptop agent with no chat is visited", async () => {
     const laptop = await insertAgent(ALICE, "laptop");
     actAs("alice");
 
-    expect(await agentRoute(ALICE_VIEWER, laptop)).toMatchObject({ variant: "local", view: { agent: { id: laptop, virtualAgentId: null } } });
-    await expect(visit(laptop)).resolves.toBeDefined();
+    await expect(visit(laptop)).rejects.toMatchObject(redirectedTo("/hub"));
   });
 
-  it("should answer not found when a stranger visits a virtual agent, its session, or an id that is nothing", async () => {
+  it("should send a stranger to the hub's home, whether the id is a virtual agent, its session or nothing", async () => {
     const { id, token } = await started(ALICE, "pcs-api");
     const agentId = (await jsonOf(await register(token, "va-session-1"))).agent_id;
     await insertUser(BOB);
     actAs("bob");
 
     for (const visited of [id, agentId, "0f8a6a1e-0000-4000-8000-00000000dead", "not-a-uuid"]) {
-      expect(await agentRoute(BOB_VIEWER, visited)).toBeUndefined();
-      await expect(visit(visited)).rejects.toMatchObject({ digest: expect.stringContaining("404") });
+      expect(await agentAddress({ ...BOB, tid: "dev" }, visited)).toEqual({ kind: "none" });
+      await expect(visit(visited)).rejects.toMatchObject(redirectedTo("/hub"));
     }
   });
 
-  it("should show a virtual agent's session as itself, and its id as not found, when virtual agents are off", async () => {
+  it("should send everyone to the hub's home when virtual agents are off", async () => {
     const { id, token } = await started(ALICE, "pcs-api");
     const agentId = (await jsonOf(await register(token, "va-session-1"))).agent_id;
     vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "");
+    actAs("alice");
 
-    expect(await agentRoute(ALICE_VIEWER, agentId)).toMatchObject({ variant: "local", view: { agent: { id: agentId, virtualAgentId: null } } });
-    expect(await agentRoute(ALICE_VIEWER, id)).toBeUndefined();
+    await expect(visit(id)).rejects.toMatchObject(redirectedTo("/hub"));
+    await expect(visit(agentId)).rejects.toMatchObject(redirectedTo("/hub"));
   });
 
-  it("should redirect the old virtual agent address to /hub/agents/{id} when it is visited", async () => {
-    const agent = await create(ALICE, "pcs-api");
-
-    await expect(oldVirtualAgentPage.default({ params: Promise.resolve({ id: agent.id }) })).rejects.toMatchObject({
-      digest: expect.stringContaining(`;/hub/agents/${agent.id};`)
-    });
-  });
-
-  it("should revalidate the virtual agent's page at /agents/{id} when an action changes it", async () => {
+  it("should revalidate the Assistant's pages, and no agent page, when an action changes a virtual agent", async () => {
     const agent = await create(ALICE, "pcs-api");
     actAs("alice");
 
-    await actions.stopVirtualAgent(form({ id: agent.id }));
+    await actions.resizeVirtualAgent(form({ id: agent.id, size: "medium" }));
 
-    expect(revalidated).toEqual(expect.arrayContaining(["/hub/virtual", `/hub/agents/${agent.id}`]));
+    expect(revalidated).toContain("/assistant");
+    expect(revalidated.some((path) => path.startsWith("/hub/agents"))).toBe(false);
   });
 });
 

@@ -172,7 +172,7 @@ function Item({ item, answerQuestion, repoBase }: { item: ThreadItem; answerQues
   if (item.type === "question") {
     return (
       <li>
-        <QuestionCard view={item.question} tone="assistant" answer={answerQuestion} />
+        <QuestionCard view={item.question} answer={answerQuestion} />
       </li>
     );
   }

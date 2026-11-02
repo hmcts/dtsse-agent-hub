@@ -11,7 +11,8 @@ export const dynamic = "force-dynamic";
  * A question this session's model asked with `AskUserQuestion`, which the client's `PreToolUse` hook intercepted
  * because nobody is at that keyboard. The owner reads it as a card in the chat and answers with an ordinary message.
  *
- * Any agent's, not a conversation's alone: an owner watching a pod agent's page gets the same card there.
+ * Any agent's, not a pod conversation's alone, since the hook runs in every session; the card shows in that agent's
+ * chat in the Assistant.
  *
  * `204` covers two of `recordQuestion`'s three outcomes — the question written, and the same question posted again,
  * which is already on screen. Both mean the hook may tell the model to wait for an answer. The third refuses with

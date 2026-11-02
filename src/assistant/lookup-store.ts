@@ -1,4 +1,4 @@
-import { canLookUpAtlassian } from "../access/rules.ts";
+import { canManageVirtualAgent } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
 import { clientSupports } from "../agents/client-features.ts";
 import { isUuid } from "../agents/store.ts";
@@ -41,7 +41,7 @@ export type Asked = { lookupId: string; virtualAgentId: string } | { answer: Loo
  */
 export async function askLookup(prisma: PrismaClient, question: LookupQuestion, now: Date = new Date()): Promise<Asked> {
   const assistant = await findAssistant(prisma, question.viewerOid);
-  if (assistant === undefined || !canLookUpAtlassian(question.viewerOid, assistant)) {
+  if (assistant === undefined || !canManageVirtualAgent(question.viewerOid, assistant)) {
     throw new HttpError(404, "you have no assistant to search with yet");
   }
   if (assistant.desired === "stopped") {

@@ -1,4 +1,4 @@
-import { canManageCredential } from "../access/rules.ts";
+import { isOwner } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
@@ -55,7 +55,7 @@ export function ownerRefusal(store: SecretStore, ownerOid: string): HttpError | 
 }
 
 function checkTarget(store: SecretStore, { actorOid, ownerOid }: CredentialTarget): void {
-  if (!canManageCredential(actorOid, ownerOid)) {
+  if (!isOwner(actorOid, { ownerOid })) {
     throw new HttpError(403, "you can only change your own credentials");
   }
   const refusal = ownerRefusal(store, ownerOid);

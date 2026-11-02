@@ -1,4 +1,4 @@
-import { canUseWelsh } from "../access/rules.ts";
+import { isOwner } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
 import { clientSupports } from "../agents/client-features.ts";
 import { isUuid } from "../agents/store.ts";
@@ -45,13 +45,13 @@ export type AskedWelsh = { jobId: string; virtualAgentId: string } | { answer: W
  */
 export async function askWelsh(prisma: PrismaClient, question: WelshQuestion, now: Date = new Date()): Promise<AskedWelsh> {
   const assistant = await findAssistant(prisma, question.viewerOid);
-  if (assistant === undefined || !canUseWelsh(question.viewerOid, assistant)) {
+  if (assistant === undefined || !isOwner(question.viewerOid, assistant)) {
     throw new HttpError(404, "you have no assistant to run that with yet");
   }
   const files = await Promise.all(
     fileIdsOf(question.args).map((id) => prisma.assistantWelshFile.findUnique({ where: { id }, select: { ownerOid: true, jobId: true } }))
   );
-  if (files.some((file) => file === null || file.ownerOid !== question.viewerOid || file.jobId !== null)) {
+  if (files.some((file) => file === null || !isOwner(question.viewerOid, file) || file.jobId !== null)) {
     throw new HttpError(404, "that spreadsheet is not there any more; upload it again");
   }
   if (assistant.desired === "stopped") {
@@ -106,7 +106,7 @@ export async function readWelsh(db: Database, viewerOid: string, jobId: string, 
       files: { select: { id: true, name: true, createdAt: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] }
     }
   });
-  if (row === null || !canUseWelsh(viewerOid, row.virtualAgent)) {
+  if (row === null || !isOwner(viewerOid, row.virtualAgent)) {
     return undefined;
   }
   const sizes = row.files.length
@@ -242,7 +242,7 @@ export async function putJobFile(
 /** A spreadsheet the viewer uploaded for a job to read: a Welsh Language Unit return. */
 export async function saveUpload(prisma: PrismaClient, viewerOid: string, name: string, bytes: Uint8Array, now: Date = new Date()): Promise<string> {
   const assistant = await findAssistant(prisma, viewerOid);
-  if (assistant === undefined || !canUseWelsh(viewerOid, assistant)) {
+  if (assistant === undefined || !isOwner(viewerOid, assistant)) {
     throw new HttpError(404, "you have no assistant to run that with yet");
   }
   if (bytes.length === 0 || bytes.length > MAX_WELSH_FILE_BYTES) {
@@ -261,7 +261,7 @@ export async function ownerFile(db: Database, viewerOid: string, fileId: string)
     return undefined;
   }
   const row = await db.assistantWelshFile.findUnique({ where: { id: fileId }, select: { ownerOid: true, name: true, bytes: true } });
-  return row === null || row.ownerOid !== viewerOid ? undefined : { name: row.name, bytes: row.bytes };
+  return row === null || !isOwner(viewerOid, row) ? undefined : { name: row.name, bytes: row.bytes };
 }
 
 /** A file the owner uploaded, for their own pod to read before it runs a job; nothing a job made, and nobody else's. */
@@ -274,7 +274,7 @@ export async function podFile(
     return undefined;
   }
   const row = await db.assistantWelshFile.findUnique({ where: { id: fileId }, select: { ownerOid: true, jobId: true, name: true, bytes: true } });
-  return row === null || row.ownerOid !== virtualAgent.ownerOid || row.jobId !== null ? undefined : { name: row.name, bytes: row.bytes };
+  return row === null || !isOwner(virtualAgent.ownerOid, row) || row.jobId !== null ? undefined : { name: row.name, bytes: row.bytes };
 }
 
 /** What the sessions stream sends the pod for one job. */

@@ -2,29 +2,19 @@ import { expect, test } from "@playwright/test";
 import { asPersona, registerAgent, unique } from "./hub";
 
 test.describe("sidebar @regression", () => {
-  test("should show seven whole agent rows and scroll the rest when there are more @regression", async ({ browser, baseURL, request }) => {
+  // The hub shows no agents: the people who registered some are the ones a roster would have listed.
+  test("should list no agents when the person has registered some @regression", async ({ browser, baseURL, request }) => {
     const persona = unique("roster");
-    const agents = [];
-    for (let index = 0; index < 9; index++) {
-      agents.push(await registerAgent(request, persona, unique(`agent${index}`)));
-    }
-    test.skip(agents.includes(undefined), "this deployment checks real agent tokens, so the suite cannot register an agent");
+    const agent = await registerAgent(request, persona, unique("agent"));
+    test.skip(agent === undefined, "this deployment checks real agent tokens, so the suite cannot register an agent");
 
     const context = await asPersona(browser, persona, baseURL!);
     try {
       const page = await context.newPage();
-      await page.setViewportSize({ width: 1280, height: 1000 });
       await page.goto("/hub");
-      const list = page.getByRole("complementary", { name: "Sidebar" }).getByRole("list", { name: "Agents" });
-      await expect(list.getByRole("link")).toHaveCount(9);
-
-      const row = await list
-        .getByRole("link")
-        .first()
-        .evaluate((link) => link.getBoundingClientRect().height);
-      const { visible, total } = await list.evaluate((element) => ({ visible: element.clientHeight, total: element.scrollHeight }));
-      expect(visible).toBe(row * 7);
-      expect(total).toBe(row * 9);
+      await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
+      await expect(page.getByRole("list", { name: "Agents" })).toHaveCount(0);
+      await expect(page.locator(`a[href^="/hub/agents/"]`)).toHaveCount(0);
     } finally {
       await context.close();
     }

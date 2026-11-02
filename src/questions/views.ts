@@ -52,10 +52,10 @@ function toView(row: Row, now: Date): QuestionView {
 /**
  * The questions one agent's sessions asked, oldest first, for a viewer who may read that agent's transcript.
  *
- * `canViewTranscript` rather than `canViewAgent`: a question is the model's own words, as a transcript entry is, and
+ * `canViewTranscript` rather than `isOwner`: a question is the model's own words, as a transcript entry is, and
  * that rule exists so who may read those can be narrowed without changing who may see the agent — which is the seam
  * to reach for if a question ever has to be shown to someone a session itself is not. Answering one is a separate
- * decision, made in `src/app/_actions/questions.ts` with `canPersonMessageAgent`.
+ * decision, made in `src/app/_actions/questions.ts` with `isOwner`.
  *
  * At most `MAX_SHOWN_QUESTIONS`, the newest kept: the transcript beside this is paginated and these are not, so a
  * long-lived conversation would otherwise carry every card it had ever been asked on every load. The read is

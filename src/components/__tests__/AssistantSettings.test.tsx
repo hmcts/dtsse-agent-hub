@@ -30,7 +30,11 @@ import type { LoginState, LoginView } from "@/virtual-agents/logins";
 import { neededCredentials, optionalCredentials } from "@/virtual-agents/views";
 
 const refresh = vi.fn();
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }), usePathname: () => "/assistant" }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh }),
+  usePathname: () => "/assistant",
+  useSearchParams: () => new URLSearchParams(window.location.search)
+}));
 vi.mock("@/components/live/HubStream", () => ({
   useHubEvent: () => undefined,
   useEndSession: () => () => undefined

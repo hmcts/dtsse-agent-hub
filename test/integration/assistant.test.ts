@@ -59,7 +59,7 @@ vi.mock("next/cache", async () => {
 
 const { actAs } = await import("./web-session.ts");
 const actions = await import("../../src/app/_actions/assistant.ts");
-const { agentRoute, assistantConversation, assistantModel, openAssistant } = await import("../../src/web/data.ts");
+const { agentAddress, assistantConversation, assistantModel, openAssistant } = await import("../../src/web/data.ts");
 
 const ALICE: Person = { oid: "dev-alice", name: "Dev alice (sign-in disabled)", email: "alice@dev.invalid" };
 const BOB: Person = { oid: "dev-bob", name: "Dev bob (sign-in disabled)", email: "bob@dev.invalid" };
@@ -435,12 +435,13 @@ describe("conversations", () => {
     expect((await jsonOf(listed)).agents.map((agent: { id: string }) => agent.id)).not.toContain(agentId);
   });
 
-  it("should send the hub's agent page for a conversation's agent to the conversation", async () => {
+  it("should send the hub's agent page for a conversation's agent to the conversation when its owner opens it", async () => {
     await startedAssistant();
     const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
     const { agentId } = await sessionOf(id);
 
-    expect(await agentRoute(VIEWER, agentId)).toEqual({ variant: "moved", to: `/assistant/${id}` });
+    expect(await agentAddress(VIEWER, agentId)).toEqual({ kind: "chat", conversationId: id });
+    expect(await agentAddress({ ...BOB, tid: "dev" }, agentId)).toEqual({ kind: "none" });
   });
 
   it("should show only the owner their conversation, and nobody else", async () => {
@@ -1113,11 +1114,9 @@ describe("the sessions stream and report", () => {
     await register(token, sessionId, id, { clientFeatures: ["stop"] });
     await pod(heartbeatRoute.POST, token, `/api/agent/${agentId}/heartbeat`, { agentId }, "POST", { status: "busy" });
     await insertUser(BOB);
-    // The refusal comes from the owner-scoped read rather than from `canStopAssistantAnswer`, which the action names
-    // after it and `rules.test.ts` covers; this is the end of it that the person would meet.
     actAs("bob");
 
-    expect(await actions.stopAssistantAnswer({ conversationId: id })).toMatchObject({ ok: false });
+    expect(await actions.stopAssistantAnswer({ conversationId: id })).toEqual({ ok: false, error: "that conversation no longer exists" });
     actAs("alice");
     expect((await assistantConversation(VIEWER, id))?.stopHistory).toEqual([]);
   });

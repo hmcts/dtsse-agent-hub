@@ -1,10 +1,10 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AgentView } from "../../src/agents/views.ts";
 import { saveChannel } from "../../src/channels/store.ts";
 import { createDirect, createPost } from "../../src/messages/store.ts";
 import { byCodePoint } from "../../src/topics/slug.ts";
+import { agentConversation } from "../../src/transcripts/views.ts";
 import type { Identity } from "../../src/users/identity.ts";
-import { agentActivity, agentRoute, channel, messagePage, overview, pluginOffer, sidebarData, topics as topicList } from "../../src/web/data.ts";
+import { agentAddress, channel, messagePage, overview, pluginOffer, sidebarData, topics as topicList } from "../../src/web/data.ts";
 import { insertAgent, insertUser, type Person, prisma, resetDatabase } from "./database.ts";
 
 const ALICE = { oid: "oid-alice", name: "Alice", email: "alice@example.com" };
@@ -12,12 +12,6 @@ const BOB = { oid: "oid-bob", name: "Bob", email: "bob@example.com" };
 const CAROL = { oid: "oid-carol", name: "Carol", email: "carol@example.com" };
 
 const viewer = (who: Person): Identity => ({ ...who, tid: "dev" });
-
-/** The agent `who` sees on `/hub/agents/{id}`, when it is an agent shown as itself. */
-async function agentPage(who: Person, id: string): Promise<AgentView | undefined> {
-  const route = await agentRoute({ ...viewer(who), modelRoute: "gateway" }, id);
-  return route?.variant === "local" ? route.view : undefined;
-}
 
 let alicesAgent: string;
 let carolsAgent: string;
@@ -34,18 +28,15 @@ afterAll(async () => {
 });
 
 describe("sidebarData", () => {
-  // A channel can still be shared; an agent cannot, so the roster is the viewer's own sessions and nothing else.
-  it("should list only the viewer's own agents, with own and shared channels", async () => {
+  it("should list the viewer's own channels and the shared ones of others", async () => {
     await saveChannel(prisma, ALICE.oid, { name: "shared one", topics: ["a"], match: "any", shared: true });
     await saveChannel(prisma, ALICE.oid, { name: "private one", topics: ["a"], match: "any", shared: false });
     await saveChannel(prisma, BOB.oid, { name: "bobs", topics: ["b"], match: "all", shared: false });
 
     const bob = await sidebarData(viewer(BOB));
 
-    expect(bob.agents).toEqual([]);
     expect(bob.channels.mine.map((entry) => entry.name)).toEqual(["bobs"]);
     expect(bob.channels.shared.map((entry) => entry.name)).toEqual(["shared one"]);
-    expect((await sidebarData(viewer(ALICE))).agents.map((agent) => agent.id)).toEqual([alicesAgent]);
   });
 
   it("should list the topics with the most posts this week first, and leave out those quiet all week", async () => {
@@ -102,25 +93,20 @@ describe("channel", () => {
   });
 });
 
-describe("agentRoute for an agent shown as itself", () => {
-  // An agent's page is its owner's. Nobody else gets one, and an id that is not theirs reads the same as one that
-  // does not exist and as one that is not a UUID.
-  it("should give the owner the page and everyone else nothing", async () => {
-    expect((await agentPage(ALICE, alicesAgent))?.agent.id).toBe(alicesAgent);
-    expect(await agentPage(BOB, alicesAgent)).toBeUndefined();
-    expect(await agentPage(BOB, carolsAgent)).toBeUndefined();
-    expect(await agentPage(BOB, "00000000-0000-0000-0000-000000000000")).toBeUndefined();
-    expect(await agentPage(BOB, "nope")).toBeUndefined();
+describe("agentAddress", () => {
+  // The hub shows no agents, so an agent on a laptop with no chat is nowhere to send anyone, its owner included. An
+  // id that is somebody else's reads the same as one that does not exist and as one that is not a UUID.
+  it("should name nothing for a laptop agent with no chat, whoever asks", async () => {
+    expect(await agentAddress(viewer(ALICE), alicesAgent)).toEqual({ kind: "none" });
+    expect(await agentAddress(viewer(BOB), alicesAgent)).toEqual({ kind: "none" });
+    expect(await agentAddress(viewer(BOB), carolsAgent)).toEqual({ kind: "none" });
+    expect(await agentAddress(viewer(BOB), "00000000-0000-0000-0000-000000000000")).toEqual({ kind: "none" });
+    expect(await agentAddress(viewer(BOB), "nope")).toEqual({ kind: "none" });
   });
+});
 
-  it("should offer the agent's skills to its owner, who is the only one with a page to offer them on", async () => {
-    const skills = [{ name: "cft-explain", description: "Explain a CFT topic" }];
-    await prisma.agent.update({ where: { id: alicesAgent }, data: { skills } });
-
-    expect((await agentPage(ALICE, alicesAgent))?.skills).toEqual(skills);
-  });
-
-  it("should show the thread both ways with delivery state", async () => {
+describe("agentConversation", () => {
+  it("should show the owner the thread both ways with delivery state", async () => {
     const incoming = await createDirect(prisma, { author: { oid: ALICE.oid, agentId: null }, targetAgentId: alicesAgent, inReplyTo: null, body: "to it" });
     await createDirect(prisma, { author: { oid: ALICE.oid, agentId: alicesAgent }, targetAgentId: carolsAgent, inReplyTo: null, body: "to carol's agent" });
     await createDirect(prisma, {
@@ -129,16 +115,14 @@ describe("agentRoute for an agent shown as itself", () => {
       inReplyTo: BigInt(incoming.id),
       body: "reply to alice"
     });
-    await createPost(prisma, { author: { oid: ALICE.oid, agentId: alicesAgent }, topics: ["a"], title: null, body: "a post", inReplyTo: null });
 
-    const owner = await agentActivity(viewer(ALICE), (await agentPage(ALICE, alicesAgent))!);
+    const owner = await agentConversation(prisma, ALICE.oid, { id: alicesAgent, ownerOid: ALICE.oid });
 
-    expect(owner.conversation.messages.map((message) => [message.body, message.delivery])).toEqual([
+    expect(owner.messages.map((message) => [message.body, message.delivery])).toEqual([
       ["to it", "queued"],
       ["to carol's agent", "queued"],
       ["reply to alice", null]
     ]);
-    expect(owner.posts.map((message) => message.body)).toEqual(["a post"]);
   });
 });
 

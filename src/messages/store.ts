@@ -116,10 +116,10 @@ export interface NewDirect {
  * Writes a direct message and, when it targets an agent, the queued delivery its stream will send.
  *
  * A direct to or from a conversation's agent is something said in that conversation, and can be the first thing: a
- * pod chat's first message, or another of the person's sessions, or the person on the agent's page in the hub,
- * writing to a laptop session nobody has typed in yet. The sidebar leaves a chat out until something is in it, so the
- * write records its first content (`announceFirstContent`) and announces the chat the first time. One indexed update
- * per direct, which writes nothing once the chats it reaches have content.
+ * pod chat's first message, or another of the person's sessions writing to a laptop session nobody has typed in yet.
+ * The sidebar leaves a chat out until something is in it, so the write records its first content
+ * (`announceFirstContent`) and announces the chat the first time. One indexed update per direct, which writes nothing
+ * once the chats it reaches have content.
  */
 export async function createDirect(prisma: PrismaClient, direct: NewDirect): Promise<ApiMessage> {
   const id = await prisma.$transaction(async (tx) => {

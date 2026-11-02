@@ -1,4 +1,4 @@
-import { type AgentRef, canReadMessage, canSeeAgentSkills, canViewAgent, canViewTranscript, canViewVirtualAgent } from "../access/rules.ts";
+import { type AgentRef, canReadMessage, canViewTranscript, isOwner } from "../access/rules.ts";
 import type { LoadedThreadMessage } from "../messages/direct-thread.ts";
 import type { Match, PostScope } from "../messages/feed.ts";
 import type { ApiMessage } from "../messages/shape.ts";
@@ -93,7 +93,7 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
       return sseEvent({ id: message.id, event: "post", data: JSON.stringify({ message }) });
     }
     case "agent_status": {
-      if (!canViewAgent(sources.viewerOid, { id: event.agent_id, ownerOid: event.owner_oid })) {
+      if (!isOwner(sources.viewerOid, { ownerOid: event.owner_oid })) {
         return undefined;
       }
       return sseEvent({ event: "agent_status", data: JSON.stringify({ agent_id: event.agent_id, status: event.status }) });
@@ -103,7 +103,7 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
       if (agent === null || (event.target_agent_id !== agent.id && event.author_agent_id !== agent.id)) {
         return undefined;
       }
-      if (!canViewAgent(sources.viewerOid, agent)) {
+      if (!isOwner(sources.viewerOid, agent)) {
         return undefined;
       }
       const loaded = await sources.direct(BigInt(event.message_id));
@@ -114,7 +114,7 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
     }
     case "delivery": {
       const agent = watch.agent;
-      if (agent === null || event.agent_id !== agent.id || !canViewAgent(sources.viewerOid, agent)) {
+      if (agent === null || event.agent_id !== agent.id || !isOwner(sources.viewerOid, agent)) {
         return undefined;
       }
       return sseEvent({ event: "delivery", data: JSON.stringify({ message_id: event.message_id, state: event.state }) });
@@ -128,14 +128,14 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
     }
     case "agent_skills": {
       const agent = watch.agent;
-      if (agent === null || event.agent_id !== agent.id || !canSeeAgentSkills(sources.viewerOid, agent)) {
+      if (agent === null || event.agent_id !== agent.id || !isOwner(sources.viewerOid, agent)) {
         return undefined;
       }
       return sseEvent({ event: "agent_skills", data: JSON.stringify({ agent_id: event.agent_id }) });
     }
     case "agent_question": {
       const agent = watch.agent;
-      if (agent === null || event.agent_id !== agent.id || !canViewAgent(sources.viewerOid, agent)) {
+      if (agent === null || event.agent_id !== agent.id || !isOwner(sources.viewerOid, agent)) {
         return undefined;
       }
       return sseEvent({ event: "agent_question", data: JSON.stringify({ agent_id: event.agent_id }) });
@@ -145,13 +145,13 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
     case "tagged_post":
       return undefined;
     case "credential":
-      return event.owner_oid === sources.viewerOid ? RESYNC : undefined;
+      return isOwner(sources.viewerOid, { ownerOid: event.owner_oid }) ? RESYNC : undefined;
     case "virtual_agent":
-      return canViewVirtualAgent(sources.viewerOid, { id: event.virtual_agent_id, ownerOid: event.owner_oid })
+      return isOwner(sources.viewerOid, { ownerOid: event.owner_oid })
         ? sseEvent({ event: "virtual_agent", data: JSON.stringify({ virtual_agent_id: event.virtual_agent_id }) })
         : undefined;
     case "assistant_conversation":
-      return event.owner_oid === sources.viewerOid
+      return isOwner(sources.viewerOid, { ownerOid: event.owner_oid })
         ? sseEvent({ event: "assistant_conversation", data: JSON.stringify({ conversation_id: event.conversation_id }) })
         : undefined;
     // Never sent to a browser: it is an instruction to the conversation's pod. The stop is recorded on the
