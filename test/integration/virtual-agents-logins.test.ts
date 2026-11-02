@@ -432,42 +432,96 @@ describe("signing in again", () => {
     return (await jsonOf(response)).requested;
   }
 
-  it("should tell no pod an Azure sign-in was asked for when the owner has not asked", async () => {
-    const { id, token } = await started(ALICE, "pcs-api");
-
-    expect(await requested(id, token, "azure")).toBe(false);
-  });
-
-  it("should restart the agent and tell its new pod the owner asked for Azure when the owner connects Azure", async () => {
-    const { id } = await started(ALICE, "pcs-api");
-
-    actAs("alice");
-    expect(await actions.reconnectSignIn(form({ id, kind: "azure" }))).toEqual({ ok: true, confirmation: "pcs-api is restarting to sign in to Azure again" });
-
-    expect(await row(id)).toMatchObject({ desired: "running", status: "provisioning" });
-    const claimed = (await claim()).find((entry) => entry.id === id);
-    const token = claimed!.launch_token!;
-    expect(await requested(id, token, "azure")).toBe(true);
-    // Only Azure is made on request; every other kind a pod relays whenever it has none.
-    expect(await requested(id, token, "github")).toBe(false);
-  });
-
-  it("should spend the Azure request once its pod relays the sign-in", async () => {
-    const { id } = await started(ALICE, "pcs-api");
-    actAs("alice");
-    await actions.reconnectSignIn(form({ id, kind: "azure" }));
-    const token = (await claim()).find((entry) => entry.id === id)!.launch_token!;
-
-    const relayed = await pod(loginRoute.POST, token, `/api/virtual/${id}/login/azure`, { virtualAgentId: id, kind: "azure" }, "POST", {
+  function relayAzure(id: string, token: string): Promise<Response> {
+    return pod(loginRoute.POST, token, `/api/virtual/${id}/login/azure`, { virtualAgentId: id, kind: "azure" }, "POST", {
       prompt: "device_code",
       verification_uri: "https://microsoft.com/devicelogin",
       user_code: "ABCDEFGHI",
       expires_in: 900
     });
+  }
 
-    expect(relayed.status).toBe(204);
+  it("should tell no pod an Azure sign-in was asked for when the owner has not asked on their own licence", async () => {
+    const { id, token } = await started(ALICE, "pcs-api", "own-licence");
+
+    expect(await requested(id, token, "azure")).toBe(false);
+  });
+
+  it("should tell a gateway pod to relay Azure when the owner has not asked and has none stored", async () => {
+    const { id, token } = await started(ALICE, "pcs-api", "gateway");
+
+    expect(await requested(id, token, "azure")).toBe(true);
+    expect(await requested(id, token, "github")).toBe(false);
+  });
+
+  it("should tell a gateway pod to relay Azure when one is stored, because it asks only once that one has failed to restore", async () => {
+    const { id, token } = await started(ALICE, "pcs-api", "gateway");
+    await putCredential(prisma, localStore(), { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "azure", value: AZURE, via: "pod" });
+
+    expect(await requested(id, token, "azure")).toBe(true);
+  });
+
+  it.each(["own-licence", "gateway"] as const)(
+    "should restart the agent and tell its new pod the owner asked for Azure when the owner connects Azure on %s",
+    async (route) => {
+      const { id } = await started(ALICE, "pcs-api", route);
+
+      actAs("alice");
+      expect(await actions.reconnectSignIn(form({ id, kind: "azure" }))).toEqual({ ok: true, confirmation: "pcs-api is restarting to sign in to Azure again" });
+
+      expect(await row(id)).toMatchObject({ desired: "running", status: "provisioning" });
+      expect((await prisma.virtualAgent.findUniqueOrThrow({ where: { id } })).azureSignInRequestedAt).not.toBeNull();
+      const claimed = (await claim()).find((entry) => entry.id === id);
+      const token = claimed!.launch_token!;
+      expect(await requested(id, token, "azure")).toBe(true);
+      // Only Azure is made on request; every other kind a pod relays whenever it has none.
+      expect(await requested(id, token, "github")).toBe(false);
+    }
+  );
+
+  it("should spend the Azure request once its pod relays the sign-in on their own licence", async () => {
+    const { id } = await started(ALICE, "pcs-api", "own-licence");
+    actAs("alice");
+    await actions.reconnectSignIn(form({ id, kind: "azure" }));
+    const token = (await claim()).find((entry) => entry.id === id)!.launch_token!;
+
+    expect((await relayAzure(id, token)).status).toBe(204);
     expect(await requested(id, token, "azure")).toBe(false);
     expect((await row(id)).status).toBe("awaiting_login");
+  });
+
+  it("should go on telling a gateway pod to relay Azure after one relay, so its next boot relays again", async () => {
+    const { id, token } = await started(ALICE, "pcs-api", "gateway");
+
+    expect((await relayAzure(id, token)).status).toBe(204);
+    expect((await prisma.virtualAgent.findUniqueOrThrow({ where: { id } })).azureSignInRequestedAt).toBeNull();
+    expect(await requested(id, token, "azure")).toBe(true);
+  });
+
+  it("should keep the stored credential but still ask and restart when the owner connects with keep=stored", async () => {
+    const { id } = await started(ALICE, "pcs-api", "own-licence");
+    await putCredential(prisma, localStore(), { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "azure", value: AZURE, via: "pod" });
+    const before = await row(id);
+
+    actAs("alice");
+    expect(await actions.reconnectSignIn(form({ id, kind: "azure", keep: "stored" }))).toEqual({
+      ok: true,
+      confirmation: "pcs-api is restarting to sign in to Azure again"
+    });
+
+    expect(await readCredential(prisma, localStore(), ALICE.oid, "azure")).toBe(AZURE);
+    expect((await prisma.virtualAgent.findUniqueOrThrow({ where: { id } })).azureSignInRequestedAt).not.toBeNull();
+    expect(await row(id)).toMatchObject({ desired: "running", status: "provisioning", generation: before.generation + 1 });
+  });
+
+  it("should delete the stored credential when the owner connects without keep=stored", async () => {
+    const { id } = await started(ALICE, "pcs-api", "own-licence");
+    await putCredential(prisma, localStore(), { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "azure", value: AZURE, via: "pod" });
+
+    actAs("alice");
+    await actions.reconnectSignIn(form({ id, kind: "azure", keep: "nothing" }));
+
+    expect(await readCredential(prisma, localStore(), ALICE.oid, "azure")).toBeUndefined();
   });
 
   it("should keep the Azure request for its next start when the owner connects Azure on a stopped agent", async () => {

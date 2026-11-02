@@ -148,8 +148,8 @@ function connectWords(name: string, stored: boolean, running: boolean): { questi
 }
 
 /**
- * Connecting a sign-in made on request. Its pod relays one only once asked, and only as it starts, so connecting is
- * `reconnectSignIn`: record the ask and restart. Behind a confirmation because the restart ends whatever the
+ * Connecting a sign-in made on request. Its pod relays one only as it starts, and off the `gateway` route only once
+ * asked, so connecting is `reconnectSignIn`: record the ask and restart. Behind a confirmation because the restart ends whatever the
  * assistant is doing, and because a lapsed sign-in with a value saved deletes the one all their agents use. The code
  * then arrives where every relayed code does, above the chats.
  */

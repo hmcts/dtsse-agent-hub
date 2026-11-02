@@ -98,12 +98,14 @@ session, and nothing else.
 
 An Azure sign-in (`azure`) is optional on `own_licence` and needed on `gateway`. It lets Claude run `az` as the owner — pipelines,
 environments, AKS, Key Vault and the workspace scripts that fetch secrets with `az` — and gives Jenkins the owner's
-Entra object id; nothing else needs it. A pod restores a stored one before Claude starts, and with none it carries on
-without Azure and relays no code. The owner connects it when they want it: **Connect** on the Azure row of the
-Assistant's settings (Connections) records the request
+Entra object id; nothing else needs it. A pod restores a stored one before Claude starts. With none that works, a
+`gateway` pod relays a device code in the background at boot, as it does GitHub's, because there Azure is the model
+credential. An `own_licence` pod carries on without Azure and relays no code, and the owner connects it when they want
+it: **Connect** on the Azure row of the Assistant's settings (Connections) records the request
 (`virtual_agent.azure_sign_in_requested_at`) and restarts the agent, and its new pod, finding the request, relays a
-device code in the background while Claude runs. Relaying spends the request, so a code that runs out unused is not
-offered again until they ask again. The Assistant raises an ask about Azure only while that code is live.
+device code in the background while Claude runs. Relaying spends the request. Either way a pod relays one Azure code
+per boot, so one that runs out unused is not offered again until the agent next starts, which on `own_licence` also
+needs the owner to ask again. There the Assistant raises an ask about Azure only while that code is live.
 
 A Jenkins API token (`jenkins`) is optional on either route: pasted under Credentials in the Assistant's settings, it enables an agent's Jenkins
 tools, and an agent starts without it. Jenkins also needs Azure connected, because the owner's Entra object id, which
