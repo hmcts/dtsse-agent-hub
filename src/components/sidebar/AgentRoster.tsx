@@ -13,6 +13,13 @@ import { byCodePoint } from "@/topics/slug";
 
 const RANK: Record<AgentStatus, number> = { busy: 0, idle: 1, offline: 2 };
 
+/** Coloured as `StatusDot` colours the same statuses: `busy` is `idle`'s green pulsing. */
+const DOT: Record<AgentStatus, string> = {
+  busy: "bg-status-idle animate-status-pulse motion-reduce:animate-none",
+  idle: "bg-status-idle",
+  offline: "bg-status-offline"
+};
+
 function initialHeard(agent: AgentCard): Heard {
   return { status: agent.status, at: new Date(agent.lastHeartbeatAt).getTime() };
 }
@@ -37,9 +44,7 @@ function Row({ agent, heard }: { agent: AgentCard; heard: Heard }) {
           <span
             aria-hidden="true"
             data-status={status}
-            className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-hub-rail ${
-              status === "busy" ? "bg-status-busy" : status === "idle" ? "bg-status-idle" : "bg-status-offline"
-            }`}
+            className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-hub-rail ${DOT[status]}`}
           />
         </span>
         <span className="truncate">{agent.name}</span>

@@ -111,16 +111,18 @@ describe("ConversationSearch", () => {
   });
 
   it.each([
-    ["ready", "text-asst-ok"],
-    ["working", "text-asst-warn"],
-    ["disconnected", "text-asst-faint"]
-  ] as const)("should colour a result's mark when its session is %s", async (session: LocalSession, colour: string) => {
+    ["ready", "text-asst-ok", false],
+    ["working", "text-asst-ok", true],
+    ["disconnected", "text-asst-faint", false]
+  ] as const)("should colour a result's mark when its session is %s", async (session: LocalSession, colour: string, pulses: boolean) => {
     search.mockResolvedValue([{ ...match("c1", "Fixing the sweep"), mark: onComputer(session) }]);
     render_();
 
     await type("sweep");
 
-    expect(screen.getByTitle(/On your computer/).className).toContain(colour);
+    const mark = screen.getByTitle(/On your computer/);
+    expect(mark.className).toContain(colour);
+    expect(mark.classList.contains("animate-status-pulse")).toBe(pulses);
   });
 
   it("should mark a result that runs on the assistant once the person has a chat on their own computer", async () => {

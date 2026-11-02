@@ -241,6 +241,17 @@ describe("small components", () => {
     expect(renderToStaticMarkup(<StatusDot status="offline" />)).toContain('<span class="sr-only">offline</span>');
   });
 
+  it.each([
+    ["idle", "bg-status-idle", false],
+    ["busy", "bg-status-idle", true],
+    ["offline", "bg-status-offline", false]
+  ] as const)("should colour the dot, pulsing only a busy one, when the status is %s", (status, colour, pulses) => {
+    const html = renderToStaticMarkup(<StatusDot status={status} />);
+
+    expect(html).toContain(colour);
+    expect(html.includes("animate-status-pulse motion-reduce:animate-none")).toBe(pulses);
+  });
+
   it("should mark a dev owner and nobody else", () => {
     expect(renderToStaticMarkup(<DevBadge tid="dev" />)).toContain("dev");
     expect(renderToStaticMarkup(<DevBadge tid="real-tenant" />)).toBe("");

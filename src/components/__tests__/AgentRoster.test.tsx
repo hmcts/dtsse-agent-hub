@@ -75,6 +75,22 @@ describe("AgentRoster", () => {
     expect(within(screen.getByRole("link", { name: /gamma/ })).getByText("offline")).toBeTruthy();
   });
 
+  it("should show a busy agent in the idle green, pulsing, when it is mid-turn", () => {
+    const { container } = render(
+      <HubStreamProvider>
+        <AgentRoster agents={[agent("1", "alpha", "idle"), agent("2", "beta", "busy")]} />
+      </HubStreamProvider>
+    );
+
+    const idle = container.querySelector('[data-status="idle"]');
+    const busy = container.querySelector('[data-status="busy"]');
+    expect(idle?.classList.contains("bg-status-idle")).toBe(true);
+    expect(idle?.classList.contains("animate-status-pulse")).toBe(false);
+    expect(busy?.classList.contains("bg-status-idle")).toBe(true);
+    expect(busy?.classList.contains("animate-status-pulse")).toBe(true);
+    expect(busy?.classList.contains("motion-reduce:animate-none")).toBe(true);
+  });
+
   it("should link to the virtual agent and mark it virtual when a virtual agent's session registered the agent", () => {
     render(
       <HubStreamProvider>

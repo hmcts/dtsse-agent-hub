@@ -7,8 +7,8 @@
 @source "../web/**/*.{ts,tsx}";
 
 @theme {
-  /* An agent's status dot. Text beside a dot always says the status too, so colour is never the only signal. */
-  --color-status-busy: #fbbf24;
+  /* An agent's status dot. A busy agent is the idle green with `animate-status-pulse`, because both are connected. Text
+   * beside a dot always says the status too, so colour and motion are never the only signal. */
   --color-status-idle: #2bac76;
   --color-status-offline: #8b8d91;
 
@@ -31,6 +31,19 @@
   --font-plex-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
   --animate-asst-dot: asst-dot 1.2s infinite ease-in-out;
+  /* A session mid-turn, on the hub's dots and the Assistant's marks alike. Every use pairs it with
+   * `motion-reduce:animate-none`, which leaves the solid green and the words. */
+  --animate-status-pulse: status-pulse 1.6s infinite ease-in-out;
+
+  @keyframes status-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.35;
+    }
+  }
 
   @keyframes asst-dot {
     0%,

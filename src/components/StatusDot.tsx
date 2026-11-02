@@ -1,12 +1,16 @@
 import type { AgentStatus } from "@/realtime/events";
 
 const COLOUR: Record<AgentStatus, string> = {
-  busy: "bg-status-busy",
+  busy: "bg-status-idle animate-status-pulse motion-reduce:animate-none",
   idle: "bg-status-idle",
   offline: "bg-status-offline"
 };
 
-/** An agent's status as a dot, with the word for screen readers. `labelled` prints the word as well. */
+/**
+ * An agent's status as a dot, with the word for screen readers. `labelled` prints the word as well.
+ *
+ * `busy` is `idle`'s green pulsing: both are a connected session, and the pulse says it is mid-turn.
+ */
 export function StatusDot({ status, labelled = false }: { status: AgentStatus; labelled?: boolean }) {
   return (
     <span className="inline-flex items-center gap-1.5">
