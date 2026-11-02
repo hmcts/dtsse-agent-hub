@@ -17,7 +17,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureClone, manifestEntries, tempWorktree } from "./clones.ts";
-import { COMMIT_TRAILER, commit, defaultBranch, draftPr, git, PR_FOOTER } from "./git.ts";
+import { commit, defaultBranch, draftPr, git } from "./git.ts";
 import { workspace } from "./paths.ts";
 import { tool } from "./tools.ts";
 
@@ -43,25 +43,55 @@ const MISSING_MS = 60_000;
 export function homeRepo(service: string): string | null {
   const cacheFile = join(workspace(), "apps", service, ".welsh-work", "home.json");
   try {
-    const cached = JSON.parse(readFileSync(cacheFile, "utf8")) as { home: string | null; at: number };
+    const cached = JSON.parse(readFileSync(cacheFile, "utf8")) as { home: string | null; at: number; error?: string };
     if (Date.now() - cached.at < (cached.home === null ? MISSING_MS : FOUND_MS)) {
+      if (cached.error) {
+        throw new Error(cached.error);
+      }
       return cached.home;
     }
-  } catch {
+  } catch (e) {
+    if ((e as Error).message && !(e instanceof SyntaxError) && (e as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw e;
+    }
     // Not looked for yet, or the note is unreadable: look again.
   }
+  const remember = (home: string | null, error?: string) => {
+    if (existsSync(join(workspace(), "apps", service))) {
+      mkdirSync(dirname(cacheFile), { recursive: true });
+      writeFileSync(cacheFile, JSON.stringify({ home, at: Date.now(), ...(error ? { error } : {}) }));
+    }
+  };
   const prefix = `apps/${service}/`;
-  const found = Object.entries(manifestEntries())
-    .filter(([path, entry]) => path.startsWith(prefix) && hasWelsh(path, entry?.url))
-    .map(([path]) => path);
+  const repos = Object.entries(manifestEntries()).filter(([path]) => path.startsWith(prefix));
+  // The service's repos that are on this machine first: they cost nothing to ask, and a home found among them needs no
+  // GitHub call for the rest. GitHub is asked only when none of them is it, and one repo it cannot answer for (a
+  // single sign-on not authorised, a rate limit) is set aside while the others are asked, rather than failing them all.
+  const here = repos.filter(([path]) => existsSync(resolve(workspace(), path)));
+  const found = here.filter(([path, entry]) => hasWelsh(path, entry?.url)).map(([path]) => path);
+  const unanswered: string[] = [];
+  if (found.length === 0) {
+    for (const [path, entry] of repos.filter((repo) => !here.includes(repo))) {
+      try {
+        if (hasWelsh(path, entry?.url)) {
+          found.push(path);
+        }
+      } catch (e) {
+        unanswered.push((e as Error).message);
+      }
+    }
+  }
   if (found.length > 1) {
     throw new Error(`${service} has a welsh/ folder in more than one repo (${found.join(", ")}); a service keeps its Welsh in one`);
   }
   const home = found[0] ?? null;
-  if (existsSync(join(workspace(), "apps", service))) {
-    mkdirSync(dirname(cacheFile), { recursive: true });
-    writeFileSync(cacheFile, JSON.stringify({ home, at: Date.now() }));
+  if (home === null && unanswered.length > 0) {
+    // Not "no Welsh": a repo that could not be asked may be the one. Kept briefly, so each keystroke does not ask again.
+    const error = unanswered.join("; ");
+    remember(null, error);
+    throw new Error(error);
   }
+  remember(home);
   return home;
 }
 
@@ -123,9 +153,12 @@ export function welshDir(service: string): string {
   if (home === null) {
     throw new Error(noHome(service));
   }
-  const clone = ensureClone(home);
+  const clone = resolve(workspace(), home);
   let dir = join(clone, "welsh");
-  if (existsSync(join(clone, ".git"))) {
+  if (!existsSync(clone)) {
+    dir = fromGitHub(home);
+  } else if (existsSync(join(clone, ".git"))) {
+    usableClone(clone);
     if (!fetchedRecently(clone)) {
       git(clone, ["fetch", "--quiet", "origin"], true);
     }
@@ -152,6 +185,46 @@ export function welshDir(service: string): string {
   }
   read.set(service, dir);
   return dir;
+}
+
+/**
+ * The home repo's welsh/ folder fetched from GitHub, for a repo this machine has not cloned: reading the catalogue
+ * clones nothing, so a quick job such as a search is never the one that starts a clone of a large repo. Only the
+ * folder's own files are fetched (catalogue, config, review list), not returns/, which nothing reads back.
+ */
+function fromGitHub(home: string): string {
+  const url = manifestEntries()[home]?.url;
+  const scratch = mkdtempSync(join(tmpdir(), "welsh-home-"));
+  process.once("exit", () => rmSync(scratch, { recursive: true, force: true }));
+  const dir = join(scratch, "welsh");
+  mkdirSync(dir);
+  if (!url) {
+    return dir;
+  }
+  const listed = spawnSync(tool("gh"), ["api", `repos/${url}/contents/welsh`], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
+  if (listed.status !== 0) {
+    throw new Error(`could not read welsh/ from ${url}: ${(listed.stderr || listed.stdout).trim()}`);
+  }
+  for (const entry of JSON.parse(listed.stdout) as { name: string; type: string }[]) {
+    if (entry.type !== "file") {
+      continue;
+    }
+    const raw = spawnSync(tool("gh"), ["api", "-H", "Accept: application/vnd.github.raw", `repos/${url}/contents/welsh/${entry.name}`], {
+      maxBuffer: 256 * 1024 * 1024
+    });
+    if (raw.status !== 0) {
+      throw new Error(`could not read welsh/${entry.name} from ${url}: ${raw.stderr.toString().trim()}`);
+    }
+    writeFileSync(join(dir, entry.name), raw.stdout);
+  }
+  return dir;
+}
+
+/** A clone that has a commit checked out, which one stopped part-way through cloning has not. */
+export function usableClone(clone: string): void {
+  if (!git(clone, ["rev-parse", "--verify", "--quiet", "HEAD"], true)) {
+    throw new Error(`the clone at ${clone} is incomplete, as if a clone was stopped part-way: remove it, and it is cloned again when next needed`);
+  }
 }
 
 function fetchedRecently(clone: string): boolean {
@@ -216,9 +289,9 @@ export function inHome<T>(service: string, argv: string[], change: HomeChange, d
       return { result, branch: null, pr: null };
     }
     const text = describe(result);
-    commit(wt.dir, ["welsh"], `${text.message}${COMMIT_TRAILER}`);
+    commit(wt.dir, ["welsh"], text.message);
     // A PR that could not be opened takes its branch with it, so running the command again starts clean.
-    const pr = change.pr ? draftPr(wt.dir, text.title, `${text.body}${PR_FOOTER}`) : null;
+    const pr = change.pr ? draftPr(wt.dir, text.title, text.body) : null;
     keep = true;
     return { result, branch: change.branch, pr };
   } finally {

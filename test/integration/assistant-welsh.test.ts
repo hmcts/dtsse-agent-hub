@@ -28,10 +28,14 @@ beforeEach(async () => {
 /** The shared fixture, bound to the claim this suite is about: the pod's own session runs Welsh jobs. */
 const claimingWelsh = podFixture(["welsh"]);
 
-/** That assistant with the Welsh plugin ticked as well, which every job and upload needs. */
+/**
+ * That assistant with the Welsh plugin ticked as well, which every job and upload needs, and its pod caught up with
+ * the tick, as one is once the orchestrator has replaced it.
+ */
 const assistantOf: AssistantFixture = async (...args) => {
   const id = await claimingWelsh(...args);
-  await prisma.virtualAgent.update({ where: { id }, data: { plugins: ["welsh"] } });
+  const row = await prisma.virtualAgent.update({ where: { id }, data: { plugins: ["welsh"] }, select: { generation: true } });
+  await prisma.virtualAgent.update({ where: { id }, data: { observedGeneration: row.generation } });
   return id;
 };
 const XLSX = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 1, 2, 3]);
@@ -127,6 +131,19 @@ describe("welsh jobs", () => {
     expect(uploaded.status).toBe(409);
     expect(await prisma.assistantWelshJob.count()).toBe(0);
     expect(await prisma.assistantWelshFile.count()).toBe(0);
+  });
+
+  it("should answer that the assistant is starting, recording no job, while the plugin just ticked is not yet on its pod", async () => {
+    // Arrange: the tick moved generation on, and the orchestrator has not replaced the pod yet.
+    const assistant = await assistantOf(ALICE);
+    await prisma.virtualAgent.update({ where: { id: assistant }, data: { generation: { increment: 1 } } });
+
+    // Act
+    const answer = await jsonOf(await start({ kind: "info", product: "cath", args: {} }));
+
+    // Assert
+    expect(answer).toEqual({ status: "waking" });
+    expect(await prisma.assistantWelshJob.count()).toBe(0);
   });
 
   it("should answer a pod that has not claimed welsh, a stopped assistant, and a bad request without recording a job", async () => {

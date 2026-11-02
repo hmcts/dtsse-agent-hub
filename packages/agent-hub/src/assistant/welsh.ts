@@ -292,7 +292,21 @@ export function signInNeeded(output: string): string | null {
 export const WELSH_PLUGIN = "welsh";
 
 /** What a job answers when its owner has not ticked the plugin, which is the only way a pod has the tools. */
-export const NOT_LOADED = "Welsh translations is not turned on for your assistant. Tick it in Settings, under Tools; your assistant restarts to load it.";
+export const NOT_LOADED =
+  "Welsh translations is not turned on for your assistant. Tick it in Settings, under Tools. If you have just ticked it, your assistant is restarting to load it: try again in a minute or two.";
+
+/** What a job answers when the tools' first install has taken so long that the job could not finish in time. */
+export const STILL_PREPARING = "Your assistant is still setting up the Welsh tools. Try again in a few minutes.";
+
+/**
+ * How long a job has from the moment its frame arrives: under the hub's 15-minute limit for a job, so the hub never
+ * gives up on one that goes on to finish (an apply that then opens its pull request, say, and is run again). Waiting
+ * for the tools' first install comes out of it, and each kind's own limit is cut to what is left.
+ */
+export const JOB_BUDGET_MS = 14 * 60_000;
+
+/** Least time worth starting a job with, once the wait for the install is over. */
+const MIN_RUN_MS = 30_000;
 
 /**
  * The Welsh tools: the pod's copy of the welsh plugin's `scripts/welsh`, made on first use. Null when the owner has not
@@ -334,17 +348,43 @@ export type WelshDeps = {
   install?: (name: string, workspace: string) => string;
   say?: (message: string) => void;
   now?: () => Date;
+  /** Milliseconds since the epoch, for the job's budget; a test passes its own. */
+  clock?: () => number;
+  /** How long a job has from when it arrives; `JOB_BUDGET_MS` unless a test says otherwise. */
+  budgetMs?: number;
 };
+
+/** Settles true once `ready` does, or false at `ms`, whichever is first. */
+async function readyWithin(ready: Promise<void> | undefined, ms: number): Promise<boolean> {
+  if (ready === undefined) {
+    return true;
+  }
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<boolean>((resolve) => {
+    timer = setTimeout(() => resolve(false), Math.max(0, ms));
+  });
+  try {
+    return await Promise.race([ready.then(() => true), late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /** Runs one job and answers it, uploading the spreadsheets it made first. Never throws. */
 export async function runWelsh(deps: WelshDeps, frame: WelshFrame): Promise<void> {
   const say = deps.say ?? (() => {});
+  const clock = deps.clock ?? Date.now;
+  const deadline = clock() + (deps.budgetMs ?? JOB_BUDGET_MS);
   const dir = mkdtempSync(join(tmpdir(), "welsh-job-"));
   let answer: WelshAnswer;
   try {
-    // A job's time limit starts once the tools' first install is done, not while it waits for one.
-    await deps.ready;
-    answer = await runIn(deps, frame, welshPaths(dir, frame));
+    // The wait for the tools' first install comes out of the job's budget, so job and wait end inside the hub's limit.
+    const ready = await readyWithin(deps.ready, deadline - clock() - MIN_RUN_MS);
+    const left = deadline - clock();
+    answer =
+      ready && left >= MIN_RUN_MS
+        ? await runIn(deps, frame, welshPaths(dir, frame), Math.min(TIMEOUT_MS[frame.kind], left))
+        : { error: "failed", detail: STILL_PREPARING };
   } catch (e) {
     answer = { error: "failed", detail: `That did not work: ${(e as Error).message}`.slice(0, MAX_DETAIL) };
   } finally {
@@ -357,7 +397,7 @@ export async function runWelsh(deps: WelshDeps, frame: WelshFrame): Promise<void
   }
 }
 
-async function runIn(deps: WelshDeps, frame: WelshFrame, paths: WelshPaths): Promise<WelshAnswer> {
+async function runIn(deps: WelshDeps, frame: WelshFrame, paths: WelshPaths, timeoutMs: number): Promise<WelshAnswer> {
   const script = welshScript(deps.workspace, deps.env, deps.install);
   if (script === null) {
     return { error: "failed", detail: NOT_LOADED };
@@ -370,7 +410,7 @@ async function runIn(deps: WelshDeps, frame: WelshFrame, paths: WelshPaths): Pro
   if (frame.strings) {
     writeFileSync(paths.strings, `${frame.strings.join("\n")}\n`);
   }
-  const result = await deps.run(script, welshArgs(frame, deps.workspace, paths), { env, timeoutMs: TIMEOUT_MS[frame.kind] });
+  const result = await deps.run(script, welshArgs(frame, deps.workspace, paths), { env, timeoutMs });
   const signIn = signInNeeded(`${result.stderr}\n${result.stdout}`);
   if (result.code !== 0) {
     return signIn ? { error: "signed_out", detail: signIn } : { error: "failed", detail: failureDetail(result.stderr, result.code) };

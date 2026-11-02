@@ -50,6 +50,3 @@ export function draftPr(repo: string, title: string, body: string): string {
   }
   return res.stdout.trim().split("\n").pop() ?? "";
 }
-
-export const PR_FOOTER = "\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n";
-export const COMMIT_TRAILER = "\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n";

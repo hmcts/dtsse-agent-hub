@@ -69,7 +69,7 @@ export async function runAssistantSupervisor({
   const workspace = welshDeps.workspace ?? env.VIRTUAL_AGENT_WORKSPACE ?? "/workspace/cft-workspace";
   // Each session loads the ticked plugins this package carries; copying one is quick once its version is on disk.
   const install = welshDeps.install ?? installBundled;
-  const pluginDirs = installTicked(env, workspace, say, install);
+  const pluginDirs = () => installTicked(env, workspace, say, install);
   const supervisor: AssistantSupervisor = createAssistantSupervisor({ api, id, env, say, pluginDirs, ...options });
   // Lookups run beside the supervisor rather than on its chain: see `createLookupRunner`.
   const lookups = createLookupRunner({

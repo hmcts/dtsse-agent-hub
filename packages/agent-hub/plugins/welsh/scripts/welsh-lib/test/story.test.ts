@@ -46,7 +46,7 @@ test("candidates come from Gherkin 'is shown:' lines, quotes and English table c
   assert.deepEqual(
     candidates(STORY)
       .map((c) => [c.origin, c.english])
-      .sort(),
+      .sort((a, b) => (a < b ? -1 : Number(a > b))),
     [
       ["after-shown", "Access tribunal documents"],
       ["quoted", "Start now"],

@@ -154,7 +154,10 @@ test("scanRepo skips pages marked staff_only, which need no Welsh", async () => 
   const config = { repos: [], identical_allowlist: [], placeholder_patterns: [], context_sensitive: [] };
   const all = scanRepo("demo", dir, { path: "x", adapters: ["ts-locale-pair"] }, config, empty);
   const publicOnly = scanRepo("demo", dir, { path: "x", adapters: ["ts-locale-pair"], staff_only: ["pages/(system-admin)/**"] }, config, empty);
-  assert.deepEqual(all.map((f) => f.english).sort(), ["Find a hearing", "Manage users"]);
+  assert.deepEqual(
+    all.map((f) => f.english).sort((a, b) => (a < b ? -1 : Number(a > b))),
+    ["Find a hearing", "Manage users"]
+  );
   assert.deepEqual(
     publicOnly.map((f) => f.english),
     ["Find a hearing"]

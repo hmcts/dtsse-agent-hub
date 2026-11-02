@@ -9,6 +9,7 @@ import {
   parseWelshFrame,
   prepareWelsh,
   runWelsh,
+  STILL_PREPARING,
   signInNeeded,
   type WelshDeps,
   welshArgs,
@@ -284,6 +285,29 @@ describe("runWelsh", () => {
     expect(before).toBe(0);
     expect(d.run).toHaveBeenCalledTimes(1);
     expect(answers).toHaveLength(1);
+  });
+
+  it("should take the wait for the install out of the job's budget, and cut its own limit to what is left", async () => {
+    // Arrange: the install finishes 13 minutes and 10 seconds into a 14-minute budget.
+    let t = 0;
+    const run = vi.fn(async () => ({ code: 0, stdout: "{}", stderr: "" }));
+    const ready = Promise.resolve().then(() => {
+      t = 13 * 60_000 + 10_000;
+    });
+    const { d } = deps({ ready, run, clock: () => t });
+
+    // Act
+    await runWelsh(d, parseWelshFrame({ job_id: JOB, kind: "apply", product: "cath", args: {} }) as NonNullable<ReturnType<typeof parseWelshFrame>>);
+
+    // Assert: 50 seconds left, not apply's own 14 minutes.
+    expect(run).toHaveBeenCalledWith(expect.any(String), expect.any(Array), expect.objectContaining({ timeoutMs: 50_000 }));
+  });
+
+  it("should answer that the tools are still being set up, running nothing, when the install leaves no time for the job", async () => {
+    const { d, answers } = deps({ ready: new Promise<void>(() => {}), budgetMs: 40_000 });
+    await runWelsh(d, parseWelshFrame({ job_id: JOB, kind: "info", product: "cath", args: {} }) as NonNullable<ReturnType<typeof parseWelshFrame>>);
+    expect(d.run).not.toHaveBeenCalled();
+    expect(answers[0]?.body).toEqual({ error: "failed", detail: STILL_PREPARING });
   });
 
   it("should answer failed with the reason rather than throw when the plugin cannot be copied onto the pod", async () => {

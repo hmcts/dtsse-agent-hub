@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -120,6 +120,12 @@ test("homeRepo asks GitHub about a repo with no clone, cloning nothing, and says
     );
     assert.equal(homeRepo("remote"), "apps/remote/remote-app");
     assert.throws(() => homeRepo("locked"), /could not check hmcts\/locked-app for a welsh\/ folder: HTTP 401: Bad credentials/);
+    // One repo GitHub cannot answer for does not stop the home being found in another.
+    writeFileSync(
+      join(ws, "workspace.yaml"),
+      "repos:\n  apps/mixed/locked-app: { url: hmcts/locked-app }\n  apps/mixed/remote-app: { url: hmcts/remote-app }\n"
+    );
+    assert.equal(homeRepo("mixed"), "apps/mixed/remote-app");
   } finally {
     process.env.PATH = path;
     writeFileSync(join(ws, "workspace.yaml"), manifest);
@@ -129,4 +135,23 @@ test("homeRepo asks GitHub about a repo with no clone, cloning nothing, and says
 test("a change's branch is new each run, so a retry never meets the branch an earlier one left", () => {
   assert.equal(branchName("cath-Return 7", new Date("2026-11-02T16:12:05Z")), "welsh/cath-return-7-20261102-161205");
   assert.notEqual(branchName("cath-x", new Date("2026-11-02T16:12:05Z")), branchName("cath-x", new Date("2026-11-02T16:12:06Z")));
+});
+
+test("a home repo on this machine is found without asking GitHub about the service's other repos", () => {
+  const bin = mkdtempSync(join(tmpdir(), "welsh-gh-"));
+  const asked = join(bin, "asked");
+  writeFileSync(join(bin, "gh"), `#!/bin/sh\ntouch ${asked}\nexit 1\n`, { mode: 0o755 });
+  const manifest = readFileSync(join(ws, "workspace.yaml"), "utf8");
+  const path = process.env.PATH;
+  process.env.PATH = `${bin}:${path}`;
+  try {
+    mkdirSync(join(ws, "apps", "local", "local-app", "welsh"), { recursive: true });
+    writeFileSync(join(ws, "apps", "local", "local-app", "welsh", "config.yaml"), "repos: []\n");
+    writeFileSync(join(ws, "workspace.yaml"), "repos:\n  apps/local/local-app: { url: hmcts/local-app }\n  apps/local/elsewhere: { url: hmcts/elsewhere }\n");
+    assert.equal(homeRepo("local"), "apps/local/local-app");
+    assert.equal(existsSync(asked), false);
+  } finally {
+    process.env.PATH = path;
+    writeFileSync(join(ws, "workspace.yaml"), manifest);
+  }
 });

@@ -68,6 +68,11 @@ export async function askWelsh(prisma: PrismaClient, question: WelshQuestion, no
   if (gate !== "ok") {
     return { answer: { status: gate } };
   }
+  // A change the orchestrator has not applied yet, such as the plugin just ticked, means the pod running now is the old
+  // one and is about to be replaced: asked now, it would say Welsh is not turned on. It is starting again instead.
+  if (assistant.generation > assistant.observedGeneration) {
+    return { answer: { status: "waking" } };
+  }
   const id = await prisma.$transaction(async (tx) => {
     // The assistant's rows are taken one job at a time, so two tabs cannot both find room under the limit.
     await tx.$queryRaw`SELECT 1 FROM virtual_agent WHERE id = ${assistant.id}::uuid FOR UPDATE`;

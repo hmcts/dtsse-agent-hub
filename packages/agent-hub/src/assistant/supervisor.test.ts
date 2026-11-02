@@ -91,7 +91,7 @@ function setup({
     max,
     idleMs,
     bootedAt,
-    pluginDirs,
+    pluginDirs: () => pluginDirs,
     say: (message) => said.push(message)
   });
   return { tmux, reports, said, clock, bootedAt, supervisor, lastReport: () => reports.at(-1) as SessionsBody };

@@ -20,7 +20,7 @@ import type { Edit } from "../adapters/types.ts";
 import { loadCatalogue, type Row } from "../catalogue.ts";
 import { ensureClone, tempWorktree, type Worktree } from "../clones.ts";
 import { loadConfig, type RepoConfig } from "../config.ts";
-import { COMMIT_TRAILER, commit, draftPr, git, PR_FOOTER } from "../git.ts";
+import { commit, draftPr, git } from "../git.ts";
 import { branchName } from "../home.ts";
 import { fail, requireService, say } from "../io.ts";
 import { workspace } from "../paths.ts";
@@ -165,7 +165,7 @@ async function applyIn(wt: Worktree, service: string, repo: RepoConfig, values: 
     sha = commit(
       abs,
       changed,
-      `Add Welsh translations from ${batch}\n\n${edits.length} value(s) from ${values.from === "catalogue" ? "the approved catalogue" : "the Welsh Language Unit"}.${COMMIT_TRAILER}`
+      `Add Welsh translations from ${batch}\n\n${edits.length} value(s) from ${values.from === "catalogue" ? "the approved catalogue" : "the Welsh Language Unit"}.`
     );
     if (values.pr) {
       pr = draftPr(abs, `Welsh translations: ${batch}`, prBody(service, batch, edits, skipped));
@@ -283,8 +283,7 @@ function prBody(service: string, batch: string, edits: Applied[], skipped: { whe
     "`welsh verify` provenance check.\n\n" +
     "| Ref | Where | English | Welsh | Source |\n|---|---|---|---|---|\n" +
     rows.join("\n") +
-    (skipped.length ? `\n\n**Not applied** (needs a developer):\n${skipped.map((s) => `- \`${s.where}\`: ${s.reason}`).join("\n")}` : "") +
-    PR_FOOTER
+    (skipped.length ? `\n\n**Not applied** (needs a developer):\n${skipped.map((s) => `- \`${s.where}\`: ${s.reason}`).join("\n")}` : "")
   );
 }
 

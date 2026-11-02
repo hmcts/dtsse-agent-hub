@@ -9,9 +9,9 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import YAML from "yaml";
 import { defaultBranch, git } from "./git.ts";
 import { workspace } from "./paths.ts";
@@ -21,6 +21,9 @@ import { findTool, tool } from "./tools.ts";
 export function ensureClone(relPath: string): string {
   const abs = resolve(workspace(), relPath);
   if (existsSync(join(abs, ".git"))) {
+    if (!git(abs, ["rev-parse", "--verify", "--quiet", "HEAD"], true)) {
+      throw new Error(`the clone at ${abs} is incomplete, as if a clone was stopped part-way: remove it, and it is cloned again when next needed`);
+    }
     return abs;
   }
   if (existsSync(abs)) {
@@ -30,13 +33,28 @@ export function ensureClone(relPath: string): string {
   if (!url) {
     throw new Error(`${relPath} is not cloned and is not in workspace.yaml`);
   }
-  // gh when there is one, for its sign-in; git over SSH otherwise.
+  // Cloned beside its place and moved into it once whole, so a clone that is stopped part-way never sits where a
+  // later run would take it for a finished one. gh when there is one, for its sign-in; git over SSH otherwise.
+  const partial = `${abs}.welsh-clone-${process.pid}`;
+  rmSync(partial, { recursive: true, force: true });
+  mkdirSync(dirname(abs), { recursive: true });
   const ghPath = findTool("gh");
-  const gh = ghPath === null ? null : spawnSync(ghPath, ["repo", "clone", url, abs, "--", "--filter=blob:none"], { encoding: "utf8" });
+  const gh = ghPath === null ? null : spawnSync(ghPath, ["repo", "clone", url, partial, "--", "--filter=blob:none"], { encoding: "utf8" });
   if (gh?.status !== 0) {
-    const ssh = spawnSync(tool("git"), ["clone", "--filter=blob:none", `git@github.com:${url}.git`, abs], { encoding: "utf8" });
+    rmSync(partial, { recursive: true, force: true });
+    const ssh = spawnSync(tool("git"), ["clone", "--filter=blob:none", `git@github.com:${url}.git`, partial], { encoding: "utf8" });
     if (ssh.status !== 0) {
+      rmSync(partial, { recursive: true, force: true });
       throw new Error(`could not clone ${url}: ${(gh?.stderr || ssh.stderr).trim()}`);
+    }
+  }
+  try {
+    renameSync(partial, abs);
+  } catch (e) {
+    // Something else cloned it meanwhile, such as the pod's own sync of the workspace: use that one.
+    rmSync(partial, { recursive: true, force: true });
+    if (!existsSync(abs)) {
+      throw e;
     }
   }
   return abs;

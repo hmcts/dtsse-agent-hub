@@ -148,13 +148,25 @@ export function installBundled(name: string, workspace: string, source = path.jo
 /**
  * Removes a plugin's other copies: earlier versions, each with the dependencies it installed, and copies a stopped
  * process left half made. Only the current version is ever run, since a pod's client, and so its plugins, is fixed
- * for the life of the process.
+ * for the life of the process. A half-made copy whose process is still running is left alone, since it is still
+ * being made.
  */
+/** Whether a process is running: signal 0 checks without sending anything. */
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
 function pruneOthers(name: string, keep: string): void {
   const root = path.dirname(keep);
   const ours = new RegExp(String.raw`^${name}-[0-9a-f]{12}(\.partial-\d+)?$`);
   for (const entry of fs.readdirSync(root)) {
-    if (ours.test(entry) && entry !== path.basename(keep)) {
+    const making = entry.match(/\.partial-(\d+)$/);
+    if (ours.test(entry) && entry !== path.basename(keep) && !(making && alive(Number(making[1])))) {
       fs.rmSync(path.join(root, entry), { recursive: true, force: true });
     }
   }

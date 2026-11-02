@@ -91,13 +91,15 @@ describe("bundled plugins", () => {
     expect(fs.existsSync(path.join(again, "scripts", "installed-later"))).toBe(true);
   });
 
-  it("should make a new copy when the plugin changes, and remove the old one and any half-made copy", () => {
+  it("should make a new copy when the plugin changes, and remove the old one and a half-made copy whose process has gone", () => {
     // Arrange
     const ws = workspace();
     const first = installBundled("welsh", ws, source());
-    const stale = path.join(pluginCacheRoot(ws), "welsh-0123456789ab.partial-99999");
+    const stale = path.join(pluginCacheRoot(ws), "welsh-0123456789ab.partial-2147483646");
+    const live = path.join(pluginCacheRoot(ws), `welsh-0123456789ab.partial-${process.pid}`);
     const unrelated = path.join(pluginCacheRoot(ws), "welsh-notes");
     fs.mkdirSync(stale);
+    fs.mkdirSync(live);
     fs.mkdirSync(unrelated);
 
     // Act
@@ -108,6 +110,7 @@ describe("bundled plugins", () => {
     expect(fs.readFileSync(path.join(second, "scripts", "welsh"), "utf8")).toBe("#!/bin/sh\necho v2\n");
     expect(fs.existsSync(first)).toBe(false);
     expect(fs.existsSync(stale)).toBe(false);
+    expect(fs.existsSync(live)).toBe(true);
     expect(fs.existsSync(unrelated)).toBe(true);
   });
 
