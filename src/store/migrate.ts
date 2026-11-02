@@ -10,8 +10,20 @@ import { resolveDatabaseUrl } from "./database-url.ts";
  * ledger `prisma migrate` keeps, so either tool sees the other's work.
  *
  * Run by the image before the server starts. Several pods can boot at once, so the whole run holds a session
- * advisory lock on a dedicated connection; a pod that waits finds nothing left to apply.
+ * advisory lock on a dedicated connection; a pod that waits finds nothing left to apply. A pod waits by trying the
+ * lock again every `LOCK_RETRY_MS` rather than blocking in `pg_advisory_lock`: a blocked call is a transaction with a
+ * snapshot, and `CREATE INDEX CONCURRENTLY` in the holder's migration waits for every such snapshot to end, so the
+ * two would wait on each other for ever.
+ *
+ * Each migration runs in its own transaction, except one whose first line is `NO_TRANSACTION`, which is for
+ * statements Postgres refuses inside a transaction, `CREATE INDEX CONCURRENTLY` among them. Its statements run one
+ * at a time, split on a `;` that ends a line, so such a migration must not put one anywhere else, and it is recorded
+ * in the ledger only once every statement has succeeded. A failure part way leaves what the earlier statements did,
+ * and the next boot runs the whole file again, so each statement has to be safe to repeat.
  */
+
+/** The first line that marks a migration as run outside a transaction. */
+export const NO_TRANSACTION = "-- migrate: no transaction";
 
 const LEDGER = `
   CREATE TABLE IF NOT EXISTS "_prisma_migrations" (
@@ -35,8 +47,58 @@ interface Migration {
   readonly checksum: string;
 }
 
+/** The statements of a migration run outside a transaction, without the comments and blank lines between them. */
+export function statementsOf(sql: string): string[] {
+  return sql
+    .split(/;[ \t]*(?:\r?\n|$)/)
+    .map((chunk) =>
+      chunk
+        .split(/\r?\n/)
+        .filter((line) => line.trim() !== "" && !line.trim().startsWith("--"))
+        .join("\n")
+        .trim()
+    )
+    .filter((statement) => statement !== "");
+}
+
+function runsInTransaction(migration: Migration): boolean {
+  return migration.sql.split(/\r?\n/, 1)[0]?.trim() !== NO_TRANSACTION;
+}
+
+const RECORD = `INSERT INTO "_prisma_migrations" (id, checksum, migration_name, started_at, finished_at, applied_steps_count)
+   VALUES ($1, $2, $3, now(), now(), 1)`;
+
+function failed(migration: Migration, error: unknown): Error {
+  return new Error(`migration ${migration.name} failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+}
+
+async function apply(client: pg.Client, migration: Migration): Promise<void> {
+  const record = [randomUUID(), migration.checksum, migration.name];
+  if (!runsInTransaction(migration)) {
+    try {
+      for (const statement of statementsOf(migration.sql)) {
+        await client.query(statement);
+      }
+      await client.query(RECORD, record);
+    } catch (error) {
+      throw failed(migration, error);
+    }
+    return;
+  }
+  await client.query("BEGIN");
+  try {
+    await client.query(migration.sql);
+    await client.query(RECORD, record);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw failed(migration, error);
+  }
+}
+
 const CONNECT_TIMEOUT_MS = 120_000;
 const CONNECT_RETRY_MS = 2_000;
+const LOCK_RETRY_MS = 500;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -117,32 +179,22 @@ function assertUnchanged(migrations: readonly Migration[], done: ReadonlyMap<str
   }
 }
 
-/** Applies every pending migration, each in its own transaction, and returns the names applied. */
+/** Applies every pending migration in name order, and returns the names applied. */
 export async function migrate(directory: string = migrationsDirectory(), pause: (ms: number) => Promise<void> = sleep): Promise<string[]> {
   const migrations = await readMigrations(directory);
   const client = await connectWhenReady(resolveDatabaseUrl(), pause);
 
   try {
-    await client.query("SELECT pg_advisory_lock($1)", [LOCK_KEY.toString()]);
+    while (!(await client.query<{ locked: boolean }>("SELECT pg_try_advisory_lock($1) AS locked", [LOCK_KEY.toString()])).rows[0]?.locked) {
+      await pause(LOCK_RETRY_MS);
+    }
     await client.query(LEDGER);
     const done = await applied(client);
     assertUnchanged(migrations, done);
     const pending = migrations.filter((migration) => !done.has(migration.name));
 
     for (const migration of pending) {
-      await client.query("BEGIN");
-      try {
-        await client.query(migration.sql);
-        await client.query(
-          `INSERT INTO "_prisma_migrations" (id, checksum, migration_name, started_at, finished_at, applied_steps_count)
-           VALUES ($1, $2, $3, now(), now(), 1)`,
-          [randomUUID(), migration.checksum, migration.name]
-        );
-        await client.query("COMMIT");
-      } catch (error) {
-        await client.query("ROLLBACK");
-        throw new Error(`migration ${migration.name} failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
-      }
+      await apply(client, migration);
     }
 
     return pending.map((migration) => migration.name);

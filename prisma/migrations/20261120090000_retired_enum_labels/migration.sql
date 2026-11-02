@@ -5,6 +5,11 @@
 -- The rebuild rewrites `credential`, `virtual_agent_login` and `virtual_agent` under an ACCESS EXCLUSIVE lock, which
 -- the build still serving waits on for as long as the rewrite runs. Its statements name each type, which keeps its
 -- name, and the Prisma adapter prepares them unnamed, so nothing it holds is planned against the old type.
+--
+-- A lock queued behind a long transaction would hold every read of those tables behind it in turn, so each lock
+-- waits 5 seconds at most. Past that the migration fails and rolls back, the migrator exits non-zero, and the pod's
+-- container restarts and tries again, while the build already serving carries on.
+SET LOCAL lock_timeout = '5s';
 
 -- `bedrock`: the pasted Amazon Bedrock API key and the route that used it. `20261107090000_bedrock_gone` moved every
 -- row off both labels; these repeat its moves so the casts below cannot meet one. The generations move with the

@@ -20,8 +20,8 @@ export async function announce(db: Database, virtualAgentId: string, ownerOid: s
  * launch token goes with it, so the pod is shut out before it is shut down and cannot report its way back out of a
  * stop the sweep decided on.
  *
- * The status becomes `stopping`, and the orchestrator's observation of the stopped StatefulSet clears the detail with
- * the pod it described.
+ * An agent not yet stopped becomes `stopping` and loses its `status_detail`, which described the pod being stopped;
+ * one already `stopped` keeps its status, its detail and when its status last changed.
  */
 export async function stopVirtualAgents(db: Database, ids: readonly string[], reason: StopReason, now: Date): Promise<{ id: string; ownerOid: string }[]> {
   if (ids.length === 0) {

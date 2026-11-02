@@ -53,9 +53,7 @@ export async function answerAgentQuestion(input: { questionId: unknown; answers:
       return checked;
     }
     const body = answerMessage(questions, checked.answer);
-    const record = async (tx: Parameters<typeof recordAnswer>[0]) => {
-      await recordAnswer(tx, question, checked.answer);
-    };
+    const record = (tx: Parameters<typeof recordAnswer>[0]) => recordAnswer(tx, question, checked.answer);
     const conversation = agent.assistantConversationId === null ? undefined : await findConversation(prisma, viewer.oid, agent.assistantConversationId);
     if (conversation !== undefined) {
       // The same path the composer's send takes, so the conversation is touched and a stopped assistant is woken.

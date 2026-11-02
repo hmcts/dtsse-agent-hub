@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isStartingError } from "./migrate.ts";
+import { isStartingError, statementsOf } from "./migrate.ts";
 
 function withCode(code: string, message = "connect failed"): Error {
   return Object.assign(new Error(message), { code });
@@ -32,5 +32,22 @@ describe("isStartingError", () => {
 
   it.each([undefined, null, "ECONNREFUSED", 42])("should not retry when the thrown value is %s", (value) => {
     expect(isStartingError(value)).toBe(false);
+  });
+});
+
+describe("statementsOf", () => {
+  it("should give each statement without its terminator or the comments around it when they end their lines", () => {
+    const sql = `-- migrate: no transaction
+-- Why the index exists; a semicolon inside a comment line is not an end.
+DROP INDEX CONCURRENTLY IF EXISTS "a_idx";
+
+CREATE INDEX CONCURRENTLY "a_idx"
+  ON "a" ("b");`;
+
+    expect(statementsOf(sql)).toEqual(['DROP INDEX CONCURRENTLY IF EXISTS "a_idx"', 'CREATE INDEX CONCURRENTLY "a_idx"\n  ON "a" ("b")']);
+  });
+
+  it("should give nothing when the file holds only comments", () => {
+    expect(statementsOf("-- migrate: no transaction\n-- nothing yet\n")).toEqual([]);
   });
 });

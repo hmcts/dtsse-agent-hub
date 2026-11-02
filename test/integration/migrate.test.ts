@@ -5,7 +5,7 @@ import path from "node:path";
 import pg from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveDatabaseUrl } from "../../src/store/database-url.ts";
-import { migrate, migrationsDirectory } from "../../src/store/migrate.ts";
+import { migrate, migrationsDirectory, NO_TRANSACTION } from "../../src/store/migrate.ts";
 import { isTypedPrompt, withoutIdeContext } from "../../src/transcripts/harness-turn.ts";
 
 const BASE = resolveDatabaseUrl();
@@ -800,7 +800,7 @@ describe("the index tidy migration", () => {
   const MIGRATION = "20261119090000_index_tidy";
   const { database: TIDY, earlier } = migrationFixture("migrate_index_tidy", MIGRATION);
 
-  it("should drop the two indexes a unique index answers and index the messages transcript entries point at when it is applied", async () => {
+  it("should drop the two indexes a unique index answers when it is applied", async () => {
     await migrate(earlier());
 
     expect((await migrate())[0]).toBe(MIGRATION);
@@ -814,15 +814,45 @@ describe("the index tidy migration", () => {
     expect(names).not.toContain("virtual_agent_owner_oid_idx");
     expect(names).toContain("assistant_template_owner_name_key");
     expect(names).toContain("virtual_agent_owner_oid_name_key");
-    expect(indexes.find((row) => row.indexname === "transcript_entry_message_id_idx")?.indexdef).toBe(
-      "CREATE INDEX transcript_entry_message_id_idx ON public.transcript_entry USING btree (message_id) WHERE (message_id IS NOT NULL)"
+  });
+});
+
+describe("the transcript message index migration", () => {
+  const MIGRATION = "20261122090000_transcript_message_index";
+  const { database: INDEXED, earlier } = migrationFixture("migrate_transcript_message", MIGRATION);
+  const DEFINITION = "CREATE INDEX transcript_entry_message_id_idx ON public.transcript_entry USING btree (message_id) WHERE (message_id IS NOT NULL)";
+
+  async function index(): Promise<{ indexdef: string; valid: boolean }[]> {
+    return await query(
+      INDEXED,
+      `SELECT pg_get_indexdef(i.indexrelid) AS indexdef, i.indisvalid AS valid
+         FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid WHERE c.relname = 'transcript_entry_message_id_idx'`
     );
+  }
+
+  it("should rebuild the index a failed concurrent build left INVALID when it is applied", async () => {
+    await migrate(earlier());
+    await query(INDEXED, `INSERT INTO "user" (oid, tid, name) VALUES ('dev-alice', 'dev', 'Alice')`);
+    await query(INDEXED, `INSERT INTO "agent" (owner_oid, session_id, name) VALUES ('dev-alice', 'laptop', 'laptop')`);
+    await query(
+      INDEXED,
+      `INSERT INTO "transcript_entry" (agent_id, session_id, entry_key, role, content, occurred_at)
+        SELECT id, 's', k, 'user', '{}', now() FROM "agent", (VALUES ('one'), ('two')) AS e (k)`
+    );
+    // A unique build over two rows with the same role fails, and a concurrent build that fails leaves its index behind.
+    await expect(query(INDEXED, `CREATE UNIQUE INDEX CONCURRENTLY "transcript_entry_message_id_idx" ON "transcript_entry" ("role")`)).rejects.toThrow();
+    expect(await index()).toMatchObject([{ valid: false }]);
+
+    expect((await migrate())[0]).toBe(MIGRATION);
+
+    expect(await index()).toEqual([{ indexdef: DEFINITION, valid: true }]);
   });
 
-  it("should answer the foreign key's set-null lookup from the new index", async () => {
-    // The statement Postgres runs for `ON DELETE SET NULL`. Sequential scans are switched off because an empty table
+  it("should answer the foreign key's set-null lookup from the index when the migration has been applied", async () => {
+    await migrate();
+    // The statement Postgres runs for `ON DELETE SET NULL`. Sequential scans are switched off because a small table
     // is cheapest to scan, and the question is whether the partial index can answer it at all.
-    const client = new pg.Client({ connectionString: urlFor(TIDY) });
+    const client = new pg.Client({ connectionString: urlFor(INDEXED) });
     await client.connect();
     try {
       await client.query("SET enable_seqscan = off");
@@ -834,6 +864,59 @@ describe("the index tidy migration", () => {
     } finally {
       await client.end();
     }
+  });
+});
+
+describe("a migration marked to run outside a transaction", () => {
+  const database = scratchDatabase("migrate_no_transaction");
+  const original = process.env.DATABASE_URL;
+  let directory: string;
+
+  beforeAll(async () => {
+    await query("postgres", `DROP DATABASE IF EXISTS "${database}"`);
+    await query("postgres", `CREATE DATABASE "${database}"`);
+    process.env.DATABASE_URL = urlFor(database);
+    directory = await mkdtemp(path.join(tmpdir(), "agent-hub-migrations-"));
+  });
+
+  afterAll(async () => {
+    if (original === undefined) {
+      delete process.env.DATABASE_URL;
+    } else {
+      process.env.DATABASE_URL = original;
+    }
+    await rm(directory, { recursive: true, force: true });
+    await query("postgres", `DROP DATABASE IF EXISTS "${database}"`);
+  });
+
+  async function write(name: string, sql: string): Promise<void> {
+    await mkdir(path.join(directory, name));
+    await writeFile(path.join(directory, name, "migration.sql"), sql);
+  }
+
+  it("should build an index CONCURRENTLY and record the migration when its first line is the marker", async () => {
+    await write("00000000000001_table", 'CREATE TABLE "thing" ("id" INTEGER);\n');
+    await write("00000000000002_index", `${NO_TRANSACTION}\n-- An index.\nCREATE INDEX CONCURRENTLY "thing_id_idx" ON "thing" ("id");\n`);
+
+    expect(await migrate(directory)).toEqual(["00000000000001_table", "00000000000002_index"]);
+
+    expect(await query(database, `SELECT indexname FROM pg_indexes WHERE tablename = 'thing'`)).toEqual([{ indexname: "thing_id_idx" }]);
+  });
+
+  it("should leave the migration unrecorded, so the next run tries it again, when one of its statements fails", async () => {
+    await write("00000000000003_fails", `${NO_TRANSACTION}\nCREATE TABLE "kept" ("id" INTEGER);\nSELECT 1 FROM "missing";\n`);
+
+    await expect(migrate(directory)).rejects.toThrow(/migration 00000000000003_fails failed/);
+
+    expect(await query(database, `SELECT 1 FROM "_prisma_migrations" WHERE migration_name = '00000000000003_fails'`)).toEqual([]);
+    expect(await query(database, `SELECT table_name FROM information_schema.tables WHERE table_name = 'kept'`)).toEqual([{ table_name: "kept" }]);
+  });
+
+  it("should refuse CREATE INDEX CONCURRENTLY when the migration carries no marker", async () => {
+    await rm(path.join(directory, "00000000000003_fails"), { recursive: true });
+    await write("00000000000004_unmarked", 'CREATE INDEX CONCURRENTLY "kept_id_idx" ON "kept" ("id");\n');
+
+    await expect(migrate(directory)).rejects.toThrow(/cannot run inside a transaction block/);
   });
 });
 
@@ -898,7 +981,7 @@ describe("the unread columns migration", () => {
   const MIGRATION = "20261121090000_unread_columns_released";
   const { database: UNREAD, earlier } = migrationFixture("migrate_unread_columns", MIGRATION);
 
-  it("should accept a credential with no updated_via and a delivered delivery with no delivered_at when it is applied", async () => {
+  it("should accept a credential with no updated_via and a delivered delivery with no delivered_at, and drop the answer message key, when it is applied", async () => {
     await migrate(earlier());
 
     expect((await migrate())[0]).toBe(MIGRATION);
@@ -911,6 +994,7 @@ describe("the unread columns migration", () => {
 
     expect(await query(UNREAD, `SELECT updated_via FROM "credential"`)).toEqual([{ updated_via: null }]);
     expect(await query(UNREAD, `SELECT state::text, delivered_at FROM "delivery"`)).toEqual([{ state: "delivered", delivered_at: null }]);
+    expect(await query(UNREAD, `SELECT conname FROM pg_constraint WHERE conname = 'agent_question_answer_message_id_fkey'`)).toEqual([]);
   });
 });
 

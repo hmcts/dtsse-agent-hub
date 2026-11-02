@@ -11,7 +11,9 @@
 -- This release's client marks them `@ignore` in prisma/schema.prisma, so it never names them and keeps working once
 -- they are gone.
 --
--- What this release has to change is the two rules that would refuse a row it writes without them.
+-- What this release has to change is the two rules that would refuse a row it writes without them, and the foreign
+-- key on `answer_message_id`, whose `ON DELETE SET NULL` scans `agent_question` for every message deleted, with no
+-- index to answer it, to clear a column nothing writes.
 
 -- Not null with no default, so an insert that leaves it out would fail.
 ALTER TABLE "credential" ALTER COLUMN "updated_via" DROP NOT NULL;
@@ -19,3 +21,5 @@ ALTER TABLE "credential" ALTER COLUMN "updated_via" DROP NOT NULL;
 -- The check tying `delivered_at` to the `delivered` state would refuse every ack, which leaves the column null. The
 -- state alone is what the queue and the UI read.
 ALTER TABLE "delivery" DROP CONSTRAINT "delivery_delivered_at_matches_state";
+
+ALTER TABLE "agent_question" DROP CONSTRAINT "agent_question_answer_message_id_fkey";

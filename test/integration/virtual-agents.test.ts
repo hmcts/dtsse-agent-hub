@@ -1746,7 +1746,7 @@ describe("sweepVirtualAgents", () => {
     expect((await row(agent.id)).desired).toBe("running");
   });
 
-  it("should stop a failed agent whose pod is still watching for a credential nobody has stored", async () => {
+  it("should stop a failed agent whose pod is still watching for a credential nobody has stored when the sweep runs overnight", async () => {
     const agent = await create(ALICE, "token-watch");
     const detail = "github: three sign-in codes went unused; paste a token on the credentials page, or stop and start this agent";
     // The pod's budget runs out, it reports failed, and then watches for a stored token without reporting again.
