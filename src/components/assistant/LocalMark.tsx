@@ -1,19 +1,19 @@
 import type { LocalSession } from "@/assistant/views";
+import { SessionMark } from "@/components/assistant/SessionMark";
 import { LaptopIcon } from "@/components/sidebar/icons";
 
 /**
  * What each of the three states is called, and the colour the icon carries it in.
  *
  * The words are the whole of the state for anyone the colour does not reach, which is why they name it rather than
- * only saying where the chat runs: colour and motion are never the only things carrying it (WCAG 1.4.1). The tokens
- * are the Assistant theme's own, so the mark is legible in the light theme as well as the dark one. `working` is
- * `ready`'s green pulsing, because both are a connected session and the pulse says it is mid-turn; the pulse stops for
- * anyone who asks for reduced motion. `asst-faint` for a session that is not connected is the colour the rest of the
- * row's secondary text is already in.
+ * only saying where the chat runs: colour is never the only thing carrying it (WCAG 1.4.1). The tokens are the
+ * Assistant theme's own, so the mark is legible in the light theme as well as the dark one. `working` is `ready`'s
+ * green with `SessionMark`'s badge, because both are a connected session and the badge says it is mid-turn.
+ * `asst-faint` for a session that is not connected is the colour the rest of the row's secondary text is already in.
  */
 const SESSION: Record<LocalSession, { words: string; colour: string }> = {
   ready: { words: "On your computer, ready", colour: "text-asst-ok" },
-  working: { words: "On your computer, working", colour: "text-asst-ok animate-status-pulse motion-reduce:animate-none" },
+  working: { words: "On your computer, working", colour: "text-asst-ok" },
   disconnected: { words: "On your computer, not connected", colour: "text-asst-faint" }
 };
 
@@ -32,12 +32,5 @@ const SESSION: Record<LocalSession, { words: string; colour: string }> = {
  */
 export function LocalMark({ session }: { session: LocalSession }) {
   const { words, colour } = SESSION[session];
-  return (
-    <span className={`flex shrink-0 items-center ${colour}`} title={words}>
-      <LaptopIcon />
-      {/* The trailing space is part of the text: the name of the row this sits in is these words joined to its
-          title, and nothing between two inline elements adds one. */}
-      <span className="sr-only">{`${words}: `}</span>
-    </span>
-  );
+  return <SessionMark words={words} colour={colour} working={session === "working"} icon={<LaptopIcon />} />;
 }

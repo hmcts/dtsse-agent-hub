@@ -135,19 +135,24 @@ describe("AssistantShell", () => {
   });
 
   // The three are the theme's own colours rather than raw palette values, so the mark stays legible in both themes.
-  // Working is ready's green pulsing, and the pulse stops for reduced motion.
+  // Working is ready's green with a badge, so it differs by shape and not only while the badge pulses.
   it.each([
     ["ready", "text-asst-ok", false],
     ["working", "text-asst-ok", true],
     ["disconnected", "text-asst-faint", false]
-  ] as const)("should colour a local chat's mark when its session is %s", (session: LocalSession, colour: string, pulses: boolean) => {
-    render(shell({ groups: [{ label: "Today", items: [link("b", "Fixing the sweep", onComputer(session))] }] }));
+  ] as const)(
+    "should colour a local chat's mark, badging only a working one, when its session is %s",
+    (session: LocalSession, colour: string, working: boolean) => {
+      render(shell({ groups: [{ label: "Today", items: [link("b", "Fixing the sweep", onComputer(session))] }] }));
 
-    const mark = screen.getByTitle(/On your computer/);
-    expect(mark.className).toContain(colour);
-    expect(mark.classList.contains("animate-status-pulse")).toBe(pulses);
-    expect(mark.classList.contains("motion-reduce:animate-none")).toBe(pulses);
-  });
+      const mark = screen.getByTitle(/On your computer/);
+      expect(mark.classList.contains(colour)).toBe(true);
+      expect(mark.classList.contains("status-pulse")).toBe(false);
+      const badge = mark.querySelector('[data-badge="working"]');
+      expect(badge !== null).toBe(working);
+      expect(badge?.classList.contains("status-pulse") ?? false).toBe(working);
+    }
+  );
 
   // The cloud is only ever there to tell a pod chat from a local one, so a list with nothing but pod chats carries
   // no marks at all: a cloud against every row would distinguish them from nothing.
@@ -164,22 +169,29 @@ describe("AssistantShell", () => {
   });
 
   // As for the laptop, colour is never the only carrier (WCAG 1.4.1): the state is in the row's name and the tooltip.
-  // Starting is a solid amber, so it never reads as working's pulsing green.
+  // Starting is a solid amber with no badge, so it never reads as working's badged green.
   it.each([
     ["ready", "On your assistant, ready", "text-asst-ok", false],
     ["working", "On your assistant, working", "text-asst-ok", true],
     ["starting", "On your assistant, starting", "text-asst-warn", false],
     ["disconnected", "On your assistant, not connected", "text-asst-faint", false]
-  ] as const)("should name and colour a pod chat's mark when its session is %s", (session: PodSession, words: string, colour: string, pulses: boolean) => {
-    render(shell({ groups: [{ label: "Today", items: [link("a", "Event help", onAssistant(session)), link("b", "Fixing the sweep", onComputer("ready"))] }] }));
+  ] as const)(
+    "should name and colour a pod chat's mark, badging only a working one, when its session is %s",
+    (session: PodSession, words: string, colour: string, working: boolean) => {
+      render(
+        shell({ groups: [{ label: "Today", items: [link("a", "Event help", onAssistant(session)), link("b", "Fixing the sweep", onComputer("ready"))] }] })
+      );
 
-    const nav = screen.getByRole("navigation", { name: "Chats" });
-    expect(within(nav).getByRole("link", { name: new RegExp(`^${words}`) }).textContent).toBe(`${words}: Event help`);
-    const mark = screen.getByTitle(words);
-    expect(mark.className).toContain(colour);
-    expect(mark.classList.contains("animate-status-pulse")).toBe(pulses);
-    expect(mark.classList.contains("motion-reduce:animate-none")).toBe(pulses);
-  });
+      const nav = screen.getByRole("navigation", { name: "Chats" });
+      expect(within(nav).getByRole("link", { name: new RegExp(`^${words}`) }).textContent).toBe(`${words}: Event help`);
+      const mark = screen.getByTitle(words);
+      expect(mark.classList.contains(colour)).toBe(true);
+      expect(mark.classList.contains("status-pulse")).toBe(false);
+      const badge = mark.querySelector('[data-badge="working"]');
+      expect(badge !== null).toBe(working);
+      expect(badge?.classList.contains("status-pulse") ?? false).toBe(working);
+    }
+  );
 
   it("should mark no chat when every one of the person's chats runs on their assistant", () => {
     render(shell({ groups: [{ label: "Today", items: [link("a", "Event help"), link("b", "Story draft")] }] }));

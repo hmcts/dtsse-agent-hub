@@ -75,7 +75,7 @@ describe("AgentRoster", () => {
     expect(within(screen.getByRole("link", { name: /gamma/ })).getByText("offline")).toBeTruthy();
   });
 
-  it("should show a busy agent in the idle green, pulsing, when it is mid-turn", () => {
+  it("should show a busy agent as a pulsing green ring and an idle one as a still green dot when one is mid-turn", () => {
     const { container } = render(
       <HubStreamProvider>
         <AgentRoster agents={[agent("1", "alpha", "idle"), agent("2", "beta", "busy")]} />
@@ -85,10 +85,43 @@ describe("AgentRoster", () => {
     const idle = container.querySelector('[data-status="idle"]');
     const busy = container.querySelector('[data-status="busy"]');
     expect(idle?.classList.contains("bg-status-idle")).toBe(true);
-    expect(idle?.classList.contains("animate-status-pulse")).toBe(false);
-    expect(busy?.classList.contains("bg-status-idle")).toBe(true);
-    expect(busy?.classList.contains("animate-status-pulse")).toBe(true);
-    expect(busy?.classList.contains("motion-reduce:animate-none")).toBe(true);
+    expect(idle?.classList.contains("status-pulse")).toBe(false);
+    expect(busy?.classList.contains("border-status-idle")).toBe(true);
+    expect(busy?.classList.contains("bg-status-idle")).toBe(false);
+    expect(busy?.classList.contains("status-pulse")).toBe(true);
+  });
+
+  it("should keep the rail edge off the pulsing element when an agent is busy", () => {
+    const { container } = render(
+      <HubStreamProvider>
+        <AgentRoster agents={[agent("1", "alpha", "busy")]} />
+      </HubStreamProvider>
+    );
+
+    const dot = container.querySelector('[data-status="busy"]');
+    expect(dot?.classList.contains("border-hub-rail")).toBe(false);
+    expect(dot?.parentElement?.classList.contains("border-hub-rail")).toBe(true);
+    expect(dot?.parentElement?.classList.contains("status-pulse")).toBe(false);
+  });
+
+  it("should re-apply the pulse when an agent goes from busy to idle and back", async () => {
+    const { container } = render(
+      <HubStreamProvider>
+        <AgentRoster agents={[agent("1", "alpha", "busy")]} />
+      </HubStreamProvider>
+    );
+    const dot = container.querySelector("[data-status]");
+
+    await act(async () => {
+      FakeSource.last?.emit("agent_status", { agent_id: "1", status: "idle" });
+    });
+    expect(dot?.classList.contains("status-pulse")).toBe(false);
+
+    await act(async () => {
+      FakeSource.last?.emit("agent_status", { agent_id: "1", status: "busy" });
+    });
+    expect(container.querySelector("[data-status]")).toBe(dot);
+    expect(dot?.classList.contains("status-pulse")).toBe(true);
   });
 
   it("should link to the virtual agent and mark it virtual when a virtual agent's session registered the agent", () => {

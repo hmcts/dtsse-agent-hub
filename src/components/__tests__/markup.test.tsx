@@ -242,14 +242,19 @@ describe("small components", () => {
   });
 
   it.each([
-    ["idle", "bg-status-idle", false],
-    ["busy", "bg-status-idle", true],
-    ["offline", "bg-status-offline", false]
-  ] as const)("should colour the dot, pulsing only a busy one, when the status is %s", (status, colour, pulses) => {
+    ["idle", ["bg-status-idle"], ["border-status-idle", "status-pulse"]],
+    ["busy", ["border-status-idle", "status-pulse"], ["bg-status-idle"]],
+    ["offline", ["bg-status-offline"], ["border-status-idle", "status-pulse"]]
+  ] as const)("should draw a busy dot as a pulsing ring and the others as still fills when the status is %s", (status, present, absent) => {
     const html = renderToStaticMarkup(<StatusDot status={status} />);
+    const classes = (new RegExp(`data-status="${status}" class="([^"]*)"`).exec(html)?.[1] ?? "").split(" ");
 
-    expect(html).toContain(colour);
-    expect(html.includes("animate-status-pulse motion-reduce:animate-none")).toBe(pulses);
+    for (const name of present) {
+      expect(classes).toContain(name);
+    }
+    for (const name of absent) {
+      expect(classes).not.toContain(name);
+    }
   });
 
   it("should mark a dev owner and nobody else", () => {

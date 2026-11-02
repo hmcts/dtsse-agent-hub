@@ -8,17 +8,11 @@ import { Avatar } from "@/components/Avatar";
 import { HeardAge } from "@/components/agents/LastHeard";
 import { useHubEvent } from "@/components/live/HubStream";
 import { NavLink } from "@/components/NavLink";
+import { STATUS_DOT } from "@/components/StatusDot";
 import type { AgentStatus } from "@/realtime/events";
 import { byCodePoint } from "@/topics/slug";
 
 const RANK: Record<AgentStatus, number> = { busy: 0, idle: 1, offline: 2 };
-
-/** Coloured as `StatusDot` colours the same statuses: `busy` is `idle`'s green pulsing. */
-const DOT: Record<AgentStatus, string> = {
-  busy: "bg-status-idle animate-status-pulse motion-reduce:animate-none",
-  idle: "bg-status-idle",
-  offline: "bg-status-offline"
-};
 
 function initialHeard(agent: AgentCard): Heard {
   return { status: agent.status, at: new Date(agent.lastHeartbeatAt).getTime() };
@@ -41,11 +35,11 @@ function Row({ agent, heard }: { agent: AgentCard; heard: Heard }) {
       <NavLink href={agentPath(agent)} className={offline ? "opacity-60" : ""}>
         <span className="relative">
           <Avatar name={agent.name} size="sm" />
-          <span
-            aria-hidden="true"
-            data-status={status}
-            className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-hub-rail ${DOT[status]}`}
-          />
+          {/* The rail-coloured edge parts the dot from the avatar and fills a busy ring's centre. It is a span of its
+              own so the pulse on the dot inside never fades it. */}
+          <span aria-hidden="true" className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-hub-rail bg-hub-rail">
+            <span data-status={status} className={`block h-full w-full rounded-full ${STATUS_DOT[status]}`} />
+          </span>
         </span>
         <span className="truncate">{agent.name}</span>
         {agent.virtualAgentId === null ? null : <span className="shrink-0 text-[10px] uppercase tracking-wide text-hub-muted">virtual</span>}
