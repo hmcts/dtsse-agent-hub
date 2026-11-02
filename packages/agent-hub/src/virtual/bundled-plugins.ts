@@ -18,8 +18,25 @@ export const BUNDLED_PLUGINS: readonly string[] = ["welsh"];
 /** The package's own copies: `plugins/<name>`, the same distance from `src/` and `dist/`. */
 export const PACKAGE_PLUGINS = fileURLToPath(new URL("../../plugins/", import.meta.url));
 
-/** Left out of a copy and its hash: what a plugin installs for itself, and its own tests. */
-const SKIPPED = new Set(["node_modules", "test"]);
+/** Left out of a copy and its hash: what a plugin installs for itself, the lock it installs under, and its tests. */
+const SKIPPED = new Set(["node_modules", ".install.lock", "test"]);
+
+/**
+ * The variable a conversation session is started with, naming the copies it loads with --plugin-dir, joined with the
+ * path delimiter. The "/" menu lists a bundled plugin's skills only from it, so a session that was not given a copy,
+ * such as the pod's main one, does not offer skills it cannot run.
+ */
+export const BUNDLED_DIRS_VAR = "AGENT_HUB_BUNDLED_PLUGIN_DIRS";
+
+/** The copies `BUNDLED_DIRS_VAR` names. */
+export function bundledDirsOf(env: Env): string[] {
+  return String(env.AGENT_HUB_BUNDLED_PLUGIN_DIRS || "")
+    .split(path.delimiter)
+    .filter((dir) => dir !== "");
+}
+
+/** Each source's version, worked out once: the package's own copy does not change while this process runs. */
+const versions = new Map<string, string>();
 
 /** Where a pod keeps its copies: beside the workspace checkout, on the same disk. */
 export function pluginCacheRoot(workspace: string): string {
@@ -71,15 +88,21 @@ function files(dir: string, under = ""): string[] {
   return out;
 }
 
-/** A short hash of a plugin's files, paths and contents, which names its copy. */
+/** A short hash of a plugin's files, paths and contents, which names its copy. Computed once per source. */
 export function pluginVersion(source: string): string {
+  const known = versions.get(source);
+  if (known !== undefined) {
+    return known;
+  }
   const hash = createHash("sha256");
   for (const rel of files(source)) {
     hash.update(`${rel}\0`);
     hash.update(fs.readFileSync(path.join(source, rel)));
     hash.update("\0");
   }
-  return hash.digest("hex").slice(0, 12);
+  const version = hash.digest("hex").slice(0, 12);
+  versions.set(source, version);
+  return version;
 }
 
 /** Where this version of a bundled plugin's copy is, whether or not it has been made yet. */
@@ -94,6 +117,7 @@ export function bundledPluginDir(name: string, workspace: string, source = path.
 export function installBundled(name: string, workspace: string, source = path.join(PACKAGE_PLUGINS, name)): string {
   const dir = bundledPluginDir(name, workspace, source);
   if (fs.existsSync(dir)) {
+    pruneOthers(name, dir);
     return dir;
   }
   fs.mkdirSync(path.dirname(dir), { recursive: true });
@@ -116,5 +140,21 @@ export function installBundled(name: string, workspace: string, source = path.jo
       throw e;
     }
   }
+  pruneOthers(name, dir);
   return dir;
+}
+
+/**
+ * Removes a plugin's other copies: earlier versions, each with the dependencies it installed, and copies a stopped
+ * process left half made. Only the current version is ever run, since a pod's client, and so its plugins, is fixed
+ * for the life of the process.
+ */
+function pruneOthers(name: string, keep: string): void {
+  const root = path.dirname(keep);
+  const ours = new RegExp(String.raw`^${name}-[0-9a-f]{12}(\.partial-\d+)?$`);
+  for (const entry of fs.readdirSync(root)) {
+    if (ours.test(entry) && entry !== path.basename(keep)) {
+      fs.rmSync(path.join(root, entry), { recursive: true, force: true });
+    }
+  }
 }

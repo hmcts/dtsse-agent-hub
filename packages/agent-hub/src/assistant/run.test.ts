@@ -132,8 +132,10 @@ describe("runAssistantSupervisor", () => {
       // Assert
       await waitUntil(() => hub.welshAnswers.length === 1, "the Welsh job to be answered");
       expect(hub.welshAnswers[0]).toEqual({ virtual_id: VID, job_id: jobId, body: { result: { total: 0, hits: [], message: "0 match(es)" } } });
-      expect(ran[0]?.cmd).toBe(path.join(plugin, "scripts", "welsh"));
-      expect(ran[0]?.args.at(-1)).toBe("back");
+      // The tools' dependencies are installed as the supervisor starts, ahead of the job.
+      expect(ran[0]).toEqual({ cmd: path.join(plugin, "scripts", "welsh"), args: ["deps"] });
+      expect(ran[1]?.cmd).toBe(path.join(plugin, "scripts", "welsh"));
+      expect(ran[1]?.args.at(-1)).toBe("back");
     } finally {
       stop.abort();
       await running;

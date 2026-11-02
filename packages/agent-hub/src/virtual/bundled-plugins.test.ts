@@ -3,7 +3,9 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  BUNDLED_DIRS_VAR,
   BUNDLED_PLUGINS,
+  bundledDirsOf,
   bundledPluginDir,
   installBundled,
   installTicked,
@@ -47,14 +49,25 @@ describe("bundled plugins", () => {
     expect(pluginCacheRoot("/workspace/cft-workspace")).toBe("/workspace/.agent-hub-plugins");
   });
 
-  it("should version a plugin by its files, ignoring its tests and installed dependencies", () => {
+  it("should version a plugin by its files, ignoring its tests, installed dependencies and install lock", () => {
+    const other = source();
+    fs.writeFileSync(path.join(other, "scripts", "lib", "test", "a.test.ts"), "changed");
+    fs.writeFileSync(path.join(other, "scripts", "lib", "node_modules", "dep", "index.js"), "changed");
+    fs.writeFileSync(path.join(other, "scripts", "lib", ".install.lock"), "");
+    expect(pluginVersion(other)).toBe(pluginVersion(source()));
+    expect(pluginVersion(source("#!/bin/sh\necho changed\n"))).not.toBe(pluginVersion(source()));
+  });
+
+  it("should work a source's version out once, since the package does not change under a running process", () => {
     const src = source();
     const before = pluginVersion(src);
-    fs.writeFileSync(path.join(src, "scripts", "lib", "test", "a.test.ts"), "changed");
-    fs.writeFileSync(path.join(src, "scripts", "lib", "node_modules", "dep", "index.js"), "changed");
-    expect(pluginVersion(src)).toBe(before);
     fs.writeFileSync(path.join(src, "scripts", "welsh"), "#!/bin/sh\necho changed\n");
-    expect(pluginVersion(src)).not.toBe(before);
+    expect(pluginVersion(src)).toBe(before);
+  });
+
+  it("should name the copies a session was started with, and none when it was given none", () => {
+    expect(bundledDirsOf({ [BUNDLED_DIRS_VAR]: ["/a/welsh-1", "/b/x-2"].join(path.delimiter) })).toEqual(["/a/welsh-1", "/b/x-2"]);
+    expect(bundledDirsOf({})).toEqual([]);
   });
 
   it("should copy a plugin once per version, without its tests or dependencies, and reuse the copy", () => {
@@ -78,12 +91,24 @@ describe("bundled plugins", () => {
     expect(fs.existsSync(path.join(again, "scripts", "installed-later"))).toBe(true);
   });
 
-  it("should make a new copy when the plugin changes", () => {
+  it("should make a new copy when the plugin changes, and remove the old one and any half-made copy", () => {
+    // Arrange
     const ws = workspace();
     const first = installBundled("welsh", ws, source());
+    const stale = path.join(pluginCacheRoot(ws), "welsh-0123456789ab.partial-99999");
+    const unrelated = path.join(pluginCacheRoot(ws), "welsh-notes");
+    fs.mkdirSync(stale);
+    fs.mkdirSync(unrelated);
+
+    // Act
     const second = installBundled("welsh", ws, source("#!/bin/sh\necho v2\n"));
+
+    // Assert
     expect(second).not.toBe(first);
     expect(fs.readFileSync(path.join(second, "scripts", "welsh"), "utf8")).toBe("#!/bin/sh\necho v2\n");
+    expect(fs.existsSync(first)).toBe(false);
+    expect(fs.existsSync(stale)).toBe(false);
+    expect(fs.existsSync(unrelated)).toBe(true);
   });
 
   it("should say and leave out a ticked plugin it cannot copy, rather than stop", () => {

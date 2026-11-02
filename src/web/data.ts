@@ -326,6 +326,12 @@ export async function assistantFiles(viewer: Viewer): Promise<UploadsOnDisk | un
   return assistant === undefined ? undefined : await uploadsOnDisk(prisma, viewer.oid, assistant.id);
 }
 
+/** Whether the viewer's assistant has the Welsh plugin ticked, which is what the Welsh page needs to run anything. */
+export async function assistantHasWelsh(viewer: Identity): Promise<boolean> {
+  const assistant = await findAssistant(prisma, viewer.oid);
+  return assistant !== undefined && hasWelshPlugin(assistant);
+}
+
 /**
  * How much the viewer's assistant has to work with, for the settings dialog's Size section: its size, what its pod
  * reports about its memory, and how many chats have a session on it. `undefined` when they have no assistant at all,
@@ -334,12 +340,6 @@ export async function assistantFiles(viewer: Viewer): Promise<UploadsOnDisk | un
  * Its own read rather than part of `openAssistant`, as the files are: only the settings dialog uses it, and it costs a
  * second query over the viewer's conversations. The owner check is the store's, through `isOwner`.
  */
-/** Whether the viewer's assistant has the Welsh plugin ticked, which is what the Welsh page needs to run anything. */
-export async function assistantHasWelsh(viewer: Identity): Promise<boolean> {
-  const assistant = await findAssistant(prisma, viewer.oid);
-  return assistant !== undefined && hasWelshPlugin(assistant);
-}
-
 export async function assistantSize(viewer: Viewer): Promise<AssistantMemory | undefined> {
   const assistant = await findAssistant(prisma, viewer.oid);
   return assistant === undefined ? undefined : await assistantMemory(prisma, viewer.oid, assistant.id);

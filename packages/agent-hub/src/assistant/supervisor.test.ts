@@ -8,6 +8,7 @@ import { type TempClaudeHome, tempClaudeHome } from "../__fixtures__/claude-home
 import { conversation, fakeTmux } from "../__fixtures__/fake-tmux.ts";
 import type { SessionsBody } from "../api.ts";
 import { ensureStateDir, hubHome, projectTranscriptPath, readText, statePath } from "../session.ts";
+import { BUNDLED_DIRS_VAR } from "../virtual/bundled-plugins.ts";
 import { launcherModel, modelPath } from "./models.ts";
 import {
   BUSY_STALE_MS,
@@ -57,7 +58,17 @@ afterAll(() => {
  * is compared against, and a filesystem that keeps mtimes to the whole second — which the CI runner's does — then
  * dates them just before it, so whether a busy session is believed would come down to the filesystem.
  */
-function setup({ max = 2, idleMs = 20 * MINUTE, canRun = () => true }: { max?: number; idleMs?: number; canRun?: ProgramCheck } = {}) {
+function setup({
+  max = 2,
+  idleMs = 20 * MINUTE,
+  canRun = () => true,
+  pluginDirs = []
+}: {
+  max?: number;
+  idleMs?: number;
+  canRun?: ProgramCheck;
+  pluginDirs?: string[];
+} = {}) {
   fs.rmSync(path.join(hubHome(), "virtual"), { recursive: true, force: true });
   const tmux = fakeTmux();
   const reports: SessionsBody[] = [];
@@ -80,6 +91,7 @@ function setup({ max = 2, idleMs = 20 * MINUTE, canRun = () => true }: { max?: n
     max,
     idleMs,
     bootedAt,
+    pluginDirs,
     say: (message) => said.push(message)
   });
   return { tmux, reports, said, clock, bootedAt, supervisor, lastReport: () => reports.at(-1) as SessionsBody };
@@ -170,6 +182,21 @@ describe("createAssistantSupervisor wake", () => {
     expect(start?.cwd).toBe(CWD);
     expect(start?.vars).toEqual({ AGENT_HUB_CONVERSATION_ID: c.conversation_id });
     expect(start?.command).toBe(`hai --dangerously-skip-permissions --session-id ${c.session_id} --append-system-prompt-file '${PROMPT_FILE}'`);
+  });
+
+  it("should load the pod's bundled plugin copies and tell the session which they are when it has any", async () => {
+    // Arrange
+    const dirs = ["/workspace/.agent-hub-plugins/welsh-abc"];
+    const { tmux, supervisor } = setup({ pluginDirs: dirs });
+    const c = conversation();
+
+    // Act
+    await supervisor.wake(c);
+
+    // Assert
+    const [start] = tmux.starts();
+    expect(start?.vars).toEqual({ AGENT_HUB_CONVERSATION_ID: c.conversation_id, [BUNDLED_DIRS_VAR]: dirs.join(path.delimiter) });
+    expect(start?.command).toContain("--plugin-dir '/workspace/.agent-hub-plugins/welsh-abc'");
   });
 
   it("should start the session on the wake's model and record it for the bridge when the wake names one", async () => {

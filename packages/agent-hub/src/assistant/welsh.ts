@@ -402,6 +402,31 @@ export type WelshRunner = {
  * since somebody is waiting on the page; the rest run one at a time, in the order they were started, because each
  * may clone, branch and push, and two at once in one checkout would get in each other's way.
  */
+/** Long enough for the first install of the tools' dependencies, which no job's own limit is. */
+const PREPARE_TIMEOUT_MS = 15 * 60_000;
+
+/**
+ * Installs the Welsh tools' dependencies as the pod starts, when the owner ticked the plugin, so the first job does
+ * not spend its own time limit on the install. A job that arrives meanwhile waits for it, since the script takes a
+ * lock to install. Never throws: a failure is said, and the next job tries the install again.
+ */
+export async function prepareWelsh(deps: Pick<WelshDeps, "run" | "env" | "workspace" | "install" | "say">): Promise<void> {
+  const say = deps.say ?? (() => {});
+  try {
+    const script = welshScript(deps.workspace, deps.env, deps.install);
+    if (script === null) {
+      return;
+    }
+    const env: NodeJS.ProcessEnv = { ...deps.env, CFT_WELSH_WORKSPACE: deps.workspace };
+    const result = await deps.run(script, ["deps"], { env, timeoutMs: PREPARE_TIMEOUT_MS });
+    if (result.code !== 0) {
+      say(`welsh: could not install the tools' dependencies (exit ${result.code}): ${result.stderr.trim().slice(-300)}`);
+    }
+  } catch (e) {
+    say(`welsh: could not prepare the tools: ${(e as Error).message}`);
+  }
+}
+
 export function createWelshRunner(deps: WelshDeps & { maxQuick?: number }): WelshRunner {
   const say = deps.say ?? (() => {});
   const maxQuick = deps.maxQuick ?? MAX_RUNNING_QUICK;

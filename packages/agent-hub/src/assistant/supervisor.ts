@@ -7,6 +7,7 @@ import { workspaceRoot } from "../agent.ts";
 import type { Api, SessionReport } from "../api.ts";
 import type { Env } from "../env.ts";
 import { hubHome, projectTranscriptPath, stateDir, statePath, validSessionId } from "../session.ts";
+import { BUNDLED_DIRS_VAR } from "../virtual/bundled-plugins.ts";
 import { removeConversationUploads, uploadsRoot } from "./attachments.ts";
 import { launcherModel, modelPath, parseModel } from "./models.ts";
 import { canRunProgram, claudeCommand, commandProgram, createTmux, type ProgramCheck, type Tmux, tmuxName } from "./tmux.ts";
@@ -325,7 +326,11 @@ export function createAssistantSupervisor({
       say(`conversation ${w.conversation_id}: could not record its model: ${(e as Error).message}`);
     }
     try {
-      await tmux.start({ name, cwd, vars: { AGENT_HUB_CONVERSATION_ID: w.conversation_id }, command });
+      const vars: Record<string, string> = { AGENT_HUB_CONVERSATION_ID: w.conversation_id };
+      if (pluginDirs.length > 0) {
+        vars[BUNDLED_DIRS_VAR] = pluginDirs.join(path.delimiter);
+      }
+      await tmux.start({ name, cwd, vars, command });
     } catch (e) {
       // Nothing registered for it, so the hub sends the wake again on the next connection.
       say(`conversation ${w.conversation_id}: could not start a session: ${(e as Error).message}`);

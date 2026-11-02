@@ -45,6 +45,36 @@ test("add supersedes a changed rendering and ignores a repeat", () => {
   assert.equal(loadCatalogue("demo").approved("Continue")[0].welsh, "Ymlaen");
 });
 
+test("a WLU return confirms a needs-review row rather than adding a second one", () => {
+  writeFileSync(join(ws, "apps", "demo", "welsh", "catalogue.csv"), "");
+  const cat = loadCatalogue("demo");
+  cat.add({ english: "Back", welsh: "Yn ôl", source: "legacy", status: "needs-review" });
+  assert.equal(cat.add({ english: "Back", welsh: "Yn ôl", source: "WLU:batch-1" }), "added");
+  assert.deepEqual(
+    cat.history("Back").map((r) => [r.welsh, r.status, r.source]),
+    [["Yn ôl", "approved", "WLU:batch-1"]]
+  );
+  assert.equal(lookup("Back", cat).kind, "hit");
+  assert.equal(cat.add({ english: "Back", welsh: "Yn ôl", source: "legacy-again", status: "needs-review" }), "unchanged");
+  assert.equal(cat.approved("Back")[0].source, "WLU:batch-1");
+});
+
+test("going back to an earlier rendering restores its row, so row ids stay unique", () => {
+  writeFileSync(join(ws, "apps", "demo", "welsh", "catalogue.csv"), "");
+  const cat = loadCatalogue("demo");
+  cat.add({ english: "Continue", welsh: "Parhau", source: "WLU-1" });
+  cat.add({ english: "Continue", welsh: "Ymlaen", source: "WLU-2" });
+  assert.equal(cat.add({ english: "Continue", welsh: "Parhau", source: "WLU-3" }), "superseded-previous");
+  assert.deepEqual(
+    cat.history("Continue").map((r) => [r.welsh, r.status]),
+    [
+      ["Parhau", "approved"],
+      ["Ymlaen", "superseded"]
+    ]
+  );
+  assert.equal(new Set(cat.rows.map((r) => r.id)).size, cat.rows.length);
+});
+
 test("a catalogue belongs to one service, with nothing shared between services", () => {
   assert.equal(cataloguePath("demo"), join(ws, "apps", "demo", "welsh", "catalogue.csv"));
   const other = loadCatalogue("other");

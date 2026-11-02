@@ -6,7 +6,7 @@ import path from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { type TempClaudeHome, tempClaudeHome } from "./__fixtures__/claude-home.ts";
 import { collectSkills, enabledPlugins, hubPlugins, parseFrontmatter, pluginInstalls, skillFrom, skillsHash } from "./skills.ts";
-import { installBundled } from "./virtual/bundled-plugins.ts";
+import { BUNDLED_DIRS_VAR, installBundled } from "./virtual/bundled-plugins.ts";
 
 let home: TempClaudeHome;
 const savedEnv: Record<string, string | undefined> = {};
@@ -276,18 +276,20 @@ describe("hubPlugins", () => {
     expect(hubPlugins({ project: l.project, env: { AGENT_HUB_PLUGINS: "pcs" } })).toEqual([]);
   });
 
-  it("should give the pod's copy of a ticked plugin this package carries, once there is one, with no marketplace entry", () => {
+  it("should give a ticked plugin this package carries only to a session started with its copy", () => {
     // Arrange
     const l = layout();
-    const env = { AGENT_HUB_PLUGINS: "welsh" };
-    const before = hubPlugins({ project: l.project, env });
-
-    // Act
     const dir = installBundled("welsh", l.project);
 
+    // Act
+    const main = hubPlugins({ project: l.project, env: { AGENT_HUB_PLUGINS: "welsh" } });
+    const conversation = hubPlugins({ project: l.project, env: { AGENT_HUB_PLUGINS: "welsh", [BUNDLED_DIRS_VAR]: dir } });
+    const unticked = hubPlugins({ project: l.project, env: { AGENT_HUB_PLUGINS: "pcs", [BUNDLED_DIRS_VAR]: dir } });
+
     // Assert
-    expect(before).toEqual([]);
-    expect(hubPlugins({ project: l.project, env })).toEqual([{ name: "welsh", dir }]);
+    expect(main).toEqual([]);
+    expect(conversation).toEqual([{ name: "welsh", dir }]);
+    expect(unticked).toEqual([]);
   });
 
   it("should skip an entry whose source is missing when the marketplace is malformed", () => {

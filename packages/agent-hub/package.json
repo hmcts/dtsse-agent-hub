@@ -20,6 +20,7 @@
     "plugins",
     "!plugins/**/node_modules",
     "!plugins/**/test",
+    "!plugins/**/.install.lock",
     "secret-patterns",
     "virtual-agent"
   ],

@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Env } from "./env.ts";
 import { claudeHome, projectDir, readJson, sha256 } from "./session.ts";
-import { BUNDLED_PLUGINS, bundledPluginDir } from "./virtual/bundled-plugins.ts";
+import { BUNDLED_PLUGINS, bundledDirsOf } from "./virtual/bundled-plugins.ts";
 
 export const MAX_SKILLS = 200;
 export const MAX_SKILL_NAME = 100;
@@ -179,18 +179,24 @@ function pluginName(dir: string, fallback: string): string {
   return typeof name === "string" && name ? name : fallback;
 }
 
-// A plugin this package carries, as the pod's copy of its current version, or null when it is not one or has none yet.
-function bundledCopy(name: string, project: string): PluginInstall | null {
+// A plugin this package carries, as the copy this session was started with, or null when it is not one or the session
+// was given none.
+function bundledCopy(name: string, env: Env): PluginInstall | null {
   if (!BUNDLED_PLUGINS.includes(name)) {
     return null;
   }
-  const dir = bundledPluginDir(name, project);
-  return fs.existsSync(path.join(dir, ".claude-plugin", "plugin.json")) ? { name: pluginName(dir, name), dir } : null;
+  for (const dir of bundledDirsOf(env)) {
+    if (fs.existsSync(path.join(dir, ".claude-plugin", "plugin.json")) && pluginName(dir, "") === name) {
+      return { name, dir };
+    }
+  }
+  return null;
 }
 
 // The plugins a virtual agent's owner ticked, which its sessions load with --plugin-dir: each name in
 // AGENT_HUB_PLUGINS resolved through this checkout's marketplace.json, as hai does, or for a plugin this package
-// carries, the pod's copy of it once one has been made. A name neither has is skipped, as hai skips it.
+// carries, the copy the session was started with, so only a session that loads one lists its skills. A name neither
+// has is skipped, as hai skips it.
 export function hubPlugins({ project, env = process.env }: { project: string; env?: Env }): PluginInstall[] {
   const names = String(env.AGENT_HUB_PLUGINS || "")
     .split(",")
@@ -203,7 +209,7 @@ export function hubPlugins({ project, env = process.env }: { project: string; en
   const listed = Array.isArray(read) ? read : null;
   const out: PluginInstall[] = [];
   for (const name of names) {
-    const bundled = bundledCopy(name, project);
+    const bundled = bundledCopy(name, env);
     if (bundled !== null) {
       out.push(bundled);
       continue;

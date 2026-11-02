@@ -74,19 +74,33 @@ export class Catalogue {
 
   /**
    * Add a row the WLU supplied. An existing approved row with the same English
-   * and context but different Welsh is marked superseded; an identical row is
-   * left alone. Returns what happened so callers can report it.
+   * and context but different Welsh is marked superseded. The same Welsh already
+   * there is never a second row, since a row's id is its English, context and
+   * Welsh: an approved one is left alone, and a needs-review or superseded one
+   * takes the new status and source, so a WLU return confirms a row awaiting
+   * review or brings back an earlier rendering. Returns what happened so callers
+   * can report it.
    */
   add(input: NewRow): "added" | "unchanged" | "superseded-previous" {
     const context = input.context?.trim() ?? "";
     const status = input.status ?? "approved";
     const existing = this.history(input.english).filter((r) => r.context.trim() === context);
-    if (existing.some((r) => r.welsh === input.welsh && r.status !== "superseded")) {
+    const identical = existing.find((r) => r.welsh === input.welsh);
+    if (identical && (identical.status === "approved" || identical.status === status)) {
       return "unchanged";
     }
-    const same = status === "approved" ? existing.filter((r) => r.status === "approved") : [];
+    const same = status === "approved" ? existing.filter((r) => r.status === "approved" && r !== identical) : [];
     for (const r of same) {
       r.status = "superseded";
+    }
+    if (identical) {
+      identical.status = status;
+      identical.source = input.source;
+      identical.received = input.received ?? new Date().toISOString().slice(0, 10);
+      if (input.notes !== undefined) {
+        identical.notes = input.notes;
+      }
+      return same.length ? "superseded-previous" : "added";
     }
     const row: Row = {
       id: rowId(input.english, context, input.welsh),
