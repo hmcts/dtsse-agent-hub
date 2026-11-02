@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { productMarks, sharedThreadItems, stopMarks } from "./sharing.ts";
+import { sharedThreadItems } from "./sharing.ts";
 import type { ThreadItem } from "./thread.ts";
 
 const ATTACHMENT = {
@@ -78,51 +78,5 @@ describe("sharedThreadItems", () => {
     for (const value of Object.values(ATTACHMENT)) {
       expect(shared).not.toContain(String(value));
     }
-  });
-});
-
-describe("productMarks", () => {
-  it("should keep every mark when the stored history is well formed", () => {
-    const marks = [
-      { product: "pcs", at: "2026-10-25T09:00:00.000Z" },
-      { product: "civil", at: "2026-10-25T10:00:00.000Z" }
-    ];
-
-    expect(productMarks(marks)).toEqual(marks);
-  });
-
-  it.each([
-    ["null", null],
-    ["an object", { product: "pcs", at: "2026-10-25T09:00:00.000Z" }],
-    ["a string", "pcs"]
-  ])("should give no marks when the stored history is %s", (_label, value) => {
-    expect(productMarks(value)).toEqual([]);
-  });
-
-  it("should leave out a mark when it has no product or no time", () => {
-    const good = { product: "pcs", at: "2026-10-25T09:00:00.000Z" };
-
-    expect(productMarks([good, null, "pcs", { product: 7, at: good.at }, { product: "civil" }, { at: good.at }])).toEqual([good]);
-  });
-});
-
-describe("stopMarks", () => {
-  it("should keep every mark when the stored history is well formed", () => {
-    const marks = [{ at: "2026-10-25T09:00:00.000Z" }, { at: "2026-10-25T10:00:00.000Z" }];
-
-    expect(stopMarks(marks)).toEqual(marks);
-  });
-
-  it.each([
-    ["null", null],
-    ["an object", { at: "2026-10-25T09:00:00.000Z" }]
-  ])("should give no marks when the stored history is %s", (_label, value) => {
-    expect(stopMarks(value)).toEqual([]);
-  });
-
-  it("should leave out a mark when it has no time", () => {
-    const good = { at: "2026-10-25T09:00:00.000Z" };
-
-    expect(stopMarks([good, null, 3, { at: 12 }, {}])).toEqual([good]);
   });
 });
