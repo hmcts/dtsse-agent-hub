@@ -72,7 +72,6 @@ export default defineConfig({
         "src/assistant/fork-store.ts",
         "src/assistant/artefact-store.ts",
         "src/assistant/assistant-store.ts",
-        "src/assistant/conversation-row.ts",
         "src/assistant/conversation-store.ts",
         "src/assistant/first-content.ts",
         "src/assistant/frame.ts",

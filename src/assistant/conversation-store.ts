@@ -133,11 +133,13 @@ export async function conversationIdsOf(db: Database, virtualAgentId: string): P
 /**
  * Creates the conversation's agent: offline, the assistant's, under a session id the pod will start a session as.
  *
- * Refused with a 409 when there is no `virtual_agent` row to select from: the agent's name and its `virtual_agent_id`
- * are read off it. That covers both a virtual agent that has gone and a conversation with no pod, whose null id
- * matches no row.
+ * Refused with a 409 for a conversation with no pod, which never gets an agent from the hub, and when its
+ * `virtual_agent` row has gone, since the agent's name and its `virtual_agent_id` are read off it.
  */
 export async function createConversationAgent(db: Database, conversation: Pick<ConversationRow, "id" | "ownerOid" | "virtualAgentId">): Promise<string> {
+  if (!hasPod(conversation)) {
+    throw new HttpError(409, "the assistant has gone");
+  }
   const [agent] = await db.$queryRaw<{ id: string }[]>`
     INSERT INTO agent (owner_oid, session_id, name, status, last_heartbeat_at, read_cursor, virtual_agent_id, assistant_conversation_id)
     SELECT ${conversation.ownerOid}, gen_random_uuid()::text, v.name, 'offline', now(), (SELECT COALESCE(max(id), 0) FROM message),

@@ -127,7 +127,7 @@ function localUserTurn(content: unknown, truncated: boolean): { notices: { text:
  * Whether a transcript entry shows in a local chat's thread as something other than a notice: a bubble of the
  * person's or the session's words, or a tool row. The one rule for "something is in this chat" as far as a
  * transcript can say, which is what puts a chat on the person's own computer in their sidebar
- * (`announceFirstContent` in store.ts) — so a chat is listed exactly when its thread would show more than the
+ * (`announceFirstContent` in first-content.ts) — so a chat is listed exactly when its thread would show more than the
  * harness's own lines.
  *
  * A shell command run with `!`, a hook's output and an interrupted request are bubbles here and so count, although none
