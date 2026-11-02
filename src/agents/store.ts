@@ -1,7 +1,8 @@
 import { agentsMessageableBy, POD_CONVERSATION_AGENT, podConversationAgentSql } from "../access/load.ts";
 import { isPodConversationAgent } from "../access/rules.ts";
 import type { Caller } from "../agent-auth/authenticate.ts";
-import { linkLocalSession, linkSession, needsLocalChatSql } from "../assistant/store.ts";
+import { linkLocalSession, needsLocalChatSql } from "../assistant/local-chat-store.ts";
+import { linkSession } from "../assistant/session-store.ts";
 import type { AgentStatus } from "../realtime/events.ts";
 import { notify } from "../realtime/notify.ts";
 import { likeLiteral } from "../store/like.ts";

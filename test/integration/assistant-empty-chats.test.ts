@@ -1,22 +1,22 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { heartbeat, registerAgent } from "../../src/agents/store.ts";
-import { acceptFork, offerFork } from "../../src/assistant/fork-store.ts";
-import { sweepLocalConversations } from "../../src/assistant/local-sweep.ts";
+import { writeArtefact } from "../../src/assistant/artefact-store.ts";
+import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
+import type { ConversationRow } from "../../src/assistant/conversation-row.ts";
 import {
-  type ConversationRow,
   conversationAgent,
   createConversation,
   deleteConversation,
-  ensureAssistant,
   findConversation,
   hasLocalConversation,
   listConversations,
   renameConversation,
-  searchConversations,
   touchConversation,
-  unsentConversation,
-  writeArtefact
-} from "../../src/assistant/store.ts";
+  unsentConversation
+} from "../../src/assistant/conversation-store.ts";
+import { acceptFork, offerFork } from "../../src/assistant/fork-store.ts";
+import { sweepLocalConversations } from "../../src/assistant/local-sweep.ts";
+import { searchConversations } from "../../src/assistant/search-store.ts";
 import { conversationMatches } from "../../src/assistant/views.ts";
 import { directAsPerson } from "../../src/messages/send.ts";
 import { createDirect } from "../../src/messages/store.ts";
@@ -30,7 +30,7 @@ import { connect, insertAgent, insertUser, person, prisma, resetDatabase } from 
 
 /**
  * Which chats the sidebar and its search leave out for having nothing in them (`first_content_at`, which
- * `announceFirstContent` in src/assistant/store.ts sets), and the announcement that puts a chat in an open sidebar the
+ * `announceFirstContent` in src/assistant/first-content.ts sets), and the announcement that puts a chat in an open sidebar the
  * moment something is in it.
  */
 

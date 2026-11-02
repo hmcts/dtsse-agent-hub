@@ -1,0 +1,73 @@
+import type { Database } from "../store/prisma.ts";
+import { ARTEFACT_SELECT, toArtefact } from "./artefact-store.ts";
+import { CONFLUENCE_SELECT, type ConfluenceExportFrame, pendingConfluenceExport } from "./confluence.ts";
+import { JIRA_SELECT, type JiraExportFrame, pendingJiraExport } from "./jira.ts";
+import { readAssistantModel } from "./model-store.ts";
+import { productLabel } from "./products.ts";
+import { type FrameAttachment, frameAttachments } from "./upload-store.ts";
+
+/**
+ * What a direct frame to a conversation's agent carries, or `undefined` for any other agent.
+ *
+ * No field is gated on a `client_features` claim (`src/agents/client-features.ts`): `attachments`, `jira_export`
+ * and `confluence_export` go to every session. A client too old to read `attachments` drops that message's files
+ * and nobody is told; one too old to read `jira_export` or `confluence_export` is handed the request in words, and
+ * the export fails on its 15-minute timeout.
+ */
+export interface AssistantFrame {
+  conversation_id: string;
+  product: string;
+  product_label: string;
+  /**
+   * The model the conversation's owner chose for all of their chats. The pod switches the session to it before
+   * delivering the message when the session is on another, which is what makes a change in the settings apply from
+   * the next message rather than from the next session.
+   */
+  model: string;
+  artefact_version: number;
+  artefact_updated_by: "user" | "agent" | null;
+  /** While an export to Jira is pending: what to create, which the session carries out with `twg`. */
+  jira_export?: JiraExportFrame;
+  /** While an export to Confluence is pending: where to create the page, which the session carries out with `twg`. */
+  confluence_export?: ConfluenceExportFrame;
+  /**
+   * The files the person attached to this message, for the pod to fetch to its disk before it delivers the message.
+   * Absent from a frame built without a message — a wake rather than a delivery — and an empty array for a message
+   * nothing was attached to. `readAttachments` in the published client is what the pod decides on: it answers the
+   * entries it will fetch and an error outcome for each it refuses, so an entry this hub and that client disagree
+   * about reaches the session as a file that could not be retrieved rather than as nothing.
+   */
+  attachments?: FrameAttachment[];
+}
+
+/** `messageId` is the direct being framed, which is what the attachments hang off. */
+export async function assistantFrame(db: Database, agentId: string, messageId?: bigint): Promise<AssistantFrame | undefined> {
+  const row = await db.agent.findUnique({
+    where: { id: agentId },
+    select: {
+      assistantConversation: {
+        select: { id: true, ownerOid: true, product: true, ...ARTEFACT_SELECT, ...JIRA_SELECT, ...CONFLUENCE_SELECT }
+      }
+    }
+  });
+  const conversation = row?.assistantConversation;
+  if (conversation === null || conversation === undefined) {
+    return undefined;
+  }
+  const artefact = toArtefact(conversation);
+  const jira = pendingJiraExport(conversation);
+  const confluence = pendingConfluenceExport(conversation);
+  return {
+    conversation_id: conversation.id,
+    // What the conversation is stored as, not what the picker can show: this is the subject the session has been
+    // working in, and a product dropped from the list still names it. `productLabel` falls back to the slug.
+    product: conversation.product,
+    product_label: productLabel(conversation.product),
+    model: await readAssistantModel(db, conversation.ownerOid),
+    artefact_version: artefact.version,
+    artefact_updated_by: artefact.updatedBy,
+    ...(jira === undefined ? {} : { jira_export: jira }),
+    ...(confluence === undefined ? {} : { confluence_export: confluence }),
+    ...(messageId === undefined ? {} : { attachments: await frameAttachments(db, messageId) })
+  };
+}

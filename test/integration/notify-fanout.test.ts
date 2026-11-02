@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { heartbeat, markOffline } from "../../src/agents/store.ts";
-import { linkLocalSession } from "../../src/assistant/store.ts";
+import { linkLocalSession } from "../../src/assistant/local-chat-store.ts";
 import { createDirect, createPost } from "../../src/messages/store.ts";
 import type { HubEvent } from "../../src/realtime/events.ts";
 import { createEventHub, type EventHub } from "../../src/realtime/hub.ts";
