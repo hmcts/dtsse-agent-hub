@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import {
   type Connection,
   type ConnectionsData,
+  checklistState,
   connections,
   connectionsWarning,
   type ModelAccess,
@@ -15,6 +16,7 @@ import {
 } from "@/assistant/connections";
 import { memoryPressure, memoryWarning } from "@/assistant/memory-report";
 import type { AssistantPluginsData } from "@/assistant/settings";
+import { pluginChoices } from "@/assistant/settings";
 import { type Theme, themeOf } from "@/assistant/theme";
 import { ActionForm, type FormAction } from "@/components/ActionForm";
 import { AgentSettings, type AssistantAgentSettings } from "@/components/assistant/AgentSettings";
@@ -29,8 +31,7 @@ import { type AssistantSize, Size } from "@/components/assistant/SizeSettings";
 import { type AssistantTemplates, Templates } from "@/components/assistant/TemplateSettings";
 import { ThemeSwitch } from "@/components/assistant/ThemeSwitch";
 import { type AssistantTokens, pastedTokens, TokenSettings } from "@/components/assistant/TokenSettings";
-import { checklistState } from "@/components/virtual-agents/OnboardingChecklist";
-import { pluginChoices } from "@/components/virtual-agents/PluginsField";
+import { SETTINGS_PARAMETER } from "@/web/home";
 
 /**
  * What a row needs to connect a sign-in the assistant makes only on request: the assistant it restarts and the action
@@ -642,14 +643,16 @@ function focusNavigation(dialog: HTMLElement | null): void {
  * into it as it opens and stays in it while it is open; closing it, by Escape, the close button or the page behind
  * it, puts focus back on the cog, which is what `onClose` is for.
  */
-function Dialog({ view, onClose }: { view: SettingsView; onClose: () => void }) {
+function Dialog({ view, onClose, initial = null }: { view: SettingsView; onClose: () => void; initial?: string | null }) {
   const panel = useRef<HTMLDivElement>(null);
   const prefix = useId();
   const wide = useTwoPane();
   const items = SECTIONS.filter((item) => item.shown(view));
   // Nothing open is the narrow interface showing its list. Wide has no such state: it always has a section beside the
   // navigation, so a chosen section that the page has stopped passing anything for falls back to the first offered one.
-  const [chosen, setChosen] = useState<string | null>(wide ? (items[0]?.id ?? null) : null);
+  const [chosen, setChosen] = useState<string | null>(
+    initial !== null && items.some((item) => item.id === initial) ? initial : wide ? (items[0]?.id ?? null) : null
+  );
   const section = items.some((item) => item.id === chosen) ? chosen : wide ? (items[0]?.id ?? null) : null;
   const tabId = (id: string) => `${prefix}-tab-${id}`;
   const panelId = `${prefix}-panel`;
@@ -807,6 +810,7 @@ export function AssistantSettings({
 }) {
   const cog = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
+  const [opening, setOpening] = useState<string | null>(null);
   // The page's own clock to begin with, then the browser's as it takes over and again whenever the dialog opens. A
   // sign-in's deadline moves slowly and a timer on every page to watch it would cost more than it is worth, but the
   // first read has to be the page's: `Date.now()` here would be the server's clock in the HTML and the browser's in
@@ -814,6 +818,19 @@ export function AssistantSettings({
   const [now, setNow] = useState(from);
   useEffect(() => {
     setNow(Date.now());
+  }, []);
+  // `?settings=<section>` opens the dialog there, which is where the hub's retired management pages send people. The
+  // parameter is taken out of the address once read, so a reload or the back button does not open it again.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const section = url.searchParams.get(SETTINGS_PARAMETER);
+    if (section === null) {
+      return;
+    }
+    url.searchParams.delete(SETTINGS_PARAMETER);
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+    setOpening(section);
+    setOpen(true);
   }, []);
   // The appearance the switch starts from. `ThemeSwitch` writes the person's choice to the cookie and to the theme
   // root, not to the server tree, so `theme` keeps the value the page was rendered with and the dialog, which
@@ -863,6 +880,7 @@ export function AssistantSettings({
         onClick={() => {
           setNow(Date.now());
           setShownTheme(shownNow());
+          setOpening(null);
           setOpen(true);
         }}
         // 36px, the size of the composer's own buttons, with the two extra pixels each way taken out of the margin
@@ -901,6 +919,7 @@ export function AssistantSettings({
                 tokens
               }}
               onClose={close}
+              initial={opening}
             />,
             themeRoot()
           )

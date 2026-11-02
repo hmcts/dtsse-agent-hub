@@ -749,7 +749,7 @@ data: {"message": <Message>}
 
 ## Virtual agents
 
-A virtual agent is a Claude Code session the hub runs for a person in the preview cluster. The person creates it in the web UI (`/hub/virtual`); the orchestrator claims it and runs a one-replica StatefulSet and PVC for it; the pod's boot script uses the launch token to report progress, fetch and save the owner's credentials and relay sign-ins to the owner; then Claude starts and the workspace client registers as an ordinary agent with the same token.
+A virtual agent is a Claude Code session the hub runs for a person in the preview cluster. The Assistant creates it for a person the first time they open it, and it is the only one it creates; the orchestrator claims it and runs a one-replica StatefulSet and PVC for it; the pod's boot script uses the launch token to report progress, fetch and save the owner's credentials and relay sign-ins to the owner; then Claude starts and the workspace client registers as an ordinary agent with the same token.
 
 All of `/api/virtual/**` and `/api/orchestrator/**` answer `404` unless the service runs with `VIRTUAL_AGENTS_ENABLED=true`.
 

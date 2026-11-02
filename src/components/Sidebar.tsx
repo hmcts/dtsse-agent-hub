@@ -1,7 +1,7 @@
 import type { ChannelSummary } from "@/channels/store";
 import { NavLink } from "@/components/NavLink";
 import { SidebarClose, SidebarDrawer } from "@/components/sidebar/Drawer";
-import { CaretIcon, ChatIcon, HashIcon, HomeIcon, LockIcon, PlusIcon, ServerIcon, StackIcon } from "@/components/sidebar/icons";
+import { CaretIcon, ChatIcon, HashIcon, HomeIcon, PlusIcon, StackIcon } from "@/components/sidebar/icons";
 import { TopicSearchShortcut } from "@/components/sidebar/TopicSearchShortcut";
 import type { TopicSummary } from "@/topics/store";
 import type { Identity } from "@/users/identity";
@@ -65,18 +65,6 @@ export function Sidebar({
               <HomeIcon />
               Home
             </NavLink>
-            {/* With virtual agents on, credentials are a section of their page. */}
-            {virtualAgents ? (
-              <NavLink href="/hub/virtual">
-                <ServerIcon />
-                Virtual agents
-              </NavLink>
-            ) : (
-              <NavLink href="/hub/settings/credentials">
-                <LockIcon />
-                Credentials
-              </NavLink>
-            )}
             {/* The HMCTS Assistant runs on the viewer's virtual agent, so it is offered wherever they are. */}
             {virtualAgents ? (
               <NavLink href="/assistant">

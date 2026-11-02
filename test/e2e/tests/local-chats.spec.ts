@@ -146,15 +146,9 @@ test.describe("local chats @regression", () => {
     const context = await asPersona(browser, persona, baseURL!);
     try {
       const page = await context.newPage();
-      // `/hub/virtual` is behind the same flag as the Assistant, and is read first deliberately: opening `/assistant`
-      // creates the person their own assistant, so after that visit they have one. What this asserts is that
-      // registering a session on a laptop created none — the chat it made has no pod and asked for no pod.
-      const virtual = await page.goto("/hub/virtual");
-      test.skip(virtual?.status() === 404, "virtual agents are off on this deployment");
-      await expect(page.getByText("You have no virtual agents.")).toBeVisible();
-
       await setAgentStatus(request, persona, agent!, "busy");
-      await page.goto("/assistant");
+      const response = await page.goto("/assistant");
+      test.skip(response?.status() === 404, ASSISTANT_OFF);
       await dismissGettingReady(page);
       await openLocalChat(page, name);
 

@@ -59,11 +59,8 @@ vi.mock("next/cache", async () => {
 
 const { actAs, revalidated } = await import("./web-session.ts");
 const actions = await import("../../src/app/_actions/virtual-agents.ts");
-const { agentAddress, assistantAgent, virtualAgentsPage } = await import("../../src/web/data.ts");
-const credentialsPage = await import("../../src/app/hub/settings/credentials/page.tsx");
+const { agentAddress, assistantAgent } = await import("../../src/web/data.ts");
 const agentsPage = await import("../../src/app/hub/agents/[id]/page.tsx");
-const oldVirtualAgentPage = await import("../../src/app/hub/virtual/[id]/page.tsx");
-const virtualHubPage = await import("../../src/app/hub/virtual/page.tsx");
 
 const SECRET = "a-test-session-secret-long-enough-to-be-plausible";
 
@@ -1865,47 +1862,24 @@ describe("sweepVirtualAgents", () => {
 });
 
 describe("the web UI's reads and actions", () => {
-  it("should create the viewer's own virtual agent, asked to run, through the action", async () => {
-    actAs("alice");
-    await insertUser(ALICE);
-
-    const created = await actions.createVirtualAgent(form({ name: "pcs-api" }));
-    expect(created).toMatchObject({ ok: true, confirmation: "pcs-api is starting" });
-    const id = (created as { id: string }).id;
-
-    expect(await row(id)).toMatchObject({ ownerOid: ALICE.oid, desired: "running" });
+  // The Assistant's `ensureAssistant` is the one thing that creates a virtual agent, and it makes one only when the
+  // person has none, so nobody can reach the per-person limit by a path they cannot undo.
+  it("should offer the web UI no action that creates a virtual agent", () => {
+    expect(Object.keys(actions).filter((name) => /create/i.test(name))).toEqual([]);
   });
 
-  it("should refuse a create with a sentence the page shows when the viewer is at the limit", async () => {
-    actAs("alice");
-    await insertUser(ALICE);
+  it("should refuse a create with a sentence when the owner is at the limit", async () => {
     for (let index = 0; index < MAX_VIRTUAL_AGENTS_PER_USER; index += 1) {
-      await actions.createVirtualAgent(form({ name: `agent-${index}` }));
+      await create(ALICE, `agent-${index}`);
     }
 
-    expect(await actions.createVirtualAgent(form({ name: "one-more" }))).toMatchObject({
-      ok: false,
-      error: expect.stringContaining(`${MAX_VIRTUAL_AGENTS_PER_USER} virtual agents`)
-    });
+    await expect(create(ALICE, "one-more")).rejects.toMatchObject({ message: expect.stringContaining(`${MAX_VIRTUAL_AGENTS_PER_USER} virtual agents`) });
   });
 
-  it("should capture the viewer's model route when the agent is created", async () => {
-    actAs("own-licence");
-    await insertUser({ oid: "dev-own-licence", name: "Dev own-licence (sign-in disabled)", email: "own-licence@dev.invalid" });
-
-    const created = (await actions.createVirtualAgent(form({ name: "pcs-api" }))) as { id: string };
-
-    expect((await row(created.id)).modelRoute).toBe("own-licence");
-  });
-
-  it("should list the viewer only their own virtual agents, with what each needs and can use", async () => {
+  it("should give the owner alone what their virtual agent needs and can use", async () => {
     const { id } = await started(ALICE, "pcs-api");
     await create(BOB, "bobs");
-    const viewer = { ...ALICE, tid: "dev", modelRoute: "gateway" as const };
 
-    const list = await virtualAgentsPage(viewer);
-
-    expect(list.agents.map((agent) => agent.name)).toEqual(["pcs-api"]);
     expect(await virtualAgentDetail(prisma, ALICE.oid, id)).toMatchObject({ needed: ["github", "azure"], optional: ["jenkins", "atlassian"] });
     expect(await virtualAgentDetail(prisma, BOB.oid, id)).toBeUndefined();
     expect(await virtualAgentDetail(prisma, ALICE.oid, "not-a-uuid")).toBeUndefined();
@@ -1960,6 +1934,18 @@ describe("the Assistant's settings for its agent", () => {
     actAs("bob");
     expect(await actions.renameVirtualAgent(form({ id: agent.id, name: "bobs" }))).toEqual({ ok: false, error: "no such virtual agent" });
     expect((await row(agent.id)).name).toBe("mine");
+  });
+
+  it("should clear the old pod's reported ports and its run of apply errors when the owner restarts it", async () => {
+    const { id, token } = await started(ALICE, "assistant");
+    expect((await ports(id, token, { ports: [3000], local_only: [5173] })).status).toBe(204);
+    await prisma.virtualAgent.update({ where: { id }, data: { applyFailures: APPLY_FAILURES_BEFORE_FAILED - 1 } });
+    actAs("alice");
+
+    await actions.restartVirtualAgent(form({ id }));
+
+    expect(await row(id)).toMatchObject({ exposedPorts: [], localOnlyPorts: [], applyFailures: 0 });
+    expect((await assistantAgent({ ...ALICE, tid: "dev", modelRoute: "gateway" }))?.exposedPorts).toEqual([]);
   });
 
   it("should replace a running agent's pod when the owner restarts it, and leave one that is not running alone", async () => {
@@ -2022,8 +2008,7 @@ describe("with virtual agents off", () => {
   it("should refuse every action with a sentence saying so", async () => {
     actAs("alice");
 
-    expect(await actions.createVirtualAgent(form({ name: "x" }))).toMatchObject({ ok: false, error: expect.stringContaining("not available") });
-    expect(await actions.resizeVirtualAgent(form({ id: "x", size: "medium" }))).toMatchObject({ ok: false });
+    expect(await actions.resizeVirtualAgent(form({ id: "x", size: "medium" }))).toMatchObject({ ok: false, error: expect.stringContaining("not available") });
     expect(await actions.pasteLoginCode(form({ id: "x", kind: "claude", code: "c" }))).toMatchObject({ ok: false });
   });
 
@@ -2132,32 +2117,16 @@ describe("renaming a virtual agent", () => {
   });
 });
 
-describe("/hub/settings/credentials", () => {
-  it("should send the viewer to the credentials section of the virtual agents page when virtual agents are on", async () => {
-    actAs("alice");
-
-    await expect(credentialsPage.default()).rejects.toMatchObject({ digest: expect.stringContaining(";/hub/virtual#credentials;") });
-  });
-
-  it("should render the standalone page when virtual agents are off", async () => {
-    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "");
-    actAs("alice");
-
-    await expect(credentialsPage.default()).resolves.toBeDefined();
-  });
-});
-
 describe("a virtual agent's size", () => {
   it("should create a small agent unless another size is chosen, and refuse one that is not a size", async () => {
     await insertUser(ALICE);
-    actAs("alice");
+    const small = await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "gateway", name: "small-one" });
+    const large = await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "gateway", name: "large-one", size: "large" });
 
-    const small = (await actions.createVirtualAgent(form({ name: "small-one" }))) as { id: string };
-    const large = (await actions.createVirtualAgent(form({ name: "large-one", size: "large" }))) as { id: string };
-
-    expect((await row(small.id)).size).toBe("small");
-    expect((await row(large.id)).size).toBe("large");
-    expect(await actions.createVirtualAgent(form({ name: "huge-one", size: "huge" }))).toEqual({ ok: false, error: "a size is one of small, medium, large" });
+    expect([small.size, large.size]).toEqual(["small", "large"]);
+    await expect(createVirtualAgent(prisma, { owner: ALICE, modelRoute: "gateway", name: "huge-one", size: "huge" })).rejects.toMatchObject({
+      message: "a size is one of small, medium, large"
+    });
   });
 
   it("should change the size of an agent the orchestrator has not claimed yet, bump its generation and claim it with the new size", async () => {
@@ -2236,22 +2205,14 @@ describe("a virtual agent's plugins", () => {
   });
 
   it("should create an agent with the ticked plugins, sorted, and claim it with them", async () => {
-    await insertUser(ALICE);
-    actAs("alice");
+    const created = await createWith(["wa", "pcs"]);
 
-    const created = (await actions.createVirtualAgent(ticked({ name: "pcs-api" }, ["wa", "pcs"]))) as { id: string };
-
-    expect((await row(created.id)).plugins).toEqual(["pcs", "wa"]);
+    expect(created.plugins).toEqual(["pcs", "wa"]);
     expect((await claim()).find((entry) => entry.id === created.id)).toMatchObject({ plugins: ["pcs", "wa"] });
   });
 
   it("should create an agent with no plugins when none are ticked", async () => {
-    await insertUser(ALICE);
-    actAs("alice");
-
-    const created = (await actions.createVirtualAgent(form({ name: "pcs-api" }))) as { id: string };
-
-    expect((await row(created.id)).plugins).toEqual([]);
+    expect((await createWith([])).plugins).toEqual([]);
   });
 
   // The offer list is only read once a name is ticked, so a hub whose configuration is malformed can still create the
@@ -2271,13 +2232,7 @@ describe("a virtual agent's plugins", () => {
   });
 
   it("should refuse to create an agent with a plugin the hub does not offer, and create nothing", async () => {
-    await insertUser(ALICE);
-    actAs("alice");
-
-    expect(await actions.createVirtualAgent(ticked({ name: "pcs-api" }, ["pcs", "civil"]))).toEqual({
-      ok: false,
-      error: "civil is not a plugin this hub offers"
-    });
+    await expect(createWith(["pcs", "civil"])).rejects.toMatchObject({ message: "civil is not a plugin this hub offers" });
     expect(await prisma.virtualAgent.count()).toBe(0);
   });
 
@@ -2385,28 +2340,6 @@ describe("a virtual agent's plugins", () => {
       prisma.virtualAgent.update({ where: { id: agent.id }, data: { plugins: Array.from({ length: 21 }, (_unused, index) => `p-${index}`) } })
     ).rejects.toThrow(/virtual_agent_plugins_check/);
     await expect(prisma.virtualAgent.update({ where: { id: agent.id }, data: { plugins: { pcs: true } } })).rejects.toThrow(/virtual_agent_plugins_check/);
-  });
-
-  /*
-   * `/hub/virtual` calls `pluginOffer()` in the body of its async default export, so awaiting the page function runs
-   * it: this rejected with `PluginConfigurationError` before the offer was caught, and resolves now. Awaiting the
-   * function is the whole of what this suite can do with a page — it gets the element tree back unrendered, because
-   * rendering one would need SSR of a tree holding client components and server actions, which nothing here does.
-   *
-   * That is why `/hub/agents/{id}` has no twin of this test rather than being an omission. There `pluginOffer()` sits
-   * inside a nested, non-async `VirtualAgent` component, so an awaited page call returns a tree with it unrendered
-   * and never calls it; only a real render would reach a throw in it.
-   *
-   * The type guarantee is narrower than it looks, so it is no substitute. `plugins` being required stops the prop
-   * being left off, and `PluginOffer` being a union stops `plugins={availablePlugins()}`, but
-   * `plugins={{ ok: true, available: availablePlugins() }}` typechecks, throws, and 500s the page.
-   */
-  it("should answer /hub/virtual with the plugin fault rather than throw when the hub's plugin configuration is malformed", async () => {
-    await insertUser(ALICE);
-    actAs("alice");
-    vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "Not A Plugin Name");
-
-    await expect(virtualHubPage.default()).resolves.toBeDefined();
   });
 });
 
@@ -2627,19 +2560,13 @@ describe("/hub/agents/{id}", () => {
     await expect(visit(agentId)).rejects.toMatchObject(redirectedTo("/hub"));
   });
 
-  it("should redirect the old virtual agent address to /hub/agents/{id} when it is visited", async () => {
-    const agent = await create(ALICE, "pcs-api");
-
-    await expect(oldVirtualAgentPage.default({ params: Promise.resolve({ id: agent.id }) })).rejects.toMatchObject(redirectedTo(`/hub/agents/${agent.id}`));
-  });
-
-  it("should revalidate the virtual agents list, and no agent page, when an action changes a virtual agent", async () => {
+  it("should revalidate the Assistant's pages, and no agent page, when an action changes a virtual agent", async () => {
     const agent = await create(ALICE, "pcs-api");
     actAs("alice");
 
     await actions.resizeVirtualAgent(form({ id: agent.id, size: "medium" }));
 
-    expect(revalidated).toContain("/hub/virtual");
+    expect(revalidated).toContain("/assistant");
     expect(revalidated.some((path) => path.startsWith("/hub/agents"))).toBe(false);
   });
 });

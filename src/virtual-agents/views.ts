@@ -12,7 +12,7 @@ import { publicUrl } from "./ports.ts";
 import { publicDomain } from "./settings.ts";
 import type { VirtualAgentSize } from "./size.ts";
 import type { StopReason } from "./stop.ts";
-import { findVirtualAgent, listVirtualAgents, type VirtualAgentRow } from "./store.ts";
+import { findVirtualAgent, type VirtualAgentRow } from "./store.ts";
 
 /**
  * Virtual agents as the pages show them: the cards and the detail, which only their owner gets.
@@ -72,8 +72,22 @@ function viewerLink(id: string, port: number, host: string | undefined): { viewe
   return host === undefined ? {} : { viewerUrl: viewerUrl(host, id, port) };
 }
 
-function toCard(row: VirtualAgentRow, newest: Map<string, Date>): VirtualAgentCard {
+/** Where each port the pod reports can be opened: its VPN URL, and with the viewer on, the viewer's too. */
+export function portLinks(
+  row: Pick<VirtualAgentRow, "id" | "statefulsetName" | "exposedPorts" | "localOnlyPorts">
+): Pick<VirtualAgentCard, "exposedPorts" | "localOnlyPorts"> {
   const viewerHost = viewerSettings()?.host;
+  return {
+    exposedPorts: row.exposedPorts.map((port) => ({
+      port,
+      url: publicUrl(row.statefulsetName, port, publicDomain()),
+      ...viewerLink(row.id, port, viewerHost)
+    })),
+    localOnlyPorts: row.localOnlyPorts
+  };
+}
+
+function toCard(row: VirtualAgentRow, newest: Map<string, Date>): VirtualAgentCard {
   return {
     id: row.id,
     name: row.name,
@@ -82,12 +96,7 @@ function toCard(row: VirtualAgentRow, newest: Map<string, Date>): VirtualAgentCa
     statusDetail: row.statusDetail,
     modelRoute: row.modelRoute,
     size: row.size,
-    exposedPorts: row.exposedPorts.map((port) => ({
-      port,
-      url: publicUrl(row.statefulsetName, port, publicDomain()),
-      ...viewerLink(row.id, port, viewerHost)
-    })),
-    localOnlyPorts: row.localOnlyPorts,
+    ...portLinks(row),
     plugins: row.plugins,
     stopReason: row.stopReason,
     stopDetail: row.stopDetail,
@@ -98,15 +107,6 @@ function toCard(row: VirtualAgentRow, newest: Map<string, Date>): VirtualAgentCa
     agentId: row.agentId,
     createdAt: row.createdAt.toISOString()
   };
-}
-
-export async function virtualAgentCards(db: Database, ownerOid: string): Promise<VirtualAgentCard[]> {
-  const rows = await listVirtualAgents(db, ownerOid);
-  const newest = await newestEntries(
-    db,
-    rows.flatMap((row) => (row.agentId === null ? [] : [row.agentId]))
-  );
-  return rows.map((row) => toCard(row, newest));
 }
 
 /**

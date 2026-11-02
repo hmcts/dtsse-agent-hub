@@ -279,3 +279,74 @@ describe("the Assistant's pasted tokens", () => {
     expect(screen.getByText("Remove your Jenkins API token? Your assistant stops using it the next time it starts.")).toBeTruthy();
   });
 });
+
+describe("the Assistant's settings deep link", () => {
+  afterEach(() => {
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("should open at the section ?settings= names, and take the parameter out of the address, when the page loads", () => {
+    window.history.replaceState(null, "", "/assistant?settings=git&x=1");
+    render(<AssistantSettings now={Date.now()} connections={connections(["github"])} git={git()} />);
+
+    expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy();
+    expect(within(nav()).getByRole("tab", { name: "Git identity" }).getAttribute("aria-selected")).toBe("true");
+    expect(`${window.location.pathname}${window.location.search}`).toBe("/assistant?x=1");
+  });
+
+  it("should open at the first section when ?settings= names one it does not offer", () => {
+    window.history.replaceState(null, "", "/assistant?settings=nothing-here");
+    render(<AssistantSettings now={Date.now()} connections={connections(["github"])} />);
+
+    expect(within(nav()).getByRole("tab", { name: "Appearance" }).getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("should stay closed when the address names no section", () => {
+    window.history.replaceState(null, "", "/assistant");
+    render(<AssistantSettings now={Date.now()} connections={connections(["github"])} />);
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+describe("the confirmations the settings' own forms close over", () => {
+  it("should close the restart question once it has been sent, and say the agent is restarting", async () => {
+    open({ agent: agentSettings() }, "Assistant");
+
+    fireEvent.click(screen.getByRole("button", { name: "Restart your assistant" }));
+    await submit("Restart your assistant");
+
+    expect(screen.queryByRole("form", { name: "Restart your assistant" })).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe("Restarting. Your chats are kept.");
+    expect(screen.getByRole("button", { name: "Restart your assistant" })).toBeTruthy();
+  });
+
+  it("should say an agent being deleted is replaced on the next chat, and offer no restart", () => {
+    open({ agent: agentSettings({ desired: "deleted" }) }, "Assistant");
+
+    expect(screen.getByText("It is being deleted. Opening a chat sets up a new assistant for you.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Restart/ })).toBeNull();
+    expect(screen.queryByText(/starts when you next open a chat/)).toBeNull();
+  });
+
+  it("should say a token was saved after its form has closed", async () => {
+    open({ tokens: tokens() }, "Tokens");
+
+    fireEvent.click(screen.getByRole("button", { name: "Add your Jenkins API token" }));
+    fireEvent.change(screen.getByLabelText("Jenkins API token"), { target: { value: "11aa" } });
+    await submit("Save your Jenkins API token");
+
+    expect(screen.queryByRole("form", { name: "Save your Jenkins API token" })).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe("Your Jenkins API token is saved");
+  });
+
+  it("should say a token was removed after its form has closed", async () => {
+    open({ tokens: tokens() }, "Tokens");
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove your Claude token" }));
+    await submit("Remove your Claude token");
+
+    expect(screen.queryByRole("form", { name: "Remove your Claude token" })).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe("Your Claude token is removed");
+  });
+});

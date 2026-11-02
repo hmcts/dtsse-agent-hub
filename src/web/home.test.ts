@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultUi, homeFor, movedHubPath, NO_AGENT, retiredAgentPath, retiredHubPath } from "./home.ts";
+import { assistantSettingsPath, defaultUi, homeFor, movedHubPath, NO_AGENT, retiredAgentPath, retiredHubPath } from "./home.ts";
 
 describe("homeFor", () => {
   it.each(["/hub", "/hub/topics", "/hub/agents/0f8a", "/hub/nonsense"])("should send someone back into the hub from %s", (pathname) => {
@@ -73,6 +73,27 @@ describe("movedHubPath", () => {
 });
 
 describe("retiredHubPath", () => {
+  it.each([
+    ["/virtual", "/assistant?settings=assistant"],
+    ["/hub/virtual", "/assistant?settings=assistant"],
+    ["/hub/virtual/0f8a", "/assistant?settings=assistant"],
+    ["/settings/credentials", "/assistant?settings=connections"],
+    ["/hub/settings/credentials", "/assistant?settings=connections"]
+  ])("should send %s to %s when virtual agents are on", (pathname, to) => {
+    expect(retiredHubPath(pathname, true)).toBe(to);
+  });
+
+  it.each(["/hub/virtual", "/hub/virtual/0f8a", "/hub/settings/credentials"])("should send %s to the hub when virtual agents are off", (pathname) => {
+    expect(retiredHubPath(pathname, false)).toBe("/hub");
+  });
+
+  it.each(["/hub/virtual/0f8a/ports/3000", "/virtual/0f8a/ports/3000", "/hub/settings", "/hub/virtualfoo"])(
+    "should leave %s alone when it is not a retired page, the viewer's ticket route among them",
+    (pathname) => {
+      expect(retiredHubPath(pathname, true)).toBeUndefined();
+    }
+  );
+
   it.each(["/access", "/hub/access"])("should send %s to the shared chats", (pathname) => {
     expect(retiredHubPath(pathname, true)).toBe("/assistant/shared");
   });
@@ -113,7 +134,13 @@ describe("retiredAgentPath", () => {
     }
   );
 
-  it("should keep a conversation id from reaching past its own path segment", () => {
+  it("should encode a conversation id when it would reach past its own path segment", () => {
     expect(retiredAgentPath({ kind: "chat", conversationId: "../shared" }, true)).toBe("/assistant/..%2Fshared");
+  });
+});
+
+describe("assistantSettingsPath", () => {
+  it("should name the section in the query the settings dialog reads when given one", () => {
+    expect(assistantSettingsPath("connections")).toBe("/assistant?settings=connections");
   });
 });

@@ -10,7 +10,6 @@ import { isSignInKind, reconnectSignIn as reconnect, SIGN_IN_TITLES, storePasted
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
 import { sizeChangeRollsPod } from "@/virtual-agents/size";
 import {
-  createVirtualAgent as create,
   findVirtualAgent,
   renameVirtualAgent as rename,
   restartVirtualAgent as restart,
@@ -20,36 +19,17 @@ import {
 import { type ActionResult, runAction, text } from "@/web/action";
 
 /**
- * Creating, renaming, restarting and resizing the signed-in person's own virtual agents, choosing their plugins, pasting
+ * Renaming, restarting and resizing the signed-in person's own virtual agents, choosing their plugins, pasting
  * a login code back to one, and having one sign in again. The owner is always the session's identity; an id from the
  * form names an agent, and `renameVirtualAgent`, `restartVirtualAgent`, `setVirtualAgentSize`, `setVirtualAgentPlugins`,
  * `storePastedCode` and `reconnectSignIn` refuse one that is not the viewer's.
  */
 
-const LIST_PATH = "/hub/virtual";
-
 const OFF: { ok: false; error: string } = { ok: false, error: "virtual agents are not available on this deployment" };
 
+/** Every Assistant page, since each one renders the settings these change. */
 function revalidate(): void {
-  revalidatePath(LIST_PATH);
-}
-
-export async function createVirtualAgent(form: FormData): Promise<ActionResult<{ confirmation: string; id: string }>> {
-  return await runAction<{ confirmation: string; id: string }>("create virtual agent", async () => {
-    if (!virtualAgentsEnabled()) {
-      return OFF;
-    }
-    const viewer = await requireViewer();
-    const row = await create(prisma, {
-      owner: viewer,
-      modelRoute: viewer.modelRoute,
-      name: form.get("name"),
-      size: form.get("size"),
-      plugins: form.getAll("plugins")
-    });
-    revalidate();
-    return { ok: true, id: row.id, confirmation: `${row.name} is starting` };
-  });
+  revalidatePath("/assistant", "layout");
 }
 
 /**
@@ -195,7 +175,6 @@ export async function reconnectSignIn(form: FormData): Promise<ActionResult<{ co
     }
     const row = await reconnect(prisma, backend.store, viewer.oid, id, kind);
     revalidate();
-    revalidatePath("/hub/settings/credentials");
     const title = SIGN_IN_TITLES[kind];
     return {
       ok: true,

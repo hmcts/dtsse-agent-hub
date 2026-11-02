@@ -6,14 +6,13 @@ import { join, relative } from "node:path";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { checklistState, connections } from "@/assistant/connections";
 import { ActionForm } from "@/components/ActionForm";
-import { ClaudeMdSection } from "@/components/credentials/ClaudeMdSection";
-import { CredentialSettingsView } from "@/components/credentials/CredentialSettingsView";
-import { OnboardingChecklist } from "@/components/virtual-agents/OnboardingChecklist";
+import { ClaudeMd } from "@/components/assistant/ClaudeMdSettings";
+import { TokenSettings } from "@/components/assistant/TokenSettings";
 import type { CredentialStatus } from "@/credentials/store";
-import type { LoginView } from "@/virtual-agents/logins";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }), usePathname: () => "/hub" }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }), usePathname: () => "/assistant" }));
 vi.mock("@/components/live/HubStream", () => ({ useEndSession: () => () => undefined }));
 
 afterEach(() => {
@@ -35,22 +34,9 @@ function missing(kind: CredentialStatus["kind"]): CredentialStatus {
   return { kind, stored: false, accountLabel: null, updatedAt: null, updatedVia: null };
 }
 
-function pasteLogin(kind: LoginView["kind"]): LoginView {
-  return {
-    kind,
-    prompt: "paste_code",
-    userCode: null,
-    verificationUri: "https://claude.ai/oauth/authorize?x=1",
-    expiresAt: "2026-10-05T12:10:00.000Z",
-    state: "pending",
-    updatedAt: "2026-10-05T12:08:00.000Z",
-    codeWaitingUntil: null
-  };
-}
-
 /** Where a browser goes when the form is submitted natively, with no script to intercept it. */
 function nativeSubmitUrl(form: HTMLFormElement): string {
-  const target = new URL(form.getAttribute("action") || "/hub/agents/va-1", "https://agent-hub.example");
+  const target = new URL(form.getAttribute("action") || "/assistant", "https://agent-hub.example");
   if (form.method === "get") {
     const query = new URLSearchParams();
     for (const [name, value] of new FormData(form)) {
@@ -100,28 +86,28 @@ describe("a form carrying a credential", () => {
     const form = new DOMParser().parseFromString(markup, "text/html").querySelector("form") as HTMLFormElement;
 
     expect(form.method).toBe("post");
-    expect(nativeSubmitUrl(form)).toBe("https://agent-hub.example/hub/agents/va-1");
+    expect(nativeSubmitUrl(form)).toBe("https://agent-hub.example/assistant");
   });
 
-  it("should post every sign-in form on the virtual agent page when keys are missing and a code is waiting to be pasted", () => {
-    const { container } = render(
-      <OnboardingChecklist
-        virtualAgentId="va-1"
-        desired="running"
-        needed={["github", "claude"]}
-        optional={["jenkins"]}
-        statuses={[]}
-        logins={[pasteLogin("claude")]}
-        paste={ok()}
-        save={ok()}
-        reconnect={ok()}
-        now={NOW}
-      />
+  it("should post the token forms in the Assistant's settings, with the value hidden, when each is opened", () => {
+    const list = connections(
+      {
+        route: "own-licence",
+        kinds: ["github", "claude", "jenkins"],
+        statuses: [stored("github"), stored("claude"), missing("jenkins")],
+        logins: [],
+        unavailable: null
+      },
+      checklistState,
+      NOW
     );
+    const { container } = render(<TokenSettings list={list} tokens={{ save: ok(), remove: ok() }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Replace your Claude token" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add your Jenkins API token" }));
     fill(container);
 
     expect([...container.querySelectorAll("form")].filter(carriesSecret).map((form) => form.getAttribute("aria-label"))).toEqual([
-      "Paste the Claude code",
+      "Save your Claude token",
       "Save your Jenkins API token"
     ]);
     expectEveryFormPosts(container);
@@ -131,53 +117,18 @@ describe("a form carrying a credential", () => {
     }
   });
 
-  it("should post the replace and reconnect forms when the pencil and reconnect buttons open them", () => {
-    const { container } = render(
-      <OnboardingChecklist
-        virtualAgentId="va-1"
-        desired="running"
-        needed={["github", "claude"]}
-        optional={["jenkins"]}
-        statuses={[stored("github"), stored("claude"), stored("jenkins")]}
-        logins={[]}
-        paste={ok()}
-        save={ok()}
-        reconnect={ok()}
-        now={NOW}
-      />
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Replace your Jenkins API token" }));
-    fireEvent.click(screen.getByRole("button", { name: "Replace your Claude token" }));
-    fireEvent.click(screen.getByRole("button", { name: "Reconnect GitHub" }));
+  it("should post the remove form in the Assistant's settings", () => {
+    const list = connections({ route: "own-licence", kinds: ["claude"], statuses: [stored("claude")], logins: [], unavailable: null }, checklistState, NOW);
+    const { container } = render(<TokenSettings list={list} tokens={{ save: ok(), remove: ok() }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Remove your Claude token" }));
 
-    expect(screen.getByRole("form", { name: "Save your Jenkins API token" })).toBeTruthy();
-    expect(screen.getByRole("form", { name: "Reconnect GitHub" })).toBeTruthy();
+    expect(screen.getByRole("form", { name: "Remove your Claude token" })).toBeTruthy();
     expectEveryFormPosts(container);
-    expectSecretInputsHidden(container);
-  });
-
-  it("should post every form on the credentials page whatever is stored", () => {
-    const kinds: CredentialStatus["kind"][] = ["github", "azure", "claude", "jenkins", "atlassian"];
-    for (const statuses of [kinds.map(missing), kinds.map(stored)]) {
-      const { container, unmount } = render(
-        <CredentialSettingsView
-          settings={{ available: true, modelRoute: "own-licence", claudeTokenUsable: true, statuses }}
-          actions={{ save: ok(), remove: ok() }}
-        />
-      );
-
-      expectEveryFormPosts(container);
-      expectSecretInputsHidden(container);
-      unmount();
-    }
   });
 
   it("should post the CLAUDE.md save and reset forms", () => {
     const { container } = render(
-      <ClaudeMdSection
-        settings={{ available: true, stored: true, text: "# Me", updatedAt: "2026-10-05T09:00:00.000Z" }}
-        actions={{ save: ok(), reset: ok() }}
-      />
+      <ClaudeMd claudeMd={{ settings: { available: true, stored: true, text: "# Me", updatedAt: "2026-10-05T09:00:00.000Z" }, save: ok(), reset: ok() }} />
     );
 
     expect(container.querySelectorAll("form")).toHaveLength(2);

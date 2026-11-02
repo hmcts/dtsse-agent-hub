@@ -11,18 +11,18 @@ async function settings(page: Page, section: string): Promise<void> {
 }
 
 test.describe("virtual agents @regression", () => {
-  test("should offer the create form when the person has no virtual agents @regression", async ({ browser, baseURL }) => {
-    const context = await asPersona(browser, unique("va-none"), baseURL!);
+  test("should open the Assistant section of its settings from the old virtual agents addresses @regression", async ({ browser, baseURL, request }) => {
+    const persona = chatPersona("va-old");
+    await connectForChat(request, persona);
+    const context = await asPersona(browser, persona, baseURL!);
     try {
       const page = await context.newPage();
-      const response = await page.goto("/hub/virtual");
-      test.skip(response?.status() === 404, "virtual agents are off on this deployment");
-
-      expect(response?.status()).toBe(200);
-      await expect(page.getByText("You have no virtual agents.")).toBeVisible();
-      const form = page.getByRole("form", { name: "Create a virtual agent" });
-      await expect(form.getByLabel("Name")).toBeVisible();
-      await expect(form.getByRole("button", { name: "Create" })).toBeEnabled();
+      for (const old of ["/hub/virtual", "/hub/virtual/0f8a6a1e-0000-4000-8000-000000000001"]) {
+        await page.goto(old);
+        test.skip(new URL(page.url()).pathname === "/hub", ASSISTANT_OFF);
+        await expect(page.getByRole("dialog", { name: "Settings" }).getByRole("heading", { name: "Your assistant" })).toBeVisible();
+        expect(`${new URL(page.url()).pathname}${new URL(page.url()).search}`).toBe("/assistant");
+      }
     } finally {
       await context.close();
     }

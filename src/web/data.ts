@@ -1,6 +1,7 @@
 import "server-only";
 import {
   canManageConversationShares,
+  canManageVirtualAgent,
   canOwnerReadCredential,
   canReadMessage,
   canViewAgent,
@@ -55,8 +56,8 @@ import { listTopics, mostActiveTopics } from "../topics/store.ts";
 import type { Identity } from "../users/identity.ts";
 import type { ModelRoute, Viewer } from "../viewer/identity.ts";
 import { availablePlugins, PluginConfigurationError, type PluginOffer, type PluginOption } from "../virtual-agents/plugins.ts";
-import { liveModelRoutes } from "../virtual-agents/store.ts";
-import { claudeTokenUsable, neededCredentials, type VirtualAgentCard, virtualAgentCards, virtualAgentDetail } from "../virtual-agents/views.ts";
+import { liveModelRoutes, type VirtualAgentRow } from "../virtual-agents/store.ts";
+import { claudeTokenUsable, neededCredentials, portLinks, type VirtualAgentCard } from "../virtual-agents/views.ts";
 import { type AgentAddress, NO_AGENT } from "./home.ts";
 
 /**
@@ -82,7 +83,7 @@ export async function overview(viewer: Identity) {
   const channels = await listChannels(prisma, viewer.oid);
   const topics = [...new Set(channels.mine.flatMap((channel) => channel.topics))];
   const watched: PostScope = topics.length > 0 ? topics : "everything";
-  return { channels, topics, watched, activity: await feedPage(watched, "any") };
+  return { topics, watched, activity: await feedPage(watched, "any") };
 }
 
 export async function channel(viewer: Identity, id: string) {
@@ -194,16 +195,6 @@ export async function messagePage(viewer: Identity, rawId: string): Promise<Mess
   };
 }
 
-export interface VirtualAgentsPageView {
-  modelRoute: ModelRoute;
-  agents: VirtualAgentCard[];
-}
-
-/** The viewer's own virtual agents. Nobody sees anyone else's. */
-export async function virtualAgentsPage(viewer: Viewer): Promise<VirtualAgentsPageView> {
-  return { modelRoute: viewer.modelRoute, agents: await virtualAgentCards(prisma, viewer.oid) };
-}
-
 /**
  * What `/hub/agents/{id}` names for the viewer, for `retiredAgentPath` to send them on from. Only their own agents and
  * virtual agents are told apart from nothing, as `canViewAgent` and `canViewVirtualAgent` decide.
@@ -254,13 +245,11 @@ function chatGateOf(toChat: readonly CredentialKind[], credentials: CredentialSe
  * malformed configuration gets, which every surface that offers plugins reads through, so none of them can let it
  * throw out through a page.
  *
- * What a surface then does with an unreadable configuration differs, and the asymmetry is deliberate. The hub's own
- * plugin surface, `/hub/virtual`, names the variable and the fault in place of the plugin
- * form, because the person reading it is the person who can fix it, and that now costs the plugin form alone
- * rather than the whole page. The Assistant says nothing and hides the section, because it is someone's whole chat
- * surface and a configuration they can neither see nor fix must not put a hub error in front of their chats.
+ * The Assistant, the one surface that offers plugins, says nothing about an unreadable configuration and hides the
+ * section, because it is someone's whole chat surface and a configuration they can neither see nor fix must not put a
+ * hub error in front of their chats.
  *
- * Neither may answer an unreadable configuration with an empty offer. "The hub offers none" is a state a person can
+ * Nor may it answer an unreadable configuration with an empty offer. "The hub offers none" is a state a person can
  * trust and act on; "the configuration cannot be read" is not, and silently merging the two would show every plugin
  * an agent already loads as one the hub no longer offers.
  */
@@ -350,21 +339,20 @@ export async function assistantTemplates(viewer: Identity): Promise<SavedTemplat
 }
 
 /** What the settings show and manage of the virtual agent the viewer's Assistant runs on. */
-export type AssistantAgent = Pick<VirtualAgentCard, "id" | "name" | "desired" | "status" | "statusDetail" | "exposedPorts" | "localOnlyPorts">;
+export type AssistantAgent = Pick<VirtualAgentRow, "id" | "name" | "desired" | "status" | "statusDetail"> &
+  Pick<VirtualAgentCard, "exposedPorts" | "localOnlyPorts">;
 
 /**
  * The viewer's assistant as its settings manage it: its name and where it stands, and the web servers its pod
  * reports. `undefined` when they have no assistant at all, which is the one case those sections are not offered.
- * The owner check is `virtualAgentDetail`'s, through `canManageVirtualAgent`.
+ * Built from the one row `findAssistant` reads and nothing more, since every Assistant page asks for it.
  */
 export async function assistantAgent(viewer: Viewer): Promise<AssistantAgent | undefined> {
-  const assistant = await findAssistant(prisma, viewer.oid);
-  const detail = assistant === undefined ? undefined : await virtualAgentDetail(prisma, viewer.oid, assistant.id);
-  if (detail === undefined) {
+  const row = await findAssistant(prisma, viewer.oid);
+  if (row === undefined || !canManageVirtualAgent(viewer.oid, row)) {
     return undefined;
   }
-  const { id, name, desired, status, statusDetail, exposedPorts, localOnlyPorts } = detail.card;
-  return { id, name, desired, status, statusDetail, exposedPorts, localOnlyPorts };
+  return { id: row.id, name: row.name, desired: row.desired, status: row.status, statusDetail: row.statusDetail, ...portLinks(row) };
 }
 
 /**

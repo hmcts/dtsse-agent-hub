@@ -14,10 +14,8 @@ const MOVED: [string, string][] = [
   ["/c?topics=e2e-routes&mode=all", "/hub/c?topics=e2e-routes&mode=all"],
   ["/channels/new", "/hub/channels/new"],
   ["/m/1", "/hub/m/1"],
-  ["/settings/credentials", "/hub/settings/credentials"],
   ["/topics", "/hub/topics"],
-  ["/topics/e2e-routes", "/hub/topics/e2e-routes"],
-  ["/virtual", "/hub/virtual"]
+  ["/topics/e2e-routes", "/hub/topics/e2e-routes"]
 ];
 
 test.describe("routes @regression", () => {
@@ -66,6 +64,24 @@ test.describe("routes @regression", () => {
 
       expect(response.status()).toBe(308);
       expect(response.headers().location).toBe(to);
+    });
+  }
+
+  // The virtual agents and credentials pages are the Assistant's settings now, opened at the section that replaced
+  // each, in one hop from the bare address as from the `/hub` one. Or the hub where virtual agents are off.
+  const RETIRED: [string, string][] = [
+    ["/virtual", "assistant"],
+    ["/hub/virtual", "assistant"],
+    ["/hub/virtual/0f8a6a1e-0000-4000-8000-000000000001", "assistant"],
+    ["/settings/credentials", "connections"],
+    ["/hub/settings/credentials", "connections"]
+  ];
+  for (const [from, section] of RETIRED) {
+    test(`should redirect the retired ${from} to the Assistant's ${section} settings @regression`, async ({ request }) => {
+      const response = await request.get(from, { maxRedirects: 0 });
+
+      expect(response.status()).toBe(308);
+      expect([`/assistant?settings=${section}`, "/hub"]).toContain(response.headers().location ?? "");
     });
   }
 

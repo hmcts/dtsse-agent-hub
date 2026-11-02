@@ -20,16 +20,12 @@ import { type ActionResult, runAction, text } from "@/web/action";
  * the gateway route has no model credential to paste at all.
  *
  * A CLAUDE.md and a git identity each have their own two actions, because they are written and reset rather than
- * pasted, in the Assistant's settings and on `/hub/virtual`, and only exist for virtual agents.
+ * pasted, in the Assistant's settings, and only exist for virtual agents.
  */
 
-/** The standalone page, and the virtual agents page that has them as a section when the feature is on. */
-const CREDENTIALS_PATHS = ["/hub/settings/credentials", "/hub/virtual"] as const;
-
+/** Every Assistant page, since each one renders the settings these change. */
 function revalidate(): void {
-  for (const path of CREDENTIALS_PATHS) {
-    revalidatePath(path);
-  }
+  revalidatePath("/assistant", "layout");
 }
 
 const PASTEABLE = { github: "GitHub token", claude: "Claude token", jenkins: "Jenkins API token" } as const;

@@ -36,21 +36,43 @@ export function movedHubPath(pathname: string): string | undefined {
 }
 
 /**
- * Where a retired hub address goes now, or `undefined` when the path is not one.
+ * The section of the Assistant's settings `?settings=` opens. The settings dialog reads the same parameter, so a link
+ * made here and the section it opens cannot be spelled two ways.
+ */
+export const SETTINGS_PARAMETER = "settings";
+
+export function assistantSettingsPath(section: string): string {
+  return `${ASSISTANT}?${new URLSearchParams({ [SETTINGS_PARAMETER]: section })}`;
+}
+
+/** `/virtual/{id}` with nothing after the id; the port ticket route under it is still served. */
+const VIRTUAL_AGENT_PAGE = /^\/virtual\/[^/]+$/;
+
+/**
+ * Where a retired hub address goes now, or `undefined` when the path is not one. Each goes where virtual agents are
+ * managed now, and to the hub's home where virtual agents are off and the Assistant's pages are not found.
  *
- * `/hub/access` goes to `SHARED_CHATS`: an agent is its owner's, somebody else's is reached by tagging it in a post,
- * and the only access one person gives another is a share or fork of one conversation at a time, which is managed
- * there. Where virtual agents are off there are no conversations to share and the Assistant's pages are not found, so
- * it goes to the hub's home instead.
+ * - `/access` goes to `SHARED_CHATS`: an agent is its owner's, somebody else's is reached by tagging it in a post, and
+ *   the only access one person gives another is a share or fork of one conversation at a time, which is managed there.
+ * - `/virtual` and `/virtual/{id}` go to the Assistant section of its settings: the Assistant's agent is the one
+ *   virtual agent a person has, and its settings are where it is renamed, restarted and its web servers opened.
+ *   `/virtual/{id}/ports/{port}` is not one of these: it is the viewer's ticket route, and is still served.
+ * - `/settings/credentials` goes to Connections, which the published client's pod boot messages still send people to.
  *
- * Both the bare address and the `/hub` one, because the page existed under both and both were pasted into tickets.
+ * Both the bare address and the `/hub` one, because each page existed under both and both were pasted into tickets.
  * Checked ahead of `movedHubPath`, which would otherwise send the bare one to a page that is no longer there.
  */
 export function retiredHubPath(pathname: string, virtualAgents: boolean): string | undefined {
-  if (pathname !== "/access" && pathname !== `${HUB}/access`) {
-    return undefined;
-  }
-  return virtualAgents ? SHARED_CHATS : HUB;
+  const path = pathname.startsWith(`${HUB}/`) ? pathname.slice(HUB.length) : pathname;
+  const to =
+    path === "/access"
+      ? SHARED_CHATS
+      : path === "/virtual" || VIRTUAL_AGENT_PAGE.test(path)
+        ? assistantSettingsPath("assistant")
+        : path === "/settings/credentials"
+          ? assistantSettingsPath("connections")
+          : undefined;
+  return to === undefined ? undefined : virtualAgents ? to : HUB;
 }
 
 /**

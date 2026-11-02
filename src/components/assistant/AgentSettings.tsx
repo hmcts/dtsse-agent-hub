@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { ActionForm, type FormAction } from "@/components/ActionForm";
-import { statusLabel } from "@/components/virtual-agents/labels";
+import { statusLabel } from "@/components/assistant/labels";
 import { MAX_NAME_LENGTH } from "@/virtual-agents/limits";
 import type { AssistantAgent } from "@/web/data";
 
@@ -29,6 +29,8 @@ const SECONDARY = "self-start rounded-[10px] border border-asst-strong px-3 py-2
  */
 function Restart({ agent, restart }: { agent: AssistantAgent; restart: FormAction }) {
   const [asking, setAsking] = useState(false);
+  // Said outside the form, which closes on success so the question is not left open to be answered twice.
+  const [restarted, setRestarted] = useState(false);
   const confirm = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -37,18 +39,43 @@ function Restart({ agent, restart }: { agent: AssistantAgent; restart: FormActio
     }
   }, [asking]);
 
+  if (agent.desired === "deleted") {
+    return <p className="text-[13px] text-asst-muted">It is being deleted. Opening a chat sets up a new assistant for you.</p>;
+  }
   if (agent.desired !== "running") {
     return <p className="text-[13px] text-asst-muted">It is not running, so there is nothing to restart. It starts when you next open a chat.</p>;
   }
   if (!asking) {
     return (
-      <button type="button" onClick={() => setAsking(true)} className={SECONDARY}>
-        Restart your assistant
-      </button>
+      <>
+        {restarted ? (
+          <p role="status" className="text-[13px] text-asst-ok">
+            Restarting. Your chats are kept.
+          </p>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => {
+            setRestarted(false);
+            setAsking(true);
+          }}
+          className={SECONDARY}
+        >
+          Restart your assistant
+        </button>
+      </>
     );
   }
   return (
-    <ActionForm action={restart} label="Restart your assistant" className="flex flex-col gap-2">
+    <ActionForm
+      action={restart}
+      label="Restart your assistant"
+      onSuccess={() => {
+        setAsking(false);
+        setRestarted(true);
+      }}
+      className="flex flex-col gap-2"
+    >
       <input type="hidden" name="id" value={agent.id} />
       <p className="text-pretty text-[13px] font-semibold">
         Restart your assistant? Anything a chat is working on right now stops. Your chats are all kept and carry on where they left off.

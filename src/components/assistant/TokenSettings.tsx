@@ -30,7 +30,7 @@ function removeQuestion(row: Connection): string {
     : `Remove your ${row.paste}? Your assistant stops using it the next time it starts.`;
 }
 
-function Replace({ row, save, onDone }: { row: Connection; save: FormAction; onDone: () => void }) {
+function Replace({ row, save, onDone, onSaved }: { row: Connection; save: FormAction; onDone: () => void; onSaved: () => void }) {
   const id = useId();
   const field = useRef<HTMLInputElement>(null);
 
@@ -39,7 +39,7 @@ function Replace({ row, save, onDone }: { row: Connection; save: FormAction; onD
   }, []);
 
   return (
-    <ActionForm action={save} label={`Save your ${row.paste}`} onSuccess={onDone} className="flex basis-full flex-col gap-2 pt-1">
+    <ActionForm action={save} label={`Save your ${row.paste}`} onSuccess={onSaved} className="flex basis-full flex-col gap-2 pt-1">
       <input type="hidden" name="kind" value={row.kind} />
       <label htmlFor={`${id}-value`} className="text-[13px] font-medium">
         {row.stored ? `New ${row.paste}` : row.paste}
@@ -57,7 +57,7 @@ function Replace({ row, save, onDone }: { row: Connection; save: FormAction; onD
   );
 }
 
-function Remove({ row, remove, onDone }: { row: Connection; remove: FormAction; onDone: () => void }) {
+function Remove({ row, remove, onDone, onRemoved }: { row: Connection; remove: FormAction; onDone: () => void; onRemoved: () => void }) {
   const confirm = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -65,7 +65,7 @@ function Remove({ row, remove, onDone }: { row: Connection; remove: FormAction; 
   }, []);
 
   return (
-    <ActionForm action={remove} label={`Remove your ${row.paste}`} onSuccess={onDone} className="flex basis-full flex-col gap-2 pt-1">
+    <ActionForm action={remove} label={`Remove your ${row.paste}`} onSuccess={onRemoved} className="flex basis-full flex-col gap-2 pt-1">
       <input type="hidden" name="kind" value={row.kind} />
       <p className="text-pretty text-[13px] font-semibold">{removeQuestion(row)}</p>
       <div className="flex items-center gap-3">
@@ -82,27 +82,42 @@ function Remove({ row, remove, onDone }: { row: Connection; remove: FormAction; 
 
 function Token({ row, tokens }: { row: Connection; tokens: AssistantTokens }) {
   const [doing, setDoing] = useState<"replace" | "remove" | null>(null);
+  // Said in the row rather than in the form, which closes on success.
+  const [done, setDone] = useState<string | null>(null);
+  const finish = (said: string) => () => {
+    setDoing(null);
+    setDone(said);
+  };
+  const start = (what: "replace" | "remove") => () => {
+    setDone(null);
+    setDoing(what);
+  };
   return (
     <li className="flex flex-wrap items-center gap-3 border-b border-asst-line px-3.5 py-3 last:border-b-0">
       <div className="flex min-w-0 flex-1 flex-col leading-tight">
         <span className="truncate text-sm font-medium">{row.paste}</span>
         <span className="truncate text-xs text-asst-muted">{row.stored ? "Saved" : "Not saved"}</span>
+        {done === null ? null : (
+          <span role="status" className="text-xs text-asst-ok">
+            {done}
+          </span>
+        )}
       </div>
       {doing === null ? (
         <div className="flex shrink-0 gap-2">
-          <button type="button" onClick={() => setDoing("replace")} aria-label={`${row.stored ? "Replace" : "Add"} your ${row.paste}`} className={SECONDARY}>
+          <button type="button" onClick={start("replace")} aria-label={`${row.stored ? "Replace" : "Add"} your ${row.paste}`} className={SECONDARY}>
             {row.stored ? "Replace" : "Add"}
           </button>
           {row.stored ? (
-            <button type="button" onClick={() => setDoing("remove")} aria-label={`Remove your ${row.paste}`} className={SECONDARY}>
+            <button type="button" onClick={start("remove")} aria-label={`Remove your ${row.paste}`} className={SECONDARY}>
               Remove
             </button>
           ) : null}
         </div>
       ) : doing === "replace" ? (
-        <Replace row={row} save={tokens.save} onDone={() => setDoing(null)} />
+        <Replace row={row} save={tokens.save} onDone={() => setDoing(null)} onSaved={finish(`Your ${row.paste} is saved`)} />
       ) : (
-        <Remove row={row} remove={tokens.remove} onDone={() => setDoing(null)} />
+        <Remove row={row} remove={tokens.remove} onDone={() => setDoing(null)} onRemoved={finish(`Your ${row.paste} is removed`)} />
       )}
     </li>
   );

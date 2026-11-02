@@ -1,46 +1,53 @@
-import { expect, type Page, test } from "@playwright/test";
-import { asPersona, unique } from "./hub";
+import { expect, test } from "@playwright/test";
+import { asPersona, chatPersona, connectForChat } from "./hub";
 
-/** With virtual agents on, `/hub/settings/credentials` sends people to the credentials section of `/hub/virtual`. */
-async function openCredentials(page: Page): Promise<void> {
-  const response = await page.goto("/hub/settings/credentials");
-  expect(response?.status()).toBe(200);
-  if (new URL(page.url()).pathname === "/hub/virtual") {
-    expect(new URL(page.url()).hash).toBe("#credentials");
-    await expect(page.getByRole("region", { name: "Credentials" })).toBeVisible();
-  } else {
-    await expect(page.getByRole("heading", { level: 1, name: "Credentials" })).toBeVisible();
-  }
-}
+const ASSISTANT_OFF = "the Assistant runs on a virtual agent, which is off on this deployment";
 
+/**
+ * A person's credentials, in the Assistant's settings. `/hub/settings/credentials`, which the published client's pod
+ * boot messages still print, lands on the Connections section; `routes.spec.ts` checks the redirect itself.
+ */
 test.describe("credentials @smoke", () => {
-  test("should render the credentials with the viewer's model route @smoke @regression", async ({ page }) => {
-    await openCredentials(page);
-
-    await expect(page.getByRole("heading", { name: "Model" })).toBeVisible();
-    await expect(page.getByText("Credentials unavailable").or(page.getByRole("heading", { name: "GitHub token" }))).toBeVisible();
-  });
-
-  test("should store and delete a pasted token without ever showing it @regression", async ({ browser, baseURL }) => {
-    const context = await asPersona(browser, `own-licence-${unique("e2e")}`, baseURL!);
+  test("should open the Assistant's settings at Connections from the old credentials address @smoke @regression", async ({ browser, baseURL, request }) => {
+    const persona = chatPersona("credentials");
+    await connectForChat(request, persona);
+    const context = await asPersona(browser, persona, baseURL!);
     try {
       const page = await context.newPage();
-      await openCredentials(page);
+      const response = await page.goto("/hub/settings/credentials");
+      test.skip(new URL(page.url()).pathname === "/hub", ASSISTANT_OFF);
+      expect(response?.status()).toBe(200);
+
+      await expect(page.getByRole("dialog", { name: "Settings" }).getByRole("heading", { name: "Connections" })).toBeVisible();
+      expect(new URL(page.url()).search).toBe("");
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("should replace and remove a pasted token without ever showing it @regression", async ({ browser, baseURL, request }) => {
+    const persona = chatPersona("tokens");
+    await connectForChat(request, persona);
+    const context = await asPersona(browser, persona, baseURL!);
+    try {
+      const page = await context.newPage();
+      const response = await page.goto("/assistant?settings=tokens");
+      test.skip(response?.status() === 404, ASSISTANT_OFF);
+      const dialog = page.getByRole("dialog", { name: "Settings" });
       // Previews and the -staging release have sign-in off, so credentials are unavailable there.
-      test.skip(await page.getByText("Credentials unavailable").isVisible(), "this deployment cannot store a development identity's credentials");
+      test.skip((await dialog.getByRole("heading", { name: "Tokens" }).count()) === 0, "this deployment cannot store a development identity's credentials");
 
-      const token = `ghp_${unique("e2e").replaceAll("-", "")}${"a".repeat(24)}`;
-      const github = page.getByRole("form", { name: "Save GitHub token" });
-      await github.getByLabel("Paste your GitHub token").fill(token);
-      await github.getByRole("button", { name: "Save" }).click();
-
-      await expect(page.getByRole("status").filter({ hasText: "Your GitHub token is stored" })).toBeVisible();
-      await expect(page.getByRole("form", { name: "Delete GitHub token" })).toBeVisible();
-      await expect(page.getByLabel("Paste your Claude token")).toBeVisible();
+      const token = `sk-ant-oat-${persona.replaceAll("-", "")}${"a".repeat(24)}`;
+      await dialog.getByRole("button", { name: "Replace your Claude token" }).click();
+      await dialog.getByLabel("New Claude token").fill(token);
+      await dialog.getByRole("button", { name: "Save" }).click();
+      await expect(dialog.getByRole("status").filter({ hasText: "Your Claude token is saved" })).toBeVisible();
       expect(await page.content()).not.toContain(token);
 
-      await page.getByRole("form", { name: "Delete GitHub token" }).getByRole("button", { name: "Delete" }).click();
-      await expect(page.getByRole("form", { name: "Delete GitHub token" })).toHaveCount(0);
+      await dialog.getByRole("button", { name: "Remove your Claude token" }).click();
+      await expect(dialog.getByText(/cannot answer again until you paste a new one/)).toBeVisible();
+      await dialog.getByRole("button", { name: "Remove", exact: true }).click();
+      await expect(dialog.getByRole("status").filter({ hasText: "Your Claude token is removed" })).toBeVisible();
     } finally {
       await context.close();
     }

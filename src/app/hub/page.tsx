@@ -38,9 +38,7 @@ async function Overview({ viewer }: { viewer: Identity }) {
           )
         }
       />
-      <div className="flex min-h-0 flex-1">
-        <ChannelView topics={watched} match="any" initial={activity} />
-      </div>
+      <ChannelView topics={watched} match="any" initial={activity} />
     </>
   );
 }
