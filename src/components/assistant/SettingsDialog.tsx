@@ -36,7 +36,7 @@ import { SETTINGS_PARAMETER } from "@/web/home";
 
 /**
  * What a row needs to connect a sign-in the assistant makes only on request: the assistant it restarts and the action
- * that does it, `reconnectSignIn`, which the getting-ready screen's "Sign in again" posts to as well.
+ * that does it, `reconnectSignIn`, which the getting-ready screen's Connect and "Sign in again" post to as well.
  */
 export interface AssistantConnect {
   assistantId: string;
