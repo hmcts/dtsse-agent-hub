@@ -441,6 +441,42 @@ describe("/api/virtual/{id}/credentials/{kind}", () => {
     expect((await prisma.virtualAgentLogin.findFirstOrThrow()).state).toBe("failed");
   });
 
+  it("should store an Azure token cache without failing the agent when the owner signed in as a guest", async () => {
+    const { id, token } = await started(ALICE, "pcs-api");
+    await pod(loginRoute.POST, token, `/api/virtual/${id}/login/azure`, { virtualAgentId: id, kind: "azure" }, "POST", {
+      prompt: "device_code",
+      verification_uri: "https://microsoft.com/devicelogin",
+      user_code: "ABCDEFGHI",
+      expires_in: 900
+    });
+    const guest = azureCacheFor(ALICE.oid, { home: "c1b2c3d4-0000-4000-8000-000000000003.99999999-9999-9999-9999-999999999999" });
+
+    const response = await pod(credentialRoute.PUT, token, `/api/virtual/${id}/credentials/azure`, { virtualAgentId: id, kind: "azure" }, "PUT", {
+      value: guest
+    });
+
+    expect(response.status).toBe(204);
+    expect(await readCredential(prisma, localStore(), ALICE.oid, "azure")).toBe(guest);
+    expect((await row(id)).status).toBe("awaiting_login");
+    expect((await prisma.virtualAgentLogin.findFirstOrThrow()).state).not.toBe("failed");
+  });
+
+  it("should refuse an Azure token cache signed in to another tenant with 409 and fail the agent saying so", async () => {
+    const { id, token } = await started(ALICE, "pcs-api");
+    const otherTenant = "99999999-9999-9999-9999-999999999999";
+
+    const response = await pod(credentialRoute.PUT, token, `/api/virtual/${id}/credentials/azure`, { virtualAgentId: id, kind: "azure" }, "PUT", {
+      value: azureCacheFor(ALICE.oid, { realms: [otherTenant], home: `c1b2c3d4-0000-4000-8000-000000000003.${otherTenant}` })
+    });
+
+    expect(response.status).toBe(409);
+    expect(await prisma.credential.count()).toBe(0);
+    const { status, statusDetail } = await row(id);
+    expect(status).toBe("failed");
+    expect(statusDetail).toContain("signed in to another tenant");
+    expect(statusDetail).not.toContain("sign in as yourself");
+  });
+
   it("should refuse a token cache that does not decode with 400, leaving the agent as it was", async () => {
     const { id, token } = await started(ALICE, "pcs-api");
 
