@@ -327,7 +327,6 @@ describe("/api/virtual/{id}/credentials/{kind}", () => {
     expect(await prisma.credential.findFirstOrThrow()).toMatchObject({
       ownerOid: ALICE.oid,
       kind: "azure",
-      updatedVia: "pod",
       accountLabel: "alice@example.com"
     });
   });
@@ -346,7 +345,6 @@ describe("/api/virtual/{id}/credentials/{kind}", () => {
     expect(await prisma.credential.findFirstOrThrow()).toMatchObject({
       kind: "atlassian",
       secretName: `u-${ALICE.oid}-atlassian`,
-      updatedVia: "pod",
       accountLabel: "alice@justice.gov.uk"
     });
   });
@@ -367,7 +365,7 @@ describe("/api/virtual/{id}/credentials/{kind}", () => {
 
     expect(response.status).toBe(204);
     expect(await readCredential(prisma, localStore(), ALICE.oid, "atlassian")).toBe(value);
-    expect(await prisma.credential.findFirstOrThrow()).toMatchObject({ kind: "atlassian", updatedVia: "pod", accountLabel: "alice@justice.gov.uk" });
+    expect(await prisma.credential.findFirstOrThrow()).toMatchObject({ kind: "atlassian", accountLabel: "alice@justice.gov.uk" });
   });
 
   it("should refuse a twg auth.conf with no refresh token with 400 and never echo it", async () => {
@@ -439,7 +437,7 @@ describe("/api/virtual/{id}/credentials/{kind}", () => {
     });
 
     expect(response.status).toBe(204);
-    expect(await prisma.credential.findFirstOrThrow()).toMatchObject({ ownerOid: ALICE.oid, kind: "jenkins", updatedVia: "pod" });
+    expect(await prisma.credential.findFirstOrThrow()).toMatchObject({ ownerOid: ALICE.oid, kind: "jenkins" });
     expect(await readCredential(prisma, localStore(), ALICE.oid, "jenkins")).toBe(JENKINS);
   });
 

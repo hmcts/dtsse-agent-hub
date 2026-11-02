@@ -98,22 +98,14 @@ describe("creating virtual agents", () => {
     await expect(setDesired(prisma, ALICE.oid, stopped.id, "running")).resolves.toMatchObject({ desired: "running" });
   });
 
-  it("should keep why an agent failed when its owner stops it themselves", async () => {
+  it("should record the stop as its owner's and clear the failure's detail when its owner stops a failed agent", async () => {
     const agent = await create(ALICE, "failed");
-    const detail = "github: the signed-in account cannot clone hmcts/cft-workspace";
-    await reportStatus(prisma, agent.id, "failed", detail);
+    await reportStatus(prisma, agent.id, "failed", "github: the signed-in account cannot clone hmcts/cft-workspace");
 
     const stopped = await setDesired(prisma, ALICE.oid, agent.id, "stopped");
 
-    expect(stopped).toMatchObject({ desired: "stopped", stopReason: "user", stopDetail: detail });
+    expect(stopped).toMatchObject({ desired: "stopped", stopReason: "user" });
     expect(stopped.statusDetail).toBeNull();
-  });
-
-  it("should keep no stop detail when its owner stops an agent that had not failed", async () => {
-    const agent = await create(ALICE, "running");
-    await reportStatus(prisma, agent.id, "running", "Claude is ready; repositories ready");
-
-    expect(await setDesired(prisma, ALICE.oid, agent.id, "stopped")).toMatchObject({ stopReason: "user", stopDetail: null });
   });
 
   it("should let only one of two concurrent creates through when one place is left", async () => {

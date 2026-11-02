@@ -52,9 +52,7 @@ export async function answerAgentQuestion(input: { questionId: unknown; answers:
       return checked;
     }
     const body = answerMessage(questions, checked.answer);
-    const record = async (tx: Parameters<typeof recordAnswer>[0], messageId: bigint) => {
-      await recordAnswer(tx, question, checked.answer, messageId);
-    };
+    const record = (tx: Parameters<typeof recordAnswer>[0]) => recordAnswer(tx, question, checked.answer);
     // A card is drawn only in its agent's conversation, so a question with none to send the answer into is one nobody
     // was offered.
     const conversation = agent.assistantConversationId === null ? undefined : await findConversation(prisma, viewer.oid, agent.assistantConversationId);
