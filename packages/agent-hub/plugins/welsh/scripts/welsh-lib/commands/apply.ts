@@ -17,7 +17,7 @@ import { existsSync } from "node:fs";
 import { basename, isAbsolute, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import type { Edit } from "../adapters/types.ts";
-import { loadCatalogues, type Row } from "../catalogue.ts";
+import { loadCatalogue, type Row } from "../catalogue.ts";
 import { ensureClone, tempWorktree, type Worktree } from "../clones.ts";
 import { loadConfig, type RepoConfig } from "../config.ts";
 import { COMMIT_TRAILER, commit, draftPr, git, PR_FOOTER } from "../git.ts";
@@ -67,9 +67,9 @@ export async function applyCmd(argv: string[]): Promise<unknown> {
 
 async function applyIn(wt: Worktree, service: string, repo: RepoConfig, values: ApplyOptions, batch: string, branch: string) {
   const abs = wt.dir;
-  const catalogues = loadCatalogues(service);
+  const catalogue = loadCatalogue(service);
   const config = loadConfig(service);
-  const findings = scanRepo(service, abs, repo, config, catalogues);
+  const findings = scanRepo(service, abs, repo, config, catalogue);
 
   // What Welsh is on offer, by Ref.
   const offered = new Map<string, { welsh: string; source: string }>();
@@ -94,10 +94,7 @@ async function applyIn(wt: Worktree, service: string, repo: RepoConfig, values: 
     }
     returnPairs = check.valid;
   }
-  for (const [ref, row] of parseChoices(
-    values.choose ?? [],
-    catalogues.flatMap((c) => c.rows)
-  )) {
+  for (const [ref, row] of parseChoices(values.choose ?? [], catalogue.rows)) {
     offered.set(ref, { welsh: row.welsh, source: `${row.source} (BA choice, row ${row.id})` });
   }
 
@@ -124,7 +121,7 @@ async function applyIn(wt: Worktree, service: string, repo: RepoConfig, values: 
 
   const check = verify(
     edits.map((e) => ({ english: e.leaf.english, welsh: e.welsh, where: e.leaf.cyFile })),
-    catalogues,
+    catalogue,
     returnPairs
   );
   if (!check.ok) {

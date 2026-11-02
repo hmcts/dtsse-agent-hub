@@ -7,7 +7,7 @@ description: Manage Welsh translations for any CFT service without machine trans
 
 Drive `${CLAUDE_PLUGIN_ROOT}/scripts/welsh`, written `welsh` below. It works on every service, and finds the
 cft-workspace from `$CLAUDE_PROJECT_DIR` (or `$CFT_WELSH_WORKSPACE`). Each service keeps its catalogue, config and
-WLU spreadsheets in `apps/<product>/welsh/`; common terms live in `welsh/shared/catalogue.csv`.
+WLU spreadsheets in `apps/<product>/welsh/`. There is no shared catalogue: the right Welsh depends on where it is used.
 Full guide: `docs/how-to/manage-welsh-translations.md` in the workspace.
 
 ## The rule that overrides everything else

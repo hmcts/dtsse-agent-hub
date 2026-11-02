@@ -8,9 +8,8 @@ import { test } from "node:test";
 const ws = mkdtempSync(join(tmpdir(), "welsh-cat-"));
 process.env.CFT_WELSH_WORKSPACE = ws;
 mkdirSync(join(ws, "apps", "demo", "welsh"), { recursive: true });
-mkdirSync(join(ws, "welsh", "shared"), { recursive: true });
 
-const { loadCatalogue, loadCatalogues, lookup, search } = await import("../catalogue.ts");
+const { cataloguePath, loadCatalogue, lookup, search } = await import("../catalogue.ts");
 const { parseCsv, toCsv } = await import("../csv.ts");
 const { matchKey, splitLegacyEnglish } = await import("../normalise.ts");
 
@@ -46,35 +45,41 @@ test("add supersedes a changed rendering and ignores a repeat", () => {
   assert.equal(loadCatalogue("demo").approved("Continue")[0].welsh, "Ymlaen");
 });
 
-test("lookup: service before shared, ambiguity and variants go to a human, needs-review never fills", () => {
+test("a catalogue belongs to one service, with nothing shared between services", () => {
+  assert.equal(cataloguePath("demo"), join(ws, "apps", "demo", "welsh", "catalogue.csv"));
+  const other = loadCatalogue("other");
+  other.add({ english: "Back", welsh: "Yn ôl", source: "WLU-other" });
+  assert.equal(lookup("Back", loadCatalogue("demo")).kind, "miss");
+});
+
+test("lookup: ambiguity and variants go to a human, needs-review never fills", () => {
   writeFileSync(join(ws, "apps", "demo", "welsh", "catalogue.csv"), "");
-  writeFileSync(join(ws, "welsh", "shared", "catalogue.csv"), "");
-  const [svc, shared] = loadCatalogues("demo");
-  shared.add({ english: "Back", welsh: "Yn ôl", source: "WLU-shared" });
+  const svc = loadCatalogue("demo");
+  svc.add({ english: "Back", welsh: "Yn ôl", source: "WLU" });
   svc.add({ english: "Before Hon", welsh: "Gerbron Ei Anrhydedd [male] / Gerbron Ei Hanrhydedd [female]", source: "WLU" });
   svc.add({ english: "Search", welsh: "Chwilio", context: "button", source: "WLU" });
   svc.add({ english: "Search", welsh: "Chwiliad", context: "heading", source: "WLU" });
   svc.add({ english: "Draft", welsh: "Drafft", source: "legacy", status: "needs-review" });
 
-  const back = lookup("“Back”", [svc, shared]);
+  const back = lookup("“Back”", svc);
   assert.equal(back.kind, "hit");
-  assert.equal(back.kind === "hit" && back.catalogue, "shared");
-  assert.equal(lookup("Before Hon", [svc, shared]).kind, "ambiguous");
-  const s = lookup("Search", [svc, shared]);
+  assert.equal(back.kind === "hit" && back.catalogue, "demo");
+  assert.equal(lookup("Before Hon", svc).kind, "ambiguous");
+  const s = lookup("Search", svc);
   assert.equal(s.kind === "ambiguous" && s.options.length, 2);
-  assert.equal(lookup("Draft", [svc, shared]).kind, "miss");
-  assert.equal(lookup("back", [svc, shared]).kind, "miss", "case differs — suggestion only");
+  assert.equal(lookup("Draft", svc).kind, "miss");
+  assert.equal(lookup("back", svc).kind, "miss", "case differs — suggestion only");
 });
 
 test("search finds either side and shows needs-review but hides superseded", () => {
-  const [svc, shared] = loadCatalogues("demo");
+  const svc = loadCatalogue("demo");
   svc.add({ english: "Sign out", welsh: "Allgofnodi", source: "WLU" });
   svc.add({ english: "Sign out", welsh: "Allgofnodi o'r cyfrif", source: "WLU-2" });
   svc.add({ english: "Draft", welsh: "Drafft", source: "legacy", status: "needs-review" });
   assert.deepEqual(
-    search("allgofnodi", [svc, shared], "contains", false).map((h) => h.welsh),
+    search("allgofnodi", svc, "contains", false).map((h) => h.welsh),
     ["Allgofnodi o'r cyfrif"]
   );
-  assert.equal(search("allgofnodi", [svc, shared], "contains", true).length, 2);
-  assert.equal(search("Draft", [svc, shared], "exact", false)[0].status, "needs-review");
+  assert.equal(search("allgofnodi", svc, "contains", true).length, 2);
+  assert.equal(search("Draft", svc, "exact", false)[0].status, "needs-review");
 });

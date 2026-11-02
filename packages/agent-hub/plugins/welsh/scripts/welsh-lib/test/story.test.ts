@@ -7,9 +7,8 @@ import { test } from "node:test";
 const ws = mkdtempSync(join(tmpdir(), "welsh-story-"));
 process.env.CFT_WELSH_WORKSPACE = ws;
 mkdirSync(join(ws, "apps", "demo", "welsh"), { recursive: true });
-mkdirSync(join(ws, "welsh", "shared"), { recursive: true });
 
-const { loadCatalogues } = await import("../catalogue.ts");
+const { loadCatalogue } = await import("../catalogue.ts");
 const { buildRows, candidates, existingRows, notInStory, withSection } = await import("../story.ts");
 const { verify } = await import("../verify.ts");
 type AdfNode = import("../jira.ts").AdfNode;
@@ -57,40 +56,40 @@ test("strings must appear in the story verbatim (after quote/space normalisation
 });
 
 test("rows fill from the catalogue, otherwise placeholder; the section replaces itself and keeps other nodes", () => {
-  const cats = loadCatalogues("demo");
-  cats[0].add({ english: "Your appeal", welsh: "Eich apêl", source: "WLU-7" });
+  const cat = loadCatalogue("demo");
+  cat.add({ english: "Your appeal", welsh: "Eich apêl", source: "WLU-7" });
   const strings = ["Access tribunal documents", "Your appeal"];
 
-  const first = buildRows("demo", strings, cats, [], new Map());
+  const first = buildRows("demo", strings, cat, [], new Map());
   assert.deepEqual(
     first.rows.map((r) => r.state),
     ["required", "filled"]
   );
   assert.equal(first.rows[1].welsh, "Eich apêl");
-  assert.ok(verify(first.rows, cats).ok);
+  assert.ok(verify(first.rows, cat).ok);
 
   const once = withSection(STORY, first.rows);
-  const twice = withSection(once, buildRows("demo", strings, cats, existingRows(once), new Map()).rows);
+  const twice = withSection(once, buildRows("demo", strings, cat, existingRows(once), new Map()).rows);
   assert.equal(twice.content!.length, STORY.content!.length + 3, "heading, note and table appended once");
   assert.deepEqual(twice.content!.slice(0, STORY.content!.length), STORY.content, "original nodes untouched, images included");
   assert.equal(candidates(twice).length, candidates(STORY).length, "the generated section is not re-read as content");
 });
 
 test("a placeholder is refilled once the WLU's answer is in the catalogue", () => {
-  const cats = loadCatalogues("demo");
-  const before = withSection(STORY, buildRows("demo", ["Access tribunal documents"], cats, [], new Map()).rows);
-  cats[0].add({ english: "Access tribunal documents", welsh: "Cael mynediad at ddogfennau’r tribiwnlys", source: "WLU-8" });
-  const after = buildRows("demo", ["Access tribunal documents"], cats, existingRows(before), new Map());
+  const cat = loadCatalogue("demo");
+  const before = withSection(STORY, buildRows("demo", ["Access tribunal documents"], cat, [], new Map()).rows);
+  cat.add({ english: "Access tribunal documents", welsh: "Cael mynediad at ddogfennau’r tribiwnlys", source: "WLU-8" });
+  const after = buildRows("demo", ["Access tribunal documents"], cat, existingRows(before), new Map());
   assert.equal(after.rows[0].state, "filled");
   assert.equal(after.rows[0].welsh, "Cael mynediad at ddogfennau’r tribiwnlys");
 });
 
 test("Welsh typed into the story by hand is kept but fails verify, so it cannot be written", () => {
-  const cats = loadCatalogues("demo");
+  const cat = loadCatalogue("demo");
   const edited = withSection(STORY, [{ ref: "CY-1", english: "Start now", welsh: "Dechrau nawr", source: "typed", state: "filled" }]);
-  const built = buildRows("demo", ["Start now"], cats, existingRows(edited), new Map());
+  const built = buildRows("demo", ["Start now"], cat, existingRows(edited), new Map());
   assert.equal(built.handEdited.length, 1);
-  const check = verify(built.rows, cats);
+  const check = verify(built.rows, cat);
   assert.equal(check.ok, false);
   assert.match(check.failures[0].reason, /no approved catalogue row/);
 });

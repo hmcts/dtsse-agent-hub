@@ -20,7 +20,7 @@ export const ADAPTERS: Record<string, Adapter> = {
   [jsonPair.name]: jsonPair
 };
 
-export function scanRepo(service: string, repoAbs: string, repo: RepoConfig, config: ServiceConfig, catalogues: Catalogue[]): Finding[] {
+export function scanRepo(service: string, repoAbs: string, repo: RepoConfig, config: ServiceConfig, catalogue: Catalogue): Finding[] {
   const files = listFiles(repoAbs).filter(globFilter(repo.include, [...(repo.exclude ?? []), ...(repo.staff_only ?? [])]));
   const extra = config.placeholder_patterns.map((p) => new RegExp(p));
   const allow = new Set(config.identical_allowlist.map(matchKey));
@@ -35,7 +35,7 @@ export function scanRepo(service: string, repoAbs: string, repo: RepoConfig, con
       if (!signal) {
         continue;
       }
-      const match = lookup(leaf.english, catalogues, config.context_sensitive);
+      const match = lookup(leaf.english, catalogue, config.context_sensitive);
       // The WLU has confirmed this English stays as it is in Welsh.
       if (signal === "identical" && match.kind === "hit" && match.welsh === leaf.welsh) {
         continue;

@@ -24,7 +24,7 @@ export function isPlaceholder(welsh: string, extra: RegExp[] = []): boolean {
   return welsh.trim() === "" || [...PLACEHOLDER_PATTERNS, ...extra].some((re) => re.test(welsh));
 }
 
-export function verify(values: Pair[], catalogues: Catalogue[], returns: Pair[] = []): VerifyResult {
+export function verify(values: Pair[], catalogue: Catalogue, returns: Pair[] = []): VerifyResult {
   const fromReturns = new Map<string, Set<string>>();
   for (const r of returns) {
     const key = matchKey(r.english);
@@ -38,12 +38,12 @@ export function verify(values: Pair[], catalogues: Catalogue[], returns: Pair[] 
       placeholders++;
       continue;
     }
-    const approved = catalogues.flatMap((c) => c.approved(v.english)).map((r) => r.welsh);
+    const approved = catalogue.approved(v.english).map((r) => r.welsh);
     if (approved.includes(v.welsh) || fromReturns.get(matchKey(v.english))?.has(v.welsh)) {
       traced++;
       continue;
     }
-    const best = lookup(v.english, catalogues);
+    const best = lookup(v.english, catalogue);
     failures.push({
       ...v,
       reason: approved.length

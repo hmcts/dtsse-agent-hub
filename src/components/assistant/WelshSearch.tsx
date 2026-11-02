@@ -11,7 +11,7 @@ export const SEARCH_AFTER_MS = 350;
 
 const STATUS_LABEL: Record<string, string> = { approved: "Approved", "needs-review": "Needs review", superseded: "Superseded" };
 
-/** Step 2 of "Look up a translation": search the service's catalogue (then the shared one) as the person types. */
+/** Step 2 of "Look up a translation": search the service's catalogue as the person types. */
 export function WelshSearch({ product, client }: Readonly<{ product: string; client: WelshClient }>) {
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState<"contains" | "exact" | "fuzzy">("contains");
@@ -86,7 +86,7 @@ function Hits({ query, total, hits }: Readonly<{ query: string; total: number; h
         </thead>
         <tbody>
           {hits.map((hit) => (
-            <tr key={`${hit.catalogue}-${hit.id}`} className="border-b border-asst-line align-top last:border-b-0">
+            <tr key={hit.id} className="border-b border-asst-line align-top last:border-b-0">
               <td className="py-1.5 pr-3">
                 {hit.english}
                 {hit.context ? <span className="block text-xs text-asst-faint">{hit.context}</span> : null}
@@ -94,10 +94,7 @@ function Hits({ query, total, hits }: Readonly<{ query: string; total: number; h
               <td className="py-1.5 pr-3" lang="cy">
                 {hit.welsh}
               </td>
-              <td className={`py-1.5 text-xs ${hit.status === "approved" ? "text-asst-ok" : "text-asst-warn"}`}>
-                {STATUS_LABEL[hit.status] ?? hit.status}
-                {hit.catalogue === "shared" ? <span className="block text-asst-faint">Shared catalogue</span> : null}
-              </td>
+              <td className={`py-1.5 text-xs ${hit.status === "approved" ? "text-asst-ok" : "text-asst-warn"}`}>{STATUS_LABEL[hit.status] ?? hit.status}</td>
             </tr>
           ))}
         </tbody>

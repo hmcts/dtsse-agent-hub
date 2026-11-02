@@ -1,7 +1,8 @@
 /**
  * Translation catalogues: one per service at apps/<product>/welsh/catalogue.csv,
- * plus welsh/shared/catalogue.csv for common terms. Every row is Welsh supplied
- * by the Welsh Language Unit — nothing in this module creates Welsh text.
+ * and nothing shared between services, because the right Welsh depends on where
+ * it is used. Every row is Welsh supplied by the Welsh Language Unit — nothing in
+ * this module creates Welsh text.
  */
 
 import { createHash } from "node:crypto";
@@ -23,7 +24,7 @@ const CONTEXT_SENSITIVE = ["Yes", "No"];
 export const STATUSES = ["approved", "superseded", "needs-review"] as const;
 
 export function cataloguePath(service: string): string {
-  return service === "shared" ? join(WORKSPACE, "welsh", "shared", "catalogue.csv") : join(WORKSPACE, "apps", service, "welsh", "catalogue.csv");
+  return join(WORKSPACE, "apps", service, "welsh", "catalogue.csv");
 }
 
 export function rowId(english: string, context: string, welsh: string): string {
@@ -37,11 +38,6 @@ export function loadCatalogue(service: string): Catalogue {
   const path = cataloguePath(service);
   const rows = existsSync(path) ? (parseRecords(readFileSync(path, "utf8")) as unknown as Row[]) : [];
   return new Catalogue(service, path, rows);
-}
-
-/** The service catalogue backed by the shared one. */
-export function loadCatalogues(service: string): Catalogue[] {
-  return service === "shared" ? [loadCatalogue("shared")] : [loadCatalogue(service), loadCatalogue("shared")];
 }
 
 export class Catalogue {
@@ -113,49 +109,44 @@ export class Catalogue {
 }
 
 /**
- * Look one English string up, service catalogue first, then shared.
+ * Look one English string up in a service's catalogue.
  *
  *  - hit:       exactly one approved Welsh rendering, usable verbatim
  *  - ambiguous: more than one rendering, a cell holding variants, or English
  *               whose Welsh depends on context (Yes/No, plus `sensitive`) — a BA picks
  *  - miss:      nothing approved; `suggestions` are near matches for a human only
  */
-export function lookup(english: string, catalogues: Catalogue[], sensitive: string[] = []): Lookup {
+export function lookup(english: string, catalogue: Catalogue, sensitive: string[] = []): Lookup {
   const contextual = [...CONTEXT_SENSITIVE, ...sensitive].map(looseKey).includes(looseKey(english));
-  for (const cat of catalogues) {
-    const rows = cat.approved(english);
-    if (!rows.length) {
-      continue;
-    }
-    const distinct = [...new Map(rows.map((r) => [r.welsh, r])).values()];
-    if (distinct.length === 1 && !hasVariants(distinct[0].welsh) && !contextual) {
-      return { kind: "hit", welsh: distinct[0].welsh, row: distinct[0], catalogue: cat.service };
-    }
-    return { kind: "ambiguous", options: distinct, catalogue: cat.service };
+  const rows = catalogue.approved(english);
+  if (!rows.length) {
+    return { kind: "miss", suggestions: suggest(english, catalogue, 3) };
   }
-  return { kind: "miss", suggestions: suggest(english, catalogues, 3) };
+  const distinct = [...new Map(rows.map((r) => [r.welsh, r])).values()];
+  if (distinct.length === 1 && !hasVariants(distinct[0].welsh) && !contextual) {
+    return { kind: "hit", welsh: distinct[0].welsh, row: distinct[0], catalogue: catalogue.service };
+  }
+  return { kind: "ambiguous", options: distinct, catalogue: catalogue.service };
 }
 
 /** Near matches by loose key, then token overlap. For display only. */
-export function suggest(english: string, catalogues: Catalogue[], limit: number): Row[] {
+export function suggest(english: string, catalogue: Catalogue, limit: number): Row[] {
   const loose = looseKey(english);
   const tokens = new Set(loose.split(/\W+/).filter((t) => t.length > 2));
   const scored: { row: Row; score: number }[] = [];
-  for (const cat of catalogues) {
-    for (const row of cat.rows) {
-      if (row.status !== "approved") {
-        continue;
-      }
-      const other = looseKey(row.english);
-      let score = other === loose ? 1 : 0;
-      if (!score && tokens.size) {
-        const otherTokens = new Set(other.split(/\W+/).filter((t) => t.length > 2));
-        const shared = [...tokens].filter((t) => otherTokens.has(t)).length;
-        score = shared / Math.max(tokens.size, otherTokens.size);
-      }
-      if (score >= 0.5) {
-        scored.push({ row, score });
-      }
+  for (const row of catalogue.rows) {
+    if (row.status !== "approved") {
+      continue;
+    }
+    const other = looseKey(row.english);
+    let score = other === loose ? 1 : 0;
+    if (!score && tokens.size) {
+      const otherTokens = new Set(other.split(/\W+/).filter((t) => t.length > 2));
+      const inBoth = [...tokens].filter((t) => otherTokens.has(t)).length;
+      score = inBoth / Math.max(tokens.size, otherTokens.size);
+    }
+    if (score >= 0.5) {
+      scored.push({ row, score });
     }
   }
   return scored
@@ -167,32 +158,30 @@ export function suggest(english: string, catalogues: Catalogue[], limit: number)
 export type SearchMode = "exact" | "contains" | "fuzzy";
 
 /** Catalogue search for BAs. Shows needs-review rows (flagged by status); superseded only with includeAll. */
-export function search(query: string, catalogues: Catalogue[], mode: SearchMode, includeAll: boolean): SearchHit[] {
+export function search(query: string, catalogue: Catalogue, mode: SearchMode, includeAll: boolean): SearchHit[] {
   // Search is for people, so it ignores case and trailing punctuation; lookup() does not.
   const q = looseKey(query);
   const hits: SearchHit[] = [];
-  for (const cat of catalogues) {
-    for (const row of cat.rows) {
-      if (!includeAll && row.status === "superseded") {
-        continue;
+  for (const row of catalogue.rows) {
+    if (!includeAll && row.status === "superseded") {
+      continue;
+    }
+    const sides: ["english" | "welsh", string][] = [
+      ["english", row.english],
+      ["welsh", row.welsh]
+    ];
+    for (const [side, text] of sides) {
+      let score = 0;
+      if (mode === "exact") {
+        score = looseKey(text) === q ? 1 : 0;
+      } else if (mode === "contains") {
+        score = looseKey(text).includes(q) ? q.length / Math.max(looseKey(text).length, 1) : 0;
+      } else {
+        score = suggestScore(q, looseKey(text));
       }
-      const sides: ["english" | "welsh", string][] = [
-        ["english", row.english],
-        ["welsh", row.welsh]
-      ];
-      for (const [side, text] of sides) {
-        let score = 0;
-        if (mode === "exact") {
-          score = looseKey(text) === q ? 1 : 0;
-        } else if (mode === "contains") {
-          score = looseKey(text).includes(q) ? q.length / Math.max(looseKey(text).length, 1) : 0;
-        } else {
-          score = suggestScore(q, looseKey(text));
-        }
-        if (score > 0) {
-          hits.push({ ...row, catalogue: cat.service, matchedOn: side, score: Number(score.toFixed(2)) });
-          break;
-        }
+      if (score > 0) {
+        hits.push({ ...row, catalogue: catalogue.service, matchedOn: side, score: Number(score.toFixed(2)) });
+        break;
       }
     }
   }
@@ -208,8 +197,8 @@ function suggestScore(q: string, text: string): number {
     return 0;
   }
   const tt = new Set(text.split(/\W+/));
-  const shared = qt.filter((t) => tt.has(t)).length / qt.length;
-  return shared >= 0.5 ? shared * 0.8 : 0;
+  const overlap = qt.filter((t) => tt.has(t)).length / qt.length;
+  return overlap >= 0.5 ? overlap * 0.8 : 0;
 }
 
 export interface Row {

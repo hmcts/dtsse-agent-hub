@@ -4,7 +4,7 @@
 # Subcommands (run with --help for options):
 #   init           set up apps/<product>/welsh/ (catalogue, config, request/return folders)
 #   info           what a service has set up: its repos and its catalogue's counts
-#   search         search a service's catalogue (then the shared one), English or Welsh side
+#   search         search a service's catalogue, English or Welsh side
 #   import-legacy  seed a catalogue from an existing WLU spreadsheet and/or JSON map
 #   scan           find English without Welsh in a service's repos; --request writes the WLU xlsx
 #   story          add or refresh the "Welsh content" section of a Jira story

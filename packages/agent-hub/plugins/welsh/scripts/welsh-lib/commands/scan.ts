@@ -12,7 +12,7 @@
 import { existsSync, writeFileSync } from "node:fs";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { loadCatalogues } from "../catalogue.ts";
+import { loadCatalogue } from "../catalogue.ts";
 import { ensureClone, latestTree } from "../clones.ts";
 import { loadConfig, type RepoConfig } from "../config.ts";
 import { fail, requireService, say } from "../io.ts";
@@ -36,7 +36,7 @@ export async function scanCmd(argv: string[]): Promise<unknown> {
   const service = requireService(values.service);
   const repos = resolveRepos(service, values.repo, values.adapter);
   const config = loadConfig(service);
-  const catalogues = loadCatalogues(service);
+  const catalogue = loadCatalogue(service);
 
   const all: Finding[] = [];
   const perRepo: Record<string, unknown> = {};
@@ -48,7 +48,7 @@ export async function scanCmd(argv: string[]): Promise<unknown> {
     const tree = latestTree(abs);
     let findings: Finding[];
     try {
-      findings = scanRepo(service, tree.dir, repo, config, catalogues);
+      findings = scanRepo(service, tree.dir, repo, config, catalogue);
     } finally {
       tree.remove();
     }

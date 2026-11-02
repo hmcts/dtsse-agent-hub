@@ -33,7 +33,7 @@ describe("the Welsh page's views", () => {
       })
     ).toEqual({
       total: 1,
-      hits: [{ id: "a", english: "Back", welsh: "Yn ôl", context: "", status: "approved", source: "WLU:x", catalogue: "cath" }]
+      hits: [{ id: "a", english: "Back", welsh: "Yn ôl", context: "", status: "approved", source: "WLU:x" }]
     });
     expect(searchView({ hits: "nope" })).toEqual({ total: 0, hits: [] });
   });
@@ -71,13 +71,13 @@ describe("the Welsh page's views", () => {
         { page: "summary of publications", english: "Back", now: "Shows the English", welsh: "Yn ôl", source: "catalogue:cath legacy:x" },
         { page: "home", english: "Upload", now: "Missing", welsh: "Llwytho", source: "WLU:return-1" },
         { page: "home", english: "Yes", now: "Missing", welsh: "Ydw", source: "legacy (BA choice, row r)" },
-        { page: "home", english: "Close", now: "Blank", welsh: "Cau", source: "catalogue:shared WLU:2" }
+        { page: "home", english: "Close", now: "Blank", welsh: "Cau", source: "catalogue:cath WLU:2" }
       ]
     });
     expect(applied).toMatchObject({ applied: 2, files: ["a/cy.ts"], pr: null, branch: null, diff: "+x", verified: true });
     expect(applied.pages.map((p) => [p.page, p.changes.map((c) => c.from)])).toEqual([
       ["summary of publications", ["Catalogue"]],
-      ["home", ["Welsh unit return", "Your choice", "Shared catalogue"]]
+      ["home", ["Welsh unit return", "Your choice", "Catalogue"]]
     ]);
     expect(applyView({ files: "x" }).files).toEqual([]);
     expect(

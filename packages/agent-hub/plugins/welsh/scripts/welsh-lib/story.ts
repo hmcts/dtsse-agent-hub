@@ -79,7 +79,7 @@ export function notInStory(strings: string[], doc: AdfNode): string[] {
 export function buildRows(
   service: string,
   strings: string[],
-  catalogues: Catalogue[],
+  catalogue: Catalogue,
   existing: StoryRow[],
   choices: Map<string, Row>,
   sensitive: string[] = []
@@ -90,7 +90,7 @@ export function buildRows(
   for (const english of strings) {
     const ref = contentRef(service, english);
     const chosen = choices.get(ref);
-    const found = lookup(english, catalogues, sensitive);
+    const found = lookup(english, catalogue, sensitive);
     const before = prior.get(matchKey(english));
 
     if (chosen) {

@@ -3,7 +3,7 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { cataloguePath, loadCatalogue, loadCatalogues, type SearchMode, search } from "../catalogue.ts";
+import { cataloguePath, loadCatalogue, type SearchMode, search } from "../catalogue.ts";
 import { loadConfig } from "../config.ts";
 import { fail, requireService, say } from "../io.ts";
 import { importLegacy, type LegacySource } from "../legacy.ts";
@@ -18,21 +18,19 @@ export async function init(argv: string[]): Promise<unknown> {
     cat.save();
     created.push(cat.path);
   }
-  if (service !== "shared") {
-    const dir = dirname(cat.path);
-    for (const sub of ["requests", "returns"]) {
-      const keep = join(dir, sub, ".gitkeep");
-      if (!existsSync(keep)) {
-        mkdirSync(dirname(keep), { recursive: true });
-        writeFileSync(keep, "");
-        created.push(keep);
-      }
+  const dir = dirname(cat.path);
+  for (const sub of ["requests", "returns"]) {
+    const keep = join(dir, sub, ".gitkeep");
+    if (!existsSync(keep)) {
+      mkdirSync(dirname(keep), { recursive: true });
+      writeFileSync(keep, "");
+      created.push(keep);
     }
-    const config = join(dir, "config.yaml");
-    if (!existsSync(config)) {
-      writeFileSync(config, CONFIG_TEMPLATE(service));
-      created.push(config);
-    }
+  }
+  const config = join(dir, "config.yaml");
+  if (!existsSync(config)) {
+    writeFileSync(config, CONFIG_TEMPLATE(service));
+    created.push(config);
   }
   say(created.length ? `Created:\n  ${created.join("\n  ")}` : `apps/${service}/welsh is already set up.`);
   return { service, created };
@@ -57,8 +55,8 @@ export async function searchCmd(argv: string[]): Promise<unknown> {
   const service = requireService(values.service);
   const mode: SearchMode = values.exact ? "exact" : values.fuzzy ? "fuzzy" : "contains";
   const limit = Number(values.limit ?? 25);
-  const hits = search(query, loadCatalogues(service), mode, Boolean(values.all));
-  say(`${hits.length} match(es) for "${query}" (${mode}) in ${service}${service === "shared" ? "" : " + shared"}`);
+  const hits = search(query, loadCatalogue(service), mode, Boolean(values.all));
+  say(`${hits.length} match(es) for "${query}" (${mode}) in ${service}`);
   return { query, mode, service, total: hits.length, hits: hits.slice(0, limit) };
 }
 
@@ -162,8 +160,7 @@ export async function infoCmd(argv: string[]): Promise<unknown> {
     service,
     initialised: existsSync(join(dirname(cataloguePath(service)), "config.yaml")),
     repos: config.repos.map((r) => ({ path: r.path, adapters: r.adapters ?? null, staffOnly: r.staff_only ?? [] })),
-    catalogue: count(service),
-    shared: count("shared")
+    catalogue: count(service)
   };
   say(`${service}: ${result.catalogue.approved} approved catalogue row(s), ${result.repos.length} repo(s) configured.`);
   return result;

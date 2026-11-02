@@ -13,7 +13,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { loadCatalogues, type Row } from "../catalogue.ts";
+import { loadCatalogue, type Row } from "../catalogue.ts";
 import { loadConfig } from "../config.ts";
 import { fail, requireService, say } from "../io.ts";
 import { type AdfNode, fetchStory, updateDescription } from "../jira.ts";
@@ -76,14 +76,10 @@ export async function storyCmd(argv: string[]): Promise<unknown> {
     fail(`these strings are not in ${key} word for word — copy them from the story:\n  ${missing.join("\n  ")}`);
   }
 
-  const catalogues = loadCatalogues(service);
-  const choices = parseChoices(
-    values.choose ?? [],
-    catalogues.flatMap((c) => c.rows),
-    service
-  );
-  const { rows, handEdited } = buildRows(service, strings, catalogues, existing, choices, loadConfig(service).context_sensitive);
-  const check = verify(rows, catalogues);
+  const catalogue = loadCatalogue(service);
+  const choices = parseChoices(values.choose ?? [], catalogue.rows, service);
+  const { rows, handEdited } = buildRows(service, strings, catalogue, existing, choices, loadConfig(service).context_sensitive);
+  const check = verify(rows, catalogue);
   const description = withSection(story.description, rows);
   writeFileSync(previewPath, JSON.stringify({ key, service, hash: story.hash, rows, description } satisfies Preview, null, 2));
 
@@ -108,7 +104,7 @@ async function write(key: string, service: string, previewPath: string, out: str
   }
   const preview = JSON.parse(readFileSync(previewPath, "utf8")) as Preview;
 
-  const check = verify(preview.rows, loadCatalogues(service));
+  const check = verify(preview.rows, loadCatalogue(service));
   if (!check.ok) {
     fail(`verify failed for ${check.failures.length} row(s); rebuild the preview after fixing the catalogue`);
   }
@@ -143,7 +139,7 @@ function parseChoices(raw: string[], rows: Row[], service: string): Map<string, 
     const [ref, id] = pair.split("=");
     const row = rows.find((r) => r.id === id && r.status === "approved");
     if (!ref || !row) {
-      fail(`--choose ${pair}: no approved catalogue row ${id} in ${service} or shared`);
+      fail(`--choose ${pair}: no approved catalogue row ${id} in ${service}`);
     }
     choices.set(ref, row);
   }

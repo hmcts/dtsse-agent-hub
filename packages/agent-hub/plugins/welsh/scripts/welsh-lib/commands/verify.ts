@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import type { Leaf } from "../adapters/types.ts";
-import { loadCatalogues } from "../catalogue.ts";
+import { loadCatalogue } from "../catalogue.ts";
 import { defaultBranch, git } from "../git.ts";
 import { requireService, say } from "../io.ts";
 import { WORKSPACE } from "../paths.ts";
@@ -67,7 +67,7 @@ export async function verifyCmd(argv: string[]): Promise<unknown> {
     for (const r of values.return ?? []) {
       returns.push(...(await readReturn(service, resolve(r))).valid);
     }
-    const check = verify(pairs, loadCatalogues(service), returns);
+    const check = verify(pairs, loadCatalogue(service), returns);
     results.push({ repo: repo.path, base, ...check });
     say(
       `${repo.path}: ${check.checked} changed Welsh value(s) vs ${base} — ${check.traced} traced to the WLU, ${check.placeholders} placeholder(s), ${check.failures.length} not traceable.` +

@@ -137,7 +137,7 @@ function importWithPr(service: string, file: string, batch: string, queriesOut: 
     let pr: string | null = null;
     if (result.added + result.superseded + result.conflicting > 0) {
       const summary = `${result.added} added, ${result.superseded} replaced, ${result.conflicting} needs-review`;
-      const where = service === "shared" ? "welsh/shared" : `apps/${service}/welsh`;
+      const where = `apps/${service}/welsh`;
       commit(wt.dir, [where], `Add Welsh Language Unit return ${batch} to the ${service} catalogue\n\n${summary}.${COMMIT_TRAILER}`);
       pr = draftPr(
         wt.dir,

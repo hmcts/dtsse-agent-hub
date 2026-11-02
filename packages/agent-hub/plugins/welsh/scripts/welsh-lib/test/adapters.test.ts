@@ -143,6 +143,8 @@ test("classify leaves URLs, acronyms and ids alone but flags copied English", ()
 
 test("scanRepo skips pages marked staff_only, which need no Welsh", async () => {
   const { scanRepo } = await import("../scan.ts");
+  const { Catalogue } = await import("../catalogue.ts");
+  const empty = new Catalogue("demo", join(tmpdir(), "no-catalogue.csv"), []);
   const dir = repo({
     "pages/(public)/home/en.ts": `export const en = { title: "Find a hearing" };\n`,
     "pages/(public)/home/cy.ts": `export const cy = { title: "Find a hearing" };\n`,
@@ -150,8 +152,8 @@ test("scanRepo skips pages marked staff_only, which need no Welsh", async () => 
     "pages/(system-admin)/users/cy.ts": `export const cy = { title: "Welsh placeholder" };\n`
   });
   const config = { repos: [], identical_allowlist: [], placeholder_patterns: [], context_sensitive: [] };
-  const all = scanRepo("demo", dir, { path: "x", adapters: ["ts-locale-pair"] }, config, []);
-  const publicOnly = scanRepo("demo", dir, { path: "x", adapters: ["ts-locale-pair"], staff_only: ["pages/(system-admin)/**"] }, config, []);
+  const all = scanRepo("demo", dir, { path: "x", adapters: ["ts-locale-pair"] }, config, empty);
+  const publicOnly = scanRepo("demo", dir, { path: "x", adapters: ["ts-locale-pair"], staff_only: ["pages/(system-admin)/**"] }, config, empty);
   assert.deepEqual(all.map((f) => f.english).sort(), ["Find a hearing", "Manage users"]);
   assert.deepEqual(
     publicOnly.map((f) => f.english),

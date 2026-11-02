@@ -23,7 +23,7 @@ export function requireService(value: string | undefined): string {
   if (!value) {
     fail("--service is required");
   }
-  if (value !== "shared" && !existsSync(join(WORKSPACE, "apps", value))) {
+  if (!existsSync(join(WORKSPACE, "apps", value))) {
     fail(`no product apps/${value} in this workspace`);
   }
   return value;
