@@ -8,7 +8,7 @@
 const TOKEN = /\{\{[^{}]+\}\}|\$\{[^{}]+\}|%\{[^{}]+\}|\(\([^()]+\)\)|%[A-Z][A-Z0-9_]*%|\{\d+\}|\{[A-Za-z_][\w.]*\}|%[sd]/g;
 
 export function tokens(text: string): string[] {
-  return (text.match(TOKEN) ?? []).map((t) => t.replace(/\s+/g, "")).sort();
+  return (text.match(TOKEN) ?? []).map((t) => t.replace(/\s+/g, "")).sort((a, b) => (a < b ? -1 : Number(a > b)));
 }
 
 /** Problems with the Welsh's tokens, or [] when they match the English exactly. */

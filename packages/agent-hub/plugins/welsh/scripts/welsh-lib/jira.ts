@@ -27,8 +27,9 @@ export function updateDescription(key: string, description: AdfNode): void {
   twg(["jira", "workitem", "update", "--id", key, "--fields-json", JSON.stringify({ description }), "-o", "json", "--output-summary", "none"]);
 }
 
+/** Whether a story's description changed between a preview and the write that follows it. */
 export function adfHash(doc: AdfNode | null): string {
-  return createHash("sha1")
+  return createHash("sha256")
     .update(JSON.stringify(doc ?? null))
     .digest("hex");
 }

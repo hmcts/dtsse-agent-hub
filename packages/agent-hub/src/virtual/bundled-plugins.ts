@@ -124,11 +124,12 @@ export function installBundled(name: string, workspace: string, source = path.jo
   const partial = `${dir}.partial-${process.pid}`;
   fs.rmSync(partial, { recursive: true, force: true });
   fs.cpSync(source, partial, { recursive: true, filter: (from) => !SKIPPED.has(path.basename(from)) || from === source });
-  // A packed package need not keep a script's executable bit, so anything that starts with a shebang gets it back.
+  // A packed package need not keep a script's executable bit, so anything that starts with a shebang gets it back:
+  // for its owner alone, the pod's user, whatever else its mode already allows.
   for (const rel of files(partial)) {
     const file = path.join(partial, rel);
     if (fs.readFileSync(file).subarray(0, 2).toString() === "#!") {
-      fs.chmodSync(file, 0o755);
+      fs.chmodSync(file, fs.statSync(file).mode | 0o100);
     }
   }
   try {
