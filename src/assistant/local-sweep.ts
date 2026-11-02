@@ -82,22 +82,18 @@ export async function sweepLocalConversations(prisma: PrismaClient, options: Loc
 /**
  * Deletes the local conversations nothing ever happened in, detaching each one's session before the row goes.
  *
- * Every condition is load-bearing:
+ * The conditions:
  *
+ * - **Nothing was ever in it** (`first_content_at`, see `announceFirstContent`). Every write that puts something in a
+ *   chat — an answer, a tool call or a prompt the person typed, a direct message to or from its session, a question
+ *   it asked, a document — sets that in its own transaction, so this one column answers for all of them, and goes on
+ *   answering once the transcript that held them has been swept after `RETENTION_DAYS`.
+ * - **Its sessions uploaded no transcript at all.** Not content by the rule above, which passes over the harness's
+ *   own turns, and still kept: a session that has written anything is one this sweep cannot be sure has finished
+ *   with its chat, and keeping such a chat costs a row where collecting it wrongly would cost the person's work.
  * - **It has no pod.** A conversation with one is the Assistant's own chat on a virtual agent, whose agent exists
  *   only to be that chat's session; `dropAbandoned` is what collects those, and the two sweeps must not both own a
  *   row.
- * - **Nothing was said in it.** No direct message to or from any of its agents. `kind = 'direct'` and not every
- *   message, unlike `dropAbandoned`'s condition: a local session's agent is an ordinary agent on the roster, and the
- *   posts it wrote to the boards are not words in this chat, while a direct is — the local thread merges directs with
- *   the transcript, so one colleague's message is a chat the person can read.
- * - **Its sessions uploaded no transcript.** This is what a local chat's own half of the conversation is: the
- *   person's prompts are transcript entries there, not hub messages. It is also what keeps a `/clear` leftover,
- *   which is a superseded session's conversation and may hold the whole of a day's work.
- * - **Its sessions asked no question.** An `AskUserQuestion` the client's hook intercepted is shown in the thread as
- *   a card, so a chat holding one has something in it even with nothing else.
- * - **No document.** A person can write the conversation's artefact themselves, and a local chat's document is a hub
- *   row they and the session both edit.
  * - **It was created longer ago than the window, and no session of it has been heard from inside it.**
  *   `last_heartbeat_at` is the hub's own column, written on register and on every heartbeat, so it answers "is this
  *   session still running" whatever the client's clock says — the near miss `transcripts/sweep.ts` records for
@@ -109,34 +105,19 @@ async function collectEmpty(tx: Database, retentionHours: number, batch: number)
     SELECT c.id::text AS id, c.owner_oid
       FROM assistant_conversation c
      WHERE c.virtual_agent_id IS NULL
-       AND c.artefact_version = 0
+       AND c.first_content_at IS NULL
        AND c.created_at < now() - make_interval(hours => ${retentionHours}::int)
        AND NOT EXISTS (
              SELECT 1 FROM agent a
               WHERE a.assistant_conversation_id = c.id
                 AND a.last_heartbeat_at >= now() - make_interval(hours => ${retentionHours}::int)
            )
-       -- Each of these drives from agent and joins out to the dependant, rather than asking the dependant whose
-       -- agent it is: that way every step is an index scan — agent_assistant_conversation_id_idx, then
-       -- transcript_entry_agent_id_id_idx, agent_question_agent_idx, message_direct_target_idx and
-       -- message_author_agent_idx. Written the other way round, as t.agent_id IN (SELECT ...), the planner reads the
-       -- whole of transcript_entry per candidate, which is the hub's largest table.
+       -- Driven from agent and joined out to the entries, rather than asking the entries whose agent they are: that
+       -- way both steps are index scans, agent_assistant_conversation_id_idx then transcript_entry_agent_id_id_idx.
+       -- Written the other way round, as t.agent_id IN (SELECT ...), the planner reads the whole of transcript_entry
+       -- per candidate, which is the hub's largest table.
        AND NOT EXISTS (
              SELECT 1 FROM agent a JOIN transcript_entry t ON t.agent_id = a.id
-              WHERE a.assistant_conversation_id = c.id
-           )
-       AND NOT EXISTS (
-             SELECT 1 FROM agent a JOIN agent_question q ON q.agent_id = a.id
-              WHERE a.assistant_conversation_id = c.id
-           )
-       -- What it received and what it sent, as two clauses rather than one OR across the two columns: each has its
-       -- own index, and an OR inside the join condition is a filter the planner cannot answer from either.
-       AND NOT EXISTS (
-             SELECT 1 FROM agent a JOIN message m ON m.kind = 'direct' AND m.target_agent_id = a.id
-              WHERE a.assistant_conversation_id = c.id
-           )
-       AND NOT EXISTS (
-             SELECT 1 FROM agent a JOIN message m ON m.kind = 'direct' AND m.author_agent_id = a.id
               WHERE a.assistant_conversation_id = c.id
            )
      ORDER BY c.created_at

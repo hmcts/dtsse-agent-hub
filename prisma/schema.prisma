@@ -555,6 +555,9 @@ model AssistantConversation {
   forkedEarlierHidden   Boolean   @default(false) @map("forked_earlier_hidden")
   /// When the copied words went to the copy's session, with the first message sent in it.
   forkContextSentAt     DateTime? @map("fork_context_sent_at") @db.Timestamptz(6)
+  /// When something was first said or written in the conversation; null while it is empty, which leaves it out of the
+  /// sidebar and the search. Set once and never cleared: see announceFirstContent in src/assistant/store.ts.
+  firstContentAt        DateTime? @map("first_content_at") @db.Timestamptz(6)
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
 

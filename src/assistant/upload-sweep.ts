@@ -100,8 +100,8 @@ export async function sweepUploads(prisma: PrismaClient, options: UploadSweepOpt
  * Deletes the conversations that exist only because someone attached a file on the new-chat screen and never sent it.
  *
  * Attaching there has to create the conversation first — a file belongs to one before any of its bytes can be sent —
- * so walking away at that point leaves an empty chat behind. It is not harmless: the sidebar shows it as a second
- * "New chat" the person did not make and cannot account for, and it carries a pre-created `agent` row with it. So it
+ * so walking away at that point leaves an empty chat behind. The sidebar and the search leave it out, since nothing was
+ * ever said in it (`first_content_at`), but the row stays, with a pre-created `agent` row and the person's file. So it
  * is swept rather than left.
  *
  * The conditions are what make this safe to run unattended, and each is load-bearing:
@@ -120,9 +120,9 @@ export async function sweepUploads(prisma: PrismaClient, options: UploadSweepOpt
  *   second file hours later puts the clock back rather than leaving a live composer to be swept out from under them.
  *
  * It deliberately does **not** require the conversation to still have an upload. Attaching a file and then removing
- * the chip deletes the upload row and leaves a conversation nothing would ever collect, showing in the sidebar as a
- * "New chat" that cannot be explained; the same is true of a `startConversation` whose first message failed after
- * the row was created. An empty conversation is one nobody has said anything in, whatever route produced it, and
+ * the chip deletes the upload row and leaves a conversation nothing else would ever collect; the same is true of a
+ * `startConversation` whose first message failed after the row was created, which the new-chat screen does not reuse:
+ * it keeps the draft, and the retry starts another conversation. An empty conversation is one nobody has said anything in, whatever route produced it, and
  * after the window it is rubbish either way.
  */
 async function dropAbandoned(tx: Database, retentionHours: number, batch: number): Promise<number> {

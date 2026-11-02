@@ -1,33 +1,47 @@
 import type { AgentRef } from "../access/rules.ts";
 import type { AgentRow } from "../agents/store.ts";
-import { refreshLocalTitle } from "../assistant/store.ts";
-import { firstPromptTitle } from "../assistant/titles.ts";
+import { announceFirstContent, refreshLocalTitle } from "../assistant/store.ts";
+import { firstPromptTitle, type PromptEntry } from "../assistant/titles.ts";
 import { notify } from "../realtime/notify.ts";
 import type { PrismaClient } from "../store/prisma.ts";
+import { typedText } from "./harness-turn.ts";
 import type { NewTranscriptEntry } from "./schema.ts";
 
 /** What storing a batch needs of the agent it belongs to, all of it already read by `ownedAgentRoute`. */
 type UploadAgent = AgentRef & Pick<AgentRow, "localConversation">;
 
 /**
- * Whether anything in this batch could name a chat: asked of `firstPromptTitle`, the rule the derivation itself
- * uses, so the two cannot come to disagree about what counts as a prompt. A redacted entry holds the pattern the
- * secret scanner matched and none of the words; a relayed hub message (`message_id`) is somebody else's words
- * delivered into the session; and whitespace is not a title.
+ * What a batch holds that a local chat cares about.
+ *
+ * - **`prompt`**: something that could name the chat, which is what `refreshLocalTitle` is called for. Asked of
+ *   `firstPromptTitle`, the rule the derivation itself uses, so the two cannot come to disagree about what counts as
+ *   a prompt. A redacted entry holds the pattern the secret scanner matched and none of the words; a relayed hub
+ *   message (`message_id`) is somebody else's words delivered into the session; and whitespace or the harness's own
+ *   turn is not a title. This gates `refreshLocalTitle`'s other derivation too, so a `/rename` the session reported is
+ *   followed on the person's next prompt rather than on the next hub message relayed into their session. The rename
+ *   itself is on the agent row the moment its heartbeat lands; it is only the chat's title that waits for them to type.
+ * - **`content`**: something the chat's thread shows, which is what makes the batch its first content
+ *   (`announceFirstContent`): an answer, a tool call, or a prompt with words the person typed (`typedText`). Not a
+ *   batch of nothing but `/clear`'s record and editor context, which costs the upload nothing. Relayed or not is not
+ *   asked: a relayed prompt is in a chat that already has the message it relays.
  *
  * `message_id` here is what the client claimed, where `firstPromptTitle` reads what was stored — an id naming
  * anything other than a direct message to this agent is stored as null. So a prompt wrongly claiming to be relayed
  * is passed over by this gate and still names the chat on the next batch that carries one.
- *
- * This gates `refreshLocalTitle`'s other derivation too, so a `/rename` the session reported is followed on the
- * person's next prompt rather than on the next hub message relayed into their session. The rename itself is on the
- * agent row the moment its heartbeat lands; it is only the chat's title that waits for them to type.
  */
-function carriesPrompt(entries: readonly NewTranscriptEntry[]): boolean {
-  const prompts = entries
-    .filter((entry) => entry.role === "user")
-    .map((entry) => ({ content: entry.content, redacted: entry.redacted, messageId: entry.message_id }));
-  return firstPromptTitle(prompts) !== null;
+function whatItCarries(entries: readonly NewTranscriptEntry[]): { prompt: boolean; content: boolean } {
+  const prompts: PromptEntry[] = [];
+  let content = false;
+  for (const entry of entries) {
+    if (entry.role === "user") {
+      prompts.push({ content: entry.content, redacted: entry.redacted, messageId: entry.message_id });
+      const text = entry.redacted ? undefined : (entry.content as { text?: unknown }).text;
+      content ||= typeof text === "string" && typedText(text) !== null;
+    } else {
+      content ||= entry.role === "assistant" || entry.role === "tool_use";
+    }
+  }
+  return { prompt: firstPromptTitle(prompts) !== null, content };
 }
 
 /**
@@ -46,6 +60,13 @@ function carriesPrompt(entries: readonly NewTranscriptEntry[]): boolean {
  * it. Most uploads are neither: a board session has no chat at all, and a pod's chat is named after the person's
  * first message rather than after what its session read that message back as. Asking the chat instead would charge
  * every one of them a read of the agent row to be told there was nothing to do.
+ *
+ * The same batch can be what puts a local chat in its owner's sidebar, which leaves out a chat with nothing in it:
+ * a local chat's batch that brought content records its first content, and the chat is announced when that is the
+ * first time, so an open sidebar redraws and lists it; naming the chat in the same transaction announces it again,
+ * which Postgres delivers once. A pod
+ * chat's batch is not asked, because a pod's session only runs once a message has been sent, and that message was its
+ * first content.
  */
 export async function appendEntries(prisma: PrismaClient, agent: UploadAgent, sessionId: string, entries: readonly NewTranscriptEntry[]): Promise<number> {
   return await prisma.$transaction(async (tx) => {
@@ -78,7 +99,14 @@ export async function appendEntries(prisma: PrismaClient, agent: UploadAgent, se
     if (accepted > 0 && inserted?.last_id) {
       await notify(tx, { type: "transcript", agent_id: agent.id, owner_oid: agent.ownerOid, last_id: inserted.last_id });
     }
-    if (accepted > 0 && agent.localConversation && carriesPrompt(entries)) {
+    if (accepted === 0 || !agent.localConversation) {
+      return accepted;
+    }
+    const carried = whatItCarries(entries);
+    if (carried.content) {
+      await announceFirstContent(tx, [agent.id]);
+    }
+    if (carried.prompt) {
       await refreshLocalTitle(tx, agent.id);
     }
     return accepted;

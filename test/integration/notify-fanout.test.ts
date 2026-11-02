@@ -80,6 +80,8 @@ describe("NOTIFY fan-out between pods", () => {
 
     const expected: HubEvent[] = [
       { type: "direct", message_id: direct.id, target_agent_id: bobsAgent, author_agent_id: alicesAgent },
+      // The direct is the first thing said in Bob's session's chat, which puts it in his sidebar.
+      { type: "assistant_conversation", conversation_id: expect.any(String), virtual_agent_id: null, owner_oid: BOB.oid },
       { type: "post", message_id: post.id },
       { type: "agent_status", agent_id: bobsAgent, owner_oid: BOB.oid, status: "busy" },
       { type: "agent_status", agent_id: alicesAgent, owner_oid: ALICE.oid, status: "offline" }
