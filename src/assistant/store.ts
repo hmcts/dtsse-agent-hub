@@ -702,8 +702,10 @@ export async function linkSession(
  * theirs stands; the registration itself is unaffected either way.
  *
  * The chat starts empty, whatever the session has said before, and nothing announces it: only content arriving after
- * the link puts it in the sidebar (`announceFirstContent`). A session whose chat the person deleted is linked a new
- * one on its next heartbeat, which stays out of the list until the session next says something.
+ * the link puts it in the sidebar (`announceFirstContent`). A session whose empty chat the local sweep collected is
+ * linked a new one on its next heartbeat, which stays out of the list until the session next says something. A
+ * session whose chat the person removed is never linked another: its callers leave out an agent with
+ * `chat_removed_at` set (`deleteConversation`).
  */
 export async function linkLocalSession(db: Database, session: { ownerOid: string; agentId: string; name: string }): Promise<ConversationRow | undefined> {
   const created = await createLocalConversation(db, { ownerOid: session.ownerOid, agentId: session.agentId, title: localTitle(session.name) });
@@ -904,13 +906,15 @@ export async function setProduct(prisma: PrismaClient, ownerOid: string, id: str
  * its deliveries and its subscriptions — along with every direct message to or from it, since those are the words of
  * the chat. The announcement tells the pod to stop the session.
  *
- * A conversation with no pod is detached instead: `agent.assistant_conversation_id` is cleared and the row then
- * deleted, and no message is touched. Its agent is a session running on the person's own laptop and one of their
- * ordinary sessions — on the hub roster, taggable in anyone's post, holding the transcript it
- * uploaded, its topic subscriptions, its questions and a direct thread that includes board messages with colleagues
- * that have nothing to do with this chat. Deleting the conversation row without clearing the column first would
- * cascade through all of that, and the session would then 404, re-register as a brand-new agent and bring the chat
- * back. Removing a chat is about the chat; the session on the laptop is left exactly as it was.
+ * A conversation with no pod is detached instead: its agents' `assistant_conversation_id` is cleared and their
+ * `chat_removed_at` set, then the row is deleted, taking its document, exports, shares and fork offers with it, and
+ * no message is touched. Its agent is a session running on the person's own laptop and one of their ordinary
+ * sessions — on the hub roster, taggable in anyone's post, holding the transcript it uploaded, its topic
+ * subscriptions, its questions and a direct thread that includes board messages with colleagues that have nothing to
+ * do with this chat. Deleting the conversation row without clearing the column first would cascade through all of
+ * that. The marker is what keeps the chat gone: a laptop session with no conversation is otherwise linked a fresh one
+ * by its next heartbeat (`linkLocalSession`), and this one must not be. Removing a chat is about the chat; the
+ * session on the laptop is left exactly as it was, and a new session is a new agent that gets a chat of its own.
  */
 export async function deleteConversation(prisma: PrismaClient, ownerOid: string, id: string): Promise<void> {
   const conversation = await findConversation(prisma, ownerOid, id);
@@ -927,7 +931,7 @@ export async function deleteConversation(prisma: PrismaClient, ownerOid: string,
                 OR author_agent_id IN (SELECT id FROM agent WHERE assistant_conversation_id = ${id}::uuid))
       `;
     } else {
-      await tx.$executeRaw`UPDATE agent SET assistant_conversation_id = NULL WHERE assistant_conversation_id = ${id}::uuid`;
+      await tx.$executeRaw`UPDATE agent SET assistant_conversation_id = NULL, chat_removed_at = now() WHERE assistant_conversation_id = ${id}::uuid`;
     }
     await tx.assistantConversation.delete({ where: { id } });
     await announce(tx, conversation);

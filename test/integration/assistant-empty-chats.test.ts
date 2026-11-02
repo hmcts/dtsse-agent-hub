@@ -8,6 +8,7 @@ import {
   createConversation,
   deleteConversation,
   ensureAssistant,
+  findConversation,
   hasLocalConversation,
   listConversations,
   renameConversation,
@@ -16,6 +17,7 @@ import {
   unsentConversation,
   writeArtefact
 } from "../../src/assistant/store.ts";
+import { conversationMatches } from "../../src/assistant/views.ts";
 import { directAsPerson } from "../../src/messages/send.ts";
 import { createDirect } from "../../src/messages/store.ts";
 import { recordQuestion } from "../../src/questions/store.ts";
@@ -262,23 +264,69 @@ describe("a chat linked to a session that has already said something", () => {
     expect(await listed()).toEqual([assistantConversationId]);
   });
 
-  it("should list the chat a heartbeat relinks after a delete, titled after the session's earliest prompt, when the session speaks again", async () => {
+  it("should give the session no new chat when the session heartbeats and speaks again after its chat was removed", async () => {
     const { conversationId, agentId } = await laptopChat();
     await uploaded(agentId, [entry("1", "user", "look at the possession claim")]);
     await deleteConversation(prisma, ALICE.oid, conversationId);
 
     await heartbeat(prisma, agentId, "idle", "possession-work");
+    await uploaded(agentId, [entry("2", "user", "and the next claim")]);
+    await heartbeat(prisma, agentId, "busy", "possession-work");
 
-    const { assistantConversationId } = await prisma.agent.findUniqueOrThrow({ where: { id: agentId } });
-    // A new chat for the same session, empty until the session next says something.
-    expect(assistantConversationId).not.toBe(conversationId);
+    expect((await prisma.agent.findUniqueOrThrow({ where: { id: agentId } })).assistantConversationId).toBeNull();
+    expect(await prisma.assistantConversation.count()).toBe(0);
     expect(await listed()).toEqual([]);
+    expect(await found("possession")).toEqual([]);
+    expect(await hasLocalConversation(prisma, ALICE.oid)).toBe(false);
+  });
 
-    expect(await announcements(assistantConversationId!, () => uploaded(agentId, [entry("2", "user", "and the next claim")]))).toBe(1);
+  it("should link a session a new chat on its next heartbeat when the sweep, not the person, collected its empty one", async () => {
+    const { conversationId, agentId } = await laptopChat();
+    const old = new Date(Date.now() - 48 * 60 * 60 * 1000);
+    await prisma.agent.update({ where: { id: agentId }, data: { lastHeartbeatAt: old } });
+    await prisma.assistantConversation.update({ where: { id: conversationId }, data: { createdAt: old } });
 
-    // Listed again, and named after the session's earliest prompt, which is the one the deleted chat had shown.
-    expect(await listed()).toEqual([assistantConversationId]);
-    expect((await prisma.assistantConversation.findUniqueOrThrow({ where: { id: assistantConversationId! } })).title).toBe("look at the possession claim");
+    expect(await sweepLocalConversations(prisma)).toEqual({ collected: 1 });
+    await heartbeat(prisma, agentId, "idle", "possession-work");
+
+    const agent = await prisma.agent.findUniqueOrThrow({ where: { id: agentId } });
+    expect(agent.chatRemovedAt).toBeNull();
+    expect(agent.assistantConversationId).not.toBeNull();
+    expect(agent.assistantConversationId).not.toBe(conversationId);
+  });
+});
+
+describe("a chat removed while its session is still running", () => {
+  /** Every read that would bring the chat back: the list, the search on old and new words, and its own page. */
+  async function expectGone(conversationId: string, agentId: string): Promise<void> {
+    expect(await listed()).toEqual([]);
+    expect(await conversationMatches(prisma, ALICE.oid, "possession")).toEqual([]);
+    expect(await conversationMatches(prisma, ALICE.oid, "eviction")).toEqual([]);
+    expect(await findConversation(prisma, ALICE.oid, conversationId)).toBeUndefined();
+    expect(await prisma.assistantConversation.count()).toBe(0);
+    expect(await prisma.agent.findUniqueOrThrow({ where: { id: agentId } })).toMatchObject({ assistantConversationId: null, chatRemovedAt: expect.any(Date) });
+  }
+
+  it("should stay removed when the session uploads a new prompt and heartbeats", async () => {
+    const { conversationId, agentId } = await laptopChat();
+    await uploaded(agentId, [entry("1", "user", "look at the possession claim")]);
+    expect(await listed()).toEqual([conversationId]);
+    await deleteConversation(prisma, ALICE.oid, conversationId);
+
+    await uploaded(agentId, [entry("2", "user", "now draft the eviction notice"), entry("3", "assistant", "Drafted.")]);
+    await heartbeat(prisma, agentId, "idle", "possession-work");
+
+    await expectGone(conversationId, agentId);
+  });
+
+  it("should stay removed when it had nothing in it and an upload then gives it content", async () => {
+    const { conversationId, agentId } = await laptopChat();
+    await deleteConversation(prisma, ALICE.oid, conversationId);
+
+    await uploaded(agentId, [entry("1", "user", "look at the possession claim about an eviction"), entry("2", "assistant", "Looking.")]);
+    await heartbeat(prisma, agentId, "idle", "possession-work");
+
+    await expectGone(conversationId, agentId);
   });
 });
 

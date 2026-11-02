@@ -146,6 +146,8 @@ async function collectEmpty(tx: Database, retentionHours: number, batch: number)
   for (const row of empty) {
     // The detach, before the delete and inside the same transaction, is the whole of why this is safe to run
     // unattended: it clears the cascading column, so the row that goes next takes nothing of the session with it.
+    // `chat_removed_at` is left unset, unlike `deleteConversation`: the person removed nothing, so a session that
+    // comes back and says something is given a chat again.
     await tx.$executeRaw`UPDATE agent SET assistant_conversation_id = NULL WHERE assistant_conversation_id = ${row.id}::uuid`;
     await tx.assistantConversation.delete({ where: { id: row.id } });
     // Announced like any other change to it, so a sidebar still open stops showing a chat that has gone. A local
