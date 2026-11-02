@@ -3,7 +3,7 @@
  */
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { type AnswerQuestionAction, QuestionCard, type QuestionTone } from "@/components/questions/QuestionCard";
+import { type AnswerQuestionAction, QuestionCard } from "@/components/questions/QuestionCard";
 import type { Question } from "@/questions/questions";
 import type { QuestionView } from "@/questions/views";
 
@@ -32,13 +32,13 @@ function answering(result: Awaited<ReturnType<AnswerQuestionAction>> = { ok: tru
   return vi.fn<AnswerQuestionAction>(async () => result);
 }
 
-function card(props: { view?: QuestionView; tone?: QuestionTone; answer?: AnswerQuestionAction } = {}) {
-  return <QuestionCard view={props.view ?? view()} tone={props.tone ?? "assistant"} answer={props.answer ?? answering()} />;
+function card(props: { view?: QuestionView; answer?: AnswerQuestionAction } = {}) {
+  return <QuestionCard view={props.view ?? view()} answer={props.answer ?? answering()} />;
 }
 
 /** The card as a viewer who may see the agent but not message it gets it: no action to give it, so no controls. */
 function readOnly(overrides: Partial<QuestionView> = {}) {
-  return <QuestionCard view={view(overrides)} tone="hub" />;
+  return <QuestionCard view={view(overrides)} />;
 }
 
 describe("QuestionCard", () => {
@@ -271,9 +271,9 @@ describe("QuestionCard", () => {
     expect(screen.queryByRole("button")).toBeNull();
   });
 
-  it.each<QuestionTone>(["assistant", "hub"])("should name itself for a screen reader in the %s theme", (tone) => {
+  it("should name itself for a screen reader when one question was asked", () => {
     // Act
-    render(card({ tone }));
+    render(card());
 
     // Assert
     expect(screen.getByRole("region", { name: "A question for you" })).toBeTruthy();

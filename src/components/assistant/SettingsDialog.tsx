@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Fragment, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -820,18 +821,23 @@ export function AssistantSettings({
     setNow(Date.now());
   }, []);
   // `?settings=<section>` opens the dialog there, which is where the hub's retired management pages send people. The
-  // parameter is taken out of the address once read, so a reload or the back button does not open it again.
+  // parameter is taken out of the address once read, so a reload or the back button does not open it again. Read
+  // whenever it changes rather than once on mount, because a client-side navigation to it keeps this mounted.
+  const requested = useSearchParams().get(SETTINGS_PARAMETER);
   useEffect(() => {
-    const url = new URL(window.location.href);
-    const section = url.searchParams.get(SETTINGS_PARAMETER);
-    if (section === null) {
+    if (requested === null) {
       return;
     }
+    const url = new URL(window.location.href);
     url.searchParams.delete(SETTINGS_PARAMETER);
-    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
-    setOpening(section);
+    // A `null` state, not the current one: Next's patched `replaceState` leaves a state carrying its `__NA` marker to
+    // itself, so the router would keep the parameter, the same link would not open the dialog again and the next
+    // refresh would put it back. Given anything else it copies its own state across and takes the new URL. Not
+    // `router.replace`, which would fetch the page from the server again.
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+    setOpening(requested);
     setOpen(true);
-  }, []);
+  }, [requested]);
   // The appearance the switch starts from. `ThemeSwitch` writes the person's choice to the cookie and to the theme
   // root, not to the server tree, so `theme` keeps the value the page was rendered with and the dialog, which
   // unmounts when it closes, would otherwise reopen showing a choice the page has moved on from.

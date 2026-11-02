@@ -4,6 +4,10 @@ import { SESSION_COOKIE, sealSession } from "@/auth/session";
 import { config, proxy } from "@/proxy";
 
 const SECRET = "a-test-session-secret-long-enough-to-be-plausible";
+
+/** A virtual agent id, as the viewer's old ticket route took one. */
+const TICKET_AGENT = "0f8a6a1e-0000-4000-8000-000000000001";
+
 const PERSON = { oid: "abc", tid: "tenant", name: "A Person", aiGateway: false };
 
 function ask(url: string, cookies: Record<string, string> = {}): NextRequest {
@@ -196,8 +200,7 @@ describe("proxy hub address redirect", () => {
     ["/channels/new", "/hub/channels/new"],
     ["/m/42", "/hub/m/42"],
     ["/topics", "/hub/topics"],
-    ["/topics/pcs-api", "/hub/topics/pcs-api"],
-    ["/virtual/0f8a/ports/3000", "/hub/virtual/0f8a/ports/3000"]
+    ["/topics/pcs-api", "/hub/topics/pcs-api"]
   ])("should redirect the bare address %s to %s", async (from, to) => {
     const response = await proxy(askWith("GET", from));
 
@@ -223,7 +226,7 @@ describe("proxy hub address redirect", () => {
 
     const response = await proxy(askWith("GET", from));
 
-    expect(response.status).toBe(308);
+    expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe("https://agent-hub.example/assistant/shared");
   });
 
@@ -239,21 +242,65 @@ describe("proxy hub address redirect", () => {
 
     const response = await proxy(askWith("GET", `${from}?tab=1`));
 
-    expect(response.status).toBe(308);
+    expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe(`https://agent-hub.example${to}`);
   });
 
   it.each(["/hub/virtual", "/hub/settings/credentials"])("should redirect the retired %s to the hub when virtual agents are off", async (from) => {
     vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "");
 
-    expect((await proxy(askWith("GET", from))).headers.get("location")).toBe("https://agent-hub.example/hub");
+    const response = await proxy(askWith("GET", from));
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("https://agent-hub.example/hub");
   });
 
-  // The viewer's ticket route is under `/hub/virtual/{id}`, and is still served.
+  it.each([
+    [`/hub/virtual/${TICKET_AGENT}/ports/3000`, true],
+    [`/virtual/${TICKET_AGENT}/ports/3000`, true],
+    [`/hub/virtual/${TICKET_AGENT}/ports/3000`, false]
+  ])("should redirect %s to the viewer's ticket route in one hop, keeping its path, when virtual agents are on is %s", async (from, on) => {
+    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", on ? "true" : "");
+
+    const response = await proxy(askWith("GET", `${from}?path=%2Fdocs%3Fpage%3D2`));
+
+    expect(response.status).toBe(308);
+    expect(response.headers.get("location")).toBe(`https://agent-hub.example/assistant/ports/${TICKET_AGENT}/3000?path=%2Fdocs%3Fpage%3D2`);
+  });
+
+  it.each([
+    "/hub/virtual/0f8a/ports/3000",
+    "/virtual/0f8a/ports/3000",
+    `/hub/virtual/${TICKET_AGENT}/ports/3000/..%2F..%2F..%2Fhub`,
+    `/hub/virtual/${TICKET_AGENT}/ports/80`
+  ])("should pass %s on to the not-found page, redirecting nowhere, when it does not name an agent's id and a port", async (from) => {
+    const response = await proxy(askWith("GET", from));
+
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+    expect(response.headers.get("location")).toBeNull();
+  });
+
+  it("should send a person with no session to sign in first when an address under the old ticket route names no port", async () => {
+    vi.stubEnv("AUTH_DISABLED", "");
+    vi.stubEnv("SESSION_SECRET", SECRET);
+
+    const response = await proxy(askWith("GET", "/hub/virtual/0f8a/ports/3000"));
+
+    expect(response.status).toBe(307);
+    expect(new URL(response.headers.get("location")!).searchParams.get("redirect")).toBe("/hub/virtual/0f8a/ports/3000");
+  });
+
+  it("should strip a secret from an address under the old ticket route before the redirect copies its query", async () => {
+    const response = await proxy(askWith("GET", `/hub/virtual/${TICKET_AGENT}/ports/3000?path=%2F&token=11a2b3c4d5e6f708192a3b4c5d`));
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(`https://agent-hub.example/hub/virtual/${TICKET_AGENT}/ports/3000`);
+  });
+
   it("should leave the viewer's ticket route alone when virtual agents are on", async () => {
     vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "true");
 
-    expect((await proxy(askWith("GET", "/hub/virtual/0f8a/ports/3000"))).status).toBe(200);
+    expect((await proxy(askWith("GET", "/assistant/ports/0f8a/3000?path=%2F"))).status).toBe(200);
   });
 
   it("should redirect before the sign-in check, so the login's redirect= carries the new address", async () => {

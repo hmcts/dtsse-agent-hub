@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useHubEvent } from "@/components/live/HubStream";
+import { useSettled } from "@/components/live/useSettled";
 
 /**
  * Data a settings section reads only once it is open, rather than every page reading it on every render for a dialog
- * that is closed by default. `load` is a server action that re-reads the viewer. A `virtual_agent` event reads it
- * again when `live` is set, since what the section shows of the agent changes under it; `reload` reads it again after
- * one of the section's own saves.
+ * that is closed by default. `load` is a server action that re-reads the viewer. A burst of `virtual_agent` events
+ * reads it again once, settled by `useSettled`, when `live` is set, since what the section shows of the agent
+ * changes under it; `reload` reads it again after one of the section's own saves.
  *
  * Reads are numbered so that one answering late cannot replace a newer one's answer.
  *
@@ -22,22 +23,30 @@ export function useSettingsData<T>(section: string, load: () => Promise<T>, live
   const loader = useRef(load);
   loader.current = load;
 
-  const reload = useCallback(() => {
-    const read = ++latest.current;
+  const read = useCallback(() => {
+    const at = ++latest.current;
     loader.current().then(
       (value) => {
-        if (read === latest.current) {
+        if (at === latest.current) {
           setData(value);
           setFailed(false);
         }
       },
       () => {
-        if (read === latest.current) {
+        if (at === latest.current) {
           setFailed(true);
         }
       }
     );
   }, []);
+
+  // A pod booting is a burst of `virtual_agent` events, which the same settle as the page's own refresh makes one read.
+  // A read asked for directly, after a save, is that read already, so it drops one still settling.
+  const settled = useSettled(read);
+  const reload = useCallback(() => {
+    settled.cancel();
+    read();
+  }, [settled, read]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: read again only when the section changes, as the comment above says
   useEffect(() => {
@@ -46,7 +55,7 @@ export function useSettingsData<T>(section: string, load: () => Promise<T>, live
 
   useHubEvent("virtual_agent", () => {
     if (live) {
-      reload();
+      settled.settle();
     }
   });
 

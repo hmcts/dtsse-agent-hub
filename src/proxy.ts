@@ -4,7 +4,7 @@ import { readSession, SESSION_COOKIE } from "@/auth/session";
 import { authRequired, sessionSecret } from "@/auth/settings";
 import { requestHost, VIEWER_ROUTE, VIEWER_URL_HEADER, viewerRouteHost, viewerSettings } from "@/port-viewer/settings";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
-import { movedHubPath, retiredHubPath } from "@/web/home";
+import { movedHubPath, movedPortTicketPath, retiredHubPath } from "@/web/home";
 
 /**
  * Sends a person with no session to sign in, before anything renders. Named `proxy`: Next 16 replaced the
@@ -56,11 +56,21 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   // into its own `Location`, and Traefik's access log keeps it. Below `carriesSecret`, so a pasted secret is already
   // stripped by the time either builds a URL. Retired first, since a bare retired address is both.
   // A retired page's query is dropped: what replaced it takes its own, and its address may already carry one.
+  // 307 rather than 308 for these alone: where each goes depends on `VIRTUAL_AGENTS_ENABLED`, and a browser keeps a
+  // permanent redirect, so a 308 would strand anyone who followed one before the flag changed. The others' targets
+  // are fixed.
   const retired = retiredHubPath(request.nextUrl.pathname, virtualAgentsEnabled());
   if (retired !== undefined) {
-    return NextResponse.redirect(new URL(retired, request.nextUrl.origin), 308);
+    return NextResponse.redirect(new URL(retired, request.nextUrl.origin), 307);
   }
-  const moved = movedHubPath(request.nextUrl.pathname);
+  // The viewer's old ticket address keeps its query, the `path=` it lands on, which `carriesSecret` has already seen.
+  // One naming no agent's port is left to the routes, which have none for it, so the person gets the not-found page and
+  // its way home rather than a bare 404, signing in first as for any other page.
+  const ticket = movedPortTicketPath(request.nextUrl.pathname);
+  if (ticket?.kind === "moved") {
+    return NextResponse.redirect(new URL(`${ticket.to}${request.nextUrl.search}`, request.nextUrl.origin), 308);
+  }
+  const moved = ticket === undefined ? movedHubPath(request.nextUrl.pathname) : undefined;
   if (moved !== undefined) {
     return NextResponse.redirect(new URL(`${moved}${request.nextUrl.search}`, request.nextUrl.origin), 308);
   }

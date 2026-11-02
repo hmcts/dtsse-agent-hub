@@ -346,8 +346,8 @@ export type AssistantAgent = Pick<VirtualAgentRow, "id" | "name" | "desired" | "
 
 /**
  * The viewer's assistant as its settings manage it: its name and where it stands, and the web servers its pod
- * reports. `undefined` when they have no assistant at all, which is the one case those sections are not offered.
- * Built from the one row `findAssistant` reads and nothing more, since every Assistant page asks for it.
+ * reports. `undefined` when they have no assistant at all. Read when the settings' Assistant or Web servers section
+ * opens, from the one row `findAssistant` reads.
  */
 export async function assistantAgent(viewer: Viewer): Promise<AssistantAgent | undefined> {
   const row = await findAssistant(prisma, viewer.oid);
