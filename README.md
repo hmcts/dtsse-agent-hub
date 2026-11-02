@@ -629,7 +629,7 @@ AUTH_DISABLED=true AGENT_AUTH_DISABLED=true yarn dev &
 yarn test:e2e
 ```
 
-The integration suite truncates every table between cases, so its files cannot share a database. Each worker gets
+The integration suite empties every table between cases, so its files cannot share a database. Each worker gets
 one of its own on the compose server — `agent_hub_test_{checkout}_w{n}`, created on first use, migrated on use and
 never dropped, so only the first run on a checkout pays to create them — and `yarn dev`'s `agent_hub` is left alone.
 A database per worker rather than a schema per worker because `LISTEN`/`NOTIFY` and the advisory locks the sweeps
@@ -637,6 +637,13 @@ take are scoped per database, and the tests that cover contention would otherwis
 part keeps this clone's databases separate from each worktree's; two runs of the *same* checkout at once still share
 them, so give one of them an explicit `DATABASE_URL`. An explicit `DATABASE_URL` names the server and the stem the
 worker names are built from, as the pipeline's does; do not point it at anything you want to keep.
+
+`yarn test:integration` always collects coverage, because the pipeline runs it by name and Sonar reads
+`coverage-integration/lcov.info`. Locally, when only the result matters, turn it off:
+
+```bash
+yarn test:integration --coverage.enabled=false
+```
 
 `INTEGRATION_WORKERS` sets how many workers run (default 6). The ceiling is the server's `max_connections`, which is
 the stock 100 against a Prisma pool of 10 per worker — not the cores available.

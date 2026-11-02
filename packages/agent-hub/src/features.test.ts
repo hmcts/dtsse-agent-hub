@@ -19,7 +19,7 @@ describe("CLIENT_FEATURES", () => {
   // an assertion below, which the per-name list cannot, and which is how this file came to claim a standard it did
   // not meet.
   it("should hold every feature this build claims, so a name dropped in a merge fails here", () => {
-    expect(CLIENT_FEATURES).toHaveLength(9);
+    expect(CLIENT_FEATURES).toHaveLength(7);
   });
 
   /**
@@ -31,13 +31,13 @@ describe("CLIENT_FEATURES", () => {
    * rather than merely withheld: without the first, the hub refuses a report with no `anon_bytes` and the Size
    * section says their assistant is an older version that cannot report its memory; without the second, the hub
    * answers a lookup with `unsupported` and the search says their assistant needs an update it will get on its next
-   * restart — which it will not, the claim being missing from the published client. `stop`, `attachments`, `files`
-   * and `memory` are quieter: the feature is withheld and nothing says so, which is why these two are worth the
-   * words and those four are covered by being on the list at all. `model-alias` is quiet the same way, except that
+   * restart — which it will not, the claim being missing from the published client. `stop`, `attachments` and
+   * `files` are quieter: the feature is withheld and nothing says so, which is why these two are worth the words and
+   * those three are covered by being on the list at all. `model-alias` is quiet the same way, except that
    * what is withheld is a reassurance: the Model section tells the person their choice waits for the next start,
    * which is wrong for a pod running this build.
    */
-  it.each(["attachments", "files", "lookups", "memory", "memory-anon", "model", "model-alias", "stop", "welsh"])("should claim %s", (feature) => {
+  it.each(["attachments", "files", "lookups", "memory-anon", "model-alias", "stop", "welsh"])("should claim %s", (feature) => {
     expect(CLIENT_FEATURES).toContain(feature);
   });
 });

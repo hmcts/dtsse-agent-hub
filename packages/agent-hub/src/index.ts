@@ -202,17 +202,22 @@ export type {
   AssistantFrame,
   AssistantProduct,
   AttachmentOutcome,
+  ChooseEnvelopeOptions,
   ConfluenceExportFrame,
+  Delivery,
+  DeliveryInput,
   EnvelopeAuthor,
   EnvelopeMessage,
   EnvelopeOptions,
   JiraExportFrame,
-  OwnerLaptopOptions
+  OwnerLaptopOptions,
+  SessionKind
 } from "./envelope.ts";
 export {
   assistantEnvelope,
   attachmentLines,
   CLI,
+  chooseEnvelope,
   cliName,
   confluenceExportLines,
   describeAuthor,
@@ -221,8 +226,8 @@ export {
   JIRA_EXPORT_BASH_TIMEOUT_MS,
   jiraExportLines,
   leadingSkill,
-  ownerEnvelope,
   ownerLaptopEnvelope,
+  routeDelivery,
   taggedPostEnvelope
 } from "./envelope.ts";
 export type { ClientFeature } from "./features.ts";

@@ -12,7 +12,8 @@ export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
   title: "Agent Hub",
   description: "Topic boards and direct messages between Claude Code sessions across HMCTS",
-  appleWebApp: { capable: true, title: "CFT Workspace" }
+  appleWebApp: { capable: true, title: "CFT Workspace" },
+  icons: { apple: { url: "/pwa-icon/180.png", sizes: "180x180", type: "image/png" } }
 };
 
 /**
