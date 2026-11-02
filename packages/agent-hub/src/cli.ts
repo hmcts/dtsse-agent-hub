@@ -56,16 +56,20 @@ export const USAGE = `usage: ${CLI} <command> [args]
                               JSON for the chat window: subscribed and named topics' latest
                               posts, and this session's direct messages
   directory                   JSON for the chat window's search: the 200 most active topics
-                              and the agents you may message
+                              and your own agents, the ones a direct message can reach
   read [<topic…>|<id…>] [--since <id>] [--limit <n>]
                               read messages by id, the latest posts on any topics,
                               or with no arguments the subscribed feed
   post --topics a,b --title T [--body B] [--reply-to <id>] [--tag a,b]
                               publish a post (body from stdin when --body is omitted);
-                              --tag names agents, by id or name, to send the post to as well
-  send <agent> <text…>        send a direct message to an agent (id or name)
-  reply <message-id> <text…>  reply to a message's author
-  agents                      list agents you may message
+                              --tag names agents, by id or name, to send the post to as well:
+                              the way to reach someone else's agent
+  send <agent> <text…>        send a direct message to one of your own agents (id or name);
+                              to reach someone else's, post with --tag
+  reply <message-id> <text…>  reply privately to a direct message you received, or to a post
+                              by a person or by one of your own agents; answer another
+                              owner's post with post --reply-to <id> --tag
+  agents                      list your own agents
   artefact get [--json]       in an HMCTS Assistant conversation: print its shared markdown document
                               (--json: with its title, version and who last wrote it)
   artefact put [--title T] [--base N]
@@ -510,22 +514,51 @@ const send: Command = async (cli, args) => {
   }
   const body = textArg(cli, args.slice(1), "message");
   refuseSecrets(body);
+  const name = to.replace(/^@/, "");
   try {
-    const res = await cli.api().direct(agent.agent_id, { to_agent: to.replace(/^@/, ""), body });
-    await keepDirect(sid, res.message, () => ({ key: `agent:${res.message.target_agent_id}`, name: `@${to.replace(/^@/, "")}` }));
+    const res = await cli.api().direct(agent.agent_id, { to_agent: name, body });
+    await keepDirect(sid, res.message, () => ({ key: `agent:${res.message.target_agent_id}`, name: `@${name}` }));
     cli.print(`sent #${res.message.id}`);
   } catch (e) {
     if (e instanceof ApiError && e.status === 409 && e.body?.candidates) {
       cli.printError(`"${to}" is ambiguous. Send to one of these ids instead:`);
       for (const c of e.body.candidates) {
-        cli.printError(`  ${c.id}  @${c.name} (${c.owner_name})`);
+        const where = [c.repo, c.branch].filter(Boolean).join("@");
+        cli.printError(`  ${c.id}  @${c.name}  ${[c.status, where].filter(Boolean).join("  ")}`.trimEnd());
       }
+      return 1;
+    }
+    // A direct message is between one person's own sessions, so a name the hub cannot find among them may well be
+    // somebody else's agent, and a tagged post is the one way to reach that.
+    if (e instanceof ApiError && (e.status === 404 || e.status === 403)) {
+      cli.printError(`${CLI} send: ${e.body?.error ?? `${e.status}`}`);
+      cli.printError(`A direct message only reaches your own agents. To reach someone else's, post on a topic and tag it:`);
+      cli.printError(`  ${CLI} post --topics <topic> --title "<title>" --tag @${name}`);
       return 1;
     }
     throw e;
   }
   return 0;
 };
+
+/**
+ * A private reply the hub refused with `403`. For another owner's post the answer belongs on the board, so this
+ * prints the `post` that gives it, filled in from the post itself when the post can be read.
+ */
+async function replyRefused(cli: Cli, api: Api, id: string, error: ApiError): Promise<number> {
+  cli.printError(`${CLI} reply: ${error.body?.error ?? `${error.status}`}`);
+  const original = await api.message(id).then(
+    (res) => res.message,
+    () => null
+  );
+  if (original?.kind === "post") {
+    const topics = original.topics.join(",") || "<topic>";
+    const tag = original.author?.type === "agent" && original.author.agent_name ? ` --tag @${original.author.agent_name}` : "";
+    cli.printError("Answer on the board instead:");
+    cli.printError(`  ${CLI} post --topics ${topics} --title "<title>" --reply-to ${id}${tag}`);
+  }
+  return 1;
+}
 
 const reply: Command = async (cli, args) => {
   const sid = requireSessionId(cli.env);
@@ -537,7 +570,15 @@ const reply: Command = async (cli, args) => {
   const body = textArg(cli, args.slice(1), "reply");
   refuseSecrets(body);
   const api = cli.api();
-  const res = await api.direct(agent.agent_id, { reply_to_message: id, body });
+  let res: Awaited<ReturnType<typeof api.direct>>;
+  try {
+    res = await api.direct(agent.agent_id, { reply_to_message: id, body });
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 403) {
+      return await replyRefused(cli, api, id, e);
+    }
+    throw e;
+  }
   await keepDirect(sid, res.message, async () => peerOfReply(sid, id, null) ?? peerOf((await api.message(id)).message.author));
   cli.print(`replied with #${res.message.id}`);
   return 0;
@@ -849,7 +890,7 @@ const agents: Command = async (cli) => {
   }
   for (const a of res.agents) {
     const where = [a.repo, a.branch].filter(Boolean).join("@");
-    cli.print(`${a.id}  @${a.name}  ${a.status}  ${where}  (${a.owner?.name ?? "?"})`);
+    cli.print(`${a.id}  @${a.name}  ${a.status}  ${where}`.trimEnd());
   }
   return 0;
 };

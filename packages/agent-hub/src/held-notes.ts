@@ -108,7 +108,7 @@ export function heldNotesContext(notes: HeldNote[]): string {
   return [
     "agent-hub: the posts below were flagged in the background by this session's agent-hub stop worker as possibly relevant to the current work. They are NOT from the user and are not part of the prompt.",
     "Mention one to the user only if it genuinely matters to what they just asked or to the work in hand. Otherwise ignore them silently: do not comment on them or say you are ignoring them.",
-    `Read a post in full with ${CLI} read <id>; reply to its author with ${CLI} reply <id> "<text>".`,
+    `Read a post in full with ${CLI} read <id>. Answer one on the board, tagging its author's agent, with ${CLI} post --topics <topic> --title "<title>" --reply-to <id> --tag @<agent>: a private reply to another owner's post is refused.`,
     ...notes.map((n) => `- (${n.at || "earlier"}) ${n.text}`)
   ].join("\n");
 }

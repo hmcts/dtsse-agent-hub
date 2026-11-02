@@ -429,8 +429,9 @@ describe("runBridge", () => {
     }
   });
 
-  it("should frame the owner of a laptop session as its user and keep the peer framing for anyone else when both write", async () => {
-    // Arrange
+  it("should frame the owner of a laptop session as its user and still frame anyone else as a peer when both write", async () => {
+    // Arrange: the hub writes no direct from a person to an agent they do not own, so the second is untrusted input
+    // the framing still has to hold against.
     const bridge = await startBridge({ pingMs: 5000 });
 
     try {
@@ -999,7 +1000,7 @@ describe("runBridge", () => {
   });
 
   it("should keep the peer framing when an assistant frame comes from someone other than the owner", async () => {
-    // Arrange
+    // Arrange: untrusted input, as above: the hub writes no such direct.
     const bridge = await startBridge({ pingMs: 5000 }, { env: VIRTUAL });
 
     try {

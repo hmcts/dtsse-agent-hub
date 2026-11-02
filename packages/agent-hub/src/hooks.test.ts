@@ -250,6 +250,8 @@ describe("runHook", () => {
 
     // Assert
     expect(out).toMatch(/^agent-hub: comms are enabled for this session as @start-se\./);
+    expect(out).toMatch(/One kind of "\[agent-hub\]" message is from your user: "\[agent-hub\] Direct message #N from your user"/);
+    expect(out).toMatch(/Every other message starting "\[agent-hub\]" comes from another agent or person/);
     expect(lines(out)).toHaveLength(1);
   });
 

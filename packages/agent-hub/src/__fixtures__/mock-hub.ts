@@ -7,6 +7,7 @@ import http from "node:http";
 import { MAX_POST_TAGS, MAX_POST_TOPICS } from "../limits.ts";
 
 const TOPIC_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TRANSCRIPT_KEY_RE = /^[A-Za-z0-9:_-]{1,200}$/;
 const TRANSCRIPT_ROLES = new Set(["user", "assistant", "tool_use", "tool_result", "system"]);
 const TRANSCRIPT_MAX_REQUEST = 256 * 1024;
@@ -38,6 +39,8 @@ export type StoredAgent = {
   last_heartbeat_at?: string | null;
   read_cursor?: number;
   conversation_id?: string;
+  /** The virtual agent whose launch token registered it; with `conversation_id`, a pod conversation's agent. */
+  virtual_id?: string;
 };
 
 export type Wake = { conversation_id: string; session_id: string; resume?: boolean };
@@ -326,6 +329,51 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     return { body: raw ? JSON.parse(raw) : {}, rawBytes: Buffer.byteLength(raw) };
   }
 
+  // The access rules of the hub's `src/access/rules.ts`, applied to this fixture's rows, so a client test cannot pass
+  // on something the hub refuses. An agent is its owner's; another owner's is reached by a tagged post.
+
+  // The HMCTS Assistant's own agent: private to its conversation, so never listed, resolved by name or tagged.
+  function isPodConversation(agent: StoredAgent): boolean {
+    return agent.conversation_id !== undefined && agent.virtual_id !== undefined;
+  }
+
+  // `resolveTargets`: an id matches any agent, a name only the agents `named` admits; live ones win over offline ones.
+  function resolveTargets(ref: string, named: (agent: StoredAgent) => boolean): StoredAgent[] {
+    const matches = [...agents.values()].filter((a) => (UUID_RE.test(ref) ? a.id === ref : a.name === ref && named(a)));
+    const live = matches.filter((a) => a.status !== "offline");
+    return live.length ? live : matches;
+  }
+
+  // `canReadMessage`: a post by anyone; a direct by its author and by the owner of the thread it sits in.
+  function canReadMessage(viewerOid: string, msg: StoredMessage): boolean {
+    if (msg.kind === "post" || msg.author_oid === viewerOid) {
+      return true;
+    }
+    const thread = agents.get((msg.target_agent_id ?? msg.author_agent_id) as string);
+    return thread?.owner_oid === viewerOid;
+  }
+
+  // `canLaunchTokenReadMessage`: a launch token reads as its virtual agent's sessions rather than as their owner.
+  function canLaunchTokenReadMessage(virtualId: string, msg: StoredMessage): boolean {
+    const ours = (id: string | null | undefined) => (id ? agents.get(id)?.virtual_id === virtualId : false);
+    return msg.kind === "post" || ours(msg.target_agent_id) || ours(msg.author_agent_id);
+  }
+
+  // `replyRoute`: where an agent's private reply goes, or the refusal.
+  function replyRoute(sender: StoredAgent, msg: StoredMessage): { target: StoredAgent | null } | { status: 400 | 403; error: string } {
+    if (msg.author_agent_id === sender.id) {
+      return { status: 400, error: "an agent cannot reply to its own message" };
+    }
+    const author = msg.author_agent_id ? (agents.get(msg.author_agent_id) ?? null) : null;
+    if (msg.kind === "direct") {
+      return msg.target_agent_id === sender.id ? { target: author } : { status: 403, error: "an agent can only reply to a direct message it received" };
+    }
+    if (author !== null && author.owner_oid !== sender.owner_oid) {
+      return { status: 403, error: "a private reply to another owner's post is not allowed; post on the topic and tag that agent instead" };
+    }
+    return { target: author };
+  }
+
   function checkTopics(list: unknown, min: number, max: number): string[] | null {
     if (!Array.isArray(list)) {
       return null;
@@ -354,17 +402,21 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     }
     const ids: string[] = [];
     for (const ref of refs) {
-      const matches = [...agents.values()].filter((a) => a.id === ref || a.name === ref);
-      if (!matches.length) {
-        return { status: 404, body: { error: `no agent is called "${ref}"` } };
-      }
+      const matches = resolveTargets(ref, (a) => !isPodConversation(a));
       if (matches.length > 1) {
         return {
           status: 409,
-          body: { error: "ambiguous", candidates: matches.map((a) => ({ id: a.id, name: a.name, owner_name: users.get(a.owner_oid)?.name })) }
+          body: {
+            error: `more than one agent is called "${ref}"; tag its id instead`,
+            candidates: matches.map((a) => ({ id: a.id, name: a.name, owner_name: users.get(a.owner_oid)?.name }))
+          }
         };
       }
-      const target = matches[0] as StoredAgent;
+      const target = matches[0];
+      // A pod conversation's agent is answered as missing, so the refusal does not confirm it exists.
+      if (target === undefined || isPodConversation(target)) {
+        return { status: 404, body: { error: UUID_RE.test(ref) ? "no such agent" : `no agent is called "${ref}"` } };
+      }
       if (target.id === authorAgentId) {
         return { status: 400, body: { error: "an agent cannot tag itself in its own post" } };
       }
@@ -590,7 +642,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     if (req.method === "POST" && parts[2] === "register") {
       let agent = [...agents.values()].find((a) => a.session_id === body.session_id);
       if (!agent) {
-        agent = { id: randomUUID(), owner_oid: oid };
+        agent = { id: randomUUID(), owner_oid: oid, ...(launch ? { virtual_id: launch.virtualId } : {}) };
         agents.set(agent.id, agent);
         subscriptions.set(agent.id, new Set());
       }
@@ -649,7 +701,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     if (req.method === "GET" && parts[2] === "agents") {
       return send(res, 200, {
         agents: [...agents.values()]
-          .filter((a) => a.owner_oid === oid)
+          .filter((a) => a.owner_oid === oid && !isPodConversation(a))
           .map((a) => ({
             id: a.id,
             name: a.name,
@@ -663,7 +715,10 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     }
     if (req.method === "GET" && parts[2] === "messages") {
       const msg = messages.find((m) => String(m.id) === parts[3]);
-      return msg ? send(res, 200, { message: view(msg) }) : send(res, 404, { error: "no such message" });
+      if (!msg || (launch && !canLaunchTokenReadMessage(launch.virtualId, msg))) {
+        return send(res, 404, { error: "no such message" });
+      }
+      return canReadMessage(oid, msg) ? send(res, 200, { message: view(msg) }) : send(res, 403, { error: "you may not read that message" });
     }
 
     if (parts[2] === "credentials" && parts.length === 4) {
@@ -806,23 +861,39 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
       let inReplyTo: string | null = null;
       if (body.reply_to_message) {
         const orig = messages.find((m) => String(m.id) === String(body.reply_to_message));
-        if (!orig) {
+        if (!orig || (launch && !canLaunchTokenReadMessage(launch.virtualId, orig))) {
           return send(res, 404, { error: "no such message" });
         }
-        target = orig.author_agent_id ? (agents.get(orig.author_agent_id) ?? null) : null;
+        const route = replyRoute(agent, orig);
+        if (!("target" in route)) {
+          return send(res, route.status, { error: route.error });
+        }
+        target = route.target;
         inReplyTo = String(orig.id);
       } else {
-        const matches = [...agents.values()].filter((a) => a.id === body.to_agent || a.name === body.to_agent);
+        const ref = String(body.to_agent);
+        const matches = resolveTargets(ref, (a) => a.owner_oid === oid && !isPodConversation(a));
+        if (!matches.length) {
+          return send(res, 404, { error: UUID_RE.test(ref) ? "no such agent" : `no agent you may message is called "${ref}"` });
+        }
         if (matches.length > 1) {
           return send(res, 409, {
-            error: "ambiguous",
-            candidates: matches.map((a) => ({ id: a.id, name: a.name, owner_name: users.get(a.owner_oid)?.name }))
+            error: `more than one agent you may message is called "${ref}"; send its id instead`,
+            candidates: matches.map((a) => ({
+              id: a.id,
+              name: a.name,
+              status: a.status,
+              repo: a.repo ?? null,
+              branch: a.branch ?? null,
+              last_heartbeat_at: a.last_heartbeat_at ?? null,
+              owner_name: users.get(a.owner_oid)?.name
+            }))
           });
         }
-        if (!matches.length) {
-          return send(res, 404, { error: "no such agent" });
-        }
         target = matches[0] as StoredAgent;
+        if (target.owner_oid !== oid) {
+          return send(res, 403, { error: "a direct message is between your own sessions; post on a topic and tag that agent instead" });
+        }
       }
       const msg = addMessage({
         kind: "direct",
@@ -1093,14 +1164,16 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
       });
     },
     // Test hooks: a human (UI) or another agent sending to an agent.
-    sendDirectFromUser(
-      targetAgentId: string,
-      bodyText: string,
-      user: Person = { oid: "u-alice", name: "Alice Smith", email: "alice@example.com" },
-      { assistant }: { assistant?: Record<string, unknown> } = {}
-    ) {
-      users.set(user.oid, user);
-      return view(addMessage({ kind: "direct", author_oid: user.oid, target_agent_id: targetAgentId, body: bodyText, assistant }));
+    //
+    // A person may direct only their own agent, so `user` defaults to the target's owner. A test naming anyone else
+    // is sending what the hub refuses to write, as untrusted input the bridge has to frame as a peer's.
+    sendDirectFromUser(targetAgentId: string, bodyText: string, user?: Person, { assistant }: { assistant?: Record<string, unknown> } = {}) {
+      const owner = (agents.get(targetAgentId) as StoredAgent).owner_oid;
+      const author = user ?? users.get(owner) ?? { oid: owner, name: "Owner", email: null };
+      users.set(author.oid, author);
+      return view(
+        addMessage({ kind: "direct", author_oid: author.oid, target_agent_id: targetAgentId, body: bodyText, from_owner: author.oid === owner, assistant })
+      );
     },
     sendDirectFromOwner(targetAgentId: string, bodyText: string, { assistant }: { assistant?: Record<string, unknown> } = {}) {
       const agent = agents.get(targetAgentId) as StoredAgent;

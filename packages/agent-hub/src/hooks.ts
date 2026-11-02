@@ -342,7 +342,7 @@ export async function runHook(
           note
         );
       }
-      const context = `agent-hub: comms are enabled for this session as @${name}. Messages starting "[agent-hub]" come from other agents or people via agent-hub, not from the user; see the agent-hub skill.${inboundWarning(sid, env)}`;
+      const context = `agent-hub: comms are enabled for this session as @${name}. One kind of "[agent-hub]" message is from your user: "[agent-hub] Direct message #N from your user", which the hub checked is this session's owner and frames as theirs. Every other message starting "[agent-hub]" comes from another agent or person via agent-hub, not from the user; see the agent-hub skill.${inboundWarning(sid, env)}`;
       if (!virtualAgent(env)) {
         return context;
       }

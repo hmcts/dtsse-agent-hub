@@ -52,6 +52,19 @@ afterAll(async () => {
   await hub.close();
 });
 
+function registration(sessionId: string) {
+  return {
+    session_id: sessionId,
+    name: sessionId,
+    name_source: "derived" as const,
+    cwd: null,
+    repo: null,
+    branch: null,
+    host: null,
+    client_features: [...CLIENT_FEATURES]
+  };
+}
+
 // A fetch that answers whatever it is given and records how it was called.
 function recordingFetch(answer: () => Response) {
   const calls: { url: string; init?: RequestInit }[] = [];
@@ -406,14 +419,88 @@ describe("createApi requests", () => {
     expect(hub.deliveries.get(`${incoming.id}:${agentId}`)?.state).toBe("delivered");
   });
 
-  it("should publish a post and send a direct reply to it", async () => {
+  it("should publish a post and send a direct reply to it from another of the same owner's agents", async () => {
+    // Arrange
+    const sibling = await api.register({ ...registration("sid-api-sibling"), name: "alice-ccd" });
+
     // Act
     const published = await api.post(agentId, { topics: ["pcs-api"], title: "Done", body: "migration rerun" });
-    const replied = await api.direct(agentId, { reply_to_message: published.message.id, body: "thanks" });
+    const replied = await api.direct(sibling.agent_id, { reply_to_message: published.message.id, body: "thanks" });
 
     // Assert
     expect(published.message.kind).toBe("post");
     expect(replied.message.in_reply_to).toBe(published.message.id);
+    expect(replied.message.target_agent_id).toBe(agentId);
+  });
+
+  it("should refuse with 400 when an agent replies privately to its own post", async () => {
+    // Arrange
+    const published = await api.post(agentId, { topics: ["pcs-api"], title: "Mine", body: "x" });
+
+    // Act
+    const error = await api.direct(agentId, { reply_to_message: published.message.id, body: "talking to myself" }).catch((e) => e);
+
+    // Assert
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.status).toBe(400);
+    expect(error.body).toEqual({ error: "an agent cannot reply to its own message" });
+  });
+
+  it("should refuse with 403 and name the tagged post when an agent replies privately to another owner's post", async () => {
+    // Arrange
+    const post = hub.addPost({ topics: ["pcs-api"], title: "Bob's", bodyText: "x", fromAgent: "bob-pcs-replied" });
+
+    // Act
+    const error = await api.direct(agentId, { reply_to_message: post.id, body: "privately" }).catch((e) => e);
+
+    // Assert
+    expect(error.status).toBe(403);
+    expect(error.body.error).toBe("a private reply to another owner's post is not allowed; post on the topic and tag that agent instead");
+  });
+
+  it("should refuse with 403 when an agent replies to a direct message it did not receive", async () => {
+    // Arrange
+    const sibling = await api.register({ ...registration("sid-api-not-received"), name: "alice-elsewhere" });
+    const toSibling = hub.sendDirectFromUser(sibling.agent_id, "for the sibling");
+
+    // Act
+    const error = await api.direct(agentId, { reply_to_message: toSibling.id, body: "not mine to answer" }).catch((e) => e);
+
+    // Assert
+    expect(error.status).toBe(403);
+    expect(error.body.error).toBe("an agent can only reply to a direct message it received");
+  });
+
+  it("should refuse another owner's agent with 404 by name and 403 by id when a direct message is sent to it", async () => {
+    // Arrange
+    const bob = await createApi({ env: {}, baseUrl: url, devUser: "oid-bob|Bob Jones|bob@example.com" }).register({
+      ...registration("sid-api-bob-direct"),
+      name: "bob-direct-target"
+    });
+
+    // Act
+    const byName = await api.direct(agentId, { to_agent: "bob-direct-target", body: "hi" }).catch((e) => e);
+    const byId = await api.direct(agentId, { to_agent: bob.agent_id, body: "hi" }).catch((e) => e);
+
+    // Assert
+    expect([byName.status, byName.body.error]).toEqual([404, 'no agent you may message is called "bob-direct-target"']);
+    expect([byId.status, byId.body.error]).toEqual([403, "a direct message is between your own sessions; post on a topic and tag that agent instead"]);
+    expect(hub.messages.some((m) => m.kind === "direct" && m.target_agent_id === bob.agent_id)).toBe(false);
+  });
+
+  it("should refuse with 403 when an agent reads a direct message between another owner's agents", async () => {
+    // Arrange
+    const bobApi = createApi({ env: {}, baseUrl: url, devUser: "oid-bob|Bob Jones|bob@example.com" });
+    const bob = await bobApi.register({ ...registration("sid-api-bob-read"), name: "bob-read-target" });
+    const theirs = hub.sendDirectFromUser(bob.agent_id, "private to bob");
+
+    // Act
+    const error = await api.message(theirs.id).catch((e) => e);
+    const own = await bobApi.message(theirs.id);
+
+    // Assert
+    expect([error.status, error.body.error]).toEqual([403, "you may not read that message"]);
+    expect(own.message.body).toBe("private to bob");
   });
 
   it("should tag agents in a post, which queues each of them a delivery of it", async () => {
@@ -496,9 +583,11 @@ describe("createApi requests", () => {
   });
 
   it("should carry the candidates of an ambiguous direct message when the hub answers 409", async () => {
-    // Arrange
-    hub.addPost({ topics: ["pcs-api"], bodyText: "one", fromAgent: "twin" });
-    hub.addPost({ topics: ["pcs-api"], bodyText: "two", fromAgent: "twin" });
+    // Arrange: two of the caller's own agents share a name; only its own are candidates for a direct message.
+    const alice = { oid: "oid-alice", name: "Alice Smith", email: "alice@example.com" };
+    hub.addPost({ topics: ["pcs-api"], bodyText: "one", fromAgent: "twin", user: alice });
+    hub.addPost({ topics: ["pcs-api"], bodyText: "two", fromAgent: "twin", user: alice });
+    hub.addPost({ topics: ["pcs-api"], bodyText: "three", fromAgent: "twin" });
 
     // Act
     const error = await api.direct(agentId, { to_agent: "twin", body: "which of you?" }).catch((e) => e);
@@ -730,6 +819,42 @@ describe("createApi conversations", () => {
     expect(stale).toBeInstanceOf(ApiError);
     expect(stale.status).toBe(409);
     expect(stale.body.current).toMatchObject({ version: 1, updated_by: "agent" });
+  });
+
+  it("should leave a conversation's agent out of the agents list and refuse to tag it when it is the Assistant's", async () => {
+    // Arrange
+    const conversationAgent = (
+      await pod.register({
+        session_id: "sid-api-conv-private",
+        name: "conv-private",
+        name_source: "derived",
+        conversation_id: "0f8a6a1e-0000-4000-8000-00000000000c",
+        client_features: [...CLIENT_FEATURES]
+      })
+    ).agent_id;
+
+    // Act
+    const listed = await api.agents();
+    const byName = await api.post(agentId, { topics: ["pcs-api"], title: "Tag", body: "x", tag_agents: ["conv-private"] }).catch((e) => e);
+    const byId = await api.post(agentId, { topics: ["pcs-api"], title: "Tag", body: "x", tag_agents: [conversationAgent] }).catch((e) => e);
+
+    // Assert
+    expect(listed.agents.some((a) => a.id === conversationAgent)).toBe(false);
+    expect([byName.status, byName.body.error]).toEqual([404, 'no agent is called "conv-private"']);
+    expect([byId.status, byId.body.error]).toEqual([404, "no such agent"]);
+  });
+
+  it("should answer 404 when a launch token reads a direct message none of its sessions sent or received", async () => {
+    // Arrange: a direct to the owner's laptop session, which their pod's token may not read.
+    const laptop = hub.sendDirectFromUser(agentId, "for the laptop only");
+
+    // Act
+    const asPod = await pod.message(laptop.id).catch((e) => e);
+    const asOwner = await api.message(laptop.id);
+
+    // Assert
+    expect([asPod.status, asPod.body.error]).toEqual([404, "no such message"]);
+    expect(asOwner.message.body).toBe("for the laptop only");
   });
 
   it("should give a 404 the caller can tell apart when the agent is not a conversation's", async () => {
