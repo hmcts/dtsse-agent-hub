@@ -9,14 +9,9 @@ import type { ActionResult } from "@/web/action";
  * A question the agent's session asked, with its options as buttons and a free-text way out, since
  * `AskUserQuestion` always lets a person answer in their own words. Once answered it shows what was chosen and
  * offers nothing.
- *
- * Shown in the Assistant's chat, the one place a question appears. `tone` picks the class set and nothing else about
- * the card, what a screen reader is told included; the chat uses `assistant`, and `hub` has no caller but its tests.
  */
 
 export type AnswerQuestionAction = (input: { questionId: unknown; answers: unknown }) => Promise<ActionResult>;
-
-export type QuestionTone = "assistant" | "hub";
 
 interface Palette {
   card: string;
@@ -32,33 +27,18 @@ interface Palette {
   error: string;
 }
 
-const PALETTES: Readonly<Record<QuestionTone, Palette>> = {
-  assistant: {
-    card: "rounded-2xl border border-asst-accent-line bg-asst-raised p-4",
-    header: "font-plex-mono text-[11px] uppercase tracking-wider text-asst-accent-soft",
-    question: "text-asst-text",
-    option: "rounded-xl border border-asst-strong px-3 py-2 text-left text-sm hover:border-asst-accent hover:bg-asst-field",
-    chosen: "border-asst-accent bg-asst-field",
-    description: "text-[13px] text-asst-muted",
-    field: "w-full rounded-xl border border-asst-strong bg-asst-field px-3 py-2 text-sm text-asst-text placeholder:text-asst-faint",
-    submit: "rounded-[10px] bg-asst-accent px-4 py-2 text-sm font-semibold text-asst-ink hover:bg-asst-accent-hover disabled:opacity-60",
-    quiet: "rounded-[10px] border border-asst-strong px-4 py-2 text-sm hover:bg-asst-active disabled:opacity-60",
-    muted: "text-[13px] text-asst-muted",
-    error: "text-[13px] text-asst-error"
-  },
-  hub: {
-    card: "rounded-lg border border-hub-line bg-hub-raised p-4",
-    header: "font-mono text-[11px] uppercase tracking-wide text-hub-muted",
-    question: "text-hub-text",
-    option: "rounded-md border border-hub-line px-3 py-2 text-left text-sm text-hub-text hover:border-hub-link hover:bg-hub-hover",
-    chosen: "border-hub-link bg-hub-hover",
-    description: "text-[13px] text-hub-muted",
-    field: "w-full rounded-md border border-hub-line bg-hub-pane px-3 py-2 text-sm text-hub-text placeholder:text-hub-muted",
-    submit: "rounded-md bg-hub-active px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-60",
-    quiet: "rounded-md border border-hub-line px-4 py-2 text-sm text-hub-text hover:bg-hub-hover disabled:opacity-60",
-    muted: "text-[13px] text-hub-muted",
-    error: "text-[13px] text-red-300"
-  }
+const PALETTE: Palette = {
+  card: "rounded-2xl border border-asst-accent-line bg-asst-raised p-4",
+  header: "font-plex-mono text-[11px] uppercase tracking-wider text-asst-accent-soft",
+  question: "text-asst-text",
+  option: "rounded-xl border border-asst-strong px-3 py-2 text-left text-sm hover:border-asst-accent hover:bg-asst-field",
+  chosen: "border-asst-accent bg-asst-field",
+  description: "text-[13px] text-asst-muted",
+  field: "w-full rounded-xl border border-asst-strong bg-asst-field px-3 py-2 text-sm text-asst-text placeholder:text-asst-faint",
+  submit: "rounded-[10px] bg-asst-accent px-4 py-2 text-sm font-semibold text-asst-ink hover:bg-asst-accent-hover disabled:opacity-60",
+  quiet: "rounded-[10px] border border-asst-strong px-4 py-2 text-sm hover:bg-asst-active disabled:opacity-60",
+  muted: "text-[13px] text-asst-muted",
+  error: "text-[13px] text-asst-error"
 };
 
 /** Nothing chosen for any question yet. */
@@ -204,8 +184,8 @@ function Quiet({
  * action to give it, so the controls cannot be rendered without one. Keeping the two inseparable is the point —
  * a `readOnly` flag beside a live action is a state the caller can get wrong.
  */
-export function QuestionCard({ view, tone, answer: send }: { view: QuestionView; tone: QuestionTone; answer?: AnswerQuestionAction }) {
-  const palette = PALETTES[tone];
+export function QuestionCard({ view, answer: send }: { view: QuestionView; answer?: AnswerQuestionAction }) {
+  const palette = PALETTE;
   const [answers, setAnswers] = useState<QuestionAnswer[]>(() => emptyAnswers(view.questions));
   const [own, setOwn] = useState(false);
   const [sending, setSending] = useState(false);

@@ -89,9 +89,12 @@ describe("GET /assistant/ports/{id}/{port}", () => {
     expect((await open(id, "3000")).status).toBe(404);
   });
 
-  it("should answer not found when the agent is being deleted", async () => {
+  // Deleting clears the ports, so they are put back: a pod still reporting while it is taken down is the case the
+  // route's own check on `desired` is there for.
+  it("should answer not found when the agent is being deleted and its pod still reports the port", async () => {
     const id = await servingAssistant();
     await setDesired(prisma, ALICE.oid, id, "deleted");
+    await prisma.virtualAgent.update({ where: { id }, data: { exposedPorts: [3000] } });
 
     expect((await open(id, "3000")).status).toBe(404);
   });

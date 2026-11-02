@@ -4,6 +4,10 @@ import { SESSION_COOKIE, sealSession } from "@/auth/session";
 import { config, proxy } from "@/proxy";
 
 const SECRET = "a-test-session-secret-long-enough-to-be-plausible";
+
+/** A virtual agent id, as the viewer's old ticket route took one. */
+const TICKET_AGENT = "0f8a6a1e-0000-4000-8000-000000000001";
+
 const PERSON = { oid: "abc", tid: "tenant", name: "A Person", aiGateway: false };
 
 function ask(url: string, cookies: Record<string, string> = {}): NextRequest {
@@ -252,23 +256,33 @@ describe("proxy hub address redirect", () => {
   });
 
   it.each([
-    ["/hub/virtual/0f8a/ports/3000", true],
-    ["/virtual/0f8a/ports/3000", true],
-    ["/hub/virtual/0f8a/ports/3000", false]
-  ])("should redirect the viewer's old ticket address %s to the new one in one hop, keeping its path, when virtual agents are %s", async (from, on) => {
+    [`/hub/virtual/${TICKET_AGENT}/ports/3000`, true],
+    [`/virtual/${TICKET_AGENT}/ports/3000`, true],
+    [`/hub/virtual/${TICKET_AGENT}/ports/3000`, false]
+  ])("should redirect %s to the viewer's ticket route in one hop, keeping its path, when virtual agents are on is %s", async (from, on) => {
     vi.stubEnv("VIRTUAL_AGENTS_ENABLED", on ? "true" : "");
 
     const response = await proxy(askWith("GET", `${from}?path=%2Fdocs%3Fpage%3D2`));
 
     expect(response.status).toBe(308);
-    expect(response.headers.get("location")).toBe("https://agent-hub.example/assistant/ports/0f8a/3000?path=%2Fdocs%3Fpage%3D2");
+    expect(response.headers.get("location")).toBe(`https://agent-hub.example/assistant/ports/${TICKET_AGENT}/3000?path=%2Fdocs%3Fpage%3D2`);
   });
 
-  it("should strip a secret from the viewer's old ticket address before the redirect copies its query", async () => {
-    const response = await proxy(askWith("GET", "/hub/virtual/0f8a/ports/3000?path=%2F&token=11a2b3c4d5e6f708192a3b4c5d"));
+  it.each(["/hub/virtual/0f8a/ports/3000", `/hub/virtual/${TICKET_AGENT}/ports/3000/..%2F..%2F..%2Fhub`, `/hub/virtual/${TICKET_AGENT}/ports/80`])(
+    "should answer not found, and redirect nowhere, for %s when it does not name an agent's id and a port",
+    async (from) => {
+      const response = await proxy(askWith("GET", from));
+
+      expect(response.status).toBe(404);
+      expect(response.headers.get("location")).toBeNull();
+    }
+  );
+
+  it("should strip a secret from an address under the old ticket route before the redirect copies its query", async () => {
+    const response = await proxy(askWith("GET", `/hub/virtual/${TICKET_AGENT}/ports/3000?path=%2F&token=11a2b3c4d5e6f708192a3b4c5d`));
 
     expect(response.status).toBe(303);
-    expect(response.headers.get("location")).toBe("https://agent-hub.example/hub/virtual/0f8a/ports/3000");
+    expect(response.headers.get("location")).toBe(`https://agent-hub.example/hub/virtual/${TICKET_AGENT}/ports/3000`);
   });
 
   it("should leave the viewer's ticket route alone when virtual agents are on", async () => {

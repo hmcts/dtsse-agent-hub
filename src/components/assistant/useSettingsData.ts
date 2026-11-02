@@ -1,13 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { SETTLE_MS } from "@/components/assistant/AssistantRefresh";
 import { useHubEvent } from "@/components/live/HubStream";
+import { useSettled } from "@/components/live/useSettled";
 
 /**
  * Data a settings section reads only once it is open, rather than every page reading it on every render for a dialog
  * that is closed by default. `load` is a server action that re-reads the viewer. A burst of `virtual_agent` events
- * reads it again once, `SETTLE_MS` after the first, when `live` is set, since what the section shows of the agent
+ * reads it again once, settled by `useSettled`, when `live` is set, since what the section shows of the agent
  * changes under it; `reload` reads it again after one of the section's own saves.
  *
  * Reads are numbered so that one answering late cannot replace a newer one's answer.
@@ -46,21 +46,10 @@ export function useSettingsData<T>(section: string, load: () => Promise<T>, live
   }, [section, reload]);
 
   // A pod booting is a burst of `virtual_agent` events, which the same settle as the page's own refresh makes one read.
-  const settling = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(
-    () => () => {
-      if (settling.current !== null) {
-        clearTimeout(settling.current);
-      }
-    },
-    []
-  );
+  const settled = useSettled(reload);
   useHubEvent("virtual_agent", () => {
-    if (live && settling.current === null) {
-      settling.current = setTimeout(() => {
-        settling.current = null;
-        reload();
-      }, SETTLE_MS);
+    if (live) {
+      settled();
     }
   });
 

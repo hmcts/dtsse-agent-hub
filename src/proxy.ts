@@ -65,8 +65,11 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   }
   // The viewer's old ticket address keeps its query, the `path=` it lands on, which `carriesSecret` has already seen.
   const ticket = movedPortTicketPath(request.nextUrl.pathname);
+  if (ticket?.kind === "not-found") {
+    return new NextResponse(null, { status: 404 });
+  }
   if (ticket !== undefined) {
-    return NextResponse.redirect(new URL(`${ticket}${request.nextUrl.search}`, request.nextUrl.origin), 308);
+    return NextResponse.redirect(new URL(`${ticket.to}${request.nextUrl.search}`, request.nextUrl.origin), 308);
   }
   const moved = movedHubPath(request.nextUrl.pathname);
   if (moved !== undefined) {

@@ -4,6 +4,8 @@
  * the secret-in-query guard decides whether a pasted secret reaches a `Location` header.
  */
 
+import { MAX_EXPOSED_PORT, MIN_EXPOSED_PORT } from "../virtual-agents/ports.ts";
+
 /** The hub's own pages all sit under this prefix, so `/` is free for the default UI. */
 const HUB = "/hub";
 
@@ -51,23 +53,43 @@ export function assistantSettingsPath(section: string): string {
   return `${ASSISTANT}?${new URLSearchParams({ [SETTINGS_PARAMETER]: section })}`;
 }
 
-/** `/virtual/{id}` with nothing after the id. */
-const VIRTUAL_AGENT_PAGE = /^\/virtual\/[^/]+$/;
+/** Anything under the viewer's ticket route as it was, `/virtual/{id}/ports`, under `/hub` or bare. */
+const OLD_PORT_TICKET = /^(?:\/hub)?\/virtual\/[^/]+\/ports(?:\/|$)/;
 
-/** The viewer's ticket route as it was, `/virtual/{id}/ports/{port}` and whatever follows, under `/hub` or bare. */
-const OLD_PORT_TICKET = /^(?:\/hub)?\/virtual\/([^/]+)\/ports(\/.*)?$/;
+/** The one shape of it that named a ticket: a virtual agent's id and a port a pod can report, and nothing after. */
+const OLD_PORT_TICKET_EXACT = /^(?:\/hub)?\/virtual\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/ports\/([1-9]\d{3,4})$/i;
+
+export type MovedPortTicket = { kind: "moved"; to: string } | { kind: "not-found" };
 
 /**
- * Where the viewer's old ticket address goes now: `PORT_TICKETS`, keeping the id, the port and anything after them, or
- * `undefined` when the path is not one. Unlike a retired page's, its query is kept, since `path=` is where the person
- * lands, so the proxy appends it. It goes there whether or not virtual agents are on: the route answers not found
- * itself when they are off. Bookmarks, pasted links and a viewer tab still open from before the move send
- * people to the old address. One hop from the bare address as from the `/hub` one, so checked ahead of `movedHubPath`.
+ * Where an address under the viewer's old ticket route goes: `PORT_TICKETS` for the same id and port, or not found
+ * when it names no agent's port, or `undefined` when the path is not under that route at all. The id and port are
+ * checked before they are put in the target because the redirect is permanent and browsers keep it: an unchecked
+ * segment such as `..` would make it a cached redirect to anywhere on the hub. The query is kept, since `path=` is
+ * where the person lands, so the proxy appends it. It goes there whether or not virtual agents are on, since the route
+ * answers not found itself when they are off. One hop from the bare address as from the `/hub` one, so checked ahead
+ * of `movedHubPath`.
  */
-export function movedPortTicketPath(pathname: string): string | undefined {
-  const match = OLD_PORT_TICKET.exec(pathname);
-  return match === null ? undefined : `${PORT_TICKETS}/${match[1]}${match[2] ?? ""}`;
+export function movedPortTicketPath(pathname: string): MovedPortTicket | undefined {
+  if (!OLD_PORT_TICKET.test(pathname)) {
+    return undefined;
+  }
+  const match = OLD_PORT_TICKET_EXACT.exec(pathname);
+  const port = match === null ? Number.NaN : Number(match[2]);
+  if (match === null || port < MIN_EXPOSED_PORT || port > MAX_EXPOSED_PORT) {
+    return { kind: "not-found" };
+  }
+  return { kind: "moved", to: `${PORT_TICKETS}/${match[1]!.toLowerCase()}/${port}` };
 }
+
+/** `/virtual` and `/virtual/{id}` with nothing after the id, the virtual agents pages. */
+const VIRTUAL_AGENT_PAGES = /^\/virtual(?:\/[^/]+)?$/;
+
+/** The other retired pages, as `retiredHubPath` sees them with any `/hub` taken off. */
+const RETIRED_PAGES = new Map<string, string>([
+  ["/access", SHARED_CHATS],
+  ["/settings/credentials", assistantSettingsPath("credentials")]
+]);
 
 /**
  * Where a retired hub address goes now, or `undefined` when the path is not one. Each goes where virtual agents are
@@ -87,19 +109,12 @@ export function movedPortTicketPath(pathname: string): string | undefined {
  */
 export function retiredHubPath(pathname: string, virtualAgents: boolean): string | undefined {
   const path = pathname.startsWith(`${HUB}/`) ? pathname.slice(HUB.length) : pathname;
-  const to = RETIRED_PAGES.get(path) ?? (VIRTUAL_AGENT_PAGE.test(path) ? assistantSettingsPath("assistant") : undefined);
+  const to = VIRTUAL_AGENT_PAGES.test(path) ? assistantSettingsPath("assistant") : RETIRED_PAGES.get(path);
   if (to === undefined) {
     return undefined;
   }
   return virtualAgents ? to : HUB;
 }
-
-/** The retired pages with one address each, as `retiredHubPath` sees them with any `/hub` taken off. */
-const RETIRED_PAGES = new Map<string, string>([
-  ["/access", SHARED_CHATS],
-  ["/virtual", assistantSettingsPath("assistant")],
-  ["/settings/credentials", assistantSettingsPath("credentials")]
-]);
 
 /**
  * What an agent's address names, as far as where it goes now: one of the viewer's own chats in the Assistant, one of

@@ -62,6 +62,25 @@ describe("useSettingsData", () => {
     expect(load).toHaveBeenCalledTimes(3);
   });
 
+  it("should hold the settled read until the network returns when the browser has none", async () => {
+    const onLine = vi.spyOn(window.navigator, "onLine", "get").mockReturnValue(false);
+    const load = vi.fn().mockResolvedValue("agent");
+    renderHook(() => useSettingsData("assistant", load, true));
+    await advance(0);
+
+    burst(3);
+    await advance(250);
+    expect(load).toHaveBeenCalledTimes(1);
+
+    onLine.mockReturnValue(true);
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
+    });
+
+    expect(load).toHaveBeenCalledTimes(2);
+    onLine.mockRestore();
+  });
+
   it("should not read again for a virtual agent event when the section is not live", async () => {
     const load = vi.fn().mockResolvedValue("identity");
     renderHook(() => useSettingsData("git-identity", load));

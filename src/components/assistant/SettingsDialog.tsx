@@ -830,7 +830,11 @@ export function AssistantSettings({
     }
     const url = new URL(window.location.href);
     url.searchParams.delete(SETTINGS_PARAMETER);
-    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+    // A `null` state, not the current one: Next's patched `replaceState` leaves a state carrying its `__NA` marker to
+    // itself, so the router would keep the parameter, the same link would not open the dialog again and the next
+    // refresh would put it back. Given anything else it copies its own state across and takes the new URL. Not
+    // `router.replace`, which would fetch the page from the server again.
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
     setOpening(requested);
     setOpen(true);
   }, [requested]);
