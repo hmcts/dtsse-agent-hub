@@ -16,6 +16,10 @@ import type {
   ConversationsResponse,
   CredentialKind,
   CredentialResponse,
+  Deck,
+  DeckAssetResponse,
+  DeckBody,
+  DeckResponse,
   DirectBody,
   FeedResponse,
   GithubExportReport,
@@ -171,6 +175,13 @@ export type Api = {
   putMemory: (virtualId: string, body: MemoryReportBody) => Promise<null>;
   getArtefact: (agentId: string) => Promise<Artefact>;
   putArtefact: (agentId: string, body: ArtefactBody) => Promise<ArtefactResponse>;
+  getDeck: (agentId: string) => Promise<Deck>;
+  putDeck: (agentId: string, body: DeckBody) => Promise<DeckResponse>;
+  /** One picture for the deck, under the SHA-256 of its bytes. At most 5 MiB. */
+  putDeckAsset: (agentId: string, sha256: string, bytes: Uint8Array) => Promise<DeckAssetResponse>;
+  deckAsset: (agentId: string, sha256: string) => Promise<Uint8Array>;
+  /** The .pptx built from one version of the deck. At most 5 MiB. */
+  putDeckPptx: (agentId: string, version: number, bytes: Uint8Array) => Promise<null>;
   /**
    * A question this session's model asked with `AskUserQuestion`, for the person to answer in the web UI. Idempotent
    * on `tool_use_id`, so a retry after a lost response does not put the question on screen twice.
@@ -274,11 +285,15 @@ export function createApi({
     }
     return new Uint8Array(await res.arrayBuffer());
   }
-  /** A Welsh spreadsheet up to the hub: raw bytes, its name in a header, on the part timeout since it can be 5 MiB. */
-  async function putBytes<T>(path: string, name: string, bytes: Uint8Array, timeoutMs = PART_TIMEOUT_MS): Promise<T> {
+  /**
+   * Raw bytes up to the hub, on the part timeout since they can be 5 MiB: a Welsh spreadsheet with its name in a
+   * header, or a deck's picture or .pptx with none.
+   */
+  async function putBytes<T>(path: string, name: string | null, bytes: Uint8Array, timeoutMs = PART_TIMEOUT_MS): Promise<T> {
+    const named: Record<string, string> = name === null ? {} : { "X-File-Name": encodeURIComponent(name) };
     const res = await fetchImpl(`${base}${path}`, {
       method: "PUT",
-      headers: await headers({ "Content-Type": "application/octet-stream", "X-File-Name": encodeURIComponent(name) }),
+      headers: await headers({ "Content-Type": "application/octet-stream", ...named }),
       body: bytes,
       signal: AbortSignal.timeout(timeoutMs)
     });
@@ -369,6 +384,11 @@ export function createApi({
     putMemory: (virtualId, body) => request<null>("PUT", v(virtualId, "memory"), body),
     getArtefact: (agentId) => request<Artefact>("GET", `${a(agentId)}/artefact`),
     putArtefact: (agentId, body) => request<ArtefactResponse>("PUT", `${a(agentId)}/artefact`, body),
+    getDeck: (agentId) => request<Deck>("GET", `${a(agentId)}/deck`),
+    putDeck: (agentId, body) => request<DeckResponse>("PUT", `${a(agentId)}/deck`, body),
+    putDeckAsset: (agentId, sha256, bytes) => putBytes<DeckAssetResponse>(`${a(agentId)}/deck/assets/${encodeURIComponent(sha256)}`, null, bytes),
+    deckAsset: (agentId, sha256) => requestBytes(`${a(agentId)}/deck/assets/${encodeURIComponent(sha256)}`),
+    putDeckPptx: (agentId, version, bytes) => putBytes<null>(`${a(agentId)}/deck/versions/${version}/pptx`, null, bytes),
     postQuestion: (agentId, body, opts) => request<null>("POST", `${a(agentId)}/question`, body, opts),
     putJiraExport: (agentId, body) => request<null>("PUT", `${a(agentId)}/jira`, body),
     putGithubExport: (agentId, body) => request<null>("PUT", `${a(agentId)}/github`, body),

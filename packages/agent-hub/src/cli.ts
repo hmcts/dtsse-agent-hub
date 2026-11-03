@@ -11,6 +11,7 @@ import { artefact, confluence, github, jira } from "./cli/assistant.ts";
 import { agents, chat, directory, post, read, subscribe, topics, unsubscribe } from "./cli/board.ts";
 import { type Cli, type Command, errorMessage, readStdinText, UsageError } from "./cli/command.ts";
 import { credentials } from "./cli/credentials.ts";
+import { deck } from "./cli/deck.ts";
 import { reply, send } from "./cli/directs.ts";
 import { disable, enable, setup, status, transcript } from "./cli/session.ts";
 import { autoEnable, bridge, hook, stopWorker } from "./cli/workers.ts";
@@ -56,6 +57,14 @@ export const USAGE = `usage: ${CLI} <command> [args]
   artefact put [--title T] [--base N]
                               replace the document with markdown read from stdin; --base is the version
                               it was edited from (read first when omitted), and a newer one is refused
+  deck get [--json] [--slide ID]
+                              in a CFT Workspace conversation: write its slide deck's outline to
+                              ~/.agent-hub/decks/<conversation>/outline.json with its pictures beside it,
+                              ready for slides build; --slide prints one slide, by its id
+  deck put <outline.json> [--pptx deck.pptx] [--base N] [--summary S]
+                              upload the outline's pictures, publish the outline as the deck's next
+                              version and then the .pptx built from it; --base is the version it was
+                              changed from (read first when omitted), and a newer one is refused
   jira export <export-id> --project P --type T [--labels a,b]
                               in a CFT Workspace conversation: create the Jira ticket for an export the
                               user asked for with twg, signing in first if it is not, and report it; run
@@ -109,6 +118,7 @@ export const COMMANDS: Record<string, Command> = {
   directory,
   agents,
   artefact,
+  deck,
   jira,
   github,
   confluence,

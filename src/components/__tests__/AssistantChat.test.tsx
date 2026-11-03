@@ -119,6 +119,7 @@ function conversation(overrides: Partial<ConversationView> = {}): ConversationVi
     sessionState: null,
     sessionDetail: null,
     artefact: { title: null, markdown: "", version: 0, updatedBy: null, updatedAt: null },
+    deck: null,
     jira: { status: "none" },
     github: { status: "none" },
     confluence: { status: "none" },
@@ -1945,5 +1946,120 @@ describe("Composer and the model", () => {
 
     expect(screen.queryByRole("menuitem", { name: /^Model/ })).toBeNull();
     expect(screen.queryByRole("menu", { name: "Models" })).toBeNull();
+  });
+});
+
+describe("ChatView slides", () => {
+  const DECK: NonNullable<ConversationView["deck"]> = {
+    title: "Ways of working",
+    outline: {
+      title: "Ways of working",
+      slides: [
+        { id: "s_0001", layout: "HMCTS_SECTION", title: "Why it matters" },
+        { id: "s_ab12", layout: "HMCTS_CONTENT", title: "Releases take three weeks", bullets: ["Build"] }
+      ]
+    },
+    version: 7,
+    updatedBy: "user",
+    updatedAt: "2026-11-03T09:00:00.000Z",
+    pptx: false,
+    sizes: {}
+  };
+  const WRITTEN = { title: "Story", markdown: "x", version: 1, updatedBy: "user" as const, updatedAt: "2026-10-21T09:00:00.000Z" };
+
+  it("should offer the slides only once there is a deck, and open them in place of the document", () => {
+    const { rerender } = render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions()} />);
+    expect(screen.queryByRole("button", { name: "Open slides" })).toBeNull();
+
+    rerender(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ deck: DECK, artefact: WRITTEN })} templates={TEMPLATES} actions={actions()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open document" }));
+    expect(screen.getByRole("region", { name: "Document" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open slides" }));
+    expect(screen.getByRole("region", { name: "Slides" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Document" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open slides" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close slides" }));
+    expect(screen.queryByRole("region", { name: "Slides" })).toBeNull();
+  });
+
+  it("should open the slides and say so when the assistant writes a newer version, and not for the person's own", async () => {
+    vi.useFakeTimers();
+    const { rerender } = render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ deck: DECK })} templates={TEMPLATES} actions={actions()} />);
+    expect(screen.queryByRole("region", { name: "Slides" })).toBeNull();
+
+    rerender(
+      <ChatView
+        jira={NO_JIRA}
+        viewerOid={VIEWER}
+        view={conversation({ deck: { ...DECK, version: 8, updatedBy: "agent" } })}
+        templates={TEMPLATES}
+        actions={actions()}
+      />
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+
+    expect(screen.getByRole("region", { name: "Slides" })).toBeTruthy();
+    expect(screen.getAllByTestId("arrivals").map((region) => region.textContent)).toContain("The assistant updated the slides");
+  });
+
+  it("should put the slide in front of the message as it is sent, and drop it afterwards, when the person asks about a slide", async () => {
+    const send = vi.fn(async () => ({ ok: true as const, message: message("99", { body: "sent" }) }));
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ deck: DECK })} templates={TEMPLATES} actions={actions({ send })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open slides" }));
+    fireEvent.click(within(screen.getByRole("list", { name: "Slide thumbnails" })).getByRole("button", { name: "Slide 3: Releases take three weeks" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Ask about this slide" }));
+    expect(screen.getByRole("button", { name: "Stop asking about Slide 3: Releases take three weeks" })).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Message" }));
+    await type("Is this still true?");
+
+    expect(send).toHaveBeenCalledWith({
+      conversationId: CONVERSATION,
+      body: '[Slide 3 of "Ways of working" v7, id s_ab12: "Releases take three weeks"]\nIs this still true?',
+      uploadIds: []
+    });
+    expect(screen.queryByRole("button", { name: /Stop asking about/ })).toBeNull();
+  });
+
+  it("should send the message as typed once the person takes the slide off it", async () => {
+    const send = vi.fn(async () => ({ ok: true as const, message: message("99", { body: "sent" }) }));
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ deck: DECK })} templates={TEMPLATES} actions={actions({ send })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open slides" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ask about this slide" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop asking about Slide 1: Ways of working" }));
+    await type("Hello");
+
+    expect(send).toHaveBeenCalledWith({ conversationId: CONVERSATION, body: "Hello", uploadIds: [] });
+  });
+
+  it("should keep the slide on the message when the send is refused", async () => {
+    const send = vi.fn(async () => ({ ok: false as const, error: "Could not send" }));
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ deck: DECK })} templates={TEMPLATES} actions={actions({ send })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open slides" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ask about this slide" }));
+
+    await type("Hello");
+
+    expect(screen.getByRole("button", { name: "Stop asking about Slide 1: Ways of working" })).toBeTruthy();
+  });
+
+  it("should give the chat back to the composer when the slides cover it on a narrow screen", () => {
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      writable: true,
+      value: () => ({ matches: true, addEventListener: () => undefined, removeEventListener: () => undefined })
+    });
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ deck: DECK })} templates={TEMPLATES} actions={actions()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open slides" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Ask about this slide" }));
+
+    expect(screen.queryByRole("region", { name: "Slides" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Stop asking about Slide 1: Ways of working" })).toBeTruthy();
   });
 });

@@ -4,6 +4,7 @@ import { conversationItems } from "../transcripts/conversation.ts";
 import { agentConversation } from "../transcripts/views.ts";
 import { readArtefact } from "./artefact-store.ts";
 import { storedHistory, storedStops } from "./conversation-row.ts";
+import { type DeckView, deckView } from "./deck-store.ts";
 import { FORKED_SELECT, type ForkedView, forkedView } from "./forks.ts";
 import { hasPod } from "./pods.ts";
 import { productLabel } from "./products.ts";
@@ -15,10 +16,11 @@ import { UNTITLED } from "./views.ts";
  * A conversation as a read-only share of it shows it.
  *
  * What a share exposes is the words: what the person asked, what the assistant answered, where the subject changed,
- * and the conversation's document. What it does not expose is the files — not their bytes, which no route outside the
- * conversation's own pod session can reach, and not their names or sizes either, because a person chooses a file for
- * the assistant to read rather than for a colleague to be shown a list of. A message that carried files says so and
- * says how many.
+ * and the conversation's document and slide deck. What it does not expose is the files — not their bytes, which no
+ * route outside the conversation's own pod session can reach, and not their names or sizes either, because a person
+ * chooses a file for the assistant to read rather than for a colleague to be shown a list of. A message that carried
+ * files says so and says how many. A deck's pictures are not attachments: the session put them in the deck, and
+ * `canReadDeck` says why serving them to a recipient is safe.
  *
  * The files stay out for a second reason, which matters to anyone adding a download here. An attachment's media type
  * is what the uploading browser claimed it was, so a person can store a `text/html` file of their own making against
@@ -89,6 +91,8 @@ export interface SharedConversationView {
   earlierHidden: boolean;
   /** The conversation's document, or `null` when it has none. Read-only here: there is no version to write against. */
   document: { title: string; markdown: string } | null;
+  /** The latest version of the conversation's slide deck, or `null` when it has none. Read-only here, as the document is. */
+  deck: DeckView | null;
   /** `owner` when the owner is looking at their own share, which is how they see what a recipient sees. */
   access: ConversationAccess;
   /**
@@ -137,9 +141,10 @@ export async function sharedConversation(
     return undefined;
   }
   const agentId = row.agentId;
-  const [page, artefact] = await Promise.all([
+  const [page, artefact, deck] = await Promise.all([
     agentId === null ? undefined : agentConversation(db, conversation.ownerOid, { id: agentId, ownerOid: conversation.ownerOid }),
-    readArtefact(db, conversation.id)
+    readArtefact(db, conversation.id),
+    deckView(db, conversation.id)
   ]);
   const items = page === undefined ? [] : conversationItems(page.messages, page.entries);
   return {
@@ -156,6 +161,7 @@ export async function sharedConversation(
     // there is one.
     earlierHidden: page?.olderBefore !== null && page?.olderBefore !== undefined,
     document: artefact.version === 0 ? null : { title: artefact.title ?? "Untitled document", markdown: artefact.markdown },
+    deck,
     access,
     fork
   };

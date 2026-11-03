@@ -13,6 +13,7 @@
 // reads cft-workspace's `.claude/settings.json`, and the `bashScan` cases drive `scripts/lib/_secret_scan.sh`.
 // Both test files that stay in cft-workspace, beside the code they exercise.
 import { execFileSync, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
@@ -1458,7 +1459,8 @@ describe("artefact, in an assistant conversation", () => {
     const dir = path.join(home.hub, sid);
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, "enabled"), "x");
-    fs.writeFileSync(path.join(dir, "agent.json"), JSON.stringify({ agent_id: agentId, session_id: sid, name: sid }));
+    // As `registerAgent` saves a conversation's session, with the conversation it is.
+    fs.writeFileSync(path.join(dir, "agent.json"), JSON.stringify({ agent_id: agentId, session_id: sid, name: sid, conversation_id: body.conversation_id }));
     return { sid, agentId };
   }
 
@@ -1579,6 +1581,180 @@ describe("artefact, in an assistant conversation", () => {
     ]) {
       expect((await cli(args, { sid, input: "x" })).code, args.join(" ")).toBe(2);
     }
+  });
+
+  describe("deck", () => {
+    // Magic bytes are all the mock looks at; the hub reads the rest.
+    const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+    const GIF = Buffer.from([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 4, 5, 6]);
+    const PPTX = Buffer.from([0x50, 0x4b, 0x03, 0x04, 9, 9]);
+    const digest = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
+
+    function outline(image: Record<string, unknown>) {
+      return {
+        title: "Ways of working",
+        slides: [
+          { id: "why", layout: "HMCTS_SECTION", title: "Why it matters" },
+          { layout: "HMCTS_IMAGE", title: "Our pipeline", image: { ...image, alt: "The pipeline" } },
+          { layout: "HMCTS_IMAGE", title: "The pipeline again", image: { ...image, alt: "The pipeline once more" } }
+        ]
+      };
+    }
+
+    function workDir(): string {
+      const dir = fs.mkdtempSync(path.join(home.root, "deck-"));
+      fs.writeFileSync(path.join(dir, "pipeline.png"), PNG);
+      fs.writeFileSync(path.join(dir, "deck.pptx"), PPTX);
+      fs.writeFileSync(path.join(dir, "outline.json"), JSON.stringify(outline({ path: "pipeline.png" })));
+      return dir;
+    }
+
+    const calls = (agentId: string, method: string, tail: string) =>
+      hub.calls.filter((c) => c.method === method && c.path.startsWith(`/api/agent/${agentId}/deck${tail}`));
+
+    it("should say there is no deck yet, and exit 0, when deck get runs before one is written", async () => {
+      // Arrange
+      const { sid } = await session();
+
+      // Act
+      const r = await cli(["deck", "get"], { sid });
+
+      // Assert
+      expect(r.code).toBe(0);
+      expect(r.errors.join("\n")).toMatch(/no slide deck yet \(version 0\)/);
+    });
+
+    it("should upload each picture once, publish the outline naming them by digest and then the .pptx, when deck put runs", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      const dir = workDir();
+
+      // Act
+      const r = await cli(["deck", "put", path.join(dir, "outline.json"), "--pptx", path.join(dir, "deck.pptx"), "--summary", "First draft"], { sid });
+
+      // Assert
+      expect(r.code, r.errors.join("\n")).toBe(0);
+      expect(r.text()).toMatch(/published the slide deck as version 1, with its \.pptx/);
+      expect(calls(agentId, "PUT", "/assets/")).toHaveLength(1);
+      const put = calls(agentId, "PUT", "").find((c) => c.path === `/api/agent/${agentId}/deck`);
+      expect(put?.body).toEqual({ outline: outline({ asset: `sha256:${digest(PNG)}` }), base_version: 0, summary: "First draft" });
+      expect(hub.decks.get(agentId)?.pptx.get(1)).toEqual(PPTX);
+      // The ids the hub gave are kept in the file, so the next put sends them back.
+      const kept = JSON.parse(fs.readFileSync(path.join(dir, "outline.json"), "utf8"));
+      expect(kept.slides.map((slide: { id?: string }) => slide.id)).toEqual(["why", "s_0001", "s_0002"]);
+      expect(kept.slides[1].image).toEqual({ path: "pipeline.png", alt: "The pipeline" });
+    });
+
+    it("should write the outline with its pictures downloaded beside it and named by path, when deck get runs", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      hub.writeDeckAsUser(agentId, outline({ asset: `sha256:${digest(GIF)}` }), { [digest(GIF)]: GIF });
+
+      // Act
+      const r = await cli(["deck", "get"], { sid });
+      const again = await cli(["deck", "get", "--json"], { sid });
+
+      // Assert
+      expect(r.code, r.errors.join("\n")).toBe(0);
+      const dir = path.join(home.root, ".agent-hub", "decks", `0f8a6a1e-0000-4000-8000-${String(nextSession).padStart(12, "0")}`);
+      const written = JSON.parse(fs.readFileSync(path.join(dir, "outline.json"), "utf8"));
+      const file = `assets/${digest(GIF)}.gif`;
+      expect(written.slides[1].image).toEqual({ path: file, alt: "The pipeline" });
+      expect(written.slides[2].image.path).toBe(file);
+      expect(fs.readFileSync(path.join(dir, file))).toEqual(GIF);
+      expect(r.text()).toMatch(/deck put .*outline\.json --pptx <deck\.pptx> --base 1/);
+      // The picture was already there with the right digest, so the second read fetched nothing.
+      expect(calls(agentId, "GET", "/assets/")).toHaveLength(1);
+      expect(JSON.parse(again.lines[0] as string)).toMatchObject({ title: "Ways of working", version: 1, updated_by: "user", pptx: false });
+    });
+
+    it("should print one slide by its id, and refuse an id the deck does not have, when deck get has --slide", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      hub.writeDeckAsUser(agentId, outline({ asset: `sha256:${digest(PNG)}` }), { [digest(PNG)]: PNG });
+
+      // Act
+      const one = await cli(["deck", "get", "--slide", "why"], { sid });
+      const none = await cli(["deck", "get", "--slide", "s_ffff"], { sid });
+
+      // Assert
+      expect(one.code).toBe(0);
+      expect(JSON.parse(one.lines[0] as string)).toMatchObject({ version: 1, number: 2, slide: { id: "why", title: "Why it matters" } });
+      expect(none.code).toBe(1);
+      expect(none.errors.join("\n")).toMatch(/version 1 has no slide with id s_ffff/);
+    });
+
+    it("should refuse to publish, naming the current version, when the deck changed since --base", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      hub.writeDeckAsUser(agentId, outline({ asset: `sha256:${digest(PNG)}` }), { [digest(PNG)]: PNG });
+      hub.writeDeckAsUser(agentId, outline({ asset: `sha256:${digest(PNG)}` }));
+      const dir = workDir();
+
+      // Act
+      const r = await cli(["deck", "put", path.join(dir, "outline.json"), "--pptx", path.join(dir, "deck.pptx"), "--base", "1"], { sid });
+
+      // Assert
+      expect(r.code).toBe(1);
+      expect(r.errors.join("\n")).toMatch(/changed since version 1: it is now version 2, last written by the user\. Nothing was saved\./);
+      expect(r.errors.join("\n")).toMatch(/deck get, make your change to that, build it, and put it again with --base 2/);
+      expect(calls(agentId, "PUT", "/versions/")).toHaveLength(0);
+    });
+
+    it("should publish an outline whose pictures are already named by digest, saying it is not built, when there is no --pptx", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      hub.writeDeckAsUser(agentId, { title: "Empty" }, { [digest(PNG)]: PNG });
+      const dir = fs.mkdtempSync(path.join(home.root, "deck-"));
+      fs.writeFileSync(path.join(dir, "outline.json"), JSON.stringify(outline({ asset: `sha256:${digest(PNG)}` })));
+
+      // Act
+      const r = await cli(["deck", "put", path.join(dir, "outline.json")], { sid });
+
+      // Assert
+      expect(r.code, r.errors.join("\n")).toBe(0);
+      expect(r.text()).toMatch(/as version 2; the person sees it as not built/);
+      expect(calls(agentId, "PUT", "/assets/")).toHaveLength(0);
+    });
+
+    it("should say the session has no deck when deck get runs outside a conversation", async () => {
+      // Arrange
+      const { sid } = await session({ conversation: false });
+
+      // Act
+      const r = await cli(["deck", "get"], { sid });
+
+      // Assert
+      expect(r.code).toBe(1);
+      expect(r.errors.join("\n")).toMatch(/not a CFT Workspace conversation, so it has no slide deck/);
+    });
+
+    it("should refuse arguments it does not take, a file that is not a .pptx and an outline that is not JSON", async () => {
+      // Arrange
+      const { sid } = await session();
+      const dir = workDir();
+      fs.writeFileSync(path.join(dir, "broken.json"), "{");
+      fs.writeFileSync(path.join(dir, "list.json"), "[]");
+      const file = path.join(dir, "outline.json");
+
+      // Act & Assert
+      for (const args of [
+        ["deck"],
+        ["deck", "edit"],
+        ["deck", "get", "extra"],
+        ["deck", "get", "--slide", "has space"],
+        ["deck", "put"],
+        ["deck", "put", file, "extra"],
+        ["deck", "put", file, "--base", "latest"],
+        ["deck", "put", file, "--summary", " "],
+        ["deck", "put", file, "--pptx", path.join(dir, "pipeline.png")],
+        ["deck", "put", path.join(dir, "missing.json")],
+        ["deck", "put", path.join(dir, "broken.json")],
+        ["deck", "put", path.join(dir, "list.json")]
+      ]) {
+        expect((await cli(args, { sid })).code, args.join(" ")).toBe(2);
+      }
+    });
   });
 
   const EXPORT = "5b0e7c1a-1111-4222-8333-444455556666";

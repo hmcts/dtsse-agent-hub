@@ -318,3 +318,12 @@ export async function conversationOfAgent(db: Database, agentId: string): Promis
   const row = await db.agent.findUnique({ where: { id: agentId }, select: { assistantConversation: { select: SELECT } } });
   return row?.assistantConversation === null || row?.assistantConversation === undefined ? undefined : toRow(row.assistantConversation);
 }
+
+/** `conversationOfAgent`, or the 404 the agent API answers for an agent that is no conversation's. */
+export async function requireConversationOfAgent(db: Database, agentId: string): Promise<ConversationRow> {
+  const conversation = await conversationOfAgent(db, agentId);
+  if (conversation === undefined) {
+    throw new HttpError(404, "that agent is not an assistant conversation's");
+  }
+  return conversation;
+}

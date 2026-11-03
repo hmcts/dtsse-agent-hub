@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { SharedConversationView } from "@/assistant/sharing";
 import { AssistantMarkdown } from "@/components/assistant/AssistantMarkdown";
+import { SharedDeck } from "@/components/assistant/DeckPanel";
 import { ForkButton, type ForkChatAction } from "@/components/assistant/ForkButton";
 import { ForkedThread } from "@/components/assistant/ForkedThread";
 import { SharedItem } from "@/components/assistant/SharedItem";
@@ -9,12 +10,13 @@ import { SHARED_CHATS } from "@/web/home";
 /**
  * A chat someone shared, to read.
  *
- * A server component with nothing interactive in it, which is what read-only means here: there is no composer, no
- * menu, no document editor and no stream, so there is nothing on the page that could ask the hub to change the chat
- * even if a rule above it were wrong. It is also a snapshot — the thread as it stood when the page was read.
+ * A server component with nothing in it that changes the chat, which is what read-only means here: there is no
+ * composer, no menu, no document editor and no stream, so there is nothing on the page that could ask the hub to change
+ * the chat even if a rule above it were wrong. It is also a snapshot — the thread as it stood when the page was read.
  *
- * The one control is the fork's, for someone the owner offered the chat to, and it writes nothing here either: it
- * makes the viewer their own copy in their own CFT Workspace.
+ * The one control that writes is the fork's, for someone the owner offered the chat to, and it writes nothing here
+ * either: it makes the viewer their own copy in their own CFT Workspace. The deck's controls only move through its
+ * slides and read its pictures and .pptx.
  */
 
 function headline(view: SharedConversationView): string {
@@ -60,6 +62,7 @@ export function SharedChat({ view, forkChat }: { view: SharedConversationView; f
               <AssistantMarkdown source={view.document.markdown} document />
             </section>
           )}
+          {view.deck === null ? null : <SharedDeck conversationId={view.id} deck={view.deck} />}
           <p className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs text-asst-faint">
             <Link href={SHARED_CHATS} className="text-asst-accent underline hover:text-asst-accent-hover">
               {view.access === "owner" ? "See all your shared chats" : "See other chats shared with you"}

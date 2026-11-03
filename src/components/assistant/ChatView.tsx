@@ -27,6 +27,7 @@ import { Mark, SidebarToggle } from "@/components/assistant/AssistantShell";
 import { ChatMenu } from "@/components/assistant/ChatMenu";
 import { Composer } from "@/components/assistant/Composer";
 import type { ExportToConfluenceAction } from "@/components/assistant/ConfluenceExport";
+import { DeckPanel, type SlideAsk } from "@/components/assistant/DeckPanel";
 import { ticketsOffered } from "@/components/assistant/ExportFooter";
 import { ForkedThread } from "@/components/assistant/ForkedThread";
 import type { ExportToGithubAction } from "@/components/assistant/GithubExport";
@@ -338,10 +339,16 @@ export function ChatView({
   });
   const [status, setStatus] = useState<AgentStatus>(view.agentStatus);
   const [pendingProduct, setPendingProduct] = useState<string | null>(null);
-  const [panel, setPanel] = useState(false);
+  /**
+   * The one panel beside the chat: the document or the deck, never both, since two panels beside a chat leave the chat
+   * no room to read in. Each has its own button in the header, so either is one press from the other.
+   */
+  const [panel, setPanel] = useState<"document" | "deck" | null>(null);
+  const [ask, setAsk] = useState<SlideAsk | null>(null);
   const [error, setError] = useState<string | null>(null);
   const warmed = useRef(false);
   const seenVersion = useRef(view.artefact.version);
+  const seenDeck = useRef(view.deck?.version ?? 0);
   const narrow = useNarrow();
 
   useEffect(() => setStatus(view.agentStatus), [view.agentStatus]);
@@ -360,11 +367,22 @@ export function ChatView({
   // The assistant writing the document opens it, so the person sees what it was asked to draft.
   useEffect(() => {
     if (view.artefact.version > seenVersion.current && view.artefact.updatedBy === "agent") {
-      setPanel(true);
+      setPanel("document");
       arrivals.announce("The assistant updated the document");
     }
     seenVersion.current = Math.max(seenVersion.current, view.artefact.version);
   }, [view.artefact.version, view.artefact.updatedBy, arrivals]);
+
+  // The same for the deck: a newer version from the assistant opens the slides in the document's place.
+  const deckVersion = view.deck?.version ?? 0;
+  const deckBy = view.deck?.updatedBy ?? null;
+  useEffect(() => {
+    if (deckVersion > seenDeck.current && deckBy === "agent") {
+      setPanel("deck");
+      arrivals.announce("The assistant updated the slides");
+    }
+    seenDeck.current = Math.max(seenDeck.current, deckVersion);
+  }, [deckVersion, deckBy, arrivals]);
 
   // The picker can only show a product it offers, so it and the dialog it opens read the stored one through this.
   const product = storedProduct(view.product);
@@ -414,10 +432,13 @@ export function ChatView({
   };
 
   async function send(body: string, uploadIds: string[]): Promise<string | null> {
-    const result = await actions.send({ conversationId: view.id, body, uploadIds });
+    // A slide the person asked about goes in front of their words, which is the whole of how the session is told.
+    const asked = ask === null ? body : `${ask.reference}\n${body}`;
+    const result = await actions.send({ conversationId: view.id, body: asked, uploadIds });
     if (!result.ok) {
       return result.error;
     }
+    setAsk(null);
     live.addMessage(result.message);
     return null;
   }
@@ -478,10 +499,23 @@ export function ChatView({
             </select>
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-1.5">
-            {panel ? null : (
+            {view.deck === null || panel === "deck" ? null : (
               <button
                 type="button"
-                onClick={() => setPanel(true)}
+                onClick={() => setPanel("deck")}
+                aria-label="Open slides"
+                className="flex h-[34px] items-center whitespace-nowrap rounded-[9px] border border-asst-strong px-2.5 text-[13px] hover:border-asst-accent-line hover:bg-asst-field min-[480px]:gap-2 min-[480px]:pr-3"
+              >
+                <span aria-hidden="true" className="text-sm leading-none text-asst-accent">
+                  ▭
+                </span>
+                <span className="hidden min-[480px]:inline">Open slides</span>
+              </button>
+            )}
+            {panel === "document" ? null : (
+              <button
+                type="button"
+                onClick={() => setPanel("document")}
                 // Named here as well, because below 480px the icon stands alone so that a 320px header still fits
                 // the title, the product chip and both buttons.
                 aria-label={view.artefact.version > 0 ? "Open document" : "Add document"}
@@ -598,6 +632,7 @@ export function ChatView({
               // control is taken away rather than left to offer something that is then refused.
               attach={pod}
               skills={view.skills}
+              reference={ask === null ? undefined : { label: ask.label, onRemove: () => setAsk(null) }}
               dropZone={scroller.ref}
               onFocus={() => {
                 if (pod && !warmed.current && status === "offline") {
@@ -609,13 +644,29 @@ export function ChatView({
           </div>
         </div>
       </div>
-      {panel ? (
+      {panel === "deck" && view.deck !== null ? (
+        <DeckPanel
+          conversationId={view.id}
+          deck={view.deck}
+          onClose={() => setPanel(null)}
+          narrow={narrow}
+          announce={arrivals.announce}
+          onAsk={(next) => {
+            setAsk(next);
+            // On a narrow screen the panel covers the chat, so it gives way to the composer the question is typed in.
+            if (narrow) {
+              setPanel(null);
+            }
+          }}
+        />
+      ) : null}
+      {panel === "document" ? (
         <ArtefactPanel
           conversationId={view.id}
           artefact={artefact}
           productLabel={view.productLabel}
           save={actions.saveArtefact}
-          onClose={() => setPanel(false)}
+          onClose={() => setPanel(null)}
           /*
            * The document itself stays on a local chat — it is a hub row the person and the session both edit, and
            * `saveArtefact` works there — but neither export is offered, which is what `pod` takes away here. An

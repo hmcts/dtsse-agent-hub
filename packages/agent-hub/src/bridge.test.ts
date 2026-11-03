@@ -351,7 +351,9 @@ describe("parseAssistantFrame", () => {
       product_label: "Possession claims",
       model: "opus",
       artefact_version: 2,
-      artefact_updated_by: "user"
+      artefact_updated_by: "user",
+      deck_version: 1,
+      deck_updated_by: "user"
     };
 
     // Act & Assert
@@ -363,6 +365,8 @@ describe("parseAssistantFrame", () => {
       model: null,
       artefact_version: 0,
       artefact_updated_by: null,
+      deck_version: null,
+      deck_updated_by: undefined,
       jira_export: null,
       github_export: null,
       confluence_export: null
@@ -386,6 +390,8 @@ describe("parseAssistantFrame", () => {
       model: "opus --dangerously-skip-permissions",
       artefact_version: "4",
       artefact_updated_by: 5,
+      deck_version: "2",
+      deck_updated_by: 6,
       jira_export: "VIBE"
     });
 
@@ -397,6 +403,8 @@ describe("parseAssistantFrame", () => {
       model: null,
       artefact_version: null,
       artefact_updated_by: undefined,
+      deck_version: null,
+      deck_updated_by: undefined,
       jira_export: null,
       github_export: null,
       confluence_export: null

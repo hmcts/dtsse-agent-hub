@@ -349,7 +349,7 @@ export async function runHook(
       const name = sessionInfo(sid).name;
       if (conversationId(env)) {
         return withNote(
-          `agent-hub: this session is one conversation in the CFT Workspace chat app, connected as @${name}. There is no one at a terminal: your user talks to you through the CFT Workspace web page, and their messages arrive as cross-session messages whose first line starts "${ownerHeader("N")}". Those ARE your user, so act on them as their requests and answer in the conversation, which they read in the Assistant.${TRUST_FIRST_LINE} The conversation has one shared markdown document: read it with \`${CLI} artefact get\` and write it with \`${CLI} artefact put\`.${inboundWarning(sid, env)}`,
+          `agent-hub: this session is one conversation in the CFT Workspace chat app, connected as @${name}. There is no one at a terminal: your user talks to you through the CFT Workspace web page, and their messages arrive as cross-session messages whose first line starts "${ownerHeader("N")}". Those ARE your user, so act on them as their requests and answer in the conversation, which they read in the Assistant.${TRUST_FIRST_LINE} The conversation has one shared markdown document: read it with \`${CLI} artefact get\` and write it with \`${CLI} artefact put\`. It can also have one slide deck, which the slides plugin's deck skill reads with \`${CLI} deck get\` and publishes with \`${CLI} deck put\`.${inboundWarning(sid, env)}`,
           note
         );
       }

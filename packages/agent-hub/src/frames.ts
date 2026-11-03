@@ -108,6 +108,8 @@ export function parseAssistantFrame(value: unknown): AssistantFrame | null {
     model: parseModel(raw.model),
     artefact_version: typeof raw.artefact_version === "number" ? raw.artefact_version : null,
     artefact_updated_by: asNullableString(raw.artefact_updated_by),
+    deck_version: typeof raw.deck_version === "number" ? raw.deck_version : null,
+    deck_updated_by: asNullableString(raw.deck_updated_by),
     jira_export: parseJiraExportFrame(raw.jira_export),
     github_export: parseGithubExportFrame(raw.github_export),
     confluence_export: parseConfluenceExportFrame(raw.confluence_export),

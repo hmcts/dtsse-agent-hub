@@ -333,6 +333,18 @@ describe("assistantEnvelope", () => {
     expect(assistantEnvelope(personMessage, { ...pcs, artefact_version: 4, artefact_updated_by: "agent" }, null)).not.toMatch(/edited the conversation/);
   });
 
+  it("should tell the session to read the deck first when the user last changed it, as a fork's copy does", () => {
+    // Act
+    const text = assistantEnvelope(personMessage, { ...pcs, deck_version: 1, deck_updated_by: "user" }, null);
+
+    // Assert
+    expect(text.split("\n")).toContain(
+      "The conversation's slide deck (version 1) was last changed by the user, not by you; read it with `agent-hub deck get` before changing it."
+    );
+    expect(assistantEnvelope(personMessage, { ...pcs, deck_version: 2, deck_updated_by: "agent" }, null)).not.toMatch(/slide deck/);
+    expect(assistantEnvelope(personMessage, { ...pcs, deck_version: 0, deck_updated_by: "user" }, null)).not.toMatch(/slide deck/);
+  });
+
   it("should say the product is not chosen, and name the user generically, when the frame and the author are empty", () => {
     // Act
     const text = assistantEnvelope({ id: "7", body: "hello" });

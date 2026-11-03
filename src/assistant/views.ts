@@ -17,6 +17,7 @@ import type { ConfluenceExportView } from "./confluence.ts";
 import { readConfluenceExport } from "./confluence-store.ts";
 import type { ConversationRow, ProductChange, SessionState, StopMark } from "./conversation-row.ts";
 import { type ConversationListRow, hasLocalConversation, listConversations, unsentConversation } from "./conversation-store.ts";
+import { type DeckView, deckView } from "./deck-store.ts";
 import { FORKED_SELECT, type ForkedView, forkedView } from "./forks.ts";
 import type { GithubExportView } from "./github.ts";
 import { readGithubExport } from "./github-store.ts";
@@ -255,6 +256,8 @@ export interface ConversationView {
   sessionState: SessionState | null;
   sessionDetail: string | null;
   artefact: { title: string | null; markdown: string; version: number; updatedBy: Artefact["updatedBy"]; updatedAt: string | null };
+  /** The latest version of the conversation's slide deck, or `null` while it has none. */
+  deck: DeckView | null;
   jira: JiraExportView;
   github: GithubExportView;
   confluence: ConfluenceExportView;
@@ -277,9 +280,10 @@ export async function conversationView(db: Database, conversation: ConversationR
   // The ref carries the agent's id and its owner and nothing else, because that is all either read asks of it: the
   // literals are not a claim about the agent that some rule elsewhere has to keep agreeing with.
   const agent = { id: agentId, ownerOid: conversation.ownerOid };
-  const [current, artefact, jira, github, confluence, page, questions, fork] = await Promise.all([
+  const [current, artefact, deck, jira, github, confluence, page, questions, fork] = await Promise.all([
     db.agent.findUnique({ where: { id: agentId }, select: { status: true, skills: true, clientFeatures: true, repo: true, branch: true } }),
     readArtefact(db, conversation.id),
+    deckView(db, conversation.id),
     readJiraExport(db, conversation.id),
     readGithubExport(db, conversation.id),
     readConfluenceExport(db, conversation.id),
@@ -303,6 +307,7 @@ export async function conversationView(db: Database, conversation: ConversationR
     sessionState: conversation.sessionState,
     sessionDetail: conversation.sessionDetail,
     artefact: { ...artefact, updatedAt: artefact.updatedAt?.toISOString() ?? null },
+    deck,
     jira,
     github,
     confluence,

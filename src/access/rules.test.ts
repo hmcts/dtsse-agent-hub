@@ -14,6 +14,7 @@ import {
   canOpenVirtualAgentPort,
   canOwnerReadCredential,
   canPersonDirectAgent,
+  canReadDeck,
   canReadMessage,
   canRemoveUploadFromDisk,
   canSessionUseAttachment,
@@ -622,6 +623,26 @@ describe("the conversation share rules", () => {
 
     it.each(EVERYONE_ELSE)("should answer none for %s, since a share is the only thing that names anyone", (_label, viewerOid) => {
       expect(conversationAccess(viewerOid, CONVERSATION, SHARES)).toBe("none");
+    });
+  });
+
+  describe("canReadDeck", () => {
+    it("should let the owner and a share's recipient read the deck when the share names them", () => {
+      expect(canReadDeck(conversationAccess(OWNER, CONVERSATION, SHARES))).toBe(true);
+      expect(canReadDeck(conversationAccess(RECIPIENT, CONVERSATION, SHARES))).toBe(true);
+    });
+
+    it("should let someone offered a fork read the deck when the offer is in the rows the rule is given", () => {
+      const offers: ConversationShare[] = [{ conversationId: CONVERSATION.id, recipientOid: ELSEWHERE }];
+      expect(canReadDeck(conversationAccess(ELSEWHERE, CONVERSATION, offers))).toBe(true);
+    });
+
+    it.each(EVERYONE_ELSE)("should refuse %s the deck, its pictures and its .pptx", (_label, viewerOid) => {
+      expect(canReadDeck(conversationAccess(viewerOid, CONVERSATION, SHARES))).toBe(false);
+    });
+
+    it("should refuse the deck when the access answered is none", () => {
+      expect(canReadDeck("none")).toBe(false);
     });
   });
 

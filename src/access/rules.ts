@@ -373,6 +373,22 @@ export function conversationAccess(viewerOid: string, conversation: SharedConver
 }
 
 /**
+ * Whether the viewer may read a conversation's slide deck in the browser — its pictures and its .pptx as well as its
+ * outline — given what `conversationAccess` answered for them: its owner, and anyone it is shared with or offered to,
+ * since a share carries the conversation's words and a deck is words the conversation made, as its document is.
+ *
+ * Read-only for all but the owner, and through the browser alone: a deck is written only by the conversation's own
+ * session, through `ownedAgentRoute`, so nothing here lets a reader change one.
+ *
+ * Serving a recipient a picture from this origin is safe where serving them an attachment would not be (see
+ * `src/assistant/sharing.ts`): a picture's type is what the hub read from its bytes, and only PNG, JPEG and GIF are
+ * stored at all.
+ */
+export function canReadDeck(access: ConversationAccess): boolean {
+  return access === "owner" || access === "reader";
+}
+
+/**
  * Whether `actorOid` may share their conversation with `recipientOid`: only the owner shares, as only they see or
  * change who it is shared with (`isOwner`). `recipientKnown` means a `user` row exists: the hub shares with a
  * person it has seen, not with an address.

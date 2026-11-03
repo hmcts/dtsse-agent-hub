@@ -4,7 +4,9 @@ HMCTS-branded PowerPoint decks from an outline. The `/slides:deck` skill asks wh
 how long it should be, writes an outline, and runs `scripts/slides build`, which turns the outline into a `.pptx`.
 
 The agent hub carries the plugin and puts it on the virtual agent of anyone who ticks **HMCTS slide decks** in the
-CFT Workspace's Settings, under Tools.
+CFT Workspace's Settings, under Tools. In a conversation the skill then publishes the deck with `agent-hub deck put`,
+and the person sees its slides beside the chat and downloads the `.pptx` from there (the Decks section of
+`docs/agent-api.md`).
 
 ## Layouts, not shapes
 
@@ -67,7 +69,10 @@ exit 2). Text over a layout's limits is only a warning, on stderr and in the res
 
 `scripts/slides-lib/masters.ts` is the whole of the layout: slide size, colours, type, each master's fixed elements
 and placeholders, their limits, `plan(outline)`, which lays each slide out as boxes in reading order, and
-`lint(outline)`. It imports nothing, so a browser preview can use the same file. `build.ts` turns the masters into
+`lint(outline)`. It imports nothing, so a browser preview can use the same file, and one does: the hub draws a
+published deck beside the chat from its own copy, `src/assistant/slides/masters.ts`, and serves the title background
+from `public/assistant/slides/`. `src/assistant/slides/masters.test.ts` fails until both copies match this plugin's,
+so change the two together. `build.ts` turns the masters into
 pptxgenjs slide masters and puts each box into its placeholder, computing no positions of its own. It then corrects
 three things pptxgenjs 4.0.1 cannot be told: the default 20% space before each body paragraph, how far a bullet hangs
 left of its text, and marking a picture decorative.

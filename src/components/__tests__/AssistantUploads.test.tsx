@@ -567,6 +567,7 @@ function conversation(overrides: Partial<ConversationView> = {}): ConversationVi
     sessionState: null,
     sessionDetail: null,
     artefact: { title: null, markdown: "", version: 0, updatedBy: null, updatedAt: null },
+    deck: null,
     jira: { status: "none" },
     github: { status: "none" },
     confluence: { status: "none" },

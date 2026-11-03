@@ -1,7 +1,7 @@
 // In-memory implementation of docs/agent-api.md for tests.
 // Auth is X-Dev-User (`<oid>|<name>|<email>`), as the service's AGENT_AUTH_DISABLED mode, or a
 // virtual agent's launch token as the bearer, which acts as the agent's owner.
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import http from "node:http";
 import { MAX_POST_TAGS, MAX_POST_TOPICS } from "../limits.ts";
@@ -97,6 +97,23 @@ export type RecordedCall = {
 };
 
 type Body = Record<string, any>;
+
+/**
+ * A conversation's slide deck, as the hub keeps it: its latest outline and version, the .pptx of each version sent
+ * one, and its pictures by digest. The hub's outline checks are not repeated here beyond what the client relies on:
+ * a picture the outline names must be held, and every slide leaves with an id.
+ */
+export type MockDeck = {
+  version: number;
+  outline: Body | null;
+  updated_by: "user" | "agent" | null;
+  updated_at: string | null;
+  pptx: Map<number, Buffer>;
+  assets: Map<string, Buffer>;
+};
+
+const DECK_ASSET_RE = /^sha256:([0-9a-f]{64})$/;
+const DECK_MAX_BYTES = 5 * 1024 * 1024;
 
 // Why the service would refuse a transcript batch with 400, or null.
 function transcriptProblem(body: Body, rawBytes: number): string | null {
@@ -204,6 +221,24 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
   const sessionStreams = new Map<string, ServerResponse>();
   // agent id → the conversation's document, for conversations' agents
   const artefacts = new Map<string, Artefact>();
+  // agent id → the conversation's slide deck
+  const decks = new Map<string, MockDeck>();
+  const deckOf = (agentId: string): MockDeck => {
+    let found = decks.get(agentId);
+    if (!found) {
+      found = { version: 0, outline: null, updated_by: null, updated_at: null, pptx: new Map(), assets: new Map() };
+      decks.set(agentId, found);
+    }
+    return found;
+  };
+  const deckBody = (stored: MockDeck) => ({
+    title: stored.outline?.title ?? null,
+    outline: stored.outline,
+    version: stored.version,
+    updated_by: stored.updated_by,
+    updated_at: stored.updated_at,
+    pptx: stored.pptx.has(stored.version)
+  });
   const jiraReports: Record<string, unknown>[] = [];
   const githubReports: Record<string, unknown>[] = [];
   const confluenceReports: Record<string, unknown>[] = [];
@@ -328,12 +363,18 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     res.end(body === undefined ? "" : JSON.stringify(body));
   }
 
-  async function readBody(req: IncomingMessage): Promise<{ body: Body; rawBytes: number }> {
-    let raw = "";
+  // A body sent as `application/octet-stream` — a deck's picture or .pptx — is kept as bytes rather than parsed.
+  async function readBody(req: IncomingMessage): Promise<{ body: Body; rawBytes: number; octets: Buffer | null }> {
+    const chunks: Buffer[] = [];
     for await (const chunk of req) {
-      raw += chunk;
+      chunks.push(Buffer.from(chunk));
     }
-    return { body: raw ? JSON.parse(raw) : {}, rawBytes: Buffer.byteLength(raw) };
+    const bytes = Buffer.concat(chunks);
+    if (req.headers["content-type"] === "application/octet-stream") {
+      return { body: {}, rawBytes: bytes.byteLength, octets: bytes };
+    }
+    const raw = bytes.toString("utf8");
+    return { body: raw ? JSON.parse(raw) : {}, rawBytes: Buffer.byteLength(raw), octets: null };
   }
 
   // The access rules of the hub's `src/access/rules.ts`, applied to this fixture's rows, so a client test cannot pass
@@ -648,11 +689,13 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     const dev = launch ? `${launch.owner.oid}|${launch.owner.name}|${launch.owner.email}` : req.headers["x-dev-user"];
     let body: Body = {};
     let rawBytes = 0;
+    let octets: Buffer | null = null;
     try {
       if (req.method !== "GET") {
         const read = await readBody(req);
         body = read.body;
         rawBytes = read.rawBytes;
+        octets = read.octets;
       }
     } catch {
       return send(res, 400, { error: "bad json" });
@@ -997,6 +1040,85 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
         return send(res, 200, { version: next.version });
       }
     }
+    if (action === "deck") {
+      if (!agent.conversation_id) {
+        return send(res, 404, { error: "not a conversation" });
+      }
+      const stored = deckOf(agent.id);
+      const sub = parts[4];
+      if (sub === undefined && req.method === "GET") {
+        return send(res, 200, deckBody(stored));
+      }
+      if (sub === undefined && req.method === "PUT") {
+        if (!Number.isInteger(body.base_version) || typeof body.outline !== "object" || !Array.isArray(body.outline?.slides)) {
+          return send(res, 400, { error: "bad deck" });
+        }
+        if (body.base_version !== stored.version) {
+          return send(res, 409, { error: "the deck has changed since that version", current: deckBody(stored) });
+        }
+        const slides: Body[] = body.outline.slides;
+        const missing = slides.flatMap((slide) => {
+          const ref = slide.image?.asset;
+          const sha = typeof ref === "string" ? DECK_ASSET_RE.exec(ref)?.[1] : undefined;
+          if (slide.image !== undefined && sha === undefined) {
+            return [String(ref)];
+          }
+          return sha !== undefined && !stored.assets.has(sha) ? [ref] : [];
+        });
+        if (missing.length) {
+          return send(res, 400, { error: "the outline names pictures the hub does not hold", missing });
+        }
+        const outline = {
+          ...body.outline,
+          slides: slides.map((slide, i) => (slide.id === undefined ? { ...slide, id: `s_${String(i).padStart(4, "0")}` } : slide))
+        };
+        stored.version += 1;
+        stored.outline = outline;
+        stored.updated_by = "agent";
+        stored.updated_at = new Date().toISOString();
+        return send(res, 200, { version: stored.version, outline });
+      }
+      if (sub === "assets") {
+        const sha = parts[5] ?? "";
+        if (!/^[0-9a-f]{64}$/.test(sha)) {
+          return send(res, 400, { error: "not a sha256" });
+        }
+        if (req.method === "GET") {
+          const bytes = stored.assets.get(sha);
+          if (!bytes) {
+            return send(res, 404, { error: "the deck does not hold that picture" });
+          }
+          beforeRespond?.();
+          res.writeHead(200, { "Content-Type": "application/octet-stream", "Content-Length": String(bytes.byteLength) });
+          return res.end(bytes);
+        }
+        if (req.method === "PUT") {
+          if (!octets || octets.byteLength === 0 || octets.byteLength > DECK_MAX_BYTES) {
+            return send(res, octets && octets.byteLength > DECK_MAX_BYTES ? 413 : 400, { error: "bad picture" });
+          }
+          if (createHash("sha256").update(octets).digest("hex") !== sha) {
+            return send(res, 400, { error: "the bytes' SHA-256 is not the one in the path" });
+          }
+          const held = stored.assets.has(sha);
+          stored.assets.set(sha, octets);
+          return send(res, held ? 200 : 201, { asset: `sha256:${sha}` });
+        }
+      }
+      if (sub === "versions" && parts[6] === "pptx" && req.method === "PUT") {
+        const version = Number(parts[5]);
+        if (octets?.subarray(0, 4).toString("hex") !== "504b0304") {
+          return send(res, 400, { error: "that is not a .pptx" });
+        }
+        if (!Number.isInteger(version) || version < 1 || version > stored.version) {
+          return send(res, 404, { error: "the deck has no such version" });
+        }
+        if (version <= stored.version - 3) {
+          return send(res, 409, { error: "only the latest 3 versions of a deck keep their .pptx" });
+        }
+        stored.pptx.set(version, octets);
+        return send(res, 204);
+      }
+    }
     if (action === "jira" && req.method === "PUT") {
       if (!agent.conversation_id) {
         return send(res, 404, { error: "not a conversation" });
@@ -1116,6 +1238,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     virtuals,
     personCredentials,
     artefacts,
+    decks,
     jiraReports,
     githubReports,
     confluenceReports,
@@ -1168,6 +1291,17 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     editArtefactAsUser(agentId: string, markdown: string, title = "Draft") {
       const doc = artefacts.get(agentId);
       artefacts.set(agentId, { title, markdown, version: (doc?.version ?? 0) + 1, updated_by: "user", updated_at: new Date().toISOString() });
+    },
+    // A deck written in the web UI as the person's — what a fork's copy is — with its pictures.
+    writeDeckAsUser(agentId: string, outline: Body, assets: Record<string, Buffer> = {}) {
+      const stored = deckOf(agentId);
+      for (const [sha, bytes] of Object.entries(assets)) {
+        stored.assets.set(sha, bytes);
+      }
+      stored.version += 1;
+      stored.outline = outline;
+      stored.updated_by = "user";
+      stored.updated_at = new Date().toISOString();
     },
     // Runs as each response is written, before the caller can see it. A test that mirrors the hub's state
     // somewhere a process outside this one reads — `src/virtual-agent-boot.test.ts` writes a file the boot

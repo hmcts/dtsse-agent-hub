@@ -36,7 +36,28 @@ Also ask for any pictures they want used, as files. Don't start the outline unti
    - Exit 2 with `{errors: [...]}`: fix every error listed and build again.
    - `warnings` in the result (also on stderr) are text over a layout's limits. Shorten the text or split the slide,
      rather than leaving it crowded. Only keep it if the person says so.
-4. Tell the person where the file is, how many slides it has, and any warnings left.
+4. In a CFT Workspace conversation, publish it, so the person sees the slides beside the chat and can download them:
+   `agent-hub deck put deck/outline.json --pptx deck/<name>.pptx --summary "<what changed>"`. It uploads the
+   pictures the outline names, saves the outline as the deck's next version and then the `.pptx` built from it. It
+   also writes the id it gave each slide back into `outline.json`; keep them, since they are how the person points
+   you at a slide. Outside a conversation there is nowhere to publish, and the command says so.
+   - "the deck has changed since version N": someone else wrote a newer version. Start again from
+     `agent-hub deck get`, make your change to that, build it, and put it with the `--base` the message gives.
+5. Tell the person how many slides it has and any warnings left. In a conversation they already see it; elsewhere,
+   say where the file is.
+
+## Changing a deck that is already there
+
+In a CFT Workspace conversation, always start from the published deck rather than an outline you remember:
+`agent-hub deck get` writes it to `~/.agent-hub/decks/<conversation>/outline.json` with its pictures beside it,
+ready for `slides build`, and prints the `deck put` to run when you have changed it. `--json` says where it is and
+which version, and whether the person can download its `.pptx` yet.
+
+A message that starts with a slide reference, such as `[Slide 4 of "Ways of working" v7, id s_ab12: "Releases take
+three weeks"]`, is the person asking about that slide. Read it with `agent-hub deck get --slide s_ab12`, which
+prints the slide as it is now (`number` is its place in the deck, the title slide being 1), and answer about it. If
+they ask for a change, change that slide in the outline `deck get` wrote, build and put the deck as above. Slide 1, the
+title slide, has no id: it is the outline's own `title`, `subtitle` and `notes`.
 
 ## The outline
 

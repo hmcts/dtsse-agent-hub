@@ -658,7 +658,9 @@ describe("conversations", () => {
       product_label: "General",
       model: "sonnet",
       artefact_version: 0,
-      artefact_updated_by: null
+      artefact_updated_by: null,
+      deck_version: 0,
+      deck_updated_by: null
     };
 
     // A wake is "this conversation needs a session", so there is no message whose files the field could name.
