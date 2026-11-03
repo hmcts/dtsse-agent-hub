@@ -562,7 +562,7 @@ describe("a question from an agent with no chat", () => {
     const response = await call(questionRoute.POST, { as: ALICE, path: `/api/agent/${agentId}/question`, params: { agentId }, method: "POST", body: QUESTION });
 
     expect(response.status).toBe(409);
-    expect(await jsonOf(response)).toEqual({ error: "this session has no chat in the HMCTS Assistant to show a question in" });
+    expect(await jsonOf(response)).toEqual({ error: "this session has no chat in the CFT Workspace to show a question in" });
     expect(await prisma.agentQuestion.count()).toBe(0);
   });
 

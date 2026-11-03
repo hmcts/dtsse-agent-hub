@@ -267,7 +267,7 @@ describe("githubTitle", () => {
   });
 
   it("should fall back to a plain title when there is neither", () => {
-    expect(githubTitle({ title: null, markdown: "Just words" })).toBe("HMCTS Assistant document");
+    expect(githubTitle({ title: null, markdown: "Just words" })).toBe("CFT Workspace document");
   });
 
   it("should shorten a title longer than GitHub allows", () => {

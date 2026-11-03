@@ -14,7 +14,7 @@ export const metadata: Metadata = {
 };
 
 /**
- * The HMCTS Assistant's area: full screen, without the hub's sidebar, in the theme the person chose. Not found while
+ * The CFT Workspace's area: full screen, without the hub's sidebar, in the theme the person chose. Not found while
  * virtual agents are off, since it runs on one. What the visit has seen is held here, where a navigation between the
  * Assistant's pages cannot lose it.
  */

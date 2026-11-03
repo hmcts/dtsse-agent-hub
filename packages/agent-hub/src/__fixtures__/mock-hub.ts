@@ -339,7 +339,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
   // The access rules of the hub's `src/access/rules.ts`, applied to this fixture's rows, so a client test cannot pass
   // on something the hub refuses. An agent is its owner's; another owner's is reached by a tagged post.
 
-  // The HMCTS Assistant's own agent: private to its conversation, so never listed, resolved by name or tagged.
+  // The CFT Workspace's own agent: private to its conversation, so never listed, resolved by name or tagged.
   function isPodConversation(agent: StoredAgent): boolean {
     return agent.conversation_id !== undefined && agent.virtual_id !== undefined;
   }

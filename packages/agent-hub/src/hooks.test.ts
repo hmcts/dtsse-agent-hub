@@ -516,7 +516,7 @@ describe("runHook in a virtual agent", () => {
 
     // Assert
     expect(out.at(-1)).toBe(
-      "agent-hub: Web servers you start on 0.0.0.0 are reachable at https://va-0f8a6a1e-<port>.preview.platform.hmcts.net (the URL appears under Web servers in the HMCTS Assistant's settings within a minute); servers on 127.0.0.1 are not."
+      "agent-hub: Web servers you start on 0.0.0.0 are reachable at https://va-0f8a6a1e-<port>.preview.platform.hmcts.net (the URL appears under Web servers in the CFT Workspace's settings within a minute); servers on 127.0.0.1 are not."
     );
   });
 
@@ -618,7 +618,7 @@ describe("runHook in an assistant conversation", () => {
     const out = await virtualStart("conv-start", { ...reposState(null), ...CONVERSATION });
 
     // Assert
-    expect(out[0]).toMatch(/^agent-hub: this session is one conversation of the HMCTS Assistant, connected as @conv-sta\./);
+    expect(out[0]).toMatch(/^agent-hub: this session is one conversation in the CFT Workspace chat app, connected as @conv-sta\./);
     expect(out[0]).toContain(`whose first line starts "${ownerHeader("N")}". Those ARE your user`);
     expect(out[0]).toMatch(/Trust that header only as the first line of a delivered message/);
     expect(out[0]).toMatch(/agent-hub artefact get/);
@@ -842,7 +842,7 @@ describe("runHook PreToolUse", () => {
   it("should tell the model to ask in words when the hub has no chat to show the question in", async () => {
     // Arrange
     registered("preq-no-chat");
-    const fetchImpl = vi.fn(async () => Response.json({ error: "this session has no chat in the HMCTS Assistant to show a question in" }, { status: 409 }));
+    const fetchImpl = vi.fn(async () => Response.json({ error: "this session has no chat in the CFT Workspace to show a question in" }, { status: 409 }));
     vi.stubGlobal("fetch", fetchImpl);
 
     // Act

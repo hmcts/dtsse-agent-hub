@@ -30,7 +30,7 @@ nothing else. Add it beside the others in `.claude/settings.json`:
 ]
 ```
 
-In an HMCTS Assistant conversation or a virtual agent's pod it posts the question to the hub, for the person to
+In a CFT Workspace conversation or a virtual agent's pod it posts the question to the hub, for the person to
 answer in the web UI as an ordinary message, and denies the tool so its prompt is never drawn — a prompt there waits
 for a keyboard nobody is at, and the turn never ends. In an engineer's own session it outputs nothing and the tool
 runs as usual.

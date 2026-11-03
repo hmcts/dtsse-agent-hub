@@ -1,6 +1,6 @@
 # Virtual agent memory and CPU
 
-Why each size runs the number of HMCTS Assistant conversations it does, why no size has a CPU limit, and why the
+Why each size runs the number of CFT Workspace conversations it does, why no size has a CPU limit, and why the
 memory warning is computed from `anon`. The rules themselves are in [`agent-api.md`](agent-api.md#conversations)
 (Capacity) and [Memory in the pod](agent-api.md#memory-in-the-pod); this page is the evidence behind them.
 

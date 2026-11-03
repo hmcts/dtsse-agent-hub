@@ -31,7 +31,7 @@ import { snippetOf } from "./search.ts";
 import { searchConversations } from "./search-store.ts";
 import { type MessageAttachment, unsentAttachments } from "./upload-store.ts";
 
-/** The HMCTS Assistant as its pages show it. Only ever the viewer's own: nobody sees anyone else's assistant. */
+/** The CFT Workspace as its pages show it. Only ever the viewer's own: nobody sees anyone else's assistant. */
 
 export interface AssistantSummary {
   id: string;

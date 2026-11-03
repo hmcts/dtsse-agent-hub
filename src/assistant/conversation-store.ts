@@ -11,7 +11,7 @@ import { DEFAULT_PRODUCT, isProduct } from "./products.ts";
 import { messageTitle, TITLE_MAX, type TitleSource } from "./titles.ts";
 
 /**
- * The HMCTS Assistant's conversations: reading, listing, creating, renaming and removing them.
+ * The CFT Workspace's conversations: reading, listing, creating, renaming and removing them.
  *
  * A conversation's agent is created with it, offline and with a session id the hub chose, so a message can queue for
  * it before any session runs. The pod's supervisor starts a session under that id when the conversation is woken,
@@ -166,7 +166,7 @@ export async function createConversation(
   }
   const assistant = await findAssistant(prisma, ownerOid);
   if (assistant === undefined) {
-    throw new HttpError(409, "open the Assistant first, so it can be set up");
+    throw new HttpError(409, "open the CFT Workspace first, so it can be set up");
   }
   const title = messageTitle(request.title ?? "");
   return await prisma.$transaction(async (tx) => {

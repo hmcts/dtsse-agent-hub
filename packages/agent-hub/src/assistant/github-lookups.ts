@@ -1,5 +1,5 @@
 // The supervisor's half of a GitHub lookup: a search of the repositories or the Projects the owner's own gh sign-in
-// can see, for the HMCTS Assistant's document panel and settings to pick where a GitHub issue goes. A repository is
+// can see, for the CFT Workspace's document panel and settings to pick where a GitHub issue goes. A repository is
 // where an issue lives; a Project is a board that shows issues from any number of repositories, so the two are
 // searched apart. Fixed and read-only: one `gh` call whose every value is checked and passed as its own argument,
 // never through a shell, and an answer cut down to the fields the hub accepts. See "Lookups" in dtsse-agent-hub's

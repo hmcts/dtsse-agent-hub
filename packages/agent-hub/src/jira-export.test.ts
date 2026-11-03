@@ -264,7 +264,7 @@ describe("jiraSummary", () => {
     // Act & Assert
     expect(jiraSummary({ title: " Fee\nstories ", markdown: "# Other" })).toBe("Fee stories");
     expect(jiraSummary({ title: null, markdown: "Intro\n\n## Pay a fee\n" })).toBe("Pay a fee");
-    expect(jiraSummary({ title: "", markdown: "no heading" })).toBe("HMCTS Assistant document");
+    expect(jiraSummary({ title: "", markdown: "no heading" })).toBe("CFT Workspace document");
   });
 
   it("should cut the summary to Jira's limit when the title is longer", () => {

@@ -28,7 +28,7 @@ describe("homeFor", () => {
 });
 
 describe("defaultUi", () => {
-  it("should send / to the HMCTS Assistant when virtual agents are on", () => {
+  it("should send / to the CFT Workspace when virtual agents are on", () => {
     expect(defaultUi(true)).toBe("/assistant");
   });
 

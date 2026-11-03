@@ -1,4 +1,4 @@
-// The commands an HMCTS Assistant conversation's session runs: its shared document, and the Jira, GitHub and
+// The commands a CFT Workspace conversation's session runs: its shared document, and the Jira, GitHub and
 // Confluence exports the person asked for.
 import { ApiError } from "../api.ts";
 import { CONFLUENCE_EXPORT_ID_RE, CONFLUENCE_ID_RE, MAX_CONFLUENCE_ERROR, MAX_PAGE_TITLE, runConfluenceExport } from "../confluence-export.ts";
@@ -43,7 +43,7 @@ function artefactArgs(argv: string[]): { action: ArtefactAction; json: boolean; 
 // Only a conversation's agent has a document, so a 404 here is the session, not a missing agent.
 function notConversation(e: unknown): never {
   if (e instanceof ApiError && e.status === 404) {
-    throw new Error("this session is not an HMCTS Assistant conversation, so it has no document");
+    throw new Error("this session is not a CFT Workspace conversation, so it has no document");
   }
   throw e;
 }
@@ -111,7 +111,7 @@ const WORD_RE = /^[A-Za-z0-9_-]{1,64}$/;
 function noExport(label: string): (e: unknown) => never {
   return (e) => {
     if (e instanceof ApiError && e.status === 404) {
-      throw new Error(`this session is not an HMCTS Assistant conversation, so it has no ${label} export`);
+      throw new Error(`this session is not a CFT Workspace conversation, so it has no ${label} export`);
     }
     throw e;
   };
@@ -201,7 +201,7 @@ const jiraExport: ExportStep = async (cli, exportId, flags) => {
     return 1;
   }
   cli.print(
-    `agent-hub: ${outcome.again ? "already created" : "created"} ${outcome.key} for export ${exportId} and reported it; the user's Assistant shows a link to ${JIRA_BROWSE_URL}${outcome.key}`
+    `agent-hub: ${outcome.again ? "already created" : "created"} ${outcome.key} for export ${exportId} and reported it; the user's CFT Workspace shows a link to ${JIRA_BROWSE_URL}${outcome.key}`
   );
   return 0;
 };
@@ -261,7 +261,7 @@ const confluenceExport: ExportStep = async (cli, exportId, flags) => {
     return 1;
   }
   cli.print(
-    `agent-hub: ${outcome.again ? "already created" : "created"} the page "${outcome.title}" (${outcome.pageId}) for export ${exportId} and reported it; the user's Assistant shows a link to it`
+    `agent-hub: ${outcome.again ? "already created" : "created"} the page "${outcome.title}" (${outcome.pageId}) for export ${exportId} and reported it; the user's CFT Workspace shows a link to it`
   );
   return 0;
 };
@@ -317,7 +317,7 @@ const githubExport: ExportStep = async (cli, exportId, flags) => {
   const board =
     project === null ? "" : outcome.projectError ? ` (not on the Project: ${outcome.projectError})` : ` on Project ${project.number} of ${project.owner}`;
   cli.print(
-    `agent-hub: ${outcome.again ? "already created" : "created"} ${repo}#${outcome.number}${board} for export ${exportId} and reported it; the user's Assistant shows a link to ${outcome.url}.${unlabelled}`
+    `agent-hub: ${outcome.again ? "already created" : "created"} ${repo}#${outcome.number}${board} for export ${exportId} and reported it; the user's CFT Workspace shows a link to ${outcome.url}.${unlabelled}`
   );
   return 0;
 };

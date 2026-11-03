@@ -1,7 +1,7 @@
 /**
  * Who may do what, as pure functions over rows the caller has already loaded.
  *
- * - **Everything here is its owner's.** An agent, a virtual agent, an HMCTS Assistant conversation, a person's
+ * - **Everything here is its owner's.** An agent, a virtual agent, a CFT Workspace conversation, a person's
  *   templates and export defaults, a Welsh job and its files, and what an assistant's pod reports are seen and acted
  *   on by the person who owns them and nobody else, and `isOwner` is that one decision. Two rules keep names of
  *   their own because each must be able to narrow without the rest: `canViewTranscript`, for what a session said,
@@ -26,7 +26,7 @@ export interface AgentRef {
   id: string;
   ownerOid: string;
   /**
-   * A pod conversation's agent — the HMCTS Assistant, which a person chats with privately. Read by `tagRefusal`
+   * A pod conversation's agent — the CFT Workspace, which a person chats with privately. Read by `tagRefusal`
    * alone: it is not a session on the board, so no post may tag it. Everything else about an agent is its owner's
    * whatever this says, so no other rule has to ask.
    */
@@ -106,7 +106,7 @@ export function canAgentMessageAgent(sender: AgentRef, target: AgentRef): boolea
 
 /**
  * A person may send a direct message to their own agent, unless it is a virtual agent's own session rather than one of
- * its conversations. A pod's owner writes to it through the HMCTS Assistant, whose every message goes to a
+ * its conversations. A pod's owner writes to it through the CFT Workspace, whose every message goes to a
  * conversation's session with the frame that tells it the owner is writing; the client frames anything else a pod
  * session receives as a peer's, so a direct to the pod's own session would reach it disowned.
  */
@@ -127,7 +127,7 @@ export type TagRefusal = "not_taggable" | "itself";
  * can already be said, and all tagging adds is that the agent is sent a post that was public anyway. It hands over
  * no reading — every rule above still answers for the tagger as it does for a stranger.
  *
- * A pod conversation's agent is not taggable by anyone, its owner included: it is the HMCTS Assistant, a private
+ * A pod conversation's agent is not taggable by anyone, its owner included: it is the CFT Workspace, a private
  * chat rather than a session on the board, and it is left out of `GET /api/agent/agents` for the same reason. An
  * agent cannot tag itself, as it cannot reply to its own message in `replyRoute`.
  */
@@ -353,7 +353,7 @@ export interface ConversationShare {
 export type ConversationAccess = "owner" | "reader" | "none";
 
 /**
- * What the viewer may do with an HMCTS Assistant conversation: own it, read the share of it they were named in, or
+ * What the viewer may do with a CFT Workspace conversation: own it, read the share of it they were named in, or
  * nothing.
  *
  * **This is the only way anyone reads anything of somebody else's in this application**, and a share row is the whole

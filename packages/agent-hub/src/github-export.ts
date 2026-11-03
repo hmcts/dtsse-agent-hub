@@ -1,4 +1,4 @@
-// `agent-hub github export`: everything an HMCTS Assistant conversation's session does to turn its document into a
+// `agent-hub github export`: everything a CFT Workspace conversation's session does to turn its document into a
 // GitHub issue, as one command, for a person whose ticket tool is GitHub. It mirrors `jira export`: the session runs
 // it, so the issue is opened with the owner's own gh sign-in and they are its author, and one command saves a model
 // turn per step. gh is signed in on every pod, since the pod clones the workspace with it, so unlike twg there is no
@@ -20,7 +20,7 @@ import type { Artefact, GithubExportReport } from "./wire.ts";
 export const MAX_GITHUB_ERROR = 300;
 // GitHub refuses an issue title over 256 characters.
 export const MAX_TITLE = 256;
-const FALLBACK_TITLE = "HMCTS Assistant document";
+const FALLBACK_TITLE = "CFT Workspace document";
 // Long enough for a slow GitHub, short enough that a hung gh is reported well inside the hub's 15-minute timeout.
 const CREATE_TIMEOUT_MS = 120000;
 // Each step after the issue exists: labelling it and putting it on a Project. Shorter than the create, so that every

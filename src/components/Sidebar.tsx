@@ -65,11 +65,11 @@ export function Sidebar({
               <HomeIcon />
               Home
             </NavLink>
-            {/* The HMCTS Assistant runs on the viewer's virtual agent, so it is offered wherever they are. */}
+            {/* The CFT Workspace runs on the viewer's virtual agent, so it is offered wherever they are. */}
             {virtualAgents ? (
               <NavLink href="/assistant">
                 <ChatIcon />
-                HMCTS Assistant
+                CFT Workspace
               </NavLink>
             ) : null}
           </div>

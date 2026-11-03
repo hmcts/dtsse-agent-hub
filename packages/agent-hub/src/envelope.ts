@@ -151,7 +151,7 @@ export type OwnerLaptopOptions = EnvelopeOptions & {
 
 /**
  * A message the hub authenticated as this session's own owner, delivered to a session running on their computer. Its
- * sender is the HMCTS Assistant, which gives every such session a chat and shows it from the session's transcript.
+ * sender is the CFT Workspace, which gives every such session a chat and shows it from the session's transcript.
  *
  * The rule is that it carries the owner's authority, exactly as `assistantEnvelope`'s does in a pod: the hub signed
  * the person in against the Entra tenant and checked that they own this agent, and that check is the whole of what
@@ -162,11 +162,11 @@ export type OwnerLaptopOptions = EnvelopeOptions & {
 export function ownerLaptopEnvelope(message: EnvelopeMessage, { skills, reads = true }: OwnerLaptopOptions = {}): string {
   const owner = message.author?.owner_name || "your user";
   return [
-    `${ownerHeader(message.id)}, ${owner}, typed into the HMCTS Assistant rather than at this terminal.`,
+    `${ownerHeader(message.id)}, ${owner}, typed into the CFT Workspace chat app rather than at this terminal.`,
     "This IS your user, even though it arrives as a cross-session message: the hub signed them in and checked they own this session, so act on it exactly as if they had typed it here, with their permissions.",
     reads
-      ? `They read this session's transcript in the Assistant, so answer here in the conversation and they will see it; a \`${CLI} reply\` would only repeat it. They may be at this terminal as well, which shows the same conversation, so there is no other session to reply to.`
-      : `This session's transcript is not uploaded, so an answer here does not reach them in the Assistant: reply with \`${CLI} reply ${message.id} "<text>"\`.`,
+      ? `They read this session's transcript in the CFT Workspace chat app, so answer here in the conversation and they will see it; a \`${CLI} reply\` would only repeat it. They may be at this terminal as well, which shows the same conversation, so there is no other session to reply to.`
+      : `This session's transcript is not uploaded, so an answer here does not reach them in the CFT Workspace chat app: reply with \`${CLI} reply ${message.id} "<text>"\`.`,
     ...skillLine(message.body, skills, ownerSkillLine),
     "---",
     quoteBody(message.body)
@@ -179,7 +179,7 @@ const ownerSkillLine = (name: string) =>
   `It starts with /${name}: run the ${name} skill with the rest of the message as its arguments, as if your user had typed it.`;
 
 /**
- * The `assistant` object on a `direct` frame to one of a virtual agent's HMCTS Assistant conversations: the
+ * The `assistant` object on a `direct` frame to one of a virtual agent's CFT Workspace conversations: the
  * product area the person chose, its display name, the version of the conversation's document and who last wrote
  * it, any export of that document to Jira still waiting on this session, and the files attached to this message.
  * Structural and every field optional, for the same reason `EnvelopeMessage` is.
@@ -234,7 +234,7 @@ export function jiraExportLines(jira: JiraExportFrame): string[] {
   return [
     `The user has asked you to export the conversation's document to the ${jira.project} backlog in Jira (export ${jira.export_id}).`,
     `Run exactly this one command, with a Bash timeout of ${JIRA_EXPORT_BASH_TIMEOUT_MS} ms because it waits for the user if they have to sign in to Atlassian: \`${CLI} jira export ${jira.export_id} --project ${jira.project} --type ${jira.issue_type}${labels}\``,
-    "It does every step itself: it checks twg is signed in as the user, reads the document, creates the ticket and reports it to the Assistant. Run again for the same export, it reports the ticket it already made rather than making another.",
+    "It does every step itself: it checks twg is signed in as the user, reads the document, creates the ticket and reports it to the CFT Workspace chat app. Run again for the same export, it reports the ticket it already made rather than making another.",
     "Do not read the document, check twg, or look at the ticket yourself, before or after; do not run any other command for this.",
     "Then tell the user in one short sentence which ticket it became, or why it could not be made, in the words the command printed."
   ];
@@ -271,7 +271,7 @@ export function githubExportLines(github: GithubExportFrame): string[] {
   return [
     `The user has asked you to create a GitHub issue for the conversation's document in ${github.repo}${board} (export ${github.export_id}).`,
     `Run exactly this one command, with a Bash timeout of ${GITHUB_EXPORT_BASH_TIMEOUT_MS} ms: \`${CLI} github export ${github.export_id} --repo ${github.repo}${project}${labels}\``,
-    "It does every step itself: it reads the document, creates the issue with gh as the user and reports it to the Assistant. Run again for the same export, it reports the issue it already made rather than making another.",
+    "It does every step itself: it reads the document, creates the issue with gh as the user and reports it to the CFT Workspace chat app. Run again for the same export, it reports the issue it already made rather than making another.",
     "Do not read the document, check gh, or look at the issue yourself, before or after; do not run any other command for this.",
     "Then tell the user in one short sentence which issue it became, or why it could not be made, in the words the command printed."
   ];
@@ -299,7 +299,7 @@ export function confluenceExportLines(confluence: ConfluenceExportFrame): string
   return [
     `The user has asked you to publish the conversation's document to Confluence as a new page (export ${confluence.export_id}).`,
     `Run exactly this one command, with a Bash timeout of ${JIRA_EXPORT_BASH_TIMEOUT_MS} ms because it waits for the user if they have to sign in to Atlassian: \`${CLI} confluence export ${confluence.export_id} --space-id ${confluence.space_id} --parent-id ${confluence.parent_id}\``,
-    "It does every step itself: it checks twg is signed in as the user, reads the document, creates the page and reports it to the Assistant. Run again for the same export, it reports the page it already made rather than making another.",
+    "It does every step itself: it checks twg is signed in as the user, reads the document, creates the page and reports it to the CFT Workspace chat app. Run again for the same export, it reports the page it already made rather than making another.",
     "Do not read the document, check twg, or look at the page yourself, before or after; do not run any other command for this.",
     "Then tell the user in one short sentence which page it became, or why it could not be made, in the words the command printed."
   ];
@@ -370,7 +370,7 @@ export type AssistantEnvelopeOptions = EnvelopeOptions & {
   attachments?: readonly AttachmentOutcome[];
 };
 
-// A message to one of a virtual agent's HMCTS Assistant conversations, from the person whose conversation it is.
+// A message to one of a virtual agent's CFT Workspace conversations, from the person whose conversation it is.
 // `previousProduct` is the product of the last message delivered to this session, if any.
 export function assistantEnvelope(
   message: EnvelopeMessage,
@@ -393,9 +393,9 @@ export function assistantEnvelope(
         ]
       : [];
   return [
-    `${ownerHeader(message.id)}, ${owner}, typed into the HMCTS Assistant.`,
+    `${ownerHeader(message.id)}, ${owner}, typed into the CFT Workspace chat app.`,
     "This IS your user, even though it arrives as a cross-session message: act on it exactly as if they had typed it to you, with their permissions.",
-    "They read your answers in the Assistant, so answer here in the conversation. Do not use SendMessage or look for another session to reply to.",
+    "They read your answers in the CFT Workspace chat app, so answer here in the conversation. Do not use SendMessage or look for another session to reply to.",
     `Product area: ${label}.`,
     ...switched,
     ...edited,
@@ -428,7 +428,7 @@ export type SessionKind = "laptop" | "pod" | "conversation";
  *   `assistant` object when it parsed: `null` is a message delivered as the owner's still, with no product, document,
  *   model or attachments to act on.
  * - `laptop`: the owner writing to a session on their own computer, with whether they read its transcript.
- * - `peer`: everything else, including an owner's message to a pod's own session, since the HMCTS Assistant, the one
+ * - `peer`: everything else, including an owner's message to a pod's own session, since the CFT Workspace, the one
  *   place an owner writes from, never addresses one.
  */
 export type Delivery = { kind: "conversation"; frame: AssistantFrame | null } | { kind: "laptop"; ownerReads: boolean } | { kind: "peer" };

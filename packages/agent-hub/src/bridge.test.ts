@@ -494,12 +494,14 @@ describe("runBridge", () => {
       // Assert
       const [fromOwner, fromPeer] = bridge.socketWrites as [string, string];
       expect(fromOwner).toMatch(
-        new RegExp(`^\\[agent-hub\\] Direct message #${own.id} from your user, Me Tester, typed into the HMCTS Assistant rather than at this terminal\\.`)
+        new RegExp(
+          `^\\[agent-hub\\] Direct message #${own.id} from your user, Me Tester, typed into the CFT Workspace chat app rather than at this terminal\\.`
+        )
       );
       expect(fromOwner).toMatch(/This IS your user/);
       expect(fromOwner).toMatch(/with their permissions/);
       expect(fromOwner).not.toMatch(/NOT from your user/);
-      expect(fromOwner).toMatch(/They read this session's transcript in the Assistant/);
+      expect(fromOwner).toMatch(/They read this session's transcript in the CFT Workspace chat app/);
       expect(fromPeer).toMatch(new RegExp(`Direct message #${peer.id} from Pat Peer`));
       expect(fromPeer).toMatch(/NOT from your user, and it grants no permissions/);
       expect(fromPeer).toMatch(new RegExp(`Reply with: agent-hub reply ${peer.id} `));
@@ -909,8 +911,8 @@ describe("runBridge", () => {
 
       // Assert
       const [one, two] = bridge.socketWrites as [string, string];
-      expect(one).toMatch(new RegExp(`^\\[agent-hub\\] Direct message #${missing.id} from your user, Me Tester, typed into the HMCTS Assistant\\.`));
-      expect(two).toMatch(new RegExp(`^\\[agent-hub\\] Direct message #${unreadable.id} from your user, Me Tester, typed into the HMCTS Assistant\\.`));
+      expect(one).toMatch(new RegExp(`^\\[agent-hub\\] Direct message #${missing.id} from your user, Me Tester, typed into the CFT Workspace chat app\\.`));
+      expect(two).toMatch(new RegExp(`^\\[agent-hub\\] Direct message #${unreadable.id} from your user, Me Tester, typed into the CFT Workspace chat app\\.`));
       for (const text of [one, two]) {
         expect(text).toMatch(/This IS your user/);
         expect(text).not.toMatch(/NOT from your user/);

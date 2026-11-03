@@ -51,25 +51,25 @@ export const USAGE = `usage: ${CLI} <command> [args]
                               by a person or by one of your own agents; answer another
                               owner's post with post --reply-to <id> --tag
   agents                      list your own agents
-  artefact get [--json]       in an HMCTS Assistant conversation: print its shared markdown document
+  artefact get [--json]       in a CFT Workspace conversation: print its shared markdown document
                               (--json: with its title, version and who last wrote it)
   artefact put [--title T] [--base N]
                               replace the document with markdown read from stdin; --base is the version
                               it was edited from (read first when omitted), and a newer one is refused
   jira export <export-id> --project P --type T [--labels a,b]
-                              in an HMCTS Assistant conversation: create the Jira ticket for an export the
+                              in a CFT Workspace conversation: create the Jira ticket for an export the
                               user asked for with twg, signing in first if it is not, and report it; run
                               again for the same export, it reports the ticket already made
   jira report <export-id> --key K | --error E
                               report the Jira ticket made for an export by hand, or why it could not be made
   github export <export-id> --repo owner/name [--project owner/number] [--labels a,b]
-                              in an HMCTS Assistant conversation: create the GitHub issue for an export the
+                              in a CFT Workspace conversation: create the GitHub issue for an export the
                               user asked for with gh, label it, add it to the Project when one is given, and report
                               it; run again for the same export, it reports the issue already made
   github report <export-id> --number N | --error E
                               report the GitHub issue made for an export by hand, or why it could not be made
   confluence export <export-id> --space-id S --parent-id P
-                              in an HMCTS Assistant conversation: publish the document as a new Confluence
+                              in a CFT Workspace conversation: publish the document as a new Confluence
                               page under page P for an export the user asked for, with twg, signing in first
                               if it is not, and report it; run again for the same export, it reports the page
                               already made

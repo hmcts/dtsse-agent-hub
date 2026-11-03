@@ -78,7 +78,7 @@ async function setCredential(cli: Cli, api: Api, pod: Pod, kind: CredentialKind,
 
 async function deleteCredential(cli: Cli, api: Api, pod: Pod, kind: CredentialKind): Promise<number> {
   if (pod) {
-    throw new UsageError("a virtual agent cannot delete its credentials; its owner removes them in the HMCTS Assistant's settings");
+    throw new UsageError("a virtual agent cannot delete its credentials; its owner removes them in the CFT Workspace's settings");
   }
   try {
     await api.deleteMyCredential(kind);

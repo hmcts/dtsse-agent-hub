@@ -21,7 +21,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ con
     return viewer;
   }
   if (!virtualAgentsEnabled()) {
-    return errorResponse(404, "the HMCTS Assistant is not available on this deployment");
+    return errorResponse(404, "the CFT Workspace is not available on this deployment");
   }
   return await uiRefusals("chat sharing read", async () => {
     const { conversationId } = await context.params;

@@ -134,7 +134,7 @@ export async function directAsAgent(prisma: PrismaClient, sender: AgentRef, requ
 }
 
 /**
- * A person's direct message to an agent, from the HMCTS Assistant. The same write as an agent's, so it queues a
+ * A person's direct message to an agent, from the CFT Workspace. The same write as an agent's, so it queues a
  * delivery the agent's stream sends and NOTIFYs every pod.
  *
  * One refusal, `canPersonDirectAgent`'s, and it is the missing one: an agent that is not the sender's, or that is a

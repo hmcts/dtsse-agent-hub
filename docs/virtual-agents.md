@@ -1,6 +1,6 @@
 # Running virtual agents
 
-Operator reference for the virtual agents the HMCTS Assistant runs on: the feature flag and its settings, model routes and
+Operator reference for the virtual agents the CFT Workspace runs on: the feature flag and its settings, model routes and
 credentials, sizes, plugins and web ports, `kubectl` in a pod, and the orchestrator. The HTTP contract between the hub,
 the pod and the orchestrator is the Virtual agents section of [`agent-api.md`](agent-api.md); the product overview is
 the [README](../README.md).
@@ -173,7 +173,7 @@ bursts want more CPU than the measurements can justify a quota at, and throttlin
 Memory keeps its limit, which is the one the kernel enforces by killing. Its owner can change their assistant's size at any time in the Assistant's
 settings, and the change bumps `generation` and `pod_generation`, so a running pod is replaced with one at the new
 resources and a stopped agent comes back at them. Replacing the pod ends every session on it, which the settings say
-before the change is made; the disk is kept. The size also sets how many HMCTS Assistant conversations the pod runs at
+before the change is made; the disk is kept. The size also sets how many CFT Workspace conversations the pod runs at
 once (`CONVERSATION_SESSIONS`), and the Assistant's settings show each size's cap and memory beside the figures its pod
 reports for itself.
 

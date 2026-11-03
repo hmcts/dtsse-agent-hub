@@ -1,6 +1,6 @@
-# HMCTS Assistant: to-do
+# CFT Workspace: to-do
 
-What is still open for the HMCTS Assistant (`/assistant`). Delete this file once everything below is done or has moved
+What is still open for the CFT Workspace (`/assistant`). Delete this file once everything below is done or has moved
 to Jira.
 
 ## Testing

@@ -1,4 +1,4 @@
-// The pod side of the HMCTS Assistant's conversations: one interactive Claude session per conversation, beside
+// The pod side of the CFT Workspace's conversations: one interactive Claude session per conversation, beside
 // the virtual agent's own. Gathered for the CLI and the package's public surface.
 export type {
   Attachment,

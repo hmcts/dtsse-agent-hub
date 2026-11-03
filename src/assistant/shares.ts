@@ -13,7 +13,7 @@ import { announce, ConversationNotFound } from "./conversation-row.ts";
 import { productLabel } from "./products.ts";
 
 /**
- * Who, besides its owner, may read an HMCTS Assistant conversation.
+ * Who, besides its owner, may read a CFT Workspace conversation.
  *
  * A share is one row naming one person, and the rows are the whole of the access: the link an owner copies resolves
  * for the people named and for nobody else, so taking a row away is the whole of the revocation. Every decision here

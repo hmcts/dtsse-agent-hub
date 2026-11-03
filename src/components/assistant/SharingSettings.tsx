@@ -212,7 +212,7 @@ export function Sharing({ sharing }: { sharing: AssistantSharing }) {
           reply, edit anything, or open files sent in the chat.
         </p>
         <p className="text-pretty text-[13px] text-asst-muted">
-          If you let them fork it, they can copy the chat into their own Assistant and carry on there. Your original stays yours.
+          If you let them fork it, they can copy the chat into their own CFT Workspace and carry on there. Your original stays yours.
         </p>
       </div>
       {failed && chats === undefined ? (

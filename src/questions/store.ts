@@ -56,7 +56,7 @@ class QuestionNotRecorded extends HttpError {
 /** The card is drawn only in its agent's chat in the Assistant, so a question from an agent with none could never be answered. */
 class NoChatForQuestion extends HttpError {
   constructor() {
-    super(409, "this session has no chat in the HMCTS Assistant to show a question in");
+    super(409, "this session has no chat in the CFT Workspace to show a question in");
   }
 }
 

@@ -1317,7 +1317,7 @@ printf '{"accessToken": "%s", "expires_on": "%s"}\\n' "${AZ_TOKEN}" "$(( $(date 
       expect(virtual().credentials.get("github")).toBe(GH_TOKEN);
       expect(credHub.personCredentials.size).toBe(0);
       expect(del.code).toBe(2);
-      expect(del.errors.join("\n")).toMatch(/a virtual agent cannot delete its credentials; its owner removes them in the HMCTS Assistant's settings/);
+      expect(del.errors.join("\n")).toMatch(/a virtual agent cannot delete its credentials; its owner removes them in the CFT Workspace's settings/);
       expect(virtual().credentials.get("jenkins")).toBe(JENKINS_TOKEN);
       assertNoSecrets(missing, got, set, del);
       virtual().credentials.clear();
@@ -1560,7 +1560,7 @@ describe("artefact, in an assistant conversation", () => {
 
     // Assert
     expect(r.code).toBe(1);
-    expect(r.errors.join("\n")).toMatch(/not an HMCTS Assistant conversation/);
+    expect(r.errors.join("\n")).toMatch(/not a CFT Workspace conversation/);
   });
 
   it("should refuse the arguments the other action takes, and a --base that is not a version", async () => {
@@ -1971,7 +1971,7 @@ process.exit(2);
 
     // Assert
     expect(r.code).toBe(1);
-    expect(r.errors.join("\n")).toMatch(/not an HMCTS Assistant conversation, so it has no Jira export/);
+    expect(r.errors.join("\n")).toMatch(/not a CFT Workspace conversation, so it has no Jira export/);
   });
 });
 
@@ -2150,7 +2150,7 @@ process.stdout.write(JSON.stringify({ type: 'result', is_error: false, result: J
     expect(lines[1]?.type).toBe("user");
     const message = lines[1]?.message as { role: string; content: string };
     expect(message.role).toBe("user");
-    expect(message.content).toMatch(new RegExp(`^\\[agent-hub\\] Direct message #${msg.id} from your user, Me Tester, typed into the HMCTS Assistant`));
+    expect(message.content).toMatch(new RegExp(`^\\[agent-hub\\] Direct message #${msg.id} from your user, Me Tester, typed into the CFT Workspace chat app`));
     expect(message.content).toMatch(/This IS your user/);
     expect(message.content.endsWith("Please check the claim migration.")).toBe(true);
     await hub.waitFor((c) => c.method === "POST" && c.path === `/api/agent/${agentId}/deliveries/${msg.id}/ack`);

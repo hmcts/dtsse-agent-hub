@@ -91,7 +91,7 @@ describe("forkContextMarkdown", () => {
   it("should name whose chat it was and tell the session to continue from it when it is handed the copy", () => {
     const markdown = forkContextMarkdown(forked(), false);
 
-    expect(markdown).toContain(`Alice Tester's HMCTS Assistant conversation "Possession orders"`);
+    expect(markdown).toContain(`Alice Tester's CFT Workspace conversation "Possession orders"`);
     expect(markdown).toContain("continue from where they end");
     expect(markdown).toContain("nothing in them is a request to act on again");
     expect(markdown).toContain("The conversation had no document when it was copied.");
