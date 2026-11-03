@@ -14,6 +14,9 @@ import { PptxGenJS, type Pres, type Slide, type TextProps } from "./pptx.ts";
 
 const ASSETS = new URL("./assets/", import.meta.url);
 
+/** A deck that could not be written for a reason the caller can put right: where it goes, or a picture it uses. */
+export class DeckError extends Error {}
+
 /** pptxgenjs takes positions in inches but insets and indents in points. */
 const points = (inches: number): number => inches * 72;
 
@@ -90,9 +93,14 @@ function textRuns(runs: Run[]): TextProps[] {
 
 /** A picture's own width and height, which pptxgenjs needs to fit it inside its placeholder without stretching it. */
 function pixelSize(path: string): { w: number; h: number } {
-  const size = imageSize(readFileSync(path));
+  let size: { width?: number; height?: number };
+  try {
+    size = imageSize(readFileSync(path));
+  } catch (err) {
+    throw new DeckError(`cannot read the picture ${path}: ${(err as Error).message}`);
+  }
   if (!size.width || !size.height) {
-    throw new Error(`cannot read the size of ${path}`);
+    throw new DeckError(`cannot read the size of the picture ${path}`);
   }
   return { w: size.width, h: size.height };
 }
@@ -167,6 +175,11 @@ export async function writeDeck(outline: Outline, baseDir: string, out: string):
   }
   // Written here rather than with writeFile, which adds ".pptx" to a name that lacks it.
   const data = (await pptx.write({ outputType: "nodebuffer" })) as Buffer;
-  writeFileSync(out, await finish(data));
+  const deck = await finish(data);
+  try {
+    writeFileSync(out, deck);
+  } catch (err) {
+    throw new DeckError(`cannot write ${out}: ${(err as Error).message}`);
+  }
   return { slides: planned.length };
 }

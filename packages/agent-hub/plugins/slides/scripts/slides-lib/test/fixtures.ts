@@ -1,6 +1,7 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { after } from "node:test";
 import { crc32, deflateSync } from "node:zlib";
 import type { Outline } from "../masters.ts";
 
@@ -30,9 +31,18 @@ export function png(width: number, height: number): Buffer {
   ]);
 }
 
-/** A directory holding `picture.png` (40 × 20) for outlines to point at. */
+const made: string[] = [];
+
+after(() => {
+  for (const dir of made.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/** A directory holding `picture.png` (40 × 20) for outlines to point at, removed once the test file has run. */
 export function workDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "slides-test-"));
+  made.push(dir);
   writeFileSync(join(dir, "picture.png"), png(40, 20));
   return dir;
 }

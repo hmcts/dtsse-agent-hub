@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import JSZip from "jszip";
-import { writeDeck } from "../build.ts";
+import { DeckError, writeDeck } from "../build.ts";
 import { everyLayout, workDir } from "./fixtures.ts";
 
 async function built(): Promise<JSZip> {
@@ -155,4 +155,45 @@ test("should print every layout with its fields and limits", () => {
     maxWords: 12,
     maxItems: 6
   });
+});
+
+function runCli(args: string[]): { status: number; stdout: string; stderr: string } {
+  const cli = join(dirname(fileURLToPath(import.meta.url)), "..", "cli.ts");
+  try {
+    const stdout = execFileSync(process.execPath, ["--no-warnings", cli, ...args], { encoding: "utf8", stdio: "pipe" });
+    return { status: 0, stdout, stderr: "" };
+  } catch (err) {
+    return err as { status: number; stdout: string; stderr: string };
+  }
+}
+
+test("should say --out is required, exit 2 and print the error as JSON, when the outline is given without it", () => {
+  const dir = workDir();
+  writeFileSync(join(dir, "outline.json"), JSON.stringify(everyLayout()));
+  const { status, stdout } = runCli(["build", join(dir, "outline.json")]);
+  assert.equal(status, 2);
+  assert.deepEqual(JSON.parse(stdout), { errors: ["--out <file.pptx> is required"] });
+});
+
+test("should exit 2 and print the error as JSON when the deck cannot be written where --out says", () => {
+  const dir = workDir();
+  writeFileSync(join(dir, "outline.json"), JSON.stringify(everyLayout()));
+  const out = join(dir, "missing", "deck.pptx");
+  const { status, stdout } = runCli(["build", join(dir, "outline.json"), "--out", out]);
+  assert.equal(status, 2);
+  const { errors } = JSON.parse(stdout);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], new RegExp(`^cannot write ${out}: ENOENT`));
+});
+
+test("should exit 2 and print the error as JSON when the command is not one there is", () => {
+  const { status, stdout } = runCli(["nope"]);
+  assert.equal(status, 2);
+  assert.deepEqual(JSON.parse(stdout), { errors: ["there is no command nope"] });
+});
+
+test("should throw a DeckError naming the picture when one cannot be read", async () => {
+  const dir = workDir();
+  writeFileSync(join(dir, "picture.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  await assert.rejects(writeDeck(everyLayout(), dir, join(dir, "deck.pptx")), (err: unknown) => err instanceof DeckError && /picture\.png/.test(err.message));
 });

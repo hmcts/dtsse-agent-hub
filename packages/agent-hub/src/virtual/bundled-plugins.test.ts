@@ -135,3 +135,21 @@ describe("bundled plugins", () => {
     expect(said).toEqual(["plugin welsh: could not copy it onto this pod: ENOSPC"]);
   });
 });
+
+describe("the bundled plugins' scripts", () => {
+  /** A plugin's wrapper from `set -euo pipefail` on, its own name made generic: its install, lock and marker logic. */
+  const logicOf = (name: string): string => {
+    const script = fs.readFileSync(path.join(PACKAGE_PLUGINS, name, "scripts", name), "utf8");
+    const start = script.indexOf("set -euo pipefail");
+    expect(start, `${name}'s wrapper sets -euo pipefail`).toBeGreaterThan(-1);
+    return script.slice(start).replaceAll(name, "<plugin>");
+  };
+
+  it("should install, lock and mark done the same way in every plugin's wrapper", () => {
+    // Each plugin carries its own copy, since it is installed and copied to pods by itself, so the copies are kept in step here.
+    const [first, ...rest] = BUNDLED_PLUGINS;
+    for (const name of rest) {
+      expect(logicOf(name), `scripts/${name} against scripts/${first}`).toBe(logicOf(first as string));
+    }
+  });
+});

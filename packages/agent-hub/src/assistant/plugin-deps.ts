@@ -17,8 +17,6 @@ export type PrepareDeps = {
   /** Makes the pod's copy of a bundled plugin; a test passes one that makes it somewhere of its own. */
   install?: (name: string, workspace: string) => string;
   say?: (message: string) => void;
-  /** Added to the environment `deps` runs with, for a script that needs more than the pod's own. */
-  scriptEnv?: NodeJS.ProcessEnv;
 };
 
 /**
@@ -40,11 +38,18 @@ export async function prepareBundled(name: string, deps: PrepareDeps): Promise<v
     if (script === null) {
       return;
     }
-    const result = await deps.run(script, ["deps"], { env: { ...deps.env, ...deps.scriptEnv }, timeoutMs: PREPARE_TIMEOUT_MS });
+    const result = await deps.run(script, ["deps"], { env: deps.env, timeoutMs: PREPARE_TIMEOUT_MS });
     if (result.code !== 0) {
       say(`${name}: could not install the tools' dependencies (exit ${result.code}): ${result.stderr.trim().slice(-300)}`);
     }
   } catch (e) {
     say(`${name}: could not prepare the tools: ${(e as Error).message}`);
+  }
+}
+
+/** Runs `prepareBundled` for each of `names` in turn, so their installs do not compete with each other. Never throws. */
+export async function prepareEach(names: readonly string[], deps: PrepareDeps): Promise<void> {
+  for (const name of names) {
+    await prepareBundled(name, deps);
   }
 }
