@@ -52,6 +52,22 @@ describe("welshArgs", () => {
     });
     expect(welshArgs("apply", "cath", { choices: [{ ref: "CY-1", row_id: "x" }] })).toHaveProperty("error");
   });
+
+  it("should take the refs a request leaves out, and refuse one that is not a ref or a repo of another product", () => {
+    expect(welshArgs("request", "cath", { repo: "apps/cath/cath-service", leave_out: ["CY-ABCDEF12"] })).toEqual({
+      args: { repo: "apps/cath/cath-service", leave_out: ["CY-ABCDEF12"] }
+    });
+    expect(welshArgs("request", "cath", {})).toEqual({ args: {} });
+    expect(welshArgs("request", "cath", { leave_out: ["--pr"] })).toEqual({ error: "that is not a ref" });
+    expect(welshArgs("request", "cath", { leave_out: Array.from({ length: 301 }, () => "CY-ABCDEF12") })).toEqual({ error: "leave out at most 300" });
+    expect(welshArgs("request", "cath", { repo: "apps/pcs/pcs-frontend" })).toHaveProperty("error");
+  });
+
+  it("should need at least one line of English to keep", () => {
+    expect(welshArgs("keep_english", "cath", { strings: [" Rolls Building "] })).toEqual({ args: { strings: ["Rolls Building"] } });
+    expect(welshArgs("keep_english", "cath", { strings: [] })).toEqual({ error: "choose at least one" });
+    expect(welshArgs("keep_english", "cath", { strings: ["two\nlines"] })).toEqual({ error: "one line each" });
+  });
 });
 
 describe("the small checks", () => {
@@ -66,6 +82,8 @@ describe("the small checks", () => {
 
   it("should know its kinds and nothing else", () => {
     expect(isWelshKind("story_write")).toBe(true);
+    expect(isWelshKind("request")).toBe(true);
+    expect(isWelshKind("keep_english")).toBe(true);
     expect(isWelshKind("translate")).toBe(false);
   });
 

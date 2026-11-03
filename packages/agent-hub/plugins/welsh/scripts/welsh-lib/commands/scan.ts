@@ -4,6 +4,7 @@
  *   scan --service X                         every repo in config.yaml
  *   scan --service X --repo apps/X/<repo>    one clone (adapters auto-detected)
  *   scan ... --request                       also write the WLU request xlsx
+ *   scan ... --leave-out REF...              the request without these: a BA decided they need no Welsh
  *
  * Each string is either already in the catalogue (apply it, no WLU needed),
  * ambiguous (a BA picks), or new (goes in the request).
@@ -15,6 +16,7 @@ import { parseArgs } from "node:util";
 import { loadCatalogue } from "../catalogue.ts";
 import { ensureClone, latestTree } from "../clones.ts";
 import { loadConfig, type RepoConfig } from "../config.ts";
+import { noWelshHint } from "../hints.ts";
 import { fail, requireService, say } from "../io.ts";
 import { matchKey } from "../normalise.ts";
 import { workspace } from "../paths.ts";
@@ -30,9 +32,11 @@ export async function scanCmd(argv: string[]): Promise<unknown> {
       adapter: { type: "string", multiple: true },
       request: { type: "boolean" },
       out: { type: "string" },
-      limit: { type: "string" }
+      limit: { type: "string" },
+      "leave-out": { type: "string", multiple: true }
     }
   });
+  const leaveOut = new Set(values["leave-out"] ?? []);
   const service = requireService(values.service);
   const repos = resolveRepos(service, values.repo, values.adapter);
   const config = loadConfig(service);
@@ -67,15 +71,19 @@ export async function scanCmd(argv: string[]): Promise<unknown> {
 
   let request: string | null = null;
   // Strings needing a choice go to the WLU too, with what the catalogue offers: one a BA does not choose for must
-  // still reach somebody who can say which Welsh is right for this screen.
-  if ((values.request || values.out) && toWlu.length + ambiguous.length) {
+  // still reach somebody who can say which Welsh is right for this screen. A BA leaves out, by ref, what they have
+  // decided needs no Welsh.
+  const requested = [...toWlu, ...ambiguous].filter((g) => !leaveOut.has(g.ref));
+  if ((values.request || values.out) && requested.length) {
     request = await saveRequest(
       service,
       `scan-${repos.map((r) => basename(r.path)).join("+")}`,
-      [
-        ...toWlu.map((g) => ({ ref: g.ref, english: g.english, context: where(g.findings), notes: tokenNote(g.english) })),
-        ...ambiguous.map((g) => ({ ref: g.ref, english: g.english, context: where(g.findings), notes: checkNote(g) }))
-      ],
+      requested.map((g) => ({
+        ref: g.ref,
+        english: g.english,
+        context: where(g.findings),
+        notes: g.findings[0].match.kind === "ambiguous" ? checkNote(g) : tokenNote(g.english)
+      })),
       values.out ? resolve(values.out) : undefined
     );
   }
@@ -95,6 +103,7 @@ export async function scanCmd(argv: string[]): Promise<unknown> {
     repos: perRepo,
     summary: { ...s, unique: groups.length, fromCatalogue: fromCatalogue.length, ambiguous: ambiguous.length, toWlu: toWlu.length },
     request,
+    left_out: toWlu.length + ambiguous.length - requested.length,
     ambiguous: ambiguous.slice(0, limit).map((g) => ({
       ref: g.ref,
       english: g.english,
@@ -104,11 +113,36 @@ export async function scanCmd(argv: string[]): Promise<unknown> {
           ? g.findings[0].match.options.map((o) => ({ id: o.id, welsh: o.welsh, context: o.context, source: o.source }))
           : []
     })),
-    toWlu: toWlu.slice(0, limit).map((g) => ({ ref: g.ref, english: g.english, where: where(g.findings) })),
-    fromCatalogue: fromCatalogue
-      .slice(0, limit)
-      .map((g) => ({ ref: g.ref, english: g.english, welsh: g.findings[0].match.kind === "hit" ? g.findings[0].match.welsh : "", where: where(g.findings) }))
+    toWlu: toWlu.slice(0, limit).map((g) => ({
+      ref: g.ref,
+      english: g.english,
+      page: pageOf(g.findings[0].cyFile),
+      where: where(g.findings),
+      hint: noWelshHint(g.english, g.findings[0].key),
+      // `identical_allowlist` only quiets Welsh that is the English already: a key with no Welsh at all needs some.
+      keepable: g.findings.every((f) => f.signal === "identical")
+    })),
+    fromCatalogue: fromCatalogue.slice(0, limit).map((g) => ({
+      ref: g.ref,
+      english: g.english,
+      welsh: g.findings[0].match.kind === "hit" ? g.findings[0].match.welsh : "",
+      page: pageOf(g.findings[0].cyFile),
+      where: where(g.findings)
+    }))
   };
+}
+
+/** A locale file's page or list, from its folder: `…/pages/(public)/summary-of-publications/cy.ts` is "summary of publications". */
+export function pageOf(file: string): string {
+  const parts = file
+    .split("/")
+    .slice(0, -1)
+    .filter(
+      (p) =>
+        !/^\(.*\)$/.test(p) && !["src", "locales", "pages", "apps", "web", "libs", "list-types", "translation", "resources", "main", "en", "cy"].includes(p)
+    );
+  const name = parts.at(-1) ?? file;
+  return name.replace(/[-_]+/g, " ");
 }
 
 export function resolveRepos(service: string, repoArg: string | undefined, adapters: string[] | undefined): RepoConfig[] {

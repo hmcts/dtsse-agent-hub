@@ -42,6 +42,18 @@ describe("parseWelshFrame", () => {
     expect(parseWelshFrame("not a frame")).toBeNull();
   });
 
+  it("should take the refs a request leaves out, and refuse one that is not a ref", () => {
+    expect(parseWelshFrame({ job_id: JOB, kind: "request", product: "cath", args: { leave_out: ["CY-ABCDEF12"] } })?.leave_out).toEqual(["CY-ABCDEF12"]);
+    expect(parseWelshFrame({ job_id: JOB, kind: "request", product: "cath", args: {} })?.leave_out).toEqual([]);
+    expect(parseWelshFrame({ job_id: JOB, kind: "request", product: "cath", args: { leave_out: ["--pr"] } })).toBeNull();
+    expect(parseWelshFrame({ job_id: JOB, kind: "request", product: "cath", args: { leave_out: "CY-ABCDEF12" } })).toBeNull();
+  });
+
+  it("should need the English to keep", () => {
+    expect(parseWelshFrame({ job_id: JOB, kind: "keep_english", product: "cath", args: { strings: ["Rolls Building"] } })?.strings).toEqual(["Rolls Building"]);
+    expect(parseWelshFrame({ job_id: JOB, kind: "keep_english", product: "cath", args: {} })).toBeNull();
+  });
+
   it("should need a file for an import and keep only a safe file name", () => {
     expect(parseWelshFrame({ job_id: JOB, kind: "import", product: "cath", args: {} })).toBeNull();
     expect(parseWelshFrame({ job_id: JOB, kind: "import", product: "cath", args: { file_id: FILE }, file_name: "../x.xlsx" })?.file_name).toBe(
@@ -84,15 +96,43 @@ describe("welshArgs", () => {
     ]);
   });
 
-  it("should give a repo as an absolute path under the workspace, and the request a path in the job's directory", () => {
+  it("should give a repo as an absolute path under the workspace, and list a scan's strings without making a spreadsheet", () => {
     expect(welshArgs(frame("scan", { repo: "apps/cath/cath-service" }), WS, paths)).toEqual([
       "scan",
       "--service",
       "cath",
       "--repo",
       `${WS}/apps/cath/cath-service`,
+      "--limit",
+      "300"
+    ]);
+  });
+
+  it("should make a request in the job's directory without the strings a BA left out", () => {
+    expect(welshArgs(frame("request", { leave_out: ["CY-ABCDEF12", "CY-12345678"] }), WS, paths)).toEqual([
+      "scan",
+      "--service",
+      "cath",
+      "--limit",
+      "0",
+      "--leave-out",
+      "CY-ABCDEF12",
+      "--leave-out",
+      "CY-12345678",
       "--out",
       "/tmp/j/request.xlsx"
+    ]);
+  });
+
+  it("should keep English as it is through a draft pull request, the English after --", () => {
+    expect(welshArgs(frame("keep_english", { strings: ["--pr", "Rolls Building"] }), WS, paths)).toEqual([
+      "keep-english",
+      "--service",
+      "cath",
+      "--pr",
+      "--",
+      "--pr",
+      "Rolls Building"
     ]);
   });
 
@@ -149,7 +189,8 @@ describe("welshArgs", () => {
   });
 
   it("should name each spreadsheet for the person downloading it", () => {
-    expect(welshOutputs(frame("scan", {}), paths, "2026-10-29")).toEqual([{ path: "/tmp/j/request.xlsx", name: "cath-welsh-request-2026-10-29.xlsx" }]);
+    expect(welshOutputs(frame("request", {}), paths, "2026-10-29")).toEqual([{ path: "/tmp/j/request.xlsx", name: "cath-welsh-request-2026-10-29.xlsx" }]);
+    expect(welshOutputs(frame("scan", {}), paths, "2026-10-29")).toEqual([]);
     expect(welshOutputs(frame("import", { file_id: FILE }, { file_name: "return.xlsx" }), paths, "2026-10-29")[0]?.name).toBe("return-queries.xlsx");
     expect(welshOutputs(frame("story_write", { key: "PUB-1" }), paths, "2026-10-29")[0]?.name).toBe("PUB-1-welsh-request-2026-10-29.xlsx");
     expect(welshOutputs(frame("search", { query: "x" }), paths, "2026-10-29")).toEqual([]);
@@ -205,7 +246,7 @@ describe("runWelsh", () => {
         return { code: 0, stdout: JSON.stringify({ summary: { toWlu: 3 } }), stderr: "3 new for the WLU." };
       })
     });
-    const frame = parseWelshFrame({ job_id: JOB, kind: "scan", product: "cath", args: {} });
+    const frame = parseWelshFrame({ job_id: JOB, kind: "request", product: "cath", args: {} });
 
     // Act
     await runWelsh(d, frame as NonNullable<typeof frame>);

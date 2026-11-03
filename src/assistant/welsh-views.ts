@@ -82,8 +82,9 @@ export interface ScanView {
   ambiguousCount: number;
   toWluCount: number;
   ambiguous: Ambiguous[];
-  toWlu: { ref: string; english: string; where: string }[];
-  filled: { ref: string; english: string; welsh: string; where: string }[];
+  /** `hint` says why a string probably needs no Welsh; `keepable` is whether `keep_english` would stop it being asked about. */
+  toWlu: { ref: string; english: string; page: string; where: string; hint: string | null; keepable: boolean }[];
+  filled: { ref: string; english: string; welsh: string; page: string; where: string }[];
 }
 
 export function scanView(result: Json): ScanView {
@@ -95,9 +96,30 @@ export function scanView(result: Json): ScanView {
     ambiguousCount: num(summary.ambiguous),
     toWluCount: num(summary.toWlu),
     ambiguous: list(result.ambiguous).map((a) => ({ ref: str(a.ref), english: str(a.english), where: str(a.where), options: options(a.options) })),
-    toWlu: list(result.toWlu).map((t) => ({ ref: str(t.ref), english: str(t.english), where: str(t.where) })),
-    filled: list(result.fromCatalogue).map((f) => ({ ref: str(f.ref), english: str(f.english), welsh: str(f.welsh), where: str(f.where) }))
+    toWlu: list(result.toWlu).map((t) => ({
+      ref: str(t.ref),
+      english: str(t.english),
+      page: str(t.page),
+      where: str(t.where),
+      hint: nullable(t.hint),
+      keepable: t.keepable === true
+    })),
+    filled: list(result.fromCatalogue).map((f) => ({ ref: str(f.ref), english: str(f.english), welsh: str(f.welsh), page: str(f.page), where: str(f.where) }))
   };
+}
+
+/** A scan's strings by the page they are on, each page where its first string came. */
+export function byPage<T extends { page: string }>(items: readonly T[]): { page: string; items: T[] }[] {
+  const pages = new Map<string, T[]>();
+  for (const item of items) {
+    pages.set(item.page, [...(pages.get(item.page) ?? []), item]);
+  }
+  return [...pages].map(([page, list]) => ({ page, items: list }));
+}
+
+/** What a `keep_english` job did: the English it added to the allowlist, and the draft pull request that adds it. */
+export function keepView(result: Json): { added: string[]; already: number; pr: string | null } {
+  return { added: (Array.isArray(result.added) ? result.added : []).map(str).filter(Boolean), already: num(result.already), pr: nullable(result.pr) };
 }
 
 export interface ImportView {

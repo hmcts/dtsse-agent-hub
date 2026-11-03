@@ -540,7 +540,8 @@ The page is for people whose assistant has the `welsh` plugin ticked (`WELSH_PLU
 |---|---|---|
 | `info` | `{}` | `welsh info`: whether the service is set up, its repos, and its catalogue's counts |
 | `search` | `{query, mode}`, `mode` being `contains`, `exact` or `fuzzy` | `welsh search` |
-| `scan` | `{repo?}` | `welsh scan --out <file>`; the request spreadsheet comes back as a file |
+| `scan` | `{repo?}` | `welsh scan --limit 300`: what is missing, each new string with `hint`, why it probably needs no Welsh, and `keepable` |
+| `request` | `{repo?, leave_out?}` | `welsh scan --leave-out <ref>... --out <file>`; the request spreadsheet, without the strings the BA left out, comes back as a file |
 | `import_check` | `{file_id}` | `welsh import <file> --dry-run` |
 | `import` | `{file_id}` | `welsh import <file> --pr --queries-out <file>`; a draft PR in the service's own repo with the catalogue change and the return itself, and the queries spreadsheet as a file |
 | `apply_preview` | `{repo?, file_id?, choices?}` | `welsh apply --from catalogue` (or the file) `--dry-run` |
@@ -548,8 +549,9 @@ The page is for people whose assistant has the `welsh` plugin ticked (`WELSH_PLU
 | `story_candidates` | `{key}` | `welsh story <key>` |
 | `story_preview` | `{key, strings, choices?}` | `welsh story <key> --strings <file>` |
 | `story_write` | `{key}` | `welsh story <key> --write --out <file>`; the request for the WLU comes back as a file |
+| `keep_english` | `{strings}` | `welsh keep-english --pr -- <english>...`; a draft PR in the service's own repo adding them to `identical_allowlist`, so a scan stops asking about them |
 
-`query` is at most 100 characters; `repo` is `apps/<product>/<name>`; `key` is a Jira key (`^[A-Z][A-Z0-9_]{1,9}-[0-9]{1,7}$`); `strings` is 1 to 200 English strings of at most 2000 characters each; `choices` is at most 200 `{ref, row_id}`, `ref` being `^CY-[0-9A-F]{8}$` and `row_id` `^[0-9a-f]{10}$`; `file_id` is a file the person uploaded (below). Anything else is `400`.
+`query` is at most 100 characters; `repo` is `apps/<product>/<name>`; `key` is a Jira key (`^[A-Z][A-Z0-9_]{1,9}-[0-9]{1,7}$`); `strings` is 1 to 200 English strings of at most 2000 characters each, one line each for `keep_english`; `leave_out` is at most 300 refs; `choices` is at most 200 `{ref, row_id}`, `ref` being `^CY-[0-9A-F]{8}$` and `row_id` `^[0-9a-f]{10}$`; `file_id` is a file the person uploaded (below). Anything else is `400`.
 
 - The hub records the job and sends the pod a `welsh` on its sessions stream. `info` and `search` wait up to 10 seconds and answer as a lookup does, or with `{status: "pending", job_id}` if the pod has not answered by then; every other kind answers at once with `{status: "pending", job_id}`, and the page reads it back with `GET /api/ui/assistant/welsh/{job_id}` until it is no longer pending.
 - Either answers `200` with one of: `{status: "done", kind, result, files}`, `files` being `[{file_id, name, bytes}]` for the spreadsheets the job made; `{status: "pending", job_id}`; `{status: "waking"}`; `{status: "unsupported"}`; `{status: "signed_out", detail}`, `detail` naming GitHub or Atlassian; `{status: "failed", detail}`; or `{status: "timeout"}` — a job unanswered after 15 minutes. `result` is the JSON `scripts/welsh` printed for that command plus `message`, what it said to a person at a terminal, at most 512 KiB in all; the page reads only the fields it knows.

@@ -33,19 +33,17 @@ const ANSWERS: Partial<Record<WelshKind, WelshResponse>> = {
     total: 1,
     hits: [{ id: "r1", english: "Back to top", welsh: "Yn ôl i frig y dudalen", context: "", status: "approved", source: "legacy", catalogue: "cath" }]
   }),
-  scan: done(
-    "scan",
-    {
-      summary: { total: 354, unique: 231, fromCatalogue: 49, ambiguous: 1, toWlu: 180 },
-      ambiguous: [
-        { ref: "CY-AAAAAAAA", english: "Yes", where: "a/cy.ts:3 (en.yes)", options: [{ id: "0123456789", welsh: "Ydw", context: "", source: "legacy" }] }
-      ],
-      toWlu: [],
-      fromCatalogue: [],
-      message: "354 place(s) need Welsh"
-    },
-    [FILE]
-  ),
+  scan: done("scan", {
+    summary: { total: 354, unique: 231, fromCatalogue: 49, ambiguous: 1, toWlu: 180 },
+    ambiguous: [
+      { ref: "CY-AAAAAAAA", english: "Yes", where: "a/cy.ts:3 (en.yes)", options: [{ id: "0123456789", welsh: "Ydw", context: "", source: "legacy" }] }
+    ],
+    toWlu: [],
+    fromCatalogue: [],
+    message: "354 place(s) need Welsh"
+  }),
+  request: done("request", { left_out: 0 }, [FILE]),
+  keep_english: done("keep_english", { added: ["ServiceNow"], already: 0, pr: "https://github.com/hmcts/cath-service/pull/12" }),
   apply_preview: done("apply_preview", {
     applied: 50,
     files: ["a/cy.ts"],
@@ -189,6 +187,8 @@ describe("WelshPage", () => {
     // Act
     fireEvent.click(screen.getByRole("button", { name: "Find missing Welsh" }));
     await screen.findByText("new, for the Welsh unit");
+    fireEvent.click(screen.getByRole("button", { name: "Make the spreadsheet of 181 strings" }));
+    await screen.findByRole("link", { name: `Download ${FILE.name}` });
     fireEvent.click(screen.getByRole("radio", { name: "Ydw" }));
     fireEvent.click(screen.getByRole("button", { name: "Put the 50 into the code" }));
     await screen.findByText(/50 Welsh values would go into 1 file/);
@@ -206,6 +206,83 @@ describe("WelshPage", () => {
       product: "cath",
       args: { repo: "apps/cath/cath-service", choices: [{ ref: "CY-AAAAAAAA", row_id: "0123456789" }] }
     });
+  });
+
+  const CHECKED = done("scan", {
+    summary: { total: 4, unique: 3, fromCatalogue: 1, ambiguous: 0, toWlu: 5 },
+    toWlu: [
+      { ref: "CY-11111111", english: "Choose a file", page: "upload", where: "pages/upload/cy.ts:3 (en.choose)", hint: null, keepable: false },
+      {
+        ref: "CY-22222222",
+        english: "ServiceNow",
+        page: "sso rejected",
+        where: "pages/sso-rejected/cy.ts:6 (en.linkText)",
+        hint: "Looks like the name of a product or system, which usually stays in English.",
+        keepable: true
+      }
+    ],
+    fromCatalogue: [{ ref: "CY-33333333", english: "Back", welsh: "Yn ôl", page: "upload", where: "pages/upload/cy.ts:9 (en.back)" }]
+  });
+
+  it("should list the new strings page by page, ticked unless the scan said why not, and the catalogue's with their Welsh", async () => {
+    // Arrange
+    await open("scan", { ...ANSWERS, scan: CHECKED });
+
+    // Act
+    fireEvent.click(screen.getByRole("button", { name: "Find missing Welsh" }));
+    await screen.findByRole("table", { name: "sso rejected" });
+
+    // Assert
+    expect((screen.getByRole("checkbox", { name: "Send “Choose a file”" }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole("checkbox", { name: "Send “ServiceNow”" }) as HTMLInputElement).checked).toBe(false);
+    expect(screen.getByText("Looks like the name of a product or system, which usually stays in English.")).toBeTruthy();
+    expect(screen.getByText("Only the first 2 are listed. The other 3 always go in.")).toBeTruthy();
+    expect(screen.getByText("pages/upload/cy.ts:3 (en.choose)")).toBeTruthy();
+    expect(screen.getByText("The 1 string already in the catalogue")).toBeTruthy();
+    expect(screen.getByText("Yn ôl").getAttribute("lang")).toBe("cy");
+  });
+
+  it("should make the spreadsheet without what was left out, then keep that English only once confirmed", async () => {
+    // Arrange
+    const { requests } = await open("scan", { ...ANSWERS, scan: CHECKED });
+    fireEvent.click(screen.getByRole("button", { name: "Find missing Welsh" }));
+    await screen.findByRole("table", { name: "sso rejected" });
+
+    // Act
+    fireEvent.click(screen.getByRole("button", { name: "Make the spreadsheet of 4 strings" }));
+    await screen.findByRole("link", { name: `Download ${FILE.name}` });
+    fireEvent.click(screen.getByRole("button", { name: "Don't ask about the 1 string I left out again…" }));
+    expect(requests.some((r) => r.kind === "keep_english")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Open the draft pull request" }));
+
+    // Assert
+    expect((await screen.findByRole("link", { name: /pull\/12/ })).getAttribute("href")).toBe("https://github.com/hmcts/cath-service/pull/12");
+    expect(requests.find((r) => r.kind === "request")).toEqual({
+      kind: "request",
+      product: "cath",
+      args: { repo: "apps/cath/cath-service", leave_out: ["CY-22222222"] }
+    });
+    expect(requests.find((r) => r.kind === "keep_english")).toEqual({ kind: "keep_english", product: "cath", args: { strings: ["ServiceNow"] } });
+  });
+
+  it("should drop the spreadsheet when a tick changes, and tick everything or go back to the suggestions", async () => {
+    // Arrange
+    await open("scan", { ...ANSWERS, scan: CHECKED });
+    fireEvent.click(screen.getByRole("button", { name: "Find missing Welsh" }));
+    await screen.findByRole("table", { name: "sso rejected" });
+    fireEvent.click(screen.getByRole("button", { name: "Make the spreadsheet of 4 strings" }));
+    await screen.findByRole("link", { name: `Download ${FILE.name}` });
+
+    // Act
+    fireEvent.click(screen.getByRole("checkbox", { name: "Send “Choose a file”" }));
+
+    // Assert
+    expect(screen.queryByRole("link", { name: `Download ${FILE.name}` })).toBeNull();
+    expect(screen.getByRole("button", { name: "Make the spreadsheet of 3 strings" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Tick all" }));
+    expect(screen.getByRole("button", { name: "Make the spreadsheet of 5 strings" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Back to the suggestions" }));
+    expect(screen.getByRole("button", { name: "Make the spreadsheet of 4 strings" })).toBeTruthy();
   });
 
   it("should check a returned spreadsheet as soon as it is chosen, then add it to the catalogue and offer the queries", async () => {

@@ -87,6 +87,29 @@ describe("welsh jobs", () => {
     expect(await podFile(prisma, va, fileId)).toBeUndefined();
   });
 
+  it("should record a request without what the BA left out, and English to keep, and frame each for the pod", async () => {
+    // Arrange
+    const assistant = await assistantOf(ALICE);
+
+    // Act
+    const request = await jsonOf<{ job_id: string }>(await start({ kind: "request", product: "cath", args: { leave_out: ["CY-ABCDEF12"] } }));
+    const keep = await jsonOf<{ job_id: string }>(await start({ kind: "keep_english", product: "cath", args: { strings: ["Rolls Building"] } }));
+
+    // Assert
+    expect(await pendingWelsh(prisma, assistant, request.job_id)).toEqual({
+      job_id: request.job_id,
+      kind: "request",
+      product: "cath",
+      args: { leave_out: ["CY-ABCDEF12"] }
+    });
+    expect(await pendingWelsh(prisma, assistant, keep.job_id)).toEqual({
+      job_id: keep.job_id,
+      kind: "keep_english",
+      product: "cath",
+      args: { strings: ["Rolls Building"] }
+    });
+  });
+
   it("should upload a return, refuse what is not an xlsx, name it in the frame, and let only the owner's pod read it", async () => {
     // Arrange
     const assistant = await assistantOf(ALICE);

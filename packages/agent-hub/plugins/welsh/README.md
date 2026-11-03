@@ -120,6 +120,8 @@ Results show each row's `status`. Only `approved` rows are ever used to fill any
 ```bash
 $WELSH scan --service cath                 # repos in config.yaml
 $WELSH scan --service cath --request       # also write the WLU spreadsheet
+$WELSH scan --service cath --request --leave-out CY-1A2B3C4D   # without a string the BA says needs no Welsh
+$WELSH keep-english --service cath --pr -- "Rolls Building"   # and stop asking about it: a draft PR to identical_allowlist
 ```
 
 The scan reads the latest code on each repo's default branch. It reports every place English has no proper Welsh: a
@@ -129,12 +131,16 @@ placeholder" or a `cy` prefix, or Welsh that is just the English copied over. Th
 - **Already in the catalogue.** Apply them now; there's no need to ask the WLU.
 - **Needs a BA choice.** More than one approved rendering, or context-sensitive English such as Yes/No. These are in
   the WLU spreadsheet too, for the WLU to confirm.
-- **New for the WLU.** One row per English string, listing where it is used. Only the Welsh column is editable.
+- **New for the WLU.** One row per English string, listing where it is used. Only the Welsh column is editable. Each
+  has `hint` when it probably needs no Welsh, in words for the BA: part of an address, a cookie's or a system's name,
+  or text built by code. A hint is only a suggestion; the Welsh page starts those unticked, and the BA decides. A link
+  to a place on the page (`#field-id`) is never content, so it is not reported at all.
 
 **Only public-facing pages need Welsh.** Pages behind a staff role (admin and system-admin screens) are listed under
 `staff_only` in `config.yaml` and never scanned. To find them, look for routes behind `requireRole` for staff roles, or
 where the service hides its Welsh toggle. To stop a correct identical value being reported (an address the WLU says
-stays in English, say), add it to `identical_allowlist`.
+stays in English, say), add it to `identical_allowlist`: `keep-english` does that in a draft PR to the home repo, keeping
+the file's comments. It quiets only Welsh that is the English already; a key with no Welsh at all is still reported.
 
 ### Add a WLU return to the catalogue
 

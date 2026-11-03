@@ -155,3 +155,18 @@ test("a home repo on this machine is found without asking GitHub about the servi
     writeFileSync(join(ws, "workspace.yaml"), manifest);
   }
 });
+
+test("keep-english commits the English it keeps on its own branch of the home repo, and nothing when it is all kept", async () => {
+  const { keepEnglishCmd } = await import("../commands/keep.ts");
+  const done = (await keepEnglishCmd(["--service", "cath", "--", "Rolls Building"])) as { added: string[]; branch: string | null; pr: string | null };
+  assert.deepEqual(done.added, ["Rolls Building"]);
+  assert.equal(done.pr, null);
+  assert.match(done.branch ?? "", /^welsh\/cath-keep-english-/);
+  assert.match(sh(clone, "show", `${done.branch}:welsh/config.yaml`), /identical_allowlist:\n {2}- Rolls Building/);
+  assert.equal(sh(clone, "rev-parse", "--abbrev-ref", "HEAD"), "main");
+
+  sh(clone, "push", "--quiet", "origin", `${done.branch}:main`);
+  const again = (await keepEnglishCmd(["--service", "cath", "--", "Rolls Building"])) as { added: string[]; branch: string | null };
+  assert.deepEqual(again.added, []);
+  assert.equal(again.branch, null);
+});
