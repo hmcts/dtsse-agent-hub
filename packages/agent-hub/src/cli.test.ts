@@ -1662,7 +1662,8 @@ describe("artefact, in an assistant conversation", () => {
       expect(written.slides[1].image).toEqual({ path: file, alt: "The pipeline" });
       expect(written.slides[2].image.path).toBe(file);
       expect(fs.readFileSync(path.join(dir, file))).toEqual(GIF);
-      expect(r.text()).toMatch(/deck put .*outline\.json --pptx <deck\.pptx> --base 1/);
+      expect(r.text()).toMatch(/deck put \S*outline\.json --pptx <deck\.pptx>, which puts it as a change to version 1/);
+      expect(fs.readFileSync(path.join(dir, "version"), "utf8")).toBe("1\n");
       // The picture was already there with the right digest, so the second read fetched nothing.
       expect(calls(agentId, "GET", "/assets/")).toHaveLength(1);
       expect(JSON.parse(again.lines[0] as string)).toMatchObject({ title: "Ways of working", version: 1, updated_by: "user", pptx: false });
@@ -1682,6 +1683,59 @@ describe("artefact, in an assistant conversation", () => {
       expect(JSON.parse(one.lines[0] as string)).toMatchObject({ version: 1, number: 2, slide: { id: "why", title: "Why it matters" } });
       expect(none.code).toBe(1);
       expect(none.errors.join("\n")).toMatch(/version 1 has no slide with id s_ffff/);
+    });
+
+    it("should put against the version deck get read, and refuse the put, when someone writes a newer one in between", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      hub.writeDeckAsUser(agentId, outline({ asset: `sha256:${digest(PNG)}` }), { [digest(PNG)]: PNG });
+      expect((await cli(["deck", "get"], { sid })).code).toBe(0);
+      const dir = path.join(home.root, ".agent-hub", "decks", `0f8a6a1e-0000-4000-8000-${String(nextSession).padStart(12, "0")}`);
+      hub.writeDeckAsUser(agentId, outline({ asset: `sha256:${digest(PNG)}` }));
+
+      // Act
+      const r = await cli(["deck", "put", path.join(dir, "outline.json")], { sid });
+
+      // Assert
+      expect(r.code).toBe(1);
+      expect(r.errors.join("\n")).toMatch(/changed since version 1: it is now version 2, last written by the user\. Nothing was saved\./);
+      expect(calls(agentId, "PUT", "").find((c) => c.path === `/api/agent/${agentId}/deck`)?.body).toMatchObject({ base_version: 1 });
+      expect(hub.decks.get(agentId)?.version).toBe(2);
+    });
+
+    it("should record each version it puts from deck get's directory, so the next put builds on it", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      hub.writeDeckAsUser(agentId, outline({ asset: `sha256:${digest(PNG)}` }), { [digest(PNG)]: PNG });
+      await cli(["deck", "get"], { sid });
+      const dir = path.join(home.root, ".agent-hub", "decks", `0f8a6a1e-0000-4000-8000-${String(nextSession).padStart(12, "0")}`);
+
+      // Act
+      const first = await cli(["deck", "put", path.join(dir, "outline.json")], { sid });
+      const second = await cli(["deck", "put", path.join(dir, "outline.json")], { sid });
+      const explicit = await cli(["deck", "put", path.join(dir, "outline.json"), "--base", "1"], { sid });
+
+      // Assert
+      expect(first.code, first.errors.join("\n")).toBe(0);
+      expect(second.code, second.errors.join("\n")).toBe(0);
+      expect(fs.readFileSync(path.join(dir, "version"), "utf8")).toBe("3\n");
+      expect(explicit.code).toBe(1);
+      expect(explicit.errors.join("\n")).toMatch(/changed since version 1: it is now version 3/);
+    });
+
+    it("should quote the outline's path in the deck put it prints, when the home directory has a space in it", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      hub.writeDeckAsUser(agentId, outline({ asset: `sha256:${digest(PNG)}` }), { [digest(PNG)]: PNG });
+      const spaced = fs.mkdtempSync(path.join(home.root, "my home "));
+
+      // Act
+      const r = await cli(["deck", "get"], { sid, extraEnv: { HOME: spaced } });
+
+      // Assert
+      expect(r.code, r.errors.join("\n")).toBe(0);
+      const file = path.join(spaced, ".agent-hub", "decks", `0f8a6a1e-0000-4000-8000-${String(nextSession).padStart(12, "0")}`, "outline.json");
+      expect(r.text()).toContain(`deck put '${file}' --pptx <deck.pptx>`);
     });
 
     it("should refuse to publish, naming the current version, when the deck changed since --base", async () => {

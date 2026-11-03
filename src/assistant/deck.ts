@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { boundedArray } from "../agent-api/bounded-array.ts";
+import { MAX_BODY } from "../messages/limits.ts";
+import { clip } from "./downloads.ts";
 import type { Outline } from "./slides/masters.ts";
 
 /**
@@ -21,7 +23,8 @@ export const MAX_PPTX_BYTES = 5 * 1024 * 1024;
 export const MAX_DECK_ASSET_BYTES = 20 * 1024 * 1024;
 /**
  * Every picture a conversation holds, those only older versions name included. An upload that would pass it drops the
- * oldest versions, never the latest, until the pictures no kept version names leave room.
+ * oldest versions, never the newest `KEEP_PPTX`, until the pictures no kept version names leave room, and is refused
+ * when they cannot.
  */
 export const MAX_HELD_ASSET_BYTES = 60 * 1024 * 1024;
 /** A picture's width and height, each: a JPEG or GIF header cannot say more, and the columns are INTEGER. */
@@ -313,11 +316,43 @@ export function isPptx(bytes: Uint8Array): boolean {
   return startsWith(bytes, [0x50, 0x4b, 0x03, 0x04]);
 }
 
+/** The longest a slide reference is, its titles cut to fit, so the composer can keep a fixed room for it. */
+export const MAX_SLIDE_REFERENCE = 300;
+/** What a message about a slide may hold of the person's words: `MAX_BODY` less the reference and its line break. */
+export const MAX_ASKED_BODY = MAX_BODY - MAX_SLIDE_REFERENCE - 1;
+
+/** `text`, or the longest start of it with an ellipsis, whose JSON string is at most `budget` inside its quotes. */
+function fitQuoted(text: string, budget: number): string {
+  const inside = (value: string) => JSON.stringify(value).length - 2;
+  if (inside(text) <= budget) {
+    return text;
+  }
+  for (let units = budget - 1; units > 0; units -= 1) {
+    const cut = `${clip(text, units)}…`;
+    if (inside(cut) <= budget) {
+      return cut;
+    }
+  }
+  return "…";
+}
+
 /**
  * The words a person's message starts with when they ask about one slide, which the session reads the slide by. Slide
- * 1 is the title slide, which is made from the outline's own fields and so has no id.
+ * 1 is the title slide, which is made from the outline's own fields and so has no id. At most `MAX_SLIDE_REFERENCE`:
+ * the titles are cut to fit, each keeping half the room unless the other needs less, and never the id or version,
+ * which the session reads the slide by.
  */
 export function slideReference(deck: { title: string; version: number }, index: number, slideTitle: string, id: string | undefined): string {
   const which = id === undefined ? "" : `, id ${id}`;
-  return `[Slide ${index + 1} of ${JSON.stringify(deck.title)} v${deck.version}${which}: ${JSON.stringify(slideTitle)}]`;
+  const reference = (deckTitle: string, title: string) =>
+    `[Slide ${index + 1} of ${JSON.stringify(deckTitle)} v${deck.version}${which}: ${JSON.stringify(title)}]`;
+  const whole = reference(deck.title, slideTitle);
+  if (whole.length <= MAX_SLIDE_REFERENCE) {
+    return whole;
+  }
+  const room = MAX_SLIDE_REFERENCE - reference("", "").length;
+  const titleLength = JSON.stringify(slideTitle).length - 2;
+  const deckBudget = Math.max(Math.floor(room / 2), room - titleLength);
+  const deckTitle = fitQuoted(deck.title, deckBudget);
+  return reference(deckTitle, fitQuoted(slideTitle, room - (JSON.stringify(deckTitle).length - 2)));
 }

@@ -4,7 +4,7 @@ import { conversationItems } from "../transcripts/conversation.ts";
 import { agentConversation } from "../transcripts/views.ts";
 import { readArtefact } from "./artefact-store.ts";
 import { storedHistory, storedStops } from "./conversation-row.ts";
-import { type DeckSummary, deckSummary } from "./deck-store.ts";
+import { DECK_SELECT, type DeckSummary, deckSummary } from "./deck-store.ts";
 import { FORKED_SELECT, type ForkedView, forkedView } from "./forks.ts";
 import { hasPod } from "./pods.ts";
 import { productLabel } from "./products.ts";
@@ -134,7 +134,8 @@ export async function sharedConversation(
       stopHistory: true,
       agentId: true,
       owner: { select: { name: true } },
-      ...FORKED_SELECT
+      ...FORKED_SELECT,
+      ...DECK_SELECT
     }
   });
   if (row === null) {
@@ -144,7 +145,7 @@ export async function sharedConversation(
   const [page, artefact, deck] = await Promise.all([
     agentId === null ? undefined : agentConversation(db, conversation.ownerOid, { id: agentId, ownerOid: conversation.ownerOid }),
     readArtefact(db, conversation.id),
-    deckSummary(db, conversation.id)
+    deckSummary(db, conversation.id, row)
   ]);
   const items = page === undefined ? [] : conversationItems(page.messages, page.entries);
   return {

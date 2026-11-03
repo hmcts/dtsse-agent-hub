@@ -4,6 +4,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Skill } from "@/agents/skills";
+import { MAX_ASKED_BODY, MAX_SLIDE_REFERENCE } from "@/assistant/deck";
 import { STARTERS, TEMPLATES } from "@/assistant/starters";
 import { WARMING_QUIPS } from "@/assistant/thread";
 import type { ConversationView } from "@/assistant/views";
@@ -2067,6 +2068,49 @@ describe("ChatView slides", () => {
     expect(chatActions.saveArtefact).toHaveBeenCalledWith({ conversationId: CONVERSATION, title: "Story", markdown: "x, edited", baseVersion: 1 });
   });
 
+  it("should open the document again with the edit, saying it could not save, when the save made as it closed fails", async () => {
+    const saveArtefact = vi.fn(async () => ({ ok: false as const, error: "down" }));
+    render(chat({ deck: DECK, artefact: WRITTEN }, actions({ saveArtefact })));
+    fireEvent.click(screen.getByRole("button", { name: "Open document" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Document, in markdown" }), { target: { value: "x, edited" } });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Close document" }));
+    });
+
+    expect(saveArtefact).toHaveBeenCalledTimes(1);
+    const reopened = screen.getByRole("region", { name: "Document" });
+    expect((within(reopened).getByRole("textbox", { name: "Document, in markdown" }) as HTMLTextAreaElement).value).toBe("x, edited");
+    expect(
+      within(reopened)
+        .getAllByRole("status")
+        .map((status) => status.textContent)
+    ).toContain("Could not save; keep typing to try again");
+  });
+
+  it("should open the document again with the edit and the conflict banner, in the slides' place, when the save made as it closed finds a newer version", async () => {
+    const theirs = { title: "Story", markdown: "theirs", version: 2, updatedBy: "agent" as const };
+    const saveArtefact = vi.fn(async () => ({ ok: true as const, saved: false as const, current: theirs }));
+    render(chat({ deck: DECK, artefact: WRITTEN }, actions({ saveArtefact })));
+    fireEvent.click(screen.getByRole("button", { name: "Open document" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Document, in markdown" }), { target: { value: "x, edited" } });
+
+    await openSlides();
+
+    expect(screen.queryByRole("region", { name: "Slides" })).toBeNull();
+    const reopened = screen.getByRole("region", { name: "Document" });
+    expect((within(reopened).getByRole("textbox", { name: "Document, in markdown" }) as HTMLTextAreaElement).value).toBe("x, edited");
+    expect(within(reopened).getByRole("alert").textContent).toContain("The assistant has changed this document.");
+
+    // Keeping theirs settles it, and closing then saves nothing more.
+    fireEvent.click(within(reopened).getByRole("button", { name: "Use theirs" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close document" }));
+    expect(screen.queryByRole("region", { name: "Document" })).toBeNull();
+    expect(saveArtefact).toHaveBeenCalledTimes(1);
+  });
+
   it("should put the slide in front of the message as it is sent, and drop it afterwards, when the person asks about a slide", async () => {
     const send = vi.fn(async () => ({ ok: true as const, message: message("99", { body: "sent" }) }));
     render(chat({ deck: DECK }, actions({ send })));
@@ -2096,6 +2140,25 @@ describe("ChatView slides", () => {
     await type("Hello");
 
     expect(send).toHaveBeenCalledWith({ conversationId: CONVERSATION, body: "Hello", uploadIds: [] });
+  });
+
+  it("should refuse words past the room the slide leaves, sending nothing, and send words that fill it, when the person asks about a slide", async () => {
+    const send = vi.fn(async () => ({ ok: true as const, message: message("99", { body: "sent" }) }));
+    render(chat({ deck: { ...DECK, title: "D".repeat(200) } }, actions({ send })));
+    await openSlides();
+    fireEvent.click(screen.getByRole("button", { name: "Ask about this slide" }));
+
+    await type("x".repeat(MAX_ASKED_BODY + 1));
+
+    expect(send).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toBe(`a message about a slide is at most ${MAX_ASKED_BODY} characters`);
+
+    await type("x".repeat(MAX_ASKED_BODY));
+
+    expect(send).toHaveBeenCalledTimes(1);
+    const sent = (send.mock.calls[0] as unknown as [{ body: string }])[0].body;
+    expect(sent.length).toBeLessThanOrEqual(MAX_SLIDE_REFERENCE + 1 + MAX_ASKED_BODY);
+    expect(sent.endsWith(`]\n${"x".repeat(MAX_ASKED_BODY)}`)).toBe(true);
   });
 
   it("should keep the slide on the message when the send is refused", async () => {

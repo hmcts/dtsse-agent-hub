@@ -404,18 +404,48 @@ describe("DeckPanel", () => {
     expect(screen.getByRole("region", { name: "Slide 1 of 7: Ways of working" })).toBeTruthy();
   });
 
-  it("should keep the slides it has when a later read fails", async () => {
-    serving(deck(), 500);
+  it("should keep the slides it has, say which version it could not load, and describe the one it shows, when a later read fails", async () => {
+    const reads = serving(
+      deck(),
+      500,
+      deck({ version: 8, title: "Ways of working, final", outline: outline({ title: "Ways of working, final" }), pptx: true })
+    );
     const { rerender } = render(
       <DeckPanel conversationId={CONVERSATION} deck={summary()} onClose={() => undefined} narrow={false} announce={() => undefined} />
     );
     await settle();
+    expect(screen.queryByRole("alert")).toBeNull();
 
-    rerender(<DeckPanel conversationId={CONVERSATION} deck={summary({ version: 8 })} onClose={() => undefined} narrow={false} announce={() => undefined} />);
+    const newer = summary({ version: 8, title: "Ways of working, final" });
+    rerender(<DeckPanel conversationId={CONVERSATION} deck={newer} onClose={() => undefined} narrow={false} announce={() => undefined} />);
     await settle();
 
     expect(screen.getByRole("region", { name: "Slide 1 of 7: Ways of working" })).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain("Couldn't load version 8");
+    // The header, the version and the download are the version on screen's, not the page's.
+    expect(screen.getByRole("heading", { level: 2, name: "Ways of working" })).toBeTruthy();
+    expect(screen.getByText("Version 7")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Download .pptx" }).getAttribute("href")).toBe(deckPptxUrl(CONVERSATION, 7));
+
+    fireEvent.click(within(screen.getByRole("alert")).getByRole("button", { name: "Try again" }));
+    await settle();
+
+    expect(reads).toHaveBeenCalledTimes(3);
     expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("heading", { level: 2, name: "Ways of working, final" })).toBeTruthy();
+    expect(screen.getByText("Version 8")).toBeTruthy();
+  });
+
+  it("should say which version it could not load on a shared chat's page too, when a later read fails", async () => {
+    serving(deck(), 500);
+    const { rerender } = render(<SharedDeck conversationId={CONVERSATION} deck={summary()} />);
+    await settle();
+
+    rerender(<SharedDeck conversationId={CONVERSATION} deck={summary({ version: 8, title: "Renamed" })} />);
+    await settle();
+
+    expect(screen.getByRole("alert").textContent).toContain("Couldn't load version 8");
+    expect(screen.getByRole("heading", { level: 2, name: "Ways of working" })).toBeTruthy();
   });
 });
 

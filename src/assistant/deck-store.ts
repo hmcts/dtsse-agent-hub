@@ -21,7 +21,8 @@ import {
  *
  * Every write applies the retention in its own transaction: the newest `KEEP_VERSIONS` outlines stay, only the newest
  * `KEEP_PPTX` keep their .pptx, and a picture no kept outline names goes once it is older than `ASSET_GRACE_MS`. An
- * upload that would take the pictures held past `MAX_HELD_ASSET_BYTES` drops the oldest outlines to make room. A
+ * upload that would take the pictures held past `MAX_HELD_ASSET_BYTES` drops the oldest outlines to make room, never
+ * one of the newest `KEEP_PPTX`, and is refused when only those would make it. A
  * write locks the conversation's row, as an asset upload and a .pptx upload do, so the three cannot interleave.
  */
 
@@ -165,7 +166,7 @@ export async function writeDeck(
   });
 }
 
-export type AssetWrite = "stored" | "held" | "deck_full";
+export type AssetWrite = "stored" | "held" | "deck_full" | "held_full";
 
 /** The bytes of the pictures the deck is using: those its latest version names, and those still in their grace. */
 async function usedAssetBytes(db: Database, conversationId: string, now: Date): Promise<number> {
@@ -189,44 +190,50 @@ async function usedAssetBytes(db: Database, conversationId: string, now: Date): 
 
 /**
  * Makes room for `incoming` more bytes under `MAX_HELD_ASSET_BYTES`, by deleting the fewest of the oldest versions
- * whose going leaves the pictures still held under it, and then the pictures nothing kept names. The latest version
- * is never deleted: what it names, with what is in its grace, is under `MAX_DECK_ASSET_BYTES` by the time this runs,
- * so dropping every older one always leaves room.
+ * whose going leaves the pictures still held under it, and then the pictures nothing kept names. The newest
+ * `KEEP_PPTX` versions are never deleted, since they are the ones the person can download: when room needs one of
+ * them, nothing is deleted and the answer is `false`.
  */
-async function makeRoom(db: Database, conversationId: string, incoming: number, now: Date): Promise<void> {
+async function makeRoom(db: Database, conversationId: string, incoming: number, now: Date): Promise<boolean> {
   const assets = await db.$queryRaw<{ sha256: string; bytes: number; fresh: boolean }[]>`
     SELECT sha256, octet_length(bytes) AS bytes, created_at >= ${new Date(now.getTime() - ASSET_GRACE_MS)} AS fresh
       FROM assistant_deck_asset WHERE conversation_id = ${conversationId}::uuid
   `;
   const held = assets.reduce((sum, asset) => sum + asset.bytes, 0);
   if (held + incoming <= MAX_HELD_ASSET_BYTES) {
-    return;
+    return true;
   }
   const versions = await db.$queryRaw<{ version: number; refs: string[] }[]>`
     SELECT version, jsonb_path_query_array(outline, '$.slides[*].image.asset') AS refs
       FROM assistant_deck_version WHERE conversation_id = ${conversationId}::uuid ORDER BY version ASC
   `;
   // Deleting the versions before `versions[cut]` keeps a picture that is fresh or named from `cut` on.
-  let cut = 0;
-  for (; cut < versions.length - 1; cut += 1) {
+  const fits = (cut: number): boolean => {
     const named = new Set(versions.slice(cut).flatMap((one) => one.refs));
     const kept = assets.filter((asset) => asset.fresh || named.has(assetRef(asset.sha256))).reduce((sum, asset) => sum + asset.bytes, 0);
-    if (kept + incoming <= MAX_HELD_ASSET_BYTES) {
-      break;
-    }
+    return kept + incoming <= MAX_HELD_ASSET_BYTES;
+  };
+  const deletable = Math.max(0, versions.length - KEEP_PPTX);
+  let cut = 0;
+  while (cut < deletable && !fits(cut)) {
+    cut += 1;
+  }
+  if (!fits(cut)) {
+    return false;
   }
   const oldestKept = versions[cut]?.version;
   if (cut > 0 && oldestKept !== undefined) {
     await db.$executeRaw`DELETE FROM assistant_deck_version WHERE conversation_id = ${conversationId}::uuid AND version < ${oldestKept}::int`;
   }
   await deleteUnnamedAssets(db, conversationId, now);
+  return true;
 }
 
 /**
  * Stores one picture for the deck, under the digest of its bytes. Storing one already held changes nothing, so an
  * upload repeated after a lost answer is answered the same. `deck_full` is a picture that would take the pictures the
  * deck is using past `MAX_DECK_ASSET_BYTES`; one that would take every picture held past `MAX_HELD_ASSET_BYTES` makes
- * room by dropping old versions instead (`makeRoom`).
+ * room by dropping old versions instead (`makeRoom`), and is `held_full` when only the newest `KEEP_PPTX` would.
  *
  * Not announced: nothing on screen shows a picture until an outline names it, and that write is announced.
  */
@@ -249,7 +256,9 @@ export async function putDeckAsset(
     if ((await usedAssetBytes(tx, conversationId, now)) + bytes.byteLength > MAX_DECK_ASSET_BYTES) {
       return "deck_full";
     }
-    await makeRoom(tx, conversationId, bytes.byteLength, now);
+    if (!(await makeRoom(tx, conversationId, bytes.byteLength, now))) {
+      return "held_full";
+    }
     await tx.assistantDeckAsset.create({
       data: { conversationId, sha256, mime: info.mime, bytes: Buffer.from(bytes), width: info.width, height: info.height, createdAt: now }
     });
@@ -265,6 +274,11 @@ export interface DeckAsset {
 export async function readDeckAsset(db: Database, conversationId: string, sha256: string): Promise<DeckAsset | undefined> {
   const row = await db.assistantDeckAsset.findUnique({ where: { conversationId_sha256: { conversationId, sha256 } }, select: { mime: true, bytes: true } });
   return row ?? undefined;
+}
+
+/** Whether the deck holds the picture, without reading its bytes: what a revalidation needs to answer `304`. */
+export async function holdsDeckAsset(db: Database, conversationId: string, sha256: string): Promise<boolean> {
+  return (await db.assistantDeckAsset.count({ where: { conversationId, sha256 } })) > 0;
 }
 
 /** Each picture's size in pixels, so the browser can keep its room before it has loaded. */
@@ -391,9 +405,13 @@ export interface DeckSummary {
   pptx: boolean;
 }
 
-export async function deckSummary(db: Database, conversationId: string): Promise<DeckSummary | null> {
-  const row = await db.assistantConversation.findUnique({ where: { id: conversationId }, select: DECK_SELECT });
-  if (row === null || row.deckVersion === 0 || row.deckTitle === null) {
+/** From the conversation's deck columns (`DECK_SELECT`), which the page has already read with the rest of its row. */
+export async function deckSummary(
+  db: Database,
+  conversationId: string,
+  row: { deckTitle: string | null; deckVersion: number; deckUpdatedBy: string | null }
+): Promise<DeckSummary | null> {
+  if (row.deckVersion === 0 || row.deckTitle === null) {
     return null;
   }
   const [latest] = await db.$queryRaw<{ pptx: boolean }[]>`

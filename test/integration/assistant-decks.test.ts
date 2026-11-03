@@ -114,8 +114,16 @@ async function agent<P>(handler: Handler<P>, path: string, params: P, method = "
   return await handler(request, { params: Promise.resolve(params) });
 }
 
-async function browser<P>(handler: (request: NextRequest, context: { params: Promise<P> }) => Promise<Response>, as: string, path: string, params: P) {
-  return await handler(new NextRequest(`http://localhost:3000${path}`, { headers: { cookie: `ah_dev_persona=${as}` } }), { params: Promise.resolve(params) });
+async function browser<P>(
+  handler: (request: NextRequest, context: { params: Promise<P> }) => Promise<Response>,
+  as: string,
+  path: string,
+  params: P,
+  headers: Record<string, string> = {}
+) {
+  return await handler(new NextRequest(`http://localhost:3000${path}`, { headers: { cookie: `ah_dev_persona=${as}`, ...headers } }), {
+    params: Promise.resolve(params)
+  });
 }
 
 async function upload(chatOf: Chat, bytes: Buffer, sha = digest(bytes)): Promise<Response> {
@@ -339,7 +347,7 @@ describe("the deck's retention", () => {
     expect(await prisma.assistantDeckVersion.count({ where: { conversationId: mine.id } })).toBe(3);
   });
 
-  it("should drop the oldest versions, never the latest, and then their pictures, when an upload would pass the conversation's ceiling", async () => {
+  it("should drop the oldest versions, never the newest 3, and then their pictures, when an upload would pass the conversation's ceiling", async () => {
     const mine = await chat();
     const pictures = MAX_HELD_ASSET_BYTES / MAX_ASSET_BYTES;
     const long = new Date(Date.now() - ASSET_GRACE_MS - 60_000);
@@ -372,6 +380,40 @@ describe("the deck's retention", () => {
     expect((await readDeck(prisma, mine.id)).version).toBe(pictures);
   });
 
+  it("should refuse a picture with a 409 naming the ceiling, deleting nothing, when only the newest 3 versions could make room", async () => {
+    const mine = await chat();
+    const long = new Date(Date.now() - ASSET_GRACE_MS - 60_000);
+    // Twelve pictures past their grace, 60 MiB in all, named 4, 5 and 3 by the only three versions.
+    const shas: string[] = [];
+    for (let seed = 1; seed <= MAX_HELD_ASSET_BYTES / MAX_ASSET_BYTES; seed += 1) {
+      const bytes = png(seed, MAX_ASSET_BYTES);
+      await prisma.assistantDeckAsset.create({
+        data: { conversationId: mine.id, sha256: digest(bytes), mime: "image/png", bytes: new Uint8Array(bytes), width: 640, height: 320, createdAt: long }
+      });
+      shas.push(digest(bytes));
+    }
+    await writeDeck(prisma, mine.row, { outline: outline(shas.slice(0, 4)), baseVersion: 0, by: "agent", summary: null }, long);
+    await writeDeck(prisma, mine.row, { outline: outline(shas.slice(4, 9)), baseVersion: 1, by: "agent", summary: null }, long);
+    await writeDeck(prisma, mine.row, { outline: outline(shas.slice(9)), baseVersion: 2, by: "agent", summary: null }, long);
+
+    // The latest names 15 MiB, so the 20 MiB rule lets a fifth in; only the 60 MiB one refuses it.
+    const refused = await upload(mine, png(100, MAX_ASSET_BYTES));
+
+    expect(refused.status).toBe(409);
+    expect((await jsonOf(refused)).error).toBe(
+      `a conversation holds at most ${MAX_HELD_ASSET_BYTES} bytes of pictures, and the latest ${KEEP_PPTX} versions, which are never deleted to make room, name too many to take this one`
+    );
+    const versions = await prisma.assistantDeckVersion.findMany({ where: { conversationId: mine.id }, select: { version: true }, orderBy: { version: "asc" } });
+    expect(versions.map((row) => row.version)).toEqual([1, 2, 3]);
+    expect(await prisma.assistantDeckAsset.count({ where: { conversationId: mine.id } })).toBe(shas.length);
+
+    // A fourth version, naming nothing new, lets version 1 go, and with it the room the picture needs.
+    await writeDeck(prisma, mine.row, { outline: outline(shas.slice(9)), baseVersion: 3, by: "agent", summary: null }, long);
+    expect((await upload(mine, png(100, MAX_ASSET_BYTES))).status).toBe(201);
+    const left = await prisma.assistantDeckVersion.findMany({ where: { conversationId: mine.id }, select: { version: true }, orderBy: { version: "asc" } });
+    expect(left.map((row) => row.version)).toEqual([2, 3, 4]);
+  });
+
   it("should take the deck's versions and pictures with the conversation when it is deleted", async () => {
     const mine = await chat();
     const sha = await store(mine, png(1));
@@ -393,18 +435,19 @@ describe("reading a deck in the browser", () => {
     return { mine, sha };
   }
 
-  const picture = (as: string, id: string, sha: string) =>
-    browser(browserAssetRoute.GET, as, `/api/ui/assistant/decks/${id}/assets/${sha}`, { conversationId: id, sha256: sha });
+  const picture = (as: string, id: string, sha: string, headers: Record<string, string> = {}) =>
+    browser(browserAssetRoute.GET, as, `/api/ui/assistant/decks/${id}/assets/${sha}`, { conversationId: id, sha256: sha }, headers);
   const outlineOf = (as: string, id: string) => browser(browserDeckRoute.GET, as, `/api/ui/assistant/decks/${id}`, { conversationId: id });
   const download = (as: string, id: string, version = "1") =>
     browser(browserPptxRoute.GET, as, `/api/ui/assistant/decks/${id}/versions/${version}/pptx`, { conversationId: id, version });
 
-  it("should give the owner the deck's pictures to cache for good, and its .pptx to download under the deck's title", async () => {
+  it("should give the owner the deck's pictures to revalidate on every use, and its .pptx to download under the deck's title", async () => {
     const { mine, sha } = await deckWithPicture();
 
     const read = await picture("alice", mine.id, sha);
     expect(read.status).toBe(200);
-    expect(read.headers.get("cache-control")).toBe("private, max-age=31536000, immutable");
+    expect(read.headers.get("cache-control")).toBe("private, no-cache");
+    expect(read.headers.get("etag")).toBe(`"${sha}"`);
     expect(read.headers.get("content-type")).toBe("image/png");
 
     const file = await download("alice", mine.id);
@@ -428,6 +471,17 @@ describe("reading a deck in the browser", () => {
     );
   });
 
+  it("should download the .pptx, with the emoji left out whole, when the deck's title has one straddling the filename's limit", async () => {
+    const mine = await chat();
+    await writeDeck(prisma, mine.row, { outline: outline([], `${"a".repeat(79)}😀 plan`), baseVersion: 0, by: "agent", summary: null });
+    await putDeckPptx(prisma, mine.row, 1, PPTX);
+
+    const file = await download("alice", mine.id);
+
+    expect(file.status).toBe(200);
+    expect(file.headers.get("content-disposition")).toBe(`attachment; filename="${"a".repeat(79)}.pptx"; filename*=UTF-8''${"a".repeat(79)}.pptx`);
+  });
+
   it("should give the owner, and anyone the chat is shared with, the latest outline with its pictures' sizes, never to be cached", async () => {
     const { mine, sha } = await deckWithPicture();
 
@@ -445,6 +499,28 @@ describe("reading a deck in the browser", () => {
 
     const empty = await chat();
     expect((await outlineOf("alice", empty.id)).status).toBe(404);
+  });
+
+  it("should answer 304 with no bytes to a revalidation the viewer may still read, and 404 once the share is taken away", async () => {
+    const { mine, sha } = await deckWithPicture();
+    actAs("alice");
+    await shareActions.shareChat({ conversationId: mine.id, recipientOid: BOB.oid });
+    const held = { "if-none-match": `W/"${digest(png(9))}", "${sha}"` };
+
+    const own = await picture("alice", mine.id, sha, held);
+    expect(own.status).toBe(304);
+    expect(own.headers.get("cache-control")).toBe("private, no-cache");
+    expect((await own.arrayBuffer()).byteLength).toBe(0);
+    expect((await picture("bob", mine.id, sha, held)).status).toBe(304);
+    expect((await picture("bob", mine.id, sha, { "if-none-match": `"${digest(png(9))}"` })).status).toBe(200);
+    expect((await picture("carol", mine.id, sha, held)).status).toBe(404);
+
+    actAs("alice");
+    await shareActions.unshareChat({ conversationId: mine.id, recipientOid: BOB.oid });
+    expect((await picture("bob", mine.id, sha, held)).status).toBe(404);
+    expect((await picture("bob", mine.id, sha, { "if-none-match": "*" })).status).toBe(404);
+    const gone = digest(png(8));
+    expect((await picture("alice", mine.id, gone, { "if-none-match": `"${gone}"` })).status).toBe(404);
   });
 
   it("should refuse someone the chat is not shared with, and serve someone it is until the share is taken away", async () => {

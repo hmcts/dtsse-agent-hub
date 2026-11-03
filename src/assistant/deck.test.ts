@@ -8,8 +8,10 @@ import {
   isPptx,
   isSha256,
   jsonbText,
+  MAX_ASKED_BODY,
   MAX_IMAGE_SIDE,
   MAX_OUTLINE_BYTES,
+  MAX_SLIDE_REFERENCE,
   newSlideId,
   outlineAssets,
   plannable,
@@ -302,6 +304,31 @@ describe("slideReference", () => {
     expect(slideReference({ title: "Ways of working", version: 7 }, 3, "Releases take three weeks", "s_ab12")).toBe(
       '[Slide 4 of "Ways of working" v7, id s_ab12: "Releases take three weeks"]'
     );
+  });
+
+  it("should cut both titles to keep the reference within its room, keeping the id and version, when both titles are at their longest", () => {
+    const reference = slideReference({ title: "D".repeat(200), version: 2_147_483_647 }, 99, "T".repeat(200), `s_${"x".repeat(62)}`);
+
+    expect(reference.length).toBeLessThanOrEqual(MAX_SLIDE_REFERENCE);
+    expect(reference).toMatch(/^\[Slide 100 of "D+…" v2147483647, id s_x{62}: "T+…"\]$/);
+    expect(MAX_ASKED_BODY).toBe(32_000 - MAX_SLIDE_REFERENCE - 1);
+  });
+
+  it("should give a short deck title its whole length and the slide's title the rest, when only the slide's is long", () => {
+    const reference = slideReference({ title: "Plan", version: 1 }, 1, "T".repeat(400), "s_ab12");
+
+    expect(reference.length).toBe(MAX_SLIDE_REFERENCE);
+    expect(reference).toMatch(/^\[Slide 2 of "Plan" v1, id s_ab12: "T+…"\]$/);
+  });
+
+  it("should measure a title as it is escaped, never cutting an escape or a surrogate pair, when the title is quotes and emoji", () => {
+    const reference = slideReference({ title: '"😀'.repeat(100), version: 1 }, 1, "Short", "s_ab12");
+
+    expect(reference.length).toBeLessThanOrEqual(MAX_SLIDE_REFERENCE);
+    const deckTitle = JSON.parse(reference.slice(reference.indexOf(" of ") + 4, reference.indexOf(" v1"))) as string;
+    expect(deckTitle.endsWith("…")).toBe(true);
+    expect(deckTitle.isWellFormed()).toBe(true);
+    expect(reference).toContain(': "Short"]');
   });
 
   it("should leave the id out for the title slide, and quote a title holding quotes", () => {
