@@ -1769,9 +1769,10 @@ const args = process.argv.slice(2);
 const file = args.find((a) => a.startsWith("--body-file="));
 const body = file ? fs.readFileSync(file.slice("--body-file=".length), "utf8") : "";
 fs.appendFileSync(${JSON.stringify(logFile)}, JSON.stringify({ args, body }) + "\\n");
+if (args[0] === "project" && args[1] === "item-add") { process.exit(0); }
 if (args[0] === "issue" && args[1] === "create") {
   const repo = args.find((a) => a.startsWith("--repo=")).slice("--repo=".length);
-  const n = fs.readFileSync(${JSON.stringify(logFile)}, "utf8").split("\\n").filter((l) => l !== "").length;
+  const n = fs.readFileSync(${JSON.stringify(logFile)}, "utf8").split("\\n").filter((l) => l.includes('"create"')).length;
   console.log("https://github.com/" + repo + "/issues/" + (40 + n));
   process.exit(0);
 }
@@ -1809,6 +1810,27 @@ process.exit(2);
       }
     ]);
     expect(githubReported(agentId)).toEqual([{ agent_id: agentId, export_id: EXPORT, number: 41 }]);
+  });
+
+  it("should add the issue to the Project given and say so when github export runs with --project", async () => {
+    // Arrange
+    const { sid, agentId } = await session();
+    const exportId = "8e3b0f4d-4444-4555-8666-777788889999";
+    hub.editArtefactAsUser(agentId, "# Stories", "Fee stories");
+    const gh = fakeGh();
+
+    // Act
+    const r = await cli(["github", "export", exportId, "--repo", "hmcts/cft-workspace", "--project", "hmcts/12"], { sid, extraEnv: gh.env });
+
+    // Assert
+    expect(r.code, r.errors.join("\n")).toBe(0);
+    expect(r.text()).toMatch(/created hmcts\/cft-workspace#41 on Project 12 of hmcts for export/);
+    expect(gh.calls().map((call) => call.args.slice(0, 2))).toEqual([
+      ["issue", "create"],
+      ["project", "item-add"]
+    ]);
+    expect(gh.calls()[1]?.args).toEqual(["project", "item-add", "12", "--owner=hmcts", "--url=https://github.com/hmcts/cft-workspace/issues/41"]);
+    expect(githubReported(agentId)).toEqual([{ agent_id: agentId, export_id: exportId, number: 41 }]);
   });
 
   it("should report the issue it already made and create no second one when github export runs again for the export", async () => {
@@ -1860,6 +1882,8 @@ process.exit(2);
       ["github", "export", EXPORT, "--repo", "cft-workspace"],
       ["github", "export", EXPORT, "--repo", "-x/../y"],
       ["github", "export", EXPORT, "--repo", "hmcts/cft-workspace", "--number", "1"],
+      ["github", "export", EXPORT, "--repo", "hmcts/cft-workspace", "--project", "12"],
+      ["github", "export", EXPORT, "--repo", "hmcts/cft-workspace", "--project", "hmcts/zero"],
       ["github", "report", EXPORT],
       ["github", "report", EXPORT, "--number", "0"],
       ["github", "report", EXPORT, "--number", "1", "--error", "both"],

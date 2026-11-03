@@ -62,10 +62,10 @@ export const USAGE = `usage: ${CLI} <command> [args]
                               again for the same export, it reports the ticket already made
   jira report <export-id> --key K | --error E
                               report the Jira ticket made for an export by hand, or why it could not be made
-  github export <export-id> --repo owner/name
+  github export <export-id> --repo owner/name [--project owner/number]
                               in an HMCTS Assistant conversation: create the GitHub issue for an export the
-                              user asked for with gh, and report it; run again for the same export, it
-                              reports the issue already made
+                              user asked for with gh, add it to the Project when one is given, and report
+                              it; run again for the same export, it reports the issue already made
   github report <export-id> --number N | --error E
                               report the GitHub issue made for an export by hand, or why it could not be made
   confluence export <export-id> --space-id S --parent-id P

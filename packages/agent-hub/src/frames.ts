@@ -144,16 +144,34 @@ export function parseJiraExportFrame(value: unknown): JiraExportFrame | null {
 
 const GITHUB_REPO_RE = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$/;
 
+const GITHUB_OWNER_RE = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/;
+
 /**
  * A pending GitHub export on the frame, or null. Its values go into the `github export` command the session is told
- * to run, so anything but an id and an `owner/name` repository is dropped rather than passed on.
+ * to run, so anything but an id, an `owner/name` repository and a Project's owner and number is dropped rather than
+ * passed on. A Project that is not one drops the whole export, since going ahead without it would put the issue
+ * somewhere other than where the person asked.
  */
 export function parseGithubExportFrame(value: unknown): GithubExportFrame | null {
   const raw = asRecord(value);
   if (!raw || typeof raw.export_id !== "string" || !EXPORT_ID_RE.test(raw.export_id) || typeof raw.repo !== "string" || !GITHUB_REPO_RE.test(raw.repo)) {
     return null;
   }
-  return { export_id: raw.export_id, repo: raw.repo };
+  if (raw.project === undefined || raw.project === null) {
+    return { export_id: raw.export_id, repo: raw.repo };
+  }
+  const project = asRecord(raw.project);
+  if (
+    !project ||
+    typeof project.owner !== "string" ||
+    !GITHUB_OWNER_RE.test(project.owner) ||
+    !Number.isInteger(project.number) ||
+    (project.number as number) < 1 ||
+    (project.number as number) > 999_999_999
+  ) {
+    return null;
+  }
+  return { export_id: raw.export_id, repo: raw.repo, project: { owner: project.owner, number: project.number as number } };
 }
 
 const NUMERIC_ID_RE = /^\d{1,20}$/;

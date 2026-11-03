@@ -284,6 +284,20 @@ describe("parseGithubExportFrame", () => {
     expect(parseAssistantFrame({ conversation_id: "c1", github_export: pending })?.github_export).toEqual(pending);
   });
 
+  it("should keep the Project to add the issue to when the hub sends one", () => {
+    const withProject = { ...pending, project: { owner: "hmcts", number: 12 } };
+
+    expect(parseGithubExportFrame(withProject)).toEqual(withProject);
+    expect(parseGithubExportFrame({ ...pending, project: null })).toEqual(pending);
+  });
+
+  it.each([[{ owner: "-x", number: 1 }], [{ owner: "hmcts", number: 0 }], [{ owner: "hmcts", number: "12" }], ["hmcts/12"]])(
+    "should drop the whole export when its Project is %j, rather than put the issue somewhere else",
+    (project) => {
+      expect(parseGithubExportFrame({ ...pending, project })).toBeNull();
+    }
+  );
+
   it.each([[{ export_id: "e1" }], [{ repo: "cft-workspace" }], [{ repo: "hmcts/x; rm -rf /" }], [{ repo: "-x/y" }], [{ repo: "hmcts/.." }], [{ repo: 42 }]])(
     "should drop the export when it has %j, since its values go into a command",
     (change) => {

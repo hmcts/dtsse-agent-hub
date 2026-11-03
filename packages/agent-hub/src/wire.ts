@@ -175,7 +175,7 @@ export type SessionsBody = {
 export type JiraExportReport = { export_id: string; key: string } | { export_id: string; error: string };
 
 /** A conversation's GitHub export result, as its session reports it: the issue number it created, or why it could not. */
-export type GithubExportReport = { export_id: string; number: number } | { export_id: string; error: string };
+export type GithubExportReport = { export_id: string; number: number; project_error?: string } | { export_id: string; error: string };
 
 /** A conversation's Confluence export result: the page it created and the title it was created with, or why it could not. */
 export type ConfluenceExportReport = { export_id: string; page_id: string; title?: string } | { export_id: string; error: string };
@@ -196,8 +196,16 @@ export type ConfluencePageFound = {
 /** The answer to one Welsh translation job: what scripts/welsh printed, or why it did not run. */
 export type WelshAnswer = { result: Record<string, unknown> } | { error: "signed_out" | "failed"; detail?: string };
 
-/** The answer to one lookup: what twg found, or why it found nothing. */
-export type LookupAnswer = { results: JiraProjectFound[] | ConfluencePageFound[] } | { error: "signed_out" | "failed" | "superseded"; detail?: string };
+/** One GitHub repository a lookup found, as `owner/name`, with its description when it has one. */
+export type GithubRepoFound = { full_name: string; description: string | null };
+
+/** One GitHub Project a lookup found: the owner and number an issue is added to it by, and its title. */
+export type GithubProjectFound = { owner: string; number: number; title: string };
+
+/** The answer to one lookup: what twg or gh found, or why it found nothing. */
+export type LookupAnswer =
+  | { results: JiraProjectFound[] | ConfluencePageFound[] | GithubRepoFound[] | GithubProjectFound[] }
+  | { error: "signed_out" | "failed" | "superseded"; detail?: string };
 
 /** A conversation's one markdown document, which the person and the session both edit. */
 export type Artefact = {

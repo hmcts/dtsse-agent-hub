@@ -294,23 +294,30 @@ const githubExport: ExportStep = async (cli, exportId, flags) => {
   if (!GITHUB_REPO_RE.test(repo)) {
     throw new UsageError("github export needs --repo, a repository as owner/name such as hmcts/cft-workspace");
   }
+  const projectMatch = flags.project === undefined ? null : /^([A-Za-z0-9][A-Za-z0-9-]{0,38})\/([1-9]\d{0,8})$/.exec(flags.project);
+  if (flags.project !== undefined && projectMatch === null) {
+    throw new UsageError(`--project must be a Project as owner/number such as hmcts/12, not ${flags.project}`);
+  }
+  const project = projectMatch === null ? null : { owner: projectMatch[1] as string, number: Number(projectMatch[2]) };
   const agent = requireAgent(requireSessionId(cli.env));
-  const outcome = await runGithubExport({ api: cli.api(), agentId: agent.agent_id, env: cli.env, run, print: cli.print }, { exportId, repo }).catch(
+  const outcome = await runGithubExport({ api: cli.api(), agentId: agent.agent_id, env: cli.env, run, print: cli.print }, { exportId, repo, project }).catch(
     noExport("GitHub")
   );
   if ("error" in outcome) {
     cli.print(`agent-hub: no issue was created for export ${exportId}: ${outcome.error} The user has been shown this.`);
     return 1;
   }
+  const board =
+    project === null ? "" : outcome.projectError ? ` (not on the Project: ${outcome.projectError})` : ` on Project ${project.number} of ${project.owner}`;
   cli.print(
-    `agent-hub: ${outcome.again ? "already created" : "created"} ${repo}#${outcome.number} for export ${exportId} and reported it; the user's Assistant shows a link to ${outcome.url}`
+    `agent-hub: ${outcome.again ? "already created" : "created"} ${repo}#${outcome.number}${board} for export ${exportId} and reported it; the user's Assistant shows a link to ${outcome.url}`
   );
   return 0;
 };
 
 export const github = exportCommand("github", {
   exportIdRe: EXPORT_ID_RE,
-  exportFlags: ["repo"],
+  exportFlags: ["repo", "project"],
   reportFlags: ["number", "error"],
   export: githubExport,
   report: githubReport

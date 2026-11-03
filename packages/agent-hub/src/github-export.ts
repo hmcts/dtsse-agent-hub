@@ -2,10 +2,13 @@
 // GitHub issue, as one command, for a person whose ticket tool is GitHub. It mirrors `jira export`: the session runs
 // it, so the issue is opened with the owner's own gh sign-in and they are its author, and one command saves a model
 // turn per step. gh is signed in on every pod, since the pod clones the workspace with it, so unlike twg there is no
-// sign-in to relay. See "GitHub export" under Conversations in dtsse-agent-hub's docs/agent-api.md.
+// sign-in to relay. When the person chose a Project as well, the issue is added to that board once it exists: an issue
+// lives in a repository, and a Project only shows it. See "GitHub export" under Conversations in dtsse-agent-hub's
+// docs/agent-api.md.
 import fs from "node:fs";
 import path from "node:path";
 import type { Api } from "./api.ts";
+import { missingScope } from "./assistant/github-lookups.ts";
 import type { Env } from "./env.ts";
 import { withRetry } from "./retry.ts";
 import { hubHome, readJson, writeJson } from "./session.ts";
@@ -21,9 +24,13 @@ const FALLBACK_TITLE = "HMCTS Assistant document";
 // Long enough for a slow GitHub, short enough that a hung gh is reported well inside the hub's 15-minute timeout.
 const CREATE_TIMEOUT_MS = 120000;
 
+/** A Project as `owner` and `number`, which is how gh names one. */
+export type GithubProject = { owner: string; number: number };
+
 export type GithubExportRequest = {
   exportId: string;
   repo: string;
+  project?: GithubProject | null;
 };
 
 export type GithubExportDeps = {
@@ -36,7 +43,8 @@ export type GithubExportDeps = {
   dir?: string;
 };
 
-export type GithubExportOutcome = { number: number; url: string; again: boolean } | { error: string };
+/** `projectError` is set when the issue was made but could not be put on the Project asked for. */
+export type GithubExportOutcome = { number: number; url: string; again: boolean; projectError?: string } | { error: string };
 
 export function githubExportsDir(): string {
   return path.join(hubHome(), "github-exports");
@@ -47,14 +55,18 @@ export function githubIssueUrl(repo: string, number: number): string {
 }
 
 // The number is remembered before it is reported, so a report that fails cannot lead to a second issue: running the
-// command again reports the remembered number instead.
-function rememberedNumber(dir: string, exportId: string): number | null {
-  const number = (readJson(path.join(dir, `${exportId}.json`)) as { number?: unknown } | null)?.number;
-  return typeof number === "number" && Number.isInteger(number) && number > 0 ? number : null;
+// command again reports the remembered number instead, with what came of adding it to the Project.
+function remembered(dir: string, exportId: string): { number: number; projectError?: string } | null {
+  const saved = readJson(path.join(dir, `${exportId}.json`)) as { number?: unknown; project_error?: unknown } | null;
+  const number = saved?.number;
+  if (typeof number !== "number" || !Number.isInteger(number) || number <= 0) {
+    return null;
+  }
+  return typeof saved?.project_error === "string" ? { number, projectError: saved.project_error } : { number };
 }
 
-function rememberNumber(dir: string, exportId: string, number: number): void {
-  writeJson(path.join(dir, `${exportId}.json`), { number, created_at: new Date().toISOString() });
+function remember(dir: string, exportId: string, number: number, projectError?: string): void {
+  writeJson(path.join(dir, `${exportId}.json`), { number, ...(projectError ? { project_error: projectError } : {}), created_at: new Date().toISOString() });
 }
 
 /** One line of issue title: the document's title, else its first heading, else a plain fallback. */
@@ -89,6 +101,25 @@ export function ghFailure(result: RunResult): string {
   return said.length > MAX_GITHUB_ERROR ? `${said.slice(0, MAX_GITHUB_ERROR - 1)}…` : said;
 }
 
+/** Why the issue could not be put on the Project, in one line, or null once it is on it. */
+async function addToProject(deps: GithubExportDeps, project: GithubProject, url: string): Promise<string | null> {
+  const args = ["project", "item-add", String(project.number), `--owner=${project.owner}`, `--url=${url}`];
+  const result = await deps.run("gh", args, { env: deps.env, timeoutMs: CREATE_TIMEOUT_MS });
+  if (result.code === 0) {
+    return null;
+  }
+  if (missingScope(result) || /project scope|read:project|required scopes/i.test(`${result.stderr}${result.stdout}`)) {
+    return "your GitHub sign-in needs the project scope to add it to a Project. Reconnect GitHub in Connections";
+  }
+  const line =
+    stripAnsi(`${result.stderr}\n${result.stdout}`)
+      .split("\n")
+      .map((text) => text.trim())
+      .find((text) => text !== "") ?? "";
+  const said = line ? `GitHub would not add it to the Project: ${line}` : "GitHub would not add it to the Project";
+  return said.length > MAX_GITHUB_ERROR ? `${said.slice(0, MAX_GITHUB_ERROR - 1)}…` : said;
+}
+
 async function create(deps: GithubExportDeps, dir: string, request: GithubExportRequest): Promise<GithubExportOutcome> {
   const doc = await withRetry(() => deps.api.getArtefact(deps.agentId), { attempts: 3 });
   if (!doc.markdown.trim()) {
@@ -106,9 +137,14 @@ async function create(deps: GithubExportDeps, dir: string, request: GithubExport
       return { error: ghFailure(result) };
     }
     const number = parseCreatedNumber(result.stdout, request.repo);
-    return number
-      ? { number, url: githubIssueUrl(request.repo, number), again: false }
-      : { error: "gh answered without an issue link, so the issue may or may not exist. Check the repository before exporting again." };
+    if (!number) {
+      return { error: "gh answered without an issue link, so the issue may or may not exist. Check the repository before exporting again." };
+    }
+    const url = githubIssueUrl(request.repo, number);
+    // Remembered before the Project is tried, so a failure there, or a crash, cannot lead to a second issue.
+    remember(dir, request.exportId, number);
+    const projectError = request.project ? await addToProject(deps, request.project, url) : null;
+    return projectError === null ? { number, url, again: false } : { number, url, again: false, projectError };
   } finally {
     fs.rmSync(bodyFile, { force: true });
   }
@@ -122,9 +158,9 @@ export async function runGithubExport(deps: GithubExportDeps, request: GithubExp
   const dir = deps.dir ?? githubExportsDir();
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   let outcome: GithubExportOutcome;
-  const known = rememberedNumber(dir, request.exportId);
+  const known = remembered(dir, request.exportId);
   if (known) {
-    outcome = { number: known, url: githubIssueUrl(request.repo, known), again: true };
+    outcome = { ...known, url: githubIssueUrl(request.repo, known.number), again: true };
   } else {
     if (!claimExport(dir, request.exportId)) {
       throw new Error(`export ${request.exportId} is already running in another command; wait for that one rather than starting another`);
@@ -132,14 +168,18 @@ export async function runGithubExport(deps: GithubExportDeps, request: GithubExp
     try {
       outcome = await create(deps, dir, request);
       if ("number" in outcome) {
-        rememberNumber(dir, request.exportId, outcome.number);
+        remember(dir, request.exportId, outcome.number, outcome.projectError);
       }
     } finally {
       releaseExport(dir, request.exportId);
     }
   }
-  const report: GithubExportReport =
-    "number" in outcome ? { export_id: request.exportId, number: outcome.number } : { export_id: request.exportId, error: outcome.error };
+  let report: GithubExportReport;
+  if ("number" in outcome) {
+    report = { export_id: request.exportId, number: outcome.number, ...(outcome.projectError ? { project_error: outcome.projectError } : {}) };
+  } else {
+    report = { export_id: request.exportId, error: outcome.error };
+  }
   await withRetry(() => deps.api.putGithubExport(deps.agentId, report), { attempts: 3 });
   return outcome;
 }

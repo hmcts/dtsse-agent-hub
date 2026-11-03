@@ -409,6 +409,16 @@ describe("assistantEnvelope", () => {
     expect(text.endsWith("\n---\nPlease create a GitHub issue for this document in hmcts/cft-workspace.")).toBe(true);
   });
 
+  it("should pass the Project to the command when the issue goes on one", () => {
+    const exportId = "5b0e7c1a-1111-4222-8333-444455556666";
+    const frame: AssistantFrame = { ...pcs, github_export: { export_id: exportId, repo: "hmcts/cft-workspace", project: { owner: "hmcts", number: 12 } } };
+
+    const text = assistantEnvelope(personMessage, frame, null);
+
+    expect(text).toContain(`\`agent-hub github export ${exportId} --repo hmcts/cft-workspace --project hmcts/12\``);
+    expect(text).toMatch(/in hmcts\/cft-workspace, on Project 12 of hmcts \(export/);
+  });
+
   it("should say nothing of GitHub when no export is pending", () => {
     // Act & Assert
     expect(assistantEnvelope(personMessage, { ...pcs, github_export: null }, null)).not.toMatch(/GitHub|github export/);

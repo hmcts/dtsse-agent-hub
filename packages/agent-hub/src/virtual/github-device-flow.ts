@@ -38,9 +38,11 @@ export const GITHUB_CLIENT_ID = "178c6fc778ccc68e1d6a";
 /**
  * The scopes gh asks for in a pod: its own minimum (`internal/authflow/flow.go`) plus the `user:email` that
  * lets `git-identity.ts` check the owner's HMCTS address is on their account. `repo` is what makes the token
- * able to clone an internal repo, which is the whole reason stage 0 signs in at all.
+ * able to clone an internal repo, which is the whole reason stage 0 signs in at all. `project` is what lets the
+ * CFT Workspace search the owner's GitHub Projects and add an issue it opens to one; a token from before it was asked
+ * for cannot, and the Project search says to reconnect GitHub.
  */
-export const GITHUB_SCOPES = "repo read:org gist user:email";
+export const GITHUB_SCOPES = "repo read:org gist user:email project";
 
 export const GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
 

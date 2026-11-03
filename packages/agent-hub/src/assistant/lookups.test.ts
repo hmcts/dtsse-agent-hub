@@ -46,7 +46,7 @@ const JIRA_OUTPUT = JSON.stringify({
 const SIGNED_OUT = { code: 77, stdout: JSON.stringify({ ok: false, error: { code: "AUTH_REQUIRED", message: "authentication required." } }), stderr: "" };
 
 function frame(overrides: Partial<LookupFrame> = {}): LookupFrame {
-  return { lookup_id: LOOKUP, kind: "confluence_page", query: "case flags", space: null, sign_in: false, ...overrides };
+  return { lookup_id: LOOKUP, kind: "confluence_page", query: "case flags", space: null, owner: null, sign_in: false, ...overrides };
 }
 
 describe("parseLookupFrame", () => {
@@ -57,6 +57,23 @@ describe("parseLookupFrame", () => {
     );
     expect(parseLookupFrame({ lookup_id: LOOKUP, kind: "jira_project", query: "vibe", space: "CCD" })?.space).toBeNull();
   });
+
+  it("should keep a GitHub lookup, with the owner only for a Project, and never ask it to sign in", () => {
+    // Act & Assert
+    expect(parseLookupFrame({ lookup_id: LOOKUP, kind: "github_repo", query: "ccd data", space: "CCD", owner: "hmcts", sign_in: true })).toEqual(
+      frame({ kind: "github_repo", query: "ccd data" })
+    );
+    expect(parseLookupFrame({ lookup_id: LOOKUP, kind: "github_project", query: "cft", owner: "hmcts" })).toEqual(
+      frame({ kind: "github_project", query: "cft", owner: "hmcts" })
+    );
+  });
+
+  it.each([[{ owner: undefined }], [{ owner: "-hmcts" }], [{ owner: "hmcts --jq ." }]])(
+    "should drop a Project lookup when it has %j, since the owner goes into the search",
+    (change) => {
+      expect(parseLookupFrame({ ...frame({ kind: "github_project", owner: "hmcts" }), ...change })).toBeNull();
+    }
+  );
 
   it.each([[{ lookup_id: "not-an-id" }], [{ kind: "people" }], [{ query: 4 }], [{ query: "x".repeat(101) }], [{ space: 'CCD" OR space = "HR' }]])(
     "should drop the lookup when it has %j, since its values go into a search",

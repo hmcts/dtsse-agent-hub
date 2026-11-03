@@ -1013,7 +1013,8 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
       if (!agent.conversation_id) {
         return send(res, 404, { error: "not a conversation" });
       }
-      const numbered = Number.isInteger(body.number) && (body.number as number) > 0;
+      const numbered =
+        Number.isInteger(body.number) && (body.number as number) > 0 && (body.project_error === undefined || typeof body.project_error === "string");
       const failed = typeof body.error === "string" && body.error.trim() !== "" && body.error.length <= 300;
       if (typeof body.export_id !== "string" || numbered === failed) {
         return send(res, 400, { error: "bad github report" });

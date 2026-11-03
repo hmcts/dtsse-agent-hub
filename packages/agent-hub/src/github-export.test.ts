@@ -158,6 +158,53 @@ describe("runGithubExport", () => {
     expect(outcome).toEqual({ error: expect.stringContaining("may or may not exist") });
   });
 
+  it("should add the issue to the Project asked for once it exists", async () => {
+    // Arrange
+    const f = fake();
+    const project = { owner: "hmcts", number: 12 };
+
+    // Act
+    const outcome = await runGithubExport(f.deps, { ...REQUEST, project });
+
+    // Assert
+    expect(outcome).toEqual({ number: 42, url: "https://github.com/hmcts/cft-workspace/issues/42", again: false });
+    expect(f.calls[1]).toEqual(["gh", "project", "item-add", "12", "--owner=hmcts", "--url=https://github.com/hmcts/cft-workspace/issues/42"]);
+    expect(f.reports).toEqual([{ export_id: EXPORT, number: 42 }]);
+  });
+
+  it("should keep and report the issue, saying why, when it cannot be added to the Project", async () => {
+    // Arrange
+    const f = fake();
+    const run = f.deps.run;
+    f.deps.run = async (cmd, args, opts) =>
+      args[0] === "project" ? { code: 1, stdout: "", stderr: "your authentication token is missing required scopes [project]\n" } : run(cmd, args, opts);
+
+    // Act
+    const outcome = await runGithubExport(f.deps, { ...REQUEST, project: { owner: "hmcts", number: 12 } });
+    const again = await runGithubExport(f.deps, { ...REQUEST, project: { owner: "hmcts", number: 12 } });
+
+    // Assert
+    const why = "your GitHub sign-in needs the project scope to add it to a Project. Reconnect GitHub in Connections";
+    expect(outcome).toMatchObject({ number: 42, projectError: why });
+    expect(again).toMatchObject({ number: 42, again: true, projectError: why });
+    expect(f.calls.filter((call) => call[1] === "issue")).toHaveLength(1);
+    expect(f.reports).toEqual([
+      { export_id: EXPORT, number: 42, project_error: why },
+      { export_id: EXPORT, number: 42, project_error: why }
+    ]);
+  });
+
+  it("should give GitHub's own reason when the Project refuses the issue for another reason", async () => {
+    const f = fake();
+    const run = f.deps.run;
+    f.deps.run = async (cmd, args, opts) =>
+      args[0] === "project" ? { code: 1, stdout: "", stderr: "Could not resolve to a ProjectV2 with the number 99.\n" } : run(cmd, args, opts);
+
+    const outcome = await runGithubExport(f.deps, { ...REQUEST, project: { owner: "hmcts", number: 99 } });
+
+    expect(outcome).toMatchObject({ projectError: "GitHub would not add it to the Project: Could not resolve to a ProjectV2 with the number 99." });
+  });
+
   it("should refuse to run when another command holds the export", async () => {
     const f = fake();
     fs.writeFileSync(path.join(dir, `${EXPORT}.lock`), "");
