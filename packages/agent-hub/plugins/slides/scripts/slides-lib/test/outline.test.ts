@@ -110,3 +110,26 @@ test("should refuse a picture whose bytes are not the format its name says", () 
     "slides[1].image.path photo.jpg is named as a JPEG but is a PNG"
   ]);
 });
+
+test("should list a missing alt text beside a structural error on the same slide", () => {
+  const errors = errorsOf({ title: "T", slides: [{ layout: "HMCTS_IMAGE", title: "P", captoin: "x", image: { path: "picture.png", alt: " " } }] });
+  assert.deepEqual(errors, [
+    "slides[0].image.alt is missing: give alt text saying what the picture shows, or decorative: true if it adds nothing",
+    "slides[0].captoin is not a field of HMCTS_IMAGE, which takes title, image, caption"
+  ]);
+});
+
+test("should still warn about text over its limits on slides with no structural error", () => {
+  const { errors, warnings } = checkOutline(
+    {
+      title: "T",
+      slides: [
+        { layout: "HMCTS_SECTION", title: "one two three four five six seven", typo: 1 },
+        { layout: "HMCTS_SECTION", title: "eight nine ten eleven twelve thirteen fourteen" }
+      ]
+    },
+    workDir()
+  );
+  assert.equal(errors.length, 1);
+  assert.deepEqual(warnings, ["slides[1].title has 7 words; the placeholder fits 6"]);
+});

@@ -241,6 +241,63 @@ describe("runAssistantSupervisor", () => {
     }
   });
 
+  it("should start no other bundled plugin's install when it is stopped before the Welsh install settles", async () => {
+    // Arrange
+    fs.rmSync(path.join(hubHome(), "virtual"), { recursive: true, force: true });
+    const hub = createMockHub({ pingMs: 5000, launchTokens: { [LAUNCH]: { virtualId: VID, owner: OWNER } } });
+    const url = await hub.listen();
+    const stop = new AbortController();
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "bundled-ws-"));
+    const ran: { cmd: string; args: string[] }[] = [];
+    let finishWelsh = () => {};
+    const welshInstalled = new Promise<void>((resolve) => {
+      finishWelsh = resolve;
+    });
+    let welshDone = false;
+    const running = runAssistantSupervisor({
+      api: createApi({ baseUrl: url, launchToken: LAUNCH }),
+      id: VID,
+      env: { AGENT_HUB_PLUGINS: "slides,welsh" },
+      tmux: fakeTmux(),
+      canRun: () => true,
+      cwd: CWD,
+      signal: stop.signal,
+      tickMs: 50,
+      welsh: {
+        workspace,
+        install: (name) => path.join(workspace, "..", `${name}-copy`),
+        run: async (cmd, args) => {
+          ran.push({ cmd, args });
+          if (cmd.endsWith("welsh")) {
+            await welshInstalled;
+            welshDone = true;
+          }
+          return { code: 0, stdout: "", stderr: "" };
+        }
+      }
+    });
+
+    try {
+      await waitUntil(() => hub.sessionStreams.has(VID), "the sessions stream to open");
+
+      // Act
+      stop.abort();
+      await running;
+      finishWelsh();
+      await waitUntil(() => welshDone, "the Welsh install to settle");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      // Assert
+      expect(ran).toEqual([{ cmd: path.join(workspace, "..", "welsh-copy", "scripts", "welsh"), args: ["deps"] }]);
+    } finally {
+      finishWelsh();
+      stop.abort();
+      await running;
+      await hub.close();
+      fs.rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   it("should start sessions for the wakes on the sessions stream, reconnect at once at its lifetime and stop one on close", async () => {
     // Arrange
     fs.rmSync(path.join(hubHome(), "virtual"), { recursive: true, force: true });
