@@ -1,12 +1,18 @@
-// The supervisor's half of an Atlassian lookup: a search of the owner's Jira or Confluence, run with their own twg
-// sign-in, for the CFT Workspace's document panel and settings to pick where a document goes. Fixed and read-only:
+// The supervisor's half of a lookup: a search of the owner's Jira or Confluence, run with their own twg sign-in, or
+// of their GitHub repositories or Projects with gh (`github-lookups.ts`), for the CFT Workspace's document panel and
+// settings to pick where a document goes. Fixed and read-only:
 // one `twg api` GET whose every value is checked and passed as its own argument, never through a shell, and an answer
 // cut down to the fields the hub accepts. See "Atlassian lookups" in dtsse-agent-hub's docs/agent-api.md.
-import type { Api, ConfluencePageFound, JiraProjectFound, LookupAnswer } from "../api.ts";
+import type { Api } from "../api.ts";
 import type { Env } from "../env.ts";
+import { GITHUB_OWNER_RE } from "../github.ts";
 import { withRetry } from "../retry.ts";
+import type { ConfluencePageFound, JiraProjectFound, LookupAnswer } from "../wire.ts";
+import { githubOwners, runGithubLookup } from "./github-lookups.ts";
 
-export type LookupKind = "jira_project" | "confluence_page";
+export type LookupKind = "jira_project" | "confluence_page" | "github_repo" | "github_project";
+
+const KINDS: readonly string[] = ["jira_project", "confluence_page", "github_repo", "github_project"];
 
 /** A lookup as the sessions stream sends it, once every value has been checked. */
 export type LookupFrame = {
@@ -14,6 +20,8 @@ export type LookupFrame = {
   kind: LookupKind;
   query: string;
   space: string | null;
+  /** For a GitHub Project: the repository owner whose Projects to search. */
+  owner: string | null;
   sign_in: boolean;
 };
 
@@ -51,19 +59,24 @@ export function parseLookupFrame(value: unknown): LookupFrame | null {
     !raw ||
     typeof raw.lookup_id !== "string" ||
     !LOOKUP_ID_RE.test(raw.lookup_id) ||
-    (raw.kind !== "jira_project" && raw.kind !== "confluence_page") ||
+    typeof raw.kind !== "string" ||
+    !KINDS.includes(raw.kind) ||
     typeof raw.query !== "string" ||
     raw.query.length > 100 ||
-    !(raw.space === null || raw.space === undefined || (typeof raw.space === "string" && SPACE_KEY_RE.test(raw.space)))
+    !(raw.space === null || raw.space === undefined || (typeof raw.space === "string" && SPACE_KEY_RE.test(raw.space))) ||
+    (raw.kind === "github_project" && !(typeof raw.owner === "string" && GITHUB_OWNER_RE.test(raw.owner)))
   ) {
     return null;
   }
+  const kind = raw.kind as LookupKind;
   return {
     lookup_id: raw.lookup_id,
-    kind: raw.kind,
+    kind,
     query: raw.query,
-    space: raw.kind === "confluence_page" ? ((raw.space as string | null | undefined) ?? null) : null,
-    sign_in: raw.sign_in === true
+    space: kind === "confluence_page" ? ((raw.space as string | null | undefined) ?? null) : null,
+    owner: kind === "github_project" ? (raw.owner as string) : null,
+    // gh is signed in on every pod, so a GitHub search has no sign-in to ask for.
+    sign_in: raw.sign_in === true && (kind === "jira_project" || kind === "confluence_page")
   };
 }
 
@@ -102,7 +115,7 @@ export function confluenceCql(query: string, space: string | null): string | nul
   return `type = page${scope} AND title ~ "${words.map((word) => `${word}*`).join(" ")}"`;
 }
 
-/** The `twg` arguments for a lookup, or null when there is nothing worth searching for. */
+/** The `twg` arguments for a Jira or Confluence lookup, or null when there is nothing worth searching for. */
 export function lookupArgs(frame: Pick<LookupFrame, "kind" | "query" | "space">): string[] | null {
   const tail = ["-o", "json", "--output-summary=none"];
   if (frame.kind === "jira_project") {
@@ -217,7 +230,7 @@ export function twgSignedOut(result: RunResult): boolean {
 }
 
 /** Why a search failed, in one line the person can read. */
-function failure(result: RunResult, kind: LookupKind): string {
+function failure(result: RunResult, kind: "jira_project" | "confluence_page"): string {
   const where = kind === "jira_project" ? "Jira" : "Confluence";
   if (result.code === 127) {
     return `twg is not installed in your assistant, so it cannot search ${where}.`;
@@ -237,10 +250,18 @@ export type LookupDeps = {
   env: Env;
   /** Signs twg in, relaying a device code to the owner; false when they did not finish. */
   login: () => Promise<boolean>;
+  /** The GitHub accounts a repository search looks in; `githubOwners` unless a test says otherwise. */
+  githubOwners?: () => Promise<string[] | null>;
 };
 
 /** Runs one lookup and answers it, signing in first when the person asked for that. Never throws. */
 export async function runLookup(deps: LookupDeps, frame: LookupFrame): Promise<LookupAnswer> {
+  if (frame.kind === "github_repo" || frame.kind === "github_project") {
+    return await runGithubLookup(
+      { run: deps.run, env: deps.env, owners: deps.githubOwners ?? githubOwners(deps.run, deps.env) },
+      { ...frame, kind: frame.kind }
+    );
+  }
   if (frame.sign_in) {
     const whoami = await deps.run("twg", ["whoami"], { env: deps.env, timeoutMs: WHOAMI_TIMEOUT_MS });
     if (whoami.code !== 0 && !(await deps.login().catch(() => false))) {
@@ -256,7 +277,7 @@ export async function runLookup(deps: LookupDeps, frame: LookupFrame): Promise<L
     return { error: "signed_out" };
   }
   const results = frame.kind === "jira_project" ? parseJiraProjects(result.stdout) : parseConfluencePages(result.stdout);
-  return result.code === 0 && results !== null ? { results } : { error: "failed", detail: failure(result, frame.kind) };
+  return result.code === 0 && results !== null ? { results } : { error: "failed", detail: failure(result, frame.kind as "jira_project" | "confluence_page") };
 }
 
 export type LookupRunnerOptions = LookupDeps & {
@@ -283,6 +304,7 @@ export function createLookupRunner({ api, id, say = () => {}, max = MAX_RUNNING_
   const waiting: LookupFrame[] = [];
   const running = new Set<Promise<void>>();
   let signingIn: Promise<boolean> | null = null;
+  const owners = deps.githubOwners ?? githubOwners(deps.run, deps.env);
   const login = () => {
     signingIn ??= deps.login().finally(() => {
       signingIn = null;
@@ -301,7 +323,7 @@ export function createLookupRunner({ api, id, say = () => {}, max = MAX_RUNNING_
   function pump(): void {
     while (running.size < max && waiting.length > 0) {
       const frame = waiting.shift() as LookupFrame;
-      const job = runLookup({ ...deps, login }, frame)
+      const job = runLookup({ ...deps, login, githubOwners: owners }, frame)
         .catch((e) => ({ error: "failed" as const, detail: `The search did not work: ${(e as Error).message}`.slice(0, MAX_DETAIL) }))
         .then((body) => answer(frame, body))
         .finally(() => {

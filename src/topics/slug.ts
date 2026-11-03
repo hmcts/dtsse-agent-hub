@@ -1,5 +1,5 @@
 /** The same pattern as the `topic_slug_format` CHECK constraint, so the database is never the first to refuse one. */
-export const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 export const MIN_POST_TOPICS = 1;
 export const MAX_POST_TOPICS = 10;

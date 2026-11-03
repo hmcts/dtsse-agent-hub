@@ -2,16 +2,17 @@
 // supervisor, and tick it so idle sessions stop and queued ones start. Reconnects as the bridge does, because the
 // stream is framed as the agent stream and ends the same way.
 import type { Api } from "../api.ts";
-import { RAPID_CLOSE_MS, type ReconnectDecision, reconnectDelay } from "../bridge.ts";
+import { RAPID_CLOSE_MS, type ReconnectDecision, reconnectDelay } from "../reconnect.ts";
 import { createSseParser, type SseEvent } from "../sse.ts";
 import { atlassianLogin } from "../virtual/atlassian.ts";
-import { run } from "../virtual/sign-in.ts";
+import { installBundled, installTicked } from "../virtual/bundled-plugins.ts";
+import { run } from "../virtual/process.ts";
 import { deleteUploads, readDeleteUploads, reconcileUploads } from "./attachments.ts";
 import { type DiskFs, reportUploads } from "./disk.ts";
 import { createLookupRunner, type LookupDeps, type Run } from "./lookups.ts";
 import { type MemoryFs, reportMemory } from "./memory.ts";
 import { type AssistantSupervisor, type CreateAssistantSupervisorOptions, createAssistantSupervisor, idleMinutes } from "./supervisor.ts";
-import { createWelshRunner } from "./welsh.ts";
+import { createWelshRunner, prepareWelsh, type WelshDeps } from "./welsh.ts";
 
 const TICK_MS = 2000;
 const STREAM_IDLE_MS = 45000;
@@ -32,9 +33,12 @@ export type RunAssistantSupervisorOptions = Omit<CreateAssistantSupervisorOption
   cgroupRoot?: string;
   memoryFs?: MemoryFs;
   /** How lookups run twg and sign it in; a test passes its own rather than a twg on PATH. */
-  /** How Welsh jobs run cft-workspace's scripts/welsh, and where that checkout is; a test passes its own. */
-  welsh?: { run?: Run; workspace?: string };
   lookups?: Partial<LookupDeps>;
+  /**
+   * How Welsh jobs run the welsh plugin's scripts/welsh, the cft-workspace checkout they work on, and how the pod's
+   * copy of a bundled plugin is made; a test passes its own.
+   */
+  welsh?: { run?: Run; workspace?: string; install?: (name: string, workspace: string) => string };
   /** Stops the supervisor, as SIGTERM and SIGINT do; a test owns neither signal. */
   signal?: AbortSignal;
   tickMs?: number;
@@ -62,7 +66,11 @@ export async function runAssistantSupervisor({
   memoryFs,
   ...options
 }: RunAssistantSupervisorOptions): Promise<void> {
-  const supervisor: AssistantSupervisor = createAssistantSupervisor({ api, id, env, say, ...options });
+  const workspace = welshDeps.workspace ?? env.VIRTUAL_AGENT_WORKSPACE ?? "/workspace/cft-workspace";
+  // Each session loads the ticked plugins this package carries; copying one is quick once its version is on disk.
+  const install = welshDeps.install ?? installBundled;
+  const pluginDirs = () => installTicked(env, workspace, say, install);
+  const supervisor: AssistantSupervisor = createAssistantSupervisor({ api, id, env, say, pluginDirs, ...options });
   // Lookups run beside the supervisor rather than on its chain: see `createLookupRunner`.
   const lookups = createLookupRunner({
     api,
@@ -75,14 +83,16 @@ export async function runAssistantSupervisor({
   });
   // Welsh jobs run beside the supervisor too: a quick one has somebody waiting on the page, and a long one runs for
   // minutes that no wake should wait behind.
-  const welsh = createWelshRunner({
+  const welshOptions: WelshDeps = {
     api,
     id,
     env,
     say,
     run: welshDeps.run ?? ((cmd, args, opts) => run(cmd, args, { env: opts.env as NodeJS.ProcessEnv, timeoutMs: opts.timeoutMs })),
-    workspace: welshDeps.workspace ?? env.VIRTUAL_AGENT_WORKSPACE ?? "/workspace/cft-workspace"
-  });
+    workspace,
+    install
+  };
+  const welsh = createWelshRunner({ ...welshOptions, ready: prepareWelsh(welshOptions) });
   const uploads = {
     api,
     id,

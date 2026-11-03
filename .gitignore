@@ -65,3 +65,6 @@ charts/**/values.preview.yaml
 # Agent worktrees, which are git repositories in their own right: committable as a gitlink otherwise.
 .claude/worktrees/
 
+
+# The welsh plugin's install lock, made beside its engine on first run.
+packages/agent-hub/plugins/*/scripts/*/.install.lock

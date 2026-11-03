@@ -12,7 +12,7 @@ import {
 import { awaitingOwnerMinutes, eveningStop, idleMinutes, type WallClock } from "./settings.ts";
 import { announce, stopVirtualAgents } from "./stop.ts";
 
-export const VIRTUAL_AGENT_SWEEP_INTERVAL_MS = 60_000;
+const VIRTUAL_AGENT_SWEEP_INTERVAL_MS = 60_000;
 
 /** "virtagnt". Distinct from the migration, offline-sweep and transcript-sweep locks. */
 const VIRTUAL_AGENT_SWEEP_LOCK_KEY = 0x76697274_61676e74n;

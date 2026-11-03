@@ -82,7 +82,7 @@ describe("agentStream", () => {
     hub.publish(direct("4", "agent-other"));
     hub.publish(direct("5", null));
     hub.publish({ type: "post", message_id: "6" });
-    hub.publish({ type: "agent_status", agent_id: AGENT, owner_oid: "o", status: "idle" });
+    hub.publish({ type: "agent_status", agent_id: AGENT, owner_oid: "o", status: "idle", local_conversation_id: null });
     await settle();
 
     expect(frames).toEqual([]);

@@ -1,13 +1,16 @@
-import { canLookUpAtlassian } from "../access/rules.ts";
+import { canManageVirtualAgent } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
-import { clientSupports } from "../agents/client-features.ts";
+import { podGate } from "../agents/client-features.ts";
 import { isUuid } from "../agents/store.ts";
 import type { EventHub } from "../realtime/hub.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { setDesired } from "../virtual-agents/store.ts";
+import { findAssistantWithClaims } from "./assistant-store.ts";
 import {
   checkResults,
+  isGithubKind,
+  LOOKUP_NOUNS,
   LOOKUP_RATE_LIMIT,
   LOOKUP_RATE_WINDOW_MS,
   LOOKUP_RETENTION_MS,
@@ -16,7 +19,6 @@ import {
   type LookupResponse,
   lookupResponse
 } from "./lookups.ts";
-import { findAssistant } from "./store.ts";
 
 /**
  * A lookup as the hub keeps it: recorded when the owner asks, sent to their pod on its sessions stream, answered by
@@ -29,6 +31,8 @@ export interface LookupQuestion {
   query: string;
   /** A Confluence space key to narrow the search to, already checked. */
   space: string | null;
+  /** For a GitHub Project: the repository owner whose Projects to search, already checked. */
+  owner?: string | null;
   signIn: boolean;
 }
 
@@ -37,23 +41,22 @@ export type Asked = { lookupId: string; virtualAgentId: string } | { answer: Loo
 
 /**
  * Records the question for the viewer's own assistant and tells its pod. A stopped assistant is started rather than
- * asked, and a pod whose client cannot answer is not sent a frame nobody would read.
+ * asked, and a pod whose client cannot answer is not sent a frame nobody would read: a GitHub search needs
+ * `github-lookups` as well, which a client that knows only the Atlassian kinds does not claim.
  */
 export async function askLookup(prisma: PrismaClient, question: LookupQuestion, now: Date = new Date()): Promise<Asked> {
-  const assistant = await findAssistant(prisma, question.viewerOid);
-  if (assistant === undefined || !canLookUpAtlassian(question.viewerOid, assistant)) {
+  const found = await findAssistantWithClaims(prisma, question.viewerOid);
+  if (found === undefined || !canManageVirtualAgent(question.viewerOid, found.assistant)) {
     throw new HttpError(404, "you have no assistant to search with yet");
   }
+  const { assistant, claims } = found;
   if (assistant.desired === "stopped") {
     await setDesired(prisma, question.viewerOid, assistant.id, "running", now);
     return { answer: { status: "waking" } };
   }
-  if (assistant.status !== "running" || assistant.agentId === null) {
-    return { answer: { status: "waking" } };
-  }
-  const current = await prisma.agent.findUnique({ where: { id: assistant.agentId }, select: { clientFeatures: true } });
-  if (!clientSupports(current?.clientFeatures, "lookups")) {
-    return { answer: { status: "unsupported" } };
+  const gate = podGate({ status: assistant.status, ...claims }, isGithubKind(question.kind) ? "github-lookups" : "lookups");
+  if (gate !== "ok") {
+    return { answer: { status: gate } };
   }
   const id = await prisma.$transaction(async (tx) => {
     // The assistant's rows are taken one lookup at a time, so two tabs cannot both find room under the limit.
@@ -66,7 +69,15 @@ export async function askLookup(prisma: PrismaClient, question: LookupQuestion, 
       throw new HttpError(429, "that is a lot of searches at once; wait a moment and try again");
     }
     const row = await tx.assistantLookup.create({
-      data: { virtualAgentId: assistant.id, kind: question.kind, query: question.query, spaceKey: question.space, signIn: question.signIn, createdAt: now },
+      data: {
+        virtualAgentId: assistant.id,
+        kind: question.kind,
+        query: question.query,
+        spaceKey: question.space,
+        githubOwner: question.owner ?? null,
+        signIn: question.signIn,
+        createdAt: now
+      },
       select: { id: true }
     });
     await notify(tx, { type: "assistant_lookup", lookup_id: row.id, virtual_agent_id: assistant.id, owner_oid: question.viewerOid });
@@ -76,7 +87,7 @@ export async function askLookup(prisma: PrismaClient, question: LookupQuestion, 
 }
 
 /** What a stored lookup answers, or `undefined` while the pod has not. A lookup that has gone answers `timeout`. */
-export async function readLookup(db: Database, lookupId: string): Promise<LookupResponse | undefined> {
+async function readLookup(db: Database, lookupId: string): Promise<LookupResponse | undefined> {
   const row = await db.assistantLookup.findUnique({ where: { id: lookupId }, select: { kind: true, status: true, results: true, error: true, detail: true } });
   return row === null ? { status: "timeout" } : lookupResponse(row);
 }
@@ -164,7 +175,8 @@ export async function answerLookup(
   if ("results" in answer) {
     const results = checkResults(row.kind as LookupKind, answer.results);
     if (results === undefined) {
-      throw new HttpError(400, `those are not ${row.kind === "jira_project" ? "Jira projects" : "Confluence pages"}`);
+      const nouns = LOOKUP_NOUNS[row.kind as LookupKind];
+      throw new HttpError(400, `those are not ${nouns.where} ${nouns.many}`);
     }
     data = { status: "done", results, answeredAt: now };
   } else {
@@ -184,6 +196,8 @@ export interface LookupFrame {
   kind: string;
   query: string;
   space: string | null;
+  /** For a GitHub Project: the owner whose Projects to search. */
+  owner: string | null;
   sign_in: boolean;
 }
 
@@ -191,10 +205,10 @@ export interface LookupFrame {
 export async function pendingLookup(db: Database, virtualAgentId: string, lookupId: string): Promise<LookupFrame | undefined> {
   const row = await db.assistantLookup.findUnique({
     where: { id: lookupId },
-    select: { virtualAgentId: true, kind: true, query: true, spaceKey: true, signIn: true, status: true }
+    select: { virtualAgentId: true, kind: true, query: true, spaceKey: true, githubOwner: true, signIn: true, status: true }
   });
   if (row === null || row.virtualAgentId !== virtualAgentId || row.status !== "pending") {
     return undefined;
   }
-  return { lookup_id: lookupId, kind: row.kind, query: row.query, space: row.spaceKey, sign_in: row.signIn };
+  return { lookup_id: lookupId, kind: row.kind, query: row.query, space: row.spaceKey, owner: row.githubOwner, sign_in: row.signIn };
 }

@@ -23,7 +23,10 @@ const HUB: MarkupTheme = {
 /**
  * A message body rendered from its markdown subset as React elements. Bodies come from agents and people across the
  * organisation, so this never renders HTML: `parseMarkup` yields only text and allow-listed links.
+ *
+ * `repoBase` is passed only where the caller knows which repo the body was written in, so a repo-relative path in it
+ * resolves to GitHub; see `Markup`.
  */
-export function MessageBody({ body }: { body: string }) {
-  return <Markup source={body} theme={HUB} />;
+export function MessageBody({ body, repoBase = null }: { body: string; repoBase?: string | null }) {
+  return <Markup source={body} theme={HUB} repoBase={repoBase} />;
 }

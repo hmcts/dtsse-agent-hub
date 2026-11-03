@@ -1,48 +1,25 @@
 /**
  * Who may do what, as pure functions over rows the caller has already loaded.
  *
- * Three sentences carry the whole model, and most of what follows is one of them applied to a surface.
+ * - **Everything here is its owner's.** An agent, a virtual agent, a CFT Workspace conversation, a person's
+ *   templates and export defaults, a Welsh job and its files, and what an assistant's pod reports are seen and acted
+ *   on by the person who owns them and nobody else, and `isOwner` is that one decision. Two rules keep names of
+ *   their own because each must be able to narrow without the rest: `canViewTranscript`, for what a session said,
+ *   and `canManageVirtualAgent`, for whatever runs as the owner on their own sign-ins. A file attached to a message
+ *   is narrower still: the upload rules hold it to its owner and also to its state, its conversation and its
+ *   message.
+ * - **Reaching somebody else's agent is a tagged post.** `tagRefusal` lets anyone tag anyone's agent, bar a pod
+ *   conversation's (the Assistant, a private chat rather than a session on the board) and the tagger itself. It is
+ *   the one cross-owner route to a session, and a public one: a post is on a board every signed-in person reads.
+ * - **A conversation is read by its owner and by whoever they share it with**, one named person and one chat at a
+ *   time. `conversationAccess` is the one rule that reads the share rows and `canForkConversation` the one that reads
+ *   fork offers. A share or a fork is never of the agent, so every agent rule answers a recipient as a stranger.
  *
- * - **An agent is its owner's.** Who may see it, message it, see the skills it offers, read what its session said
- *   and read its thread is the person who owns it, and nobody else. There is no standing access of one person's
- *   agents to another: nothing here takes a grant, because no row grants one.
- * - **Reaching somebody else's agent is a tagged post.** `tagRefusal` decides who may be tagged — anyone, by
- *   anyone, bar the two it names — and the post is pushed to each agent it tags on the stream that agent already
- *   holds. That is the one cross-owner route to a session, and it is deliberately a public one: a post is on a board
- *   every signed-in person reads, so reaching an agent costs the sender the same openness it costs its owner.
- * - **A conversation is read by its owner and by whoever they share it with.** The share rows are the whole of that
- *   access, one conversation at a time, and `conversationAccess` is the one rule that reads them.
- *
- * The rest:
- *
- * - Topics are open: anyone signed in and any registered agent may read and post.
- * - A direct message is between an owner's own sessions, or it is a reply: it is readable by whoever wrote it, by the
- *   owner of the thread it sits in, and by the person an agent replied to. `canReadMessage` is where those three are
- *   said. An agent may always answer a direct it received, whatever the owner — `replyRoute` explains why.
- * - Only a person saves, replaces or deletes their own credentials. Of their values, they may read back their
- *   CLAUDE.md and their git identity, with their own token; every other kind is write-only for them.
- *   `canOwnerReadCredential` says why those two and nothing else.
- * - A virtual agent is visible to whoever may see its owner's agents, since its sessions are among them, which makes
- *   it its owner's too. Only that person manages it and sees its login codes. A virtual agent's launch token acts as
- *   its owner for that virtual agent and the agents its sessions registered, and for nothing else of theirs.
- * - A CFT Workspace conversation, and the agent the sessions on its pod run as, are its owner's: the conversation
- *   is a private chat rather than a session on the board, which is also why `tagRefusal` will not let a post tag one.
- *   A conversation of a session on the person's own laptop has no pod, and its agent is an ordinary session that can
- *   be seen on the board and tagged like any other; what stays private either way are the words. A file attached to
- *   one of a conversation's messages is narrower still: only the person who uploaded it may add parts to it, discard
- *   it or download it back, and only the session of the conversation it was attached to may fetch its bytes. So are
- *   the person's saved Assistant templates, which only they read or change.
- * - A conversation its owner may share, read-only, with people they name one at a time. A recipient reads the thread
- *   and the document on the share's own page and can do nothing else: not send, stop an answer, rename, delete, edit
- *   the document, download an attachment, search for the chat, or watch it live. The share is of the conversation and
- *   never of its agent, so every agent rule above still answers for a recipient exactly as it does for a stranger.
- * - The owner may also offer a conversation, one named person at a time, to be forked: the recipient reads it as a
- *   share's recipient does, and may take their own copy into their own Assistant. The copy is theirs; the original
- *   is still the owner's, and nothing about a fork lets its recipient write to it.
- *
- * Every decision about an agent here is about owners rather than agent ids, bar the three that cannot be: the two
- * that have to recognise the agent acting (`tagRefusal`, `replyRoute`) and the one that answers as a launch token's
- * own sessions rather than as their owner (`canLaunchTokenReadMessage`).
+ * A direct message is between one owner's sessions, or is an agent's reply to a person (`canReadMessage`,
+ * `replyRoute`). A launch token acts as its owner only for its own virtual agent and the agents its sessions
+ * registered. Only its owner saves, replaces or deletes a credential (`isOwner`), and its value is write-only for
+ * them except the kinds `canOwnerReadCredential` allows; which kinds a pod may store is
+ * `canVirtualAgentStoreCredential`.
  */
 
 export interface AgentRef {
@@ -83,47 +60,35 @@ export interface MessageRef {
   parentAuthorOid: string | null;
 }
 
-export function canViewAgent(viewerOid: string, agent: AgentRef): boolean {
-  return viewerOid === agent.ownerOid;
+/**
+ * Whether `oid` owns `owned`: who may see an agent or a virtual agent, message an agent or answer its questions, be
+ * offered its skills, open, search, stop or share an Assistant conversation, see what an assistant's pod reports
+ * about its memory and its disk, run a Welsh job and read it and its files, read or change a person's templates and
+ * export defaults, and save or delete their credentials. One decision, because each of those is something of the
+ * owner's that nobody else has standing to reach; the share rows that `conversationAccess` reads are the only
+ * widening of any of it. A row rather than a bare oid, so that an agent id passed by mistake does not type-check.
+ */
+export function isOwner(oid: string, owned: { ownerOid: string }): boolean {
+  return oid === owned.ownerOid;
 }
 
 /**
- * An agent's transcript is its owner's. Its own rule rather than `canViewAgent`'s because a transcript holds far more
- * than the agent's status and thread, so who may read it has to be able to narrow without changing who may see the
- * agent — and because what it decides about is words, which is a different thing to argue about from a session.
+ * Who may read what an agent's session said: its owner. Its own rule rather than `isOwner` because a transcript holds
+ * far more than the agent's status, so who may read it has to be able to narrow without changing who may see the
+ * agent.
+ *
+ * One rule for both halves of a conversation, because its words are kept in two places. What the session wrote is
+ * transcript entries; what the person typed into the composer, and the session's answers to it, are direct messages
+ * to the agent (`sendToConversation` sends through `directAsPerson`). A rule applied to only one of the two would
+ * narrow the transcript and leave the same conversation readable through the agent's thread, so `canReadMessage`
+ * reads this one too, as do the transcript route and the questions beside it.
  *
  * No share or fork row is read here. The one reader of a shared conversation, `sharedConversation` in
  * `src/assistant/sharing.ts`, reads as `conversation.ownerOid` and is where what a recipient may see is cut back to
  * the words of the thread; so a recipient reaches a transcript as the owner or not at all.
  */
 export function canViewTranscript(viewerOid: string, agent: AgentRef): boolean {
-  return canReadSessionWords(viewerOid, agent);
-}
-
-/**
- * Who may read what an agent's session said: its owner.
- *
- * One rule for both halves of a conversation, because its words are kept in two places. What the session wrote is
- * transcript entries; what the person typed into the composer, and the session's answers to it, are direct messages
- * to the agent (`sendToConversation` sends through `directAsPerson`). A rule applied to only one of the two would
- * narrow the transcript and leave the same conversation readable through the agent's thread, which is a privacy
- * claim the code would not keep. `canReadMessage` reads this one for that reason, and so do the transcript route
- * and the questions beside it.
- */
-function canReadSessionWords(viewerOid: string, agent: AgentRef): boolean {
-  return viewerOid === agent.ownerOid;
-}
-
-export function canPersonMessageAgent(senderOid: string, target: AgentRef): boolean {
-  return senderOid === target.ownerOid;
-}
-
-/**
- * The skills an agent reported are offered to whoever may message it, as the composer's "/" autocomplete. Its own
- * rule because the list says what the agent's session can do on its owner's behalf, which a reader has no use for.
- */
-export function canSeeAgentSkills(viewerOid: string, agent: AgentRef): boolean {
-  return canPersonMessageAgent(viewerOid, agent);
+  return isOwner(viewerOid, agent);
 }
 
 /**
@@ -132,11 +97,21 @@ export function canSeeAgentSkills(viewerOid: string, agent: AgentRef): boolean {
  *
  * Another owner's agent is reached by tagging it in a post instead (`tagRefusal`), so this rule refusing a stranger
  * takes nothing away: it moves the cross-owner route onto the board, where a session's words to somebody else's
- * session are visible to that person rather than arriving in a thread only two agents can see. The one exception is
- * an answer, which is `replyRoute`'s.
+ * session are visible to that person rather than arriving in a thread only two agents can see. `replyRoute` holds an
+ * answer to the same rule.
  */
 export function canAgentMessageAgent(sender: AgentRef, target: AgentRef): boolean {
-  return canPersonMessageAgent(sender.ownerOid, target);
+  return isOwner(sender.ownerOid, target);
+}
+
+/**
+ * A person may send a direct message to their own agent, unless it is a virtual agent's own session rather than one of
+ * its conversations. A pod's owner writes to it through the CFT Workspace, whose every message goes to a
+ * conversation's session with the frame that tells it the owner is writing; the client frames anything else a pod
+ * session receives as a peer's, so a direct to the pod's own session would reach it disowned.
+ */
+export function canPersonDirectAgent(senderOid: string, target: AgentRef & { virtualAgentId: string | null; ownerOnly: boolean }): boolean {
+  return isOwner(senderOid, target) && (target.virtualAgentId === null || target.ownerOnly);
 }
 
 /** Why a post may not tag an agent: `not_taggable` is answered as a missing agent, `itself` as a bad request. */
@@ -166,9 +141,9 @@ export function tagRefusal(authorAgentId: string | null, target: AgentRef): TagR
 /**
  * A post is readable by anyone. A direct message is readable by three people and no others:
  *
- * - whoever sent it, which is the check that lets an agent's owner read what it said to a stranger's session;
+ * - whoever sent it, which keeps it readable by its author once the agents on it are gone;
  * - the owner of the thread it sits in — the target agent's, or, for an agent's reply to a person (which has no
- *   target agent), the replying agent's own — by `canReadSessionWords`, because a thread is words;
+ *   target agent), the replying agent's own — by `canViewTranscript`, because a thread is words;
  * - the person an agent replied to, who can read that reply without being able to see the replying agent at all.
  *   Without this a session answering somebody else's post privately would be answering into a thread that person
  *   cannot open.
@@ -181,7 +156,7 @@ export function canReadMessage(viewerOid: string, message: MessageRef): boolean 
     return true;
   }
   const thread = message.targetAgent ?? message.authorAgent;
-  return thread !== null && canReadSessionWords(viewerOid, thread);
+  return thread !== null && canViewTranscript(viewerOid, thread);
 }
 
 export type ReplyRoute = { to: "agent"; target: AgentRef } | { to: "person" } | { to: "nobody"; reason: string; status: 400 | 403 };
@@ -189,57 +164,37 @@ export type ReplyRoute = { to: "agent"; target: AgentRef } | { to: "person" } | 
 /**
  * Where an agent's private reply to a message goes. It is always a direct message to the original author.
  *
- * **Replying to a direct message the agent received is always allowed, whatever the owner**, and it is the one place
- * a direct crosses between two people's agents. The sender reached this agent, so an answer is what they asked for;
- * refusing it because this agent could not have opened the conversation would leave every cross-owner exchange
- * one-way, with the opener able to speak and the answerer able only to post. It goes back to the author agent, or
- * into this agent's own thread when a person wrote it from the UI.
+ * A direct message is answered only by the agent it was sent to. An answer to a person, whether to their post or to
+ * their direct message, goes into this agent's own thread, where that person can read it (`canReadMessage`).
  *
- * Replying privately to another owner's **post** is refused, and that is the change rather than an oversight: a post
- * was written to a board, so an answer belongs on it, where the person whose session is being answered can read it.
- * The refusal says to post on the topic and tag the agent instead, which reaches it on its stream exactly as a direct
- * message would have. A post of this owner's own is still answerable privately, since both sessions are theirs.
- * Replying to a person's post goes into this agent's own thread, where that person can read it.
+ * An answer to an agent goes to it only when both agents have one owner, because a direct message is between one
+ * person's sessions. Another owner's agent is answered on the board instead: a post was written to a board, so an
+ * answer belongs on it, where the person whose session is being answered can read it. The refusal says to post on the
+ * topic and tag the agent, which reaches it on its stream exactly as a direct message would have.
  */
 export function replyRoute(sender: AgentRef, message: MessageRef): ReplyRoute {
   if (message.authorAgent?.id === sender.id) {
     return { to: "nobody", reason: "an agent cannot reply to its own message", status: 400 };
   }
-
-  if (message.kind === "direct") {
-    if (message.targetAgent?.id !== sender.id) {
-      return { to: "nobody", reason: "an agent can only reply to a direct message it received", status: 403 };
-    }
-    return message.authorAgent === null ? { to: "person" } : { to: "agent", target: message.authorAgent };
+  if (message.kind === "direct" && message.targetAgent?.id !== sender.id) {
+    return { to: "nobody", reason: "an agent can only reply to a direct message it received", status: 403 };
   }
-
   if (message.authorAgent === null) {
     return { to: "person" };
   }
   if (!canAgentMessageAgent(sender, message.authorAgent)) {
-    return {
-      to: "nobody",
-      reason: "a private reply to another owner's post is not allowed; post on the topic and tag that agent instead",
-      status: 403
-    };
+    const what = message.kind === "direct" ? "an agent of another owner" : "another owner's post";
+    return { to: "nobody", reason: `a private reply to ${what} is not allowed; post on the topic and tag that agent instead`, status: 403 };
   }
   return { to: "agent", target: message.authorAgent };
 }
 
 /**
- * Whether `actorOid` may save, replace or delete `ownerOid`'s stored credentials. This rule lets nobody read a value
- * back; `canOwnerReadCredential` is the one exception to credentials being write-only for people.
- */
-export function canManageCredential(actorOid: string, ownerOid: string): boolean {
-  return actorOid === ownerOid;
-}
-
-/**
  * Whether a person may read back their own stored credential of `kind`, through `GET /api/agent/credentials/{kind}`
- * or the web UI. Their CLAUDE.md and their git identity, because the page that edits them has to show them. Anyone
- * holding that person's agent-hub token can therefore read both. No model credential is readable: the gateway route
- * stores none at all, and every other kind acts as the person in GitHub, Azure, Claude, Jenkins or Atlassian, so it
- * stays write-only.
+ * or the web UI: the one exception to their credentials being write-only for them. Their CLAUDE.md and their git
+ * identity, because the page that edits them has to show them. Anyone holding that person's agent-hub token can
+ * therefore read both. No model credential is readable: the gateway route stores none at all, and every other kind
+ * acts as the person in GitHub, Azure, Claude, Jenkins or Atlassian, so it stays write-only.
  */
 export function canOwnerReadCredential(kind: string): boolean {
   return kind === "claude_md" || kind === "git_identity";
@@ -255,16 +210,6 @@ export function canVirtualAgentStoreCredential(kind: string): boolean {
   return kind !== "claude_md" && kind !== "git_identity";
 }
 
-/**
- * Whether `actorOid` may read, save, rename or delete `ownerOid`'s saved Assistant templates. Their own alone, and
- * reading is the same decision as writing: a template is a prompt somebody wrote for themselves, so there is nothing
- * about it a reader is entitled to that an editor is not. Its own rule rather than an agent's, because a template is
- * not part of any session: nothing a person does with their agents, or anyone else's, should ever reach one.
- */
-export function canManageTemplate(actorOid: string, ownerOid: string): boolean {
-  return actorOid === ownerOid;
-}
-
 export type UploadState = "pending" | "stored" | "fetched" | "expired";
 
 /** The columns every upload rule reads. */
@@ -277,17 +222,17 @@ export interface UploadRef {
 }
 
 /**
- * Whether `viewerOid` may add a part to an upload or discard it. Its own rule rather than `canViewAgent`'s: an upload
+ * Whether `viewerOid` may add a part to an upload or discard it. Narrower than `isOwner`: an upload
  * belongs to the person who started it rather than to any agent of theirs, so it is not the conversation's session
  * that writes it. Once it is attached to a message it is finished with, so there is nothing left to write.
  */
 export function canWriteUpload(viewerOid: string, upload: UploadRef): boolean {
-  return viewerOid === upload.ownerOid && upload.messageId === null && (upload.state === "pending" || upload.state === "stored");
+  return isOwner(viewerOid, upload) && upload.messageId === null && (upload.state === "pending" || upload.state === "stored");
 }
 
 /** Whether an upload may be stamped onto a message of `conversationId`: a finished one of that conversation, once. */
 export function canAttachUpload(viewerOid: string, conversationId: string, upload: UploadRef): boolean {
-  return viewerOid === upload.ownerOid && upload.conversationId === conversationId && upload.messageId === null && upload.state === "stored";
+  return isOwner(viewerOid, upload) && upload.conversationId === conversationId && upload.messageId === null && upload.state === "stored";
 }
 
 /** `part` reads one part's bytes; `fetched` reports the whole file is on the pod's disk. */
@@ -329,7 +274,7 @@ export type AttachmentDownload = "ok" | "not_yours" | "not_held";
  * reached yet is past its window and is refused as though it had.
  */
 export function attachmentDownload(viewerOid: string, upload: UploadRef, heldUntil: Date, now: Date): AttachmentDownload {
-  if (viewerOid !== upload.ownerOid) {
+  if (!isOwner(viewerOid, upload)) {
     return "not_yours";
   }
   // `pending` is here too: its parts are incomplete, so what it would serve is a file with holes in it.
@@ -340,19 +285,6 @@ export function attachmentDownload(viewerOid: string, upload: UploadRef, heldUnt
 }
 
 /**
- * Whether `viewerOid` may see what a virtual agent's volume holds, and ask for files on it to be deleted. Its owner
- * alone.
- *
- * Its own rule rather than `canViewAgent`'s: what is on an assistant's disk is not a session, so it is not something
- * an agent rule should ever be able to answer for. Reading is the same decision as deleting, because the list is of
- * their own attachments and there is nothing about it a reader is entitled to that a deleter is not — the same
- * reasoning as `canManageTemplate`.
- */
-export function canManageUploadsOnDisk(viewerOid: string, ownerOid: string): boolean {
-  return viewerOid === ownerOid;
-}
-
-/**
  * Whether `viewerOid` may ask for the pod's copy of an upload to be deleted: their own upload, and one that reached a
  * message, since that is the only kind a pod ever fetched.
  *
@@ -360,50 +292,25 @@ export function canManageUploadsOnDisk(viewerOid: string, ownerOid: string): boo
  * it refuses both alike and confirms nothing about an id.
  */
 export function canRemoveUploadFromDisk(viewerOid: string, upload: UploadRef): boolean {
-  return viewerOid === upload.ownerOid && upload.messageId !== null;
+  return isOwner(viewerOid, upload) && upload.messageId !== null;
 }
 
 /**
- * Whether `viewerOid` may see what an assistant's pod reports about its own memory. Its owner alone.
- *
- * Its own rule rather than `canManageUploadsOnDisk`'s, which is named for the files it decides about: this is read
- * beside a setting that changes the pod's size, and a rule borrowed from another feature is one that moves when that
- * feature's reasoning does. How much memory someone's assistant is using is not a session either way, so no agent
- * rule should be able to answer for it.
+ * Whether `actorOid` may make a virtual agent act as its owner: start, stop, rename, resize or delete it, see its
+ * device codes or paste a login code back to it, and have its pod search Jira or Confluence. Its owner alone, and its
+ * own rule rather than `isOwner` because the reason is narrower than ownership: the agent acts with the owner's
+ * GitHub, Azure and Atlassian sign-ins, so a code it shows is a sign-in as them and a search it runs reads Atlassian
+ * as them. Whatever ever widens who may see a virtual agent must not widen this.
  */
-export function canSeeAssistantMemory(viewerOid: string, ownerOid: string): boolean {
-  return viewerOid === ownerOid;
-}
-
-export interface VirtualAgentRef {
-  id: string;
-  ownerOid: string;
+export function canManageVirtualAgent(actorOid: string, virtualAgent: { ownerOid: string }): boolean {
+  return isOwner(actorOid, virtualAgent);
 }
 
 /**
- * Whoever may see the agents a virtual agent's sessions register may see the virtual agent itself: its name, its
- * state and its current session, which makes it its owner's. Everything else about it is `canManageVirtualAgent`'s,
- * whose reasoning is its own and does not follow this one.
+ * Only its owner opens a virtual agent's web servers through the viewer, as only they see its ports: a server there
+ * runs as the owner, with their GitHub and Azure access, and may serve what it read with them.
  */
-export function canViewVirtualAgent(viewerOid: string, virtualAgent: VirtualAgentRef): boolean {
-  return canViewAgent(viewerOid, virtualAgent);
-}
-
-/**
- * Only its owner starts, stops, renames or deletes a virtual agent, and only they see its device codes or paste a
- * login code back to it. Narrower than `canViewVirtualAgent` on purpose, and the reason is worth keeping in sight:
- * the agent acts with the owner's GitHub and Azure access, so a code it shows is a sign-in as the owner.
- */
-export function canManageVirtualAgent(actorOid: string, virtualAgent: VirtualAgentRef): boolean {
-  return actorOid === virtualAgent.ownerOid;
-}
-
-/**
- * Only its owner opens a virtual agent's web servers through the viewer, as only they see its ports. No grant
- * extends to it: a server there runs as the owner, with their GitHub and Azure access, and may serve what it read
- * with them.
- */
-export function canOpenVirtualAgentPort(actorOid: string, virtualAgent: VirtualAgentRef): boolean {
+export function canOpenVirtualAgentPort(actorOid: string, virtualAgent: { ownerOid: string }): boolean {
   return canManageVirtualAgent(actorOid, virtualAgent);
 }
 
@@ -429,11 +336,12 @@ export function canUseCredentialRoutes(caller: { virtualAgentId?: string }): boo
 }
 
 /**
- * A conversation as the share rules read it: `ConversationRef`, which is what every rule about a chat takes, and its
- * id as well, because a share is of one conversation rather than of a person's chats.
+ * A conversation as the share rules read it: its owner, and its id as well, because a share is of one conversation
+ * rather than of a person's chats.
  */
-export interface SharedConversationRef extends ConversationRef {
+export interface SharedConversationRef {
   id: string;
+  ownerOid: string;
 }
 
 /** One read-only share of one conversation with one named person. The rows are the whole of the access. */
@@ -458,37 +366,19 @@ export type ConversationAccess = "owner" | "reader" | "none";
  * the link who is not named in a row gets `none`, exactly as if the conversation did not exist.
  */
 export function conversationAccess(viewerOid: string, conversation: SharedConversationRef, shares: readonly ConversationShare[]): ConversationAccess {
-  if (viewerOid === conversation.ownerOid) {
+  if (isOwner(viewerOid, conversation)) {
     return "owner";
   }
   return shares.some((share) => share.conversationId === conversation.id && share.recipientOid === viewerOid) ? "reader" : "none";
 }
 
 /**
- * Whether `viewerOid` may read a conversation's share page: its owner, or someone they named. What that page shows is
- * narrower than the conversation — the words of the thread and the document, never a file's bytes and never a live
- * update — and `sharedConversation` in `src/assistant/sharing.ts` is what holds it to that.
- *
- * Nothing else widens with it, because a share is of the conversation and the agent rules are about the agent: a
- * recipient is not its owner, so `canViewAgent`, `canPersonMessageAgent`, `canSeeAgentSkills` and `canViewTranscript`
- * answer for them exactly as they do for a stranger, and with them `/api/ui/stream`, every `/api/agent/{agent_id}/…`
- * route and the hub's rosters.
- */
-export function canViewSharedConversation(viewerOid: string, conversation: SharedConversationRef, shares: readonly ConversationShare[]): boolean {
-  return conversationAccess(viewerOid, conversation, shares) !== "none";
-}
-
-/** Only the owner sees who a conversation is shared with, adds someone, or takes them off the list. */
-export function canManageConversationShares(actorOid: string, conversation: SharedConversationRef): boolean {
-  return actorOid === conversation.ownerOid;
-}
-
-/**
- * Whether `actorOid` may share their conversation with `recipientOid`. `recipientKnown` means a `user` row exists:
- * the hub shares with a person it has seen, not with an address.
+ * Whether `actorOid` may share their conversation with `recipientOid`: only the owner shares, as only they see or
+ * change who it is shared with (`isOwner`). `recipientKnown` means a `user` row exists: the hub shares with a
+ * person it has seen, not with an address.
  */
 export function canShareConversationWith(actorOid: string, conversation: SharedConversationRef, recipientOid: string, recipientKnown: boolean): boolean {
-  return canManageConversationShares(actorOid, conversation) && recipientKnown && recipientOid !== conversation.ownerOid;
+  return isOwner(actorOid, conversation) && recipientKnown && recipientOid !== conversation.ownerOid;
 }
 
 /**
@@ -530,24 +420,15 @@ export function peopleLookup(raw: string): PeopleLookup {
 }
 
 /**
- * What `GET /api/ui/agents` may answer: the agents the post composer offers to tag, by the same search-not-a-list
- * shape as `peopleLookup`, and sharing its two bounds because the reasoning is the same one.
+ * What `GET /api/ui/agents`, the post composer's tag picker, may answer. It matches every agent rather than the
+ * viewer's own, because tagging does (`tagRefusal`), and hands over only an agent's name and whose it is, which every
+ * post of that agent's already shows in its byline; no status, heartbeat or repo, which are its owner's alone.
  *
- * It matches every agent rather than the viewer's own, because tagging does (`tagRefusal`): a picker holding only
- * their own sessions would leave out every agent a tag exists to reach. What it hands over — an agent's name and
- * whose it is — is what every post of that agent's already shows in its byline to anyone signed in. It answers no
- * status, heartbeat or repo: those are the agent's page, which is its owner's alone.
+ * It shares `peopleLookup`'s bounds on purpose: a list of agents names the people who own them, so it must be no
+ * easier to walk than the people search.
  */
 export function agentLookup(raw: string): PeopleLookup {
   return peopleLookup(raw);
-}
-
-/**
- * Whether a matched agent may be offered to tag: anything the post would not then be refused for. The composer
- * posts as the person signed in, never as one of their agents, so there is no self-tag for it to leave out.
- */
-export function canSuggestAgent(agent: AgentRef): boolean {
-  return tagRefusal(null, agent) === undefined;
 }
 
 /** Whether a matched person may be offered to `viewerOid` as someone to share with: anyone but themselves. */
@@ -567,54 +448,4 @@ export function canLaunchTokenReadMessage(sessionAgentIds: readonly string[], me
   }
   const ours = (agent: AgentRef | null) => agent !== null && sessionAgentIds.includes(agent.id);
   return ours(message.targetAgent) || ours(message.authorAgent);
-}
-
-/** The columns every conversation rule reads. */
-export interface ConversationRef {
-  ownerOid: string;
-}
-
-/**
- * Whether `viewerOid` may see a CFT Workspace conversation: its owner, and nobody else. Its own rule rather than
- * `canViewAgent`'s, because this is about the chat rather than about the agent a session of it runs as, and because
- * searching, listing and opening one all have to agree on the same single answer. A share of the conversation is the
- * one thing that widens it, and `conversationAccess` rather than this is where that is read.
- */
-export function canViewConversation(viewerOid: string, conversation: ConversationRef): boolean {
-  return viewerOid === conversation.ownerOid;
-}
-
-/**
- * Only its owner stops an answer their conversation is working on. The same single answer as
- * `canViewConversation`'s, and its own rule for the same reason: interrupting a turn is an act on the session rather
- * than a read of the chat, so it is worth saying separately that a share of the chat does not carry it.
- */
-export function canStopAssistantAnswer(actorOid: string, conversation: ConversationRef): boolean {
-  return actorOid === conversation.ownerOid;
-}
-
-/**
- * Whether `viewerOid` may search Jira or Confluence through a virtual agent: its owner, and nobody else. The search
- * runs with the owner's own Atlassian sign-in, so anyone else asking would be reading Atlassian as them; and the
- * answer goes back only to whoever asked.
- */
-export function canLookUpAtlassian(viewerOid: string, virtualAgent: { ownerOid: string }): boolean {
-  return viewerOid === virtualAgent.ownerOid;
-}
-
-/**
- * Whether `viewerOid` may run a Welsh translation job through a virtual agent, or download one of its Welsh files: its
- * owner, and nobody else. A job runs with the owner's own GitHub and Atlassian sign-ins, opening pull requests and
- * editing Jira stories as them, and its spreadsheets are theirs. No share of a chat of theirs reaches it.
- */
-export function canUseWelsh(viewerOid: string, virtualAgent: { ownerOid: string }): boolean {
-  return viewerOid === virtualAgent.ownerOid;
-}
-
-/**
- * Only its owner reads or changes where their documents go by default. Nothing about it is a secret, but it is theirs
- * alone, as their templates are.
- */
-export function canManageExportDefaults(actorOid: string, ownerOid: string): boolean {
-  return actorOid === ownerOid;
 }

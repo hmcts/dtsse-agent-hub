@@ -2,7 +2,19 @@ import { describe, expect, it } from "vitest";
 import type { ThreadMessage } from "../messages/direct-thread.ts";
 import type { QuestionView } from "../questions/views.ts";
 import { type ConversationItem, conversationItems, type TranscriptEntryView } from "../transcripts/conversation.ts";
-import { activityLabel, backgroundHelpers, MAX_HELPERS, progress, progressAnnouncement, progressLabel, runningHelpers, threadItems } from "./thread.ts";
+import {
+  activityLabel,
+  backgroundHelpers,
+  MAX_HELPERS,
+  progress,
+  progressAnnouncement,
+  progressLabel,
+  runningHelpers,
+  sessionNotice,
+  shownInThread,
+  threadItems,
+  WARMING_QUIPS
+} from "./thread.ts";
 
 let next = 0;
 
@@ -501,6 +513,67 @@ describe("runningHelpers", () => {
   });
 });
 
+describe("sessionNotice", () => {
+  const IDLE = { state: "idle" } as const;
+
+  it("should say nothing while a session is live, which will answer whatever is sent to it", () => {
+    expect(sessionNotice("live", "offline", IDLE)).toBeNull();
+  });
+
+  it("should offer the warming quips while the pod is starting a session", () => {
+    const notice = sessionNotice("starting", "offline", IDLE);
+
+    expect(notice).toEqual({ state: "starting", words: WARMING_QUIPS, announcement: "Starting your assistant" });
+    expect(notice?.words.length).toBeGreaterThan(1);
+  });
+
+  // Every quip has to carry the one fact on its own: it is the only line on the screen, and somebody reading one of
+  // them and nothing else must not come away thinking the assistant is there.
+  it.each(WARMING_QUIPS)("should still say an assistant is coming in %j", (quip) => {
+    expect(quip).toMatch(/assistant/i);
+    expect(quip).toMatch(/start|warm|wak|kettle|lur/i);
+  });
+
+  // A real wait with a real cause — the pod is at its cap and another chat has to give up its session first. A joke
+  // over it would hide both, so this is the same plain wording the line under the thread uses.
+  it("should say plainly that the chat is waiting its turn when the pod has queued it", () => {
+    expect(sessionNotice("queued", "offline", IDLE)).toEqual({
+      state: "queued",
+      words: ["Waiting for a free assistant…"],
+      announcement: "Waiting for a free assistant"
+    });
+  });
+
+  it("should say what will start a session when nothing has asked for one", () => {
+    expect(sessionNotice(null, "offline", IDLE)).toEqual({
+      state: "unstarted",
+      words: ["Your assistant starts when you send a message."],
+      announcement: "Your assistant starts when you send a message."
+    });
+  });
+
+  // No pod, no supervisor, and `localOfflineNote` already says the one thing there is to say about a laptop that is
+  // away. This is what keeps the two from both being on the screen.
+  it.each(["starting", "queued", "live", null] as const)("should say nothing at all on a local chat reading %j", (session) => {
+    expect(sessionNotice(session, "offline", IDLE, true)).toBeNull();
+  });
+
+  // Whatever a report yet to land says, an agent answering the hub has a session behind it — and is also the agent
+  // the composer's wake on focus leaves alone, so this is the same bound the wake itself is gated on.
+  it.each(["idle", "busy"] as const)("should say nothing about a session when the agent is %j", (agentStatus) => {
+    expect(sessionNotice(null, agentStatus, IDLE)).toBeNull();
+  });
+
+  // The line under the thread words the wait once the person has sent something. Both would be the same wait said
+  // twice, directly above and below each other.
+  it.each([[{ state: "waking", label: "Starting your assistant…" } as const], [{ state: "working", label: "Reading", helpers: 0 } as const]])(
+    "should leave the wait to the progress line when it is already saying %j",
+    (doing) => {
+      expect(sessionNotice("starting", "offline", doing)).toBeNull();
+    }
+  );
+});
+
 describe("progressLabel and progressAnnouncement", () => {
   it.each([
     [{ state: "idle" } as const, "", ""],
@@ -567,5 +640,102 @@ describe("backgroundHelpers", () => {
 
   it("should leave out a launch over an hour old that never reported, even when it is the last entry", () => {
     expect(backgroundHelpers(conversationItems([], [launch("a", T(1))]), NOW + 2 * 60 * 60 * 1000)).toBe(0);
+  });
+});
+
+describe("harness turns in a local chat", () => {
+  const localItems = (...texts: string[]) =>
+    conversationItems(
+      [],
+      texts.map((text, index) => entry("user", { text }, T(index + 1)))
+    );
+
+  it("should show a slash command as a quiet notice rather than its XML", () => {
+    const thread = threadItems(
+      localItems("<command-name>/clear</command-name>\n<command-message>clear</command-message>\n<command-args></command-args>"),
+      [],
+      [],
+      true
+    );
+
+    expect(thread).toMatchObject([{ type: "notice", text: "Ran /clear", failed: false }]);
+  });
+
+  it("should show a command's arguments after its name", () => {
+    const thread = threadItems(localItems("<command-name>/model</command-name><command-args>opus</command-args>"), [], [], true);
+
+    expect(thread).toMatchObject([{ type: "notice", text: "Ran /model opus" }]);
+  });
+
+  it("should show a finished background task as its summary, and a failed one as failed", () => {
+    const done =
+      '<task-notification><task-id>x</task-id><status>completed</status><summary>Agent "Review" finished</summary><result>long report</result></task-notification>';
+    const bad = "<task-notification><status>failed</status><summary>Build broke</summary></task-notification>";
+    const thread = threadItems(localItems(done, bad), [], [], true);
+
+    expect(thread).toMatchObject([
+      { type: "notice", text: 'Agent "Review" finished', failed: false },
+      { type: "notice", text: "Build broke", failed: true }
+    ]);
+  });
+
+  it("should leave out a command's output and caveat", () => {
+    expect(threadItems(localItems("<local-command-stdout>ok</local-command-stdout>", "<local-command-caveat>x</local-command-caveat>"), [], [], true)).toEqual(
+      []
+    );
+  });
+
+  it("should keep a prompt the person typed as their own message", () => {
+    expect(threadItems(localItems("fix the bug"), [], [], true)).toMatchObject([{ type: "user", text: "fix the bug" }]);
+  });
+});
+
+describe("harness turns that are not wholly harness text", () => {
+  const localItems = (text: string) => conversationItems([], [entry("user", { text }, T(1))]);
+
+  it("should read a command turn that starts with whitespace", () => {
+    expect(threadItems(localItems("\n <command-name>/clear</command-name>"), [], [], true)).toMatchObject([{ type: "notice", text: "Ran /clear" }]);
+  });
+
+  it("should keep a prompt that merely starts by quoting command output", () => {
+    const thread = threadItems(localItems("<local-command-stdout>ok</local-command-stdout> why did this fail?"), [], [], true);
+
+    expect(thread).toMatchObject([{ type: "user" }]);
+  });
+
+  it("should bound a long notice to one line", () => {
+    const thread = threadItems(localItems(`<command-name>/skill</command-name><command-args>${"word\n".repeat(200)}</command-args>`), [], [], true);
+
+    expect(thread[0]).toMatchObject({ type: "notice" });
+    expect((thread[0] as { text: string }).text.length).toBeLessThanOrEqual(200);
+  });
+});
+
+describe("shownInThread", () => {
+  const IDE = "<ide_opened_file>The user opened the file /a/b.ts in the IDE.</ide_opened_file>";
+
+  it.each([
+    ["an answer with words", "assistant", { text: "Here it is." }],
+    ["a tool call", "tool_use", { id: "t", name: "Read", input: {} }],
+    ["a redacted tool call, which still shows as a row", "tool_use", { id: "t", name: "Read", redacted: "aws" }],
+    ["a typed prompt", "user", { text: "fix this" }],
+    ["words after editor context", "user", { text: `${IDE} fix this` }],
+    ["a shell command run with !", "user", { text: "<bash-input>ls</bash-input>" }],
+    ["an interrupted request", "user", { text: "[Request interrupted by user]" }]
+  ])("should count an entry as shown when it is %s", (_, role, content) => {
+    expect(shownInThread({ role, content, truncated: false })).toBe(true);
+  });
+
+  it.each([
+    ["an answer with no words", "assistant", { text: "   " }],
+    ["a redacted answer", "assistant", { redacted: "aws" }],
+    ["a tool result", "tool_result", { tool_use_id: "t", is_error: false, text: "ok" }],
+    ["a system line", "system", { text: "compacted" }],
+    ["editor context alone", "user", { text: IDE }],
+    ["a slash command, which shows as a notice", "user", { text: "<command-name>/clear</command-name>" }],
+    ["a local command's output, which shows nothing", "user", { text: "<local-command-stdout>ok</local-command-stdout>" }],
+    ["a redacted prompt", "user", { redacted: "aws" }]
+  ])("should not count an entry as shown when it is %s", (_, role, content) => {
+    expect(shownInThread({ role, content, truncated: false })).toBe(false);
   });
 });

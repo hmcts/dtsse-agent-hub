@@ -6,11 +6,11 @@ import { MAX_DELETED_PER_FRAME, MAX_REPORTED_FILES } from "./upload-report.ts";
 
 export const MAX_ARTEFACT_MARKDOWN = 100_000;
 export const MAX_ARTEFACT_TITLE = 200;
-export const MAX_SESSION_DETAIL = 200;
-export const MAX_SESSIONS_REPORTED = 50;
-export const MAX_SESSIONS_AT_ONCE = 20;
+const MAX_SESSION_DETAIL = 200;
+const MAX_SESSIONS_REPORTED = 50;
+const MAX_SESSIONS_AT_ONCE = 20;
 
-export const artefactTitle = z.string().trim().min(1).max(MAX_ARTEFACT_TITLE);
+const artefactTitle = z.string().trim().min(1).max(MAX_ARTEFACT_TITLE);
 
 export const artefactPutBody = z.object({
   title: artefactTitle.nullish(),
@@ -33,12 +33,25 @@ export const sessionsReportBody = z.object({
 export type SessionsReport = z.infer<typeof sessionsReportBody>;
 
 /** A Jira issue key and the longest error a pod may report for an export; the migration checks the same. */
-export const JIRA_KEY_RE = /^[A-Z][A-Z0-9_]{1,9}-\d{1,9}$/;
+const JIRA_KEY_RE = /^[A-Z][A-Z0-9_]{1,9}-\d{1,9}$/;
 export const MAX_JIRA_ERROR = 300;
 
 export const jiraExportReportBody = z.union([
   z.strictObject({ export_id: z.uuid(), key: z.string().regex(JIRA_KEY_RE) }),
   z.strictObject({ export_id: z.uuid(), error: z.string().trim().min(1).max(MAX_JIRA_ERROR) })
+]);
+
+/** The longest error a pod may report for a GitHub export; the migration checks the same. */
+export const MAX_GITHUB_ERROR = 300;
+
+export const githubExportReportBody = z.union([
+  z.strictObject({
+    export_id: z.uuid(),
+    number: z.number().int().min(1).max(2_147_483_647),
+    // The issue was made, but could not be put on the Project asked for.
+    project_error: z.string().trim().min(1).max(MAX_GITHUB_ERROR).optional()
+  }),
+  z.strictObject({ export_id: z.uuid(), error: z.string().trim().min(1).max(MAX_GITHUB_ERROR) })
 ]);
 
 /** The longest error a pod may report for a Confluence export; the migration checks the same. */

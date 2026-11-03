@@ -4,6 +4,7 @@ import { AssistantMarkdown } from "@/components/assistant/AssistantMarkdown";
 import { ForkButton, type ForkChatAction } from "@/components/assistant/ForkButton";
 import { ForkedThread } from "@/components/assistant/ForkedThread";
 import { SharedItem } from "@/components/assistant/SharedItem";
+import { SHARED_CHATS } from "@/web/home";
 
 /**
  * A chat someone shared, to read.
@@ -60,7 +61,7 @@ export function SharedChat({ view, forkChat }: { view: SharedConversationView; f
             </section>
           )}
           <p className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs text-asst-faint">
-            <Link href="/assistant/shared" className="text-asst-accent underline hover:text-asst-accent-hover">
+            <Link href={SHARED_CHATS} className="text-asst-accent underline hover:text-asst-accent-hover">
               {view.access === "owner" ? "See all your shared chats" : "See other chats shared with you"}
             </Link>
             <Link href="/assistant" className="text-asst-accent underline hover:text-asst-accent-hover">

@@ -6,7 +6,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fakeSecrets, type TempClaudeHome, tempClaudeHome } from "./__fixtures__/claude-home.ts";
 import { createMockHub } from "./__fixtures__/mock-hub.ts";
-import { type Api, ApiError, createApi, type RequestOptions, type TranscriptBody, type TranscriptResponse } from "./api.ts";
+import { type Api, ApiError, createApi, type RequestOptions } from "./api.ts";
 import type { Env } from "./env.ts";
 import { directEnvelope } from "./envelope.ts";
 import { CLIENT_FEATURES } from "./features.ts";
@@ -32,6 +32,7 @@ import {
   transcriptOffBySession,
   UNAVAILABLE_PAUSE_MS
 } from "./transcript-sync.ts";
+import type { TranscriptBody, TranscriptResponse } from "./wire.ts";
 
 let home: TempClaudeHome;
 const savedEnv: Record<string, string | undefined> = {};
@@ -751,7 +752,7 @@ describe("createTranscriptSync", () => {
     try {
       const api = createApi({ baseUrl: url, devUser: "u-me|Me|me@example.com" });
       const sid = `sync-test-${++nextSession}`;
-      const { agent_id: agentId } = await api.register({ session_id: sid, name: sid, client_features: [...CLIENT_FEATURES] });
+      const { agent_id: agentId } = await api.register({ session_id: sid, name: sid, name_source: "derived", client_features: [...CLIENT_FEATURES] });
       ensureStateDir(sid);
       const file = path.join(home.root, `${sid}.jsonl`);
       const lines: unknown[] = [];

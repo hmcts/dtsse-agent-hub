@@ -16,7 +16,7 @@ import { createVaultStore } from "./vault.ts";
  *   deployment without the vault (a preview) still starts.
  */
 
-export const VAULT_URL_VARIABLE = "CREDENTIALS_VAULT_URL";
+const VAULT_URL_VARIABLE = "CREDENTIALS_VAULT_URL";
 
 export type CredentialBackend = { available: true; store: SecretStore } | { available: false; reason: string };
 

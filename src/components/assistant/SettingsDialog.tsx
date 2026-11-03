@@ -1,11 +1,12 @@
 "use client";
 
-import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Fragment, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   type Connection,
   type ConnectionsData,
+  checklistState,
   connections,
   connectionsWarning,
   type ModelAccess,
@@ -15,22 +16,27 @@ import {
 } from "@/assistant/connections";
 import { memoryPressure, memoryWarning } from "@/assistant/memory-report";
 import type { AssistantPluginsData } from "@/assistant/settings";
+import { pluginChoices } from "@/assistant/settings";
 import { type Theme, themeOf } from "@/assistant/theme";
 import { ActionForm, type FormAction } from "@/components/ActionForm";
+import { AgentSettings, type AssistantAgentSettings } from "@/components/assistant/AgentSettings";
 import { type AssistantClaudeMd, ClaudeMd } from "@/components/assistant/ClaudeMdSettings";
 import { type AssistantExportDefaults, ExportSettings } from "@/components/assistant/ExportSettings";
 import { type AssistantFiles, Files } from "@/components/assistant/FileSettings";
+import { type AssistantGitIdentity, GitIdentity } from "@/components/assistant/GitIdentitySettings";
 import { SETTINGS_TWO_PANE_MIN_WIDTH } from "@/components/assistant/layout";
 import { type AssistantModelSetting, ModelSettings } from "@/components/assistant/ModelSettings";
+import { PortSettings } from "@/components/assistant/PortSettings";
+import { type AssistantSharing, Sharing } from "@/components/assistant/SharingSettings";
 import { type AssistantSize, Size } from "@/components/assistant/SizeSettings";
 import { type AssistantTemplates, Templates } from "@/components/assistant/TemplateSettings";
 import { ThemeSwitch } from "@/components/assistant/ThemeSwitch";
-import { checklistState } from "@/components/virtual-agents/OnboardingChecklist";
-import { pluginChoices } from "@/components/virtual-agents/PluginsField";
+import { type AssistantTokens, TokenSettings } from "@/components/assistant/TokenSettings";
+import { SETTINGS_PARAMETER, withoutSettingsParameter } from "@/web/home";
 
 /**
  * What a row needs to connect a sign-in the assistant makes only on request: the assistant it restarts and the action
- * that does it, `reconnectSignIn`, which the getting-ready screen's "Sign in again" posts to as well.
+ * that does it, `reconnectSignIn`, which the getting-ready screen's Connect and "Sign in again" post to as well.
  */
 export interface AssistantConnect {
   assistantId: string;
@@ -39,7 +45,7 @@ export interface AssistantConnect {
   reconnect: FormAction;
 }
 
-/** The plugins the dialog shows, with the action it posts a change to: the one the hub's `/agents/{id}` page uses. */
+/** The plugins the dialog shows, with the action it posts a change to, `setVirtualAgentPlugins`. */
 export type AssistantPlugins = AssistantPluginsData & { save: FormAction };
 
 interface SettingsView {
@@ -57,6 +63,10 @@ interface SettingsView {
   files: AssistantFiles | undefined;
   size: AssistantSize | undefined;
   exports: AssistantExportDefaults | undefined;
+  sharing: AssistantSharing | undefined;
+  agent: AssistantAgentSettings | undefined;
+  git: AssistantGitIdentity | undefined;
+  tokens: AssistantTokens | undefined;
 }
 
 /**
@@ -81,7 +91,7 @@ export const FOCUSABLE = ["a[href]", "button:not([disabled])", "input:not([disab
  * and the document panel's queries: a fractional viewport in between — a zoomed page, a scaled display — would
  * otherwise lay out one pane inside a box the CSS had already widened for two.
  */
-export const SETTINGS_TWO_PANE = `(min-width: ${SETTINGS_TWO_PANE_MIN_WIDTH}px)`;
+const SETTINGS_TWO_PANE = `(min-width: ${SETTINGS_TWO_PANE_MIN_WIDTH}px)`;
 
 const STATE_CLASS: Record<Connection["state"], string> = {
   connected: "text-asst-ok",
@@ -138,8 +148,8 @@ function connectWords(name: string, stored: boolean, running: boolean): { questi
 }
 
 /**
- * Connecting a sign-in made on request. Its pod relays one only once asked, and only as it starts, so connecting is
- * `reconnectSignIn`: record the ask and restart. Behind a confirmation because the restart ends whatever the
+ * Connecting a sign-in made on request. Its pod relays one only as it starts, and off the `gateway` route only once
+ * asked, so connecting is `reconnectSignIn`: record the ask and restart. Behind a confirmation because the restart ends whatever the
  * assistant is doing, and because a lapsed sign-in with a value saved deletes the one all their agents use. The code
  * then arrives where every relayed code does, above the chats.
  */
@@ -224,20 +234,6 @@ function Appearance({ theme }: { theme: Theme }) {
   );
 }
 
-function SharedChats() {
-  return (
-    <section aria-labelledby="assistant-settings-sharing" className="flex flex-col gap-2.5">
-      <h3 id="assistant-settings-sharing" className="text-sm font-semibold">
-        Shared chats
-      </h3>
-      <p className="text-[13px] text-asst-muted">Chats that others have shared with you, and the ones you have shared.</p>
-      <Link href="/assistant/shared" className="self-start rounded-[10px] border border-asst-strong px-3 py-2 text-[13px] hover:bg-asst-hover">
-        View shared chats
-      </Link>
-    </section>
-  );
-}
-
 function Connections({ list, access, connect, unavailable, warning }: Pick<SettingsView, "list" | "access" | "connect" | "unavailable" | "warning">) {
   return (
     <section aria-labelledby="assistant-settings-connections" className="flex flex-col gap-2.5">
@@ -277,7 +273,7 @@ function Connections({ list, access, connect, unavailable, warning }: Pick<Setti
 /**
  * The plugins in plain words: whatever the hub's configuration says each one is for, with its marketplace name
  * underneath for anyone who knows it. A plugin the hub has stopped offering can be unticked but not ticked again,
- * which is `pluginChoices`'s rule and the hub's own page's.
+ * which is `pluginChoices`'s rule.
  */
 function Plugins({ plugins }: { plugins: AssistantPlugins }) {
   const choices = pluginChoices(plugins.available, plugins.checked);
@@ -357,6 +353,13 @@ const SECTIONS: readonly SettingsSection[] = [
     panel: (view) => <Connections list={view.list} access={view.access} connect={view.connect} unavailable={view.unavailable} warning={view.warning} />
   },
   {
+    id: "credentials",
+    label: "Credentials",
+    group: "General",
+    shown: (view) => view.tokens !== undefined && (view.tokens.rows.length > 0 || view.tokens.unavailable !== null),
+    panel: (view) => (view.tokens === undefined ? null : <TokenSettings tokens={view.tokens} />)
+  },
+  {
     id: "templates",
     label: "Templates",
     group: "General",
@@ -365,12 +368,25 @@ const SECTIONS: readonly SettingsSection[] = [
   },
   {
     id: "exports",
-    label: "Jira & Confluence",
+    label: "Tickets & Confluence",
     group: "General",
     shown: (view) => view.exports !== undefined,
     panel: (view) => (view.exports === undefined ? null : <ExportSettings exports={view.exports} />)
   },
-  { id: "sharing", label: "Sharing", group: "General", shown: () => true, panel: () => <SharedChats /> },
+  {
+    id: "sharing",
+    label: "Sharing",
+    group: "General",
+    shown: (view) => view.sharing !== undefined,
+    panel: (view) => (view.sharing === undefined ? null : <Sharing sharing={view.sharing} />)
+  },
+  {
+    id: "assistant",
+    label: "Assistant",
+    group: "Agent",
+    shown: (view) => view.agent !== undefined,
+    panel: (view) => (view.agent === undefined ? null : <AgentSettings settings={view.agent} />)
+  },
   {
     id: "model",
     label: "Model",
@@ -385,6 +401,13 @@ const SECTIONS: readonly SettingsSection[] = [
     group: "Agent",
     shown: (view) => view.claudeMd !== undefined,
     panel: (view) => (view.claudeMd === undefined ? null : <ClaudeMd claudeMd={view.claudeMd} />)
+  },
+  {
+    id: "git",
+    label: "Git identity",
+    group: "Agent",
+    shown: (view) => view.git !== undefined,
+    panel: (view) => (view.git === undefined ? null : <GitIdentity git={view.git} />)
   },
   {
     id: "tools",
@@ -403,6 +426,13 @@ const SECTIONS: readonly SettingsSection[] = [
     group: "Agent",
     shown: (view) => view.size !== undefined,
     panel: (view) => (view.size === undefined ? null : <Size size={view.size} />)
+  },
+  {
+    id: "ports",
+    label: "Web servers",
+    group: "Agent",
+    shown: (view) => view.agent !== undefined,
+    panel: (view) => (view.agent === undefined ? null : <PortSettings load={view.agent.load} />)
   },
   {
     id: "files",
@@ -607,14 +637,17 @@ function focusNavigation(dialog: HTMLElement | null): void {
  * into it as it opens and stays in it while it is open; closing it, by Escape, the close button or the page behind
  * it, puts focus back on the cog, which is what `onClose` is for.
  */
-function Dialog({ view, onClose }: { view: SettingsView; onClose: () => void }) {
+function Dialog({ view, onClose, initial = null }: { view: SettingsView; onClose: () => void; initial?: string | null }) {
   const panel = useRef<HTMLDivElement>(null);
   const prefix = useId();
   const wide = useTwoPane();
   const items = SECTIONS.filter((item) => item.shown(view));
   // Nothing open is the narrow interface showing its list. Wide has no such state: it always has a section beside the
   // navigation, so a chosen section that the page has stopped passing anything for falls back to the first offered one.
-  const [chosen, setChosen] = useState<string | null>(wide ? (items[0]?.id ?? null) : null);
+  // A section the address names is open from the start at either width, which on the narrow one is drilled into.
+  const [chosen, setChosen] = useState<string | null>(
+    initial !== null && items.some((item) => item.id === initial) ? initial : wide ? (items[0]?.id ?? null) : null
+  );
   const section = items.some((item) => item.id === chosen) ? chosen : wide ? (items[0]?.id ?? null) : null;
   const tabId = (id: string) => `${prefix}-tab-${id}`;
   const panelId = `${prefix}-panel`;
@@ -748,7 +781,11 @@ export function AssistantSettings({
   templates,
   files,
   size,
-  exports
+  exports,
+  sharing,
+  agent,
+  git,
+  tokens
 }: {
   theme?: Theme;
   connections?: ConnectionsData;
@@ -763,9 +800,17 @@ export function AssistantSettings({
   files?: AssistantFiles;
   size?: AssistantSize;
   exports?: AssistantExportDefaults;
+  sharing?: AssistantSharing;
+  agent?: AssistantAgentSettings;
+  git?: AssistantGitIdentity;
+  tokens?: AssistantTokens;
 }) {
+  // `get` is the first value, so an address carrying the parameter twice still names one section.
+  const addressed = useSearchParams().get(SETTINGS_PARAMETER);
   const cog = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
+  const [opening, setOpening] = useState<string | null>(null);
+  const fromAddress = useRef(false);
   // The page's own clock to begin with, then the browser's as it takes over and again whenever the dialog opens. A
   // sign-in's deadline moves slowly and a timer on every page to watch it would cost more than it is worth, but the
   // first read has to be the page's: `Date.now()` here would be the server's clock in the HTML and the browser's in
@@ -805,9 +850,42 @@ export function AssistantSettings({
     return live === undefined ? theme : themeOf(live);
   }
 
+  function show(section: string | null): void {
+    setNow(Date.now());
+    setShownTheme(shownNow());
+    setOpening(section);
+    setOpen(true);
+  }
+
+  // `?settings=<section>` opens the dialog there, which is where retired pages and the share dialog send people. It is
+  // read on the client, so opening and closing the dialog never re-renders the page on the server. Opened after the
+  // first render rather than in it, because the dialog is portalled into the theme root and the server has no document
+  // to find one in. Shut by the address too, so the back button closes a dialog the address opened, with focus back on
+  // the cog as any other close leaves it; one the cog opened is left alone.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the address alone, since `show` reads the page as it stands when the address changes
+  useEffect(() => {
+    if (addressed !== null) {
+      fromAddress.current = true;
+      show(addressed);
+    } else if (fromAddress.current) {
+      fromAddress.current = false;
+      setOpen(false);
+      cog.current?.focus();
+    }
+  }, [addressed]);
+
   function close(): void {
     setOpen(false);
     cog.current?.focus();
+    // Replaced rather than navigated, which Next keeps `useSearchParams` in step with, so a reload does not open the
+    // dialog again. The parameter is cut out as text, so the rest of the query keeps the encoding it came with. A `null`
+    // state, not the current one: Next's patched `replaceState` leaves a state carrying its `__NA` marker to itself, so
+    // the router would keep the parameter, the same link would not open the dialog again and the next refresh would put
+    // it back.
+    if (addressed !== null) {
+      const { pathname, search, hash } = window.location;
+      window.history.replaceState(null, "", `${pathname}${withoutSettingsParameter(search)}${hash}`);
+    }
   }
 
   return (
@@ -819,11 +897,7 @@ export function AssistantSettings({
         aria-expanded={open}
         aria-label={attention.length === 0 ? "Settings" : `Settings. ${attention.join(". ")}`}
         title="Settings"
-        onClick={() => {
-          setNow(Date.now());
-          setShownTheme(shownNow());
-          setOpen(true);
-        }}
+        onClick={() => show(null)}
         // 36px, the size of the composer's own buttons, with the two extra pixels each way taken out of the margin
         // again so the footer row stays the height the 32px avatar beside it sets.
         className="relative -my-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-asst-muted hover:bg-asst-hover hover:text-asst-text"
@@ -854,8 +928,15 @@ export function AssistantSettings({
                 templates,
                 files,
                 size,
-                exports
+                exports,
+                sharing,
+                agent,
+                git,
+                tokens
               }}
+              // Remounted for a section the address names while the dialog is already open, so it opens on that one.
+              key={opening ?? ""}
+              initial={opening}
               onClose={close}
             />,
             themeRoot()

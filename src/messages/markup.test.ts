@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { type Alignment, type Block, type Inline, parseInline, parseMarkup, safeHref } from "./markup.ts";
+import { type Alignment, type Block, type Inline, parseInline, parseMarkup, repoHref, safeHref } from "./markup.ts";
+
+/** Where a body written in `cft-workspace` on `master` resolves its repo-relative paths, as `repoFileBase` builds it. */
+const BASE = "https://github.com/hmcts/cft-workspace/blob/master/";
 
 const text = (value: string): Inline => ({ type: "text", text: value });
 const code = (value: string): Inline => ({ type: "code", text: value });
@@ -252,6 +255,133 @@ describe("parseInline", () => {
         expect(href).toMatch(/^(https?:\/\/|mailto:)/);
       }
     }
+  });
+});
+
+describe("repoHref", () => {
+  it("should resolve a repo path against the base", () => {
+    expect(repoHref("apps/ccd/docs/how-to/decentralise-a-service.md", BASE)).toBe(`${BASE}apps/ccd/docs/how-to/decentralise-a-service.md`);
+    expect(repoHref("./docs/agent-api.md", BASE)).toBe(`${BASE}docs/agent-api.md`);
+    expect(repoHref("src/messages/markup.ts#L54", BASE)).toBe(`${BASE}src/messages/markup.ts#L54`);
+    expect(repoHref("src/messages/markup.ts?plain=1", BASE)).toBe(`${BASE}src/messages/markup.ts?plain=1`);
+  });
+
+  it("should refuse a target that leaves the base's host", () => {
+    // Protocol-relative: it resolves to https, which a scheme check would pass, and to another host entirely.
+    expect(new URL("//evil.example/x.md", BASE).href).toBe("https://evil.example/x.md");
+    expect(repoHref("//evil.example/x.md", BASE)).toBeNull();
+    expect(repoHref("//evil.example/a/b.md", BASE)).toBeNull();
+  });
+
+  it("should keep a `..` traversal on the base's origin", () => {
+    expect(repoHref("../../../../../../etc/passwd.md", BASE)).toBe("https://github.com/etc/passwd.md");
+    expect(repoHref("../other/README.md", BASE)).toBe("https://github.com/hmcts/cft-workspace/blob/other/README.md");
+  });
+
+  it("should refuse a target that is not a path in a repo", () => {
+    // No slash, no extension, or neither: a `#anchor`, a bare query, prose that happens to hold one of the two.
+    for (const raw of ["notapath", "#anchor", "?plain=1", "and/or", "9/10", "README.md", "v1.2", "scripts/grep", "src/messages/"]) {
+      expect(repoHref(raw, BASE)).toBeNull();
+    }
+  });
+
+  it("should refuse a target holding whitespace, a control character or an unsafe scheme", () => {
+    expect(repoHref("docs/a b.md", BASE)).toBeNull();
+    expect(repoHref("docs/a\u0000b.md", BASE)).toBeNull();
+    expect(repoHref("javascript:x/y.md", BASE)).toBeNull();
+    expect(repoHref("data:text/html,x.md", BASE)).toBeNull();
+  });
+
+  it("should refuse every target when the base is not a URL", () => {
+    expect(repoHref("docs/a.md", "not a url")).toBeNull();
+  });
+});
+
+describe("parseInline with a repo base", () => {
+  const base = { repoBase: BASE };
+
+  it("should link a repo-relative path when a base is given", () => {
+    // The body the complaint was about, as the session wrote it.
+    expect(
+      parseInline(
+        "Follow-ups: [Decentralise a service](apps/ccd/docs/how-to/decentralise-a-service.md) (step-by-step), " +
+          "[Decentralised callbacks reference](apps/ccd/docs/reference/decentralised-callbacks.md)",
+        base
+      )
+    ).toEqual([
+      text("Follow-ups: "),
+      link(`${BASE}apps/ccd/docs/how-to/decentralise-a-service.md`, text("Decentralise a service")),
+      text(" (step-by-step), "),
+      link(`${BASE}apps/ccd/docs/reference/decentralised-callbacks.md`, text("Decentralised callbacks reference"))
+    ]);
+  });
+
+  it("should keep a repo-relative path as text when no base is given", () => {
+    const body = "see [the guide](apps/ccd/docs/how-to/decentralise-a-service.md)";
+    expect(parseInline(body)).toEqual([text(body)]);
+    expect(links(parseInline(body))).toEqual([]);
+  });
+
+  it("should leave an absolute link and a mailto as they are when a base is given", () => {
+    expect(parseInline("[the docs](https://example.com/docs)", base)).toEqual([link("https://example.com/docs", text("the docs"))]);
+    expect(parseInline("[mail me](mailto:a@example.com)", base)).toEqual([link("mailto:a@example.com", text("mail me"))]);
+    expect(parseInline("see https://example.com/a", base)).toEqual([text("see "), link("https://example.com/a", text("https://example.com/a"))]);
+  });
+
+  it("should keep a target that is not a repo path as the text it was written as, with a base given", () => {
+    for (const body of ["[a word](notapath)", "[a word](#anchor)", "[a word](?plain=1)", "[click](javascript:alert(1))", "[one](and/or)"]) {
+      const nodes = parseInline(body, base);
+      expect(links(nodes)).toEqual([]);
+      expect(flatten(nodes)).toBe(body);
+    }
+  });
+
+  it("should still read #digits as a message reference when a base is given", () => {
+    expect(parseInline("see #1234 and docs/a.md", base)).toEqual([text("see "), ref("1234"), text(" and docs/a.md")]);
+  });
+
+  it("should refuse a repo path longer than the link limit", () => {
+    const long = `docs/${"a".repeat(2_044)}.md`;
+    expect(long.length).toBeGreaterThan(2_048);
+    const nodes = parseInline(`[x](${long})`, base);
+    expect(links(nodes)).toEqual([]);
+    expect(flatten(nodes)).toBe(`[x](${long})`);
+    const fits = `docs/${"a".repeat(2_030)}.md`;
+    expect(links(parseInline(`[x](${fits})`, base))).toEqual([`${BASE}${fits}`]);
+  });
+
+  it("should never leave the base's origin whatever the target", () => {
+    const hostile = [
+      "[a](//evil.example/x.md)",
+      "[a](/\\/evil.example/x.md)",
+      "[a](////evil.example/x.md)",
+      "[**a**](..//evil.example/x.md)",
+      "[a](docs/../../../../evil.example/x.md)"
+    ];
+    for (const body of hostile) {
+      for (const href of links(parseInline(body, base))) {
+        expect(new URL(href).origin).toBe("https://github.com");
+      }
+    }
+  });
+});
+
+describe("parseMarkup with a repo base", () => {
+  const base = { repoBase: BASE };
+  const href = `${BASE}docs/a.md`;
+
+  it("should resolve a repo path in every block that holds inlines", () => {
+    expect(parseMarkup("# [h](docs/a.md)", base)).toEqual([{ type: "heading", level: 1, children: [link(href, text("h"))] }]);
+    expect(parseMarkup("[p](docs/a.md)", base)).toEqual([paragraph(link(href, text("p")))]);
+    const [list] = parseMarkup("- [l](docs/a.md)\n  - [n](docs/a.md)", base) as Extract<Block, { type: "list" }>[];
+    expect(list?.items[0]?.children).toEqual([link(href, text("l"))]);
+    expect(list?.items[0]?.lists[0]?.items[0]?.children).toEqual([link(href, text("n"))]);
+    expect(parseMarkup("| [h](docs/a.md) |\n| - |\n| [c](docs/a.md) |", base)).toEqual([table([null], [[link(href, text("h"))]], [[link(href, text("c"))]])]);
+  });
+
+  it("should keep the same paths as text when no base is given", () => {
+    expect(links(parseMarkup("# [h](docs/a.md)", undefined).flatMap((block) => ("children" in block ? block.children : [])))).toEqual([]);
+    expect(parseMarkup("[p](docs/a.md)")).toEqual([paragraph(text("[p](docs/a.md)"))]);
   });
 });
 
@@ -690,6 +820,13 @@ describe("parseMarkup on hostile and huge inputs", () => {
       expect(elapsed).toBeLessThan(500);
     });
   }
+
+  // Resolving a path is a regex and a `URL` per bracket, which is paid for every opener a body holds, matched or not.
+  it("should parse within the time budget when a body at the size limit is resolved against a repo", () => {
+    for (const body of ["[a](docs/x/y.md) ".repeat(LIMIT / 17), "[a](docs/no-extension) ".repeat(LIMIT / 23), `${"a/".repeat(LIMIT / 2)}b`]) {
+      expect(timed(() => parseMarkup(body, { repoBase: BASE }))).toBeLessThan(500);
+    }
+  });
 
   it("should keep every character of a plain paragraph when the body is at the size limit", () => {
     const body = "word_with_underscores and *stars* ".repeat(LIMIT / 34);

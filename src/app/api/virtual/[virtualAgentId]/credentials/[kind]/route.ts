@@ -30,14 +30,14 @@ export const GET = virtualRoute<{ virtualAgentId: string; kind: string }>(async 
 });
 
 /**
- * An Azure token cache must be signed in as the owner alone. One that is not is refused with 409, never stored, and
- * fails the agent, as a `complete` naming another account does; one that does not decode is left to the ordinary
- * value check's 400. A CLAUDE.md or a git identity is refused with 403 (`canVirtualAgentStoreCredential`).
+ * An Azure token cache must be signed in as the owner alone, in the hub's tenant. One that is not is refused with
+ * 409, never stored, and fails the agent, as a `complete` naming another account does; one that does not decode is
+ * left to the ordinary value check's 400. A CLAUDE.md or a git identity is refused with 403 (`canVirtualAgentStoreCredential`).
  */
 export const PUT = virtualRoute<{ virtualAgentId: string; kind: string }>(async ({ virtualAgent, request, params }) => {
   const kind = pathKind(params.kind);
   if (!canVirtualAgentStoreCredential(kind)) {
-    throw new HttpError(403, `only its owner can change their ${kind === "claude_md" ? "CLAUDE.md" : "git identity"}, on agent-hub's virtual agents page`);
+    throw new HttpError(403, `only its owner can change their ${kind === "claude_md" ? "CLAUDE.md" : "git identity"}, in the CFT Workspace's settings`);
   }
   const { value } = parse(credentialValueBody, await readJson(request));
   const owner = virtualAgent.ownerOid;
@@ -46,8 +46,9 @@ export const PUT = virtualRoute<{ virtualAgentId: string; kind: string }>(async 
     if (!owned.ok && owned.reason === "unconfigured") {
       throw new HttpError(503, owned.error);
     }
-    if (!owned.ok && owned.reason === "not-owner") {
-      await failForAzureAccount(prisma, virtualAgent, `the Azure token cache the agent saved was refused: ${owned.error}; sign in as yourself`);
+    if (!owned.ok && (owned.reason === "not-owner" || owned.reason === "other-tenant")) {
+      const advice = owned.reason === "not-owner" ? "; sign in as yourself" : "";
+      await failForAzureAccount(prisma, virtualAgent, `the Azure token cache the agent saved was refused: ${owned.error}${advice}`);
       throw new HttpError(409, owned.error);
     }
   }

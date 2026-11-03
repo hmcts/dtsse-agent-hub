@@ -9,7 +9,7 @@ export type RetryOptions = {
   retryable?: (error: unknown) => boolean;
 };
 
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+export const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Anything carrying a numeric `status` came from an HTTP response, and only a rate limit or a server fault is
 // worth repeating. Everything else — a socket reset, a DNS failure, a thrown `Error` — gets another attempt.

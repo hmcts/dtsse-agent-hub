@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { boundedArray } from "../agent-api/bounded-array.ts";
+import { clientFeatures } from "../agent-api/schemas.ts";
 import { POD_PHASES } from "./lifecycle.ts";
 import { MAX_EXPOSED_PORT, MAX_REPORTED_PORTS, MIN_EXPOSED_PORT } from "./ports.ts";
 
@@ -8,7 +9,7 @@ import { MAX_EXPOSED_PORT, MAX_REPORTED_PORTS, MIN_EXPOSED_PORT } from "./ports.
 const MAX_DETAIL = 500;
 const MAX_URI = 2048;
 /** The longest a device-code login may wait: GitHub's codes last 15 minutes and Azure's about the same. */
-export const MAX_LOGIN_SECONDS = 3600;
+const MAX_LOGIN_SECONDS = 3600;
 
 /** GitHub's `ABCD-1234`, Azure's `ABCDEFGHI`: letters, digits and hyphens. */
 const USER_CODE = /^[A-Za-z0-9-]{1,64}$/;
@@ -23,9 +24,11 @@ const optionalText = (max: number) =>
     .nullish()
     .transform((value) => (value === undefined || value === null || value === "" ? null : value));
 
+/** `client_features` is validated as a registration's is, so a pod and its sessions are held to one rule. */
 export const statusBody = z.object({
   phase: z.enum(POD_PHASES),
-  detail: optionalText(MAX_DETAIL)
+  detail: optionalText(MAX_DETAIL),
+  client_features: clientFeatures
 });
 
 export const credentialValueBody = z.object({ value: z.string() });

@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { clientSupports, MAX_CLIENT_FEATURE_NAME, MAX_CLIENT_FEATURES, normaliseClientFeatures, storedClientFeatures } from "./client-features.ts";
+import {
+  clientSupports,
+  MAX_CLIENT_FEATURE_NAME,
+  MAX_CLIENT_FEATURES,
+  normaliseClientFeatures,
+  podGate,
+  podLacks,
+  podSupports,
+  storedClientFeatures
+} from "./client-features.ts";
 
 describe("normaliseClientFeatures", () => {
   it("should sort and de-duplicate the names when a client reports a list", () => {
@@ -53,5 +62,67 @@ describe("clientSupports", () => {
     expect(clientSupports(null, "attachments")).toBe(false);
     expect(clientSupports(undefined, "attachments")).toBe(false);
     expect(clientSupports("attachments", "attachments")).toBe(false);
+  });
+});
+
+describe("podSupports", () => {
+  it("should read the pod's own claim when it reported one", () => {
+    expect(podSupports({ clientFeatures: ["files"], agent: { clientFeatures: [] } }, "files")).toBe(true);
+    expect(podSupports({ clientFeatures: ["files"] }, "lookups")).toBe(false);
+  });
+
+  it("should not fall back when the pod reported an empty claim", () => {
+    expect(podSupports({ clientFeatures: [], agent: { clientFeatures: ["files"] } }, "files")).toBe(false);
+  });
+
+  it("should read the main-session agent's claim when the pod reported none", () => {
+    expect(podSupports({ clientFeatures: null, agent: { clientFeatures: ["welsh"] } }, "welsh")).toBe(true);
+    expect(podSupports({ clientFeatures: null, agent: { clientFeatures: ["files"] } }, "welsh")).toBe(false);
+  });
+
+  it("should be false when neither the pod nor a main-session agent claims anything", () => {
+    expect(podSupports({ clientFeatures: null, agent: null }, "files")).toBe(false);
+    expect(podSupports({ clientFeatures: undefined }, "files")).toBe(false);
+  });
+});
+
+describe("podGate", () => {
+  it("should say waking when the pod is not running, whatever it claimed", () => {
+    expect(podGate({ status: "cloning", clientFeatures: ["lookups"] }, "lookups")).toBe("waking");
+  });
+
+  it("should say waking when the pod runs but has claimed nothing and no main-session agent has registered", () => {
+    expect(podGate({ status: "running", clientFeatures: null, agent: null }, "lookups")).toBe("waking");
+    expect(podGate({ status: "running", clientFeatures: "lookups" }, "lookups")).toBe("waking");
+  });
+
+  it("should read the pod's own claim, even before a main-session agent registers", () => {
+    expect(podGate({ status: "running", clientFeatures: ["lookups"], agent: null }, "lookups")).toBe("ok");
+    expect(podGate({ status: "running", clientFeatures: [], agent: { clientFeatures: ["lookups"] } }, "lookups")).toBe("unsupported");
+  });
+
+  it("should read the main-session agent's claim when the pod reported none", () => {
+    expect(podGate({ status: "running", clientFeatures: null, agent: { clientFeatures: ["welsh"] } }, "welsh")).toBe("ok");
+    expect(podGate({ status: "running", clientFeatures: null, agent: { clientFeatures: ["files"] } }, "welsh")).toBe("unsupported");
+  });
+
+  it("should say unsupported when the main-session agent registered on a client that claims nothing", () => {
+    expect(podGate({ status: "running", clientFeatures: null, agent: { clientFeatures: null } }, "welsh")).toBe("unsupported");
+  });
+});
+
+describe("podLacks", () => {
+  it("should say a running pod lacks a feature only when its claim leaves the feature out", () => {
+    expect(podLacks({ status: "running", clientFeatures: ["lookups"] }, "github-lookups")).toBe(true);
+    expect(podLacks({ status: "running", clientFeatures: ["lookups", "github-lookups"] }, "github-lookups")).toBe(false);
+  });
+
+  it("should not count a pod that has claimed nothing yet, or is not running, since it boots on the current client", () => {
+    expect(podLacks({ status: "running", clientFeatures: null }, "github-lookups")).toBe(false);
+    expect(podLacks({ status: "stopped", clientFeatures: ["lookups"] }, "github-lookups")).toBe(false);
+  });
+
+  it("should read the main session's claim when the pod reported none of its own", () => {
+    expect(podLacks({ status: "running", clientFeatures: null, agent: { clientFeatures: ["lookups"] } }, "github-lookups")).toBe(true);
   });
 });

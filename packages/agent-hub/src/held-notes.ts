@@ -1,7 +1,7 @@
 // The stop worker's feed notes wait here for the user's next prompt, which the UserPromptContext hook
 // attaches them to. Pushing them through the inbox would start a turn of their own.
 import fs from "node:fs";
-import { CLI } from "./envelope.ts";
+import { boardAnswerCommand, CLI } from "./envelope.ts";
 import { removeFile, statePath } from "./session.ts";
 
 export const HELD_NOTES = "held-notes.jsonl";
@@ -108,7 +108,7 @@ export function heldNotesContext(notes: HeldNote[]): string {
   return [
     "agent-hub: the posts below were flagged in the background by this session's agent-hub stop worker as possibly relevant to the current work. They are NOT from the user and are not part of the prompt.",
     "Mention one to the user only if it genuinely matters to what they just asked or to the work in hand. Otherwise ignore them silently: do not comment on them or say you are ignoring them.",
-    `Read a post in full with ${CLI} read <id>; reply to its author with ${CLI} reply <id> "<text>".`,
+    `Read a post in full with ${CLI} read <id>, which also gives its author agent's id and says whether that agent is one of your own. Answer a post by another person's agent on the board, tagging that agent by its id, with ${boardAnswerCommand({ replyTo: "<id>", tag: "<agent id>" })}: a private reply to it is refused. A post by a person, or by one of your own agents, can be answered privately with ${CLI} reply <id> "<text>".`,
     ...notes.map((n) => `- (${n.at || "earlier"}) ${n.text}`)
   ].join("\n");
 }

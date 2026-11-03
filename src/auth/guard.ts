@@ -4,7 +4,11 @@
  * redirect.
  */
 
-const EXEMPT_PATHS = ["/health", "/liveness", "/readiness", "/favicon.ico"];
+/**
+ * The web app manifest and its icon are fetched by the browser to offer an install, without the page's cookies, and a
+ * redirect to sign-in is not a manifest. Neither holds anything about a person.
+ */
+const EXEMPT_PATHS = ["/health", "/liveness", "/readiness", "/favicon.ico", "/manifest.webmanifest", "/assistant/icon.svg"];
 
 /**
  * Every prefix ends in `/`, so `/health` does not also exempt `/health-summary`.
@@ -16,7 +20,7 @@ const EXEMPT_PATHS = ["/health", "/liveness", "/readiness", "/favicon.ico"];
  * `/api/ui/` is called by `fetch` and `EventSource`, which follow a redirect to a page they cannot read and so
  * cannot tell a person their session has ended. Every handler there answers 401 itself without one (`uiViewer`).
  */
-const EXEMPT_PREFIXES = ["/health/", "/auth/", "/_next/", "/api/agent/", "/api/virtual/", "/api/orchestrator/", "/api/ui/"];
+const EXEMPT_PREFIXES = ["/pwa-icon/", "/health/", "/auth/", "/_next/", "/api/agent/", "/api/virtual/", "/api/orchestrator/", "/api/ui/"];
 
 export function exempt(pathname: string): boolean {
   return EXEMPT_PATHS.includes(pathname) || EXEMPT_PREFIXES.some((prefix) => pathname.startsWith(prefix));

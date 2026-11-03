@@ -3,7 +3,8 @@ import { expect, test } from "@playwright/test";
 /**
  * Where the two UIs live. The CFT Workspace is the default UI, so `/` is it wherever it runs and the hub keeps its
  * own pages under `/hub`. Every address the hub used to answer on still redirects, because `/hub/agents/{id}` and
- * `/hub/topics/{slug}` are pasted into chats and tickets.
+ * `/hub/topics/{slug}` are pasted into chats and tickets — and `/hub/agents/{id}` itself only sends people on, since
+ * the hub shows no agents.
  */
 
 /** Each old hub address, and where it now lives. */
@@ -13,10 +14,8 @@ const MOVED: [string, string][] = [
   ["/c?topics=e2e-routes&mode=all", "/hub/c?topics=e2e-routes&mode=all"],
   ["/channels/new", "/hub/channels/new"],
   ["/m/1", "/hub/m/1"],
-  ["/settings/credentials", "/hub/settings/credentials"],
   ["/topics", "/hub/topics"],
-  ["/topics/e2e-routes", "/hub/topics/e2e-routes"],
-  ["/virtual", "/hub/virtual"]
+  ["/topics/e2e-routes", "/hub/topics/e2e-routes"]
 ];
 
 test.describe("routes @regression", () => {
@@ -50,6 +49,15 @@ test.describe("routes @regression", () => {
     await expect(page.getByRole("link", { name: "Back to home" })).toHaveAttribute("href", "/");
   });
 
+  // An id that is none of the viewer's: their own chats' agents go to the chat, which needs a registered agent, and
+  // that is `local-chats.spec.ts`'s to set up.
+  test("should send an agent's page to the hub's home when the agent is none of the viewer's @regression", async ({ page }) => {
+    const response = await page.goto("/hub/agents/00000000-0000-0000-0000-000000000000");
+
+    expect(response?.status()).toBe(200);
+    expect(new URL(page.url()).pathname).toBe("/hub");
+  });
+
   for (const [from, to] of MOVED) {
     test(`should redirect ${from} to ${to} @regression`, async ({ request }) => {
       const response = await request.get(from, { maxRedirects: 0 });
@@ -59,15 +67,52 @@ test.describe("routes @regression", () => {
     });
   }
 
+  // The virtual agents and credentials pages are the Assistant's settings now, opened at the section that replaced
+  // each, in one hop from the bare address as from the `/hub` one. Or the hub where virtual agents are off.
+  const RETIRED: [string, string][] = [
+    ["/virtual", "assistant"],
+    ["/hub/virtual", "assistant"],
+    ["/hub/virtual/0f8a6a1e-0000-4000-8000-000000000001", "assistant"],
+    ["/settings/credentials", "credentials"],
+    ["/hub/settings/credentials", "credentials"]
+  ];
+  for (const [from, section] of RETIRED) {
+    test(`should redirect the retired ${from} to the Assistant's ${section} settings @regression`, async ({ request }) => {
+      const response = await request.get(from, { maxRedirects: 0 });
+
+      expect(response.status()).toBe(307);
+      expect([`/assistant?settings=${section}`, "/hub"]).toContain(response.headers().location ?? "");
+    });
+  }
+
+  // `/hub/virtual/{id}/ports/{port}` and `/virtual/{id}/ports/{port}` redirect in one hop to the viewer's ticket route,
+  // `/assistant/ports/{id}/{port}`, keeping `path=`.
+  for (const from of ["/hub/virtual/0f8a6a1e-0000-4000-8000-000000000001/ports/3000", "/virtual/0f8a6a1e-0000-4000-8000-000000000001/ports/3000"]) {
+    test(`should redirect ${from} to the viewer's ticket route @regression`, async ({ request }) => {
+      const response = await request.get(`${from}?path=%2Fdocs`, { maxRedirects: 0 });
+
+      expect(response.status()).toBe(308);
+      expect(response.headers().location).toBe("/assistant/ports/0f8a6a1e-0000-4000-8000-000000000001/3000?path=%2Fdocs");
+    });
+  }
+
+  test("should show the not-found page, and redirect nowhere, when an address under the old ticket route names no port @regression", async ({ request }) => {
+    const response = await request.get("/hub/virtual/not-an-id/ports/3000", { maxRedirects: 0 });
+
+    expect(response.status()).toBe(404);
+    expect(response.headers().location).toBeUndefined();
+    expect(response.headers()["content-type"]).toContain("text/html");
+  });
+
   // The access page managed standing access to every agent its owner had; there is none. What anyone shares is one
-  // chat at a time, which is `/assistant/shared`, so both of its addresses go there — or to the hub where virtual
-  // agents are off and the Assistant's pages are not found at all.
-  for (const from of ["/access", "/hub/access"]) {
+  // chat at a time, managed in the settings' Sharing section, so both of its addresses go there, as does
+  // `/assistant/shared` — or to the hub where virtual agents are off and the Assistant's pages are not found at all.
+  for (const from of ["/access", "/hub/access", "/assistant/shared"]) {
     test(`should redirect the retired ${from} to the shared chats @regression`, async ({ request }) => {
       const response = await request.get(from, { maxRedirects: 0 });
 
-      expect(response.status()).toBe(308);
-      expect(response.headers().location).toMatch(/^(\/assistant\/shared|\/hub)$/);
+      expect(response.status()).toBe(307);
+      expect(response.headers().location).toMatch(/^(\/assistant\?settings=sharing|\/hub)$/);
     });
   }
 

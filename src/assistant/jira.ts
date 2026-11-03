@@ -25,8 +25,12 @@ export interface JiraProjectChoice {
   key: string;
   name: string;
 }
-export const JIRA_ISSUE_TYPE = "Story";
-export const JIRA_LABELS: readonly string[] = ["hmcts-assistant"];
+const JIRA_ISSUE_TYPE = "Story";
+/**
+ * What every ticket the CFT Workspace makes is labelled, in Jira and on GitHub alike, so the people who triage a backlog
+ * can find the ones it made with a single filter, whichever tool they use.
+ */
+export const TICKET_LABELS: readonly string[] = ["cft-workspace"];
 
 /** Long enough for a stopped assistant to start and its owner to sign in to Atlassian on the way. */
 export const JIRA_EXPORT_TIMEOUT_MS = 15 * 60_000;
@@ -114,5 +118,5 @@ export function pendingJiraExport(
   ) {
     return undefined;
   }
-  return { export_id: row.jiraExportId, project: row.jiraProject, issue_type: JIRA_ISSUE_TYPE, labels: [...JIRA_LABELS] };
+  return { export_id: row.jiraExportId, project: row.jiraProject, issue_type: JIRA_ISSUE_TYPE, labels: [...TICKET_LABELS] };
 }

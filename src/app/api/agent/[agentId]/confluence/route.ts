@@ -1,8 +1,8 @@
 import { HttpError, noContent, parse, readJson } from "@/agent-api/http";
 import { ownedAgentRoute } from "@/agent-api/route";
 import { recordConfluenceExport } from "@/assistant/confluence-store";
+import { conversationOfAgent } from "@/assistant/conversation-store";
 import { confluenceExportReportBody } from "@/assistant/schemas";
-import { conversationOfAgent } from "@/assistant/store";
 import { prisma } from "@/store/prisma";
 
 export const runtime = "nodejs";

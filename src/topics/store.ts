@@ -72,7 +72,7 @@ export async function listTopics(db: Database, prefix: string, limit: number, hi
   }));
 }
 
-export const ACTIVE_WINDOW_DAYS = 7;
+const ACTIVE_WINDOW_DAYS = 7;
 
 /**
  * The topics with the most posts in the last `ACTIVE_WINDOW_DAYS`, busiest first, ties broken by the latest post. A

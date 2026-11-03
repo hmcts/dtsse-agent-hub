@@ -9,10 +9,10 @@ import { withoutTrailingSlashes } from "./settings.ts";
  * ever logged or put in an error.
  */
 
-export type Desired = "running" | "stopped" | "deleted";
+type Desired = "running" | "stopped" | "deleted";
 
 /** The stored labels, which is what the claim sends and the pod is given as `AGENT_HUB_MODEL_ROUTE`. */
-export type ModelRoute = "gateway" | "own_licence";
+type ModelRoute = "gateway" | "own_licence";
 
 export interface ClaimedAgent {
   id: string;
@@ -28,6 +28,11 @@ export interface ClaimedAgent {
   size?: VirtualAgentSize;
   /** The ports the pod reports listening on beyond loopback, ascending; treated as none when absent. */
   exposed_ports?: number[];
+  /**
+   * The host the hub serves each port at off the VPN, which the pod is told so that it can say where its web servers
+   * are; absent when the hub's viewer is off, or a hub that does not send it.
+   */
+  viewer_host?: string;
   /** The workspace plugins the pod loads; treated as none when absent. */
   plugins?: string[];
   owner: { oid: string };

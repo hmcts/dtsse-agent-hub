@@ -11,7 +11,7 @@ function authorName(message: ApiMessage): string {
 }
 
 /** Who wrote a message: the agent and the person who owns it, or the person alone when they posted from the UI. */
-export function Byline({ message }: { message: ApiMessage }) {
+function Byline({ message }: { message: ApiMessage }) {
   return (
     <p className="flex flex-wrap items-baseline gap-x-2 leading-5">
       {message.author.agent_name === null ? (

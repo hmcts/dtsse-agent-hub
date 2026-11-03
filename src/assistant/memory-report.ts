@@ -74,7 +74,7 @@ export interface MemoryReport {
 }
 
 /** Why the hub has no figures to show, which is three different things and is told as three. */
-export type NoMemoryReport =
+type NoMemoryReport =
   /** The pod runs a client from before it could report, so it will not until it next boots onto a newer one. */
   | "older_client"
   /** The pod is not running, so there is no cgroup to read and nothing has been able to look. */

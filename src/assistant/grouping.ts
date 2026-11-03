@@ -5,7 +5,7 @@
 
 export type DateGroup = "Today" | "Yesterday" | "Previous 7 days" | "Previous 30 days" | "Older";
 
-export const DATE_GROUPS: readonly DateGroup[] = ["Today", "Yesterday", "Previous 7 days", "Previous 30 days", "Older"];
+const DATE_GROUPS: readonly DateGroup[] = ["Today", "Yesterday", "Previous 7 days", "Previous 30 days", "Older"];
 
 const LONDON = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit" });
 

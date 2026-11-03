@@ -1,17 +1,19 @@
-import { canUseWelsh } from "../access/rules.ts";
+import { isOwner } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
-import { clientSupports } from "../agents/client-features.ts";
+import { podGate } from "../agents/client-features.ts";
 import { isUuid } from "../agents/store.ts";
 import type { EventHub } from "../realtime/hub.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { setDesired } from "../virtual-agents/store.ts";
-import { findAssistant } from "./store.ts";
+import { findAssistant, findAssistantWithClaims } from "./assistant-store.ts";
 import {
   fileIdsOf,
+  hasWelshPlugin,
   MAX_WELSH_FILE_BYTES,
   MAX_WELSH_FILES_PER_JOB,
   resultFits,
+  WELSH_NOT_TURNED_ON,
   WELSH_RATE_LIMIT,
   WELSH_RATE_WINDOW_MS,
   WELSH_RETENTION_MS,
@@ -20,6 +22,7 @@ import {
   type WelshFileView,
   type WelshKind,
   type WelshResponse,
+  welshFeature,
   welshResponse
 } from "./welsh.ts";
 
@@ -44,26 +47,32 @@ export type AskedWelsh = { jobId: string; virtualAgentId: string } | { answer: W
  * and a pod whose client cannot run jobs is not sent a frame nobody would read. Files a job reads must be the viewer's.
  */
 export async function askWelsh(prisma: PrismaClient, question: WelshQuestion, now: Date = new Date()): Promise<AskedWelsh> {
-  const assistant = await findAssistant(prisma, question.viewerOid);
-  if (assistant === undefined || !canUseWelsh(question.viewerOid, assistant)) {
+  const found = await findAssistantWithClaims(prisma, question.viewerOid);
+  if (found === undefined || !isOwner(question.viewerOid, found.assistant)) {
     throw new HttpError(404, "you have no assistant to run that with yet");
+  }
+  const { assistant, claims } = found;
+  if (!hasWelshPlugin(assistant)) {
+    throw new HttpError(409, WELSH_NOT_TURNED_ON);
   }
   const files = await Promise.all(
     fileIdsOf(question.args).map((id) => prisma.assistantWelshFile.findUnique({ where: { id }, select: { ownerOid: true, jobId: true } }))
   );
-  if (files.some((file) => file === null || file.ownerOid !== question.viewerOid || file.jobId !== null)) {
+  if (files.some((file) => file === null || !isOwner(question.viewerOid, file) || file.jobId !== null)) {
     throw new HttpError(404, "that spreadsheet is not there any more; upload it again");
   }
   if (assistant.desired === "stopped") {
     await setDesired(prisma, question.viewerOid, assistant.id, "running", now);
     return { answer: { status: "waking" } };
   }
-  if (assistant.status !== "running" || assistant.agentId === null) {
-    return { answer: { status: "waking" } };
+  const gate = podGate({ status: assistant.status, ...claims }, welshFeature(question.kind));
+  if (gate !== "ok") {
+    return { answer: { status: gate } };
   }
-  const current = await prisma.agent.findUnique({ where: { id: assistant.agentId }, select: { clientFeatures: true } });
-  if (!clientSupports(current?.clientFeatures, "welsh")) {
-    return { answer: { status: "unsupported" } };
+  // A change the orchestrator has not applied yet, such as the plugin just ticked, means the pod running now is the old
+  // one and is about to be replaced: asked now, it would say Welsh is not turned on. It is starting again instead.
+  if (assistant.generation > assistant.observedGeneration) {
+    return { answer: { status: "waking" } };
   }
   const id = await prisma.$transaction(async (tx) => {
     // The assistant's rows are taken one job at a time, so two tabs cannot both find room under the limit.
@@ -106,7 +115,7 @@ export async function readWelsh(db: Database, viewerOid: string, jobId: string, 
       files: { select: { id: true, name: true, createdAt: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] }
     }
   });
-  if (row === null || !canUseWelsh(viewerOid, row.virtualAgent)) {
+  if (row === null || !isOwner(viewerOid, row.virtualAgent)) {
     return undefined;
   }
   const sizes = row.files.length
@@ -242,8 +251,11 @@ export async function putJobFile(
 /** A spreadsheet the viewer uploaded for a job to read: a Welsh Language Unit return. */
 export async function saveUpload(prisma: PrismaClient, viewerOid: string, name: string, bytes: Uint8Array, now: Date = new Date()): Promise<string> {
   const assistant = await findAssistant(prisma, viewerOid);
-  if (assistant === undefined || !canUseWelsh(viewerOid, assistant)) {
+  if (assistant === undefined || !isOwner(viewerOid, assistant)) {
     throw new HttpError(404, "you have no assistant to run that with yet");
+  }
+  if (!hasWelshPlugin(assistant)) {
+    throw new HttpError(409, WELSH_NOT_TURNED_ON);
   }
   if (bytes.length === 0 || bytes.length > MAX_WELSH_FILE_BYTES) {
     throw new HttpError(413, "that spreadsheet is over 5 MB");
@@ -261,7 +273,7 @@ export async function ownerFile(db: Database, viewerOid: string, fileId: string)
     return undefined;
   }
   const row = await db.assistantWelshFile.findUnique({ where: { id: fileId }, select: { ownerOid: true, name: true, bytes: true } });
-  return row === null || row.ownerOid !== viewerOid ? undefined : { name: row.name, bytes: row.bytes };
+  return row === null || !isOwner(viewerOid, row) ? undefined : { name: row.name, bytes: row.bytes };
 }
 
 /** A file the owner uploaded, for their own pod to read before it runs a job; nothing a job made, and nobody else's. */
@@ -274,7 +286,7 @@ export async function podFile(
     return undefined;
   }
   const row = await db.assistantWelshFile.findUnique({ where: { id: fileId }, select: { ownerOid: true, jobId: true, name: true, bytes: true } });
-  return row === null || row.ownerOid !== virtualAgent.ownerOid || row.jobId !== null ? undefined : { name: row.name, bytes: row.bytes };
+  return row === null || !isOwner(virtualAgent.ownerOid, row) || row.jobId !== null ? undefined : { name: row.name, bytes: row.bytes };
 }
 
 /** What the sessions stream sends the pod for one job. */

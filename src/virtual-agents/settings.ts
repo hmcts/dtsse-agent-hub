@@ -14,7 +14,7 @@ export const DEFAULT_IDLE_MINUTES = 120;
  * that nobody is coming, and the pod is holding a node to hand out codes to an empty room.
  */
 export const DEFAULT_AWAITING_OWNER_MINUTES = 30;
-export const DEFAULT_EVENING_STOP = "19:00";
+const DEFAULT_EVENING_STOP = "19:00";
 export const DEFAULT_DISK_TTL_DAYS = 14;
 export const DEFAULT_ORCHESTRATOR_LEASE_SECONDS = 120;
 

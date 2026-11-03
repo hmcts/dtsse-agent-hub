@@ -11,10 +11,12 @@ import path from "node:path";
 import type { Api } from "./api.ts";
 import type { Env } from "./env.ts";
 import { CLIENT_FEATURES } from "./features.ts";
+import { sleep } from "./retry.ts";
 import {
   conversationId,
   ensureStateDir,
   log,
+  type NameSource,
   pidAlive,
   projectDir,
   readJson,
@@ -159,6 +161,8 @@ function relativeTo(root: string, p: string): string | null {
 export type AgentMetadata = {
   session_id: string;
   name: string;
+  /** Where `name` came from, so the service can keep a name the person chose and replace one this client invented. */
+  name_source: NameSource;
   cwd: string;
   repo: string | null;
   branch: string | null;
@@ -180,6 +184,7 @@ export function gatherMetadata(sid: string, { cwd, root = workspaceRoot() }: Gat
   return {
     session_id: sid,
     name: info.name,
+    name_source: info.nameSource,
     cwd: dir,
     repo: repoDir ? repoName(repoDir) : null,
     branch: repoDir ? gitBranch(repoDir) : null,
@@ -439,8 +444,6 @@ export async function ensureBridge(sid: string, { env = process.env }: { env?: N
   log(sid, `spawned bridge pid ${pid}`);
   return { pid, started: true };
 }
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Returns true if a running bridge exited (it posts offline itself on the way out).
 export async function stopBridge(sid: string, { waitMs = 3000 }: { waitMs?: number } = {}): Promise<boolean> {

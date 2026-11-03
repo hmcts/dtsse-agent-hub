@@ -1,16 +1,12 @@
-import type { AgentCard } from "@/agents/views";
 import type { ChannelSummary } from "@/channels/store";
-import { NewAgentWatcher } from "@/components/agents/NewAgentWatcher";
 import { NavLink } from "@/components/NavLink";
-import { AgentRoster } from "@/components/sidebar/AgentRoster";
 import { SidebarClose, SidebarDrawer } from "@/components/sidebar/Drawer";
-import { CaretIcon, ChatIcon, HashIcon, HomeIcon, LockIcon, PlusIcon, ServerIcon, StackIcon } from "@/components/sidebar/icons";
+import { CaretIcon, ChatIcon, HashIcon, HomeIcon, PlusIcon, StackIcon } from "@/components/sidebar/icons";
 import { TopicSearchShortcut } from "@/components/sidebar/TopicSearchShortcut";
 import type { TopicSummary } from "@/topics/store";
 import type { Identity } from "@/users/identity";
 
 export interface SidebarData {
-  agents: AgentCard[];
   channels: { mine: ChannelSummary[]; shared: ChannelSummary[] };
   topics: TopicSummary[];
 }
@@ -31,10 +27,7 @@ function Hint({ children }: { children: React.ReactNode }) {
   return <p className="px-5 py-1 text-xs text-hub-muted">{children}</p>;
 }
 
-/**
- * The left rail, as in Slack: the workspace and who is signed in, saved channels, the busiest topics this week, and
- * the viewer's agents pinned to the bottom.
- */
+/** The left rail, as in Slack: the workspace and who is signed in, saved channels and the busiest topics this week. */
 export function Sidebar({
   data,
   viewer,
@@ -50,7 +43,6 @@ export function Sidebar({
   return (
     <SidebarDrawer>
       <aside aria-label="Sidebar" className="flex w-64 max-w-[85vw] shrink-0 flex-col border-r border-hub-line bg-hub-rail">
-        <NewAgentWatcher known={data.agents.map((agent) => agent.id)} />
         <TopicSearchShortcut />
         <div className="flex min-h-[49px] items-center gap-2 border-b border-hub-line px-4">
           <div className="min-w-0">
@@ -73,18 +65,6 @@ export function Sidebar({
               <HomeIcon />
               Home
             </NavLink>
-            {/* With virtual agents on, credentials are a section of their page. */}
-            {virtualAgents ? (
-              <NavLink href="/hub/virtual">
-                <ServerIcon />
-                Virtual agents
-              </NavLink>
-            ) : (
-              <NavLink href="/hub/settings/credentials">
-                <LockIcon />
-                Credentials
-              </NavLink>
-            )}
             {/* The CFT Workspace runs on the viewer's virtual agent, so it is offered wherever they are. */}
             {virtualAgents ? (
               <NavLink href="/assistant">
@@ -152,8 +132,6 @@ export function Sidebar({
             </NavLink>
           </Group>
         </nav>
-
-        <AgentRoster agents={data.agents} />
       </aside>
     </SidebarDrawer>
   );

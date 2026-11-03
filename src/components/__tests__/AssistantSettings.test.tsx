@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConnectionsData } from "@/assistant/connections";
 import type { AssistantMemory } from "@/assistant/memory";
 import { CONVERSATION_MEMORY_BYTES, type MemoryUse } from "@/assistant/memory-report";
+import type { SharedChatLink, SharePerson } from "@/assistant/shares";
 import { TEMPLATES, type Template } from "@/assistant/starters";
 import { checkTemplate, MAX_TEMPLATE_BODY, MAX_TEMPLATES, type SavedTemplate, TEMPLATES_FULL } from "@/assistant/templates";
 import type { UploadsOnDisk } from "@/assistant/upload-disk";
@@ -20,6 +21,7 @@ import type { AssistantFiles } from "@/components/assistant/FileSettings";
 import { SETTINGS_TWO_PANE_MIN_WIDTH } from "@/components/assistant/layout";
 import type { AssistantModelSetting } from "@/components/assistant/ModelSettings";
 import { type AssistantPlugins, AssistantSettings, FOCUSABLE } from "@/components/assistant/SettingsDialog";
+import type { AssistantSharing } from "@/components/assistant/SharingSettings";
 import type { AssistantSize } from "@/components/assistant/SizeSettings";
 import { type AssistantTemplates, copyName } from "@/components/assistant/TemplateSettings";
 import { DEFAULT_CLAUDE_MD, MAX_CLAUDE_MD_CHARACTERS } from "@/credentials/claude-md";
@@ -28,9 +30,15 @@ import type { CredentialStatus } from "@/credentials/store";
 import type { ModelRoute } from "@/viewer/identity";
 import type { LoginState, LoginView } from "@/virtual-agents/logins";
 import { neededCredentials, optionalCredentials } from "@/virtual-agents/views";
+import type { SharedChats } from "@/web/data";
 
 const refresh = vi.fn();
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }), usePathname: () => "/assistant" }));
+// The address as the browser has it, read on every render as Next's own hook is kept in step with `history`.
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh }),
+  usePathname: () => "/assistant",
+  useSearchParams: () => new URLSearchParams(window.location.search)
+}));
 vi.mock("@/components/live/HubStream", () => ({
   useHubEvent: () => undefined,
   useEndSession: () => () => undefined
@@ -39,6 +47,7 @@ vi.mock("@/components/live/HubStream", () => ({
 afterEach(() => {
   cleanup();
   refresh.mockReset();
+  window.history.replaceState(null, "", "/");
   // biome-ignore lint/suspicious/noDocumentCookie: clears what the appearance switch under test wrote, the way it wrote it
   document.cookie = "asst_theme=; Path=/; Max-Age=0";
 });
@@ -52,7 +61,7 @@ const BEFORE_STORED = "2026-10-23T09:00:00.000Z";
 const AFTER_STORED = "2026-10-24T15:00:00.000Z";
 
 function status(kind: CredentialKind, accountLabel: string | null = null): CredentialStatus {
-  return { kind, stored: true, accountLabel, updatedAt: STORED_AT, updatedVia: "pod" };
+  return { kind, stored: true, accountLabel, updatedAt: STORED_AT };
 }
 
 function login(kind: CredentialKind, state: LoginState, expiresAt = new Date(Date.now() + 600_000).toISOString(), updatedAt = BEFORE_STORED): LoginView {
@@ -74,6 +83,13 @@ function login(kind: CredentialKind, state: LoginState, expiresAt = new Date(Dat
  */
 function data(stored: CredentialKind[], logins: LoginView[] = [], unavailable: string | null = null): ConnectionsData {
   return { route: "own-licence", kinds: KINDS, statuses: stored.map((kind) => status(kind)), logins, unavailable };
+}
+
+/** The Sharing section's read of its four lists, each empty unless a test says otherwise, and its four actions. */
+function sharingSettings(chats: Partial<SharedChats> = {}, overrides: Partial<AssistantSharing> = {}): AssistantSharing {
+  const none = vi.fn(async () => ({ ok: true as const, people: [] as SharePerson[] }));
+  const lists: SharedChats = { given: [], received: [], offered: [], forkable: [], ...chats };
+  return { load: vi.fn(async () => lists), share: none, unshare: none, offer: none, withdraw: none, ...overrides };
 }
 
 function cog(): HTMLElement {
@@ -102,7 +118,7 @@ function go(label: string): void {
  * a test of any other one says which it is about.
  */
 function open(props: Partial<Parameters<typeof AssistantSettings>[0]> = {}, section?: string): void {
-  render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} {...props} />);
+  render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} sharing={sharingSettings()} {...props} />);
   fireEvent.click(cog());
   if (section !== undefined) {
     go(section);
@@ -118,7 +134,7 @@ function themed(props: Partial<Parameters<typeof AssistantSettings>[0]> = {}, th
   root.className = "asst-theme";
   root.dataset.theme = theme;
   document.body.append(root);
-  render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} {...props} />, { container: root });
+  render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} sharing={sharingSettings()} {...props} />, { container: root });
   return root;
 }
 
@@ -238,7 +254,7 @@ describe("the Assistant's settings cog", () => {
   it("should read the sign-ins against the clock the page was built with", () => {
     const built = Date.now() - 4 * 60_000;
     const relayed = login("github", "pending", new Date(built + 1000).toISOString(), new Date(built - 60_000).toISOString());
-    const stored: CredentialStatus = { kind: "github", stored: true, accountLabel: null, updatedAt: new Date(built - 30_000).toISOString(), updatedVia: "pod" };
+    const stored: CredentialStatus = { kind: "github", stored: true, accountLabel: null, updatedAt: new Date(built - 30_000).toISOString() };
     const connections: ConnectionsData = {
       route: "own-licence",
       kinds: KINDS,
@@ -256,7 +272,7 @@ describe("the Assistant's settings cog", () => {
   it("should read the sign-ins again once the browser has taken the page over", () => {
     const built = Date.now() - 4 * 60_000;
     const relayed = login("github", "pending", new Date(built + 1000).toISOString(), new Date(built - 60_000).toISOString());
-    const stored: CredentialStatus = { kind: "github", stored: true, accountLabel: null, updatedAt: new Date(built - 30_000).toISOString(), updatedVia: "pod" };
+    const stored: CredentialStatus = { kind: "github", stored: true, accountLabel: null, updatedAt: new Date(built - 30_000).toISOString() };
 
     render(
       <AssistantSettings
@@ -1433,7 +1449,15 @@ describe("the Assistant's CLAUDE.md", () => {
 
 /** The whole dialog, which is what a person has when they open it: the navigation and every section it offers. */
 function everything(): Partial<Parameters<typeof AssistantSettings>[0]> {
-  return { plugins: plugins(), model: modelSetting(), claudeMd: claudeMd(), templates: templates({ mine: [row("Stand-up")] }), files: files(), size: size() };
+  return {
+    plugins: plugins(),
+    model: modelSetting(),
+    claudeMd: claudeMd(),
+    templates: templates({ mine: [row("Stand-up")] }),
+    files: files(),
+    size: size(),
+    sharing: sharingSettings()
+  };
 }
 
 function tabs(): HTMLElement[] {
@@ -2018,13 +2042,16 @@ describe("the Assistant's files", () => {
   }, 20_000);
 });
 
-describe("the Assistant's Jira and Confluence defaults", () => {
+describe("the Assistant's ticket and Confluence defaults", () => {
   const PROJECT = { key: "PCS", name: "Possession claims", url: "https://hmcts.atlassian.net/browse/PCS" };
 
   function exportsSettings(overrides: Partial<AssistantExportDefaults> = {}): AssistantExportDefaults {
     return {
-      defaults: { jira: null, confluence: null },
-      save: vi.fn(async (input: { jira: unknown; confluence: unknown }) => ({ ok: true as const, defaults: input as AssistantExportDefaults["defaults"] })),
+      defaults: { ticketTool: "jira", jira: null, github: null, githubProject: null, confluence: null },
+      save: vi.fn(async (input: { ticketTool: unknown; jira: unknown; github: unknown; githubProject: unknown; confluence: unknown }) => ({
+        ok: true as const,
+        defaults: input as AssistantExportDefaults["defaults"]
+      })),
       access: { connected: true, login: null },
       lookUp: vi.fn(async () => ({ status: "done" as const, results: [PROJECT] })),
       ...overrides
@@ -2034,19 +2061,13 @@ describe("the Assistant's Jira and Confluence defaults", () => {
   it("should offer the section only when the page passes the defaults", () => {
     open({ exports: exportsSettings() });
 
-    expect(sections()).toContain("Jira & Confluence");
-  });
-
-  it("should link to the shared chats from the Sharing section", () => {
-    open({}, "Sharing");
-
-    expect(screen.getByRole("link", { name: "View shared chats" }).getAttribute("href")).toBe("/assistant/shared");
+    expect(sections()).toContain("Tickets & Confluence");
   });
 
   it("should save a Jira project the person found by searching their own Jira", async () => {
     vi.useFakeTimers();
     const exports = exportsSettings();
-    open({ exports }, "Jira & Confluence");
+    open({ exports }, "Tickets & Confluence");
 
     fireEvent.click(within(screen.getByRole("group", { name: "Jira backlog" })).getByRole("button", { name: "Change" }));
     fireEvent.change(screen.getByRole("combobox", { name: /default backlog/ }), { target: { value: "possess" } });
@@ -2059,14 +2080,22 @@ describe("the Assistant's Jira and Confluence defaults", () => {
     });
     vi.useRealTimers();
 
-    expect(exports.save).toHaveBeenCalledWith({ jira: { key: "PCS", name: "Possession claims" }, confluence: null });
+    expect(exports.save).toHaveBeenCalledWith({
+      ticketTool: "jira",
+      jira: { key: "PCS", name: "Possession claims" },
+      github: null,
+      githubProject: null,
+      confluence: null
+    });
     expect(screen.getByText("Your defaults are saved")).toBeTruthy();
     expect(refresh).toHaveBeenCalled();
   });
 
   it("should clear a default and save nothing until something has changed", async () => {
-    const exports = exportsSettings({ defaults: { jira: { key: "VIBE", name: "Vibe" }, confluence: null } });
-    open({ exports }, "Jira & Confluence");
+    const exports = exportsSettings({
+      defaults: { ticketTool: "jira", jira: { key: "VIBE", name: "Vibe" }, github: null, githubProject: null, confluence: null }
+    });
+    open({ exports }, "Tickets & Confluence");
 
     expect((screen.getByRole("button", { name: "Save defaults" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Clear" }));
@@ -2074,7 +2103,7 @@ describe("the Assistant's Jira and Confluence defaults", () => {
       fireEvent.click(screen.getByRole("button", { name: "Save defaults" }));
     });
 
-    expect(exports.save).toHaveBeenCalledWith({ jira: null, confluence: null });
+    expect(exports.save).toHaveBeenCalledWith({ ticketTool: "jira", jira: null, github: null, githubProject: null, confluence: null });
     const jira = within(screen.getByRole("group", { name: "Jira backlog" }));
     const confluence = within(screen.getByRole("group", { name: "Confluence page" }));
     expect(jira.getByText("VIBE")).toBeTruthy();
@@ -2085,13 +2114,138 @@ describe("the Assistant's Jira and Confluence defaults", () => {
     expect(confluence.queryByRole("button", { name: "Clear" })).toBeNull();
   });
 
+  it("should offer Jira as the ticket tool, with its backlog, when the person has not chosen", () => {
+    open({ exports: exportsSettings() }, "Tickets & Confluence");
+
+    expect((screen.getByRole("radio", { name: "Jira" }) as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByRole("group", { name: "Jira backlog" })).toBeTruthy();
+    expect(screen.queryByRole("group", { name: "GitHub repository" })).toBeNull();
+  });
+
+  /** A search that finds one repository, or one of the owner's Projects. */
+  function githubSearch() {
+    return vi.fn(async (request: { kind: string; owner?: string | null }) =>
+      request.kind === "github_repo"
+        ? { status: "done" as const, results: [{ full_name: "hmcts/cft-workspace", description: null, url: "https://github.com/hmcts/cft-workspace" }] }
+        : { status: "done" as const, results: [{ owner: request.owner as string, number: 12, title: "CFT roadmap" }] }
+    );
+  }
+
+  async function pick(group: string, box: RegExp, text: string, option: RegExp): Promise<void> {
+    fireEvent.click(within(screen.getByRole("group", { name: group })).getByRole("button", { name: "Change" }));
+    fireEvent.change(screen.getByRole("combobox", { name: box }), { target: { value: text } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(LOOKUP_AFTER_MS);
+    });
+    fireEvent.click(screen.getByRole("option", { name: option }));
+  }
+
+  it("should save GitHub as the ticket tool, with a repository and a Project the person found by searching", async () => {
+    // Arrange
+    vi.useFakeTimers();
+    const lookUp = githubSearch();
+    const exports = exportsSettings({ lookUp });
+    open({ exports }, "Tickets & Confluence");
+
+    // Act
+    fireEvent.click(screen.getByRole("radio", { name: "GitHub" }));
+    expect(screen.queryByRole("group", { name: "GitHub Project" })).toBeNull();
+    await pick("GitHub repository", /GitHub repositories for your default/, "cft", /hmcts\/cft-workspace/);
+    await pick("GitHub Project", /hmcts's GitHub Projects/, "roadmap", /CFT roadmap/);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save defaults" }));
+    });
+    vi.useRealTimers();
+
+    // Assert
+    expect(screen.queryByRole("group", { name: "Jira backlog" })).toBeNull();
+    expect(lookUp).toHaveBeenCalledWith(expect.objectContaining({ kind: "github_project", owner: "hmcts" }), expect.any(AbortSignal));
+    expect(exports.save).toHaveBeenCalledWith({
+      ticketTool: "github",
+      jira: null,
+      github: "hmcts/cft-workspace",
+      githubProject: { owner: "hmcts", number: 12, title: "CFT roadmap" },
+      confluence: null
+    });
+    expect(screen.getByText("Your defaults are saved")).toBeTruthy();
+  });
+
+  it("should drop the Project when the person clears the repository it went with", async () => {
+    // Arrange
+    const exports = exportsSettings({
+      defaults: {
+        ticketTool: "github",
+        jira: null,
+        github: "hmcts/cft-workspace",
+        githubProject: { owner: "hmcts", number: 12, title: "CFT roadmap" },
+        confluence: null
+      }
+    });
+    open({ exports }, "Tickets & Confluence");
+
+    // Act
+    fireEvent.click(within(screen.getByRole("group", { name: "GitHub repository" })).getByRole("button", { name: "Clear" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save defaults" }));
+    });
+
+    // Assert
+    expect(screen.queryByRole("group", { name: "GitHub Project" })).toBeNull();
+    expect(exports.save).toHaveBeenCalledWith({ ticketTool: "github", jira: null, github: null, githubProject: null, confluence: null });
+  });
+
+  it("should keep the Jira project when the person switches to GitHub and back", async () => {
+    // Arrange
+    const exports = exportsSettings({
+      defaults: { ticketTool: "github", jira: { key: "VIBE", name: "Vibe" }, github: "hmcts/cft-workspace", githubProject: null, confluence: null }
+    });
+    open({ exports }, "Tickets & Confluence");
+
+    // Act
+    fireEvent.click(screen.getByRole("radio", { name: "Jira" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save defaults" }));
+    });
+
+    // Assert
+    expect(within(screen.getByRole("group", { name: "Jira backlog" })).getByText("VIBE")).toBeTruthy();
+    expect(exports.save).toHaveBeenCalledWith({
+      ticketTool: "jira",
+      jira: { key: "VIBE", name: "Vibe" },
+      github: "hmcts/cft-workspace",
+      githubProject: null,
+      confluence: null
+    });
+  });
+
+  it("should raise no WCAG A or AA violations with GitHub chosen and its repository search open", async () => {
+    const root = document.createElement("div");
+    root.className = "asst-theme";
+    document.body.append(root);
+    const exports = exportsSettings({
+      defaults: { ticketTool: "github", jira: null, github: "hmcts/cft-workspace", githubProject: null, confluence: null }
+    });
+    render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} exports={exports} />, { container: root });
+    fireEvent.click(cog());
+    go("Tickets & Confluence");
+    fireEvent.click(within(screen.getByRole("group", { name: "GitHub repository" })).getByRole("button", { name: "Change" }));
+
+    const results = await axe.run(root, {
+      runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"] },
+      rules: { "color-contrast": { enabled: false } }
+    });
+
+    expect(results.violations.map((violation) => violation.id)).toEqual([]);
+    root.remove();
+  }, 20_000);
+
   it("should raise no WCAG A or AA violations with the section open", async () => {
     const root = document.createElement("div");
     root.className = "asst-theme";
     document.body.append(root);
     render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} exports={exportsSettings()} />, { container: root });
     fireEvent.click(cog());
-    go("Jira & Confluence");
+    go("Tickets & Confluence");
     fireEvent.click(within(screen.getByRole("group", { name: "Confluence page" })).getByRole("button", { name: "Change" }));
 
     const results = await axe.run(root, {
@@ -2414,5 +2568,423 @@ describe("the Assistant's size", () => {
 
   it("should raise no WCAG A or AA violations with Size open", async () => {
     await auditOpenDialog("Size");
+  }, 20_000);
+});
+
+describe("the Assistant's Sharing section", () => {
+  const MINE = "11111111-1111-1111-1111-111111111111";
+  const THEIRS = "22222222-2222-2222-2222-222222222222";
+  const OFFERED = "33333333-3333-3333-3333-333333333333";
+  const FORKABLE = "44444444-4444-4444-4444-444444444444";
+
+  afterEach(() => {
+    wideAgain();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  function chat(id: string, title: string, withWhom: string): SharedChatLink {
+    return { id, title, productLabel: "Possession", lastActiveAt: "2026-10-25T09:00:00.000Z", withWhom };
+  }
+
+  function person(oid: string, name: string): SharePerson {
+    return { oid, name, email: `${oid}@example.com`, sharedAt: "2026-10-25T09:00:00.000Z" };
+  }
+
+  const EVERY_LIST: SharedChats = {
+    given: [chat(MINE, "Writing a possession order", "1 person")],
+    received: [chat(THEIRS, "Bob's research", "Bob Tester")],
+    offered: [chat(OFFERED, "A claim to carry on", "2 people")],
+    forkable: [chat(FORKABLE, "Carol's prototype", "Carol Tester")]
+  };
+
+  function everyList(overrides: Partial<AssistantSharing> = {}): AssistantSharing {
+    return sharingSettings(EVERY_LIST, overrides);
+  }
+
+  /** Opens the dialog at Sharing, as the cog and the navigation do, and lets its read of the lists answer. */
+  async function openSharing(sharing: AssistantSharing = everyList()): Promise<void> {
+    open({ sharing }, "Sharing");
+    await act(async () => undefined);
+  }
+
+  /** The page as `?settings=` loads it: the address first, then the settings reading it after their first render. */
+  async function addressed(search: string, sharing: AssistantSharing = everyList(), path = "/assistant"): Promise<void> {
+    window.history.replaceState(null, "", `${path}${search}`);
+    render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} sharing={sharing} />);
+    await act(async () => undefined);
+  }
+
+  /**
+   * `fetch` answering the section's read of who a chat is shared with, and the people search, and the addresses it
+   * was asked for. `shares` is `null` for a read the route refuses.
+   */
+  function answering(shares: SharePerson[] | null, candidates: { oid: string; name: string; email: string | null }[] = []): string[] {
+    const asked: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        asked.push(url);
+        if (url.startsWith("/api/ui/people")) {
+          return new Response(JSON.stringify({ people: candidates }));
+        }
+        return shares === null ? new Response(JSON.stringify({ error: "not found" }), { status: 404 }) : new Response(JSON.stringify({ people: shares }));
+      })
+    );
+    return asked;
+  }
+
+  function list(name: string): HTMLElement {
+    return screen.getByRole("list", { name });
+  }
+
+  async function change(name: RegExp): Promise<void> {
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name }));
+    });
+  }
+
+  it("should list the chats shared and offered both ways, each linking to its read-only page, when the section opens", async () => {
+    await openSharing();
+
+    const given = within(list("Chats you have shared"));
+    expect(given.getByRole("link", { name: "Writing a possession order" }).getAttribute("href")).toBe(`/assistant/shared/${MINE}`);
+    expect(given.getByText("Possession")).toBeTruthy();
+    expect(given.getByText("1 person")).toBeTruthy();
+    expect(within(list("Chats shared with you")).getByRole("link", { name: "Bob's research" }).getAttribute("href")).toBe(`/assistant/shared/${THEIRS}`);
+    expect(within(list("Chats shared with you")).getByText("Bob Tester")).toBeTruthy();
+    expect(within(list("Chats you have let people fork")).getByText("2 people")).toBeTruthy();
+    expect(within(list("Chats you can fork")).getByRole("link", { name: "Carol's prototype" }).getAttribute("href")).toBe(`/assistant/shared/${FORKABLE}`);
+  });
+
+  it("should read the four lists only when the Sharing section is opened", async () => {
+    const sharing = everyList();
+    open({ sharing });
+    await act(async () => undefined);
+    expect(sharing.load).not.toHaveBeenCalled();
+
+    go("Sharing");
+    await act(async () => undefined);
+
+    expect(sharing.load).toHaveBeenCalledTimes(1);
+    expect(list("Chats you have shared")).toBeTruthy();
+  });
+
+  it("should say the lists are being read when the section has opened and they have not answered yet", () => {
+    open({ sharing: sharingSettings({}, { load: () => new Promise<SharedChats>(() => undefined) }) }, "Sharing");
+
+    expect(screen.getByText("Reading your shared chats…")).toBeTruthy();
+    expect(screen.getByRole("tabpanel").querySelector("[aria-busy='true']")).not.toBeNull();
+  });
+
+  it("should say so when the lists cannot be read", async () => {
+    await openSharing(sharingSettings({}, { load: async () => Promise.reject(new Error("down")) }));
+
+    expect(screen.getByText(/Your shared chats could not be read/)).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Chats you have shared" })).toBeNull();
+  });
+
+  it("should say what a share lets someone do, under the same headings as each list, when the section opens", async () => {
+    await openSharing();
+    const panel = screen.getByRole("tabpanel");
+
+    expect(within(panel).getByRole("heading", { name: "Shared chats" })).toBeTruthy();
+    expect(within(panel).getByText(/Only the people you share a chat with can open it/)).toBeTruthy();
+    expect(within(panel).getByText(/Your original stays yours/)).toBeTruthy();
+    expect(
+      within(panel)
+        .getAllByRole("heading", { level: 4 })
+        .map((heading) => heading.textContent)
+    ).toEqual(["Chats you have shared", "Chats shared with you", "Chats you have let people fork", "Chats you can fork"]);
+  });
+
+  it("should say so in each list when nothing has been shared either way", async () => {
+    await openSharing(sharingSettings());
+
+    expect(screen.getByText("You have not shared any of your chats.")).toBeTruthy();
+    expect(screen.getByText("Nobody has shared a chat with you.")).toBeTruthy();
+    expect(screen.getByText("You have not offered any of your chats to be forked.")).toBeTruthy();
+    expect(screen.getByText("Nobody has offered you a chat to fork.")).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Chats you have shared" })).toBeNull();
+  });
+
+  it("should offer to change who can read or fork a chat only when it is the person's own", async () => {
+    await openSharing();
+
+    expect(within(list("Chats you have shared")).getByRole("button", { name: /^Change who can read it/ })).toBeTruthy();
+    expect(within(list("Chats you have let people fork")).getByRole("button", { name: /^Change who can fork it/ })).toBeTruthy();
+    expect(within(list("Chats shared with you")).queryByRole("button")).toBeNull();
+    expect(within(list("Chats you can fork")).queryByRole("button")).toBeNull();
+  });
+
+  it("should offer no Sharing section when the page passes no shared chats", () => {
+    open({ sharing: undefined });
+
+    expect(sections()).not.toContain("Sharing");
+  });
+
+  it("should open an editor under the row, in the settings rather than over them, with who it is shared with, when its button is pressed", async () => {
+    const asked = answering([person("bob", "Bob Tester")]);
+    await openSharing();
+
+    await change(/^Change who can read it/);
+
+    expect(asked).toEqual([`/api/ui/assistant/shares/${MINE}`]);
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    const button = screen.getByRole("button", { name: /^Change who can read it/ });
+    expect(button.getAttribute("aria-expanded")).toBe("true");
+    const editor = document.getElementById(button.getAttribute("aria-controls") ?? "");
+    expect(editor).not.toBeNull();
+    expect(within(editor as HTMLElement).getByRole("list", { name: "Shared with" }).textContent).toContain("Bob Tester");
+    expect((within(editor as HTMLElement).getByLabelText("Their link") as HTMLInputElement).value).toContain(`/assistant/shared/${MINE}`);
+    expect(within(editor as HTMLElement).getByRole("combobox", { name: "Who can read it" })).toBeTruthy();
+  });
+
+  it("should read who a chat is offered to when the row is one the person has let people fork", async () => {
+    const asked = answering([person("carol", "Carol Tester")]);
+    await openSharing();
+
+    await change(/^Change who can fork it/);
+
+    expect(asked).toEqual([`/api/ui/assistant/shares/${OFFERED}?mode=fork`]);
+    expect(within(screen.getByRole("list", { name: "Offered to" })).getByText("can fork")).toBeTruthy();
+  });
+
+  it("should close the editor again when its button is pressed a second time", async () => {
+    answering([]);
+    await openSharing();
+
+    await change(/^Change who can read it/);
+    await change(/^Change who can read it/);
+
+    expect(screen.getByRole("button", { name: /^Change who can read it/ }).getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("combobox")).toBeNull();
+  });
+
+  it("should say so when who a chat is shared with cannot be read", async () => {
+    answering(null);
+    await openSharing();
+
+    await change(/^Change who can read it/);
+
+    expect(screen.getByRole("alert").textContent).toContain("could not be loaded");
+    expect(screen.queryByRole("combobox")).toBeNull();
+  });
+
+  it("should share the chat through the share action, and read the lists again, when a person is picked", async () => {
+    answering([], [{ oid: "carol", name: "Carol Tester", email: "carol@example.com" }]);
+    const share = vi.fn(async () => ({ ok: true as const, people: [person("carol", "Carol Tester")] }));
+    const sharing = everyList({ share });
+    await openSharing(sharing);
+    await change(/^Change who can read it/);
+    vi.useFakeTimers();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Who can read it" }), { target: { value: "carol" } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("option", { name: /Carol Tester/ }));
+    });
+
+    expect(share).toHaveBeenCalledWith({ conversationId: MINE, recipientOid: "carol" });
+    expect(within(screen.getByRole("list", { name: "Shared with" })).getByText(/Carol Tester/)).toBeTruthy();
+    expect(sharing.load).toHaveBeenCalledTimes(2);
+    expect(refresh).toHaveBeenCalled();
+  });
+
+  it("should offer the chat to fork through the offer action when the row is one the person has let people fork", async () => {
+    answering([], [{ oid: "carol", name: "Carol Tester", email: null }]);
+    const offer = vi.fn(async () => ({ ok: true as const, people: [person("carol", "Carol Tester")] }));
+    await openSharing(everyList({ offer }));
+    await change(/^Change who can fork it/);
+    vi.useFakeTimers();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Who can fork it" }), { target: { value: "carol" } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    await act(async () => {
+      fireEvent.keyDown(screen.getByRole("combobox", { name: "Who can fork it" }), { key: "Enter" });
+    });
+
+    expect(offer).toHaveBeenCalledWith({ conversationId: OFFERED, recipientOid: "carol" });
+  });
+
+  it("should take a person off through the unshare action when their share is removed", async () => {
+    answering([person("bob", "Bob Tester")]);
+    const unshare = vi.fn(async () => ({ ok: true as const, people: [] as SharePerson[] }));
+    await openSharing(everyList({ unshare }));
+    await change(/^Change who can read it/);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    });
+
+    expect(unshare).toHaveBeenCalledWith({ conversationId: MINE, recipientOid: "bob" });
+    expect(screen.getByText("This chat is not shared with anyone.")).toBeTruthy();
+    expect(refresh).toHaveBeenCalled();
+  });
+
+  it("should keep the open row and its editor when the lists are read again without it, until the person closes it", async () => {
+    answering([person("bob", "Bob Tester")]);
+    const others = chat("55555555-5555-5555-5555-555555555555", "Another of mine", "3 people");
+    const reads = [
+      { ...EVERY_LIST, given: [chat(MINE, "Writing a possession order", "1 person"), others] },
+      { ...EVERY_LIST, given: [others] }
+    ];
+    const load = vi.fn(async () => reads[Math.min(load.mock.calls.length - 1, reads.length - 1)] as SharedChats);
+    const unshare = vi.fn(async () => ({ ok: true as const, people: [] as SharePerson[] }));
+    await openSharing(everyList({ load, unshare }));
+    await change(/^Change who can read it: Writing a possession order/);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    });
+
+    expect(load).toHaveBeenCalledTimes(2);
+    const rows = within(list("Chats you have shared")).getAllByRole("listitem");
+    expect(rows.map((row) => within(row).getAllByRole("link")[0]?.textContent)).toEqual(["Writing a possession order", "Another of mine"]);
+    expect(screen.getByText("This chat is not shared with anyone.")).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Who can read it" })).toBeTruthy();
+
+    await change(/^Change who can read it: Writing a possession order/);
+
+    expect(within(list("Chats you have shared")).queryByRole("link", { name: "Writing a possession order" })).toBeNull();
+    expect(screen.queryByRole("combobox")).toBeNull();
+  });
+
+  it("should shut the list of people without closing the settings when Escape is pressed in the name box", async () => {
+    answering([], [{ oid: "carol", name: "Carol Tester", email: null }]);
+    await openSharing();
+    await change(/^Change who can read it/);
+    vi.useFakeTimers();
+    const box = screen.getByRole("combobox", { name: "Who can read it" });
+    fireEvent.change(box, { target: { value: "carol" } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+
+    fireEvent.keyDown(box, { key: "Escape" });
+
+    expect(box.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy();
+  });
+
+  it("should keep the editor's controls inside the dialog's focus trap when an editor is open", async () => {
+    answering([person("bob", "Bob Tester")]);
+    await openSharing();
+
+    await change(/^Change who can read it/);
+
+    const reachable = stops();
+    expect(reachable).toContain(screen.getByRole("combobox", { name: "Who can read it" }));
+    expect(reachable).toContain(screen.getByRole("button", { name: "Copy" }));
+    expect(reachable).not.toContain(screen.getByRole("listbox", { hidden: true }));
+  });
+
+  it("should open on the section the address names, without the cog being pressed, when the page loads with ?settings=", async () => {
+    await addressed("?settings=sharing");
+
+    expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy();
+    expect(selected()).toBe("Sharing");
+    expect(screen.getByRole("heading", { name: "Shared chats" })).toBeTruthy();
+    expect(window.location.search).toBe("?settings=sharing");
+  });
+
+  it("should open on the first section the address names when ?settings= appears more than once", async () => {
+    await addressed("?settings=sharing&settings=appearance");
+
+    expect(selected()).toBe("Sharing");
+  });
+
+  it("should open on the first section when the address names one the dialog does not have", async () => {
+    await addressed("?settings=nowhere");
+
+    expect(selected()).toBe("Appearance");
+  });
+
+  it("should drill into the section the address names when the screen is narrow", async () => {
+    narrow();
+    await addressed("?settings=sharing");
+
+    expect(screen.queryByRole("list", { name: "Settings sections" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Back to settings" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Shared chats" })).toBeTruthy();
+  });
+
+  it("should render nothing of the dialog in the page's HTML when the address names a section", () => {
+    window.history.replaceState(null, "", "/assistant?settings=sharing");
+    const html = renderToString(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} sharing={everyList()} />);
+
+    expect(html).not.toContain('role="dialog"');
+  });
+
+  it("should take the parameter off the address, and keep the rest of it, when the dialog it opened is closed", async () => {
+    await addressed("?settings=sharing&share=1", everyList(), `/assistant/${MINE}`);
+    const replace = vi.spyOn(window.history, "replaceState");
+
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Close settings" }));
+
+    expect(replace).toHaveBeenCalledTimes(1);
+    expect(`${window.location.pathname}${window.location.search}`).toBe(`/assistant/${MINE}?share=1`);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(cog());
+    replace.mockRestore();
+  });
+
+  it("should leave the rest of the query encoded as it was when the dialog the address opened is closed", async () => {
+    await addressed("?view=a,b&settings=sharing&q=x%20y#top");
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(`${window.location.search}${window.location.hash}`).toBe("?view=a,b&q=x%20y#top");
+  });
+
+  it("should leave the address alone when the dialog the cog opened is closed", async () => {
+    window.history.replaceState(null, "", "/assistant?share=1");
+    await openSharing();
+    const replace = vi.spyOn(window.history, "replaceState");
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(replace).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    replace.mockRestore();
+  });
+
+  it("should close the dialog the address opened, and put focus back on the cog, when the back button takes the parameter off", async () => {
+    window.history.replaceState(null, "", "/assistant");
+    window.history.pushState(null, "", "/assistant?settings=sharing");
+    const { rerender } = render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} sharing={everyList()} />);
+    await act(async () => undefined);
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(screen.getByRole("dialog").contains(document.activeElement)).toBe(true);
+
+    // What the back button leaves behind, which Next then renders the page again for.
+    window.history.replaceState(null, "", "/assistant");
+    rerender(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} sharing={everyList()} />);
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(cog());
+  });
+
+  it("should raise no WCAG A or AA violations when Sharing is open with an editor showing", async () => {
+    answering([person("bob", "Bob Tester")]);
+    const root = document.createElement("div");
+    root.className = "asst-theme";
+    document.body.append(root);
+    window.history.replaceState(null, "", "/assistant?settings=sharing");
+    render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} sharing={everyList()} />, { container: root });
+    await act(async () => undefined);
+    await change(/^Change who can read it/);
+
+    const results = await axe.run(root, {
+      runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"] },
+      rules: { "color-contrast": { enabled: false } }
+    });
+
+    expect(results.violations.map((violation) => `${violation.id}: ${violation.nodes.map((node) => node.html).join(" ")}`)).toEqual([]);
+    root.remove();
   }, 20_000);
 });

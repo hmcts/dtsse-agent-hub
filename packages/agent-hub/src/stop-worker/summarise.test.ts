@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Message } from "../api.ts";
+import type { Message } from "../wire.ts";
 import { buildPrompt, formatFeed, parseHaikuResult, validateHaikuOutput } from "./summarise.ts";
 
 const message = (over: Partial<Message> = {}): Message => ({

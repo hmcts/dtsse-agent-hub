@@ -1,8 +1,9 @@
 import { NextRequest } from "next/server";
 import { describe, expect, it, vi } from "vitest";
-import { registerAgent } from "../../src/agents/store.ts";
+import { heartbeat, registerAgent } from "../../src/agents/store.ts";
 import * as artefactRoute from "../../src/app/api/agent/[agentId]/artefact/route.ts";
 import * as confluenceRoute from "../../src/app/api/agent/[agentId]/confluence/route.ts";
+import * as githubRoute from "../../src/app/api/agent/[agentId]/github/route.ts";
 import * as heartbeatRoute from "../../src/app/api/agent/[agentId]/heartbeat/route.ts";
 import * as jiraRoute from "../../src/app/api/agent/[agentId]/jira/route.ts";
 import * as streamRoute from "../../src/app/api/agent/[agentId]/stream/route.ts";
@@ -15,17 +16,26 @@ import * as uiTranscriptRoute from "../../src/app/api/ui/agents/[id]/transcript/
 import * as lookupsRoute from "../../src/app/api/ui/assistant/lookups/route.ts";
 import * as lookupAnswerRoute from "../../src/app/api/virtual/[virtualAgentId]/lookups/[lookupId]/route.ts";
 import * as sessionsRoute from "../../src/app/api/virtual/[virtualAgentId]/sessions/route.ts";
+import * as statusRoute from "../../src/app/api/virtual/[virtualAgentId]/status/route.ts";
+import { writeArtefact } from "../../src/assistant/artefact-store.ts";
+import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
 import { CONFLUENCE_EXPORT_TIMEOUT_MS } from "../../src/assistant/confluence.ts";
+import { createConversation, findConversation, hasLocalConversation, listConversations } from "../../src/assistant/conversation-store.ts";
 import { readExportDefaults, saveExportDefaults } from "../../src/assistant/export-default-store.ts";
+import { assistantFrame } from "../../src/assistant/frame.ts";
+import { GITHUB_EXPORT_TIMEOUT_MS } from "../../src/assistant/github.ts";
 import { JIRA_EXPORT_TIMEOUT_MS } from "../../src/assistant/jira.ts";
 import { askLookup } from "../../src/assistant/lookup-store.ts";
 import { LOOKUP_RATE_LIMIT, LOOKUP_RETENTION_MS } from "../../src/assistant/lookups.ts";
-import { assistantFrame, createConversation, ensureAssistant, findConversation, linkSession, pendingWakes } from "../../src/assistant/store.ts";
+import { searchConversations } from "../../src/assistant/search-store.ts";
+import { linkSession, pendingWakes } from "../../src/assistant/session-store.ts";
+import { accessToConversation, conversationsSharedBy, conversationsSharedWith, shareConversation } from "../../src/assistant/shares.ts";
 import { credentialBackend } from "../../src/credentials/backend.ts";
 import { putCredential } from "../../src/credentials/store.ts";
 import { directAsPerson } from "../../src/messages/send.ts";
 import { createDirect, expireDeliveries } from "../../src/messages/store.ts";
 import { subscribe, subscriptions } from "../../src/topics/store.ts";
+import { appendEntries } from "../../src/transcripts/store.ts";
 import { MAX_VIRTUAL_AGENTS_PER_USER } from "../../src/virtual-agents/limits.ts";
 import { type ClaimedVirtualAgent, type ClaimResult, createVirtualAgent, setDesired } from "../../src/virtual-agents/store.ts";
 import { sweepVirtualAgents } from "../../src/virtual-agents/sweep.ts";
@@ -46,7 +56,7 @@ vi.mock("next/cache", async () => {
 
 const { actAs } = await import("./web-session.ts");
 const actions = await import("../../src/app/_actions/assistant.ts");
-const { agentRoute, assistantConversation, assistantModel, openAssistant } = await import("../../src/web/data.ts");
+const { agentAddress, assistantConversation, assistantModel, openAssistant } = await import("../../src/web/data.ts");
 
 const ALICE: Person = { oid: "dev-alice", name: "Dev alice (sign-in disabled)", email: "alice@dev.invalid" };
 const BOB: Person = { oid: "dev-bob", name: "Dev bob (sign-in disabled)", email: "bob@dev.invalid" };
@@ -96,12 +106,14 @@ function register(
   token: string,
   sessionId: string,
   conversationId?: string,
-  reported: { skills?: { name: string; description: string }[]; clientFeatures?: string[] } = {}
+  reported: { skills?: { name: string; description: string }[]; clientFeatures?: string[]; repo?: string; branch?: string } = {}
 ): Promise<Response> {
   return pod(registerRoute.POST, token, "/api/agent/register", {}, "POST", {
     session_id: sessionId,
     name: "session",
     ...(conversationId === undefined ? {} : { conversation_id: conversationId }),
+    ...(reported.repo === undefined ? {} : { repo: reported.repo }),
+    ...(reported.branch === undefined ? {} : { branch: reported.branch }),
     ...(reported.skills === undefined ? {} : { skills: reported.skills }),
     // Left out unless a test is a newer client: a pod runs whatever client version its image booted with.
     ...(reported.clientFeatures === undefined ? {} : { client_features: reported.clientFeatures })
@@ -129,6 +141,14 @@ async function sessionOf(conversationId: string): Promise<{ agentId: string; ses
 async function laptopChat(sessionId = "alices-laptop"): Promise<string> {
   await registerAgent(prisma, { ...ALICE, tid: "dev" }, { sessionId, name: sessionId, cwd: null, repo: null, branch: null, host: null });
   return (await prisma.assistantConversation.findFirstOrThrow({ where: { virtualAgentId: null }, orderBy: { createdAt: "desc" } })).id;
+}
+
+/** A prompt typed at the laptop: a chat with nothing said in it is left out of the list, so a test that lists one needs this. */
+async function typedAtLaptop(conversationId: string): Promise<void> {
+  const agent = await prisma.agent.findFirstOrThrow({ where: { assistantConversationId: conversationId } });
+  await appendEntries(prisma, { id: agent.id, ownerOid: agent.ownerOid }, agent.sessionId, [
+    { key: "typed", role: "user", content: { text: "look at the claim" }, truncated: false, redacted: false, message_id: null, occurred_at: new Date() }
+  ]);
 }
 
 assistantSuite([ALICE, BOB]);
@@ -412,12 +432,13 @@ describe("conversations", () => {
     expect((await jsonOf(listed)).agents.map((agent: { id: string }) => agent.id)).not.toContain(agentId);
   });
 
-  it("should send the hub's agent page for a conversation's agent to the conversation", async () => {
+  it("should send the hub's agent page for a conversation's agent to the conversation when its owner opens it", async () => {
     await startedAssistant();
     const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
     const { agentId } = await sessionOf(id);
 
-    expect(await agentRoute(VIEWER, agentId)).toEqual({ variant: "moved", to: `/assistant/${id}` });
+    expect(await agentAddress(VIEWER, agentId)).toEqual({ kind: "chat", conversationId: id });
+    expect(await agentAddress({ ...BOB, tid: "dev" }, agentId)).toEqual({ kind: "none" });
   });
 
   it("should show only the owner their conversation, and nobody else", async () => {
@@ -470,6 +491,22 @@ describe("conversations", () => {
       { name: "cft-explain", description: "Answer a what is X question" },
       { name: "cft-how-to", description: "Find a how-to recipe" }
     ]);
+  });
+
+  /** Where a repo-relative path in an answer resolves to, which is the registering session's repo and branch. */
+  it("should carry the session's repo and branch to the conversation page as a GitHub base, and none before it registers", async () => {
+    const { token } = await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+    const { sessionId } = await sessionOf(id);
+
+    expect((await assistantConversation(VIEWER, id))?.repoBase).toBeNull();
+
+    await register(token, sessionId, id, { repo: "cft-workspace", branch: "feat/repo-relative-links" });
+    expect((await assistantConversation(VIEWER, id))?.repoBase).toBe("https://github.com/hmcts/cft-workspace/blob/feat/repo-relative-links/");
+
+    // A session with no branch to report — a detached HEAD, or a worktree git answered nothing for — still links.
+    await register(token, sessionId, id, { repo: "cft-workspace" });
+    expect((await assistantConversation(VIEWER, id))?.repoBase).toBe("https://github.com/hmcts/cft-workspace/blob/HEAD/");
   });
 
   it("should record each change of product, and leave it alone when it is the same", async () => {
@@ -661,41 +698,38 @@ describe("conversations", () => {
 
   /**
    * A conversation with no pod is a session on the person's own computer, and removing the chat has to leave that
-   * session exactly as it was. `agent.assistant_conversation_id` is `ON DELETE CASCADE` and the agent's own
-   * dependants cascade from there, so deleting the row without clearing the column first would take the live
-   * session's agent, the transcript it uploaded, its subscriptions and every direct message to or from it — board
-   * messages with colleagues included — after which the session 404s, re-registers as a new agent and the chat
-   * comes back.
+   * session exactly as it was and keep the chat gone. `agent.assistant_conversation_id` is `ON DELETE CASCADE` and the
+   * agent's own dependants cascade from there, so the row is deleted only once the agent is detached. A detached
+   * laptop session is otherwise linked a fresh chat by its next heartbeat, so the detach also marks it
+   * (`chat_removed_at`) as one never to be given another.
    *
    * The rename is here too: every write to a conversation announces it inside its own transaction, so a write path
    * that could not announce one with no pod would roll back and leave a chat nobody can rename or get rid of.
    */
-  it("should detach a conversation with no pod and leave the session on the laptop standing", async () => {
+  it("should delete a conversation with no pod, keep it gone through its session's writes and heartbeats, and leave the session on the laptop standing", async () => {
     const laptop = await registerAgent(
       prisma,
       { ...ALICE, tid: "dev" },
       { sessionId: "alices-laptop", name: "alices-laptop", cwd: null, repo: null, branch: null, host: null }
     );
     const id = (await prisma.assistantConversation.findFirstOrThrow()).id;
+    await typedAtLaptop(id);
     await subscribe(prisma, laptop.id, ["pcs"]);
-    await prisma.transcriptEntry.create({
-      data: {
-        agentId: laptop.id,
-        sessionId: "alices-laptop",
-        entryKey: "e1",
-        role: "assistant",
-        content: { text: "read off my own disk" },
-        occurredAt: new Date()
-      }
-    });
     // Seeded rather than sent: nobody can direct another owner's session any more, so a cross-owner direct is a row
-    // written before that changed. It is here because the old delete took every message of the agent with it,
-    // including ones that had nothing to do with the chat being removed.
+    // written before that changed. It is here because a delete that cascaded would take every message of the agent
+    // with it, including ones that had nothing to do with the chat being removed.
     const board = await createDirect(prisma, {
       author: { oid: BOB.oid, agentId: null },
       targetAgentId: laptop.id,
       inReplyTo: null,
       body: "nothing to do with that chat"
+    });
+    await shareConversation(prisma, ALICE.oid, id, BOB.oid);
+    await writeArtefact(prisma, (await findConversation(prisma, ALICE.oid, id))!, {
+      title: "Notes",
+      markdown: "something sensitive",
+      baseVersion: 0,
+      by: "user"
     });
 
     expect(await actions.renameConversation({ conversationId: id, title: "On my laptop" })).toEqual({ ok: true });
@@ -703,11 +737,68 @@ describe("conversations", () => {
     expect(await actions.deleteConversation({ conversationId: id })).toEqual({ ok: true });
 
     expect(await prisma.assistantConversation.count()).toBe(0);
-    expect(await prisma.agent.findUniqueOrThrow({ where: { id: laptop.id } })).toMatchObject({ sessionId: "alices-laptop", assistantConversationId: null });
-    expect(await prisma.transcriptEntry.count({ where: { agentId: laptop.id } })).toBe(1);
+    expect(await prisma.assistantConversationShare.count()).toBe(0);
+
+    await heartbeat(prisma, laptop.id, "busy", "alices-laptop");
+    await appendEntries(prisma, { id: laptop.id, ownerOid: ALICE.oid }, "alices-laptop", [
+      {
+        key: "typed-again",
+        role: "user",
+        content: { text: "and the next claim" },
+        truncated: false,
+        redacted: false,
+        message_id: null,
+        occurred_at: new Date()
+      }
+    ]);
+    const artefact = await call(artefactRoute.PUT, {
+      as: ALICE,
+      path: `/api/agent/${laptop.id}/artefact`,
+      params: { agentId: laptop.id },
+      method: "PUT",
+      body: { markdown: "written after the chat went", base_version: 0 }
+    });
+    expect(artefact.status).toBe(404);
+    await heartbeat(prisma, laptop.id, "idle", "alices-laptop");
+    await registerAgent(
+      prisma,
+      { ...ALICE, tid: "dev" },
+      { sessionId: "alices-laptop", name: "alices-laptop", cwd: null, repo: null, branch: null, host: null }
+    );
+
+    expect(await prisma.assistantConversation.count()).toBe(0);
+    expect(await prisma.agent.findUniqueOrThrow({ where: { id: laptop.id } })).toMatchObject({
+      sessionId: "alices-laptop",
+      assistantConversationId: null,
+      chatRemovedAt: expect.any(Date)
+    });
+    expect(await assistantConversation(VIEWER, id)).toBeUndefined();
+    expect(await actions.deleteConversation({ conversationId: id })).toEqual({ ok: false, error: "no such conversation" });
+    expect((await openAssistant(VIEWER)).conversations).toEqual([]);
+    expect(await listConversations(prisma, ALICE.oid)).toEqual([]);
+    expect(await hasLocalConversation(prisma, ALICE.oid)).toBe(false);
+    expect(await searchConversations(prisma, ALICE.oid, "claim")).toEqual([]);
+    expect(await accessToConversation(prisma, BOB.oid, id)).toBeUndefined();
+    expect(await conversationsSharedWith(prisma, BOB.oid)).toEqual([]);
+    expect(await conversationsSharedBy(prisma, ALICE.oid)).toEqual([]);
+
+    expect(await prisma.transcriptEntry.count({ where: { agentId: laptop.id } })).toBe(2);
     expect(await subscriptions(prisma, laptop.id)).toEqual(["pcs"]);
     expect(await prisma.message.count({ where: { id: BigInt(board.id) } })).toBe(1);
     expect(await prisma.delivery.count({ where: { agentId: laptop.id } })).toBe(1);
+  });
+
+  it("should give a new session a chat of its own when the person removed the last one's", async () => {
+    const removed = await laptopChat("alices-laptop");
+    await typedAtLaptop(removed);
+    expect(await actions.deleteConversation({ conversationId: removed })).toEqual({ ok: true });
+
+    const fresh = await laptopChat("alices-laptop-after-clear");
+    await typedAtLaptop(fresh);
+
+    expect(fresh).not.toBe(removed);
+    expect((await listConversations(prisma, ALICE.oid)).map((chat) => chat.id)).toEqual([fresh]);
+    expect(await hasLocalConversation(prisma, ALICE.oid)).toBe(true);
   });
 
   /**
@@ -718,22 +809,52 @@ describe("conversations", () => {
     const { token } = await startedAssistant();
     const onPod = ((await actions.startConversation({ product: "general", body: "on my assistant" })) as { id: string }).id;
     await register(token, (await sessionOf(onPod)).sessionId, onPod);
-    await registerAgent(
-      prisma,
-      { ...ALICE, tid: "dev" },
-      { sessionId: "alices-laptop", name: "alices-laptop", cwd: null, repo: null, branch: null, host: null }
-    );
-    const onLaptop = (await prisma.assistantConversation.findFirstOrThrow({ where: { virtualAgentId: null } })).id;
+    const onLaptop = await laptopChat();
+    await typedAtLaptop(onLaptop);
 
     expect((await assistantConversation(VIEWER, onLaptop))!.local).toBe(true);
     expect((await assistantConversation(VIEWER, onPod))!.local).toBe(false);
     const listed = (await openAssistant(VIEWER)).conversations.flatMap((group) => group.items);
-    expect(new Map(listed.map((item) => [item.id, item.local]))).toEqual(
+    expect(new Map(listed.map((item) => [item.id, item.mark?.where ?? null]))).toEqual(
       new Map([
-        [onLaptop, true],
-        [onPod, false]
+        [onLaptop, "computer"],
+        [onPod, "assistant"]
       ])
     );
+  });
+
+  /**
+   * A local chat's mark is coloured by the state of its session, which lives on the agent rather than on the
+   * conversation: the sidebar's read has to bring `agent.status` back with each row or every laptop would be marked
+   * the same whatever its session was doing.
+   */
+  it.each([
+    ["busy", "working"],
+    ["idle", "ready"],
+    ["offline", "disconnected"]
+  ] as const)("should mark a listed local chat as %s with the state of its session", async (status, session) => {
+    await startedAssistant();
+    const onLaptop = await laptopChat();
+    await typedAtLaptop(onLaptop);
+    await prisma.agent.updateMany({ where: { assistantConversationId: onLaptop }, data: { status } });
+
+    const listed = (await openAssistant(VIEWER)).conversations.flatMap((group) => group.items);
+
+    expect(listed.map((item) => [item.id, item.mark])).toEqual([[onLaptop, { where: "computer", session }]]);
+  });
+
+  /**
+   * The cloud is there only to tell a pod chat from a local one, so somebody who has never run a session on their
+   * own computer sees no marks at all. One read answers it for the whole list; see `hasLocalConversation`.
+   */
+  it("should mark no chat when every one of the person's chats runs on their assistant", async () => {
+    const { token } = await startedAssistant();
+    const onPod = ((await actions.startConversation({ product: "general", body: "on my assistant" })) as { id: string }).id;
+    await register(token, (await sessionOf(onPod)).sessionId, onPod);
+
+    const listed = (await openAssistant(VIEWER)).conversations.flatMap((group) => group.items);
+
+    expect(listed.map((item) => [item.id, item.mark])).toEqual([[onPod, null]]);
   });
 
   it("should wake a conversation when its composer is focused and the session is offline", async () => {
@@ -990,11 +1111,9 @@ describe("the sessions stream and report", () => {
     await register(token, sessionId, id, { clientFeatures: ["stop"] });
     await pod(heartbeatRoute.POST, token, `/api/agent/${agentId}/heartbeat`, { agentId }, "POST", { status: "busy" });
     await insertUser(BOB);
-    // The refusal comes from the owner-scoped read rather than from `canStopAssistantAnswer`, which the action names
-    // after it and `rules.test.ts` covers; this is the end of it that the person would meet.
     actAs("bob");
 
-    expect(await actions.stopAssistantAnswer({ conversationId: id })).toMatchObject({ ok: false });
+    expect(await actions.stopAssistantAnswer({ conversationId: id })).toEqual({ ok: false, error: "that conversation no longer exists" });
     actAs("alice");
     expect((await assistantConversation(VIEWER, id))?.stopHistory).toEqual([]);
   });
@@ -1121,7 +1240,7 @@ describe("jira export", () => {
 
     expect(request).toMatchObject({
       message: { body: "Please export this document to the VIBE backlog in Jira." },
-      assistant: { conversation_id: id, jira_export: { export_id: exportId, project: "VIBE", issue_type: "Story", labels: ["hmcts-assistant"] } }
+      assistant: { conversation_id: id, jira_export: { export_id: exportId, project: "VIBE", issue_type: "Story", labels: ["cft-workspace"] } }
     });
     expect((await assistantConversation(VIEWER, id))?.jira).toMatchObject({ status: "pending", project: "VIBE", requestedAt: expect.any(String) });
 
@@ -1234,6 +1353,223 @@ describe("jira export", () => {
 
     expect((await report(token, plain, { export_id: exportId, key: "VIBE-1" })).status).toBe(404);
     expect((await report(token, agentId, { export_id: exportId, key: "not a key" })).status).toBe(400);
+  });
+});
+
+describe("github export", () => {
+  async function written(): Promise<{ token: string; id: string; agentId: string }> {
+    const { token } = await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "write a story" })) as { id: string }).id;
+    const { agentId, sessionId } = await sessionOf(id);
+    await register(token, sessionId, id);
+    await actions.saveArtefact({ conversationId: id, title: "Flags for caseworkers", markdown: "# Problem\n\nFlags are hidden.", baseVersion: 0 });
+    return { token, id, agentId };
+  }
+
+  function report(token: string, agentId: string, body: unknown): Promise<Response> {
+    return pod(githubRoute.PUT, token, `/api/agent/${agentId}/github`, { agentId }, "PUT", body);
+  }
+
+  async function currentExport(id: string): Promise<string> {
+    return (await prisma.assistantConversation.findUniqueOrThrow({ where: { id }, select: { githubExportId: true } })).githubExportId!;
+  }
+
+  it("should ask the session in the chat, with the export in the message's frame, and show the issue once it reports the number", async () => {
+    const { token, id, agentId } = await written();
+
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: " https://github.com/hmcts/cft-workspace " })).toEqual({ ok: true });
+    const exportId = await currentExport(id);
+    const abort = new AbortController();
+    const stream = frames(await pod(streamRoute.GET, token, `/api/agent/${agentId}/stream`, { agentId }, "GET", undefined, abort.signal));
+    const sent = await stream.named("direct", 2);
+    abort.abort();
+    await stream.cancel();
+    const request = JSON.parse(sent[1]!.data!);
+
+    expect(request).toMatchObject({
+      message: { body: "Please create a GitHub issue for this document in hmcts/cft-workspace." },
+      assistant: { conversation_id: id, github_export: { export_id: exportId, repo: "hmcts/cft-workspace", labels: ["cft-workspace"] } }
+    });
+    expect(request.assistant.jira_export).toBeUndefined();
+    expect((await assistantConversation(VIEWER, id))?.github).toMatchObject({
+      status: "pending",
+      repo: "hmcts/cft-workspace",
+      requestedAt: expect.any(String)
+    });
+
+    expect((await report(token, agentId, { export_id: exportId, number: 42 })).status).toBe(204);
+    expect((await assistantConversation(VIEWER, id))?.github).toEqual({
+      status: "done",
+      repo: "hmcts/cft-workspace",
+      number: 42,
+      url: "https://github.com/hmcts/cft-workspace/issues/42",
+      project: null,
+      projectError: null
+    });
+    expect((await assistantFrame(prisma, agentId))?.github_export).toBeUndefined();
+  });
+
+  it("should carry the Project to the session, and show why the issue is not on it when adding it failed", async () => {
+    const { token, id, agentId } = await written();
+    const project = { owner: "hmcts", number: 12, title: "CFT roadmap" };
+
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace", project })).toEqual({ ok: true });
+    const exportId = await currentExport(id);
+    expect((await assistantFrame(prisma, agentId))?.github_export).toEqual({
+      export_id: exportId,
+      repo: "hmcts/cft-workspace",
+      labels: ["cft-workspace"],
+      project: { owner: "hmcts", number: 12 }
+    });
+    expect((await assistantConversation(VIEWER, id))?.github).toMatchObject({ status: "pending", project });
+
+    expect((await report(token, agentId, { export_id: exportId, number: 42, project_error: "needs the project scope" })).status).toBe(204);
+    expect((await assistantConversation(VIEWER, id))?.github).toMatchObject({ status: "done", number: 42, project, projectError: "needs the project scope" });
+  });
+
+  it("should say the Project in the message the person sends, and refuse one that is not whole", async () => {
+    const { id } = await written();
+
+    expect(
+      await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace", project: { owner: "hmcts", number: 0, title: "x" } })
+    ).toEqual({ ok: false, error: "pick the GitHub Project from the search, or none" });
+    await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace", project: { owner: "hmcts", number: 12, title: "CFT roadmap" } });
+
+    const sent = await prisma.message.findFirstOrThrow({ where: { body: { startsWith: "Please create a GitHub issue" } }, select: { body: true } });
+    expect(sent.body).toBe('Please create a GitHub issue for this document in hmcts/cft-workspace, on the "CFT roadmap" Project.');
+  });
+
+  it("should refuse an issue for a document already in Jira, or on its way there", async () => {
+    const { token, id, agentId } = await written();
+    await actions.exportArtefactToJira({ conversationId: id, project: "VIBE" });
+
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" })).toEqual({
+      ok: false,
+      error: "this document is already being exported"
+    });
+    const jiraExport = (await prisma.assistantConversation.findUniqueOrThrow({ where: { id }, select: { jiraExportId: true } })).jiraExportId!;
+    await pod(jiraRoute.PUT, token, `/api/agent/${agentId}/jira`, { agentId }, "PUT", { export_id: jiraExport, key: "VIBE-9" });
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" })).toEqual({
+      ok: false,
+      error: "this document is already in Jira as VIBE-9"
+    });
+  });
+
+  it("should refuse a Jira ticket for a document that is already a GitHub issue", async () => {
+    const { token, id, agentId } = await written();
+    await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" });
+    await report(token, agentId, { export_id: await currentExport(id), number: 5 });
+
+    expect(await actions.exportArtefactToJira({ conversationId: id, project: "VIBE" })).toEqual({
+      ok: false,
+      error: "this document is already on GitHub as hmcts/cft-workspace#5"
+    });
+  });
+
+  it("should export to a repository whose name starts with a dot", async () => {
+    const { id } = await written();
+
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/.github" })).toEqual({ ok: true });
+    expect((await assistantConversation(VIEWER, id))?.github).toMatchObject({ status: "pending", repo: "hmcts/.github" });
+  });
+
+  it("should refuse an export, claiming nothing, when the running pod's client is too old to carry it out", async () => {
+    const { id } = await written();
+    const assistantId = (await findConversation(prisma, ALICE.oid, id))!.virtualAgentId!;
+    await prisma.virtualAgent.update({ where: { id: assistantId }, data: { status: "running", clientFeatures: ["lookups"] } });
+
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" })).toEqual({
+      ok: false,
+      error: "your assistant needs an update to create GitHub issues; it gets one the next time it restarts"
+    });
+    expect(await currentExport(id)).toBeNull();
+
+    await prisma.virtualAgent.update({ where: { id: assistantId }, data: { clientFeatures: ["lookups", "github-lookups"] } });
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" })).toEqual({ ok: true });
+  });
+
+  it("should refuse a second export while one is pending, and any once the document is an issue", async () => {
+    const { token, id, agentId } = await written();
+    await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" });
+
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" })).toEqual({
+      ok: false,
+      error: "this document is already being exported"
+    });
+
+    await report(token, agentId, { export_id: await currentExport(id), number: 42 });
+
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" })).toEqual({
+      ok: false,
+      error: "this document is already on GitHub as hmcts/cft-workspace#42"
+    });
+  });
+
+  it("should let the person try again under a new export id, and ignore the old one's late report, when the export failed", async () => {
+    const { token, id, agentId } = await written();
+    await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/nope" });
+    const first = await currentExport(id);
+    await report(token, agentId, { export_id: first, error: "GitHub refused the issue: no such repository" });
+    expect((await assistantConversation(VIEWER, id))?.github).toEqual({
+      status: "failed",
+      repo: "hmcts/nope",
+      project: null,
+      error: "GitHub refused the issue: no such repository"
+    });
+
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" })).toEqual({ ok: true });
+    expect(await currentExport(id)).not.toBe(first);
+
+    expect((await report(token, agentId, { export_id: first, number: 1 })).status).toBe(204);
+    expect((await assistantConversation(VIEWER, id))?.github).toMatchObject({ status: "pending", repo: "hmcts/cft-workspace" });
+  });
+
+  it("should allow a new export once the session has not answered in time", async () => {
+    const { id } = await written();
+    await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" });
+    await prisma.assistantConversation.update({ where: { id }, data: { githubRequestedAt: new Date(Date.now() - GITHUB_EXPORT_TIMEOUT_MS - 1000) } });
+
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" })).toEqual({ ok: true });
+  });
+
+  it("should refuse an export of a document nobody has written, or to something that is not a repository", async () => {
+    await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" })).toEqual({
+      ok: false,
+      error: "write the document before exporting it"
+    });
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "cft-workspace" })).toEqual({
+      ok: false,
+      error: "name the GitHub repository as owner/name, such as hmcts/cft-workspace"
+    });
+  });
+
+  it("should refuse an export from a chat that is a session on the person's own computer, and claim nothing", async () => {
+    const id = await laptopChat();
+    await actions.saveArtefact({ conversationId: id, title: "Notes", markdown: "# What I found", baseVersion: 0 });
+
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" })).toEqual({
+      ok: false,
+      error: "this chat is a session on your own computer, which cannot export to GitHub; download the document and attach it yourself"
+    });
+    expect(await prisma.assistantConversation.findUniqueOrThrow({ where: { id }, select: { githubStatus: true, githubExportId: true } })).toEqual({
+      githubStatus: null,
+      githubExportId: null
+    });
+  });
+
+  it("should refuse a report from an agent that is not a conversation's, and one that breaks the contract", async () => {
+    const { token, id, agentId } = await written();
+    await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" });
+    const exportId = await currentExport(id);
+    const { agent_id: plain } = await jsonOf<{ agent_id: string }>(await register(token, "plain-session"));
+
+    expect((await report(token, plain, { export_id: exportId, number: 1 })).status).toBe(404);
+    expect((await report(token, agentId, { export_id: exportId, number: 0 })).status).toBe(400);
+    expect((await report(token, agentId, { export_id: exportId, number: "42" })).status).toBe(400);
+    expect((await report(token, agentId, { export_id: exportId, number: 1, project_error: "x".repeat(301) })).status).toBe(400);
   });
 });
 
@@ -1387,7 +1723,7 @@ describe("atlassian lookups", () => {
     const asked = ask({ kind: "confluence_page", query: "  case  guides ", space: "CCD" });
     const [frame] = await stream.named("lookup", 1);
     const lookup = JSON.parse(frame!.data!);
-    expect(lookup).toEqual({ lookup_id: expect.any(String), kind: "confluence_page", query: "case guides", space: "CCD", sign_in: false });
+    expect(lookup).toEqual({ lookup_id: expect.any(String), kind: "confluence_page", query: "case guides", space: "CCD", owner: null, sign_in: false });
     expect((await answer(id, token, lookup.lookup_id, { results: [PAGE] })).status).toBe(204);
     const answered = await jsonOf<{ status: string; results: unknown[] }>(await asked);
     abort.abort();
@@ -1411,12 +1747,94 @@ describe("atlassian lookups", () => {
     expect(await jsonOf(await ask({ kind: "jira_project", query: "vibe" }))).toEqual({ status: "unsupported" });
   });
 
+  it("should send the lookup when the pod claims lookups on its status and no main session has registered", async () => {
+    const { id, token } = await startedAssistant();
+    const reported = await pod(statusRoute.POST, token, `/api/virtual/${id}/status`, { virtualAgentId: id }, "POST", {
+      phase: "running",
+      client_features: ["lookups"]
+    });
+    expect(reported.status).toBe(204);
+    expect((await prisma.virtualAgent.findUniqueOrThrow({ where: { id }, select: { agentId: true } })).agentId).toBeNull();
+
+    const asked = await askLookup(prisma, { viewerOid: ALICE.oid, kind: "jira_project", query: "vibe", space: null, signIn: false });
+
+    expect(asked).toEqual({ lookupId: expect.any(String), virtualAgentId: id });
+  });
+
+  it("should read the pod's own claim over its main session's when the pod reported one", async () => {
+    const { id, token } = await answeringAssistant(["lookups"]);
+    await pod(statusRoute.POST, token, `/api/virtual/${id}/status`, { virtualAgentId: id }, "POST", { phase: "running", client_features: ["files"] });
+
+    expect(await jsonOf(await ask({ kind: "jira_project", query: "vibe" }))).toEqual({ status: "unsupported" });
+  });
+
+  it("should say the assistant is waking when it runs with neither a claim of its own nor a main session", async () => {
+    const { id } = await startedAssistant();
+    await prisma.virtualAgent.update({ where: { id }, data: { status: "running" } });
+
+    expect(await jsonOf(await ask({ kind: "jira_project", query: "vibe" }))).toEqual({ status: "waking" });
+  });
+
   it("should answer a query too short to search, or a bad request, without asking the pod", async () => {
     await answeringAssistant();
 
     expect(await jsonOf(await ask({ kind: "jira_project", query: "v" }))).toEqual({ status: "done", results: [] });
     expect((await ask({ kind: "people", query: "vibe" })).status).toBe(400);
     expect((await ask({ kind: "confluence_page", query: "vibe", space: "CCD OR 1=1" })).status).toBe(400);
+    expect(await prisma.assistantLookup.count()).toBe(0);
+  });
+
+  it("should send a Project search with the repository owner to a pod that claims github-lookups", async () => {
+    const { id, token } = await answeringAssistant(["lookups", "github-lookups"]);
+    const abort = new AbortController();
+    const stream = frames(await pod(sessionsRoute.GET, token, `/api/virtual/${id}/sessions`, { virtualAgentId: id }, "GET", undefined, abort.signal));
+
+    // A sign-in asked for with a GitHub search is dropped: gh is signed in on every pod.
+    const asked = ask({ kind: "github_project", query: "roadmap", owner: "hmcts", sign_in: true });
+    const [frame] = await stream.named("lookup", 1);
+    const lookup = JSON.parse(frame!.data!);
+    expect(lookup).toEqual({ lookup_id: expect.any(String), kind: "github_project", query: "roadmap", space: null, owner: "hmcts", sign_in: false });
+    const project = { owner: "hmcts", number: 12, title: "CFT roadmap" };
+    expect((await answer(id, token, lookup.lookup_id, { results: [project] })).status).toBe(204);
+    const answered = await jsonOf(await asked);
+    abort.abort();
+    await stream.cancel();
+
+    expect(answered).toEqual({ status: "done", results: [project] });
+  });
+
+  it("should answer a repository search with links the hub builds, and refuse repositories that are not", async () => {
+    const { id, token } = await answeringAssistant(["lookups", "github-lookups"]);
+    const abort = new AbortController();
+    const stream = frames(await pod(sessionsRoute.GET, token, `/api/virtual/${id}/sessions`, { virtualAgentId: id }, "GET", undefined, abort.signal));
+
+    const asked = ask({ kind: "github_repo", query: "cft workspace" });
+    const [frame] = await stream.named("lookup", 1);
+    const lookup = JSON.parse(frame!.data!);
+    expect((await answer(id, token, lookup.lookup_id, { results: [{ full_name: "not a repo", description: null }] })).status).toBe(400);
+    expect((await answer(id, token, lookup.lookup_id, { results: [{ full_name: "hmcts/cft-workspace", description: null }] })).status).toBe(204);
+    const answered = await jsonOf(await asked);
+    abort.abort();
+    await stream.cancel();
+
+    expect(answered).toEqual({
+      status: "done",
+      results: [{ full_name: "hmcts/cft-workspace", description: null, url: "https://github.com/hmcts/cft-workspace" }]
+    });
+  });
+
+  it("should say the pod cannot search GitHub when its client claims lookups but not github-lookups", async () => {
+    await answeringAssistant(["lookups"]);
+
+    expect(await jsonOf(await ask({ kind: "github_repo", query: "cft" }))).toEqual({ status: "unsupported" });
+    expect(await prisma.assistantLookup.count()).toBe(0);
+  });
+
+  it("should refuse a Project search with no repository owner, without asking the pod", async () => {
+    await answeringAssistant(["lookups", "github-lookups"]);
+
+    expect((await ask({ kind: "github_project", query: "roadmap" })).status).toBe(400);
+    expect((await ask({ kind: "github_project", query: "roadmap", owner: "hmcts --jq ." })).status).toBe(400);
     expect(await prisma.assistantLookup.count()).toBe(0);
   });
 
@@ -1481,13 +1899,25 @@ describe("export defaults", () => {
     await insertUser(BOB);
     const alice = { actorOid: ALICE.oid, ownerOid: ALICE.oid };
 
-    expect(await readExportDefaults(prisma, alice)).toEqual({ jira: null, confluence: null });
+    expect(await readExportDefaults(prisma, alice)).toEqual({ ticketTool: "jira", jira: null, github: null, githubProject: null, confluence: null });
     await saveExportDefaults(prisma, alice, { jira: { key: "CCD", name: "Core Case Data" }, confluence: PAGE });
-    expect(await readExportDefaults(prisma, alice)).toEqual({ jira: { key: "CCD", name: "Core Case Data" }, confluence: PAGE });
+    expect(await readExportDefaults(prisma, alice)).toEqual({
+      ticketTool: "jira",
+      jira: { key: "CCD", name: "Core Case Data" },
+      github: null,
+      githubProject: null,
+      confluence: PAGE
+    });
     await saveExportDefaults(prisma, alice, { jira: null, confluence: PAGE });
 
     expect((await readExportDefaults(prisma, alice)).jira).toBeNull();
-    expect(await readExportDefaults(prisma, { actorOid: BOB.oid, ownerOid: BOB.oid })).toEqual({ jira: null, confluence: null });
+    expect(await readExportDefaults(prisma, { actorOid: BOB.oid, ownerOid: BOB.oid })).toEqual({
+      ticketTool: "jira",
+      jira: null,
+      github: null,
+      githubProject: null,
+      confluence: null
+    });
     await expect(readExportDefaults(prisma, { actorOid: BOB.oid, ownerOid: ALICE.oid })).rejects.toMatchObject({ status: 403 });
   });
 
@@ -1497,5 +1927,51 @@ describe("export defaults", () => {
 
     await expect(saveExportDefaults(prisma, alice, { jira: { key: "ccd", name: "x" }, confluence: null })).rejects.toMatchObject({ status: 400 });
     await expect(saveExportDefaults(prisma, alice, { jira: null, confluence: { ...PAGE, space_id: "x" } })).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("should keep GitHub as the person's ticket tool, with its repository and Project, beside their Jira project", async () => {
+    await insertUser(ALICE);
+    const alice = { actorOid: ALICE.oid, ownerOid: ALICE.oid };
+    const githubProject = { owner: "hmcts", number: 12, title: "CFT roadmap" };
+
+    await saveExportDefaults(prisma, alice, {
+      ticketTool: "github",
+      jira: { key: "CCD", name: "Core Case Data" },
+      github: "https://github.com/hmcts/cft-workspace",
+      githubProject,
+      confluence: null
+    });
+
+    expect(await readExportDefaults(prisma, alice)).toEqual({
+      ticketTool: "github",
+      jira: { key: "CCD", name: "Core Case Data" },
+      github: "hmcts/cft-workspace",
+      githubProject,
+      confluence: null
+    });
+    // A caller that sends no ticket tool is one that knows nothing of GitHub, so it puts the person back on Jira.
+    await saveExportDefaults(prisma, alice, { jira: null, confluence: null });
+    expect(await readExportDefaults(prisma, alice)).toEqual({ ticketTool: "jira", jira: null, github: null, githubProject: null, confluence: null });
+  });
+
+  it("should refuse a ticket tool or a repository that is not one", async () => {
+    await insertUser(ALICE);
+    const alice = { actorOid: ALICE.oid, ownerOid: ALICE.oid };
+
+    await saveExportDefaults(prisma, alice, { ticketTool: "github", jira: null, github: "hmcts/.github", confluence: null });
+    expect((await readExportDefaults(prisma, alice)).github).toBe("hmcts/.github");
+    await expect(saveExportDefaults(prisma, alice, { ticketTool: "trello", jira: null, confluence: null })).rejects.toMatchObject({ status: 400 });
+    await expect(
+      saveExportDefaults(prisma, alice, {
+        ticketTool: "github",
+        jira: null,
+        github: "hmcts/x",
+        githubProject: { owner: "hmcts", number: 0, title: "x" },
+        confluence: null
+      })
+    ).rejects.toMatchObject({ status: 400 });
+    await expect(saveExportDefaults(prisma, alice, { ticketTool: "github", jira: null, github: "cft-workspace", confluence: null })).rejects.toMatchObject({
+      status: 400
+    });
   });
 });

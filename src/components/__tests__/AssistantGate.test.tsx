@@ -79,7 +79,7 @@ function assistant(overrides: Partial<AssistantSummary> = {}): AssistantSummary 
 }
 
 function statuses(...stored: CredentialKind[]): CredentialStatus[] {
-  return stored.map((kind) => ({ kind, stored: true, accountLabel: null, updatedAt: new Date().toISOString(), updatedVia: null }));
+  return stored.map((kind) => ({ kind, stored: true, accountLabel: null, updatedAt: new Date().toISOString() }));
 }
 
 /**
@@ -93,6 +93,7 @@ function home(chat: AssistantHome["chat"], stored: CredentialStatus[] = [], over
     credentials: { modelRoute: "own-licence", claudeTokenUsable: true, available: true, statuses: stored },
     conversations: [],
     plugins: null,
+    welsh: false,
     chat
   };
 }
@@ -108,12 +109,14 @@ function conversation(local: boolean): ConversationView {
     local,
     agentId: AGENT,
     agentStatus: "idle",
+    repoBase: null,
     skills: [],
     clientFeatures: null,
     sessionState: null,
     sessionDetail: null,
     artefact: { title: null, markdown: "", version: 0, updatedBy: null, updatedAt: null },
     jira: { status: "none" },
+    github: { status: "none" },
     confluence: { status: "none" },
     page: { messages: [], entries: [], olderBefore: null, lastId: null, more: false },
     forked: null,
@@ -162,7 +165,7 @@ function chatPage(chat: AssistantHome["chat"], local: boolean, stored: Credentia
         viewerOid={VIEWER}
         actions={actions()}
         jira={{ connected: false, login: null }}
-        defaults={{ jira: null, confluence: null }}
+        defaults={{ ticketTool: "jira", jira: null, github: null, githubProject: null, confluence: null }}
       />
     </AssistantGate>
   );

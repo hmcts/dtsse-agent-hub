@@ -1,4 +1,5 @@
 import { storedClientFeatures } from "../agents/client-features.ts";
+import { repoFileBase } from "../agents/github.ts";
 import { type Skill, storedSkills } from "../agents/skills.ts";
 import type { CredentialKind } from "../credentials/names.ts";
 import { agentQuestions, type QuestionView } from "../questions/views.ts";
@@ -11,17 +12,23 @@ import type { VirtualAgentDesired, VirtualAgentStatus } from "../virtual-agents/
 import { type LoginView, loginViews } from "../virtual-agents/logins.ts";
 import type { VirtualAgentRow } from "../virtual-agents/store.ts";
 import { neededCredentials, optionalCredentials } from "../virtual-agents/views.ts";
+import { type Artefact, readArtefact } from "./artefact-store.ts";
 import type { ConfluenceExportView } from "./confluence.ts";
 import { readConfluenceExport } from "./confluence-store.ts";
+import type { ConversationRow, ProductChange, SessionState, StopMark } from "./conversation-row.ts";
+import { type ConversationListRow, hasLocalConversation, listConversations, unsentConversation } from "./conversation-store.ts";
 import { FORKED_SELECT, type ForkedView, forkedView } from "./forks.ts";
+import type { GithubExportView } from "./github.ts";
+import { readGithubExport } from "./github-store.ts";
 import { type DateGroup, groupByDate } from "./grouping.ts";
 import type { JiraExportView } from "./jira.ts";
 import { readJiraExport } from "./jira-store.ts";
+import { LOCAL_SESSION, type LocalSession } from "./local-session.ts";
 import { chatCredentials, onboarded, type Readiness, readiness } from "./onboarding.ts";
 import { hasPod } from "./pods.ts";
 import { productLabel } from "./products.ts";
 import { snippetOf } from "./search.ts";
-import { type Artefact, type ConversationRow, listConversations, readArtefact, type SessionState, searchConversations, unsentConversation } from "./store.ts";
+import { searchConversations } from "./search-store.ts";
 import { type MessageAttachment, unsentAttachments } from "./upload-store.ts";
 
 /** The CFT Workspace as its pages show it. Only ever the viewer's own: nobody sees anyone else's assistant. */
@@ -48,20 +55,54 @@ export interface AssistantSummary {
   toChat: CredentialKind[];
 }
 
+/**
+ * Which of four states the session of a chat on the person's assistant is in: answering, connected and waiting,
+ * on its way, or not connected and nothing on its way.
+ *
+ * Worked out from two reports. The agent's own status is first, as for a local chat: a session that is not
+ * `offline` is connected whatever a supervisor report yet to land says, `busy` being mid-turn. Only an `offline`
+ * agent looks at the pod's `sessionState`, where `starting` and `queued` are both "not connected yet, and the pod
+ * is on it" — the difference between them is said in words on the chat's own page, and two shades of waiting would
+ * be more than a list can carry. `live` on an offline agent is a heartbeat that has lapsed under a session the
+ * supervisor still counts, and `null` is no report at all; both are not connected.
+ */
+export type PodSession = "ready" | "working" | "starting" | "disconnected";
+
+export function podSessionOf(agentStatus: AgentStatus, sessionState: SessionState | null): PodSession {
+  if (agentStatus === "busy") {
+    return "working";
+  }
+  if (agentStatus === "idle") {
+    return "ready";
+  }
+  return sessionState === "starting" || sessionState === "queued" ? "starting" : "disconnected";
+}
+
+/**
+ * What a chat's row in the sidebar, and its result in the search, is marked with.
+ *
+ * Decided here rather than in either list, so a chat found by searching is marked exactly as the same chat in the
+ * list below it. Three cases and no more:
+ *
+ * - `computer` — a Claude Code session on the person's own machine, which has no pod behind it. It is the one thing
+ *   about a chat that no title can say and that changes what the chat can do: it takes no files, cannot be stopped
+ *   from here and answers only while the laptop is connected. `hasPod` is what decides it, so the screens and the
+ *   stores cannot disagree. The state of its session rides along, because that is the other thing the person cannot
+ *   see from the title and the mark is the only place it is said in the list.
+ * - `assistant` — a chat running on their assistant's pod, marked to tell it apart from a local one, and carrying
+ *   its session's state as the local mark does; see `podSessionOf`.
+ * - `null` — nothing to mark. Every one of the person's chats runs on their assistant, so a cloud against each of
+ *   them would distinguish them from nothing; see `hasLocalConversation`.
+ */
+export type ConversationMark = { where: "computer"; session: LocalSession } | { where: "assistant"; session: PodSession } | null;
+
 export interface ConversationLink {
   id: string;
   title: string;
   product: string;
   productLabel: string;
   lastActiveAt: string;
-  /**
-   * Where the chat runs: `true` for a Claude Code session on the person's own computer, which has no pod behind it.
-   *
-   * On every link rather than only the sidebar's, because it is the one thing about a chat that no title can say and
-   * that changes what the chat can do — a local one takes no files, cannot be stopped from here and answers only
-   * while the laptop is connected. `hasPod` is what decides it, so the screens and the stores cannot disagree.
-   */
-  local: boolean;
+  mark: ConversationMark;
 }
 
 export const UNTITLED = "New chat";
@@ -86,25 +127,42 @@ export async function assistantSummary(db: Database, assistant: VirtualAgentRow,
   };
 }
 
-function toLink(row: Pick<ConversationRow, "id" | "title" | "product" | "lastActiveAt" | "virtualAgentId">): ConversationLink {
+type LinkRow = Pick<ConversationListRow, "id" | "title" | "product" | "lastActiveAt" | "virtualAgentId" | "agentStatus" | "sessionState">;
+
+/** `anyLocal` is `hasLocalConversation`'s answer for the whole of the person's list; see `ConversationMark`. */
+function markOf(row: LinkRow, anyLocal: boolean): ConversationMark {
+  if (!hasPod(row)) {
+    return { where: "computer", session: LOCAL_SESSION[row.agentStatus] };
+  }
+  return anyLocal ? { where: "assistant", session: podSessionOf(row.agentStatus, row.sessionState) } : null;
+}
+
+function toLink(row: LinkRow, anyLocal: boolean): ConversationLink {
   return {
     id: row.id,
     title: row.title ?? UNTITLED,
     product: row.product,
     productLabel: productLabel(row.product),
     lastActiveAt: row.lastActiveAt.toISOString(),
-    local: !hasPod(row)
+    mark: markOf(row, anyLocal)
   };
 }
 
 /** The chats running on one of the owner's virtual agents, for its page in the hub. */
 export async function conversationLinks(db: Database, ownerOid: string, virtualAgentId: string): Promise<ConversationLink[]> {
-  return (await listConversations(db, ownerOid, 200, virtualAgentId)).map(toLink);
+  // Every chat here runs on the pod being asked about, so none of them is local; the question is still asked,
+  // because `mark` is a statement about the person's list and not about the page that happens to be reading it.
+  const [rows, anyLocal] = await Promise.all([listConversations(db, ownerOid, 200, virtualAgentId), hasLocalConversation(db, ownerOid)]);
+  return rows.map((row) => toLink(row, anyLocal));
 }
 
 export async function conversationGroups(db: Database, ownerOid: string, now: Date = new Date()): Promise<{ label: DateGroup; items: ConversationLink[] }[]> {
-  const rows = await listConversations(db, ownerOid);
-  return groupByDate(rows.map(toLink), (link) => new Date(link.lastActiveAt), now);
+  const [rows, anyLocal] = await Promise.all([listConversations(db, ownerOid), hasLocalConversation(db, ownerOid)]);
+  return groupByDate(
+    rows.map((row) => toLink(row, anyLocal)),
+    (link) => new Date(link.lastActiveAt),
+    now
+  );
 }
 
 export interface ConversationMatch extends ConversationLink {
@@ -112,10 +170,16 @@ export interface ConversationMatch extends ConversationLink {
   snippet: string | null;
 }
 
-/** The viewer's own chats matching every word of `query`, for the sidebar's search. */
+/**
+ * The viewer's own chats matching every word of `query`, for the sidebar's search.
+ *
+ * Marked through the same `toLink` and the same `hasLocalConversation` as the grouped list, so the search cannot
+ * answer differently from the page for the same person: the mark is on the result rather than left to the browser to
+ * work out from a list it can only see a page of.
+ */
 export async function conversationMatches(db: Database, ownerOid: string, query: string): Promise<ConversationMatch[]> {
-  const rows = await searchConversations(db, ownerOid, query);
-  return rows.map((row) => ({ ...toLink(row), snippet: snippetOf(row.excerpt) }));
+  const [rows, anyLocal] = await Promise.all([searchConversations(db, ownerOid, query), hasLocalConversation(db, ownerOid)]);
+  return rows.map((row) => ({ ...toLink(row, anyLocal), snippet: snippetOf(row.excerpt) }));
 }
 
 /**
@@ -155,17 +219,23 @@ export interface ConversationView {
   title: string;
   product: string;
   productLabel: string;
-  productHistory: { product: string; at: string }[];
+  productHistory: ProductChange[];
   /** Every answer the person stopped, so the thread shows where each one was cut off. */
-  stopHistory: { at: string }[];
+  stopHistory: StopMark[];
   /**
-   * Where the chat runs, as `ConversationLink.local`. The one thing the chat's own screen reads it for is which of
+   * Whether the chat has no pod (`!hasPod`). The one thing the chat's own screen reads it for is which of
    * its controls make sense: everything a pod does for a conversation — carrying a file to its session, interrupting
    * a turn, starting one on demand — there is nobody to do for a session on somebody's laptop.
    */
   local: boolean;
   agentId: string;
   agentStatus: AgentStatus;
+  /**
+   * Where a repo-relative path in an answer points, from the repo and branch the conversation's session registered;
+   * `null` when it reported no repo. A session working in a clone cites paths rather than URLs, and without this the
+   * whole of a `[text](path)` is shown as the text the author wrote.
+   */
+  repoBase: string | null;
   /**
    * What the composer's "/" autocomplete offers: the skills the conversation's session reported. Empty until one has
    * registered, so a chat whose assistant is not running yet gets no list. No access check guards it, unlike the
@@ -186,6 +256,7 @@ export interface ConversationView {
   sessionDetail: string | null;
   artefact: { title: string | null; markdown: string; version: number; updatedBy: Artefact["updatedBy"]; updatedAt: string | null };
   jira: JiraExportView;
+  github: GithubExportView;
   confluence: ConfluenceExportView;
   page: ConversationPage;
   /** Where the chat was forked from and the words copied from it, shown above its own; `null` unless it is a copy. */
@@ -206,10 +277,11 @@ export async function conversationView(db: Database, conversation: ConversationR
   // The ref carries the agent's id and its owner and nothing else, because that is all either read asks of it: the
   // literals are not a claim about the agent that some rule elsewhere has to keep agreeing with.
   const agent = { id: agentId, ownerOid: conversation.ownerOid };
-  const [current, artefact, jira, confluence, page, questions, fork] = await Promise.all([
-    db.agent.findUnique({ where: { id: agentId }, select: { status: true, skills: true, clientFeatures: true } }),
+  const [current, artefact, jira, github, confluence, page, questions, fork] = await Promise.all([
+    db.agent.findUnique({ where: { id: agentId }, select: { status: true, skills: true, clientFeatures: true, repo: true, branch: true } }),
     readArtefact(db, conversation.id),
     readJiraExport(db, conversation.id),
+    readGithubExport(db, conversation.id),
     readConfluenceExport(db, conversation.id),
     agentConversation(db, conversation.ownerOid, agent),
     agentQuestions(db, conversation.ownerOid, agent),
@@ -225,12 +297,14 @@ export async function conversationView(db: Database, conversation: ConversationR
     local: !hasPod(conversation),
     agentId,
     agentStatus: current?.status ?? "offline",
+    repoBase: repoFileBase(current?.repo ?? null, current?.branch ?? null),
     skills: storedSkills(current?.skills),
     clientFeatures: storedClientFeatures(current?.clientFeatures),
     sessionState: conversation.sessionState,
     sessionDetail: conversation.sessionDetail,
     artefact: { ...artefact, updatedAt: artefact.updatedAt?.toISOString() ?? null },
     jira,
+    github,
     confluence,
     page,
     forked: fork === null ? null : forkedView(fork),

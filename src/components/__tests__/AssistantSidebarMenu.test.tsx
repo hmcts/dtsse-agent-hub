@@ -8,7 +8,11 @@ import { AssistantShell, type ConversationActions, SidebarToggle } from "@/compo
 
 const refresh = vi.fn();
 const push = vi.fn();
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh, push }), usePathname: () => "/assistant" }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh, push }),
+  usePathname: () => "/assistant",
+  useSearchParams: () => new URLSearchParams(window.location.search)
+}));
 
 vi.mock("@/components/live/HubStream", () => ({
   useHubEvent: () => undefined,
@@ -33,7 +37,7 @@ afterEach(() => {
 });
 
 function link(id: string, title: string): ConversationLink {
-  return { id, title, product: "ccd", productLabel: "CCD", lastActiveAt: "2026-10-21T09:00:00.000Z", local: false };
+  return { id, title, product: "ccd", productLabel: "CCD", lastActiveAt: "2026-10-21T09:00:00.000Z", mark: null };
 }
 
 function ok() {
@@ -178,6 +182,32 @@ describe("AssistantShell conversation menu", () => {
     expect(remove).not.toHaveBeenCalled();
     expect(push).not.toHaveBeenCalled();
     expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("should say a chat on the person's own computer will not come back to the list when they are asked to delete it", () => {
+    render(
+      <AssistantShell
+        now={Date.now()}
+        viewerName="Alice Smith"
+        groups={[{ label: "Today", items: [{ ...link("c", "On my laptop"), mark: { where: "computer", session: "ready" } }, link("a", "Event help")] }]}
+        activeId={null}
+        actions={actions()}
+      >
+        <p>page</p>
+      </AssistantShell>
+    );
+    const NOTE = "The session on your computer will not come back to your chats, even if you resume it. A new session starts a new chat.";
+
+    fireEvent.click(screen.getByRole("button", { name: "Options for On my laptop" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete chat" }));
+    expect(screen.getByText(CONFIRMATION)).toBeTruthy();
+    expect(screen.getByText(NOTE)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    openMenu("Event help");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete chat" }));
+    expect(screen.getByText(CONFIRMATION)).toBeTruthy();
+    expect(screen.queryByText(NOTE)).toBeNull();
   });
 
   it("should go to a new chat when the person deletes the chat they are looking at", async () => {

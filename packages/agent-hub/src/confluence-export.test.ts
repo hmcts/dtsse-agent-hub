@@ -2,17 +2,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Artefact, ConfluenceExportReport } from "./api.ts";
-import {
-  type ConfluenceExportDeps,
-  confluenceFailure,
-  datedTitle,
-  pageBody,
-  pageTitle,
-  parseCreatedPageId,
-  type RunResult,
-  runConfluenceExport
-} from "./confluence-export.ts";
+import { type ConfluenceExportDeps, confluenceFailure, datedTitle, pageBody, pageTitle, parseCreatedPageId, runConfluenceExport } from "./confluence-export.ts";
+import type { RunResult } from "./virtual/process.ts";
+import type { Artefact, ConfluenceExportReport } from "./wire.ts";
 
 const EXPORT = "5b0e7c1a-1111-4222-8333-444455556666";
 const REQUEST = { exportId: EXPORT, spaceId: "280952876", parentId: "280959611" };

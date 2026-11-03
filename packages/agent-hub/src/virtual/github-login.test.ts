@@ -1,0 +1,528 @@
+// The pod's GitHub sign-in, against the mock hub with a fake gh on PATH that prints what the real one prints. No real
+// sign-in is ever started, and every assertion that a secret stays off stderr is kept from the workspace suite.
+import fs from "node:fs";
+import path from "node:path";
+import { describe, expect, it } from "vitest";
+import { captureStderr, captureStderrOfFailure, podSecrets } from "../__fixtures__/pod-shims.ts";
+import { useSignInHub } from "../__fixtures__/sign-in-hub.ts";
+import { type Api, ApiError } from "../api.ts";
+import { MAX_DETAIL_CHARS, MAX_URI_CHARS, MAX_USER_CODE_CHARS, RELAY_WORDING_CHARS } from "./github-device-flow.ts";
+import { GITHUB_SIGN_IN_CODES, GITHUB_SIGN_IN_GAP_MS, type GithubLoginOptions, githubLogin, githubLoginStatus, githubSignInGapMs } from "./github-login.ts";
+
+const GH_TOKEN = podSecrets.githubToken;
+
+const { hub, pod, virtual, api } = await useSignInHub();
+
+describe("githubSignInGapMs", () => {
+  it("should take a whole number of milliseconds in range when one is asked for", () => {
+    // Act & Assert
+    expect(githubSignInGapMs({ AGENT_HUB_GITHUB_SIGN_IN_GAP_MS: "250" })).toBe(250);
+    expect(githubSignInGapMs({ AGENT_HUB_GITHUB_SIGN_IN_GAP_MS: "0" })).toBe(0);
+  });
+
+  it("should keep the gap for a value nobody meant to set, which an empty one is", () => {
+    // Arrange: `Number("")` is 0, so an unset Helm value or an `env` entry with `value: ""` would otherwise read
+    // as a deliberate request for no gap at all — the one setting that brings back what the gap exists to stop.
+    // Act & Assert
+    expect(githubSignInGapMs({})).toBe(GITHUB_SIGN_IN_GAP_MS);
+    expect(githubSignInGapMs({ AGENT_HUB_GITHUB_SIGN_IN_GAP_MS: "" })).toBe(GITHUB_SIGN_IN_GAP_MS);
+    expect(githubSignInGapMs({ AGENT_HUB_GITHUB_SIGN_IN_GAP_MS: " " })).toBe(GITHUB_SIGN_IN_GAP_MS);
+  });
+
+  it("should keep the gap for anything that is not a millisecond count it can wait", () => {
+    // Arrange: `setTimeout` fires after 1ms for anything past a signed 32-bit count, so the far end removes the
+    // gap exactly as the empty string does.
+    // Act & Assert
+    expect(githubSignInGapMs({ AGENT_HUB_GITHUB_SIGN_IN_GAP_MS: "soon" })).toBe(GITHUB_SIGN_IN_GAP_MS);
+    expect(githubSignInGapMs({ AGENT_HUB_GITHUB_SIGN_IN_GAP_MS: "-1" })).toBe(GITHUB_SIGN_IN_GAP_MS);
+    expect(githubSignInGapMs({ AGENT_HUB_GITHUB_SIGN_IN_GAP_MS: "1.5" })).toBe(GITHUB_SIGN_IN_GAP_MS);
+    // `Number` would read these as ten thousand and sixteen; a typo in one must not become a 16ms gap.
+    expect(githubSignInGapMs({ AGENT_HUB_GITHUB_SIGN_IN_GAP_MS: "1e4" })).toBe(GITHUB_SIGN_IN_GAP_MS);
+    expect(githubSignInGapMs({ AGENT_HUB_GITHUB_SIGN_IN_GAP_MS: "0x10" })).toBe(GITHUB_SIGN_IN_GAP_MS);
+    expect(githubSignInGapMs({ AGENT_HUB_GITHUB_SIGN_IN_GAP_MS: String(2 ** 31) })).toBe(GITHUB_SIGN_IN_GAP_MS);
+  });
+});
+
+describe("githubLogin", () => {
+  const PENDING = "error=authorization_pending&error_description=The+authorization+request+is+still+pending.";
+  const EXPIRED = "error=expired_token&error_description=The+code+expired.";
+  const DENIED = "error=access_denied&error_description=The+user+cancelled+it.";
+  const token = (value: string) => new URLSearchParams({ access_token: value, token_type: "bearer" }).toString();
+
+  const deviceCode = (extra: Record<string, string> = {}) =>
+    new URLSearchParams({
+      device_code: "dev-code",
+      user_code: "7B7F-C198",
+      verification_uri: "https://github.com/login/device",
+      expires_in: "899",
+      // A second rather than github.com's five, so a poll is two seconds behind the code rather than ten.
+      interval: "1",
+      ...extra
+    }).toString();
+
+  /**
+   * github.com, scripted per attempt: each argument is what every poll of that attempt's code answers, the last
+   * one standing for any further attempt. A mint is what moves it on, which is what makes a budget readable here.
+   */
+  function githubAnswering(...attempts: string[]): typeof fetch {
+    let attempt = -1;
+    return (async (url: string | URL) => {
+      const minting = String(url).endsWith("/login/device/code");
+      if (minting) {
+        attempt += 1;
+      }
+      const body = minting ? deviceCode() : (attempts[Math.min(attempt, attempts.length - 1)] ?? PENDING);
+      return new Response(body, { headers: { "Content-Type": "application/x-www-form-urlencoded" } });
+    }) as unknown as typeof fetch;
+  }
+
+  // Every case here takes the wait between codes as a no-op, as `withRetry`'s own `wait` is taken: a minute of
+  // it buys a test nothing. "should wait between codes" is where the waiting itself is asserted.
+  const signIn = (fetchImpl: typeof fetch, extra: Record<string, string> = {}, opts: Partial<GithubLoginOptions> = {}) =>
+    githubLogin({ api: api(), env: pod.env(extra), fetchImpl, wait: async () => {}, ...opts });
+
+  it("should relay the device code, poll for the token itself and hand it to gh", async () => {
+    // Arrange: GH_TOKEN is in the pod's environment and the shim exits 9 if it reaches gh.
+    // Act
+    const { result, stderr } = await captureStderr(() => signIn(githubAnswering(token(GH_TOKEN)), { GH_TOKEN: "stale" }));
+
+    // Assert
+    expect(result).toBe("signed-in");
+    expect(virtual().prompts).toEqual([
+      { kind: "github", prompt: "device_code", verification_uri: "https://github.com/login/device", user_code: "7B7F-C198", expires_in: 899 }
+    ]);
+    expect(virtual().completes).toEqual([{ kind: "github", account_label: "octocat" }]);
+    expect(fs.readFileSync(path.join(pod.stateDir, "gh-login-args"), "utf8")).toMatch(/--with-token/);
+    expect(virtual().credentials.get("github")).toBe(GH_TOKEN);
+    expect(stderr).not.toContain(GH_TOKEN);
+  });
+
+  it("should say which OAuth app the owner is being asked to authorise", async () => {
+    // Act
+    const { stderr } = await captureStderr(() => signIn(githubAnswering(token(GH_TOKEN))));
+
+    // Assert: the default is the app every gh binary carries, so without this line the only record of whose app
+    // a pod's owner granted is a constant in the source.
+    expect(stderr).toMatch(/github: signing in through the GitHub CLI OAuth app \(client 178c6fc778ccc68e1d6a\)/);
+  });
+
+  it("should word the live-code status in exactly the characters MAX_URI_CHARS is derived from", async () => {
+    // Act & Assert: `MAX_URI_CHARS` is `MAX_DETAIL_CHARS` less this wording and a user code, so the wording's
+    // own length has to be held to the constant that measures it. Without this, rewording the line above by a
+    // character moves the real bound and nothing fails — the page stays inside 2048, the detail goes over 500,
+    // and the hub 400s a status for a code already on the owner's screen.
+    expect(githubLoginStatus("", "")).toHaveLength(RELAY_WORDING_CHARS);
+  });
+
+  it("should fill the hub's detail bound exactly at the longest code and page the mint will take", async () => {
+    // Arrange: the worst case the mint lets through — a user code at `USER_CODE`'s 64 characters and a page of
+    // exactly `MAX_URI_CHARS`. The detail is a `virtualStatus`, which the hub bounds at 500 and rejects rather
+    // than truncates; a `400` there is not retryable, so it would throw after the code was already on the
+    // owner's screen and burn the budget on codes that would have worked.
+    const page = `https://github.com/login/device?${"x".repeat(MAX_URI_CHARS - "https://github.com/login/device?".length)}`;
+    expect(page).toHaveLength(MAX_URI_CHARS);
+    const fetchImpl = ((): typeof fetch => {
+      const longest = new URLSearchParams({
+        device_code: "dev-code",
+        user_code: "A".repeat(MAX_USER_CODE_CHARS),
+        verification_uri: page,
+        expires_in: "899",
+        interval: "1"
+      }).toString();
+      return (async (url: string | URL) => {
+        const body = String(url).endsWith("/login/device/code") ? longest : token(GH_TOKEN);
+        return new Response(body, { headers: { "Content-Type": "application/x-www-form-urlencoded" } });
+      }) as unknown as typeof fetch;
+    })();
+
+    // Act
+    const { result } = await captureStderr(() => signIn(fetchImpl));
+
+    // Assert: exactly the bound, not merely inside it. Slack here is what lets the wording drift unnoticed.
+    expect(result).toBe("signed-in");
+    const awaiting = virtual().status.filter((s) => s.phase === "awaiting_login");
+    expect(awaiting).toHaveLength(1);
+    expect((awaiting[0] as { detail: string }).detail).toHaveLength(MAX_DETAIL_CHARS);
+  });
+
+  it("should store the token gh already holds without relaying a code when an earlier call signed it in", async () => {
+    // Arrange: a pod whose previous call was granted a token and failed only to finish storing it. gh's config
+    // is memory-backed, so a token there is one this pod was granted — asking for another would ask the owner
+    // to authorise what they have authorised already.
+    fs.writeFileSync(path.join(pod.stateDir, "gh-token"), GH_TOKEN);
+
+    // Act
+    const { result, stderr } = await captureStderr(() => signIn(githubAnswering(DENIED)));
+
+    // Assert
+    expect(result).toBe("signed-in");
+    expect(virtual().prompts).toEqual([]);
+    expect(virtual().credentials.get("github")).toBe(GH_TOKEN);
+    expect(stderr).toMatch(/github: gh is already signed in; storing the token it holds/);
+  });
+
+  it("should relay a fresh code on a later call, which is what keeps a dead one off the owner's screen", async () => {
+    // Arrange: the budget is per call, and `virtual-agent-boot` calls this again for anything that is not the
+    // owner's to act on. Each code replaces the last, so none outlives its own time by long.
+    await captureStderr(() => signIn(githubAnswering(DENIED, DENIED, DENIED)));
+    virtual().loginFailures.length = 0;
+
+    // Act
+    await captureStderr(() => signIn(githubAnswering(token(GH_TOKEN))));
+
+    // Assert
+    expect(virtual().prompts.filter((prompt) => prompt.kind === "github")).toHaveLength(GITHUB_SIGN_IN_CODES + 1);
+  });
+
+  it("should spend every code and report the sign-in failed when GitHub answers the poll with a refusal", async () => {
+    // Arrange: an owner who cancels, or an app registration GitHub will not run the flow for. Each attempt is
+    // over in a poll, which is why the budget has a gap in it.
+    // Act
+    const { result, stderr } = await captureStderr(() => signIn(githubAnswering(DENIED, DENIED, DENIED)));
+
+    // Assert
+    expect(result).toBe("not-signed-in");
+    expect(virtual().prompts).toHaveLength(GITHUB_SIGN_IN_CODES);
+    expect(virtual().loginFailures).toEqual([
+      { kind: "github", state: "failed", detail: "github: GitHub stopped the sign-in before it could be completed, so the code is no longer any use" }
+    ]);
+    // What GitHub answered is the only thing that says why, and the pod's log is where it goes.
+    expect(stderr).toMatch(/GitHub answered access_denied: The user cancelled it\./);
+  });
+
+  it("should stop at its budget of codes and report the sign-in expired when each one runs out", async () => {
+    // Arrange: `expired_token` is GitHub's own word that a code reached its `expires_in` unused, which is what
+    // an owner who never came back to it produces.
+    // Act
+    const { result } = await captureStderr(() => signIn(githubAnswering(EXPIRED, EXPIRED, EXPIRED)));
+
+    // Assert
+    expect(result).toBe("not-signed-in");
+    expect(virtual().prompts).toHaveLength(GITHUB_SIGN_IN_CODES);
+    expect(virtual().loginFailures).toEqual([
+      { kind: "github", state: "expired", detail: "github: the sign-in code ran out before it was used; start the agent again to be sent another" }
+    ]);
+  });
+
+  it("should take the owner's next code when an earlier one was refused and a later one works", async () => {
+    // Arrange: the budget is not conditioned on why an attempt failed, because a fault that does not last is
+    // exactly what the second chance is for.
+    // Act
+    const { result } = await captureStderr(() => signIn(githubAnswering(DENIED, token(GH_TOKEN))));
+
+    // Assert
+    expect(result).toBe("signed-in");
+    expect(virtual().prompts).toHaveLength(2);
+    expect(virtual().loginFailures).toEqual([]);
+    expect(virtual().credentials.get("github")).toBe(GH_TOKEN);
+  });
+
+  it("should keep the owner's code and poll on when GitHub answers a fault, which is what gh will not do", async () => {
+    // Arrange: a 429 and then a reset, both of which end the sign-in under `gh auth login --web` and take the
+    // owner's code with them.
+    let n = 0;
+    const fetchImpl = (async (url: string | URL) => {
+      if (String(url).endsWith("/login/device/code")) {
+        return new Response(deviceCode(), { headers: { "Content-Type": "application/x-www-form-urlencoded" } });
+      }
+      switch (n++) {
+        case 0:
+          return new Response("<html>too many requests</html>", { status: 429, headers: { "Retry-After": "0", "Content-Type": "text/html" } });
+        case 1:
+          throw new Error("socket hang up");
+        default:
+          return new Response(token(GH_TOKEN), { headers: { "Content-Type": "application/x-www-form-urlencoded" } });
+      }
+    }) as unknown as typeof fetch;
+
+    // Act
+    const { result, stderr } = await captureStderr(() => signIn(fetchImpl));
+
+    // Assert: one code relayed, never withdrawn, and the sign-in completed on the third poll of it.
+    expect(result).toBe("signed-in");
+    expect(virtual().prompts).toHaveLength(1);
+    expect(virtual().loginFailures).toEqual([]);
+    expect(stderr).toMatch(/github: GitHub answered HTTP 429; the code is still good/);
+    expect(stderr).toMatch(/github: the poll could not reach GitHub \(socket hang up\); the code is still good/);
+  });
+
+  it("should spend only one code on a relay that failed after the hub already had the code", async () => {
+    // Arrange: the prompt landed, so a code is on the owner's screen; the status after it did not. A 400 and
+    // not a 500, because `withRetry` rides a 500 out and the relay would never fail at all. One code gone, and
+    // the next one earned: a single hub blip costs a code rather than the call.
+    hub.failNextStatuses(1, 400);
+
+    // Act
+    const { result } = await captureStderr(() => signIn(githubAnswering(token(GH_TOKEN))));
+
+    // Assert
+    expect(result).toBe("signed-in");
+    expect(virtual().prompts).toHaveLength(2);
+    expect(virtual().credentials.get("github")).toBe(GH_TOKEN);
+  });
+
+  it("should report the sign-in rather than throw when every code reached the owner but no status did", async () => {
+    // Arrange: a code on their screen is a code they could have used, whatever failed after it, so the hub is
+    // owed a `failed` and the caller must not be asked to relay a fourth. Throwing here is what puts a pod back
+    // to handing out a code every few minutes.
+    hub.failNextStatuses(GITHUB_SIGN_IN_CODES, 400);
+
+    // Act
+    const { result } = await captureStderr(() => signIn(githubAnswering(PENDING)));
+
+    // Assert
+    expect(result).toBe("not-signed-in");
+    expect(virtual().prompts).toHaveLength(GITHUB_SIGN_IN_CODES);
+    expect(virtual().loginFailures).toEqual([
+      { kind: "github", state: "failed", detail: "github: the sign-in could not be finished; start the agent again to be sent another code" }
+    ]);
+  });
+
+  it("should throw rather than report the owner at fault when GitHub will not mint a code for them", async () => {
+    // Arrange: nothing ever reached the owner, so there is nothing to conclude about them and nothing for the
+    // hub to mark. The boot script rides this out on its own backoff.
+    const fetchImpl = (async () =>
+      new Response("error=device_flow_disabled&error_description=Not+enabled.", {
+        headers: { "Content-Type": "application/x-www-form-urlencoded" }
+      })) as unknown as typeof fetch;
+
+    // Act
+    const { error } = await captureStderrOfFailure(() => signIn(fetchImpl));
+
+    // Assert
+    expect((error as Error).message).toMatch(/GitHub would not give a device code: device_flow_disabled/);
+    expect(virtual().prompts).toEqual([]);
+    expect(virtual().loginFailures).toEqual([]);
+  });
+
+  it("should call it expired, not refused, when GitHub says the code ran out", async () => {
+    // Arrange: our own deadline is set after the mint and after the relay, both of which can back off, so
+    // GitHub's clock always runs out first and its word is what the owner's report has to come from.
+    // Act
+    await captureStderr(() => signIn(githubAnswering(EXPIRED, EXPIRED, EXPIRED)));
+
+    // Assert
+    expect(virtual().loginFailures[0]).toMatchObject({ state: "expired" });
+  });
+
+  it("should keep a token the owner granted when gh cannot reach GitHub to validate it", async () => {
+    // Arrange: gh exits 1 whether the token is bad or the API is briefly away, so the attempt is repeated.
+    // Act
+    const { result } = await captureStderr(() => signIn(githubAnswering(token(GH_TOKEN)), { FAKE_GH_STORE_FAILS: "2" }));
+
+    // Assert
+    expect(result).toBe("signed-in");
+    expect(virtual().credentials.get("github")).toBe(GH_TOKEN);
+    expect(virtual().loginFailures).toEqual([]);
+  });
+
+  it("should store a token the owner granted before gh is handed it, and report when gh refuses it", async () => {
+    // Arrange: a token GitHub will not accept. The grant is still the scarce thing, so it is on the hub before
+    // gh is asked — the boot script's watcher reads it and tries it again without costing another code.
+    // Act
+    const { result, stderr } = await captureStderr(() => signIn(githubAnswering(token(GH_TOKEN)), { FAKE_GH_REFUSES_TOKEN: GH_TOKEN }));
+
+    // Assert
+    expect(result).toBe("not-signed-in");
+    expect(virtual().credentials.get("github")).toBe(GH_TOKEN);
+    expect(virtual().completes).toEqual([]);
+    expect(virtual().loginFailures).toEqual([
+      {
+        kind: "github",
+        state: "failed",
+        detail: "github: GitHub would not accept the token the sign-in granted; it is saved on agent-hub, so this agent will keep trying it"
+      }
+    ]);
+    // gh's own words say whether a scope was refused or the token was already revoked, redacted on the way out.
+    expect(stderr).toMatch(/gh would not store the GitHub token the owner signed in for \(exit 1\): error validating token: HTTP 401: Bad credentials/);
+    expect(stderr).not.toContain(GH_TOKEN);
+  });
+
+  it("should treat a store that rejects with no error at all as a failure, not as success", async () => {
+    // Arrange: a store rejecting with something falsy is the one shape that could read as success to the
+    // truthiness check and as failure to the `!== null` one four lines below it — the token nowhere and the
+    // call answering `signed-in`. Not reachable through the real client today, which is why it is pinned here.
+    const noReason: Api = { ...api(), putCredential: () => Promise.reject(undefined) };
+
+    // Act
+    const { error, stderr } = await captureStderrOfFailure(() =>
+      githubLogin({ api: noReason, env: pod.env(), fetchImpl: githubAnswering(token(GH_TOKEN)), wait: async () => {} })
+    );
+
+    // Assert: the hub-failed row, reached by a rejection that carried nothing to say.
+    expect(error).toBeInstanceOf(Error);
+    expect(virtual().loginFailures).toEqual([
+      {
+        kind: "github",
+        state: "failed",
+        detail: "github: signed in, but the token could not be saved to agent-hub yet; this agent is holding it and will keep trying"
+      }
+    ]);
+    // And the log says something about it rather than carrying the bare value as the whole account.
+    expect(stderr).toMatch(/github: the store rejected with undefined/);
+  });
+
+  it("should throw rather than ask for a code when gh refuses a token nobody was asked for", async () => {
+    // Arrange: the token came out of gh's own config, so no code was spent and there is nothing to report.
+    fs.writeFileSync(path.join(pod.stateDir, "gh-token"), GH_TOKEN);
+
+    // Act
+    const { error } = await captureStderrOfFailure(() => signIn(githubAnswering(token(GH_TOKEN)), { FAKE_GH_REFUSES_TOKEN: GH_TOKEN }));
+
+    // Assert
+    expect((error as Error).message).toMatch(/gh would not store the GitHub token/);
+    expect(virtual().prompts).toEqual([]);
+    expect(virtual().loginFailures).toEqual([]);
+  });
+
+  it("should hand the token to gh anyway and throw when the hub will not take it, so the next call repairs it", async () => {
+    // Arrange: a hub that refuses the store does not refuse the sign-in, so gh is still handed the token and
+    // keeps the owner's grant. The throw is what earns the next call — `not-signed-in` would stop the asking
+    // and leave the boot script watching for the very thing that could not be stored — and the report goes
+    // first because a code was shown and the hub is owed exactly one outcome for it.
+    hub.failNextCredentialPuts(1, 400);
+
+    // Act
+    const { error } = await captureStderrOfFailure(() => signIn(githubAnswering(token(GH_TOKEN))));
+
+    // Assert
+    expect((error as Error).message).toMatch(/400/);
+    expect(virtual().loginFailures).toEqual([
+      {
+        kind: "github",
+        state: "failed",
+        detail: "github: signed in, but the token could not be saved to agent-hub yet; this agent is holding it and will keep trying"
+      }
+    ]);
+    expect(virtual().completes).toEqual([]);
+    // gh is holding it, which is what makes the next call free: it finds it and relays nothing.
+    expect(fs.readFileSync(path.join(pod.stateDir, "gh-token"), "utf8")).toBe(GH_TOKEN);
+  });
+
+  it("should finish the sign-in on the next call, relaying no code, when the hub takes the token the second time", async () => {
+    // Arrange: the recovery that throw exists for. The first call leaves the token in gh's config; the second
+    // finds it through `storedGhToken`, skips the loop entirely and completes the hub row from `failed`.
+    hub.failNextCredentialPuts(1, 400);
+    await captureStderrOfFailure(() => signIn(githubAnswering(token(GH_TOKEN))));
+    const relayed = virtual().prompts.length;
+
+    // Act: a GitHub that would refuse every poll, to show that none is made.
+    const { result } = await captureStderr(() => signIn(githubAnswering(DENIED)));
+
+    // Assert
+    expect(result).toBe("signed-in");
+    expect(virtual().prompts).toHaveLength(relayed);
+    expect(virtual().credentials.get("github")).toBe(GH_TOKEN);
+    expect(virtual().completes).toEqual([{ kind: "github", account_label: "octocat" }]);
+  });
+
+  it("should report and stop asking when neither the hub nor gh will keep the token", async () => {
+    // Arrange: the grant is lost whatever happens next, so this is the owner's to act on — and the way on is
+    // the pasted token the boot script then watches for, not another code this would spend.
+    hub.failNextCredentialPuts(1, 400);
+
+    // Act
+    const { result, stderr } = await captureStderr(() => signIn(githubAnswering(token(GH_TOKEN)), { FAKE_GH_REFUSES_TOKEN: GH_TOKEN }));
+
+    // Assert
+    expect(result).toBe("not-signed-in");
+    expect(virtual().loginFailures).toEqual([
+      { kind: "github", state: "failed", detail: "github: signed in, but the token could not be saved either on agent-hub or in this agent" }
+    ]);
+    expect(virtual().credentials.has("github")).toBe(false);
+    // Both failures reach the pod's log, because either one alone would read as the whole story.
+    expect(stderr).toMatch(/400/);
+    expect(stderr).toMatch(/gh would not store the GitHub token/);
+  });
+
+  it("should still report the failure to its caller when the hub will not take the report", async () => {
+    // Arrange: a hub with no row for this sign-in refuses the report, which may not become the failure said.
+    const refusing: Api = {
+      ...api(),
+      loginFailed: () => Promise.reject(new ApiError(404, { error: "there is no github sign-in to report on" }, "POST", "login/github/failed"))
+    };
+
+    // Act
+    const { result, stderr } = await captureStderr(() =>
+      githubLogin({ api: refusing, env: pod.env(), fetchImpl: githubAnswering(DENIED, DENIED, DENIED), wait: async () => {} })
+    );
+
+    // Assert
+    expect(result).toBe("not-signed-in");
+    expect(stderr).toMatch(/github: could not tell agent-hub the sign-in was not completed/);
+  });
+
+  it("should keep a long fault out of the detail, which the hub rejects over 500 characters", async () => {
+    // Arrange: a transport fault whose own message is long — an undici error with its causes reads like this —
+    // on a code with a second to live. The hub answers `400` to a detail over 500 characters and a `400` is not
+    // retryable, so a fault's message interpolated into one would be a report the owner never gets.
+    const long = `connect ECONNREFUSED ${"140.82.121.4:443 ".repeat(60)}`;
+    const fetchImpl = (async (url: string | URL) => {
+      if (String(url).endsWith("/login/device/code")) {
+        return new Response(deviceCode({ expires_in: "1" }), { headers: { "Content-Type": "application/x-www-form-urlencoded" } });
+      }
+      throw new Error(long);
+    }) as unknown as typeof fetch;
+
+    // Act
+    const { result, stderr } = await captureStderr(() => githubLogin({ api: api(), env: pod.env(), fetchImpl, codes: 1 }));
+
+    // Assert: the owner is told what to do about it, and the whole of what happened goes to the pod's log.
+    expect(result).toBe("not-signed-in");
+    expect(virtual().loginFailures).toEqual([
+      { kind: "github", state: "failed", detail: "github: the sign-in could not be finished; start the agent again to be sent another code" }
+    ]);
+    expect(stderr).toContain("connect ECONNREFUSED");
+  });
+
+  it("should wait between codes, so a fault that may not last is given the time not to", async () => {
+    // Arrange: an attempt refused on its first poll is over in seconds, so without this the budget is three
+    // codes in half a minute — the same fault three times rather than three chances at it.
+    const waits: number[] = [];
+
+    // Act
+    await captureStderr(() =>
+      githubLogin({
+        api: api(),
+        env: pod.env(),
+        fetchImpl: githubAnswering(DENIED, DENIED, DENIED),
+        wait: async (ms) => {
+          waits.push(ms);
+        }
+      })
+    );
+
+    // Assert: one wait between each pair of codes, at the gap the pod uses rather than one a test chose, less
+    // whatever the attempt itself took. The short waits in the list are the polls' own.
+    const gaps = waits.filter((ms) => ms > GITHUB_SIGN_IN_GAP_MS / 2);
+    expect(gaps).toHaveLength(GITHUB_SIGN_IN_CODES - 1);
+    for (const ms of gaps) {
+      expect(ms).toBeLessThanOrEqual(GITHUB_SIGN_IN_GAP_MS);
+    }
+  });
+
+  it("should not wait at all when the attempt already took the gap, as one that ran its code out has", async () => {
+    // Arrange: a gap this short is the fifteen-minute case in miniature — there is nothing left to wait for,
+    // and waiting again would add an hour to three expiring codes.
+    const waits: number[] = [];
+
+    // Act
+    await captureStderr(() =>
+      githubLogin({
+        api: api(),
+        env: pod.env(),
+        fetchImpl: githubAnswering(EXPIRED, EXPIRED, EXPIRED),
+        gapMs: 1,
+        wait: async (ms) => {
+          waits.push(ms);
+        }
+      })
+    );
+
+    // Assert: the gaps, which are the waits of no consequence beside the polls' own seconds. Up to the gap
+    // rather than exactly nil, because `gapLeft` is `gapMs` less a real elapsed time: an attempt that finishes
+    // inside the same millisecond leaves 1 of a gap of 1, which is the same nothing and not a different result.
+    const gaps = waits.filter((ms) => ms <= 1);
+    expect(gaps).toHaveLength(GITHUB_SIGN_IN_CODES - 1);
+  });
+});

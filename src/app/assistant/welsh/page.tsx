@@ -2,6 +2,7 @@ import Link from "next/link";
 import { isWelshTask, WELSH_PRODUCTS } from "@/assistant/welsh";
 import { WelshPage } from "@/components/assistant/WelshPage";
 import { requireViewer } from "@/viewer/current";
+import { assistantHasWelsh } from "@/web/data";
 
 export const dynamic = "force-dynamic";
 
@@ -12,8 +13,8 @@ export const dynamic = "force-dynamic";
 export default async function WelshTranslationsPage({
   searchParams
 }: Readonly<{ searchParams: Promise<{ product?: string | string[]; task?: string | string[] }> }>) {
-  await requireViewer();
-  const { product, task } = await searchParams;
+  const viewer = await requireViewer();
+  const [{ product, task }, turnedOn] = await Promise.all([searchParams, assistantHasWelsh(viewer)]);
   const initial = WELSH_PRODUCTS.find((p) => p.slug === product)?.slug ?? null;
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
@@ -26,7 +27,7 @@ export default async function WelshTranslationsPage({
             sign-ins. It never writes Welsh itself: every word comes from the Welsh Language Unit.
           </p>
         </div>
-        <WelshPage products={WELSH_PRODUCTS} initialProduct={initial} initialTask={isWelshTask(task) ? task : null} />
+        {turnedOn ? <WelshPage products={WELSH_PRODUCTS} initialProduct={initial} initialTask={isWelshTask(task) ? task : null} /> : <TurnOn />}
         <p className="text-[13px]">
           <Link href="/assistant" className="text-asst-accent underline hover:text-asst-accent-hover">
             Back to CFT Workspace
@@ -34,5 +35,20 @@ export default async function WelshTranslationsPage({
         </p>
       </div>
     </div>
+  );
+}
+
+/** For someone whose assistant does not have the Welsh plugin: how to get it, since nothing here can run without it. */
+function TurnOn() {
+  return (
+    <section aria-labelledby="welsh-turn-on" className="flex flex-col gap-2 rounded-xl border border-asst-line px-4 py-3.5">
+      <h2 id="welsh-turn-on" className="text-sm font-semibold">
+        Turn on Welsh translations first
+      </h2>
+      <p className="text-pretty text-[13px] text-asst-body">
+        Your assistant does this work with the Welsh translations tool, which is not turned on for it yet. Go back to CFT Workspace, open Settings at the bottom
+        of the sidebar, and tick Welsh translations under Tools. Your assistant restarts to load it, and keeps your chats.
+      </p>
+    </section>
   );
 }

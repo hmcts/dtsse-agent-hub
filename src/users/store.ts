@@ -34,13 +34,6 @@ export interface KnownUser {
   tid: string;
 }
 
-/** Everyone the hub knows at this address, matched without regard to case. Entra does not promise one per address. */
-export async function usersByEmail(db: Database, email: string): Promise<KnownUser[]> {
-  return await db.$queryRaw<KnownUser[]>`
-    SELECT oid, name, email, tid FROM "user" WHERE lower(email) = lower(${email.trim()}) ORDER BY oid
-  `;
-}
-
 /**
  * People the hub knows whose name starts a word with `query`, or whose address starts with it, nearest the start of
  * the name first. A search, never a list: `peopleLookup` in `src/access/rules.ts` is what decides that a query is

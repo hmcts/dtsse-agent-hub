@@ -3,7 +3,8 @@
  */
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ConversationLink } from "@/assistant/views";
+import type { LocalSession } from "@/assistant/local-session";
+import type { ConversationLink, ConversationMark, PodSession } from "@/assistant/views";
 import { ArtefactPanel } from "@/components/assistant/ArtefactPanel";
 import { AssistantMarkdown } from "@/components/assistant/AssistantMarkdown";
 import { AssistantRefresh } from "@/components/assistant/AssistantRefresh";
@@ -11,7 +12,11 @@ import { AssistantShell, SidebarToggle } from "@/components/assistant/AssistantS
 import { ProductSelect } from "@/components/assistant/ProductSelect";
 
 const refresh = vi.fn();
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }), usePathname: () => "/assistant" }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh }),
+  usePathname: () => "/assistant",
+  useSearchParams: () => new URLSearchParams(window.location.search)
+}));
 
 const hubHandlers = new Map<string, (data: unknown) => void>();
 vi.mock("@/components/live/HubStream", () => ({
@@ -52,8 +57,18 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function link(id: string, title: string, local = false): ConversationLink {
-  return { id, title, product: "ccd", productLabel: "CCD", lastActiveAt: "2026-10-21T09:00:00.000Z", local };
+function link(id: string, title: string, mark: ConversationMark = null): ConversationLink {
+  return { id, title, product: "ccd", productLabel: "CCD", lastActiveAt: "2026-10-21T09:00:00.000Z", mark };
+}
+
+/** A chat on the person's own computer, whose session is in one of the three states its mark carries. */
+function onComputer(session: LocalSession): ConversationMark {
+  return { where: "computer", session };
+}
+
+/** A chat on the person's assistant, whose session is in one of the four states its mark carries. */
+function onAssistant(session: PodSession): ConversationMark {
+  return { where: "assistant", session };
 }
 
 function shell(props: Partial<Parameters<typeof AssistantShell>[0]> = {}) {
@@ -98,14 +113,193 @@ describe("AssistantShell", () => {
   // The icon alone would say nothing to a screen reader, and where a chat runs is the one thing about it that is not
   // in its title: a local chat takes no files, cannot be stopped from here and answers only while the laptop is on.
   it("should mark a chat that is a session on the person's own computer, in words as well as an icon", () => {
-    render(shell({ groups: [{ label: "Today", items: [link("a", "Event help"), link("b", "Fixing the sweep", true)] }] }));
+    render(shell({ groups: [{ label: "Today", items: [link("a", "Event help"), link("b", "Fixing the sweep", onComputer("ready"))] }] }));
 
     const nav = screen.getByRole("navigation", { name: "Chats" });
     const row = within(nav).getByRole("link", { name: /On your computer/ });
     expect(row.getAttribute("href")).toBe("/assistant/b");
     // The words lead the title, so where the chat runs is the first thing read out rather than trailing it.
-    expect(row.textContent).toBe("On your computer: Fixing the sweep");
+    expect(row.textContent).toBe("On your computer, ready: Fixing the sweep");
     expect(within(nav).getByRole("link", { name: "Event help" }).textContent).toBe("Event help");
+  });
+
+  // Colour is never the only thing carrying the state (WCAG 1.4.1): each of the three names itself in the row's own
+  // accessible name, so a session that is not connected is not told apart from a working one by a hue alone.
+  it.each([
+    ["ready", "On your computer, ready"],
+    ["working", "On your computer, working"],
+    ["disconnected", "On your computer, not connected"]
+  ] as const)("should name the state of a local chat's session in its row when it is %s", (session: LocalSession, words: string) => {
+    render(shell({ groups: [{ label: "Today", items: [link("b", "Fixing the sweep", onComputer(session))] }] }));
+
+    const nav = screen.getByRole("navigation", { name: "Chats" });
+    // The words lead the name, so the state is the first thing read out rather than trailing the title.
+    expect(within(nav).getByRole("link", { name: new RegExp(`^${words}`) }).textContent).toBe(`${words}: Fixing the sweep`);
+    // The tooltip says the same to a pointer, which has no other way of being told.
+    expect(screen.getByTitle(words)).toBeTruthy();
+  });
+
+  // The three are the theme's own colours rather than raw palette values, so the mark stays legible in both themes.
+  // Working is ready's green with a badge, so it differs by shape and not only while the badge pulses.
+  it.each([
+    ["ready", "text-asst-ok", false],
+    ["working", "text-asst-ok", true],
+    ["disconnected", "text-asst-faint", false]
+  ] as const)(
+    "should colour a local chat's mark, badging only a working one, when its session is %s",
+    (session: LocalSession, colour: string, working: boolean) => {
+      render(shell({ groups: [{ label: "Today", items: [link("b", "Fixing the sweep", onComputer(session))] }] }));
+
+      const mark = screen.getByTitle(/On your computer/);
+      expect(mark.classList.contains(colour)).toBe(true);
+      expect(mark.querySelector('[data-badge="working"]') !== null).toBe(working);
+    }
+  );
+
+  // The cloud is only ever there to tell a pod chat from a local one, so a list with nothing but pod chats carries
+  // no marks at all: a cloud against every row would distinguish them from nothing.
+  it("should mark a chat on the assistant once the person has one on their own computer as well", () => {
+    render(
+      shell({
+        groups: [{ label: "Today", items: [link("a", "Event help", onAssistant("ready")), link("b", "Fixing the sweep", onComputer("ready"))] }]
+      })
+    );
+
+    const nav = screen.getByRole("navigation", { name: "Chats" });
+    expect(within(nav).getByRole("link", { name: /On your assistant/ }).textContent).toBe("On your assistant, ready: Event help");
+    expect(within(nav).getByRole("link", { name: /On your computer/ }).textContent).toBe("On your computer, ready: Fixing the sweep");
+  });
+
+  // As for the laptop, colour is never the only carrier (WCAG 1.4.1): the state is in the row's name and the tooltip.
+  // Starting is a solid amber with no badge, so it never reads as working's badged green.
+  it.each([
+    ["ready", "On your assistant, ready", "text-asst-ok", false],
+    ["working", "On your assistant, working", "text-asst-ok", true],
+    ["starting", "On your assistant, starting", "text-asst-warn", false],
+    ["disconnected", "On your assistant, not connected", "text-asst-faint", false]
+  ] as const)(
+    "should name and colour a pod chat's mark, badging only a working one, when its session is %s",
+    (session: PodSession, words: string, colour: string, working: boolean) => {
+      render(
+        shell({ groups: [{ label: "Today", items: [link("a", "Event help", onAssistant(session)), link("b", "Fixing the sweep", onComputer("ready"))] }] })
+      );
+
+      const nav = screen.getByRole("navigation", { name: "Chats" });
+      expect(within(nav).getByRole("link", { name: new RegExp(`^${words}`) }).textContent).toBe(`${words}: Event help`);
+      const mark = screen.getByTitle(words);
+      expect(mark.classList.contains(colour)).toBe(true);
+      expect(mark.querySelector('[data-badge="working"]') !== null).toBe(working);
+    }
+  );
+
+  it("should mark no chat when every one of the person's chats runs on their assistant", () => {
+    render(shell({ groups: [{ label: "Today", items: [link("a", "Event help"), link("b", "Story draft")] }] }));
+
+    const nav = screen.getByRole("navigation", { name: "Chats" });
+    expect(within(nav).getByRole("link", { name: "Event help" }).textContent).toBe("Event help");
+    expect(within(nav).queryByTitle(/On your/)).toBeNull();
+  });
+
+  it("should still mark a chat on the person's own computer when every one of their chats is one", () => {
+    render(
+      shell({
+        groups: [{ label: "Today", items: [link("a", "Event help", onComputer("ready")), link("b", "Fixing the sweep", onComputer("disconnected"))] }]
+      })
+    );
+
+    const nav = screen.getByRole("navigation", { name: "Chats" });
+    expect(
+      within(nav)
+        .getAllByRole("link")
+        .map((row) => row.textContent)
+    ).toEqual(["On your computer, ready: Event help", "On your computer, not connected: Fixing the sweep"]);
+  });
+
+  it("should keep the workflows menu closed until its plus is pressed", () => {
+    render(shell({ welsh: true }));
+
+    const plus = screen.getByRole("button", { name: "Workflows" });
+    expect(plus.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("menu", { name: "Workflows" })).toBeNull();
+  });
+
+  it("should offer the Welsh and Scheduled pages when the person's assistant has the Welsh plugin ticked", () => {
+    render(shell({ welsh: true }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
+
+    const menu = screen.getByRole("menu", { name: "Workflows" });
+    expect(
+      within(menu)
+        .getAllByRole("menuitem")
+        .map((item) => item.getAttribute("href"))
+    ).toEqual(["/assistant/welsh", "/assistant/scheduled"]);
+  });
+
+  it("should offer only the Scheduled page when the person's assistant does not have the Welsh plugin", () => {
+    render(shell());
+
+    fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
+
+    const menu = screen.getByRole("menu", { name: "Workflows" });
+    expect(
+      within(menu)
+        .getAllByRole("menuitem")
+        .map((item) => item.getAttribute("href"))
+    ).toEqual(["/assistant/scheduled"]);
+  });
+
+  it("should close the workflows menu and return focus to the plus when Escape is pressed", () => {
+    render(shell({ welsh: true }));
+    const plus = screen.getByRole("button", { name: "Workflows" });
+    fireEvent.click(plus);
+    within(screen.getByRole("menu", { name: "Workflows" }))
+      .getAllByRole("menuitem")[0]
+      ?.focus();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.queryByRole("menu", { name: "Workflows" })).toBeNull();
+    expect(document.activeElement).toBe(plus);
+  });
+
+  it("should keep the workflows menu open when a key other than Escape is pressed or the menu itself is pressed", () => {
+    render(shell({ welsh: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
+    const menu = screen.getByRole("menu", { name: "Workflows" });
+
+    fireEvent.keyDown(document, { key: "ArrowDown" });
+    fireEvent.mouseDown(menu);
+
+    expect(screen.getByRole("menu", { name: "Workflows" })).toBeTruthy();
+  });
+
+  it("should close the workflows menu when the person clicks outside it", () => {
+    render(shell({ welsh: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
+
+    fireEvent.mouseDown(document.body);
+
+    expect(screen.queryByRole("menu", { name: "Workflows" })).toBeNull();
+  });
+
+  it("should close the workflows menu when the plus is pressed again", () => {
+    render(shell({ welsh: true }));
+    const plus = screen.getByRole("button", { name: "Workflows" });
+    fireEvent.click(plus);
+
+    fireEvent.click(plus);
+
+    expect(screen.queryByRole("menu", { name: "Workflows" })).toBeNull();
+  });
+
+  it("should close the workflows menu when one of its pages is chosen", () => {
+    render(shell({ welsh: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
+
+    fireEvent.click(screen.getByRole("menuitem", { name: /Scheduled/ }));
+
+    expect(screen.queryByRole("menu", { name: "Workflows" })).toBeNull();
   });
 
   it("should say chats will appear when there are none", () => {
@@ -698,26 +892,5 @@ describe("ProductSelect", () => {
     fireEvent.change(select, { target: { value: "nfdiv" } });
 
     expect(onChange).toHaveBeenCalledWith("nfdiv");
-  });
-});
-
-describe("AssistantChatsPanel", () => {
-  it("should link each chat on the virtual agent to the Assistant when it has some", async () => {
-    const { AssistantChatsPanel } = await import("@/components/virtual-agents/AssistantChatsPanel");
-    render(
-      <AssistantChatsPanel
-        chats={[{ id: "c1", title: "Listing story", product: "ccd", productLabel: "CCD", lastActiveAt: "2026-10-22T09:00:00.000Z", local: false }]}
-      />
-    );
-
-    expect(screen.getByRole("link", { name: "Listing story" }).getAttribute("href")).toBe("/assistant/c1");
-    expect(screen.getByText("CCD")).toBeDefined();
-  });
-
-  it("should point to the Assistant when the virtual agent has no chats yet", async () => {
-    const { AssistantChatsPanel } = await import("@/components/virtual-agents/AssistantChatsPanel");
-    render(<AssistantChatsPanel chats={[]} />);
-
-    expect(screen.getByRole("link", { name: "CFT Workspace" }).getAttribute("href")).toBe("/assistant");
   });
 });

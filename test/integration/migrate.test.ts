@@ -6,6 +6,7 @@ import pg from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveDatabaseUrl } from "../../src/store/database-url.ts";
 import { migrate, migrationsDirectory } from "../../src/store/migrate.ts";
+import { isTypedPrompt, withoutIdeContext } from "../../src/transcripts/harness-turn.ts";
 
 const BASE = resolveDatabaseUrl();
 
@@ -56,6 +57,39 @@ async function query<T extends pg.QueryResultRow>(database: string, statement: s
   } finally {
     await client.end();
   }
+}
+
+/** Every type whose name starts with `prefix`, with its labels in order, so a type left behind by a rebuild shows. */
+async function enumLabels(database: string, prefix: string): Promise<{ type: string; labels: string }[]> {
+  return await query(
+    database,
+    `SELECT t.typname AS type, string_agg(e.enumlabel, ',' ORDER BY e.enumsortorder) AS labels
+       FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid
+      WHERE t.typname LIKE '${prefix}%' GROUP BY t.typname ORDER BY t.typname`
+  );
+}
+
+/**
+ * Applies the pending migrations while another transaction holds `table` in the weakest mode there is, which only
+ * the ACCESS EXCLUSIVE lock `migration` takes waits for, and expects it to give up within its lock timeout, leaving
+ * nothing in the ledger.
+ */
+async function expectLockTimeout(database: string, migration: string, table: string): Promise<void> {
+  const holder = new pg.Client({ connectionString: urlFor(database) });
+  await holder.connect();
+  try {
+    await holder.query("BEGIN");
+    await holder.query(`LOCK TABLE "${table}" IN ACCESS SHARE MODE`);
+    const started = Date.now();
+
+    await expect(migrate()).rejects.toThrow(`migration ${migration} failed: canceling statement due to lock timeout`);
+
+    expect(Date.now() - started).toBeLessThan(15_000);
+  } finally {
+    await holder.query("ROLLBACK");
+    await holder.end();
+  }
+  expect(await query(database, `SELECT 1 FROM "_prisma_migrations" WHERE migration_name = '${migration}'`)).toEqual([]);
 }
 
 /**
@@ -336,34 +370,17 @@ describe("the bedrock migration", () => {
     expect((await migrate())[0]).toBe(MIGRATION);
 
     // `migrate()` applies every migration from this one on, so what is asserted is the state at head rather than the
-    // one this migration left: `20261107090000_bedrock_gone` moves the renamed row back to `gateway` and takes the
-    // value out of both enums again.
+    // one this migration left: `20261107090000_bedrock_gone` moves the renamed row back to `gateway`, and
+    // `20261120090000_credential_kind_rebuilt` and `20261121090000_virtual_agent_enums_rebuilt` take the value out of both
+    // enums again.
     const agents = await query<{ name: string; model_route: string }>(RENAME, `SELECT name, model_route::text FROM "virtual_agent" ORDER BY name`);
     expect(agents).toEqual([
       { name: "on-gateway", model_route: "gateway" },
       { name: "own", model_route: "own_licence" }
     ]);
-    const labels = await query<{ type: string; label: string }>(
-      RENAME,
-      `SELECT t.typname AS type, e.enumlabel AS label FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid
-        WHERE t.typname IN ('credential_kind', 'model_route') ORDER BY t.typname, e.enumsortorder`
-    );
-    // `bedrock` is still a label on both types at head: `20261107090000_bedrock_gone` moves every row off it and
-    // deletes the credentials, and leaves the labels for a release so the build it replaces can keep reading the
-    // columns. `model_route` carries it first because the rename this migration makes keeps the value's sort order
-    // and `20261106090000_model_route_gateway` added `gateway` after it.
-    expect(labels).toEqual([
-      { type: "credential_kind", label: "github" },
-      { type: "credential_kind", label: "azure" },
-      { type: "credential_kind", label: "claude" },
-      { type: "credential_kind", label: "bedrock" },
-      { type: "credential_kind", label: "jenkins" },
-      { type: "credential_kind", label: "claude_md" },
-      { type: "credential_kind", label: "git_identity" },
-      { type: "credential_kind", label: "atlassian" },
-      { type: "model_route", label: "bedrock" },
-      { type: "model_route", label: "gateway" },
-      { type: "model_route", label: "own_licence" }
+    expect([...(await enumLabels(RENAME, "credential_kind")), ...(await enumLabels(RENAME, "model_route"))]).toEqual([
+      { type: "credential_kind", labels: "github,azure,claude,jenkins,claude_md,git_identity,atlassian" },
+      { type: "model_route", labels: "gateway,own_licence" }
     ]);
   });
 });
@@ -415,17 +432,6 @@ describe("the bedrock-gone migration", () => {
     );
     expect(Number(moved[0]?.generation)).toBeGreaterThan(Number(untouched[0]?.generation));
     expect(Number(moved[0]?.pod_generation)).toBeGreaterThan(Number(untouched[0]?.pod_generation));
-    // Both labels stay on their types for one release. The previous build is still serving while this commits, and
-    // rebuilding either type would change the column's result-type OID under its cached statements.
-    const labels = await query<{ type: string; label: string }>(
-      GONE,
-      `SELECT t.typname AS type, e.enumlabel AS label FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid
-        WHERE t.typname IN ('credential_kind', 'model_route') AND e.enumlabel = 'bedrock' ORDER BY t.typname`
-    );
-    expect(labels).toEqual([
-      { type: "credential_kind", label: "bedrock" },
-      { type: "model_route", label: "bedrock" }
-    ]);
   });
 });
 
@@ -462,13 +468,493 @@ describe("the assistant product list migration", () => {
 });
 
 /**
+ * The recovery half of the title-source migration, which is the part of this change people see: the chats their own
+ * Claude Code sessions put in the Assistant were named `hmcts-25` after the session registry's handle, and the
+ * sessions that were named worst of all have ended, so no better name is ever coming from their clients. Their
+ * prompts are still here, and this is what reads them.
+ *
+ * The other half of what is under test is what it leaves alone. `name_source` cannot help a historical row — the
+ * column it adds says `derived` for every session ever registered, renamed or not — so the only evidence is the
+ * shape of the title, and a title it does not recognise as one of the client's own fallbacks keeps whatever it has.
+ * Leaving a chat badly named can be put right later; overwriting a name somebody chose cannot.
+ */
+describe("the conversation title source migration", () => {
+  const MIGRATION = "20261115090000_conversation_title_source";
+  const { database: TITLES, earlier } = migrationFixture("migrate_titles", MIGRATION);
+
+  it("should name a local chat carrying one of the client's handles after its first prompt, and leave every other title alone, when it is applied", async () => {
+    await migrate(earlier());
+    await query(TITLES, `INSERT INTO "user" (oid, tid, name) VALUES ('dev-alice', 'dev', 'Alice')`);
+    await query(TITLES, `INSERT INTO "virtual_agent" (owner_oid, name, model_route) VALUES ('dev-alice', 'assistant', 'own_licence')`);
+    // One session per chat. `stale` is the complaint itself: its client worked out a real name hours later and a
+    // heartbeat stored it on the agent, while the chat kept the handle it was made with.
+    await query(
+      TITLES,
+      `INSERT INTO "agent" (owner_oid, session_id, name) VALUES
+        ('dev-alice', 'stale', 'fix-local-chat-titles'),
+        ('dev-alice', 'session-id', 'hmcts-3e'),
+        ('dev-alice', 'generated', 'local-chat-titles'),
+        ('dev-alice', 'renamed', 'hdpi-9653-welsh'),
+        ('dev-alice', 'silent', 'hmcts-99'),
+        ('dev-alice', 'blank', 'hmcts-ab'),
+        ('dev-alice', 'branch-named', 'update-the-db'),
+        ('dev-alice', 'pod', 'assistant')`
+    );
+    await query(
+      TITLES,
+      `INSERT INTO "assistant_conversation" (owner_oid, agent_id, title)
+        SELECT 'dev-alice', a.id, t.title
+          FROM "agent" a
+          JOIN (VALUES ('stale', 'hmcts-25'), ('session-id', 'a1b2c3d4'), ('generated', 'local-chat-titles'),
+                       ('renamed', 'hdpi-9653-welsh'), ('silent', 'hmcts-99'), ('blank', NULL::text),
+                       ('branch-named', 'update-the-db')) AS t (session_id, title)
+            ON t.session_id = a.session_id`
+    );
+    await query(
+      TITLES,
+      `INSERT INTO "assistant_conversation" (owner_oid, virtual_agent_id, agent_id, title)
+        SELECT 'dev-alice', v.id, a.id, 'what the person asked for' FROM "virtual_agent" v, "agent" a WHERE a.session_id = 'pod'`
+    );
+    await query(TITLES, `UPDATE "agent" a SET assistant_conversation_id = c.id FROM "assistant_conversation" c WHERE c.agent_id = a.id`);
+    await query(
+      TITLES,
+      `INSERT INTO "transcript_entry" (agent_id, session_id, entry_key, role, content, redacted, occurred_at)
+        SELECT a.id, a.session_id, t.entry_key, 'user'::transcript_role, t.content::jsonb, t.redacted, t.at::timestamptz
+          FROM "agent" a
+          JOIN (VALUES
+                 ('stale', '1', '{"redacted": "azure-client-secret"}', true, '2026-11-14T09:00:00Z'),
+                 ('stale', '2', '{"text": "  why can''t this user   see tasks? "}', false, '2026-11-14T09:01:00Z'),
+                 ('stale', '3', '{"text": "and later, something else"}', false, '2026-11-14T09:02:00Z'),
+                 ('session-id', '1', '{"text": "the prompt that names it"}', false, '2026-11-14T09:00:00Z'),
+                 ('generated', '1', '{"text": "a prompt this chat is not named after"}', false, '2026-11-14T09:00:00Z'),
+                 ('renamed', '1', '{"text": "look at the failing run on PR 2114"}', false, '2026-11-14T09:00:00Z'),
+                 ('blank', '1', '{"text": "   "}', false, '2026-11-14T09:00:00Z'),
+                 ('blank', '2', '{"text": "the first prompt with words in it"}', false, '2026-11-14T09:01:00Z'),
+                 ('branch-named', '1', '{"text": "a prompt this chat must not be renamed to"}', false, '2026-11-14T09:00:00Z'),
+                 ('pod', '1', '{"text": "the session reading the message back"}', false, '2026-11-14T09:00:00Z'))
+               AS t (session_id, entry_key, content, redacted, at)
+            ON t.session_id = a.session_id`
+    );
+
+    expect((await migrate())[0]).toBe(MIGRATION);
+
+    const chats = await query<{ session_id: string; title: string | null; title_source: string }>(
+      TITLES,
+      `SELECT a.session_id, c.title, c.title_source FROM "assistant_conversation" c JOIN "agent" a ON a.id = c.agent_id ORDER BY a.session_id`
+    );
+    expect(chats).toEqual([
+      // Its client reported no name at all, and its opening prompt is whitespace: the next one names it.
+      { session_id: "blank", title: "the first prompt with words in it", title_source: "message" },
+      // A /rename whose last segment is two hex characters fits the handle shape, and branch-style names do that, so
+      // a tail that reads as a word or an abbreviation is refused. The handles this costs are `summariser-cwd-*`
+      // background sessions; the names it saves are people's own.
+      { session_id: "branch-named", title: "update-the-db", title_source: "message" },
+      // A name Claude Code generated for the conversation reads exactly like a /rename, so it is left alone — and
+      // what it is left with is a readable name rather than a handle, which is why that costs the person little.
+      { session_id: "generated", title: "local-chat-titles", title_source: "message" },
+      // Named after its first message when it was sent, and a chat with a pod is no business of this migration's.
+      { session_id: "pod", title: "what the person asked for", title_source: "message" },
+      // The name the person chose with /rename, which is the one thing this must not take away.
+      { session_id: "renamed", title: "hdpi-9653-welsh", title_source: "message" },
+      // The start of the session id, `agentName`'s last resort, which no person types as a title.
+      { session_id: "session-id", title: "the prompt that names it", title_source: "message" },
+      { session_id: "silent", title: "hmcts-99", title_source: "agent" },
+      // The redacted prompt is passed over, the next one names the chat, and its whitespace is collapsed as a title's is.
+      { session_id: "stale", title: "why can't this user see tasks?", title_source: "message" }
+    ]);
+    // Every session the hub already knew about is read as carrying a name its client worked out, because that is
+    // all the column can say about a row written before it existed.
+    expect(await query(TITLES, `SELECT DISTINCT name_source FROM "agent"`)).toEqual([{ name_source: "derived" }]);
+    // A conversation made from here on says where its title came from, and both columns take nothing else: any
+    // other value is a write site that forgot to decide, which would read as a title or a name nothing may replace.
+    await query(TITLES, `INSERT INTO "assistant_conversation" (owner_oid, title) VALUES ('dev-alice', 'made at head')`);
+    expect(await query(TITLES, `SELECT title_source FROM "assistant_conversation" WHERE title = 'made at head'`)).toEqual([{ title_source: "message" }]);
+    await expect(query(TITLES, `UPDATE "assistant_conversation" SET title_source = 'guessed' WHERE title = 'made at head'`)).rejects.toThrow(/title_source/);
+    await expect(query(TITLES, `UPDATE "agent" SET name_source = 'auto' WHERE session_id = 'stale'`)).rejects.toThrow(/name_source/);
+  });
+});
+
+/**
+ * The backfill of `first_content_at`, which decides which of the conversations already here the sidebar lists. Its
+ * typed-prompt rule is a copy of `isTypedPrompt`'s three patterns, applied by Postgres, so every sample prompt here is
+ * one chat and the chats the migration dates are held to the ones `isTypedPrompt` accepts: the samples are where the
+ * two engines are most likely to part — whitespace outside ASCII, which `\s` means differently in each; newlines inside
+ * an editor-context block, which `.` means differently in each; and a selection quoting its own closing tag, where a
+ * lazy quantifier would stop in one and run on in the other.
+ */
+describe("the conversation first content migration", () => {
+  const MIGRATION = "20261117090000_conversation_first_content";
+  const { database: FIRSTS, earlier } = migrationFixture("migrate_firsts", MIGRATION);
+
+  const IDE = "<ide_opened_file>The user opened the file /a/b.ts in the IDE.</ide_opened_file>";
+  const SELECTION = "<ide_selection>const x = 1;\nconst y = <T>(a: T) => a;\n</ide_selection>";
+
+  const SAMPLES = [
+    "\u1680",
+    "\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a",
+    "\u205f",
+    "\u2005<command-name>/clear</command-name>",
+    "\u1680<ide_selection>a</ide_selection>\u205f",
+    "",
+    "fix this",
+    "   ",
+    "\n\t\r\v\f",
+    "\u00a0",
+    "\u202f",
+    "\ufeff",
+    "\u3000\u2028\u2029",
+    "\u0085",
+    "\u180e",
+    "\u200b",
+    "<command-name>/clear</command-name>\n<command-message>clear</command-message>\n<command-args></command-args>",
+    "<command-message>review</command-message>",
+    "<command-args>x</command-args>",
+    "<local-command-stdout>Set model to opus</local-command-stdout>",
+    "<local-command-caveat>Caveat</local-command-caveat>",
+    "<system-reminder>x</system-reminder>",
+    "<task-notification><status>completed</status></task-notification>",
+    "<bash-input>ls</bash-input>",
+    "<bash-stdout>a</bash-stdout><bash-stderr></bash-stderr>",
+    "<bash-stderr>no</bash-stderr>",
+    "<user-prompt-submit-hook>x</user-prompt-submit-hook>",
+    "[Request interrupted by user]",
+    "[Request interrupted by user for tool use]",
+    "Request interrupted by user",
+    "  \n<command-name>/compact</command-name>",
+    "\u00a0<bash-input>ls</bash-input>",
+    "\ufeff<command-name>/clear</command-name>",
+    "\u0085<command-name>/clear</command-name>",
+    "why does <command-name> show up in titles?",
+    "<command-name",
+    "<COMMAND-NAME>/clear</COMMAND-NAME>",
+    IDE,
+    `${IDE}\n`,
+    `${IDE}\u00a0\u3000`,
+    `${IDE} fix this`,
+    `${IDE}\n${SELECTION}\nfix this`,
+    `${SELECTION}${IDE}`,
+    `  ${IDE}  ${SELECTION}  `,
+    `${IDE}<command-name>/clear</command-name>`,
+    `${IDE}\n[Request interrupted by user]`,
+    "<ide_selection>a</ide_selection> my words </ide_selection>",
+    "<ide_selection>a</ide_selection><ide_selection>b</ide_selection></ide_selection>",
+    "<ide_selection>a</ide_opened_file> b</ide_selection>",
+    "<ide_selection>never closed",
+    "<ide_selection></ide_selection>",
+    "<ide_opened_file>x</ide_selection>",
+    `fix this ${IDE}`,
+    "\u00a0<ide_selection>a</ide_selection>",
+    "\u0085<ide_selection>a</ide_selection>"
+  ];
+
+  async function seeded(statements: readonly [string, unknown[]][]): Promise<void> {
+    const client = new pg.Client({ connectionString: urlFor(FIRSTS) });
+    await client.connect();
+    try {
+      for (const [statement, values] of statements) {
+        await client.query(statement, values);
+      }
+    } finally {
+      await client.end();
+    }
+  }
+
+  /** A chat on Alice's laptop, its session `session`, with one transcript entry when `role` is given. */
+  function chat(session: string, entry?: { role: string; text?: string; redacted?: boolean; at?: string }): [string, unknown[]][] {
+    return [
+      [`INSERT INTO "agent" (owner_oid, session_id, name) VALUES ('dev-alice', $1, $1)`, [session]],
+      [`INSERT INTO "assistant_conversation" (owner_oid, agent_id, title) SELECT 'dev-alice', id, session_id FROM "agent" WHERE session_id = $1`, [session]],
+      [`UPDATE "agent" a SET assistant_conversation_id = c.id FROM "assistant_conversation" c WHERE c.agent_id = a.id AND a.session_id = $1`, [session]],
+      ...(entry === undefined
+        ? []
+        : ([
+            [
+              `INSERT INTO "transcript_entry" (agent_id, session_id, entry_key, role, content, redacted, occurred_at)
+                SELECT id, session_id, 'e1', $2::transcript_role, $3::jsonb, $4, $5::timestamptz FROM "agent" WHERE session_id = $1`,
+              [
+                session,
+                entry.role,
+                JSON.stringify(entry.text === undefined ? {} : { text: entry.text }),
+                entry.redacted ?? false,
+                entry.at ?? "2026-11-01T09:00:00Z"
+              ]
+            ]
+          ] as [string, unknown[]][]))
+    ];
+  }
+
+  async function dated(): Promise<Map<string, string | null>> {
+    const rows = await query<{ session_id: string; first_content_at: Date | null }>(
+      FIRSTS,
+      `SELECT a.session_id, c.first_content_at FROM "assistant_conversation" c JOIN "agent" a ON a.id = c.agent_id`
+    );
+    return new Map(rows.map((row) => [row.session_id, row.first_content_at?.toISOString() ?? null]));
+  }
+
+  it("should date a chat whose only prompt isTypedPrompt accepts and leave the rest undated when it is applied to every sample", async () => {
+    await migrate(earlier());
+    await query(FIRSTS, `INSERT INTO "user" (oid, tid, name) VALUES ('dev-alice', 'dev', 'Alice')`);
+    await seeded(SAMPLES.flatMap((text, index) => chat(`sample-${index}`, { role: "user", text })));
+
+    expect((await migrate())[0]).toBe(MIGRATION);
+
+    const firsts = await dated();
+    expect(SAMPLES.map((text, index) => ({ text, dated: firsts.get(`sample-${index}`) !== null }))).toEqual(
+      SAMPLES.map((text) => ({ text, dated: isTypedPrompt(text) }))
+    );
+  });
+
+  it("should reach both verdicts and strip editor context from several samples when the samples are read by isTypedPrompt", () => {
+    const verdicts = SAMPLES.map(isTypedPrompt);
+    expect(verdicts.filter(Boolean).length).toBeGreaterThan(5);
+    expect(verdicts.filter((typed) => !typed).length).toBeGreaterThan(5);
+    expect(SAMPLES.filter((text) => withoutIdeContext(text) !== text.trim()).length).toBeGreaterThan(5);
+  });
+});
+
+describe("the conversation first content migration on everything else a chat can hold", () => {
+  const MIGRATION = "20261117090000_conversation_first_content";
+  const { database: HELD, earlier } = migrationFixture("migrate_held", MIGRATION);
+
+  it("should date each chat by the earliest thing in it and leave an empty or redacted one undated when it is applied", async () => {
+    await migrate(earlier());
+    await query(HELD, `INSERT INTO "user" (oid, tid, name) VALUES ('dev-alice', 'dev', 'Alice')`);
+    await query(
+      HELD,
+      `INSERT INTO "agent" (owner_oid, session_id, name) VALUES
+        ('dev-alice', 'empty', 'empty'), ('dev-alice', 'answered', 'answered'), ('dev-alice', 'tooled', 'tooled'),
+        ('dev-alice', 'redacted', 'redacted'), ('dev-alice', 'messaged', 'messaged'), ('dev-alice', 'sent', 'sent'),
+        ('dev-alice', 'asked', 'asked'), ('dev-alice', 'documented', 'documented'), ('dev-alice', 'forked', 'forked'),
+        ('dev-alice', 'prompted', 'prompted'), ('dev-alice', 'cleared', 'cleared'), ('dev-alice', 'other', 'other')`
+    );
+    await query(
+      HELD,
+      `INSERT INTO "assistant_conversation" (owner_oid, agent_id, title)
+        SELECT 'dev-alice', id, session_id FROM "agent" WHERE session_id <> 'other'`
+    );
+    await query(HELD, `UPDATE "agent" a SET assistant_conversation_id = c.id FROM "assistant_conversation" c WHERE c.agent_id = a.id`);
+    await query(
+      HELD,
+      `INSERT INTO "message" (kind, author_oid, author_agent_id, target_agent_id, body, created_at)
+        SELECT 'direct'::message_kind, 'dev-alice', o.id, t.id, 'hello', '2026-11-01T08:00:00Z'::timestamptz FROM "agent" o, "agent" t
+         WHERE o.session_id = 'other' AND t.session_id = 'messaged'
+        UNION ALL
+        SELECT 'direct'::message_kind, 'dev-alice', s.id, o.id, 'over to you', '2026-11-01T07:00:00Z'::timestamptz FROM "agent" s, "agent" o
+         WHERE s.session_id = 'sent' AND o.session_id = 'other'`
+    );
+    await query(
+      HELD,
+      // `occurred_at` is what the client claimed, here a year out, and `created_at` the hub's own receipt, which is
+      // what a chat is dated by.
+      `INSERT INTO "transcript_entry" (agent_id, session_id, entry_key, role, content, redacted, occurred_at, created_at)
+        SELECT a.id, a.session_id, t.entry_key, t.role::transcript_role, t.content::jsonb, t.redacted, '2027-11-01T00:00:00Z', t.at::timestamptz
+          FROM "agent" a
+          JOIN (VALUES
+                 ('answered', 'e1', 'assistant', '{"text":"Hello."}', false, '2026-11-01T09:00:00Z'),
+                 ('answered', 'e2', 'user', '{"text":"later prompt"}', false, '2026-11-01T10:00:00Z'),
+                 ('tooled', 'e1', 'tool_use', '{"id":"t","name":"Read","input":{}}', false, '2026-11-01T09:30:00Z'),
+                 ('redacted', 'e1', 'user', '{"redacted":"aws-key"}', true, '2026-11-01T09:00:00Z'),
+                 ('prompted', 'e1', 'user', '{"text":"<command-name>/clear</command-name>"}', false, '2026-11-01T02:00:00Z'),
+                 ('prompted', 'e2', 'user', '{"text":"why is the claim stuck?"}', false, '2026-11-01T03:00:00Z'),
+                 ('prompted', 'e3', 'user', '{"text":"and this one?"}', false, '2026-11-01T03:30:00Z'),
+                 ('cleared', 'e1', 'user', '{"text":"<command-name>/clear</command-name>"}', false, '2026-11-01T02:00:00Z'),
+                 ('messaged', 'e1', 'user', '{"text":"a later prompt"}', false, '2026-11-01T11:00:00Z'))
+               AS t (session_id, entry_key, role, content, redacted, at)
+            ON t.session_id = a.session_id
+         ORDER BY t.at`
+    );
+    await query(
+      HELD,
+      `INSERT INTO "agent_question" (agent_id, session_id, tool_use_id, questions, asked_at)
+        SELECT id, session_id, 'toolu_1', '[]'::jsonb, '2026-11-01T06:00:00Z' FROM "agent" WHERE session_id = 'asked'`
+    );
+    await query(
+      HELD,
+      `UPDATE "assistant_conversation" SET artefact_version = 2, artefact_markdown = '# Plan', artefact_updated_at = '2026-11-01T05:00:00Z'
+        WHERE title = 'documented'`
+    );
+    await query(
+      HELD,
+      `UPDATE "assistant_conversation" SET forked_at = '2026-11-01T04:00:00Z', forked_thread = '[]'::jsonb, forked_from_owner_name = 'Bob'
+        WHERE title = 'forked'`
+    );
+
+    expect((await migrate())[0]).toBe(MIGRATION);
+
+    const rows = await query<{ title: string; first_content_at: Date | null }>(
+      HELD,
+      `SELECT title, first_content_at FROM "assistant_conversation" ORDER BY title`
+    );
+    expect(rows.map((row) => [row.title, row.first_content_at?.toISOString() ?? null])).toEqual([
+      ["answered", "2026-11-01T09:00:00.000Z"],
+      ["asked", "2026-11-01T06:00:00.000Z"],
+      ["cleared", null],
+      ["documented", "2026-11-01T05:00:00.000Z"],
+      ["empty", null],
+      ["forked", "2026-11-01T04:00:00.000Z"],
+      ["messaged", "2026-11-01T08:00:00.000Z"],
+      ["prompted", "2026-11-01T03:00:00.000Z"],
+      ["redacted", null],
+      ["sent", "2026-11-01T07:00:00.000Z"],
+      ["tooled", "2026-11-01T09:30:00.000Z"]
+    ]);
+  });
+});
+
+describe("the agent chat removed migration", () => {
+  const MIGRATION = "20261118090000_agent_chat_removed";
+  const { database: REMOVED, earlier } = migrationFixture("migrate_chat_removed", MIGRATION);
+
+  it("should leave every existing session able to be given a chat when it is applied", async () => {
+    await migrate(earlier());
+    await query(REMOVED, `INSERT INTO "user" (oid, tid, name) VALUES ('dev-alice', 'dev', 'Alice')`);
+    await query(REMOVED, `INSERT INTO "agent" (owner_oid, session_id, name) VALUES ('dev-alice', 'laptop', 'laptop')`);
+
+    expect((await migrate())[0]).toBe(MIGRATION);
+
+    expect(await query<{ session_id: string; chat_removed_at: Date | null }>(REMOVED, `SELECT session_id, chat_removed_at FROM "agent"`)).toEqual([
+      { session_id: "laptop", chat_removed_at: null }
+    ]);
+  });
+});
+
+describe("the index tidy migration", () => {
+  const MIGRATION = "20261119090000_index_tidy";
+  const { database: TIDY, earlier } = migrationFixture("migrate_index_tidy", MIGRATION);
+
+  it("should fail within its lock timeout and record nothing when another transaction holds a table it drops an index of", async () => {
+    await migrate(earlier());
+
+    await expectLockTimeout(TIDY, MIGRATION, "virtual_agent");
+  });
+
+  it("should drop the two indexes a unique index answers when it is applied", async () => {
+    await migrate(earlier());
+
+    expect((await migrate())[0]).toBe(MIGRATION);
+
+    const indexes = await query<{ indexname: string; indexdef: string }>(
+      TIDY,
+      `SELECT indexname, indexdef FROM pg_indexes WHERE tablename IN ('assistant_template', 'virtual_agent', 'transcript_entry') ORDER BY indexname`
+    );
+    const names = indexes.map((row) => row.indexname);
+    expect(names).not.toContain("assistant_template_owner_idx");
+    expect(names).not.toContain("virtual_agent_owner_oid_idx");
+    expect(names).toContain("assistant_template_owner_name_key");
+    expect(names).toContain("virtual_agent_owner_oid_name_key");
+  });
+});
+
+describe("the credential kind rebuild migration", () => {
+  const MIGRATION = "20261120090000_credential_kind_rebuilt";
+  const { database: KINDS, earlier } = migrationFixture("migrate_credential_kind", MIGRATION);
+
+  it("should fail within its lock timeout and record nothing when another transaction holds a table it rewrites", async () => {
+    await migrate(earlier());
+
+    await expectLockTimeout(KINDS, MIGRATION, "virtual_agent_login");
+  });
+
+  it("should delete every bedrock credential and sign-in and rebuild the type without the label when it is applied", async () => {
+    await migrate(earlier());
+    await query(KINDS, `INSERT INTO "user" (oid, tid, name) VALUES ('dev-alice', 'dev', 'Alice')`);
+    await query(KINDS, `INSERT INTO "virtual_agent" (owner_oid, name, model_route) VALUES ('dev-alice', 'assistant', 'gateway')`);
+    await query(
+      KINDS,
+      `INSERT INTO "credential" (owner_oid, kind, secret_name, updated_via)
+        VALUES ('dev-alice', 'bedrock', 'u-dev-alice-bedrock', 'web'), ('dev-alice', 'github', 'u-dev-alice-github', 'web')`
+    );
+    await query(
+      KINDS,
+      `INSERT INTO "virtual_agent_login" (virtual_agent_id, kind, prompt, verification_uri, expires_at)
+        SELECT id, kind, 'paste_code', 'https://example.invalid', now() + interval '1 hour'
+          FROM "virtual_agent", (VALUES ('bedrock'::credential_kind), ('github'::credential_kind)) AS k (kind)`
+    );
+
+    expect((await migrate())[0]).toBe(MIGRATION);
+
+    expect(await query(KINDS, `SELECT kind::text FROM "credential"`)).toEqual([{ kind: "github" }]);
+    expect(await query(KINDS, `SELECT kind::text FROM "virtual_agent_login"`)).toEqual([{ kind: "github" }]);
+    expect(await enumLabels(KINDS, "credential_kind")).toEqual([
+      { type: "credential_kind", labels: "github,azure,claude,jenkins,claude_md,git_identity,atlassian" }
+    ]);
+  });
+});
+
+describe("the virtual agent enums rebuild migration", () => {
+  const MIGRATION = "20261121090000_virtual_agent_enums_rebuilt";
+  const { database: AGENTS, earlier } = migrationFixture("migrate_agent_enums", MIGRATION);
+
+  it("should fail within its lock timeout and record nothing when another transaction holds a table it rewrites", async () => {
+    await migrate(earlier());
+
+    await expectLockTimeout(AGENTS, MIGRATION, "virtual_agent");
+  });
+
+  it("should move every agent off the retired route and stop reasons and rebuild both types without them when it is applied", async () => {
+    await migrate(earlier());
+    await query(AGENTS, `INSERT INTO "user" (oid, tid, name) VALUES ('dev-alice', 'dev', 'Alice')`);
+    await query(
+      AGENTS,
+      `INSERT INTO "virtual_agent" (owner_oid, name, model_route, desired, stop_reason)
+        VALUES ('dev-alice', 'bedrock', 'bedrock', 'running', NULL), ('dev-alice', 'quota', 'gateway', 'stopped', 'quota'),
+               ('dev-alice', 'expired', 'gateway', 'stopped', 'expired'), ('dev-alice', 'evening', 'own_licence', 'stopped', 'evening')`
+    );
+    const [before] = await query<{ generation: number }>(AGENTS, `SELECT generation FROM "virtual_agent" WHERE name = 'bedrock'`);
+
+    expect((await migrate())[0]).toBe(MIGRATION);
+
+    const agents = await query<{ name: string; model_route: string; stop_reason: string | null; generation: number }>(
+      AGENTS,
+      `SELECT name, model_route::text, stop_reason::text, generation FROM "virtual_agent" ORDER BY name`
+    );
+    expect(agents.map(({ generation: _, ...agent }) => agent)).toEqual([
+      { name: "bedrock", model_route: "gateway", stop_reason: null },
+      { name: "evening", model_route: "own_licence", stop_reason: "evening" },
+      { name: "expired", model_route: "gateway", stop_reason: null },
+      { name: "quota", model_route: "gateway", stop_reason: null }
+    ]);
+    expect(Number(agents[0]?.generation)).toBe(Number(before?.generation) + 1);
+    expect([...(await enumLabels(AGENTS, "model_route")), ...(await enumLabels(AGENTS, "virtual_agent_stop_reason"))]).toEqual([
+      { type: "model_route", labels: "gateway,own_licence" },
+      { type: "virtual_agent_stop_reason", labels: "user,idle,evening,failed,awaiting_owner" }
+    ]);
+  });
+});
+
+describe("the unread columns migration", () => {
+  const MIGRATION = "20261122090000_unread_columns_released";
+  const { database: UNREAD, earlier } = migrationFixture("migrate_unread_columns", MIGRATION);
+
+  it("should fail within its lock timeout and record nothing when another transaction holds a table it drops a constraint of", async () => {
+    await migrate(earlier());
+
+    await expectLockTimeout(UNREAD, MIGRATION, "agent_question");
+  });
+
+  it("should accept a delivered delivery with no delivered_at, and drop the answer message key, when it is applied", async () => {
+    await migrate(earlier());
+
+    expect((await migrate())[0]).toBe(MIGRATION);
+
+    await query(UNREAD, `INSERT INTO "user" (oid, tid, name) VALUES ('dev-alice', 'dev', 'Alice')`);
+    await query(UNREAD, `INSERT INTO "agent" (owner_oid, session_id, name) VALUES ('dev-alice', 'laptop', 'laptop')`);
+    await query(UNREAD, `INSERT INTO "message" (kind, author_oid, target_agent_id, body) SELECT 'direct', 'dev-alice', id, 'hello' FROM "agent"`);
+    await query(UNREAD, `INSERT INTO "delivery" (message_id, agent_id, state) SELECT m.id, a.id, 'delivered' FROM "message" m, "agent" a`);
+
+    expect(await query(UNREAD, `SELECT state::text, delivered_at FROM "delivery"`)).toEqual([{ state: "delivered", delivered_at: null }]);
+    expect(await query(UNREAD, `SELECT conname FROM pg_constraint WHERE conname = 'agent_question_answer_message_id_fkey'`)).toEqual([]);
+  });
+});
+
+/**
  * The sweep's pattern and the name generator have to agree, and nothing else in the suite would notice if they
  * stopped: an unswept name leaks silently, and `dropAbandonedScratchDatabases` swallows its own errors by design.
  */
 describe("the scratch database sweep's pattern", () => {
   const pattern = new RegExp(SCRATCH_PATTERN);
 
-  it.each(["migrate", "migrate_bedrock", "migrate_bedrock_gone", "migrate_product", "assistant2", "x", "a_much_longer_suffix_9"])(
+  it.each(["migrate", "migrate_bedrock", "migrate_bedrock_gone", "migrate_product", "migrate_titles", "assistant2", "x", "a_much_longer_suffix_9"])(
     "should match the name the generator produces for the %s suffix",
     (suffix) => {
       expect(scratchDatabase(suffix)).toMatch(pattern);

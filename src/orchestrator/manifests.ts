@@ -14,8 +14,8 @@ import type { VirtualAgentSpec } from "./settings.ts";
 export const MANAGED_BY = "agent-hub-orchestrator";
 export const MANAGED_SELECTOR = `app.kubernetes.io/managed-by=${MANAGED_BY}`;
 export const ID_LABEL = "agent-hub.hmcts.net/virtual-agent-id";
-export const GENERATION_ANNOTATION = "agent-hub.hmcts.net/generation";
-export const LAUNCH_TOKEN_ENV = "AGENT_HUB_LAUNCH_TOKEN";
+const GENERATION_ANNOTATION = "agent-hub.hmcts.net/generation";
+const LAUNCH_TOKEN_ENV = "AGENT_HUB_LAUNCH_TOKEN";
 
 const CONTAINER = "agent";
 const CLAIM_TEMPLATE = "work";
@@ -31,7 +31,7 @@ export function labels(id: string): Record<string, string> {
 }
 
 /** A StatefulSet's claim template cannot change once created, so an existing agent keeps the disk it was made with. */
-export interface Disk {
+interface Disk {
   size: string;
   storageClass: string | null;
 }
@@ -166,6 +166,18 @@ function gatewayEnv(agent: ClaimedAgent) {
 }
 
 /**
+ * The host the hub serves the agent's ports at off the VPN, from the claim, so the pod can tell its agent to give out
+ * `https://<host>/<id>/<port>/` instead of the VPN-only ingress URL. Nothing when the claim has none, or has something
+ * that is not a bare DNS name, since the pod puts it into a URL it tells people to open.
+ */
+function viewerEnv(agent: Pick<ClaimedAgent, "viewer_host">) {
+  const host = agent.viewer_host;
+  return typeof host === "string" && /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(host)
+    ? [{ name: "VIRTUAL_AGENT_VIEWER_HOST", value: host }]
+    : [];
+}
+
+/**
  * The pod is given its public domain rather than its URLs, so that a server starting or stopping changes the Service
  * and Ingress and never the pod template. Its plugins are in the template, empty for none, so a change of them rolls
  * the pod, as the `pod_generation` bump that comes with it asks.
@@ -201,6 +213,7 @@ function env(agent: ClaimedAgent, spec: VirtualAgentSpec, launchToken: string) {
     { name: "HAI_NO_UPDATE", value: "1" },
     { name: "KNOWLEDGE_SWEEP_CHILD", value: "1" },
     { name: "VIRTUAL_AGENT_PUBLIC_DOMAIN", value: spec.publicDomain },
+    ...viewerEnv(agent),
     { name: LAUNCH_TOKEN_ENV, value: launchToken }
   ];
 }

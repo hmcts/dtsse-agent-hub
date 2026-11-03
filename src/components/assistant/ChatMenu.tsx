@@ -2,14 +2,15 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useDismiss } from "@/components/assistant/useDismiss";
 
 const TRIGGER = "flex h-[34px] w-[34px] items-center justify-center rounded-[9px] text-lg text-asst-muted hover:bg-asst-field hover:text-asst-text";
 
 /**
  * A generous allowance for the panel's height, used to decide which way it opens before it is rendered and can be
- * measured. Its tallest pane, the delete confirmation carrying a refusal, comes to about 130px.
+ * measured. Its tallest pane, a laptop chat's delete confirmation carrying a refusal, comes to about 210px.
  */
-const PANEL_HEIGHT = 170;
+const PANEL_HEIGHT = 250;
 
 /** How wide the panel is wherever there is room for it; the sidebar can be dragged narrower than this. */
 const PANEL_WIDTH = 240;
@@ -44,6 +45,8 @@ function room(element: HTMLElement): { above: number; below: number; beside: num
   return { above: rect.top - top, below: bottom - rect.bottom, beside: rect.right - left - PANEL_INSET };
 }
 
+const LOCAL_DELETE_NOTE = "The session on your computer will not come back to your chats, even if you resume it. A new session starts a new chat.";
+
 /**
  * A conversation's options: share it read-only, offer it to be forked, rename it, or delete it and its document. Shown from the chat's
  * header for the open conversation and from every row of the sidebar, so the destructive confirmation is written
@@ -63,6 +66,7 @@ export function ChatMenu({
   onRename,
   onDelete,
   onOpen,
+  local = false,
   label = "Chat options",
   triggerClassName = TRIGGER
 }: {
@@ -75,6 +79,11 @@ export function ChatMenu({
   onDelete: () => Promise<void>;
   /** Called as the menu opens, so whatever is shown about the last attempt can be dropped. */
   onOpen?: () => void;
+  /**
+   * A chat with a session on the person's own computer. Deleting one is permanent for that session, which the hub
+   * never gives a chat again, so the confirmation says so.
+   */
+  local?: boolean;
   /** The accessible name of the trigger and of the menu. Name the chat wherever more than one menu is on the page. */
   label?: string;
   triggerClassName?: string;
@@ -101,31 +110,7 @@ export function ChatMenu({
     }
   }, [open]);
 
-  useEffect(() => {
-    if (open === "closed") {
-      return;
-    }
-    const dismiss = (event: MouseEvent | KeyboardEvent) => {
-      if (event instanceof KeyboardEvent) {
-        if (event.key === "Escape") {
-          // Escape dismisses the innermost thing only. The shell closes its drawer on Escape from `window`, which is
-          // the next stop after `document`, so a row's menu would otherwise take the whole sidebar with it.
-          event.stopPropagation();
-          close();
-        }
-        return;
-      }
-      if (!ref.current?.contains(event.target as Node)) {
-        close();
-      }
-    };
-    document.addEventListener("mousedown", dismiss);
-    document.addEventListener("keydown", dismiss);
-    return () => {
-      document.removeEventListener("mousedown", dismiss);
-      document.removeEventListener("keydown", dismiss);
-    };
-  }, [open, close]);
+  useDismiss(open !== "closed", ref, close);
 
   /** Opens a pane, forgetting whatever the last attempt reported. */
   function show(next: "menu" | "rename" | "delete"): void {
@@ -233,6 +218,7 @@ export function ChatMenu({
           ) : (
             <div className="flex flex-col gap-2 p-1">
               <p className="text-sm">Delete this chat and its document? This cannot be undone.</p>
+              {local ? <p className="text-sm">{LOCAL_DELETE_NOTE}</p> : null}
               <div className="flex justify-end gap-2">
                 <button type="button" onClick={close} className="rounded-lg border border-asst-strong px-3 py-1.5 text-sm">
                   Cancel

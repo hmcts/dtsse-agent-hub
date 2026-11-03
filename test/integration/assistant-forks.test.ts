@@ -1,7 +1,8 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { writeArtefact } from "../../src/assistant/artefact-store.ts";
+import { ensureAssistant, findAssistant } from "../../src/assistant/assistant-store.ts";
 import { forkRecipients } from "../../src/assistant/fork-store.ts";
 import { FORK_CONTEXT_FILE_NAME } from "../../src/assistant/forks.ts";
-import { ensureAssistant, findAssistant, writeArtefact } from "../../src/assistant/store.ts";
 import { frameAttachments } from "../../src/assistant/upload-store.ts";
 import { sweepUploads } from "../../src/assistant/upload-sweep.ts";
 import { realtime } from "../../src/realtime/process.ts";

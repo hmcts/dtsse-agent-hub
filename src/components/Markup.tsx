@@ -184,6 +184,11 @@ function noCaseFor(block: never): never {
   throw new Error(`Markup has no case for the ${(block as Block).type} block`);
 }
 
-export function Markup({ source, theme }: { source: string; theme: MarkupTheme }) {
-  return <div className={theme.container}>{parseMarkup(source).map((block, index) => renderBlock(block, index, theme))}</div>;
+/**
+ * `repoBase` is where a repo-relative link in the body points, as `repoFileBase` builds it from the authoring
+ * agent's repo and branch. A surface that cannot tell which repo a body was written in passes none, and such a link
+ * stays the text the author wrote.
+ */
+export function Markup({ source, theme, repoBase = null }: { source: string; theme: MarkupTheme; repoBase?: string | null }) {
+  return <div className={theme.container}>{parseMarkup(source, { repoBase }).map((block, index) => renderBlock(block, index, theme))}</div>;
 }

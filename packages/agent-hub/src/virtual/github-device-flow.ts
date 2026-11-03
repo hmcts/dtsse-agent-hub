@@ -20,6 +20,7 @@
 // Polling with headroom over the server's minimum follows from that last point: a poll that arrives early
 // costs the code 5 extra seconds for the rest of its life, and the code is the owner's only way in.
 import type { Env } from "../env.ts";
+import { sleep } from "../retry.ts";
 
 export const GITHUB_OAUTH_HOST = "https://github.com";
 /** The flow's two endpoints on `host`, which is `GITHUB_OAUTH_HOST` for github.com. */
@@ -37,9 +38,11 @@ export const GITHUB_CLIENT_ID = "178c6fc778ccc68e1d6a";
 /**
  * The scopes gh asks for in a pod: its own minimum (`internal/authflow/flow.go`) plus the `user:email` that
  * lets `git-identity.ts` check the owner's HMCTS address is on their account. `repo` is what makes the token
- * able to clone an internal repo, which is the whole reason stage 0 signs in at all.
+ * able to clone an internal repo, which is the whole reason stage 0 signs in at all. `project` is what lets the
+ * CFT Workspace search the owner's GitHub Projects and add an issue it opens to one; a token from before it was asked
+ * for cannot, and the Project search says to reconnect GitHub.
  */
-export const GITHUB_SCOPES = "repo read:org gist user:email";
+export const GITHUB_SCOPES = "repo read:org gist user:email project";
 
 export const GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
 
@@ -52,7 +55,7 @@ export const MIN_INTERVAL_S = 1;
 
 /**
  * The hub's own bounds on a relayed sign-in, from `src/virtual-agents/schemas.ts` — written out again here,
- * as `api.ts` writes out every other shape, because this package is published on its own and may not reach
+ * as `wire.ts` writes out every other shape, because this package is published on its own and may not reach
  * into the service's module graph.
  *
  * They are applied to the answer before any of it is sent, because the hub **rejects** rather than truncates
@@ -187,8 +190,6 @@ export class DeviceFlowError extends Error {
 export function deviceFlowRetryable(error: unknown): boolean {
   return error instanceof DeviceFlowError ? error.retryable : true;
 }
-
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * The response body as a flat map. The shape is taken from the body rather than the `Content-Type`, because a

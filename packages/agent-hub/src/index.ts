@@ -34,60 +34,8 @@ export {
   workspaceRepoName,
   workspaceRoot
 } from "./agent.ts";
-export type {
-  AgentSummary,
-  AgentsResponse,
-  Api,
-  ApiErrorBody,
-  Artefact,
-  ArtefactBody,
-  ArtefactResponse,
-  ConfluenceExportReport,
-  ConfluencePageFound,
-  CreateApiOptions,
-  CredentialKind,
-  DirectBody,
-  DirectCandidate,
-  FeedResponse,
-  HeartbeatBody,
-  JiraProjectFound,
-  LoginCompleteBody,
-  LoginFailedBody,
-  LoginPromptBody,
-  LookupAnswer,
-  MemoryReportBody,
-  Message,
-  MessageAuthor,
-  MessageResponse,
-  MessagesResponse,
-  PostBody,
-  RegisterBody,
-  RegisterResponse,
-  RequestOptions,
-  RunAz,
-  SessionReport,
-  SessionsBody,
-  Skill,
-  StreamOptions,
-  TopicListResponse,
-  TopicSummary,
-  TopicsResponse,
-  TranscriptBody,
-  TranscriptEntry,
-  TranscriptResponse,
-  VirtualPhase
-} from "./api.ts";
-export {
-  ApiError,
-  CREDENTIAL_KINDS,
-  createApi,
-  createTokenProvider,
-  DEFAULT_SCOPE,
-  DEFAULT_URL,
-  isMissingRoute,
-  parseAzToken,
-  requireAzureLogin
-} from "./api.ts";
+export type { Api, CreateApiOptions, RequestOptions, StreamOptions } from "./api.ts";
+export { ApiError, createApi, DEFAULT_URL, isMissingRoute } from "./api.ts";
 export type {
   AssistantSupervisor,
   Attachment,
@@ -147,20 +95,11 @@ export {
   unfetchedAttachments,
   uploadsRoot
 } from "./assistant/index.ts";
-export type { Deliver, DirectEventAuthor, DirectEventMessage, ReconnectDecision, RetryState, RunBridgeOptions, StreamEnd } from "./bridge.ts";
-export {
-  nextBackoff,
-  parseAssistantFrame,
-  parseAssistantProduct,
-  parseConfluenceExportFrame,
-  parseDirectEventMessage,
-  parseJiraExportFrame,
-  RAPID_CLOSE_MS,
-  RAPID_CLOSES_BEFORE_BACKOFF,
-  readStatus,
-  reconnectDelay,
-  runBridge
-} from "./bridge.ts";
+export type { RunAz } from "./az-token.ts";
+export { createTokenProvider, DEFAULT_SCOPE, parseAzToken, requireAzureLogin } from "./az-token.ts";
+export type { Deliver, RunBridgeOptions } from "./bridge.ts";
+export { readStatus, runBridge } from "./bridge.ts";
+export { readStdinText } from "./cli/command.ts";
 export type { ConfluenceExportDeps, ConfluenceExportOutcome, ConfluenceExportRequest } from "./confluence-export.ts";
 export {
   CONFLUENCE_EXPORT_ID_RE,
@@ -202,31 +141,48 @@ export type {
   AssistantFrame,
   AssistantProduct,
   AttachmentOutcome,
+  ChooseEnvelopeOptions,
   ConfluenceExportFrame,
+  Delivery,
+  DeliveryInput,
   EnvelopeAuthor,
   EnvelopeMessage,
   EnvelopeOptions,
+  GithubExportFrame,
   JiraExportFrame,
-  OwnerLaptopOptions
+  OwnerLaptopOptions,
+  SessionKind
 } from "./envelope.ts";
 export {
   assistantEnvelope,
   attachmentLines,
   CLI,
+  chooseEnvelope,
   cliName,
   confluenceExportLines,
   describeAuthor,
   directEnvelope,
   formatMessage,
+  GITHUB_EXPORT_BASH_TIMEOUT_MS,
+  githubExportLines,
   JIRA_EXPORT_BASH_TIMEOUT_MS,
   jiraExportLines,
   leadingSkill,
-  ownerEnvelope,
   ownerLaptopEnvelope,
+  routeDelivery,
   taggedPostEnvelope
 } from "./envelope.ts";
 export type { ClientFeature } from "./features.ts";
 export { CLIENT_FEATURES } from "./features.ts";
+export type { DirectEventAuthor, DirectEventMessage } from "./frames.ts";
+export {
+  parseAssistantFrame,
+  parseAssistantProduct,
+  parseConfluenceExportFrame,
+  parseDirectEventMessage,
+  parseGithubExportFrame,
+  parseJiraExportFrame
+} from "./frames.ts";
 export type {
   ChooseIdentityOptions,
   ChosenIdentity,
@@ -277,6 +233,8 @@ export {
   readTables,
   watchPorts
 } from "./ports.ts";
+export type { ReconnectDecision, RetryState, StreamEnd } from "./reconnect.ts";
+export { nextBackoff, RAPID_CLOSE_MS, RAPID_CLOSES_BEFORE_BACKOFF, reconnectDelay } from "./reconnect.ts";
 export type { RetryOptions } from "./retry.ts";
 export { retryableByStatus, withRetry } from "./retry.ts";
 export { containsSecret, findSecret, loadPatterns, PATTERNS_FILE, parsePatterns } from "./secret-scan.ts";
@@ -487,7 +445,6 @@ export {
   pruneMsalCache,
   readAtlassianAuth,
   readAzureCache,
-  readStdinText,
   relayDeviceLogin,
   requireCredentialKind,
   restoreAtlassianAuth,
@@ -510,3 +467,42 @@ export {
 } from "./virtual/index.ts";
 export type { VirtualAgent } from "./virtual-agent.ts";
 export { MISSING_LAUNCH_TOKEN, MISSING_VIRTUAL_AGENT_ID, requireVirtualAgent, virtualAgent } from "./virtual-agent.ts";
+export type {
+  AgentSummary,
+  AgentsResponse,
+  ApiErrorBody,
+  Artefact,
+  ArtefactBody,
+  ArtefactResponse,
+  ConfluenceExportReport,
+  ConfluencePageFound,
+  CredentialKind,
+  DirectBody,
+  DirectCandidate,
+  FeedResponse,
+  HeartbeatBody,
+  JiraProjectFound,
+  LoginCompleteBody,
+  LoginFailedBody,
+  LoginPromptBody,
+  LookupAnswer,
+  MemoryReportBody,
+  Message,
+  MessageAuthor,
+  MessageResponse,
+  MessagesResponse,
+  PostBody,
+  RegisterBody,
+  RegisterResponse,
+  SessionReport,
+  SessionsBody,
+  Skill,
+  TopicListResponse,
+  TopicSummary,
+  TopicsResponse,
+  TranscriptBody,
+  TranscriptEntry,
+  TranscriptResponse,
+  VirtualPhase
+} from "./wire.ts";
+export { CREDENTIAL_KINDS } from "./wire.ts";

@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { createEventHub } from "../realtime/hub.ts";
 import type { LookupFrame } from "./lookup-store.ts";
+import type { Wake } from "./session-store.ts";
 import { closeFrame, deleteUploadsFrame, interruptFrame, lookupFrame, sessionStream, wakeFrame, welshFrame } from "./session-stream.ts";
-import type { Wake } from "./store.ts";
 import type { WelshFrame } from "./welsh-store.ts";
 
 const ASSISTANT = "va-1";
@@ -397,7 +397,7 @@ describe("sessionStream deletions", () => {
 });
 
 describe("sessionStream lookups", () => {
-  const LOOKUP: LookupFrame = { lookup_id: "l1", kind: "confluence_page", query: "case flags", space: "CCD", sign_in: false };
+  const LOOKUP: LookupFrame = { lookup_id: "l1", kind: "confluence_page", query: "case flags", space: "CCD", owner: null, sign_in: false };
 
   function asked(lookupId: string, virtualAgent = ASSISTANT) {
     return { type: "assistant_lookup" as const, lookup_id: lookupId, virtual_agent_id: virtualAgent, owner_oid: "o" };

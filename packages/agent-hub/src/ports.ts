@@ -25,7 +25,7 @@ export type Listening = {
   local: number[];
 };
 
-// The body of `PUT /api/virtual/{id}/ports`. It lives here rather than in `api.ts` because this is the
+// The body of `PUT /api/virtual/{id}/ports`. It lives here rather than in `wire.ts` because this is the
 // feature that decides what goes in it.
 export type PortsReport = {
   ports: number[];
@@ -263,4 +263,17 @@ export function publicUrlPattern(env: Env = process.env): string | null {
   }
   const domain = (env.VIRTUAL_AGENT_PUBLIC_DOMAIN || "").trim() || DEFAULT_PUBLIC_DOMAIN;
   return `https://va-${id.slice(0, 8)}-<port>.${domain}`;
+}
+
+/**
+ * Where the hub serves a port off the VPN, `https://<viewer host>/<virtual agent id>/<port>/`, for its owner alone once
+ * signed in to the hub. `null` when the pod was not told a viewer host, or is not a virtual agent.
+ */
+export function viewerUrlPattern(env: Env = process.env): string | null {
+  const id = env.AGENT_HUB_VIRTUAL_AGENT_ID;
+  const host = (env.VIRTUAL_AGENT_VIEWER_HOST || "").trim().toLowerCase();
+  if (!id || !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(host)) {
+    return null;
+  }
+  return `https://${host}/${id}/<port>/`;
 }

@@ -7,12 +7,18 @@ import { GET as agents } from "../../src/app/api/agent/agents/route.ts";
 import { GET as messages } from "../../src/app/api/agent/messages/[id]/route.ts";
 import { createDirect } from "../../src/messages/store.ts";
 import { realtime } from "../../src/realtime/process.ts";
-import { MIN_STREAM_MAX_SECONDS, RECONNECT_AFTER_MS } from "../../src/realtime/sse.ts";
+import { RECONNECT_AFTER_MS } from "../../src/realtime/sse.ts";
 import { streamLimits } from "../../src/realtime/stream-slots.ts";
 import { byCodePoint } from "../../src/topics/slug.ts";
 import { insertAgent, insertUser, type Person, person, prisma, resetDatabase } from "./database.ts";
 import { call, jsonOf } from "./routes.ts";
 import { frames } from "./sse-reader.ts";
+import { SHORT_LIFETIME_MS, streamLifetime } from "./stream-lifetime.ts";
+
+vi.mock("../../src/realtime/sse.ts", async (importOriginal) => {
+  const { withStreamLifetime } = await import("./stream-lifetime.ts");
+  return withStreamLifetime(await importOriginal());
+});
 
 const ALICE = person("alice");
 const BOB = person("bob");
@@ -75,7 +81,7 @@ describe("direct messages", () => {
     expect(response.status).toBe(201);
     const { message } = await jsonOf(response);
     expect(message).toMatchObject({ kind: "direct", topics: [], title: null, target_agent_id: alicesOther, author: { agent_id: alicesAgent } });
-    expect(await prisma.delivery.findFirstOrThrow()).toMatchObject({ agentId: alicesOther, state: "queued", deliveredAt: null });
+    expect(await prisma.delivery.findFirstOrThrow()).toMatchObject({ agentId: alicesOther, state: "queued" });
   });
 
   it("should answer an ambiguous name with 409 and the candidates, preferring live agents over offline ones", async () => {
@@ -103,11 +109,8 @@ describe("direct messages", () => {
     expect(body.candidates.find((candidate: { id: string }) => candidate.id === first)).toMatchObject({ status: "idle", repo: null, branch: null });
   });
 
-  // The other case that has to keep working. The row is written through the store rather than sent: the only way a
-  // direct crosses between two owners' agents now is this reply, so nothing could have sent the one it answers. A
-  // row written before the owner-wide access went looks exactly like this, and an agent must still be able to answer
-  // one. Alice reached Bob's agent, so Bob's agent may answer whatever Alice holds.
-  it("should route a reply to a received direct message back to its author, whoever owns the sender", async () => {
+  // Written through the store, because nothing can send a direct between two owners' agents.
+  it("should refuse a reply to a received direct message when another owner's agent sent it", async () => {
     const original = await createDirect(prisma, {
       author: { oid: ALICE.oid, agentId: alicesAgent },
       targetAgentId: bobsAgent,
@@ -117,8 +120,9 @@ describe("direct messages", () => {
 
     const response = await send(BOB, bobsAgent, { reply_to_message: original.id, body: "answer" });
 
-    expect(response.status).toBe(201);
-    expect((await jsonOf(response)).message).toMatchObject({ target_agent_id: alicesAgent, in_reply_to: original.id });
+    expect(response.status).toBe(403);
+    expect((await jsonOf(response)).error).toMatch(/reply to an agent of another owner .*post on the topic and tag that agent/);
+    expect(await prisma.message.count({ where: { inReplyTo: BigInt(original.id) } })).toBe(0);
   });
 
   it("should route a reply to a person's message into the agent's own thread, readable by that person", async () => {
@@ -217,11 +221,11 @@ describe("the agent stream", () => {
 
   describe("at its lifetime", () => {
     afterEach(() => {
-      vi.unstubAllEnvs();
+      streamLifetime.ms = undefined;
     });
 
     it("should end with a reconnect event and give its slot back, and the next connection should replay a message sent in between", async () => {
-      vi.stubEnv("STREAM_MAX_SECONDS", String(MIN_STREAM_MAX_SECONDS));
+      streamLifetime.ms = SHORT_LIFETIME_MS;
       const opened = Date.now();
       const first = openStream(ALICE, alicesOther);
       const ended = await frames(await first.response).end();
@@ -230,11 +234,14 @@ describe("the agent stream", () => {
       expect(ended[0]).toEqual({ comment: "connected" });
       expect(ended[1]).toEqual({ retry: String(RECONNECT_AFTER_MS) });
       expect(ended.at(-1)).toEqual({ event: "reconnect", data: "{}" });
-      expect(lastedMs).toBeGreaterThanOrEqual(MIN_STREAM_MAX_SECONDS * 900);
-      expect(lastedMs).toBeLessThan(MIN_STREAM_MAX_SECONDS * 1000 + 2000);
+      // The stream's timer starts inside the route, after `opened` is read, but a timer may fire a millisecond or so
+      // early on the clock `Date.now()` reads, so the bound allows for that and no more.
+      expect(lastedMs).toBeGreaterThanOrEqual(SHORT_LIFETIME_MS - 50);
+      expect(lastedMs).toBeLessThan(SHORT_LIFETIME_MS + 2000);
       expect(streamLimits().agent.held(ALICE.oid)).toBe(0);
 
       const { message: between } = await jsonOf(await send(ALICE, alicesAgent, { to_agent: alicesOther, body: "sent between streams" }));
+      streamLifetime.ms = undefined;
       const second = openStream(ALICE, alicesOther);
       const reader = frames(await second.response);
 

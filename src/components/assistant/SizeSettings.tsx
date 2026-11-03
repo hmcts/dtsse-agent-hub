@@ -31,7 +31,7 @@ import { Timestamp } from "@/components/time/Timestamp";
 export interface AssistantSize {
   view: AssistantMemory;
   assistantId: string;
-  /** The hub's own resize action, which re-reads the viewer; the agent page posts to the same one. */
+  /** `resizeVirtualAgent`, which re-reads the viewer. */
   save: FormAction;
 }
 

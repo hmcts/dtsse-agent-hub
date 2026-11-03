@@ -40,32 +40,14 @@ test.describe("accessibility @nightly", () => {
     await context.addCookies([{ name: PERSONA_COOKIE, value: PERSONA, url: baseURL! }]);
   });
 
-  // With virtual agents on, /hub/settings/credentials redirects to /hub/virtual#credentials, so this audits that section.
-  for (const path of ["/hub", "/hub/topics", "/hub/channels/new", "/hub/settings/credentials", "/hub/c?topics=e2e-a11y", "/hub/topics/e2e-a11y"]) {
+  for (const path of ["/hub", "/hub/topics", "/hub/channels/new", "/hub/c?topics=e2e-a11y", "/hub/topics/e2e-a11y"]) {
     test(`should raise no WCAG A or AA violations on ${path} @nightly @a11y`, async ({ page }) => {
       await audit(page, path);
     });
   }
 
-  test("should raise no WCAG A or AA violations on the virtual agents pages @nightly @a11y", async ({ page }) => {
-    const response = await page.goto("/hub/virtual");
-    test.skip(response?.status() === 404, "virtual agents are off on this deployment");
-    await audit(page, "/hub/virtual");
-
-    const name = unique("a11y").toLowerCase();
-    await page.getByLabel("Name").fill(name);
-    await page.getByRole("button", { name: "Create" }).click();
-    await page.waitForURL(/\/hub\/agents\/[0-9a-f-]{36}$/);
-    const path = new URL(page.url()).pathname;
-    await audit(page, path);
-
-    await page.getByRole("button", { name: "Delete" }).click();
-    await page.getByRole("button", { name: `Delete ${name}` }).click();
-    await expect(page.getByText("This virtual agent and its disk are being deleted.")).toBeVisible();
-  });
-
   test("should raise no WCAG A or AA violations on the not-found page @nightly @a11y", async ({ page }) => {
-    await audit(page, "/hub/agents/00000000-0000-0000-0000-000000000000", 404);
+    await audit(page, "/hub/nonsense", 404);
   });
 
   test("should raise no WCAG A or AA violations on a saved channel with posts @nightly @a11y", async ({ page }) => {
@@ -103,20 +85,15 @@ test.describe("accessibility @nightly", () => {
     await audit(page, "/hub/m/9223372036854775807", 404);
   });
 
-  test("should raise no WCAG A or AA violations on an agent page @nightly @a11y", async ({ page, request }) => {
-    const agent = await registerAgent(request, PERSONA, unique("agent"));
+  // In a chat on the person's own computer, for the reasons the test of that chat below gives.
+  test("should raise no WCAG A or AA violations on a chat showing a question @nightly @a11y", async ({ page, baseURL, request }) => {
+    const persona = chatPersona("a11y-question");
+    const name = unique("laptop");
+    const agent = await registerAgent(request, persona, name);
     test.skip(agent === undefined, "this deployment checks real agent tokens, so the suite cannot register an agent");
-    await uploadTranscript(request, PERSONA, agent!, sampleTranscript(unique("a11y")));
-
-    await audit(page, `/hub/agents/${agent}`);
-    await page.locator("details summary").first().click();
-    await expectNoViolations(page);
-  });
-
-  test("should raise no WCAG A or AA violations on an agent page showing a question @nightly @a11y", async ({ page, request }) => {
-    const agent = await registerAgent(request, PERSONA, unique("agent"));
-    test.skip(agent === undefined, "this deployment checks real agent tokens, so the suite cannot register an agent");
-    await askQuestion(request, PERSONA, agent!, {
+    await connectForChat(request, persona);
+    await page.context().addCookies([{ name: PERSONA_COOKIE, value: persona, url: baseURL! }]);
+    await askQuestion(request, persona, agent!, {
       question: "Do you prefer red or blue?",
       header: "Colour",
       options: [
@@ -125,10 +102,12 @@ test.describe("accessibility @nightly", () => {
       ]
     });
 
-    const response = await page.goto(`/hub/agents/${agent}`);
-    expect(response?.status()).toBe(200);
-    // The card alone, not the page around it: the agent page is audited whole by the test above, and this one is
-    // about the question's own markup — its fieldsets, its labelled options and the free-text way out.
+    const response = await page.goto("/assistant");
+    test.skip(response?.status() === 404, "the Assistant is off on this deployment");
+    await dismissGettingReady(page);
+    await openLocalChat(page, name);
+    // The card alone, not the page around it: the chat is audited whole by its own test, and this one is about the
+    // question's own markup — its fieldsets, its labelled options and the free-text way out.
     const card = '[aria-label="A question for you"]';
     await expect(page.locator(card)).toBeVisible();
     await expectNoViolations(page, card);
@@ -165,9 +144,9 @@ test.describe("accessibility @nightly", () => {
   });
 
   /**
-   * The Assistant's Welsh page, as it renders before any job has answered: the service picker, the tasks and the
-   * catalogue search. Gated on the Assistant being on, as the new-chat screen above is; without a pod the page says its
-   * assistant is starting, which is part of what is audited.
+   * The Assistant's Welsh page for someone whose assistant does not have the Welsh plugin ticked, which is every
+   * persona here: no spec ticks a plugin. It says how to turn Welsh on, in place of the tasks. Gated on the Assistant
+   * being on, as the new-chat screen above is.
    */
   test("should raise no WCAG A or AA violations on the Assistant's Welsh page @nightly @a11y", async ({ page, request }) => {
     await connectForChat(request, PERSONA);
@@ -178,7 +157,19 @@ test.describe("accessibility @nightly", () => {
     expect(response?.status()).toBe(200);
 
     await expect(page.getByRole("heading", { name: "Welsh translations" })).toBeVisible();
-    await expect(page.getByLabel("English or Welsh")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Turn on Welsh translations first" })).toBeVisible();
+    await expectNoViolations(page);
+  });
+
+  test("should raise no WCAG A or AA violations on the Assistant's Scheduled page @nightly @a11y", async ({ page, request }) => {
+    await connectForChat(request, PERSONA);
+    const response = await page.goto("/assistant/scheduled");
+    // Skipped only where the deployment has the Assistant off (VIRTUAL_AGENTS_ENABLED "false" answers 404), as the
+    // Welsh page's audit above is; it runs unchanged wherever the flag is on.
+    test.skip(response?.status() === 404, "the Assistant is off on this deployment");
+    expect(response?.status()).toBe(200);
+
+    await expect(page.getByRole("heading", { name: "Scheduled" })).toBeVisible();
     await expectNoViolations(page);
   });
 

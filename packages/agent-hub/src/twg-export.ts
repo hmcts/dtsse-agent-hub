@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Env } from "./env.ts";
 import type { AtlassianLoginResult } from "./virtual/atlassian.ts";
-import { type RunResult, stripAnsi } from "./virtual/sign-in.ts";
+import { type RunResult, stripAnsi } from "./virtual/process.ts";
 
 // The hub's export timeout: a lock older than this belongs to an export the hub has already given up on.
 const LOCK_STALE_MS = 15 * 60_000;

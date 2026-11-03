@@ -231,8 +231,8 @@ describe("offering a person's templates", () => {
  * - Bob naming Alice's template id in a save or a delete does not reach her row. The `where` in every statement
  *   carries the owner, so his id matches nothing: he is told the template has gone and *Alice's row is unchanged*,
  *   which is the assertion — a refusal with her row quietly rewritten would pass a test that only read the result.
- * - A caller that hands the store a different owner outright is refused by `canManageTemplate` rather than served,
- *   so the rule and not the query shape is what is being relied on.
+ * - A caller that hands the store a different owner outright is refused by `isOwner` rather than served, so the rule
+ *   and not the query shape is what is being relied on.
  * - The actions never read an owner from the form, so a hand-rolled POST naming Alice writes against Bob.
  */
 describe("another person's templates", () => {

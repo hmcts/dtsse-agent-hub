@@ -2,23 +2,30 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ConnectionsData } from "@/assistant/connections";
 import type { DateGroup } from "@/assistant/grouping";
+import type { LocalSession } from "@/assistant/local-session";
 import type { Theme } from "@/assistant/theme";
 import type { ConversationLink } from "@/assistant/views";
+import type { AssistantAgentSettings } from "@/components/assistant/AgentSettings";
+import { ChatMark } from "@/components/assistant/ChatMark";
 import { ChatMenu } from "@/components/assistant/ChatMenu";
 import type { AssistantClaudeMd } from "@/components/assistant/ClaudeMdSettings";
 import { ConversationSearch } from "@/components/assistant/ConversationSearch";
 import type { AssistantExportDefaults } from "@/components/assistant/ExportSettings";
 import type { AssistantFiles } from "@/components/assistant/FileSettings";
-import { LocalMark } from "@/components/assistant/LocalMark";
+import type { AssistantGitIdentity } from "@/components/assistant/GitIdentitySettings";
+import { LiveLocalSessions } from "@/components/assistant/LiveLocalSessions";
 import { besideSidebar, SIDEBAR_DRAWER_MAX_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_WIDTH } from "@/components/assistant/layout";
 import type { AssistantModelSetting } from "@/components/assistant/ModelSettings";
 import { type AssistantConnect, type AssistantPlugins, AssistantSettings } from "@/components/assistant/SettingsDialog";
+import type { AssistantSharing } from "@/components/assistant/SharingSettings";
 import type { AssistantSize } from "@/components/assistant/SizeSettings";
 import type { AssistantTemplates } from "@/components/assistant/TemplateSettings";
+import type { AssistantTokens } from "@/components/assistant/TokenSettings";
 import { useResizableWidth } from "@/components/assistant/useResizableWidth";
+import { WorkflowsMenu } from "@/components/assistant/WorkflowsMenu";
 import type { ActionResult } from "@/web/action";
 
 /** What a sidebar row's options menu does. The pages pass the same server actions the chat's own header uses. */
@@ -101,12 +108,17 @@ export function AssistantShell({
   connect,
   now,
   plugins,
+  welsh = false,
   model,
   claudeMd,
   templates,
   files,
   size,
   exports,
+  sharing,
+  agent,
+  git,
+  tokens,
   actions,
   children
 }: {
@@ -123,6 +135,8 @@ export function AssistantShell({
   now: number;
   /** The workspace plugins the footer's settings lets the person tick. */
   plugins?: AssistantPlugins;
+  /** Their assistant has the Welsh plugin ticked, so the way to the Welsh page is shown. */
+  welsh?: boolean;
   /** The Claude model the person's chats run on, which the footer's settings shows and changes. */
   model?: AssistantModelSetting;
   /** The person's own CLAUDE.md, which the footer's settings shows and edits. */
@@ -134,6 +148,14 @@ export function AssistantShell({
   size?: AssistantSize;
   /** Where the person's documents go by default, which the footer's settings shows and edits. */
   exports?: AssistantExportDefaults;
+  /** How the footer's settings reads the person's shared chats once its Sharing section opens, and changes who each is shared with. */
+  sharing?: AssistantSharing;
+  /** The virtual agent the Assistant runs on, which the footer's settings renames and restarts and lists the web servers of. */
+  agent?: AssistantAgentSettings;
+  /** The git identity the person's agents commit as, which the footer's settings shows and changes. */
+  git?: AssistantGitIdentity;
+  /** How the footer's settings replaces and removes a pasted token. */
+  tokens?: AssistantTokens;
   /** Given, every row offers an options menu; left out, the rows are links alone. */
   actions?: ConversationActions;
   children: React.ReactNode;
@@ -156,6 +178,7 @@ export function AssistantShell({
   });
   // The drawer is its own width over the page, so a width dragged on a wide screen never reaches it.
   const width = narrow ? SIDEBAR_WIDTH : resize.width;
+  const served = useMemo(() => localSessions(groups), [groups]);
 
   // A collapsed sidebar is out of the tab order. Set on the element itself, since React 18 and the React 19 the app
   // router runs disagree on how `inert` is written as a prop.
@@ -241,84 +264,80 @@ export function AssistantShell({
               </span>
               New chat
             </Link>
-            {/* The Welsh page, a business analyst's tools for a service's Welsh: its own page too, so a link. */}
-            <Link
-              href="/assistant/welsh"
-              aria-label="Welsh translations"
-              title="Welsh translations"
-              className="flex w-[44px] shrink-0 items-center justify-center self-stretch rounded-[10px] border border-asst-strong text-[12px] font-semibold tracking-wide text-asst-muted hover:bg-asst-hover hover:text-asst-text"
-            >
-              <span aria-hidden="true">CY</span>
-            </Link>
+            {/* The workflows a person can open beside their chats, each its own page, behind one plus. */}
+            <WorkflowsMenu welsh={welsh} />
           </div>
-          <ConversationSearch>
-            {groups.length === 0 ? <p className="px-2.5 text-[13px] text-asst-faint">Your chats appear here.</p> : null}
-            {groups.map((group) => (
-              <div key={group.label} className="flex flex-col gap-0.5">
-                <h2 className="px-2.5 pb-1.5 pt-1 text-xs font-medium text-asst-faint">{group.label}</h2>
-                <ul className="flex flex-col gap-0.5">
-                  {group.items.map((item) => (
-                    <li key={item.id} className="group relative">
-                      <Link
-                        href={`/assistant/${item.id}`}
-                        aria-current={item.id === activeId ? "page" : undefined}
-                        className={`flex items-center gap-1.5 rounded-lg py-2 pl-2.5 text-sm ${actions === undefined ? "pr-2.5" : "pr-9"} ${
-                          item.id === activeId ? "bg-asst-active text-asst-text" : "text-asst-body hover:bg-asst-raised"
-                        }`}
-                      >
-                        {item.local ? <LocalMark /> : null}
-                        {/* The title is what gives way, so the marker beside it stays whole at any sidebar width. */}
-                        <span className="min-w-0 truncate">{item.title}</span>
-                      </Link>
-                      {actions === undefined ? null : (
-                        // A sibling of the link, not a child: an anchor may not hold a button.
-                        <div className="absolute right-1 top-1 flex">
-                          <ChatMenu
-                            title={item.title}
-                            shareHref={`/assistant/${item.id}?share=1`}
-                            forkHref={`/assistant/${item.id}?fork=1`}
-                            label={`Options for ${item.title}`}
-                            // The trigger appears when the row is hovered, but a keyboard or touch user never
-                            // hovers, so it is shown as well while the focus is anywhere inside the row, at every
-                            // drawer-width screen, and always on the chat that is open.
-                            triggerClassName={`flex h-7 w-7 items-center justify-center rounded-md text-base leading-none text-asst-muted hover:bg-asst-field hover:text-asst-text group-hover:opacity-100 group-focus-within:opacity-100 max-md:opacity-100 ${
-                              item.id === activeId ? "" : "opacity-0"
-                            }`}
-                            onOpen={() => setFailed(null)}
-                            onRename={async (title) => {
-                              const result = await actions.rename({ conversationId: item.id, title });
-                              setFailed(result.ok ? null : { id: item.id, error: result.error });
-                              router.refresh();
-                            }}
-                            onDelete={async () => {
-                              const result = await actions.remove({ conversationId: item.id });
-                              if (!result.ok) {
-                                setFailed({ id: item.id, error: result.error });
-                                return;
-                              }
-                              setFailed(null);
-                              // The open chat's page now has nothing to show, so it has to be left; deleting any
-                              // other only takes a row out of the list.
-                              if (item.id === activeId) {
-                                router.push("/assistant");
-                              } else {
+          <LiveLocalSessions served={served}>
+            <ConversationSearch>
+              {groups.length === 0 ? <p className="px-2.5 text-[13px] text-asst-faint">Your chats appear here.</p> : null}
+              {groups.map((group) => (
+                <div key={group.label} className="flex flex-col gap-0.5">
+                  <h2 className="px-2.5 pb-1.5 pt-1 text-xs font-medium text-asst-faint">{group.label}</h2>
+                  <ul className="flex flex-col gap-0.5">
+                    {group.items.map((item) => (
+                      <li key={item.id} className="group relative">
+                        <Link
+                          href={`/assistant/${item.id}`}
+                          aria-current={item.id === activeId ? "page" : undefined}
+                          className={`flex items-center gap-1.5 rounded-lg py-2 pl-2.5 text-sm ${actions === undefined ? "pr-2.5" : "pr-9"} ${
+                            item.id === activeId ? "bg-asst-active text-asst-text" : "text-asst-body hover:bg-asst-raised"
+                          }`}
+                        >
+                          <ChatMark conversationId={item.id} mark={item.mark} />
+                          {/* The title is what gives way, so the marker beside it stays whole at any sidebar width. */}
+                          <span className="min-w-0 truncate">{item.title}</span>
+                        </Link>
+                        {actions === undefined ? null : (
+                          // A sibling of the link, not a child: an anchor may not hold a button.
+                          <div className="absolute right-1 top-1 flex">
+                            <ChatMenu
+                              title={item.title}
+                              shareHref={`/assistant/${item.id}?share=1`}
+                              local={item.mark?.where === "computer"}
+                              forkHref={`/assistant/${item.id}?fork=1`}
+                              label={`Options for ${item.title}`}
+                              // The trigger appears when the row is hovered, but a keyboard or touch user never
+                              // hovers, so it is shown as well while the focus is anywhere inside the row, at every
+                              // drawer-width screen, and always on the chat that is open.
+                              triggerClassName={`flex h-7 w-7 items-center justify-center rounded-md text-base leading-none text-asst-muted hover:bg-asst-field hover:text-asst-text group-hover:opacity-100 group-focus-within:opacity-100 max-md:opacity-100 ${
+                                item.id === activeId ? "" : "opacity-0"
+                              }`}
+                              onOpen={() => setFailed(null)}
+                              onRename={async (title) => {
+                                const result = await actions.rename({ conversationId: item.id, title });
+                                setFailed(result.ok ? null : { id: item.id, error: result.error });
                                 router.refresh();
-                              }
-                            }}
-                          />
-                        </div>
-                      )}
-                      {failed?.id === item.id ? (
-                        <p role="alert" className="px-2.5 pb-1 text-xs text-asst-error">
-                          {failed.error}
-                        </p>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </ConversationSearch>
+                              }}
+                              onDelete={async () => {
+                                const result = await actions.remove({ conversationId: item.id });
+                                if (!result.ok) {
+                                  setFailed({ id: item.id, error: result.error });
+                                  return;
+                                }
+                                setFailed(null);
+                                // The open chat's page now has nothing to show, so it has to be left; deleting any
+                                // other only takes a row out of the list.
+                                if (item.id === activeId) {
+                                  router.push("/assistant");
+                                } else {
+                                  router.refresh();
+                                }
+                              }}
+                            />
+                          </div>
+                        )}
+                        {failed?.id === item.id ? (
+                          <p role="alert" className="px-2.5 pb-1 text-xs text-asst-error">
+                            {failed.error}
+                          </p>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </ConversationSearch>
+          </LiveLocalSessions>
           <div className="flex min-w-0 items-center gap-2.5 border-t border-asst-active px-4 py-3">
             <span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-asst-line text-xs font-semibold">
               {initials(viewerName)}
@@ -338,6 +357,10 @@ export function AssistantShell({
               files={files}
               size={size}
               exports={exports}
+              sharing={sharing}
+              agent={agent}
+              git={git}
+              tokens={tokens}
             />
           </div>
           {/* Dragging stops at the narrowest the titles stay readable at; collapsing the sidebar is the button's job,
@@ -353,4 +376,9 @@ export function AssistantShell({
       </div>
     </ShellContext.Provider>
   );
+}
+
+/** The server's state for each chat in the list that is on the person's own computer; see `LiveLocalSessions`. */
+function localSessions(groups: { items: ConversationLink[] }[]): ReadonlyMap<string, LocalSession> {
+  return new Map(groups.flatMap((group) => group.items.flatMap((item) => (item.mark?.where === "computer" ? [[item.id, item.mark.session] as const] : []))));
 }

@@ -113,7 +113,7 @@ export async function serveViewer(request: Request, pathAndQuery: string, deps: 
     case "auth": {
       const ticket = await openTicket(target.ticket, settings.secret);
       if (ticket === undefined) {
-        return text(400, "This link has expired. Open the web server again from the agent's page on agent-hub.");
+        return text(400, "This link has expired. Open the web server again from Web servers in your CFT Workspace settings.");
       }
       const prefix = viewerPrefix(ticket.virtualAgentId, ticket.port);
       const cookie = await sealViewerCookie(ticket, settings.secret, deps.now?.());
@@ -127,7 +127,7 @@ export async function serveViewer(request: Request, pathAndQuery: string, deps: 
       const grant = await openViewerCookie(cookieValue(request.headers.get("cookie"), viewerCookieName(virtualAgentId, port)), settings.secret);
       if (grant === undefined || grant.virtualAgentId !== virtualAgentId || grant.port !== port) {
         if (request.method !== "GET" && request.method !== "HEAD") {
-          return text(401, "Open this web server from the agent's page on agent-hub first.");
+          return text(401, "Open this web server from Web servers in your CFT Workspace settings first.");
         }
         return seeOther(`${settings.hubOrigin}${ticketPath(virtualAgentId, port, `${rest}${search}`)}`);
       }

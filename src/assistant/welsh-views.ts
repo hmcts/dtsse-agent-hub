@@ -1,5 +1,5 @@
 /**
- * What the Welsh page shows of a job's result. Pure. The result is whatever cft-workspace's `scripts/welsh` printed,
+ * What the Welsh page shows of a job's result. Pure. The result is whatever the welsh plugin's `scripts/welsh` printed,
  * which is released separately from this app, so every field is read defensively: a missing or mistyped one shows as
  * nothing rather than breaking the page. Welsh is only ever displayed here, exactly as the result carries it.
  */
@@ -43,7 +43,6 @@ export interface CatalogueHit {
   context: string;
   status: string;
   source: string;
-  catalogue: string;
 }
 
 export function searchView(result: Json): { total: number; hits: CatalogueHit[] } {
@@ -55,13 +54,12 @@ export function searchView(result: Json): { total: number; hits: CatalogueHit[] 
       welsh: str(h.welsh),
       context: str(h.context),
       status: str(h.status),
-      source: str(h.source),
-      catalogue: str(h.catalogue)
+      source: str(h.source)
     }))
   };
 }
 
-export interface CatalogueOption {
+interface CatalogueOption {
   id: string;
   welsh: string;
   context: string;
@@ -84,8 +82,12 @@ export interface ScanView {
   ambiguousCount: number;
   toWluCount: number;
   ambiguous: Ambiguous[];
-  toWlu: { ref: string; english: string; where: string }[];
-  filled: { ref: string; english: string; welsh: string; where: string }[];
+  /**
+   * `hint` says why a string probably needs no Welsh; `keepable` is whether `keep_english` would stop it being asked
+   * about; `suggestLeaveOut` is whether the page starts it unticked.
+   */
+  toWlu: { ref: string; english: string; page: string; where: string; hint: string | null; keepable: boolean; suggestLeaveOut: boolean }[];
+  filled: { ref: string; english: string; welsh: string; page: string; where: string }[];
 }
 
 export function scanView(result: Json): ScanView {
@@ -97,9 +99,37 @@ export function scanView(result: Json): ScanView {
     ambiguousCount: num(summary.ambiguous),
     toWluCount: num(summary.toWlu),
     ambiguous: list(result.ambiguous).map((a) => ({ ref: str(a.ref), english: str(a.english), where: str(a.where), options: options(a.options) })),
-    toWlu: list(result.toWlu).map((t) => ({ ref: str(t.ref), english: str(t.english), where: str(t.where) })),
-    filled: list(result.fromCatalogue).map((f) => ({ ref: str(f.ref), english: str(f.english), welsh: str(f.welsh), where: str(f.where) }))
+    toWlu: list(result.toWlu).map((t) => ({
+      ref: str(t.ref),
+      english: str(t.english),
+      page: str(t.page),
+      where: str(t.where),
+      hint: nullable(t.hint),
+      keepable: t.keepable === true,
+      // A scan from before the engine said so is read as its hint alone, as it was then.
+      suggestLeaveOut: typeof t.suggest_leave_out === "boolean" ? t.suggest_leave_out : nullable(t.hint) !== null
+    })),
+    filled: list(result.fromCatalogue).map((f) => ({ ref: str(f.ref), english: str(f.english), welsh: str(f.welsh), page: str(f.page), where: str(f.where) }))
   };
+}
+
+/** A scan's strings by the page they are on, each page where its first string came. */
+export function byPage<T extends { page: string }>(items: readonly T[]): { page: string; items: T[] }[] {
+  const pages = new Map<string, T[]>();
+  for (const item of items) {
+    const list = pages.get(item.page);
+    if (list) {
+      list.push(item);
+    } else {
+      pages.set(item.page, [item]);
+    }
+  }
+  return [...pages].map(([page, list]) => ({ page, items: list }));
+}
+
+/** What a `keep_english` job did: the English it added to the allowlist, and the draft pull request that adds it. */
+export function keepView(result: Json): { added: string[]; already: number; pr: string | null } {
+  return { added: (Array.isArray(result.added) ? result.added : []).map(str).filter(Boolean), already: num(result.already), pr: nullable(result.pr) };
 }
 
 export interface ImportView {
@@ -168,7 +198,7 @@ function fromOf(source: string): string {
   if (source.startsWith("WLU:")) {
     return "Welsh unit return";
   }
-  return source.includes("catalogue:shared") ? "Shared catalogue" : "Catalogue";
+  return "Catalogue";
 }
 
 /** The same English on one page appears once per place it is used; a BA checks the words, so it is shown once. */
@@ -202,7 +232,7 @@ export function storyCandidatesView(result: Json): StoryCandidates {
   };
 }
 
-export type StoryRowState = "filled" | "required" | "ambiguous" | "hand-edited";
+type StoryRowState = "filled" | "required" | "ambiguous" | "hand-edited";
 
 export interface StoryRow {
   ref: string;

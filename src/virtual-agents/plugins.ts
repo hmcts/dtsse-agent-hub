@@ -2,8 +2,9 @@ import { byCodePoint } from "../topics/slug.ts";
 import type { Environment } from "./settings.ts";
 
 /**
- * The workspace plugins a virtual agent's pod can load, from the workspace marketplace (`.claude-plugin/
- * marketplace.json` in the checkout). Which ones are offered is hub configuration, `VIRTUAL_AGENT_PLUGINS`; the
+ * The plugins a virtual agent's pod can load: those of the workspace marketplace (`.claude-plugin/marketplace.json` in
+ * the checkout), and those the pod client carries in `packages/agent-hub/plugins/`, which the pod copies onto its
+ * own disk. Which ones are offered is hub configuration, `VIRTUAL_AGENT_PLUGINS`; the
  * owner ticks any of them, and the orchestrator passes the ticked names to the pod as `AGENT_HUB_PLUGINS`. The pod
  * skips a name its checkout does not have, so a name dropped from the configuration does no harm on a pod that keeps
  * it.
@@ -12,7 +13,7 @@ import type { Environment } from "./settings.ts";
 export const MAX_PLUGINS = 20;
 
 /** A marketplace plugin name: lowercase letters, digits and hyphens, starting with a letter or digit. */
-export const PLUGIN_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const PLUGIN_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 export interface PluginOption {
   name: string;

@@ -6,7 +6,7 @@ import type { Database } from "../store/prisma.ts";
  * Next traces that into an Edge bundle too, where the store's `node:crypto` is not available.
  */
 
-export type StopReason = "user" | "idle" | "evening" | "quota" | "expired" | "failed" | "awaiting_owner";
+export type StopReason = "user" | "idle" | "evening" | "failed" | "awaiting_owner";
 
 /** Tells the owner's UI streams that one of their virtual agents changed. Inside the transaction that changed it. */
 export async function announce(db: Database, virtualAgentId: string, ownerOid: string): Promise<void> {
@@ -20,9 +20,9 @@ export async function announce(db: Database, virtualAgentId: string, ownerOid: s
  * launch token goes with it, so the pod is shut out before it is shut down and cannot report its way back out of a
  * stop the sweep decided on.
  *
- * A failed agent's `status_detail` is carried to `stop_detail` on the way, because it says why the agent failed and
- * that is still true with its pod gone. Nothing else survives: the status becomes `stopping`, and the orchestrator's
- * observation of the stopped StatefulSet clears the detail with the pod it described.
+ * An agent not yet stopped becomes `stopping` and loses its `status_detail`, which described the pod being stopped;
+ * one already `stopped` keeps its status, its detail and when its status last changed. The pod's client-features
+ * claim goes either way, since the next boot may run another client.
  */
 export async function stopVirtualAgents(db: Database, ids: readonly string[], reason: StopReason, now: Date): Promise<{ id: string; ownerOid: string }[]> {
   if (ids.length === 0) {
@@ -31,9 +31,8 @@ export async function stopVirtualAgents(db: Database, ids: readonly string[], re
   const stopped = await db.$queryRaw<{ id: string; owner_oid: string }[]>`
     UPDATE virtual_agent
        SET desired = 'stopped', stop_reason = ${reason}::virtual_agent_stop_reason, generation = generation + 1, pod_generation = pod_generation + 1,
-           exposed_ports = '{}', local_only_ports = '{}',
+           exposed_ports = '{}', local_only_ports = '{}', client_features = NULL,
            launch_token_hash = NULL, launch_token_issued_at = NULL, apply_failures = 0,
-           stop_detail = CASE WHEN status = 'failed' THEN status_detail ELSE NULL END,
            status = CASE WHEN status = 'stopped' THEN status ELSE 'stopping' END,
            status_detail = CASE WHEN status = 'stopped' THEN status_detail ELSE NULL END,
            status_changed_at = CASE WHEN status = 'stopped' THEN status_changed_at ELSE ${now} END,

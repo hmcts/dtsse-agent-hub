@@ -1,5 +1,5 @@
-import { canSeeAssistantMemory } from "../access/rules.ts";
-import { clientSupports } from "../agents/client-features.ts";
+import { isOwner } from "../access/rules.ts";
+import { podSupports } from "../agents/client-features.ts";
 import type { PrismaClient } from "../store/prisma.ts";
 import { DEFAULT_SIZE, isVirtualAgentSize, sizeChangeRefusal, sizeChangeRollsPod, type VirtualAgentSize } from "../virtual-agents/size.ts";
 import { type ChatCapacity, chatCapacity, type MemoryReport, type MemoryUse, memoryUse } from "./memory-report.ts";
@@ -51,8 +51,8 @@ export async function reportMemoryUse(prisma: PrismaClient, virtualAgentId: stri
 /**
  * What the viewer's assistant reports about its memory, or `undefined` when it is not theirs.
  *
- * `reports` comes from the pod's *own* session — the virtual agent's current agent, which is the supervisor's
- * registration — because the supervisor is what reads the cgroup, not a conversation's session.
+ * `reports` is the pod's claim (`podSupports`), not a conversation session's, because the supervisor is what reads the
+ * cgroup.
  *
  * A session the supervisor reports `queued` is not counted among the open chats: it is waiting for a slot, so it is
  * costing the pod nothing and closing it would free nothing.
@@ -71,10 +71,11 @@ export async function assistantMemory(prisma: PrismaClient, viewerOid: string, v
       memoryPeakBytes: true,
       memoryAnonBytes: true,
       memoryReportedAt: true,
+      clientFeatures: true,
       agent: { select: { clientFeatures: true } }
     }
   });
-  if (agent === null || !canSeeAssistantMemory(viewerOid, agent.ownerOid)) {
+  if (agent === null || !isOwner(viewerOid, agent)) {
     return undefined;
   }
   const size = isVirtualAgentSize(agent.size) ? agent.size : DEFAULT_SIZE;
@@ -88,7 +89,7 @@ export async function assistantMemory(prisma: PrismaClient, viewerOid: string, v
       memoryAnonBytes: agent.memoryAnonBytes,
       memoryReportedAt: agent.memoryReportedAt,
       running,
-      reports: clientSupports(agent.agent?.clientFeatures, "memory-anon")
+      reports: podSupports(agent, "memory-anon")
     }),
     size,
     capacity: chatCapacity(agent.sessionsMax, size, running),

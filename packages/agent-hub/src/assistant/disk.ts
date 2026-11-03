@@ -4,8 +4,8 @@
 // second is the one that explains why something has started going wrong.
 import nodeFs from "node:fs";
 import path from "node:path";
-import type { UploadsReportBody } from "../api.ts";
 import type { Env } from "../env.ts";
+import type { UploadsReportBody } from "../wire.ts";
 import { type AttachmentFs, uploadsRoot } from "./attachments.ts";
 
 /** As many files as one report names, largest first; `MAX_REPORTED_FILES` in the service's upload-report.ts. */

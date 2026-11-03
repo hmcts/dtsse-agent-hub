@@ -1,4 +1,4 @@
-import { type AgentRef, canReadMessage, canSeeAgentSkills, canViewAgent, canViewTranscript, canViewVirtualAgent } from "../access/rules.ts";
+import { type AgentRef, canReadMessage, canViewTranscript, isOwner } from "../access/rules.ts";
 import type { LoadedThreadMessage } from "../messages/direct-thread.ts";
 import type { Match, PostScope } from "../messages/feed.ts";
 import type { ApiMessage } from "../messages/shape.ts";
@@ -15,7 +15,11 @@ import { type OnOpen, type Send, sseEvent } from "./sse.ts";
  *
  * - `post`: a post on the watched topics, matched `any` or `all`, or any post when the page watches `everything`.
  *   Posts are readable by everyone signed in.
- * - `agent_status`: a status change of any agent the viewer can see, for the sidebar's dots.
+ * - `agent_status`: a status change of the watched agent, or of the current session of any of the viewer's listed
+ *   chats on their own computer, when the viewer owns it. `conversation_id` names that chat, or is null for any other
+ *   agent. The Assistant's chat shows from it whether its session is working, and the sidebar and its search recolour
+ *   a local chat's laptop mark from it. One frame serves both, so a local chat that is also the open one is sent one
+ *   frame, and the chat is named from the NOTIFY itself rather than read per event.
  * - `direct` and `delivery`: a message in the watched agent's thread, or a change to its delivery, when the viewer
  *   can still see that agent and read that message.
  * - `transcript`: the watched agent's transcript has new entries, up to `last_id`, when the viewer may still read
@@ -24,9 +28,9 @@ import { type OnOpen, type Send, sseEvent } from "./sse.ts";
  *   sent; the page re-reads, which hands its composer the new list.
  * - `agent_question`: the watched agent asked a question, or one of its questions was answered, when the viewer can
  *   still see that agent. Only the id is sent; the page re-reads, which hands the thread the cards.
- * - `virtual_agent`: one of the viewer's own virtual agents changed, so the live view keeps up with the page rather
- *   than quietly going stale. Only the id is sent, which is no more than the page already shows them: its login codes
- *   and settings are read under their own rule when the page re-reads.
+ * - `virtual_agent`: one of the viewer's own virtual agents changed, so the Assistant re-reads its page, its sign-in
+ *   codes included, and any settings section that is open re-reads its data. Only the id is sent; what is re-read is
+ *   read under its own rule.
  * - `assistant_conversation`: one of the viewer's own assistant conversations changed. Only the id is sent, and only
  *   to its owner; the page re-reads it.
  * - `resync`: the pod's listener reconnected and NOTIFYs may have been missed, or the viewer saved or deleted a
@@ -93,17 +97,23 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
       return sseEvent({ id: message.id, event: "post", data: JSON.stringify({ message }) });
     }
     case "agent_status": {
-      if (!canViewAgent(sources.viewerOid, { id: event.agent_id, ownerOid: event.owner_oid })) {
+      const agent = watch.agent;
+      const watched = agent?.id === event.agent_id && isOwner(sources.viewerOid, agent);
+      const localChat = event.local_conversation_id !== null && isOwner(sources.viewerOid, { ownerOid: event.owner_oid });
+      if (!watched && !localChat) {
         return undefined;
       }
-      return sseEvent({ event: "agent_status", data: JSON.stringify({ agent_id: event.agent_id, status: event.status }) });
+      return sseEvent({
+        event: "agent_status",
+        data: JSON.stringify({ agent_id: event.agent_id, status: event.status, conversation_id: event.local_conversation_id })
+      });
     }
     case "direct": {
       const agent = watch.agent;
       if (agent === null || (event.target_agent_id !== agent.id && event.author_agent_id !== agent.id)) {
         return undefined;
       }
-      if (!canViewAgent(sources.viewerOid, agent)) {
+      if (!isOwner(sources.viewerOid, agent)) {
         return undefined;
       }
       const loaded = await sources.direct(BigInt(event.message_id));
@@ -114,7 +124,7 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
     }
     case "delivery": {
       const agent = watch.agent;
-      if (agent === null || event.agent_id !== agent.id || !canViewAgent(sources.viewerOid, agent)) {
+      if (agent === null || event.agent_id !== agent.id || !isOwner(sources.viewerOid, agent)) {
         return undefined;
       }
       return sseEvent({ event: "delivery", data: JSON.stringify({ message_id: event.message_id, state: event.state }) });
@@ -128,14 +138,14 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
     }
     case "agent_skills": {
       const agent = watch.agent;
-      if (agent === null || event.agent_id !== agent.id || !canSeeAgentSkills(sources.viewerOid, agent)) {
+      if (agent === null || event.agent_id !== agent.id || !isOwner(sources.viewerOid, agent)) {
         return undefined;
       }
       return sseEvent({ event: "agent_skills", data: JSON.stringify({ agent_id: event.agent_id }) });
     }
     case "agent_question": {
       const agent = watch.agent;
-      if (agent === null || event.agent_id !== agent.id || !canViewAgent(sources.viewerOid, agent)) {
+      if (agent === null || event.agent_id !== agent.id || !isOwner(sources.viewerOid, agent)) {
         return undefined;
       }
       return sseEvent({ event: "agent_question", data: JSON.stringify({ agent_id: event.agent_id }) });
@@ -145,13 +155,13 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
     case "tagged_post":
       return undefined;
     case "credential":
-      return event.owner_oid === sources.viewerOid ? RESYNC : undefined;
+      return isOwner(sources.viewerOid, { ownerOid: event.owner_oid }) ? RESYNC : undefined;
     case "virtual_agent":
-      return canViewVirtualAgent(sources.viewerOid, { id: event.virtual_agent_id, ownerOid: event.owner_oid })
+      return isOwner(sources.viewerOid, { ownerOid: event.owner_oid })
         ? sseEvent({ event: "virtual_agent", data: JSON.stringify({ virtual_agent_id: event.virtual_agent_id }) })
         : undefined;
     case "assistant_conversation":
-      return event.owner_oid === sources.viewerOid
+      return isOwner(sources.viewerOid, { ownerOid: event.owner_oid })
         ? sseEvent({ event: "assistant_conversation", data: JSON.stringify({ conversation_id: event.conversation_id }) })
         : undefined;
     // Never sent to a browser: it is an instruction to the conversation's pod. The stop is recorded on the

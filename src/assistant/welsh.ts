@@ -4,29 +4,55 @@ import { PRODUCTS } from "./products.ts";
 
 /**
  * Welsh translation jobs for the Assistant's Welsh page: the kinds, what each takes, the limits, what the pod may
- * answer, and what the browser is shown. Pure. Every job is one run of cft-workspace's `scripts/welsh` in the person's
- * pod, with their own GitHub and `twg` sign-ins, so the hub holds neither and calls nothing; `welsh-store.ts` records
+ * answer, and what the browser is shown. Pure. Every job is one run of the `welsh` plugin's `scripts/welsh` in the
+ * person's pod, with their own GitHub and `twg` sign-ins, so the hub holds neither and calls nothing; `welsh-store.ts` records
  * the job and reads back the answer. No job goes through a model turn, and none generates Welsh: it comes from the
  * service's catalogue or a Welsh Language Unit return, and `scripts/welsh verify` refuses anything else. See "Welsh
  * translation jobs" in docs/agent-api.md.
  */
 
-export const WELSH_KINDS = [
+/**
+ * The plugin that carries the Welsh tools, which the pod client carries in `packages/agent-hub/plugins/welsh` and puts
+ * on the pods of people who tick it. The Welsh page is for people who ticked it for
+ * their assistant: the pod loads only what is ticked, so for anyone else there would be nothing to run a job with.
+ */
+export const WELSH_PLUGIN = "welsh";
+
+/** Whether a virtual agent has the Welsh plugin ticked. */
+export function hasWelshPlugin(virtualAgent: { plugins: readonly string[] }): boolean {
+  return virtualAgent.plugins.includes(WELSH_PLUGIN);
+}
+
+/** What a Welsh job or upload is refused with when the person's assistant has not got the plugin ticked. */
+export const WELSH_NOT_TURNED_ON = "turn on Welsh translations in Settings, under Tools, first";
+
+const WELSH_KINDS = [
   "info",
   "search",
   "scan",
+  "request",
   "import_check",
   "import",
   "apply_preview",
   "apply",
   "story_candidates",
   "story_preview",
-  "story_write"
+  "story_write",
+  "keep_english"
 ] as const;
 export type WelshKind = (typeof WELSH_KINDS)[number];
 
+/**
+ * The client feature a pod must claim to be sent a kind. `request` and `keep_english` came after `welsh`, and a pod on
+ * a client from before them ignores their frames, so it is answered `unsupported` (needs an update) rather than left to
+ * time out.
+ */
+export function welshFeature(kind: WelshKind): "welsh" | "welsh-review" {
+  return kind === "request" || kind === "keep_english" ? "welsh-review" : "welsh";
+}
+
 /** The Welsh page's tasks, which `?task=` can open directly. */
-export const WELSH_TASK_IDS = ["search", "scan", "return", "story"] as const;
+const WELSH_TASK_IDS = ["search", "scan", "return", "story"] as const;
 export type WelshTask = (typeof WELSH_TASK_IDS)[number];
 
 export function isWelshTask(value: unknown): value is WelshTask {
@@ -48,16 +74,19 @@ export const WELSH_RATE_LIMIT = 30;
 export const MAX_WELSH_FILE_BYTES = 5 * 1024 * 1024;
 export const MAX_WELSH_FILES_PER_JOB = 4;
 export const MAX_WELSH_RESULT_BYTES = 512 * 1024;
-export const MAX_WELSH_DETAIL = 500;
+const MAX_WELSH_DETAIL = 500;
 export const MAX_WELSH_QUERY = 100;
 export const MAX_WELSH_STRINGS = 200;
-export const MAX_WELSH_STRING = 2000;
-export const MAX_WELSH_CHOICES = 200;
+const MAX_WELSH_STRING = 2000;
+const MAX_WELSH_CHOICES = 200;
+/** As many refs as a scan lists, since a BA can only leave out one they were shown: the pod's `SCAN_LIST_LIMIT`. */
+const MAX_WELSH_LEAVE_OUT = 300;
 
-export const WELSH_REF_RE = /^CY-[\dA-F]{8}$/;
-export const WELSH_ROW_ID_RE = /^[\da-f]{10}$/;
+const WELSH_REF_RE = /^CY-[\dA-F]{8}$/;
+const WELSH_ROW_ID_RE = /^[\da-f]{10}$/;
+/** Must agree with the pod's `KEY_RE` (`packages/agent-hub/src/assistant/welsh.ts`), which re-checks every job. */
 export const JIRA_KEY_RE = /^[A-Z][A-Z\d_]{1,9}-\d{1,7}$/;
-export const UUID_RE = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
+const UUID_RE = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
 const REPO_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 
 /**
@@ -112,6 +141,14 @@ const ARG_SCHEMAS: Record<WelshKind, z.ZodTypeAny> = {
   info: z.object({}).strict(),
   search: z.object({ query: z.string().trim().min(1).max(MAX_WELSH_QUERY), mode: z.enum(["contains", "exact", "fuzzy"]).default("contains") }).strict(),
   scan: z.object({ repo: repo.optional() }).strict(),
+  request: z
+    .object({
+      repo: repo.optional(),
+      leave_out: boundedArray(z.string().regex(WELSH_REF_RE, "that is not a ref"), MAX_WELSH_LEAVE_OUT, {
+        message: `leave out at most ${MAX_WELSH_LEAVE_OUT}`
+      }).optional()
+    })
+    .strict(),
   import_check: z.object({ file_id: fileId }).strict(),
   import: z.object({ file_id: fileId }).strict(),
   apply_preview: applyArgs,
@@ -126,7 +163,23 @@ const ARG_SCHEMAS: Record<WelshKind, z.ZodTypeAny> = {
       choices: choices.optional()
     })
     .strict(),
-  story_write: z.object({ key }).strict()
+  story_write: z.object({ key }).strict(),
+  keep_english: z
+    .object({
+      strings: boundedArray(
+        z
+          .string()
+          .trim()
+          .min(1)
+          .max(MAX_WELSH_STRING)
+          .regex(/^[^\r\n]*$/, "one line each"),
+        MAX_WELSH_STRINGS,
+        {
+          message: `keep at most ${MAX_WELSH_STRINGS} at a time`
+        }
+      ).refine((strings) => strings.length > 0, "choose at least one")
+    })
+    .strict()
 };
 
 export type WelshArgs = Record<string, unknown>;

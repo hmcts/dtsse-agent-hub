@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { LoginCountdown } from "@/components/virtual-agents/LoginCountdown";
+import { LoginCountdown } from "@/components/assistant/LoginCountdown";
 import type { LoginView } from "@/virtual-agents/logins";
 
 /** Where the Atlassian sign-in an export is waiting on has got to, which decides what the footer may claim. */

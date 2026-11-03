@@ -14,7 +14,7 @@ import type { Database, PrismaClient } from "../store/prisma.ts";
  */
 
 /** How often the sweep runs. With `UPLOAD_SWEEP_BATCH` this is the drain rate for every upload; see that constant. */
-export const UPLOAD_SWEEP_INTERVAL_MS = 10 * 60_000;
+const UPLOAD_SWEEP_INTERVAL_MS = 10 * 60_000;
 
 /**
  * How long an upload keeps its bytes in Postgres, from the moment it was started.
@@ -36,7 +36,7 @@ export const UPLOAD_RETENTION_HOURS = 3;
  * their window, so this and the interval are what to raise first — before the per-file or per-conversation caps, which
  * bound one person's share and say nothing about the whole database's.
  */
-export const UPLOAD_SWEEP_BATCH = 20;
+const UPLOAD_SWEEP_BATCH = 20;
 
 /** "upldswep". Distinct from the migration, offline-sweep and transcript-sweep locks. */
 const UPLOAD_SWEEP_LOCK_KEY = 0x75706c64_73776570n;
@@ -100,8 +100,8 @@ export async function sweepUploads(prisma: PrismaClient, options: UploadSweepOpt
  * Deletes the conversations that exist only because someone attached a file on the new-chat screen and never sent it.
  *
  * Attaching there has to create the conversation first — a file belongs to one before any of its bytes can be sent —
- * so walking away at that point leaves an empty chat behind. It is not harmless: the sidebar shows it as a second
- * "New chat" the person did not make and cannot account for, and it carries a pre-created `agent` row with it. So it
+ * so walking away at that point leaves an empty chat behind. The sidebar and the search leave it out, since nothing was
+ * ever said in it (`first_content_at`), but the row stays, with a pre-created `agent` row and the person's file. So it
  * is swept rather than left.
  *
  * The conditions are what make this safe to run unattended, and each is load-bearing:
@@ -120,9 +120,9 @@ export async function sweepUploads(prisma: PrismaClient, options: UploadSweepOpt
  *   second file hours later puts the clock back rather than leaving a live composer to be swept out from under them.
  *
  * It deliberately does **not** require the conversation to still have an upload. Attaching a file and then removing
- * the chip deletes the upload row and leaves a conversation nothing would ever collect, showing in the sidebar as a
- * "New chat" that cannot be explained; the same is true of a `startConversation` whose first message failed after
- * the row was created. An empty conversation is one nobody has said anything in, whatever route produced it, and
+ * the chip deletes the upload row and leaves a conversation nothing else would ever collect; the same is true of a
+ * `startConversation` whose first message failed after the row was created, which the new-chat screen does not reuse:
+ * it keeps the draft, and the retry starts another conversation. An empty conversation is one nobody has said anything in, whatever route produced it, and
  * after the window it is rubbish either way.
  */
 async function dropAbandoned(tx: Database, retentionHours: number, batch: number): Promise<number> {

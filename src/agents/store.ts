@@ -1,12 +1,15 @@
-import { agentsMessageableBy, POD_CONVERSATION_AGENT } from "../access/load.ts";
+import { agentsMessageableBy, POD_CONVERSATION_AGENT, podConversationAgentSql } from "../access/load.ts";
 import { isPodConversationAgent } from "../access/rules.ts";
 import type { Caller } from "../agent-auth/authenticate.ts";
-import { linkLocalSession, linkSession } from "../assistant/store.ts";
+import { linkLocalSession, localConversationSql, needsLocalChatSql } from "../assistant/local-chat-store.ts";
+import { linkSession } from "../assistant/session-store.ts";
 import type { AgentStatus } from "../realtime/events.ts";
 import { notify } from "../realtime/notify.ts";
 import { likeLiteral } from "../store/like.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { upsertUser } from "../users/store.ts";
+import { isUuid } from "./ids.ts";
+import { type NameSource, nameSourceOf } from "./name-source.ts";
 import { normaliseSkills, type Skill, skillsChanged, storedSkills } from "./skills.ts";
 
 export interface Registration {
@@ -24,6 +27,11 @@ export interface Registration {
    * register would have the hub send a field this client does not read.
    */
   clientFeatures?: string[];
+  /**
+   * Where `name` came from. Replaced on every registration as `clientFeatures` is, and for the same reason: it
+   * describes the name this session is running under now. `derived` when a client did not say.
+   */
+  nameSource?: NameSource;
   /** The assistant conversation this session is for, sent by an assistant pod's conversation sessions only. */
   conversationId?: string | null;
 }
@@ -60,6 +68,7 @@ export async function registerAgent(prisma: PrismaClient, owner: Caller, registr
   const virtualAgentId = owner.virtualAgentId ?? null;
   const skills = registration.skills === undefined ? null : JSON.stringify(registration.skills);
   const clientFeatures = registration.clientFeatures === undefined ? null : JSON.stringify(registration.clientFeatures);
+  const nameSource = nameSourceOf(registration.nameSource);
   const conversationId = registration.conversationId ?? null;
   // Nobody's pod, and naming no conversation: a session on somebody's laptop.
   const local = virtualAgentId === null && conversationId === null;
@@ -94,11 +103,14 @@ export async function registerAgent(prisma: PrismaClient, owner: Caller, registr
         : await tx.$queryRaw<
             { id: string; skills: unknown }[]
           >`SELECT id::text AS id, skills FROM agent WHERE session_id = ${registration.sessionId} FOR UPDATE`;
-    const [agent] = await tx.$queryRaw<{ id: string; name: string; conversation_id: string | null }[]>`
-      INSERT INTO agent (owner_oid, session_id, name, cwd, repo, branch, host, status, last_heartbeat_at, read_cursor, virtual_agent_id, skills, client_features, assistant_conversation_id)
+    const [agent] = await tx.$queryRaw<
+      { id: string; name: string; conversation_id: string | null; needs_local_chat: boolean; local_conversation_id: string | null }[]
+    >`
+      INSERT INTO agent (owner_oid, session_id, name, name_source, cwd, repo, branch, host, status, last_heartbeat_at, read_cursor, virtual_agent_id, skills, client_features, assistant_conversation_id)
       VALUES (
         ${owner.oid}, ${registration.sessionId},
         COALESCE((SELECT name FROM virtual_agent WHERE id = ${virtualAgentId}::uuid), ${registration.name}),
+        ${nameSource},
         ${registration.cwd}, ${registration.repo},
         ${registration.branch}, ${registration.host}, 'idle', now(), (SELECT COALESCE(max(id), 0) FROM message), ${virtualAgentId}::uuid,
         COALESCE(${skills}::jsonb, '[]'::jsonb), ${clientFeatures}::jsonb, ${conversationId}::uuid
@@ -106,8 +118,9 @@ export async function registerAgent(prisma: PrismaClient, owner: Caller, registr
       ON CONFLICT (session_id) DO UPDATE
         SET name = EXCLUDED.name, cwd = EXCLUDED.cwd, repo = EXCLUDED.repo, branch = EXCLUDED.branch, host = EXCLUDED.host,
             status = 'idle', last_heartbeat_at = now(), ended_at = NULL, skills = COALESCE(${skills}::jsonb, agent.skills),
-            -- Not COALESCEd, unlike the skills: whatever this register reported is what is running, nothing included.
-            client_features = EXCLUDED.client_features
+            -- Neither of these is COALESCEd, unlike the skills: whatever this register reported is what is running,
+            -- nothing included. name_source goes with the name it describes, which this register also replaced.
+            client_features = EXCLUDED.client_features, name_source = EXCLUDED.name_source
         WHERE agent.owner_oid = EXCLUDED.owner_oid AND agent.virtual_agent_id IS NOT DISTINCT FROM EXCLUDED.virtual_agent_id
           -- The second arm is a caller that is nobody's pod and names no conversation, which is a session on a
           -- laptop re-registering: it sends no conversation id and the hub's own link is already on the row, so
@@ -118,12 +131,13 @@ export async function registerAgent(prisma: PrismaClient, owner: Caller, registr
           -- already refuses. assistant_conversation_id is not in the SET list, so neither caller moves it.
           AND (agent.assistant_conversation_id IS NOT DISTINCT FROM EXCLUDED.assistant_conversation_id
                OR (EXCLUDED.virtual_agent_id IS NULL AND EXCLUDED.assistant_conversation_id IS NULL))
-      RETURNING id::text AS id, name, assistant_conversation_id::text AS conversation_id
+      RETURNING id::text AS id, name, assistant_conversation_id::text AS conversation_id, ${needsLocalChatSql("agent")} AS needs_local_chat,
+                ${localConversationSql("agent")} AS local_conversation_id
     `;
     if (agent === undefined) {
       throw new SessionOwnedElsewhere("that session id is registered to someone else");
     }
-    await notify(tx, { type: "agent_status", agent_id: agent.id, owner_oid: owner.oid, status: "idle" });
+    await notify(tx, { type: "agent_status", agent_id: agent.id, owner_oid: owner.oid, status: "idle", local_conversation_id: agent.local_conversation_id });
     if (existing?.id === agent.id && registration.skills !== undefined && skillsChanged(storedSkills(existing.skills), normaliseSkills(registration.skills))) {
       await notify(tx, { type: "agent_skills", agent_id: agent.id, owner_oid: owner.oid });
     }
@@ -132,9 +146,10 @@ export async function registerAgent(prisma: PrismaClient, owner: Caller, registr
     } else if (virtualAgentId !== null) {
       await tx.virtualAgent.update({ where: { id: virtualAgentId }, data: { agentId: agent.id, lastActiveAt: new Date(), updatedAt: new Date() } });
       await notify(tx, { type: "virtual_agent", virtual_agent_id: virtualAgentId, owner_oid: owner.oid });
-    } else if (local && agent.conversation_id === null) {
+    } else if (agent.needs_local_chat) {
       // The column as the upsert left it, read under the advisory lock, so a re-registration finds the conversation
-      // the first one made rather than making a second.
+      // the first one made rather than making a second. A session whose chat the person removed is given none
+      // (`deleteConversation`); `chat_removed_at` is not in the upsert's SET list, so a re-registration keeps it.
       await linkLocalSession(tx, { ownerOid: owner.oid, agentId: agent.id, name: agent.name });
     }
     return { id: agent.id, name: agent.name };
@@ -168,10 +183,31 @@ export async function findAgent(db: Database, id: string): Promise<AgentRow | un
 async function lockAgent(
   db: Database,
   agentId: string
-): Promise<{ status: AgentStatus; ownerOid: string; virtualName: string | null; skills: Skill[]; name: string; local: boolean } | undefined> {
-  const [row] = await db.$queryRaw<{ status: AgentStatus; owner_oid: string; virtual_name: string | null; skills: unknown; name: string; local: boolean }[]>`
+): Promise<
+  | {
+      status: AgentStatus;
+      ownerOid: string;
+      virtualName: string | null;
+      skills: Skill[];
+      name: string;
+      needsLocalChat: boolean;
+      localConversationId: string | null;
+    }
+  | undefined
+> {
+  const [row] = await db.$queryRaw<
+    {
+      status: AgentStatus;
+      owner_oid: string;
+      virtual_name: string | null;
+      skills: unknown;
+      name: string;
+      needs_local_chat: boolean;
+      local_conversation_id: string | null;
+    }[]
+  >`
     SELECT a.status::text AS status, a.owner_oid, v.name AS virtual_name, a.skills, a.name,
-           (a.virtual_agent_id IS NULL AND a.assistant_conversation_id IS NULL) AS local
+           ${needsLocalChatSql("a")} AS needs_local_chat, ${localConversationSql("a")} AS local_conversation_id
       FROM agent a LEFT JOIN virtual_agent v ON v.id = a.virtual_agent_id
      WHERE a.id = ${agentId}::uuid
        FOR UPDATE OF a
@@ -184,7 +220,8 @@ async function lockAgent(
         virtualName: row.virtual_name,
         skills: storedSkills(row.skills),
         name: row.name,
-        local: row.local
+        needsLocalChat: row.needs_local_chat,
+        localConversationId: row.local_conversation_id
       };
 }
 
@@ -193,13 +230,18 @@ async function lockAgent(
  * with its next heartbeat. A virtual agent's session takes the name its owner gave the virtual agent, which also corrects one registered
  * under another name. `skills`, sent only when the session's list changed, replaces the stored list, and is announced
  * when it differs from it, so an open agent page re-reads its composer's "/" autocomplete.
+ *
+ * `nameSource` is stored with the name and only when the name is, so a heartbeat that reports no name says nothing
+ * about where the stored one came from. That is what lets a `/rename` part-way through a session reach the hub
+ * within a heartbeat, which is the whole reason a chat on somebody's own computer can keep the name they chose.
  */
 export async function heartbeat(
   prisma: PrismaClient,
   agentId: string,
   status: Exclude<AgentStatus, "offline">,
   name: string | null,
-  skills?: Skill[]
+  skills?: Skill[],
+  nameSource?: NameSource
 ): Promise<void> {
   await prisma.$transaction(async (tx) => {
     const before = await lockAgent(tx, agentId);
@@ -213,22 +255,23 @@ export async function heartbeat(
         lastHeartbeatAt: new Date(),
         endedAt: null,
         ...(skills === undefined ? {} : { skills: skills.map(({ name, description }) => ({ name, description })) }),
-        ...(before.virtualName !== null ? { name: before.virtualName } : name === null ? {} : { name })
+        ...(before.virtualName !== null ? { name: before.virtualName } : name === null ? {} : { name, nameSource: nameSourceOf(nameSource) })
       }
     });
     if (before.status !== status) {
-      await notify(tx, { type: "agent_status", agent_id: agentId, owner_oid: before.ownerOid, status });
+      await notify(tx, { type: "agent_status", agent_id: agentId, owner_oid: before.ownerOid, status, local_conversation_id: before.localConversationId });
     }
     if (skills !== undefined && skillsChanged(before.skills, normaliseSkills(skills))) {
       await notify(tx, { type: "agent_skills", agent_id: agentId, owner_oid: before.ownerOid });
     }
-    // A laptop session with no conversation gets one here as well as at registration, because registration is not
-    // where most of them arrive. The client registers only while it holds no agent id and heartbeats ever after, so
-    // every session already running when conversations were introduced — and every agent row written before then —
-    // would otherwise never have had one, with nothing to create it later. Under the same row lock the heartbeat
-    // already takes, so two heartbeats cannot both make one.
-    if (before.local) {
-      await linkLocalSession(tx, { ownerOid: before.ownerOid, agentId, name: before.name });
+    // A laptop session with no conversation gets one here as well as at registration: the client registers only while
+    // it holds no agent id and heartbeats ever after, so a session whose agent row has no conversation would otherwise
+    // never get one. Under the same row lock the heartbeat already takes, so two heartbeats cannot both make one. Not a
+    // session whose chat the person removed, which `needsLocalChatSql` leaves out (`deleteConversation`).
+    if (before.needsLocalChat) {
+      // The name this heartbeat reported, not the one the row held before it: the two differ exactly when the
+      // client has just worked out a better one, and the chat made here would otherwise be named the worse of them.
+      await linkLocalSession(tx, { ownerOid: before.ownerOid, agentId, name: name ?? before.name });
     }
   });
 }
@@ -241,7 +284,13 @@ export async function markOffline(prisma: PrismaClient, agentId: string): Promis
     }
     await tx.agent.update({ where: { id: agentId }, data: { status: "offline", endedAt: new Date() } });
     if (before.status !== "offline") {
-      await notify(tx, { type: "agent_status", agent_id: agentId, owner_oid: before.ownerOid, status: "offline" });
+      await notify(tx, {
+        type: "agent_status",
+        agent_id: agentId,
+        owner_oid: before.ownerOid,
+        status: "offline",
+        local_conversation_id: before.localConversationId
+      });
     }
   });
 }
@@ -265,7 +314,7 @@ export interface ListedAgent {
   owner: { name: string; email: string | null };
 }
 
-export const MAX_LISTED_AGENTS = 200;
+const MAX_LISTED_AGENTS = 200;
 
 /**
  * The agents `oid` may message, live ones first and then most recently heard from: their own sessions, which is what
@@ -306,8 +355,6 @@ export interface SuggestedAgent {
   ownerOid: string;
   name: string;
   ownerName: string;
-  /** Read by `canSuggestAgent`, so the rule and not this query is the last word on what may be offered. */
-  ownerOnly: boolean;
 }
 
 /**
@@ -316,40 +363,25 @@ export interface SuggestedAgent {
  * answer at all and how many agents one answer may carry.
  *
  * A hyphen rather than any substring, so "pcs" finds `alice-pcs-api` without "api" finding every agent that has one
- * in its name. Every owner's, because tagging reaches every owner's; the pod conversation's agents it leaves out are
- * the ones nobody may tag.
+ * in its name. Every owner's, because tagging reaches every owner's, less the pod conversations' agents, which
+ * nobody may tag (`tagRefusal`): left out in the query, by `podConversationAgentSql`, so that a person with a dozen
+ * chats, each an agent named after their assistant, does not spend the whole `LIMIT` on rows nobody may be offered.
  */
 export async function searchTaggableAgents(db: Database, query: string, limit: number): Promise<SuggestedAgent[]> {
   const starts = `${likeLiteral(query)}%`;
   const afterHyphen = `%-${likeLiteral(query)}%`;
-  // The pod conversations are left out here as well as by the rule, rather than only by it: a person with a dozen
-  // chats has a dozen agents all named after their assistant, and a query matching that name would otherwise spend
-  // the whole limit on rows the rule then drops and answer with nothing.
-  const rows = await db.$queryRaw<
-    { id: string; owner_oid: string; name: string; owner_name: string; conversation_id: string | null; virtual_agent_id: string | null }[]
-  >`
-    SELECT a.id::text AS id, a.owner_oid, a.name, u.name AS owner_name,
-           a.assistant_conversation_id::text AS conversation_id, a.virtual_agent_id::text AS virtual_agent_id
+  const rows = await db.$queryRaw<{ id: string; owner_oid: string; name: string; owner_name: string }[]>`
+    SELECT a.id::text AS id, a.owner_oid, a.name, u.name AS owner_name
       FROM agent a JOIN "user" u ON u.oid = a.owner_oid
      WHERE (lower(a.name) LIKE ${starts} OR lower(a.name) LIKE ${afterHyphen})
-       AND NOT (a.assistant_conversation_id IS NOT NULL AND a.virtual_agent_id IS NOT NULL)
+       AND NOT ${podConversationAgentSql("a")}
      ORDER BY (a.status = 'offline'), a.last_heartbeat_at DESC, a.id
      LIMIT ${limit}
   `;
-  return rows.map((row) => ({
-    id: row.id,
-    ownerOid: row.owner_oid,
-    name: row.name,
-    ownerName: row.owner_name,
-    ownerOnly: isPodConversationAgent({ assistantConversationId: row.conversation_id, virtualAgentId: row.virtual_agent_id })
-  }));
+  return rows.map((row) => ({ id: row.id, ownerOid: row.owner_oid, name: row.name, ownerName: row.owner_name }));
 }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-export function isUuid(value: string): boolean {
-  return UUID.test(value);
-}
+export { isUuid };
 
 export interface Candidate {
   id: string;

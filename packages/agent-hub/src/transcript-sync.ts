@@ -2,10 +2,11 @@
 // upload is incremental: a byte offset into the JSONL file is saved beside the session's other state and only
 // moves past batches the service took. Everything that leaves this module has been through the secret scanner.
 import fs from "node:fs";
-import { type Api, ApiError, type TranscriptEntry } from "./api.ts";
+import { type Api, ApiError } from "./api.ts";
 import type { Env } from "./env.ts";
 import { findSecret } from "./secret-scan.ts";
 import { log, readJson, removeFile, statePath, transcriptPath, writeJson } from "./session.ts";
+import type { TranscriptEntry } from "./wire.ts";
 
 export const MAX_CONTENT_BYTES = 16384;
 export const MAX_BATCH_ENTRIES = 100;

@@ -61,7 +61,7 @@ export const PUT = agentRoute<{ kind: string }>(async ({ caller, request, params
     if (!owned.ok && owned.reason === "unconfigured") {
       throw new HttpError(503, owned.error);
     }
-    if (!owned.ok && owned.reason === "not-owner") {
+    if (!owned.ok && (owned.reason === "not-owner" || owned.reason === "other-tenant")) {
       throw new HttpError(400, owned.error);
     }
   }

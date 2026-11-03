@@ -22,7 +22,9 @@ import * as partRoute from "../../src/app/api/ui/uploads/[uploadId]/parts/[index
 import * as discardRoute from "../../src/app/api/ui/uploads/[uploadId]/route.ts";
 import * as uploadRoute from "../../src/app/api/ui/uploads/route.ts";
 import * as conversationsRoute from "../../src/app/api/virtual/[virtualAgentId]/conversations/route.ts";
-import { createConversation, ensureAssistant, linkLocalSession } from "../../src/assistant/store.ts";
+import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
+import { createConversation } from "../../src/assistant/conversation-store.ts";
+import { linkLocalSession } from "../../src/assistant/local-chat-store.ts";
 import { startUploadSweep, sweepUploads } from "../../src/assistant/upload-sweep.ts";
 import { MAX_ATTACHMENTS_PER_MESSAGE, MAX_CONVERSATION_BYTES, MAX_UPLOAD_BYTES, PART_BYTES } from "../../src/assistant/uploads.ts";
 import { unsentChat } from "../../src/assistant/views.ts";
@@ -1298,7 +1300,7 @@ describe("a file from the browser to the session's envelope", () => {
     const { agentId, sessionId } = await sessionOf(conversation.id);
     await register(token, sessionId, conversation.id);
 
-    // Act: exactly what `bridge.ts` does on a `direct` — parse the frame, fetch what it names, then build the envelope.
+    // Act: exactly what the bridge does on a `direct` — parse the frame (`frames.ts`), fetch what it names, then build the envelope.
     const frame = await frameFor(token, agentId);
     const assistant = parseAssistantFrame(frame.assistant);
     const attachments = parseAttachments(assistant?.attachments);
@@ -1704,8 +1706,7 @@ describe("the sweep of conversations attaching left behind", () => {
 
   it("should delete an old empty conversation whatever became of its files, since nobody ever spoke in it", async () => {
     // It used to take an upload still being present, which left anything whose file had been removed — or whose
-    // very first message failed after the row was created — showing in the sidebar for ever with nothing to
-    // collect it.
+    // very first message failed after the row was created — in the table for ever with nothing to collect it.
     // Arrange
     await startedAssistant();
     const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });

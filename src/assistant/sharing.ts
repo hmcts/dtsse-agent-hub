@@ -2,12 +2,13 @@ import type { ConversationAccess } from "../access/rules.ts";
 import type { Database } from "../store/prisma.ts";
 import { conversationItems } from "../transcripts/conversation.ts";
 import { agentConversation } from "../transcripts/views.ts";
+import { readArtefact } from "./artefact-store.ts";
+import { storedHistory, storedStops } from "./conversation-row.ts";
 import { FORKED_SELECT, type ForkedView, forkedView } from "./forks.ts";
 import { hasPod } from "./pods.ts";
 import { productLabel } from "./products.ts";
 import type { SharedConversationRow } from "./shares.ts";
-import { readArtefact } from "./store.ts";
-import { type ProductMark, type StopMark, type ThreadItem, threadItems } from "./thread.ts";
+import { type ThreadItem, threadItems } from "./thread.ts";
 import { UNTITLED } from "./views.ts";
 
 /**
@@ -50,7 +51,7 @@ export type SharedThreadItem =
  * assistant asked, which are controls rather than words — a recipient must not answer one, and an answered question
  * is quoted back in the owner's own answering message, which a share does show.
  *
- * The tool calls go too. A share carries the words, and the one reader a tool row is for is the developer whose own
+ * The tool calls and the harness notices (a command run, a background task reporting) go too. A share carries the words, and the one reader a tool row is for is the developer whose own
  * session made the call: it names a path on their disk, a command they ran or a repository they were in, none of
  * which is anything the chat was about. `sharedConversation` asks for the thread without them in any case, since
  * only a local chat has them; this is the type refusing to carry one that reached here another way.
@@ -65,7 +66,7 @@ export function sharedThreadItems(items: readonly ThreadItem[]): SharedThreadIte
       shared.push({ type: "user", key: item.key, at: item.at, text: item.text, attachmentCount: item.attachments.length });
     } else if (item.type === "assistant") {
       shared.push({ type: "assistant", key: item.key, at: item.at, text: item.text });
-    } else if (item.type !== "question" && item.type !== "tool") {
+    } else if (item.type !== "question" && item.type !== "tool" && item.type !== "notice") {
       shared.push(item);
     }
   }
@@ -99,20 +100,8 @@ export interface SharedConversationView {
   fork: { copyId: string | null } | null;
 }
 
-/** The stored product history, as the thread reads it. */
-export function productMarks(value: unknown): ProductMark[] {
-  return Array.isArray(value)
-    ? value.filter((mark): mark is ProductMark => typeof mark === "object" && mark !== null && typeof mark.product === "string" && typeof mark.at === "string")
-    : [];
-}
-
-/** The stored stop history, as the thread reads it. */
-export function stopMarks(value: unknown): StopMark[] {
-  return Array.isArray(value) ? value.filter((mark): mark is StopMark => typeof mark === "object" && mark !== null && typeof mark.at === "string") : [];
-}
-
 /**
- * The share page's read, for a viewer `canViewSharedConversation` has already allowed.
+ * The share page's read, for a viewer `conversationAccess` has already allowed.
  *
  * **The thread is read as the conversation's owner, and that is the design rather than a shortcut.** A share is
  * read-through access to one chat: every message in it is between the owner and their assistant, so `canReadMessage`
@@ -161,7 +150,7 @@ export async function sharedConversation(
     // `local` so a shared laptop chat reads as a conversation rather than as a monologue of answers: the person's
     // prompts are transcript entries there, not hub messages. `sharedThreadItems` drops the tool rows it also lets
     // through, so what a recipient gets is still the words alone.
-    thread: sharedThreadItems(threadItems(items, productMarks(row.productHistory), stopMarks(row.stopHistory), !hasPod(conversation))),
+    thread: sharedThreadItems(threadItems(items, storedHistory(row.productHistory), storedStops(row.stopHistory), !hasPod(conversation))),
     forked: forkedView(row),
     // `olderBefore` is the entry the owner's own page would ask for the previous page before; here it only says that
     // there is one.

@@ -89,7 +89,7 @@ export function createGithubDeviceFlowStub({
           send(200, form({ error: "authorization_pending", error_description: "The authorization request is still pending." }));
           return;
         }
-        send(200, form({ access_token: token, token_type: "bearer", scope: "repo,read:org,gist,user:email" }));
+        send(200, form({ access_token: token, token_type: "bearer", scope: "repo,read:org,gist,user:email,project" }));
         return;
       }
       send(404, form({ error: "not_found" }));

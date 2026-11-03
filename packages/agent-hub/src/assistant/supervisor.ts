@@ -4,9 +4,11 @@
 import nodeFs from "node:fs";
 import path from "node:path";
 import { workspaceRoot } from "../agent.ts";
-import type { Api, SessionReport } from "../api.ts";
+import type { Api } from "../api.ts";
 import type { Env } from "../env.ts";
 import { hubHome, projectTranscriptPath, stateDir, statePath, validSessionId } from "../session.ts";
+import { BUNDLED_DIRS_VAR } from "../virtual/bundled-plugins.ts";
+import type { SessionReport } from "../wire.ts";
 import { removeConversationUploads, uploadsRoot } from "./attachments.ts";
 import { launcherModel, modelPath, parseModel } from "./models.ts";
 import { canRunProgram, claudeCommand, commandProgram, createTmux, type ProgramCheck, type Tmux, tmuxName } from "./tmux.ts";
@@ -135,6 +137,11 @@ export type CreateAssistantSupervisorOptions = {
   busyStaleMs?: number;
   /** When this supervisor started, which bounds how old a `busy` it will believe is; a test passes its own. */
   bootedAt?: number;
+  /**
+   * The pod's copies of the ticked plugins this package carries, which every session loads. Asked as each session
+   * starts, so a copy that failed once is tried again rather than lost until the pod restarts.
+   */
+  pluginDirs?: () => readonly string[];
 };
 
 // The pod's state directory, which `virtual/phases.ts` also writes to. Spelled out rather than taken from
@@ -191,7 +198,8 @@ export function createAssistantSupervisor({
   reportEveryMs = REPORT_EVERY_MS,
   refusalEveryMs = REFUSAL_EVERY_MS,
   busyStaleMs = BUSY_STALE_MS,
-  bootedAt = now()
+  bootedAt = now(),
+  pluginDirs = () => []
 }: CreateAssistantSupervisorOptions): AssistantSupervisor {
   const sessions = new Map<string, ConversationSession>();
   // Wakes waiting for a free slot, oldest first. A conversation whose session is stopping waits here too.
@@ -307,7 +315,8 @@ export function createAssistantSupervisor({
     const resume = w.resume || fs.existsSync(transcript(w.session_id));
     const name = tmuxName(w.conversation_id);
     const launched = launcherModel(w.model);
-    const command = claudeCommand(w.session_id, resume, launched);
+    const dirs = pluginDirs();
+    const command = claudeCommand(w.session_id, resume, launched, dirs);
     // What the session starts on, for the bridge to compare each message's model with: it types `/model` only for a
     // message asking for another. Cleared when it starts on hai's default, so the first message that names a model
     // switches to it rather than being taken for one already in use.
@@ -322,7 +331,11 @@ export function createAssistantSupervisor({
       say(`conversation ${w.conversation_id}: could not record its model: ${(e as Error).message}`);
     }
     try {
-      await tmux.start({ name, cwd, vars: { AGENT_HUB_CONVERSATION_ID: w.conversation_id }, command });
+      const vars: Record<string, string> = { AGENT_HUB_CONVERSATION_ID: w.conversation_id };
+      if (dirs.length > 0) {
+        vars[BUNDLED_DIRS_VAR] = dirs.join(path.delimiter);
+      }
+      await tmux.start({ name, cwd, vars, command });
     } catch (e) {
       // Nothing registered for it, so the hub sends the wake again on the next connection.
       say(`conversation ${w.conversation_id}: could not start a session: ${(e as Error).message}`);

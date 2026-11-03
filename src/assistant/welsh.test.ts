@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   fileIdsOf,
+  hasWelshPlugin,
   isRepoOf,
   isWelshKind,
   isWelshProduct,
@@ -10,6 +11,7 @@ import {
   WELSH_JOB_TIMEOUT_MS,
   welshAnswerBody,
   welshArgs,
+  welshFeature,
   welshFileName,
   welshResponse
 } from "./welsh.ts";
@@ -39,12 +41,33 @@ describe("welshArgs", () => {
     expect(welshArgs("story_candidates", "cath", { key: "pub 1234" })).toEqual({ error: "that is not a Jira key, like PUB-1234" });
   });
 
+  it("should refuse a Jira key when its number has more digits than the pod accepts", () => {
+    expect(welshArgs("story_candidates", "cath", { key: "PUB-1234567" })).toEqual({ args: { key: "PUB-1234567" } });
+    expect(welshArgs("story_candidates", "cath", { key: "PUB-12345678" })).toEqual({ error: "that is not a Jira key, like PUB-1234" });
+  });
+
   it("should need at least one English string for a story preview, and check each choice's shape", () => {
     expect(welshArgs("story_preview", "cath", { key: "PUB-1", strings: [] })).toEqual({ error: "pick at least one English string" });
     expect(welshArgs("story_preview", "cath", { key: "PUB-1", strings: ["Continue"], choices: [{ ref: "CY-ABCDEF12", row_id: "0123456789" }] })).toEqual({
       args: { key: "PUB-1", strings: ["Continue"], choices: [{ ref: "CY-ABCDEF12", row_id: "0123456789" }] }
     });
     expect(welshArgs("apply", "cath", { choices: [{ ref: "CY-1", row_id: "x" }] })).toHaveProperty("error");
+  });
+
+  it("should take the refs a request leaves out, and refuse one that is not a ref or a repo of another product", () => {
+    expect(welshArgs("request", "cath", { repo: "apps/cath/cath-service", leave_out: ["CY-ABCDEF12"] })).toEqual({
+      args: { repo: "apps/cath/cath-service", leave_out: ["CY-ABCDEF12"] }
+    });
+    expect(welshArgs("request", "cath", {})).toEqual({ args: {} });
+    expect(welshArgs("request", "cath", { leave_out: ["--pr"] })).toEqual({ error: "that is not a ref" });
+    expect(welshArgs("request", "cath", { leave_out: Array.from({ length: 301 }, () => "CY-ABCDEF12") })).toEqual({ error: "leave out at most 300" });
+    expect(welshArgs("request", "cath", { repo: "apps/pcs/pcs-frontend" })).toHaveProperty("error");
+  });
+
+  it("should need at least one line of English to keep", () => {
+    expect(welshArgs("keep_english", "cath", { strings: [" Rolls Building "] })).toEqual({ args: { strings: ["Rolls Building"] } });
+    expect(welshArgs("keep_english", "cath", { strings: [] })).toEqual({ error: "choose at least one" });
+    expect(welshArgs("keep_english", "cath", { strings: ["two\nlines"] })).toEqual({ error: "one line each" });
   });
 });
 
@@ -58,8 +81,16 @@ describe("the small checks", () => {
     expect(isWelshProduct(7)).toBe(false);
   });
 
+  it("should need welsh-review for the kinds an older client ignores, and welsh for the rest", () => {
+    expect(welshFeature("request")).toBe("welsh-review");
+    expect(welshFeature("keep_english")).toBe("welsh-review");
+    expect(welshFeature("scan")).toBe("welsh");
+  });
+
   it("should know its kinds and nothing else", () => {
     expect(isWelshKind("story_write")).toBe(true);
+    expect(isWelshKind("request")).toBe(true);
+    expect(isWelshKind("keep_english")).toBe(true);
     expect(isWelshKind("translate")).toBe(false);
   });
 
@@ -134,5 +165,13 @@ describe("the public-facing services", () => {
   it("should each be a product the Assistant knows", async () => {
     const { PUBLIC_FACING_SERVICES, WELSH_PRODUCTS } = await import("./welsh.ts");
     expect(WELSH_PRODUCTS.map((p) => p.slug).sort((a, b) => (a < b ? -1 : 1))).toEqual([...PUBLIC_FACING_SERVICES].sort((a, b) => (a < b ? -1 : 1)));
+  });
+});
+
+describe("hasWelshPlugin", () => {
+  it("should be true only when the welsh plugin is among the ticked ones", () => {
+    expect(hasWelshPlugin({ plugins: ["dtsse", "welsh"] })).toBe(true);
+    expect(hasWelshPlugin({ plugins: ["pcs"] })).toBe(false);
+    expect(hasWelshPlugin({ plugins: [] })).toBe(false);
   });
 });

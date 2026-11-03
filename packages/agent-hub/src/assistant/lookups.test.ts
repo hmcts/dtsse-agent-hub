@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { LookupAnswer } from "../api.ts";
+import type { LookupAnswer } from "../wire.ts";
 import {
   confluenceCql,
   createLookupRunner,
@@ -46,7 +46,7 @@ const JIRA_OUTPUT = JSON.stringify({
 const SIGNED_OUT = { code: 77, stdout: JSON.stringify({ ok: false, error: { code: "AUTH_REQUIRED", message: "authentication required." } }), stderr: "" };
 
 function frame(overrides: Partial<LookupFrame> = {}): LookupFrame {
-  return { lookup_id: LOOKUP, kind: "confluence_page", query: "case flags", space: null, sign_in: false, ...overrides };
+  return { lookup_id: LOOKUP, kind: "confluence_page", query: "case flags", space: null, owner: null, sign_in: false, ...overrides };
 }
 
 describe("parseLookupFrame", () => {
@@ -57,6 +57,23 @@ describe("parseLookupFrame", () => {
     );
     expect(parseLookupFrame({ lookup_id: LOOKUP, kind: "jira_project", query: "vibe", space: "CCD" })?.space).toBeNull();
   });
+
+  it("should keep a GitHub lookup, with the owner only for a Project, and never ask it to sign in", () => {
+    // Act & Assert
+    expect(parseLookupFrame({ lookup_id: LOOKUP, kind: "github_repo", query: "ccd data", space: "CCD", owner: "hmcts", sign_in: true })).toEqual(
+      frame({ kind: "github_repo", query: "ccd data" })
+    );
+    expect(parseLookupFrame({ lookup_id: LOOKUP, kind: "github_project", query: "cft", owner: "hmcts" })).toEqual(
+      frame({ kind: "github_project", query: "cft", owner: "hmcts" })
+    );
+  });
+
+  it.each([[{ owner: undefined }], [{ owner: "-hmcts" }], [{ owner: "hmcts --jq ." }]])(
+    "should drop a Project lookup when it has %j, since the owner goes into the search",
+    (change) => {
+      expect(parseLookupFrame({ ...frame({ kind: "github_project", owner: "hmcts" }), ...change })).toBeNull();
+    }
+  );
 
   it.each([[{ lookup_id: "not-an-id" }], [{ kind: "people" }], [{ query: 4 }], [{ query: "x".repeat(101) }], [{ space: 'CCD" OR space = "HR' }]])(
     "should drop the lookup when it has %j, since its values go into a search",
@@ -225,6 +242,72 @@ describe("runLookup", () => {
 
     // Act & Assert
     expect(await runLookup(d, frame())).toEqual({ error: "failed", detail: "Confluence could not search that: Could not parse cql" });
+  });
+});
+
+describe("runLookup for GitHub", () => {
+  const REPOS = JSON.stringify([{ fullName: "hmcts/cft-workspace", description: null, hasIssues: true }]);
+
+  it("should search the person's repositories with gh, never twg, and never sign in", async () => {
+    // Arrange
+    const run = vi.fn<Run>(async () => ({ code: 0, stdout: REPOS, stderr: "" }));
+    const login = vi.fn(async () => true);
+
+    // Act
+    const answer = await runLookup(
+      { run, env: {}, login, githubOwners: async () => ["hmcts"] },
+      frame({ kind: "github_repo", query: "cft workspace", sign_in: true })
+    );
+
+    // Assert
+    expect(answer).toEqual({ results: [{ full_name: "hmcts/cft-workspace", description: null }] });
+    expect(run.mock.calls.map((call) => call[0])).toEqual(["gh"]);
+    expect(login).not.toHaveBeenCalled();
+  });
+
+  it("should ask gh for the person's accounts itself when it is given none to search", async () => {
+    // Arrange
+    const run = vi.fn<Run>(async (_cmd, args) =>
+      args[0] === "api" && args[1] === "user"
+        ? { code: 0, stdout: "SarahL\n", stderr: "" }
+        : args[0] === "api"
+          ? { code: 0, stdout: "hmcts\n", stderr: "" }
+          : { code: 0, stdout: REPOS, stderr: "" }
+    );
+
+    // Act
+    await runLookup({ run, env: {}, login: async () => true }, frame({ kind: "github_repo", query: "cft" }));
+
+    // Assert
+    expect(run.mock.calls.at(-1)?.[1]).toEqual(expect.arrayContaining(["--owner=SarahL", "--owner=hmcts"]));
+  });
+
+  it("should ask for the person's accounts once for every search a runner makes", async () => {
+    // Arrange
+    const answers: LookupAnswer[] = [];
+    const run = vi.fn<Run>(async (_cmd, args) => (args[0] === "api" ? { code: 0, stdout: "hmcts\n", stderr: "" } : { code: 0, stdout: REPOS, stderr: "" }));
+    const runner = createLookupRunner({
+      api: {
+        putLookup: async (_va, _id, body) => {
+          answers.push(body);
+          return null;
+        }
+      },
+      id: "va-1",
+      env: {},
+      run,
+      login: async () => true
+    });
+
+    // Act
+    runner.lookup({ lookup_id: "5b0e7c1a-1111-4222-8333-444455556661", kind: "github_repo", query: "cft" });
+    await runner.idle();
+    runner.lookup({ lookup_id: "5b0e7c1a-1111-4222-8333-444455556662", kind: "github_repo", query: "ccd" });
+    await runner.idle();
+
+    // Assert
+    expect(answers).toHaveLength(2);
+    expect(run.mock.calls.filter((call) => call[1][0] === "api")).toHaveLength(2);
   });
 });
 

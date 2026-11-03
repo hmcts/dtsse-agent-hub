@@ -1,5 +1,5 @@
 // Welsh translation jobs end to end through Postgres: the page's request, the frame the pod is sent, the pod's
-// answer and files, and who may read any of it. The pod's own half — running scripts/welsh — is in the client
+// answer and files, and who may read any of it. The pod's own half — running the welsh plugin's scripts/welsh — is in the client
 // package's `src/assistant/welsh.test.ts`.
 import { NextRequest } from "next/server";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,7 +9,7 @@ import * as welshRoute from "../../src/app/api/ui/assistant/welsh/route.ts";
 import { WELSH_JOB_TIMEOUT_MS, WELSH_RATE_LIMIT, WELSH_RETENTION_MS } from "../../src/assistant/welsh.ts";
 import { answerWelsh, askWelsh, ownerFile, pendingWelsh, podFile, putJobFile, readWelsh, saveUpload } from "../../src/assistant/welsh-store.ts";
 import { setDesired } from "../../src/virtual-agents/store.ts";
-import { ALICE, BOB, podFixture } from "./assistant-pod.ts";
+import { ALICE, type AssistantFixture, BOB, podFixture } from "./assistant-pod.ts";
 import { connect, prisma, resetDatabase } from "./database.ts";
 import { jsonOf } from "./routes.ts";
 
@@ -26,7 +26,20 @@ beforeEach(async () => {
 });
 
 /** The shared fixture, bound to the claim this suite is about: the pod's own session runs Welsh jobs. */
-const assistantOf = podFixture(["welsh"]);
+const claimingWelsh = podFixture(["welsh"]);
+/** A pod on a client that also runs the kinds that came after `welsh`. */
+const claimingReview = podFixture(["welsh", "welsh-review"]);
+
+/**
+ * An assistant with the Welsh plugin ticked as well, which every job and upload needs, and its pod caught up with the
+ * tick, as one is once the orchestrator has replaced it.
+ */
+async function withPlugin(id: string): Promise<string> {
+  const row = await prisma.virtualAgent.update({ where: { id }, data: { plugins: ["welsh"] }, select: { generation: true } });
+  await prisma.virtualAgent.update({ where: { id }, data: { observedGeneration: row.generation } });
+  return id;
+}
+const assistantOf: AssistantFixture = async (...args) => withPlugin(await claimingWelsh(...args));
 const XLSX = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 1, 2, 3]);
 
 function browser(
@@ -76,6 +89,43 @@ describe("welsh jobs", () => {
     expect(await podFile(prisma, va, fileId)).toBeUndefined();
   });
 
+  it("should record a request without what the BA left out, and English to keep, and frame each for the pod", async () => {
+    // Arrange
+    const assistant = await withPlugin(await claimingReview(ALICE));
+
+    // Act
+    const request = await jsonOf<{ job_id: string }>(await start({ kind: "request", product: "cath", args: { leave_out: ["CY-ABCDEF12"] } }));
+    const keep = await jsonOf<{ job_id: string }>(await start({ kind: "keep_english", product: "cath", args: { strings: ["Rolls Building"] } }));
+
+    // Assert
+    expect(await pendingWelsh(prisma, assistant, request.job_id)).toEqual({
+      job_id: request.job_id,
+      kind: "request",
+      product: "cath",
+      args: { leave_out: ["CY-ABCDEF12"] }
+    });
+    expect(await pendingWelsh(prisma, assistant, keep.job_id)).toEqual({
+      job_id: keep.job_id,
+      kind: "keep_english",
+      product: "cath",
+      args: { strings: ["Rolls Building"] }
+    });
+  });
+
+  it("should answer that the assistant needs an update, recording nothing, when its client runs welsh but not the kinds after it", async () => {
+    // Arrange
+    const assistant = await assistantOf(ALICE);
+
+    // Act
+    const request = await jsonOf(await start({ kind: "request", product: "cath", args: {} }));
+    const keep = await jsonOf(await start({ kind: "keep_english", product: "cath", args: { strings: ["Rolls Building"] } }));
+
+    // Assert
+    expect(request).toEqual({ status: "unsupported" });
+    expect(keep).toEqual({ status: "unsupported" });
+    expect(await prisma.assistantWelshJob.count({ where: { virtualAgentId: assistant } })).toBe(0);
+  });
+
   it("should upload a return, refuse what is not an xlsx, name it in the frame, and let only the owner's pod read it", async () => {
     // Arrange
     const assistant = await assistantOf(ALICE);
@@ -104,6 +154,35 @@ describe("welsh jobs", () => {
     expect(await podFile(prisma, { id: bobs.id, ownerOid: BOB.oid }, uploaded.file_id)).toBeUndefined();
     expect(download.headers.get("content-disposition")).toBe(`attachment; filename="Ymateb _.xlsx"; filename*=UTF-8''${encodeURIComponent("Ymateb ŵ.xlsx")}`);
     expect(download.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("should refuse a job and an upload, recording neither, when the person's assistant does not have the Welsh plugin", async () => {
+    // Arrange
+    await claimingWelsh(ALICE);
+
+    // Act
+    const job = await start({ kind: "info", product: "cath", args: {} });
+    const uploaded = await browser(uploadRoute.POST, "/api/ui/assistant/welsh/files", { body: XLSX, headers: { "x-file-name": "return.xlsx" } });
+
+    // Assert
+    expect(job.status).toBe(409);
+    expect(await jsonOf(job)).toEqual({ error: "turn on Welsh translations in Settings, under Tools, first" });
+    expect(uploaded.status).toBe(409);
+    expect(await prisma.assistantWelshJob.count()).toBe(0);
+    expect(await prisma.assistantWelshFile.count()).toBe(0);
+  });
+
+  it("should answer that the assistant is starting, recording no job, while the plugin just ticked is not yet on its pod", async () => {
+    // Arrange: the tick moved generation on, and the orchestrator has not replaced the pod yet.
+    const assistant = await assistantOf(ALICE);
+    await prisma.virtualAgent.update({ where: { id: assistant }, data: { generation: { increment: 1 } } });
+
+    // Act
+    const answer = await jsonOf(await start({ kind: "info", product: "cath", args: {} }));
+
+    // Assert
+    expect(answer).toEqual({ status: "waking" });
+    expect(await prisma.assistantWelshJob.count()).toBe(0);
   });
 
   it("should answer a pod that has not claimed welsh, a stopped assistant, and a bad request without recording a job", async () => {

@@ -8,7 +8,7 @@ import type { NotifiedEvent } from "../events.ts";
  *
  * Several samples per type where the shape has variants worth decoding separately.
  */
-export const NOTIFIED_EVENT_SAMPLES: { [T in NotifiedEvent["type"]]: readonly Extract<NotifiedEvent, { type: T }>[] } = {
+const NOTIFIED_EVENT_SAMPLES: { [T in NotifiedEvent["type"]]: readonly Extract<NotifiedEvent, { type: T }>[] } = {
   post: [{ type: "post", message_id: "12" }],
   direct: [
     { type: "direct", message_id: "13", target_agent_id: "agent-b", author_agent_id: "agent-a" },
@@ -16,7 +16,11 @@ export const NOTIFIED_EVENT_SAMPLES: { [T in NotifiedEvent["type"]]: readonly Ex
     { type: "direct", message_id: "15", target_agent_id: "agent-b", author_agent_id: null }
   ],
   tagged_post: [{ type: "tagged_post", message_id: "12", agent_id: "agent-b" }],
-  agent_status: [{ type: "agent_status", agent_id: "agent-a", owner_oid: "oid-a", status: "offline" }],
+  agent_status: [
+    { type: "agent_status", agent_id: "agent-a", owner_oid: "oid-a", status: "offline", local_conversation_id: null },
+    // A session on the person's own computer, which names its chat.
+    { type: "agent_status", agent_id: "agent-b", owner_oid: "oid-a", status: "busy", local_conversation_id: "c-b" }
+  ],
   agent_skills: [{ type: "agent_skills", agent_id: "agent-a", owner_oid: "oid-a" }],
   agent_question: [{ type: "agent_question", agent_id: "agent-a", owner_oid: "oid-a" }],
   delivery: [{ type: "delivery", message_id: "16", agent_id: "agent-b", state: "delivered" }],

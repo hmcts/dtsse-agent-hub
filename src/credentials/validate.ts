@@ -90,12 +90,27 @@ function checkAzureCache(value: string): CheckedCredential {
   return { ok: true, value, accountLabel: accountUsername(parsed.Account) };
 }
 
-export type AzureOwnership = { ok: true } | { ok: false; reason: "malformed" | "unconfigured" | "not-owner"; error: string };
+export type AzureOwnership = { ok: true } | { ok: false; reason: "malformed" | "unconfigured" | "not-owner" | "other-tenant"; error: string };
+
+const NOT_OWNER = { ok: false, reason: "not-owner", error: "that Azure token cache is signed in as someone other than you, or in another tenant" } as const;
+
+/** `<oid>.<tid>`, lowercased, as MSAL writes `home_account_id`; `undefined` for anything else. */
+function homeAccount(value: unknown): { id: string; oid: string; tid: string } | undefined {
+  const id = typeof value === "string" ? value.toLowerCase() : "";
+  const [oid, tid, ...rest] = id.split(".");
+  return oid && tid && rest.length === 0 ? { id, oid, tid } : undefined;
+}
 
 /**
- * Whether an Azure token cache holds only the owner's own sign-in: at least one account, and every account's
- * `home_account_id`, which MSAL writes as `<oid>.<tid>`, naming the owner's oid in this hub's tenant. A cache with
- * anyone else's account in it would let a virtual agent act in Azure as that person.
+ * Whether an Azure token cache holds only the owner's own sign-in, so that a virtual agent cannot act in Azure as
+ * anyone else. It needs at least one account, and every account's `home_account_id` must be `<oid>.<tid>`. One whose
+ * tid is this hub's tenant is a member's, and its oid must be the owner's, whatever its `realm`: `az login` without
+ * `--tenant` writes one account per tenant the person can reach, all with the same `home_account_id`. One whose tid
+ * is another tenant is a B2B guest's, named in their home tenant, so it must instead have the owner's oid as its
+ * `local_account_id` and this hub's tenant as its `realm`. MSAL keys refresh tokens by `home_account_id` alone, so
+ * every entry in the `RefreshToken` section must carry the `home_account_id` of one of those accounts. Comparisons
+ * are case-insensitive. A guest's account in another realm is `other-tenant`, unless something else in the cache is
+ * not the owner's.
  */
 export function checkAzureCacheOwner(raw: unknown, ownerOid: string, tenantId: string | undefined): AzureOwnership {
   const parsed = decodeAzureCache(typeof raw === "string" ? raw.trim() : "");
@@ -111,12 +126,39 @@ export function checkAzureCacheOwner(raw: unknown, ownerOid: string, tenantId: s
     return { ok: false, reason: "not-owner", error: "that Azure token cache holds no account" };
   }
   const owner = ownerOid.toLowerCase();
+  const owned = new Set<string>();
+  let otherRealm = false;
   for (const account of accounts) {
-    const home = (account as { home_account_id?: unknown } | null)?.home_account_id;
-    const [oid, tid, ...rest] = typeof home === "string" ? home.toLowerCase().split(".") : [];
-    if (oid !== owner || tid !== tenant || rest.length > 0) {
-      return { ok: false, reason: "not-owner", error: "that Azure token cache is signed in as someone other than you, or in another tenant" };
+    const { home_account_id, local_account_id, realm } = (account ?? {}) as { home_account_id?: unknown; local_account_id?: unknown; realm?: unknown };
+    const home = homeAccount(home_account_id);
+    if (home === undefined) {
+      return NOT_OWNER;
     }
+    if (home.tid === tenant) {
+      if (home.oid !== owner) {
+        return NOT_OWNER;
+      }
+    } else if (typeof local_account_id !== "string" || local_account_id.toLowerCase() !== owner) {
+      return NOT_OWNER;
+    } else if (typeof realm !== "string" || realm.toLowerCase() !== tenant) {
+      otherRealm = true;
+    }
+    owned.add(home.id);
+  }
+  const section = parsed.RefreshToken;
+  const refreshTokens = section === undefined ? [] : typeof section === "object" && section !== null ? Object.values(section) : [section];
+  for (const refreshToken of refreshTokens) {
+    const home = (refreshToken as { home_account_id?: unknown } | null)?.home_account_id;
+    if (typeof home !== "string" || !owned.has(home.toLowerCase())) {
+      return NOT_OWNER;
+    }
+  }
+  if (otherRealm) {
+    return {
+      ok: false,
+      reason: "other-tenant",
+      error: `that Azure token cache is signed in to another tenant, not this hub's: sign in to the hub's tenant, with az login --tenant ${tenant}`
+    };
   }
   return { ok: true };
 }

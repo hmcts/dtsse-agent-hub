@@ -8,7 +8,7 @@ import type { Lease } from "./hub.ts";
  * hold the hub's lease is meant to be idle, and restarting it would change nothing.
  */
 
-export const HEALTH_PATHS: readonly string[] = ["/health", "/health/liveness", "/health/readiness"];
+const HEALTH_PATHS: readonly string[] = ["/health", "/health/liveness", "/health/readiness"];
 
 export interface Health {
   /** A pass succeeded; `standby` is the lease another cluster holds, when it was on standby. */

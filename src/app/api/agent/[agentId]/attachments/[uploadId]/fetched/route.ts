@@ -1,6 +1,6 @@
 import { HttpError, noContent } from "@/agent-api/http";
 import { ownedAgentRoute } from "@/agent-api/route";
-import { conversationOfAgent } from "@/assistant/store";
+import { conversationOfAgent } from "@/assistant/conversation-store";
 import { reportFetched, sessionAttachment } from "@/assistant/upload-store";
 import { prisma } from "@/store/prisma";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";

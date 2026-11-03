@@ -4,7 +4,7 @@
 // The pod's own half — measuring the volume and deleting the files — is in the client package's
 // `src/assistant/disk.test.ts` and `src/assistant/attachments.test.ts`.
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { createConversation } from "../../src/assistant/store.ts";
+import { createConversation } from "../../src/assistant/conversation-store.ts";
 import { pendingUploadDeletions, reportedUploadIds, reportUploadsOnDisk, requestUploadRemoval, uploadsOnDisk } from "../../src/assistant/upload-disk.ts";
 import { createEventHub } from "../../src/realtime/hub.ts";
 import { startListener } from "../../src/realtime/listener.ts";
@@ -302,6 +302,17 @@ describe("asking an assistant to delete its files", () => {
     expect(await requestUploadRemoval(prisma, ALICE.oid, assistant, [upload])).toEqual({ outcome: "unsupported_client", count: 0 });
     expect(await uploadRow(upload)).toMatchObject({ state: "fetched", podDeleteRequestedAt: null, _count: { parts: 1 } });
     expect(await pendingUploadDeletions(prisma, assistant)).toEqual([]);
+  });
+
+  it("should take the pod's own claim when it has no main session, and over the main session's when it has one", async () => {
+    const solo = await assistantOf(ALICE, null, "running", { session: false });
+    await prisma.virtualAgent.update({ where: { id: solo }, data: { clientFeatures: ["files"] } });
+    const theirs = await assistantOf(BOB, ["files"]);
+    await prisma.virtualAgent.update({ where: { id: theirs }, data: { clientFeatures: ["stop"] } });
+    const upload = await sentUpload(BOB, await chat(BOB, "Possession claim"), "bundle.pdf", 2048);
+
+    expect((await uploadsOnDisk(prisma, ALICE.oid, solo))?.disk).toEqual({ reported: false, reason: "waiting" });
+    expect(await requestUploadRemoval(prisma, BOB.oid, theirs, [upload])).toEqual({ outcome: "unsupported_client", count: 0 });
   });
 
   // No pod ever fetched it, so there is no copy of it on any disk to ask about.

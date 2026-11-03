@@ -7,7 +7,7 @@ import type { TranscriptContent, TranscriptRole } from "./schema.ts";
 export const CONVERSATION_PAGE_SIZE = 100;
 
 /** Entries one live top-up reads; a client further behind than this reads again. */
-export const TOP_UP_LIMIT = 200;
+const TOP_UP_LIMIT = 200;
 
 export type ConversationCursor = { before: bigint } | { after: bigint } | Record<string, never>;
 

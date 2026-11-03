@@ -1,27 +1,31 @@
-// The supervisor's half of a Welsh translation job for the CFT Workspace's Welsh page: one run of cft-workspace's
-// `scripts/welsh`, as the owner, with their own GitHub and twg sign-ins. Fixed: every value in the frame is checked
+// The supervisor's half of a Welsh translation job for the CFT Workspace's Welsh page: one run of the welsh plugin's
+// `scripts/welsh`, the plugin this package carries in `plugins/welsh`, from the pod's copy of it, as the owner, with their own GitHub and twg sign-ins. Fixed: every value in the frame is checked
 // again here and passed as its own argument, never through a shell, and the only program run is that script. No job
 // goes through a model, and none generates Welsh — the script takes it from the catalogue or a Welsh Language Unit
 // return and refuses anything else. See "Welsh translation jobs" in dtsse-agent-hub's docs/agent-api.md.
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Api, WelshAnswer } from "../api.ts";
+import type { Api } from "../api.ts";
 import type { Env } from "../env.ts";
 import { withRetry } from "../retry.ts";
+import { installBundled, tickedBundled } from "../virtual/bundled-plugins.ts";
+import type { WelshAnswer } from "../wire.ts";
 import type { Run } from "./lookups.ts";
 
 export const WELSH_KINDS = [
   "info",
   "search",
   "scan",
+  "request",
   "import_check",
   "import",
   "apply_preview",
   "apply",
   "story_candidates",
   "story_preview",
-  "story_write"
+  "story_write",
+  "keep_english"
 ] as const;
 export type WelshKind = (typeof WELSH_KINDS)[number];
 
@@ -34,13 +38,15 @@ const TIMEOUT_MS: Record<WelshKind, number> = {
   info: 60_000,
   search: 60_000,
   scan: 10 * 60_000,
+  request: 10 * 60_000,
   import_check: 3 * 60_000,
   import: 5 * 60_000,
   apply_preview: 12 * 60_000,
   apply: 14 * 60_000,
   story_candidates: 2 * 60_000,
   story_preview: 2 * 60_000,
-  story_write: 3 * 60_000
+  story_write: 3 * 60_000,
+  keep_english: 5 * 60_000
 };
 
 const MAX_DETAIL = 500;
@@ -48,6 +54,12 @@ const MAX_MESSAGE = 4000;
 const MAX_STRINGS = 200;
 const MAX_STRING = 2000;
 const MAX_CHOICES = 200;
+/**
+ * How many strings a scan lists in each group, for the Welsh page to show before anything is sent or changed. Their
+ * size varies, so `fitResult` shortens the lists further when a result would not fit the hub's limit. The counts are
+ * always the full ones.
+ */
+const SCAN_LIST_LIMIT = 300;
 
 const UUID_RE = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
 const PRODUCT_RE = /^[a-z][a-z0-9-]{0,39}$/;
@@ -72,6 +84,8 @@ export type WelshFrame = {
   key?: string;
   strings?: string[];
   choices?: WelshChoice[];
+  /** Refs a BA left out of the Welsh Language Unit's spreadsheet. */
+  leave_out?: string[];
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -145,6 +159,15 @@ const choicesArg: ArgReader = (args) => {
   return choices === null ? null : { choices };
 };
 
+/** Refs to leave out of a request: at most as many as a scan lists, since a BA can only untick one they were shown. */
+const leaveOutArg: ArgReader = (args) => {
+  const refs = args.leave_out ?? [];
+  if (!Array.isArray(refs) || refs.length > SCAN_LIST_LIMIT || !refs.every((r): r is string => typeof r === "string" && REF_RE.test(r))) {
+    return null;
+  }
+  return { leave_out: refs };
+};
+
 const keyArg: ArgReader = (args) => (typeof args.key === "string" && KEY_RE.test(args.key) ? { key: args.key } : null);
 
 const stringsArg: ArgReader = (args) => {
@@ -161,6 +184,10 @@ const KIND_ARGS: Record<WelshKind, [readonly string[], ArgReader][]> = {
   info: [],
   search: [[["query", "mode"], searchArgs]],
   scan: [[["repo"], repoArg]],
+  request: [
+    [["repo"], repoArg],
+    [["leave_out"], leaveOutArg]
+  ],
   import_check: [[["file_id"], fileArg(true)]],
   import: [[["file_id"], fileArg(true)]],
   apply_preview: [
@@ -179,7 +206,8 @@ const KIND_ARGS: Record<WelshKind, [readonly string[], ArgReader][]> = {
     [["strings"], stringsArg],
     [["choices"], choicesArg]
   ],
-  story_write: [[["key"], keyArg]]
+  story_write: [[["key"], keyArg]],
+  keep_english: [[["strings"], stringsArg]]
 };
 
 /**
@@ -243,7 +271,10 @@ export function welshArgs(frame: WelshFrame, workspace: string, paths: WelshPath
     case "search":
       return ["search", ...service, ...MODE_FLAG[frame.mode ?? "contains"], "--limit", "25", "--", frame.query ?? ""];
     case "scan":
-      return ["scan", ...service, ...repo, "--out", paths.request];
+      return ["scan", ...service, ...repo, "--limit", String(SCAN_LIST_LIMIT)];
+    case "request":
+      // The same scan, run again so the spreadsheet is of the code as it is now; its lists are not wanted a second time.
+      return ["scan", ...service, ...repo, "--limit", "0", ...(frame.leave_out ?? []).flatMap((ref) => ["--leave-out", ref]), "--out", paths.request];
     case "import_check":
       return ["import", ...service, "--dry-run", "--", paths.input];
     case "import":
@@ -258,13 +289,15 @@ export function welshArgs(frame: WelshFrame, workspace: string, paths: WelshPath
       return ["story", ...service, "--strings", paths.strings, ...choices, "--", frame.key ?? ""];
     case "story_write":
       return ["story", ...service, "--write", "--out", paths.request, "--", frame.key ?? ""];
+    case "keep_english":
+      return ["keep-english", ...service, "--pr", "--", ...(frame.strings ?? [])];
   }
 }
 
 /** The spreadsheets a job may make, and the name each is offered to download as. */
 export function welshOutputs(frame: WelshFrame, paths: WelshPaths, today: string): { path: string; name: string }[] {
   switch (frame.kind) {
-    case "scan":
+    case "request":
       return [{ path: paths.request, name: `${frame.product}-welsh-request-${today}.xlsx` }];
     case "story_write":
       return [{ path: paths.request, name: `${frame.key}-welsh-request-${today}.xlsx` }];
@@ -286,10 +319,41 @@ export function signInNeeded(output: string): string | null {
   return null;
 }
 
+/** The plugin that carries the Welsh tools, and the name the owner ticks. */
+export const WELSH_PLUGIN = "welsh";
+
+/** What a job answers when its owner has not ticked the plugin, which is the only way a pod has the tools. */
+export const NOT_LOADED =
+  "Welsh translations is not turned on for your assistant. Tick it in Settings, under Tools. If you have just ticked it, your assistant is restarting to load it: try again in a minute or two.";
+
+/** What a job answers when the tools' first install has taken so long that the job could not finish in time. */
+export const STILL_PREPARING = "Your assistant is still setting up the Welsh tools. Try again in a few minutes.";
+
+/**
+ * How long a job has from the moment its frame arrives: under the hub's 15-minute limit for a job, so the hub never
+ * gives up on one that goes on to finish (an apply that then opens its pull request, say, and is run again). Waiting
+ * for the tools' first install comes out of it, and each kind's own limit is cut to what is left.
+ */
+export const JOB_BUDGET_MS = 14 * 60_000;
+
+/** Least time worth starting a job with, once the wait for the install is over. */
+const MIN_RUN_MS = 30_000;
+
+/**
+ * The Welsh tools: the pod's copy of the welsh plugin's `scripts/welsh`, made on first use. Null when the owner has not
+ * ticked the plugin, so a pod runs them only for someone who asked for them.
+ */
+export function welshScript(workspace: string, env: Env, install: (name: string, workspace: string) => string = installBundled): string | null {
+  if (!tickedBundled(env).includes(WELSH_PLUGIN)) {
+    return null;
+  }
+  return join(install(WELSH_PLUGIN, workspace), "scripts", "welsh");
+}
+
 /** Why the script failed, in at most `MAX_DETAIL` characters: its own message, without the usage line or a stack. */
 export function failureDetail(stderr: string, code: number): string {
   if (code === 127) {
-    return "Your assistant's copy of cft-workspace does not have the Welsh tools yet. Restart your assistant to update it.";
+    return "Your assistant could not start the Welsh tools. Restart your assistant, then try again.";
   }
   const lines = stderr
     .split("\n")
@@ -309,17 +373,49 @@ export type WelshDeps = {
   env: Env;
   /** The cft-workspace checkout; `$VIRTUAL_AGENT_WORKSPACE` in a pod. */
   workspace: string;
+  /** Settles once the tools' dependencies are installed, or the attempt has failed; see `prepareWelsh`. */
+  ready?: Promise<void>;
+  /** Makes the pod's copy of a bundled plugin; a test passes one that makes it somewhere of its own. */
+  install?: (name: string, workspace: string) => string;
   say?: (message: string) => void;
   now?: () => Date;
+  /** Milliseconds since the epoch, for the job's budget; a test passes its own. */
+  clock?: () => number;
+  /** How long a job has from when it arrives; `JOB_BUDGET_MS` unless a test says otherwise. */
+  budgetMs?: number;
 };
+
+/** Settles true once `ready` does, or false at `ms`, whichever is first. */
+async function readyWithin(ready: Promise<void> | undefined, ms: number): Promise<boolean> {
+  if (ready === undefined) {
+    return true;
+  }
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<boolean>((resolve) => {
+    timer = setTimeout(() => resolve(false), Math.max(0, ms));
+  });
+  try {
+    return await Promise.race([ready.then(() => true), late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /** Runs one job and answers it, uploading the spreadsheets it made first. Never throws. */
 export async function runWelsh(deps: WelshDeps, frame: WelshFrame): Promise<void> {
   const say = deps.say ?? (() => {});
+  const clock = deps.clock ?? Date.now;
+  const deadline = clock() + (deps.budgetMs ?? JOB_BUDGET_MS);
   const dir = mkdtempSync(join(tmpdir(), "welsh-job-"));
   let answer: WelshAnswer;
   try {
-    answer = await runIn(deps, frame, welshPaths(dir, frame));
+    // The wait for the tools' first install comes out of the job's budget, so job and wait end inside the hub's limit.
+    const ready = await readyWithin(deps.ready, deadline - clock() - MIN_RUN_MS);
+    const left = deadline - clock();
+    answer =
+      ready && left >= MIN_RUN_MS
+        ? await runIn(deps, frame, welshPaths(dir, frame), Math.min(TIMEOUT_MS[frame.kind], left))
+        : { error: "failed", detail: STILL_PREPARING };
   } catch (e) {
     answer = { error: "failed", detail: `That did not work: ${(e as Error).message}`.slice(0, MAX_DETAIL) };
   } finally {
@@ -332,18 +428,20 @@ export async function runWelsh(deps: WelshDeps, frame: WelshFrame): Promise<void
   }
 }
 
-async function runIn(deps: WelshDeps, frame: WelshFrame, paths: WelshPaths): Promise<WelshAnswer> {
-  const script = join(deps.workspace, "scripts", "welsh");
-  if (!existsSync(script)) {
-    return { error: "failed", detail: failureDetail("", 127) };
+async function runIn(deps: WelshDeps, frame: WelshFrame, paths: WelshPaths, timeoutMs: number): Promise<WelshAnswer> {
+  const script = welshScript(deps.workspace, deps.env, deps.install);
+  if (script === null) {
+    return { error: "failed", detail: NOT_LOADED };
   }
+  // The copy is outside the workspace, so the script is told which workspace's catalogues and clones it works on.
+  const env: NodeJS.ProcessEnv = { ...deps.env, CFT_WELSH_WORKSPACE: deps.workspace };
   if (frame.file_id) {
     writeFileSync(paths.input, await deps.api.welshFile(deps.id, frame.file_id));
   }
   if (frame.strings) {
     writeFileSync(paths.strings, `${frame.strings.join("\n")}\n`);
   }
-  const result = await deps.run(script, welshArgs(frame, deps.workspace, paths), { env: deps.env, timeoutMs: TIMEOUT_MS[frame.kind] });
+  const result = await deps.run(script, welshArgs(frame, deps.workspace, paths), { env, timeoutMs });
   const signIn = signInNeeded(`${result.stderr}\n${result.stdout}`);
   if (result.code !== 0) {
     return signIn ? { error: "signed_out", detail: signIn } : { error: "failed", detail: failureDetail(result.stderr, result.code) };
@@ -365,8 +463,33 @@ async function runIn(deps: WelshDeps, frame: WelshFrame, paths: WelshPaths): Pro
     made.map((output) => withRetry(() => deps.api.putWelshFile(deps.id, frame.job_id, output.name, readFileSync(output.path)), { attempts: 2 }))
   );
   // What the script told a person at a terminal, for the page to show beside the figures it reads.
-  return { result: { ...body, message: result.stderr.trim().slice(0, MAX_MESSAGE) } };
+  return { result: fitResult({ ...body, message: result.stderr.trim().slice(0, MAX_MESSAGE) }) };
 }
+
+/** The hub's limit on a result (`MAX_WELSH_RESULT_BYTES`), less room for the JSON around it. */
+const MAX_RESULT_BYTES = 500 * 1024;
+
+/**
+ * A result small enough for the hub to keep: a scan's lists are shortened, by half each time, until it fits. Their
+ * entries vary in size (paths, hints, a catalogue's options), so no fixed count is safe for every service. The counts
+ * in `summary` stay the full ones, so the page says how many were not listed.
+ */
+export function fitResult(result: Record<string, unknown>, max = MAX_RESULT_BYTES): Record<string, unknown> {
+  let fitted = result;
+  while (Buffer.byteLength(JSON.stringify(fitted), "utf8") > max) {
+    const lists = SCAN_LISTS.filter((name) => Array.isArray(fitted[name]) && (fitted[name] as unknown[]).length > 0);
+    if (lists.length === 0) {
+      return fitted;
+    }
+    fitted = {
+      ...fitted,
+      ...Object.fromEntries(lists.map((name) => [name, (fitted[name] as unknown[]).slice(0, Math.floor((fitted[name] as unknown[]).length / 2))]))
+    };
+  }
+  return fitted;
+}
+
+const SCAN_LISTS = ["toWlu", "ambiguous", "fromCatalogue"] as const;
 
 export type WelshRunner = {
   /** Takes a `welsh` frame's data and runs it as soon as there is room. */
@@ -374,6 +497,32 @@ export type WelshRunner = {
   /** Resolves once nothing is running or waiting; for a test, and for the supervisor's shutdown. */
   idle: () => Promise<void>;
 };
+
+/** Long enough for the first install of the tools' dependencies, which no job's own limit is. */
+const PREPARE_TIMEOUT_MS = 15 * 60_000;
+
+/**
+ * Installs the Welsh tools' dependencies as the pod starts, when the owner ticked the plugin, so the first job does
+ * not spend its own time limit on the install. Jobs wait for this before they start (`ready` on their deps), so none
+ * is cut off by its own limit while the install runs. Never throws: a failure is said, and the next job tries the
+ * install again.
+ */
+export async function prepareWelsh(deps: Pick<WelshDeps, "run" | "env" | "workspace" | "install" | "say">): Promise<void> {
+  const say = deps.say ?? (() => {});
+  try {
+    const script = welshScript(deps.workspace, deps.env, deps.install);
+    if (script === null) {
+      return;
+    }
+    const env: NodeJS.ProcessEnv = { ...deps.env, CFT_WELSH_WORKSPACE: deps.workspace };
+    const result = await deps.run(script, ["deps"], { env, timeoutMs: PREPARE_TIMEOUT_MS });
+    if (result.code !== 0) {
+      say(`welsh: could not install the tools' dependencies (exit ${result.code}): ${result.stderr.trim().slice(-300)}`);
+    }
+  } catch (e) {
+    say(`welsh: could not prepare the tools: ${(e as Error).message}`);
+  }
+}
 
 /**
  * Runs jobs beside the supervisor rather than behind it. Quick ones (`info`, `search`) run at most two at once,

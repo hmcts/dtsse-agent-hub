@@ -1,19 +1,14 @@
 import { NextRequest } from "next/server";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { GET as searchRoute } from "../../src/app/api/ui/assistant/search/route.ts";
-import {
-  type ConversationRow,
-  conversationAgent,
-  createConversation,
-  ensureAssistant,
-  listConversations,
-  renameConversation,
-  searchConversations,
-  touchConversation
-} from "../../src/assistant/store.ts";
-import { type ConversationMatch, conversationMatches } from "../../src/assistant/views.ts";
+import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
+import type { ConversationRow } from "../../src/assistant/conversation-row.ts";
+import { conversationAgent, createConversation, listConversations, renameConversation, touchConversation } from "../../src/assistant/conversation-store.ts";
+import { searchConversations } from "../../src/assistant/search-store.ts";
+import { type ConversationMark, type ConversationMatch, conversationGroups, conversationMatches } from "../../src/assistant/views.ts";
 import { directAsPerson } from "../../src/messages/send.ts";
 import { byCodePoint } from "../../src/topics/slug.ts";
+import { appendEntries } from "../../src/transcripts/store.ts";
 import { setDesired } from "../../src/virtual-agents/store.ts";
 import { insertUser, type Person, person, prisma, resetDatabase } from "./database.ts";
 import { jsonOf } from "./routes.ts";
@@ -53,6 +48,12 @@ async function listed(who: Person): Promise<(string | null)[]> {
   return (await listConversations(prisma, who.oid)).map((chat) => chat.title);
 }
 
+/** What the sidebar's own grouped list marks each of their chats with, which a search result has to agree with. */
+async function marked(who: Person): Promise<Map<string, ConversationMark>> {
+  const groups = await conversationGroups(prisma, who.oid);
+  return new Map(groups.flatMap((group) => group.items).map((item) => [item.title, item.mark]));
+}
+
 /**
  * The chat with its pod taken off it, which is what a local Claude Code session's conversation is: no `virtual_agent`
  * row behind it.
@@ -84,6 +85,64 @@ beforeEach(async () => {
 
 afterAll(async () => {
   await prisma.$disconnect();
+});
+
+/** A local chat with nothing said in it by anyone but, perhaps, the harness: the entries are its transcript's. */
+async function localChat(title: string, entries: readonly { role: "user" | "assistant"; text: string }[]): Promise<ConversationRow> {
+  const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
+  const agentId = await conversationAgent(prisma, conversation);
+  await renameConversation(prisma, ALICE.oid, conversation.id, title);
+  // Through the upload, which is what records a chat's first content; a pod chat's title is left alone by it.
+  await appendEntries(
+    prisma,
+    { id: agentId, ownerOid: ALICE.oid },
+    "s",
+    entries.map((entry, index) => ({
+      key: `k${index}`,
+      role: entry.role,
+      content: { text: entry.text },
+      truncated: false,
+      redacted: false,
+      message_id: null,
+      occurred_at: new Date(Date.UTC(2026, 9, 30, 10, 0, index))
+    }))
+  );
+  await withoutPod(conversation);
+  return conversation;
+}
+
+describe("a chat on the person's own computer with nothing in it", () => {
+  const CLEAR = "<command-name>/clear</command-name><command-message>clear</command-message><command-args></command-args>";
+
+  it("should be left out of the list and the search when it has no transcript and no message", async () => {
+    await localChat("Possession handle", []);
+
+    expect(await listed(ALICE)).toEqual([]);
+    expect(await found(ALICE, "possession")).toEqual([]);
+  });
+
+  it("should be left out when all it holds is the harness's record of a command", async () => {
+    await localChat("Possession handle", [{ role: "user", text: CLEAR }]);
+
+    expect(await listed(ALICE)).toEqual([]);
+    expect(await found(ALICE, "possession")).toEqual([]);
+  });
+
+  it("should be listed and found once the person has typed a prompt", async () => {
+    await localChat("Possession handle", [
+      { role: "user", text: CLEAR },
+      { role: "user", text: "look at the possession claim" }
+    ]);
+
+    expect(await listed(ALICE)).toEqual(["Possession handle"]);
+    expect(await found(ALICE, "possession")).toEqual(["Possession handle"]);
+  });
+
+  it("should be listed once the session has answered, whatever the person typed", async () => {
+    await localChat("Possession handle", [{ role: "assistant", text: "hello" }]);
+
+    expect(await listed(ALICE)).toEqual(["Possession handle"]);
+  });
 });
 
 describe("searching conversations", () => {
@@ -299,12 +358,55 @@ describe("a chat with no assistant behind it", () => {
 
     const matches = await conversationMatches(prisma, ALICE.oid, "possession");
 
-    expect(new Map(matches.map((match) => [match.title, match.local]))).toEqual(
+    expect(new Map(matches.map((match) => [match.title, match.mark]))).toEqual(
       new Map([
-        ["A possession claim with no assistant", true],
-        ["A possession claim on my assistant", false]
+        ["A possession claim with no assistant", { where: "computer", session: "disconnected" }],
+        ["A possession claim on my assistant", { where: "assistant", session: "disconnected" }]
       ])
     );
+  });
+
+  /**
+   * A result's mark is coloured by the state of its session, as a row in the list below it is, so the search's own
+   * query has to bring the current agent's status back with each match: without it every laptop found by searching
+   * would be marked the same whatever its session was doing.
+   */
+  it.each([
+    ["busy", "working"],
+    ["idle", "ready"],
+    ["offline", "disconnected"]
+  ] as const)("should mark a result that is a local chat as %s with the state of its session", async (status, session) => {
+    const local = await chat(ALICE, ["A possession claim with no assistant"]);
+    await withoutPod(local);
+    await prisma.agent.updateMany({ where: { assistantConversationId: local.id }, data: { status } });
+
+    const matches = await conversationMatches(prisma, ALICE.oid, "possession");
+
+    expect(matches.map((match) => match.mark)).toEqual([{ where: "computer", session }]);
+  });
+
+  /**
+   * Whether a pod chat is marked as one is a fact about the person's whole list, and the sidebar's list and its
+   * search are two requests apart: the page renders one and the browser asks the route for the other. Both read it
+   * through `hasLocalConversation`, which is what keeps them from answering differently for the same person.
+   */
+  it("should mark a pod chat the same in the sidebar's list and in the search for the same person", async () => {
+    const ON_POD = "A possession claim on my assistant";
+    const ON_LAPTOP = "A possession claim with no assistant";
+    await chat(ALICE, [ON_POD]);
+
+    // Nothing of theirs is local yet, so neither read marks the pod chat: there is nothing to tell it apart from.
+    expect(await marked(ALICE)).toEqual(new Map([[ON_POD, null]]));
+    expect(new Map((await asked("alice", "possession")).map((match) => [match.title, match.mark]))).toEqual(new Map([[ON_POD, null]]));
+
+    await withoutPod(await chat(ALICE, [ON_LAPTOP]));
+
+    const mixed = new Map([
+      [ON_LAPTOP, { where: "computer", session: "disconnected" }],
+      [ON_POD, { where: "assistant", session: "disconnected" }]
+    ]);
+    expect(await marked(ALICE)).toEqual(mixed);
+    expect(new Map((await asked("alice", "possession")).map((match) => [match.title, match.mark]))).toEqual(mixed);
   });
 
   it("should find nothing of another person's chat that has no assistant either", async () => {

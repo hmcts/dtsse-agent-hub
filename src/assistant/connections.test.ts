@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { checklistState } from "@/components/virtual-agents/OnboardingChecklist";
 import { CREDENTIAL_KINDS, type CredentialKind } from "../credentials/names.ts";
 import type { CredentialStatus } from "../credentials/store.ts";
 import { type ModelRoute, modelRouteFor } from "../viewer/identity.ts";
@@ -12,6 +11,7 @@ import {
   type Connection,
   type ConnectionState,
   canSignInAgain,
+  checklistState,
   codeCollectable,
   connectionState,
   connections,
@@ -47,7 +47,7 @@ const BEFORE_STORED = "2026-10-23T09:00:00.000Z";
 const AFTER_STORED = "2026-10-25T11:00:00.000Z";
 
 function status(kind: CredentialKind, stored: boolean, accountLabel: string | null = null): CredentialStatus {
-  return { kind, stored, accountLabel, updatedAt: stored ? STORED_AT : null, updatedVia: stored ? "pod" : null };
+  return { kind, stored, accountLabel, updatedAt: stored ? STORED_AT : null };
 }
 
 /** What `connectionState` needs of a credential: whether one is stored, and when it was last saved. */

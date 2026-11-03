@@ -1,18 +1,20 @@
-import { ensureAssistant } from "../../src/assistant/store.ts";
+import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
 import { devIdentity, type Viewer } from "../../src/viewer/identity.ts";
 import { insertUser, type Person, prisma } from "./database.ts";
 
 /**
- * The scaffolding every suite about an assistant's own pod needs: who is signed in, and an assistant with a
- * supervisor session whose client claims whatever the suite is about.
+ * The scaffolding every suite about an assistant's own pod needs: who is signed in, and an assistant whose pod's
+ * client claims whatever the suite is about. The claim is made through the pod's main-session agent, which
+ * `podSupports` reads while the pod has reported no claim of its own; a suite about the pod's own claim sets
+ * `virtual_agent.client_features` itself.
  *
- * Shared because the setup is the same question each time — "a running pod whose own session claims X" — and three
+ * Shared because the setup is the same question each time — "a running pod whose client claims X" — and three
  * copies of it had already drifted in their defaults. What each suite keeps is its `vi.mock` calls, which Vitest
  * hoists per file, and the fixtures that are about its own feature.
  */
 
 /** A development persona, as the `X-Dev-User` header and the persona cookie name one. */
-export function persona(name: string): Person {
+function persona(name: string): Person {
   const identity = devIdentity(name);
   return { oid: identity.oid, name: identity.name, email: identity.email! };
 }
@@ -25,20 +27,19 @@ export function viewer(who: Person): Viewer {
   return { ...who, tid: "dev", modelRoute: "own-licence" };
 }
 
-export interface PodSession {
+interface PodSession {
   /** Whether a supervisor session has ever registered. Without one nothing has claimed anything either way. */
   session?: boolean;
 }
 
 /**
- * The person's assistant, with its own session registered as its current agent — which is where a client-feature
- * claim lives, because the supervisor is what reports and what acts on the sessions stream, not a conversation's
- * session.
+ * The person's assistant, with its main session registered as its current agent and no claim of the pod's own, so
+ * `podSupports` reads the main session's claim. A suite about the pod's own claim sets `virtual_agent.client_features`.
  *
  * `features` is explicit rather than defaulted: which feature a suite is about is the whole point of the fixture,
  * and `null` is a client from before client features existed, which is a different state from claiming none.
  */
-export async function assistantOf(
+async function assistantOf(
   who: Person,
   features: string[] | null,
   status: "running" | "stopped" = "running",

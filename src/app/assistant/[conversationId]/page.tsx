@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import {
   deleteConversation,
   exportArtefactToConfluence,
+  exportArtefactToGithub,
   exportArtefactToJira,
   renameConversation,
   saveArtefact,
@@ -13,14 +14,17 @@ import {
   warmConversation
 } from "@/app/_actions/assistant";
 import { deleteAllAssistantFiles, deleteAssistantFile } from "@/app/_actions/assistant-files";
-import { resetClaudeMd, saveClaudeMd } from "@/app/_actions/credentials";
+import { readAssistantAgent, readGitIdentity } from "@/app/_actions/assistant-settings";
+import { clearGitIdentity, removeCredential, resetClaudeMd, saveClaudeMd, saveCredential, saveGitIdentity } from "@/app/_actions/credentials";
 import { saveExportDefaults } from "@/app/_actions/export-defaults";
 import { offerChatFork, withdrawChatFork } from "@/app/_actions/forks";
 import { answerAgentQuestion } from "@/app/_actions/questions";
 import { shareChat, unshareChat } from "@/app/_actions/shares";
 import { deleteTemplate, saveTemplate } from "@/app/_actions/templates";
-import { reconnectSignIn, resizeVirtualAgent, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
+import { reconnectSignIn, renameVirtualAgent, resizeVirtualAgent, restartVirtualAgent, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
+import { SHARING_SETTINGS } from "@/app/assistant/sharing";
 import { connectionsData } from "@/assistant/connections";
+import { savedCredentialsData } from "@/assistant/saved-credentials";
 import { assistantPluginsData } from "@/assistant/settings";
 import { offeredTemplates } from "@/assistant/templates";
 import { THEME_COOKIE, themeOf } from "@/assistant/theme";
@@ -55,6 +59,7 @@ const ACTIONS: ChatActions = {
   answerQuestion: answerAgentQuestion,
   saveArtefact,
   exportToJira: exportArtefactToJira,
+  exportToGithub: exportArtefactToGithub,
   exportToConfluence: exportArtefactToConfluence
 };
 
@@ -107,12 +112,17 @@ export default async function ConversationPage({
       connect={{ assistantId: home.assistant.id, running: home.assistant.desired === "running", reconnect: reconnectSignIn }}
       now={Date.now()}
       plugins={pluginSettings}
+      welsh={home.welsh}
       claudeMd={{ settings: claudeMd, save: saveClaudeMd, reset: resetClaudeMd }}
       templates={{ mine, save: saveTemplate, remove: deleteTemplate }}
       files={files === undefined ? undefined : { view: files, remove: deleteAssistantFile, removeAll: deleteAllAssistantFiles }}
       size={size === undefined ? undefined : { view: size, assistantId: home.assistant.id, save: resizeVirtualAgent }}
       model={model === undefined ? undefined : { ...model, save: saveAssistantModel }}
       exports={{ defaults, save: saveExportDefaults, access: jira }}
+      sharing={SHARING_SETTINGS}
+      agent={{ load: readAssistantAgent, rename: renameVirtualAgent, restart: restartVirtualAgent }}
+      git={{ load: readGitIdentity, save: saveGitIdentity, clear: clearGitIdentity }}
+      tokens={{ ...savedCredentialsData(home.credentials, home.assistant.modelRoute), save: saveCredential, remove: removeCredential }}
     >
       {/* `local` so a chat on the person's own computer is not held behind credentials only a pod needs. */}
       <AssistantGate home={home} waiting={jar.get(WAITING_COOKIE)?.value} theme={theme} local={view.local}>

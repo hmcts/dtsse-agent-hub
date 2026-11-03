@@ -10,10 +10,10 @@ import { Composer, type ComposerFiller } from "@/components/assistant/Composer";
 import { ProductSelect } from "@/components/assistant/ProductSelect";
 import type { ActionResult } from "@/web/action";
 
-export type StartAction = (input: { product: unknown; body: unknown }) => Promise<ActionResult<{ id: string }>>;
-export type OpenAction = (input: { product: unknown }) => Promise<ActionResult<{ id: string }>>;
-export type SendAction = (input: { conversationId: unknown; body: unknown; uploadIds: unknown }) => Promise<ActionResult>;
-export type ProductAction = (input: { conversationId: unknown; product: unknown }) => Promise<ActionResult>;
+type StartAction = (input: { product: unknown; body: unknown }) => Promise<ActionResult<{ id: string }>>;
+type OpenAction = (input: { product: unknown }) => Promise<ActionResult<{ id: string }>>;
+type SendAction = (input: { conversationId: unknown; body: unknown; uploadIds: unknown }) => Promise<ActionResult>;
+type ProductAction = (input: { conversationId: unknown; product: unknown }) => Promise<ActionResult>;
 
 export interface EmptyChatActions {
   /** A conversation and its first message in one go, for the ordinary case where nothing was attached. */

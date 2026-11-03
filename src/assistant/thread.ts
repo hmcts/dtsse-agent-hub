@@ -3,6 +3,9 @@ import type { QuestionView } from "../questions/views.ts";
 import type { AgentStatus } from "../realtime/events.ts";
 import { byCodePoint } from "../topics/slug.ts";
 import { type ConversationItem, toolSummary } from "../transcripts/conversation.ts";
+import { withoutIdeContext } from "../transcripts/harness-turn.ts";
+import { taskFailed, taskNotifications } from "../transcripts/task-notification.ts";
+import type { ProductChange, SessionState, StopMark } from "./conversation-row.ts";
 import { productLabel } from "./products.ts";
 import type { MessageAttachment } from "./upload-store.ts";
 
@@ -41,16 +44,13 @@ export type ThreadItem =
    * keeps no `tool_use_id` — leaves every call it might have answered neutral, because marking a call failed on a
    * guess is worse than saying nothing about how it went.
    */
-  | { type: "tool"; key: string; at: string; name: string; summary: string; failed: boolean };
-
-export interface ProductMark {
-  product: string;
-  at: string;
-}
-
-export interface StopMark {
-  at: string;
-}
+  | { type: "tool"; key: string; at: string; name: string; summary: string; failed: boolean }
+  /**
+   * A line the harness wrote into the session's user turns rather than the person: a slash command they ran, or a
+   * background task reporting back. Local chats only, since a pod chat's user turns are all hub messages. Shown as a
+   * quiet line, because the raw text is XML nobody typed.
+   */
+  | { type: "notice"; key: string; at: string; text: string; failed: boolean };
 
 function textOf(content: unknown): string | undefined {
   if (typeof content === "object" && content !== null && "text" in content && typeof content.text === "string") {
@@ -58,6 +58,94 @@ function textOf(content: unknown): string | undefined {
     return text === "" ? undefined : text;
   }
   return undefined;
+}
+
+/** The text of a slash command's turn, or `undefined` when it is not one. */
+function commandNotice(text: string): string | undefined {
+  if (!text.startsWith("<command-name>")) {
+    return undefined;
+  }
+  const field = (tag: string) => new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`).exec(text)?.[1]?.trim() ?? "";
+  const name = field("command-name");
+  const args = field("command-args");
+  return name === "" ? undefined : `Ran ${name}${args === "" ? "" : ` ${args}`}`;
+}
+
+/** Turns the harness writes as the user that carry nothing a person should read: a command's output and its caveat. */
+const SILENT_TURNS = ["local-command-stdout", "local-command-stderr", "local-command-caveat", "system-reminder"];
+
+/** The longest a notice is, so one monitor event or a skill's long arguments cannot fill the line. */
+const NOTICE_LIMIT = 200;
+
+/** One line, bounded: harness text can carry newlines and whole prompts. */
+function oneLine(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > NOTICE_LIMIT ? `${flat.slice(0, NOTICE_LIMIT - 1)}…` : flat;
+}
+
+/**
+ * What a local chat's user turn is when the harness wrote it: notices to show, an empty list to show nothing, or
+ * `undefined` when the person typed it.
+ */
+function harnessTurn(raw: string, truncated: boolean): { text: string; failed: boolean }[] | undefined {
+  const text = raw.trim();
+  const command = commandNotice(text);
+  if (command !== undefined) {
+    return [{ text: oneLine(command), failed: false }];
+  }
+  // Only a turn that is wholly one such block: a person quoting output at the start of their own prompt is not dropped.
+  if (SILENT_TURNS.some((tag) => text.startsWith(`<${tag}>`) && text.endsWith(`</${tag}>`))) {
+    return [];
+  }
+  return taskNotifications(text, { truncated })?.map((task) => ({
+    text: oneLine(task.summary ?? task.event ?? "A background task finished"),
+    failed: taskFailed(task.status)
+  }));
+}
+
+/**
+ * What a local chat shows for one of its user turns: the notices of a turn the harness wrote (none for a silent one),
+ * the words the person typed, or `undefined` for a turn that shows nothing at all — redacted, empty, or nothing but
+ * an IDE's editor context, which is put in front of a prompt and says nothing on its own.
+ */
+function localUserTurn(content: unknown, truncated: boolean): { notices: { text: string; failed: boolean }[] } | { said: string } | undefined {
+  // A prompt whose words were redacted is left out rather than shown as an empty bubble, as a wordless assistant
+  // entry is: `textOf` answers nothing for the `{redacted}` content such an entry keeps.
+  const typed = textOf(content);
+  if (typed === undefined) {
+    return undefined;
+  }
+  const text = withoutIdeContext(typed);
+  const notices = harnessTurn(text, truncated);
+  if (notices !== undefined) {
+    return { notices };
+  }
+  return text === "" ? undefined : { said: text };
+}
+
+/**
+ * Whether a transcript entry shows in a local chat's thread as something other than a notice: a bubble of the
+ * person's or the session's words, or a tool row. The one rule for "something is in this chat" as far as a
+ * transcript can say, which is what puts a chat on the person's own computer in their sidebar
+ * (`announceFirstContent` in first-content.ts) — so a chat is listed exactly when its thread would show more than the
+ * harness's own lines.
+ *
+ * A shell command run with `!`, a hook's output and an interrupted request are bubbles here and so count, although none
+ * of them can name a chat (`typedText` in harness-turn.ts): a chat is about what was typed, but it holds what it
+ * shows. A tool result shows nothing of its own; the call it answers is the row.
+ */
+export function shownInThread(entry: { role: string; content: unknown; truncated: boolean }): boolean {
+  if (entry.role === "tool_use") {
+    return true;
+  }
+  if (entry.role === "assistant") {
+    return textOf(entry.content) !== undefined;
+  }
+  if (entry.role === "user") {
+    const turn = localUserTurn(entry.content, entry.truncated);
+    return turn !== undefined && "said" in turn;
+  }
+  return false;
 }
 
 /** A tool call the session made, with what came back. */
@@ -167,7 +255,7 @@ function awaitingAnswer(thread: readonly ThreadItem[]): boolean {
  */
 export function threadItems(
   items: readonly ConversationItem[],
-  products: readonly ProductMark[] = [],
+  products: readonly ProductChange[] = [],
   stops: readonly StopMark[] = [],
   local = false
 ): ThreadItem[] {
@@ -188,12 +276,14 @@ export function threadItems(
         thread.push({ type: "assistant", key: item.key, at: item.at, text });
       }
     } else if (local && item.entry.role === "user") {
-      // A prompt whose words were redacted is left out rather than shown as an empty bubble, as a wordless assistant
-      // entry is: `textOf` answers nothing for the `{redacted}` content such an entry keeps.
-      const text = textOf(item.entry.content);
-      if (text !== undefined) {
+      const turn = localUserTurn(item.entry.content, item.entry.truncated);
+      if (turn !== undefined && "notices" in turn) {
+        for (const [index, notice] of turn.notices.entries()) {
+          thread.push({ type: "notice", key: `${item.key}:${index}`, at: item.at, text: notice.text, failed: notice.failed });
+        }
+      } else if (turn !== undefined) {
         // No delivery and no attachments: this is what was typed at the laptop, not a message the hub carried there.
-        thread.push({ type: "user", key: item.key, at: item.at, text, delivery: null, attachments: [] });
+        thread.push({ type: "user", key: item.key, at: item.at, text: turn.said, delivery: null, attachments: [] });
       }
     }
   }
@@ -223,8 +313,6 @@ const ACTIVITIES: Readonly<Record<string, string>> = {
 export function activityLabel(toolName: string | undefined): string {
   return (toolName === undefined ? undefined : ACTIVITIES[toolName]) ?? "Thinking";
 }
-
-export type SessionState = "starting" | "live" | "queued" | null;
 
 export type Progress =
   | { state: "idle" }
@@ -320,6 +408,13 @@ export function backgroundHelpers(items: readonly ConversationItem[], now = Date
 }
 
 /**
+ * The two wordings for a pod's session that is not there yet, read from here by both the line under the thread and
+ * the one above the composer, so the same wait is never worded two ways on the one screen.
+ */
+const STARTING = "Starting your assistant…";
+const QUEUED = "Waiting for a free assistant…";
+
+/**
  * What to say about an offline agent the person's last message is waiting on.
  *
  * Three different things, and only one of them is ever true of a given chat. A pod's session is either being started
@@ -328,11 +423,11 @@ export function backgroundHelpers(items: readonly ConversationItem[], now = Date
  * that it is not connected, and `local` is checked first because `sessionState` is only ever written by a pod's
  * supervisor and so is null for every local chat — leaving the `queued` arm unreachable there rather than wrong.
  */
-function wakingLabel(session: SessionState, local: boolean): string {
+function wakingLabel(session: SessionState | null, local: boolean): string {
   if (local) {
     return "Waiting for your session to reconnect…";
   }
-  return session === "queued" ? "Waiting for a free assistant…" : "Starting your assistant…";
+  return session === "queued" ? QUEUED : STARTING;
 }
 
 /**
@@ -349,7 +444,7 @@ export function progress(
   items: readonly ConversationItem[],
   thread: readonly ThreadItem[],
   agentStatus: AgentStatus,
-  session: SessionState,
+  session: SessionState | null,
   local = false
 ): Progress {
   // The words and the marks on them. A product change is not something either of them said, and nor is a tool row:
@@ -387,6 +482,14 @@ export function progress(
   return { state: "idle" };
 }
 
+/**
+ * A wait as it is read out rather than shown. The trailing ellipsis is punctuation for the eye — it says the line is
+ * standing there — and a screen reader either says nothing for it or says "ellipsis", so it goes.
+ */
+function spoken(label: string): string {
+  return label.replace(/…$/, "");
+}
+
 function helperCount(helpers: number): string {
   return helpers === 1 ? "1 helper" : `${helpers} helpers`;
 }
@@ -412,7 +515,74 @@ export function progressAnnouncement(doing: Progress): string {
     return "";
   }
   if (doing.state === "waking") {
-    return doing.label.replace(/…$/, "");
+    return spoken(doing.label);
   }
   return doing.helpers === 0 ? "Working on your answer" : `Working on your answer, with ${helperCount(doing.helpers)} running`;
+}
+
+/**
+ * Light words for the wait while a pod starts a session, shown in turn.
+ *
+ * Every one of them still says the assistant is starting, because the line is the only thing on the screen saying so:
+ * somebody who reads one of these and nothing else has to come away with the truth. The first is what a person sees
+ * for the first few seconds of most waits, and is the plainest.
+ */
+export const WARMING_QUIPS: readonly [string, ...string[]] = [
+  "Warming up your assistant…",
+  "Luring an assistant with tea and biscuits…",
+  "Putting the kettle on while your assistant starts…",
+  "Waking your assistant, which is not a morning person…",
+  "Starting your assistant — it is just finding its glasses…"
+];
+
+/**
+ * What a chat with no session behind it says. Not a wait at all: nothing has been asked to start one, so the line
+ * says what will ask, which is the person sending something.
+ */
+const UNSTARTED = "Your assistant starts when you send a message.";
+
+/** One wording each, so the words a person reads come from here rather than from a list built on every render. */
+const QUEUED_WORDS: readonly [string, ...string[]] = [QUEUED];
+const UNSTARTED_WORDS: readonly [string, ...string[]] = [UNSTARTED];
+
+export interface SessionNotice {
+  /** Which wait this is. `starting` is the one whose words rotate; the other two have one wording each. */
+  state: "starting" | "queued" | "unstarted";
+  /** The words to show, in the order they are shown. Never empty, so the view always has a line to draw. */
+  words: readonly [string, ...string[]];
+  /** What a screen reader is told: the state itself, once, and never the quip standing in for it on the screen. */
+  announcement: string;
+}
+
+/**
+ * Whether to say anything above the composer about the session behind this chat, and what.
+ *
+ * A pod runs a bounded number of sessions and `/exit`s one after twenty idle minutes, so an old conversation on a
+ * running pod can have no session behind it, and the wake that focusing the composer fires asks for one silently. So
+ * four states, worded for what each is:
+ *
+ * - `live` — nothing. There is a session and it will answer.
+ * - `starting` — the quips, which is the one wait that is only ever a few seconds and nobody's fault.
+ * - `queued` — the pod is at its cap and another chat has to give up its session first. Said plainly: this is a real
+ *   wait with a cause, and a joke over it would hide both.
+ * - `null` — no session and nothing starting one, which is what `reportSessions` writes for every conversation its
+ *   pod's supervisor leaves out of a report. Says what will start one.
+ *
+ * Nothing at all in three cases. A chat on somebody's laptop has no pod, no supervisor and so no `sessionState` worth
+ * reading, and `localOfflineNote` already says the one thing there is to say there — checked first, so the two can
+ * never both be on the screen. An agent that is not `offline` has a session whatever a report yet to land says, and
+ * is also the agent the composer's wake leaves alone. And anything `progress` is already saying is left to it: the
+ * line under the thread and this one would otherwise both word the same wait, directly above and below each other.
+ */
+export function sessionNotice(session: SessionState | null, agentStatus: AgentStatus, doing: Progress, local = false): SessionNotice | null {
+  if (local || agentStatus !== "offline" || doing.state !== "idle" || session === "live") {
+    return null;
+  }
+  if (session === "starting") {
+    return { state: "starting", words: WARMING_QUIPS, announcement: spoken(STARTING) };
+  }
+  if (session === "queued") {
+    return { state: "queued", words: QUEUED_WORDS, announcement: spoken(QUEUED) };
+  }
+  return { state: "unstarted", words: UNSTARTED_WORDS, announcement: UNSTARTED };
 }

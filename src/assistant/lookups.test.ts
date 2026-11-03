@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { breadcrumb, checkResults, lookupAnswerBody, lookupQuery, lookupResponse, lookupResults, MAX_LOOKUP_RESULTS, searchable } from "./lookups.ts";
+import {
+  breadcrumb,
+  checkResults,
+  isGithubKind,
+  lookupAnswerBody,
+  lookupQuery,
+  lookupResponse,
+  lookupResults,
+  MAX_LOOKUP_RESULTS,
+  searchable
+} from "./lookups.ts";
 
 const PAGE = {
   id: "280959611",
@@ -100,5 +110,46 @@ describe("breadcrumb", () => {
   it("should say the space once when its top page is named after it", () => {
     expect(breadcrumb({ ...PAGE, title: "Spec" })).toEqual(["Platform Engineering", "Products", "Spec"]);
     expect(breadcrumb({ space_name: "CCD", ancestors: ["Home", "Guides"], title: "Flags" })).toEqual(["CCD", "Home", "Guides", "Flags"]);
+  });
+});
+
+describe("GitHub lookups", () => {
+  const REPO = { full_name: "hmcts/cft-workspace", description: null };
+  const PROJECT = { owner: "hmcts", number: 12, title: "CFT roadmap" };
+
+  it("should accept repositories and Projects only as their own kind", () => {
+    expect(checkResults("github_repo", [REPO])).toEqual([REPO]);
+    expect(checkResults("github_project", [PROJECT])).toEqual([PROJECT]);
+    expect(checkResults("github_repo", [PROJECT])).toBeUndefined();
+    expect(checkResults("github_project", [REPO])).toBeUndefined();
+  });
+
+  it.each([
+    ["a repository that is not owner/name", "github_repo", { full_name: "cft-workspace", description: null }],
+    ["a repository with no description field", "github_repo", { full_name: "hmcts/x" }],
+    ["a Project of an owner that is not a login", "github_project", { ...PROJECT, owner: "hmcts --jq ." }],
+    ["a Project numbered 0", "github_project", { ...PROJECT, number: 0 }]
+  ] as const)("should refuse %s", (_label, kind, result) => {
+    expect(checkResults(kind, [result])).toBeUndefined();
+  });
+
+  it("should link a repository the browser is shown, and not a Project, whose address the hub cannot know", () => {
+    expect(lookupResults("github_repo", [REPO])).toEqual([{ ...REPO, url: "https://github.com/hmcts/cft-workspace" }]);
+    expect(lookupResults("github_project", [PROJECT])).toEqual([PROJECT]);
+  });
+
+  it("should know a GitHub kind from an Atlassian one", () => {
+    expect(isGithubKind("github_repo")).toBe(true);
+    expect(isGithubKind("github_project")).toBe(true);
+    expect(isGithubKind("jira_project")).toBe(false);
+  });
+});
+
+describe("searchable for a GitHub Project", () => {
+  it("should search for a Project number of any length, and not for one digit of anything else", () => {
+    expect(searchable("7", "github_project")).toBe(true);
+    expect(searchable("#43", "github_project")).toBe(true);
+    expect(searchable("7", "github_repo")).toBe(false);
+    expect(searchable("7")).toBe(false);
   });
 });

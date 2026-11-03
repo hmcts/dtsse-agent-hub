@@ -13,7 +13,7 @@ import { AgentAuthFailed, verifyEntraToken } from "./token.ts";
 export const ORCHESTRATE_ROLE = "VirtualAgents.Orchestrate";
 
 /** Local development only, under the same `AGENT_AUTH_DISABLED` as `X-Dev-User`. */
-export const DEV_ORCHESTRATOR_HEADER = "x-dev-orchestrator";
+const DEV_ORCHESTRATOR_HEADER = "x-dev-orchestrator";
 
 export interface Orchestrator {
   oid: string;

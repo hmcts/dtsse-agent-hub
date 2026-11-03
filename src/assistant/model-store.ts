@@ -1,5 +1,5 @@
 import { HttpError } from "../agent-api/http.ts";
-import { clientSupports } from "../agents/client-features.ts";
+import { podSupports } from "../agents/client-features.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { DEFAULT_MODEL, isKnownModel } from "./models.ts";
 
@@ -30,17 +30,16 @@ export interface AssistantModelChoice {
 /**
  * Their choice and whether their assistant's pod can act on it.
  *
- * `honoured` comes from the pod's *own* session — the virtual agent's current agent, which is the supervisor's
- * registration — because the supervisor is what starts a session on the model, as the Files and Size sections read
- * their own reports from it. A pod runs whatever client it booted with, so this is per pod and changes when it
+ * `honoured` is the pod's claim (`podSupports`), because the supervisor is what starts a session on the model, as the
+ * Files and Size sections read their own reports from it. A pod runs whatever client it booted with, so this is per pod and changes when it
  * restarts; nothing is gated on it, since a choice saved now is honoured by whatever starts next.
  */
 export async function assistantModelChoice(prisma: PrismaClient, ownerOid: string, virtualAgentId: string): Promise<AssistantModelChoice> {
   const [model, agent] = await Promise.all([
     readAssistantModel(prisma, ownerOid),
-    prisma.virtualAgent.findUnique({ where: { id: virtualAgentId, ownerOid }, select: { agent: { select: { clientFeatures: true } } } })
+    prisma.virtualAgent.findUnique({ where: { id: virtualAgentId, ownerOid }, select: { clientFeatures: true, agent: { select: { clientFeatures: true } } } })
   ]);
-  return { model, honoured: clientSupports(agent?.agent?.clientFeatures, "model-alias") };
+  return { model, honoured: agent !== null && podSupports(agent, "model-alias") };
 }
 
 /**

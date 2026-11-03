@@ -1,9 +1,10 @@
 import { HttpError } from "../agent-api/http.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
+import { announce, type ConversationRow } from "./conversation-row.ts";
+import { GITHUB_SELECT } from "./github.ts";
 import { isJiraProject, JIRA_EXPORT_TIMEOUT_MS, JIRA_SELECT, type JiraExportView, jiraExportView } from "./jira.ts";
 import { hasPod } from "./pods.ts";
 import { MAX_JIRA_ERROR } from "./schemas.ts";
-import { announce, type ConversationRow } from "./store.ts";
 
 /**
  * A conversation's Jira export as the hub keeps it: claimed when its owner asks, carried to the conversation's
@@ -49,14 +50,24 @@ export async function requestJiraExport(
          AND jira_key IS NULL
          AND artefact_version > 0
          AND (jira_status IS DISTINCT FROM 'pending' OR jira_requested_at < ${staleBefore})
+         -- One ticket a document, whichever tool made it: a person who has since switched to Jira is not offered a
+         -- second for a document already on GitHub, or on its way there.
+         AND github_number IS NULL
+         AND (github_status IS DISTINCT FROM 'pending' OR github_requested_at < ${staleBefore})
     `;
     if (updated === 0) {
-      const row = await tx.assistantConversation.findUnique({ where: { id: conversation.id }, select: { artefactVersion: true, ...JIRA_SELECT } });
+      const row = await tx.assistantConversation.findUnique({
+        where: { id: conversation.id },
+        select: { artefactVersion: true, ...JIRA_SELECT, ...GITHUB_SELECT }
+      });
       if (row === null) {
         throw new HttpError(404, "that conversation no longer exists");
       }
       if (row.jiraKey !== null) {
         throw new HttpError(409, `this document is already in Jira as ${row.jiraKey}`);
+      }
+      if (row.githubNumber !== null) {
+        throw new HttpError(409, `this document is already on GitHub as ${row.githubRepo}#${row.githubNumber}`);
       }
       if (row.artefactVersion === 0) {
         throw new HttpError(409, "write the document before exporting it");
@@ -82,7 +93,7 @@ export async function recordJiraExport(
   const where = { id: conversation.id, jiraExportId: result.export_id, jiraKey: null };
   const data =
     "key" in result
-      ? { jiraStatus: "done", jiraKey: result.key, jiraError: null, jiraExportedAt: now, updatedAt: now }
+      ? { jiraStatus: "done", jiraKey: result.key, jiraError: null, updatedAt: now }
       : { jiraStatus: "failed", jiraError: result.error.slice(0, MAX_JIRA_ERROR), updatedAt: now };
   await prisma.$transaction(async (tx) => {
     const { count } = await tx.assistantConversation.updateMany({ where, data });

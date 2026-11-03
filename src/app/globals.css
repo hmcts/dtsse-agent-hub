@@ -7,11 +7,6 @@
 @source "../web/**/*.{ts,tsx}";
 
 @theme {
-  /* An agent's status dot. Text beside a dot always says the status too, so colour is never the only signal. */
-  --color-status-busy: #fbbf24;
-  --color-status-idle: #2bac76;
-  --color-status-offline: #8b8d91;
-
   --color-accent: #1d9bd1;
 
   /* Slack's dark theme: a darker rail for the sidebar, the message pane a shade lighter. */
@@ -31,7 +26,6 @@
   --font-plex-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
   --animate-asst-dot: asst-dot 1.2s infinite ease-in-out;
-
   @keyframes asst-dot {
     0%,
     80%,
@@ -43,6 +37,31 @@
       opacity: 1;
       transform: translateY(-3px);
     }
+  }
+}
+
+/* The Assistant's working badge, on a session mid-turn. Three cycles, so it stops within five seconds of the status
+ * changing (WCAG 2.2.2) and rests on the static badge, which carries the state without it; it runs again whenever the
+ * class is re-applied, as it is on the next change to working. It dims only to 0.6 so the green keeps its contrast,
+ * and it is off entirely for anyone who asks for reduced motion. */
+@utility status-pulse {
+  animation: status-pulse 1.6s ease-in-out 3;
+}
+
+/* Unlayered, so it wins over the utility in Tailwind's `utilities` layer. */
+@media (prefers-reduced-motion: reduce) {
+  .status-pulse {
+    animation: none;
+  }
+}
+
+@keyframes status-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
   }
 }
 
@@ -108,6 +127,14 @@
 html,
 body {
   height: 100%;
+}
+
+/* The height of what is visible, which on a phone is less than the window while the keyboard is up; see ViewportFit. */
+@supports (height: 100dvh) {
+  html,
+  body {
+    height: var(--app-height, 100dvh);
+  }
 }
 
 ::-webkit-scrollbar {
