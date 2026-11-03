@@ -195,7 +195,7 @@ export function AtlassianSearch({
   useEffect(() => {
     // `attempt` is read so a retry runs this again with the same query.
     void attempt;
-    if (!searchable(query)) {
+    if (!searchable(query, kind)) {
       setShown(IDLE);
       return;
     }

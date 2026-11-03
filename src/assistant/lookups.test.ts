@@ -144,3 +144,12 @@ describe("GitHub lookups", () => {
     expect(isGithubKind("jira_project")).toBe(false);
   });
 });
+
+describe("searchable for a GitHub Project", () => {
+  it("should search for a Project number of any length, and not for one digit of anything else", () => {
+    expect(searchable("7", "github_project")).toBe(true);
+    expect(searchable("#43", "github_project")).toBe(true);
+    expect(searchable("7", "github_repo")).toBe(false);
+    expect(searchable("7")).toBe(false);
+  });
+});

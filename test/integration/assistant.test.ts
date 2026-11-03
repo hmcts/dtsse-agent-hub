@@ -1240,7 +1240,7 @@ describe("jira export", () => {
 
     expect(request).toMatchObject({
       message: { body: "Please export this document to the VIBE backlog in Jira." },
-      assistant: { conversation_id: id, jira_export: { export_id: exportId, project: "VIBE", issue_type: "Story", labels: ["hmcts-assistant"] } }
+      assistant: { conversation_id: id, jira_export: { export_id: exportId, project: "VIBE", issue_type: "Story", labels: ["cft-workspace"] } }
     });
     expect((await assistantConversation(VIEWER, id))?.jira).toMatchObject({ status: "pending", project: "VIBE", requestedAt: expect.any(String) });
 
@@ -1388,7 +1388,7 @@ describe("github export", () => {
 
     expect(request).toMatchObject({
       message: { body: "Please create a GitHub issue for this document in hmcts/cft-workspace." },
-      assistant: { conversation_id: id, github_export: { export_id: exportId, repo: "hmcts/cft-workspace" } }
+      assistant: { conversation_id: id, github_export: { export_id: exportId, repo: "hmcts/cft-workspace", labels: ["cft-workspace"] } }
     });
     expect(request.assistant.jira_export).toBeUndefined();
     expect((await assistantConversation(VIEWER, id))?.github).toMatchObject({
@@ -1418,6 +1418,7 @@ describe("github export", () => {
     expect((await assistantFrame(prisma, agentId))?.github_export).toEqual({
       export_id: exportId,
       repo: "hmcts/cft-workspace",
+      labels: ["cft-workspace"],
       project: { owner: "hmcts", number: 12 }
     });
     expect((await assistantConversation(VIEWER, id))?.github).toMatchObject({ status: "pending", project });

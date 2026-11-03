@@ -1,3 +1,5 @@
+import { TICKET_LABELS } from "./jira.ts";
+
 /**
  * Exporting a conversation's document to a GitHub repository as an issue, once, for a person whose ticket tool is
  * GitHub: what the panel shows, and what the conversation's session is told while an export is pending. It mirrors
@@ -171,6 +173,8 @@ export function githubExportView(row: GithubExportRow, now: Date = new Date()): 
 export interface GithubExportFrame {
   export_id: string;
   repo: string;
+  /** What the issue is labelled, as the Jira ticket is; the session creates a label the repository does not have. */
+  labels: string[];
   /** The Project to add the issue to once it exists; left out when the person chose none. */
   project?: { owner: string; number: number };
 }
@@ -189,7 +193,6 @@ export function pendingGithubExport(row: GithubExportRow, now: Date = new Date()
     return undefined;
   }
   const project = projectOf(row);
-  return project === null
-    ? { export_id: row.githubExportId, repo: row.githubRepo }
-    : { export_id: row.githubExportId, repo: row.githubRepo, project: { owner: project.owner, number: project.number } };
+  const frame = { export_id: row.githubExportId, repo: row.githubRepo, labels: [...TICKET_LABELS] };
+  return project === null ? frame : { ...frame, project: { owner: project.owner, number: project.number } };
 }

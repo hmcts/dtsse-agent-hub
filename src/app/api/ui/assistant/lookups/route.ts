@@ -44,7 +44,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     const query = lookupQuery(body.query);
     // gh is signed in on every pod, so a GitHub search has no sign-in to start.
     const signIn = body.sign_in === true && !isGithubKind(body.kind);
-    if (!signIn && !searchable(query)) {
+    if (!signIn && !searchable(query, body.kind)) {
       return json({ status: "done", results: [] } satisfies LookupResponse);
     }
     // Subscribed before the lookup is recorded, so an answer that comes back before the wait starts is still heard.

@@ -187,7 +187,7 @@ function GithubChoices({
           <AtlassianSearch
             kind="github_project"
             label={`Search ${repoOwner(repo)}'s GitHub Projects for your default`}
-            placeholder="Type a few words of the Project's title"
+            placeholder="Type a few words of its title, or paste its link"
             owner={repoOwner(repo)}
             access={SIGNED_IN}
             lookUp={lookUp}

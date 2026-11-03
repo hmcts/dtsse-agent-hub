@@ -53,8 +53,14 @@ export function lookupQuery(raw: unknown): string {
   return (typeof raw === "string" ? raw : "").replace(/\s+/g, " ").trim().slice(0, MAX_LOOKUP_QUERY);
 }
 
-/** Whether a query is worth sending to the pod at all: at least `MIN_LOOKUP_CHARS` letters or digits. */
-export function searchable(query: string): boolean {
+/**
+ * Whether a query is worth sending to the pod at all: at least `MIN_LOOKUP_CHARS` letters or digits, or for a GitHub
+ * Project a number of any length, since `#7` names one board outright.
+ */
+export function searchable(query: string, kind?: LookupKind): boolean {
+  if (kind === "github_project" && /^#?[1-9]\d{0,8}$/.test(query.trim())) {
+    return true;
+  }
   return (query.match(/[\p{L}\p{N}]/gu)?.length ?? 0) >= MIN_LOOKUP_CHARS;
 }
 

@@ -208,7 +208,7 @@ export function GithubFooter({
         <AtlassianSearch
           kind="github_project"
           label={`Search ${owner}'s GitHub Projects`}
-          placeholder="Type a few words of the Project's title"
+          placeholder="Type a few words of its title, or paste its link"
           owner={owner}
           access={SIGNED_IN}
           lookUp={lookUp}

@@ -92,13 +92,18 @@ describe("pendingGithubExport", () => {
   const pending = row({ githubExportId: EXPORT, githubRepo: "hmcts/cft-workspace", githubStatus: "pending", githubRequestedAt: NOW });
 
   it("should carry the export id and repository while an export is pending", () => {
-    expect(pendingGithubExport(pending, NOW)).toEqual({ export_id: EXPORT, repo: "hmcts/cft-workspace" });
+    expect(pendingGithubExport(pending, NOW)).toEqual({ export_id: EXPORT, repo: "hmcts/cft-workspace", labels: ["cft-workspace"] });
   });
 
   it("should carry the Project's owner and number, not its title, when the person chose one", () => {
     const onBoard = { ...pending, githubProjectOwner: "hmcts", githubProjectNumber: 12, githubProjectTitle: "CFT roadmap" };
 
-    expect(pendingGithubExport(onBoard, NOW)).toEqual({ export_id: EXPORT, repo: "hmcts/cft-workspace", project: { owner: "hmcts", number: 12 } });
+    expect(pendingGithubExport(onBoard, NOW)).toEqual({
+      export_id: EXPORT,
+      repo: "hmcts/cft-workspace",
+      labels: ["cft-workspace"],
+      project: { owner: "hmcts", number: 12 }
+    });
   });
 
   it.each([
