@@ -11,8 +11,12 @@ import { deleteUploads, readDeleteUploads, reconcileUploads } from "./attachment
 import { type DiskFs, reportUploads } from "./disk.ts";
 import { createLookupRunner, type LookupDeps, type Run } from "./lookups.ts";
 import { type MemoryFs, reportMemory } from "./memory.ts";
+import { prepareBundled } from "./plugin-deps.ts";
 import { type AssistantSupervisor, type CreateAssistantSupervisorOptions, createAssistantSupervisor, idleMinutes } from "./supervisor.ts";
 import { createWelshRunner, prepareWelsh, type WelshDeps } from "./welsh.ts";
+
+/** The bundled plugin whose dependencies are installed at start beside the Welsh tools'. */
+const SLIDES_PLUGIN = "slides";
 
 const TICK_MS = 2000;
 const STREAM_IDLE_MS = 45000;
@@ -35,8 +39,8 @@ export type RunAssistantSupervisorOptions = Omit<CreateAssistantSupervisorOption
   /** How lookups run twg and sign it in; a test passes its own rather than a twg on PATH. */
   lookups?: Partial<LookupDeps>;
   /**
-   * How Welsh jobs run the welsh plugin's scripts/welsh, the cft-workspace checkout they work on, and how the pod's
-   * copy of a bundled plugin is made; a test passes its own.
+   * How Welsh jobs run the welsh plugin's scripts/welsh, and the start-up installs run each bundled plugin's `deps`;
+   * the cft-workspace checkout they work on; and how the pod's copy of a bundled plugin is made. A test passes its own.
    */
   welsh?: { run?: Run; workspace?: string; install?: (name: string, workspace: string) => string };
   /** Stops the supervisor, as SIGTERM and SIGINT do; a test owns neither signal. */
@@ -93,6 +97,8 @@ export async function runAssistantSupervisor({
     install
   };
   const welsh = createWelshRunner({ ...welshOptions, ready: prepareWelsh(welshOptions) });
+  // Nothing waits on this: slides has no hub jobs, and a session's own run of scripts/slides installs if it is not done.
+  void prepareBundled(SLIDES_PLUGIN, welshOptions);
   const uploads = {
     api,
     id,

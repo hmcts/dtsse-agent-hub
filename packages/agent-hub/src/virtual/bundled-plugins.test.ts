@@ -33,10 +33,17 @@ function workspace(): string {
 }
 
 describe("bundled plugins", () => {
-  it("should carry the welsh plugin in the package itself", () => {
-    expect(BUNDLED_PLUGINS).toEqual(["welsh"]);
-    expect(fs.existsSync(path.join(PACKAGE_PLUGINS, "welsh", ".claude-plugin", "plugin.json"))).toBe(true);
-    expect(fs.existsSync(path.join(PACKAGE_PLUGINS, "welsh", "scripts", "welsh"))).toBe(true);
+  it.each(["welsh", "slides"])("should carry the %s plugin in the package itself", (name) => {
+    expect(BUNDLED_PLUGINS).toContain(name);
+    expect(fs.existsSync(path.join(PACKAGE_PLUGINS, name, ".claude-plugin", "plugin.json"))).toBe(true);
+    expect(fs.existsSync(path.join(PACKAGE_PLUGINS, name, "scripts", name))).toBe(true);
+  });
+
+  it("should list every plugin it carries in the repository's marketplace, for anyone to install", () => {
+    const marketplace = JSON.parse(fs.readFileSync(path.join(PACKAGE_PLUGINS, "..", "..", "..", ".claude-plugin", "marketplace.json"), "utf8"));
+    expect(marketplace.plugins.map((plugin: { name: string; source: string }) => [plugin.name, plugin.source])).toEqual(
+      BUNDLED_PLUGINS.map((name) => [name, `./packages/agent-hub/plugins/${name}`])
+    );
   });
 
   it("should pick out only the ticked names this package carries", () => {

@@ -38,6 +38,6 @@
     "test": "yarn run -T vitest run && yarn test:plugins",
     "test:watch": "yarn run -T vitest watch",
     "test:coverage": "yarn run -T vitest run --coverage && yarn test:plugins",
-    "test:plugins": "cd plugins/welsh/scripts/welsh-lib && npm ci --no-audit --no-fund --silent && npm test && npx tsc -p ."
+    "test:plugins": "cd plugins/welsh/scripts/welsh-lib && npm ci --no-audit --no-fund --silent && npm test && npx tsc -p . && cd ../../../slides/scripts/slides-lib && npm ci --no-audit --no-fund --silent && npm test && npx tsc -p ."
   }
 }

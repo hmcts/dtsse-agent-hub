@@ -144,6 +144,51 @@ describe("runAssistantSupervisor", () => {
     }
   });
 
+  it("should install the slides plugin's dependencies as it starts when slides is ticked, and keep running when that fails", async () => {
+    // Arrange
+    fs.rmSync(path.join(hubHome(), "virtual"), { recursive: true, force: true });
+    const hub = createMockHub({ pingMs: 5000, launchTokens: { [LAUNCH]: { virtualId: VID, owner: OWNER } } });
+    const url = await hub.listen();
+    const stop = new AbortController();
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "slides-ws-"));
+    const ran: { cmd: string; args: string[] }[] = [];
+    const said: string[] = [];
+
+    // Act
+    const running = runAssistantSupervisor({
+      api: createApi({ baseUrl: url, launchToken: LAUNCH }),
+      id: VID,
+      env: { AGENT_HUB_PLUGINS: "slides" },
+      say: (m) => said.push(m),
+      tmux: fakeTmux(),
+      canRun: () => true,
+      cwd: CWD,
+      signal: stop.signal,
+      tickMs: 50,
+      welsh: {
+        workspace,
+        install: (name) => path.join(workspace, "..", `${name}-copy`),
+        run: async (cmd, args) => {
+          ran.push({ cmd, args });
+          return { code: 1, stdout: "", stderr: "npm ERR! network" };
+        }
+      }
+    });
+
+    try {
+      // Assert
+      await waitUntil(() => said.some((m) => m.startsWith("slides:")), "the failed install to be said");
+      await waitUntil(() => hub.sessionStreams.has(VID), "the sessions stream to open despite it");
+      expect(ran).toEqual([{ cmd: path.join(workspace, "..", "slides-copy", "scripts", "slides"), args: ["deps"] }]);
+      expect(said).toContain("slides: could not install the tools' dependencies (exit 1): npm ERR! network");
+    } finally {
+      stop.abort();
+      await running;
+      await hub.close();
+      fs.rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   it("should start sessions for the wakes on the sessions stream, reconnect at once at its lifetime and stop one on close", async () => {
     // Arrange
     fs.rmSync(path.join(hubHome(), "virtual"), { recursive: true, force: true });

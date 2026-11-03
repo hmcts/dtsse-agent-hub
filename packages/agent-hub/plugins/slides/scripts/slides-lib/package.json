@@ -1,0 +1,22 @@
+{
+  "name": "cft-slides",
+  "private": true,
+  "description": "HMCTS-branded PowerPoint decks from an outline. Driven by the slides plugin's scripts/slides.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "test": "node --test 'test/*.test.ts'",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "image-size": "1.2.1",
+    "jszip": "3.10.1",
+    "pptxgenjs": "4.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "typescript": "5.9.3"
+  }
+}

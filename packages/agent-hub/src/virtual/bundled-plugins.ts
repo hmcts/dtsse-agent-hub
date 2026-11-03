@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import type { Env } from "../env.ts";
 
 /** The plugins in this package, by the name the owner ticks. */
-export const BUNDLED_PLUGINS: readonly string[] = ["welsh"];
+export const BUNDLED_PLUGINS: readonly string[] = ["welsh", "slides"];
 
 /** The package's own copies: `plugins/<name>`, the same distance from `src/` and `dist/`. */
 export const PACKAGE_PLUGINS = fileURLToPath(new URL("../../plugins/", import.meta.url));
