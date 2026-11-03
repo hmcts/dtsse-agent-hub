@@ -22,7 +22,7 @@ describe("lookUp", () => {
     expect(fetch).toHaveBeenCalledWith("/api/ui/assistant/lookups", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ kind: "confluence_page", query: "flags", space: "CCD", sign_in: false }),
+      body: JSON.stringify({ kind: "confluence_page", query: "flags", space: "CCD", owner: null, sign_in: false }),
       signal
     });
   });

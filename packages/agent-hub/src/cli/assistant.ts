@@ -1,13 +1,15 @@
-// The commands an HMCTS Assistant conversation's session runs: its shared document, and the Jira and Confluence
-// exports the person asked for.
+// The commands an HMCTS Assistant conversation's session runs: its shared document, and the Jira, GitHub and
+// Confluence exports the person asked for.
 import { ApiError } from "../api.ts";
 import { CONFLUENCE_EXPORT_ID_RE, CONFLUENCE_ID_RE, MAX_CONFLUENCE_ERROR, MAX_PAGE_TITLE, runConfluenceExport } from "../confluence-export.ts";
 import { CLI } from "../envelope.ts";
+import { GITHUB_REPO_RE } from "../github.ts";
+import { MAX_GITHUB_ERROR, runGithubExport } from "../github-export.ts";
 import { EXPORT_ID_RE, JIRA_BROWSE_URL, JIRA_KEY_RE, MAX_JIRA_ERROR, runJiraExport } from "../jira-export.ts";
 import { requireSessionId } from "../session.ts";
 import { atlassianLogin, run } from "../virtual/index.ts";
 import { virtualAgent } from "../virtual-agent.ts";
-import type { Artefact, ArtefactBody, ConfluenceExportReport, JiraExportReport } from "../wire.ts";
+import type { Artefact, ArtefactBody, ConfluenceExportReport, GithubExportReport, JiraExportReport } from "../wire.ts";
 import { type Cli, type Command, parseFlags, refuseSecrets, requireAgent, UsageError } from "./command.ts";
 
 type ArtefactAction = "get" | "put";
@@ -117,7 +119,7 @@ function noExport(label: string): (e: unknown) => never {
 
 type ExportStep = (cli: Cli, exportId: string, flags: Record<string, string>) => Promise<number>;
 
-/** `jira` and `confluence`: each takes `export` or `report` and the export id, and each action has flags of its own. */
+/** `jira`, `github` and `confluence`: each takes `export` or `report` and the export id, and each action has flags of its own. */
 type ExportSpec = {
   exportIdRe: RegExp;
   exportFlags: readonly string[];
@@ -263,6 +265,70 @@ const confluenceExport: ExportStep = async (cli, exportId, flags) => {
   );
   return 0;
 };
+
+const githubReport: ExportStep = async (cli, exportId, flags) => {
+  if ((flags.number === undefined) === (flags.error === undefined)) {
+    throw new UsageError("github report takes one of --number or --error");
+  }
+  if (flags.number !== undefined && !/^[1-9]\d{0,8}$/.test(flags.number)) {
+    throw new UsageError(`--number must be an issue number such as 42, not ${flags.number}`);
+  }
+  const error = flags.error?.trim();
+  if (error === "") {
+    throw new UsageError("--error needs a reason");
+  }
+  const agent = requireAgent(requireSessionId(cli.env));
+  const body: GithubExportReport =
+    flags.number !== undefined
+      ? { export_id: exportId, number: Number(flags.number) }
+      : { export_id: exportId, error: (error ?? "").slice(0, MAX_GITHUB_ERROR) };
+  await cli.api().putGithubExport(agent.agent_id, body).catch(noExport("GitHub"));
+  cli.print(
+    flags.number !== undefined ? `agent-hub: reported issue #${flags.number} for export ${exportId}` : `agent-hub: reported export ${exportId} as failed`
+  );
+  return 0;
+};
+
+// The whole export as one command, so the session spends one tool call on it rather than one per step.
+const githubExport: ExportStep = async (cli, exportId, flags) => {
+  const repo = flags.repo ?? "";
+  if (!GITHUB_REPO_RE.test(repo)) {
+    throw new UsageError("github export needs --repo, a repository as owner/name such as hmcts/cft-workspace");
+  }
+  const projectMatch = flags.project === undefined ? null : /^([A-Za-z0-9][A-Za-z0-9-]{0,38})\/([1-9]\d{0,8})$/.exec(flags.project);
+  if (flags.project !== undefined && projectMatch === null) {
+    throw new UsageError(`--project must be a Project as owner/number such as hmcts/12, not ${flags.project}`);
+  }
+  const project = projectMatch === null ? null : { owner: projectMatch[1] as string, number: Number(projectMatch[2]) };
+  const labels = flags.labels ? flags.labels.split(",") : [];
+  if (!labels.every((name) => WORD_RE.test(name))) {
+    throw new UsageError("--labels must be comma-separated words");
+  }
+  const agent = requireAgent(requireSessionId(cli.env));
+  const outcome = await runGithubExport(
+    { api: cli.api(), agentId: agent.agent_id, env: cli.env, run, print: cli.print },
+    { exportId, repo, project, labels }
+  ).catch(noExport("GitHub"));
+  if ("error" in outcome) {
+    cli.print(`agent-hub: no issue was created for export ${exportId}: ${outcome.error} The user has been shown this.`);
+    return 1;
+  }
+  const unlabelled = outcome.labelError ? ` It has no label: ${outcome.labelError}.` : "";
+  const board =
+    project === null ? "" : outcome.projectError ? ` (not on the Project: ${outcome.projectError})` : ` on Project ${project.number} of ${project.owner}`;
+  cli.print(
+    `agent-hub: ${outcome.again ? "already created" : "created"} ${repo}#${outcome.number}${board} for export ${exportId} and reported it; the user's Assistant shows a link to ${outcome.url}.${unlabelled}`
+  );
+  return 0;
+};
+
+export const github = exportCommand("github", {
+  exportIdRe: EXPORT_ID_RE,
+  exportFlags: ["repo", "project", "labels"],
+  reportFlags: ["number", "error"],
+  export: githubExport,
+  report: githubReport
+});
 
 export const jira = exportCommand("jira", {
   exportIdRe: EXPORT_ID_RE,

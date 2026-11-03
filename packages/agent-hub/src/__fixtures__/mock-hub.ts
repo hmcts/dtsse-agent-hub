@@ -205,6 +205,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
   // agent id → the conversation's document, for conversations' agents
   const artefacts = new Map<string, Artefact>();
   const jiraReports: Record<string, unknown>[] = [];
+  const githubReports: Record<string, unknown>[] = [];
   const confluenceReports: Record<string, unknown>[] = [];
   /**
    * The questions a session's `AskUserQuestion` hook put on screen, oldest first, one per `tool_use_id`, each with
@@ -1008,6 +1009,19 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
       jiraReports.push({ agent_id: agent.id, ...body });
       return send(res, 204);
     }
+    if (action === "github" && req.method === "PUT") {
+      if (!agent.conversation_id) {
+        return send(res, 404, { error: "not a conversation" });
+      }
+      const numbered =
+        Number.isInteger(body.number) && (body.number as number) > 0 && (body.project_error === undefined || typeof body.project_error === "string");
+      const failed = typeof body.error === "string" && body.error.trim() !== "" && body.error.length <= 300;
+      if (typeof body.export_id !== "string" || numbered === failed) {
+        return send(res, 400, { error: "bad github report" });
+      }
+      githubReports.push({ agent_id: agent.id, ...body });
+      return send(res, 204);
+    }
     if (action === "question" && req.method === "POST") {
       const asked = Array.isArray(body.questions) ? body.questions : [];
       if (typeof body.session_id !== "string" || typeof body.tool_use_id !== "string" || asked.length < 1 || asked.length > 4) {
@@ -1103,6 +1117,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     personCredentials,
     artefacts,
     jiraReports,
+    githubReports,
     confluenceReports,
     questions,
     lookupAnswers,

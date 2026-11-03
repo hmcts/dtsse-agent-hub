@@ -74,7 +74,7 @@ describe("pendingJiraExport", () => {
   const asked = row({ jiraExportId: EXPORT, jiraProject: "VIBE", jiraStatus: "pending", jiraRequestedAt: new Date(NOW.getTime() - 60_000) });
 
   it("should give the session what to create and the id to report it under when an export is pending", () => {
-    expect(pendingJiraExport(asked, NOW)).toEqual({ export_id: EXPORT, project: "VIBE", issue_type: "Story", labels: ["hmcts-assistant"] });
+    expect(pendingJiraExport(asked, NOW)).toEqual({ export_id: EXPORT, project: "VIBE", issue_type: "Story", labels: ["cft-workspace"] });
   });
 
   it.each([

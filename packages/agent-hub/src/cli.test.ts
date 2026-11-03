@@ -1738,6 +1738,188 @@ process.exit(2);
     expect(reported(agentId)).toHaveLength(0);
   });
 
+  const githubReported = (agentId: string) => hub.githubReports.filter((r) => r.agent_id === agentId);
+
+  it("should report the issue's number, or why there is none, when github report runs in a conversation", async () => {
+    // Arrange
+    const { sid, agentId } = await session();
+
+    // Act
+    const created = await cli(["github", "report", EXPORT, "--number", "42"], { sid });
+    const failed = await cli(["github", "report", EXPORT, "--error", "  Issues are turned off  "], { sid });
+
+    // Assert
+    expect(created.code, created.errors.join("\n")).toBe(0);
+    expect(created.text()).toMatch(/reported issue #42 for export/);
+    expect(failed.code).toBe(0);
+    expect(githubReported(agentId)).toEqual([
+      { agent_id: agentId, export_id: EXPORT, number: 42 },
+      { agent_id: agentId, export_id: EXPORT, error: "Issues are turned off" }
+    ]);
+  });
+
+  // A gh that is signed in, on PATH ahead of any real one. It logs each call's argv and the body file it was given,
+  // and answers a create as gh does, with the new issue's link on its last line, numbering each issue it makes.
+  function fakeGh(): { env: Env; calls: () => { args: string[]; body: string }[] } {
+    const bin = fs.mkdtempSync(path.join(home.root, "gh-bin-"));
+    const logFile = path.join(bin, "gh.log");
+    const script = `#!/usr/bin/env node
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+const file = args.find((a) => a.startsWith("--body-file="));
+const body = file ? fs.readFileSync(file.slice("--body-file=".length), "utf8") : "";
+fs.appendFileSync(${JSON.stringify(logFile)}, JSON.stringify({ args, body }) + "\\n");
+if (args[0] === "project" && args[1] === "item-add") { process.exit(0); }
+if (args[0] === "label" && args[1] === "create") { console.error("label already exists"); process.exit(1); }
+if (args[0] === "issue" && args[1] === "edit") { process.exit(0); }
+if (args[0] === "issue" && args[1] === "create") {
+  const repo = args.find((a) => a.startsWith("--repo=")).slice("--repo=".length);
+  const n = fs.readFileSync(${JSON.stringify(logFile)}, "utf8").split("\\n").filter((l) => l.includes('"create"')).length;
+  console.log("https://github.com/" + repo + "/issues/" + (40 + n));
+  process.exit(0);
+}
+console.error("unexpected gh " + args.join(" "));
+process.exit(2);
+`;
+    fs.writeFileSync(path.join(bin, "gh"), script, { mode: 0o755 });
+    return {
+      env: { PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}` },
+      calls: () =>
+        fs
+          .readFileSync(logFile, "utf8")
+          .split("\n")
+          .filter((line) => line !== "")
+          .map((line) => JSON.parse(line) as { args: string[]; body: string })
+    };
+  }
+
+  it("should create the issue with gh, report its number and print where it is when github export runs in a conversation", async () => {
+    // Arrange
+    const { sid, agentId } = await session();
+    hub.editArtefactAsUser(agentId, "# Stories\n\nAs a claimant, $(whoami)…", 'Fee "stories"');
+    const gh = fakeGh();
+
+    // Act
+    const r = await cli(["github", "export", EXPORT, "--repo", "hmcts/cft-workspace"], { sid, extraEnv: gh.env });
+
+    // Assert
+    expect(r.code, r.errors.join("\n")).toBe(0);
+    expect(r.text()).toMatch(/created hmcts\/cft-workspace#41 for export .*https:\/\/github\.com\/hmcts\/cft-workspace\/issues\/41/);
+    expect(gh.calls()).toEqual([
+      {
+        args: ["issue", "create", "--repo=hmcts/cft-workspace", '--title=Fee "stories"', expect.stringMatching(/^--body-file=.*\.md$/)],
+        body: "# Stories\n\nAs a claimant, $(whoami)…"
+      }
+    ]);
+    expect(githubReported(agentId)).toEqual([{ agent_id: agentId, export_id: EXPORT, number: 41 }]);
+  });
+
+  it("should add the issue to the Project given and say so when github export runs with --project", async () => {
+    // Arrange
+    const { sid, agentId } = await session();
+    const exportId = "8e3b0f4d-4444-4555-8666-777788889999";
+    hub.editArtefactAsUser(agentId, "# Stories", "Fee stories");
+    const gh = fakeGh();
+
+    // Act
+    const r = await cli(["github", "export", exportId, "--repo", "hmcts/cft-workspace", "--project", "hmcts/12"], { sid, extraEnv: gh.env });
+
+    // Assert
+    expect(r.code, r.errors.join("\n")).toBe(0);
+    expect(r.text()).toMatch(/created hmcts\/cft-workspace#41 on Project 12 of hmcts for export/);
+    expect(gh.calls().map((call) => call.args.slice(0, 2))).toEqual([
+      ["issue", "create"],
+      ["project", "item-add"]
+    ]);
+    expect(gh.calls()[1]?.args).toEqual(["project", "item-add", "12", "--owner=hmcts", "--url=https://github.com/hmcts/cft-workspace/issues/41"]);
+    expect(githubReported(agentId)).toEqual([{ agent_id: agentId, export_id: exportId, number: 41 }]);
+  });
+
+  it("should label the issue, making the label if need be, when github export runs with --labels", async () => {
+    // Arrange
+    const { sid, agentId } = await session();
+    const exportId = "9f4c1a5e-5555-4666-8777-88889999aaaa";
+    hub.editArtefactAsUser(agentId, "# Stories", "Fee stories");
+    const gh = fakeGh();
+
+    // Act
+    const r = await cli(["github", "export", exportId, "--repo", "hmcts/cft-workspace", "--labels", "cft-workspace"], { sid, extraEnv: gh.env });
+
+    // Assert
+    expect(r.code, r.errors.join("\n")).toBe(0);
+    expect(r.text()).not.toMatch(/no label/);
+    expect(gh.calls().map((call) => call.args.slice(0, 2))).toEqual([
+      ["issue", "create"],
+      ["label", "create"],
+      ["issue", "edit"]
+    ]);
+    expect(gh.calls()[2]?.args).toEqual(["issue", "edit", "41", "--repo=hmcts/cft-workspace", "--add-label=cft-workspace"]);
+  });
+
+  it("should report the issue it already made and create no second one when github export runs again for the export", async () => {
+    // Arrange
+    const { sid, agentId } = await session();
+    const exportId = "6c1f8d2b-2222-4333-8444-555566667777";
+    hub.editArtefactAsUser(agentId, "# Stories", "Fee stories");
+    const gh = fakeGh();
+    const args = ["github", "export", exportId, "--repo", "hmcts/cft-workspace"];
+    await cli(args, { sid, extraEnv: gh.env });
+
+    // Act
+    const r = await cli(args, { sid, extraEnv: gh.env });
+
+    // Assert
+    expect(r.code, r.errors.join("\n")).toBe(0);
+    expect(r.text()).toMatch(/already created hmcts\/cft-workspace#41/);
+    expect(gh.calls()).toHaveLength(1);
+    expect(githubReported(agentId)).toEqual([
+      { agent_id: agentId, export_id: exportId, number: 41 },
+      { agent_id: agentId, export_id: exportId, number: 41 }
+    ]);
+  });
+
+  it("should exit 1 and say no issue was made when the conversation's document is empty", async () => {
+    // Arrange
+    const { sid, agentId } = await session();
+    const exportId = "7d2a9e3c-3333-4444-8555-666677778888";
+    const gh = fakeGh();
+
+    // Act
+    const r = await cli(["github", "export", exportId, "--repo", "hmcts/cft-workspace"], { sid, extraEnv: gh.env });
+
+    // Assert
+    expect(r.code).toBe(1);
+    expect(r.text()).toMatch(/no issue was created for export .*document is empty/);
+    expect(githubReported(agentId)).toEqual([{ agent_id: agentId, export_id: exportId, error: "The document is empty, so there was nothing to export." }]);
+  });
+
+  it("should refuse a github export or report that is not well formed", async () => {
+    // Arrange
+    const { sid, agentId } = await session();
+
+    // Act & Assert
+    for (const args of [
+      ["github"],
+      ["github", "export", EXPORT],
+      ["github", "export", "not-an-id", "--repo", "hmcts/cft-workspace"],
+      ["github", "export", EXPORT, "--repo", "cft-workspace"],
+      ["github", "export", EXPORT, "--repo", "-x/../y"],
+      ["github", "export", EXPORT, "--repo", "hmcts/cft-workspace", "--number", "1"],
+      ["github", "export", EXPORT, "--repo", "hmcts/cft-workspace", "--project", "12"],
+      ["github", "export", EXPORT, "--repo", "hmcts/cft-workspace", "--project", "hmcts/zero"],
+      ["github", "export", EXPORT, "--repo", "hmcts/cft-workspace", "--labels", "a b"],
+      ["github", "report", EXPORT],
+      ["github", "report", EXPORT, "--number", "0"],
+      ["github", "report", EXPORT, "--number", "1", "--error", "both"],
+      ["github", "report", EXPORT, "--error", " "],
+      ["github", "report", EXPORT, "--number", "1", "--repo", "hmcts/cft-workspace"]
+    ]) {
+      const r = await cli(args, { sid });
+      expect(r.code, args.join(" ")).toBe(2);
+    }
+    expect(githubReported(agentId)).toHaveLength(0);
+  });
+
   const confluenceReported = (agentId: string) => hub.confluenceReports.filter((r) => r.agent_id === agentId);
 
   it("should report the page, or why there is none, when confluence report runs in a conversation", async () => {

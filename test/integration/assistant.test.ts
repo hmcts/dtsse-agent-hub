@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { heartbeat, registerAgent } from "../../src/agents/store.ts";
 import * as artefactRoute from "../../src/app/api/agent/[agentId]/artefact/route.ts";
 import * as confluenceRoute from "../../src/app/api/agent/[agentId]/confluence/route.ts";
+import * as githubRoute from "../../src/app/api/agent/[agentId]/github/route.ts";
 import * as heartbeatRoute from "../../src/app/api/agent/[agentId]/heartbeat/route.ts";
 import * as jiraRoute from "../../src/app/api/agent/[agentId]/jira/route.ts";
 import * as streamRoute from "../../src/app/api/agent/[agentId]/stream/route.ts";
@@ -22,6 +23,7 @@ import { CONFLUENCE_EXPORT_TIMEOUT_MS } from "../../src/assistant/confluence.ts"
 import { createConversation, findConversation, hasLocalConversation, listConversations } from "../../src/assistant/conversation-store.ts";
 import { readExportDefaults, saveExportDefaults } from "../../src/assistant/export-default-store.ts";
 import { assistantFrame } from "../../src/assistant/frame.ts";
+import { GITHUB_EXPORT_TIMEOUT_MS } from "../../src/assistant/github.ts";
 import { JIRA_EXPORT_TIMEOUT_MS } from "../../src/assistant/jira.ts";
 import { askLookup } from "../../src/assistant/lookup-store.ts";
 import { LOOKUP_RATE_LIMIT, LOOKUP_RETENTION_MS } from "../../src/assistant/lookups.ts";
@@ -1238,7 +1240,7 @@ describe("jira export", () => {
 
     expect(request).toMatchObject({
       message: { body: "Please export this document to the VIBE backlog in Jira." },
-      assistant: { conversation_id: id, jira_export: { export_id: exportId, project: "VIBE", issue_type: "Story", labels: ["hmcts-assistant"] } }
+      assistant: { conversation_id: id, jira_export: { export_id: exportId, project: "VIBE", issue_type: "Story", labels: ["cft-workspace"] } }
     });
     expect((await assistantConversation(VIEWER, id))?.jira).toMatchObject({ status: "pending", project: "VIBE", requestedAt: expect.any(String) });
 
@@ -1351,6 +1353,223 @@ describe("jira export", () => {
 
     expect((await report(token, plain, { export_id: exportId, key: "VIBE-1" })).status).toBe(404);
     expect((await report(token, agentId, { export_id: exportId, key: "not a key" })).status).toBe(400);
+  });
+});
+
+describe("github export", () => {
+  async function written(): Promise<{ token: string; id: string; agentId: string }> {
+    const { token } = await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "write a story" })) as { id: string }).id;
+    const { agentId, sessionId } = await sessionOf(id);
+    await register(token, sessionId, id);
+    await actions.saveArtefact({ conversationId: id, title: "Flags for caseworkers", markdown: "# Problem\n\nFlags are hidden.", baseVersion: 0 });
+    return { token, id, agentId };
+  }
+
+  function report(token: string, agentId: string, body: unknown): Promise<Response> {
+    return pod(githubRoute.PUT, token, `/api/agent/${agentId}/github`, { agentId }, "PUT", body);
+  }
+
+  async function currentExport(id: string): Promise<string> {
+    return (await prisma.assistantConversation.findUniqueOrThrow({ where: { id }, select: { githubExportId: true } })).githubExportId!;
+  }
+
+  it("should ask the session in the chat, with the export in the message's frame, and show the issue once it reports the number", async () => {
+    const { token, id, agentId } = await written();
+
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: " https://github.com/hmcts/cft-workspace " })).toEqual({ ok: true });
+    const exportId = await currentExport(id);
+    const abort = new AbortController();
+    const stream = frames(await pod(streamRoute.GET, token, `/api/agent/${agentId}/stream`, { agentId }, "GET", undefined, abort.signal));
+    const sent = await stream.named("direct", 2);
+    abort.abort();
+    await stream.cancel();
+    const request = JSON.parse(sent[1]!.data!);
+
+    expect(request).toMatchObject({
+      message: { body: "Please create a GitHub issue for this document in hmcts/cft-workspace." },
+      assistant: { conversation_id: id, github_export: { export_id: exportId, repo: "hmcts/cft-workspace", labels: ["cft-workspace"] } }
+    });
+    expect(request.assistant.jira_export).toBeUndefined();
+    expect((await assistantConversation(VIEWER, id))?.github).toMatchObject({
+      status: "pending",
+      repo: "hmcts/cft-workspace",
+      requestedAt: expect.any(String)
+    });
+
+    expect((await report(token, agentId, { export_id: exportId, number: 42 })).status).toBe(204);
+    expect((await assistantConversation(VIEWER, id))?.github).toEqual({
+      status: "done",
+      repo: "hmcts/cft-workspace",
+      number: 42,
+      url: "https://github.com/hmcts/cft-workspace/issues/42",
+      project: null,
+      projectError: null
+    });
+    expect((await assistantFrame(prisma, agentId))?.github_export).toBeUndefined();
+  });
+
+  it("should carry the Project to the session, and show why the issue is not on it when adding it failed", async () => {
+    const { token, id, agentId } = await written();
+    const project = { owner: "hmcts", number: 12, title: "CFT roadmap" };
+
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace", project })).toEqual({ ok: true });
+    const exportId = await currentExport(id);
+    expect((await assistantFrame(prisma, agentId))?.github_export).toEqual({
+      export_id: exportId,
+      repo: "hmcts/cft-workspace",
+      labels: ["cft-workspace"],
+      project: { owner: "hmcts", number: 12 }
+    });
+    expect((await assistantConversation(VIEWER, id))?.github).toMatchObject({ status: "pending", project });
+
+    expect((await report(token, agentId, { export_id: exportId, number: 42, project_error: "needs the project scope" })).status).toBe(204);
+    expect((await assistantConversation(VIEWER, id))?.github).toMatchObject({ status: "done", number: 42, project, projectError: "needs the project scope" });
+  });
+
+  it("should say the Project in the message the person sends, and refuse one that is not whole", async () => {
+    const { id } = await written();
+
+    expect(
+      await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace", project: { owner: "hmcts", number: 0, title: "x" } })
+    ).toEqual({ ok: false, error: "pick the GitHub Project from the search, or none" });
+    await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace", project: { owner: "hmcts", number: 12, title: "CFT roadmap" } });
+
+    const sent = await prisma.message.findFirstOrThrow({ where: { body: { startsWith: "Please create a GitHub issue" } }, select: { body: true } });
+    expect(sent.body).toBe('Please create a GitHub issue for this document in hmcts/cft-workspace, on the "CFT roadmap" Project.');
+  });
+
+  it("should refuse an issue for a document already in Jira, or on its way there", async () => {
+    const { token, id, agentId } = await written();
+    await actions.exportArtefactToJira({ conversationId: id, project: "VIBE" });
+
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" })).toEqual({
+      ok: false,
+      error: "this document is already being exported"
+    });
+    const jiraExport = (await prisma.assistantConversation.findUniqueOrThrow({ where: { id }, select: { jiraExportId: true } })).jiraExportId!;
+    await pod(jiraRoute.PUT, token, `/api/agent/${agentId}/jira`, { agentId }, "PUT", { export_id: jiraExport, key: "VIBE-9" });
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" })).toEqual({
+      ok: false,
+      error: "this document is already in Jira as VIBE-9"
+    });
+  });
+
+  it("should refuse a Jira ticket for a document that is already a GitHub issue", async () => {
+    const { token, id, agentId } = await written();
+    await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" });
+    await report(token, agentId, { export_id: await currentExport(id), number: 5 });
+
+    expect(await actions.exportArtefactToJira({ conversationId: id, project: "VIBE" })).toEqual({
+      ok: false,
+      error: "this document is already on GitHub as hmcts/cft-workspace#5"
+    });
+  });
+
+  it("should export to a repository whose name starts with a dot", async () => {
+    const { id } = await written();
+
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/.github" })).toEqual({ ok: true });
+    expect((await assistantConversation(VIEWER, id))?.github).toMatchObject({ status: "pending", repo: "hmcts/.github" });
+  });
+
+  it("should refuse an export, claiming nothing, when the running pod's client is too old to carry it out", async () => {
+    const { id } = await written();
+    const assistantId = (await findConversation(prisma, ALICE.oid, id))!.virtualAgentId!;
+    await prisma.virtualAgent.update({ where: { id: assistantId }, data: { status: "running", clientFeatures: ["lookups"] } });
+
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" })).toEqual({
+      ok: false,
+      error: "your assistant needs an update to create GitHub issues; it gets one the next time it restarts"
+    });
+    expect(await currentExport(id)).toBeNull();
+
+    await prisma.virtualAgent.update({ where: { id: assistantId }, data: { clientFeatures: ["lookups", "github-lookups"] } });
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" })).toEqual({ ok: true });
+  });
+
+  it("should refuse a second export while one is pending, and any once the document is an issue", async () => {
+    const { token, id, agentId } = await written();
+    await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" });
+
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" })).toEqual({
+      ok: false,
+      error: "this document is already being exported"
+    });
+
+    await report(token, agentId, { export_id: await currentExport(id), number: 42 });
+
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" })).toEqual({
+      ok: false,
+      error: "this document is already on GitHub as hmcts/cft-workspace#42"
+    });
+  });
+
+  it("should let the person try again under a new export id, and ignore the old one's late report, when the export failed", async () => {
+    const { token, id, agentId } = await written();
+    await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/nope" });
+    const first = await currentExport(id);
+    await report(token, agentId, { export_id: first, error: "GitHub refused the issue: no such repository" });
+    expect((await assistantConversation(VIEWER, id))?.github).toEqual({
+      status: "failed",
+      repo: "hmcts/nope",
+      project: null,
+      error: "GitHub refused the issue: no such repository"
+    });
+
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" })).toEqual({ ok: true });
+    expect(await currentExport(id)).not.toBe(first);
+
+    expect((await report(token, agentId, { export_id: first, number: 1 })).status).toBe(204);
+    expect((await assistantConversation(VIEWER, id))?.github).toMatchObject({ status: "pending", repo: "hmcts/cft-workspace" });
+  });
+
+  it("should allow a new export once the session has not answered in time", async () => {
+    const { id } = await written();
+    await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" });
+    await prisma.assistantConversation.update({ where: { id }, data: { githubRequestedAt: new Date(Date.now() - GITHUB_EXPORT_TIMEOUT_MS - 1000) } });
+
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" })).toEqual({ ok: true });
+  });
+
+  it("should refuse an export of a document nobody has written, or to something that is not a repository", async () => {
+    await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" })).toEqual({
+      ok: false,
+      error: "write the document before exporting it"
+    });
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "cft-workspace" })).toEqual({
+      ok: false,
+      error: "name the GitHub repository as owner/name, such as hmcts/cft-workspace"
+    });
+  });
+
+  it("should refuse an export from a chat that is a session on the person's own computer, and claim nothing", async () => {
+    const id = await laptopChat();
+    await actions.saveArtefact({ conversationId: id, title: "Notes", markdown: "# What I found", baseVersion: 0 });
+
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" })).toEqual({
+      ok: false,
+      error: "this chat is a session on your own computer, which cannot export to GitHub; download the document and attach it yourself"
+    });
+    expect(await prisma.assistantConversation.findUniqueOrThrow({ where: { id }, select: { githubStatus: true, githubExportId: true } })).toEqual({
+      githubStatus: null,
+      githubExportId: null
+    });
+  });
+
+  it("should refuse a report from an agent that is not a conversation's, and one that breaks the contract", async () => {
+    const { token, id, agentId } = await written();
+    await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" });
+    const exportId = await currentExport(id);
+    const { agent_id: plain } = await jsonOf<{ agent_id: string }>(await register(token, "plain-session"));
+
+    expect((await report(token, plain, { export_id: exportId, number: 1 })).status).toBe(404);
+    expect((await report(token, agentId, { export_id: exportId, number: 0 })).status).toBe(400);
+    expect((await report(token, agentId, { export_id: exportId, number: "42" })).status).toBe(400);
+    expect((await report(token, agentId, { export_id: exportId, number: 1, project_error: "x".repeat(301) })).status).toBe(400);
   });
 });
 
@@ -1504,7 +1723,7 @@ describe("atlassian lookups", () => {
     const asked = ask({ kind: "confluence_page", query: "  case  guides ", space: "CCD" });
     const [frame] = await stream.named("lookup", 1);
     const lookup = JSON.parse(frame!.data!);
-    expect(lookup).toEqual({ lookup_id: expect.any(String), kind: "confluence_page", query: "case guides", space: "CCD", sign_in: false });
+    expect(lookup).toEqual({ lookup_id: expect.any(String), kind: "confluence_page", query: "case guides", space: "CCD", owner: null, sign_in: false });
     expect((await answer(id, token, lookup.lookup_id, { results: [PAGE] })).status).toBe(204);
     const answered = await jsonOf<{ status: string; results: unknown[] }>(await asked);
     abort.abort();
@@ -1562,6 +1781,60 @@ describe("atlassian lookups", () => {
     expect(await jsonOf(await ask({ kind: "jira_project", query: "v" }))).toEqual({ status: "done", results: [] });
     expect((await ask({ kind: "people", query: "vibe" })).status).toBe(400);
     expect((await ask({ kind: "confluence_page", query: "vibe", space: "CCD OR 1=1" })).status).toBe(400);
+    expect(await prisma.assistantLookup.count()).toBe(0);
+  });
+
+  it("should send a Project search with the repository owner to a pod that claims github-lookups", async () => {
+    const { id, token } = await answeringAssistant(["lookups", "github-lookups"]);
+    const abort = new AbortController();
+    const stream = frames(await pod(sessionsRoute.GET, token, `/api/virtual/${id}/sessions`, { virtualAgentId: id }, "GET", undefined, abort.signal));
+
+    // A sign-in asked for with a GitHub search is dropped: gh is signed in on every pod.
+    const asked = ask({ kind: "github_project", query: "roadmap", owner: "hmcts", sign_in: true });
+    const [frame] = await stream.named("lookup", 1);
+    const lookup = JSON.parse(frame!.data!);
+    expect(lookup).toEqual({ lookup_id: expect.any(String), kind: "github_project", query: "roadmap", space: null, owner: "hmcts", sign_in: false });
+    const project = { owner: "hmcts", number: 12, title: "CFT roadmap" };
+    expect((await answer(id, token, lookup.lookup_id, { results: [project] })).status).toBe(204);
+    const answered = await jsonOf(await asked);
+    abort.abort();
+    await stream.cancel();
+
+    expect(answered).toEqual({ status: "done", results: [project] });
+  });
+
+  it("should answer a repository search with links the hub builds, and refuse repositories that are not", async () => {
+    const { id, token } = await answeringAssistant(["lookups", "github-lookups"]);
+    const abort = new AbortController();
+    const stream = frames(await pod(sessionsRoute.GET, token, `/api/virtual/${id}/sessions`, { virtualAgentId: id }, "GET", undefined, abort.signal));
+
+    const asked = ask({ kind: "github_repo", query: "cft workspace" });
+    const [frame] = await stream.named("lookup", 1);
+    const lookup = JSON.parse(frame!.data!);
+    expect((await answer(id, token, lookup.lookup_id, { results: [{ full_name: "not a repo", description: null }] })).status).toBe(400);
+    expect((await answer(id, token, lookup.lookup_id, { results: [{ full_name: "hmcts/cft-workspace", description: null }] })).status).toBe(204);
+    const answered = await jsonOf(await asked);
+    abort.abort();
+    await stream.cancel();
+
+    expect(answered).toEqual({
+      status: "done",
+      results: [{ full_name: "hmcts/cft-workspace", description: null, url: "https://github.com/hmcts/cft-workspace" }]
+    });
+  });
+
+  it("should say the pod cannot search GitHub when its client claims lookups but not github-lookups", async () => {
+    await answeringAssistant(["lookups"]);
+
+    expect(await jsonOf(await ask({ kind: "github_repo", query: "cft" }))).toEqual({ status: "unsupported" });
+    expect(await prisma.assistantLookup.count()).toBe(0);
+  });
+
+  it("should refuse a Project search with no repository owner, without asking the pod", async () => {
+    await answeringAssistant(["lookups", "github-lookups"]);
+
+    expect((await ask({ kind: "github_project", query: "roadmap" })).status).toBe(400);
+    expect((await ask({ kind: "github_project", query: "roadmap", owner: "hmcts --jq ." })).status).toBe(400);
     expect(await prisma.assistantLookup.count()).toBe(0);
   });
 
@@ -1626,13 +1899,25 @@ describe("export defaults", () => {
     await insertUser(BOB);
     const alice = { actorOid: ALICE.oid, ownerOid: ALICE.oid };
 
-    expect(await readExportDefaults(prisma, alice)).toEqual({ jira: null, confluence: null });
+    expect(await readExportDefaults(prisma, alice)).toEqual({ ticketTool: "jira", jira: null, github: null, githubProject: null, confluence: null });
     await saveExportDefaults(prisma, alice, { jira: { key: "CCD", name: "Core Case Data" }, confluence: PAGE });
-    expect(await readExportDefaults(prisma, alice)).toEqual({ jira: { key: "CCD", name: "Core Case Data" }, confluence: PAGE });
+    expect(await readExportDefaults(prisma, alice)).toEqual({
+      ticketTool: "jira",
+      jira: { key: "CCD", name: "Core Case Data" },
+      github: null,
+      githubProject: null,
+      confluence: PAGE
+    });
     await saveExportDefaults(prisma, alice, { jira: null, confluence: PAGE });
 
     expect((await readExportDefaults(prisma, alice)).jira).toBeNull();
-    expect(await readExportDefaults(prisma, { actorOid: BOB.oid, ownerOid: BOB.oid })).toEqual({ jira: null, confluence: null });
+    expect(await readExportDefaults(prisma, { actorOid: BOB.oid, ownerOid: BOB.oid })).toEqual({
+      ticketTool: "jira",
+      jira: null,
+      github: null,
+      githubProject: null,
+      confluence: null
+    });
     await expect(readExportDefaults(prisma, { actorOid: BOB.oid, ownerOid: ALICE.oid })).rejects.toMatchObject({ status: 403 });
   });
 
@@ -1642,5 +1927,51 @@ describe("export defaults", () => {
 
     await expect(saveExportDefaults(prisma, alice, { jira: { key: "ccd", name: "x" }, confluence: null })).rejects.toMatchObject({ status: 400 });
     await expect(saveExportDefaults(prisma, alice, { jira: null, confluence: { ...PAGE, space_id: "x" } })).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("should keep GitHub as the person's ticket tool, with its repository and Project, beside their Jira project", async () => {
+    await insertUser(ALICE);
+    const alice = { actorOid: ALICE.oid, ownerOid: ALICE.oid };
+    const githubProject = { owner: "hmcts", number: 12, title: "CFT roadmap" };
+
+    await saveExportDefaults(prisma, alice, {
+      ticketTool: "github",
+      jira: { key: "CCD", name: "Core Case Data" },
+      github: "https://github.com/hmcts/cft-workspace",
+      githubProject,
+      confluence: null
+    });
+
+    expect(await readExportDefaults(prisma, alice)).toEqual({
+      ticketTool: "github",
+      jira: { key: "CCD", name: "Core Case Data" },
+      github: "hmcts/cft-workspace",
+      githubProject,
+      confluence: null
+    });
+    // A caller that sends no ticket tool is one that knows nothing of GitHub, so it puts the person back on Jira.
+    await saveExportDefaults(prisma, alice, { jira: null, confluence: null });
+    expect(await readExportDefaults(prisma, alice)).toEqual({ ticketTool: "jira", jira: null, github: null, githubProject: null, confluence: null });
+  });
+
+  it("should refuse a ticket tool or a repository that is not one", async () => {
+    await insertUser(ALICE);
+    const alice = { actorOid: ALICE.oid, ownerOid: ALICE.oid };
+
+    await saveExportDefaults(prisma, alice, { ticketTool: "github", jira: null, github: "hmcts/.github", confluence: null });
+    expect((await readExportDefaults(prisma, alice)).github).toBe("hmcts/.github");
+    await expect(saveExportDefaults(prisma, alice, { ticketTool: "trello", jira: null, confluence: null })).rejects.toMatchObject({ status: 400 });
+    await expect(
+      saveExportDefaults(prisma, alice, {
+        ticketTool: "github",
+        jira: null,
+        github: "hmcts/x",
+        githubProject: { owner: "hmcts", number: 0, title: "x" },
+        confluence: null
+      })
+    ).rejects.toMatchObject({ status: 400 });
+    await expect(saveExportDefaults(prisma, alice, { ticketTool: "github", jira: null, github: "cft-workspace", confluence: null })).rejects.toMatchObject({
+      status: 400
+    });
   });
 });

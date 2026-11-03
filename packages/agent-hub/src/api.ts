@@ -18,6 +18,7 @@ import type {
   CredentialResponse,
   DirectBody,
   FeedResponse,
+  GithubExportReport,
   HeartbeatBody,
   JiraExportReport,
   LoginCodeResponse,
@@ -176,6 +177,7 @@ export type Api = {
    */
   postQuestion: (agentId: string, body: QuestionBody, opts?: RequestOptions) => Promise<null>;
   putJiraExport: (agentId: string, body: JiraExportReport) => Promise<null>;
+  putGithubExport: (agentId: string, body: GithubExportReport) => Promise<null>;
   putConfluenceExport: (agentId: string, body: ConfluenceExportReport) => Promise<null>;
   /** The supervisor's answer to one of its owner's Jira or Confluence lookups. */
   putLookup: (virtualId: string, lookupId: string, body: LookupAnswer) => Promise<null>;
@@ -369,6 +371,7 @@ export function createApi({
     putArtefact: (agentId, body) => request<ArtefactResponse>("PUT", `${a(agentId)}/artefact`, body),
     postQuestion: (agentId, body, opts) => request<null>("POST", `${a(agentId)}/question`, body, opts),
     putJiraExport: (agentId, body) => request<null>("PUT", `${a(agentId)}/jira`, body),
+    putGithubExport: (agentId, body) => request<null>("PUT", `${a(agentId)}/github`, body),
     putConfluenceExport: (agentId, body) => request<null>("PUT", `${a(agentId)}/confluence`, body),
     putLookup: (virtualId, lookupId, body) => request<null>("PUT", v(virtualId, `lookups/${encodeURIComponent(lookupId)}`), body),
     putWelsh: (virtualId, jobId, body) => request<null>("PUT", v(virtualId, `welsh/${encodeURIComponent(jobId)}`), body),

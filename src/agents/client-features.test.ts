@@ -5,6 +5,7 @@ import {
   MAX_CLIENT_FEATURES,
   normaliseClientFeatures,
   podGate,
+  podLacks,
   podSupports,
   storedClientFeatures
 } from "./client-features.ts";
@@ -107,5 +108,21 @@ describe("podGate", () => {
 
   it("should say unsupported when the main-session agent registered on a client that claims nothing", () => {
     expect(podGate({ status: "running", clientFeatures: null, agent: { clientFeatures: null } }, "welsh")).toBe("unsupported");
+  });
+});
+
+describe("podLacks", () => {
+  it("should say a running pod lacks a feature only when its claim leaves the feature out", () => {
+    expect(podLacks({ status: "running", clientFeatures: ["lookups"] }, "github-lookups")).toBe(true);
+    expect(podLacks({ status: "running", clientFeatures: ["lookups", "github-lookups"] }, "github-lookups")).toBe(false);
+  });
+
+  it("should not count a pod that has claimed nothing yet, or is not running, since it boots on the current client", () => {
+    expect(podLacks({ status: "running", clientFeatures: null }, "github-lookups")).toBe(false);
+    expect(podLacks({ status: "stopped", clientFeatures: ["lookups"] }, "github-lookups")).toBe(false);
+  });
+
+  it("should read the main session's claim when the pod reported none of its own", () => {
+    expect(podLacks({ status: "running", clientFeatures: null, agent: { clientFeatures: ["lookups"] } }, "github-lookups")).toBe(true);
   });
 });

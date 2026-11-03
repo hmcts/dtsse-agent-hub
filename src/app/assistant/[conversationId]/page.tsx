@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import {
   deleteConversation,
   exportArtefactToConfluence,
+  exportArtefactToGithub,
   exportArtefactToJira,
   renameConversation,
   saveArtefact,
@@ -58,6 +59,7 @@ const ACTIONS: ChatActions = {
   answerQuestion: answerAgentQuestion,
   saveArtefact,
   exportToJira: exportArtefactToJira,
+  exportToGithub: exportArtefactToGithub,
   exportToConfluence: exportArtefactToConfluence
 };
 
