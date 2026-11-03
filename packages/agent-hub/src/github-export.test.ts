@@ -158,6 +158,36 @@ describe("runGithubExport", () => {
     expect(outcome).toEqual({ error: expect.stringContaining("may or may not exist") });
   });
 
+  it("should create a missing label and label the issue once it exists", async () => {
+    // Arrange
+    const f = fake();
+
+    // Act
+    const outcome = await runGithubExport(f.deps, { ...REQUEST, labels: ["cft-workspace"] });
+
+    // Assert
+    expect(outcome).toEqual({ number: 42, url: "https://github.com/hmcts/cft-workspace/issues/42", again: false });
+    expect(f.calls.slice(1)).toEqual([
+      ["gh", "label", "create", "cft-workspace", "--repo=hmcts/cft-workspace", "--color=1f883d", "--description=Made from the CFT Workspace"],
+      ["gh", "issue", "edit", "42", "--repo=hmcts/cft-workspace", "--add-label=cft-workspace"]
+    ]);
+  });
+
+  it("should keep the issue, and say why it has no label, when GitHub will not label it", async () => {
+    // Arrange
+    const f = fake();
+    const run = f.deps.run;
+    f.deps.run = async (cmd, args, opts) =>
+      args[0] === "label" || args[1] === "edit" ? { code: 1, stdout: "", stderr: "HTTP 403: Must have triage access\n" } : run(cmd, args, opts);
+
+    // Act
+    const outcome = await runGithubExport(f.deps, { ...REQUEST, labels: ["cft-workspace"] });
+
+    // Assert
+    expect(outcome).toMatchObject({ number: 42, labelError: "GitHub would not label it cft-workspace: HTTP 403: Must have triage access" });
+    expect(f.reports).toEqual([{ export_id: EXPORT, number: 42 }]);
+  });
+
   it("should add the issue to the Project asked for once it exists", async () => {
     // Arrange
     const f = fake();

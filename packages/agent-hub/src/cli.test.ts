@@ -1770,6 +1770,8 @@ const file = args.find((a) => a.startsWith("--body-file="));
 const body = file ? fs.readFileSync(file.slice("--body-file=".length), "utf8") : "";
 fs.appendFileSync(${JSON.stringify(logFile)}, JSON.stringify({ args, body }) + "\\n");
 if (args[0] === "project" && args[1] === "item-add") { process.exit(0); }
+if (args[0] === "label" && args[1] === "create") { console.error("label already exists"); process.exit(1); }
+if (args[0] === "issue" && args[1] === "edit") { process.exit(0); }
 if (args[0] === "issue" && args[1] === "create") {
   const repo = args.find((a) => a.startsWith("--repo=")).slice("--repo=".length);
   const n = fs.readFileSync(${JSON.stringify(logFile)}, "utf8").split("\\n").filter((l) => l.includes('"create"')).length;
@@ -1833,6 +1835,27 @@ process.exit(2);
     expect(githubReported(agentId)).toEqual([{ agent_id: agentId, export_id: exportId, number: 41 }]);
   });
 
+  it("should label the issue, making the label if need be, when github export runs with --labels", async () => {
+    // Arrange
+    const { sid, agentId } = await session();
+    const exportId = "9f4c1a5e-5555-4666-8777-88889999aaaa";
+    hub.editArtefactAsUser(agentId, "# Stories", "Fee stories");
+    const gh = fakeGh();
+
+    // Act
+    const r = await cli(["github", "export", exportId, "--repo", "hmcts/cft-workspace", "--labels", "cft-workspace"], { sid, extraEnv: gh.env });
+
+    // Assert
+    expect(r.code, r.errors.join("\n")).toBe(0);
+    expect(r.text()).not.toMatch(/no label/);
+    expect(gh.calls().map((call) => call.args.slice(0, 2))).toEqual([
+      ["issue", "create"],
+      ["label", "create"],
+      ["issue", "edit"]
+    ]);
+    expect(gh.calls()[2]?.args).toEqual(["issue", "edit", "41", "--repo=hmcts/cft-workspace", "--add-label=cft-workspace"]);
+  });
+
   it("should report the issue it already made and create no second one when github export runs again for the export", async () => {
     // Arrange
     const { sid, agentId } = await session();
@@ -1884,6 +1907,7 @@ process.exit(2);
       ["github", "export", EXPORT, "--repo", "hmcts/cft-workspace", "--number", "1"],
       ["github", "export", EXPORT, "--repo", "hmcts/cft-workspace", "--project", "12"],
       ["github", "export", EXPORT, "--repo", "hmcts/cft-workspace", "--project", "hmcts/zero"],
+      ["github", "export", EXPORT, "--repo", "hmcts/cft-workspace", "--labels", "a b"],
       ["github", "report", EXPORT],
       ["github", "report", EXPORT, "--number", "0"],
       ["github", "report", EXPORT, "--number", "1", "--error", "both"],

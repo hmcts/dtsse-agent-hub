@@ -246,6 +246,8 @@ export type GithubExportFrame = {
   repo: string;
   /** The Project to add the issue to once it exists, when the person chose one. */
   project?: { owner: string; number: number } | null;
+  /** What the issue is labelled; empty from a hub older than labels. */
+  labels?: string[];
 };
 
 /**
@@ -262,10 +264,11 @@ export const GITHUB_EXPORT_BASH_TIMEOUT_MS = 240000;
  */
 export function githubExportLines(github: GithubExportFrame): string[] {
   const project = github.project ? ` --project ${github.project.owner}/${github.project.number}` : "";
+  const labels = github.labels?.length ? ` --labels ${github.labels.join(",")}` : "";
   const board = github.project ? `, on Project ${github.project.number} of ${github.project.owner}` : "";
   return [
     `The user has asked you to create a GitHub issue for the conversation's document in ${github.repo}${board} (export ${github.export_id}).`,
-    `Run exactly this one command, with a Bash timeout of ${GITHUB_EXPORT_BASH_TIMEOUT_MS} ms: \`${CLI} github export ${github.export_id} --repo ${github.repo}${project}\``,
+    `Run exactly this one command, with a Bash timeout of ${GITHUB_EXPORT_BASH_TIMEOUT_MS} ms: \`${CLI} github export ${github.export_id} --repo ${github.repo}${project}${labels}\``,
     "It does every step itself: it reads the document, creates the issue with gh as the user and reports it to the Assistant. Run again for the same export, it reports the issue it already made rather than making another.",
     "Do not read the document, check gh, or look at the issue yourself, before or after; do not run any other command for this.",
     "Then tell the user in one short sentence which issue it became, or why it could not be made, in the words the command printed."

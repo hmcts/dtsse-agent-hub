@@ -419,6 +419,13 @@ describe("assistantEnvelope", () => {
     expect(text).toMatch(/in hmcts\/cft-workspace, on Project 12 of hmcts \(export/);
   });
 
+  it("should pass the labels to the command when the hub sends them", () => {
+    const exportId = "5b0e7c1a-1111-4222-8333-444455556666";
+    const frame: AssistantFrame = { ...pcs, github_export: { export_id: exportId, repo: "hmcts/x", labels: ["cft-workspace"] } };
+
+    expect(assistantEnvelope(personMessage, frame, null)).toContain(`\`agent-hub github export ${exportId} --repo hmcts/x --labels cft-workspace\``);
+  });
+
   it("should say nothing of GitHub when no export is pending", () => {
     // Act & Assert
     expect(assistantEnvelope(personMessage, { ...pcs, github_export: null }, null)).not.toMatch(/GitHub|github export/);

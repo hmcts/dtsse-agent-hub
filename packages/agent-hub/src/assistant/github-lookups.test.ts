@@ -3,8 +3,11 @@ import {
   ghLookupFailure,
   githubOwners,
   githubWords,
+  parseProject,
   parseProjects,
   parseRepos,
+  projectByNumberArgs,
+  projectRef,
   projectSearchArgs,
   type Run,
   type RunResult,
@@ -227,5 +230,54 @@ describe("runGithubLookup", () => {
     const answer = await runGithubLookup({ run: runner({}).run, env: {}, owners: async () => [] }, { kind: "github_project", query: "x", owner: null });
 
     expect(answer).toMatchObject({ error: "failed", detail: expect.stringContaining("Choose the repository first") });
+  });
+});
+
+describe("a Project named by its link or number", () => {
+  it.each([
+    ["https://github.com/orgs/hmcts/projects/43", { owner: "hmcts", number: 43 }],
+    ["github.com/orgs/hmcts/projects/43/views/2?filterQuery=x", { owner: "hmcts", number: 43 }],
+    ["https://github.com/users/SarahL/projects/7", { owner: "SarahL", number: 7 }],
+    ["43", { owner: "repo-owner", number: 43 }],
+    ["#43", { owner: "repo-owner", number: 43 }],
+    ["roadmap 2026", null],
+    ["https://github.com/orgs/hmcts/projects/0", null],
+    ["https://evil.example/orgs/hmcts/projects/43", null]
+  ])("should read %j as %j", (query, expected) => {
+    expect(projectRef(query, "repo-owner")).toEqual(expected);
+  });
+
+  it("should look the pasted Project up by its own owner and number, closed or not", async () => {
+    const { run, calls } = runner({
+      "api graphql": OK(JSON.stringify({ data: { repositoryOwner: { projectV2: { number: 43, title: "CFT Workspace", closed: true } } } }))
+    });
+
+    const answer = await runGithubLookup(
+      { run, env: {}, owners: async () => [] },
+      { kind: "github_project", query: "https://github.com/orgs/hmcts/projects/43", owner: "other" }
+    );
+
+    expect(answer).toEqual({ results: [{ owner: "hmcts", number: 43, title: "CFT Workspace" }] });
+    expect(calls[0]?.slice(5)).toEqual(["-F", "owner=hmcts", "-F", "number=43"]);
+  });
+
+  it("should find nothing, rather than fail, when there is no Project of that number", async () => {
+    const { run } = runner({
+      "api graphql": { code: 1, stdout: JSON.stringify({ errors: [{ message: "Could not resolve to a ProjectV2 with the number 99." }] }), stderr: "" }
+    });
+
+    expect(await runGithubLookup({ run, env: {}, owners: async () => [] }, { kind: "github_project", query: "99", owner: "hmcts" })).toEqual({
+      results: []
+    });
+  });
+
+  it("should give none when the by-number answer carries no data", () => {
+    expect(parseProject("not json", "hmcts")).toBeNull();
+    expect(parseProject(JSON.stringify({ errors: [] }), "hmcts")).toBeNull();
+    expect(parseProject(JSON.stringify({ data: { repositoryOwner: null } }), "hmcts")).toEqual([]);
+  });
+
+  it("should pass the owner and number as variables", () => {
+    expect(projectByNumberArgs("hmcts", 43).slice(4)).toEqual(["-F", "owner=hmcts", "-F", "number=43"]);
   });
 });

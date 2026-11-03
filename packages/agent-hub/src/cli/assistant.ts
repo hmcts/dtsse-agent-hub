@@ -299,25 +299,31 @@ const githubExport: ExportStep = async (cli, exportId, flags) => {
     throw new UsageError(`--project must be a Project as owner/number such as hmcts/12, not ${flags.project}`);
   }
   const project = projectMatch === null ? null : { owner: projectMatch[1] as string, number: Number(projectMatch[2]) };
+  const labels = flags.labels ? flags.labels.split(",") : [];
+  if (!labels.every((name) => WORD_RE.test(name))) {
+    throw new UsageError("--labels must be comma-separated words");
+  }
   const agent = requireAgent(requireSessionId(cli.env));
-  const outcome = await runGithubExport({ api: cli.api(), agentId: agent.agent_id, env: cli.env, run, print: cli.print }, { exportId, repo, project }).catch(
-    noExport("GitHub")
-  );
+  const outcome = await runGithubExport(
+    { api: cli.api(), agentId: agent.agent_id, env: cli.env, run, print: cli.print },
+    { exportId, repo, project, labels }
+  ).catch(noExport("GitHub"));
   if ("error" in outcome) {
     cli.print(`agent-hub: no issue was created for export ${exportId}: ${outcome.error} The user has been shown this.`);
     return 1;
   }
+  const unlabelled = outcome.labelError ? ` It has no label: ${outcome.labelError}.` : "";
   const board =
     project === null ? "" : outcome.projectError ? ` (not on the Project: ${outcome.projectError})` : ` on Project ${project.number} of ${project.owner}`;
   cli.print(
-    `agent-hub: ${outcome.again ? "already created" : "created"} ${repo}#${outcome.number}${board} for export ${exportId} and reported it; the user's Assistant shows a link to ${outcome.url}`
+    `agent-hub: ${outcome.again ? "already created" : "created"} ${repo}#${outcome.number}${board} for export ${exportId} and reported it; the user's Assistant shows a link to ${outcome.url}.${unlabelled}`
   );
   return 0;
 };
 
 export const github = exportCommand("github", {
   exportIdRe: EXPORT_ID_RE,
-  exportFlags: ["repo", "project"],
+  exportFlags: ["repo", "project", "labels"],
   reportFlags: ["number", "error"],
   export: githubExport,
   report: githubReport

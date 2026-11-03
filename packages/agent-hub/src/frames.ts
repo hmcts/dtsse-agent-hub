@@ -157,8 +157,11 @@ export function parseGithubExportFrame(value: unknown): GithubExportFrame | null
   if (!raw || typeof raw.export_id !== "string" || !EXPORT_ID_RE.test(raw.export_id) || typeof raw.repo !== "string" || !GITHUB_REPO_RE.test(raw.repo)) {
     return null;
   }
+  // Labels go into the command as one comma-separated flag, so each is a plain word; a list that is not is dropped
+  // whole rather than in part, since the issue would otherwise be labelled other than the hub asked.
+  const labels = Array.isArray(raw.labels) && raw.labels.every((label) => typeof label === "string" && WORD_RE.test(label)) ? (raw.labels as string[]) : [];
   if (raw.project === undefined || raw.project === null) {
-    return { export_id: raw.export_id, repo: raw.repo };
+    return { export_id: raw.export_id, repo: raw.repo, labels };
   }
   const project = asRecord(raw.project);
   if (
@@ -171,7 +174,7 @@ export function parseGithubExportFrame(value: unknown): GithubExportFrame | null
   ) {
     return null;
   }
-  return { export_id: raw.export_id, repo: raw.repo, project: { owner: project.owner, number: project.number as number } };
+  return { export_id: raw.export_id, repo: raw.repo, labels, project: { owner: project.owner, number: project.number as number } };
 }
 
 const NUMERIC_ID_RE = /^\d{1,20}$/;

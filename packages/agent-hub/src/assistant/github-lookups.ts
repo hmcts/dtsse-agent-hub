@@ -37,6 +37,14 @@ const PROJECTS_QUERY = `query($owner: String!, $q: String!) {
   }
 }`;
 
+// One Project by its number, for a pasted link or a number typed on its own: a title search would not find either.
+const PROJECT_QUERY = `query($owner: String!, $number: Int!) {
+  repositoryOwner(login: $owner) {
+    ... on Organization { projectV2(number: $number) { number title closed } }
+    ... on User { projectV2(number: $number) { number title closed } }
+  }
+}`;
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
@@ -106,6 +114,43 @@ export function parseRepos(stdout: string): GithubRepoFound[] | null {
 /** The `gh api graphql` arguments for the Projects of `owner` whose titles match the words. */
 export function projectSearchArgs(owner: string, words: readonly string[]): string[] {
   return ["api", "graphql", "-f", `query=${PROJECTS_QUERY}`, "-F", `owner=${owner}`, "-f", `q=${words.join(" ")}`];
+}
+
+/**
+ * A Project named outright rather than searched for: a pasted `https://github.com/orgs/{owner}/projects/{number}` (or
+ * `users/…`, with anything after the number, such as a view), or a number typed on its own, with or without `#`, which
+ * is one of `owner`'s. Null for anything else, which is searched for by title.
+ */
+export function projectRef(query: string, owner: string): { owner: string; number: number } | null {
+  const trimmed = query.trim();
+  const link = /^(?:https?:\/\/)?(?:www\.)?github\.com\/(?:orgs|users)\/([A-Za-z0-9][A-Za-z0-9-]{0,38})\/projects\/([1-9]\d{0,8})(?:[/?#].*)?$/i.exec(trimmed);
+  if (link) {
+    return { owner: link[1] as string, number: Number(link[2]) };
+  }
+  const number = /^#?([1-9]\d{0,8})$/.exec(trimmed);
+  return number ? { owner, number: Number(number[1]) } : null;
+}
+
+/** The `gh api graphql` arguments for one Project by its owner and number. */
+export function projectByNumberArgs(owner: string, number: number): string[] {
+  return ["api", "graphql", "-f", `query=${PROJECT_QUERY}`, "-F", `owner=${owner}`, "-F", `number=${number}`];
+}
+
+/** The Project in the by-number answer, closed or not, since the person named it: none when there is no such Project. */
+export function parseProject(stdout: string, owner: string): GithubProjectFound[] | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    return null;
+  }
+  const data = asRecord(asRecord(parsed)?.data);
+  if (data === null) {
+    return null;
+  }
+  const raw = asRecord(asRecord(data.repositoryOwner)?.projectV2);
+  const title = shortText(raw?.title, MAX_TITLE);
+  return raw && Number.isInteger(raw.number) && (raw.number as number) > 0 && title !== null ? [{ owner, number: raw.number as number, title }] : [];
 }
 
 /** The open Projects in the GraphQL answer, as the hub accepts them, or null when the output is not one. */
@@ -202,7 +247,8 @@ export type GithubLookupDeps = {
 /**
  * Runs one GitHub lookup. A repository search looks in the owner's own account and organisations, or in the one owner
  * the person typed; a Project search looks in the one owner the hub sends, the chosen repository's, since that is where
- * the boards for its issues are. Never throws.
+ * the boards for its issues are, unless the person pasted a Project's link or typed its number, which is looked up
+ * as it stands. Never throws.
  */
 export async function runGithubLookup(
   deps: GithubLookupDeps,
@@ -212,8 +258,17 @@ export async function runGithubLookup(
     if (frame.owner === null) {
       return { error: "failed", detail: "Choose the repository first: its Projects are the ones offered." };
     }
-    const result = await deps.run("gh", projectSearchArgs(frame.owner, githubWords(frame.query)), { env: deps.env, timeoutMs: SEARCH_TIMEOUT_MS });
-    const results = result.code === 0 ? parseProjects(result.stdout, frame.owner) : null;
+    const named = projectRef(frame.query, frame.owner);
+    const args = named === null ? projectSearchArgs(frame.owner, githubWords(frame.query)) : projectByNumberArgs(named.owner, named.number);
+    const result = await deps.run("gh", args, { env: deps.env, timeoutMs: SEARCH_TIMEOUT_MS });
+    // A Project GitHub has no record of is a GraphQL error naming it, not an empty answer, and is simply not found.
+    if (named !== null && result.code !== 0 && /Could not resolve to a ProjectV2/i.test(`${result.stdout}${result.stderr}`)) {
+      return { results: [] };
+    }
+    let results: GithubProjectFound[] | null = null;
+    if (result.code === 0) {
+      results = named === null ? parseProjects(result.stdout, frame.owner) : parseProject(result.stdout, named.owner);
+    }
     return results !== null ? { results } : { error: "failed", detail: ghLookupFailure(result, "Projects") };
   }
   const { owner, words } = repoQuery(frame.query);

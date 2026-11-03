@@ -276,7 +276,15 @@ describe("parseJiraExportFrame", () => {
 });
 
 describe("parseGithubExportFrame", () => {
-  const pending = { export_id: "5b0e7c1a-1111-4222-8333-444455556666", repo: "hmcts/cft-workspace" };
+  const pending = { export_id: "5b0e7c1a-1111-4222-8333-444455556666", repo: "hmcts/cft-workspace", labels: ["cft-workspace"] };
+
+  it("should read a frame from a hub older than labels as one with none", () => {
+    expect(parseGithubExportFrame({ export_id: pending.export_id, repo: pending.repo })).toEqual({ ...pending, labels: [] });
+  });
+
+  it("should drop the labels whole, keeping the export, when one is not a plain word", () => {
+    expect(parseGithubExportFrame({ ...pending, labels: ["cft-workspace", "a,b"] })).toEqual({ ...pending, labels: [] });
+  });
 
   it("should keep a pending export when every value is one the hub would send", () => {
     // Act & Assert

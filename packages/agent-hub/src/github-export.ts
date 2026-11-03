@@ -31,6 +31,8 @@ export type GithubExportRequest = {
   exportId: string;
   repo: string;
   project?: GithubProject | null;
+  /** What to label the issue, as the Jira ticket is labelled. */
+  labels?: string[];
 };
 
 export type GithubExportDeps = {
@@ -43,8 +45,11 @@ export type GithubExportDeps = {
   dir?: string;
 };
 
-/** `projectError` is set when the issue was made but could not be put on the Project asked for. */
-export type GithubExportOutcome = { number: number; url: string; again: boolean; projectError?: string } | { error: string };
+/**
+ * `projectError` is set when the issue was made but could not be put on the Project asked for, and `labelError` when
+ * it could not be labelled. Only the first is reported: a missing label is said to the session, which tells the person.
+ */
+export type GithubExportOutcome = { number: number; url: string; again: boolean; projectError?: string; labelError?: string } | { error: string };
 
 export function githubExportsDir(): string {
   return path.join(hubHome(), "github-exports");
@@ -120,6 +125,38 @@ async function addToProject(deps: GithubExportDeps, project: GithubProject, url:
   return said.length > MAX_GITHUB_ERROR ? `${said.slice(0, MAX_GITHUB_ERROR - 1)}…` : said;
 }
 
+// GitHub's dark green, which reads on both its light and dark themes.
+const LABEL_COLOUR = "1f883d";
+
+/**
+ * Labels the issue, creating any label the repository does not have yet: GitHub refuses an issue a label it has never
+ * heard of. Done once the issue exists, so a person who may open issues but not label them still gets the issue, and
+ * is told why it has no label. Null once it is labelled.
+ */
+async function label(deps: GithubExportDeps, repo: string, number: number, labels: readonly string[]): Promise<string | null> {
+  for (const name of labels) {
+    // Fails harmlessly when the label is there already, or the person cannot make labels, which the edit then says.
+    await deps.run("gh", ["label", "create", name, `--repo=${repo}`, `--color=${LABEL_COLOUR}`, "--description=Made from the CFT Workspace"], {
+      env: deps.env,
+      timeoutMs: CREATE_TIMEOUT_MS
+    });
+  }
+  const result = await deps.run("gh", ["issue", "edit", String(number), `--repo=${repo}`, `--add-label=${labels.join(",")}`], {
+    env: deps.env,
+    timeoutMs: CREATE_TIMEOUT_MS
+  });
+  if (result.code === 0) {
+    return null;
+  }
+  const line =
+    stripAnsi(`${result.stderr}\n${result.stdout}`)
+      .split("\n")
+      .map((text) => text.trim())
+      .find((text) => text !== "") ?? "";
+  const said = line ? `GitHub would not label it ${labels.join(", ")}: ${line}` : `GitHub would not label it ${labels.join(", ")}`;
+  return said.length > MAX_GITHUB_ERROR ? `${said.slice(0, MAX_GITHUB_ERROR - 1)}…` : said;
+}
+
 async function create(deps: GithubExportDeps, dir: string, request: GithubExportRequest): Promise<GithubExportOutcome> {
   const doc = await withRetry(() => deps.api.getArtefact(deps.agentId), { attempts: 3 });
   if (!doc.markdown.trim()) {
@@ -143,8 +180,15 @@ async function create(deps: GithubExportDeps, dir: string, request: GithubExport
     const url = githubIssueUrl(request.repo, number);
     // Remembered before the Project is tried, so a failure there, or a crash, cannot lead to a second issue.
     remember(dir, request.exportId, number);
+    const labelError = request.labels?.length ? await label(deps, request.repo, number, request.labels) : null;
     const projectError = request.project ? await addToProject(deps, request.project, url) : null;
-    return projectError === null ? { number, url, again: false } : { number, url, again: false, projectError };
+    return {
+      number,
+      url,
+      again: false,
+      ...(projectError === null ? {} : { projectError }),
+      ...(labelError === null ? {} : { labelError })
+    };
   } finally {
     fs.rmSync(bodyFile, { force: true });
   }
