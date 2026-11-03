@@ -245,6 +245,72 @@ describe("runLookup", () => {
   });
 });
 
+describe("runLookup for GitHub", () => {
+  const REPOS = JSON.stringify([{ fullName: "hmcts/cft-workspace", description: null, hasIssues: true }]);
+
+  it("should search the person's repositories with gh, never twg, and never sign in", async () => {
+    // Arrange
+    const run = vi.fn<Run>(async () => ({ code: 0, stdout: REPOS, stderr: "" }));
+    const login = vi.fn(async () => true);
+
+    // Act
+    const answer = await runLookup(
+      { run, env: {}, login, githubOwners: async () => ["hmcts"] },
+      frame({ kind: "github_repo", query: "cft workspace", sign_in: true })
+    );
+
+    // Assert
+    expect(answer).toEqual({ results: [{ full_name: "hmcts/cft-workspace", description: null }] });
+    expect(run.mock.calls.map((call) => call[0])).toEqual(["gh"]);
+    expect(login).not.toHaveBeenCalled();
+  });
+
+  it("should ask gh for the person's accounts itself when it is given none to search", async () => {
+    // Arrange
+    const run = vi.fn<Run>(async (_cmd, args) =>
+      args[0] === "api" && args[1] === "user"
+        ? { code: 0, stdout: "SarahL\n", stderr: "" }
+        : args[0] === "api"
+          ? { code: 0, stdout: "hmcts\n", stderr: "" }
+          : { code: 0, stdout: REPOS, stderr: "" }
+    );
+
+    // Act
+    await runLookup({ run, env: {}, login: async () => true }, frame({ kind: "github_repo", query: "cft" }));
+
+    // Assert
+    expect(run.mock.calls.at(-1)?.[1]).toEqual(expect.arrayContaining(["--owner=SarahL", "--owner=hmcts"]));
+  });
+
+  it("should ask for the person's accounts once for every search a runner makes", async () => {
+    // Arrange
+    const answers: LookupAnswer[] = [];
+    const run = vi.fn<Run>(async (_cmd, args) => (args[0] === "api" ? { code: 0, stdout: "hmcts\n", stderr: "" } : { code: 0, stdout: REPOS, stderr: "" }));
+    const runner = createLookupRunner({
+      api: {
+        putLookup: async (_va, _id, body) => {
+          answers.push(body);
+          return null;
+        }
+      },
+      id: "va-1",
+      env: {},
+      run,
+      login: async () => true
+    });
+
+    // Act
+    runner.lookup({ lookup_id: "5b0e7c1a-1111-4222-8333-444455556661", kind: "github_repo", query: "cft" });
+    await runner.idle();
+    runner.lookup({ lookup_id: "5b0e7c1a-1111-4222-8333-444455556662", kind: "github_repo", query: "ccd" });
+    await runner.idle();
+
+    // Assert
+    expect(answers).toHaveLength(2);
+    expect(run.mock.calls.filter((call) => call[1][0] === "api")).toHaveLength(2);
+  });
+});
+
 describe("createLookupRunner", () => {
   it("should answer a waiting lookup superseded when a newer one of its kind arrives, and run at most two at once", async () => {
     // Arrange
