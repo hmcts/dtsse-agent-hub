@@ -300,10 +300,10 @@ export function inHome<T>(service: string, argv: string[], change: HomeChange, d
 }
 
 /**
- * A branch name from a label, as git accepts it, made unique with the time, so running a change again never meets the
- * branch an earlier run left behind.
+ * A branch name from a label, as git accepts it, made unique with the time to the millisecond, so running a change again
+ * never meets the branch an earlier run left behind, even one a second ago, as two quick clicks on the Welsh page are.
  */
 export function branchName(label: string, now: Date = new Date()): string {
-  const stamp = now.toISOString().slice(0, 19).replace(/[-:]/g, "").replace("T", "-");
+  const stamp = now.toISOString().slice(0, 23).replace(/[-:.]/g, "").replace("T", "-");
   return `welsh/${label}-${stamp}`.toLowerCase().replace(/[^a-z0-9/._-]+/g, "-");
 }

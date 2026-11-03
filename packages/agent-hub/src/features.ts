@@ -14,7 +14,7 @@
  * `ClientFeature` in the service's `src/agents/client-features.ts`, which gates on the same names and cannot import
  * from here; keep the two in step, so a name only one side knows is a type error on that side.
  */
-export type ClientFeature = "attachments" | "files" | "github-lookups" | "lookups" | "memory-anon" | "model-alias" | "stop" | "welsh";
+export type ClientFeature = "attachments" | "files" | "github-lookups" | "lookups" | "memory-anon" | "model-alias" | "stop" | "welsh" | "welsh-review";
 
 /**
  * What this build claims. A name belongs here only once this client reads the field it names, and in the same change
@@ -49,6 +49,12 @@ export type ClientFeature = "attachments" | "files" | "github-lookups" | "lookup
  * the welsh plugin's `scripts/welsh` for the CFT Workspace's Welsh page. The hub gates on it, answering `unsupported`
  * to a pod that did not claim it.
  *
+ * `welsh-review` is claimed because the assistant supervisor also runs the `welsh` frame's `request` and
+ * `keep_english` kinds: the Welsh Language Unit's spreadsheet of only the strings a BA ticked, and a draft pull
+ * request keeping what they left out in English. A build that claims only `welsh` ignores those two, so the hub gates
+ * them on this name and answers `unsupported`, which the page reads as "needs an update", rather than a job that
+ * times out.
+ *
  * `memory-anon` is claimed because the assistant supervisor reads its own container's memory cgroup and reports it,
  * including `anon_bytes` from `memory.stat`, which the hub's memory route requires and computes its low-memory
  * warning from. This is the name the current hub gates the Size section on, so that it can tell a pod that cannot
@@ -60,4 +66,14 @@ export type ClientFeature = "attachments" | "files" | "github-lookups" | "lookup
  * setting is theirs to save whenever they like. What reads it is the settings' Model section, which says their choice
  * waits for the assistant's next start when its pod's own session did not claim it.
  */
-export const CLIENT_FEATURES: readonly ClientFeature[] = ["attachments", "files", "github-lookups", "lookups", "memory-anon", "model-alias", "stop", "welsh"];
+export const CLIENT_FEATURES: readonly ClientFeature[] = [
+  "attachments",
+  "files",
+  "github-lookups",
+  "lookups",
+  "memory-anon",
+  "model-alias",
+  "stop",
+  "welsh",
+  "welsh-review"
+];

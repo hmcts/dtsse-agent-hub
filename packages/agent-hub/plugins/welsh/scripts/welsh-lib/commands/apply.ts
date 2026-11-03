@@ -29,7 +29,7 @@ import { ADAPTERS, type Finding, scanRepo } from "../scan.ts";
 import { tokenProblems } from "../tokens.ts";
 import { tool } from "../tools.ts";
 import { type Pair, verify } from "../verify.ts";
-import { resolveRepos } from "./scan.ts";
+import { pageOf, resolveRepos } from "./scan.ts";
 
 export async function applyCmd(argv: string[]): Promise<unknown> {
   const { values } = parseArgs({
@@ -215,19 +215,6 @@ function changeList(edits: Applied[]): Change[] {
     welsh: e.welsh,
     source: e.source
   }));
-}
-
-/** A locale file's page or list, from its folder: `…/pages/(public)/summary-of-publications/cy.ts` is "summary of publications". */
-export function pageOf(file: string): string {
-  const parts = file
-    .split("/")
-    .slice(0, -1)
-    .filter(
-      (p) =>
-        !/^\(.*\)$/.test(p) && !["src", "locales", "pages", "apps", "web", "libs", "list-types", "translation", "resources", "main", "en", "cy"].includes(p)
-    );
-  const name = parts.at(-1) ?? file;
-  return name.replace(/[-_]+/g, " ");
 }
 
 interface Change {

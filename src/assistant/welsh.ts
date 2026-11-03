@@ -26,8 +26,30 @@ export function hasWelshPlugin(virtualAgent: { plugins: readonly string[] }): bo
 /** What a Welsh job or upload is refused with when the person's assistant has not got the plugin ticked. */
 export const WELSH_NOT_TURNED_ON = "turn on Welsh translations in Settings, under Tools, first";
 
-const WELSH_KINDS = ["info", "search", "scan", "import_check", "import", "apply_preview", "apply", "story_candidates", "story_preview", "story_write"] as const;
+const WELSH_KINDS = [
+  "info",
+  "search",
+  "scan",
+  "request",
+  "import_check",
+  "import",
+  "apply_preview",
+  "apply",
+  "story_candidates",
+  "story_preview",
+  "story_write",
+  "keep_english"
+] as const;
 export type WelshKind = (typeof WELSH_KINDS)[number];
+
+/**
+ * The client feature a pod must claim to be sent a kind. `request` and `keep_english` came after `welsh`, and a pod on
+ * a client from before them ignores their frames, so it is answered `unsupported` (needs an update) rather than left to
+ * time out.
+ */
+export function welshFeature(kind: WelshKind): "welsh" | "welsh-review" {
+  return kind === "request" || kind === "keep_english" ? "welsh-review" : "welsh";
+}
 
 /** The Welsh page's tasks, which `?task=` can open directly. */
 const WELSH_TASK_IDS = ["search", "scan", "return", "story"] as const;
@@ -57,6 +79,8 @@ export const MAX_WELSH_QUERY = 100;
 export const MAX_WELSH_STRINGS = 200;
 const MAX_WELSH_STRING = 2000;
 const MAX_WELSH_CHOICES = 200;
+/** As many refs as a scan lists, since a BA can only leave out one they were shown: the pod's `SCAN_LIST_LIMIT`. */
+const MAX_WELSH_LEAVE_OUT = 300;
 
 const WELSH_REF_RE = /^CY-[\dA-F]{8}$/;
 const WELSH_ROW_ID_RE = /^[\da-f]{10}$/;
@@ -117,6 +141,14 @@ const ARG_SCHEMAS: Record<WelshKind, z.ZodTypeAny> = {
   info: z.object({}).strict(),
   search: z.object({ query: z.string().trim().min(1).max(MAX_WELSH_QUERY), mode: z.enum(["contains", "exact", "fuzzy"]).default("contains") }).strict(),
   scan: z.object({ repo: repo.optional() }).strict(),
+  request: z
+    .object({
+      repo: repo.optional(),
+      leave_out: boundedArray(z.string().regex(WELSH_REF_RE, "that is not a ref"), MAX_WELSH_LEAVE_OUT, {
+        message: `leave out at most ${MAX_WELSH_LEAVE_OUT}`
+      }).optional()
+    })
+    .strict(),
   import_check: z.object({ file_id: fileId }).strict(),
   import: z.object({ file_id: fileId }).strict(),
   apply_preview: applyArgs,
@@ -131,7 +163,23 @@ const ARG_SCHEMAS: Record<WelshKind, z.ZodTypeAny> = {
       choices: choices.optional()
     })
     .strict(),
-  story_write: z.object({ key }).strict()
+  story_write: z.object({ key }).strict(),
+  keep_english: z
+    .object({
+      strings: boundedArray(
+        z
+          .string()
+          .trim()
+          .min(1)
+          .max(MAX_WELSH_STRING)
+          .regex(/^[^\r\n]*$/, "one line each"),
+        MAX_WELSH_STRINGS,
+        {
+          message: `keep at most ${MAX_WELSH_STRINGS} at a time`
+        }
+      ).refine((strings) => strings.length > 0, "choose at least one")
+    })
+    .strict()
 };
 
 export type WelshArgs = Record<string, unknown>;

@@ -71,11 +71,12 @@ export function classify(leaf: Leaf, extra: RegExp[], allow: Set<string>): Signa
   return null;
 }
 
-/** URLs, emails, codes, acronyms and kebab-case ids are legitimately the same in Welsh. */
+/** URLs, links to a place on the page (`#field-id`, which translating would break), emails, codes, acronyms and kebab-case ids are legitimately the same in Welsh. */
 export function looksUntranslatable(text: string): boolean {
   const t = text.trim();
   return (
     /^(https?:\/\/|www\.|mailto:|tel:|\/)/i.test(t) ||
+    /^#[\w-]+$/.test(t) ||
     /^[\w.+-]+@[\w-]+\.[\w.]+$/.test(t) ||
     /^[A-Z0-9][A-Z0-9 &/().-]{0,9}$/.test(t) ||
     /^[a-z0-9]+(-[a-z0-9]+)+$/.test(t) ||

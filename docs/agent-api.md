@@ -550,7 +550,8 @@ The page is for people whose assistant has the `welsh` plugin ticked (`WELSH_PLU
 |---|---|---|
 | `info` | `{}` | `welsh info`: whether the service is set up, its repos, and its catalogue's counts |
 | `search` | `{query, mode}`, `mode` being `contains`, `exact` or `fuzzy` | `welsh search` |
-| `scan` | `{repo?}` | `welsh scan --out <file>`; the request spreadsheet comes back as a file |
+| `scan` | `{repo?}` | `welsh scan --limit 300`: what is missing, each new string with `hint`, why it probably needs no Welsh, and `keepable` |
+| `request` | `{repo?, leave_out?}` | `welsh scan --leave-out <ref>... --out <file>`; the request spreadsheet, without the strings the BA left out, comes back as a file |
 | `import_check` | `{file_id}` | `welsh import <file> --dry-run` |
 | `import` | `{file_id}` | `welsh import <file> --pr --queries-out <file>`; a draft PR in the service's own repo with the catalogue change and the return itself, and the queries spreadsheet as a file |
 | `apply_preview` | `{repo?, file_id?, choices?}` | `welsh apply --from catalogue` (or the file) `--dry-run` |
@@ -558,8 +559,9 @@ The page is for people whose assistant has the `welsh` plugin ticked (`WELSH_PLU
 | `story_candidates` | `{key}` | `welsh story <key>` |
 | `story_preview` | `{key, strings, choices?}` | `welsh story <key> --strings <file>` |
 | `story_write` | `{key}` | `welsh story <key> --write --out <file>`; the request for the WLU comes back as a file |
+| `keep_english` | `{strings}` | `welsh keep-english --pr -- <english>...`; a draft PR in the service's own repo adding them to `identical_allowlist`, so a scan stops asking about them |
 
-`query` is at most 100 characters; `repo` is `apps/<product>/<name>`; `key` is a Jira key (`^[A-Z][A-Z0-9_]{1,9}-[0-9]{1,7}$`); `strings` is 1 to 200 English strings of at most 2000 characters each; `choices` is at most 200 `{ref, row_id}`, `ref` being `^CY-[0-9A-F]{8}$` and `row_id` `^[0-9a-f]{10}$`; `file_id` is a file the person uploaded (below). Anything else is `400`.
+`query` is at most 100 characters; `repo` is `apps/<product>/<name>`; `key` is a Jira key (`^[A-Z][A-Z0-9_]{1,9}-[0-9]{1,7}$`); `strings` is 1 to 200 English strings of at most 2000 characters each, one line each for `keep_english`; `leave_out` is at most 300 refs; `choices` is at most 200 `{ref, row_id}`, `ref` being `^CY-[0-9A-F]{8}$` and `row_id` `^[0-9a-f]{10}$`; `file_id` is a file the person uploaded (below). Anything else is `400`.
 
 - The hub records the job and sends the pod a `welsh` on its sessions stream. `info` and `search` wait up to 10 seconds and answer as a lookup does, or with `{status: "pending", job_id}` if the pod has not answered by then; every other kind answers at once with `{status: "pending", job_id}`, and the page reads it back with `GET /api/ui/assistant/welsh/{job_id}` until it is no longer pending.
 - Either answers `200` with one of: `{status: "done", kind, result, files}`, `files` being `[{file_id, name, bytes}]` for the spreadsheets the job made; `{status: "pending", job_id}`; `{status: "waking"}`; `{status: "unsupported"}`; `{status: "signed_out", detail}`, `detail` naming GitHub or Atlassian; `{status: "failed", detail}`; or `{status: "timeout"}` — a job unanswered after 15 minutes. `result` is the JSON `scripts/welsh` printed for that command plus `message`, what it said to a person at a terminal, at most 512 KiB in all; the page reads only the fields it knows.
@@ -571,7 +573,7 @@ The page is for people whose assistant has the `welsh` plugin ticked (`WELSH_PLU
 
 **The answer.** `PUT /api/virtual/{id}/welsh/{job_id}` with `{result}`, the JSON object `scripts/welsh` printed with `message` added (its stderr, at most 4000 characters), or `{error, detail?}`, `error` being `signed_out` or `failed` and `detail` at most 500 characters. `204`. Kept only for a job of that virtual agent's that is still pending; anything else is ignored, still `204`. A file is accepted only for such a job, at most 5 MiB and 4 a job. Jobs and their files are deleted once they are 7 days old, as the next job is recorded.
 
-**An older client.** Gated on the `welsh` client feature, claimed by the pod's own session, as `lookups` is: the hub answers `unsupported` rather than send a frame nobody will read.
+**An older client.** Gated on the `welsh` client feature, claimed by the pod's own session, as `lookups` is: the hub answers `unsupported` rather than send a frame nobody will read. `request` and `keep_english` came later and are gated on `welsh-review` instead, since a client that claims only `welsh` ignores them.
 
 ## Client features
 
@@ -607,7 +609,7 @@ field out and the UI can say that the feature is not available on that session y
 
 ### A pod's claim
 
-The features a pod's supervisor acts on — `files`, `lookups`, `github-lookups`, `welsh`, `memory-anon` and `model-alias` — are gated
+The features a pod's supervisor acts on — `files`, `lookups`, `github-lookups`, `welsh`, `welsh-review`, `memory-anon` and `model-alias` — are gated
 on the **pod's** claim, not on any conversation session's. A pod makes it with `client_features` on
 `POST /api/virtual/{id}/status`, which the client sends on every phase report it makes. The boot script
 (`bin/virtual-agent-boot`) reports its early phases before it upgrades the client and sends no claim, and a report
@@ -662,6 +664,9 @@ the same time and a count is a third place to remember. The list is the record.
 - `welsh`, because their supervisor answers the sessions stream's `welsh` frame (see Welsh translation jobs). Read from
   the pod's claim, as `lookups` is. Gated: the hub answers a job for a pod that has not claimed it with
   `unsupported`, and sends it no frame.
+- `welsh-review`, because their supervisor also runs the `welsh` frame's `request` and `keep_english` kinds, which a
+  client claiming only `welsh` ignores. Read from the pod's claim, as `welsh` is. Gated: the hub answers those two
+  kinds for a pod that has not claimed it with `unsupported`, and sends it no frame.
 - `memory-anon`, because their supervisor reads its own container cgroup and reports it
   (`PUT /api/virtual/{id}/memory`), including `memory.stat`'s `anon` line as `anon_bytes`, which that route requires.
   **This is the name the Size section gates on**, so that it can word a pod that cannot report as an older version

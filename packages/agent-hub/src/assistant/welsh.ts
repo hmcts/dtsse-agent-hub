@@ -17,13 +17,15 @@ export const WELSH_KINDS = [
   "info",
   "search",
   "scan",
+  "request",
   "import_check",
   "import",
   "apply_preview",
   "apply",
   "story_candidates",
   "story_preview",
-  "story_write"
+  "story_write",
+  "keep_english"
 ] as const;
 export type WelshKind = (typeof WELSH_KINDS)[number];
 
@@ -36,13 +38,15 @@ const TIMEOUT_MS: Record<WelshKind, number> = {
   info: 60_000,
   search: 60_000,
   scan: 10 * 60_000,
+  request: 10 * 60_000,
   import_check: 3 * 60_000,
   import: 5 * 60_000,
   apply_preview: 12 * 60_000,
   apply: 14 * 60_000,
   story_candidates: 2 * 60_000,
   story_preview: 2 * 60_000,
-  story_write: 3 * 60_000
+  story_write: 3 * 60_000,
+  keep_english: 5 * 60_000
 };
 
 const MAX_DETAIL = 500;
@@ -50,6 +54,12 @@ const MAX_MESSAGE = 4000;
 const MAX_STRINGS = 200;
 const MAX_STRING = 2000;
 const MAX_CHOICES = 200;
+/**
+ * How many strings a scan lists in each group, for the Welsh page to show before anything is sent or changed. Their
+ * size varies, so `fitResult` shortens the lists further when a result would not fit the hub's limit. The counts are
+ * always the full ones.
+ */
+const SCAN_LIST_LIMIT = 300;
 
 const UUID_RE = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
 const PRODUCT_RE = /^[a-z][a-z0-9-]{0,39}$/;
@@ -74,6 +84,8 @@ export type WelshFrame = {
   key?: string;
   strings?: string[];
   choices?: WelshChoice[];
+  /** Refs a BA left out of the Welsh Language Unit's spreadsheet. */
+  leave_out?: string[];
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -147,6 +159,15 @@ const choicesArg: ArgReader = (args) => {
   return choices === null ? null : { choices };
 };
 
+/** Refs to leave out of a request: at most as many as a scan lists, since a BA can only untick one they were shown. */
+const leaveOutArg: ArgReader = (args) => {
+  const refs = args.leave_out ?? [];
+  if (!Array.isArray(refs) || refs.length > SCAN_LIST_LIMIT || !refs.every((r): r is string => typeof r === "string" && REF_RE.test(r))) {
+    return null;
+  }
+  return { leave_out: refs };
+};
+
 const keyArg: ArgReader = (args) => (typeof args.key === "string" && KEY_RE.test(args.key) ? { key: args.key } : null);
 
 const stringsArg: ArgReader = (args) => {
@@ -163,6 +184,10 @@ const KIND_ARGS: Record<WelshKind, [readonly string[], ArgReader][]> = {
   info: [],
   search: [[["query", "mode"], searchArgs]],
   scan: [[["repo"], repoArg]],
+  request: [
+    [["repo"], repoArg],
+    [["leave_out"], leaveOutArg]
+  ],
   import_check: [[["file_id"], fileArg(true)]],
   import: [[["file_id"], fileArg(true)]],
   apply_preview: [
@@ -181,7 +206,8 @@ const KIND_ARGS: Record<WelshKind, [readonly string[], ArgReader][]> = {
     [["strings"], stringsArg],
     [["choices"], choicesArg]
   ],
-  story_write: [[["key"], keyArg]]
+  story_write: [[["key"], keyArg]],
+  keep_english: [[["strings"], stringsArg]]
 };
 
 /**
@@ -245,7 +271,10 @@ export function welshArgs(frame: WelshFrame, workspace: string, paths: WelshPath
     case "search":
       return ["search", ...service, ...MODE_FLAG[frame.mode ?? "contains"], "--limit", "25", "--", frame.query ?? ""];
     case "scan":
-      return ["scan", ...service, ...repo, "--out", paths.request];
+      return ["scan", ...service, ...repo, "--limit", String(SCAN_LIST_LIMIT)];
+    case "request":
+      // The same scan, run again so the spreadsheet is of the code as it is now; its lists are not wanted a second time.
+      return ["scan", ...service, ...repo, "--limit", "0", ...(frame.leave_out ?? []).flatMap((ref) => ["--leave-out", ref]), "--out", paths.request];
     case "import_check":
       return ["import", ...service, "--dry-run", "--", paths.input];
     case "import":
@@ -260,13 +289,15 @@ export function welshArgs(frame: WelshFrame, workspace: string, paths: WelshPath
       return ["story", ...service, "--strings", paths.strings, ...choices, "--", frame.key ?? ""];
     case "story_write":
       return ["story", ...service, "--write", "--out", paths.request, "--", frame.key ?? ""];
+    case "keep_english":
+      return ["keep-english", ...service, "--pr", "--", ...(frame.strings ?? [])];
   }
 }
 
 /** The spreadsheets a job may make, and the name each is offered to download as. */
 export function welshOutputs(frame: WelshFrame, paths: WelshPaths, today: string): { path: string; name: string }[] {
   switch (frame.kind) {
-    case "scan":
+    case "request":
       return [{ path: paths.request, name: `${frame.product}-welsh-request-${today}.xlsx` }];
     case "story_write":
       return [{ path: paths.request, name: `${frame.key}-welsh-request-${today}.xlsx` }];
@@ -432,8 +463,33 @@ async function runIn(deps: WelshDeps, frame: WelshFrame, paths: WelshPaths, time
     made.map((output) => withRetry(() => deps.api.putWelshFile(deps.id, frame.job_id, output.name, readFileSync(output.path)), { attempts: 2 }))
   );
   // What the script told a person at a terminal, for the page to show beside the figures it reads.
-  return { result: { ...body, message: result.stderr.trim().slice(0, MAX_MESSAGE) } };
+  return { result: fitResult({ ...body, message: result.stderr.trim().slice(0, MAX_MESSAGE) }) };
 }
+
+/** The hub's limit on a result (`MAX_WELSH_RESULT_BYTES`), less room for the JSON around it. */
+const MAX_RESULT_BYTES = 500 * 1024;
+
+/**
+ * A result small enough for the hub to keep: a scan's lists are shortened, by half each time, until it fits. Their
+ * entries vary in size (paths, hints, a catalogue's options), so no fixed count is safe for every service. The counts
+ * in `summary` stay the full ones, so the page says how many were not listed.
+ */
+export function fitResult(result: Record<string, unknown>, max = MAX_RESULT_BYTES): Record<string, unknown> {
+  let fitted = result;
+  while (Buffer.byteLength(JSON.stringify(fitted), "utf8") > max) {
+    const lists = SCAN_LISTS.filter((name) => Array.isArray(fitted[name]) && (fitted[name] as unknown[]).length > 0);
+    if (lists.length === 0) {
+      return fitted;
+    }
+    fitted = {
+      ...fitted,
+      ...Object.fromEntries(lists.map((name) => [name, (fitted[name] as unknown[]).slice(0, Math.floor((fitted[name] as unknown[]).length / 2))]))
+    };
+  }
+  return fitted;
+}
+
+const SCAN_LISTS = ["toWlu", "ambiguous", "fromCatalogue"] as const;
 
 export type WelshRunner = {
   /** Takes a `welsh` frame's data and runs it as soon as there is room. */

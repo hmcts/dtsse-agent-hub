@@ -20,7 +20,7 @@ import { byCodePoint } from "../topics/slug.ts";
  * the client package. Reported names are *not* checked against it: an unrecognised one is kept, since it is a newer
  * client claiming a field a later hub will send.
  */
-export type ClientFeature = "attachments" | "files" | "github-lookups" | "lookups" | "memory-anon" | "model-alias" | "stop" | "welsh";
+export type ClientFeature = "attachments" | "files" | "github-lookups" | "lookups" | "memory-anon" | "model-alias" | "stop" | "welsh" | "welsh-review";
 
 export const MAX_CLIENT_FEATURES = 50;
 export const MAX_CLIENT_FEATURE_NAME = 50;

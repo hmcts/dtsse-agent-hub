@@ -58,7 +58,9 @@ on stdout and the human summary is on stderr. Relay the summary and the table, n
 
 **Repo (requirements 1, 2 and 6)**
 1. `scan` and report the three numbers: already in the catalogue, needs a BA choice, new for the WLU.
-2. New strings: `scan --request`. Tell the BA where the spreadsheet is. They send it to the WLU.
+2. New strings: show the BA the list, with each `hint`, and ask which to leave out. Then `scan --request
+   --leave-out <ref>...`. Tell the BA where the spreadsheet is. They send it to the WLU. If they want what they left
+   out never asked about again, **ask before** `keep-english --pr -- <english>...`.
 3. On return: `import --dry-run`, show the problems (changed English, lost placeholders, unknown
    Refs), then `import`. Problem rows go into a `-queries.xlsx` for the WLU. **Ask before `--pr`.**
 4. `apply --from <return.xlsx> --dry-run` (or `--from catalogue`), and show the diff summary.
@@ -71,8 +73,8 @@ on stdout and the human summary is on stderr. Relay the summary and the table, n
 - Don't hand-edit `catalogue.csv` to add Welsh. Only `import` adds rows. A BA may change a row's
   `status` (`needs-review` → `approved`/`superseded`) once the WLU confirms.
 - Don't use a `needs-review` row or a fuzzy `search` hit to fill anything.
-- Don't add strings to `identical_allowlist` or `context_sensitive` yourself — those are the BA's
-  call, usually after asking the WLU.
+- Don't add strings to `identical_allowlist` (`keep-english`) or `context_sensitive` without the BA naming
+  them — those are the BA's call, usually after asking the WLU.
 - Don't edit a clone by hand to "help" `apply`. It works in a temporary worktree off the default branch and never touches the checkout.
 - Formats not covered yet (Rails YAML, `messages_cy.properties`, CCD dictionary, Flyway `_Cy`,
   Notify templates, `content.ts` steps) are listed in the how-to. Say so; don't improvise.

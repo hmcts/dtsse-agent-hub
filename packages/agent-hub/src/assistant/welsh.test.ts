@@ -5,6 +5,7 @@ import type { WelshAnswer } from "../wire.ts";
 import {
   createWelshRunner,
   failureDetail,
+  fitResult,
   NOT_LOADED,
   parseWelshFrame,
   prepareWelsh,
@@ -40,6 +41,18 @@ describe("parseWelshFrame", () => {
     expect(parseWelshFrame({ job_id: JOB, kind: "scan", product: "cath", args: { repo: "apps/pcs/pcs-frontend" } })).toBeNull();
     expect(parseWelshFrame({ job_id: "nope", kind: "info", product: "cath", args: {} })).toBeNull();
     expect(parseWelshFrame("not a frame")).toBeNull();
+  });
+
+  it("should take the refs a request leaves out, and refuse one that is not a ref", () => {
+    expect(parseWelshFrame({ job_id: JOB, kind: "request", product: "cath", args: { leave_out: ["CY-ABCDEF12"] } })?.leave_out).toEqual(["CY-ABCDEF12"]);
+    expect(parseWelshFrame({ job_id: JOB, kind: "request", product: "cath", args: {} })?.leave_out).toEqual([]);
+    expect(parseWelshFrame({ job_id: JOB, kind: "request", product: "cath", args: { leave_out: ["--pr"] } })).toBeNull();
+    expect(parseWelshFrame({ job_id: JOB, kind: "request", product: "cath", args: { leave_out: "CY-ABCDEF12" } })).toBeNull();
+  });
+
+  it("should need the English to keep", () => {
+    expect(parseWelshFrame({ job_id: JOB, kind: "keep_english", product: "cath", args: { strings: ["Rolls Building"] } })?.strings).toEqual(["Rolls Building"]);
+    expect(parseWelshFrame({ job_id: JOB, kind: "keep_english", product: "cath", args: {} })).toBeNull();
   });
 
   it("should need a file for an import and keep only a safe file name", () => {
@@ -84,15 +97,43 @@ describe("welshArgs", () => {
     ]);
   });
 
-  it("should give a repo as an absolute path under the workspace, and the request a path in the job's directory", () => {
+  it("should give a repo as an absolute path under the workspace, and list a scan's strings without making a spreadsheet", () => {
     expect(welshArgs(frame("scan", { repo: "apps/cath/cath-service" }), WS, paths)).toEqual([
       "scan",
       "--service",
       "cath",
       "--repo",
       `${WS}/apps/cath/cath-service`,
+      "--limit",
+      "300"
+    ]);
+  });
+
+  it("should make a request in the job's directory without the strings a BA left out", () => {
+    expect(welshArgs(frame("request", { leave_out: ["CY-ABCDEF12", "CY-12345678"] }), WS, paths)).toEqual([
+      "scan",
+      "--service",
+      "cath",
+      "--limit",
+      "0",
+      "--leave-out",
+      "CY-ABCDEF12",
+      "--leave-out",
+      "CY-12345678",
       "--out",
       "/tmp/j/request.xlsx"
+    ]);
+  });
+
+  it("should keep English as it is through a draft pull request, the English after --", () => {
+    expect(welshArgs(frame("keep_english", { strings: ["--pr", "Rolls Building"] }), WS, paths)).toEqual([
+      "keep-english",
+      "--service",
+      "cath",
+      "--pr",
+      "--",
+      "--pr",
+      "Rolls Building"
     ]);
   });
 
@@ -149,7 +190,8 @@ describe("welshArgs", () => {
   });
 
   it("should name each spreadsheet for the person downloading it", () => {
-    expect(welshOutputs(frame("scan", {}), paths, "2026-10-29")).toEqual([{ path: "/tmp/j/request.xlsx", name: "cath-welsh-request-2026-10-29.xlsx" }]);
+    expect(welshOutputs(frame("request", {}), paths, "2026-10-29")).toEqual([{ path: "/tmp/j/request.xlsx", name: "cath-welsh-request-2026-10-29.xlsx" }]);
+    expect(welshOutputs(frame("scan", {}), paths, "2026-10-29")).toEqual([]);
     expect(welshOutputs(frame("import", { file_id: FILE }, { file_name: "return.xlsx" }), paths, "2026-10-29")[0]?.name).toBe("return-queries.xlsx");
     expect(welshOutputs(frame("story_write", { key: "PUB-1" }), paths, "2026-10-29")[0]?.name).toBe("PUB-1-welsh-request-2026-10-29.xlsx");
     expect(welshOutputs(frame("search", { query: "x" }), paths, "2026-10-29")).toEqual([]);
@@ -205,7 +247,7 @@ describe("runWelsh", () => {
         return { code: 0, stdout: JSON.stringify({ summary: { toWlu: 3 } }), stderr: "3 new for the WLU." };
       })
     });
-    const frame = parseWelshFrame({ job_id: JOB, kind: "scan", product: "cath", args: {} });
+    const frame = parseWelshFrame({ job_id: JOB, kind: "request", product: "cath", args: {} });
 
     // Act
     await runWelsh(d, frame as NonNullable<typeof frame>);
@@ -440,5 +482,25 @@ describe("the client's Welsh calls", () => {
     const runner = createWelshRunner(plain);
     runner.welsh("nonsense");
     await runner.idle();
+  });
+});
+
+describe("fitResult", () => {
+  const entry = (i: number) => ({ ref: `CY-${String(i).padStart(8, "0")}`, english: "x".repeat(200), where: "y".repeat(300) });
+
+  it("should halve a scan's lists until the result fits, keeping its full counts", () => {
+    const result = { summary: { toWlu: 300 }, toWlu: Array.from({ length: 300 }, (_, i) => entry(i)), fromCatalogue: [entry(0)], message: "m" };
+    const fitted = fitResult(result, 50_000);
+    expect(Buffer.byteLength(JSON.stringify(fitted))).toBeLessThanOrEqual(50_000);
+    expect((fitted.toWlu as unknown[]).length).toBeLessThan(300);
+    expect((fitted.toWlu as unknown[]).length).toBeGreaterThan(0);
+    expect(fitted.summary).toEqual({ toWlu: 300 });
+  });
+
+  it("should leave a result that fits, or one with no lists to shorten, as it is", () => {
+    const small = { toWlu: [entry(1)], message: "m" };
+    expect(fitResult(small, 50_000)).toBe(small);
+    const noLists = { message: "z".repeat(100) };
+    expect(fitResult(noLists, 10)).toBe(noLists);
   });
 });

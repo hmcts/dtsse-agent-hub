@@ -27,17 +27,19 @@ beforeEach(async () => {
 
 /** The shared fixture, bound to the claim this suite is about: the pod's own session runs Welsh jobs. */
 const claimingWelsh = podFixture(["welsh"]);
+/** A pod on a client that also runs the kinds that came after `welsh`. */
+const claimingReview = podFixture(["welsh", "welsh-review"]);
 
 /**
- * That assistant with the Welsh plugin ticked as well, which every job and upload needs, and its pod caught up with
- * the tick, as one is once the orchestrator has replaced it.
+ * An assistant with the Welsh plugin ticked as well, which every job and upload needs, and its pod caught up with the
+ * tick, as one is once the orchestrator has replaced it.
  */
-const assistantOf: AssistantFixture = async (...args) => {
-  const id = await claimingWelsh(...args);
+async function withPlugin(id: string): Promise<string> {
   const row = await prisma.virtualAgent.update({ where: { id }, data: { plugins: ["welsh"] }, select: { generation: true } });
   await prisma.virtualAgent.update({ where: { id }, data: { observedGeneration: row.generation } });
   return id;
-};
+}
+const assistantOf: AssistantFixture = async (...args) => withPlugin(await claimingWelsh(...args));
 const XLSX = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 1, 2, 3]);
 
 function browser(
@@ -85,6 +87,43 @@ describe("welsh jobs", () => {
     expect(await ownerFile(prisma, BOB.oid, fileId)).toBeUndefined();
     // A file a job made is for its owner to download, never for the pod to read back as input.
     expect(await podFile(prisma, va, fileId)).toBeUndefined();
+  });
+
+  it("should record a request without what the BA left out, and English to keep, and frame each for the pod", async () => {
+    // Arrange
+    const assistant = await withPlugin(await claimingReview(ALICE));
+
+    // Act
+    const request = await jsonOf<{ job_id: string }>(await start({ kind: "request", product: "cath", args: { leave_out: ["CY-ABCDEF12"] } }));
+    const keep = await jsonOf<{ job_id: string }>(await start({ kind: "keep_english", product: "cath", args: { strings: ["Rolls Building"] } }));
+
+    // Assert
+    expect(await pendingWelsh(prisma, assistant, request.job_id)).toEqual({
+      job_id: request.job_id,
+      kind: "request",
+      product: "cath",
+      args: { leave_out: ["CY-ABCDEF12"] }
+    });
+    expect(await pendingWelsh(prisma, assistant, keep.job_id)).toEqual({
+      job_id: keep.job_id,
+      kind: "keep_english",
+      product: "cath",
+      args: { strings: ["Rolls Building"] }
+    });
+  });
+
+  it("should answer that the assistant needs an update, recording nothing, when its client runs welsh but not the kinds after it", async () => {
+    // Arrange
+    const assistant = await assistantOf(ALICE);
+
+    // Act
+    const request = await jsonOf(await start({ kind: "request", product: "cath", args: {} }));
+    const keep = await jsonOf(await start({ kind: "keep_english", product: "cath", args: { strings: ["Rolls Building"] } }));
+
+    // Assert
+    expect(request).toEqual({ status: "unsupported" });
+    expect(keep).toEqual({ status: "unsupported" });
+    expect(await prisma.assistantWelshJob.count({ where: { virtualAgentId: assistant } })).toBe(0);
   });
 
   it("should upload a return, refuse what is not an xlsx, name it in the frame, and let only the owner's pod read it", async () => {

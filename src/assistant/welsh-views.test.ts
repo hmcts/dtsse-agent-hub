@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   applyView,
+  byPage,
   importView,
   infoView,
+  keepView,
   messageOf,
   safeLink,
   scanView,
@@ -42,13 +44,61 @@ describe("the Welsh page's views", () => {
     const view = scanView({
       summary: { total: 354, unique: 231, fromCatalogue: 49, ambiguous: 2, toWlu: 180 },
       ambiguous: [{ ref: "CY-1", english: "Yes", where: "a.ts", options: [{ id: "r1", welsh: "Ydw", context: "", source: "legacy" }] }],
-      toWlu: [{ ref: "CY-2", english: "Upload", where: "b.ts" }],
-      fromCatalogue: [{ ref: "CY-3", english: "Back", welsh: "Yn ôl", where: "c.ts" }]
+      toWlu: [{ ref: "CY-2", english: "Upload", page: "upload", where: "b.ts" }],
+      fromCatalogue: [{ ref: "CY-3", english: "Back", welsh: "Yn ôl", page: "summary", where: "c.ts" }]
     });
     expect(view).toMatchObject({ places: 354, unique: 231, fromCatalogue: 49, ambiguousCount: 2, toWluCount: 180 });
     expect(view.ambiguous[0]?.options[0]?.welsh).toBe("Ydw");
     expect(view.toWlu).toHaveLength(1);
-    expect(view.filled[0]?.welsh).toBe("Yn ôl");
+    expect(view.toWlu[0]?.page).toBe("upload");
+    expect(view.filled[0]?.page).toBe("summary");
+  });
+
+  it("should show a scan string with no page when the result does not name one", () => {
+    expect(scanView({ toWlu: [{ ref: "CY-2", english: "Upload" }] }).toWlu[0]?.page).toBe("");
+  });
+
+  it("should read why a new string probably needs no Welsh, and whether it can be kept, as nothing and no when absent", () => {
+    const [hinted, plain] = scanView({
+      toWlu: [
+        { ref: "CY-2", english: "Rolls Building", hint: "Part of an address.", keepable: true },
+        { ref: "CY-3", english: "Upload", keepable: "yes" }
+      ]
+    }).toWlu;
+    expect(hinted).toMatchObject({ hint: "Part of an address.", keepable: true });
+    expect(plain).toMatchObject({ hint: null, keepable: false });
+  });
+
+  it("should take the engine's suggestion to leave a string out, and read an older scan's hint as one", () => {
+    const [told, older] = scanView({
+      toWlu: [
+        { ref: "CY-2", english: "Rolls Building", hint: "Part of an address.", suggest_leave_out: false },
+        { ref: "CY-3", english: "ServiceNow", hint: "A system." }
+      ]
+    }).toWlu;
+    expect(told?.suggestLeaveOut).toBe(false);
+    expect(older?.suggestLeaveOut).toBe(true);
+  });
+
+  it("should read what keeping English added, and its pull request", () => {
+    expect(keepView({ added: ["Rolls Building", 7], already: 1, pr: "https://github.com/hmcts/cath-service/pull/12" })).toEqual({
+      added: ["Rolls Building"],
+      already: 1,
+      pr: "https://github.com/hmcts/cath-service/pull/12"
+    });
+    expect(keepView({})).toEqual({ added: [], already: 0, pr: null });
+  });
+
+  it("should group strings by page, in the order each page first comes", () => {
+    const items = [
+      { page: "upload", english: "Choose a file" },
+      { page: "summary", english: "Back" },
+      { page: "upload", english: "Continue" }
+    ];
+    expect(byPage(items)).toEqual([
+      { page: "upload", items: [items[0], items[2]] },
+      { page: "summary", items: [items[1]] }
+    ]);
   });
 
   it("should read an import, an apply and the story steps", () => {

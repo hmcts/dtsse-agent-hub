@@ -8,6 +8,7 @@
 import { applyCmd } from "./commands/apply.ts";
 import { importLegacyCmd, infoCmd, init, searchCmd } from "./commands/catalogue.ts";
 import { importCmd } from "./commands/import.ts";
+import { keepEnglishCmd } from "./commands/keep.ts";
 import { scanCmd } from "./commands/scan.ts";
 import { storyCmd } from "./commands/story.ts";
 import { verifyCmd } from "./commands/verify.ts";
@@ -21,12 +22,16 @@ const COMMANDS: Record<string, { usage: string; run: (argv: string[]) => Promise
     usage: "import-legacy --service <product> [--xlsx <file>]... [--json <file>]... [--received YYYY-MM-DD]",
     run: importLegacyCmd
   },
-  scan: { usage: "scan --service <product> [--repo <clone>] [--adapter <name>]... [--request] [--out <file.xlsx>]", run: scanCmd },
+  scan: {
+    usage: "scan --service <product> [--repo <clone>] [--adapter <name>]... [--request] [--out <file.xlsx>] [--leave-out REF]... [--limit N]",
+    run: scanCmd
+  },
   story: {
     usage: "story <JIRA-KEY> --service <product> [--strings <file> | --candidates | --refresh] [--choose REF=ROW-ID]... [--write [--out <file.xlsx>]]",
     run: storyCmd
   },
   import: { usage: "import <returned.xlsx> --service <product> [--dry-run] [--pr] [--queries-out <file.xlsx>]", run: importCmd },
+  "keep-english": { usage: "keep-english --service <product> [--dry-run] [--pr] -- <english>...", run: keepEnglishCmd },
   apply: {
     usage: "apply --service <product> --from catalogue|<returned.xlsx> [--repo <clone>] [--choose REF=ROW-ID]... [--dry-run] [--test] [--pr]",
     run: applyCmd

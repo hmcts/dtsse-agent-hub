@@ -164,7 +164,7 @@ function PickStep({
       return next;
     });
   return (
-    <Step n={3} title="Pick the content" done={built} summary={ticked.size ? `${ticked.size} picked` : undefined}>
+    <Step n={3} title="Choose what needs Welsh" done={built} summary={ticked.size ? `${ticked.size} picked` : undefined}>
       {candidates.candidates.length === 0 ? (
         <p className="text-[13px] text-asst-muted">
           No English content was found in quotes, in an English column of a table, or after “the following is shown”. Put the content in one of those forms in
@@ -172,7 +172,10 @@ function PickStep({
         </p>
       ) : (
         <fieldset className="flex flex-col gap-1">
-          <legend className="pb-1 text-[13px] text-asst-muted">Which of these does a user see on screen? Leave out instructions.</legend>
+          <legend className="pb-1 text-[13px] text-asst-muted">
+            This is the English found in the story. Tick the words that will appear on the service's pages, such as headings, buttons, hints and error messages.
+            Leave out anything written for the team, such as acceptance criteria or notes for developers.
+          </legend>
           {candidates.candidates.map((c) => (
             <label key={c.english} className="flex items-start gap-2 text-[13px]">
               <input
