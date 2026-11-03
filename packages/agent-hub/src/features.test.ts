@@ -38,7 +38,10 @@ describe("CLIENT_FEATURES", () => {
    * which is wrong for a pod running this build.
    * `github-lookups` is misdiagnosed as `lookups` is, for the GitHub repository and Project searches alone.
    */
-  it.each(["attachments", "files", "github-lookups", "lookups", "memory-anon", "model-alias", "stop", "welsh", "welsh-review"])("should claim %s", (feature) => {
-    expect(CLIENT_FEATURES).toContain(feature);
-  });
+  it.each(["attachments", "files", "github-lookups", "lookups", "memory-anon", "model-alias", "stop", "welsh", "welsh-review"])(
+    "should claim %s",
+    (feature) => {
+      expect(CLIENT_FEATURES).toContain(feature);
+    }
+  );
 });

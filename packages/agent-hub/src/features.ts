@@ -66,4 +66,14 @@ export type ClientFeature = "attachments" | "files" | "github-lookups" | "lookup
  * setting is theirs to save whenever they like. What reads it is the settings' Model section, which says their choice
  * waits for the assistant's next start when its pod's own session did not claim it.
  */
-export const CLIENT_FEATURES: readonly ClientFeature[] = ["attachments", "files", "github-lookups", "lookups", "memory-anon", "model-alias", "stop", "welsh", "welsh-review"];
+export const CLIENT_FEATURES: readonly ClientFeature[] = [
+  "attachments",
+  "files",
+  "github-lookups",
+  "lookups",
+  "memory-anon",
+  "model-alias",
+  "stop",
+  "welsh",
+  "welsh-review"
+];
