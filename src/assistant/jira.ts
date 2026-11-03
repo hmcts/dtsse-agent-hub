@@ -28,7 +28,7 @@ export interface JiraProjectChoice {
 const JIRA_ISSUE_TYPE = "Story";
 /**
  * What every ticket the CFT Workspace makes is labelled, in Jira and on GitHub alike, so the people who triage a backlog
- * can find them. Tickets made before the rename keep the `hmcts-assistant` they were given.
+ * can find the ones it made with a single filter, whichever tool they use.
  */
 export const TICKET_LABELS: readonly string[] = ["cft-workspace"];
 

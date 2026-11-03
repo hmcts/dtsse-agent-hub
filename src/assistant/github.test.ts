@@ -9,7 +9,8 @@ import {
   pendingGithubExport,
   readGithubProject,
   readGithubRepo,
-  repoOwner
+  repoOwner,
+  sameOwner
 } from "./github.ts";
 
 const NOW = new Date("2026-11-02T10:00:00.000Z");
@@ -124,12 +125,14 @@ describe("readGithubRepo", () => {
     ["https://github.com/hmcts/cft-workspace", "hmcts/cft-workspace"],
     ["https://www.github.com/hmcts/cft-workspace/", "hmcts/cft-workspace"],
     ["https://github.com/hmcts/cft-workspace.git", "hmcts/cft-workspace"],
-    ["hmcts/dtsse.agent_hub-2", "hmcts/dtsse.agent_hub-2"]
+    ["hmcts/dtsse.agent_hub-2", "hmcts/dtsse.agent_hub-2"],
+    ["hmcts/.github", "hmcts/.github"],
+    ["https://github.com/hmcts/.github", "hmcts/.github"]
   ])("should read %j as %s", (typed, repo) => {
     expect(readGithubRepo(typed)).toBe(repo);
   });
 
-  it.each([["cft-workspace"], ["hmcts/"], ["-hmcts/x"], ["hmcts/.."], ["hmcts/x/y"], ["hmcts/x; rm -rf /"], [""], [42], [null]])(
+  it.each([["cft-workspace"], ["hmcts/"], ["-hmcts/x"], ["hmcts/.."], ["hmcts/."], ["hmcts/x/y"], ["hmcts/x; rm -rf /"], [""], [42], [null]])(
     "should refuse %j",
     (typed) => {
       expect(readGithubRepo(typed)).toBeUndefined();
@@ -162,6 +165,13 @@ describe("readGithubProject and repoOwner", () => {
 
   it("should give the owner half of a repository", () => {
     expect(repoOwner("hmcts/cft-workspace")).toBe("hmcts");
+  });
+});
+
+describe("sameOwner", () => {
+  it("should read logins without regard to case, as GitHub does", () => {
+    expect(sameOwner("HMCTS", "hmcts")).toBe(true);
+    expect(sameOwner("hmcts", "hmcts-reform")).toBe(false);
   });
 });
 

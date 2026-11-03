@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { type GithubExportView, type GithubProjectChoice, repoOwner } from "@/assistant/github";
+import { type GithubExportView, type GithubProjectChoice, repoOwner, sameOwner } from "@/assistant/github";
 import type { GithubProjectResult, GithubRepoResult } from "@/assistant/lookups";
 import { AtlassianSearch } from "@/components/assistant/AtlassianSearch";
 import type { JiraAccess } from "@/components/assistant/JiraExport";
@@ -69,7 +69,7 @@ function starting(
   }
   const chosen = repo ?? null;
   // A default Project of another owner's is not one this repository's issues are offered.
-  return { repo: chosen, project: chosen !== null && project && project.owner === repoOwner(chosen) ? project : null };
+  return { repo: chosen, project: chosen !== null && project && sameOwner(project.owner, repoOwner(chosen)) ? project : null };
 }
 
 /** One line of the footer: what is chosen, and a way to search for another, or to take it off. */
@@ -187,7 +187,7 @@ export function GithubFooter({
           onPick={(result) => {
             const repo = (result as GithubRepoResult).full_name;
             // A Project of another owner's does not go with this repository.
-            setChosen((now) => ({ repo, project: now.project && now.project.owner === repoOwner(repo) ? now.project : null }));
+            setChosen((now) => ({ repo, project: now.project && sameOwner(now.project.owner, repoOwner(repo)) ? now.project : null }));
             setSearching(null);
           }}
         />

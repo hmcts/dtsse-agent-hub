@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { DEFAULT_CONFLUENCE_PARENT } from "@/assistant/confluence";
 import type { DefaultConfluencePage, DefaultJiraProject, ExportDefaults } from "@/assistant/export-defaults";
-import { type GithubProjectChoice, repoOwner, TICKET_TOOLS, type TicketTool } from "@/assistant/github";
+import { type GithubProjectChoice, repoOwner, sameOwner, TICKET_TOOLS, type TicketTool } from "@/assistant/github";
 import { DEFAULT_JIRA_PROJECT } from "@/assistant/jira";
 import { breadcrumb, type ConfluencePageResult, type GithubProjectResult, type GithubRepoResult, type JiraProjectResult } from "@/assistant/lookups";
 import { AtlassianSearch } from "@/components/assistant/AtlassianSearch";
@@ -262,7 +262,7 @@ export function ExportSettings({ exports }: { exports: AssistantExportDefaults }
           onRepo={(repo) => {
             setGithub(repo);
             // A Project of another owner's does not go with this repository.
-            setGithubProject((project) => (repo !== null && project !== null && project.owner === repoOwner(repo) ? project : null));
+            setGithubProject((project) => (repo !== null && project !== null && sameOwner(project.owner, repoOwner(repo)) ? project : null));
           }}
           onProject={setGithubProject}
           searching={searching === "github" || searching === "github_project" ? searching : null}

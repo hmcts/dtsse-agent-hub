@@ -88,6 +88,15 @@ export function podSupports(pod: PodClaims, feature: ClientFeature): boolean {
 }
 
 /**
+ * Whether a running pod's client is known to be too old for `feature`: it has made its claim, and the claim leaves the
+ * feature out. A pod that is not running, or has claimed nothing yet, is not: it will boot on the current client.
+ */
+export function podLacks(pod: PodClaims & { status: string }, feature: ClientFeature): boolean {
+  const claim = pod.status === "running" ? podClaim(pod) : null;
+  return claim !== null && !claim.includes(feature);
+}
+
+/**
  * Whether a request needing `feature` may be sent to the pod now. `waking` for a pod that is not running, or is
  * running but has claimed nothing yet, which is a pod still booting; `unsupported` for one whose claim leaves the
  * feature out.

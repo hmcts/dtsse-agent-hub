@@ -1073,6 +1073,29 @@ describe("ChatView document", () => {
     expect(screen.getByRole("button", { name: /Publish to Confluence/ })).toBeTruthy();
   });
 
+  it("should keep showing the document's Jira ticket, and offer no GitHub issue, after the person switches to GitHub", () => {
+    const written = conversation({
+      artefact: { title: "Notes", markdown: "# Notes", version: 1, updatedBy: "user", updatedAt: "2026-10-21T09:00:00.000Z" },
+      jira: { status: "done", project: "VIBE", key: "VIBE-7", url: "https://hmcts.atlassian.net/browse/VIBE-7" }
+    });
+    render(
+      <ChatView
+        jira={JIRA}
+        viewerOid={VIEWER}
+        view={written}
+        templates={TEMPLATES}
+        actions={actions({ exportToConfluence: ok(), exportToGithub: ok() })}
+        defaults={{ ticketTool: "github", jira: null, github: "hmcts/cft-workspace", githubProject: null, confluence: null }}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Open document/ }));
+
+    expect(screen.getByText("In Jira")).toBeTruthy();
+    expect(screen.getByRole("radio", { name: /Jira backlog/ })).toBeTruthy();
+    expect(screen.queryByRole("radio", { name: /GitHub issue/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Create GitHub issue" })).toBeNull();
+  });
+
   it("should offer a GitHub issue in the Jira backlog's place when the person's ticket tool is GitHub", () => {
     const written = conversation({ artefact: { title: "Notes", markdown: "# Notes", version: 1, updatedBy: "user", updatedAt: "2026-10-21T09:00:00.000Z" } });
     render(

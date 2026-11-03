@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { boundedArray } from "../agent-api/bounded-array.ts";
-import { GITHUB_REPO_RE, GITHUB_SITE_URL } from "./github.ts";
+import { GITHUB_OWNER_RE, GITHUB_REPO_RE, GITHUB_SITE_URL } from "./github.ts";
 import { JIRA_SITE_URL } from "./jira.ts";
 
 /**
@@ -36,8 +36,6 @@ export const JIRA_PROJECT_RE = /^[A-Z][A-Z0-9_]{1,9}$/;
 /** A Confluence space key: letters, digits and `_-`, with `~` in front of a personal space's. */
 export const SPACE_KEY_RE = /^~?[A-Za-z0-9_-]{1,100}$/;
 export const NUMERIC_ID_RE = /^[0-9]{1,20}$/;
-/** A GitHub user or organisation login. */
-export const GITHUB_OWNER_RE = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/;
 
 /** Whether a kind is searched in GitHub, with gh, rather than in Atlassian with twg. */
 export function isGithubKind(kind: LookupKind): kind is "github_repo" | "github_project" {

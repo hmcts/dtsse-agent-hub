@@ -13,11 +13,16 @@ import { TICKET_LABELS } from "./jira.ts";
 export const GITHUB_SITE_URL = "https://github.com";
 
 /**
- * A repository as `owner/name`. GitHub's own rules, near enough: an owner of 1–39 letters, digits and hyphens that
- * does not start with a hyphen, and a name of letters, digits, `.`, `_` and `-` that does not start with a dot, so
- * neither `.` nor `..` can be a name. The migration checks the same.
+ * A repository as `owner/name`: an owner of 1–39 letters, digits and hyphens that does not start with a hyphen, and a
+ * name of 1–100 letters, digits, `.`, `_` and `-`, which may start with a dot, as `hmcts/.github` does, but is never
+ * `.` or `..`. The migrations and the client's `src/github.ts` check the same.
  */
-export const GITHUB_REPO_RE = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$/;
+export const GITHUB_REPO_RE = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/(?!\.\.?$)[A-Za-z0-9._-]{1,100}$/;
+
+/** Whether two logins are the same account: GitHub reads them without regard to case. */
+export function sameOwner(a: string, b: string): boolean {
+  return a.toLowerCase() === b.toLowerCase();
+}
 
 /** Where a person's tickets go: their own Jira, or a GitHub repository's issues. */
 export const TICKET_TOOLS = ["jira", "github"] as const;

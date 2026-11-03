@@ -1439,6 +1439,55 @@ describe("github export", () => {
     expect(sent.body).toBe('Please create a GitHub issue for this document in hmcts/cft-workspace, on the "CFT roadmap" Project.');
   });
 
+  it("should refuse an issue for a document already in Jira, or on its way there", async () => {
+    const { token, id, agentId } = await written();
+    await actions.exportArtefactToJira({ conversationId: id, project: "VIBE" });
+
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" })).toEqual({
+      ok: false,
+      error: "this document is already being exported"
+    });
+    const jiraExport = (await prisma.assistantConversation.findUniqueOrThrow({ where: { id }, select: { jiraExportId: true } })).jiraExportId!;
+    await pod(jiraRoute.PUT, token, `/api/agent/${agentId}/jira`, { agentId }, "PUT", { export_id: jiraExport, key: "VIBE-9" });
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" })).toEqual({
+      ok: false,
+      error: "this document is already in Jira as VIBE-9"
+    });
+  });
+
+  it("should refuse a Jira ticket for a document that is already a GitHub issue", async () => {
+    const { token, id, agentId } = await written();
+    await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" });
+    await report(token, agentId, { export_id: await currentExport(id), number: 5 });
+
+    expect(await actions.exportArtefactToJira({ conversationId: id, project: "VIBE" })).toEqual({
+      ok: false,
+      error: "this document is already on GitHub as hmcts/cft-workspace#5"
+    });
+  });
+
+  it("should export to a repository whose name starts with a dot", async () => {
+    const { id } = await written();
+
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/.github" })).toEqual({ ok: true });
+    expect((await assistantConversation(VIEWER, id))?.github).toMatchObject({ status: "pending", repo: "hmcts/.github" });
+  });
+
+  it("should refuse an export, claiming nothing, when the running pod's client is too old to carry it out", async () => {
+    const { id } = await written();
+    const assistantId = (await findConversation(prisma, ALICE.oid, id))!.virtualAgentId!;
+    await prisma.virtualAgent.update({ where: { id: assistantId }, data: { status: "running", clientFeatures: ["lookups"] } });
+
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" })).toEqual({
+      ok: false,
+      error: "your assistant needs an update to create GitHub issues; it gets one the next time it restarts"
+    });
+    expect(await currentExport(id)).toBeNull();
+
+    await prisma.virtualAgent.update({ where: { id: assistantId }, data: { clientFeatures: ["lookups", "github-lookups"] } });
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" })).toEqual({ ok: true });
+  });
+
   it("should refuse a second export while one is pending, and any once the document is an issue", async () => {
     const { token, id, agentId } = await written();
     await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" });
@@ -1909,6 +1958,8 @@ describe("export defaults", () => {
     await insertUser(ALICE);
     const alice = { actorOid: ALICE.oid, ownerOid: ALICE.oid };
 
+    await saveExportDefaults(prisma, alice, { ticketTool: "github", jira: null, github: "hmcts/.github", confluence: null });
+    expect((await readExportDefaults(prisma, alice)).github).toBe("hmcts/.github");
     await expect(saveExportDefaults(prisma, alice, { ticketTool: "trello", jira: null, confluence: null })).rejects.toMatchObject({ status: 400 });
     await expect(
       saveExportDefaults(prisma, alice, {

@@ -1,7 +1,9 @@
 import { HttpError } from "../agent-api/http.ts";
+import { podLacks } from "../agents/client-features.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { announce, type ConversationRow } from "./conversation-row.ts";
 import { GITHUB_EXPORT_TIMEOUT_MS, GITHUB_SELECT, type GithubExportView, githubExportView, readGithubProject, readGithubRepo } from "./github.ts";
+import { JIRA_SELECT } from "./jira.ts";
 import { hasPod } from "./pods.ts";
 import { MAX_GITHUB_ERROR } from "./schemas.ts";
 
@@ -32,6 +34,16 @@ export async function requestGithubExport(
   if (!hasPod(conversation)) {
     throw new HttpError(409, "this chat is a session on your own computer, which cannot export to GitHub; download the document and attach it yourself");
   }
+  // A client older than GitHub exports would read only the chat message, and a session that acted on it alone would
+  // make an issue the hub never hears of: the export times out, and a retry makes a second. `github-lookups` came in
+  // the same client as `github export`, so it is the claim that says the pod can carry one out.
+  const pod = await prisma.virtualAgent.findUnique({
+    where: { id: conversation.virtualAgentId as string },
+    select: { status: true, clientFeatures: true, agent: { select: { clientFeatures: true } } }
+  });
+  if (pod !== null && podLacks(pod, "github-lookups")) {
+    throw new HttpError(409, "your assistant needs an update to create GitHub issues; it gets one the next time it restarts");
+  }
   const checked = readGithubRepo(repo);
   if (checked === undefined) {
     throw new HttpError(400, "name the GitHub repository as owner/name, such as hmcts/cft-workspace");
@@ -52,14 +64,23 @@ export async function requestGithubExport(
          AND github_number IS NULL
          AND artefact_version > 0
          AND (github_status IS DISTINCT FROM 'pending' OR github_requested_at < ${staleBefore})
+         -- One ticket a document, whichever tool made it, as requestJiraExport has it.
+         AND jira_key IS NULL
+         AND (jira_status IS DISTINCT FROM 'pending' OR jira_requested_at < ${staleBefore})
     `;
     if (updated === 0) {
-      const row = await tx.assistantConversation.findUnique({ where: { id: conversation.id }, select: { artefactVersion: true, ...GITHUB_SELECT } });
+      const row = await tx.assistantConversation.findUnique({
+        where: { id: conversation.id },
+        select: { artefactVersion: true, ...GITHUB_SELECT, ...JIRA_SELECT }
+      });
       if (row === null) {
         throw new HttpError(404, "that conversation no longer exists");
       }
       if (row.githubNumber !== null) {
         throw new HttpError(409, `this document is already on GitHub as ${row.githubRepo}#${row.githubNumber}`);
+      }
+      if (row.jiraKey !== null) {
+        throw new HttpError(409, `this document is already in Jira as ${row.jiraKey}`);
       }
       if (row.artefactVersion === 0) {
         throw new HttpError(409, "write the document before exporting it");

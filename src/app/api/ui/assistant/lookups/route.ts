@@ -1,7 +1,8 @@
 import type { NextRequest } from "next/server";
 import { errorResponse, json, readJson } from "@/agent-api/http";
+import { GITHUB_OWNER_RE } from "@/assistant/github";
 import { askLookup, waitForLookup } from "@/assistant/lookup-store";
-import { GITHUB_OWNER_RE, isGithubKind, isLookupKind, LOOKUP_WAIT_MS, type LookupResponse, lookupQuery, SPACE_KEY_RE, searchable } from "@/assistant/lookups";
+import { isGithubKind, isLookupKind, LOOKUP_WAIT_MS, type LookupResponse, lookupQuery, SPACE_KEY_RE, searchable } from "@/assistant/lookups";
 import { realtime } from "@/realtime/process";
 import { prisma } from "@/store/prisma";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";

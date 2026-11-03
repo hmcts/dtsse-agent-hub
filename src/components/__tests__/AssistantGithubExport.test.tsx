@@ -10,7 +10,7 @@ import type { LookupResponse } from "@/assistant/lookups";
 import { ArtefactPanel } from "@/components/assistant/ArtefactPanel";
 import { LOOKUP_AFTER_MS } from "@/components/assistant/AtlassianSearch";
 import type { ExportToConfluenceAction } from "@/components/assistant/ConfluenceExport";
-import { openingDestination } from "@/components/assistant/ExportFooter";
+import { ExportFooter, openingDestination, ticketsOffered } from "@/components/assistant/ExportFooter";
 import type { ExportToGithubAction } from "@/components/assistant/GithubExport";
 import type { LookUp } from "@/components/assistant/lookupClient";
 
@@ -110,6 +110,12 @@ describe("the document's GitHub export", () => {
     expect(screen.getByText("CFT roadmap")).toBeTruthy();
     expect(exportTo).toHaveBeenCalledWith({ conversationId: CONVERSATION, repo: "hmcts/cft-workspace", project: ROADMAP });
     expect(screen.getByText("Creating issue…").getAttribute("role")).toBe("status");
+  });
+
+  it("should keep the default Project when the repository's owner is written in another case", () => {
+    render(panel({ defaultRepo: "HMCTS/cft-workspace", defaultProject: ROADMAP }));
+
+    expect(screen.getByText("CFT roadmap")).toBeTruthy();
   });
 
   it("should leave out a default Project that is not the repository owner's", () => {
@@ -303,6 +309,54 @@ describe("the document's GitHub export", () => {
     expect(options).toEqual(["github", "confluence"]);
     expect(screen.getByText("GitHub issue")).toBeTruthy();
     expect(screen.queryByText("Jira backlog")).toBeNull();
+  });
+});
+
+describe("ticketsOffered", () => {
+  const none = { status: "none" };
+  const done = { status: "done" };
+  const pending = { status: "pending" };
+  const failed = { status: "failed" };
+
+  it("should offer only the person's own tool for a document with no ticket", () => {
+    expect(ticketsOffered("github", none, none)).toEqual({ jira: false, github: true });
+    expect(ticketsOffered("jira", none, failed)).toEqual({ jira: true, github: false });
+  });
+
+  it("should show the ticket the document has in the other tool, and offer no second one", () => {
+    expect(ticketsOffered("github", done, none)).toEqual({ jira: true, github: false });
+    expect(ticketsOffered("jira", none, pending)).toEqual({ jira: false, github: true });
+  });
+
+  it("should offer the person's own tool again when the other tool's export failed", () => {
+    expect(ticketsOffered("github", failed, none)).toEqual({ jira: false, github: true });
+  });
+});
+
+describe("the footer with a ticket in each tool", () => {
+  it("should offer both, ticked, beside Confluence", () => {
+    render(
+      <ExportFooter
+        conversationId={CONVERSATION}
+        jira={{
+          exported: { status: "done", project: "VIBE", key: "VIBE-1", url: "https://hmcts.atlassian.net/browse/VIBE-1" },
+          access: { connected: true, login: null },
+          exportTo: vi.fn(async () => ({ ok: true as const }))
+        }}
+        github={{ exported: { ...DONE, project: null, projectError: null }, exportTo: exporting() }}
+        confluence={{
+          exported: { status: "none" },
+          access: { connected: true, login: null },
+          exportTo: vi.fn<ExportToConfluenceAction>(async () => ({ ok: true }))
+        }}
+        saved
+        written
+      />
+    );
+
+    expect(screen.getAllByRole("radio").map((radio) => (radio as HTMLInputElement).value)).toEqual(["jira", "github", "confluence"]);
+    expect((screen.getByRole("radio", { name: /Confluence page/ }) as HTMLInputElement).checked).toBe(true);
+    expect(screen.getAllByText("(done)")).toHaveLength(2);
   });
 });
 
