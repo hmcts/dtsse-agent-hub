@@ -62,7 +62,9 @@ The outline is JSON:
 `build` refuses an outline with an unknown layout, a missing or unknown field, bullets nested too deep, a picture
 with neither alt text nor `decorative`, or a picture that doesn't exist or whose contents are not the PNG, JPEG or
 GIF its name says, listing every problem (`{errors}` on stdout, exit 2). Text over a layout's limits is only a
-warning, on stderr and in the result's `warnings`.
+warning, on stderr and in the result's `warnings`. The limits are set so the longest text they allow still fits its
+box, and the check estimates how each bullet and title wraps from Arial's character widths, so text within its word
+limit that would still run long is warned about too.
 
 Every command prints one JSON object on stdout:
 
@@ -78,12 +80,13 @@ Every command prints one JSON object on stdout:
 and placeholders, their limits, `plan(outline)`, which lays each slide out as boxes in reading order, and
 `lint(outline)`. It imports nothing, so a browser preview can use the same file. `build.ts` turns the masters into
 pptxgenjs slide masters and puts each box into its placeholder, computing no positions of its own. It then corrects
-three things pptxgenjs 4.0.1 cannot be told: the default 20% space before each body paragraph, how far a bullet hangs
-left of its text, and marking a picture decorative.
+what pptxgenjs 4.0.1 cannot be told: the default 20% space before each body paragraph, how far a bullet hangs left of
+its text, the second bullet level of each layout's bullet placeholders (pptxgenjs writes only the first), the blank
+`DEFAULT` layout it always adds, which is removed, and marking a picture decorative. Pictures are handed to pptxgenjs
+as copies named for the format their bytes are, since it takes a picture's content type from its file name.
 
-Known limits of pptxgenjs 4.0.1: the picture placeholder is written without `type="pic"`, so PowerPoint treats it as
-a content placeholder (which takes a picture all the same); and a layout's placeholders carry the first level's text
-style only, so a nested bullet added by hand in PowerPoint takes its bullet from the slide master.
+Known limit of pptxgenjs 4.0.1: the picture placeholder is written without `type="pic"`, so PowerPoint treats it as a
+content placeholder (which takes a picture all the same).
 
 ## Tests
 
