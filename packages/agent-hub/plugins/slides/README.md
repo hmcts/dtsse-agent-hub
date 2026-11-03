@@ -62,8 +62,17 @@ The outline is JSON:
 - `id` is the caller's own name for a slide, kept in the plan and never shown.
 
 `build` refuses an outline with an unknown layout, a missing or unknown field, bullets nested too deep, a picture
-with neither alt text nor `decorative`, or a picture that doesn't exist, listing every problem (`{errors}` on stdout,
-exit 2). Text over a layout's limits is only a warning, on stderr and in the result's `warnings`.
+with neither alt text nor `decorative`, or a picture that doesn't exist or whose contents are not the PNG, JPEG or
+GIF its name says, listing every problem (`{errors}` on stdout, exit 2). Text over a layout's limits is only a
+warning, on stderr and in the result's `warnings`.
+
+Every command prints one JSON object on stdout:
+
+| Exit | stdout | Means |
+| --- | --- | --- |
+| 0 | the result | done |
+| 2 | `{errors: [...]}` | something the caller can fix: the outline, the arguments, an `--out` that cannot be written, or a picture that cannot be read |
+| 1 | `{error}` | a fault in the script itself, with its stack on stderr |
 
 ## How it is built
 

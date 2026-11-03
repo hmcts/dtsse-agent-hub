@@ -1,10 +1,13 @@
 /**
- * Entry point for the slides plugin's `scripts/slides`: routes a subcommand and prints its result.
+ * Entry point for the slides plugin's `scripts/slides`: routes a subcommand and prints its result. Every run of a
+ * command prints one JSON object on stdout: the result (exit 0), `{errors}` for anything the caller can put right,
+ * such as the outline, the arguments, where the deck goes or a picture it uses (exit 2), or `{error}` for a fault in
+ * the script itself (exit 1).
  */
 
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { writeDeck } from "./build.ts";
+import { DeckError, writeDeck } from "./build.ts";
 import { fail, say, UsageError } from "./io.ts";
 import { layoutSummary } from "./masters.ts";
 import { OutlineError, validateOutline } from "./outline.ts";
@@ -26,7 +29,7 @@ function readOutline(file: string): unknown {
 export async function buildCmd(argv: string[]): Promise<unknown> {
   const outAt = argv.indexOf("--out");
   const out = outAt === -1 ? undefined : argv[outAt + 1];
-  const rest = argv.filter((_, i) => i !== outAt && i !== outAt + 1);
+  const rest = outAt === -1 ? argv : argv.filter((_, i) => i !== outAt && i !== outAt + 1);
   if (rest.length !== 1) {
     fail("give one outline file");
   }
@@ -56,6 +59,10 @@ const COMMANDS: Record<string, { usage: string; run: (argv: string[]) => Promise
   layouts: { usage: "layouts", run: layoutsCmd }
 };
 
+const print = (value: unknown): void => {
+  process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+};
+
 async function main(): Promise<void> {
   const [command, ...rest] = process.argv.slice(2);
   if (!command || command === "--help" || command === "-h" || !COMMANDS[command]) {
@@ -63,28 +70,33 @@ async function main(): Promise<void> {
     for (const c of Object.values(COMMANDS)) {
       say(`  ${c.usage}`);
     }
-    process.exitCode = command && command !== "--help" && command !== "-h" ? 2 : 0;
+    if (command && command !== "--help" && command !== "-h") {
+      print({ errors: [`there is no command ${command}`] });
+      process.exitCode = 2;
+    }
     return;
   }
   try {
-    const result = await COMMANDS[command].run(rest);
-    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    print(await COMMANDS[command].run(rest));
   } catch (err) {
     if (err instanceof OutlineError) {
       say(`slides ${command}: ${err.message}`);
-      process.stdout.write(`${JSON.stringify({ errors: err.problems }, null, 2)}\n`);
-      process.exitCode = 2;
-      return;
-    }
-    if (!(err instanceof UsageError)) {
+      print({ errors: err.problems });
+    } else if (err instanceof DeckError) {
+      say(`slides ${command}: ${err.message}`);
+      print({ errors: [err.message] });
+    } else if (err instanceof UsageError) {
+      say(`slides ${command}: ${err.message}\n  usage: slides ${COMMANDS[command].usage}`);
+      print({ errors: [err.message] });
+    } else {
       throw err;
     }
-    say(`slides ${command}: ${err.message}\n  usage: slides ${COMMANDS[command].usage}`);
     process.exitCode = 2;
   }
 }
 
 main().catch((err) => {
   say(err instanceof Error ? (err.stack ?? err.message) : String(err));
+  print({ error: err instanceof Error ? err.message : String(err) });
   process.exitCode = 1;
 });

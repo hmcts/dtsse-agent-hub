@@ -33,7 +33,9 @@ Also ask for any pictures they want used, as files. Don't start the outline unti
 2. Write the outline to a file beside any pictures it uses, such as `deck/outline.json`. Show the person the slide
    titles in order and agree them before filling in the rest.
 3. `slides build deck/outline.json --out deck/<name>.pptx`.
-   - Exit 2 with `{errors: [...]}`: fix every error listed and build again.
+   - Exit 2 with `{errors: [...]}`: fix every error listed (the outline, the arguments, the `--out` path or a
+     picture) and build again.
+   - Exit 1 with `{error}` is a fault in the script, not the outline: tell the person rather than retrying.
    - `warnings` in the result (also on stderr) are text over a layout's limits. Shorten the text or split the slide,
      rather than leaving it crowded. Only keep it if the person says so.
 4. In a CFT Workspace conversation, publish it, so the person sees the slides beside the chat and can download them:

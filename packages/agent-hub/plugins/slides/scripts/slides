@@ -7,10 +7,11 @@
 #
 # Guide: the plugin's README.md
 #
-# JSON result on stdout, commentary and warnings on stderr. Exit 2 for an outline
-# or arguments that need fixing. Needs Node 22.18+ (runs the TypeScript sources
-# directly); dependencies install on first run, or with `slides deps`, which
-# installs them and does nothing else.
+# One JSON object on stdout, commentary and warnings on stderr. Exit 2 with
+# {errors} for anything the caller can fix (the outline, the arguments, --out or
+# a picture), exit 1 with {error} for a fault in the script. Needs Node 22.18+
+# (runs the TypeScript sources directly); dependencies install on first run, or
+# with `slides deps`, which installs them and does nothing else.
 
 set -euo pipefail
 

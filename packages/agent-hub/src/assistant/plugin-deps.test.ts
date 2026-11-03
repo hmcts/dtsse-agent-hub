@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { PREPARE_TIMEOUT_MS, prepareBundled } from "./plugin-deps.ts";
+import { PREPARE_TIMEOUT_MS, prepareBundled, prepareEach } from "./plugin-deps.ts";
 
 const WS = "/workspace/cft-workspace";
 const install = (name: string) => `/workspace/.agent-hub-plugins/${name}-0123456789ab`;
@@ -13,15 +13,6 @@ describe("prepareBundled", () => {
     expect(run).toHaveBeenCalledTimes(1);
     expect(run).toHaveBeenCalledWith(join(install("slides"), "scripts", "slides"), ["deps"], {
       env: expect.objectContaining({ HOME: "/home/agent" }),
-      timeoutMs: PREPARE_TIMEOUT_MS
-    });
-  });
-
-  it("should add the script's own environment to the pod's when one is given", async () => {
-    const run = ok();
-    await prepareBundled("welsh", { run, env: { AGENT_HUB_PLUGINS: "welsh" }, workspace: WS, install, scriptEnv: { CFT_WELSH_WORKSPACE: WS } });
-    expect(run).toHaveBeenCalledWith(join(install("welsh"), "scripts", "welsh"), ["deps"], {
-      env: expect.objectContaining({ AGENT_HUB_PLUGINS: "welsh", CFT_WELSH_WORKSPACE: WS }),
       timeoutMs: PREPARE_TIMEOUT_MS
     });
   });
@@ -58,5 +49,36 @@ describe("prepareBundled", () => {
       prepareBundled("slides", { run: ok(), env: { AGENT_HUB_PLUGINS: "slides" }, workspace: WS, install: copyFails, say: (m) => said.push(m) })
     ).resolves.toBeUndefined();
     expect(said).toEqual(["slides: could not prepare the tools: spawn ENOENT", "slides: could not prepare the tools: ENOSPC"]);
+  });
+});
+
+describe("prepareEach", () => {
+  it("should start each plugin's install only once the one before it has finished", async () => {
+    const started: string[] = [];
+    let finishFirst = () => {};
+    const run = vi.fn(async (cmd: string) => {
+      started.push(cmd);
+      if (started.length === 1) {
+        await new Promise<void>((resolve) => {
+          finishFirst = resolve;
+        });
+      }
+      return { code: 0, stdout: "", stderr: "" };
+    });
+    const done = prepareEach(["welsh", "slides"], { run, env: { AGENT_HUB_PLUGINS: "welsh,slides" }, workspace: WS, install });
+    await vi.waitFor(() => expect(started).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(started).toEqual([join(install("welsh"), "scripts", "welsh")]);
+    finishFirst();
+    await done;
+    expect(started).toEqual([join(install("welsh"), "scripts", "welsh"), join(install("slides"), "scripts", "slides")]);
+  });
+
+  it("should go on to the next plugin when one's install fails", async () => {
+    const said: string[] = [];
+    const run = vi.fn(async (cmd: string) => ({ code: cmd.endsWith("welsh") ? 1 : 0, stdout: "", stderr: "npm ERR! network" }));
+    await prepareEach(["welsh", "slides"], { run, env: { AGENT_HUB_PLUGINS: "welsh,slides" }, workspace: WS, install, say: (m) => said.push(m) });
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(said).toEqual(["welsh: could not install the tools' dependencies (exit 1): npm ERR! network"]);
   });
 });

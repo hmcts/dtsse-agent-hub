@@ -3,7 +3,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { checkOutline, OutlineError, validateOutline } from "../outline.ts";
-import { everyLayout, workDir } from "./fixtures.ts";
+import { everyLayout, png, workDir } from "./fixtures.ts";
 
 const errorsOf = (input: unknown, dir = workDir()) => checkOutline(input, dir).errors;
 
@@ -78,4 +78,35 @@ test("should throw every problem when the outline cannot be built", () => {
     () => validateOutline({ title: "", slides: [] }, workDir()),
     (err: unknown) => err instanceof OutlineError && err.problems.length === 2
   );
+});
+
+test("should list a missing alt text beside a structural error elsewhere in the outline", () => {
+  const errors = errorsOf({
+    title: "T",
+    slides: [
+      { layout: "nope", title: "x" },
+      { layout: "HMCTS_IMAGE", title: "P", image: { path: "picture.png" } }
+    ]
+  });
+  assert.equal(errors.length, 2);
+  assert.match(errors[0], /^slides\[0\]\.layout "nope" is not a layout/);
+  assert.match(errors[1], /^slides\[1\]\.image\.alt is missing/);
+});
+
+test("should refuse a key a bullet does not take, so a misspelt bullets is not dropped", () => {
+  const errors = errorsOf({ title: "T", slides: [{ layout: "HMCTS_CONTENT", title: "B", bullets: [{ text: "a", bullet: ["b"] }] }] });
+  assert.deepEqual(errors, ["slides[0].bullets[0].bullet is not a field of a bullet, which takes text, bullets"]);
+});
+
+test("should refuse a picture whose bytes are not the format its name says", () => {
+  const dir = workDir();
+  writeFileSync(join(dir, "fake.png"), "not a picture");
+  writeFileSync(join(dir, "photo.jpg"), png(4, 4));
+  writeFileSync(join(dir, "anim.gif"), Buffer.from("GIF89a\x01\x00\x01\x00", "latin1"));
+  writeFileSync(join(dir, "real.jpeg"), Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10]));
+  const slide = (path: string) => ({ layout: "HMCTS_IMAGE", title: path, image: { path, alt: "a" } });
+  assert.deepEqual(errorsOf({ title: "T", slides: ["fake.png", "photo.jpg", "anim.gif", "real.jpeg"].map(slide) }, dir), [
+    "slides[0].image.path fake.png is named as a PNG but is not a PNG, JPEG or GIF",
+    "slides[1].image.path photo.jpg is named as a JPEG but is a PNG"
+  ]);
 });
