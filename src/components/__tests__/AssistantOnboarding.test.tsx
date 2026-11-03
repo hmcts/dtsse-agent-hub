@@ -247,65 +247,41 @@ describe("GettingReady connectors", () => {
     expect(within(connector("GitHub")).queryByRole("button", { name: "Connect" })).toBeNull();
   });
 
-  // GitHub is signed in to only as the pod boots, so a running assistant relays no code for it however long the row
-  // waits: Connect has to restart it.
-  it("should restart the assistant to ask for the GitHub sign-in when the person clicks Connect on a running assistant", async () => {
-    const reconnect = ok();
-    render(ready({ assistant: assistant("running"), reconnect }));
+  /**
+   * The sign-ins whose Connect has to restart the assistant, because nothing else makes its pod relay a code: GitHub is
+   * signed in to only as the pod boots, and a running gateway assistant with no Azure code and none stored is one whose
+   * boot relay never reached the person. Without the restart no code ever arrives and the person is held here for good.
+   */
+  const RESTARTING = [
+    { name: "GitHub", kind: "github", props: (status: VirtualAgentStatus) => ({ assistant: assistant(status) }) },
+    {
+      name: "Azure",
+      kind: "azure",
+      props: (status: VirtualAgentStatus) => ({
+        assistant: assistant(status, { modelRoute: "gateway", needed: neededCredentials("gateway"), optional: optionalCredentials("gateway") }),
+        statuses: statuses("github")
+      })
+    }
+  ] as const;
 
-    expect(within(connector("GitHub")).getByRole("form", { name: "Connect GitHub" })).toBeTruthy();
+  it.each(RESTARTING)("should restart the assistant to ask for the $name sign-in when the person clicks Connect", async ({ name, kind, props }) => {
+    const reconnect = ok();
+    render(ready({ ...props("running"), reconnect }));
+
+    const row = connector(name);
+    expect(within(row).getByRole("form", { name: `Connect ${name}` })).toBeTruthy();
     await act(async () => {
-      fireEvent.click(within(connector("GitHub")).getByRole("button", { name: "Connect" }));
+      fireEvent.click(within(row).getByRole("button", { name: "Connect" }));
     });
 
     expect(reconnect).toHaveBeenCalledTimes(1);
     const sent = (reconnect.mock.calls[0] as unknown as [FormData])[0];
     expect(sent.get("id")).toBe(ASSISTANT);
-    expect(sent.get("kind")).toBe("github");
-    expect(sent.get("keep")).toBe("stored");
-    expect(within(connector("GitHub")).getByText("Connecting…")).toBeTruthy();
-    expect(within(connector("GitHub")).getByText(/The sign-in will appear here/)).toBeTruthy();
-  });
-
-  it("should offer Connect for GitHub again once the assistant has restarted without relaying a code", async () => {
-    const { rerender } = render(ready({ assistant: assistant("running") }));
-
-    await act(async () => {
-      fireEvent.click(within(connector("GitHub")).getByRole("button", { name: "Connect" }));
-    });
-    rerender(ready({ assistant: assistant("provisioning") }));
-    expect(within(connector("GitHub")).getByText("Connecting…")).toBeTruthy();
-
-    rerender(ready({ assistant: assistant("running") }));
-    expect(within(connector("GitHub")).queryByText("Connecting…")).toBeNull();
-    expect(within(connector("GitHub")).getByRole("button", { name: "Connect" })).toBeTruthy();
-  });
-
-  // A running gateway assistant with no Azure code and none stored is one whose boot relay never reached the person,
-  // so Connect has to ask, or no code ever arrives and a person whose chats wait on Azure is held here for good.
-  it("should ask for the Azure sign-in when the person clicks Connect on the gateway route", async () => {
-    const reconnect = ok();
-    const summary = assistant("running", {
-      modelRoute: "gateway",
-      needed: neededCredentials("gateway"),
-      optional: optionalCredentials("gateway")
-    });
-    render(ready({ assistant: summary, statuses: statuses("github"), reconnect }));
-
-    const azure = connector("Azure");
-    expect(within(azure).getByRole("form", { name: "Connect Azure" })).toBeTruthy();
-    await act(async () => {
-      fireEvent.click(within(azure).getByRole("button", { name: "Connect" }));
-    });
-
-    expect(reconnect).toHaveBeenCalledTimes(1);
-    const sent = (reconnect.mock.calls[0] as unknown as [FormData])[0];
-    expect(sent.get("id")).toBe(ASSISTANT);
-    expect(sent.get("kind")).toBe("azure");
+    expect(sent.get("kind")).toBe(kind);
     // The row shows nothing stored, so it asks no question, and so it must not delete one saved since either.
     expect(sent.get("keep")).toBe("stored");
-    expect(within(connector("Azure")).getByText("Connecting…")).toBeTruthy();
-    expect(within(connector("Azure")).getByText(/The sign-in will appear here/)).toBeTruthy();
+    expect(within(connector(name)).getByText("Connecting…")).toBeTruthy();
+    expect(within(connector(name)).getByText(/The sign-in will appear here/)).toBeTruthy();
   });
 
   it("should disable Connect for Azure while asking for its sign-in is in flight, so a second click posts nothing", async () => {
@@ -334,23 +310,21 @@ describe("GettingReady connectors", () => {
     expect(within(connector("Azure")).getByText("Connecting…")).toBeTruthy();
   });
 
-  it("should offer Connect for Azure again once the assistant has restarted without relaying a code", async () => {
-    const gateway = (status: VirtualAgentStatus) =>
-      assistant(status, { modelRoute: "gateway", needed: neededCredentials("gateway"), optional: optionalCredentials("gateway") });
-    const { rerender } = render(ready({ assistant: gateway("running"), statuses: statuses("github") }));
+  it.each(RESTARTING)("should offer Connect for $name again once the assistant has restarted without relaying a code", async ({ name, props }) => {
+    const { rerender } = render(ready(props("running")));
 
     await act(async () => {
-      fireEvent.click(within(connector("Azure")).getByRole("button", { name: "Connect" }));
+      fireEvent.click(within(connector(name)).getByRole("button", { name: "Connect" }));
     });
     // Still the page from before the restart: the ask has gone, and the row waits for the restart to show.
-    expect(within(connector("Azure")).getByText("Connecting…")).toBeTruthy();
+    expect(within(connector(name)).getByText("Connecting…")).toBeTruthy();
 
-    rerender(ready({ assistant: gateway("provisioning"), statuses: statuses("github") }));
-    expect(within(connector("Azure")).getByText("Connecting…")).toBeTruthy();
+    rerender(ready(props("provisioning")));
+    expect(within(connector(name)).getByText("Connecting…")).toBeTruthy();
 
-    rerender(ready({ assistant: gateway("running"), statuses: statuses("github") }));
-    expect(within(connector("Azure")).queryByText("Connecting…")).toBeNull();
-    expect(within(connector("Azure")).getByRole("button", { name: "Connect" })).toBeTruthy();
+    rerender(ready(props("running")));
+    expect(within(connector(name)).queryByText("Connecting…")).toBeNull();
+    expect(within(connector(name)).getByRole("button", { name: "Connect" })).toBeTruthy();
   });
 
   it("should show the Azure code relayed at boot, with Claude waiting on it, on the gateway route with nothing stored", () => {
