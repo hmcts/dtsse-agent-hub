@@ -5,16 +5,22 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ArtefactSnapshot } from "@/app/_actions/assistant";
 import type { ConfluenceExportView } from "@/assistant/confluence";
-import type { GithubExportView } from "@/assistant/github";
+import type { GithubExportView, GithubProjectChoice } from "@/assistant/github";
+import type { LookupResponse } from "@/assistant/lookups";
 import { ArtefactPanel } from "@/components/assistant/ArtefactPanel";
+import { LOOKUP_AFTER_MS } from "@/components/assistant/AtlassianSearch";
 import type { ExportToConfluenceAction } from "@/components/assistant/ConfluenceExport";
 import { openingDestination } from "@/components/assistant/ExportFooter";
 import type { ExportToGithubAction } from "@/components/assistant/GithubExport";
+import type { LookUp } from "@/components/assistant/lookupClient";
 
 const CONVERSATION = "22222222-2222-2222-2222-222222222222";
+const ROADMAP: GithubProjectChoice = { owner: "hmcts", number: 12, title: "CFT roadmap" };
+const DONE = { status: "done", repo: "hmcts/cft-workspace", number: 42, url: "https://github.com/hmcts/cft-workspace/issues/42" } as const;
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   window.localStorage.clear();
 });
 
@@ -26,17 +32,37 @@ function exporting(result: Awaited<ReturnType<ExportToGithubAction>> = { ok: tru
   return vi.fn<ExportToGithubAction>(async () => result);
 }
 
+/** Answers a repository search with two repositories and a Project search with the owner's one board. */
+function searching(): ReturnType<typeof vi.fn<LookUp>> {
+  return vi.fn<LookUp>(
+    async (request): Promise<LookupResponse> =>
+      request.kind === "github_repo"
+        ? {
+            status: "done",
+            results: [
+              { full_name: "hmcts/ccd-data-store-api", description: "Store/search cases", url: "https://github.com/hmcts/ccd-data-store-api" },
+              { full_name: "other/ccd-tool", description: null, url: "https://github.com/other/ccd-tool" }
+            ]
+          }
+        : { status: "done", results: [{ owner: request.owner as string, number: 12, title: "CFT roadmap" }] }
+  );
+}
+
 function panel({
   artefact = snapshot(),
   exported = { status: "none" },
   exportTo = exporting(),
   defaultRepo = null,
+  defaultProject = null,
+  lookUp = searching(),
   confluence
 }: {
   artefact?: ArtefactSnapshot;
   exported?: GithubExportView;
   exportTo?: ExportToGithubAction;
   defaultRepo?: string | null;
+  defaultProject?: GithubProjectChoice | null;
+  lookUp?: LookUp;
   confluence?: ConfluenceExportView;
 } = {}) {
   return (
@@ -47,7 +73,7 @@ function panel({
       save={vi.fn(async () => ({ ok: true as const, saved: true as const, version: 99 }))}
       onClose={() => undefined}
       narrow={false}
-      github={{ exported, exportTo, defaultRepo }}
+      github={{ exported, exportTo, defaultRepo, defaultProject, lookUp }}
       confluence={
         confluence === undefined
           ? undefined
@@ -61,15 +87,18 @@ function createButton(): HTMLButtonElement {
   return screen.getByRole("button", { name: "Create GitHub issue" }) as HTMLButtonElement;
 }
 
-function repoField(): HTMLInputElement {
-  return screen.getByLabelText("Repository") as HTMLInputElement;
+async function search(box: string, text: string): Promise<void> {
+  fireEvent.change(screen.getByRole("combobox", { name: box }), { target: { value: text } });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(LOOKUP_AFTER_MS);
+  });
 }
 
 describe("the document's GitHub export", () => {
-  it("should start from the person's default repository and create the issue there when the document is saved", async () => {
+  it("should start from the person's default repository and Project and create the issue there", async () => {
     // Arrange
     const exportTo = exporting();
-    render(panel({ exportTo, defaultRepo: "hmcts/cft-workspace" }));
+    render(panel({ exportTo, defaultRepo: "hmcts/cft-workspace", defaultProject: ROADMAP }));
 
     // Act
     await act(async () => {
@@ -77,31 +106,115 @@ describe("the document's GitHub export", () => {
     });
 
     // Assert
-    expect(repoField().value).toBe("hmcts/cft-workspace");
-    expect(exportTo).toHaveBeenCalledWith({ conversationId: CONVERSATION, repo: "hmcts/cft-workspace" });
+    expect(screen.getByText("hmcts/cft-workspace")).toBeTruthy();
+    expect(screen.getByText("CFT roadmap")).toBeTruthy();
+    expect(exportTo).toHaveBeenCalledWith({ conversationId: CONVERSATION, repo: "hmcts/cft-workspace", project: ROADMAP });
     expect(screen.getByText("Creating issue…").getAttribute("role")).toBe("status");
   });
 
-  it("should wait for a repository when the person has no default", () => {
+  it("should leave out a default Project that is not the repository owner's", () => {
+    render(panel({ defaultRepo: "other/repo", defaultProject: ROADMAP }));
+
+    expect(screen.queryByText("CFT roadmap")).toBeNull();
+    expect(screen.getByText("None")).toBeTruthy();
+  });
+
+  it("should ask for a repository, and offer no Project, when the person has no default", () => {
     render(panel());
 
     expect(createButton().disabled).toBe(true);
-    expect(screen.getByText("Name the repository as owner/name, such as hmcts/cft-workspace.")).toBeTruthy();
+    expect(screen.getByText("Choose the repository the issue goes in.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Choose the GitHub repository" })).toBeTruthy();
+    expect(screen.queryByText("Project")).toBeNull();
   });
 
-  it("should create the issue in a repository typed for this document, read from a pasted link", async () => {
+  it("should create the issue in a repository found by searching the person's GitHub", async () => {
     // Arrange
+    vi.useFakeTimers();
     const exportTo = exporting();
-    render(panel({ exportTo, defaultRepo: "hmcts/cft-workspace" }));
+    const lookUp = searching();
+    render(panel({ exportTo, lookUp }));
 
     // Act
-    fireEvent.change(repoField(), { target: { value: " https://github.com/hmcts/dtsse-agent-hub " } });
+    fireEvent.click(screen.getByRole("button", { name: "Choose the GitHub repository" }));
+    await search("Search your GitHub repositories", "ccd data");
+    fireEvent.click(screen.getByRole("option", { name: /hmcts\/ccd-data-store-api/ }));
     await act(async () => {
       fireEvent.click(createButton());
     });
 
     // Assert
-    expect(exportTo).toHaveBeenCalledWith({ conversationId: CONVERSATION, repo: "hmcts/dtsse-agent-hub" });
+    expect(lookUp).toHaveBeenCalledWith({ kind: "github_repo", query: "ccd data", space: null, owner: null }, expect.any(AbortSignal));
+    expect(exportTo).toHaveBeenCalledWith({ conversationId: CONVERSATION, repo: "hmcts/ccd-data-store-api", project: null });
+  });
+
+  it("should offer a typed owner/name first, as it stands, even when the search does not find it", async () => {
+    // Arrange
+    vi.useFakeTimers();
+    const exportTo = exporting();
+    render(panel({ exportTo, lookUp: vi.fn<LookUp>(async () => ({ status: "done", results: [] })) }));
+
+    // Act
+    fireEvent.click(screen.getByRole("button", { name: "Choose the GitHub repository" }));
+    await search("Search your GitHub repositories", "https://github.com/someone/elsewhere");
+    fireEvent.click(screen.getByRole("option", { name: /someone\/elsewhere/ }));
+    await act(async () => {
+      fireEvent.click(createButton());
+    });
+
+    // Assert
+    expect(exportTo).toHaveBeenCalledWith({ conversationId: CONVERSATION, repo: "someone/elsewhere", project: null });
+  });
+
+  it("should search the repository owner's Projects and put the issue on the one picked", async () => {
+    // Arrange
+    vi.useFakeTimers();
+    const exportTo = exporting();
+    const lookUp = searching();
+    render(panel({ exportTo, lookUp, defaultRepo: "hmcts/cft-workspace" }));
+
+    // Act
+    fireEvent.click(screen.getByRole("button", { name: "Choose a GitHub Project to add the issue to" }));
+    await search("Search hmcts's GitHub Projects", "roadmap");
+    fireEvent.click(screen.getByRole("option", { name: /CFT roadmap/ }));
+    await act(async () => {
+      fireEvent.click(createButton());
+    });
+
+    // Assert
+    expect(lookUp).toHaveBeenCalledWith({ kind: "github_project", query: "roadmap", space: null, owner: "hmcts" }, expect.any(AbortSignal));
+    expect(exportTo).toHaveBeenCalledWith({ conversationId: CONVERSATION, repo: "hmcts/cft-workspace", project: ROADMAP });
+  });
+
+  it("should take the Project off when the person picks a repository of another owner's", async () => {
+    // Arrange
+    vi.useFakeTimers();
+    const exportTo = exporting();
+    render(panel({ exportTo, defaultRepo: "hmcts/cft-workspace", defaultProject: ROADMAP }));
+
+    // Act
+    fireEvent.click(screen.getByRole("button", { name: "Change the GitHub repository, now hmcts/cft-workspace" }));
+    await search("Search your GitHub repositories", "ccd");
+    fireEvent.click(screen.getByRole("option", { name: /other\/ccd-tool/ }));
+    await act(async () => {
+      fireEvent.click(createButton());
+    });
+
+    // Assert
+    expect(screen.queryByText("CFT roadmap")).toBeNull();
+    expect(exportTo).toHaveBeenCalledWith({ conversationId: CONVERSATION, repo: "other/ccd-tool", project: null });
+  });
+
+  it("should add the issue to no Project when the person removes the default one", async () => {
+    const exportTo = exporting();
+    render(panel({ exportTo, defaultRepo: "hmcts/cft-workspace", defaultProject: ROADMAP }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Add it to no Project" }));
+    await act(async () => {
+      fireEvent.click(createButton());
+    });
+
+    expect(exportTo).toHaveBeenCalledWith({ conversationId: CONVERSATION, repo: "hmcts/cft-workspace", project: null });
   });
 
   it("should not export a document nobody has written when the panel shows the starter outline", () => {
@@ -124,30 +237,45 @@ describe("the document's GitHub export", () => {
     expect(screen.getByText("Waiting for the document to save.")).toBeTruthy();
   });
 
-  it("should show the issue in the repository's place, and a banner linking to it, when the export is done", () => {
-    render(panel({ exported: { status: "done", repo: "hmcts/cft-workspace", number: 42, url: "https://github.com/hmcts/cft-workspace/issues/42" } }));
+  it("should show the issue and its Project, and a banner linking to it, when the export is done", () => {
+    render(panel({ exported: { ...DONE, project: ROADMAP, projectError: null } }));
 
     expect(screen.queryByRole("button", { name: "Create GitHub issue" })).toBeNull();
-    expect(screen.queryByLabelText("Repository")).toBeNull();
     expect(screen.getByText("On GitHub")).toBeTruthy();
-    expect((screen.getByRole("link", { name: "Open issue" }) as HTMLAnchorElement).href).toBe("https://github.com/hmcts/cft-workspace/issues/42");
-    expect((screen.getByRole("link", { name: "View on GitHub" }) as HTMLAnchorElement).href).toBe("https://github.com/hmcts/cft-workspace/issues/42");
+    expect(screen.getByText(/· CFT roadmap/)).toBeTruthy();
+    expect(screen.getByText(/on CFT roadmap/)).toBeTruthy();
+    expect((screen.getByRole("link", { name: "Open issue" }) as HTMLAnchorElement).href).toBe(DONE.url);
+    expect((screen.getByRole("link", { name: "View on GitHub" }) as HTMLAnchorElement).href).toBe(DONE.url);
   });
 
-  it("should show the repository and no way to export again while the export is pending", () => {
-    render(panel({ exported: { status: "pending", repo: "hmcts/cft-workspace", requestedAt: new Date().toISOString() } }));
+  it("should say the issue is not on the Project, and why, when adding it failed", () => {
+    render(panel({ exported: { ...DONE, project: ROADMAP, projectError: "your GitHub sign-in needs the project scope" } }));
 
-    expect(repoField().value).toBe("hmcts/cft-workspace");
-    expect(repoField().disabled).toBe(true);
+    expect(screen.getByRole("alert").textContent).toBe("It is not on CFT roadmap: your GitHub sign-in needs the project scope.");
+    expect(screen.queryByText(/· CFT roadmap/)).toBeNull();
+  });
+
+  it("should show the repository and no way to change it or export again while the export is pending", () => {
+    render(panel({ exported: { status: "pending", repo: "hmcts/cft-workspace", project: null, requestedAt: new Date().toISOString() } }));
+
+    expect(screen.getByText("hmcts/cft-workspace")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Change the GitHub repository/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "Create GitHub issue" })).toBeNull();
   });
 
-  it("should show why and offer the export again when it failed", () => {
-    render(panel({ exported: { status: "failed", repo: "hmcts/nope", error: "GitHub refused the issue: no such repository" } }));
+  it("should show why and offer the export again, to the same place, when it failed", async () => {
+    // Arrange
+    const exportTo = exporting();
+    render(panel({ exportTo, exported: { status: "failed", repo: "hmcts/nope", project: null, error: "GitHub refused the issue: no such repository" } }));
 
+    // Act
     expect(screen.getByRole("alert").textContent).toBe("GitHub refused the issue: no such repository");
-    expect(repoField().value).toBe("hmcts/nope");
-    expect(createButton().disabled).toBe(false);
+    await act(async () => {
+      fireEvent.click(createButton());
+    });
+
+    // Assert
+    expect(exportTo).toHaveBeenCalledWith({ conversationId: CONVERSATION, repo: "hmcts/nope", project: null });
   });
 
   it("should show the refusal and bring the button back when the action is refused", async () => {
@@ -186,10 +314,10 @@ describe("openingDestination with GitHub", () => {
   });
 
   it("should open on Confluence once the GitHub issue is done", () => {
-    expect(openingDestination({ status: "done", repo: "hmcts/x", number: 1, url: "https://github.com/hmcts/x/issues/1" }, none, "github")).toBe("confluence");
+    expect(openingDestination({ ...DONE, project: null, projectError: null }, none, "github")).toBe("confluence");
   });
 
   it("should open on GitHub while its export is pending", () => {
-    expect(openingDestination({ status: "pending", repo: "hmcts/x", requestedAt: "2026-11-02T10:00:00.000Z" }, none, "github")).toBe("github");
+    expect(openingDestination({ status: "pending", repo: "hmcts/x", project: null, requestedAt: "2026-11-02T10:00:00.000Z" }, none, "github")).toBe("github");
   });
 });

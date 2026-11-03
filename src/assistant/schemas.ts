@@ -45,7 +45,12 @@ export const jiraExportReportBody = z.union([
 export const MAX_GITHUB_ERROR = 300;
 
 export const githubExportReportBody = z.union([
-  z.strictObject({ export_id: z.uuid(), number: z.number().int().min(1).max(2_147_483_647) }),
+  z.strictObject({
+    export_id: z.uuid(),
+    number: z.number().int().min(1).max(2_147_483_647),
+    // The issue was made, but could not be put on the Project asked for.
+    project_error: z.string().trim().min(1).max(MAX_GITHUB_ERROR).optional()
+  }),
   z.strictObject({ export_id: z.uuid(), error: z.string().trim().min(1).max(MAX_GITHUB_ERROR) })
 ]);
 

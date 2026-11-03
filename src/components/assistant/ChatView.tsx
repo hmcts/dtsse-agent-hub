@@ -631,7 +631,7 @@ export function ChatView({
           }
           github={
             pod && defaults.ticketTool === "github" && actions.exportToGithub !== undefined
-              ? { exported: view.github, exportTo: actions.exportToGithub, defaultRepo: defaults.github }
+              ? { exported: view.github, exportTo: actions.exportToGithub, defaultRepo: defaults.github, defaultProject: defaults.githubProject }
               : undefined
           }
           confluence={

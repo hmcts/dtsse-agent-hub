@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   checkConfluenceDefault,
   checkGithubDefault,
+  checkGithubProjectDefault,
   checkJiraDefault,
   checkTicketTool,
   type ExportDefaultRow,
@@ -94,7 +95,13 @@ describe("exportDefaultsOf", () => {
   });
 
   it("should give both defaults when the row holds both whole", () => {
-    expect(exportDefaultsOf(ROW)).toEqual({ ticketTool: "jira", jira: { key: "HDPI", name: "Housing Disputes" }, github: null, confluence: PAGE });
+    expect(exportDefaultsOf(ROW)).toEqual({
+      ticketTool: "jira",
+      jira: { key: "HDPI", name: "Housing Disputes" },
+      github: null,
+      githubProject: null,
+      confluence: PAGE
+    });
   });
 
   it("should give neither default when the row holds neither", () => {
@@ -114,6 +121,7 @@ describe("exportDefaultsOf", () => {
       ticketTool: "jira",
       jira: { key: "HDPI", name: "Housing Disputes" },
       github: null,
+      githubProject: null,
       confluence: null
     });
   });
@@ -124,6 +132,33 @@ describe("exportDefaultsOf", () => {
 });
 
 describe("the ticket tool and GitHub repository defaults", () => {
+  it("should read the GitHub Project when the row holds it whole, and none when it does not", () => {
+    const row = {
+      ...ROW,
+      ticketTool: "github",
+      githubRepo: "hmcts/cft-workspace",
+      githubProjectOwner: "hmcts",
+      githubProjectNumber: 12,
+      githubProjectTitle: "CFT roadmap"
+    };
+
+    expect(exportDefaultsOf(row).githubProject).toEqual({ owner: "hmcts", number: 12, title: "CFT roadmap" });
+    expect(exportDefaultsOf({ ...row, githubProjectTitle: null }).githubProject).toBeNull();
+  });
+
+  it.each([
+    [null, null],
+    [
+      { owner: "hmcts", number: 12, title: "  CFT\n roadmap " },
+      { owner: "hmcts", number: 12, title: "CFT roadmap" }
+    ],
+    [{ owner: "-hmcts", number: 12, title: "x" }, undefined],
+    [{ owner: "hmcts", number: 0, title: "x" }, undefined],
+    [{ owner: "hmcts", number: 12, title: " " }, undefined]
+  ])("should read the Project %j as %j", (value, expected) => {
+    expect(checkGithubProjectDefault(value)).toEqual(expected);
+  });
+
   it("should read GitHub and its repository when the row has them", () => {
     expect(exportDefaultsOf({ ...ROW, ticketTool: "github", githubRepo: "hmcts/cft-workspace" })).toMatchObject({
       ticketTool: "github",

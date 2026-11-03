@@ -165,7 +165,7 @@ function chatPage(chat: AssistantHome["chat"], local: boolean, stored: Credentia
         viewerOid={VIEWER}
         actions={actions()}
         jira={{ connected: false, login: null }}
-        defaults={{ ticketTool: "jira", jira: null, github: null, confluence: null }}
+        defaults={{ ticketTool: "jira", jira: null, github: null, githubProject: null, confluence: null }}
       />
     </AssistantGate>
   );

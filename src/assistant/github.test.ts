@@ -7,7 +7,9 @@ import {
   isGithubRepo,
   isTicketTool,
   pendingGithubExport,
-  readGithubRepo
+  readGithubProject,
+  readGithubRepo,
+  repoOwner
 } from "./github.ts";
 
 const NOW = new Date("2026-11-02T10:00:00.000Z");
@@ -28,6 +30,7 @@ describe("githubExportView", () => {
     expect(githubExportView(row({ githubStatus: "pending", githubRepo: "hmcts/cft-workspace", githubRequestedAt: requested }), NOW)).toEqual({
       status: "pending",
       repo: "hmcts/cft-workspace",
+      project: null,
       requestedAt: requested.toISOString()
     });
   });
@@ -38,6 +41,7 @@ describe("githubExportView", () => {
     expect(githubExportView(row({ githubStatus: "pending", githubRepo: "hmcts/cft-workspace", githubRequestedAt: requested }), NOW)).toEqual({
       status: "failed",
       repo: "hmcts/cft-workspace",
+      project: null,
       error: "GitHub did not answer in time. Try again."
     });
   });
@@ -47,7 +51,21 @@ describe("githubExportView", () => {
       status: "done",
       repo: "hmcts/cft-workspace",
       number: 42,
-      url: "https://github.com/hmcts/cft-workspace/issues/42"
+      url: "https://github.com/hmcts/cft-workspace/issues/42",
+      project: null,
+      projectError: null
+    });
+  });
+
+  it("should carry the Project, and why the issue is not on it, when the pod reported that", () => {
+    const project = { githubProjectOwner: "hmcts", githubProjectNumber: 12, githubProjectTitle: "CFT roadmap" };
+
+    expect(
+      githubExportView(row({ githubStatus: "done", githubRepo: "hmcts/x", githubNumber: 1, githubProjectError: "needs the project scope", ...project }), NOW)
+    ).toMatchObject({ project: { owner: "hmcts", number: 12, title: "CFT roadmap" }, projectError: "needs the project scope" });
+    expect(githubExportView(row({ githubStatus: "done", githubRepo: "hmcts/x", githubNumber: 1, githubProjectError: "stray" }), NOW)).toMatchObject({
+      project: null,
+      projectError: null
     });
   });
 
@@ -55,6 +73,7 @@ describe("githubExportView", () => {
     expect(githubExportView(row({ githubStatus: "failed", githubRepo: "hmcts/nope", githubError: "Could not resolve to a Repository" }), NOW)).toEqual({
       status: "failed",
       repo: "hmcts/nope",
+      project: null,
       error: "Could not resolve to a Repository"
     });
   });
@@ -63,6 +82,7 @@ describe("githubExportView", () => {
     expect(githubExportView(row({ githubStatus: "failed", githubRepo: "hmcts/nope" }), NOW)).toEqual({
       status: "failed",
       repo: "hmcts/nope",
+      project: null,
       error: "The issue could not be created."
     });
   });
@@ -73,6 +93,12 @@ describe("pendingGithubExport", () => {
 
   it("should carry the export id and repository while an export is pending", () => {
     expect(pendingGithubExport(pending, NOW)).toEqual({ export_id: EXPORT, repo: "hmcts/cft-workspace" });
+  });
+
+  it("should carry the Project's owner and number, not its title, when the person chose one", () => {
+    const onBoard = { ...pending, githubProjectOwner: "hmcts", githubProjectNumber: 12, githubProjectTitle: "CFT roadmap" };
+
+    expect(pendingGithubExport(onBoard, NOW)).toEqual({ export_id: EXPORT, repo: "hmcts/cft-workspace", project: { owner: "hmcts", number: 12 } });
   });
 
   it.each([
@@ -117,6 +143,20 @@ describe("isGithubRepo and isTicketTool", () => {
     expect(isTicketTool("github")).toBe(true);
     expect(isTicketTool("GitHub")).toBe(false);
     expect(isTicketTool(undefined)).toBe(false);
+  });
+});
+
+describe("readGithubProject and repoOwner", () => {
+  it("should read a Project the browser sent, tidying its title, and refuse one that is not whole", () => {
+    expect(readGithubProject(undefined)).toBeNull();
+    expect(readGithubProject({ owner: "hmcts", number: 12, title: " CFT  roadmap " })).toEqual({ owner: "hmcts", number: 12, title: "CFT roadmap" });
+    expect(readGithubProject({ owner: "hmcts", number: 1.5, title: "x" })).toBeUndefined();
+    expect(readGithubProject({ owner: "hmcts", number: 12, title: "x".repeat(201) })).toBeUndefined();
+    expect(readGithubProject("hmcts/12")).toBeUndefined();
+  });
+
+  it("should give the owner half of a repository", () => {
+    expect(repoOwner("hmcts/cft-workspace")).toBe("hmcts");
   });
 });
 

@@ -4,9 +4,9 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { DEFAULT_CONFLUENCE_PARENT } from "@/assistant/confluence";
 import type { DefaultConfluencePage, DefaultJiraProject, ExportDefaults } from "@/assistant/export-defaults";
-import { readGithubRepo, TICKET_TOOLS, type TicketTool } from "@/assistant/github";
+import { type GithubProjectChoice, repoOwner, TICKET_TOOLS, type TicketTool } from "@/assistant/github";
 import { DEFAULT_JIRA_PROJECT } from "@/assistant/jira";
-import { breadcrumb, type ConfluencePageResult, type JiraProjectResult } from "@/assistant/lookups";
+import { breadcrumb, type ConfluencePageResult, type GithubProjectResult, type GithubRepoResult, type JiraProjectResult } from "@/assistant/lookups";
 import { AtlassianSearch } from "@/components/assistant/AtlassianSearch";
 import type { JiraAccess } from "@/components/assistant/JiraExport";
 import type { LookUp } from "@/components/assistant/lookupClient";
@@ -16,6 +16,7 @@ type SaveExportDefaultsAction = (input: {
   ticketTool: unknown;
   jira: unknown;
   github: unknown;
+  githubProject: unknown;
   confluence: unknown;
 }) => Promise<ActionResult<{ defaults: ExportDefaults }>>;
 
@@ -118,65 +119,120 @@ function TicketToolChoice({ tool, onChange }: { tool: TicketTool; onChange: (too
   );
 }
 
-/** The repository GitHub issues go to by default, typed as `owner/name` or pasted as a link. */
-function GithubRepoField({ value, onChange, invalid }: { value: string; onChange: (value: string) => void; invalid: boolean }) {
+/** What a GitHub choice reads while the person has none: there is no built-in repository or Project. */
+function NoneChosen({ text }: { text: string }) {
+  return <span className="text-[13px] text-asst-faint">{text}</span>;
+}
+
+const SIGNED_IN: JiraAccess = { connected: true, login: null };
+
+/**
+ * The GitHub defaults: the repository issues go in, and a Project of its owner's to put them on. A repository is where
+ * an issue lives and a Project is a board showing issues from any number of repositories, so the Project is a second,
+ * optional choice, offered once there is a repository and searched for in that repository's owner.
+ */
+function GithubChoices({
+  repo,
+  project,
+  onRepo,
+  onProject,
+  searching,
+  onSearch,
+  lookUp
+}: {
+  repo: string | null;
+  project: GithubProjectChoice | null;
+  onRepo: (repo: string | null) => void;
+  onProject: (project: GithubProjectChoice | null) => void;
+  searching: "github" | "github_project" | null;
+  onSearch: (what: "github" | "github_project" | null) => void;
+  lookUp?: LookUp;
+}) {
   return (
-    <div className="flex flex-col gap-1.5">
-      <label htmlFor="assistant-settings-github-default" className="text-[13px] font-medium">
-        GitHub repository
-      </label>
-      <p id="assistant-settings-github-hint" className="text-pretty text-xs text-asst-muted">
-        Issues are created here, as you. Write it as owner/name, such as hmcts/cft-workspace, or paste its link.
-      </p>
-      <input
+    <>
+      <Choice
         id="assistant-settings-github-default"
-        type="text"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder="owner/name"
-        spellCheck={false}
-        autoComplete="off"
-        aria-invalid={invalid}
-        aria-describedby={invalid ? "assistant-settings-github-hint assistant-settings-github-error" : "assistant-settings-github-hint"}
-        className="rounded-[10px] border border-asst-line bg-transparent px-3.5 py-2.5 font-plex-mono text-[13px] outline-hidden focus:border-asst-accent-line"
-      />
-      {invalid ? (
-        <p id="assistant-settings-github-error" className="text-xs text-asst-error">
-          That is not a repository: write it as owner/name.
-        </p>
-      ) : null}
-    </div>
+        label="GitHub repository"
+        hint="Issues are created here, as you. Search your own repositories and organisations', or type owner/name."
+        builtIn={<NoneChosen text="None chosen yet" />}
+        current={repo === null ? null : <span className="block truncate font-plex-mono text-[13px] font-medium">{repo}</span>}
+        searching={searching === "github"}
+        onSearch={() => onSearch("github")}
+        onClear={() => onRepo(null)}
+      >
+        <AtlassianSearch
+          kind="github_repo"
+          label="Search your GitHub repositories for your default"
+          placeholder="Type a repository's name, or owner/name"
+          access={SIGNED_IN}
+          lookUp={lookUp}
+          onCancel={() => onSearch(null)}
+          onPick={(result) => {
+            onRepo((result as GithubRepoResult).full_name);
+            onSearch(null);
+          }}
+        />
+      </Choice>
+      {repo === null ? null : (
+        <Choice
+          id="assistant-settings-github-project-default"
+          label="GitHub Project"
+          hint={`Optional. A board of ${repoOwner(repo)}'s that your issues are added to as well.`}
+          builtIn={<NoneChosen text="None" />}
+          current={project === null ? null : <span className="block truncate text-[13px] font-medium">{project.title}</span>}
+          searching={searching === "github_project"}
+          onSearch={() => onSearch("github_project")}
+          onClear={() => onProject(null)}
+        >
+          <AtlassianSearch
+            kind="github_project"
+            label={`Search ${repoOwner(repo)}'s GitHub Projects for your default`}
+            placeholder="Type a few words of the Project's title"
+            owner={repoOwner(repo)}
+            access={SIGNED_IN}
+            lookUp={lookUp}
+            onCancel={() => onSearch(null)}
+            onPick={(result) => {
+              const picked = result as GithubProjectResult;
+              onProject({ owner: picked.owner, number: picked.number, title: picked.title });
+              onSearch(null);
+            }}
+          />
+        </Choice>
+      )}
+    </>
   );
 }
 
 /**
  * Where the person's documents go by default: the tool their tickets go to, and in it a Jira backlog or a GitHub
  * repository; and a Confluence page to put new pages under. The document panel starts from these and can be changed
- * there for one document; a Confluence search in the panel starts in this page's space. Jira projects and Confluence
- * pages are found by searching the person's own Jira and Confluence, as them; a GitHub repository is typed.
+ * there for one document; a Confluence search in the panel starts in this page's space. Each is found by searching the
+ * person's own Jira, Confluence or GitHub, as them.
  */
 export function ExportSettings({ exports }: { exports: AssistantExportDefaults }) {
   const router = useRouter();
   const [tool, setTool] = useState<TicketTool>(exports.defaults.ticketTool);
   const [jira, setJira] = useState<DefaultJiraProject | null>(exports.defaults.jira);
-  const [github, setGithub] = useState(exports.defaults.github ?? "");
+  const [github, setGithub] = useState<string | null>(exports.defaults.github);
+  const [githubProject, setGithubProject] = useState<GithubProjectChoice | null>(exports.defaults.githubProject);
   const [confluence, setConfluence] = useState<DefaultConfluencePage | null>(exports.defaults.confluence);
-  const [searching, setSearching] = useState<"jira" | "confluence" | null>(null);
+  const [searching, setSearching] = useState<"jira" | "confluence" | "github" | "github_project" | null>(null);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
-  // Blank is no default; anything else has to read as a repository before it can be saved.
-  const repo = github.trim() === "" ? null : (readGithubRepo(github) ?? undefined);
+  const projectKey = (project: GithubProjectChoice | null) => (project === null ? null : `${project.owner}/${project.number}`);
   const changed =
     tool !== exports.defaults.ticketTool ||
     jira?.key !== exports.defaults.jira?.key ||
-    repo !== exports.defaults.github ||
+    github !== exports.defaults.github ||
+    projectKey(githubProject) !== projectKey(exports.defaults.githubProject) ||
     confluence?.id !== exports.defaults.confluence?.id;
 
   async function save(): Promise<void> {
     setSaving(true);
     setMessage(null);
     try {
-      const result = await exports.save({ ticketTool: tool, jira, github: repo, confluence });
+      const result = await exports.save({ ticketTool: tool, jira, github, githubProject, confluence });
       setMessage(result.ok ? { ok: true, text: "Your defaults are saved" } : { ok: false, text: result.error });
       if (result.ok) {
         router.refresh();
@@ -200,7 +256,19 @@ export function ExportSettings({ exports }: { exports: AssistantExportDefaults }
       </div>
       <TicketToolChoice tool={tool} onChange={setTool} />
       {tool === "github" ? (
-        <GithubRepoField value={github} onChange={setGithub} invalid={repo === undefined} />
+        <GithubChoices
+          repo={github}
+          project={githubProject}
+          onRepo={(repo) => {
+            setGithub(repo);
+            // A Project of another owner's does not go with this repository.
+            setGithubProject((project) => (repo !== null && project !== null && project.owner === repoOwner(repo) ? project : null));
+          }}
+          onProject={setGithubProject}
+          searching={searching === "github" || searching === "github_project" ? searching : null}
+          onSearch={setSearching}
+          lookUp={exports.lookUp}
+        />
       ) : (
         <Choice
           id="assistant-settings-jira-default"
@@ -287,7 +355,7 @@ export function ExportSettings({ exports }: { exports: AssistantExportDefaults }
         <button
           type="button"
           onClick={() => void save()}
-          disabled={!changed || saving || repo === undefined}
+          disabled={!changed || saving}
           className="rounded-[10px] bg-asst-accent px-3.5 py-2 text-[13px] font-semibold text-asst-ink hover:bg-asst-accent-hover disabled:opacity-40"
         >
           {saving ? "Saving…" : "Save defaults"}

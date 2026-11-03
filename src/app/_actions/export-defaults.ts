@@ -16,6 +16,7 @@ export async function saveExportDefaults(input: {
   ticketTool?: unknown;
   jira: unknown;
   github?: unknown;
+  githubProject?: unknown;
   confluence: unknown;
 }): Promise<ActionResult<{ defaults: ExportDefaults }>> {
   return await runAction<{ defaults: ExportDefaults }>("save export defaults", async () => {

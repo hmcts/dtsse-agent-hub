@@ -1,7 +1,15 @@
 import { isOwner } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
 import type { Database } from "../store/prisma.ts";
-import { checkConfluenceDefault, checkGithubDefault, checkJiraDefault, checkTicketTool, type ExportDefaults, exportDefaultsOf } from "./export-defaults.ts";
+import {
+  checkConfluenceDefault,
+  checkGithubDefault,
+  checkGithubProjectDefault,
+  checkJiraDefault,
+  checkTicketTool,
+  type ExportDefaults,
+  exportDefaultsOf
+} from "./export-defaults.ts";
 
 /**
  * Each person's own export defaults, one row each. `isOwner` is asked on every call, as it is for templates, and the
@@ -29,7 +37,10 @@ const SELECT = {
   confluenceSpaceName: true,
   confluenceAncestors: true,
   ticketTool: true,
-  githubRepo: true
+  githubRepo: true,
+  githubProjectOwner: true,
+  githubProjectNumber: true,
+  githubProjectTitle: true
 } as const;
 
 export async function readExportDefaults(db: Database, target: DefaultsTarget): Promise<ExportDefaults> {
@@ -44,7 +55,7 @@ export async function readExportDefaults(db: Database, target: DefaultsTarget): 
 export async function saveExportDefaults(
   db: Database,
   target: DefaultsTarget,
-  input: { ticketTool?: unknown; jira: unknown; github?: unknown; confluence: unknown },
+  input: { ticketTool?: unknown; jira: unknown; github?: unknown; githubProject?: unknown; confluence: unknown },
   now: Date = new Date()
 ): Promise<ExportDefaults> {
   allow(target);
@@ -60,6 +71,10 @@ export async function saveExportDefaults(
   if (github === undefined) {
     throw new HttpError(400, "name the GitHub repository as owner/name, such as hmcts/cft-workspace");
   }
+  const githubProject = checkGithubProjectDefault(input.githubProject ?? null);
+  if (githubProject === undefined) {
+    throw new HttpError(400, "pick the GitHub Project from the search, or none");
+  }
   const confluence = checkConfluenceDefault(input.confluence ?? null);
   if (confluence === undefined) {
     throw new HttpError(400, "pick a Confluence page from the search");
@@ -67,6 +82,9 @@ export async function saveExportDefaults(
   const data = {
     ticketTool,
     githubRepo: github,
+    githubProjectOwner: githubProject?.owner ?? null,
+    githubProjectNumber: githubProject?.number ?? null,
+    githubProjectTitle: githubProject?.title ?? null,
     jiraProject: jira?.key ?? null,
     jiraProjectName: jira?.name ?? null,
     confluenceParentId: confluence?.id ?? null,
@@ -78,5 +96,5 @@ export async function saveExportDefaults(
     updatedAt: now
   };
   await db.assistantExportDefault.upsert({ where: { ownerOid: target.ownerOid }, create: { ownerOid: target.ownerOid, ...data }, update: data });
-  return { ticketTool, jira, github, confluence };
+  return { ticketTool, jira, github, githubProject, confluence };
 }

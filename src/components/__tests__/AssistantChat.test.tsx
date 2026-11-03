@@ -1082,7 +1082,7 @@ describe("ChatView document", () => {
         view={written}
         templates={TEMPLATES}
         actions={actions({ exportToConfluence: ok(), exportToGithub: ok() })}
-        defaults={{ ticketTool: "github", jira: null, github: "hmcts/cft-workspace", confluence: null }}
+        defaults={{ ticketTool: "github", jira: null, github: "hmcts/cft-workspace", githubProject: null, confluence: null }}
       />
     );
     fireEvent.click(screen.getByRole("button", { name: /Open document/ }));
@@ -1090,7 +1090,7 @@ describe("ChatView document", () => {
     expect(screen.getByRole("radio", { name: /GitHub issue/ })).toBeTruthy();
     expect(screen.queryByRole("radio", { name: /Jira backlog/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /Export to Jira backlog/ })).toBeNull();
-    expect((screen.getByLabelText("Repository") as HTMLInputElement).value).toBe("hmcts/cft-workspace");
+    expect(screen.getByRole("button", { name: "Change the GitHub repository, now hmcts/cft-workspace" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Create GitHub issue" })).toBeTruthy();
   });
 

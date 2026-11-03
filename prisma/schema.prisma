@@ -550,6 +550,12 @@ model AssistantConversation {
   githubNumber          Int?      @map("github_number")
   githubError           String?   @map("github_error")
   githubRequestedAt     DateTime? @map("github_requested_at") @db.Timestamptz(6)
+  /// The Project the issue is added to, when the person chose one: its owner, number and title together.
+  githubProjectOwner    String?   @map("github_project_owner")
+  githubProjectNumber   Int?      @map("github_project_number")
+  githubProjectTitle    String?   @map("github_project_title")
+  /// Why the issue, though made, could not be added to the Project.
+  githubProjectError    String?   @map("github_project_error")
   /// Where a copy was forked from; null once the source is deleted, and for a conversation that is not a copy.
   forkedFromId          String?   @map("forked_from_id") @db.Uuid
   forkedFromOwnerName   String?   @map("forked_from_owner_name")
@@ -675,6 +681,9 @@ model AssistantExportDefault {
   /// jira or github: where the person's tickets go.
   ticketTool            String   @default("jira") @map("ticket_tool")
   githubRepo            String?  @map("github_repo")
+  githubProjectOwner    String?  @map("github_project_owner")
+  githubProjectNumber   Int?     @map("github_project_number")
+  githubProjectTitle    String?  @map("github_project_title")
   updatedAt             DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
 
   owner User @relation(fields: [ownerOid], references: [oid], onDelete: Cascade)
@@ -686,10 +695,12 @@ model AssistantExportDefault {
 model AssistantLookup {
   id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   virtualAgentId String    @map("virtual_agent_id") @db.Uuid
-  /// jira_project or confluence_page.
+  /// jira_project, confluence_page, github_repo or github_project.
   kind           String
   query          String
   spaceKey       String?   @map("space_key")
+  /// For a github_project lookup: the owner whose Projects to search.
+  githubOwner    String?   @map("github_owner")
   signIn         Boolean   @default(false) @map("sign_in")
   /// pending, done or failed.
   status         String    @default("pending")

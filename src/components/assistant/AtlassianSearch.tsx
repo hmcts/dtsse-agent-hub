@@ -1,10 +1,14 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
+import { readGithubRepo } from "@/assistant/github";
 import {
   breadcrumb,
   type ConfluencePageResult,
+  type GithubProjectResult,
+  type GithubRepoResult,
   type JiraProjectResult,
+  LOOKUP_NOUNS,
   type LookupKind,
   type LookupResult,
   MAX_LOOKUP_QUERY,
@@ -15,9 +19,10 @@ import type { JiraAccess } from "@/components/assistant/JiraExport";
 import { lookUp as fetchLookup, type LookUp } from "@/components/assistant/lookupClient";
 
 /**
- * Finding a Jira project or a Confluence page by typing a few words of it, searched as the person, in their own pod,
- * with their own Atlassian sign-in (see "Atlassian lookups" in docs/agent-api.md). The document panel and the settings
- * both use it, for where a document goes.
+ * Finding a Jira project, a Confluence page, a GitHub repository or a GitHub Project by typing a few words of it,
+ * searched as the person, in their own pod, with their own Atlassian or GitHub sign-in (see "Atlassian lookups" in
+ * docs/agent-api.md). The document panel and the settings both use it, for where a document goes. GitHub is signed in
+ * on every pod, so its searches never ask for a sign-in.
  *
  * A combobox over a listbox, as the sidebar's chat search is: focus stays in the box, the arrows move
  * `aria-activedescendant` through the results and Enter picks the one it is on. Unlike that search, the answer can be
@@ -46,13 +51,8 @@ export function shortCrumb(parts: readonly string[]): string {
   return (parts.length > 4 ? [parts[0], "…", ...parts.slice(-2)] : parts).join(" › ");
 }
 
-function nouns(kind: LookupKind): [string, string] {
-  return kind === "jira_project" ? ["project", "projects"] : ["page", "pages"];
-}
-
 function summary(kind: LookupKind, shown: Shown): string {
-  const [one, many] = nouns(kind);
-  const where = kind === "jira_project" ? "Jira" : "Confluence";
+  const { one, many, where } = LOOKUP_NOUNS[kind];
   switch (shown.phase) {
     case "idle":
       return "";
@@ -77,7 +77,36 @@ function summary(kind: LookupKind, shown: Shown): string {
   }
 }
 
+/** What tells one result from another in the list, whatever its kind. */
+function resultKey(result: LookupResult): string {
+  if ("full_name" in result) {
+    return result.full_name;
+  }
+  if ("number" in result) {
+    return `${result.owner}/${result.number}`;
+  }
+  return "key" in result ? result.key : result.id;
+}
+
 function Option({ result }: { result: LookupResult }) {
+  if ("full_name" in result) {
+    const repo = result as GithubRepoResult;
+    return (
+      <span className="flex min-w-0 flex-col leading-tight">
+        <span className="truncate font-plex-mono text-[13px] font-medium">{repo.full_name}</span>
+        {repo.description === null ? null : <span className="truncate text-xs text-asst-faint">{repo.description}</span>}
+      </span>
+    );
+  }
+  if ("number" in result) {
+    const project = result as GithubProjectResult;
+    return (
+      <span className="flex min-w-0 items-baseline gap-2">
+        <span className="truncate text-[13px] font-medium">{project.title}</span>
+        <span className="shrink-0 font-plex-mono text-xs text-asst-faint">#{project.number}</span>
+      </span>
+    );
+  }
   if ("key" in result) {
     const project = result as JiraProjectResult;
     return (
@@ -103,13 +132,25 @@ export interface AtlassianSearchProps {
   placeholder: string;
   /** For a Confluence page: the space to search first, which the person can widen to all of Confluence. */
   scope?: { key: string; name: string } | null;
+  /** For a GitHub Project: the repository owner whose Projects are offered. */
+  owner?: string | null;
   access: JiraAccess;
   onPick: (result: LookupResult) => void;
   onCancel: () => void;
   lookUp?: LookUp;
 }
 
-export function AtlassianSearch({ kind, label, placeholder, scope = null, access, onPick, onCancel, lookUp = fetchLookup }: AtlassianSearchProps) {
+export function AtlassianSearch({
+  kind,
+  label,
+  placeholder,
+  scope = null,
+  owner = null,
+  access,
+  onPick,
+  onCancel,
+  lookUp = fetchLookup
+}: AtlassianSearchProps) {
   const listId = useId();
   const box = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
@@ -123,7 +164,14 @@ export function AtlassianSearch({ kind, label, placeholder, scope = null, access
   const [signInAt, setSignInAt] = useState<number | null>(null);
   const now = useSignInClock(access.login);
   const space = scoped && scope !== null ? scope.key : null;
-  const results = shown.phase === "found" ? shown.results : [];
+  // A repository typed or pasted as `owner/name` is offered as it stands, first, whatever the search finds: it may be one
+  // outside the person's own organisations, which the search does not look in.
+  const typed = kind === "github_repo" ? readGithubRepo(query) : undefined;
+  const found = shown.phase === "found" ? shown.results : [];
+  const results: LookupResult[] =
+    typed === undefined || found.some((result) => "full_name" in result && result.full_name.toLowerCase() === typed.toLowerCase())
+      ? found
+      : [{ full_name: typed, description: "Use this repository", url: `https://github.com/${typed}` }, ...found];
   const current = results.length === 0 ? -1 : Math.min(active, results.length - 1);
   const optionId = (index: number) => `${listId}-${index}`;
 
@@ -158,7 +206,7 @@ export function AtlassianSearch({ kind, label, placeholder, scope = null, access
     const timer = setTimeout(() => {
       void (async () => {
         try {
-          const answer = await lookUp({ kind, query, space }, controller.signal);
+          const answer = await lookUp({ kind, query, space, owner }, controller.signal);
           if (controller.signal.aborted) {
             return;
           }
@@ -189,7 +237,7 @@ export function AtlassianSearch({ kind, label, placeholder, scope = null, access
       clearTimeout(retry);
       controller.abort();
     };
-  }, [query, space, kind, attempt, lookUp]);
+  }, [query, space, owner, kind, attempt, lookUp]);
 
   async function signIn(): Promise<void> {
     setSignInAt(Date.now());
@@ -283,7 +331,7 @@ export function AtlassianSearch({ kind, label, placeholder, scope = null, access
       <div
         id={listId}
         role="listbox"
-        aria-label={kind === "jira_project" ? "Jira projects found" : "Confluence pages found"}
+        aria-label={`${LOOKUP_NOUNS[kind].where} ${LOOKUP_NOUNS[kind].many} found`}
         hidden={results.length === 0}
         // The display class switches as well as the attribute, so the border and padding never stand as an empty box
         // under the search whichever of the two wins.
@@ -291,7 +339,7 @@ export function AtlassianSearch({ kind, label, placeholder, scope = null, access
       >
         {results.map((result, index) => (
           <div
-            key={"key" in result ? result.key : result.id}
+            key={resultKey(result)}
             id={optionId(index)}
             role="option"
             tabIndex={-1}
