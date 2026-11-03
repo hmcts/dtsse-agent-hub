@@ -10,14 +10,14 @@ import {
   connectionState,
   connections,
   connectionsPrompt,
+  connectRestarts,
   hasLapsed,
   type ModelAccess,
   modelAccess,
   modelAccessAfter,
   offeredConnections,
   screenDetail,
-  signInPrompt,
-  signsInOnRequest
+  signInPrompt
 } from "@/assistant/connections";
 import { type ConnectionsAsk, chatGate, connectionsAsk } from "@/assistant/onboarding";
 import type { Theme } from "@/assistant/theme";
@@ -332,7 +332,7 @@ function ConnectionRow({
   // Connect back once it has started, or failed, with no code to show, so a pod that never relays one does not leave
   // the row saying it is connecting for good.
   const [restarted, setRestarted] = useState(false);
-  const asked = connecting && signsInOnRequest(kind);
+  const asked = connecting && connectRestarts(kind);
   if (asked && starting && !restarted) {
     setRestarted(true);
   } else if (asked && !starting && restarted && answer !== "login") {
@@ -355,7 +355,7 @@ function ConnectionRow({
   // `reconnectSignIn`, recording the ask and restarting, sent as `keep=stored` so it deletes nothing: the row shows
   // nothing stored, which is why it asks no question first, but a credential saved since would be the one every agent
   // of theirs uses.
-  const askForm = words === null && signsInOnRequest(kind);
+  const askForm = words === null && connectRestarts(kind);
   let right: React.ReactNode = null;
   if (words === null && !askForm) {
     right = (

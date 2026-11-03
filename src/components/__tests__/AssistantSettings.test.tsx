@@ -696,6 +696,52 @@ describe("how the Assistant's settings say its agents reach Claude", () => {
   });
 });
 
+describe("signing in to GitHub again from the Assistant's settings", () => {
+  function githubRow(): HTMLElement {
+    return connectionRow("GitHub");
+  }
+
+  // A token granted before the hub asked for `project` works for everything else, so this is the only way to it.
+  it("should offer to sign in to GitHub again while it is connected", () => {
+    open({ connections: data(ALL_SIGNED_IN), connect: connectWith() }, "Connections");
+
+    expect(within(githubRow()).getByRole("button", { name: "Connect GitHub" }).textContent).toBe("Sign in again");
+  });
+
+  it("should delete the saved GitHub token and restart the assistant when the person confirms", async () => {
+    const reconnect = ok();
+    open({ connections: data(ALL_SIGNED_IN), connect: connectWith({ reconnect }) }, "Connections");
+
+    fireEvent.click(within(githubRow()).getByRole("button", { name: "Connect GitHub" }));
+    expect(
+      screen.getByText(
+        "Delete your saved GitHub sign-in, which all your virtual agents use, and restart your assistant so it asks you to sign in again? Your chats are kept."
+      )
+    ).toBeTruthy();
+    await act(async () => {
+      fireEvent.submit(within(githubRow()).getByRole("form", { name: "Connect GitHub" }));
+    });
+
+    const sent = (reconnect.mock.calls[0] as unknown as [FormData])[0];
+    expect([sent.get("id"), sent.get("kind"), sent.get("keep")]).toEqual([ASSISTANT_ID, "github", null]);
+  });
+
+  it("should offer nothing to press on GitHub while its code is live", () => {
+    open(
+      {
+        connections: data(
+          ALL_SIGNED_IN.filter((kind) => kind !== "github"),
+          [login("github", "pending")]
+        ),
+        connect: connectWith()
+      },
+      "Connections"
+    );
+
+    expect(within(githubRow()).queryByRole("button", { name: "Connect GitHub" })).toBeNull();
+  });
+});
+
 describe("connecting Azure from the Assistant's settings", () => {
   it("should offer to connect Azure when it is not connected", () => {
     open({ connections: data(["github", "claude"]), connect: connectWith() }, "Connections");
@@ -763,11 +809,11 @@ describe("connecting Azure from the Assistant's settings", () => {
     expect(within(azureRow()).queryByRole("button")).toBeNull();
   });
 
-  it("should offer a connect for nothing but Azure", () => {
+  it("should offer a connect for nothing but GitHub and Azure", () => {
     open({ connections: data([]), connect: connectWith() }, "Connections");
 
     const buttons = within(screen.getByRole("list", { name: "Connections" })).getAllByRole("button");
-    expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual(["Connect Azure"]);
+    expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual(["Connect GitHub", "Connect Azure"]);
   });
 
   it("should only say where Azure stands when the page gives no way to connect it", () => {

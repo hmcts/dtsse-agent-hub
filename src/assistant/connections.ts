@@ -420,6 +420,16 @@ export function signsInOnRequest(kind: CredentialKind): boolean {
 }
 
 /**
+ * Whether connecting `kind` has to restart the assistant, through `reconnectSignIn`, for a code to come. A sign-in made
+ * on request does, and so does GitHub: stage 0 of the pod signs in to it before the workspace is cloned and never
+ * again, so a pod that is running, or that failed, relays no code for it however long the screen waits. Both are the
+ * only states a Connect for it is shown in, since a starting assistant reads "Connecting…" instead.
+ */
+export function connectRestarts(kind: CredentialKind): boolean {
+  return signsInOnRequest(kind) || kind === "github";
+}
+
+/**
  * Whether a lapsed sign-in of this row's kind is left to the settings section rather than put back in front of the
  * person. One made on request is: nothing in a chat waits for `az`, so a lapsed one says so in settings and offers to
  * connect again rather than nagging somebody who may have changed their mind.
@@ -443,8 +453,15 @@ function asksAbout(row: Pick<Connection, "kind" | "state" | "modelCredential">):
  * Whether the settings row offers to connect this sign-in: one made on request that is not connected and is not
  * waiting on a code already. The connect restarts the assistant so its pod relays the sign-in, and a code that is live
  * is already the thing to do.
+ *
+ * GitHub is offered while connected as well. A token granted before the hub asked for a scope it now needs — `project`,
+ * for the Project search — works for everything else, so nothing ever marks it lapsed, and signing in again is the only
+ * way to the new scope. The confirmation says the saved token goes, and `reconnectSignIn` deletes it before the restart.
  */
 export function offersConnect(row: Pick<Connection, "kind" | "state">): boolean {
+  if (row.kind === "github") {
+    return row.state === "connected" || row.state === "waiting" || hasLapsed(row.state);
+  }
   return signsInOnRequest(row.kind) && (row.state === "waiting" || hasLapsed(row.state));
 }
 
