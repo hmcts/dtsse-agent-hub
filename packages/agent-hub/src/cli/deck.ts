@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { type Api, ApiError } from "../api.ts";
 import { CLI } from "../envelope.ts";
+import { type RetryOptions, withRetry } from "../retry.ts";
 import { requireSessionId } from "../session.ts";
 import type { Deck, DeckOutline, DeckSlide } from "../wire.ts";
 import { type Cli, type Command, parseFlags, refuseSecrets, requireAgent, UsageError } from "./command.ts";
@@ -16,6 +17,11 @@ import { type Cli, type Command, parseFlags, refuseSecrets, requireAgent, UsageE
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const ASSET_RE = /^sha256:([0-9a-f]{64})$/;
 const SLIDE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
+/**
+ * How often a .pptx is sent before giving up. Its outline is already published by then, so a failure is worth a few
+ * more tries: putting the whole deck again would publish another version.
+ */
+export const PPTX_RETRY: RetryOptions = { attempts: 3, baseMs: 500 };
 
 /** What a picture's own bytes say it is, which decides the extension it is saved under. */
 function pictureExtension(bytes: Uint8Array): string {
@@ -156,6 +162,19 @@ function readFile(file: string, what: string): Uint8Array {
   return bytes;
 }
 
+function readPptx(file: string, given: string): Uint8Array {
+  const pptx = readFile(file, "the deck");
+  if (!(pptx[0] === 0x50 && pptx[1] === 0x4b && pptx[2] === 0x03 && pptx[3] === 0x04)) {
+    throw new UsageError(`${given} is not a .pptx`);
+  }
+  return pptx;
+}
+
+/** A path as one word of a shell command, so a command printed for the session to run can be run as it stands. */
+function shellWord(value: string): string {
+  return /^[A-Za-z0-9_/.,:=+@%-]+$/.test(value) ? value : `'${value.replace(/'/g, "'\\''")}'`;
+}
+
 function readOutline(file: string): DeckOutline {
   const text = new TextDecoder().decode(readFile(file, "the outline"));
   let parsed: unknown;
@@ -226,10 +245,7 @@ async function putDeck(cli: Cli, argv: string[]): Promise<number> {
   const outlineFile = path.resolve(cli.cwd(), file);
   const local = readOutline(outlineFile);
   const pptxFile = flags.pptx === undefined ? undefined : path.resolve(cli.cwd(), flags.pptx);
-  const pptx = pptxFile === undefined ? undefined : readFile(pptxFile, "the deck");
-  if (pptx !== undefined && !(pptx[0] === 0x50 && pptx[1] === 0x4b && pptx[2] === 0x03 && pptx[3] === 0x04)) {
-    throw new UsageError(`${flags.pptx} is not a .pptx`);
-  }
+  const pptx = pptxFile === undefined ? undefined : readPptx(pptxFile, flags.pptx as string);
   const agent = requireAgent(requireSessionId(cli.env));
   const api = cli.api();
   const base = flags.base === undefined ? (await api.getDeck(agent.agent_id).catch(noDeck)).version : Number(flags.base);
@@ -245,11 +261,57 @@ async function putDeck(cli: Cli, argv: string[]): Promise<number> {
     return 1;
   }
   keepIds(outlineFile, local, written.outline);
-  if (pptx !== undefined) {
-    await api.putDeckPptx(agent.agent_id, written.version, pptx);
+  if (pptx !== undefined && pptxFile !== undefined) {
+    try {
+      await withRetry(() => api.putDeckPptx(agent.agent_id, written.version, pptx), PPTX_RETRY);
+    } catch (e) {
+      cli.printError(`agent-hub deck: published the slide deck as version ${written.version}, but its .pptx did not reach the hub: ${(e as Error).message}`);
+      cli.printError(
+        `Do not put the outline again, which would publish another version. Send the .pptx alone: ${CLI} deck pptx ${shellWord(pptxFile)} --version ${written.version}`
+      );
+      return 1;
+    }
   }
   const built = pptx === undefined ? "; the person sees it as not built until a .pptx is put with --pptx" : ", with its .pptx";
   cli.print(`agent-hub: published the slide deck as version ${written.version}${built}`);
+  return 0;
+}
+
+function pptxArgs(argv: string[]): { file: string; version: number } {
+  const { flags, rest } = parseFlags(argv, ["version"]);
+  const [file, ...extra] = rest;
+  if (!file) {
+    throw new UsageError("deck pptx takes the .pptx file");
+  }
+  if (extra.length) {
+    throw new UsageError(`unexpected argument: ${extra[0]}`);
+  }
+  if (flags.version === undefined || !/^[1-9]\d*$/.test(flags.version)) {
+    throw new UsageError("deck pptx needs --version, the version the .pptx was built from");
+  }
+  return { file, version: Number(flags.version) };
+}
+
+/** Sends the .pptx built from a version already published, which is how a `deck put` whose .pptx failed is finished. */
+async function putPptx(cli: Cli, argv: string[]): Promise<number> {
+  const { file, version } = pptxArgs(argv);
+  const pptx = readPptx(path.resolve(cli.cwd(), file), file);
+  const agent = requireAgent(requireSessionId(cli.env));
+  const api = cli.api();
+  try {
+    await withRetry(() => api.putDeckPptx(agent.agent_id, version, pptx), PPTX_RETRY);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 409) {
+      cli.printError(`agent-hub deck: version ${version} is older than the latest 3, which are the only ones the hub keeps a .pptx for. Nothing was sent.`);
+      return 1;
+    }
+    if (e instanceof ApiError && e.status === 404) {
+      cli.printError(`agent-hub deck: the deck has no version ${version}, or this session is not a CFT Workspace conversation. Nothing was sent.`);
+      return 1;
+    }
+    throw e;
+  }
+  cli.print(`agent-hub: sent the .pptx for version ${version} of the slide deck`);
   return 0;
 }
 
@@ -261,5 +323,8 @@ export const deck: Command = async (cli, argv) => {
   if (action === "put") {
     return putDeck(cli, rest);
   }
-  throw new UsageError("deck takes get or put");
+  if (action === "pptx") {
+    return putPptx(cli, rest);
+  }
+  throw new UsageError("deck takes get, put or pptx");
 };

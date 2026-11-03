@@ -5,9 +5,22 @@ import * as assetRoute from "../../src/app/api/agent/[agentId]/deck/assets/[sha2
 import * as deckRoute from "../../src/app/api/agent/[agentId]/deck/route.ts";
 import * as pptxRoute from "../../src/app/api/agent/[agentId]/deck/versions/[version]/pptx/route.ts";
 import * as browserAssetRoute from "../../src/app/api/ui/assistant/decks/[conversationId]/assets/[sha256]/route.ts";
+import * as browserDeckRoute from "../../src/app/api/ui/assistant/decks/[conversationId]/route.ts";
 import * as browserPptxRoute from "../../src/app/api/ui/assistant/decks/[conversationId]/versions/[version]/pptx/route.ts";
 import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
-import { ASSET_GRACE_MS, assetRef, type DeckOutline, imageInfo, KEEP_PPTX, KEEP_VERSIONS, MAX_ASSET_BYTES } from "../../src/assistant/deck.ts";
+import {
+  ASSET_GRACE_MS,
+  assetRef,
+  type DeckOutline,
+  imageInfo,
+  jsonbText,
+  KEEP_PPTX,
+  KEEP_VERSIONS,
+  MAX_ASSET_BYTES,
+  MAX_HELD_ASSET_BYTES,
+  MAX_OUTLINE_BYTES,
+  withSlideIds
+} from "../../src/assistant/deck.ts";
 import { putDeckAsset, putDeckPptx, readDeck, writeDeck } from "../../src/assistant/deck-store.ts";
 import { assistantFrame } from "../../src/assistant/frame.ts";
 import { devIdentity } from "../../src/viewer/identity.ts";
@@ -62,10 +75,10 @@ async function chat(): Promise<Chat> {
 }
 
 /** A real PNG header of the given size, padded to `length` bytes, so each call can be a distinct picture. */
-function png(seed: number, length = 64): Buffer {
+function png(seed: number, length = 64, width = 640): Buffer {
   const bytes = Buffer.alloc(length);
   bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
-  bytes.writeUInt32BE(640, 16);
+  bytes.writeUInt32BE(width, 16);
   bytes.writeUInt32BE(320, 20);
   bytes.writeUInt32BE(seed, 28);
   return bytes;
@@ -170,6 +183,34 @@ describe("the deck routes", () => {
     expect((await readDeck(prisma, mine.id)).version).toBe(0);
   });
 
+  it("should store an outline at exactly the column's limit as Postgres measures it, and refuse one byte more with a 400", async () => {
+    const mine = await chat();
+    const put = (body: unknown) => agent(deckRoute.PUT, `/api/agent/${mine.agentId}/deck`, { agentId: mine.agentId }, "PUT", body);
+    // Slides without ids, so the ids the hub gives them are part of what it measures.
+    const sized = (extra: number): DeckOutline => ({
+      title: "Deck",
+      notes: "x".repeat(extra),
+      slides: Array.from({ length: 20 }, (_, index) => ({ layout: "HMCTS_SECTION" as const, title: `Part ${index}`, notes: "n".repeat(9800) }))
+    });
+    const measured = (value: DeckOutline) => Buffer.byteLength(jsonbText(withSlideIds(value)) ?? "");
+    const fits = MAX_OUTLINE_BYTES - measured(sized(0));
+
+    const over = await put({ outline: sized(fits + 1), base_version: 0 });
+    expect(over.status).toBe(400);
+    expect((await jsonOf(over)).error).toBe(`the outline is larger than ${MAX_OUTLINE_BYTES} bytes`);
+
+    const exact = await put({ outline: sized(fits), base_version: 0 });
+    expect(exact.status).toBe(200);
+    const [row] = await prisma.$queryRaw<{ bytes: number; text: string; outline: DeckOutline }[]>`
+      SELECT octet_length(outline::text) AS bytes, outline::text AS text, outline FROM assistant_deck_version WHERE conversation_id = ${mine.id}::uuid
+    `;
+    expect(row?.bytes).toBe(MAX_OUTLINE_BYTES);
+    expect(jsonbText(row?.outline)).toBe(row?.text);
+
+    const nul = await put({ outline: { ...outline(), notes: "a\u0000b" }, base_version: 1 });
+    expect(nul.status).toBe(400);
+  });
+
   it("should answer 404 for the deck of an agent that is not a conversation's", async () => {
     const mine = await chat();
     const other = await prisma.agent.create({ data: { ownerOid: ALICE.oid, sessionId: "laptop-session", name: "laptop" }, select: { id: true } });
@@ -195,11 +236,14 @@ describe("the deck routes", () => {
     expect((await upload(mine, svg)).status).toBe(400);
     expect((await upload(mine, png(2), digest(png(3)))).status).toBe(400);
     expect((await upload(mine, png(2), "NOT-A-DIGEST")).status).toBe(400);
+    const huge = await upload(mine, png(6, 64, 2 ** 31));
+    expect(huge.status).toBe(400);
+    expect((await jsonOf(huge)).error).toBe("that is not a PNG, JPEG or GIF of 1 to 65535 pixels each way");
     const absent = digest(png(4));
     expect((await agent(assetRoute.GET, `/api/agent/${mine.agentId}/deck/assets/${absent}`, { agentId: mine.agentId, sha256: absent })).status).toBe(404);
   });
 
-  it("should refuse a picture over 5 MiB, and one that would take the deck's pictures past 20 MiB", async () => {
+  it("should refuse a picture over 5 MiB, and one that would take the pictures a deck is using past 20 MiB", async () => {
     const mine = await chat();
 
     expect((await upload(mine, png(1, MAX_ASSET_BYTES + 1))).status).toBe(413);
@@ -271,6 +315,63 @@ describe("the deck's retention", () => {
     expect(left.map((asset) => asset.sha256)).toEqual([fresh]);
   });
 
+  it("should take a replacement picture at the cap once the latest version no longer names the one it replaces", async () => {
+    const mine = await chat();
+    const pictures = [1, 2, 3, 4].map((seed) => png(seed, MAX_ASSET_BYTES));
+    const shas = pictures.map(digest);
+    for (const picture of pictures) {
+      expect((await upload(mine, picture)).status).toBe(201);
+    }
+    await writeDeck(prisma, mine.row, { outline: outline(shas), baseVersion: 0, by: "agent", summary: null });
+    // Past their grace, so only being named counts them.
+    await prisma.assistantDeckAsset.updateMany({ where: { conversationId: mine.id }, data: { createdAt: new Date(Date.now() - ASSET_GRACE_MS - 60_000) } });
+
+    // At the cap, a fifth picture is refused while the latest version names all four.
+    const replacement = png(5, MAX_ASSET_BYTES);
+    expect((await upload(mine, replacement)).status).toBe(409);
+
+    // A version without the fourth leaves its bytes held, for version 1, but not counted.
+    await writeDeck(prisma, mine.row, { outline: outline(shas.slice(0, 3)), baseVersion: 1, by: "agent", summary: null });
+    expect((await upload(mine, replacement)).status).toBe(201);
+    await writeDeck(prisma, mine.row, { outline: outline([...shas.slice(0, 3), digest(replacement)]), baseVersion: 2, by: "agent", summary: null });
+
+    expect(await prisma.assistantDeckAsset.count({ where: { conversationId: mine.id } })).toBe(5);
+    expect(await prisma.assistantDeckVersion.count({ where: { conversationId: mine.id } })).toBe(3);
+  });
+
+  it("should drop the oldest versions, never the latest, and then their pictures, when an upload would pass the conversation's ceiling", async () => {
+    const mine = await chat();
+    const pictures = MAX_HELD_ASSET_BYTES / MAX_ASSET_BYTES;
+    const long = new Date(Date.now() - ASSET_GRACE_MS - 60_000);
+    // Each version names one picture of its own, so every picture is held by one version and counted by none but the latest.
+    for (let seed = 1; seed <= pictures; seed += 1) {
+      const sha = await store(mine, png(seed, MAX_ASSET_BYTES));
+      await writeDeck(prisma, mine.row, { outline: outline([sha]), baseVersion: seed - 1, by: "agent", summary: null });
+      await prisma.assistantDeckAsset.update({ where: { conversationId_sha256: { conversationId: mine.id, sha256: sha } }, data: { createdAt: long } });
+    }
+    const first = digest(png(1, MAX_ASSET_BYTES));
+    const latest = digest(png(pictures, MAX_ASSET_BYTES));
+    expect(await prisma.assistantDeckAsset.count({ where: { conversationId: mine.id } })).toBe(pictures);
+
+    // One more picture: version 1 and its picture go to make room for it.
+    expect((await upload(mine, png(100, MAX_ASSET_BYTES))).status).toBe(201);
+    const versions = await prisma.assistantDeckVersion.findMany({ where: { conversationId: mine.id }, select: { version: true }, orderBy: { version: "asc" } });
+    expect(versions.map((row) => row.version)).toEqual(Array.from({ length: pictures - 1 }, (_, index) => index + 2));
+    const held = await prisma.assistantDeckAsset.findMany({ where: { conversationId: mine.id }, select: { sha256: true } });
+    expect(held.map((asset) => asset.sha256)).not.toContain(first);
+    expect(held.map((asset) => asset.sha256)).toContain(latest);
+    expect(held).toHaveLength(pictures);
+
+    // Each upload past the ceiling drops one more of the oldest, and the latest stays. Fresh pictures are counted by
+    // the 20 MiB rule, which refuses the third.
+    expect((await upload(mine, png(101, MAX_ASSET_BYTES))).status).toBe(201);
+    expect((await upload(mine, png(102, MAX_ASSET_BYTES))).status).toBe(201);
+    const left = await prisma.assistantDeckVersion.findMany({ where: { conversationId: mine.id }, select: { version: true }, orderBy: { version: "asc" } });
+    expect(left.map((row) => row.version)).toEqual(Array.from({ length: pictures - 3 }, (_, index) => index + 4));
+    expect((await upload(mine, png(103, MAX_ASSET_BYTES))).status).toBe(409);
+    expect((await readDeck(prisma, mine.id)).version).toBe(pictures);
+  });
+
   it("should take the deck's versions and pictures with the conversation when it is deleted", async () => {
     const mine = await chat();
     const sha = await store(mine, png(1));
@@ -294,6 +395,7 @@ describe("reading a deck in the browser", () => {
 
   const picture = (as: string, id: string, sha: string) =>
     browser(browserAssetRoute.GET, as, `/api/ui/assistant/decks/${id}/assets/${sha}`, { conversationId: id, sha256: sha });
+  const outlineOf = (as: string, id: string) => browser(browserDeckRoute.GET, as, `/api/ui/assistant/decks/${id}`, { conversationId: id });
   const download = (as: string, id: string, version = "1") =>
     browser(browserPptxRoute.GET, as, `/api/ui/assistant/decks/${id}/versions/${version}/pptx`, { conversationId: id, version });
 
@@ -314,6 +416,37 @@ describe("reading a deck in the browser", () => {
     expect((await download("alice", mine.id, "latest")).status).toBe(404);
   });
 
+  it("should encode every character RFC 5987 does not allow in the download's filename*", async () => {
+    const mine = await chat();
+    await writeDeck(prisma, mine.row, { outline: outline([], "Team's plan (draft)"), baseVersion: 0, by: "agent", summary: null });
+    await putDeckPptx(prisma, mine.row, 1, PPTX);
+
+    const file = await download("alice", mine.id);
+
+    expect(file.headers.get("content-disposition")).toBe(
+      `attachment; filename="Team's plan (draft).pptx"; filename*=UTF-8''Team%27s%20plan%20%28draft%29.pptx`
+    );
+  });
+
+  it("should give the owner, and anyone the chat is shared with, the latest outline with its pictures' sizes, never to be cached", async () => {
+    const { mine, sha } = await deckWithPicture();
+
+    const own = await outlineOf("alice", mine.id);
+    expect(own.status).toBe(200);
+    expect(own.headers.get("cache-control")).toBe("no-store");
+    const read = await jsonOf(own);
+    expect(read).toMatchObject({ title: 'Plan: "Q4"/é', version: 1, updatedBy: "agent", pptx: true, sizes: { [sha]: { width: 640, height: 320 } } });
+    expect(read.outline.slides).toHaveLength(3);
+
+    expect((await outlineOf("bob", mine.id)).status).toBe(404);
+    actAs("alice");
+    await shareActions.shareChat({ conversationId: mine.id, recipientOid: BOB.oid });
+    expect((await outlineOf("bob", mine.id)).status).toBe(200);
+
+    const empty = await chat();
+    expect((await outlineOf("alice", empty.id)).status).toBe(404);
+  });
+
   it("should refuse someone the chat is not shared with, and serve someone it is until the share is taken away", async () => {
     const { mine, sha } = await deckWithPicture();
 
@@ -331,16 +464,18 @@ describe("reading a deck in the browser", () => {
     expect((await picture("bob", mine.id, sha)).status).toBe(404);
   });
 
-  it("should carry the deck on the owner's page and, read-only, on the share page", async () => {
+  it("should carry the deck's version, without its outline, on the owner's page and on the share page", async () => {
     const { mine, sha } = await deckWithPicture();
     actAs("alice");
     await shareActions.shareChat({ conversationId: mine.id, recipientOid: CAROL.oid });
 
     const own = await assistantConversation(viewerOf(ALICE), mine.id);
-    expect(own?.deck).toMatchObject({ version: 1, updatedBy: "agent", pptx: true, sizes: { [sha]: { width: 640, height: 320 } } });
+    // The version and no more: the panel reads the outline itself.
+    expect(own?.deck).toEqual({ title: 'Plan: "Q4"/é', version: 1, updatedBy: "agent", pptx: true });
+    expect(sha).toBeDefined();
 
     const shared = await sharedChat(viewerOf(CAROL), mine.id);
-    expect(shared?.deck).toMatchObject({ title: 'Plan: "Q4"/é', version: 1, pptx: true });
+    expect(shared?.deck).toEqual({ title: 'Plan: "Q4"/é', version: 1, updatedBy: "agent", pptx: true });
   });
 });
 

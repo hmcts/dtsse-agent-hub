@@ -17,7 +17,7 @@ import type { ConfluenceExportView } from "./confluence.ts";
 import { readConfluenceExport } from "./confluence-store.ts";
 import type { ConversationRow, ProductChange, SessionState, StopMark } from "./conversation-row.ts";
 import { type ConversationListRow, hasLocalConversation, listConversations, unsentConversation } from "./conversation-store.ts";
-import { type DeckView, deckView } from "./deck-store.ts";
+import { type DeckSummary, deckSummary } from "./deck-store.ts";
 import { FORKED_SELECT, type ForkedView, forkedView } from "./forks.ts";
 import type { GithubExportView } from "./github.ts";
 import { readGithubExport } from "./github-store.ts";
@@ -256,8 +256,8 @@ export interface ConversationView {
   sessionState: SessionState | null;
   sessionDetail: string | null;
   artefact: { title: string | null; markdown: string; version: number; updatedBy: Artefact["updatedBy"]; updatedAt: string | null };
-  /** The latest version of the conversation's slide deck, or `null` while it has none. */
-  deck: DeckView | null;
+  /** The latest version of the conversation's slide deck, without its outline, which the panel reads; `null` while it has none. */
+  deck: DeckSummary | null;
   jira: JiraExportView;
   github: GithubExportView;
   confluence: ConfluenceExportView;
@@ -283,7 +283,7 @@ export async function conversationView(db: Database, conversation: ConversationR
   const [current, artefact, deck, jira, github, confluence, page, questions, fork] = await Promise.all([
     db.agent.findUnique({ where: { id: agentId }, select: { status: true, skills: true, clientFeatures: true, repo: true, branch: true } }),
     readArtefact(db, conversation.id),
-    deckView(db, conversation.id),
+    deckSummary(db, conversation.id),
     readJiraExport(db, conversation.id),
     readGithubExport(db, conversation.id),
     readConfluenceExport(db, conversation.id),

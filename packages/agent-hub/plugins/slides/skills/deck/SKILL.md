@@ -45,6 +45,12 @@ Also ask for any pictures they want used, as files. Don't start the outline unti
    you at a slide. Outside a conversation there is nowhere to publish, and the command says so.
    - "the deck has changed since version N": someone else wrote a newer version. Start again from
      `agent-hub deck get`, make your change to that, build it, and put it with the `--base` the message gives.
+   - "a deck uses at most … bytes of pictures": the pictures the latest version names, with any uploaded in the last
+     hour, are at the limit. Put a version without the pictures you are replacing first, then put the one with the
+     new pictures; if it is still refused, the old ones were uploaded under an hour ago, so tell the person.
+   - "published the slide deck as version N, but its .pptx did not reach the hub": the outline is saved and only
+     the file is missing. Do not run `deck put` again, which would publish another version. Run the command the
+     message gives, `agent-hub deck pptx deck/<name>.pptx --version N`, which sends the `.pptx` alone.
 5. Tell the person how many slides it has and any warnings left. In a conversation they already see it; elsewhere,
    say where the file is.
 

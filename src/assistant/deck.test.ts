@@ -7,6 +7,8 @@ import {
   imageInfo,
   isPptx,
   isSha256,
+  jsonbText,
+  MAX_IMAGE_SIDE,
   MAX_OUTLINE_BYTES,
   newSlideId,
   outlineAssets,
@@ -38,6 +40,15 @@ function outline(overrides: Partial<DeckOutline> = {}): DeckOutline {
   };
 }
 
+/** Draws that never repeat, so the ids `withSlideIds` gives are the same from one call to the next. */
+function counter(): () => number {
+  let drawn = 0;
+  return () => {
+    drawn += 1;
+    return drawn / 0x10000;
+  };
+}
+
 function refused(value: unknown): string {
   const result = checkOutline(value);
   if (result.ok) {
@@ -59,8 +70,9 @@ describe("SLIDE_SCHEMAS", () => {
 });
 
 describe("checkOutline", () => {
-  it("should accept an outline that uses every layout", () => {
-    expect(checkOutline(outline())).toEqual({ ok: true, outline: outline() });
+  it("should accept an outline that uses every layout, with an id on every slide", () => {
+    const random = counter();
+    expect(checkOutline(outline(), random)).toEqual({ ok: true, outline: withSlideIds(outline(), counter()) });
   });
 
   it("should refuse a picture named by path when the hub holds pictures by their hash", () => {
@@ -116,8 +128,49 @@ describe("checkOutline", () => {
     expect(refused({ title: "Deck", slides })).toBe(`the outline is larger than ${MAX_OUTLINE_BYTES} bytes`);
   });
 
+  it("should measure the outline as Postgres prints it, ids and all, when it is at the column's limit", () => {
+    // Slides without ids, so the ids the check gives them are part of what it measures.
+    const sized = (extra: number): DeckOutline => ({
+      title: "Deck",
+      notes: "x".repeat(extra),
+      slides: Array.from({ length: 20 }, (_, index) => ({ layout: "HMCTS_SECTION" as const, title: `Part ${index}`, notes: "n".repeat(9800) }))
+    });
+    const stored = (value: DeckOutline) => new TextEncoder().encode(jsonbText(withSlideIds(value, counter())) ?? "").byteLength;
+    const fits = MAX_OUTLINE_BYTES - stored(sized(0));
+    expect(fits).toBeGreaterThan(0);
+    expect(stored(sized(fits))).toBe(MAX_OUTLINE_BYTES);
+
+    expect(checkOutline(sized(fits), counter()).ok).toBe(true);
+    expect(refused(sized(fits + 1))).toBe(`the outline is larger than ${MAX_OUTLINE_BYTES} bytes`);
+    // What the check used to measure: compact JSON, before the ids. It is well under the limit for the same outline.
+    expect(new TextEncoder().encode(JSON.stringify(sized(fits + 1))).byteLength).toBeLessThan(MAX_OUTLINE_BYTES - 100);
+  });
+
+  it("should refuse text a jsonb cannot hold when it has a NUL or half a surrogate pair", () => {
+    const error = "the outline has text the hub cannot store: a NUL character, or half of a surrogate pair";
+    expect(refused(outline({ notes: "a\u0000b" }))).toBe(error);
+    expect(refused(outline({ subtitle: "\ud83d" }))).toBe(error);
+    expect(refused(outline({ subtitle: "\ude00 alone" }))).toBe(error);
+    expect(checkOutline(outline({ subtitle: "\ud83d\ude00 a whole emoji" })).ok).toBe(true);
+  });
+
   it("should say the outline is not valid when it is not an object", () => {
     expect(checkOutline("slides").ok).toBe(false);
+  });
+});
+
+describe("jsonbText", () => {
+  it("should print a value as Postgres prints a jsonb, when keys, arrays and escapes are all in it", () => {
+    // `SELECT '{"b":[1,2],"aa":{"x":"é\\n\\u001f"},"c":true}'::jsonb::text` on Postgres 16.
+    expect(jsonbText({ b: [1, 2], aa: { x: "é\n\u001f" }, c: true })).toBe('{"b": [1, 2], "c": true, "aa": {"x": "é\\n\\u001f"}}');
+    expect(jsonbText({ ab: 1, aa: 2, b: undefined, é: 3, z: 4 })).toBe('{"z": 4, "aa": 2, "ab": 1, "é": 3}');
+    expect(jsonbText({ list: [], none: null, nested: {} })).toBe('{"list": [], "none": null, "nested": {}}');
+  });
+
+  it("should answer nothing for a value a jsonb cannot hold", () => {
+    expect(jsonbText(["fine", "nul\u0000"])).toBeUndefined();
+    expect(jsonbText({ "\u0000": "key" })).toBeUndefined();
+    expect(jsonbText({ a: { b: "\udfff" } })).toBeUndefined();
   });
 });
 
@@ -221,6 +274,13 @@ describe("imageInfo", () => {
   it("should refuse a JPEG whose segments do not lead to a frame header", () => {
     expect(imageInfo(new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x04, 0x00, 0x00, 0x12, 0x34, 0, 0, 0]))).toBeUndefined();
     expect(imageInfo(new Uint8Array([0xff, 0xd8, 0xff]))).toBeUndefined();
+  });
+
+  it("should refuse a picture wider or taller than an INTEGER column and a JPEG or GIF header can say", () => {
+    expect(imageInfo(png(MAX_IMAGE_SIDE, MAX_IMAGE_SIDE))).toEqual({ mime: "image/png", width: MAX_IMAGE_SIDE, height: MAX_IMAGE_SIDE });
+    expect(imageInfo(png(MAX_IMAGE_SIDE + 1, 10))).toBeUndefined();
+    expect(imageInfo(png(10, 2 ** 31))).toBeUndefined();
+    expect(imageInfo(png(2 ** 32 - 1, 2 ** 32 - 1))).toBeUndefined();
   });
 
   it("should refuse a picture of no size, and anything that is not one of the three types", () => {

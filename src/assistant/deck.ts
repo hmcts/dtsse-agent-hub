@@ -9,7 +9,7 @@ import type { Outline } from "./slides/masters.ts";
  * errors, and leaves their word-count warnings to the plugin, since a crowded slide still renders.
  */
 
-/** The migration's CHECK on `assistant_deck_version.outline`, in bytes of its JSON text. */
+/** The migration's CHECK on `assistant_deck_version.outline`: the bytes of the jsonb's text, as Postgres prints it. */
 export const MAX_OUTLINE_BYTES = 200_000;
 export const MAX_SLIDES = 100;
 export const MAX_DECK_TITLE = 200;
@@ -17,8 +17,15 @@ export const MAX_SUMMARY = 200;
 /** One picture, and one .pptx: the migration's CHECKs. */
 export const MAX_ASSET_BYTES = 5 * 1024 * 1024;
 export const MAX_PPTX_BYTES = 5 * 1024 * 1024;
-/** Every picture a deck holds, together. */
+/** The pictures a deck is using: those its latest version names, and those still in their upload grace. */
 export const MAX_DECK_ASSET_BYTES = 20 * 1024 * 1024;
+/**
+ * Every picture a conversation holds, those only older versions name included. An upload that would pass it drops the
+ * oldest versions, never the latest, until the pictures no kept version names leave room.
+ */
+export const MAX_HELD_ASSET_BYTES = 60 * 1024 * 1024;
+/** A picture's width and height, each: a JPEG or GIF header cannot say more, and the columns are INTEGER. */
+export const MAX_IMAGE_SIDE = 65_535;
 /** How many versions of an outline are kept, and how many of the newest keep their .pptx. */
 export const KEEP_VERSIONS = 100;
 export const KEEP_PPTX = 3;
@@ -118,17 +125,66 @@ function issueText(issue: z.core.$ZodIssue): string {
   return `outline${where} ${issue.message}`;
 }
 
-/** The outline, once it is one the plugin could build and it fits the column; otherwise the first problem, worded. */
-export function checkOutline(value: unknown): OutlineCheck {
+const utf8 = new TextEncoder();
+
+function compareBytes(a: Uint8Array, b: Uint8Array): number {
+  for (let at = 0; at < Math.min(a.length, b.length); at += 1) {
+    if (a[at] !== b[at]) {
+      return (a[at] ?? 0) - (b[at] ?? 0);
+    }
+  }
+  return a.length - b.length;
+}
+
+/** A NUL, or half of a surrogate pair: text a jsonb cannot hold, which Postgres refuses as the row is written. */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: a NUL is what Postgres refuses, so it is what this finds
+const UNSTORABLE_RE = /\u0000|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+
+/**
+ * `value` as Postgres prints a jsonb, which is what the column's CHECK measures: `", "` between items, `": "` after a
+ * key, and an object's keys shortest first, then by their bytes. Strings are escaped as `JSON.stringify` escapes them.
+ * `undefined` for text a jsonb cannot hold at all.
+ */
+export function jsonbText(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    return UNSTORABLE_RE.test(value) ? undefined : JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    const items = value.map(jsonbText);
+    return items.includes(undefined) ? undefined : `[${items.join(", ")}]`;
+  }
+  if (value !== null && typeof value === "object") {
+    const entries = Object.entries(value)
+      .filter(([, item]) => item !== undefined)
+      .map(([key, item]) => ({ key, bytes: utf8.encode(key), text: jsonbText(item) }));
+    if (entries.some((entry) => entry.text === undefined || UNSTORABLE_RE.test(entry.key))) {
+      return undefined;
+    }
+    entries.sort((a, b) => a.bytes.length - b.bytes.length || compareBytes(a.bytes, b.bytes));
+    return `{${entries.map((entry) => `${JSON.stringify(entry.key)}: ${entry.text}`).join(", ")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+/**
+ * The outline with an id on every slide, once it is one the plugin could build and it fits the column as it will be
+ * stored, ids and all; otherwise the first problem, worded.
+ */
+export function checkOutline(value: unknown, random: () => number = Math.random): OutlineCheck {
   const parsed = deckOutline.safeParse(value);
   if (!parsed.success) {
     const [first] = parsed.error.issues;
     return { ok: false, error: first === undefined ? "the outline is not valid" : issueText(first) };
   }
-  if (new TextEncoder().encode(JSON.stringify(parsed.data)).byteLength > MAX_OUTLINE_BYTES) {
+  const outline = withSlideIds(parsed.data as DeckOutline, random);
+  const stored = jsonbText(outline);
+  if (stored === undefined) {
+    return { ok: false, error: "the outline has text the hub cannot store: a NUL character, or half of a surrogate pair" };
+  }
+  if (utf8.encode(stored).byteLength > MAX_OUTLINE_BYTES) {
     return { ok: false, error: `the outline is larger than ${MAX_OUTLINE_BYTES} bytes` };
   }
-  return { ok: true, outline: parsed.data as DeckOutline };
+  return { ok: true, outline };
 }
 
 /** A fresh id for a slide that came without one: short, so a slide reference stays readable. */
@@ -235,7 +291,7 @@ function jpegSize(bytes: Uint8Array): { width: number; height: number } | undefi
 
 /**
  * What a picture is, read from its bytes: one of the three types the plugin builds into a deck, and its size in
- * pixels. Anything else is `undefined`. The type is what the hub serves the picture as, to the owner and to anyone
+ * pixels, 1 to `MAX_IMAGE_SIDE` each way. Anything else is `undefined`. The type is what the hub serves the picture as, to the owner and to anyone
  * they share the chat with, so it is never taken from the uploader.
  */
 export function imageInfo(bytes: Uint8Array): ImageInfo | undefined {
@@ -248,7 +304,8 @@ export function imageInfo(bytes: Uint8Array): ImageInfo | undefined {
     const size = jpegSize(bytes);
     found = size === undefined ? undefined : { mime: "image/jpeg", ...size };
   }
-  return found !== undefined && found.width > 0 && found.height > 0 ? found : undefined;
+  const fits = (side: number) => side >= 1 && side <= MAX_IMAGE_SIDE;
+  return found !== undefined && fits(found.width) && fits(found.height) ? found : undefined;
 }
 
 /** A .pptx is a zip: its first local file header. */

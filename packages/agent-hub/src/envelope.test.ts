@@ -345,6 +345,24 @@ describe("assistantEnvelope", () => {
     expect(assistantEnvelope(personMessage, { ...pcs, deck_version: 0, deck_updated_by: "user" }, null)).not.toMatch(/slide deck/);
   });
 
+  it("should say both lines on every message, not only the first, until the session writes the document or the deck itself", () => {
+    // Arrange
+    const forked = { ...pcs, artefact_version: 1, artefact_updated_by: "user" as const, deck_version: 1, deck_updated_by: "user" as const };
+    const later = { ...personMessage, id: "8", body: "and another thing" };
+
+    // Act
+    const first = assistantEnvelope(personMessage, forked, null);
+    const second = assistantEnvelope(later, forked, { product: "pcs", product_label: "Possession claims" });
+    const written = assistantEnvelope(later, { ...forked, artefact_version: 2, artefact_updated_by: "agent", deck_version: 2, deck_updated_by: "agent" }, null);
+
+    // Assert
+    for (const text of [first, second]) {
+      expect(text).toMatch(/edited the conversation's document \(version 1\)/);
+      expect(text).toMatch(/slide deck \(version 1\) was last changed by the user/);
+    }
+    expect(written).not.toMatch(/edited the conversation's document|slide deck/);
+  });
+
   it("should say the product is not chosen, and name the user generically, when the frame and the author are empty", () => {
     // Act
     const text = assistantEnvelope({ id: "7", body: "hello" });

@@ -9,6 +9,7 @@ import {
   KEEP_PPTX,
   KEEP_VERSIONS,
   MAX_DECK_ASSET_BYTES,
+  MAX_HELD_ASSET_BYTES,
   outlineAssets,
   withSlideIds
 } from "./deck.ts";
@@ -19,7 +20,8 @@ import {
  * sends it after the outline, so a version can be read before its .pptx exists.
  *
  * Every write applies the retention in its own transaction: the newest `KEEP_VERSIONS` outlines stay, only the newest
- * `KEEP_PPTX` keep their .pptx, and a picture no kept outline names goes once it is older than `ASSET_GRACE_MS`. A
+ * `KEEP_PPTX` keep their .pptx, and a picture no kept outline names goes once it is older than `ASSET_GRACE_MS`. An
+ * upload that would take the pictures held past `MAX_HELD_ASSET_BYTES` drops the oldest outlines to make room. A
  * write locks the conversation's row, as an asset upload and a .pptx upload do, so the three cannot interleave.
  */
 
@@ -86,7 +88,7 @@ async function lockConversation(db: Database, conversationId: string): Promise<b
   return rows.length > 0;
 }
 
-/** The retention: old outlines, old .pptx files, and pictures no kept outline names. */
+/** The retention: old outlines, old .pptx files, and pictures no kept outline names. `makeRoom` is the rest of it. */
 async function prune(db: Database, conversationId: string, latest: number, now: Date): Promise<void> {
   await db.$executeRaw`
     DELETE FROM assistant_deck_version WHERE conversation_id = ${conversationId}::uuid AND version <= ${latest - KEEP_VERSIONS}::int
@@ -95,6 +97,11 @@ async function prune(db: Database, conversationId: string, latest: number, now: 
     UPDATE assistant_deck_version SET pptx = NULL
      WHERE conversation_id = ${conversationId}::uuid AND version <= ${latest - KEEP_PPTX}::int AND pptx IS NOT NULL
   `;
+  await deleteUnnamedAssets(db, conversationId, now);
+}
+
+/** The pictures no kept version names, once they are past their grace. */
+async function deleteUnnamedAssets(db: Database, conversationId: string, now: Date): Promise<void> {
   await db.$executeRaw`
     DELETE FROM assistant_deck_asset a
      WHERE a.conversation_id = ${conversationId}::uuid
@@ -160,30 +167,91 @@ export async function writeDeck(
 
 export type AssetWrite = "stored" | "held" | "deck_full";
 
+/** The bytes of the pictures the deck is using: those its latest version names, and those still in their grace. */
+async function usedAssetBytes(db: Database, conversationId: string, now: Date): Promise<number> {
+  const [used] = await db.$queryRaw<{ bytes: bigint | null }[]>`
+    SELECT SUM(octet_length(a.bytes))::bigint AS bytes
+      FROM assistant_deck_asset a
+      JOIN assistant_conversation c ON c.id = a.conversation_id
+     WHERE a.conversation_id = ${conversationId}::uuid
+       AND (
+         a.created_at >= ${new Date(now.getTime() - ASSET_GRACE_MS)}
+         OR EXISTS (
+           SELECT 1 FROM assistant_deck_version v
+            WHERE v.conversation_id = a.conversation_id
+              AND v.version = c.deck_version
+              AND jsonb_path_exists(v.outline, '$.slides[*].image.asset ? (@ == $ref)', jsonb_build_object('ref', 'sha256:' || a.sha256))
+         )
+       )
+  `;
+  return Number(used?.bytes ?? 0);
+}
+
+/**
+ * Makes room for `incoming` more bytes under `MAX_HELD_ASSET_BYTES`, by deleting the fewest of the oldest versions
+ * whose going leaves the pictures still held under it, and then the pictures nothing kept names. The latest version
+ * is never deleted: what it names, with what is in its grace, is under `MAX_DECK_ASSET_BYTES` by the time this runs,
+ * so dropping every older one always leaves room.
+ */
+async function makeRoom(db: Database, conversationId: string, incoming: number, now: Date): Promise<void> {
+  const assets = await db.$queryRaw<{ sha256: string; bytes: number; fresh: boolean }[]>`
+    SELECT sha256, octet_length(bytes) AS bytes, created_at >= ${new Date(now.getTime() - ASSET_GRACE_MS)} AS fresh
+      FROM assistant_deck_asset WHERE conversation_id = ${conversationId}::uuid
+  `;
+  const held = assets.reduce((sum, asset) => sum + asset.bytes, 0);
+  if (held + incoming <= MAX_HELD_ASSET_BYTES) {
+    return;
+  }
+  const versions = await db.$queryRaw<{ version: number; refs: string[] }[]>`
+    SELECT version, jsonb_path_query_array(outline, '$.slides[*].image.asset') AS refs
+      FROM assistant_deck_version WHERE conversation_id = ${conversationId}::uuid ORDER BY version ASC
+  `;
+  // Deleting the versions before `versions[cut]` keeps a picture that is fresh or named from `cut` on.
+  let cut = 0;
+  for (; cut < versions.length - 1; cut += 1) {
+    const named = new Set(versions.slice(cut).flatMap((one) => one.refs));
+    const kept = assets.filter((asset) => asset.fresh || named.has(assetRef(asset.sha256))).reduce((sum, asset) => sum + asset.bytes, 0);
+    if (kept + incoming <= MAX_HELD_ASSET_BYTES) {
+      break;
+    }
+  }
+  const oldestKept = versions[cut]?.version;
+  if (cut > 0 && oldestKept !== undefined) {
+    await db.$executeRaw`DELETE FROM assistant_deck_version WHERE conversation_id = ${conversationId}::uuid AND version < ${oldestKept}::int`;
+  }
+  await deleteUnnamedAssets(db, conversationId, now);
+}
+
 /**
  * Stores one picture for the deck, under the digest of its bytes. Storing one already held changes nothing, so an
- * upload repeated after a lost answer is answered the same. `deck_full` is a picture that would take the deck's
- * pictures past `MAX_DECK_ASSET_BYTES`.
+ * upload repeated after a lost answer is answered the same. `deck_full` is a picture that would take the pictures the
+ * deck is using past `MAX_DECK_ASSET_BYTES`; one that would take every picture held past `MAX_HELD_ASSET_BYTES` makes
+ * room by dropping old versions instead (`makeRoom`).
  *
  * Not announced: nothing on screen shows a picture until an outline names it, and that write is announced.
  */
-export async function putDeckAsset(prisma: PrismaClient, conversationId: string, sha256: string, bytes: Uint8Array, info: ImageInfo): Promise<AssetWrite> {
+export async function putDeckAsset(
+  prisma: PrismaClient,
+  conversationId: string,
+  sha256: string,
+  bytes: Uint8Array,
+  info: ImageInfo,
+  now: Date = new Date()
+): Promise<AssetWrite> {
   return await prisma.$transaction(async (tx) => {
     await lockConversation(tx, conversationId);
     const existing = await tx.assistantDeckAsset.count({ where: { conversationId, sha256 } });
     if (existing > 0) {
       // Touched, so a picture uploaded again for an outline about to name it gets its full grace again.
-      await tx.assistantDeckAsset.update({ where: { conversationId_sha256: { conversationId, sha256 } }, data: { createdAt: new Date() } });
+      await tx.assistantDeckAsset.update({ where: { conversationId_sha256: { conversationId, sha256 } }, data: { createdAt: now } });
       return "held";
     }
-    const [total] = await tx.$queryRaw<{ bytes: bigint | null }[]>`
-      SELECT SUM(octet_length(bytes))::bigint AS bytes FROM assistant_deck_asset WHERE conversation_id = ${conversationId}::uuid
-    `;
-    if (Number(total?.bytes ?? 0) + bytes.byteLength > MAX_DECK_ASSET_BYTES) {
+    if ((await usedAssetBytes(tx, conversationId, now)) + bytes.byteLength > MAX_DECK_ASSET_BYTES) {
       return "deck_full";
     }
+    await makeRoom(tx, conversationId, bytes.byteLength, now);
     await tx.assistantDeckAsset.create({
-      data: { conversationId, sha256, mime: info.mime, bytes: Buffer.from(bytes), width: info.width, height: info.height }
+      data: { conversationId, sha256, mime: info.mime, bytes: Buffer.from(bytes), width: info.width, height: info.height, createdAt: now }
     });
     return "stored";
   });
@@ -308,4 +376,28 @@ export async function deckView(db: Database, conversationId: string): Promise<De
     pptx: deck.pptx,
     sizes: await deckAssetSizes(db, conversationId)
   };
+}
+
+/**
+ * What a page carries about the latest version of a deck, which is all it needs to offer the slides and to know when
+ * they have changed; the panel reads the outline itself, as `DeckView`, when it opens and whenever `version` moves on.
+ * `null` for a conversation with none.
+ */
+export interface DeckSummary {
+  title: string;
+  version: number;
+  updatedBy: DeckAuthor | null;
+  /** Whether the latest version's .pptx can be downloaded. */
+  pptx: boolean;
+}
+
+export async function deckSummary(db: Database, conversationId: string): Promise<DeckSummary | null> {
+  const row = await db.assistantConversation.findUnique({ where: { id: conversationId }, select: DECK_SELECT });
+  if (row === null || row.deckVersion === 0 || row.deckTitle === null) {
+    return null;
+  }
+  const [latest] = await db.$queryRaw<{ pptx: boolean }[]>`
+    SELECT pptx IS NOT NULL AS pptx FROM assistant_deck_version WHERE conversation_id = ${conversationId}::uuid AND version = ${row.deckVersion}::int
+  `;
+  return { title: row.deckTitle, version: row.deckVersion, updatedBy: author(row.deckUpdatedBy), pptx: latest?.pptx ?? false };
 }

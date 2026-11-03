@@ -624,6 +624,16 @@ describe("runHook in an assistant conversation", () => {
     expect(out[0]).toMatch(/agent-hub artefact get/);
     expect(out.some((l) => /^This is a virtual agent/.test(l))).toBe(false);
   });
+
+  it("should mention the slide deck only when the slides plugin is ticked, when SessionStart runs in a conversation", async () => {
+    // Act
+    const without = await virtualStart("conv-no-slides", { ...reposState(null), ...CONVERSATION, AGENT_HUB_PLUGINS: "welsh" });
+    const ticked = await virtualStart("conv-slides", { ...reposState(null), ...CONVERSATION, AGENT_HUB_PLUGINS: "welsh, slides" });
+
+    // Assert
+    expect(without[0]).not.toMatch(/slide deck|deck get/);
+    expect(ticked[0]).toContain("It can also have one slide deck, which the slides plugin's deck skill reads with `agent-hub deck get`");
+  });
 });
 
 /**

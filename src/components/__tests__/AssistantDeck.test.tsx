@@ -4,9 +4,9 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { assetRef, type DeckOutline } from "@/assistant/deck";
-import type { DeckView } from "@/assistant/deck-store";
+import type { DeckSummary, DeckView } from "@/assistant/deck-store";
 import { plan } from "@/assistant/slides/masters";
-import { DeckPanel, DeckViewer, deckAssetUrl, deckPptxUrl, SharedDeck, type SlideAsk } from "@/components/assistant/DeckPanel";
+import { DeckPanel, DeckViewer, deckAssetUrl, deckPptxUrl, deckUrl, SharedDeck, type SlideAsk } from "@/components/assistant/DeckPanel";
 import { nestRuns, SlideCanvas, slideTitle } from "@/components/assistant/SlideCanvas";
 
 const CONVERSATION = "22222222-2222-2222-2222-222222222222";
@@ -16,6 +16,7 @@ const DECORATIVE = "d".repeat(64);
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 function outline(overrides: Partial<DeckOutline> = {}): DeckOutline {
@@ -58,6 +59,28 @@ function deck(overrides: Partial<DeckView> = {}): DeckView {
     sizes: { [SHA]: { width: 1200, height: 600 } },
     ...overrides
   };
+}
+
+/** What the page hands the panel: the deck's version and no outline. */
+function summary(overrides: Partial<DeckSummary> = {}): DeckSummary {
+  return { title: "Ways of working", version: 7, updatedBy: "agent", pptx: true, ...overrides };
+}
+
+/** The outline route, answering each read with the next of `answers` and the last one after that. */
+function serving(...answers: (DeckView | number)[]) {
+  const reads = vi.fn(async (_url: string, _init?: RequestInit) => {
+    const answer = answers.length > 1 ? answers.shift() : answers[0];
+    return typeof answer === "number" ? new Response(JSON.stringify({ error: "no" }), { status: answer }) : new Response(JSON.stringify(answer));
+  });
+  vi.stubGlobal("fetch", reads);
+  return reads;
+}
+
+/** Lets the outline's read settle. */
+async function settle(): Promise<void> {
+  await act(async () => {
+    await Promise.resolve();
+  });
 }
 
 const background = (image: string) => `/bg/${image}`;
@@ -303,9 +326,11 @@ describe("DeckViewer", () => {
 });
 
 describe("DeckPanel", () => {
-  it("should be a named panel with the deck's title and a close button", () => {
+  it("should be a named panel with the deck's title and a close button", async () => {
+    serving(deck());
     const onClose = vi.fn();
-    render(<DeckPanel conversationId={CONVERSATION} deck={deck()} onClose={onClose} narrow={false} announce={() => undefined} />);
+    render(<DeckPanel conversationId={CONVERSATION} deck={summary()} onClose={onClose} narrow={false} announce={() => undefined} />);
+    await settle();
 
     const panel = screen.getByRole("region", { name: "Slides" });
     expect(within(panel).getByRole("heading", { level: 2, name: "Ways of working" })).toBeTruthy();
@@ -314,18 +339,93 @@ describe("DeckPanel", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it("should cover the page with no resize handle when the screen is narrow", () => {
-    render(<DeckPanel conversationId={CONVERSATION} deck={deck()} onClose={() => undefined} narrow announce={() => undefined} />);
+  it("should cover the page with no resize handle when the screen is narrow", async () => {
+    serving(deck());
+    render(<DeckPanel conversationId={CONVERSATION} deck={summary()} onClose={() => undefined} narrow announce={() => undefined} />);
+    await settle();
 
     expect(screen.getByRole("region", { name: "Slides" }).className).toContain("fixed inset-0");
     expect(screen.queryByRole("separator")).toBeNull();
+  });
+
+  it("should read the outline, never from a cache, as it opens and again when the page says the version has moved on", async () => {
+    const reads = serving(deck(), deck({ version: 8, outline: outline({ slides: outline().slides.slice(0, 2) }) }));
+    const { rerender } = render(
+      <DeckPanel conversationId={CONVERSATION} deck={summary()} onClose={() => undefined} narrow={false} announce={() => undefined} />
+    );
+    expect(screen.getByRole("status").textContent).toBe("Loading the slides…");
+    await settle();
+
+    expect(reads).toHaveBeenCalledTimes(1);
+    expect(reads.mock.calls[0]?.[0]).toBe(deckUrl(CONVERSATION));
+    expect(reads.mock.calls[0]?.[1]).toMatchObject({ cache: "no-store" });
+    expect(screen.getByRole("region", { name: "Slide 1 of 7: Ways of working" })).toBeTruthy();
+
+    // The same version again, as every refresh of the page hands down, reads nothing.
+    rerender(<DeckPanel conversationId={CONVERSATION} deck={summary()} onClose={() => undefined} narrow={false} announce={() => undefined} />);
+    await settle();
+    expect(reads).toHaveBeenCalledTimes(1);
+
+    rerender(<DeckPanel conversationId={CONVERSATION} deck={summary({ version: 8 })} onClose={() => undefined} narrow={false} announce={() => undefined} />);
+    // The version on screen stays while the next is read.
+    expect(screen.getByRole("region", { name: "Slide 1 of 7: Ways of working" })).toBeTruthy();
+    await settle();
+    expect(reads).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("region", { name: "Slide 1 of 3: Ways of working" })).toBeTruthy();
+    expect(screen.getByText("Version 8")).toBeTruthy();
+  });
+
+  it("should offer the .pptx the page says has arrived without reading the outline again", async () => {
+    const reads = serving(deck({ pptx: false }));
+    const { rerender } = render(
+      <DeckPanel conversationId={CONVERSATION} deck={summary({ pptx: false })} onClose={() => undefined} narrow={false} announce={() => undefined} />
+    );
+    await settle();
+    expect(screen.getByText("Not built yet")).toBeTruthy();
+
+    rerender(<DeckPanel conversationId={CONVERSATION} deck={summary({ pptx: true })} onClose={() => undefined} narrow={false} announce={() => undefined} />);
+    await settle();
+
+    expect(screen.getByRole("link", { name: "Download .pptx" })).toBeTruthy();
+    expect(reads).toHaveBeenCalledTimes(1);
+  });
+
+  it("should say it could not load the slides, and read them again when the person asks, when the read fails", async () => {
+    const reads = serving(500, deck());
+    render(<DeckPanel conversationId={CONVERSATION} deck={summary()} onClose={() => undefined} narrow={false} announce={() => undefined} />);
+    await settle();
+
+    expect(screen.getByRole("alert").textContent).toContain("Could not load the slides.");
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await settle();
+
+    expect(reads).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("region", { name: "Slide 1 of 7: Ways of working" })).toBeTruthy();
+  });
+
+  it("should keep the slides it has when a later read fails", async () => {
+    serving(deck(), 500);
+    const { rerender } = render(
+      <DeckPanel conversationId={CONVERSATION} deck={summary()} onClose={() => undefined} narrow={false} announce={() => undefined} />
+    );
+    await settle();
+
+    rerender(<DeckPanel conversationId={CONVERSATION} deck={summary({ version: 8 })} onClose={() => undefined} narrow={false} announce={() => undefined} />);
+    await settle();
+
+    expect(screen.getByRole("region", { name: "Slide 1 of 7: Ways of working" })).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });
 
 describe("SharedDeck", () => {
   it("should show the deck read-only and announce the slide through its own region", async () => {
+    const reads = serving(deck());
     vi.useFakeTimers();
-    render(<SharedDeck conversationId={CONVERSATION} deck={deck()} />);
+    render(<SharedDeck conversationId={CONVERSATION} deck={summary()} />);
+    await settle();
+    expect(reads.mock.calls[0]?.[0]).toBe(deckUrl(CONVERSATION));
 
     expect(screen.getByRole("heading", { level: 2, name: "Ways of working" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Ask about this slide" })).toBeNull();

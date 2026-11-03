@@ -344,6 +344,10 @@ export function ChatView({
    * no room to read in. Each has its own button in the header, so either is one press from the other.
    */
   const [panel, setPanel] = useState<"document" | "deck" | null>(null);
+  /** The document panel has edits not yet saved, or a conflict showing, which a panel opened in its place would cut short. */
+  const documentBusy = useRef(false);
+  /** The assistant wrote a newer deck while the document was busy, so the slides wait behind their button instead. */
+  const [slidesWaiting, setSlidesWaiting] = useState(false);
   const [ask, setAsk] = useState<SlideAsk | null>(null);
   const [error, setError] = useState<string | null>(null);
   const warmed = useRef(false);
@@ -373,16 +377,30 @@ export function ChatView({
     seenVersion.current = Math.max(seenVersion.current, view.artefact.version);
   }, [view.artefact.version, view.artefact.updatedBy, arrivals]);
 
-  // The same for the deck: a newer version from the assistant opens the slides in the document's place.
+  /**
+   * The same for the deck: a newer version from the assistant opens the slides in the document's place, unless the
+   * person is part-way through the document, when it is announced and its button marked instead. The document is
+   * taken in over the slides whatever they are doing, since the slides hold nothing of theirs to lose.
+   */
   const deckVersion = view.deck?.version ?? 0;
   const deckBy = view.deck?.updatedBy ?? null;
   useEffect(() => {
     if (deckVersion > seenDeck.current && deckBy === "agent") {
-      setPanel("deck");
-      arrivals.announce("The assistant updated the slides");
+      if (panel === "document" && documentBusy.current) {
+        setSlidesWaiting(true);
+        arrivals.announce("The assistant updated the slides. Open slides to see them.");
+      } else {
+        setPanel("deck");
+        arrivals.announce("The assistant updated the slides");
+      }
     }
     seenDeck.current = Math.max(seenDeck.current, deckVersion);
-  }, [deckVersion, deckBy, arrivals]);
+  }, [deckVersion, deckBy, arrivals, panel]);
+  useEffect(() => {
+    if (panel === "deck") {
+      setSlidesWaiting(false);
+    }
+  }, [panel]);
 
   // The picker can only show a product it offers, so it and the dialog it opens read the stored one through this.
   const product = storedProduct(view.product);
@@ -424,6 +442,9 @@ export function ChatView({
    */
   const stoppable = pod && doing.state === "working" && clientSupports(view.clientFeatures, "stop");
   const scroller = useStickToBottom<HTMLDivElement>(`${thread.length}:${doing.state}`);
+  function markDocumentBusy(busy: boolean): void {
+    documentBusy.current = busy;
+  }
   const artefact: ArtefactSnapshot = {
     title: view.artefact.title,
     markdown: view.artefact.markdown,
@@ -503,13 +524,15 @@ export function ChatView({
               <button
                 type="button"
                 onClick={() => setPanel("deck")}
-                aria-label="Open slides"
-                className="flex h-[34px] items-center whitespace-nowrap rounded-[9px] border border-asst-strong px-2.5 text-[13px] hover:border-asst-accent-line hover:bg-asst-field min-[480px]:gap-2 min-[480px]:pr-3"
+                aria-label={slidesWaiting ? "Open slides, updated by the assistant" : "Open slides"}
+                className={`flex h-[34px] items-center whitespace-nowrap rounded-[9px] border px-2.5 text-[13px] hover:border-asst-accent-line hover:bg-asst-field min-[480px]:gap-2 min-[480px]:pr-3 ${slidesWaiting ? "border-asst-accent bg-asst-field" : "border-asst-strong"}`}
               >
                 <span aria-hidden="true" className="text-sm leading-none text-asst-accent">
                   ▭
                 </span>
                 <span className="hidden min-[480px]:inline">Open slides</span>
+                {/* Marked by a shape as well as the border's colour, so the change is not told by colour alone. */}
+                {slidesWaiting ? <span aria-hidden="true" data-testid="slides-updated" className="h-1.5 w-1.5 rounded-full bg-asst-accent" /> : null}
               </button>
             )}
             {panel === "document" ? null : (
@@ -667,6 +690,7 @@ export function ChatView({
           productLabel={view.productLabel}
           save={actions.saveArtefact}
           onClose={() => setPanel(null)}
+          onBusy={markDocumentBusy}
           /*
            * The document itself stays on a local chat — it is a hub row the person and the session both edit, and
            * `saveArtefact` works there — but neither export is offered, which is what `pod` takes away here. An

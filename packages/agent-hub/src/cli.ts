@@ -65,6 +65,9 @@ export const USAGE = `usage: ${CLI} <command> [args]
                               upload the outline's pictures, publish the outline as the deck's next
                               version and then the .pptx built from it; --base is the version it was
                               changed from (read first when omitted), and a newer one is refused
+  deck pptx <deck.pptx> --version N
+                              send the .pptx built from version N alone, for a deck put that published
+                              the outline but could not send its .pptx
   jira export <export-id> --project P --type T [--labels a,b]
                               in a CFT Workspace conversation: create the Jira ticket for an export the
                               user asked for with twg, signing in first if it is not, and report it; run

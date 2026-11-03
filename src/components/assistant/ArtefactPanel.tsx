@@ -65,8 +65,6 @@ export function format(
   return { text: `${text.slice(0, lineStart)}${marked}${text.slice(end)}`, start: lineStart, end: lineStart + marked.length };
 }
 
-export { fileName };
-
 /** Downloads `text` as `name`, through the one mechanism a browser gives a page: a blob URL on a clicked anchor. */
 function download(text: string, name: string, type: string): void {
   const url = URL.createObjectURL(new Blob([text], { type }));
@@ -174,8 +172,8 @@ export function starterDocument(productLabel: string): string {
 
 /**
  * The conversation's one document, beside the chat. The person edits it as markdown or reads it rendered, and it
- * saves itself after each pause. The assistant can write it too: an update from it is taken in at once unless the
- * person has unsaved changes, when they choose between the assistant's version and their own.
+ * saves itself after each pause, and as the panel closes. The assistant can write it too: an update from it is taken
+ * in at once unless the person has unsaved changes, when they choose between the assistant's version and their own.
  */
 export function ArtefactPanel({
   conversationId,
@@ -186,7 +184,8 @@ export function ArtefactPanel({
   narrow,
   jira,
   github,
-  confluence
+  confluence,
+  onBusy
 }: {
   conversationId: string;
   artefact: ArtefactSnapshot;
@@ -194,6 +193,8 @@ export function ArtefactPanel({
   save: SaveArtefactAction;
   onClose: () => void;
   narrow: boolean;
+  /** Told whether the person has edits not yet saved, or a conflict to settle, which taking the panel away would cut short. */
+  onBusy?: (busy: boolean) => void;
   /** The export to Jira, below the document; left out, the panel has none. */
   jira?: JiraExportProps;
   /** The export to GitHub, in place of the Jira one for a person whose ticket tool is GitHub. */
@@ -224,6 +225,18 @@ export function ArtefactPanel({
   const dirty = state === "unsaved" || state === "failed" || state === "saving";
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const busy = dirty || conflict !== null;
+  /**
+   * The edit the panel would save as it closes: one not yet saved, or whose save failed, with no conflict in the way.
+   * A conflict is the person's to settle, so closing on one saves nothing over the newer version.
+   */
+  const unsaved = useRef<{ title: string; markdown: string; base: number } | null>(null);
+  unsaved.current = (state === "unsaved" || state === "failed") && conflict === null ? { title, markdown, base } : null;
+  // Read by the closing save, which runs once, so a page that hands down new functions on each render cannot set it off.
+  const closing = useRef({ conversationId, save, onBusy });
+  closing.current = { conversationId, save, onBusy };
+
+  useEffect(() => closing.current.onBusy?.(busy), [busy]);
 
   /**
    * Printing is what makes a PDF here: the sheet is mounted on the body, where `@media print` in `globals.css` hides
@@ -298,6 +311,7 @@ export function ArtefactPanel({
     }
   }
 
+  // Closing, by the person or by the page opening the slides in its place, saves the edit the pause would have.
   useEffect(
     () => () => {
       if (timer.current !== null) {
@@ -306,6 +320,12 @@ export function ArtefactPanel({
       if (noticeTimer.current !== null) {
         clearTimeout(noticeTimer.current);
       }
+      const pending = unsaved.current;
+      const { conversationId: id, save: saveNow, onBusy: told } = closing.current;
+      if (pending !== null) {
+        void saveNow({ conversationId: id, title: pending.title, markdown: pending.markdown, baseVersion: pending.base });
+      }
+      told?.(false);
     },
     []
   );

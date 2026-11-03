@@ -199,7 +199,8 @@ export type MockHubOptions = {
 // the ack would.
 export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEvent = true, replayAcked = false, launchTokens = {} }: MockHubOptions = {}) {
   const options = { maxLifetimeMs, reconnectEvent, replayAcked };
-  const failures: { stream: number[]; ack: number[]; transcript: number[]; credential: number[]; status: number[] } = {
+  const failures: { stream: number[]; ack: number[]; transcript: number[]; credential: number[]; status: number[]; pptx: number[] } = {
+    pptx: [],
     stream: [],
     ack: [],
     transcript: [],
@@ -1105,6 +1106,10 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
         }
       }
       if (sub === "versions" && parts[6] === "pptx" && req.method === "PUT") {
+        const refused = failures.pptx.shift();
+        if (refused !== undefined) {
+          return send(res, refused, { error: "the hub could not store the .pptx" });
+        }
         const version = Number(parts[5]);
         if (octets?.subarray(0, 4).toString("hex") !== "504b0304") {
           return send(res, 400, { error: "that is not a .pptx" });
@@ -1312,8 +1317,8 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     onBeforeRespond(hook: () => void) {
       beforeRespond = hook;
     },
-    // The next `count` stream requests, acks, transcript uploads, credential saves or phase reports answer
-    // `status` instead.
+    // The next `count` stream requests, acks, transcript uploads, credential saves, phase reports or deck .pptx
+    // uploads answer `status` instead.
     failNextStreams(count: number, status = 500) {
       for (let i = 0; i < count; i++) {
         failures.stream.push(status);
@@ -1337,6 +1342,11 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     failNextStatuses(count: number, status = 500) {
       for (let i = 0; i < count; i++) {
         failures.status.push(status);
+      }
+    },
+    failNextDeckPptx(count: number, status = 500) {
+      for (let i = 0; i < count; i++) {
+        failures.pptx.push(status);
       }
     },
     async listen(): Promise<string> {

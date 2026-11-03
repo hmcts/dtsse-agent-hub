@@ -395,7 +395,9 @@ export function assistantEnvelope(
           `The user has edited the conversation's document (version ${assistant.artefact_version}) since; read it with \`${CLI} artefact get\` before changing it.`
         ]
       : [];
-  // Only a fork writes a deck as the user today: the copy's session has never seen the deck it was handed.
+  // Only a fork writes a deck as the user today: the copy's session has never seen the deck it was handed. Like the
+  // document's line above, it is said on every message while the person's version is the latest, since the frame
+  // carries who wrote it last and not whether this session has read it since.
   const deckChanged =
     assistant.deck_updated_by === "user" && (assistant.deck_version ?? 0) > 0
       ? [

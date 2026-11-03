@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { plannable, slideReference } from "@/assistant/deck";
-import type { DeckView } from "@/assistant/deck-store";
+import type { DeckSummary, DeckView } from "@/assistant/deck-store";
 import { type PlannedSlide, plan } from "@/assistant/slides/masters";
 import { useSidebarWidth } from "@/components/assistant/AssistantShell";
 import { ARTEFACT_MIN_WIDTH, ARTEFACT_WIDTH, CHAT_MIN_WIDTH } from "@/components/assistant/layout";
@@ -12,7 +12,11 @@ import { AnnouncerRegion, useAnnouncer } from "@/components/live/Announcer";
 import { ScrollPane } from "@/components/Markup";
 import { DownloadIcon } from "@/components/sidebar/icons";
 
-/** Where the browser reads a deck's pictures and its .pptx: `src/app/api/ui/assistant/decks/`. */
+/** Where the browser reads a deck's outline, its pictures and its .pptx: `src/app/api/ui/assistant/decks/`. */
+export function deckUrl(conversationId: string): string {
+  return `/api/ui/assistant/decks/${encodeURIComponent(conversationId)}`;
+}
+
 export function deckAssetUrl(conversationId: string, sha256: string): string {
   return `/api/ui/assistant/decks/${encodeURIComponent(conversationId)}/assets/${sha256}`;
 }
@@ -21,6 +25,8 @@ export function deckPptxUrl(conversationId: string, version: number): string {
   return `/api/ui/assistant/decks/${encodeURIComponent(conversationId)}/versions/${version}/pptx`;
 }
 
+const button = "flex h-[30px] shrink-0 items-center gap-1.5 rounded-lg border border-asst-strong px-2.5 text-[13px] hover:bg-asst-field disabled:opacity-40";
+
 /** The masters' artwork, which `public/assistant/slides/` serves as the plugin ships it. */
 const backgroundSrc = (image: string): string => `/assistant/slides/${image}`;
 
@@ -28,6 +34,54 @@ const backgroundSrc = (image: string): string => `/assistant/slides/${image}`;
 export interface SlideAsk {
   reference: string;
   label: string;
+}
+
+/**
+ * The latest version of the deck, read when the viewer opens and again whenever the page says `version` has moved
+ * on. The version on screen stays there while the next one is read, and a failed read keeps it too.
+ */
+export function useDeckView(deck: DeckSummary, conversationId: string): { deck: DeckView | null; failed: boolean; retry: () => void } {
+  const { version, pptx } = deck;
+  const [read, setRead] = useState<{ deck: DeckView | null; failed: boolean }>({ deck: null, failed: false });
+  const [attempt, setAttempt] = useState(0);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a newer version, or another attempt, is what makes the outline worth reading again
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const response = await fetch(deckUrl(conversationId), { cache: "no-store", signal: controller.signal });
+        if (!response.ok) {
+          throw new Error(`the deck read answered ${response.status}`);
+        }
+        const deck = (await response.json()) as DeckView;
+        setRead({ deck, failed: false });
+      } catch {
+        if (!controller.signal.aborted) {
+          setRead((before) => ({ deck: before.deck, failed: true }));
+        }
+      }
+    })();
+    return () => controller.abort();
+  }, [conversationId, version, attempt]);
+  // A .pptx arrives after its version's outline and changes nothing in it, so the page's word on it is taken as it is.
+  const shown = read.deck !== null && read.deck.version === version ? { ...read.deck, pptx } : read.deck;
+  return { deck: shown, failed: read.failed, retry: () => setAttempt((count) => count + 1) };
+}
+
+/** What stands in the viewer's place until the outline has been read, or when it could not be. */
+function DeckLoading({ failed, retry }: { failed: boolean; retry: () => void }) {
+  return failed ? (
+    <div role="alert" className="flex flex-col items-start gap-2 px-4 py-5 text-[13px] text-asst-error">
+      Could not load the slides.
+      <button type="button" onClick={retry} className={button}>
+        Try again
+      </button>
+    </div>
+  ) : (
+    <p role="status" className="px-4 py-5 text-[13px] text-asst-muted">
+      Loading the slides…
+    </p>
+  );
 }
 
 /** The deck's slides as `plan` lays them out, with each picture's address and size. */
@@ -101,8 +155,6 @@ function DeckText({ slides, headingLevel }: { slides: readonly PlannedSlide[]; h
     </ol>
   );
 }
-
-const button = "flex h-[30px] shrink-0 items-center gap-1.5 rounded-lg border border-asst-strong px-2.5 text-[13px] hover:bg-asst-field disabled:opacity-40";
 
 /**
  * A deck to look through: a rail of thumbnails, the current slide drawn large, its speaker notes, and the same deck as
@@ -265,7 +317,7 @@ export function DeckViewer({
 /**
  * The conversation's deck beside the chat, in the document panel's shell: the same resizable width, close button and
  * header, so the two read as one kind of thing. The width is kept apart from the document's, since a deck is looked at
- * wider than a document is written.
+ * wider than a document is written. The page hands it the deck's version; the outline is read here (`useDeckView`).
  */
 export function DeckPanel({
   conversationId,
@@ -276,12 +328,13 @@ export function DeckPanel({
   onAsk
 }: {
   conversationId: string;
-  deck: DeckView;
+  deck: DeckSummary;
   onClose: () => void;
   narrow: boolean;
   announce: (text: string) => void;
   onAsk?: (ask: SlideAsk) => void;
 }) {
+  const view = useDeckView(deck, conversationId);
   const sidebarWidth = useSidebarWidth();
   const resize = useResizableWidth({
     storageKey: "hmcts-assistant-deck-width",
@@ -318,7 +371,11 @@ export function DeckPanel({
           ×
         </button>
       </div>
-      <DeckViewer conversationId={conversationId} deck={deck} announce={announce} onAsk={onAsk} />
+      {view.deck === null ? (
+        <DeckLoading failed={view.failed} retry={view.retry} />
+      ) : (
+        <DeckViewer conversationId={conversationId} deck={view.deck} announce={announce} onAsk={onAsk} />
+      )}
     </section>
   );
 }
@@ -327,14 +384,19 @@ export function DeckPanel({
  * The deck on a shared chat's page, read-only: no asking about a slide, since the reader has no composer, and the
  * page's own announcer, since a share page has none of the chat's.
  */
-export function SharedDeck({ conversationId, deck }: { conversationId: string; deck: DeckView }) {
+export function SharedDeck({ conversationId, deck }: { conversationId: string; deck: DeckSummary }) {
+  const view = useDeckView(deck, conversationId);
   const slides = useAnnouncer("slides");
   return (
     <section aria-labelledby="shared-deck" className="flex h-[min(640px,80vh)] flex-col overflow-hidden rounded-2xl border border-asst-line">
       <h2 id="shared-deck" className="shrink-0 border-b border-asst-field px-5 py-3 text-[18px] font-semibold">
         {deck.title}
       </h2>
-      <DeckViewer conversationId={conversationId} deck={deck} announce={slides.announce} />
+      {view.deck === null ? (
+        <DeckLoading failed={view.failed} retry={view.retry} />
+      ) : (
+        <DeckViewer conversationId={conversationId} deck={view.deck} announce={slides.announce} />
+      )}
       <AnnouncerRegion text={slides.text} />
     </section>
   );

@@ -4,7 +4,7 @@ import { isUuid } from "../agents/store.ts";
 import { ensureAssistant, findAssistant } from "../assistant/assistant-store.ts";
 import { conversationAgent, findConversation } from "../assistant/conversation-store.ts";
 import { isSha256 } from "../assistant/deck.ts";
-import { type DeckAsset, readDeckAsset, readDeckPptx } from "../assistant/deck-store.ts";
+import { type DeckAsset, type DeckView, deckView, readDeckAsset, readDeckPptx } from "../assistant/deck-store.ts";
 import { readExportDefaults } from "../assistant/export-default-store.ts";
 import type { ExportDefaults } from "../assistant/export-defaults.ts";
 import { conversationsForkableBy, conversationsOfferedBy, forkChoice, forkRecipients } from "../assistant/fork-store.ts";
@@ -417,6 +417,14 @@ export async function sharedChat(viewer: Identity, id: string): Promise<SharedCo
 async function deckReadable(viewer: Identity, id: string): Promise<boolean> {
   const allowed = await accessToConversation(prisma, viewer.oid, id);
   return allowed !== undefined && canReadDeck(allowed.access);
+}
+
+/** The latest version of a conversation's deck, outline and all, under the same rule as its pictures; `null` while it has none. */
+export async function readableDeck(viewer: Identity, id: string): Promise<DeckView | null | undefined> {
+  if (!(await deckReadable(viewer, id))) {
+    return undefined;
+  }
+  return await deckView(prisma, id);
 }
 
 /** One picture of a conversation's deck, for anyone `canReadDeck` lets read it; `undefined` for everyone else. */

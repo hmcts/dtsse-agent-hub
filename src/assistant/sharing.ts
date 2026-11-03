@@ -4,7 +4,7 @@ import { conversationItems } from "../transcripts/conversation.ts";
 import { agentConversation } from "../transcripts/views.ts";
 import { readArtefact } from "./artefact-store.ts";
 import { storedHistory, storedStops } from "./conversation-row.ts";
-import { type DeckView, deckView } from "./deck-store.ts";
+import { type DeckSummary, deckSummary } from "./deck-store.ts";
 import { FORKED_SELECT, type ForkedView, forkedView } from "./forks.ts";
 import { hasPod } from "./pods.ts";
 import { productLabel } from "./products.ts";
@@ -91,8 +91,8 @@ export interface SharedConversationView {
   earlierHidden: boolean;
   /** The conversation's document, or `null` when it has none. Read-only here: there is no version to write against. */
   document: { title: string; markdown: string } | null;
-  /** The latest version of the conversation's slide deck, or `null` when it has none. Read-only here, as the document is. */
-  deck: DeckView | null;
+  /** The latest version of the conversation's slide deck, without its outline, which the viewer reads; `null` when it has none. Read-only here, as the document is. */
+  deck: DeckSummary | null;
   /** `owner` when the owner is looking at their own share, which is how they see what a recipient sees. */
   access: ConversationAccess;
   /**
@@ -144,7 +144,7 @@ export async function sharedConversation(
   const [page, artefact, deck] = await Promise.all([
     agentId === null ? undefined : agentConversation(db, conversation.ownerOid, { id: agentId, ownerOid: conversation.ownerOid }),
     readArtefact(db, conversation.id),
-    deckView(db, conversation.id)
+    deckSummary(db, conversation.id)
   ]);
   const items = page === undefined ? [] : conversationItems(page.messages, page.entries);
   return {

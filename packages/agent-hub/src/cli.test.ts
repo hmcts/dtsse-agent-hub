@@ -1717,6 +1717,69 @@ describe("artefact, in an assistant conversation", () => {
       expect(calls(agentId, "PUT", "/assets/")).toHaveLength(0);
     });
 
+    it("should send the .pptx again when the hub fails it once, when deck put runs", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      const dir = workDir();
+      hub.failNextDeckPptx(1);
+
+      // Act
+      const r = await cli(["deck", "put", path.join(dir, "outline.json"), "--pptx", path.join(dir, "deck.pptx")], { sid });
+
+      // Assert
+      expect(r.code, r.errors.join("\n")).toBe(0);
+      expect(calls(agentId, "PUT", "/versions/1/pptx")).toHaveLength(2);
+      expect(hub.decks.get(agentId)?.pptx.get(1)).toEqual(PPTX);
+    });
+
+    it("should exit 1 naming the version published without its .pptx, and the command that sends it alone, when every try fails", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      const dir = workDir();
+      hub.failNextDeckPptx(3, 503);
+
+      // Act
+      const r = await cli(["deck", "put", path.join(dir, "outline.json"), "--pptx", path.join(dir, "deck.pptx")], { sid });
+
+      // Assert
+      expect(r.code).toBe(1);
+      expect(calls(agentId, "PUT", "/versions/1/pptx")).toHaveLength(3);
+      const said = r.errors.join("\n");
+      expect(said).toMatch(/published the slide deck as version 1, but its \.pptx did not reach the hub/);
+      expect(said).toContain(
+        `Do not put the outline again, which would publish another version. Send the .pptx alone: agent-hub deck pptx ${path.join(dir, "deck.pptx")} --version 1`
+      );
+      expect(hub.decks.get(agentId)?.version).toBe(1);
+
+      // Act
+      const sent = await cli(["deck", "pptx", path.join(dir, "deck.pptx"), "--version", "1"], { sid });
+
+      // Assert
+      expect(sent.code, sent.errors.join("\n")).toBe(0);
+      expect(sent.text()).toMatch(/sent the \.pptx for version 1 of the slide deck/);
+      expect(hub.decks.get(agentId)?.pptx.get(1)).toEqual(PPTX);
+      expect(hub.decks.get(agentId)?.version).toBe(1);
+    });
+
+    it("should say why deck pptx sent nothing when the version is not there or too old to keep a .pptx", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      const dir = workDir();
+      for (let i = 0; i < 4; i++) {
+        hub.writeDeckAsUser(agentId, outline({ asset: `sha256:${digest(PNG)}` }), { [digest(PNG)]: PNG });
+      }
+
+      // Act
+      const missing = await cli(["deck", "pptx", path.join(dir, "deck.pptx"), "--version", "9"], { sid });
+      const old = await cli(["deck", "pptx", path.join(dir, "deck.pptx"), "--version", "1"], { sid });
+
+      // Assert
+      expect(missing.code).toBe(1);
+      expect(missing.errors.join("\n")).toMatch(/the deck has no version 9/);
+      expect(old.code).toBe(1);
+      expect(old.errors.join("\n")).toMatch(/version 1 is older than the latest 3/);
+    });
+
     it("should say the session has no deck when deck get runs outside a conversation", async () => {
       // Arrange
       const { sid } = await session({ conversation: false });
@@ -1750,7 +1813,12 @@ describe("artefact, in an assistant conversation", () => {
         ["deck", "put", file, "--pptx", path.join(dir, "pipeline.png")],
         ["deck", "put", path.join(dir, "missing.json")],
         ["deck", "put", path.join(dir, "broken.json")],
-        ["deck", "put", path.join(dir, "list.json")]
+        ["deck", "put", path.join(dir, "list.json")],
+        ["deck", "pptx"],
+        ["deck", "pptx", path.join(dir, "deck.pptx")],
+        ["deck", "pptx", path.join(dir, "deck.pptx"), "--version", "0"],
+        ["deck", "pptx", path.join(dir, "deck.pptx"), "--version", "1", "extra"],
+        ["deck", "pptx", path.join(dir, "pipeline.png"), "--version", "1"]
       ]) {
         expect((await cli(args, { sid })).code, args.join(" ")).toBe(2);
       }
