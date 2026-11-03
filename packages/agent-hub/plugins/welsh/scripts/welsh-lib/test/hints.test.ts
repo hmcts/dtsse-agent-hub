@@ -43,3 +43,11 @@ test("should treat a link to a field on the page as never content", () => {
   assert.equal(looksUntranslatable("#confirm-bulk"), true);
   assert.equal(looksUntranslatable("# of cases"), false);
 });
+
+test("should give the same answer for the same text every time, and read an unclosed brace as content", () => {
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: text a scan read out of code is what this checks
+  const code = "${A}\\n${B}";
+  assert.equal(noWelshHint(code, "en.a"), CODE_HINT);
+  assert.equal(noWelshHint(code, "en.b"), CODE_HINT);
+  assert.equal(noWelshHint("{{ not closed", "en.c"), null);
+});

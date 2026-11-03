@@ -254,7 +254,7 @@ function CatalogueList({ strings, total }: Readonly<{ strings: ScanView["filled"
 type NewString = ScanView["toWlu"][number];
 
 /** Whether a new string goes in the spreadsheet: as suggested (ticked unless the scan suggests leaving it out), or as toggled. */
-const isTicked = (s: NewString, toggled: ReadonlySet<string>) => !s.suggestLeaveOut !== toggled.has(s.ref);
+const isTicked = (s: NewString, toggled: ReadonlySet<string>) => s.suggestLeaveOut === toggled.has(s.ref);
 
 /**
  * The new strings, to tick what goes to the Welsh Language Unit, then the spreadsheet of just those. What is left out

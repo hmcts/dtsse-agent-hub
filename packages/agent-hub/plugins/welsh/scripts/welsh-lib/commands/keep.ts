@@ -18,7 +18,12 @@ import { branchName, HOME_OVERRIDE, homeRepo, inHome, welshDir } from "../home.t
 import { fail, requireService, say } from "../io.ts";
 import { matchKey } from "../normalise.ts";
 
-export async function keepEnglishCmd(argv: string[]): Promise<unknown> {
+/** As every command is, a promise: of the result, or of the usage error `fail` throws. */
+export function keepEnglishCmd(argv: string[]): Promise<unknown> {
+  return Promise.resolve().then(() => keepEnglish(argv));
+}
+
+function keepEnglish(argv: string[]): unknown {
   const { values, positionals } = parseArgs({
     args: argv,
     allowPositionals: true,
@@ -83,7 +88,7 @@ function keepInHome(service: string, strings: string[], pr: boolean): unknown {
       title: `Welsh: ${service} keeps ${result.added.length} string(s) in English`,
       body:
         `Adds these to \`identical_allowlist\` in \`welsh/config.yaml\`, so a scan no longer asks for their Welsh:\n\n` +
-        `${result.added.map((s) => `- \`${s.replace(/`/g, "'")}\``).join("\n")}\n\n` +
+        `${result.added.map((s) => `- \`${s.replaceAll("`", "'")}\``).join("\n")}\n\n` +
         "A BA left them out of the Welsh Language Unit's spreadsheet on the Welsh page, as right in English on a Welsh page: " +
         "an address, a system's name, a cookie's name. Remove any that the Welsh unit says do need Welsh."
     })
