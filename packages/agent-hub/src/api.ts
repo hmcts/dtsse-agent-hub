@@ -19,6 +19,7 @@ import type {
   Deck,
   DeckAssetResponse,
   DeckBody,
+  DeckBuild,
   DeckResponse,
   DirectBody,
   FeedResponse,
@@ -175,7 +176,8 @@ export type Api = {
   putMemory: (virtualId: string, body: MemoryReportBody) => Promise<null>;
   getArtefact: (agentId: string) => Promise<Artefact>;
   putArtefact: (agentId: string, body: ArtefactBody) => Promise<ArtefactResponse>;
-  getDeck: (agentId: string) => Promise<Deck>;
+  /** The latest version of the deck, or one kept version of it, which then says the version the deck is at now. */
+  getDeck: (agentId: string, version?: number) => Promise<Deck>;
   putDeck: (agentId: string, body: DeckBody) => Promise<DeckResponse>;
   /** One picture for the deck, under the SHA-256 of its bytes. At most 5 MiB. */
   putDeckAsset: (agentId: string, sha256: string, bytes: Uint8Array) => Promise<DeckAssetResponse>;
@@ -198,6 +200,12 @@ export type Api = {
   putWelshFile: (virtualId: string, jobId: string, name: string, bytes: Uint8Array) => Promise<{ file_id: string }>;
   /** A spreadsheet the owner uploaded for a Welsh job to read. At most 5 MiB, so read whole. */
   welshFile: (virtualId: string, fileId: string) => Promise<Uint8Array>;
+  /** The version one of its owner's pending deck builds is of, outline and all. */
+  deckBuild: (virtualId: string, jobId: string) => Promise<DeckBuild>;
+  /** One picture a pending deck build's outline names. At most 5 MiB, so read whole. */
+  deckBuildAsset: (virtualId: string, jobId: string, sha256: string) => Promise<Uint8Array>;
+  /** The supervisor's answer to a deck build: the .pptx it built, at most 5 MiB, or why there is none. */
+  putDeckBuild: (virtualId: string, jobId: string, answer: { pptx: Uint8Array } | { error: string }) => Promise<null>;
   /** One part of a file attached to a message in this agent's conversation. One part, never the whole file. */
   attachmentPart: (agentId: string, uploadId: string, index: number) => Promise<Uint8Array>;
   /** The whole file is on this pod's disk, which is what makes the hub delete its part rows. */
@@ -384,7 +392,7 @@ export function createApi({
     putMemory: (virtualId, body) => request<null>("PUT", v(virtualId, "memory"), body),
     getArtefact: (agentId) => request<Artefact>("GET", `${a(agentId)}/artefact`),
     putArtefact: (agentId, body) => request<ArtefactResponse>("PUT", `${a(agentId)}/artefact`, body),
-    getDeck: (agentId) => request<Deck>("GET", `${a(agentId)}/deck`),
+    getDeck: (agentId, version) => request<Deck>("GET", `${a(agentId)}/deck${qs({ version })}`),
     putDeck: (agentId, body) => request<DeckResponse>("PUT", `${a(agentId)}/deck`, body),
     putDeckAsset: (agentId, sha256, bytes) => putBytes<DeckAssetResponse>(`${a(agentId)}/deck/assets/${encodeURIComponent(sha256)}`, null, bytes),
     deckAsset: (agentId, sha256) => requestBytes(`${a(agentId)}/deck/assets/${encodeURIComponent(sha256)}`),
@@ -397,6 +405,12 @@ export function createApi({
     putWelsh: (virtualId, jobId, body) => request<null>("PUT", v(virtualId, `welsh/${encodeURIComponent(jobId)}`), body),
     putWelshFile: (virtualId, jobId, name, bytes) => putBytes<{ file_id: string }>(v(virtualId, `welsh/${encodeURIComponent(jobId)}/files`), name, bytes),
     welshFile: (virtualId, fileId) => requestBytes(v(virtualId, `welsh/files/${encodeURIComponent(fileId)}`)),
+    deckBuild: (virtualId, jobId) => request<DeckBuild>("GET", v(virtualId, `deck-builds/${encodeURIComponent(jobId)}`)),
+    deckBuildAsset: (virtualId, jobId, sha256) => requestBytes(v(virtualId, `deck-builds/${encodeURIComponent(jobId)}/assets/${encodeURIComponent(sha256)}`)),
+    putDeckBuild: (virtualId, jobId, answer) =>
+      "pptx" in answer
+        ? putBytes<null>(v(virtualId, `deck-builds/${encodeURIComponent(jobId)}`), null, answer.pptx)
+        : request<null>("PUT", v(virtualId, `deck-builds/${encodeURIComponent(jobId)}`), { error: answer.error }),
     attachmentPart: (agentId, uploadId, index) => requestBytes(`${a(agentId)}/attachments/${encodeURIComponent(uploadId)}/parts/${index}`),
     attachmentFetched: (agentId, uploadId) => request<null>("POST", `${a(agentId)}/attachments/${encodeURIComponent(uploadId)}/fetched`),
     stream: (id, opts) => openStream(`${a(id)}/stream`, opts)

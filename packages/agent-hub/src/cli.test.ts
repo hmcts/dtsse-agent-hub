@@ -1684,6 +1684,44 @@ describe("artefact, in an assistant conversation", () => {
       expect(none.errors.join("\n")).toMatch(/version 1 has no slide with id s_ffff/);
     });
 
+    it("should write an older version beside the working copy, saying the version to put a change on, when deck get has --version", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      const older = outline({ asset: `sha256:${digest(PNG)}` });
+      hub.writeDeckAsUser(agentId, older, { [digest(PNG)]: PNG });
+      hub.writeDeckAsUser(agentId, { ...older, title: "Ways of shipping" });
+
+      // Act
+      const r = await cli(["deck", "get", "--version", "1"], { sid });
+      const json = await cli(["deck", "get", "--version", "1", "--json"], { sid });
+
+      // Assert
+      expect(r.code, r.errors.join("\n")).toBe(0);
+      const dir = path.join(home.root, ".agent-hub", "decks", `0f8a6a1e-0000-4000-8000-${String(nextSession).padStart(12, "0")}`);
+      expect(JSON.parse(fs.readFileSync(path.join(dir, "outline-v1.json"), "utf8")).title).toBe("Ways of working");
+      expect(fs.existsSync(path.join(dir, "outline.json"))).toBe(false);
+      expect(r.text()).toMatch(/wrote version 1 of the slide deck, which is not the latest \(version 2\)/);
+      expect(r.text()).toMatch(/deck put .*outline-v1\.json --pptx <deck\.pptx> --base 2/);
+      expect(calls(agentId, "GET", "").some((c) => c.query?.version === "1")).toBe(true);
+      expect(JSON.parse(json.lines[0] as string)).toMatchObject({ version: 1, latest_version: 2, outline: path.join(dir, "outline-v1.json") });
+    });
+
+    it("should say the version is not kept, and refuse a version that is not a number, when deck get has --version", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      hub.writeDeckAsUser(agentId, outline({ asset: `sha256:${digest(PNG)}` }), { [digest(PNG)]: PNG });
+
+      // Act
+      const missing = await cli(["deck", "get", "--version", "9"], { sid });
+      const bad = await cli(["deck", "get", "--version", "v2"], { sid });
+
+      // Assert
+      expect(missing.code).toBe(1);
+      expect(missing.errors.join("\n")).toMatch(/does not keep version 9/);
+      expect(bad.code).not.toBe(0);
+      expect(bad.errors.join("\n")).toMatch(/--version takes a version number from 1/);
+    });
+
     it("should refuse to publish, naming the current version, when the deck changed since --base", async () => {
       // Arrange
       const { sid, agentId } = await session();

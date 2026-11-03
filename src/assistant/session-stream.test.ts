@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { createEventHub } from "../realtime/hub.ts";
+import type { DeckBuildFrame } from "./deck-build-store.ts";
 import type { LookupFrame } from "./lookup-store.ts";
 import type { Wake } from "./session-store.ts";
-import { closeFrame, deleteUploadsFrame, interruptFrame, lookupFrame, sessionStream, wakeFrame, welshFrame } from "./session-stream.ts";
+import { closeFrame, deckBuildFrame, deleteUploadsFrame, interruptFrame, lookupFrame, sessionStream, wakeFrame, welshFrame } from "./session-stream.ts";
 import type { WelshFrame } from "./welsh-store.ts";
 
 const ASSISTANT = "va-1";
@@ -32,6 +33,7 @@ const none = async () => [];
 const noLookup = async () => undefined;
 /** No Welsh job to send, which is every test but the one about Welsh jobs. */
 const noWelsh = async () => undefined;
+const noBuild = async () => undefined;
 
 function noFail(error: unknown): void {
   throw new Error(`the stream failed: ${String(error)}`);
@@ -50,10 +52,16 @@ describe("sessionStream", () => {
     const hub = createEventHub();
     const frames: string[] = [];
     const one = vi.fn(async (id: string) => wake(id));
-    sessionStream(ASSISTANT, { hub, ready, deletions: none, lookup: noLookup, welsh: noWelsh, wakes: async () => [wake("c1"), wake("c2")], wake: one })(
-      (frame) => frames.push(frame),
-      noFail
-    );
+    sessionStream(ASSISTANT, {
+      hub,
+      ready,
+      deletions: none,
+      lookup: noLookup,
+      welsh: noWelsh,
+      deckBuild: noBuild,
+      wakes: async () => [wake("c1"), wake("c2")],
+      wake: one
+    })((frame) => frames.push(frame), noFail);
     await settle();
 
     hub.publish(changed("c3"));
@@ -66,10 +74,16 @@ describe("sessionStream", () => {
   it("should send a wake once per connection when it is both replayed and notified", async () => {
     const hub = createEventHub();
     const frames: string[] = [];
-    sessionStream(ASSISTANT, { hub, ready, deletions: none, lookup: noLookup, welsh: noWelsh, wakes: async () => [wake("c1")], wake: async (id) => wake(id) })(
-      (frame) => frames.push(frame),
-      noFail
-    );
+    sessionStream(ASSISTANT, {
+      hub,
+      ready,
+      deletions: none,
+      lookup: noLookup,
+      welsh: noWelsh,
+      deckBuild: noBuild,
+      wakes: async () => [wake("c1")],
+      wake: async (id) => wake(id)
+    })((frame) => frames.push(frame), noFail);
     hub.publish(changed("c1"));
     await settle();
 
@@ -85,6 +99,7 @@ describe("sessionStream", () => {
       deletions: none,
       lookup: noLookup,
       welsh: noWelsh,
+      deckBuild: noBuild,
       wakes: async () => [wake("c1", "old")],
       wake: async (id) => wake(id, "new")
     })((frame) => frames.push(frame), noFail);
@@ -98,10 +113,16 @@ describe("sessionStream", () => {
   it("should send a close when the conversation has gone", async () => {
     const hub = createEventHub();
     const frames: string[] = [];
-    sessionStream(ASSISTANT, { hub, ready, deletions: none, lookup: noLookup, welsh: noWelsh, wakes: async () => [], wake: async () => null })(
-      (frame) => frames.push(frame),
-      noFail
-    );
+    sessionStream(ASSISTANT, {
+      hub,
+      ready,
+      deletions: none,
+      lookup: noLookup,
+      welsh: noWelsh,
+      deckBuild: noBuild,
+      wakes: async () => [],
+      wake: async () => null
+    })((frame) => frames.push(frame), noFail);
     hub.publish(changed("c9"));
     await settle();
 
@@ -111,10 +132,16 @@ describe("sessionStream", () => {
   it("should send nothing when a change leaves the conversation without a pending wake", async () => {
     const hub = createEventHub();
     const frames: string[] = [];
-    sessionStream(ASSISTANT, { hub, ready, deletions: none, lookup: noLookup, welsh: noWelsh, wakes: async () => [], wake: async () => undefined })(
-      (frame) => frames.push(frame),
-      noFail
-    );
+    sessionStream(ASSISTANT, {
+      hub,
+      ready,
+      deletions: none,
+      lookup: noLookup,
+      welsh: noWelsh,
+      deckBuild: noBuild,
+      wakes: async () => [],
+      wake: async () => undefined
+    })((frame) => frames.push(frame), noFail);
     hub.publish(changed("c1"));
     await settle();
 
@@ -125,7 +152,7 @@ describe("sessionStream", () => {
     const hub = createEventHub();
     const frames: string[] = [];
     const one = vi.fn(async (id: string) => wake(id));
-    sessionStream(ASSISTANT, { hub, ready, deletions: none, lookup: noLookup, welsh: noWelsh, wakes: async () => [], wake: one })(
+    sessionStream(ASSISTANT, { hub, ready, deletions: none, lookup: noLookup, welsh: noWelsh, deckBuild: noBuild, wakes: async () => [], wake: one })(
       (frame) => frames.push(frame),
       noFail
     );
@@ -140,10 +167,16 @@ describe("sessionStream", () => {
   it("should ignore an interrupt for another assistant's conversation", async () => {
     const hub = createEventHub();
     const frames: string[] = [];
-    sessionStream(ASSISTANT, { hub, ready, deletions: none, lookup: noLookup, welsh: noWelsh, wakes: async () => [], wake: async () => undefined })(
-      (frame) => frames.push(frame),
-      noFail
-    );
+    sessionStream(ASSISTANT, {
+      hub,
+      ready,
+      deletions: none,
+      lookup: noLookup,
+      welsh: noWelsh,
+      deckBuild: noBuild,
+      wakes: async () => [],
+      wake: async () => undefined
+    })((frame) => frames.push(frame), noFail);
     await settle();
     hub.publish(stopped("c1", "va-other"));
     await settle();
@@ -161,6 +194,7 @@ describe("sessionStream", () => {
       deletions: none,
       lookup: noLookup,
       welsh: noWelsh,
+      deckBuild: noBuild,
       wakes: async () => [],
       wake: async () => undefined
     })((frame) => frames.push(frame), noFail);
@@ -179,7 +213,7 @@ describe("sessionStream", () => {
     const hub = createEventHub();
     const frames: string[] = [];
     const one = vi.fn(async (id: string) => wake(id));
-    sessionStream(ASSISTANT, { hub, ready, deletions: none, lookup: noLookup, welsh: noWelsh, wakes: async () => [], wake: one })(
+    sessionStream(ASSISTANT, { hub, ready, deletions: none, lookup: noLookup, welsh: noWelsh, deckBuild: noBuild, wakes: async () => [], wake: one })(
       (frame) => frames.push(frame),
       noFail
     );
@@ -195,10 +229,16 @@ describe("sessionStream", () => {
     const hub = createEventHub();
     const frames: string[] = [];
     const pending = [wake("c1")];
-    sessionStream(ASSISTANT, { hub, ready, deletions: none, lookup: noLookup, welsh: noWelsh, wakes: async () => [...pending], wake: async () => undefined })(
-      (frame) => frames.push(frame),
-      noFail
-    );
+    sessionStream(ASSISTANT, {
+      hub,
+      ready,
+      deletions: none,
+      lookup: noLookup,
+      welsh: noWelsh,
+      deckBuild: noBuild,
+      wakes: async () => [...pending],
+      wake: async () => undefined
+    })((frame) => frames.push(frame), noFail);
     await settle();
     pending.push(wake("c2"));
     hub.publish({ type: "resync" });
@@ -216,6 +256,7 @@ describe("sessionStream", () => {
       deletions: none,
       lookup: noLookup,
       welsh: noWelsh,
+      deckBuild: noBuild,
       wakes: async () => [],
       wake: async () => null
     })((frame) => frames.push(frame), noFail);
@@ -237,6 +278,7 @@ describe("sessionStream", () => {
       deletions: none,
       lookup: noLookup,
       welsh: noWelsh,
+      deckBuild: noBuild,
       wakes: () => Promise.reject(new Error("connection reset")),
       wake: async (id) => wake(id)
     })((frame) => frames.push(frame), fail);
@@ -273,7 +315,8 @@ describe("sessionStream deletions", () => {
       wake: async (id) => wake(id),
       deletions: async () => [DELETION],
       lookup: noLookup,
-      welsh: noWelsh
+      welsh: noWelsh,
+      deckBuild: noBuild
     })((frame) => frames.push(frame), noFail);
     await settle();
 
@@ -284,10 +327,16 @@ describe("sessionStream deletions", () => {
     const hub = createEventHub();
     const frames: string[] = [];
     const deletions = vi.fn(async () => [DELETION]);
-    sessionStream(ASSISTANT, { hub, ready, wakes: async () => [], wake: async () => undefined, deletions, lookup: noLookup, welsh: noWelsh })(
-      (frame) => frames.push(frame),
-      noFail
-    );
+    sessionStream(ASSISTANT, {
+      hub,
+      ready,
+      wakes: async () => [],
+      wake: async () => undefined,
+      deletions,
+      lookup: noLookup,
+      welsh: noWelsh,
+      deckBuild: noBuild
+    })((frame) => frames.push(frame), noFail);
     await settle();
 
     hub.publish(uploadsChanged());
@@ -309,7 +358,8 @@ describe("sessionStream deletions", () => {
       wake: async () => undefined,
       deletions: async () => [DELETION],
       lookup: noLookup,
-      welsh: noWelsh
+      welsh: noWelsh,
+      deckBuild: noBuild
     })((frame) => frames.push(frame), noFail);
     await settle();
 
@@ -323,10 +373,16 @@ describe("sessionStream deletions", () => {
     const hub = createEventHub();
     const frames: string[] = [];
     const deletions = vi.fn(async () => [DELETION]);
-    sessionStream(ASSISTANT, { hub, ready, wakes: async () => [], wake: async () => undefined, deletions, lookup: noLookup, welsh: noWelsh })(
-      (frame) => frames.push(frame),
-      noFail
-    );
+    sessionStream(ASSISTANT, {
+      hub,
+      ready,
+      wakes: async () => [],
+      wake: async () => undefined,
+      deletions,
+      lookup: noLookup,
+      welsh: noWelsh,
+      deckBuild: noBuild
+    })((frame) => frames.push(frame), noFail);
     await settle();
     frames.length = 0;
 
@@ -340,10 +396,16 @@ describe("sessionStream deletions", () => {
   it("should send nothing when no deletion is outstanding", async () => {
     const hub = createEventHub();
     const frames: string[] = [];
-    sessionStream(ASSISTANT, { hub, ready, wakes: async () => [], wake: async () => undefined, deletions: none, lookup: noLookup, welsh: noWelsh })(
-      (frame) => frames.push(frame),
-      noFail
-    );
+    sessionStream(ASSISTANT, {
+      hub,
+      ready,
+      wakes: async () => [],
+      wake: async () => undefined,
+      deletions: none,
+      lookup: noLookup,
+      welsh: noWelsh,
+      deckBuild: noBuild
+    })((frame) => frames.push(frame), noFail);
     await settle();
 
     expect(frames).toEqual([]);
@@ -359,6 +421,7 @@ describe("sessionStream deletions", () => {
       wake: async () => undefined,
       lookup: noLookup,
       welsh: noWelsh,
+      deckBuild: noBuild,
       deletions: async () => {
         throw new Error("no database");
       }
@@ -383,7 +446,8 @@ describe("sessionStream deletions", () => {
       wake: async () => undefined,
       deletions: async () => [DELETION],
       lookup: noLookup,
-      welsh: noWelsh
+      welsh: noWelsh,
+      deckBuild: noBuild
     })((frame) => frames.push(frame), noFail);
     await settle();
     frames.length = 0;
@@ -404,10 +468,16 @@ describe("sessionStream lookups", () => {
   }
 
   function open(lookup: (id: string) => Promise<LookupFrame | undefined>, frames: string[], hub = createEventHub()) {
-    const close = sessionStream(ASSISTANT, { hub, ready, wakes: async () => [], wake: async () => undefined, deletions: none, lookup, welsh: noWelsh })(
-      (frame) => frames.push(frame),
-      noFail
-    );
+    const close = sessionStream(ASSISTANT, {
+      hub,
+      ready,
+      wakes: async () => [],
+      wake: async () => undefined,
+      deletions: none,
+      lookup,
+      welsh: noWelsh,
+      deckBuild: noBuild
+    })((frame) => frames.push(frame), noFail);
     return { hub, close };
   }
 
@@ -470,7 +540,7 @@ describe("sessionStream Welsh jobs", () => {
   }
 
   function open(welsh: (id: string) => Promise<WelshFrame | undefined>, frames: string[], hub = createEventHub()) {
-    sessionStream(ASSISTANT, { hub, ready, wakes: async () => [], wake: async () => undefined, deletions: none, lookup: noLookup, welsh })(
+    sessionStream(ASSISTANT, { hub, ready, wakes: async () => [], wake: async () => undefined, deletions: none, lookup: noLookup, welsh, deckBuild: noBuild })(
       (frame) => frames.push(frame),
       noFail
     );
@@ -520,6 +590,72 @@ describe("sessionStream Welsh jobs", () => {
 
     // Act
     hub.publish(started("w1"));
+    await settle();
+    hub.publish(stopped("c1"));
+
+    // Assert
+    expect(frames).toEqual([interruptFrame("c1")]);
+  });
+});
+
+describe("sessionStream deck builds", () => {
+  const BUILD: DeckBuildFrame = { job_id: "d1", conversation_id: "c1", version: 4 };
+
+  function asked(jobId: string, virtualAgent = ASSISTANT) {
+    return { type: "assistant_deck_build" as const, job_id: jobId, virtual_agent_id: virtualAgent, owner_oid: "o" };
+  }
+
+  function open(deckBuild: (id: string) => Promise<DeckBuildFrame | undefined>, frames: string[], hub = createEventHub()) {
+    sessionStream(ASSISTANT, { hub, ready, wakes: async () => [], wake: async () => undefined, deletions: none, lookup: noLookup, welsh: noWelsh, deckBuild })(
+      (frame) => frames.push(frame),
+      noFail
+    );
+    return hub;
+  }
+
+  it("should send the pod a deck build as soon as its owner asks for one", async () => {
+    // Arrange
+    const frames: string[] = [];
+    const hub = open(async (id) => (id === "d1" ? BUILD : undefined), frames);
+    await settle();
+
+    // Act
+    hub.publish(asked("d1"));
+    await settle();
+
+    // Assert
+    expect(frames).toEqual([deckBuildFrame(BUILD)]);
+    expect(deckBuildFrame(BUILD)).toBe(`event: deck_build\ndata: ${JSON.stringify(BUILD)}\n\n`);
+  });
+
+  it("should send nothing for another assistant's build, one already answered, or on a resync", async () => {
+    // Arrange
+    const frames: string[] = [];
+    const read = vi.fn(async () => undefined);
+    const hub = open(read, frames);
+    await settle();
+
+    // Act
+    hub.publish(asked("d1", "va-other"));
+    hub.publish(asked("d2"));
+    hub.publish({ type: "resync" });
+    await settle();
+
+    // Assert
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(frames.filter((frame) => frame.startsWith("event: deck_build"))).toEqual([]);
+  });
+
+  it("should keep the stream open when reading a deck build fails", async () => {
+    // Arrange
+    const frames: string[] = [];
+    const hub = open(async () => {
+      throw new Error("no database");
+    }, frames);
+    await settle();
+
+    // Act
+    hub.publish(asked("d1"));
     await settle();
     hub.publish(stopped("c1"));
 

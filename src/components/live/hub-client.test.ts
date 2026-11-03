@@ -72,7 +72,8 @@ describe("HUB_EVENT_TYPES", () => {
       "assistant_lookup",
       "assistant_lookup_answered",
       "assistant_welsh",
-      "assistant_welsh_answered"
+      "assistant_welsh_answered",
+      "assistant_deck_build"
     ];
     const frames = NOTIFIED_EVENT_TYPES.filter((type) => !unframed.includes(type));
 

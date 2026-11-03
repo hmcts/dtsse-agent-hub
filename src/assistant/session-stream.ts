@@ -1,5 +1,6 @@
 import type { EventHub } from "../realtime/hub.ts";
 import { type OnOpen, sseEvent } from "../realtime/sse.ts";
+import type { DeckBuildFrame } from "./deck-build-store.ts";
 import type { LookupFrame } from "./lookup-store.ts";
 import type { Wake } from "./session-store.ts";
 import type { UploadDeletion } from "./upload-disk.ts";
@@ -19,6 +20,8 @@ export interface SessionStreamSources {
   lookup: (lookupId: string) => Promise<LookupFrame | undefined>;
   /** The Welsh job to send the pod, `undefined` once it is answered or when it is not this assistant's. */
   welsh: (jobId: string) => Promise<WelshFrame | undefined>;
+  /** The deck build to send the pod, `undefined` once it is answered or when it is not this assistant's. */
+  deckBuild: (jobId: string) => Promise<DeckBuildFrame | undefined>;
 }
 
 export function wakeFrame(wake: Wake): string {
@@ -39,6 +42,10 @@ export function lookupFrame(lookup: LookupFrame): string {
 
 export function welshFrame(job: WelshFrame): string {
   return sseEvent({ event: "welsh", data: JSON.stringify(job) });
+}
+
+export function deckBuildFrame(build: DeckBuildFrame): string {
+  return sseEvent({ event: "deck_build", data: JSON.stringify(build) });
 }
 
 export function deleteUploadsFrame(deletion: UploadDeletion): string {
@@ -63,7 +70,8 @@ export function deleteUploadsFrame(deletion: UploadDeletion): string {
  * typing and waiting for it; and like an interrupt it is never replayed, since the search it was for has been replaced
  * by the time another stream opens. A read that fails loses that one lookup, which the browser reports as a timeout,
  * rather than ending the stream. A Welsh job is sent the same way: once, as it is started, and never replayed — a job
- * lost to a reconnect times out, and the person starts it again, which is safer than running a pull request twice.
+ * lost to a reconnect times out, and the person starts it again, which is safer than running a pull request twice. A
+ * deck build is too: a build lost to a reconnect times out, and the person asks again.
  *
  * An interrupt is the exception to all of that: it is neither replayed on connect nor resent on a `resync`, because
  * it names no state to reach but a turn to end, and the turn a missed one would have ended is over by the time
@@ -143,6 +151,15 @@ export function sessionStream(virtualAgentId: string, sources: SessionStreamSour
           (job) => {
             if (open && job !== undefined) {
               send(welshFrame(job));
+            }
+          },
+          () => undefined
+        );
+      } else if (event.type === "assistant_deck_build" && event.virtual_agent_id === virtualAgentId) {
+        sources.deckBuild(event.job_id).then(
+          (build) => {
+            if (open && build !== undefined) {
+              send(deckBuildFrame(build));
             }
           },
           () => undefined

@@ -7,6 +7,7 @@ import {
   canActAsVirtualAgent,
   canAgentMessageAgent,
   canAttachUpload,
+  canChangeDeck,
   canForkConversation,
   canLaunchTokenActForAgent,
   canLaunchTokenReadMessage,
@@ -643,6 +644,27 @@ describe("the conversation share rules", () => {
 
     it("should refuse the deck when the access answered is none", () => {
       expect(canReadDeck("none")).toBe(false);
+    });
+  });
+
+  describe("canChangeDeck", () => {
+    it("should let the owner restore a version or start a build", () => {
+      expect(canChangeDeck(conversationAccess(OWNER, CONVERSATION, SHARES))).toBe(true);
+    });
+
+    it("should refuse a share's recipient when the share lets them read the deck", () => {
+      const access = conversationAccess(RECIPIENT, CONVERSATION, SHARES);
+      expect(canReadDeck(access)).toBe(true);
+      expect(canChangeDeck(access)).toBe(false);
+    });
+
+    it("should refuse someone offered a fork when the offer lets them read the deck", () => {
+      const offers: ConversationShare[] = [{ conversationId: CONVERSATION.id, recipientOid: ELSEWHERE }];
+      expect(canChangeDeck(conversationAccess(ELSEWHERE, CONVERSATION, offers))).toBe(false);
+    });
+
+    it.each(EVERYONE_ELSE)("should refuse %s a restore and a build", (_label, viewerOid) => {
+      expect(canChangeDeck(conversationAccess(viewerOid, CONVERSATION, SHARES))).toBe(false);
     });
   });
 

@@ -8,6 +8,7 @@ import { atlassianLogin } from "../virtual/atlassian.ts";
 import { installBundled, installTicked, tickedBundled } from "../virtual/bundled-plugins.ts";
 import { run } from "../virtual/process.ts";
 import { deleteUploads, readDeleteUploads, reconcileUploads } from "./attachments.ts";
+import { createDeckBuildRunner } from "./deck-build.ts";
 import { type DiskFs, reportUploads } from "./disk.ts";
 import { createLookupRunner, type LookupDeps, type Run } from "./lookups.ts";
 import { type MemoryFs, reportMemory } from "./memory.ts";
@@ -26,7 +27,21 @@ const STREAM_IDLE_MS = 45000;
 const RECONCILE_MS = 10 * 60 * 1000;
 
 export type RunAssistantSupervisorOptions = Omit<CreateAssistantSupervisorOptions, "api" | "id"> & {
-  api: Pick<Api, "putSessions" | "sessionsStream" | "conversations" | "putUploads" | "putLookup" | "putMemory" | "putWelsh" | "putWelshFile" | "welshFile">;
+  api: Pick<
+    Api,
+    | "putSessions"
+    | "sessionsStream"
+    | "conversations"
+    | "putUploads"
+    | "putLookup"
+    | "putMemory"
+    | "putWelsh"
+    | "putWelshFile"
+    | "welshFile"
+    | "deckBuild"
+    | "deckBuildAsset"
+    | "putDeckBuild"
+  >;
   id: string;
   /** The filesystem the uploads report and the deletions use; a test passes its own. */
   uploadsFs?: DiskFs;
@@ -36,8 +51,9 @@ export type RunAssistantSupervisorOptions = Omit<CreateAssistantSupervisorOption
   /** How lookups run twg and sign it in; a test passes its own rather than a twg on PATH. */
   lookups?: Partial<LookupDeps>;
   /**
-   * How Welsh jobs run the welsh plugin's scripts/welsh, and the start-up installs run each bundled plugin's `deps`;
-   * the cft-workspace checkout they work on; and how the pod's copy of a bundled plugin is made. A test passes its own.
+   * How Welsh jobs run the welsh plugin's scripts/welsh, deck builds the slides plugin's scripts/slides, and the start-up
+   * installs each bundled plugin's `deps`; the cft-workspace checkout they work on; and how the pod's copy of a bundled
+   * plugin is made. A test passes its own.
    */
   welsh?: { run?: Run; workspace?: string; install?: (name: string, workspace: string) => string };
   /** Stops the supervisor, as SIGTERM and SIGINT do; a test owns neither signal. */
@@ -99,6 +115,9 @@ export async function runAssistantSupervisor({
   // its install is not done.
   const ready = prepareBundled(WELSH_PLUGIN, welshOptions);
   const welsh = createWelshRunner({ ...welshOptions, ready });
+  // Deck builds run beside the supervisor as well, on the same runner and workspace as the Welsh jobs: a build is a
+  // minute of Node that no wake should wait behind.
+  const deckBuilds = createDeckBuildRunner({ ...welshOptions, api });
   void ready.then(() =>
     prepareEach(
       tickedBundled(env).filter((name) => name !== WELSH_PLUGIN),
@@ -200,6 +219,13 @@ export async function runAssistantSupervisor({
             welsh.welsh(JSON.parse(event.data));
           } catch {
             say("unparseable welsh event");
+          }
+        } else if (event.event === "deck_build") {
+          // Not through `handle`: a build can take a minute, and the wakes behind it must not wait.
+          try {
+            deckBuilds.deckBuild(JSON.parse(event.data));
+          } catch {
+            say("unparseable deck_build event");
           }
         } else if (event.event === "delete_uploads") {
           handle(removeUploads, event);

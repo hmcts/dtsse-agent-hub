@@ -144,6 +144,62 @@ describe("runAssistantSupervisor", () => {
     }
   });
 
+  it("should build a deck version on the sessions stream with the slides plugin's script and send the .pptx", async () => {
+    // Arrange
+    fs.rmSync(path.join(hubHome(), "virtual"), { recursive: true, force: true });
+    const hub = createMockHub({ pingMs: 5000, launchTokens: { [LAUNCH]: { virtualId: VID, owner: OWNER } } });
+    const url = await hub.listen();
+    const stop = new AbortController();
+    const jobId = "7d2a9e3c-1111-4222-8333-444455556666";
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "slides-ws-"));
+    const plugin = path.join(workspace, "..", "slides-copy");
+    const pptx = Buffer.from([0x50, 0x4b, 0x03, 0x04, 1]);
+    const ran: { cmd: string; args: string[] }[] = [];
+    const running = runAssistantSupervisor({
+      api: createApi({ baseUrl: url, launchToken: LAUNCH }),
+      id: VID,
+      env: { AGENT_HUB_PLUGINS: "slides" },
+      tmux: fakeTmux(),
+      canRun: () => true,
+      cwd: CWD,
+      signal: stop.signal,
+      tickMs: 50,
+      welsh: {
+        workspace,
+        install: () => plugin,
+        run: async (cmd, args) => {
+          ran.push({ cmd, args });
+          if (args[0] === "build") {
+            fs.writeFileSync(args[3] as string, pptx);
+          }
+          return { code: 0, stdout: "{}", stderr: "" };
+        }
+      }
+    });
+
+    try {
+      await waitUntil(() => hub.sessionStreams.has(VID), "the sessions stream to open");
+
+      // Act
+      hub.sendDeckBuild(VID, jobId, {
+        conversation_id: "0f8a6a1e-0000-4000-8000-0000000000c2",
+        version: 2,
+        outline: { title: "Ways of working", slides: [{ id: "why", layout: "HMCTS_SECTION", title: "Why" }] },
+        assets: {}
+      });
+
+      // Assert
+      await waitUntil(() => hub.deckBuildAnswers.length === 1, "the deck build to be answered");
+      expect(hub.deckBuildAnswers[0]).toEqual({ virtual_id: VID, job_id: jobId, pptx });
+      expect(ran.find((one) => one.args[0] === "build")?.cmd).toBe(path.join(plugin, "scripts", "slides"));
+    } finally {
+      stop.abort();
+      await running;
+      await hub.close();
+      fs.rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   it("should install the slides plugin's dependencies as it starts when slides is ticked, and keep running when that fails", async () => {
     // Arrange
     fs.rmSync(path.join(hubHome(), "virtual"), { recursive: true, force: true });
@@ -352,6 +408,9 @@ describe("runAssistantSupervisor", () => {
       putWelsh: async () => null,
       putWelshFile: async () => ({ file_id: "f" }),
       welshFile: async () => new Uint8Array(),
+      deckBuild: async () => Promise.reject(new Error("no builds here")),
+      deckBuildAsset: async () => new Uint8Array(),
+      putDeckBuild: async () => null,
       putMemory: async () => null,
       sessionsStream: async (): Promise<Response> => {
         opens.push(Date.now());
@@ -404,6 +463,9 @@ describe("runAssistantSupervisor", () => {
         putWelsh: async () => null,
         putWelshFile: async () => ({ file_id: "f" }),
         welshFile: async () => new Uint8Array(),
+        deckBuild: async () => Promise.reject(new Error("no builds here")),
+        deckBuildAsset: async () => new Uint8Array(),
+        putDeckBuild: async () => null,
         putMemory: async () => null,
         sessionsStream: async () => new Response("", { status: 200 })
       },
@@ -491,6 +553,9 @@ describe("runAssistantSupervisor", () => {
       putWelsh: async () => null,
       putWelshFile: async () => ({ file_id: "f" }),
       welshFile: async () => new Uint8Array(),
+      deckBuild: async () => Promise.reject(new Error("no builds here")),
+      deckBuildAsset: async () => new Uint8Array(),
+      putDeckBuild: async () => null,
       putMemory: async (_id: string, body: unknown) => {
         attempts.push(body);
         return await held;
@@ -540,6 +605,9 @@ describe("runAssistantSupervisor", () => {
       putWelsh: async () => null,
       putWelshFile: async () => ({ file_id: "f" }),
       welshFile: async () => new Uint8Array(),
+      deckBuild: async () => Promise.reject(new Error("no builds here")),
+      deckBuildAsset: async () => new Uint8Array(),
+      putDeckBuild: async () => null,
       putMemory: async () => null,
       sessionsStream: async () => new Response("", { status: 200 })
     };
@@ -586,6 +654,9 @@ describe("runAssistantSupervisor", () => {
       putWelsh: async () => null,
       putWelshFile: async () => ({ file_id: "f" }),
       welshFile: async () => new Uint8Array(),
+      deckBuild: async () => Promise.reject(new Error("no builds here")),
+      deckBuildAsset: async () => new Uint8Array(),
+      putDeckBuild: async () => null,
       putMemory: async () => null,
       sessionsStream: async (_id: string, opts: { signal?: AbortSignal } = {}): Promise<Response> => {
         opens += 1;
@@ -635,6 +706,9 @@ describe("runAssistantSupervisor", () => {
       putWelsh: async () => null,
       putWelshFile: async () => ({ file_id: "f" }),
       welshFile: async () => new Uint8Array(),
+      deckBuild: async () => Promise.reject(new Error("no builds here")),
+      deckBuildAsset: async () => new Uint8Array(),
+      putDeckBuild: async () => null,
       putMemory: async () => null,
       sessionsStream: async () => new Response("event: wake\ndata: {oops\n\nevent: close\ndata: nope\n\nevent: reconnect\ndata: {}\n\n", { status: 200 })
     };

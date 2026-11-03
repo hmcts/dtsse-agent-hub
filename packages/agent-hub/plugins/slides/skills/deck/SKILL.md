@@ -67,6 +67,11 @@ prints the slide as it is now (`number` is its place in the deck, the title slid
 they ask for a change, change that slide in the outline `deck get` wrote, build and put the deck as above. Slide 1, the
 title slide, has no id: it is the outline's own `title`, `subtitle` and `notes`.
 
+The hub keeps the deck's last 100 versions, and the person can look back through them and restore one in the web
+UI. When they ask about an older version, or to bring one back in part, `agent-hub deck get --version N` writes that
+version to `outline-vN.json` beside `outline.json`, leaving your working copy alone, and says the version the deck is
+at now, which is the `--base` to put a change with.
+
 ## The outline
 
 ```json

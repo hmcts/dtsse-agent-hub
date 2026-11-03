@@ -241,7 +241,12 @@ export type Deck = {
   updated_by: "user" | "agent" | null;
   updated_at: string | null;
   pptx: boolean;
+  /** Only when one kept version was asked for: the version the deck is at now. */
+  latest_version?: number;
 };
+
+/** A deck build as the supervisor reads it: the version to build, with its outline as `GET …/deck` returns one. */
+export type DeckBuild = { job_id: string; conversation_id: string; version: number; outline: DeckOutline };
 
 export type DeckImage = { asset?: string; path?: string; alt?: string; decorative?: boolean };
 export type DeckSlide = { id?: string; layout?: string; title?: string; image?: DeckImage; [field: string]: unknown };

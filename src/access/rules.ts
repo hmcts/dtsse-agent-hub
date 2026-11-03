@@ -389,6 +389,16 @@ export function canReadDeck(access: ConversationAccess): boolean {
 }
 
 /**
+ * Whether the viewer may change a conversation's deck from the browser — restore an older version as the next one, or
+ * have the conversation's pod build an older version's .pptx — given what `conversationAccess` answered for them: its
+ * owner alone. A reader may look through every version `canReadDeck` lets them read, and download a .pptx the hub
+ * already holds, but a restore writes to someone else's conversation and a build runs in someone else's pod.
+ */
+export function canChangeDeck(access: ConversationAccess): boolean {
+  return access === "owner";
+}
+
+/**
  * Whether `actorOid` may share their conversation with `recipientOid`: only the owner shares, as only they see or
  * change who it is shared with (`isOwner`). `recipientKnown` means a `user` row exists: the hub shares with a
  * person it has seen, not with an address.

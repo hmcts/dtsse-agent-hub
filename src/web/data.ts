@@ -4,7 +4,8 @@ import { isUuid } from "../agents/store.ts";
 import { ensureAssistant, findAssistant } from "../assistant/assistant-store.ts";
 import { conversationAgent, findConversation } from "../assistant/conversation-store.ts";
 import { isSha256 } from "../assistant/deck.ts";
-import { type DeckAsset, type DeckView, deckView, readDeckAsset, readDeckPptx } from "../assistant/deck-store.ts";
+import { type DeckVersionEntry, type DeckVersionView, listDeckVersions, readDeckVersion, readVersionPptx } from "../assistant/deck-history-store.ts";
+import { type DeckAsset, type DeckView, deckView, readDeckAsset } from "../assistant/deck-store.ts";
 import { readExportDefaults } from "../assistant/export-default-store.ts";
 import type { ExportDefaults } from "../assistant/export-defaults.ts";
 import { conversationsForkableBy, conversationsOfferedBy, forkChoice, forkRecipients } from "../assistant/fork-store.ts";
@@ -435,12 +436,29 @@ export async function deckAsset(viewer: Identity, id: string, sha256: string): P
   return await readDeckAsset(prisma, id, sha256);
 }
 
-/** One version's .pptx, under the same rule as its pictures. */
+/** One version's .pptx, kept with it or built on request, under the same rule as its pictures. */
 export async function deckPptx(viewer: Identity, id: string, version: number): Promise<{ title: string; bytes: Uint8Array } | undefined> {
   if (!(await deckReadable(viewer, id))) {
     return undefined;
   }
-  return await readDeckPptx(prisma, id, version);
+  return await readVersionPptx(prisma, id, version);
+}
+
+/** Every kept version of a conversation's deck, newest first, under the same rule as its pictures; `undefined` for anyone else and for a chat with none. */
+export async function deckVersions(viewer: Identity, id: string): Promise<DeckVersionEntry[] | undefined> {
+  if (!(await deckReadable(viewer, id))) {
+    return undefined;
+  }
+  const versions = await listDeckVersions(prisma, id);
+  return versions.length === 0 ? undefined : versions;
+}
+
+/** One kept version of a conversation's deck, outline and all, under the same rule as its pictures. */
+export async function deckVersion(viewer: Identity, id: string, version: number): Promise<DeckVersionView | undefined> {
+  if (!(await deckReadable(viewer, id))) {
+    return undefined;
+  }
+  return await readDeckVersion(prisma, id, version);
 }
 
 /** Who one of the viewer's own conversations is shared with, or `undefined` when it is not theirs to share. */

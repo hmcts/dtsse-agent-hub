@@ -110,7 +110,12 @@ export type MockDeck = {
   updated_at: string | null;
   pptx: Map<number, Buffer>;
   assets: Map<string, Buffer>;
+  /** Every version's outline and who wrote it, for `GET …/deck?version=N`. */
+  history: Map<number, { outline: Body; updated_by: "user" | "agent"; updated_at: string }>;
 };
+
+/** A deck build the hub has asked a pod for, with the outline and pictures `GET …/deck-builds/{job_id}` serves. */
+export type MockDeckBuild = { conversation_id: string; version: number; outline: Body; assets: Record<string, Buffer> };
 
 const DECK_ASSET_RE = /^sha256:([0-9a-f]{64})$/;
 const DECK_MAX_BYTES = 5 * 1024 * 1024;
@@ -227,7 +232,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
   const deckOf = (agentId: string): MockDeck => {
     let found = decks.get(agentId);
     if (!found) {
-      found = { version: 0, outline: null, updated_by: null, updated_at: null, pptx: new Map(), assets: new Map() };
+      found = { version: 0, outline: null, updated_by: null, updated_at: null, pptx: new Map(), assets: new Map(), history: new Map() };
       decks.set(agentId, found);
     }
     return found;
@@ -251,6 +256,9 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
   // Every answer a supervisor gave to a lookup, in the order they came.
   const lookupAnswers: { virtual_id: string; lookup_id: string; body: Record<string, unknown> }[] = [];
   const welshAnswers: { virtual_id: string; job_id: string; body: Record<string, unknown> }[] = [];
+  // job id → a deck build a pod may read, and every answer a supervisor gave to one
+  const deckBuilds = new Map<string, MockDeckBuild & { virtualId: string; answered: boolean }>();
+  const deckBuildAnswers: { virtual_id: string; job_id: string; pptx?: Buffer; error?: string }[] = [];
   // upload id → the parts the pod may still fetch, and whether it has reported having the whole file
   const attachments = new Map<string, { parts: Uint8Array[]; fetched: boolean }>();
   // virtual agent id → { owner, status: [], credentials: Map, prompts: [], codes: Map, completes: [], ports: [], wakes: [], sessionReports: [] }
@@ -505,7 +513,14 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
   const KINDS = new Set(["github", "azure", "claude", "jenkins", "atlassian", "claude_md", "git_identity"]);
   const DEFAULT_CLAUDE_MD = "You are running in a pod in Preview and connected via the agent hub.";
 
-  function handleVirtual(req: IncomingMessage, res: ServerResponse, parts: string[], body: Body, launch: LaunchToken | null | undefined) {
+  function handleVirtual(
+    req: IncomingMessage,
+    res: ServerResponse,
+    parts: string[],
+    body: Body,
+    launch: LaunchToken | null | undefined,
+    octets: Buffer | null
+  ) {
     const [, , id, area, kind, sub] = parts;
     if (!launch || launch.virtualId !== id || !id) {
       return send(res, 403, { error: "forbidden" });
@@ -542,6 +557,42 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
       }
       welshAnswers.push({ virtual_id: id, job_id: kind, body });
       return send(res, 204);
+    }
+    if (area === "deck-builds" && kind) {
+      // Only a build of this virtual agent's that it has not answered, as the hub answers only a pending one.
+      const build = deckBuilds.get(kind);
+      const open = build !== undefined && build.virtualId === id && !build.answered;
+      if (req.method === "GET" && !sub) {
+        return open
+          ? send(res, 200, { job_id: kind, conversation_id: build.conversation_id, version: build.version, outline: build.outline })
+          : send(res, 404, { error: "no such build waiting for an answer" });
+      }
+      if (req.method === "GET" && sub === "assets") {
+        const bytes = open ? build.assets[parts[6] ?? ""] : undefined;
+        if (!bytes) {
+          return send(res, 404, { error: "that build has no such picture" });
+        }
+        beforeRespond?.();
+        res.writeHead(200, { "Content-Type": "application/octet-stream", "Content-Length": String(bytes.byteLength) });
+        return res.end(bytes);
+      }
+      if (req.method === "PUT" && !sub) {
+        if (octets) {
+          if (octets.subarray(0, 4).toString("hex") !== "504b0304") {
+            return send(res, 400, { error: "that is not a .pptx" });
+          }
+          if (octets.byteLength > DECK_MAX_BYTES) {
+            return send(res, 413, { error: "a .pptx is at most 5242880 bytes" });
+          }
+        } else if (typeof body.error !== "string" || body.error.trim() === "" || body.error.length > 2000) {
+          return send(res, 400, { error: "bad deck build answer" });
+        }
+        if (open) {
+          build.answered = true;
+        }
+        deckBuildAnswers.push({ virtual_id: id, job_id: kind, ...(octets ? { pptx: octets } : { error: body.error }) });
+        return send(res, 204);
+      }
     }
     if (req.method === "PUT" && area === "uploads" && !kind) {
       const whole = (value: unknown) => typeof value === "number" && Number.isInteger(value) && value >= 0;
@@ -710,7 +761,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
 
     const parts = url.pathname.split("/").filter(Boolean);
     if (parts[0] === "api" && parts[1] === "virtual") {
-      return handleVirtual(req, res, parts, body, launch);
+      return handleVirtual(req, res, parts, body, launch, octets);
     }
     if (parts[0] !== "api" || parts[1] !== "agent") {
       return send(res, 404, { error: "not found" });
@@ -1048,7 +1099,26 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
       const stored = deckOf(agent.id);
       const sub = parts[4];
       if (sub === undefined && req.method === "GET") {
-        return send(res, 200, deckBody(stored));
+        const asked = url.searchParams.get("version");
+        if (asked === null) {
+          return send(res, 200, deckBody(stored));
+        }
+        const kept = stored.history.get(Number(asked));
+        if (!/^[1-9]\d*$/.test(asked)) {
+          return send(res, 400, { error: "the version must be a whole number from 1" });
+        }
+        if (!kept) {
+          return send(res, 404, { error: `the deck does not keep version ${asked}` });
+        }
+        return send(res, 200, {
+          title: kept.outline.title ?? null,
+          outline: kept.outline,
+          version: Number(asked),
+          updated_by: kept.updated_by,
+          updated_at: kept.updated_at,
+          pptx: stored.pptx.has(Number(asked)),
+          latest_version: stored.version
+        });
       }
       if (sub === undefined && req.method === "PUT") {
         if (!Number.isInteger(body.base_version) || typeof body.outline !== "object" || !Array.isArray(body.outline?.slides)) {
@@ -1077,6 +1147,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
         stored.outline = outline;
         stored.updated_by = "agent";
         stored.updated_at = new Date().toISOString();
+        stored.history.set(stored.version, { outline, updated_by: "agent", updated_at: stored.updated_at });
         return send(res, 200, { version: stored.version, outline });
       }
       if (sub === "assets") {
@@ -1250,6 +1321,8 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     questions,
     lookupAnswers,
     welshAnswers,
+    deckBuilds,
+    deckBuildAnswers,
     attachments,
     sessionStreams,
     // A wake for one of a virtual agent's conversations: kept, and sent on every sessions stream, until a session
@@ -1275,6 +1348,14 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     // The owner starting a Welsh translation job. Sent once and never replayed, as the hub does.
     sendWelsh(virtualId: string, data: Record<string, unknown>) {
       sessionStreams.get(virtualId)?.write(`event: welsh\ndata: ${JSON.stringify(data)}\n\n`);
+    },
+    // The owner asking for a deck version's .pptx: the build is kept for the pod to read, and the frame sent once and
+    // never replayed, as the hub does.
+    sendDeckBuild(virtualId: string, jobId: string, build: MockDeckBuild) {
+      deckBuilds.set(jobId, { ...build, virtualId, answered: false });
+      sessionStreams
+        .get(virtualId)
+        ?.write(`event: deck_build\ndata: ${JSON.stringify({ job_id: jobId, conversation_id: build.conversation_id, version: build.version })}\n\n`);
     },
     sendClose(virtualId: string, data: { conversation_id: string }) {
       const v = virtuals.get(virtualId) as VirtualRecord;
@@ -1307,6 +1388,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
       stored.outline = outline;
       stored.updated_by = "user";
       stored.updated_at = new Date().toISOString();
+      stored.history.set(stored.version, { outline, updated_by: "user", updated_at: stored.updated_at });
     },
     // Runs as each response is written, before the caller can see it. A test that mirrors the hub's state
     // somewhere a process outside this one reads — `src/virtual-agent-boot.test.ts` writes a file the boot

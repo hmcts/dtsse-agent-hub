@@ -5,6 +5,7 @@ import { plannable, slideReference } from "@/assistant/deck";
 import type { DeckSummary, DeckView } from "@/assistant/deck-store";
 import { type PlannedSlide, plan } from "@/assistant/slides/masters";
 import { useSidebarWidth } from "@/components/assistant/AssistantShell";
+import { DeckHistory, type RestoreDeckAction } from "@/components/assistant/DeckHistory";
 import { ARTEFACT_MIN_WIDTH, ARTEFACT_WIDTH, CHAT_MIN_WIDTH } from "@/components/assistant/layout";
 import { nestRuns, SlideCanvas, slideTitle } from "@/components/assistant/SlideCanvas";
 import { useResizableWidth } from "@/components/assistant/useResizableWidth";
@@ -170,7 +171,9 @@ export function DeckViewer({
   deck,
   announce,
   onAsk,
-  headingLevel = 3
+  headingLevel = 3,
+  tools,
+  download
 }: {
   conversationId: string;
   deck: DeckView;
@@ -178,6 +181,10 @@ export function DeckViewer({
   announce: (text: string) => void;
   onAsk?: (ask: SlideAsk) => void;
   headingLevel?: 2 | 3 | 4;
+  /** More of the toolbar's controls, such as the history's. */
+  tools?: React.ReactNode;
+  /** What stands for the .pptx in place of the link to the one the hub holds. */
+  download?: React.ReactNode;
 }) {
   const { slides, sizes } = useSlides(conversationId, deck);
   const [chosen, setChosen] = useState(0);
@@ -233,15 +240,17 @@ export function DeckViewer({
             Ask about this slide
           </button>
         )}
+        {tools}
         <span className="ml-auto text-xs text-asst-faint">Version {deck.version}</span>
-        {deck.pptx ? (
-          <a href={deckPptxUrl(conversationId, deck.version)} download className={`${button} no-underline`}>
-            <DownloadIcon />
-            Download .pptx
-          </a>
-        ) : (
-          <span className="text-[13px] text-asst-muted">Not built yet</span>
-        )}
+        {download ??
+          (deck.pptx ? (
+            <a href={deckPptxUrl(conversationId, deck.version)} download className={`${button} no-underline`}>
+              <DownloadIcon />
+              Download .pptx
+            </a>
+          ) : (
+            <span className="text-[13px] text-asst-muted">Not built yet</span>
+          ))}
       </div>
       {text ? (
         <ScrollPane as="section" label="Deck as text" className="min-h-0 flex-1 overflow-y-auto px-[22px] py-5">
@@ -325,7 +334,8 @@ export function DeckPanel({
   onClose,
   narrow,
   announce,
-  onAsk
+  onAsk,
+  restore
 }: {
   conversationId: string;
   deck: DeckSummary;
@@ -333,6 +343,7 @@ export function DeckPanel({
   narrow: boolean;
   announce: (text: string) => void;
   onAsk?: (ask: SlideAsk) => void;
+  restore?: RestoreDeckAction;
 }) {
   const view = useDeckView(deck, conversationId);
   const sidebarWidth = useSidebarWidth();
@@ -374,7 +385,7 @@ export function DeckPanel({
       {view.deck === null ? (
         <DeckLoading failed={view.failed} retry={view.retry} />
       ) : (
-        <DeckViewer conversationId={conversationId} deck={view.deck} announce={announce} onAsk={onAsk} />
+        <DeckHistory conversationId={conversationId} latest={view.deck} announce={announce} onAsk={onAsk} owner restore={restore} />
       )}
     </section>
   );
@@ -395,7 +406,7 @@ export function SharedDeck({ conversationId, deck }: { conversationId: string; d
       {view.deck === null ? (
         <DeckLoading failed={view.failed} retry={view.retry} />
       ) : (
-        <DeckViewer conversationId={conversationId} deck={view.deck} announce={slides.announce} />
+        <DeckHistory conversationId={conversationId} latest={view.deck} announce={slides.announce} owner={false} />
       )}
       <AnnouncerRegion text={slides.text} />
     </section>
