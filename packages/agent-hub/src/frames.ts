@@ -1,7 +1,8 @@
 // How the bridge reads a `direct` stream event. The stream is untrusted input from a hub that may be older or newer
 // than this client, so every field is checked here and anything that does not fit is dropped or left absent.
 import { parseModel } from "./assistant/models.ts";
-import type { AssistantFrame, AssistantProduct, ConfluenceExportFrame, JiraExportFrame } from "./envelope.ts";
+import type { AssistantFrame, AssistantProduct, ConfluenceExportFrame, GithubExportFrame, JiraExportFrame } from "./envelope.ts";
+import { GITHUB_OWNER_RE, GITHUB_REPO_RE } from "./github.ts";
 
 // Structural, and every field optional: it is the shape both `directs` and `envelope` read, so a message
 // narrowed here fits either without this module choosing one of their author types over the other.
@@ -108,6 +109,7 @@ export function parseAssistantFrame(value: unknown): AssistantFrame | null {
     artefact_version: typeof raw.artefact_version === "number" ? raw.artefact_version : null,
     artefact_updated_by: asNullableString(raw.artefact_updated_by),
     jira_export: parseJiraExportFrame(raw.jira_export),
+    github_export: parseGithubExportFrame(raw.github_export),
     confluence_export: parseConfluenceExportFrame(raw.confluence_export),
     // Left as it came: `readAttachments`, at the point of delivery, is what decides which entries this client will
     // fetch and what the envelope says about the rest, so checking them here would only do it twice.
@@ -139,6 +141,37 @@ export function parseJiraExportFrame(value: unknown): JiraExportFrame | null {
     return null;
   }
   return { export_id: raw.export_id, project: raw.project, issue_type: raw.issue_type, labels: raw.labels as string[] };
+}
+
+/**
+ * A pending GitHub export on the frame, or null. Its values go into the `github export` command the session is told
+ * to run, so anything but an id, an `owner/name` repository and a Project's owner and number is dropped rather than
+ * passed on. A Project that is not one drops the whole export, since going ahead without it would put the issue
+ * somewhere other than where the person asked.
+ */
+export function parseGithubExportFrame(value: unknown): GithubExportFrame | null {
+  const raw = asRecord(value);
+  if (!raw || typeof raw.export_id !== "string" || !EXPORT_ID_RE.test(raw.export_id) || typeof raw.repo !== "string" || !GITHUB_REPO_RE.test(raw.repo)) {
+    return null;
+  }
+  // Labels go into the command as one comma-separated flag, so each is a plain word; a list that is not is dropped
+  // whole rather than in part, since the issue would otherwise be labelled other than the hub asked.
+  const labels = Array.isArray(raw.labels) && raw.labels.every((label) => typeof label === "string" && WORD_RE.test(label)) ? (raw.labels as string[]) : [];
+  if (raw.project === undefined || raw.project === null) {
+    return { export_id: raw.export_id, repo: raw.repo, labels };
+  }
+  const project = asRecord(raw.project);
+  if (
+    !project ||
+    typeof project.owner !== "string" ||
+    !GITHUB_OWNER_RE.test(project.owner) ||
+    !Number.isInteger(project.number) ||
+    (project.number as number) < 1 ||
+    (project.number as number) > 999_999_999
+  ) {
+    return null;
+  }
+  return { export_id: raw.export_id, repo: raw.repo, labels, project: { owner: project.owner, number: project.number as number } };
 }
 
 const NUMERIC_ID_RE = /^\d{1,20}$/;

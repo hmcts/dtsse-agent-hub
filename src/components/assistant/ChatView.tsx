@@ -27,7 +27,9 @@ import { Mark, SidebarToggle } from "@/components/assistant/AssistantShell";
 import { ChatMenu } from "@/components/assistant/ChatMenu";
 import { Composer } from "@/components/assistant/Composer";
 import type { ExportToConfluenceAction } from "@/components/assistant/ConfluenceExport";
+import { ticketsOffered } from "@/components/assistant/ExportFooter";
 import { ForkedThread } from "@/components/assistant/ForkedThread";
+import type { ExportToGithubAction } from "@/components/assistant/GithubExport";
 import type { ExportToJiraAction, JiraAccess } from "@/components/assistant/JiraExport";
 import { ARTEFACT_OVERLAY_MAX_WIDTH } from "@/components/assistant/layout";
 import { MessageAttachments } from "@/components/assistant/MessageAttachments";
@@ -52,6 +54,8 @@ export interface ChatActions {
   answerQuestion: AnswerQuestionAction;
   saveArtefact: SaveArtefactAction;
   exportToJira: ExportToJiraAction;
+  /** Left out, a person whose ticket tool is GitHub is offered no ticket export. */
+  exportToGithub?: ExportToGithubAction;
   exportToConfluence?: ExportToConfluenceAction;
 }
 
@@ -371,6 +375,7 @@ export function ChatView({
    * disagree about where the chat is.
    */
   const pod = !view.local;
+  const tickets = ticketsOffered(defaults.ticketTool, view.jira, view.github);
   const thread = threadItems(live.items, view.productHistory, view.stopHistory, view.local);
   const doing: Progress = progress(live.items, thread, status, view.sessionState, view.local);
   // Not part of `doing`: background work carries on after the session goes idle, so it has to show when nothing else does.
@@ -620,7 +625,14 @@ export function ChatView({
            * The panel keeps copy, download and print, which are the ways a document leaves a local chat.
            * `requestJiraExport` and `requestConfluenceExport` refuse it as well, so this is the convenience half.
            */
-          jira={pod ? { exported: view.jira, access: jira, exportTo: actions.exportToJira, defaultProject: defaults.jira } : undefined}
+          // The person's ticket tool, a Jira backlog or a GitHub repository, and the other tool too when the document
+          // already has a ticket there (`ticketsOffered`).
+          jira={pod && tickets.jira ? { exported: view.jira, access: jira, exportTo: actions.exportToJira, defaultProject: defaults.jira } : undefined}
+          github={
+            pod && tickets.github && actions.exportToGithub !== undefined
+              ? { exported: view.github, exportTo: actions.exportToGithub, defaultRepo: defaults.github, defaultProject: defaults.githubProject }
+              : undefined
+          }
           confluence={
             !pod || actions.exportToConfluence === undefined
               ? undefined

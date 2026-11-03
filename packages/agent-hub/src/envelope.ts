@@ -193,6 +193,7 @@ export type AssistantFrame = {
   artefact_version?: number | null;
   artefact_updated_by?: string | null;
   jira_export?: JiraExportFrame | null;
+  github_export?: GithubExportFrame | null;
   confluence_export?: ConfluenceExportFrame | null;
   /** The files attached to this message. Absent from a hub with uploads off, or one older than them. */
   attachments?: unknown;
@@ -236,6 +237,43 @@ export function jiraExportLines(jira: JiraExportFrame): string[] {
     "It does every step itself: it checks twg is signed in as the user, reads the document, creates the ticket and reports it to the Assistant. Run again for the same export, it reports the ticket it already made rather than making another.",
     "Do not read the document, check twg, or look at the ticket yourself, before or after; do not run any other command for this.",
     "Then tell the user in one short sentence which ticket it became, or why it could not be made, in the words the command printed."
+  ];
+}
+
+/** An export of the conversation's document to a GitHub issue the person has asked for and nobody has reported yet. */
+export type GithubExportFrame = {
+  export_id: string;
+  repo: string;
+  /** The Project to add the issue to once it exists, when the person chose one. */
+  project?: { owner: string; number: number } | null;
+  /** What the issue is labelled; empty from a hub older than labels. */
+  labels?: string[];
+};
+
+/**
+ * How long the session is told to let `github export` run: the Jira export's, which is the most the Bash tool allows.
+ * The command's own limits have to fit inside it with the report still made — two minutes for the create and half a
+ * minute for each step after it, a label create per label, the label edit and the Project add — or a command cut off
+ * after the issue exists would leave the hub waiting. There is no sign-in to wait for, since gh is signed in on every
+ * pod. The test beside `runGithubExport` adds the limits up.
+ */
+export const GITHUB_EXPORT_BASH_TIMEOUT_MS = 600000;
+
+/**
+ * How to carry out a pending GitHub export: one command, `github export`, that reads the document, opens the issue
+ * with the person's own gh sign-in and reports it, for the reasons `jira export` is one. Placed as the Jira lines
+ * are, before the skill line.
+ */
+export function githubExportLines(github: GithubExportFrame): string[] {
+  const project = github.project ? ` --project ${github.project.owner}/${github.project.number}` : "";
+  const labels = github.labels?.length ? ` --labels ${github.labels.join(",")}` : "";
+  const board = github.project ? `, on Project ${github.project.number} of ${github.project.owner}` : "";
+  return [
+    `The user has asked you to create a GitHub issue for the conversation's document in ${github.repo}${board} (export ${github.export_id}).`,
+    `Run exactly this one command, with a Bash timeout of ${GITHUB_EXPORT_BASH_TIMEOUT_MS} ms: \`${CLI} github export ${github.export_id} --repo ${github.repo}${project}${labels}\``,
+    "It does every step itself: it reads the document, creates the issue with gh as the user and reports it to the Assistant. Run again for the same export, it reports the issue it already made rather than making another.",
+    "Do not read the document, check gh, or look at the issue yourself, before or after; do not run any other command for this.",
+    "Then tell the user in one short sentence which issue it became, or why it could not be made, in the words the command printed."
   ];
 }
 
@@ -369,6 +407,7 @@ export function assistantEnvelope(
     // as: here is the file, now run the skill.
     ...attachmentLines(attachments),
     ...(assistant.jira_export ? jiraExportLines(assistant.jira_export) : []),
+    ...(assistant.github_export ? githubExportLines(assistant.github_export) : []),
     ...(assistant.confluence_export ? confluenceExportLines(assistant.confluence_export) : []),
     ...skillLine(message.body, skills, ownerSkillLine),
     "---",

@@ -139,7 +139,7 @@ describe("Confluence export in the document panel", () => {
       fireEvent.click(publishButton());
     });
 
-    expect(lookUp).toHaveBeenCalledWith({ kind: "confluence_page", query: "design", space: "CCD" }, expect.any(AbortSignal));
+    expect(lookUp).toHaveBeenCalledWith({ kind: "confluence_page", query: "design", space: "CCD", owner: null }, expect.any(AbortSignal));
     expect(exportTo).toHaveBeenCalledWith({
       conversationId: CONVERSATION,
       parent: { id: PAGE.id, title: PAGE.title, space_id: PAGE.space_id, space_key: "CCD", space_name: "Core Case Data" }
@@ -283,7 +283,7 @@ describe("AtlassianSearch", () => {
     });
 
     expect(lookUp).toHaveBeenCalledTimes(1);
-    expect(lookUp).toHaveBeenCalledWith({ kind: "confluence_page", query: "des", space: null }, expect.any(AbortSignal));
+    expect(lookUp).toHaveBeenCalledWith({ kind: "confluence_page", query: "des", space: null, owner: null }, expect.any(AbortSignal));
     expect(screen.getByText("No pages match that.")).toBeTruthy();
   });
 

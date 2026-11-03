@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { checkConfluenceDefault, checkJiraDefault, type ExportDefaultRow, exportDefaultsOf, NO_DEFAULTS } from "./export-defaults.ts";
+import {
+  checkConfluenceDefault,
+  checkGithubDefault,
+  checkGithubProjectDefault,
+  checkJiraDefault,
+  checkTicketTool,
+  type ExportDefaultRow,
+  exportDefaultsOf,
+  NO_DEFAULTS
+} from "./export-defaults.ts";
 import { MAX_LOOKUP_ANCESTORS } from "./lookups.ts";
 
 const PAGE = {
@@ -86,7 +95,13 @@ describe("exportDefaultsOf", () => {
   });
 
   it("should give both defaults when the row holds both whole", () => {
-    expect(exportDefaultsOf(ROW)).toEqual({ jira: { key: "HDPI", name: "Housing Disputes" }, confluence: PAGE });
+    expect(exportDefaultsOf(ROW)).toEqual({
+      ticketTool: "jira",
+      jira: { key: "HDPI", name: "Housing Disputes" },
+      github: null,
+      githubProject: null,
+      confluence: PAGE
+    });
   });
 
   it("should give neither default when the row holds neither", () => {
@@ -102,10 +117,70 @@ describe("exportDefaultsOf", () => {
   });
 
   it("should drop the Confluence half and keep the Jira half when the page is not whole", () => {
-    expect(exportDefaultsOf({ ...ROW, confluenceParentTitle: null })).toEqual({ jira: { key: "HDPI", name: "Housing Disputes" }, confluence: null });
+    expect(exportDefaultsOf({ ...ROW, confluenceParentTitle: null })).toEqual({
+      ticketTool: "jira",
+      jira: { key: "HDPI", name: "Housing Disputes" },
+      github: null,
+      githubProject: null,
+      confluence: null
+    });
   });
 
   it("should drop the Confluence half when the stored titles above it are not a list", () => {
     expect(exportDefaultsOf({ ...ROW, confluenceAncestors: { not: "a list" } }).confluence).toBeNull();
+  });
+});
+
+describe("the ticket tool and GitHub repository defaults", () => {
+  it("should read the GitHub Project when the row holds it whole, and none when it does not", () => {
+    const row = {
+      ...ROW,
+      ticketTool: "github",
+      githubRepo: "hmcts/cft-workspace",
+      githubProjectOwner: "hmcts",
+      githubProjectNumber: 12,
+      githubProjectTitle: "CFT roadmap"
+    };
+
+    expect(exportDefaultsOf(row).githubProject).toEqual({ owner: "hmcts", number: 12, title: "CFT roadmap" });
+    expect(exportDefaultsOf({ ...row, githubProjectTitle: null }).githubProject).toBeNull();
+  });
+
+  it.each([
+    [null, null],
+    [
+      { owner: "hmcts", number: 12, title: "  CFT\n roadmap " },
+      { owner: "hmcts", number: 12, title: "CFT roadmap" }
+    ],
+    [{ owner: "-hmcts", number: 12, title: "x" }, undefined],
+    [{ owner: "hmcts", number: 0, title: "x" }, undefined],
+    [{ owner: "hmcts", number: 12, title: " " }, undefined]
+  ])("should read the Project %j as %j", (value, expected) => {
+    expect(checkGithubProjectDefault(value)).toEqual(expected);
+  });
+
+  it("should read GitHub and its repository when the row has them", () => {
+    expect(exportDefaultsOf({ ...ROW, ticketTool: "github", githubRepo: "hmcts/cft-workspace" })).toMatchObject({
+      ticketTool: "github",
+      github: "hmcts/cft-workspace"
+    });
+  });
+
+  it("should fall back to Jira and no repository when the row's values are not ones the hub writes", () => {
+    expect(exportDefaultsOf({ ...ROW, ticketTool: "trello", githubRepo: "not a repo" })).toMatchObject({ ticketTool: "jira", github: null });
+  });
+
+  it("should accept only jira and github from the browser", () => {
+    expect(checkTicketTool("github")).toBe("github");
+    expect(checkTicketTool("trello")).toBeUndefined();
+  });
+
+  it.each([
+    [null, null],
+    ["  ", null],
+    ["https://github.com/hmcts/cft-workspace", "hmcts/cft-workspace"],
+    ["cft-workspace", undefined]
+  ])("should read the repository %j as %j", (value, expected) => {
+    expect(checkGithubDefault(value)).toBe(expected);
   });
 });

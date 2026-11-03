@@ -20,7 +20,7 @@ import { byCodePoint } from "../topics/slug.ts";
  * the client package. Reported names are *not* checked against it: an unrecognised one is kept, since it is a newer
  * client claiming a field a later hub will send.
  */
-export type ClientFeature = "attachments" | "files" | "lookups" | "memory-anon" | "model-alias" | "stop" | "welsh" | "welsh-review";
+export type ClientFeature = "attachments" | "files" | "github-lookups" | "lookups" | "memory-anon" | "model-alias" | "stop" | "welsh" | "welsh-review";
 
 export const MAX_CLIENT_FEATURES = 50;
 export const MAX_CLIENT_FEATURE_NAME = 50;
@@ -85,6 +85,15 @@ function podClaim(pod: PodClaims): string[] | null {
 /** Whether the client a virtual agent's pod booted on claimed `feature`; `false` while it has claimed nothing. */
 export function podSupports(pod: PodClaims, feature: ClientFeature): boolean {
   return podClaim(pod)?.includes(feature) === true;
+}
+
+/**
+ * Whether a running pod's client is known to be too old for `feature`: it has made its claim, and the claim leaves the
+ * feature out. A pod that is not running, or has claimed nothing yet, is not: it will boot on the current client.
+ */
+export function podLacks(pod: PodClaims & { status: string }, feature: ClientFeature): boolean {
+  const claim = pod.status === "running" ? podClaim(pod) : null;
+  return claim !== null && !claim.includes(feature);
 }
 
 /**

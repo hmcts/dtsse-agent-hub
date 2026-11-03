@@ -269,7 +269,7 @@ describe("Jira export in the document panel", () => {
       fireEvent.click(exportButton());
     });
 
-    expect(lookUp).toHaveBeenCalledWith({ kind: "jira_project", query: "possess", space: null }, expect.any(AbortSignal));
+    expect(lookUp).toHaveBeenCalledWith({ kind: "jira_project", query: "possess", space: null, owner: null }, expect.any(AbortSignal));
     expect(exportTo).toHaveBeenCalledWith({ conversationId: CONVERSATION, project: "PCS" });
   });
 });
