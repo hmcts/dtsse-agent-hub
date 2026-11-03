@@ -5,6 +5,7 @@
 // never through a shell, and an answer cut down to the fields the hub accepts. See "Lookups" in dtsse-agent-hub's
 // docs/agent-api.md.
 import type { Env } from "../env.ts";
+import { GITHUB_OWNER_RE, GITHUB_REPO_RE, ghSaid } from "../github.ts";
 import type { GithubProjectFound, GithubRepoFound, LookupAnswer } from "../wire.ts";
 
 export type RunResult = { code: number; stdout: string; stderr: string };
@@ -23,10 +24,6 @@ const MAX_DETAIL = 300;
 const SEARCH_LIMIT = 20;
 // gh exits 4 when it has no usable sign-in.
 const GH_EXIT_AUTH = 4;
-
-/** A GitHub user or organisation login. */
-export const GITHUB_OWNER_RE = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/;
-const GITHUB_REPO_RE = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$/;
 
 // One query for an organisation's Projects or a user's: `repositoryOwner` answers either, and only the fragment for
 // the kind it is fills in. Closed Projects are asked for and dropped here, since nobody files new work on one.
@@ -88,6 +85,39 @@ export function repoSearchArgs(words: readonly string[], owners: readonly string
     `--limit=${SEARCH_LIMIT}`,
     "--json=fullName,description,hasIssues"
   ];
+}
+
+// GitHub refuses a search query over 256 characters, and gh puts each owner in it as ` user:{owner}`, with
+// ` in:name archived:false` for the flags beside them.
+const MAX_SEARCH_QUERY = 256;
+const FLAG_QUALIFIERS = " in:name archived:false".length;
+// At most this many searches for one lookup: each is one of the person's 30 code-search calls a minute, and a lookup
+// is made for every pause in their typing. Owners past what fits are their organisations listed last.
+const MAX_SEARCHES = 4;
+
+/**
+ * The owners split into groups whose searches each fit GitHub's query limit with the words, in order, at most
+ * `MAX_SEARCHES` of them. One group for anybody in a handful of organisations.
+ */
+export function ownerGroups(words: readonly string[], owners: readonly string[]): string[][] {
+  const room = MAX_SEARCH_QUERY - words.join(" ").length - FLAG_QUALIFIERS;
+  const groups: string[][] = [];
+  let group: string[] = [];
+  let used = 0;
+  for (const owner of owners) {
+    const cost = ` user:${owner}`.length;
+    if (group.length > 0 && used + cost > room) {
+      groups.push(group);
+      group = [];
+      used = 0;
+    }
+    group.push(owner);
+    used += cost;
+  }
+  if (group.length > 0) {
+    groups.push(group);
+  }
+  return groups.slice(0, MAX_SEARCHES);
 }
 
 /** The repositories in `gh search repos --json`, as the hub accepts them: any with issues turned off are left out. */
@@ -201,13 +231,9 @@ export function ghLookupFailure(result: RunResult, what: "repositories" | "Proje
   if (what === "Projects" && missingScope(result)) {
     return NO_PROJECT_SCOPE;
   }
-  const line =
-    `${result.stderr}\n${result.stdout}`
-      .split("\n")
-      .map((text) => text.trim())
-      .find((text) => text !== "" && !text.startsWith("{")) ?? "";
-  const why = line ? `GitHub could not search ${what}: ${line}` : `GitHub ${what} could not be searched just now.`;
-  return why.length > MAX_DETAIL ? `${why.slice(0, MAX_DETAIL - 1)}…` : why;
+  const said = `GitHub could not search ${what}`;
+  const why = ghSaid(result, said, MAX_DETAIL);
+  return why === said ? `GitHub ${what} could not be searched just now.` : why;
 }
 
 /**
@@ -225,10 +251,12 @@ export function githubOwners(run: Run, env: Env): () => Promise<string[] | null>
       run("gh", ["api", "user", "--jq", ".login"], { env, timeoutMs: OWNERS_TIMEOUT_MS }),
       run("gh", ["api", "user/orgs?per_page=100", "--jq", ".[].login"], { env, timeoutMs: OWNERS_TIMEOUT_MS })
     ]);
-    if (user.code !== 0) {
+    // Kept only when both answered: the person's login alone would leave every organisation out of every search
+    // until the supervisor restarts.
+    if (user.code !== 0 || orgs.code !== 0) {
       return null;
     }
-    const logins = [user.stdout, orgs.code === 0 ? orgs.stdout : ""]
+    const logins = [user.stdout, orgs.stdout]
       .join("\n")
       .split("\n")
       .map((login) => login.trim())
@@ -279,7 +307,21 @@ export async function runGithubLookup(
   if (owners === null) {
     return { error: "failed", detail: "Your assistant is not signed in to GitHub, so it cannot search repositories. Reconnect GitHub in Connections." };
   }
-  const result = await deps.run("gh", repoSearchArgs(words, owners), { env: deps.env, timeoutMs: SEARCH_TIMEOUT_MS });
-  const results = result.code === 0 ? parseRepos(result.stdout) : null;
-  return results !== null ? { results } : { error: "failed", detail: ghLookupFailure(result, "repositories") };
+  // One search per group of owners, side by side, merged in order. A group that fails leaves its owners out rather
+  // than the whole answer; only when every one fails is the search said to have failed.
+  const searched = await Promise.all(
+    ownerGroups(words, owners).map(async (group) => {
+      const result = await deps.run("gh", repoSearchArgs(words, group), { env: deps.env, timeoutMs: SEARCH_TIMEOUT_MS });
+      return { result, repos: result.code === 0 ? parseRepos(result.stdout) : null };
+    })
+  );
+  const found = searched.filter((one) => one.repos !== null);
+  if (searched.length > 0 && found.length === 0) {
+    return { error: "failed", detail: ghLookupFailure((searched[0] as { result: RunResult }).result, "repositories") };
+  }
+  const seen = new Set<string>();
+  const results = found
+    .flatMap((one) => one.repos as GithubRepoFound[])
+    .filter((repo) => !seen.has(repo.full_name.toLowerCase()) && seen.add(repo.full_name.toLowerCase()));
+  return { results: results.slice(0, MAX_GITHUB_RESULTS) };
 }

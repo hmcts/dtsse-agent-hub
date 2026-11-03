@@ -5,9 +5,10 @@
 // cut down to the fields the hub accepts. See "Atlassian lookups" in dtsse-agent-hub's docs/agent-api.md.
 import type { Api } from "../api.ts";
 import type { Env } from "../env.ts";
+import { GITHUB_OWNER_RE } from "../github.ts";
 import { withRetry } from "../retry.ts";
 import type { ConfluencePageFound, JiraProjectFound, LookupAnswer } from "../wire.ts";
-import { GITHUB_OWNER_RE, githubOwners, runGithubLookup } from "./github-lookups.ts";
+import { githubOwners, runGithubLookup } from "./github-lookups.ts";
 
 export type LookupKind = "jira_project" | "confluence_page" | "github_repo" | "github_project";
 

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { GITHUB_EXPORT_BASH_TIMEOUT_MS } from "./envelope.ts";
 import {
   type GithubExportDeps,
   type GithubExportRequest,
@@ -10,7 +11,8 @@ import {
   MAX_GITHUB_ERROR,
   MAX_TITLE,
   parseCreatedNumber,
-  runGithubExport
+  runGithubExport,
+  STEP_TIMEOUT_MS
 } from "./github-export.ts";
 import type { RunResult } from "./virtual/process.ts";
 import type { Artefact, GithubExportReport } from "./wire.ts";
@@ -241,6 +243,17 @@ describe("runGithubExport", () => {
 
     await expect(runGithubExport(f.deps, REQUEST)).rejects.toThrow("already running");
     expect(f.calls).toEqual([]);
+  });
+});
+
+describe("the time the session gives github export", () => {
+  it("should fit every gh call at its limit, and the report, inside the Bash timeout the session is told", () => {
+    // The create, a label create for each label, the label edit and the Project add, with a minute spare for reading
+    // the document and reporting, for an export with the most labels the hub sends today.
+    const labels = 1;
+    const worst = 120000 + STEP_TIMEOUT_MS * (labels + 2) + 60000;
+
+    expect(worst).toBeLessThanOrEqual(GITHUB_EXPORT_BASH_TIMEOUT_MS);
   });
 });
 

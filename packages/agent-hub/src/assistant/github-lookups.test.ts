@@ -3,6 +3,7 @@ import {
   ghLookupFailure,
   githubOwners,
   githubWords,
+  ownerGroups,
   parseProject,
   parseProjects,
   parseRepos,
@@ -20,6 +21,7 @@ const OK = (stdout: string): RunResult => ({ code: 0, stdout, stderr: "" });
 const REPOS = JSON.stringify([
   { fullName: "hmcts/ccd-data-store-api", description: "  Store/search\n cases ", hasIssues: true },
   { fullName: "hmcts/no-issues", description: "", hasIssues: false },
+  { fullName: "hmcts/.github", description: null, hasIssues: true },
   { fullName: "not a repo", description: null, hasIssues: true }
 ]);
 const PROJECTS = JSON.stringify({
@@ -88,9 +90,37 @@ describe("repoSearchArgs and projectSearchArgs", () => {
   });
 });
 
+describe("ownerGroups", () => {
+  it("should keep everybody in one search when they fit", () => {
+    expect(ownerGroups(["ccd"], ["SarahL", "hmcts"])).toEqual([["SarahL", "hmcts"]]);
+  });
+
+  it("should split owners so that each search stays inside GitHub's 256-character query, in order", () => {
+    const owners = Array.from({ length: 30 }, (_, i) => `hmcts-team-${String(i).padStart(2, "0")}`);
+
+    const groups = ownerGroups(["ccd", "data"], owners);
+
+    expect(groups.length).toBeGreaterThan(1);
+    expect(groups.flat()).toEqual(owners.slice(0, groups.flat().length));
+    for (const group of groups) {
+      const query = `ccd data${group.map((o) => ` user:${o}`).join("")} in:name archived:false`;
+      expect(query.length).toBeLessThanOrEqual(256);
+    }
+  });
+
+  it("should make at most four searches, leaving the last organisations out", () => {
+    const owners = Array.from({ length: 100 }, (_, i) => `organisation-number-${i}`);
+
+    expect(ownerGroups(["x"], owners)).toHaveLength(4);
+  });
+});
+
 describe("parseRepos", () => {
   it("should keep repositories with issues, tidying their descriptions", () => {
-    expect(parseRepos(REPOS)).toEqual([{ full_name: "hmcts/ccd-data-store-api", description: "Store/search cases" }]);
+    expect(parseRepos(REPOS)).toEqual([
+      { full_name: "hmcts/ccd-data-store-api", description: "Store/search cases" },
+      { full_name: "hmcts/.github", description: null }
+    ]);
   });
 
   it("should give none when the output is not gh's list", () => {
@@ -155,6 +185,22 @@ describe("githubOwners", () => {
     expect(calls).toHaveLength(2);
   });
 
+  it("should keep nothing when only the organisations could not be read, so the next search asks again", async () => {
+    // Arrange
+    let orgs: RunResult = { code: 1, stdout: "", stderr: "HTTP 502" };
+    const run: Run = async (_cmd, args) => (args[1] === "user" ? OK("SarahL\n") : orgs);
+    const owners = githubOwners(run, {});
+
+    // Act
+    const first = await owners();
+    orgs = OK("hmcts\n");
+    const second = await owners();
+
+    // Assert
+    expect(first).toBeNull();
+    expect(second).toEqual(["SarahL", "hmcts"]);
+  });
+
   it("should keep nothing, and ask again next time, when gh is not signed in", async () => {
     const { run, calls } = runner({ "api user/orgs": { code: 4, stdout: "", stderr: "" }, "api user ": { code: 4, stdout: "", stderr: "" } });
     const owners = githubOwners(run, {});
@@ -172,8 +218,47 @@ describe("runGithubLookup", () => {
 
     const answer = await runGithubLookup({ run, env: {}, owners }, { kind: "github_repo", query: "ccd data", owner: null });
 
-    expect(answer).toEqual({ results: [{ full_name: "hmcts/ccd-data-store-api", description: "Store/search cases" }] });
+    expect(answer).toEqual({
+      results: [
+        { full_name: "hmcts/ccd-data-store-api", description: "Store/search cases" },
+        { full_name: "hmcts/.github", description: null }
+      ]
+    });
     expect(calls[0]).toContain("--owner=SarahL");
+  });
+
+  it("should merge the searches of every group of owners, once each, when the person is in many organisations", async () => {
+    // Arrange
+    const owners = Array.from({ length: 30 }, (_, i) => `hmcts-team-${String(i).padStart(2, "0")}`);
+    const run: Run = async (_cmd, args) => {
+      const first = args.find((arg) => arg.startsWith("--owner="))?.slice("--owner=".length);
+      return OK(
+        JSON.stringify([
+          { fullName: `${first}/ccd`, description: null, hasIssues: true },
+          { fullName: "HMCTS/shared", description: null, hasIssues: true }
+        ])
+      );
+    };
+
+    // Act
+    const answer = await runGithubLookup({ run, env: {}, owners: async () => owners }, { kind: "github_repo", query: "ccd", owner: null });
+
+    // Assert
+    const names = "results" in answer ? answer.results.map((repo) => (repo as { full_name: string }).full_name) : [];
+    expect(names[0]).toBe("hmcts-team-00/ccd");
+    expect(names.filter((name) => name.toLowerCase() === "hmcts/shared")).toHaveLength(1);
+  });
+
+  it("should answer what the searches that worked found when one group's fails", async () => {
+    const owners = Array.from({ length: 30 }, (_, i) => `hmcts-team-${String(i).padStart(2, "0")}`);
+    const run: Run = async (_cmd, args) =>
+      args.includes("--owner=hmcts-team-00")
+        ? OK(JSON.stringify([{ fullName: "hmcts-team-00/ccd", description: null, hasIssues: true }]))
+        : { code: 1, stdout: "", stderr: "HTTP 502" };
+
+    const answer = await runGithubLookup({ run, env: {}, owners: async () => owners }, { kind: "github_repo", query: "ccd", owner: null });
+
+    expect(answer).toEqual({ results: [{ full_name: "hmcts-team-00/ccd", description: null }] });
   });
 
   it("should search only the owner typed before a slash, without asking for the person's accounts", async () => {

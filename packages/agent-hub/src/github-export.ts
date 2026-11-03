@@ -10,19 +10,23 @@ import path from "node:path";
 import type { Api } from "./api.ts";
 import { missingScope } from "./assistant/github-lookups.ts";
 import type { Env } from "./env.ts";
+import { ghSaid } from "./github.ts";
 import { withRetry } from "./retry.ts";
 import { hubHome, readJson, writeJson } from "./session.ts";
 import { claimExport, releaseExport } from "./twg-export.ts";
-import { type RunResult, stripAnsi } from "./virtual/process.ts";
+import type { RunResult } from "./virtual/process.ts";
 import type { Artefact, GithubExportReport } from "./wire.ts";
 
-export const GITHUB_REPO_RE = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$/;
 export const MAX_GITHUB_ERROR = 300;
 // GitHub refuses an issue title over 256 characters.
 export const MAX_TITLE = 256;
 const FALLBACK_TITLE = "HMCTS Assistant document";
 // Long enough for a slow GitHub, short enough that a hung gh is reported well inside the hub's 15-minute timeout.
 const CREATE_TIMEOUT_MS = 120000;
+// Each step after the issue exists: labelling it and putting it on a Project. Shorter than the create, so that every
+// step at its limit still ends inside the Bash timeout the session is given (`GITHUB_EXPORT_BASH_TIMEOUT_MS`), with
+// the report made: the document read and the report are quick, and a label step is one call per label plus one.
+export const STEP_TIMEOUT_MS = 30000;
 
 /** A Project as `owner` and `number`, which is how gh names one. */
 export type GithubProject = { owner: string; number: number };
@@ -97,32 +101,20 @@ export function ghFailure(result: RunResult): string {
   if (result.code === 127) {
     return "gh is not installed here, so the issue could not be created.";
   }
-  const line =
-    stripAnsi(`${result.stderr}\n${result.stdout}`)
-      .split("\n")
-      .map((text) => text.trim())
-      .find((text) => text !== "") ?? "";
-  const said = line ? `GitHub refused the issue: ${line}` : "GitHub refused the issue";
-  return said.length > MAX_GITHUB_ERROR ? `${said.slice(0, MAX_GITHUB_ERROR - 1)}…` : said;
+  return ghSaid(result, "GitHub refused the issue", MAX_GITHUB_ERROR);
 }
 
 /** Why the issue could not be put on the Project, in one line, or null once it is on it. */
 async function addToProject(deps: GithubExportDeps, project: GithubProject, url: string): Promise<string | null> {
   const args = ["project", "item-add", String(project.number), `--owner=${project.owner}`, `--url=${url}`];
-  const result = await deps.run("gh", args, { env: deps.env, timeoutMs: CREATE_TIMEOUT_MS });
+  const result = await deps.run("gh", args, { env: deps.env, timeoutMs: STEP_TIMEOUT_MS });
   if (result.code === 0) {
     return null;
   }
   if (missingScope(result) || /project scope|read:project|required scopes/i.test(`${result.stderr}${result.stdout}`)) {
     return "your GitHub sign-in needs the project scope to add it to a Project. Reconnect GitHub in Connections";
   }
-  const line =
-    stripAnsi(`${result.stderr}\n${result.stdout}`)
-      .split("\n")
-      .map((text) => text.trim())
-      .find((text) => text !== "") ?? "";
-  const said = line ? `GitHub would not add it to the Project: ${line}` : "GitHub would not add it to the Project";
-  return said.length > MAX_GITHUB_ERROR ? `${said.slice(0, MAX_GITHUB_ERROR - 1)}…` : said;
+  return ghSaid(result, "GitHub would not add it to the Project", MAX_GITHUB_ERROR);
 }
 
 // GitHub's dark green, which reads on both its light and dark themes.
@@ -138,23 +130,14 @@ async function label(deps: GithubExportDeps, repo: string, number: number, label
     // Fails harmlessly when the label is there already, or the person cannot make labels, which the edit then says.
     await deps.run("gh", ["label", "create", name, `--repo=${repo}`, `--color=${LABEL_COLOUR}`, "--description=Made from the CFT Workspace"], {
       env: deps.env,
-      timeoutMs: CREATE_TIMEOUT_MS
+      timeoutMs: STEP_TIMEOUT_MS
     });
   }
   const result = await deps.run("gh", ["issue", "edit", String(number), `--repo=${repo}`, `--add-label=${labels.join(",")}`], {
     env: deps.env,
-    timeoutMs: CREATE_TIMEOUT_MS
+    timeoutMs: STEP_TIMEOUT_MS
   });
-  if (result.code === 0) {
-    return null;
-  }
-  const line =
-    stripAnsi(`${result.stderr}\n${result.stdout}`)
-      .split("\n")
-      .map((text) => text.trim())
-      .find((text) => text !== "") ?? "";
-  const said = line ? `GitHub would not label it ${labels.join(", ")}: ${line}` : `GitHub would not label it ${labels.join(", ")}`;
-  return said.length > MAX_GITHUB_ERROR ? `${said.slice(0, MAX_GITHUB_ERROR - 1)}…` : said;
+  return result.code === 0 ? null : ghSaid(result, `GitHub would not label it ${labels.join(", ")}`, MAX_GITHUB_ERROR);
 }
 
 async function create(deps: GithubExportDeps, dir: string, request: GithubExportRequest): Promise<GithubExportOutcome> {

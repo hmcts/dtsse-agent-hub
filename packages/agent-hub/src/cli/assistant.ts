@@ -3,7 +3,8 @@
 import { ApiError } from "../api.ts";
 import { CONFLUENCE_EXPORT_ID_RE, CONFLUENCE_ID_RE, MAX_CONFLUENCE_ERROR, MAX_PAGE_TITLE, runConfluenceExport } from "../confluence-export.ts";
 import { CLI } from "../envelope.ts";
-import { GITHUB_REPO_RE, MAX_GITHUB_ERROR, runGithubExport } from "../github-export.ts";
+import { GITHUB_REPO_RE } from "../github.ts";
+import { MAX_GITHUB_ERROR, runGithubExport } from "../github-export.ts";
 import { EXPORT_ID_RE, JIRA_BROWSE_URL, JIRA_KEY_RE, MAX_JIRA_ERROR, runJiraExport } from "../jira-export.ts";
 import { requireSessionId } from "../session.ts";
 import { atlassianLogin, run } from "../virtual/index.ts";

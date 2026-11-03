@@ -251,11 +251,13 @@ export type GithubExportFrame = {
 };
 
 /**
- * How long the session is told to let `github export` run: the command's own two-minute limit on gh, with room for
- * reading the document and reporting either side of it. There is no sign-in to wait for, since gh is signed in on
- * every pod.
+ * How long the session is told to let `github export` run: the Jira export's, which is the most the Bash tool allows.
+ * The command's own limits have to fit inside it with the report still made — two minutes for the create and half a
+ * minute for each step after it, a label create per label, the label edit and the Project add — or a command cut off
+ * after the issue exists would leave the hub waiting. There is no sign-in to wait for, since gh is signed in on every
+ * pod. The test beside `runGithubExport` adds the limits up.
  */
-export const GITHUB_EXPORT_BASH_TIMEOUT_MS = 240000;
+export const GITHUB_EXPORT_BASH_TIMEOUT_MS = 600000;
 
 /**
  * How to carry out a pending GitHub export: one command, `github export`, that reads the document, opens the issue

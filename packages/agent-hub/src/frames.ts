@@ -2,6 +2,7 @@
 // than this client, so every field is checked here and anything that does not fit is dropped or left absent.
 import { parseModel } from "./assistant/models.ts";
 import type { AssistantFrame, AssistantProduct, ConfluenceExportFrame, GithubExportFrame, JiraExportFrame } from "./envelope.ts";
+import { GITHUB_OWNER_RE, GITHUB_REPO_RE } from "./github.ts";
 
 // Structural, and every field optional: it is the shape both `directs` and `envelope` read, so a message
 // narrowed here fits either without this module choosing one of their author types over the other.
@@ -141,10 +142,6 @@ export function parseJiraExportFrame(value: unknown): JiraExportFrame | null {
   }
   return { export_id: raw.export_id, project: raw.project, issue_type: raw.issue_type, labels: raw.labels as string[] };
 }
-
-const GITHUB_REPO_RE = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$/;
-
-const GITHUB_OWNER_RE = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/;
 
 /**
  * A pending GitHub export on the frame, or null. Its values go into the `github export` command the session is told

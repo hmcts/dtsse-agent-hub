@@ -403,7 +403,7 @@ describe("assistantEnvelope", () => {
     // Assert
     expect(text).toMatch(`create a GitHub issue for the conversation's document in hmcts/cft-workspace (export ${exportId})`);
     expect(text).toContain(`\`agent-hub github export ${exportId} --repo hmcts/cft-workspace\``);
-    expect(text).toMatch(/Bash timeout of 240000 ms/);
+    expect(text).toMatch(/Bash timeout of 600000 ms/);
     expect(text).toMatch(/reports the issue it already made rather than making another/);
     expect(text).not.toMatch(/gh issue create|artefact get|github report|twg/);
     expect(text.endsWith("\n---\nPlease create a GitHub issue for this document in hmcts/cft-workspace.")).toBe(true);
