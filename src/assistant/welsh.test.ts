@@ -11,6 +11,7 @@ import {
   WELSH_JOB_TIMEOUT_MS,
   welshAnswerBody,
   welshArgs,
+  welshFeature,
   welshFileName,
   welshResponse
 } from "./welsh.ts";
@@ -78,6 +79,12 @@ describe("the small checks", () => {
     expect(isWelshProduct("general")).toBe(false);
     expect(isWelshProduct("platform")).toBe(false);
     expect(isWelshProduct(7)).toBe(false);
+  });
+
+  it("should need welsh-review for the kinds an older client ignores, and welsh for the rest", () => {
+    expect(welshFeature("request")).toBe("welsh-review");
+    expect(welshFeature("keep_english")).toBe("welsh-review");
+    expect(welshFeature("scan")).toBe("welsh");
   });
 
   it("should know its kinds and nothing else", () => {

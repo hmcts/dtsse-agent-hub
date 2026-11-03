@@ -563,7 +563,7 @@ The page is for people whose assistant has the `welsh` plugin ticked (`WELSH_PLU
 
 **The answer.** `PUT /api/virtual/{id}/welsh/{job_id}` with `{result}`, the JSON object `scripts/welsh` printed with `message` added (its stderr, at most 4000 characters), or `{error, detail?}`, `error` being `signed_out` or `failed` and `detail` at most 500 characters. `204`. Kept only for a job of that virtual agent's that is still pending; anything else is ignored, still `204`. A file is accepted only for such a job, at most 5 MiB and 4 a job. Jobs and their files are deleted once they are 7 days old, as the next job is recorded.
 
-**An older client.** Gated on the `welsh` client feature, claimed by the pod's own session, as `lookups` is: the hub answers `unsupported` rather than send a frame nobody will read.
+**An older client.** Gated on the `welsh` client feature, claimed by the pod's own session, as `lookups` is: the hub answers `unsupported` rather than send a frame nobody will read. `request` and `keep_english` came later and are gated on `welsh-review` instead, since a client that claims only `welsh` ignores them.
 
 ## Client features
 
@@ -599,7 +599,7 @@ field out and the UI can say that the feature is not available on that session y
 
 ### A pod's claim
 
-The features a pod's supervisor acts on — `files`, `lookups`, `welsh`, `memory-anon` and `model-alias` — are gated
+The features a pod's supervisor acts on — `files`, `lookups`, `welsh`, `welsh-review`, `memory-anon` and `model-alias` — are gated
 on the **pod's** claim, not on any conversation session's. A pod makes it with `client_features` on
 `POST /api/virtual/{id}/status`, which the client sends on every phase report it makes. The boot script
 (`bin/virtual-agent-boot`) reports its early phases before it upgrades the client and sends no claim, and a report
@@ -652,6 +652,9 @@ the same time and a count is a third place to remember. The list is the record.
 - `welsh`, because their supervisor answers the sessions stream's `welsh` frame (see Welsh translation jobs). Read from
   the pod's claim, as `lookups` is. Gated: the hub answers a job for a pod that has not claimed it with
   `unsupported`, and sends it no frame.
+- `welsh-review`, because their supervisor also runs the `welsh` frame's `request` and `keep_english` kinds, which a
+  client claiming only `welsh` ignores. Read from the pod's claim, as `welsh` is. Gated: the hub answers those two
+  kinds for a pod that has not claimed it with `unsupported`, and sends it no frame.
 - `memory-anon`, because their supervisor reads its own container cgroup and reports it
   (`PUT /api/virtual/{id}/memory`), including `memory.stat`'s `anon` line as `anon_bytes`, which that route requires.
   **This is the name the Size section gates on**, so that it can word a pod that cannot report as an older version

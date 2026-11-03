@@ -22,6 +22,7 @@ import {
   type WelshFileView,
   type WelshKind,
   type WelshResponse,
+  welshFeature,
   welshResponse
 } from "./welsh.ts";
 
@@ -64,7 +65,7 @@ export async function askWelsh(prisma: PrismaClient, question: WelshQuestion, no
     await setDesired(prisma, question.viewerOid, assistant.id, "running", now);
     return { answer: { status: "waking" } };
   }
-  const gate = podGate({ status: assistant.status, ...claims }, "welsh");
+  const gate = podGate({ status: assistant.status, ...claims }, welshFeature(question.kind));
   if (gate !== "ok") {
     return { answer: { status: gate } };
   }

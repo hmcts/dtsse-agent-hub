@@ -42,6 +42,15 @@ const WELSH_KINDS = [
 ] as const;
 export type WelshKind = (typeof WELSH_KINDS)[number];
 
+/**
+ * The client feature a pod must claim to be sent a kind. `request` and `keep_english` came after `welsh`, and a pod on
+ * a client from before them ignores their frames, so it is answered `unsupported` (needs an update) rather than left to
+ * time out.
+ */
+export function welshFeature(kind: WelshKind): "welsh" | "welsh-review" {
+  return kind === "request" || kind === "keep_english" ? "welsh-review" : "welsh";
+}
+
 /** The Welsh page's tasks, which `?task=` can open directly. */
 const WELSH_TASK_IDS = ["search", "scan", "return", "story"] as const;
 export type WelshTask = (typeof WELSH_TASK_IDS)[number];
