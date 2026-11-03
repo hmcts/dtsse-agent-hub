@@ -67,7 +67,7 @@ approved translation, it still goes to the WLU for this one. Inside a catalogue,
 
 ## Using it
 
-**Business analysts** use the CFT Workspace's **Welsh translations** page: the CY button in the sidebar once the plugin
+**Business analysts** use the CFT Workspace's **Welsh translations** page: the **+** button beside New chat in the sidebar, then **Welsh translations**, once the plugin
 is ticked, or `/assistant/welsh`. It runs the commands below in their own assistant, with their own GitHub and Jira
 sign-ins.
 
