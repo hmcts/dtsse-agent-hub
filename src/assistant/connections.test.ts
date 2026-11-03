@@ -19,6 +19,7 @@ import {
   connectionsPrompt,
   connectionsWarning,
   connectorFor,
+  connectRestarts,
   hasLapsed,
   inWords,
   isConnection,
@@ -986,8 +987,30 @@ describe("sign-ins made on request", () => {
     expect(offersConnect({ kind: "azure", state })).toBe(expected);
   });
 
-  it.each(["github", "jenkins", "atlassian"] as const)("should offer no connect from settings for %s, which is not made on request", (kind) => {
+  it.each(["jenkins", "atlassian"] as const)("should offer no connect from settings for %s, which is not made on request", (kind) => {
     expect(offersConnect({ kind, state: "waiting" })).toBe(false);
+  });
+
+  // A connected GitHub token can still lack a scope the hub asks for now, and nothing marks it lapsed, so signing in
+  // again from settings is the only way to the new one.
+  it.each([
+    ["connected", true],
+    ["waiting", true],
+    ["expired", true],
+    ["failed", true],
+    ["signing-in", false],
+    ["refreshing", false],
+    ["finishing", false]
+  ] as const)("should offer to sign in to GitHub again from settings when it is %s: %s", (state, expected) => {
+    expect(offersConnect({ kind: "github", state })).toBe(expected);
+  });
+
+  it("should restart the assistant to connect Azure and GitHub, and nothing else", () => {
+    expect(connectRestarts("azure")).toBe(true);
+    expect(connectRestarts("github")).toBe(true);
+    expect(connectRestarts("atlassian")).toBe(false);
+    expect(connectRestarts("jenkins")).toBe(false);
+    expect(connectRestarts("claude")).toBe(false);
   });
 
   it("should say whether a value is saved on each row", () => {

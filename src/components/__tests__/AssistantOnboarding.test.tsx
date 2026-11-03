@@ -247,23 +247,38 @@ describe("GettingReady connectors", () => {
     expect(within(connector("GitHub")).queryByRole("button", { name: "Connect" })).toBeNull();
   });
 
-  it("should show a sign-in as connecting with a note once the person clicks Connect on a running assistant", () => {
-    render(ready({ assistant: assistant("running") }));
+  // GitHub is signed in to only as the pod boots, so a running assistant relays no code for it however long the row
+  // waits: Connect has to restart it.
+  it("should restart the assistant to ask for the GitHub sign-in when the person clicks Connect on a running assistant", async () => {
+    const reconnect = ok();
+    render(ready({ assistant: assistant("running"), reconnect }));
 
-    fireEvent.click(within(connector("GitHub")).getByRole("button", { name: "Connect" }));
+    expect(within(connector("GitHub")).getByRole("form", { name: "Connect GitHub" })).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(within(connector("GitHub")).getByRole("button", { name: "Connect" }));
+    });
 
+    expect(reconnect).toHaveBeenCalledTimes(1);
+    const sent = (reconnect.mock.calls[0] as unknown as [FormData])[0];
+    expect(sent.get("id")).toBe(ASSISTANT);
+    expect(sent.get("kind")).toBe("github");
+    expect(sent.get("keep")).toBe("stored");
     expect(within(connector("GitHub")).getByText("Connecting…")).toBeTruthy();
     expect(within(connector("GitHub")).getByText(/The sign-in will appear here/)).toBeTruthy();
   });
 
-  it("should post nothing when the person clicks Connect on a sign-in the pod relays by itself", () => {
-    const reconnect = ok();
-    render(ready({ assistant: assistant("running"), reconnect }));
+  it("should offer Connect for GitHub again once the assistant has restarted without relaying a code", async () => {
+    const { rerender } = render(ready({ assistant: assistant("running") }));
 
-    expect(within(connector("GitHub")).queryByRole("form")).toBeNull();
-    fireEvent.click(within(connector("GitHub")).getByRole("button", { name: "Connect" }));
+    await act(async () => {
+      fireEvent.click(within(connector("GitHub")).getByRole("button", { name: "Connect" }));
+    });
+    rerender(ready({ assistant: assistant("provisioning") }));
+    expect(within(connector("GitHub")).getByText("Connecting…")).toBeTruthy();
 
-    expect(reconnect).not.toHaveBeenCalled();
+    rerender(ready({ assistant: assistant("running") }));
+    expect(within(connector("GitHub")).queryByText("Connecting…")).toBeNull();
+    expect(within(connector("GitHub")).getByRole("button", { name: "Connect" })).toBeTruthy();
   });
 
   // A running gateway assistant with no Azure code and none stored is one whose boot relay never reached the person,
