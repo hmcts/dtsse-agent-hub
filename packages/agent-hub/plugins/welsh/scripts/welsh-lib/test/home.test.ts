@@ -133,8 +133,8 @@ test("homeRepo asks GitHub about a repo with no clone, cloning nothing, and says
 });
 
 test("a change's branch is new each run, so a retry never meets the branch an earlier one left", () => {
-  assert.equal(branchName("cath-Return 7", new Date("2026-11-02T16:12:05Z")), "welsh/cath-return-7-20261102-161205");
-  assert.notEqual(branchName("cath-x", new Date("2026-11-02T16:12:05Z")), branchName("cath-x", new Date("2026-11-02T16:12:06Z")));
+  assert.equal(branchName("cath-Return 7", new Date("2026-11-02T16:12:05.042Z")), "welsh/cath-return-7-20261102-161205042");
+  assert.notEqual(branchName("cath-x", new Date("2026-11-02T16:12:05.001Z")), branchName("cath-x", new Date("2026-11-02T16:12:05.002Z")));
 });
 
 test("a home repo on this machine is found without asking GitHub about the service's other repos", () => {
