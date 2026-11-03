@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useDismiss } from "@/components/assistant/useDismiss";
 
 const TRIGGER = "flex h-[34px] w-[34px] items-center justify-center rounded-[9px] text-lg text-asst-muted hover:bg-asst-field hover:text-asst-text";
 
@@ -109,31 +110,7 @@ export function ChatMenu({
     }
   }, [open]);
 
-  useEffect(() => {
-    if (open === "closed") {
-      return;
-    }
-    const dismiss = (event: MouseEvent | KeyboardEvent) => {
-      if (event instanceof KeyboardEvent) {
-        if (event.key === "Escape") {
-          // Escape dismisses the innermost thing only. The shell closes its drawer on Escape from `window`, which is
-          // the next stop after `document`, so a row's menu would otherwise take the whole sidebar with it.
-          event.stopPropagation();
-          close();
-        }
-        return;
-      }
-      if (!ref.current?.contains(event.target as Node)) {
-        close();
-      }
-    };
-    document.addEventListener("mousedown", dismiss);
-    document.addEventListener("keydown", dismiss);
-    return () => {
-      document.removeEventListener("mousedown", dismiss);
-      document.removeEventListener("keydown", dismiss);
-    };
-  }, [open, close]);
+  useDismiss(open !== "closed", ref, close);
 
   /** Opens a pane, forgetting whatever the last attempt reported. */
   function show(next: "menu" | "rename" | "delete"): void {

@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
+import { useDismiss } from "@/components/assistant/useDismiss";
 
 /** One workflow the menu offers: its own page, so a link. */
 type Workflow = { href: string; label: string; hint: string };
@@ -16,7 +17,7 @@ const SCHEDULED: Workflow = { href: "/assistant/scheduled", label: "Scheduled", 
  * Dismissed by Escape or a click outside, in the same shape as the chat menu: closing from the keyboard puts focus
  * back on the trigger, while a click elsewhere leaves focus where the click put it.
  */
-export function WorkflowsMenu({ welsh = false }: { welsh?: boolean }) {
+export function WorkflowsMenu({ welsh = false }: Readonly<{ welsh?: boolean }>) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -29,30 +30,7 @@ export function WorkflowsMenu({ welsh = false }: { welsh?: boolean }) {
     setOpen(false);
   }, []);
 
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-    const dismiss = (event: MouseEvent | KeyboardEvent) => {
-      if (event instanceof KeyboardEvent) {
-        if (event.key === "Escape") {
-          // Escape closes this menu only, not the sidebar drawer the shell closes on Escape from `window`.
-          event.stopPropagation();
-          close();
-        }
-        return;
-      }
-      if (!ref.current?.contains(event.target as Node)) {
-        close();
-      }
-    };
-    document.addEventListener("mousedown", dismiss);
-    document.addEventListener("keydown", dismiss);
-    return () => {
-      document.removeEventListener("mousedown", dismiss);
-      document.removeEventListener("keydown", dismiss);
-    };
-  }, [open, close]);
+  useDismiss(open, ref, close);
 
   return (
     <div ref={ref} className="relative flex shrink-0">

@@ -263,6 +263,17 @@ describe("AssistantShell", () => {
     expect(document.activeElement).toBe(plus);
   });
 
+  it("should keep the workflows menu open when a key other than Escape is pressed or the menu itself is pressed", () => {
+    render(shell({ welsh: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
+    const menu = screen.getByRole("menu", { name: "Workflows" });
+
+    fireEvent.keyDown(document, { key: "ArrowDown" });
+    fireEvent.mouseDown(menu);
+
+    expect(screen.getByRole("menu", { name: "Workflows" })).toBeTruthy();
+  });
+
   it("should close the workflows menu when the person clicks outside it", () => {
     render(shell({ welsh: true }));
     fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
