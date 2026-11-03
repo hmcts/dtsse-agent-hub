@@ -215,16 +215,80 @@ describe("AssistantShell", () => {
     ).toEqual(["On your computer, ready: Event help", "On your computer, not connected: Fixing the sweep"]);
   });
 
-  it("should link to the Welsh page when the person's assistant has the Welsh plugin ticked", () => {
+  it("should keep the workflows menu closed until its plus is pressed", () => {
     render(shell({ welsh: true }));
 
-    expect(screen.getByRole("link", { name: "Welsh translations" }).getAttribute("href")).toBe("/assistant/welsh");
+    const plus = screen.getByRole("button", { name: "Workflows" });
+    expect(plus.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("menu", { name: "Workflows" })).toBeNull();
   });
 
-  it("should not offer the Welsh page when the person's assistant does not have the Welsh plugin", () => {
+  it("should offer the Welsh and Scheduled pages when the person's assistant has the Welsh plugin ticked", () => {
+    render(shell({ welsh: true }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
+
+    const menu = screen.getByRole("menu", { name: "Workflows" });
+    expect(
+      within(menu)
+        .getAllByRole("menuitem")
+        .map((item) => item.getAttribute("href"))
+    ).toEqual(["/assistant/welsh", "/assistant/scheduled"]);
+  });
+
+  it("should offer only the Scheduled page when the person's assistant does not have the Welsh plugin", () => {
     render(shell());
 
-    expect(screen.queryByRole("link", { name: "Welsh translations" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
+
+    const menu = screen.getByRole("menu", { name: "Workflows" });
+    expect(
+      within(menu)
+        .getAllByRole("menuitem")
+        .map((item) => item.getAttribute("href"))
+    ).toEqual(["/assistant/scheduled"]);
+  });
+
+  it("should close the workflows menu and return focus to the plus when Escape is pressed", () => {
+    render(shell({ welsh: true }));
+    const plus = screen.getByRole("button", { name: "Workflows" });
+    fireEvent.click(plus);
+    within(screen.getByRole("menu", { name: "Workflows" }))
+      .getAllByRole("menuitem")[0]
+      ?.focus();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.queryByRole("menu", { name: "Workflows" })).toBeNull();
+    expect(document.activeElement).toBe(plus);
+  });
+
+  it("should close the workflows menu when the person clicks outside it", () => {
+    render(shell({ welsh: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
+
+    fireEvent.mouseDown(document.body);
+
+    expect(screen.queryByRole("menu", { name: "Workflows" })).toBeNull();
+  });
+
+  it("should close the workflows menu when the plus is pressed again", () => {
+    render(shell({ welsh: true }));
+    const plus = screen.getByRole("button", { name: "Workflows" });
+    fireEvent.click(plus);
+
+    fireEvent.click(plus);
+
+    expect(screen.queryByRole("menu", { name: "Workflows" })).toBeNull();
+  });
+
+  it("should close the workflows menu when one of its pages is chosen", () => {
+    render(shell({ welsh: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
+
+    fireEvent.click(screen.getByRole("menuitem", { name: /Scheduled/ }));
+
+    expect(screen.queryByRole("menu", { name: "Workflows" })).toBeNull();
   });
 
   it("should say chats will appear when there are none", () => {

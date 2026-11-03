@@ -25,6 +25,7 @@ import type { AssistantSize } from "@/components/assistant/SizeSettings";
 import type { AssistantTemplates } from "@/components/assistant/TemplateSettings";
 import type { AssistantTokens } from "@/components/assistant/TokenSettings";
 import { useResizableWidth } from "@/components/assistant/useResizableWidth";
+import { WorkflowsMenu } from "@/components/assistant/WorkflowsMenu";
 import type { ActionResult } from "@/web/action";
 
 /** What a sidebar row's options menu does. The pages pass the same server actions the chat's own header uses. */
@@ -263,18 +264,8 @@ export function AssistantShell({
               </span>
               New chat
             </Link>
-            {/* The Welsh page, a business analyst's tools for a service's Welsh: its own page, so a link, and only for
-                someone whose assistant has the plugin that runs them. */}
-            {welsh ? (
-              <Link
-                href="/assistant/welsh"
-                aria-label="Welsh translations"
-                title="Welsh translations"
-                className="flex w-[44px] shrink-0 items-center justify-center self-stretch rounded-[10px] border border-asst-strong text-[12px] font-semibold tracking-wide text-asst-muted hover:bg-asst-hover hover:text-asst-text"
-              >
-                <span aria-hidden="true">CY</span>
-              </Link>
-            ) : null}
+            {/* The workflows a person can open beside their chats, each its own page, behind one plus. */}
+            <WorkflowsMenu welsh={welsh} />
           </div>
           <LiveLocalSessions served={served}>
             <ConversationSearch>
