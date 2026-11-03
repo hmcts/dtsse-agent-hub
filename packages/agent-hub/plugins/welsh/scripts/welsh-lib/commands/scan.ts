@@ -16,7 +16,7 @@ import { parseArgs } from "node:util";
 import { loadCatalogue } from "../catalogue.ts";
 import { ensureClone, latestTree } from "../clones.ts";
 import { loadConfig, type RepoConfig } from "../config.ts";
-import { noWelshHint } from "../hints.ts";
+import { leaveOutSuggested, noWelshHint } from "../hints.ts";
 import { fail, requireService, say } from "../io.ts";
 import { matchKey } from "../normalise.ts";
 import { workspace } from "../paths.ts";
@@ -113,15 +113,20 @@ export async function scanCmd(argv: string[]): Promise<unknown> {
           ? g.findings[0].match.options.map((o) => ({ id: o.id, welsh: o.welsh, context: o.context, source: o.source }))
           : []
     })),
-    toWlu: toWlu.slice(0, limit).map((g) => ({
-      ref: g.ref,
-      english: g.english,
-      page: pageOf(g.findings[0].cyFile),
-      where: where(g.findings),
-      hint: noWelshHint(g.english, g.findings[0].key),
+    toWlu: toWlu.slice(0, limit).map((g) => {
+      const hint = noWelshHint(g.english, g.findings[0].key);
       // `identical_allowlist` only quiets Welsh that is the English already: a key with no Welsh at all needs some.
-      keepable: g.findings.every((f) => f.signal === "identical")
-    })),
+      const keepable = g.findings.every((f) => f.signal === "identical");
+      return {
+        ref: g.ref,
+        english: g.english,
+        page: pageOf(g.findings[0].cyFile),
+        where: where(g.findings),
+        hint,
+        keepable,
+        suggest_leave_out: leaveOutSuggested(hint, keepable)
+      };
+    }),
     fromCatalogue: fromCatalogue.slice(0, limit).map((g) => ({
       ref: g.ref,
       english: g.english,

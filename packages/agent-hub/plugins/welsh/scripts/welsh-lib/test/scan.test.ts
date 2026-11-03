@@ -6,13 +6,13 @@ import { test } from "node:test";
 import { pageOf, scanCmd } from "../commands/scan.ts";
 import { readTable } from "../xlsx.ts";
 
-test("pageOf names a page by its folder, leaving out route groups and the usual source folders", () => {
+test("should name a page by its folder, leaving out route groups and the usual source folders", () => {
   assert.equal(pageOf("apps/web/src/pages/(public)/summary-of-publications/cy.ts"), "summary of publications");
   assert.equal(pageOf("libs/list-types/siac-poac-paac-weekly-hearing-list/src/locales/cy.ts"), "siac poac paac weekly hearing list");
   assert.equal(pageOf("src/main/resources/locales/cy/case_details/cy.json"), "case details");
 });
 
-test("pageOf falls back to the file when every folder is a usual one", () => {
+test("should fall back to the file when every folder is a usual one", () => {
   assert.equal(pageOf("src/locales/cy.json"), "src/locales/cy.json");
 });
 
@@ -38,13 +38,13 @@ function service(): { ws: string; repo: string } {
 }
 
 interface Scanned {
-  toWlu: { ref: string; english: string; page: string; hint: string | null; keepable: boolean }[];
+  toWlu: { ref: string; english: string; page: string; hint: string | null; keepable: boolean; suggest_leave_out: boolean }[];
   fromCatalogue: { english: string; welsh: string; page: string }[];
   left_out: number;
   request: string | null;
 }
 
-test("scan says why a new string probably needs no Welsh, whether it can be kept, and never finds a link to the page", async () => {
+test("should say why a new string probably needs no Welsh and whether it can be kept, and never find a link to the page", async () => {
   const { repo } = service();
   const result = (await scanCmd(["--service", "cath", "--repo", repo])) as Scanned;
   const byEnglish = Object.fromEntries(result.toWlu.map((s) => [s.english, s]));
@@ -56,6 +56,8 @@ test("scan says why a new string probably needs no Welsh, whether it can be kept
   assert.equal(byEnglish["Rolls Building"]?.keepable, true);
   assert.equal(byEnglish["Choose a file"]?.hint, null);
   assert.equal(byEnglish["Upload documents"]?.keepable, false, "a key with no Welsh at all");
+  assert.equal(byEnglish["Rolls Building"]?.suggest_leave_out, true);
+  assert.equal(byEnglish["Choose a file"]?.suggest_leave_out, false);
   assert.equal(byEnglish["Choose a file"]?.page, "upload");
   assert.deepEqual(
     result.fromCatalogue.map(({ english, welsh, page }) => ({ english, welsh, page })),
@@ -64,7 +66,7 @@ test("scan says why a new string probably needs no Welsh, whether it can be kept
   assert.equal(result.request, null, "no spreadsheet unless asked for");
 });
 
-test("scan writes the request without the strings a BA left out", async () => {
+test("should write the request without the strings a BA left out", async () => {
   const { ws, repo } = service();
   const out = join(ws, "request.xlsx");
   const first = (await scanCmd(["--service", "cath", "--repo", repo])) as Scanned;

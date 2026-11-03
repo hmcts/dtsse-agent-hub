@@ -69,6 +69,17 @@ describe("the Welsh page's views", () => {
     expect(plain).toMatchObject({ hint: null, keepable: false });
   });
 
+  it("should take the engine's suggestion to leave a string out, and read an older scan's hint as one", () => {
+    const [told, older] = scanView({
+      toWlu: [
+        { ref: "CY-2", english: "Rolls Building", hint: "Part of an address.", suggest_leave_out: false },
+        { ref: "CY-3", english: "ServiceNow", hint: "A system." }
+      ]
+    }).toWlu;
+    expect(told?.suggestLeaveOut).toBe(false);
+    expect(older?.suggestLeaveOut).toBe(true);
+  });
+
   it("should read what keeping English added, and its pull request", () => {
     expect(keepView({ added: ["Rolls Building", 7], already: 1, pr: "https://github.com/hmcts/cath-service/pull/12" })).toEqual({
       added: ["Rolls Building"],

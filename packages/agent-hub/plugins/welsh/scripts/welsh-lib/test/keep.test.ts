@@ -20,7 +20,7 @@ function home(): string {
   return welsh;
 }
 
-test("keep-english adds new English to identical_allowlist once, keeping the file's comments and style", async () => {
+test("should add new English to identical_allowlist once, keeping the file's comments and style", async () => {
   const welsh = home();
   const result = (await keepEnglishCmd(["--service", "cath", "--", "Rolls Building", "ServiceNow", "Rolls Building "])) as { added: string[]; already: number };
   assert.deepEqual(result.added, ["Rolls Building"]);
@@ -31,20 +31,27 @@ test("keep-english adds new English to identical_allowlist once, keeping the fil
   assert.match(text, /identical_allowlist:\n {2}- ServiceNow\n {2}- Rolls Building\n/);
 });
 
-test("keep-english changes nothing on a dry run", async () => {
+test("should change nothing on a dry run", async () => {
   const welsh = home();
   const result = (await keepEnglishCmd(["--service", "cath", "--dry-run", "--", "Rolls Building"])) as { added: string[] };
   assert.deepEqual(result.added, ["Rolls Building"]);
   assert.equal(readFileSync(join(welsh, "config.yaml"), "utf8"), CONFIG);
 });
 
-test("keep-english refuses a call with no English", async () => {
+test("should refuse a call with no English", async () => {
   home();
   await assert.rejects(keepEnglishCmd(["--service", "cath", "--"]), /give the English to keep/);
 });
 
-test("keep-english refuses a service whose welsh folder has no config yet", async () => {
+test("should refuse a service whose welsh folder has no config yet", async () => {
   const welsh = home();
   rmSync(join(welsh, "config.yaml"));
   await assert.rejects(keepEnglishCmd(["--service", "cath", "--", "Rolls Building"]), /cath has no welsh\/config.yaml yet/);
+});
+
+test("should keep each entry's comment and an entry that is not a string when keep-english adds to the list", async () => {
+  const welsh = home();
+  writeFileSync(join(welsh, "config.yaml"), "repos: []\nidentical_allowlist:\n  - GOV.UK # brand\n  - 2024\n");
+  await keepEnglishCmd(["--service", "cath", "--", "Rolls Building", "2024"]);
+  assert.equal(readFileSync(join(welsh, "config.yaml"), "utf8"), "repos: []\nidentical_allowlist:\n  - GOV.UK # brand\n  - 2024\n  - Rolls Building\n");
 });

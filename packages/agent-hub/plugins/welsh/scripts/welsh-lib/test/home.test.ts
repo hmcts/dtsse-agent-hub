@@ -156,7 +156,7 @@ test("a home repo on this machine is found without asking GitHub about the servi
   }
 });
 
-test("keep-english commits the English it keeps on its own branch of the home repo, and nothing when it is all kept", async () => {
+test("should commit the English keep-english keeps on its own branch of the home repo, and nothing when it is all kept", async () => {
   const { keepEnglishCmd } = await import("../commands/keep.ts");
   const done = (await keepEnglishCmd(["--service", "cath", "--", "Rolls Building"])) as { added: string[]; branch: string | null; pr: string | null };
   assert.deepEqual(done.added, ["Rolls Building"]);

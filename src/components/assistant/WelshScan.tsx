@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useState } from "react";
-import { MAX_WELSH_STRINGS } from "@/assistant/welsh";
+import { MAX_WELSH_STRINGS, type WelshFileView } from "@/assistant/welsh";
 import { type Ambiguous, byPage, keepView, type ScanView, scanView } from "@/assistant/welsh-views";
 import { WelshApply } from "@/components/assistant/WelshApply";
 import {
@@ -63,21 +63,26 @@ export function WelshScan({
     );
   }
 
-  // A spreadsheet, or a pull request keeping English, is of the ticks it was made from: changing them drops both.
+  // A spreadsheet is of the ticks it was made from, so changing them drops it. A pull request already opened keeping
+  // English stays, link and all: it is on GitHub whatever the ticks are now, and offering it again would open a second.
   const retick = (next: ReadonlySet<string>) => {
     setToggled(next);
+    request.reset();
+  };
+  // A new check starts everything afresh, so it waits for a spreadsheet or a pull request still being made.
+  const fresh = () => {
+    setPicked({});
+    setToggled(new Set());
     request.reset();
     keep.reset();
   };
   const check = () => {
-    setPicked({});
-    retick(new Set());
+    fresh();
     void scan.run({ kind: "scan", product, args: { repo } });
   };
   const changeRepo = (next: string) => {
     setRepo(next);
-    setPicked({});
-    retick(new Set());
+    fresh();
     scan.reset();
   };
   const steps = numberSteps(view);
@@ -89,6 +94,7 @@ export function WelshScan({
         repo={repo}
         repos={repos}
         state={scan.state}
+        busy={isBusy(scan.state, request.state, keep.state)}
         view={view}
         result={done?.result ?? {}}
         skipsStaffPages={skipsStaffPages}
@@ -102,6 +108,7 @@ export function WelshScan({
           toggled={toggled}
           onRetick={retick}
           request={request.state}
+          scanFiles={done?.files ?? []}
           onMake={(leaveOut) => void request.run({ kind: "request", product, args: { repo, leave_out: leaveOut } })}
           keep={keep.state}
           onKeep={(strings) => void keep.run({ kind: "keep_english", product, args: { strings } })}
@@ -138,6 +145,7 @@ function CheckStep({
   repo,
   repos,
   state,
+  busy,
   view,
   result,
   skipsStaffPages,
@@ -147,6 +155,7 @@ function CheckStep({
   repo: string;
   repos: readonly string[];
   state: JobState;
+  busy: boolean;
   view: ScanView | null;
   result: Record<string, unknown>;
   skipsStaffPages: boolean;
@@ -158,7 +167,7 @@ function CheckStep({
     <Step n={2} title="Check the code" done={view !== null} summary={view ? repoName(repo) : undefined}>
       <div className="flex flex-wrap items-end gap-3">
         {repos.length > 1 ? <RepoSelect repos={repos} value={repo} onChange={onRepo} /> : onlyRepo}
-        <button type="button" className={view ? RECHECK : PRIMARY} disabled={isBusy(state)} onClick={onCheck}>
+        <button type="button" className={view ? RECHECK : PRIMARY} disabled={busy} onClick={onCheck}>
           {view ? "Check again" : "Find missing Welsh"}
         </button>
       </div>
@@ -244,8 +253,8 @@ function CatalogueList({ strings, total }: Readonly<{ strings: ScanView["filled"
 
 type NewString = ScanView["toWlu"][number];
 
-/** Whether a new string goes in the spreadsheet: as suggested (ticked unless the scan said why not), or as toggled. */
-const isTicked = (s: NewString, toggled: ReadonlySet<string>) => (s.hint === null) !== toggled.has(s.ref);
+/** Whether a new string goes in the spreadsheet: as suggested (ticked unless the scan suggests leaving it out), or as toggled. */
+const isTicked = (s: NewString, toggled: ReadonlySet<string>) => !s.suggestLeaveOut !== toggled.has(s.ref);
 
 /**
  * The new strings, to tick what goes to the Welsh Language Unit, then the spreadsheet of just those. What is left out
@@ -258,6 +267,7 @@ function SendStep({
   toggled,
   onRetick,
   request,
+  scanFiles,
   onMake,
   keep,
   onKeep
@@ -267,20 +277,22 @@ function SendStep({
   toggled: ReadonlySet<string>;
   onRetick: (toggled: ReadonlySet<string>) => void;
   request: JobState;
+  /** The spreadsheet of every string, from a pod whose client still makes one with the scan. */
+  scanFiles: readonly WelshFileView[];
   onMake: (leaveOut: string[]) => void;
   keep: JobState;
   onKeep: (strings: string[]) => void;
 }>) {
   const leftOut = view.toWlu.filter((s) => !isTicked(s, toggled));
   const sending = view.toWluCount - leftOut.length + view.ambiguousCount;
-  // Only English that is one line can be kept, and only so many at once: the rest stays a one-off.
-  const keepable = leftOut
-    .filter((s) => s.keepable && !/[\r\n]/.test(s.english))
-    .map((s) => s.english)
-    .slice(0, MAX_WELSH_STRINGS);
+  // Only English that is one line can be kept, and only so many at once: the page says when there are more.
+  const canKeep = leftOut.filter((s) => s.keepable && !/[\r\n]/.test(s.english)).map((s) => s.english);
+  const keepable = canKeep.slice(0, MAX_WELSH_STRINGS);
+  // A pod on a client from before the request kind answers it unsupported; its scan's own spreadsheet has every string.
+  const olderPod = request.response?.status === "unsupported" && scanFiles.length > 0;
   const made = doneResult(request);
   const kept = doneResult(keep);
-  const suggested = view.toWlu.filter((s) => s.hint !== null).length;
+  const suggested = view.toWlu.filter((s) => s.suggestLeaveOut).length;
   const flip = (ref: string) => {
     const next = new Set(toggled);
     if (!next.delete(ref)) {
@@ -306,7 +318,7 @@ function SendStep({
           type="button"
           className={RECHECK}
           disabled={busy}
-          onClick={() => onRetick(new Set(view.toWlu.filter((s) => s.hint !== null).map((s) => s.ref)))}
+          onClick={() => onRetick(new Set(view.toWlu.filter((s) => s.suggestLeaveOut).map((s) => s.ref)))}
         >
           Tick all
         </button>
@@ -329,6 +341,14 @@ function SendStep({
         </div>
       )}
       <JobStatus state={request} working="Making the spreadsheet…" />
+      {olderPod ? (
+        <>
+          <p className="text-[13px]">
+            Until your assistant updates, it can only make the spreadsheet of every string. Download it and remove the rows you left out before sending it.
+          </p>
+          <Downloads files={scanFiles} label="Spreadsheet for the Welsh Language Unit" />
+        </>
+      ) : null}
       {made ? (
         <>
           <p className="text-[13px]">
@@ -338,7 +358,7 @@ function SendStep({
           <Downloads files={made.files} label="Spreadsheet for the Welsh Language Unit" />
         </>
       ) : null}
-      {made && keepable.length > 0 && !kept ? (
+      {keepable.length > 0 && !kept ? (
         <Confirm
           ask={`Don't ask about the ${plural(keepable.length, "string")} I left out again…`}
           explain={
@@ -346,6 +366,9 @@ function SendStep({
               <span>This opens a </span>
               <strong>draft</strong>
               {` pull request in the service's repo, as you, adding ${plural(keepable.length, "string")} to the list of English that stays the same in Welsh (identical_allowlist in welsh/config.yaml). Later checks will not ask about them. A developer reviews it before anything is merged.`}
+              {canKeep.length > keepable.length
+                ? ` It takes the first ${keepable.length}; do this again afterwards for the other ${canKeep.length - keepable.length}.`
+                : ""}
             </>
           }
           confirm="Open the draft pull request"
@@ -392,7 +415,11 @@ function ChecklistTable({
               </td>
               <td className="py-1.5 pr-3">
                 <span className="block">{s.english}</span>
-                {s.hint ? <span className="block text-xs text-asst-muted">{s.hint}</span> : null}
+                {s.hint ? (
+                  <span className="block text-xs text-asst-muted">
+                    {s.suggestLeaveOut ? s.hint : `${s.hint} It has no Welsh yet, though, so left out it would have none: it stays ticked.`}
+                  </span>
+                ) : null}
               </td>
               <td className="break-all py-1.5 font-plex-mono text-xs text-asst-muted">{s.where}</td>
             </tr>

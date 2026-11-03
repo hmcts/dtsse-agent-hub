@@ -37,11 +37,19 @@ export async function keepEnglishCmd(argv: string[]): Promise<unknown> {
     fail(`${service} has no welsh/config.yaml yet; run init first`);
   }
   const doc = YAML.parseDocument(readFileSync(path, "utf8"));
-  const current = ((doc.toJS() as { identical_allowlist?: string[] } | null)?.identical_allowlist ?? []).filter((s) => typeof s === "string");
-  const known = new Set(current.map(matchKey));
+  // Appended to the list as it is, so each entry keeps its comment and its form, a number or a quoted string alike.
+  const node = doc.get("identical_allowlist", true);
+  const list = YAML.isSeq(node) ? node : doc.createNode([]);
+  const known = new Set(list.items.map((item) => matchKey(String(YAML.isScalar(item) ? item.value : item))));
   const added = strings.filter((s) => !known.has(matchKey(s)));
   if (added.length && !values["dry-run"]) {
-    doc.set("identical_allowlist", doc.createNode([...current, ...added]));
+    for (const s of added) {
+      list.add(doc.createNode(s));
+    }
+    list.flow = false;
+    if (list !== node) {
+      doc.set("identical_allowlist", list);
+    }
     writeFileSync(path, doc.toString({ flowCollectionPadding: false }));
   }
   say(

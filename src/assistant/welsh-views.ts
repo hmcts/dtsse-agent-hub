@@ -82,8 +82,11 @@ export interface ScanView {
   ambiguousCount: number;
   toWluCount: number;
   ambiguous: Ambiguous[];
-  /** `hint` says why a string probably needs no Welsh; `keepable` is whether `keep_english` would stop it being asked about. */
-  toWlu: { ref: string; english: string; page: string; where: string; hint: string | null; keepable: boolean }[];
+  /**
+   * `hint` says why a string probably needs no Welsh; `keepable` is whether `keep_english` would stop it being asked
+   * about; `suggestLeaveOut` is whether the page starts it unticked.
+   */
+  toWlu: { ref: string; english: string; page: string; where: string; hint: string | null; keepable: boolean; suggestLeaveOut: boolean }[];
   filled: { ref: string; english: string; welsh: string; page: string; where: string }[];
 }
 
@@ -102,7 +105,9 @@ export function scanView(result: Json): ScanView {
       page: str(t.page),
       where: str(t.where),
       hint: nullable(t.hint),
-      keepable: t.keepable === true
+      keepable: t.keepable === true,
+      // A scan from before the engine said so is read as its hint alone, as it was then.
+      suggestLeaveOut: typeof t.suggest_leave_out === "boolean" ? t.suggest_leave_out : nullable(t.hint) !== null
     })),
     filled: list(result.fromCatalogue).map((f) => ({ ref: str(f.ref), english: str(f.english), welsh: str(f.welsh), page: str(f.page), where: str(f.where) }))
   };
@@ -112,7 +117,12 @@ export function scanView(result: Json): ScanView {
 export function byPage<T extends { page: string }>(items: readonly T[]): { page: string; items: T[] }[] {
   const pages = new Map<string, T[]>();
   for (const item of items) {
-    pages.set(item.page, [...(pages.get(item.page) ?? []), item]);
+    const list = pages.get(item.page);
+    if (list) {
+      list.push(item);
+    } else {
+      pages.set(item.page, [item]);
+    }
   }
   return [...pages].map(([page, list]) => ({ page, items: list }));
 }

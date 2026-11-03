@@ -5,6 +5,7 @@ import type { WelshAnswer } from "../wire.ts";
 import {
   createWelshRunner,
   failureDetail,
+  fitResult,
   NOT_LOADED,
   parseWelshFrame,
   prepareWelsh,
@@ -481,5 +482,25 @@ describe("the client's Welsh calls", () => {
     const runner = createWelshRunner(plain);
     runner.welsh("nonsense");
     await runner.idle();
+  });
+});
+
+describe("fitResult", () => {
+  const entry = (i: number) => ({ ref: `CY-${String(i).padStart(8, "0")}`, english: "x".repeat(200), where: "y".repeat(300) });
+
+  it("should halve a scan's lists until the result fits, keeping its full counts", () => {
+    const result = { summary: { toWlu: 300 }, toWlu: Array.from({ length: 300 }, (_, i) => entry(i)), fromCatalogue: [entry(0)], message: "m" };
+    const fitted = fitResult(result, 50_000);
+    expect(Buffer.byteLength(JSON.stringify(fitted))).toBeLessThanOrEqual(50_000);
+    expect((fitted.toWlu as unknown[]).length).toBeLessThan(300);
+    expect((fitted.toWlu as unknown[]).length).toBeGreaterThan(0);
+    expect(fitted.summary).toEqual({ toWlu: 300 });
+  });
+
+  it("should leave a result that fits, or one with no lists to shorten, as it is", () => {
+    const small = { toWlu: [entry(1)], message: "m" };
+    expect(fitResult(small, 50_000)).toBe(small);
+    const noLists = { message: "z".repeat(100) };
+    expect(fitResult(noLists, 10)).toBe(noLists);
   });
 });

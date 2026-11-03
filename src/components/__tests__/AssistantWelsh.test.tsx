@@ -265,6 +265,67 @@ describe("WelshPage", () => {
     expect(requests.find((r) => r.kind === "keep_english")).toEqual({ kind: "keep_english", product: "cath", args: { strings: ["ServiceNow"] } });
   });
 
+  it("should keep a hinted string with no Welsh yet ticked, and say why", async () => {
+    // Arrange
+    const scan = done("scan", {
+      summary: { total: 1, unique: 1, fromCatalogue: 0, ambiguous: 0, toWlu: 1 },
+      toWlu: [
+        {
+          ref: "CY-44444444",
+          english: "Rolls Building",
+          page: "list",
+          where: "list/cy.ts:2 (en.locationLine1)",
+          hint: "Part of an address.",
+          keepable: false,
+          suggest_leave_out: false
+        }
+      ]
+    });
+    await open("scan", { ...ANSWERS, scan });
+
+    // Act
+    fireEvent.click(screen.getByRole("button", { name: "Find missing Welsh" }));
+    await screen.findByRole("table", { name: "list" });
+
+    // Assert
+    expect((screen.getByRole("checkbox", { name: "Send “Rolls Building”" }) as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByText(/It has no Welsh yet, though, so left out it would have none: it stays ticked\./)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Don't ask about/ })).toBeNull();
+  });
+
+  it("should offer to keep English before any spreadsheet, and keep the pull request when a tick changes after", async () => {
+    // Arrange
+    const { requests } = await open("scan", { ...ANSWERS, scan: CHECKED });
+    fireEvent.click(screen.getByRole("button", { name: "Find missing Welsh" }));
+    await screen.findByRole("table", { name: "sso rejected" });
+
+    // Act
+    fireEvent.click(screen.getByRole("button", { name: "Don't ask about the 1 string I left out again…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open the draft pull request" }));
+    await screen.findByRole("link", { name: /pull\/12/ });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Send “Choose a file”" }));
+
+    // Assert
+    expect(screen.getByRole("link", { name: /pull\/12/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Don't ask about/ })).toBeNull();
+    expect(requests.filter((r) => r.kind === "keep_english")).toHaveLength(1);
+  });
+
+  it("should offer the scan's own spreadsheet when the assistant is too old to leave strings out", async () => {
+    // Arrange
+    const scan = { ...CHECKED, files: [FILE] } as WelshResponse;
+    await open("scan", { ...ANSWERS, scan, request: { status: "unsupported" } });
+    fireEvent.click(screen.getByRole("button", { name: "Find missing Welsh" }));
+    await screen.findByRole("table", { name: "sso rejected" });
+
+    // Act
+    fireEvent.click(screen.getByRole("button", { name: "Make the spreadsheet of 4 strings" }));
+
+    // Assert
+    expect(await screen.findByText(/Until your assistant updates, it can only make the spreadsheet of every string\./)).toBeTruthy();
+    expect(screen.getByRole("link", { name: `Download ${FILE.name}` })).toBeTruthy();
+  });
+
   it("should drop the spreadsheet when a tick changes, and tick everything or go back to the suggestions", async () => {
     // Arrange
     await open("scan", { ...ANSWERS, scan: CHECKED });

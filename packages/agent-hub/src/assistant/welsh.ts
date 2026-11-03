@@ -55,9 +55,9 @@ const MAX_STRINGS = 200;
 const MAX_STRING = 2000;
 const MAX_CHOICES = 200;
 /**
- * How many strings a scan lists in each group, for the Welsh page to show before anything is sent or changed: about
- * 200 bytes each, so three full groups stay well inside the hub's 512 KiB limit on a result. The counts are always
- * the full ones.
+ * How many strings a scan lists in each group, for the Welsh page to show before anything is sent or changed. Their
+ * size varies, so `fitResult` shortens the lists further when a result would not fit the hub's limit. The counts are
+ * always the full ones.
  */
 const SCAN_LIST_LIMIT = 300;
 
@@ -463,8 +463,33 @@ async function runIn(deps: WelshDeps, frame: WelshFrame, paths: WelshPaths, time
     made.map((output) => withRetry(() => deps.api.putWelshFile(deps.id, frame.job_id, output.name, readFileSync(output.path)), { attempts: 2 }))
   );
   // What the script told a person at a terminal, for the page to show beside the figures it reads.
-  return { result: { ...body, message: result.stderr.trim().slice(0, MAX_MESSAGE) } };
+  return { result: fitResult({ ...body, message: result.stderr.trim().slice(0, MAX_MESSAGE) }) };
 }
+
+/** The hub's limit on a result (`MAX_WELSH_RESULT_BYTES`), less room for the JSON around it. */
+const MAX_RESULT_BYTES = 500 * 1024;
+
+/**
+ * A result small enough for the hub to keep: a scan's lists are shortened, by half each time, until it fits. Their
+ * entries vary in size (paths, hints, a catalogue's options), so no fixed count is safe for every service. The counts
+ * in `summary` stay the full ones, so the page says how many were not listed.
+ */
+export function fitResult(result: Record<string, unknown>, max = MAX_RESULT_BYTES): Record<string, unknown> {
+  let fitted = result;
+  while (Buffer.byteLength(JSON.stringify(fitted), "utf8") > max) {
+    const lists = SCAN_LISTS.filter((name) => Array.isArray(fitted[name]) && (fitted[name] as unknown[]).length > 0);
+    if (lists.length === 0) {
+      return fitted;
+    }
+    fitted = {
+      ...fitted,
+      ...Object.fromEntries(lists.map((name) => [name, (fitted[name] as unknown[]).slice(0, Math.floor((fitted[name] as unknown[]).length / 2))]))
+    };
+  }
+  return fitted;
+}
+
+const SCAN_LISTS = ["toWlu", "ambiguous", "fromCatalogue"] as const;
 
 export type WelshRunner = {
   /** Takes a `welsh` frame's data and runs it as soon as there is room. */
