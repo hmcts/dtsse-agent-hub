@@ -22,6 +22,7 @@ export type ClientFeature =
   | "lookups"
   | "memory-anon"
   | "model-alias"
+  | "slides-always-on"
   | "stop"
   | "welsh"
   | "welsh-review";
@@ -79,6 +80,11 @@ export type ClientFeature =
  * bare family alias, `sonnet` or `opus`, and hands it to both unchanged. No write is gated on it: the person's model
  * setting is theirs to save whenever they like. What reads it is the Assistant section's model choice, which says their choice
  * waits for the assistant's next start when its pod's own session did not claim it.
+ *
+ * `slides-always-on` is claimed because this build loads the slides plugin on every pod (`ALWAYS_ON_PLUGINS`) whatever
+ * `AGENT_HUB_PLUGINS` names, and builds a deck without checking that it was ticked. A pod on an older build has the
+ * slides tools only when its `AGENT_HUB_PLUGINS` named `slides` as it started, so the hub answers a deck build for one
+ * that did not with `restart_needed` rather than send it a frame it would refuse.
  */
 export const CLIENT_FEATURES: readonly ClientFeature[] = [
   "attachments",
@@ -88,6 +94,7 @@ export const CLIENT_FEATURES: readonly ClientFeature[] = [
   "lookups",
   "memory-anon",
   "model-alias",
+  "slides-always-on",
   "stop",
   "welsh",
   "welsh-review"

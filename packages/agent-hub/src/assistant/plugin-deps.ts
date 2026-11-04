@@ -3,7 +3,7 @@
 // `deps`, which installs them under a lock and does nothing else.
 import { join } from "node:path";
 import type { Env } from "../env.ts";
-import { installBundled, isAlwaysOn, loadedBundled } from "../virtual/bundled-plugins.ts";
+import { installBundled, loadedBundled, SLIDES_PLUGIN } from "../virtual/bundled-plugins.ts";
 import type { Run } from "./lookups.ts";
 
 /** Long enough for a first install of a plugin's dependencies on a pod's network. */
@@ -31,15 +31,9 @@ export function bundledScript(name: string, workspace: string, env: Env, install
   return join(install(name, workspace), "scripts", name);
 }
 
-/**
- * The pod's copy of an always-on plugin's `scripts/<name>`, made on first use. Every pod loads one, so there is no
- * null to handle; a name that is not always on is refused, since whether the pod loads it depends on its owner.
- */
-export function alwaysOnScript(name: string, workspace: string, install: (name: string, workspace: string) => string = installBundled): string {
-  if (!isAlwaysOn(name)) {
-    throw new Error(`${name} is not an always-on plugin`);
-  }
-  return join(install(name, workspace), "scripts", name);
+/** The pod's copy of the slides plugin's `scripts/slides`, made on first use. Every pod loads slides, so there is always one. */
+export function slidesScript(workspace: string, install: (name: string, workspace: string) => string = installBundled): string {
+  return join(install(SLIDES_PLUGIN, workspace), "scripts", SLIDES_PLUGIN);
 }
 
 /** Runs a loaded bundled plugin's `scripts/<name> deps`. Never throws: a failure is said, and the next run of the script installs again. */

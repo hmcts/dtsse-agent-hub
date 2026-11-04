@@ -6,7 +6,7 @@ import path from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { type TempClaudeHome, tempClaudeHome } from "./__fixtures__/claude-home.ts";
 import { collectSkills, enabledPlugins, hubPlugins, parseFrontmatter, pluginInstalls, skillFrom, skillsHash } from "./skills.ts";
-import { BUNDLED_DIRS_VAR, installBundled } from "./virtual/bundled-plugins.ts";
+import { BUNDLED_DIRS_VAR, installBundled, loadedBundled } from "./virtual/bundled-plugins.ts";
 
 let home: TempClaudeHome;
 const savedEnv: Record<string, string | undefined> = {};
@@ -337,21 +337,25 @@ describe("hubPlugins", () => {
     expect(main.map((plugin) => plugin.name)).toEqual(["pcs"]);
   });
 
-  it("should list the ticked plugins and then the always-on ones when a conversation session loads both", () => {
+  it("should list the bundled plugins in the order the pod loads them, and then the marketplace's, when a conversation session loads both", () => {
     // Arrange
     const l = layout();
+    marketplacePlugin(l, "pcs");
     const slides = installBundled("slides", l.project);
     const welsh = installBundled("welsh", l.project);
-    const dirs = [slides, welsh].join(path.delimiter);
+    const dirs = [welsh, slides].join(path.delimiter);
+    const env = { AGENT_HUB_PLUGINS: "pcs,welsh,slides,welsh", [BUNDLED_DIRS_VAR]: dirs };
 
     // Act
-    const found = hubPlugins({ project: l.project, env: { AGENT_HUB_PLUGINS: "slides,welsh,welsh", [BUNDLED_DIRS_VAR]: dirs } });
+    const found = hubPlugins({ project: l.project, env });
 
     // Assert
     expect(found).toEqual([
+      { name: "slides", dir: slides },
       { name: "welsh", dir: welsh },
-      { name: "slides", dir: slides }
+      { name: "pcs", dir: path.join(l.project, "apps", "pcs", ".claude") }
     ]);
+    expect(found.slice(0, 2).map((plugin) => plugin.name)).toEqual(loadedBundled(env));
   });
 
   it("should skip an entry whose source is missing when the marketplace is malformed", () => {

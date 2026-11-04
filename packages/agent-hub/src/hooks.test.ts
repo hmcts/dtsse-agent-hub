@@ -24,6 +24,7 @@ import { HELD_NOTES, holdNote } from "./held-notes.ts";
 import { type HookPayload, mustDeny, parseHandoff, reposNote, runHook, virtualAgentStateDir, webServersNote } from "./hooks.ts";
 import { ASK_USER_QUESTION, ASKED_REASON, type HookDenyOutput, UNDELIVERED_REASON } from "./questions.ts";
 import { ensureStateDir, statePath, writeJson } from "./session.ts";
+import { BUNDLED_DIRS_VAR, installBundled } from "./virtual/bundled-plugins.ts";
 
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const DEAD_PID = 999999999;
@@ -625,16 +626,28 @@ describe("runHook in an assistant conversation", () => {
     expect(out.some((l) => /^This is a virtual agent/.test(l))).toBe(false);
   });
 
-  it("should mention the slide deck whether or not the slides plugin is ticked, when SessionStart runs in a conversation", async () => {
+  it("should mention the slide deck whether or not the slides plugin is ticked, when the session was started with its copy", async () => {
+    // Arrange
+    const copy = { [BUNDLED_DIRS_VAR]: installBundled("slides", path.join(home.root, "slides-ws", "cft-workspace")) };
+
     // Act
-    const unticked = await virtualStart("conv-no-slides", { ...reposState(null), ...CONVERSATION, AGENT_HUB_PLUGINS: "welsh" });
-    const none = await virtualStart("conv-none", { ...reposState(null), ...CONVERSATION, AGENT_HUB_PLUGINS: "" });
-    const ticked = await virtualStart("conv-slides", { ...reposState(null), ...CONVERSATION, AGENT_HUB_PLUGINS: "welsh, slides" });
+    const unticked = await virtualStart("conv-no-slides", { ...reposState(null), ...CONVERSATION, ...copy, AGENT_HUB_PLUGINS: "welsh" });
+    const none = await virtualStart("conv-none", { ...reposState(null), ...CONVERSATION, ...copy, AGENT_HUB_PLUGINS: "" });
+    const ticked = await virtualStart("conv-slides", { ...reposState(null), ...CONVERSATION, ...copy, AGENT_HUB_PLUGINS: "welsh, slides" });
 
     // Assert
     for (const out of [unticked, none, ticked]) {
       expect(out[0]).toContain("It can also have one slide deck, which the slides plugin's deck skill reads with `agent-hub deck get`");
     }
+  });
+
+  it("should not mention the slide deck when the session was started without a copy of the slides plugin", async () => {
+    // Act
+    const out = await virtualStart("conv-no-copy", { ...reposState(null), ...CONVERSATION, AGENT_HUB_PLUGINS: "slides" });
+
+    // Assert
+    expect(out[0]).toMatch(/agent-hub artefact get/);
+    expect(out[0]).not.toMatch(/slide deck|deck get/);
   });
 });
 

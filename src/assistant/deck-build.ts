@@ -31,6 +31,7 @@ export type DeckBuildRequest =
   | { status: "pending"; job_id: string }
   | { status: "waking" }
   | { status: "unsupported" }
+  | { status: "restart_needed" }
   | { status: "assistant_gone" }
   | { status: "no_pod" };
 

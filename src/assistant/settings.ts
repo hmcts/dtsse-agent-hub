@@ -41,7 +41,8 @@ export function assistantPluginsData(
 
 /**
  * What the hub offers, then any ticked name it no longer does, which can be kept or unticked but not ticked again. An
- * always-on name a row still has is not shown: there is nothing to choose, and saving keeps it.
+ * always-on name a row still has is not shown: there is nothing to choose, and a save that changes no ticked name
+ * keeps it.
  */
 export function pluginChoices(available: readonly PluginOption[], checked: readonly string[]): (PluginOption & { offered: boolean })[] {
   const offered = available.map((option) => ({ ...option, offered: true }));

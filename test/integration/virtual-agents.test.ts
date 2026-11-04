@@ -495,15 +495,15 @@ describe("a virtual agent's plugins", () => {
     expect((await claim()).find((entry) => entry.id === created.id)).toMatchObject({ plugins: ["slides"] });
   });
 
-  it("should strip a stored slides on a save without bumping either generation when nothing ticked has changed", async () => {
+  it("should write nothing and bump nothing on a save whose ticked plugins are unchanged when the row still holds slides", async () => {
     const { id } = await started(ALICE, "pcs-api");
     await prisma.virtualAgent.update({ where: { id }, data: { plugins: ["pcs", "slides"] } });
-    const before = await row(id);
+    const before = await prisma.virtualAgent.findUniqueOrThrow({ where: { id } });
     actAs("alice");
 
     expect(await actions.setVirtualAgentPlugins(ticked({ id }, ["pcs"]))).toEqual({ ok: true, confirmation: "Its plugins are unchanged" });
 
-    expect(await row(id)).toMatchObject({ plugins: ["pcs"], generation: before.generation, podGeneration: before.podGeneration });
+    expect(await prisma.virtualAgent.findUniqueOrThrow({ where: { id } })).toEqual(before);
     expect((await claim()).some((entry) => entry.id === id)).toBe(false);
   });
 

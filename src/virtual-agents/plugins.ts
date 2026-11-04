@@ -10,13 +10,16 @@ import type { Environment } from "./settings.ts";
  * it.
  */
 
+/** The plugin that carries the slides tools, which a deck build needs on the pod. */
+export const SLIDES_PLUGIN = "slides";
+
 /**
  * The plugins every pod loads without being ticked, mirroring the pod client's own `ALWAYS_ON_PLUGINS`
  * (`packages/agent-hub/src/virtual/bundled-plugins.ts`). Slides is one because the Assistant's slides panel, history,
  * editing and builds depend on it. None is offered or stored; every claim adds them to the plugins it hands the
  * orchestrator (`podPlugins`), so a pod on a client that loads only what `AGENT_HUB_PLUGINS` names loads them too.
  */
-export const ALWAYS_ON_PLUGINS: readonly string[] = ["slides"];
+export const ALWAYS_ON_PLUGINS: readonly string[] = [SLIDES_PLUGIN];
 
 export const isAlwaysOn = (name: string): boolean => ALWAYS_ON_PLUGINS.includes(name);
 
@@ -119,7 +122,9 @@ export function tickedPlugins(stored: readonly string[]): string[] {
 
 /**
  * What a claim hands the orchestrator for `AGENT_HUB_PLUGINS`: the stored names and the always-on ones, distinct and
- * in code-point order, so a row that still holds an always-on name gives the same list as one that does not.
+ * in code-point order, so a row that still holds an always-on name gives the same list as one that does not. This is
+ * transitional: it is kept until every pod's client loads `ALWAYS_ON_PLUGINS` itself, which a client shows by claiming
+ * the `slides-always-on` feature.
  */
 export function podPlugins(stored: readonly string[]): string[] {
   return [...new Set([...stored, ...ALWAYS_ON_PLUGINS])].sort(byCodePoint);

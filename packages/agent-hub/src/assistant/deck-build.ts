@@ -9,9 +9,8 @@ import type { Api } from "../api.ts";
 import { materialise } from "../cli/deck.ts";
 import type { Env } from "../env.ts";
 import { withRetry } from "../retry.ts";
-import { SLIDES_PLUGIN } from "../virtual/bundled-plugins.ts";
 import type { Run } from "./lookups.ts";
-import { alwaysOnScript, MIN_RUN_MS, readyWithin, reason, safeSay } from "./plugin-deps.ts";
+import { MIN_RUN_MS, readyWithin, reason, safeSay, slidesScript } from "./plugin-deps.ts";
 
 /** Under the hub's 15 minutes for a build, so an answer is never thrown away. */
 export const BUILD_BUDGET_MS = 14 * 60_000;
@@ -125,7 +124,7 @@ async function buildIn(
   deadline: number,
   clock: () => number
 ): Promise<{ pptx: Uint8Array } | { error: string }> {
-  const script = alwaysOnScript(SLIDES_PLUGIN, deps.workspace, deps.install);
+  const script = slidesScript(deps.workspace, deps.install);
   const build = await deps.api.deckBuild(deps.id, frame.job_id);
   if (build.version !== frame.version || build.conversation_id !== frame.conversation_id) {
     return { error: "The hub sent a different version from the one asked for. Try again." };

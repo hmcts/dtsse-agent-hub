@@ -1,20 +1,16 @@
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { alwaysOnScript, PREPARE_TIMEOUT_MS, prepareBundled, prepareEach, readyWithin, reason, safeSay } from "./plugin-deps.ts";
+import { PREPARE_TIMEOUT_MS, prepareBundled, prepareEach, readyWithin, reason, safeSay, slidesScript } from "./plugin-deps.ts";
 
 const WS = "/workspace/cft-workspace";
 const install = (name: string) => `/workspace/.agent-hub-plugins/${name}-0123456789ab`;
 const ok = () => vi.fn(async () => ({ code: 0, stdout: "", stderr: "" }));
 
-describe("alwaysOnScript", () => {
-  it("should give the pod's copy of scripts/slides when the plugin is always on", () => {
-    expect(alwaysOnScript("slides", WS, install)).toBe(join(install("slides"), "scripts", "slides"));
-  });
-
-  it("should refuse a plugin that is not always on, and make no copy of it", () => {
+describe("slidesScript", () => {
+  it("should give the pod's copy of scripts/slides whatever the pod was told to load", () => {
     const copy = vi.fn(install);
-    expect(() => alwaysOnScript("welsh", WS, copy)).toThrow("welsh is not an always-on plugin");
-    expect(copy).not.toHaveBeenCalled();
+    expect(slidesScript(WS, copy)).toBe(join(install("slides"), "scripts", "slides"));
+    expect(copy).toHaveBeenCalledWith("slides", WS);
   });
 });
 

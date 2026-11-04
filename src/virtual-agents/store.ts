@@ -330,8 +330,9 @@ export async function setVirtualAgentSize(prisma: PrismaClient, actorOid: string
 /**
  * The plugins the pod loads, any of those `VIRTUAL_AGENT_PLUGINS` offers. A name no longer offered may be kept, so the
  * owner can save other changes without first unticking it, but not added. An always-on plugin is never offered or
- * stored, and a save drops one the row still holds; that alone is no change, since every claim adds it back
- * (`podPlugins`), so it is written without bumping anything and announced to nobody. A change bumps `generation` and
+ * stored. A save whose ticked names are the ones the row already has writes nothing, even to a row that still holds an
+ * always-on name: every claim adds it anyway (`podPlugins`), and leaving it is what a hub rolled back to one that
+ * stores it reads. Only a change rewrites the names, without any always-on one. A change bumps `generation` and
  * `pod_generation`, as a resize does, so the orchestrator applies the StatefulSet with the new `AGENT_HUB_PLUGINS`:
  * a running pod is replaced, and the conversation continues on its disk; a stopped one picks the change up when it
  * next starts. Refused while the agent is being deleted; someone other than the owner is told there is no such agent.
@@ -358,10 +359,7 @@ export async function setVirtualAgentPlugins(
       throw new HttpError(400, checked.error);
     }
     if (samePlugins(tickedPlugins(row.plugins), checked.plugins)) {
-      if (samePlugins(row.plugins, checked.plugins)) {
-        return row;
-      }
-      return toRow(await tx.virtualAgent.update({ where: { id }, data: { plugins: checked.plugins, updatedAt: now }, select: SELECT }));
+      return row;
     }
     const updated = toRow(
       await tx.virtualAgent.update({

@@ -395,7 +395,7 @@ describe("a version the person wrote", () => {
     const row = await prisma.virtualAgent.findUniqueOrThrow({ where: { id: mine.virtualAgentId }, select: { generation: true } });
     await prisma.virtualAgent.update({
       where: { id: mine.virtualAgentId },
-      data: { observedGeneration: row.generation, status: "running", clientFeatures: ["deck-build"] }
+      data: { observedGeneration: row.generation, status: "running", clientFeatures: ["deck-build", "slides-always-on"] }
     });
     await save(mine, outline("Mine"), { version: 1, revision: 1 });
     const prepare = () =>

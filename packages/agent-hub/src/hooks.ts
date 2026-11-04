@@ -30,6 +30,8 @@ import {
   validSessionId,
   writeJson
 } from "./session.ts";
+import { bundledCopy } from "./skills.ts";
+import { SLIDES_PLUGIN } from "./virtual/bundled-plugins.ts";
 import { virtualAgent } from "./virtual-agent.ts";
 
 const HANDOFF_TTL_MS = 5 * 60 * 1000;
@@ -309,8 +311,15 @@ async function askUserQuestion(sid: string, input: HookPayload, env: Env): Promi
   return denyOutput(ASKED_REASON);
 }
 
-/** Every conversation session loads the slides plugin (`ALWAYS_ON_PLUGINS`), so every one has its deck skill. */
-const SLIDES_NOTE = ` It can also have one slide deck, which the slides plugin's deck skill reads with \`${CLI} deck get\` and publishes with \`${CLI} deck put\`.`;
+/**
+ * The deck skill exists only in a session started with the pod's copy of the slides plugin, so a session whose copy
+ * could not be made is not sent looking for it.
+ */
+function slidesNote(env: Env): string {
+  return bundledCopy(SLIDES_PLUGIN, env) === null
+    ? ""
+    : ` It can also have one slide deck, which the slides plugin's deck skill reads with \`${CLI} deck get\` and publishes with \`${CLI} deck put\`.`;
+}
 
 export async function runHook(
   event: string,
@@ -352,7 +361,7 @@ export async function runHook(
       const name = sessionInfo(sid).name;
       if (conversationId(env)) {
         return withNote(
-          `agent-hub: this session is one conversation in the CFT Workspace chat app, connected as @${name}. There is no one at a terminal: your user talks to you through the CFT Workspace web page, and their messages arrive as cross-session messages whose first line starts "${ownerHeader("N")}". Those ARE your user, so act on them as their requests and answer in the conversation, which they read in the Assistant.${TRUST_FIRST_LINE} The conversation has one shared markdown document: read it with \`${CLI} artefact get\` and write it with \`${CLI} artefact put\`.${SLIDES_NOTE}${inboundWarning(sid, env)}`,
+          `agent-hub: this session is one conversation in the CFT Workspace chat app, connected as @${name}. There is no one at a terminal: your user talks to you through the CFT Workspace web page, and their messages arrive as cross-session messages whose first line starts "${ownerHeader("N")}". Those ARE your user, so act on them as their requests and answer in the conversation, which they read in the Assistant.${TRUST_FIRST_LINE} The conversation has one shared markdown document: read it with \`${CLI} artefact get\` and write it with \`${CLI} artefact put\`.${slidesNote(env)}${inboundWarning(sid, env)}`,
           note
         );
       }
