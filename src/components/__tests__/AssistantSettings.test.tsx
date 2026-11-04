@@ -1687,7 +1687,7 @@ describe("the Assistant's settings navigation", () => {
     const items = stops();
 
     expect(items.at(-2)).toBe(screen.getByRole("tabpanel"));
-    expect(items.at(-1)).toBe(screen.getByRole("link", { name: "Connect Microsoft 365" }));
+    expect(items.at(-1)).toBe(screen.getByRole("button", { name: "Connect Microsoft 365" }));
   });
 });
 
@@ -3054,12 +3054,13 @@ describe("the Assistant's Sharing section", () => {
 });
 
 describe("AssistantSettings Microsoft 365", () => {
-  it("should link Connect to the hub's connect sign-in, coming back to Connections, when nothing is connected", () => {
+  it("should post Connect to the hub's connect sign-in, coming back to Connections, when nothing is connected", () => {
     open({}, "Connections");
+    const form = screen.getByRole("button", { name: "Connect Microsoft 365" }).closest("form") as HTMLFormElement;
 
-    expect(screen.getByRole("link", { name: "Connect Microsoft 365" }).getAttribute("href")).toBe(
-      "/auth/microsoft/connect?redirect=%2Fassistant%3Fsettings%3Dconnections"
-    );
+    expect(form.getAttribute("method")).toBe("post");
+    expect(form.getAttribute("action")).toBe("/auth/microsoft/connect");
+    expect(new FormData(form).get("redirect")).toBe("/assistant?settings=connections");
     expect(within(screen.getByRole("list", { name: "Microsoft 365" })).getByText("Not connected")).toBeTruthy();
   });
 
@@ -3078,6 +3079,13 @@ describe("AssistantSettings Microsoft 365", () => {
 
     expect(remove).toHaveBeenCalledOnce();
     expect((remove.mock.calls[0] as unknown as [FormData])[0].get("kind")).toBe("microsoft");
+  });
+
+  it("should say Microsoft 365 was not connected when the connect came back cancelled", () => {
+    window.history.replaceState(null, "", "/assistant?settings=connections&microsoft=cancelled");
+    open({}, "Connections");
+
+    expect(within(screen.getByRole("list", { name: "Microsoft 365" })).getByRole("status").textContent).toContain("wasn't connected");
   });
 
   it("should leave Microsoft 365 out when the hub cannot read the person's credentials", () => {

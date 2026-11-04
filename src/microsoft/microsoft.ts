@@ -112,3 +112,37 @@ export type RefreshFailure = "reconnect" | "unavailable";
 export function refreshFailure(error: string | undefined): RefreshFailure {
   return error === "invalid_grant" || error === "interaction_required" || error === "consent_required" ? "reconnect" : "unavailable";
 }
+
+/** Where Connect posts to: the start of the connect sign-in. */
+export const CONNECT_PATH = "/auth/microsoft/connect";
+
+/** How a connect that came back without a connection ended, as the settings address carries it back. */
+export type ConnectOutcome = "cancelled" | "failed";
+
+export const CONNECT_OUTCOME_PARAMETER = "microsoft";
+
+/** What the Microsoft 365 row says about a connect that came back without one. */
+export const CONNECT_OUTCOME_WORDS: Record<ConnectOutcome, string> = {
+  cancelled: "Microsoft 365 wasn't connected, because it was cancelled at Microsoft. Press Connect to try again.",
+  failed: "Microsoft 365 couldn't be connected. Press Connect to try again."
+};
+
+export function isConnectOutcome(value: string | null): value is ConnectOutcome {
+  return value === "cancelled" || value === "failed";
+}
+
+/**
+ * How Entra's `error` on a connect callback reads: `access_denied` is the person declining or cancelling at Microsoft,
+ * and anything else is a connect that failed.
+ */
+export function connectOutcome(error: string): ConnectOutcome {
+  return error === "access_denied" ? "cancelled" : "failed";
+}
+
+/** The address a connect returns to when it ended without a connection: the page it began on, saying how. */
+export function withConnectOutcome(returnTo: string, outcome: ConnectOutcome): string {
+  const [path, query = ""] = returnTo.split("?", 2) as [string, string?];
+  const search = new URLSearchParams(query);
+  search.set(CONNECT_OUTCOME_PARAMETER, outcome);
+  return `${path}?${search}`;
+}

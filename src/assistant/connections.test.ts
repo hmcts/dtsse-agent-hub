@@ -1107,7 +1107,8 @@ describe("microsoftConnection", () => {
     expect(microsoftConnection(data([]))).toEqual({
       stored: false,
       accountLabel: null,
-      connectPath: "/auth/microsoft/connect?redirect=%2Fassistant%3Fsettings%3Dconnections"
+      connectPath: "/auth/microsoft/connect",
+      returnTo: "/assistant?settings=connections"
     });
   });
 

@@ -74,3 +74,17 @@ export function carriesSecret(method: string, pathname: string, search: URLSearc
   }
   return false;
 }
+
+/**
+ * Whether a POST that changes something for the signed-in person came from the hub's own pages. The session cookie is
+ * `SameSite=Lax`, which already keeps it off a cross-site POST, and this is the second lock: a browser's
+ * `Sec-Fetch-Site` must say `same-origin`, and a browser too old to send it must send an `Origin` that is the hub's
+ * own public origin (the redirect URI's, since a route handler's own URL carries the pod's listen address). Neither
+ * header, or a different one, is refused.
+ */
+export function sameOriginPost(headers: { secFetchSite: string | null; origin: string | null }, publicOrigin: string): boolean {
+  if (headers.secFetchSite !== null) {
+    return headers.secFetchSite === "same-origin";
+  }
+  return headers.origin !== null && headers.origin === publicOrigin;
+}

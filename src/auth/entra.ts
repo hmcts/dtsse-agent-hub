@@ -69,6 +69,10 @@ export async function authorizationUrl(settings: AuthSettings, signIn: SignInSta
     // Identity-platform scopes only for a sign-in, so signing in to the hub never asks for more than who someone is.
     // `profile` is what puts `oid` in the id token. Connecting Microsoft 365 asks for Graph as well, and only then.
     scope: signIn.purpose === "microsoft" ? CONNECT_SCOPE : "openid profile email",
+    // A connect always shows a Microsoft screen, so it is never completed silently by an existing Entra session. It is
+    // `select_account` and not `consent`: the Graph permissions are admin-consented, and `prompt=consent` asks the
+    // person to consent again themselves, which Entra refuses ("Need admin approval") for anyone who is not an admin.
+    ...(signIn.purpose === "microsoft" ? { prompt: "select_account" } : {}),
     state: signIn.state,
     nonce: signIn.nonce,
     code_challenge: await client.calculatePKCECodeChallenge(signIn.codeVerifier),

@@ -2,12 +2,15 @@ import { describe, expect, it } from "vitest";
 import {
   accessTokenView,
   CONNECT_SCOPE,
+  connectOutcome,
   GRAPH_PERMISSIONS,
   GRAPH_SCOPE,
   grantedPermissions,
+  isConnectOutcome,
   parseSignIn,
   refreshFailure,
-  serialiseSignIn
+  serialiseSignIn,
+  withConnectOutcome
 } from "./microsoft.ts";
 
 const NOW = Date.parse("2026-12-01T09:00:00.000Z");
@@ -83,5 +86,24 @@ describe("refreshFailure", () => {
 
   it.each([undefined, "temporarily_unavailable", "server_error"])("should call it unavailable when Entra answers %s", (error) => {
     expect(refreshFailure(error)).toBe("unavailable");
+  });
+});
+
+describe("connect outcomes", () => {
+  it("should read access_denied as a cancelled connect and anything else as a failed one", () => {
+    expect(connectOutcome("access_denied")).toBe("cancelled");
+    expect(connectOutcome("server_error")).toBe("failed");
+  });
+
+  it("should carry the outcome back on the settings address it began on", () => {
+    expect(withConnectOutcome("/assistant?settings=connections", "cancelled")).toBe("/assistant?settings=connections&microsoft=cancelled");
+    expect(withConnectOutcome("/assistant", "failed")).toBe("/assistant?microsoft=failed");
+  });
+
+  it("should know only the two outcomes it words", () => {
+    expect(isConnectOutcome("cancelled")).toBe(true);
+    expect(isConnectOutcome("failed")).toBe(true);
+    expect(isConnectOutcome("connected")).toBe(false);
+    expect(isConnectOutcome(null)).toBe(false);
   });
 });

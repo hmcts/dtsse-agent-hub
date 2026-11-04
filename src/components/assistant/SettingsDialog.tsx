@@ -34,6 +34,7 @@ import type { AssistantSize } from "@/components/assistant/SizeSettings";
 import { type AssistantTemplates, Templates } from "@/components/assistant/TemplateSettings";
 import { ThemeSwitch } from "@/components/assistant/ThemeSwitch";
 import { type AssistantTokens, TokenSettings } from "@/components/assistant/TokenSettings";
+import { CONNECT_OUTCOME_PARAMETER, CONNECT_OUTCOME_WORDS, isConnectOutcome } from "@/microsoft/microsoft";
 import { SETTINGS_PARAMETER, withoutSettingsParameter } from "@/web/home";
 
 /**
@@ -82,8 +83,17 @@ interface SettingsView {
  * the navigation is a roving tabindex, and all but one of its buttons are deliberately not tab stops. The trap below
  * reads only the two ends of the list and those are the close button and the open section's last control either way,
  * with the navigation between them — so this is about the constant meaning what it says, not about fixing the wrap.
+ * A hidden input is left out for the same reason: Tab never lands on one, and a form posting a hidden field (Microsoft
+ * 365's Connect) would otherwise be counted as a stop.
  */
-export const FOCUSABLE = ["a[href]", "button:not([disabled])", "input:not([disabled])", "select:not([disabled])", "textarea:not([disabled])", "[tabindex]"]
+export const FOCUSABLE = [
+  "a[href]",
+  "button:not([disabled])",
+  'input:not([disabled]):not([type="hidden"])',
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "[tabindex]"
+]
   .map((selector) => `${selector}:not([tabindex="-1"])`)
   .join(", ");
 
@@ -226,11 +236,13 @@ function Row({ row, connect }: { row: Connection | ModelAccess; connect?: Assist
 
 /**
  * Microsoft 365, which the person connects themselves in a browser sign-in of the hub's rather than through their
- * assistant: Connect is a link to it, not a restart. Disconnecting deletes the connection, which is `removeCredential`,
+ * assistant: Connect posts to it (a form rather than a link, so only this page can start one), not a restart. A connect
+ * that came back without a connection says so here, from the address it returned to. Disconnecting deletes the connection, which is `removeCredential`,
  * and needs no restart either, since agents ask the hub for a token each time and are refused from then on.
  */
 function MicrosoftRow({ connection, remove }: { connection: MicrosoftConnection; remove: FormAction | undefined }) {
   const [asking, setAsking] = useState(false);
+  const outcome = useSearchParams().get(CONNECT_OUTCOME_PARAMETER);
   return (
     <ul aria-label="Microsoft 365" className="flex flex-col overflow-hidden rounded-[10px] border border-asst-line">
       <li className="flex flex-wrap items-center gap-3 px-3.5 py-3">
@@ -257,13 +269,16 @@ function MicrosoftRow({ connection, remove }: { connection: MicrosoftConnection;
             </button>
           )
         ) : (
-          <a
-            href={connection.connectPath}
-            aria-label="Connect Microsoft 365"
-            className="shrink-0 rounded-[9px] border border-asst-accent-line px-3 py-1 text-xs font-medium text-asst-accent-soft hover:bg-asst-accent hover:text-asst-ink"
-          >
-            Connect
-          </a>
+          <form method="post" action={connection.connectPath} className="shrink-0">
+            <input type="hidden" name="redirect" value={connection.returnTo} />
+            <button
+              type="submit"
+              aria-label="Connect Microsoft 365"
+              className="shrink-0 rounded-[9px] border border-asst-accent-line px-3 py-1 text-xs font-medium text-asst-accent-soft hover:bg-asst-accent hover:text-asst-ink"
+            >
+              Connect
+            </button>
+          </form>
         )}
         {connection.stored && remove !== undefined && asking ? (
           <ActionForm action={remove} label="Disconnect Microsoft 365" onSuccess={() => setAsking(false)} className="flex basis-full flex-col gap-2 pt-1">
@@ -280,6 +295,11 @@ function MicrosoftRow({ connection, remove }: { connection: MicrosoftConnection;
               </button>
             </div>
           </ActionForm>
+        ) : null}
+        {!connection.stored && isConnectOutcome(outcome) ? (
+          <p role="status" className="basis-full text-pretty text-[13px] text-asst-warn">
+            {CONNECT_OUTCOME_WORDS[outcome]}
+          </p>
         ) : null}
       </li>
     </ul>

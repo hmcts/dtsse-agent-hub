@@ -123,6 +123,7 @@ describe("authorizationUrl", () => {
     const url = await authorizationUrl(SETTINGS, beginSignIn("/"));
 
     expect(url.searchParams.get("scope")).toBe("openid profile email");
+    expect(url.searchParams.get("prompt")).toBeNull();
   });
 
   it("should carry the redirect uri, state and nonce", async () => {
@@ -279,6 +280,7 @@ describe("connecting Microsoft 365", () => {
     expect(url.searchParams.get("scope")).toContain("https://graph.microsoft.com/Mail.Read");
     expect(url.searchParams.get("scope")).toContain("offline_access");
     expect(url.searchParams.get("redirect_uri")).toBe(SETTINGS.redirectUri);
+    expect(url.searchParams.get("prompt")).toBe("select_account");
   });
 
   it("should keep the refresh token, the account and the scope granted when the signed-in person connects", async () => {

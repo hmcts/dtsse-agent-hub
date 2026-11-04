@@ -7,7 +7,7 @@ import { readSession, SESSION_COOKIE, sealSession } from "@/auth/session";
 import { type AuthSettings, authRequired, authSettings } from "@/auth/settings";
 import { credentialBackend } from "@/credentials/backend";
 import { putCredential } from "@/credentials/store";
-import { serialiseSignIn } from "@/microsoft/microsoft";
+import { type ConnectOutcome, connectOutcome, serialiseSignIn, withConnectOutcome } from "@/microsoft/microsoft";
 import { prisma } from "@/store/prisma";
 import { upsertUser } from "@/users/store";
 
@@ -61,35 +61,45 @@ export async function GET(request: NextRequest): Promise<Response> {
  * connection is then the one credential of theirs only this writes. It sets no session: they already have one.
  */
 async function connectMicrosoft(request: NextRequest, settings: AuthSettings, callbackUrl: URL, signIn: SignInState): Promise<Response> {
+  const returnTo = safeReturnTo(signIn.returnTo);
+  // Cancelled or refused at Microsoft: nothing to exchange, and the person is still signed in to the hub, so they go
+  // back to the settings they started from rather than to a sign-in they do not need.
+  const error = request.nextUrl.searchParams.get("error");
+  if (error !== null) {
+    console.info(`a Microsoft 365 connection came back with ${error}`);
+    return connectEnded(returnTo, connectOutcome(error));
+  }
   const session = await readSession(request.cookies.get(SESSION_COOKIE)?.value, settings.sessionSecret);
   if (session === undefined) {
     console.warn("a Microsoft 365 connection came back with nobody signed in, so it was not kept");
-    return redirectTo(`/auth/login?redirect=${encodeURIComponent(safeReturnTo(signIn.returnTo))}`);
+    return redirectTo(`/auth/login?redirect=${encodeURIComponent(returnTo)}`);
   }
-  let connection: Awaited<ReturnType<typeof completeMicrosoftConnect>>;
   try {
-    connection = await completeMicrosoftConnect(settings, callbackUrl, signIn, session);
-  } catch (error) {
-    console.warn(`a Microsoft 365 connection could not be completed: ${error instanceof SignInFailed ? error.message : String(error)}`);
-    return signInRefused();
-  }
-  const backend = credentialBackend(prisma);
-  if (!backend.available) {
-    console.warn(`a Microsoft 365 connection could not be kept: ${backend.reason}`);
-    return new Response(`We could not keep your Microsoft 365 connection: ${backend.reason}\n`, {
-      status: 503,
-      headers: { "content-type": "text/plain; charset=utf-8" }
+    const connection = await completeMicrosoftConnect(settings, callbackUrl, signIn, session);
+    const backend = credentialBackend(prisma);
+    if (!backend.available) {
+      throw new Error(backend.reason);
+    }
+    await putCredential(prisma, backend.store, {
+      actorOid: session.oid,
+      ownerOid: session.oid,
+      kind: "microsoft",
+      value: serialiseSignIn(connection),
+      via: "web"
     });
+  } catch (failure) {
+    console.warn(`a Microsoft 365 connection could not be completed or kept: ${failure instanceof SignInFailed ? failure.message : String(failure)}`);
+    return connectEnded(returnTo, "failed");
   }
-  await putCredential(prisma, backend.store, {
-    actorOid: session.oid,
-    ownerOid: session.oid,
-    kind: "microsoft",
-    value: serialiseSignIn(connection),
-    via: "web"
-  });
   console.info(`${session.name} connected Microsoft 365`);
-  const response = redirectTo(safeReturnTo(signIn.returnTo));
+  const response = redirectTo(returnTo);
+  response.headers.append("set-cookie", clearedSignInCookie());
+  return response;
+}
+
+/** Back to where Connect was pressed, saying how it ended, with the sign-in cookie cleared so it cannot be replayed. */
+function connectEnded(returnTo: string, outcome: ConnectOutcome): Response {
+  const response = redirectTo(withConnectOutcome(returnTo, outcome));
   response.headers.append("set-cookie", clearedSignInCookie());
   return response;
 }

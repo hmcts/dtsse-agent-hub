@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { exempt, safeReturnTo } from "./guard.ts";
+import { exempt, safeReturnTo, sameOriginPost } from "./guard.ts";
 
 describe("exempt", () => {
   it.each(["/health", "/health/liveness", "/health/readiness", "/liveness", "/readiness"])(
@@ -93,5 +93,26 @@ describe("safeReturnTo", () => {
     ["a DEL", 0x7f]
   ])("should refuse %s", (_label, code) => {
     expect(safeReturnTo(`/c${String.fromCharCode(code)}x`)).toBe("/");
+  });
+});
+
+describe("sameOriginPost", () => {
+  const HUB = "https://agent-hub.example";
+
+  it("should accept a POST the browser says came from the hub's own page", () => {
+    expect(sameOriginPost({ secFetchSite: "same-origin", origin: HUB }, HUB)).toBe(true);
+  });
+
+  it.each(["cross-site", "same-site", "none"])("should refuse a POST whose Sec-Fetch-Site is %s, whatever its Origin says", (site) => {
+    expect(sameOriginPost({ secFetchSite: site, origin: HUB }, HUB)).toBe(false);
+  });
+
+  it("should fall back to the Origin when the browser sends no Sec-Fetch-Site", () => {
+    expect(sameOriginPost({ secFetchSite: null, origin: HUB }, HUB)).toBe(true);
+    expect(sameOriginPost({ secFetchSite: null, origin: "https://evil.example" }, HUB)).toBe(false);
+  });
+
+  it("should refuse a POST with neither header", () => {
+    expect(sameOriginPost({ secFetchSite: null, origin: null }, HUB)).toBe(false);
   });
 });

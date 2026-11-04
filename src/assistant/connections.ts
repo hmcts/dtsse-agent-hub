@@ -1,5 +1,6 @@
 import type { CredentialKind } from "../credentials/names.ts";
 import type { CredentialStatus } from "../credentials/store.ts";
+import { CONNECT_PATH } from "../microsoft/microsoft.ts";
 import type { ModelRoute } from "../viewer/identity.ts";
 import type { LoginView } from "../virtual-agents/logins.ts";
 import { assistantSettingsPath } from "../web/home.ts";
@@ -667,8 +668,10 @@ export function signInPrompt(list: readonly Connection[]): ConnectionsPrompt | n
 export interface MicrosoftConnection {
   stored: boolean;
   accountLabel: string | null;
-  /** Where Connect goes: the hub's connect sign-in, which returns to this section. */
+  /** Where Connect posts: the hub's connect sign-in. */
   connectPath: string;
+  /** Where the connect sign-in returns to: this section. */
+  returnTo: string;
 }
 
 export function microsoftConnection(data: ConnectionsData | undefined): MicrosoftConnection | null {
@@ -679,6 +682,7 @@ export function microsoftConnection(data: ConnectionsData | undefined): Microsof
   return {
     stored: status?.stored === true,
     accountLabel: status?.accountLabel ?? null,
-    connectPath: `/auth/microsoft/connect?${new URLSearchParams({ redirect: assistantSettingsPath("connections") })}`
+    connectPath: CONNECT_PATH,
+    returnTo: assistantSettingsPath("connections")
   };
 }
