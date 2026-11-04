@@ -41,6 +41,12 @@ function credentialArgs(argv: string[]): { action: CredentialAction; kind: Crede
   if (fromGh && (action !== "set" || kind !== "github")) {
     throw new UsageError("--from-gh only goes with credentials set github");
   }
+  // The hub keeps a Microsoft 365 connection to itself: it is made with Connect and never read back or uploaded.
+  if (kind === "microsoft" && action !== "delete") {
+    throw new UsageError(
+      "a Microsoft 365 connection is made with Connect in the Assistant's settings and is never read back; credentials delete microsoft disconnects it"
+    );
+  }
   return { action, kind, fromGh };
 }
 

@@ -5,7 +5,7 @@
 import type { NameSource } from "./session.ts";
 
 /** The credential kinds `docs/agent-api.md` defines; any other gives 404. */
-export const CREDENTIAL_KINDS = ["github", "azure", "claude", "jenkins", "atlassian", "claude_md", "git_identity"] as const;
+export const CREDENTIAL_KINDS = ["github", "azure", "claude", "jenkins", "atlassian", "claude_md", "git_identity", "microsoft"] as const;
 
 export type CredentialKind = (typeof CREDENTIAL_KINDS)[number];
 
