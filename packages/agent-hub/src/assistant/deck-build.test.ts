@@ -400,7 +400,7 @@ describe("createDeckBuildRunner", () => {
     expect(answerOf(second.job_id)).toEqual({ virtual_id: VID, job_id: second.job_id, pptx: PPTX });
   });
 
-  it("should say a build that throws and still run the next, without the chain rejecting", async () => {
+  it("should still answer a build, and run the next, when its working directory cannot be removed", async () => {
     // Arrange
     const said: string[] = [];
     const first = asked();
@@ -417,8 +417,33 @@ describe("createDeckBuildRunner", () => {
     await expect(runner.idle()).resolves.toBeUndefined();
 
     // Assert
-    expect(said).toEqual([`deck build ${first.job_id} failed: EBUSY`]);
+    expect(said).toEqual([expect.stringMatching(new RegExp(`^deck build ${first.job_id}: could not remove .*: EBUSY$`))]);
     expect(calls).toHaveLength(2);
+    expect(answerOf(first.job_id)?.error).toMatch(/x/);
+    expect(answerOf(second.job_id)?.error).toMatch(/x/);
+  });
+
+  it("should settle cleanly and still answer the next build, when a build's answer fails and so does the logger", async () => {
+    // Arrange
+    const first = asked();
+    const second = asked();
+    const api = createApi({ baseUrl: url, launchToken: LAUNCH });
+    const putDeckBuild = vi.fn(api.putDeckBuild).mockRejectedValueOnce(new Error("hub away")).mockRejectedValueOnce(new Error("hub away"));
+    const say = vi.fn(() => {
+      throw new Error("logger broke");
+    });
+    const { deps: d, calls } = deps(() => ({ code: 2, stdout: JSON.stringify({ errors: ["x"] }), stderr: "" }), { say, api: { ...api, putDeckBuild } });
+    const runner = createDeckBuildRunner(d);
+
+    // Act
+    runner.deckBuild(first);
+    runner.deckBuild(second);
+    await expect(runner.idle()).resolves.toBeUndefined();
+
+    // Assert
+    expect(calls).toHaveLength(2);
+    expect(say).toHaveBeenCalledWith(`deck build ${first.job_id}: could not answer it: hub away`);
+    expect(answerOf(first.job_id)).toBeUndefined();
     expect(answerOf(second.job_id)?.error).toMatch(/x/);
   });
 

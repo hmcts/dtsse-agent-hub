@@ -80,3 +80,20 @@ export async function readyWithin(ready: Promise<void> | undefined, ms: number):
     clearTimeout(timer);
   }
 }
+
+/**
+ * A job's `say`, made unable to throw: it only reports, and a logger that fails must not leave a job unanswered or
+ * reject its runner's queue.
+ */
+export function safeSay(say: ((message: string) => void) | undefined): (message: string) => void {
+  return (message) => {
+    try {
+      say?.(message);
+    } catch {
+      // Reporting failed; there is nowhere left to report it.
+    }
+  };
+}
+
+/** What went wrong, for a message: an error's own message, or whatever was thrown. */
+export const reason = (e: unknown): string => (e instanceof Error ? e.message : String(e));

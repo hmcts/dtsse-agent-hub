@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { PREPARE_TIMEOUT_MS, prepareBundled, prepareEach, readyWithin } from "./plugin-deps.ts";
+import { PREPARE_TIMEOUT_MS, prepareBundled, prepareEach, readyWithin, reason, safeSay } from "./plugin-deps.ts";
 
 const WS = "/workspace/cft-workspace";
 const install = (name: string) => `/workspace/.agent-hub-plugins/${name}-0123456789ab`;
@@ -135,5 +135,29 @@ describe("readyWithin", () => {
   it("should be true once the install settles inside the time, and false when it does not", async () => {
     await expect(readyWithin(Promise.resolve(), 1000)).resolves.toBe(true);
     await expect(readyWithin(new Promise<void>(() => {}), 10)).resolves.toBe(false);
+  });
+});
+
+describe("safeSay", () => {
+  it("should pass each message on to the logger it wraps", () => {
+    const say = vi.fn();
+    safeSay(say)("hello");
+    expect(say).toHaveBeenCalledWith("hello");
+  });
+
+  it("should not throw when the logger it wraps throws, or when there is none", () => {
+    const say = vi.fn(() => {
+      throw new Error("logger broke");
+    });
+    expect(() => safeSay(say)("hello")).not.toThrow();
+    expect(() => safeSay(undefined)("hello")).not.toThrow();
+  });
+});
+
+describe("reason", () => {
+  it("should give an error's message, and anything else thrown as text", () => {
+    expect(reason(new Error("boom"))).toBe("boom");
+    expect(reason("plain")).toBe("plain");
+    expect(reason(42)).toBe("42");
   });
 });

@@ -10,7 +10,7 @@ import { materialise } from "../cli/deck.ts";
 import type { Env } from "../env.ts";
 import { withRetry } from "../retry.ts";
 import type { Run } from "./lookups.ts";
-import { bundledScript, MIN_RUN_MS, readyWithin } from "./plugin-deps.ts";
+import { bundledScript, MIN_RUN_MS, readyWithin, reason, safeSay } from "./plugin-deps.ts";
 
 /** The plugin that carries `scripts/slides`, and the name the owner ticks. */
 export const SLIDES_PLUGIN = "slides";
@@ -91,7 +91,7 @@ export type DeckBuildDeps = {
 
 /** Builds one version, once the slides tools are installed, and answers the hub with the .pptx or why there is none. Never throws. */
 export async function runDeckBuild(deps: DeckBuildDeps, frame: DeckBuildFrame): Promise<void> {
-  const say = deps.say ?? (() => {});
+  const say = safeSay(deps.say);
   const clock = deps.clock ?? Date.now;
   const deadline = clock() + (deps.budgetMs ?? BUILD_BUDGET_MS);
   let dir: string | undefined;
@@ -105,16 +105,20 @@ export async function runDeckBuild(deps: DeckBuildDeps, frame: DeckBuildFrame): 
       answer = { error: STILL_PREPARING };
     }
   } catch (e) {
-    answer = { error: clip(`This version could not be built: ${(e as Error).message}`) };
+    answer = { error: clip(`This version could not be built: ${reason(e)}`) };
   } finally {
     if (dir !== undefined) {
-      fs.rmSync(dir, { recursive: true, force: true });
+      try {
+        fs.rmSync(dir, { recursive: true, force: true });
+      } catch (e) {
+        say(`deck build ${frame.job_id}: could not remove ${dir}: ${reason(e)}`);
+      }
     }
   }
   try {
     await withRetry(() => deps.api.putDeckBuild(deps.id, frame.job_id, answer), { attempts: 2 });
   } catch (e) {
-    say(`deck build ${frame.job_id}: could not answer it: ${(e as Error).message}`);
+    say(`deck build ${frame.job_id}: could not answer it: ${reason(e)}`);
   }
 }
 
@@ -165,7 +169,7 @@ export type DeckBuildRunner = {
 
 /** Runs builds beside the supervisor, one at a time in the order they came, since each is a whole Node process. */
 export function createDeckBuildRunner(deps: DeckBuildDeps): DeckBuildRunner {
-  const say = deps.say ?? (() => {});
+  const say = safeSay(deps.say);
   let chain: Promise<void> = Promise.resolve();
   return {
     deckBuild(data) {
@@ -179,7 +183,7 @@ export function createDeckBuildRunner(deps: DeckBuildDeps): DeckBuildRunner {
       // Each link catches its own failure, so one build that throws neither skips the builds behind it nor goes unhandled.
       chain = chain
         .then(() => runDeckBuild({ ...deps, budgetMs: (deps.budgetMs ?? BUILD_BUDGET_MS) - ((deps.clock ?? Date.now)() - arrived) }, frame))
-        .catch((e: unknown) => say(`deck build ${frame.job_id} failed: ${e instanceof Error ? e.message : String(e)}`));
+        .catch((e: unknown) => say(`deck build ${frame.job_id} failed: ${reason(e)}`));
     },
     idle: () => chain
   };
