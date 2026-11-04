@@ -30,9 +30,11 @@ interface Cached {
 }
 
 /** One cache per process, on `globalThis` because Next builds route handlers as separate module graphs. */
-const store = globalThis as typeof globalThis & { __microsoftTokens?: Map<string, Cached>; __microsoftMints?: Map<string, Promise<MicrosoftAccessToken>> };
-const cache = (store.__microsoftTokens ??= new Map());
-const inFlight = (store.__microsoftMints ??= new Map());
+const globalForTokens = globalThis as unknown as { microsoftTokens?: Map<string, Cached>; microsoftMints?: Map<string, Promise<MicrosoftAccessToken>> };
+globalForTokens.microsoftTokens ??= new Map();
+globalForTokens.microsoftMints ??= new Map();
+const cache = globalForTokens.microsoftTokens;
+const inFlight = globalForTokens.microsoftMints;
 
 /** Forgets every cached token: for tests, which share the process. */
 export function forgetMicrosoftTokens(): void {
