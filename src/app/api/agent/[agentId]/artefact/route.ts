@@ -1,7 +1,7 @@
 import { HttpError, json, parse, readJson } from "@/agent-api/http";
 import { ownedAgentRoute } from "@/agent-api/route";
 import { type Artefact, ArtefactConflict, readArtefact, writeArtefact } from "@/assistant/artefact-store";
-import { conversationOfAgent } from "@/assistant/conversation-store";
+import { requireConversationOfAgent } from "@/assistant/conversation-store";
 import { artefactPutBody } from "@/assistant/schemas";
 import { prisma } from "@/store/prisma";
 
@@ -18,22 +18,14 @@ function artefactBody(artefact: Artefact) {
   };
 }
 
-async function conversationOf(agentId: string) {
-  const conversation = await conversationOfAgent(prisma, agentId);
-  if (conversation === undefined) {
-    throw new HttpError(404, "that agent is not an assistant conversation's");
-  }
-  return conversation;
-}
-
 export const GET = ownedAgentRoute<{ agentId: string }>(async ({ agent }) => {
-  const conversation = await conversationOf(agent.id);
+  const conversation = await requireConversationOfAgent(prisma, agent.id);
   return json(artefactBody(await readArtefact(prisma, conversation.id)));
 });
 
 export const PUT = ownedAgentRoute<{ agentId: string }>(async ({ agent, request }) => {
   const body = parse(artefactPutBody, await readJson(request));
-  const conversation = await conversationOf(agent.id);
+  const conversation = await requireConversationOfAgent(prisma, agent.id);
   try {
     const version = await writeArtefact(prisma, conversation, {
       title: body.title ?? null,

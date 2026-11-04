@@ -39,7 +39,8 @@ export interface SlideAsk {
 
 /**
  * The latest version of the deck, read when the viewer opens and again whenever the page says `version` has moved
- * on. The version on screen stays there while the next one is read, and a failed read keeps it too.
+ * on. The version on screen stays there while the next one is read, and a failed read keeps it too, which
+ * `DeckBehind` then says.
  */
 export function useDeckView(deck: DeckSummary, conversationId: string): { deck: DeckView | null; failed: boolean; retry: () => void } {
   const { version, pptx } = deck;
@@ -82,6 +83,26 @@ function DeckLoading({ failed, retry }: { failed: boolean; retry: () => void }) 
     <p role="status" className="px-4 py-5 text-[13px] text-asst-muted">
       Loading the slides…
     </p>
+  );
+}
+
+/**
+ * Said over a version older than the page's when reading the newer one failed, so a stale deck never passes for the
+ * latest. Everything else on the panel describes the version it shows.
+ */
+function DeckBehind({ shown, latest, failed, retry }: { shown: DeckView | null; latest: number; failed: boolean; retry: () => void }) {
+  if (shown === null || !failed || shown.version >= latest) {
+    return null;
+  }
+  return (
+    <div role="alert" className="flex shrink-0 flex-wrap items-center gap-2 border-b border-asst-field bg-asst-raised px-4 py-2.5 text-[13px]">
+      <span className="min-w-0 flex-1">
+        Couldn't load version {latest}. Showing version {shown.version}.
+      </span>
+      <button type="button" onClick={retry} className={button}>
+        Try again
+      </button>
+    </div>
   );
 }
 
@@ -372,7 +393,7 @@ export function DeckPanel({
         <span aria-hidden="true" className="shrink-0 font-plex-mono text-[11px] uppercase tracking-wider text-asst-accent-soft">
           .pptx
         </span>
-        <h2 className="min-w-0 flex-1 truncate text-[15px] font-medium text-asst-text">{deck.title}</h2>
+        <h2 className="min-w-0 flex-1 truncate text-[15px] font-medium text-asst-text">{view.deck?.title ?? deck.title}</h2>
         <button
           type="button"
           onClick={onClose}
@@ -382,6 +403,7 @@ export function DeckPanel({
           ×
         </button>
       </div>
+      <DeckBehind shown={view.deck} latest={deck.version} failed={view.failed} retry={view.retry} />
       {view.deck === null ? (
         <DeckLoading failed={view.failed} retry={view.retry} />
       ) : (
@@ -401,8 +423,9 @@ export function SharedDeck({ conversationId, deck }: { conversationId: string; d
   return (
     <section aria-labelledby="shared-deck" className="flex h-[min(640px,80vh)] flex-col overflow-hidden rounded-2xl border border-asst-line">
       <h2 id="shared-deck" className="shrink-0 border-b border-asst-field px-5 py-3 text-[18px] font-semibold">
-        {deck.title}
+        {view.deck?.title ?? deck.title}
       </h2>
+      <DeckBehind shown={view.deck} latest={deck.version} failed={view.failed} retry={view.retry} />
       {view.deck === null ? (
         <DeckLoading failed={view.failed} retry={view.retry} />
       ) : (

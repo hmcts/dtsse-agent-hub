@@ -34,6 +34,142 @@ export const BULLET_INDENT = 0.5;
 /** How far a bullet hangs left of its text: the deck's 342900 EMU. */
 export const BULLET_HANG = 0.375;
 
+/** A line of single-spaced Arial, as PowerPoint and LibreOffice set it, in multiples of the font size. */
+export const LINE_HEIGHT = 1.2;
+
+/** Arial's advance widths in thousandths of an em, for estimating how text wraps. */
+const ARIAL_WIDTHS: Record<string, number> = {
+  " ": 278,
+  "!": 278,
+  '"': 355,
+  "#": 556,
+  $: 556,
+  "%": 889,
+  "&": 667,
+  "'": 191,
+  "(": 333,
+  ")": 333,
+  "*": 389,
+  "+": 584,
+  ",": 278,
+  "-": 333,
+  ".": 278,
+  "/": 278,
+  ":": 278,
+  ";": 278,
+  "<": 584,
+  "=": 584,
+  ">": 584,
+  "?": 556,
+  "@": 1015,
+  "[": 278,
+  "\\": 278,
+  "]": 278,
+  "^": 469,
+  _: 556,
+  "`": 333,
+  "{": 334,
+  "|": 260,
+  "}": 334,
+  "~": 584,
+  A: 667,
+  B: 667,
+  C: 722,
+  D: 722,
+  E: 667,
+  F: 611,
+  G: 778,
+  H: 722,
+  I: 278,
+  J: 500,
+  K: 667,
+  L: 556,
+  M: 833,
+  N: 722,
+  O: 778,
+  P: 667,
+  Q: 778,
+  R: 722,
+  S: 667,
+  T: 611,
+  U: 722,
+  V: 667,
+  W: 944,
+  X: 667,
+  Y: 667,
+  Z: 611,
+  c: 500,
+  f: 278,
+  i: 222,
+  j: 222,
+  k: 500,
+  l: 222,
+  m: 833,
+  r: 333,
+  s: 500,
+  t: 278,
+  v: 500,
+  w: 722,
+  x: 500,
+  y: 500,
+  z: 500,
+  "‘": 222,
+  "’": 222,
+  "“": 333,
+  "”": 333,
+  "–": 556,
+  "—": 1000,
+  "…": 1000
+};
+/** Every other lowercase letter and digit is this wide, and so, for an estimate, is any other Latin character. */
+const ARIAL_COMMON = 556;
+/** Symbols, emoji and East Asian characters are about an em wide. */
+const ARIAL_WIDE = 1000;
+
+const advance = (char: string): number => ARIAL_WIDTHS[char] ?? ((char.codePointAt(0) ?? 0) < 0x2000 ? ARIAL_COMMON : ARIAL_WIDE);
+
+/** How wide `text` is in Arial at `fontSize`, in points. */
+export function textWidth(text: string, fontSize: number): number {
+  let width = 0;
+  for (const char of text) {
+    width += advance(char);
+  }
+  return (width * fontSize) / 1000;
+}
+
+/** How many lines `text` wraps to in a line `width` points long: whole words, and a word too long for a line broken anywhere. */
+export function wrappedLines(text: string, width: number, fontSize: number): number {
+  const space = textWidth(" ", fontSize);
+  let lines = 1;
+  let used = 0;
+  let empty = true;
+  for (const word of text.split(/\s+/).filter((part) => part !== "")) {
+    const w = textWidth(word, fontSize);
+    if (!empty && used + space + w <= width) {
+      used += space + w;
+      continue;
+    }
+    if (!empty) {
+      lines += 1;
+      used = 0;
+    }
+    empty = false;
+    if (w <= width) {
+      used = w;
+      continue;
+    }
+    for (const char of word) {
+      const c = textWidth(char, fontSize);
+      if (used > 0 && used + c > width) {
+        lines += 1;
+        used = 0;
+      }
+      used += c;
+    }
+  }
+  return lines;
+}
+
 export interface Frame {
   x: number;
   y: number;
@@ -81,6 +217,10 @@ export interface PlaceholderSpec extends Frame {
   style?: TextStyle;
   /** For text, the most words; for bullets, the most words in any one item. */
   maxWords?: number;
+  /** For text, the most characters that are sure to fit in `maxLines`. */
+  maxChars?: number;
+  /** For text, the most lines it may wrap to; for bullets, the most lines any one item may wrap to. */
+  maxLines?: number;
   /** For bullets, the most items, nested ones included. */
   maxItems?: number;
 }
@@ -138,7 +278,11 @@ const barTitle = (maxWords = 8): PlaceholderSpec => ({
   maxWords
 });
 
-const coverTitle = (description: string, prompt: string, maxWords: number): PlaceholderSpec => ({
+/**
+ * The title on the artwork is one line, as in the deck: a second would run into the subtitle and the skyline's cloud.
+ * 23 characters as wide as most lowercase letters fill the line at 50pt.
+ */
+const coverTitle = (description: string, prompt: string): PlaceholderSpec => ({
   ...COVER_TITLE,
   name: "title",
   field: "title",
@@ -147,7 +291,8 @@ const coverTitle = (description: string, prompt: string, maxWords: number): Plac
   description,
   prompt,
   style: text(FONT_SIZES.coverTitle, COLOURS.white, "middle"),
-  maxWords
+  maxChars: 23,
+  maxLines: 1
 });
 
 const coverSubtitle = (description: string, prompt: string, maxWords: number, h = COVER_SUBTITLE.h): PlaceholderSpec => ({
@@ -163,7 +308,11 @@ const coverSubtitle = (description: string, prompt: string, maxWords: number, h 
   maxWords
 });
 
-const bullets = (name: string, frame: Frame, description: string, maxWords: number, maxItems: number): PlaceholderSpec => ({
+/**
+ * Limits for a list of bullets that fit its box at worst: `maxItems` items of `maxWords` seven-character words, each
+ * character as wide as most lowercase letters, wrap to no more than `maxLines` lines each, and that many lines fit.
+ */
+const bullets = (name: string, frame: Frame, description: string, maxWords: number, maxLines: number, maxItems: number): PlaceholderSpec => ({
   ...frame,
   name,
   field: name === "body" ? "bullets" : name,
@@ -173,6 +322,7 @@ const bullets = (name: string, frame: Frame, description: string, maxWords: numb
   prompt: "Bullet points",
   style: BODY_STYLE,
   maxWords,
+  maxLines,
   maxItems
 });
 
@@ -183,7 +333,7 @@ export const MASTERS: readonly MasterSpec[] = [
     inSlides: false,
     background: { image: BACKGROUND_IMAGE },
     fixed: [],
-    placeholders: [coverTitle("Deck title", "Presentation title", 8), coverSubtitle("One line saying what the talk is", "What the talk is about", 15)]
+    placeholders: [coverTitle("Deck title", "Presentation title"), coverSubtitle("One line saying what the talk is", "What the talk is about", 15)]
   },
   {
     name: "HMCTS_SECTION",
@@ -214,7 +364,7 @@ export const MASTERS: readonly MasterSpec[] = [
     inSlides: true,
     background: { color: COLOURS.white },
     fixed: [BAR],
-    placeholders: [barTitle(), bullets("body", BODY, "Strings, or {text, bullets: [strings]} for one nested level", 12, 6)]
+    placeholders: [barTitle(), bullets("body", BODY, "Strings, or {text, bullets: [strings]} for one nested level", 7, 1, 6)]
   },
   {
     name: "HMCTS_TWO_COLUMN",
@@ -224,8 +374,8 @@ export const MASTERS: readonly MasterSpec[] = [
     fixed: [BAR],
     placeholders: [
       barTitle(),
-      bullets("left", { ...BODY, w: COLUMN_W }, "Left column, bullets as for HMCTS_CONTENT", 8, 5),
-      bullets("right", { ...BODY, x: BODY.x + COLUMN_W + GUTTER, w: COLUMN_W }, "Right column, bullets as for HMCTS_CONTENT", 8, 5)
+      bullets("left", { ...BODY, w: COLUMN_W }, "Left column, bullets as for HMCTS_CONTENT", 6, 2, 3),
+      bullets("right", { ...BODY, x: BODY.x + COLUMN_W + GUTTER, w: COLUMN_W }, "Right column, bullets as for HMCTS_CONTENT", 6, 2, 3)
     ]
   },
   {
@@ -265,7 +415,7 @@ export const MASTERS: readonly MasterSpec[] = [
     inSlides: true,
     background: { image: BACKGROUND_IMAGE },
     fixed: [],
-    placeholders: [coverTitle('Closing line, such as "Questions?"', "Questions?", 6), coverSubtitle("Contact or follow-up details", "Contact details", 25, 1.4)]
+    placeholders: [coverTitle('Closing line, such as "Questions?"', "Questions?"), coverSubtitle("Contact or follow-up details", "Contact details", 25, 1.4)]
   }
 ];
 
@@ -371,14 +521,53 @@ export function wordCount(value: string): number {
   return value.split(/\s+/).filter((word) => word !== "").length;
 }
 
+/** How long a line of a placeholder's text is, in points: inside its insets and, for a bullet, after its indent. */
+function lineWidth(spec: PlaceholderSpec, level: number | null): number {
+  const style = spec.style as TextStyle;
+  const indent = level === null ? 0 : BULLET_INDENT * (level + 1);
+  return (spec.w - 2 * style.inset - indent) * 72;
+}
+
+/** How many lines `text` wraps to in a placeholder, as a bullet at `level` or, with null, as plain text. */
+export function linesIn(spec: PlaceholderSpec, text: string, level: number | null): number {
+  return wrappedLines(text, lineWidth(spec, level), (spec.style as TextStyle).fontSize);
+}
+
+/** How many lines of a placeholder's text fit inside its insets. */
+export function linesThatFit(spec: PlaceholderSpec): number {
+  const style = spec.style as TextStyle;
+  const line = style.fontSize * LINE_HEIGHT * (style.lineSpacingMultiple ?? 1);
+  return Math.floor(((spec.h - 2 * style.inset) * 72) / line + 1e-9);
+}
+
+const linesSaid = (n: number): string => (n === 1 ? "1 line" : `${n} lines`);
+
 function lintField(where: string, spec: PlaceholderSpec, value: unknown, issues: Issue[]): void {
-  if (spec.kind === "text" && typeof value === "string" && spec.maxWords !== undefined && wordCount(value) > spec.maxWords) {
-    issues.push({ level: "warning", where, message: `has ${wordCount(value)} words; the placeholder fits ${spec.maxWords}` });
+  if (spec.kind === "text" && typeof value === "string") {
+    if (spec.maxWords !== undefined && wordCount(value) > spec.maxWords) {
+      issues.push({ level: "warning", where, message: `has ${wordCount(value)} words; the placeholder fits ${spec.maxWords}` });
+    } else if (spec.maxLines !== undefined && linesIn(spec, value, null) > spec.maxLines) {
+      const chars = spec.maxChars === undefined ? "" : `, about ${spec.maxChars} characters`;
+      issues.push({
+        level: "warning",
+        where,
+        message: `runs to about ${linesSaid(linesIn(spec, value, null))}; the placeholder fits ${linesSaid(spec.maxLines)}${chars}`
+      });
+    }
   } else if (spec.kind === "bullets" && Array.isArray(value)) {
     const runs = runsOf(value as Bullet[]);
+    let lines = 0;
     for (const [i, run] of runs.entries()) {
+      const runLines = linesIn(spec, run.text, run.level);
+      lines += runLines;
       if (spec.maxWords !== undefined && wordCount(run.text) > spec.maxWords) {
         issues.push({ level: "warning", where: `${where} item ${i + 1}`, message: `has ${wordCount(run.text)} words; keep a bullet to ${spec.maxWords}` });
+      } else if (spec.maxLines !== undefined && runLines > spec.maxLines) {
+        issues.push({
+          level: "warning",
+          where: `${where} item ${i + 1}`,
+          message: `runs to about ${linesSaid(runLines)}; keep a bullet to ${linesSaid(spec.maxLines)}`
+        });
       }
     }
     if (spec.maxItems !== undefined && runs.length > spec.maxItems) {
@@ -387,23 +576,26 @@ function lintField(where: string, spec: PlaceholderSpec, value: unknown, issues:
         where,
         message: `has ${runs.length} bullets, nested ones included; the placeholder fits ${spec.maxItems}. Split the slide`
       });
+    } else if (lines > linesThatFit(spec)) {
+      issues.push({
+        level: "warning",
+        where,
+        message: `runs to about ${linesSaid(lines)}; the placeholder fits ${linesSaid(linesThatFit(spec))}. Split the slide`
+      });
     }
   } else if (spec.kind === "image" && typeof value === "object" && value !== null) {
     const image = value as { alt?: unknown; decorative?: unknown };
-    const hasAlt = typeof image.alt === "string" && image.alt.trim() !== "";
-    if (image.decorative === true && hasAlt) {
+    if (image.decorative === true && typeof image.alt === "string" && image.alt.trim() !== "") {
       issues.push({ level: "warning", where, message: "is marked decorative, so its alt text is not used" });
-    } else if (image.decorative !== true && !hasAlt) {
-      issues.push({
-        level: "error",
-        where: `${where}.alt`,
-        message: "is missing: give alt text saying what the picture shows, or decorative: true if it adds nothing"
-      });
     }
   }
 }
 
-/** Text over a placeholder's limits (warnings) and pictures with neither alt text nor `decorative` (errors). */
+/**
+ * Text over a placeholder's limits, its wrapped lines estimated from Arial's widths; a decorative picture given alt
+ * text; and two slides with one title, all as warnings. A picture with neither alt text nor `decorative` is refused by
+ * the outline's structural check.
+ */
 export function lint(outline: Outline): Issue[] {
   const issues: Issue[] = [];
   const check = (where: string, master: MasterSpec, content: Record<string, unknown>) => {
@@ -446,6 +638,8 @@ export function layoutSummary(): unknown[] {
           required: spec.required,
           description: spec.description,
           ...(spec.maxWords === undefined ? {} : { maxWords: spec.maxWords }),
+          ...(spec.maxChars === undefined ? {} : { maxChars: spec.maxChars }),
+          ...(spec.maxLines === undefined ? {} : { maxLines: spec.maxLines }),
           ...(spec.maxItems === undefined ? {} : { maxItems: spec.maxItems })
         }
       ])

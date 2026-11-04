@@ -156,6 +156,27 @@ describe("welsh jobs", () => {
     expect(download.headers.get("cache-control")).toBe("no-store");
   });
 
+  it("should download a spreadsheet whose name has a letter outside the BMP, encoding the whole pair, when the owner reads it", async () => {
+    // Arrange
+    await assistantOf(ALICE);
+    const name = `Ymateb ${"𝐀".repeat(90)}.xlsx`;
+    const uploaded = await jsonOf<{ file_id: string }>(
+      await browser(uploadRoute.POST, "/api/ui/assistant/welsh/files", { body: XLSX, headers: { "x-file-name": encodeURIComponent(name) } })
+    );
+
+    // Act
+    const download = await downloadRoute.GET(
+      new NextRequest(`http://localhost:3000/api/ui/assistant/welsh/files/${uploaded.file_id}`, { headers: { cookie: "ah_dev_persona=alice" } }),
+      { params: Promise.resolve({ fileId: uploaded.file_id }) }
+    );
+
+    // Assert
+    expect(download.status).toBe(200);
+    expect(download.headers.get("content-disposition")).toBe(
+      `attachment; filename="Ymateb ${"__".repeat(90)}.xlsx"; filename*=UTF-8''${encodeURIComponent(name)}`
+    );
+  });
+
   it("should refuse a job and an upload, recording neither, when the person's assistant does not have the Welsh plugin", async () => {
     // Arrange
     await claimingWelsh(ALICE);

@@ -47,9 +47,15 @@ export async function prepareBundled(name: string, deps: PrepareDeps): Promise<v
   }
 }
 
-/** Runs `prepareBundled` for each of `names` in turn, so their installs do not compete with each other. Never throws. */
-export async function prepareEach(names: readonly string[], deps: PrepareDeps): Promise<void> {
+/**
+ * Runs `prepareBundled` for each of `names` in turn, so their installs do not compete with each other, and starts
+ * none once `signal` has aborted. Never throws.
+ */
+export async function prepareEach(names: readonly string[], deps: PrepareDeps, signal?: AbortSignal): Promise<void> {
   for (const name of names) {
+    if (signal?.aborted) {
+      return;
+    }
     await prepareBundled(name, deps);
   }
 }

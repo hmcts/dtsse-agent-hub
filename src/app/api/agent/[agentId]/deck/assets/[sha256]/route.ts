@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { HttpError, json } from "@/agent-api/http";
 import { ownedAgentRoute } from "@/agent-api/route";
 import { requireConversationOfAgent } from "@/assistant/conversation-store";
-import { assetRef, imageInfo, isSha256, MAX_ASSET_BYTES, MAX_DECK_ASSET_BYTES, MAX_IMAGE_SIDE } from "@/assistant/deck";
+import { assetRef, imageInfo, isSha256, KEEP_PPTX, MAX_ASSET_BYTES, MAX_DECK_ASSET_BYTES, MAX_HELD_ASSET_BYTES, MAX_IMAGE_SIDE } from "@/assistant/deck";
 import { putDeckAsset, readDeckAsset } from "@/assistant/deck-store";
 import { readBytes } from "@/assistant/upload-body";
 import { prisma } from "@/store/prisma";
@@ -38,6 +38,12 @@ export const PUT = ownedAgentRoute<Params>(async ({ agent, request, params }) =>
     throw new HttpError(
       409,
       `a deck uses at most ${MAX_DECK_ASSET_BYTES} bytes of pictures: those its latest version names, and those uploaded in the last hour`
+    );
+  }
+  if (result === "held_full") {
+    throw new HttpError(
+      409,
+      `a conversation holds at most ${MAX_HELD_ASSET_BYTES} bytes of pictures, and the latest ${KEEP_PPTX} versions, which are never deleted to make room, name too many to take this one`
     );
   }
   return json({ asset: assetRef(sha256) }, result === "stored" ? 201 : 200);

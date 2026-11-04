@@ -65,7 +65,7 @@ const print = (value: unknown): void => {
 
 async function main(): Promise<void> {
   const [command, ...rest] = process.argv.slice(2);
-  if (!command || command === "--help" || command === "-h" || !COMMANDS[command]) {
+  if (!command || command === "--help" || command === "-h" || !Object.hasOwn(COMMANDS, command)) {
     say("Usage: slides <command> [options]\n");
     for (const c of Object.values(COMMANDS)) {
       say(`  ${c.usage}`);

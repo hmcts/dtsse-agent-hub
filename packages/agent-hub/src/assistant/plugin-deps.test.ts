@@ -74,6 +74,25 @@ describe("prepareEach", () => {
     expect(started).toEqual([join(install("welsh"), "scripts", "welsh"), join(install("slides"), "scripts", "slides")]);
   });
 
+  it("should start no further install once the signal has aborted", async () => {
+    const stop = new AbortController();
+    const run = vi.fn(async () => {
+      stop.abort();
+      return { code: 0, stdout: "", stderr: "" };
+    });
+    await prepareEach(["welsh", "slides"], { run, env: { AGENT_HUB_PLUGINS: "welsh,slides" }, workspace: WS, install }, stop.signal);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run).toHaveBeenCalledWith(join(install("welsh"), "scripts", "welsh"), ["deps"], expect.anything());
+  });
+
+  it("should start nothing when the signal has aborted before it begins", async () => {
+    const run = ok();
+    const copy = vi.fn(install);
+    await prepareEach(["slides"], { run, env: { AGENT_HUB_PLUGINS: "slides" }, workspace: WS, install: copy }, AbortSignal.abort());
+    expect(run).not.toHaveBeenCalled();
+    expect(copy).not.toHaveBeenCalled();
+  });
+
   it("should go on to the next plugin when one's install fails", async () => {
     const said: string[] = [];
     const run = vi.fn(async (cmd: string) => ({ code: cmd.endsWith("welsh") ? 1 : 0, stdout: "", stderr: "npm ERR! network" }));

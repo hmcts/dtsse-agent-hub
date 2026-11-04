@@ -1,6 +1,6 @@
 /**
- * Checks an outline read from a file: its shape, its layouts and fields, that its images exist, and then `lint`'s
- * limits and alt text. Errors stop the build; text over a limit is only a warning, since the slide still renders.
+ * Checks an outline read from a file: its shape, its layouts and fields, that its images exist and say what they show,
+ * and then `lint`'s limits. Errors stop the build; text over a limit is only a warning, since the slide still renders.
  */
 
 import { closeSync, existsSync, openSync, readSync, statSync } from "node:fs";
@@ -88,7 +88,12 @@ function checkBullets(where: string, value: unknown, errors: string[]): void {
   });
 }
 
-/** Which picture format a file's first bytes are, or null when they are none of them. */
+/** Which picture format bytes starting a file are (PNG, JPEG or GIF), or null when they are none of them. */
+export function formatOf(start: Buffer): string | null {
+  const match = SIGNATURES.find(([, signatures]) => signatures.some((signature) => start.subarray(0, signature.length).equals(signature)));
+  return match ? match[0] : null;
+}
+
 function sniff(file: string): string | null {
   const head = Buffer.alloc(8);
   const fd = openSync(file, "r");
@@ -98,9 +103,7 @@ function sniff(file: string): string | null {
   } finally {
     closeSync(fd);
   }
-  const start = head.subarray(0, length);
-  const match = SIGNATURES.find(([, signatures]) => signatures.some((signature) => start.subarray(0, signature.length).equals(signature)));
-  return match ? match[0] : null;
+  return formatOf(head.subarray(0, length));
 }
 
 function checkImage(where: string, value: unknown, baseDir: string, errors: string[]): void {
@@ -113,6 +116,9 @@ function checkImage(where: string, value: unknown, baseDir: string, errors: stri
   }
   if (value.decorative !== undefined && typeof value.decorative !== "boolean") {
     errors.push(`${where}.decorative must be true or false`);
+  }
+  if (value.decorative !== true && (value.alt === undefined || (typeof value.alt === "string" && !nonEmpty(value.alt)))) {
+    errors.push(`${where}.alt is missing: give alt text saying what the picture shows, or decorative: true if it adds nothing`);
   }
   if (!nonEmpty(value.path)) {
     errors.push(`${where}.path is missing`);
@@ -228,8 +234,9 @@ function checkStructure(input: unknown, baseDir: string): { errors: string[]; pa
 }
 
 /**
- * Every error and warning in an outline. `baseDir` is where image paths are resolved from. Lint runs over whatever
- * passed the structural check, so a missing alt text is listed beside a structural error rather than after its fix.
+ * Every error and warning in an outline. `baseDir` is where image paths are resolved from. The structural check
+ * covers every slide, a picture's alt text included; lint's limits and repeated titles are checked only over what
+ * passed it.
  */
 export function checkOutline(input: unknown, baseDir: string): Checked {
   const { errors, passed } = checkStructure(input, baseDir);

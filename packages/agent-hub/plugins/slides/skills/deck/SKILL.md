@@ -42,9 +42,14 @@ Also ask for any pictures they want used, as files. Don't start the outline unti
    `agent-hub deck put deck/outline.json --pptx deck/<name>.pptx --summary "<what changed>"`. It uploads the
    pictures the outline names, saves the outline as the deck's next version and then the `.pptx` built from it. It
    also writes the id it gave each slide back into `outline.json`; keep them, since they are how the person points
-   you at a slide. Outside a conversation there is nowhere to publish, and the command says so.
+   you at a slide. Outside a conversation there is nowhere to publish, and the command says so. For an outline
+   `agent-hub deck get` wrote (below), `deck put` sends the version `deck get` read as `--base` by itself, so a
+   newer version the person wrote meanwhile is refused rather than overwritten; don't pass `--base` yourself.
    - "the deck has changed since version N": someone else wrote a newer version. Start again from
      `agent-hub deck get`, make your change to that, build it, and put it with the `--base` the message gives.
+   - "a conversation holds at most … bytes of pictures": the latest 3 versions, which the hub never deletes to make
+     room, name too many pictures between them. Put versions that name fewer pictures, then try again; if it is still
+     refused, tell the person.
    - "a deck uses at most … bytes of pictures": the pictures the latest version names, with any uploaded in the last
      hour, are at the limit. Put a version without the pictures you are replacing first, then put the one with the
      new pictures; if it is still refused, the old ones were uploaded under an hour ago, so tell the person.
@@ -58,7 +63,8 @@ Also ask for any pictures they want used, as files. Don't start the outline unti
 
 In a CFT Workspace conversation, always start from the published deck rather than an outline you remember:
 `agent-hub deck get` writes it to `~/.agent-hub/decks/<conversation>/outline.json` with its pictures beside it,
-ready for `slides build`, and prints the `deck put` to run when you have changed it. `--json` says where it is and
+ready for `slides build`, records the version it read in `version` beside them, and prints the `deck put` to run
+when you have changed it. Change that `outline.json` in place: `deck put` reads its base from there. `--json` says where it is and
 which version, and whether the person can download its `.pptx` yet.
 
 A message that starts with a slide reference, such as `[Slide 4 of "Ways of working" v7, id s_ab12: "Releases take

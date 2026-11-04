@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { clientSupports } from "@/agents/client-features";
 import { EXPIRE_AFTER_SECONDS } from "@/agents/liveness";
 import type { ArtefactSnapshot } from "@/app/_actions/assistant";
+import { MAX_ASKED_BODY } from "@/assistant/deck";
 import { type ExportDefaults, NO_DEFAULTS } from "@/assistant/export-defaults";
 import { PRODUCTS, productLabel, storedProduct } from "@/assistant/products";
 import type { Template } from "@/assistant/starters";
@@ -21,7 +22,7 @@ import {
 } from "@/assistant/thread";
 import type { ConversationView } from "@/assistant/views";
 import { useLiveConversation } from "@/components/agents/useLiveConversation";
-import { ArtefactPanel, type SaveArtefactAction } from "@/components/assistant/ArtefactPanel";
+import { ArtefactPanel, type SaveArtefactAction, type UnsavedDraft } from "@/components/assistant/ArtefactPanel";
 import { AssistantMarkdown } from "@/components/assistant/AssistantMarkdown";
 import { Mark, SidebarToggle } from "@/components/assistant/AssistantShell";
 import { ChatMenu } from "@/components/assistant/ChatMenu";
@@ -351,6 +352,11 @@ export function ChatView({
   const documentBusy = useRef(false);
   /** The assistant wrote a newer deck while the document was busy, so the slides wait behind their button instead. */
   const [slidesWaiting, setSlidesWaiting] = useState(false);
+  /**
+   * An edit the document was closed on whose save then failed or found a newer version: the document opens again with
+   * it, keyed afresh so a panel the person opened meanwhile takes it in too.
+   */
+  const [unsaved, setUnsaved] = useState<{ draft: UnsavedDraft; key: number } | null>(null);
   const [ask, setAsk] = useState<SlideAsk | null>(null);
   const [error, setError] = useState<string | null>(null);
   const warmed = useRef(false);
@@ -403,7 +409,17 @@ export function ChatView({
     if (panel === "deck") {
       setSlidesWaiting(false);
     }
+    if (panel !== "document") {
+      setUnsaved(null);
+    }
   }, [panel]);
+  function reopenDocument(draft: UnsavedDraft): void {
+    setUnsaved((before) => ({ draft, key: (before?.key ?? 0) + 1 }));
+    setPanel("document");
+    arrivals.announce(
+      draft.conflict === null ? "Your document could not be saved, so it is open again" : "The document changed while you were editing it, so it is open again"
+    );
+  }
 
   // The picker can only show a product it offers, so it and the dialog it opens read the stored one through this.
   const product = storedProduct(view.product);
@@ -456,7 +472,11 @@ export function ChatView({
   };
 
   async function send(body: string, uploadIds: string[]): Promise<string | null> {
-    // A slide the person asked about goes in front of their words, which is the whole of how the session is told.
+    // A slide the person asked about goes in front of their words, which is the whole of how the session is told. Its
+    // room is kept whatever its length, so the limit the person is told is the same for every slide.
+    if (ask !== null && body.length > MAX_ASKED_BODY) {
+      return `a message about a slide is at most ${MAX_ASKED_BODY} characters`;
+    }
     const asked = ask === null ? body : `${ask.reference}\n${body}`;
     const result = await actions.send({ conversationId: view.id, body: asked, uploadIds });
     if (!result.ok) {
@@ -689,6 +709,9 @@ export function ChatView({
       ) : null}
       {panel === "document" ? (
         <ArtefactPanel
+          key={unsaved?.key ?? 0}
+          draft={unsaved?.draft}
+          onUnsaved={reopenDocument}
           conversationId={view.id}
           artefact={artefact}
           productLabel={view.productLabel}

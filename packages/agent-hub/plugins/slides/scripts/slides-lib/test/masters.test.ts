@@ -1,6 +1,20 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { BACKGROUND_IMAGE, COLOURS, lint, MASTERS, type Outline, plan, runsOf, SLIDE } from "../masters.ts";
+import {
+  BACKGROUND_IMAGE,
+  COLOURS,
+  LINE_HEIGHT,
+  linesIn,
+  linesThatFit,
+  lint,
+  MASTERS,
+  type Outline,
+  plan,
+  runsOf,
+  SLIDE,
+  textWidth,
+  wrappedLines
+} from "../masters.ts";
 import { everyLayout } from "./fixtures.ts";
 
 test("should make the title slide from the outline's own title, subtitle and notes", () => {
@@ -95,11 +109,91 @@ test("should warn, not fail, when text runs over a placeholder's limits", () => 
   );
 });
 
-test("should fail a picture with neither alt text nor decorative", () => {
-  const outline: Outline = { title: "T", slides: [{ layout: "HMCTS_IMAGE", title: "P", image: { path: "p.png", alt: " " } }] };
+test("should leave a picture without alt text to the outline check, and warn about alt text on a decorative one", () => {
+  const outline: Outline = {
+    title: "T",
+    slides: [
+      { layout: "HMCTS_IMAGE", title: "P", image: { path: "p.png", alt: " " } },
+      { layout: "HMCTS_IMAGE", title: "Q", image: { path: "p.png", alt: "A chart", decorative: true } }
+    ]
+  };
   assert.deepEqual(
     lint(outline).map((issue) => [issue.level, issue.where]),
-    [["error", "slides[0].image.alt"]]
+    [["warning", "slides[1].image"]]
+  );
+});
+
+/** The worst case the limits allow: words of seven characters, each as wide as most lowercase letters. */
+const widest = (words: number): string => Array.from({ length: words }, () => "nnnnnnn").join(" ");
+
+test("should fit the most bullets of the most words the limits allow inside each list's box", () => {
+  const lists = MASTERS.flatMap((master) => master.placeholders.filter((spec) => spec.kind === "bullets"));
+  assert.ok(lists.length >= 3);
+  for (const spec of lists) {
+    const { maxWords, maxLines, maxItems } = spec as Required<typeof spec>;
+    for (const level of [0, 1]) {
+      assert.ok(linesIn(spec, widest(maxWords), level) <= maxLines, `${spec.name} level ${level}`);
+    }
+    assert.ok(maxItems * maxLines <= linesThatFit(spec), `${spec.name}: ${maxItems} x ${maxLines} lines in ${linesThatFit(spec)}`);
+  }
+});
+
+test("should fit the most characters the limits allow on the title and closing slides' one line", () => {
+  for (const name of ["HMCTS_TITLE", "HMCTS_CLOSING"]) {
+    const title = MASTERS.find((master) => master.name === name)?.placeholders.find((spec) => spec.name === "title");
+    assert.ok(title?.maxChars !== undefined && title.maxLines === 1, name);
+    assert.equal(linesIn(title, "n".repeat(title.maxChars), null), 1, name);
+    assert.equal(linesIn(title, "n".repeat(title.maxChars + 1), null), 2, name);
+    assert.ok(linesThatFit(title) >= 1, name);
+  }
+});
+
+test("should measure text in Arial's widths and wrap it at whole words", () => {
+  assert.equal(textWidth("Wi", 10), 11.66);
+  assert.equal(wrappedLines("aa bb", textWidth("aa bb", 18), 18), 1);
+  assert.equal(wrappedLines("aa bb", textWidth("aa bb", 18) - 0.01, 18), 2);
+  assert.equal(wrappedLines("", 100, 18), 1);
+  assert.equal(wrappedLines("mmmmmmmmmm", textWidth("mmmm", 18), 18), 3);
+  assert.equal(LINE_HEIGHT, 1.2);
+});
+
+test("should warn when a bullet within its word limit wraps to more lines than it may", () => {
+  const long = "Internationalisation, accessibility, responsibilities, documentation, comprehensively, standardisation";
+  const outline: Outline = {
+    title: "T",
+    slides: [
+      { layout: "HMCTS_TWO_COLUMN", title: "A", left: [long], right: ["Short"] },
+      { layout: "HMCTS_CONTENT", title: "B", bullets: [long.replaceAll(",", ""), "Short"] }
+    ]
+  };
+  assert.deepEqual(
+    lint(outline).map((issue) => `${issue.where} ${issue.message}`),
+    ["slides[0].left item 1 runs to about 3 lines; keep a bullet to 2 lines", "slides[1].bullets item 1 runs to about 2 lines; keep a bullet to 1 line"]
+  );
+});
+
+test("should warn when a list's bullets together run past the bottom of its box", () => {
+  const long = "Internationalisation accessibility responsibilities documentation comprehensively standardisation";
+  const outline: Outline = { title: "T", slides: [{ layout: "HMCTS_CONTENT", title: "B", bullets: [long, long, long, long] }] };
+  const issues = lint(outline).map((issue) => `${issue.where} ${issue.message}`);
+  assert.equal(issues.length, 5);
+  assert.equal(issues[4], "slides[0].bullets runs to about 8 lines; the placeholder fits 7 lines. Split the slide");
+});
+
+test("should warn when the deck's title or the closing line runs past one line, by its width rather than its words", () => {
+  const outline: Outline = {
+    title: "Releasing software every week",
+    slides: [
+      { layout: "HMCTS_CLOSING", title: "Ways of working at HMCTS" },
+      { layout: "HMCTS_CLOSING", title: "WWWWWWWWWWWWWWW" }
+    ]
+  };
+  assert.deepEqual(
+    lint(outline).map((issue) => `${issue.where} ${issue.message}`),
+    [
+      "outline.title runs to about 2 lines; the placeholder fits 1 line, about 23 characters",
+      "slides[1].title runs to about 2 lines; the placeholder fits 1 line, about 23 characters"
+    ]
   );
 });
 

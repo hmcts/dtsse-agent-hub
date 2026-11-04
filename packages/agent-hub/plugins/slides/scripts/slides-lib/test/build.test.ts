@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import JSZip from "jszip";
 import { DeckError, writeDeck } from "../build.ts";
-import { everyLayout, workDir } from "./fixtures.ts";
+import { everyLayout, png, workDir } from "./fixtures.ts";
 
 async function built(): Promise<JSZip> {
   const dir = workDir();
@@ -30,6 +31,20 @@ async function layoutNames(zip: JSZip): Promise<Map<string, string>> {
   return names;
 }
 
+/** The XML of the slide layout named `name`. */
+async function layoutNamed(zip: JSZip, name: string): Promise<string> {
+  const part = [...(await layoutNames(zip)).entries()].find(([, layout]) => layout === name)?.[0];
+  assert.ok(part, `there is a layout named ${name}`);
+  return read(zip, part.replace("../", "ppt/"));
+}
+
+/** A placeholder's shape in a layout, by the placeholder's name. */
+function shapeNamed(layout: string, name: string): string {
+  const shape = layout.match(/<p:sp>[\s\S]*?<\/p:sp>/g)?.find((sp) => sp.includes(`name="${name}"`));
+  assert.ok(shape, `the layout has a placeholder named ${name}`);
+  return shape;
+}
+
 const byNumber = (a: string, b: string): number => Number(a.match(/\d+/)?.[0]) - Number(b.match(/\d+/)?.[0]);
 
 async function slideParts(zip: JSZip): Promise<string[]> {
@@ -45,10 +60,78 @@ test("should write a slide master with every HMCTS layout as a named slide layou
   for (const name of ["HMCTS_TITLE", "HMCTS_SECTION", "HMCTS_CONTENT", "HMCTS_TWO_COLUMN", "HMCTS_IMAGE", "HMCTS_CLOSING"]) {
     assert.ok(names.includes(name), `${name} is one of ${names.join(", ")}`);
   }
-  const content = await read(zip, `ppt/slideLayouts/slideLayout${names.indexOf("HMCTS_CONTENT") + 1}.xml`);
+  const content = await layoutNamed(zip, "HMCTS_CONTENT");
   assert.match(content, /<p:cNvPr id="\d+" name="title">[\s\S]*?type="title"/);
   assert.match(content, /<p:cNvPr id="\d+" name="body">[\s\S]*?type="body"/);
   assert.match(content, /<a:srgbClr val="073763"\/>/);
+});
+
+test("should give each layout's bullet placeholders the deck's two bullet levels, so text typed into one is bulleted", async () => {
+  const zip = await built();
+  const lists: [string, string][] = [
+    ["HMCTS_CONTENT", "body"],
+    ["HMCTS_TWO_COLUMN", "left"],
+    ["HMCTS_TWO_COLUMN", "right"]
+  ];
+  for (const [layout, name] of lists) {
+    const style = shapeNamed(await layoutNamed(zip, layout), name).match(/<a:lstStyle>([\s\S]*?)<\/a:lstStyle>/)?.[1] ?? "";
+    const level = (n: number) => style.match(new RegExp(`<a:lvl${n}pPr([^>]*)>([\\s\\S]*?)</a:lvl${n}pPr>`));
+    const first = level(1);
+    const second = level(2);
+    assert.ok(first && second, `${layout} ${name} has both levels: ${style}`);
+    assert.match(first[1], /marL="457200" indent="-342900"/);
+    assert.match(first[2], /<a:buChar char="&#x25CF;"\/>/);
+    assert.match(second[1], /marL="914400" indent="-342900"/);
+    assert.match(second[2], /<a:buChar char="&#x25CB;"\/>/);
+    for (const [, , body] of [first, second]) {
+      assert.doesNotMatch(body, /buNone/);
+      assert.match(body, /<a:spcPct val="150000"\/>[\s\S]*sz="1800"/);
+    }
+  }
+  const title = shapeNamed(await layoutNamed(zip, "HMCTS_CONTENT"), "title");
+  assert.doesNotMatch(title, /buChar|lvl2pPr/);
+});
+
+test("should leave out the blank DEFAULT layout pptxgenjs adds, and every reference to it", async () => {
+  const zip = await built();
+  const names = await layoutNames(zip);
+  assert.deepEqual([...names.values()].sort(), ["HMCTS_CLOSING", "HMCTS_CONTENT", "HMCTS_IMAGE", "HMCTS_SECTION", "HMCTS_TITLE", "HMCTS_TWO_COLUMN"]);
+  const rels = await read(zip, "ppt/slideMasters/_rels/slideMaster1.xml.rels");
+  const targets = [...rels.matchAll(/Target="(\.\.\/slideLayouts\/[^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(targets.sort(), [...names.keys()].sort());
+  const master = await read(zip, "ppt/slideMasters/slideMaster1.xml");
+  const ids = [...master.matchAll(/<p:sldLayoutId id="\d+" r:id="([^"]+)"\/>/g)].map((m) => m[1]);
+  assert.equal(ids.length, names.size);
+  for (const id of ids) {
+    assert.match(rels, new RegExp(`Id="${id}" Type="[^"]+/slideLayout"`));
+  }
+  const types = await read(zip, "[Content_Types].xml");
+  const overridden = [...types.matchAll(/PartName="\/(ppt\/slideLayouts\/[^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(overridden.sort(), [...names.keys()].map((part) => part.replace("../", "ppt/")).sort());
+  for (const name of Object.keys(zip.files).filter((file) => file.startsWith("ppt/slideLayouts/") && !zip.files[file].dir)) {
+    const part = name.replace("_rels/", "").replace(/\.rels$/, "");
+    assert.ok(overridden.includes(part), `${name} belongs to a layout that is listed`);
+  }
+});
+
+test("should give a picture the content type of its bytes when its name has a ? in it", async () => {
+  const dir = workDir();
+  writeFileSync(join(dir, "what?.png"), png(30, 30));
+  const outline = { title: "T", slides: [{ layout: "HMCTS_IMAGE", title: "P", image: { path: "what?.png", alt: "A square" } }] };
+  const staged = () => readdirSync(tmpdir()).filter((name) => name.startsWith("slides-pictures-"));
+  const before = staged();
+  await writeDeck(outline, dir, join(dir, "deck.pptx"));
+  assert.deepEqual(staged(), before);
+  const zip = await JSZip.loadAsync(readFileSync(join(dir, "deck.pptx")));
+  const media = Object.keys(zip.files).filter((name) => name.startsWith("ppt/media/") && !zip.files[name].dir);
+  const picture = await Promise.all(
+    media.map(async (name) => ((await (zip.file(name) as JSZip.JSZipObject).async("nodebuffer")).equals(png(30, 30)) ? name : null))
+  );
+  const [part] = picture.filter((name) => name !== null);
+  assert.match(part ?? "", /\.png$/);
+  const types = await read(zip, "[Content_Types].xml");
+  assert.match(types, /<Default Extension="png" ContentType="image\/png"\/>/);
+  assert.doesNotMatch(types, /Extension="what"/);
 });
 
 test("should base each slide on its layout and fill its placeholders", async () => {
@@ -152,7 +235,8 @@ test("should print every layout with its fields and limits", () => {
     kind: "bullets",
     required: true,
     description: "Strings, or {text, bullets: [strings]} for one nested level",
-    maxWords: 12,
+    maxWords: 7,
+    maxLines: 1,
     maxItems: 6
   });
 });
@@ -190,6 +274,14 @@ test("should exit 2 and print the error as JSON when the command is not one ther
   const { status, stdout } = runCli(["nope"]);
   assert.equal(status, 2);
   assert.deepEqual(JSON.parse(stdout), { errors: ["there is no command nope"] });
+});
+
+test("should exit 2 and print the error as JSON when the command is a name every object inherits", () => {
+  for (const command of ["constructor", "__proto__", "toString"]) {
+    const { status, stdout } = runCli([command]);
+    assert.equal(status, 2, command);
+    assert.deepEqual(JSON.parse(stdout), { errors: [`there is no command ${command}`] });
+  }
 });
 
 test("should throw a DeckError naming the picture when one cannot be read", async () => {

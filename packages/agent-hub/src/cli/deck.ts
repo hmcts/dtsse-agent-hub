@@ -2,6 +2,8 @@
 // from. The hub names each picture by the SHA-256 of its bytes; the plugin reads pictures from paths beside the
 // outline. `get` writes the hub's outline out with its pictures downloaded beside it and named by path, so `slides
 // build` runs on it unchanged, and `put` turns the paths back into uploaded pictures before it sends the outline.
+// `get` also records the version it wrote, which `put` sends as its base for an outline in that directory, so a
+// version someone else wrote in between is refused rather than overwritten.
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -46,6 +48,28 @@ function noDeck(e: unknown): never {
 /** Where `get` writes a conversation's deck: one directory per conversation, under the home directory. */
 export function deckDir(cli: Cli, conversation: string): string {
   return path.join(cli.env.HOME || os.homedir(), ".agent-hub", "decks", conversation);
+}
+
+/** The file in the deck's directory naming the version its outline was read at, or last put as. */
+const VERSION_FILE = "version";
+
+function isInside(dir: string, file: string): boolean {
+  const relative = path.relative(dir, file);
+  return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+
+function recordVersion(dir: string, version: number): void {
+  fs.writeFileSync(path.join(dir, VERSION_FILE), `${version}\n`);
+}
+
+function recordedVersion(dir: string): number | undefined {
+  let text: string;
+  try {
+    text = fs.readFileSync(path.join(dir, VERSION_FILE), "utf8").trim();
+  } catch {
+    return undefined;
+  }
+  return /^\d+$/.test(text) ? Number(text) : undefined;
 }
 
 /**
@@ -121,6 +145,10 @@ async function getDeck(cli: Cli, argv: string[]): Promise<number> {
   // An older version is written beside the working copy rather than over it.
   const file = path.join(dir, version === undefined ? "outline.json" : `outline-v${deck.version}.json`);
   fs.writeFileSync(file, `${JSON.stringify(outline, null, 2)}\n`);
+  // The recorded version is what the working copy builds on, so reading an older version leaves it alone.
+  if (version === undefined) {
+    recordVersion(dir, deck.version);
+  }
   if (slide !== undefined) {
     const index = (outline.slides ?? []).findIndex((one) => one.id === slide);
     if (index === -1) {
@@ -153,7 +181,9 @@ async function getDeck(cli: Cli, argv: string[]): Promise<number> {
     return 0;
   }
   cli.print(`agent-hub: wrote version ${deck.version} of the slide deck to ${file}, with its pictures beside it`);
-  cli.print(`Change it there, build it with slides build, then publish it with ${CLI} deck put ${file} --pptx <deck.pptx> --base ${deck.version}`);
+  cli.print(
+    `Change it there, build it with slides build, then publish it with ${CLI} deck put ${shellWord(file)} --pptx <deck.pptx>, which puts it as a change to version ${deck.version} and is refused if someone has written a newer one`
+  );
   return 0;
 }
 
@@ -274,7 +304,11 @@ async function putDeck(cli: Cli, argv: string[]): Promise<number> {
   const pptx = pptxFile === undefined ? undefined : readPptx(pptxFile, flags.pptx as string);
   const agent = requireAgent(requireSessionId(cli.env));
   const api = cli.api();
-  const base = flags.base === undefined ? (await api.getDeck(agent.agent_id).catch(noDeck)).version : Number(flags.base);
+  const dir = deckDir(cli, agent.conversation_id ?? agent.agent_id);
+  const fromGet = isInside(dir, outlineFile);
+  // An outline `get` wrote is a change to the version it read; any other is a new deck, put on whatever is there.
+  const recorded = fromGet ? recordedVersion(dir) : undefined;
+  const base = flags.base !== undefined ? Number(flags.base) : recorded !== undefined ? recorded : (await api.getDeck(agent.agent_id).catch(noDeck)).version;
   const outline = await uploadPictures(api, agent.agent_id, local, path.dirname(outlineFile)).catch(noDeck);
   let written: { version: number; outline: DeckOutline };
   try {
@@ -287,6 +321,9 @@ async function putDeck(cli: Cli, argv: string[]): Promise<number> {
     return 1;
   }
   keepIds(outlineFile, local, written.outline);
+  if (fromGet) {
+    recordVersion(dir, written.version);
+  }
   if (pptx !== undefined && pptxFile !== undefined) {
     try {
       await withRetry(() => api.putDeckPptx(agent.agent_id, written.version, pptx), PPTX_RETRY);

@@ -112,7 +112,8 @@ export async function runAssistantSupervisor({
   // Every ticked bundled plugin's dependencies are installed as the pod starts, so its first use does not wait on npm.
   // Welsh jobs wait for the Welsh install, so none spends its own time limit on it, and it runs first and alone. The
   // others follow it one at a time; nothing waits on them, and a session's own run of a plugin's script installs if
-  // its install is not done.
+  // its install is not done. None starts once the supervisor is stopping.
+  const stopped = new AbortController();
   const ready = prepareBundled(WELSH_PLUGIN, welshOptions);
   const welsh = createWelshRunner({ ...welshOptions, ready });
   // Deck builds run beside the supervisor as well, on the same runner and workspace as the Welsh jobs: a build is a
@@ -121,7 +122,8 @@ export async function runAssistantSupervisor({
   void ready.then(() =>
     prepareEach(
       tickedBundled(env).filter((name) => name !== WELSH_PLUGIN),
-      welshOptions
+      welshOptions,
+      stopped.signal
     )
   );
   const uploads = {
@@ -169,6 +171,7 @@ export async function runAssistantSupervisor({
   let wake: (() => void) | null = null;
   const onSignal = () => {
     stopping = true;
+    stopped.abort();
     controller?.abort();
     wake?.();
   };
