@@ -216,6 +216,7 @@ export function ArtefactPanel({
   confluence,
   onBusy,
   draft,
+  onDraftTaken,
   onUnsaved
 }: {
   conversationId: string;
@@ -234,6 +235,8 @@ export function ArtefactPanel({
   confluence?: ConfluenceExportProps;
   /** An edit a closed panel could not save, to open with in place of the saved document. Read as the panel mounts. */
   draft?: UnsavedDraft;
+  /** Told once the panel has taken `draft`, so the page opens the document afresh next time. */
+  onDraftTaken?: () => void;
   /** Told of an edit the panel was closed on whose save failed or found a newer version, once that save settles. */
   onUnsaved?: (draft: UnsavedDraft) => void;
 }) {
@@ -275,6 +278,13 @@ export function ArtefactPanel({
   const mounted = useRef(true);
 
   useEffect(() => closing.current.onBusy?.(busy), [busy]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: taken once, as the panel mounts, as the draft itself is
+  useEffect(() => {
+    if (draft !== undefined) {
+      onDraftTaken?.();
+    }
+  }, []);
 
   /**
    * Printing is what makes a PDF here: the sheet is mounted on the body, where `@media print` in `globals.css` hides

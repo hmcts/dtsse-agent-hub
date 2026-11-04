@@ -6,7 +6,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { assetRef, type DeckOutline } from "@/assistant/deck";
 import type { DeckSummary, DeckView } from "@/assistant/deck-store";
 import { plan } from "@/assistant/slides/masters";
-import { DeckPanel, DeckViewer, deckAssetUrl, deckPptxUrl, deckUrl, SharedDeck, type SlideAsk } from "@/components/assistant/DeckPanel";
+import { DeckPanel, DeckViewer, SharedDeck, type SlideAsk } from "@/components/assistant/DeckPanel";
+import { deckAssetUrl, deckPptxUrl, deckUrl } from "@/components/assistant/deck-addresses";
 import { nestRuns, SlideCanvas, slideTitle } from "@/components/assistant/SlideCanvas";
 
 const CONVERSATION = "22222222-2222-2222-2222-222222222222";
@@ -63,7 +64,7 @@ function deck(overrides: Partial<DeckView> = {}): DeckView {
 
 /** What the page hands the panel: the deck's version and no outline. */
 function summary(overrides: Partial<DeckSummary> = {}): DeckSummary {
-  return { title: "Ways of working", version: 7, updatedBy: "agent", pptx: true, ...overrides };
+  return { title: "Ways of working", version: 7, revision: 7, updatedBy: "agent", pptx: true, ...overrides };
 }
 
 /** The outline route, answering each read with the next of `answers` and the last one after that. */

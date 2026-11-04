@@ -142,7 +142,7 @@ describe("the deck routes", () => {
     const route = (method: string, body?: unknown) =>
       agent(method === "GET" ? deckRoute.GET : deckRoute.PUT, `/api/agent/${mine.agentId}/deck`, { agentId: mine.agentId }, method, body);
 
-    expect(await jsonOf(await route("GET"))).toEqual({ title: null, outline: null, version: 0, updated_by: null, updated_at: null, pptx: false });
+    expect(await jsonOf(await route("GET"))).toEqual({ title: null, outline: null, version: 0, revision: 0, updated_by: null, updated_at: null, pptx: false });
 
     const first = await jsonOf(await route("PUT", { outline: outline(), base_version: 0, summary: "First draft" }));
     expect(first.version).toBe(1);
@@ -547,11 +547,11 @@ describe("reading a deck in the browser", () => {
 
     const own = await assistantConversation(viewerOf(ALICE), mine.id);
     // The version and no more: the panel reads the outline itself.
-    expect(own?.deck).toEqual({ title: 'Plan: "Q4"/é', version: 1, updatedBy: "agent", pptx: true });
+    expect(own?.deck).toEqual({ title: 'Plan: "Q4"/é', version: 1, revision: 1, updatedBy: "agent", pptx: true });
     expect(sha).toBeDefined();
 
     const shared = await sharedChat(viewerOf(CAROL), mine.id);
-    expect(shared?.deck).toEqual({ title: 'Plan: "Q4"/é', version: 1, updatedBy: "agent", pptx: true });
+    expect(shared?.deck).toEqual({ title: 'Plan: "Q4"/é', version: 1, revision: 1, updatedBy: "agent", pptx: true });
   });
 });
 

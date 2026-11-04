@@ -16,7 +16,7 @@ import {
 import { deleteAllAssistantFiles, deleteAssistantFile } from "@/app/_actions/assistant-files";
 import { readAssistantAgent, readGitIdentity } from "@/app/_actions/assistant-settings";
 import { clearGitIdentity, removeCredential, resetClaudeMd, saveClaudeMd, saveCredential, saveGitIdentity } from "@/app/_actions/credentials";
-import { restoreDeckVersion } from "@/app/_actions/decks";
+import { restoreDeckVersion, saveDeck } from "@/app/_actions/decks";
 import { saveExportDefaults } from "@/app/_actions/export-defaults";
 import { offerChatFork, withdrawChatFork } from "@/app/_actions/forks";
 import { answerAgentQuestion } from "@/app/_actions/questions";
@@ -62,7 +62,8 @@ const ACTIONS: ChatActions = {
   exportToJira: exportArtefactToJira,
   exportToGithub: exportArtefactToGithub,
   exportToConfluence: exportArtefactToConfluence,
-  restoreDeck: restoreDeckVersion
+  restoreDeck: restoreDeckVersion,
+  saveDeck
 };
 
 /** One of the viewer's conversations. Anyone else's, or one deleted, is not found. */

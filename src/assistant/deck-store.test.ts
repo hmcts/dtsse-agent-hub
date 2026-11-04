@@ -14,9 +14,10 @@ describe("deckSummary", () => {
   it("should summarise the deck from the row it is given, reading only whether the latest version has its .pptx", async () => {
     const { db, $queryRaw } = probeOnly(true);
 
-    expect(await deckSummary(db, CONVERSATION, { deckTitle: "Plan", deckVersion: 3, deckUpdatedBy: "agent" })).toEqual({
+    expect(await deckSummary(db, CONVERSATION, { deckTitle: "Plan", deckVersion: 3, deckRevision: 5, deckUpdatedBy: "agent" })).toEqual({
       title: "Plan",
       version: 3,
+      revision: 5,
       updatedBy: "agent",
       pptx: true
     });
@@ -26,7 +27,7 @@ describe("deckSummary", () => {
   it("should answer null, reading nothing, when the row says there is no deck", async () => {
     const { db, $queryRaw } = probeOnly(true);
 
-    expect(await deckSummary(db, CONVERSATION, { deckTitle: null, deckVersion: 0, deckUpdatedBy: null })).toBeNull();
+    expect(await deckSummary(db, CONVERSATION, { deckTitle: null, deckVersion: 0, deckRevision: 0, deckUpdatedBy: null })).toBeNull();
     expect($queryRaw).not.toHaveBeenCalled();
   });
 });

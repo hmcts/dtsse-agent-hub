@@ -353,7 +353,9 @@ describe("parseAssistantFrame", () => {
       artefact_version: 2,
       artefact_updated_by: "user",
       deck_version: 1,
-      deck_updated_by: "user"
+      deck_updated_by: "user",
+      deck_revision: 3,
+      deck_agent_version: 0
     };
 
     // Act & Assert
@@ -367,6 +369,8 @@ describe("parseAssistantFrame", () => {
       artefact_updated_by: null,
       deck_version: null,
       deck_updated_by: undefined,
+      deck_revision: null,
+      deck_agent_version: null,
       jira_export: null,
       github_export: null,
       confluence_export: null
@@ -392,6 +396,8 @@ describe("parseAssistantFrame", () => {
       artefact_updated_by: 5,
       deck_version: "2",
       deck_updated_by: 6,
+      deck_revision: "3",
+      deck_agent_version: "1",
       jira_export: "VIBE"
     });
 
@@ -405,6 +411,8 @@ describe("parseAssistantFrame", () => {
       artefact_updated_by: undefined,
       deck_version: null,
       deck_updated_by: undefined,
+      deck_revision: null,
+      deck_agent_version: null,
       jira_export: null,
       github_export: null,
       confluence_export: null

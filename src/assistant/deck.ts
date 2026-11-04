@@ -118,6 +118,7 @@ export interface DeckOutline {
 export const deckPutBody = z.object({
   outline: z.unknown(),
   base_version: z.number().int().nonnegative(),
+  base_revision: z.number().int().nonnegative().optional(),
   summary: z.string().trim().min(1).max(MAX_SUMMARY).optional()
 });
 

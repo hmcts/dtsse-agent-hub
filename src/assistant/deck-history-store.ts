@@ -17,6 +17,8 @@ export interface DeckVersionEntry {
   by: DeckAuthor;
   summary: string | null;
   created_at: string;
+  /** When it was last written: an amend's time, or `created_at` for a version never amended. */
+  updated_at: string;
   /** Whether a .pptx of this version can be downloaded now (`pptxHeld`). */
   pptx: boolean;
 }
@@ -40,6 +42,7 @@ interface VersionRow {
   by: string;
   summary: string | null;
   created_at: Date;
+  updated_at: Date;
   pptx: boolean;
   outline: DeckOutline | null;
 }
@@ -51,7 +54,7 @@ interface VersionRow {
 async function versionRows(db: Database, conversationId: string, version: number | null, now: Date): Promise<VersionRow[]> {
   const { sql } = clientPrisma();
   return await db.$queryRaw<VersionRow[]>`
-    SELECT v.version, v.by, v.summary, v.created_at, ${pptxHeld(now)} AS pptx, ${version === null ? sql`NULL::jsonb` : sql`v.outline`} AS outline
+    SELECT v.version, v.by, v.summary, v.created_at, COALESCE(v.updated_at, v.created_at) AS updated_at, ${pptxHeld(now)} AS pptx, ${version === null ? sql`NULL::jsonb` : sql`v.outline`} AS outline
       FROM assistant_deck_version v
      WHERE v.conversation_id = ${conversationId}::uuid AND (${version}::int IS NULL OR v.version = ${version}::int)
      ORDER BY v.version DESC
@@ -63,6 +66,7 @@ const entryOf = (row: VersionRow): DeckVersionEntry => ({
   by: byOf(row.by),
   summary: row.summary,
   created_at: row.created_at.toISOString(),
+  updated_at: row.updated_at.toISOString(),
   pptx: row.pptx
 });
 

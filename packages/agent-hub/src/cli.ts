@@ -57,18 +57,21 @@ export const USAGE = `usage: ${CLI} <command> [args]
   artefact put [--title T] [--base N]
                               replace the document with markdown read from stdin; --base is the version
                               it was edited from (read first when omitted), and a newer one is refused
-  deck get [--json] [--slide ID] [--version N]
+  deck get [--json] [--slide ID] [--version N] [--diff-from N]
                               in a CFT Workspace conversation: write its slide deck's outline to
                               ~/.agent-hub/decks/<conversation>/outline.json with its pictures beside it,
-                              ready for slides build, and the version it read beside them; --slide
-                              prints one slide, by its id; --version writes an older kept version
-                              to outline-vN.json beside it instead
+                              ready for slides build, and the version and revision it read beside them;
+                              --slide prints one slide, by its id; --version writes an older kept
+                              version to outline-vN.json beside it instead; --diff-from also prints
+                              what changed in the latest since kept version N, slide by slide
   deck put <outline.json> [--pptx deck.pptx] [--base N] [--summary S]
                               upload the outline's pictures, publish the outline as the deck's next
                               version and then the .pptx built from it; --base is the version it was
                               changed from, and a newer one is refused. Omitted, it is the version deck
                               get recorded for an outline in its directory, or the hub's current one
-                              for an outline anywhere else
+                              for an outline anywhere else. For an outline in that directory the
+                              revision deck get recorded is sent either way, so an amend made since is
+                              refused
   deck pptx <deck.pptx> --version N
                               send the .pptx built from version N alone, for a deck put that published
                               the outline but could not send its .pptx

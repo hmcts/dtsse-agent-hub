@@ -1,8 +1,3 @@
-// A deck's history through Postgres: the browser's version list and reads, the agent API's read of one version, the
-// owner's restore, and the build of an older version's .pptx from the request through the pod's answer to the download.
-// The pod's own half of a build — running the slides plugin's script — is in the client package's
-// `src/assistant/deck-build.test.ts`.
-import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
 import { describe, expect, it, vi } from "vitest";
 import * as deckRoute from "../../src/app/api/agent/[agentId]/deck/route.ts";
@@ -16,7 +11,7 @@ import * as versionsRoute from "../../src/app/api/ui/assistant/decks/[conversati
 import * as podAssetRoute from "../../src/app/api/virtual/[virtualAgentId]/deck-builds/[jobId]/assets/[sha256]/route.ts";
 import * as podBuildRoute from "../../src/app/api/virtual/[virtualAgentId]/deck-builds/[jobId]/route.ts";
 import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
-import { assetRef, type DeckOutline, imageInfo } from "../../src/assistant/deck.ts";
+import { assetRef, type DeckOutline } from "../../src/assistant/deck.ts";
 import { DECK_BUILD_KEEP_MS, DECK_BUILD_TIMEOUT_MS, DECK_BUILDS_KEPT } from "../../src/assistant/deck-build.ts";
 import {
   answerDeckBuild,
@@ -27,69 +22,25 @@ import {
   sweepDeckBuilds
 } from "../../src/assistant/deck-build-store.ts";
 import { listDeckVersions, restoreDeckVersion } from "../../src/assistant/deck-history-store.ts";
-import { deckSummary, deckView, putDeckAsset, putDeckPptx, readDeck, writeDeck } from "../../src/assistant/deck-store.ts";
+import { deckSummary, deckView, putDeckPptx, readDeck, writeDeck } from "../../src/assistant/deck-store.ts";
 import { assistantFrame } from "../../src/assistant/frame.ts";
-import { devIdentity } from "../../src/viewer/identity.ts";
 import { assistantSuite } from "./assistant-suite.ts";
-import { type Person, prisma } from "./database.ts";
+import { prisma } from "./database.ts";
+import { ALICE, BOB, CAROL, type Chat, chat, PPTX, png, store, viewerOf } from "./deck-chats.ts";
 import { jsonOf } from "./routes.ts";
 
 vi.mock("next/headers", async () => (await import("./web-session.ts")).nextHeadersMock());
 vi.mock("next/cache", async () => (await import("./web-session.ts")).nextCacheMock());
 
 const { actAs } = await import("./web-session.ts");
-const assistantActions = await import("../../src/app/_actions/assistant.ts");
+const _assistantActions = await import("../../src/app/_actions/assistant.ts");
 const deckActions = await import("../../src/app/_actions/decks.ts");
 const shareActions = await import("../../src/app/_actions/shares.ts");
 const forkActions = await import("../../src/app/_actions/forks.ts");
 
-function persona(name: string): Person {
-  const identity = devIdentity(name);
-  return { oid: identity.oid, name: identity.name, email: identity.email! };
-}
-
-const ALICE = persona("alice");
-const BOB = persona("bob");
-const CAROL = persona("carol");
-
 assistantSuite([ALICE, BOB, CAROL]);
 
-const viewerOf = (who: Person) => ({ ...who, tid: "dev", modelRoute: "own-licence" as const });
-const PPTX = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00]);
 const BUILT = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x99, 0x01]);
-
-interface Chat {
-  id: string;
-  agentId: string;
-  virtualAgentId: string;
-  row: { id: string; virtualAgentId: string | null; ownerOid: string };
-}
-
-async function chat(): Promise<Chat> {
-  actAs("alice");
-  await ensureAssistant(prisma, viewerOf(ALICE));
-  const started = await assistantActions.startConversation({ product: "general", body: "Make me some slides" });
-  const id = (started as { ok: true; id: string }).id;
-  const row = await prisma.assistantConversation.findUniqueOrThrow({ where: { id }, select: { agentId: true, virtualAgentId: true, ownerOid: true } });
-  return { id, agentId: row.agentId!, virtualAgentId: row.virtualAgentId!, row: { id, virtualAgentId: row.virtualAgentId, ownerOid: row.ownerOid } };
-}
-
-function png(seed: number): Buffer {
-  const bytes = Buffer.alloc(64);
-  bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
-  bytes.writeUInt32BE(640, 16);
-  bytes.writeUInt32BE(320, 20);
-  bytes.writeUInt32BE(seed, 28);
-  return bytes;
-}
-
-const digest = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
-
-async function store(of: Chat, bytes: Buffer): Promise<string> {
-  const sha = digest(bytes);
-  await putDeckAsset(prisma, of.id, sha, bytes, imageInfo(bytes)!);
-  return sha;
-}
 
 function outline(title: string, pictures: string[] = []): DeckOutline {
   return {
@@ -676,7 +627,7 @@ describe("building an older version's .pptx", () => {
     expect(await jsonOf(await panel("alice"))).toMatchObject({ version: 4, pptx: true });
     expect(await jsonOf(await panel("bob"))).toMatchObject({ version: 4, pptx: true });
     expect((await readDeck(prisma, mine.id)).pptx).toBe(true);
-    expect(await deckSummary(prisma, mine.id, { deckTitle: "v4", deckVersion: 4, deckUpdatedBy: "user" })).toMatchObject({ pptx: true });
+    expect(await deckSummary(prisma, mine.id, { deckTitle: "v4", deckVersion: 4, deckRevision: 4, deckUpdatedBy: "user" })).toMatchObject({ pptx: true });
     expect((await listDeckVersions(prisma, mine.id))[0]).toMatchObject({ version: 4, pptx: true });
     // A day on, the build is no longer held, by every one of them alike.
     const dayOn = new Date(Date.now() + DECK_BUILD_KEEP_MS + 60_000);

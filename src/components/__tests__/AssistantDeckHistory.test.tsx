@@ -17,7 +17,8 @@ import {
   LATEST_BUILD_GRACE_MS,
   type RestoreDeckAction
 } from "@/components/assistant/DeckHistory";
-import { deckPptxUrl, SharedDeck } from "@/components/assistant/DeckPanel";
+import { SharedDeck } from "@/components/assistant/DeckPanel";
+import { deckPptxUrl } from "@/components/assistant/deck-addresses";
 
 const CONVERSATION = "22222222-2222-2222-2222-222222222222";
 const SHA = "c".repeat(64);
@@ -71,9 +72,9 @@ function latest(overrides: Partial<DeckView> = {}): DeckView {
 }
 
 const VERSIONS: DeckVersionEntry[] = [
-  { version: 7, by: "agent", summary: "Added the pipeline", created_at: "2026-11-03T09:00:00.000Z", pptx: true },
-  { version: 6, by: "user", summary: "Restored version 4", created_at: "2026-11-02T15:30:00.000Z", pptx: false },
-  { version: 5, by: "agent", summary: null, created_at: "2026-11-01T10:00:00.000Z", pptx: false }
+  { version: 7, by: "agent", summary: "Added the pipeline", created_at: "2026-11-03T09:00:00.000Z", updated_at: "2026-11-03T09:00:00.000Z", pptx: true },
+  { version: 6, by: "user", summary: "Restored version 4", created_at: "2026-11-02T15:30:00.000Z", updated_at: "2026-11-02T15:30:00.000Z", pptx: false },
+  { version: 5, by: "agent", summary: null, created_at: "2026-11-01T10:00:00.000Z", updated_at: "2026-11-01T10:00:00.000Z", pptx: false }
 ];
 
 function old(version = 5, overrides: Partial<DeckVersionView> = {}): DeckVersionView {
@@ -168,6 +169,24 @@ describe("DeckHistory's list", () => {
 
     // Assert
     expect(screen.getAllByRole("button", { name: /^Version / })).toHaveLength(3);
+  });
+
+  it("should read the list again when the latest version is amended, its number staying the same", async () => {
+    // Arrange
+    const amended: DeckVersionEntry[] = [{ ...VERSIONS[0]!, by: "user", summary: "Reordered slides", pptx: false }, ...VERSIONS.slice(1)];
+    let calls = 0;
+    const reads = serving({ [`GET ${deckVersionsUrl(CONVERSATION)}`]: () => ({ body: calls++ === 0 ? VERSIONS : amended }) });
+    const { rerender } = render(<DeckHistory conversationId={CONVERSATION} latest={latest({ revision: 3 })} announce={vi.fn()} owner />);
+    await openHistory();
+    expect(screen.getAllByRole("button", { name: /^Version 7/ })[0]?.textContent).toContain("Added the pipeline");
+
+    // Act
+    rerender(<DeckHistory conversationId={CONVERSATION} latest={latest({ revision: 4, updatedBy: "user", pptx: false })} announce={vi.fn()} owner />);
+    await settle();
+
+    // Assert
+    expect(reads).toHaveBeenCalledTimes(2);
+    expect(screen.getAllByRole("button", { name: /^Version 7/ })[0]?.textContent).toContain("Reordered slides");
   });
 
   it("should close the list again, and say so", async () => {
@@ -420,7 +439,7 @@ describe("DeckHistory's older version", () => {
       [`GET ${deckVersionsUrl(CONVERSATION)}`]: { body: VERSIONS },
       [`GET ${deckVersionUrl(CONVERSATION, 5)}`]: { body: old() }
     });
-    render(<SharedDeck conversationId={CONVERSATION} deck={{ title: "Ways of working", version: 7, updatedBy: "agent", pptx: true }} />);
+    render(<SharedDeck conversationId={CONVERSATION} deck={{ title: "Ways of working", version: 7, revision: 7, updatedBy: "agent", pptx: true }} />);
     await settle();
 
     // Act
@@ -795,7 +814,7 @@ describe("DeckDownload", () => {
     it("should say the assistant is building it, with no build to start, until two minutes after it was written", async () => {
       // Arrange
       vi.useFakeTimers({ now: new Date("2026-11-03T09:01:00.000Z") });
-      shown({ latest: true, writtenBy: "agent", writtenAt: "2026-11-03T09:00:00.000Z" });
+      shown({ latest: true, writtenAt: "2026-11-03T09:00:00.000Z" });
 
       // Assert
       expect(screen.getByText("The assistant is building this")).toBeTruthy();
@@ -816,7 +835,7 @@ describe("DeckDownload", () => {
       vi.useFakeTimers({ now: new Date("2026-11-03T09:05:00.000Z") });
 
       // Act
-      shown({ latest: true, writtenBy: "agent", writtenAt: "2026-11-03T09:00:00.000Z" });
+      shown({ latest: true, writtenAt: "2026-11-03T09:00:00.000Z" });
 
       // Assert
       expect(screen.getByRole("button", { name: "Prepare .pptx" })).toBeTruthy();
@@ -833,12 +852,24 @@ describe("DeckDownload", () => {
       expect(screen.getByRole("button", { name: "Prepare .pptx" })).toBeTruthy();
     });
 
-    it("should offer a build of it straight away when the person wrote it, as a restore, which no session builds", () => {
+    it("should say the assistant is building it in the history when the assistant wrote it", () => {
       // Arrange
       vi.useFakeTimers({ now: new Date("2026-11-03T09:00:30.000Z") });
 
       // Act
-      shown({ latest: true, writtenBy: "user", writtenAt: "2026-11-03T09:00:00.000Z" });
+      history({ latest: latest({ updatedBy: "agent", pptx: false }) });
+
+      // Assert
+      expect(screen.getByText("The assistant is building this")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Prepare .pptx" })).toBeNull();
+    });
+
+    it("should offer a build of it straight away in the history when the person wrote it, which no session builds", () => {
+      // Arrange
+      vi.useFakeTimers({ now: new Date("2026-11-03T09:00:30.000Z") });
+
+      // Act
+      history({ latest: latest({ updatedBy: "user", pptx: false }) });
 
       // Assert
       expect(screen.getByRole("button", { name: "Prepare .pptx" })).toBeTruthy();

@@ -1,6 +1,7 @@
 import { HttpError } from "../agent-api/http.ts";
 import { InvalidTopics } from "../topics/slug.ts";
 import { NotSignedIn } from "../viewer/identity.ts";
+import { ACTION_FAULT } from "./action-fault.ts";
 
 /**
  * What every server action returns: the result, or a sentence to show the person. Actions never throw at the
@@ -28,7 +29,7 @@ export async function runAction<T extends object>(name: string, work: () => Prom
       return { ok: false, error: message };
     }
     console.error(`the ${name} action failed: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`);
-    return { ok: false, error: "something went wrong on our side; try again" };
+    return { ok: false, error: ACTION_FAULT };
   }
 }
 

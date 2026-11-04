@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { assetRef, type DeckOutline, type DeckSlide } from "./deck.ts";
 import { bulletText, diffDecks, diffSummary, diffWords, MAX_DIFF_CELLS, type WordPart } from "./deck-diff.ts";
@@ -248,5 +249,12 @@ describe("diffDecks", () => {
   it("should say slides in the plural when more than one changed", () => {
     const diff = diffDecks(deck([section("a", "A"), section("b", "B")]), deck([section("a", "A2"), section("b", "B2")]));
     expect(diffSummary(diff)).toBe("2 slides changed");
+  });
+});
+
+describe("the client's copy of the diff", () => {
+  it("should be byte for byte this module when agent-hub deck get --diff-from compares two versions", () => {
+    const client = new URL("../../packages/agent-hub/src/deck-diff.ts", import.meta.url);
+    expect(readFileSync(client, "utf8")).toBe(readFileSync(new URL("./deck-diff.ts", import.meta.url), "utf8"));
   });
 });

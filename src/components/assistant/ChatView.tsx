@@ -28,6 +28,7 @@ import { Mark, SidebarToggle } from "@/components/assistant/AssistantShell";
 import { ChatMenu } from "@/components/assistant/ChatMenu";
 import { Composer } from "@/components/assistant/Composer";
 import type { ExportToConfluenceAction } from "@/components/assistant/ConfluenceExport";
+import type { SaveDeckAction, UnsavedDeckDraft } from "@/components/assistant/DeckEditor";
 import type { RestoreDeckAction } from "@/components/assistant/DeckHistory";
 import { DeckPanel, type SlideAsk } from "@/components/assistant/DeckPanel";
 import { ticketsOffered } from "@/components/assistant/ExportFooter";
@@ -62,6 +63,8 @@ export interface ChatActions {
   exportToConfluence?: ExportToConfluenceAction;
   /** Left out, the slides panel offers no restore of an older version. */
   restoreDeck?: RestoreDeckAction;
+  /** Left out, the slides panel offers no editing. */
+  saveDeck?: SaveDeckAction;
 }
 
 /**
@@ -348,15 +351,27 @@ export function ChatView({
    * no room to read in. Each has its own button in the header, so either is one press from the other.
    */
   const [panel, setPanel] = useState<"document" | "deck" | null>(null);
+  // Read by a closed editor's late answer, which comes back through the props of the render that last showed it.
+  const panelNow = useRef(panel);
+  panelNow.current = panel;
   /** The document panel has edits not yet saved, or a conflict showing, which a panel opened in its place would cut short. */
   const documentBusy = useRef(false);
+  /** The same for the slides' editor. */
+  const deckBusy = useRef(false);
   /** The assistant wrote a newer deck while the document was busy, so the slides wait behind their button instead. */
   const [slidesWaiting, setSlidesWaiting] = useState(false);
+  /** The assistant wrote the document while the slides' editor was busy, so the document waits behind its button. */
+  const [documentWaiting, setDocumentWaiting] = useState(false);
   /**
    * An edit the document was closed on whose save then failed or found a newer version: the document opens again with
-   * it, keyed afresh so a panel the person opened meanwhile takes it in too.
+   * it, keyed afresh so a panel the person opened meanwhile takes it in too, or, while the slides' editor is busy, it
+   * waits behind the document's button. The panel that takes it clears it, so it is handed to one panel only.
    */
-  const [unsaved, setUnsaved] = useState<{ draft: UnsavedDraft; key: number } | null>(null);
+  const [unsaved, setUnsaved] = useState<{ draft: UnsavedDraft | null; key: number }>({ draft: null, key: 0 });
+  /** The same for an edit the slides' editor was closed on. */
+  const [unsavedDeck, setUnsavedDeck] = useState<{ draft: UnsavedDeckDraft | null; key: number }>({ draft: null, key: 0 });
+  const deckDraftWaiting = unsavedDeck.draft !== null && panel !== "deck";
+  const documentDraftWaiting = unsaved.draft !== null && panel !== "document";
   const [ask, setAsk] = useState<SlideAsk | null>(null);
   const [error, setError] = useState<string | null>(null);
   const warmed = useRef(false);
@@ -377,19 +392,25 @@ export function ChatView({
     }
   });
 
-  // The assistant writing the document opens it, so the person sees what it was asked to draft.
+  // The assistant writing the document opens it, so the person sees what it was asked to draft, unless they are part-way
+  // through editing the slides, when it is announced and its button marked instead.
   useEffect(() => {
     if (view.artefact.version > seenVersion.current && view.artefact.updatedBy === "agent") {
-      setPanel("document");
-      arrivals.announce("The assistant updated the document");
+      if (panel === "deck" && deckBusy.current) {
+        setDocumentWaiting(true);
+        arrivals.announce("The assistant updated the document. Open document to see it.");
+      } else {
+        setPanel("document");
+        arrivals.announce("The assistant updated the document");
+      }
     }
     seenVersion.current = Math.max(seenVersion.current, view.artefact.version);
-  }, [view.artefact.version, view.artefact.updatedBy, arrivals]);
+  }, [view.artefact.version, view.artefact.updatedBy, arrivals, panel]);
 
   /**
    * The same for the deck: a newer version from the assistant opens the slides in the document's place, unless the
-   * person is part-way through the document, when it is announced and its button marked instead. The document is
-   * taken in over the slides whatever they are doing, since the slides hold nothing of theirs to lose.
+   * person is part-way through the document, when it is announced and its button marked instead. The slides' own
+   * editor takes in a newer deck itself, or offers it against the person's edit.
    */
   const deckVersion = view.deck?.version ?? 0;
   const deckBy = view.deck?.updatedBy ?? null;
@@ -409,12 +430,42 @@ export function ChatView({
     if (panel === "deck") {
       setSlidesWaiting(false);
     }
-    if (panel !== "document") {
-      setUnsaved(null);
+    if (panel === "document") {
+      setDocumentWaiting(false);
     }
   }, [panel]);
+  /**
+   * An edit the slides' editor could not save as it closed opens the slides again with it, unless the person is
+   * part-way through the document, which keeps the panel: the edit then waits behind the slides' button.
+   */
+  function reopenDeck(draft: UnsavedDeckDraft): void {
+    setUnsavedDeck((before) => ({ draft, key: before.key + 1 }));
+    if (panelNow.current === "document" && documentBusy.current) {
+      arrivals.announce(
+        draft.conflict === null
+          ? "Your slides could not be saved. Open slides to see your changes."
+          : "The slides changed while you were editing them. Open slides to see your changes."
+      );
+      return;
+    }
+    setPanel("deck");
+    arrivals.announce(
+      draft.conflict === null
+        ? "Your slides could not be saved, so they are open again"
+        : "The slides changed while you were editing them, so they are open again"
+    );
+  }
+  /** The same for the document, which waits behind its button while the slides' editor is busy. */
   function reopenDocument(draft: UnsavedDraft): void {
-    setUnsaved((before) => ({ draft, key: (before?.key ?? 0) + 1 }));
+    setUnsaved((before) => ({ draft, key: before.key + 1 }));
+    if (panelNow.current === "deck" && deckBusy.current) {
+      arrivals.announce(
+        draft.conflict === null
+          ? "Your document could not be saved. Open document to see your changes."
+          : "The document changed while you were editing it. Open document to see your changes."
+      );
+      return;
+    }
     setPanel("document");
     arrivals.announce(
       draft.conflict === null ? "Your document could not be saved, so it is open again" : "The document changed while you were editing it, so it is open again"
@@ -463,6 +514,9 @@ export function ChatView({
   const scroller = useStickToBottom<HTMLDivElement>(`${thread.length}:${doing.state}`);
   function markDocumentBusy(busy: boolean): void {
     documentBusy.current = busy;
+  }
+  function markDeckBusy(busy: boolean): void {
+    deckBusy.current = busy;
   }
   const artefact: ArtefactSnapshot = {
     title: view.artefact.title,
@@ -547,15 +601,21 @@ export function ChatView({
               <button
                 type="button"
                 onClick={() => setPanel("deck")}
-                aria-label={slidesWaiting ? "Open slides, updated by the assistant" : "Open slides"}
-                className={`flex h-[34px] items-center whitespace-nowrap rounded-[9px] border px-2.5 text-[13px] hover:border-asst-accent-line hover:bg-asst-field min-[480px]:gap-2 min-[480px]:pr-3 ${slidesWaiting ? "border-asst-accent bg-asst-field" : "border-asst-strong"}`}
+                aria-label={
+                  deckDraftWaiting ? "Open slides, with your unsaved changes" : slidesWaiting ? "Open slides, updated by the assistant" : "Open slides"
+                }
+                className={`flex h-[34px] items-center whitespace-nowrap rounded-[9px] border px-2.5 text-[13px] hover:border-asst-accent-line hover:bg-asst-field min-[480px]:gap-2 min-[480px]:pr-3 ${slidesWaiting || deckDraftWaiting ? "border-asst-accent bg-asst-field" : "border-asst-strong"}`}
               >
                 <span aria-hidden="true" className="text-sm leading-none text-asst-accent">
                   ▭
                 </span>
                 <span className="hidden min-[480px]:inline">Open slides</span>
                 {/* Marked by a shape as well as the border's colour, so the change is not told by colour alone. */}
-                {slidesWaiting ? <span aria-hidden="true" data-testid="slides-updated" className="h-1.5 w-1.5 rounded-full bg-asst-accent" /> : null}
+                {deckDraftWaiting ? (
+                  <span aria-hidden="true" data-testid="slides-unsaved" className="h-1.5 w-1.5 rounded-full bg-asst-accent" />
+                ) : slidesWaiting ? (
+                  <span aria-hidden="true" data-testid="slides-updated" className="h-1.5 w-1.5 rounded-full bg-asst-accent" />
+                ) : null}
               </button>
             )}
             {panel === "document" ? null : (
@@ -564,13 +624,26 @@ export function ChatView({
                 onClick={() => setPanel("document")}
                 // Named here as well, because below 480px the icon stands alone so that a 320px header still fits
                 // the title, the product chip and both buttons.
-                aria-label={view.artefact.version > 0 ? "Open document" : "Add document"}
-                className="flex h-[34px] items-center whitespace-nowrap rounded-[9px] border border-asst-strong px-2.5 text-[13px] hover:border-asst-accent-line hover:bg-asst-field min-[480px]:gap-2 min-[480px]:pr-3"
+                aria-label={
+                  documentDraftWaiting
+                    ? "Open document, with your unsaved changes"
+                    : documentWaiting
+                      ? "Open document, updated by the assistant"
+                      : view.artefact.version > 0
+                        ? "Open document"
+                        : "Add document"
+                }
+                className={`flex h-[34px] items-center whitespace-nowrap rounded-[9px] border px-2.5 text-[13px] hover:border-asst-accent-line hover:bg-asst-field min-[480px]:gap-2 min-[480px]:pr-3 ${documentWaiting || documentDraftWaiting ? "border-asst-accent bg-asst-field" : "border-asst-strong"}`}
               >
                 <span aria-hidden="true" className="text-lg leading-none text-asst-accent">
                   +
                 </span>
                 <span className="hidden min-[480px]:inline">{view.artefact.version > 0 ? "Open document" : "Add document"}</span>
+                {documentDraftWaiting ? (
+                  <span aria-hidden="true" data-testid="document-unsaved" className="h-1.5 w-1.5 rounded-full bg-asst-accent" />
+                ) : documentWaiting ? (
+                  <span aria-hidden="true" data-testid="document-updated" className="h-1.5 w-1.5 rounded-full bg-asst-accent" />
+                ) : null}
               </button>
             )}
             <ChatMenu
@@ -692,6 +765,12 @@ export function ChatView({
       </div>
       {panel === "deck" && view.deck !== null ? (
         <DeckPanel
+          key={unsavedDeck.key}
+          draft={unsavedDeck.draft ?? undefined}
+          onDraftTaken={() => setUnsavedDeck((before) => ({ draft: null, key: before.key }))}
+          onUnsaved={reopenDeck}
+          save={actions.saveDeck}
+          onBusy={markDeckBusy}
           conversationId={view.id}
           deck={view.deck}
           onClose={() => setPanel(null)}
@@ -709,8 +788,9 @@ export function ChatView({
       ) : null}
       {panel === "document" ? (
         <ArtefactPanel
-          key={unsaved?.key ?? 0}
-          draft={unsaved?.draft}
+          key={unsaved.key}
+          draft={unsaved.draft ?? undefined}
+          onDraftTaken={() => setUnsaved((before) => ({ draft: null, key: before.key }))}
           onUnsaved={reopenDocument}
           conversationId={view.id}
           artefact={artefact}

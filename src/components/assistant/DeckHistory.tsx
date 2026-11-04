@@ -4,18 +4,11 @@ import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import type { RestoreDeckResult } from "@/app/_actions/decks";
 import { DECK_BUILD_TIMEOUT_MS, type DeckBuildRequest, type DeckBuildView } from "@/assistant/deck-build";
 import { type DeckDiff, diffDecks, diffSummary, type FieldChange, type SlideDiff, type WordPart } from "@/assistant/deck-diff";
+import { sessionBuildsIt } from "@/assistant/deck-edit";
 import type { DeckVersionEntry, DeckVersionView } from "@/assistant/deck-history-store";
-import type { DeckAuthor, DeckView } from "@/assistant/deck-store";
-import {
-  DeckViewer,
-  deckAssetUrl,
-  deckPptxUrl,
-  deckUrl,
-  type PlannedDeck,
-  planDeck,
-  type SlideAsk,
-  unknownLayoutMessage
-} from "@/components/assistant/DeckPanel";
+import type { DeckView } from "@/assistant/deck-store";
+import { DeckViewer, type PlannedDeck, planDeck, type SlideAsk, unknownLayoutMessage } from "@/components/assistant/DeckPanel";
+import { backgroundSrc, deckAssetUrl, deckPptxUrl, deckUrl } from "@/components/assistant/deck-addresses";
 import { SlideCanvas } from "@/components/assistant/SlideCanvas";
 import { ScrollPane } from "@/components/Markup";
 import { DownloadIcon } from "@/components/sidebar/icons";
@@ -44,8 +37,6 @@ export function deckBuildUrl(conversationId: string, jobId: string): string {
 export type RestoreDeckAction = (input: { conversationId: unknown; version: unknown; baseVersion: unknown }) => Promise<ActionResult<RestoreDeckResult>>;
 
 const button = "flex h-[30px] shrink-0 items-center gap-1.5 rounded-lg border border-asst-strong px-2.5 text-[13px] hover:bg-asst-field disabled:opacity-40";
-
-const backgroundSrc = (image: string): string => `/assistant/slides/${image}`;
 
 /** How often a build being prepared is read back. */
 export const BUILD_POLL_MS = 2000;
@@ -76,11 +67,14 @@ async function readJson<T>(url: string, signal?: AbortSignal): Promise<T> {
   return (await response.json()) as T;
 }
 
-/** The kept versions, read when the list opens and again whenever the latest version moves on while it is open. */
-function useVersions(conversationId: string, latest: number, open: boolean) {
+/**
+ * The kept versions, read when the list opens and again whenever the latest version or the revision moves on while it
+ * is open: an amend keeps the version and changes its summary and .pptx.
+ */
+function useVersions(conversationId: string, latest: number, revision: number, open: boolean) {
   const [state, setState] = useState<{ versions: DeckVersionEntry[] | null; failed: boolean }>({ versions: null, failed: false });
   const [attempt, setAttempt] = useState(0);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: a newer latest version, or another attempt, is what makes the list worth reading again
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a newer latest version or revision, or another attempt, is what makes the list worth reading again
   useEffect(() => {
     if (!open) {
       return;
@@ -95,7 +89,7 @@ function useVersions(conversationId: string, latest: number, open: boolean) {
       }
     );
     return () => controller.abort();
-  }, [conversationId, latest, open, attempt]);
+  }, [conversationId, latest, revision, open, attempt]);
   return { ...state, retry: () => setAttempt((count) => count + 1) };
 }
 
@@ -129,7 +123,7 @@ function asView(version: DeckVersionView): DeckView {
     outline: version.outline,
     version: version.version,
     updatedBy: version.by,
-    updatedAt: version.created_at,
+    updatedAt: version.updated_at,
     pptx: version.pptx,
     sizes: version.sizes
   };
@@ -167,9 +161,8 @@ const NOT_STARTED: Record<"waking" | "unsupported" | "assistant_gone" | "no_pod"
 /**
  * One version's .pptx: a download when the hub holds it, and otherwise, for the owner, a build by their pod, read back
  * until it is ready and then downloaded. Anyone else is told it is not available. The latest version's own session
- * builds and uploads it when the assistant wrote it, so the owner is offered a build of such a version only once
- * `LATEST_BUILD_GRACE_MS` has passed since it was written without one arriving. A version the person wrote, such as a
- * restore, has no session building it.
+ * builds and uploads it when the assistant wrote it (`latest`), so the owner is offered a build of such a version only
+ * once `LATEST_BUILD_GRACE_MS` has passed since it was written without one arriving.
  */
 export function DeckDownload({
   conversationId,
@@ -178,7 +171,6 @@ export function DeckDownload({
   canBuild,
   latest,
   writtenAt = null,
-  writtenBy = null,
   announce,
   pollMs = BUILD_POLL_MS
 }: {
@@ -186,18 +178,20 @@ export function DeckDownload({
   version: number;
   pptx: boolean;
   canBuild: boolean;
-  /** The latest version, which the session builds itself, says "Not built yet" rather than "Not available". */
+  /**
+   * The latest version, when the session builds it itself (`sessionBuildsIt`): it says "Not built yet" rather than
+   * "Not available", and waits for the session's upload. A version the person wrote, such as an edit or a restore, has
+   * no session building it.
+   */
   latest: boolean;
   /** When the version was written, which is when its session started building it. */
   writtenAt?: string | null;
-  /** Who wrote the version: only a version the assistant wrote has a session building it. */
-  writtenBy?: DeckAuthor | null;
   announce: (text: string) => void;
   pollMs?: number;
 }) {
   const [building, setBuilding] = useState<Building>({ state: "idle" });
   const href = deckPptxUrl(conversationId, version);
-  const sessionBuildsUntil = latest && writtenBy === "agent" && writtenAt !== null ? Date.parse(writtenAt) + LATEST_BUILD_GRACE_MS : 0;
+  const sessionBuildsUntil = latest && writtenAt !== null ? Date.parse(writtenAt) + LATEST_BUILD_GRACE_MS : 0;
   const [, rerender] = useState(0);
 
   useEffect(() => {
@@ -405,7 +399,7 @@ function VersionList({
                   {entry.version === latest ? " (latest)" : ""}
                 </span>
                 <span className="text-asst-muted">
-                  {who(entry.by, owner)}, {when(entry.created_at)}
+                  {who(entry.by, owner)}, {when(entry.updated_at)}
                 </span>
                 {entry.summary === null ? null : <span className="text-asst-body">{entry.summary}</span>}
               </button>
@@ -634,7 +628,7 @@ export function DeckHistory({
   const [restoring, setRestoring] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
   const listId = useId();
-  const versions = useVersions(conversationId, latest.version, open);
+  const versions = useVersions(conversationId, latest.version, latest.revision ?? 0, open);
   const viewing = picked !== null && picked !== latest.version ? picked : null;
   const older = useVersion(conversationId, viewing);
 
@@ -776,9 +770,8 @@ export function DeckHistory({
               version={view.version}
               pptx={view.pptx}
               canBuild={owner}
-              latest={viewing === null}
+              latest={viewing === null && sessionBuildsIt(view)}
               writtenAt={view.updatedAt}
-              writtenBy={view.updatedBy}
               announce={announce}
             />
           }

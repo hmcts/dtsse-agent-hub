@@ -2,17 +2,20 @@
 // from. The hub names each picture by the SHA-256 of its bytes; the plugin reads pictures from paths beside the
 // outline. `get` writes the hub's outline out with its pictures downloaded beside it and named by path, so `slides
 // build` runs on it unchanged, and `put` turns the paths back into uploaded pictures before it sends the outline.
-// `get` also records the version it wrote, which `put` sends as its base for an outline in that directory, so a
-// version someone else wrote in between is refused rather than overwritten.
+// `get` also records the version and revision it wrote, which `put` sends as its base for an outline in that directory,
+// so a version someone else wrote in between, or the person's amend of the one read, is refused rather than overwritten.
+// The revision goes with the version `get` recorded, so it is sent only for a put on that version: an explicit `--base`
+// naming any other is put on the hub's version check alone.
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { type Api, ApiError } from "../api.ts";
+import { type DeckOutline as CheckedOutline, type DeckDiff, diffDecks, diffSummary, type FieldChange, type WordPart } from "../deck-diff.ts";
 import { CLI } from "../envelope.ts";
 import { type RetryOptions, withRetry } from "../retry.ts";
 import { requireSessionId } from "../session.ts";
-import type { Deck, DeckOutline, DeckSlide } from "../wire.ts";
+import type { Deck, DeckOutline, DeckResponse, DeckSlide } from "../wire.ts";
 import { type Cli, type Command, parseFlags, refuseSecrets, requireAgent, UsageError } from "./command.ts";
 
 /** The hub's limits on one picture and one .pptx, checked here so a file too big is refused before it is sent. */
@@ -52,6 +55,8 @@ export function deckDir(cli: Cli, conversation: string): string {
 
 /** The file in the deck's directory naming the version its outline was read at, or last put as. */
 const VERSION_FILE = "version";
+/** Beside it, the deck's revision then: a person's amend moves it on and leaves the version where it was. */
+const REVISION_FILE = "revision";
 
 function isInside(dir: string, file: string): boolean {
   const relative = path.relative(dir, file);
@@ -62,15 +67,28 @@ function recordVersion(dir: string, version: number): void {
   fs.writeFileSync(path.join(dir, VERSION_FILE), `${version}\n`);
 }
 
-function recordedVersion(dir: string): number | undefined {
+/** A hub older than revisions answers none, and a revision left from an earlier read must not be sent as this one's. */
+function recordRevision(dir: string, revision: number | undefined): void {
+  const file = path.join(dir, REVISION_FILE);
+  if (revision === undefined) {
+    fs.rmSync(file, { force: true });
+    return;
+  }
+  fs.writeFileSync(file, `${revision}\n`);
+}
+
+function recordedNumber(dir: string, name: string): number | undefined {
   let text: string;
   try {
-    text = fs.readFileSync(path.join(dir, VERSION_FILE), "utf8").trim();
+    text = fs.readFileSync(path.join(dir, name), "utf8").trim();
   } catch {
     return undefined;
   }
   return /^\d+$/.test(text) ? Number(text) : undefined;
 }
+
+const recordedVersion = (dir: string): number | undefined => recordedNumber(dir, VERSION_FILE);
+const recordedRevision = (dir: string): number | undefined => recordedNumber(dir, REVISION_FILE);
 
 /**
  * Downloads every picture the outline names into `dir/assets/` with `fetchAsset`, and answers the outline with each
@@ -107,11 +125,11 @@ export async function materialise(fetchAsset: (sha: string) => Promise<Uint8Arra
   return { ...outline, slides };
 }
 
-function getArgs(argv: string[]): { json: boolean; slide: string | undefined; version: number | undefined } {
+function getArgs(argv: string[]): { json: boolean; slide: string | undefined; version: number | undefined; diffFrom: number | undefined } {
   const json = argv.includes("--json");
   const { flags, rest } = parseFlags(
     argv.filter((a) => a !== "--json"),
-    ["slide", "version"]
+    ["slide", "version", "diff-from"]
   );
   if (rest.length) {
     throw new UsageError(`unexpected argument: ${rest[0]}`);
@@ -123,11 +141,76 @@ function getArgs(argv: string[]): { json: boolean; slide: string | undefined; ve
   if (flags.version !== undefined && !/^[1-9]\d{0,8}$/.test(flags.version)) {
     throw new UsageError("--version takes a version number from 1");
   }
-  return { json, slide: flags.slide, version: flags.version === undefined ? undefined : Number(flags.version) };
+  const diffFrom = flags["diff-from"];
+  if (diffFrom !== undefined && !/^[1-9]\d{0,8}$/.test(diffFrom)) {
+    throw new UsageError("--diff-from takes a version number from 1");
+  }
+  if (diffFrom !== undefined && (flags.version !== undefined || flags.slide !== undefined)) {
+    throw new UsageError("--diff-from compares the latest version, so it cannot be given with --version or --slide");
+  }
+  return {
+    json,
+    slide: flags.slide,
+    version: flags.version === undefined ? undefined : Number(flags.version),
+    diffFrom: diffFrom === undefined ? undefined : Number(diffFrom)
+  };
+}
+
+/** Words the newer version lost as `[-…-]` and gained as `{+…+}`, each line marked on its own. */
+function markedWords(parts: readonly WordPart[]): string {
+  return parts
+    .map((part) => {
+      if (part.kind === "same") {
+        return part.text;
+      }
+      const [open, close] = part.kind === "added" ? ["{+", "+}"] : ["[-", "-]"];
+      return part.text
+        .split("\n")
+        .map((line) => {
+          const lead = line.startsWith(" ") ? " " : "";
+          const words = line.slice(lead.length);
+          return words === "" ? line : `${lead}${open}${words}${close}`;
+        })
+        .join("\n");
+    })
+    .join("");
+}
+
+function fieldLines(fields: readonly FieldChange[]): string[] {
+  return fields.flatMap((field) => {
+    const [first = "", ...more] = markedWords(field.parts).split("\n");
+    return [`  ${field.label}: ${first}`, ...more.map((line) => `    ${line}`), ...(field.note === undefined ? [] : [`    (${field.note})`])];
+  });
+}
+
+/**
+ * The diff as the session reads it: the summary, the title slide's own fields, then every slide that is not the same,
+ * numbered as the deck draws them, after the title slide, and named by id, which is what `--slide` takes.
+ */
+export function diffText(diff: DeckDiff, from: number, to: number): string {
+  const lines = [`Version ${to}, the latest, against version ${from}: ${diffSummary(diff)}.`];
+  if (diff.deck.length > 0) {
+    lines.push("Title slide (slide 1), changed:", ...fieldLines(diff.deck));
+  }
+  for (const slide of diff.slides) {
+    if (slide.status === "same") {
+      continue;
+    }
+    const title = JSON.stringify((slide.after ?? slide.before)?.slide.title ?? "");
+    if (slide.status === "removed") {
+      lines.push(`Removed: slide ${(slide.before?.index ?? 0) + 2} of version ${from}, id ${slide.id}: ${title}`);
+      continue;
+    }
+    const place = slide.moved && slide.before !== undefined ? ` from slide ${slide.before.index + 2}` : "";
+    const what = slide.status === "added" ? "added" : slide.status === "moved" ? `moved${place}` : `changed${slide.moved ? `, moved${place}` : ""}`;
+    lines.push(`Slide ${(slide.after?.index ?? 0) + 2}, id ${slide.id}, ${what}: ${title}`);
+    lines.push(...fieldLines(slide.fields));
+  }
+  return lines.join("\n");
 }
 
 async function getDeck(cli: Cli, argv: string[]): Promise<number> {
-  const { json, slide, version } = getArgs(argv);
+  const { json, slide, version, diffFrom } = getArgs(argv);
   const agent = requireAgent(requireSessionId(cli.env));
   const api = cli.api();
   const deck = await api.getDeck(agent.agent_id, version).catch((e: unknown) => {
@@ -149,6 +232,10 @@ async function getDeck(cli: Cli, argv: string[]): Promise<number> {
   // The recorded version is what the working copy builds on, so reading an older version leaves it alone.
   if (version === undefined) {
     recordVersion(dir, deck.version);
+    recordRevision(dir, deck.revision);
+  }
+  if (diffFrom !== undefined) {
+    return await printDiff(cli, api, agent.agent_id, { deck, diffFrom, file, dir, json });
   }
   if (slide !== undefined) {
     const index = (outline.slides ?? []).findIndex((one) => one.id === slide);
@@ -184,6 +271,38 @@ async function getDeck(cli: Cli, argv: string[]): Promise<number> {
   cli.print(`agent-hub: wrote version ${deck.version} of the slide deck to ${file}, with its pictures beside it`);
   cli.print(
     `Change it there, build it with slides build, then publish it with ${CLI} deck put ${shellWord(file)} --pptx <deck.pptx>, which puts it as a change to version ${deck.version} and is refused if someone has written a newer one`
+  );
+  return 0;
+}
+
+/** The latest version, already written out, against kept version `diffFrom`, as text or with `--json` as the diff itself. */
+async function printDiff(
+  cli: Cli,
+  api: Api,
+  agentId: string,
+  { deck, diffFrom, file, dir, json }: { deck: Deck; diffFrom: number; file: string; dir: string; json: boolean }
+): Promise<number> {
+  let older: Deck;
+  try {
+    older = await api.getDeck(agentId, diffFrom);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) {
+      cli.printError(
+        `agent-hub deck: the slide deck does not keep version ${diffFrom}; the hub keeps the latest 100. The latest, version ${deck.version}, is in ${file}`
+      );
+      return 1;
+    }
+    throw e;
+  }
+  // Both outlines are as the hub stored and checked them, which is the shape the diff reads.
+  const diff = diffDecks(older.outline as unknown as CheckedOutline, deck.outline as unknown as CheckedOutline);
+  if (json) {
+    cli.print(JSON.stringify({ version: deck.version, revision: deck.revision, diff_from: diffFrom, dir, outline: file, summary: diffSummary(diff), diff }));
+    return 0;
+  }
+  cli.print(diffText(diff, diffFrom, deck.version));
+  cli.print(
+    `agent-hub: wrote version ${deck.version} of the slide deck to ${file}, with its pictures beside it. Make your change to that, build it with slides build, and publish it with ${CLI} deck put ${shellWord(file)} --pptx <deck.pptx>`
   );
   return 0;
 }
@@ -270,12 +389,19 @@ async function uploadPictures(api: Api, agentId: string, outline: DeckOutline, b
   return { ...outline, slides };
 }
 
-/** Says why a put was refused for a newer version, and how to put the change again on top of it. */
-function printConflict(cli: Cli, base: number, current: Deck | undefined): void {
+/**
+ * Says why a put was refused, for a newer version or, when the revision was sent and the version still matches, for
+ * the user's amend of the one read, and how to put the change again on top of it: by reading it again, which records
+ * the version and revision the next put sends.
+ */
+function printConflict(cli: Cli, base: number, current: Deck | undefined, baseRevision: number | undefined): void {
   const by = current?.updated_by ? `, last written by ${current.updated_by === "user" ? "the user" : "this conversation"}` : "";
-  const again = current?.version === undefined ? "" : ` with --base ${current.version}`;
-  cli.printError(`agent-hub deck: the deck has changed since version ${base}: it is now version ${current?.version ?? "?"}${by}. Nothing was saved.`);
-  cli.printError(`Read it with ${CLI} deck get, make your change to that, build it, and put it again${again}.`);
+  if (baseRevision !== undefined && current?.version === base && current.revision !== baseRevision) {
+    cli.printError(`agent-hub deck: the user has changed version ${base} of the deck since you read it. Nothing was saved.`);
+  } else {
+    cli.printError(`agent-hub deck: the deck has changed since version ${base}: it is now version ${current?.version ?? "?"}${by}. Nothing was saved.`);
+  }
+  cli.printError(`Run ${CLI} deck get, make your change to the outline it writes, build it, and put again.`);
 }
 
 /**
@@ -310,20 +436,29 @@ async function putDeck(cli: Cli, argv: string[]): Promise<number> {
   // An outline `get` wrote is a change to the version it read; any other is a new deck, put on whatever is there.
   const recorded = fromGet ? recordedVersion(dir) : undefined;
   const base = flags.base !== undefined ? Number(flags.base) : recorded !== undefined ? recorded : (await api.getDeck(agent.agent_id).catch(noDeck)).version;
+  // Only the revision `get` read, and only with the version it read: one taken from the hub now would let the put
+  // over an amend it never saw, and one sent with another version could never match.
+  const baseRevision = recorded !== undefined && base === recorded ? recordedRevision(dir) : undefined;
   const outline = await uploadPictures(api, agent.agent_id, local, path.dirname(outlineFile)).catch(noDeck);
-  let written: { version: number; outline: DeckOutline };
+  let written: DeckResponse;
   try {
-    written = await api.putDeck(agent.agent_id, { outline, base_version: base, ...(flags.summary === undefined ? {} : { summary: flags.summary.trim() }) });
+    written = await api.putDeck(agent.agent_id, {
+      outline,
+      base_version: base,
+      ...(baseRevision === undefined ? {} : { base_revision: baseRevision }),
+      ...(flags.summary === undefined ? {} : { summary: flags.summary.trim() })
+    });
   } catch (e) {
     if (!(e instanceof ApiError && e.status === 409)) {
       return noDeck(e);
     }
-    printConflict(cli, base, e.body?.current as Deck | undefined);
+    printConflict(cli, base, e.body?.current as Deck | undefined, baseRevision);
     return 1;
   }
   keepIds(outlineFile, local, written.outline);
   if (fromGet) {
     recordVersion(dir, written.version);
+    recordRevision(dir, written.revision);
   }
   if (pptx !== undefined && pptxFile !== undefined) {
     try {

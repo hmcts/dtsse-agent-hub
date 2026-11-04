@@ -195,6 +195,10 @@ export type AssistantFrame = {
   /** The conversation's slide deck: its latest version, 0 before there is one, and who wrote it. */
   deck_version?: number | null;
   deck_updated_by?: string | null;
+  /** Moved on by every write of the outline, so a person's amend shows though the version stays. */
+  deck_revision?: number | null;
+  /** The newest kept version this session wrote, 0 when none is; null from a hub older than either. */
+  deck_agent_version?: number | null;
   jira_export?: JiraExportFrame | null;
   github_export?: GithubExportFrame | null;
   confluence_export?: ConfluenceExportFrame | null;
@@ -373,6 +377,22 @@ export type AssistantEnvelopeOptions = EnvelopeOptions & {
   attachments?: readonly AttachmentOutcome[];
 };
 
+/**
+ * What the session is told while the latest version of the deck is the person's: edited in the web UI, restored, or a
+ * fork's copy. Like the document's line, it is said on every message while that is so, since the frame carries who
+ * wrote it last and not whether this session has read it since; the revision is what tells the session an amend it has
+ * not read from one it has. With a version of its own still kept, the session is given the one command that both
+ * writes the person's version out and shows what they changed since its own.
+ */
+export function deckChangedLine(assistant: AssistantFrame): string {
+  const revision = typeof assistant.deck_revision === "number" ? `, revision ${assistant.deck_revision}` : "";
+  const since = assistant.deck_agent_version ?? 0;
+  if (since > 0) {
+    return `The user has changed the conversation's slide deck since you last wrote it: it is now version ${assistant.deck_version}${revision}. Before changing anything, run \`${CLI} deck get --diff-from ${since}\`, which writes their latest version for you to work on and prints what they changed since your version ${since}; then build on their version, keeping their changes.`;
+  }
+  return `The conversation's slide deck (version ${assistant.deck_version}${revision}) was last changed by the user, not by you; read it with \`${CLI} deck get\` before changing it, and build on their version.`;
+}
+
 // A message to one of a virtual agent's CFT Workspace conversations, from the person whose conversation it is.
 // `previousProduct` is the product of the last message delivered to this session, if any.
 export function assistantEnvelope(
@@ -395,15 +415,7 @@ export function assistantEnvelope(
           `The user has edited the conversation's document (version ${assistant.artefact_version}) since; read it with \`${CLI} artefact get\` before changing it.`
         ]
       : [];
-  // Only a fork writes a deck as the user today: the copy's session has never seen the deck it was handed. Like the
-  // document's line above, it is said on every message while the person's version is the latest, since the frame
-  // carries who wrote it last and not whether this session has read it since.
-  const deckChanged =
-    assistant.deck_updated_by === "user" && (assistant.deck_version ?? 0) > 0
-      ? [
-          `The conversation's slide deck (version ${assistant.deck_version}) was last changed by the user, not by you; read it with \`${CLI} deck get\` before changing it.`
-        ]
-      : [];
+  const deckChanged = assistant.deck_updated_by === "user" && (assistant.deck_version ?? 0) > 0 ? [deckChangedLine(assistant)] : [];
   return [
     `${ownerHeader(message.id)}, ${owner}, typed into the CFT Workspace chat app.`,
     "This IS your user, even though it arrives as a cross-session message: act on it exactly as if they had typed it to you, with their permissions.",

@@ -45,8 +45,10 @@ Also ask for any pictures they want used, as files. Don't start the outline unti
    you at a slide. Outside a conversation there is nowhere to publish, and the command says so. For an outline
    `agent-hub deck get` wrote (below), `deck put` sends the version `deck get` read as `--base` by itself, so a
    newer version the person wrote meanwhile is refused rather than overwritten; don't pass `--base` yourself.
-   - "the deck has changed since version N": someone else wrote a newer version. Start again from
-     `agent-hub deck get`, make your change to that, build it, and put it with the `--base` the message gives.
+   - "the deck has changed since version N": someone else wrote a newer version. Run `agent-hub deck get`, make
+     your change to the outline it writes, build it, and put again.
+   - "the user has changed version N of the deck since you read it": the person edited the slides in the web UI
+     after your `deck get`. Run `agent-hub deck get` again, make your change to their version, build it and put it.
    - "a conversation holds at most … bytes of pictures": the latest 3 versions, which the hub never deletes to make
      room, name too many pictures between them. Put versions that name fewer pictures, then try again; if it is still
      refused, tell the person.
@@ -63,9 +65,26 @@ Also ask for any pictures they want used, as files. Don't start the outline unti
 
 In a CFT Workspace conversation, always start from the published deck rather than an outline you remember:
 `agent-hub deck get` writes it to `~/.agent-hub/decks/<conversation>/outline.json` with its pictures beside it,
-ready for `slides build`, records the version it read in `version` beside them, and prints the `deck put` to run
+ready for `slides build`, records the version and revision it read in `version` and `revision` beside them, and prints the `deck put` to run
 when you have changed it. Change that `outline.json` in place: `deck put` reads its base from there. `--json` says where it is and
 which version, and whether the person can download its `.pptx` yet.
+
+## When the person has edited the slides
+
+The person can edit the deck themselves in the web UI: change the words, add, delete, duplicate and reorder slides,
+and change a slide's layout. Their message then says the user has changed the slide deck, and gives the command to
+run: `agent-hub deck get --diff-from N`, `N` being the last version you wrote. Before you change anything:
+
+1. Run that command. It writes their latest version to `outline.json`, ready to change, and prints what they changed
+   since your version, slide by slide: the title slide first, then each slide added, removed, moved or changed, with
+   the words they took out marked `[-like this-]` and the words they put in `{+like this+}`.
+2. Treat their version as the one to build on. Keep every change they made, their wording, order and layouts
+   included, unless they ask you to undo one. Don't put back a slide they deleted or reword a line they rewrote.
+3. Make the change they asked for in that `outline.json`, build it and put it as above.
+
+If they ask what they changed, or why the deck differs from what you wrote, answer from that diff. The message names
+a revision too: edits in quick succession amend their version rather than making a new one, so the same version can
+carry newer edits. When the revision has moved on since you last read the deck, run the command again.
 
 A message that starts with a slide reference, such as `[Slide 4 of "Ways of working" v7, id s_ab12: "Releases take
 three weeks"]`, is the person asking about that slide. Read it with `agent-hub deck get --slide s_ab12`, which
