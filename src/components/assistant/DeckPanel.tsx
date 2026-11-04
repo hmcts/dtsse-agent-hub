@@ -5,6 +5,7 @@ import { plannable, slideReference } from "@/assistant/deck";
 import type { DeckSummary, DeckView } from "@/assistant/deck-store";
 import { type PlannedSlide, plan } from "@/assistant/slides/masters";
 import { useSidebarWidth } from "@/components/assistant/AssistantShell";
+import { DeckEditor, type SaveDeckAction, type UnsavedDeckDraft } from "@/components/assistant/DeckEditor";
 import { DeckHistory, type RestoreDeckAction } from "@/components/assistant/DeckHistory";
 import { ARTEFACT_MIN_WIDTH, ARTEFACT_WIDTH, CHAT_MIN_WIDTH } from "@/components/assistant/layout";
 import { nestRuns, SlideCanvas, slideTitle } from "@/components/assistant/SlideCanvas";
@@ -38,15 +39,15 @@ export interface SlideAsk {
 }
 
 /**
- * The latest version of the deck, read when the viewer opens and again whenever the page says `version` has moved
- * on. The version on screen stays there while the next one is read, and a failed read keeps it too, which
+ * The latest version of the deck, read when the viewer opens and again whenever the page says `version` or
+ * `revision` has moved on, the second being a person's amend of their own latest version. The version on screen stays there while the next one is read, and a failed read keeps it too, which
  * `DeckBehind` then says.
  */
 export function useDeckView(deck: DeckSummary, conversationId: string): { deck: DeckView | null; failed: boolean; retry: () => void } {
-  const { version, pptx } = deck;
+  const { version, revision, pptx } = deck;
   const [read, setRead] = useState<{ deck: DeckView | null; failed: boolean }>({ deck: null, failed: false });
   const [attempt, setAttempt] = useState(0);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: a newer version, or another attempt, is what makes the outline worth reading again
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a newer version or revision, or another attempt, is what makes the outline worth reading again
   useEffect(() => {
     const controller = new AbortController();
     void (async () => {
@@ -64,9 +65,9 @@ export function useDeckView(deck: DeckSummary, conversationId: string): { deck: 
       }
     })();
     return () => controller.abort();
-  }, [conversationId, version, attempt]);
+  }, [conversationId, version, revision, attempt]);
   // A .pptx arrives after its version's outline and changes nothing in it, so the page's word on it is taken as it is.
-  const shown = read.deck !== null && read.deck.version === version ? { ...read.deck, pptx } : read.deck;
+  const shown = read.deck !== null && read.deck.version === version && (read.deck.revision ?? revision) === revision ? { ...read.deck, pptx } : read.deck;
   return { deck: shown, failed: read.failed, retry: () => setAttempt((count) => count + 1) };
 }
 
@@ -348,6 +349,10 @@ export function DeckViewer({
  * The conversation's deck beside the chat, in the document panel's shell: the same resizable width, close button and
  * header, so the two read as one kind of thing. The width is kept apart from the document's, since a deck is looked at
  * wider than a document is written. The page hands it the deck's version; the outline is read here (`useDeckView`).
+ *
+ * With `save`, which only the chat's owner is handed, "Edit slides" turns the panel into the editor on the latest
+ * version, and Done turns it back. An edit the editor could not save comes back through `onUnsaved`, and the page
+ * opens the panel again with it as `draft`, straight into the editor.
  */
 export function DeckPanel({
   conversationId,
@@ -356,7 +361,11 @@ export function DeckPanel({
   narrow,
   announce,
   onAsk,
-  restore
+  restore,
+  save,
+  onBusy,
+  draft,
+  onUnsaved
 }: {
   conversationId: string;
   deck: DeckSummary;
@@ -365,8 +374,15 @@ export function DeckPanel({
   announce: (text: string) => void;
   onAsk?: (ask: SlideAsk) => void;
   restore?: RestoreDeckAction;
+  /** Left out, the slides are not editable here. */
+  save?: SaveDeckAction;
+  onBusy?: (busy: boolean) => void;
+  draft?: UnsavedDeckDraft;
+  onUnsaved?: (draft: UnsavedDeckDraft) => void;
 }) {
   const view = useDeckView(deck, conversationId);
+  const [editing, setEditing] = useState(draft !== undefined);
+  const editable = save !== undefined && view.deck !== null;
   const sidebarWidth = useSidebarWidth();
   const resize = useResizableWidth({
     storageKey: "hmcts-assistant-deck-width",
@@ -394,6 +410,18 @@ export function DeckPanel({
           .pptx
         </span>
         <h2 className="min-w-0 flex-1 truncate text-[15px] font-medium text-asst-text">{view.deck?.title ?? deck.title}</h2>
+        {editable && !editing ? (
+          <button
+            type="button"
+            onClick={() => {
+              setEditing(true);
+              announce("Editing the slides");
+            }}
+            className={button}
+          >
+            Edit slides
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={onClose}
@@ -406,6 +434,21 @@ export function DeckPanel({
       <DeckBehind shown={view.deck} latest={deck.version} failed={view.failed} retry={view.retry} />
       {view.deck === null ? (
         <DeckLoading failed={view.failed} retry={view.retry} />
+      ) : editing && save !== undefined ? (
+        <DeckEditor
+          conversationId={conversationId}
+          deck={view.deck}
+          save={save}
+          announce={announce}
+          onDone={() => {
+            setEditing(false);
+            announce("Finished editing the slides");
+          }}
+          onBusy={onBusy}
+          draft={draft}
+          onUnsaved={onUnsaved}
+          narrow={narrow}
+        />
       ) : (
         <DeckHistory conversationId={conversationId} latest={view.deck} announce={announce} onAsk={onAsk} owner restore={restore} />
       )}

@@ -105,6 +105,7 @@ type Body = Record<string, any>;
  */
 export type MockDeck = {
   version: number;
+  revision: number;
   outline: Body | null;
   updated_by: "user" | "agent" | null;
   updated_at: string | null;
@@ -232,7 +233,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
   const deckOf = (agentId: string): MockDeck => {
     let found = decks.get(agentId);
     if (!found) {
-      found = { version: 0, outline: null, updated_by: null, updated_at: null, pptx: new Map(), assets: new Map(), history: new Map() };
+      found = { version: 0, revision: 0, outline: null, updated_by: null, updated_at: null, pptx: new Map(), assets: new Map(), history: new Map() };
       decks.set(agentId, found);
     }
     return found;
@@ -241,6 +242,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     title: stored.outline?.title ?? null,
     outline: stored.outline,
     version: stored.version,
+    revision: stored.revision,
     updated_by: stored.updated_by,
     updated_at: stored.updated_at,
     pptx: stored.pptx.has(stored.version)
@@ -1124,7 +1126,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
         if (!Number.isInteger(body.base_version) || typeof body.outline !== "object" || !Array.isArray(body.outline?.slides)) {
           return send(res, 400, { error: "bad deck" });
         }
-        if (body.base_version !== stored.version) {
+        if (body.base_version !== stored.version || (body.base_revision !== undefined && body.base_revision !== stored.revision)) {
           return send(res, 409, { error: "the deck has changed since that version", current: deckBody(stored) });
         }
         const slides: Body[] = body.outline.slides;
@@ -1144,11 +1146,12 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
           slides: slides.map((slide, i) => (slide.id === undefined ? { ...slide, id: `s_${String(i).padStart(4, "0")}` } : slide))
         };
         stored.version += 1;
+        stored.revision += 1;
         stored.outline = outline;
         stored.updated_by = "agent";
         stored.updated_at = new Date().toISOString();
         stored.history.set(stored.version, { outline, updated_by: "agent", updated_at: stored.updated_at });
-        return send(res, 200, { version: stored.version, outline });
+        return send(res, 200, { version: stored.version, revision: stored.revision, outline });
       }
       if (sub === "assets") {
         const sha = parts[5] ?? "";
@@ -1385,10 +1388,21 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
         stored.assets.set(sha, bytes);
       }
       stored.version += 1;
+      stored.revision += 1;
       stored.outline = outline;
       stored.updated_by = "user";
       stored.updated_at = new Date().toISOString();
       stored.history.set(stored.version, { outline, updated_by: "user", updated_at: stored.updated_at });
+    },
+    // The person editing their own latest version again in the web UI: the outline replaced, the version kept.
+    amendDeckAsUser(agentId: string, outline: Body) {
+      const stored = deckOf(agentId);
+      stored.revision += 1;
+      stored.outline = outline;
+      stored.updated_by = "user";
+      stored.updated_at = new Date().toISOString();
+      stored.pptx.delete(stored.version);
+      stored.history.set(stored.version, { outline, updated_by: "user", updated_at: stored.history.get(stored.version)?.updated_at ?? stored.updated_at });
     },
     // Runs as each response is written, before the caller can see it. A test that mirrors the hub's state
     // somewhere a process outside this one reads — `src/virtual-agent-boot.test.ts` writes a file the boot

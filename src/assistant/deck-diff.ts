@@ -1,14 +1,41 @@
-import type { DeckOutline, DeckSlide } from "./deck.ts";
-
 /**
- * What changed between two versions of a deck, for the slides panel's "Compare with latest". Slides are lined up by
+ * What changed between two versions of a deck, for the slides panel's "Compare with latest" and the client's
+ * `agent-hub deck get --diff-from`. Slides are lined up by
  * id, which every stored slide has and keeps across versions (`withSlideIds`), so a slide whose title was rewritten is
  * still the same slide, and one moved to another place is moved rather than removed and added again.
  *
  * Text is compared word by word. A bullet list is compared as its lines, so a new bullet reads as added words on a
  * line of their own. Nothing here says how a change is drawn; the panel marks each with words and icons, never colour
  * alone.
+ *
+ * It imports nothing, because `packages/agent-hub/src/deck-diff.ts` is a byte-for-byte copy of it, held to it by
+ * `deck-diff.test.ts`: the published client cannot import the hub's code, and the two must compare alike. Its types
+ * are the outline's shape as `deck.ts` checks it, written out here for that reason.
  */
+
+type Bullet = string | { text: string; bullets?: string[] };
+
+interface SlideBase {
+  id?: string;
+  title: string;
+  notes?: string;
+}
+
+/** One slide of a checked outline: `DeckSlide` in the hub's `deck.ts`. */
+export type DeckSlide =
+  | (SlideBase & { layout: "HMCTS_SECTION" })
+  | (SlideBase & { layout: "HMCTS_CONTENT"; bullets: Bullet[] })
+  | (SlideBase & { layout: "HMCTS_TWO_COLUMN"; left: Bullet[]; right: Bullet[] })
+  | (SlideBase & { layout: "HMCTS_IMAGE"; image: { asset: string; alt?: string; decorative?: boolean }; caption?: string })
+  | (SlideBase & { layout: "HMCTS_CLOSING"; subtitle?: string });
+
+/** A checked outline: `DeckOutline` in the hub's `deck.ts`. */
+export interface DeckOutline {
+  title: string;
+  subtitle?: string;
+  notes?: string;
+  slides: DeckSlide[];
+}
 
 export type WordKind = "same" | "added" | "removed";
 
@@ -146,8 +173,6 @@ export function diffWords(before: string, after: string): WordPart[] {
   marked.push(...a.slice(a.length - end).map((token) => ({ kind: "same" as const, token })));
   return runs(marked);
 }
-
-type Bullet = string | { text: string; bullets?: string[] };
 
 /** A bullet list as lines: each bullet on its own, and each sub-bullet under it marked as one. */
 export function bulletText(bullets: readonly Bullet[] | undefined): string {

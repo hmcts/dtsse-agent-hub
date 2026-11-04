@@ -5,6 +5,7 @@ import type { RestoreDeckResult } from "@/app/_actions/decks";
 import { plannable } from "@/assistant/deck";
 import type { DeckBuildRequest, DeckBuildView } from "@/assistant/deck-build";
 import { type DeckDiff, diffDecks, diffSummary, type FieldChange, type SlideDiff, type WordPart } from "@/assistant/deck-diff";
+import { sessionBuildsIt } from "@/assistant/deck-edit";
 import type { DeckVersionEntry, DeckVersionView } from "@/assistant/deck-history-store";
 import type { DeckView } from "@/assistant/deck-store";
 import { type PlannedSlide, plan } from "@/assistant/slides/masters";
@@ -672,7 +673,7 @@ export function DeckHistory({
               version={view.version}
               pptx={view.pptx}
               canBuild={owner}
-              latest={viewing === null}
+              latest={viewing === null && sessionBuildsIt(view)}
               announce={announce}
             />
           }

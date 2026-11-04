@@ -536,7 +536,7 @@ describe("SharedChat", () => {
     };
     const reads = vi.fn(async (_url: string) => new Response(JSON.stringify(outline)));
     vi.stubGlobal("fetch", reads);
-    render(<SharedChat view={view({ deck: { title: "Ways of working", version: 2, updatedBy: "agent", pptx: true } })} />);
+    render(<SharedChat view={view({ deck: { title: "Ways of working", version: 2, revision: 2, updatedBy: "agent", pptx: true } })} />);
     await act(async () => {
       await Promise.resolve();
     });

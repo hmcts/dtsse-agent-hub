@@ -33,15 +33,17 @@ export interface Deck {
   title: string | null;
   outline: DeckOutline | null;
   version: number;
+  /** Moved on by every write of the outline, an amend that leaves `version` where it was included. */
+  revision: number;
   updatedBy: DeckAuthor | null;
   updatedAt: Date | null;
   /** Whether the hub holds the latest version's .pptx. */
   pptx: boolean;
 }
 
-const EMPTY_DECK: Deck = { title: null, outline: null, version: 0, updatedBy: null, updatedAt: null, pptx: false };
+const EMPTY_DECK: Deck = { title: null, outline: null, version: 0, revision: 0, updatedBy: null, updatedAt: null, pptx: false };
 
-export const DECK_SELECT = { deckTitle: true, deckVersion: true, deckUpdatedBy: true, deckUpdatedAt: true } as const;
+export const DECK_SELECT = { deckTitle: true, deckVersion: true, deckRevision: true, deckUpdatedBy: true, deckUpdatedAt: true } as const;
 
 const author = (value: string | null): DeckAuthor | null => (value === "user" || value === "agent" ? value : null);
 
@@ -52,7 +54,7 @@ export function deckAuthor(row: { deckUpdatedBy: string | null }): DeckAuthor | 
 export async function readDeck(db: Database, conversationId: string): Promise<Deck> {
   const row = await db.assistantConversation.findUnique({ where: { id: conversationId }, select: DECK_SELECT });
   if (row === null || row.deckVersion === 0) {
-    return EMPTY_DECK;
+    return { ...EMPTY_DECK, revision: row?.deckRevision ?? 0 };
   }
   const [latest] = await db.$queryRaw<{ outline: DeckOutline; pptx: boolean }[]>`
     SELECT outline, pptx IS NOT NULL AS pptx FROM assistant_deck_version WHERE conversation_id = ${conversationId}::uuid AND version = ${row.deckVersion}::int
@@ -61,10 +63,21 @@ export async function readDeck(db: Database, conversationId: string): Promise<De
     title: row.deckTitle,
     outline: latest?.outline ?? null,
     version: row.deckVersion,
+    revision: row.deckRevision,
     updatedBy: author(row.deckUpdatedBy),
     updatedAt: row.deckUpdatedAt,
     pptx: latest?.pptx ?? false
   };
+}
+
+/** The newest kept version a session wrote, 0 when no kept version is one. */
+export async function newestAgentVersion(db: Database, conversationId: string): Promise<number> {
+  const newest = await db.assistantDeckVersion.findFirst({
+    where: { conversationId, by: "agent" },
+    orderBy: { version: "desc" },
+    select: { version: true }
+  });
+  return newest?.version ?? 0;
 }
 
 export class DeckConflict extends Error {
@@ -90,7 +103,7 @@ async function lockConversation(db: Database, conversationId: string): Promise<b
 }
 
 /** The retention: old outlines, old .pptx files, and pictures no kept outline names. `makeRoom` is the rest of it. */
-async function prune(db: Database, conversationId: string, latest: number, now: Date): Promise<void> {
+export async function prune(db: Database, conversationId: string, latest: number, now: Date): Promise<void> {
   await db.$executeRaw`
     DELETE FROM assistant_deck_version WHERE conversation_id = ${conversationId}::uuid AND version <= ${latest - KEEP_VERSIONS}::int
   `;
@@ -115,54 +128,64 @@ async function deleteUnnamedAssets(db: Database, conversationId: string, now: Da
   `;
 }
 
+/** Refuses with `DeckAssetsMissing` an outline naming pictures the conversation does not hold. */
+export async function requireHeldAssets(db: Database, conversationId: string, outline: DeckOutline): Promise<void> {
+  const named = outlineAssets(outline);
+  if (named.length === 0) {
+    return;
+  }
+  const held = await db.$queryRaw<{ sha256: string }[]>`
+    SELECT sha256 FROM assistant_deck_asset WHERE conversation_id = ${conversationId}::uuid AND sha256 = ANY(${named}::text[])
+  `;
+  const have = new Set(held.map((asset) => asset.sha256));
+  const missing = named.filter((sha) => !have.has(sha));
+  if (missing.length > 0) {
+    throw new DeckAssetsMissing(missing);
+  }
+}
+
 /**
- * Writes a new version of the conversation's deck if `baseVersion` is still its version, and answers the new one.
- * Otherwise nothing is written and `DeckConflict` carries what is there now. Slides without an id are given one, and
- * every picture the outline names must already be held (`DeckAssetsMissing`).
+ * Writes a new version of the conversation's deck if `baseVersion` is still its version, and `baseRevision`, when
+ * given, its revision, and answers the new one. Otherwise nothing is written and `DeckConflict` carries what is there
+ * now. Slides without an id are given one, and every picture the outline names must already be held
+ * (`DeckAssetsMissing`). `editorOid` is the person writing it through the web UI's editor, which is what lets their
+ * next edit amend it (`deck-edit-store.ts`).
  *
  * A deck is something in the chat, so the first one records the conversation's first content, as a document does.
  */
 export async function writeDeck(
   prisma: PrismaClient,
   conversation: Pick<ConversationRow, "id" | "virtualAgentId" | "ownerOid">,
-  write: { outline: DeckOutline; baseVersion: number; by: DeckAuthor; summary: string | null },
+  write: { outline: DeckOutline; baseVersion: number; baseRevision?: number; by: DeckAuthor; summary: string | null; editorOid?: string },
   now: Date = new Date()
-): Promise<{ version: number; outline: DeckOutline }> {
+): Promise<{ version: number; revision: number; outline: DeckOutline }> {
   const outline = withSlideIds(write.outline);
-  const named = outlineAssets(outline);
   return await prisma.$transaction(async (tx) => {
-    const updated = await tx.$queryRaw<{ version: number }[]>`
+    const updated = await tx.$queryRaw<{ version: number; revision: number }[]>`
       UPDATE assistant_conversation
          SET deck_title = ${outline.title},
              deck_version = deck_version + 1,
+             deck_revision = deck_revision + 1,
              deck_updated_by = ${write.by},
              deck_updated_at = ${now},
              first_content_at = COALESCE(first_content_at, ${now}),
              updated_at = ${now}
        WHERE id = ${conversation.id}::uuid AND deck_version = ${write.baseVersion}::int
-      RETURNING deck_version AS version
+         AND (${write.baseRevision ?? null}::int IS NULL OR deck_revision = ${write.baseRevision ?? null}::int)
+      RETURNING deck_version AS version, deck_revision AS revision
     `;
     const [row] = updated;
     if (row === undefined) {
       throw new DeckConflict(await readDeck(tx, conversation.id));
     }
-    if (named.length > 0) {
-      const held = await tx.$queryRaw<{ sha256: string }[]>`
-        SELECT sha256 FROM assistant_deck_asset WHERE conversation_id = ${conversation.id}::uuid AND sha256 = ANY(${named}::text[])
-      `;
-      const have = new Set(held.map((asset) => asset.sha256));
-      const missing = named.filter((sha) => !have.has(sha));
-      if (missing.length > 0) {
-        throw new DeckAssetsMissing(missing);
-      }
-    }
+    await requireHeldAssets(tx, conversation.id, outline);
     await tx.$executeRaw`
-      INSERT INTO assistant_deck_version (conversation_id, version, outline, by, summary, created_at)
-      VALUES (${conversation.id}::uuid, ${row.version}::int, ${JSON.stringify(outline)}::jsonb, ${write.by}, ${write.summary}, ${now})
+      INSERT INTO assistant_deck_version (conversation_id, version, outline, by, summary, created_at, editor_oid)
+      VALUES (${conversation.id}::uuid, ${row.version}::int, ${JSON.stringify(outline)}::jsonb, ${write.by}, ${write.summary}, ${now}, ${write.editorOid ?? null})
     `;
     await prune(tx, conversation.id, row.version, now);
     await announce(tx, conversation);
-    return { version: row.version, outline };
+    return { version: row.version, revision: row.revision, outline };
   });
 }
 
@@ -358,7 +381,7 @@ export async function copyDeck(db: Database, fromId: string, toId: string, now: 
   `;
   await db.assistantConversation.update({
     where: { id: toId },
-    data: { deckVersion: 1, deckTitle: source.deckTitle, deckUpdatedBy: "user", deckUpdatedAt: now }
+    data: { deckVersion: 1, deckRevision: 1, deckTitle: source.deckTitle, deckUpdatedBy: "user", deckUpdatedAt: now }
   });
   return true;
 }
@@ -368,6 +391,8 @@ export interface DeckView {
   title: string;
   outline: DeckOutline;
   version: number;
+  /** The deck's revision as this was read; left out for an older version, which the history draws as a `DeckView` too. */
+  revision?: number;
   updatedBy: DeckAuthor | null;
   updatedAt: string | null;
   /** Whether the latest version's .pptx can be downloaded. */
@@ -385,6 +410,7 @@ export async function deckView(db: Database, conversationId: string): Promise<De
     title: deck.title ?? deck.outline.title,
     outline: deck.outline,
     version: deck.version,
+    revision: deck.revision,
     updatedBy: deck.updatedBy,
     updatedAt: deck.updatedAt?.toISOString() ?? null,
     pptx: deck.pptx,
@@ -400,6 +426,7 @@ export async function deckView(db: Database, conversationId: string): Promise<De
 export interface DeckSummary {
   title: string;
   version: number;
+  revision: number;
   updatedBy: DeckAuthor | null;
   /** Whether the latest version's .pptx can be downloaded. */
   pptx: boolean;
@@ -409,7 +436,7 @@ export interface DeckSummary {
 export async function deckSummary(
   db: Database,
   conversationId: string,
-  row: { deckTitle: string | null; deckVersion: number; deckUpdatedBy: string | null }
+  row: { deckTitle: string | null; deckVersion: number; deckRevision: number; deckUpdatedBy: string | null }
 ): Promise<DeckSummary | null> {
   if (row.deckVersion === 0 || row.deckTitle === null) {
     return null;
@@ -417,5 +444,5 @@ export async function deckSummary(
   const [latest] = await db.$queryRaw<{ pptx: boolean }[]>`
     SELECT pptx IS NOT NULL AS pptx FROM assistant_deck_version WHERE conversation_id = ${conversationId}::uuid AND version = ${row.deckVersion}::int
   `;
-  return { title: row.deckTitle, version: row.deckVersion, updatedBy: author(row.deckUpdatedBy), pptx: latest?.pptx ?? false };
+  return { title: row.deckTitle, version: row.deckVersion, revision: row.deckRevision, updatedBy: author(row.deckUpdatedBy), pptx: latest?.pptx ?? false };
 }

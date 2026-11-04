@@ -660,7 +660,9 @@ describe("conversations", () => {
       artefact_version: 0,
       artefact_updated_by: null,
       deck_version: 0,
-      deck_updated_by: null
+      deck_updated_by: null,
+      deck_revision: 0,
+      deck_agent_version: 0
     };
 
     // A wake is "this conversation needs a session", so there is no message whose files the field could name.

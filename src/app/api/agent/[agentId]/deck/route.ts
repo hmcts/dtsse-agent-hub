@@ -15,6 +15,7 @@ function deckBody(deck: Deck) {
     title: deck.title,
     outline: deck.outline,
     version: deck.version,
+    revision: deck.revision,
     updated_by: deck.updatedBy,
     updated_at: deck.updatedAt?.toISOString() ?? null,
     pptx: deck.pptx
@@ -58,6 +59,7 @@ export const PUT = ownedAgentRoute<{ agentId: string }>(async ({ agent, request 
     const written = await writeDeck(prisma, conversation, {
       outline: checked.outline,
       baseVersion: body.base_version,
+      ...(body.base_revision === undefined ? {} : { baseRevision: body.base_revision }),
       by: "agent",
       summary: body.summary ?? null
     });

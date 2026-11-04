@@ -1742,6 +1742,115 @@ describe("artefact, in an assistant conversation", () => {
       expect(hub.decks.get(agentId)?.version).toBe(2);
     });
 
+    it("should refuse the put, saying the user changed it, when the user amended the version deck get read", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      hub.writeDeckAsUser(agentId, outline({ asset: `sha256:${digest(PNG)}` }), { [digest(PNG)]: PNG });
+      expect((await cli(["deck", "get"], { sid })).code).toBe(0);
+      const dir = path.join(home.root, ".agent-hub", "decks", `0f8a6a1e-0000-4000-8000-${String(nextSession).padStart(12, "0")}`);
+      hub.amendDeckAsUser(agentId, { ...outline({ asset: `sha256:${digest(PNG)}` }), title: "Ways of shipping" });
+
+      // Act
+      const r = await cli(["deck", "put", path.join(dir, "outline.json")], { sid });
+
+      // Assert
+      expect(fs.readFileSync(path.join(dir, "revision"), "utf8")).toBe("1\n");
+      expect(r.code).toBe(1);
+      expect(r.errors.join("\n")).toMatch(/the user has changed version 1 of the deck since you read it\. Nothing was saved\./);
+      expect(calls(agentId, "PUT", "").find((c) => c.path === `/api/agent/${agentId}/deck`)?.body).toMatchObject({ base_version: 1, base_revision: 1 });
+      expect(hub.decks.get(agentId)?.outline?.title).toBe("Ways of shipping");
+    });
+
+    it("should record the revision each put answers, and send none with --base", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      hub.writeDeckAsUser(agentId, outline({ asset: `sha256:${digest(PNG)}` }), { [digest(PNG)]: PNG });
+      await cli(["deck", "get"], { sid });
+      const dir = path.join(home.root, ".agent-hub", "decks", `0f8a6a1e-0000-4000-8000-${String(nextSession).padStart(12, "0")}`);
+
+      // Act
+      const put = await cli(["deck", "put", path.join(dir, "outline.json")], { sid });
+      const explicit = await cli(["deck", "put", path.join(dir, "outline.json"), "--base", "2"], { sid });
+
+      // Assert
+      expect(put.code, put.errors.join("\n")).toBe(0);
+      expect(explicit.code, explicit.errors.join("\n")).toBe(0);
+      expect(fs.readFileSync(path.join(dir, "revision"), "utf8")).toBe("3\n");
+      const bodies = calls(agentId, "PUT", "")
+        .filter((c) => c.path === `/api/agent/${agentId}/deck`)
+        .map((c) => c.body);
+      expect(bodies[0]).toMatchObject({ base_version: 1, base_revision: 1 });
+      expect(bodies[1]).not.toHaveProperty("base_revision");
+    });
+
+    it("should write the latest version and print what changed since the version asked for, slide by slide, when deck get has --diff-from", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      const first = {
+        title: "Ways of working",
+        slides: [
+          { id: "why", layout: "HMCTS_SECTION", title: "Why it matters" },
+          { id: "how", layout: "HMCTS_CONTENT", title: "How we ship", bullets: ["Build", "Test"] },
+          { id: "old", layout: "HMCTS_SECTION", title: "Going away" }
+        ]
+      };
+      hub.writeDeckAsUser(agentId, first);
+      hub.writeDeckAsUser(agentId, {
+        title: "Ways of working",
+        slides: [
+          { id: "how", layout: "HMCTS_CONTENT", title: "How we ship", bullets: ["Build", "Test", "Release"] },
+          { id: "why", layout: "HMCTS_SECTION", title: "Why it matters" },
+          { id: "new", layout: "HMCTS_SECTION", title: "Questions" }
+        ]
+      });
+
+      // Act
+      const r = await cli(["deck", "get", "--diff-from", "1"], { sid });
+      const json = await cli(["deck", "get", "--diff-from", "1", "--json"], { sid });
+
+      // Assert
+      expect(r.code, r.errors.join("\n")).toBe(0);
+      expect(r.text().trimEnd().split("\n")).toEqual([
+        "Version 2, the latest, against version 1: 1 slide changed, 1 slide added, 1 slide removed and 1 slide moved.",
+        'Slide 2, id how, changed: "How we ship"',
+        "  Bullets: Build",
+        "    Test",
+        "    {+Release+}",
+        // A removed slide is listed after the one it followed in the older version.
+        'Removed: slide 4 of version 1, id old: "Going away"',
+        'Slide 3, id why, moved from slide 2: "Why it matters"',
+        'Slide 4, id new, added: "Questions"',
+        expect.stringMatching(/^agent-hub: wrote version 2 of the slide deck to \S*outline\.json/)
+      ]);
+      const dir = path.join(home.root, ".agent-hub", "decks", `0f8a6a1e-0000-4000-8000-${String(nextSession).padStart(12, "0")}`);
+      expect(fs.readFileSync(path.join(dir, "version"), "utf8")).toBe("2\n");
+      expect(JSON.parse(json.lines[0] as string)).toMatchObject({
+        version: 2,
+        revision: 2,
+        diff_from: 1,
+        diff: { counts: { added: 1, removed: 1, moved: 1, changed: 1 } }
+      });
+    });
+
+    it("should refuse --diff-from with --version or --slide, one that is not a number, and a version the deck does not keep", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      hub.writeDeckAsUser(agentId, outline({ asset: `sha256:${digest(PNG)}` }), { [digest(PNG)]: PNG });
+
+      // Act
+      const withVersion = await cli(["deck", "get", "--diff-from", "1", "--version", "1"], { sid });
+      const withSlide = await cli(["deck", "get", "--diff-from", "1", "--slide", "why"], { sid });
+      const bad = await cli(["deck", "get", "--diff-from", "v1"], { sid });
+      const missing = await cli(["deck", "get", "--diff-from", "9"], { sid });
+
+      // Assert
+      expect(withVersion.errors.join("\n")).toMatch(/cannot be given with --version or --slide/);
+      expect(withSlide.errors.join("\n")).toMatch(/cannot be given with --version or --slide/);
+      expect(bad.errors.join("\n")).toMatch(/--diff-from takes a version number from 1/);
+      expect(missing.code).toBe(1);
+      expect(missing.errors.join("\n")).toMatch(/does not keep version 9; the hub keeps the latest 100\. The latest, version 1, is in /);
+    });
+
     it("should record each version it puts from deck get's directory, so the next put builds on it", async () => {
       // Arrange
       const { sid, agentId } = await session();

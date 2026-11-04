@@ -335,14 +335,45 @@ describe("assistantEnvelope", () => {
 
   it("should tell the session to read the deck first when the user last changed it, as a fork's copy does", () => {
     // Act
-    const text = assistantEnvelope(personMessage, { ...pcs, deck_version: 1, deck_updated_by: "user" }, null);
+    const text = assistantEnvelope(personMessage, { ...pcs, deck_version: 1, deck_updated_by: "user", deck_revision: 1, deck_agent_version: 0 }, null);
 
     // Assert
     expect(text.split("\n")).toContain(
-      "The conversation's slide deck (version 1) was last changed by the user, not by you; read it with `agent-hub deck get` before changing it."
+      "The conversation's slide deck (version 1, revision 1) was last changed by the user, not by you; read it with `agent-hub deck get` before changing it, and build on their version."
     );
     expect(assistantEnvelope(personMessage, { ...pcs, deck_version: 2, deck_updated_by: "agent" }, null)).not.toMatch(/slide deck/);
     expect(assistantEnvelope(personMessage, { ...pcs, deck_version: 0, deck_updated_by: "user" }, null)).not.toMatch(/slide deck/);
+  });
+
+  it("should give the session the command that shows what the user changed since its own version when the user has edited the slides", () => {
+    // Act
+    const text = assistantEnvelope(personMessage, { ...pcs, deck_version: 5, deck_updated_by: "user", deck_revision: 9, deck_agent_version: 4 }, null);
+
+    // Assert
+    expect(text.split("\n")).toContain(
+      "The user has changed the conversation's slide deck since you last wrote it: it is now version 5, revision 9. Before changing anything, run `agent-hub deck get --diff-from 4`, which writes their latest version for you to work on and prints what they changed since your version 4; then build on their version, keeping their changes."
+    );
+  });
+
+  it("should name the revision an amend moved on to when the version is the same as before", () => {
+    // Arrange
+    const before = { ...pcs, deck_version: 5, deck_updated_by: "user" as const, deck_revision: 9, deck_agent_version: 4 };
+
+    // Act
+    const first = assistantEnvelope(personMessage, before, null);
+    const amended = assistantEnvelope(personMessage, { ...before, deck_revision: 10 }, null);
+
+    // Assert
+    expect(first).toMatch(/version 5, revision 9\./);
+    expect(amended).toMatch(/version 5, revision 10\./);
+  });
+
+  it("should leave the revision out when the hub is older than revisions", () => {
+    // Act
+    const text = assistantEnvelope(personMessage, { ...pcs, deck_version: 2, deck_updated_by: "user" }, null);
+
+    // Assert
+    expect(text).toMatch(/slide deck \(version 2\) was last changed by the user/);
   });
 
   it("should say both lines on every message, not only the first, until the session writes the document or the deck itself", () => {

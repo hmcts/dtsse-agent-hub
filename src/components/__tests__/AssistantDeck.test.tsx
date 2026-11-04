@@ -63,7 +63,7 @@ function deck(overrides: Partial<DeckView> = {}): DeckView {
 
 /** What the page hands the panel: the deck's version and no outline. */
 function summary(overrides: Partial<DeckSummary> = {}): DeckSummary {
-  return { title: "Ways of working", version: 7, updatedBy: "agent", pptx: true, ...overrides };
+  return { title: "Ways of working", version: 7, revision: 7, updatedBy: "agent", pptx: true, ...overrides };
 }
 
 /** The outline route, answering each read with the next of `answers` and the last one after that. */

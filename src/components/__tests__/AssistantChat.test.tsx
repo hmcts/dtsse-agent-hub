@@ -1958,7 +1958,7 @@ describe("ChatView slides", () => {
       { id: "s_ab12", layout: "HMCTS_CONTENT" as const, title: "Releases take three weeks", bullets: ["Build"] }
     ]
   };
-  const DECK: NonNullable<ConversationView["deck"]> = { title: "Ways of working", version: 7, updatedBy: "user", pptx: false };
+  const DECK: NonNullable<ConversationView["deck"]> = { title: "Ways of working", version: 7, revision: 7, updatedBy: "user", pptx: false };
   const WRITTEN = { title: "Story", markdown: "x", version: 1, updatedBy: "user" as const, updatedAt: "2026-10-21T09:00:00.000Z" };
 
   beforeEach(() => {
@@ -2109,6 +2109,47 @@ describe("ChatView slides", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close document" }));
     expect(screen.queryByRole("region", { name: "Document" })).toBeNull();
     expect(saveArtefact).toHaveBeenCalledTimes(1);
+  });
+
+  it("should keep the slides' editor open, say the document changed and mark its button, when the assistant writes the document mid-edit", async () => {
+    vi.useFakeTimers();
+    const saveDeck = vi.fn(() => new Promise<never>(() => undefined));
+    const chatActions = actions({ saveDeck });
+    const { rerender } = render(chat({ deck: DECK, artefact: WRITTEN }, chatActions));
+    await openSlides();
+    fireEvent.click(screen.getByRole("button", { name: "Edit slides" }));
+    // The page's announcer reads a burst as a count, so each announcement is let through on its own.
+    await announced();
+    fireEvent.change(screen.getByRole("textbox", { name: "Deck title" }), { target: { value: "Mine" } });
+
+    rerender(chat({ deck: DECK, artefact: { ...WRITTEN, version: 2, updatedBy: "agent" } }, chatActions));
+
+    expect(await announced()).toContain("The assistant updated the document. Open document to see it.");
+    expect(screen.getByRole("toolbar", { name: "Editing slides" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Document" })).toBeNull();
+    expect(screen.getByTestId("document-updated")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Open document, updated by the assistant" }));
+    expect(screen.getByRole("region", { name: "Document" })).toBeTruthy();
+    expect(screen.queryByTestId("document-updated")).toBeNull();
+  });
+
+  it("should open the slides' editor again with the edit, saying so, when the save made as it closes fails", async () => {
+    vi.useFakeTimers();
+    const saveDeck = vi.fn(async () => ({ ok: false as const, error: "down" }));
+    render(chat({ deck: DECK }, actions({ saveDeck })));
+    await openSlides();
+    fireEvent.click(screen.getByRole("button", { name: "Edit slides" }));
+    // The page's announcer reads a burst as a count, so each announcement is let through on its own.
+    await announced();
+    fireEvent.change(screen.getByRole("textbox", { name: "Deck title" }), { target: { value: "Mine" } });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Close slides" }));
+    });
+
+    expect(saveDeck).toHaveBeenCalledTimes(1);
+    expect((screen.getByRole("textbox", { name: "Deck title" }) as HTMLInputElement).value).toBe("Mine");
+    expect(await announced()).toContain("Your slides could not be saved, so they are open again");
   });
 
   it("should put the slide in front of the message as it is sent, and drop it afterwards, when the person asks about a slide", async () => {

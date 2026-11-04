@@ -391,7 +391,7 @@ describe("DeckHistory's older version", () => {
       [`GET ${deckVersionsUrl(CONVERSATION)}`]: { body: VERSIONS },
       [`GET ${deckVersionUrl(CONVERSATION, 5)}`]: { body: old() }
     });
-    render(<SharedDeck conversationId={CONVERSATION} deck={{ title: "Ways of working", version: 7, updatedBy: "agent", pptx: true }} />);
+    render(<SharedDeck conversationId={CONVERSATION} deck={{ title: "Ways of working", version: 7, revision: 7, updatedBy: "agent", pptx: true }} />);
     await settle();
 
     // Act

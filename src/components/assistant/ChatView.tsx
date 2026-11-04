@@ -28,6 +28,7 @@ import { Mark, SidebarToggle } from "@/components/assistant/AssistantShell";
 import { ChatMenu } from "@/components/assistant/ChatMenu";
 import { Composer } from "@/components/assistant/Composer";
 import type { ExportToConfluenceAction } from "@/components/assistant/ConfluenceExport";
+import type { SaveDeckAction, UnsavedDeckDraft } from "@/components/assistant/DeckEditor";
 import type { RestoreDeckAction } from "@/components/assistant/DeckHistory";
 import { DeckPanel, type SlideAsk } from "@/components/assistant/DeckPanel";
 import { ticketsOffered } from "@/components/assistant/ExportFooter";
@@ -62,6 +63,8 @@ export interface ChatActions {
   exportToConfluence?: ExportToConfluenceAction;
   /** Left out, the slides panel offers no restore of an older version. */
   restoreDeck?: RestoreDeckAction;
+  /** Left out, the slides panel offers no editing. */
+  saveDeck?: SaveDeckAction;
 }
 
 /**
@@ -350,13 +353,19 @@ export function ChatView({
   const [panel, setPanel] = useState<"document" | "deck" | null>(null);
   /** The document panel has edits not yet saved, or a conflict showing, which a panel opened in its place would cut short. */
   const documentBusy = useRef(false);
+  /** The same for the slides' editor. */
+  const deckBusy = useRef(false);
   /** The assistant wrote a newer deck while the document was busy, so the slides wait behind their button instead. */
   const [slidesWaiting, setSlidesWaiting] = useState(false);
+  /** The assistant wrote the document while the slides' editor was busy, so the document waits behind its button. */
+  const [documentWaiting, setDocumentWaiting] = useState(false);
   /**
    * An edit the document was closed on whose save then failed or found a newer version: the document opens again with
    * it, keyed afresh so a panel the person opened meanwhile takes it in too.
    */
   const [unsaved, setUnsaved] = useState<{ draft: UnsavedDraft; key: number } | null>(null);
+  /** The same for an edit the slides' editor was closed on. */
+  const [unsavedDeck, setUnsavedDeck] = useState<{ draft: UnsavedDeckDraft; key: number } | null>(null);
   const [ask, setAsk] = useState<SlideAsk | null>(null);
   const [error, setError] = useState<string | null>(null);
   const warmed = useRef(false);
@@ -377,19 +386,25 @@ export function ChatView({
     }
   });
 
-  // The assistant writing the document opens it, so the person sees what it was asked to draft.
+  // The assistant writing the document opens it, so the person sees what it was asked to draft, unless they are part-way
+  // through editing the slides, when it is announced and its button marked instead.
   useEffect(() => {
     if (view.artefact.version > seenVersion.current && view.artefact.updatedBy === "agent") {
-      setPanel("document");
-      arrivals.announce("The assistant updated the document");
+      if (panel === "deck" && deckBusy.current) {
+        setDocumentWaiting(true);
+        arrivals.announce("The assistant updated the document. Open document to see it.");
+      } else {
+        setPanel("document");
+        arrivals.announce("The assistant updated the document");
+      }
     }
     seenVersion.current = Math.max(seenVersion.current, view.artefact.version);
-  }, [view.artefact.version, view.artefact.updatedBy, arrivals]);
+  }, [view.artefact.version, view.artefact.updatedBy, arrivals, panel]);
 
   /**
    * The same for the deck: a newer version from the assistant opens the slides in the document's place, unless the
-   * person is part-way through the document, when it is announced and its button marked instead. The document is
-   * taken in over the slides whatever they are doing, since the slides hold nothing of theirs to lose.
+   * person is part-way through the document, when it is announced and its button marked instead. The slides' own
+   * editor takes in a newer deck itself, or offers it against the person's edit.
    */
   const deckVersion = view.deck?.version ?? 0;
   const deckBy = view.deck?.updatedBy ?? null;
@@ -408,11 +423,24 @@ export function ChatView({
   useEffect(() => {
     if (panel === "deck") {
       setSlidesWaiting(false);
+    } else {
+      setUnsavedDeck(null);
     }
-    if (panel !== "document") {
+    if (panel === "document") {
+      setDocumentWaiting(false);
+    } else {
       setUnsaved(null);
     }
   }, [panel]);
+  function reopenDeck(draft: UnsavedDeckDraft): void {
+    setUnsavedDeck((before) => ({ draft, key: (before?.key ?? 0) + 1 }));
+    setPanel("deck");
+    arrivals.announce(
+      draft.conflict === null
+        ? "Your slides could not be saved, so they are open again"
+        : "The slides changed while you were editing them, so they are open again"
+    );
+  }
   function reopenDocument(draft: UnsavedDraft): void {
     setUnsaved((before) => ({ draft, key: (before?.key ?? 0) + 1 }));
     setPanel("document");
@@ -463,6 +491,9 @@ export function ChatView({
   const scroller = useStickToBottom<HTMLDivElement>(`${thread.length}:${doing.state}`);
   function markDocumentBusy(busy: boolean): void {
     documentBusy.current = busy;
+  }
+  function markDeckBusy(busy: boolean): void {
+    deckBusy.current = busy;
   }
   const artefact: ArtefactSnapshot = {
     title: view.artefact.title,
@@ -564,13 +595,14 @@ export function ChatView({
                 onClick={() => setPanel("document")}
                 // Named here as well, because below 480px the icon stands alone so that a 320px header still fits
                 // the title, the product chip and both buttons.
-                aria-label={view.artefact.version > 0 ? "Open document" : "Add document"}
-                className="flex h-[34px] items-center whitespace-nowrap rounded-[9px] border border-asst-strong px-2.5 text-[13px] hover:border-asst-accent-line hover:bg-asst-field min-[480px]:gap-2 min-[480px]:pr-3"
+                aria-label={documentWaiting ? "Open document, updated by the assistant" : view.artefact.version > 0 ? "Open document" : "Add document"}
+                className={`flex h-[34px] items-center whitespace-nowrap rounded-[9px] border px-2.5 text-[13px] hover:border-asst-accent-line hover:bg-asst-field min-[480px]:gap-2 min-[480px]:pr-3 ${documentWaiting ? "border-asst-accent bg-asst-field" : "border-asst-strong"}`}
               >
                 <span aria-hidden="true" className="text-lg leading-none text-asst-accent">
                   +
                 </span>
                 <span className="hidden min-[480px]:inline">{view.artefact.version > 0 ? "Open document" : "Add document"}</span>
+                {documentWaiting ? <span aria-hidden="true" data-testid="document-updated" className="h-1.5 w-1.5 rounded-full bg-asst-accent" /> : null}
               </button>
             )}
             <ChatMenu
@@ -692,6 +724,11 @@ export function ChatView({
       </div>
       {panel === "deck" && view.deck !== null ? (
         <DeckPanel
+          key={unsavedDeck?.key ?? 0}
+          draft={unsavedDeck?.draft}
+          onUnsaved={reopenDeck}
+          save={actions.saveDeck}
+          onBusy={markDeckBusy}
           conversationId={view.id}
           deck={view.deck}
           onClose={() => setPanel(null)}

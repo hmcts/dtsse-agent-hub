@@ -525,6 +525,8 @@ model AssistantConversation {
   /// user or agent.
   deckUpdatedBy     String?   @map("deck_updated_by")
   deckUpdatedAt     DateTime? @map("deck_updated_at") @db.Timestamptz(6)
+  /// Moved on by every write of the outline, an amend of the latest version included. See "Revisions" in docs/agent-api.md.
+  deckRevision      Int       @default(0) @map("deck_revision")
   jiraExportId      String?   @map("jira_export_id") @db.Uuid
   jiraProject       String?   @map("jira_project")
   /// pending, done or failed; null before the first export.
@@ -606,6 +608,10 @@ model AssistantDeckVersion {
   summary        String?
   createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   pptx           Bytes?
+  /// Who wrote it through the web UI's editor, which only they may amend; null for every other write.
+  editorOid      String?  @map("editor_oid")
+  /// The last amend; null for a version never amended.
+  updatedAt      DateTime? @map("updated_at") @db.Timestamptz(6)
 
   conversation AssistantConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 

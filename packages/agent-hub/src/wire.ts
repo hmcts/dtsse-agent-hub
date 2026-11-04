@@ -238,6 +238,8 @@ export type Deck = {
   title: string | null;
   outline: DeckOutline | null;
   version: number;
+  /** Moved on by every write of the outline, a person's amend of their latest version included; absent from an older hub. */
+  revision?: number;
   updated_by: "user" | "agent" | null;
   updated_at: string | null;
   pptx: boolean;
@@ -255,10 +257,12 @@ export type DeckOutline = { title?: string; slides?: DeckSlide[]; [field: string
 export type DeckBody = {
   outline: DeckOutline;
   base_version: number;
+  /** The revision the outline was read at, so a person's amend since is refused rather than overwritten. */
+  base_revision?: number;
   summary?: string;
 };
 
-export type DeckResponse = { version: number; outline: DeckOutline };
+export type DeckResponse = { version: number; revision?: number; outline: DeckOutline };
 
 export type DeckAssetResponse = { asset: string };
 

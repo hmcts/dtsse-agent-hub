@@ -1,7 +1,7 @@
 import type { Database } from "../store/prisma.ts";
 import { ARTEFACT_SELECT, toArtefact } from "./artefact-store.ts";
 import { CONFLUENCE_SELECT, type ConfluenceExportFrame, pendingConfluenceExport } from "./confluence.ts";
-import { DECK_SELECT, deckAuthor } from "./deck-store.ts";
+import { DECK_SELECT, deckAuthor, newestAgentVersion } from "./deck-store.ts";
 import { GITHUB_SELECT, type GithubExportFrame, pendingGithubExport } from "./github.ts";
 import { JIRA_SELECT, type JiraExportFrame, pendingJiraExport } from "./jira.ts";
 import { readAssistantModel } from "./model-store.ts";
@@ -31,6 +31,10 @@ export interface AssistantFrame {
   /** The conversation's slide deck's latest version, 0 before there is one, and who wrote it. */
   deck_version: number;
   deck_updated_by: "user" | "agent" | null;
+  /** Moved on by every write of the outline, so an amend of the person's latest version is seen though `deck_version` stays. */
+  deck_revision: number;
+  /** The newest kept version the session wrote itself, 0 when none is: what the envelope tells it to diff from. */
+  deck_agent_version: number;
   /** While an export to Jira is pending: what to create, which the session carries out with `twg`. */
   jira_export?: JiraExportFrame;
   /** While an export to GitHub is pending: the repository to create the issue in, which the session does with `gh`. */
@@ -76,6 +80,8 @@ export async function assistantFrame(db: Database, agentId: string, messageId?: 
     artefact_updated_by: artefact.updatedBy,
     deck_version: conversation.deckVersion,
     deck_updated_by: deckAuthor(conversation),
+    deck_revision: conversation.deckRevision,
+    deck_agent_version: await newestAgentVersion(db, conversation.id),
     ...(jira === undefined ? {} : { jira_export: jira }),
     ...(github === undefined ? {} : { github_export: github }),
     ...(confluence === undefined ? {} : { confluence_export: confluence }),
