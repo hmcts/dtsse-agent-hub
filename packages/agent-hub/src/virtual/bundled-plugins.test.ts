@@ -3,12 +3,14 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  ALWAYS_ON_PLUGINS,
   BUNDLED_DIRS_VAR,
   BUNDLED_PLUGINS,
   bundledDirsOf,
   bundledPluginDir,
   installBundled,
-  installTicked,
+  installLoaded,
+  loadedBundled,
   PACKAGE_PLUGINS,
   pluginCacheRoot,
   pluginVersion,
@@ -50,6 +52,28 @@ describe("bundled plugins", () => {
     expect(tickedBundled({ AGENT_HUB_PLUGINS: "pcs, welsh ,dtsse" })).toEqual(["welsh"]);
     expect(tickedBundled({ AGENT_HUB_PLUGINS: "pcs" })).toEqual([]);
     expect(tickedBundled({})).toEqual([]);
+  });
+
+  it("should load slides whether or not it is ticked", () => {
+    expect(ALWAYS_ON_PLUGINS).toEqual(["slides"]);
+    expect(loadedBundled({})).toEqual(["slides"]);
+    expect(loadedBundled({ AGENT_HUB_PLUGINS: "pcs" })).toEqual(["slides"]);
+  });
+
+  it("should load welsh only when it is ticked, and slides once when it is ticked too", () => {
+    expect(loadedBundled({ AGENT_HUB_PLUGINS: "pcs,welsh" })).toEqual(["slides", "welsh"]);
+    expect(loadedBundled({ AGENT_HUB_PLUGINS: "slides,welsh" })).toEqual(["slides", "welsh"]);
+    expect(loadedBundled({ AGENT_HUB_PLUGINS: "slides" })).toEqual(["slides"]);
+  });
+
+  it("should copy slides onto the pod when nothing is ticked", () => {
+    const copied: string[] = [];
+    const dirs = installLoaded({}, "/workspace/cft-workspace", undefined, (name) => {
+      copied.push(name);
+      return `/copies/${name}`;
+    });
+    expect(copied).toEqual(["slides"]);
+    expect(dirs).toEqual(["/copies/slides"]);
   });
 
   it("should keep the copies beside the workspace, on the same disk", () => {
@@ -121,17 +145,20 @@ describe("bundled plugins", () => {
     expect(fs.existsSync(unrelated)).toBe(true);
   });
 
-  it("should say and leave out a ticked plugin it cannot copy, rather than stop", () => {
+  it("should say and leave out a plugin it cannot copy, rather than stop", () => {
     const said: string[] = [];
-    const dirs = installTicked(
+    const dirs = installLoaded(
       { AGENT_HUB_PLUGINS: "welsh" },
       "/workspace/cft-workspace",
       (m) => said.push(m),
-      () => {
-        throw new Error("ENOSPC");
+      (name) => {
+        if (name === "welsh") {
+          throw new Error("ENOSPC");
+        }
+        return `/copies/${name}`;
       }
     );
-    expect(dirs).toEqual([]);
+    expect(dirs).toEqual(["/copies/slides"]);
     expect(said).toEqual(["plugin welsh: could not copy it onto this pod: ENOSPC"]);
   });
 });

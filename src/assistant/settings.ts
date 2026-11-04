@@ -1,5 +1,5 @@
 import type { VirtualAgentDesired, VirtualAgentStatus } from "../virtual-agents/lifecycle.ts";
-import type { PluginOption } from "../virtual-agents/plugins.ts";
+import { isAlwaysOn, type PluginOption } from "../virtual-agents/plugins.ts";
 
 /**
  * What the Assistant's settings need that is not a sign-in or an appearance. Pure, so the page can build it and the
@@ -39,9 +39,12 @@ export function assistantPluginsData(
   };
 }
 
-/** What the hub offers, then any ticked name it no longer does, which can be kept or unticked but not ticked again. */
+/**
+ * What the hub offers, then any ticked name it no longer does, which can be kept or unticked but not ticked again. An
+ * always-on name a row still has is not shown: there is nothing to choose, and saving keeps it.
+ */
 export function pluginChoices(available: readonly PluginOption[], checked: readonly string[]): (PluginOption & { offered: boolean })[] {
   const offered = available.map((option) => ({ ...option, offered: true }));
-  const dropped = checked.filter((name) => !available.some((option) => option.name === name));
+  const dropped = checked.filter((name) => !isAlwaysOn(name) && !available.some((option) => option.name === name));
   return [...offered, ...dropped.map((name) => ({ name, description: "", offered: false }))];
 }

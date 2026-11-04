@@ -6,16 +6,7 @@ import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { findAssistantWithClaims } from "./assistant-store.ts";
 import type { DeckOutline } from "./deck.ts";
-import {
-  buildStatus,
-  DECK_BUILD_TIMEOUT_MS,
-  DECK_BUILDS_KEPT,
-  type DeckBuildRequest,
-  type DeckBuildView,
-  heldBuildSince,
-  SLIDES_NOT_TURNED_ON,
-  SLIDES_PLUGIN
-} from "./deck-build.ts";
+import { buildStatus, DECK_BUILD_TIMEOUT_MS, DECK_BUILDS_KEPT, type DeckBuildRequest, type DeckBuildView, heldBuildSince } from "./deck-build.ts";
 import { readDeckVersionEntry } from "./deck-history-store.ts";
 import { type DeckAsset, lockConversation } from "./deck-store.ts";
 import { accessToConversation } from "./shares.ts";
@@ -87,9 +78,6 @@ export async function requestDeckBuild(
     return { status: "assistant_gone" };
   }
   const { assistant } = found;
-  if (!assistant.plugins.includes(SLIDES_PLUGIN)) {
-    throw new HttpError(409, SLIDES_NOT_TURNED_ON);
-  }
   const ready = await podReady(prisma, viewerOid, found, "deck-build", now);
   if (ready !== "ok") {
     return { status: ready };

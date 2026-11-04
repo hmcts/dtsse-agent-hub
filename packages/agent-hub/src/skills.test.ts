@@ -292,6 +292,22 @@ describe("hubPlugins", () => {
     expect(unticked).toEqual([]);
   });
 
+  it("should give the slides plugin to a session started with its copy when nothing is ticked", () => {
+    // Arrange
+    const l = layout();
+    const dir = installBundled("slides", l.project);
+
+    // Act
+    const main = hubPlugins({ project: l.project, env: {} });
+    const conversation = hubPlugins({ project: l.project, env: { [BUNDLED_DIRS_VAR]: dir } });
+    const ticked = hubPlugins({ project: l.project, env: { AGENT_HUB_PLUGINS: "slides", [BUNDLED_DIRS_VAR]: dir } });
+
+    // Assert
+    expect(main).toEqual([]);
+    expect(conversation).toEqual([{ name: "slides", dir }]);
+    expect(ticked).toEqual([{ name: "slides", dir }]);
+  });
+
   it("should skip an entry whose source is missing when the marketplace is malformed", () => {
     // Arrange
     const l = layout();

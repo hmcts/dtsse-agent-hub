@@ -1,5 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
-import { availablePlugins, checkPlugins, MAX_PLUGINS, PluginConfigurationError, samePlugins, storedPlugins } from "./plugins.ts";
+import {
+  ALWAYS_ON_PLUGINS,
+  availablePlugins,
+  checkPlugins,
+  isAlwaysOn,
+  MAX_PLUGINS,
+  PluginConfigurationError,
+  samePlugins,
+  storedPlugins,
+  withStoredAlwaysOn
+} from "./plugins.ts";
+
+describe("ALWAYS_ON_PLUGINS", () => {
+  it("should hold slides and not welsh", () => {
+    expect(ALWAYS_ON_PLUGINS).toEqual(["slides"]);
+    expect(isAlwaysOn("slides")).toBe(true);
+    expect(isAlwaysOn("welsh")).toBe(false);
+  });
+});
 
 describe("availablePlugins", () => {
   it.each([{}, { VIRTUAL_AGENT_PLUGINS: "" }, { VIRTUAL_AGENT_PLUGINS: " , ," }])("should offer none when the variable is %j", (env) => {
@@ -16,6 +34,12 @@ describe("availablePlugins", () => {
 
   it("should keep the first entry when a name is repeated", () => {
     expect(availablePlugins({ VIRTUAL_AGENT_PLUGINS: "pcs=first,pcs=second" })).toEqual([{ name: "pcs", description: "first" }]);
+  });
+
+  it("should not offer slides when the configuration still names it", () => {
+    expect(availablePlugins({ VIRTUAL_AGENT_PLUGINS: "welsh=Welsh translations,slides=HMCTS slide decks" })).toEqual([
+      { name: "welsh", description: "Welsh translations" }
+    ]);
   });
 
   it.each(["PCS", "-pcs", "pcs team", "=no name", "pcs/x"])("should refuse the configuration when it names %j", (entry) => {
@@ -36,6 +60,11 @@ describe("checkPlugins", () => {
 
   it("should refuse a name the hub does not offer", () => {
     expect(checkPlugins(["pcs", "civil"], () => OFFERED)).toEqual({ ok: false, error: "civil is not a plugin this hub offers" });
+  });
+
+  it("should accept slides and store it no more when the form sends it, though the hub does not offer it", () => {
+    expect(checkPlugins(["slides", "pcs"], () => OFFERED)).toEqual({ ok: true, plugins: ["pcs"] });
+    expect(checkPlugins(["slides"], () => OFFERED)).toEqual({ ok: true, plugins: [] });
   });
 
   it.each([[["pcs team"]], [[""]], [[3]], [[{}]]])("should refuse %j when it is not a list of plugin names", (raw) => {
@@ -85,6 +114,19 @@ describe("samePlugins", () => {
     expect(samePlugins(["dtsse", "pcs"], ["dtsse", "pcs"])).toBe(true);
     expect(samePlugins(["dtsse", "pcs"], ["dtsse"])).toBe(false);
     expect(samePlugins([], [])).toBe(true);
+  });
+});
+
+describe("withStoredAlwaysOn", () => {
+  it("should keep the slides a row already has, in code-point order, whatever is chosen", () => {
+    expect(withStoredAlwaysOn(["pcs", "slides"], ["welsh"])).toEqual(["slides", "welsh"]);
+    expect(withStoredAlwaysOn(["pcs", "slides"], [])).toEqual(["slides"]);
+    expect(withStoredAlwaysOn(["slides"], ["slides"])).toEqual(["slides"]);
+  });
+
+  it("should not add slides when the row does not have it", () => {
+    expect(withStoredAlwaysOn(["pcs"], ["welsh"])).toEqual(["welsh"]);
+    expect(withStoredAlwaysOn([], [])).toEqual([]);
   });
 });
 

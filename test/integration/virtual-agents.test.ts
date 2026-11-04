@@ -583,6 +583,43 @@ describe("a virtual agent's plugins", () => {
     await expect(setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, ["dtsse", "pcs"])).rejects.toMatchObject({ status: 400 });
   });
 
+  it("should create an agent without slides when the request names it, since every pod loads it", async () => {
+    expect((await createWith(["slides", "pcs"])).plugins).toEqual(["pcs"]);
+  });
+
+  it("should save the settings of an agent that has a stored slides, keeping it, when the form does not send it", async () => {
+    const { id } = await started(ALICE, "pcs-api");
+    await prisma.virtualAgent.update({ where: { id }, data: { plugins: ["pcs", "slides"] } });
+    const before = await row(id);
+    actAs("alice");
+
+    expect(await actions.setVirtualAgentPlugins(ticked({ id }, ["pcs"]))).toEqual({ ok: true, confirmation: "Its plugins are unchanged" });
+    expect(await row(id)).toMatchObject({ plugins: ["pcs", "slides"], generation: before.generation, podGeneration: before.podGeneration });
+
+    expect(await actions.setVirtualAgentPlugins(ticked({ id }, ["dtsse"]))).toEqual({ ok: true, confirmation: "pcs-api is restarting with its new plugins" });
+    expect((await row(id)).plugins).toEqual(["dtsse", "slides"]);
+    expect((await claim()).find((entry) => entry.id === id)).toMatchObject({ plugins: ["dtsse", "slides"] });
+  });
+
+  it("should neither add nor refuse slides when the form sends it for an agent that has none stored", async () => {
+    const agent = await createWith(["pcs"]);
+
+    expect(await setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, ["pcs", "slides"])).toMatchObject({ plugins: ["pcs"], generation: agent.generation });
+  });
+
+  it("should refuse a stored slides and every offered plugin together with 400 when that is more than the most an agent may have", async () => {
+    const many = Array.from({ length: 20 }, (_, index) => `p-${index}`);
+    vi.stubEnv("VIRTUAL_AGENT_PLUGINS", many.join(","));
+    const agent = await createWith([]);
+    await prisma.virtualAgent.update({ where: { id: agent.id }, data: { plugins: ["slides"] } });
+
+    await expect(setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, many)).rejects.toMatchObject({
+      status: 400,
+      message: "a virtual agent has at most 20 plugins"
+    });
+    expect((await row(agent.id)).plugins).toEqual(["slides"]);
+  });
+
   it("should refuse someone other than the owner as if there were no such agent", async () => {
     const agent = await create(ALICE, "pcs-api");
 

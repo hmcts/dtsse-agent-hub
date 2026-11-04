@@ -10,6 +10,16 @@ import type { Environment } from "./settings.ts";
  * it.
  */
 
+/**
+ * The plugins every pod loads without being ticked, as the pod client's own `ALWAYS_ON_PLUGINS` does
+ * (`packages/agent-hub/src/virtual/bundled-plugins.ts`). Slides is one because the Assistant's slides panel, history,
+ * editing and builds depend on it. None is offered, and a form's value naming one is not stored; one a row already
+ * has is kept, since a pod whose client predates always-on plugins loads it only because it is named.
+ */
+export const ALWAYS_ON_PLUGINS: readonly string[] = ["slides"];
+
+export const isAlwaysOn = (name: string): boolean => ALWAYS_ON_PLUGINS.includes(name);
+
 export const MAX_PLUGINS = 20;
 
 /** A marketplace plugin name: lowercase letters, digits and hyphens, starting with a letter or digit. */
@@ -35,7 +45,8 @@ export const NO_PLUGINS: PluginOffer = { ok: true, available: [] };
 
 /**
  * `VIRTUAL_AGENT_PLUGINS`, a comma-separated list of `name` or `name=description`, as `pcs=PCS team workflows,dtsse`,
- * in the order given. A name repeated keeps its first entry. Read per call, as the other virtual-agent settings are.
+ * in the order given. A name repeated keeps its first entry, and an always-on one is left out, since there is nothing
+ * to tick. Read per call, as the other virtual-agent settings are.
  */
 export function availablePlugins(env: Environment = process.env): PluginOption[] {
   const options: PluginOption[] = [];
@@ -49,7 +60,7 @@ export function availablePlugins(env: Environment = process.env): PluginOption[]
     if (!PLUGIN_NAME.test(name)) {
       throw new PluginConfigurationError(`VIRTUAL_AGENT_PLUGINS has ${JSON.stringify(name)}, which is not a plugin name`);
     }
-    if (!options.some((option) => option.name === name)) {
+    if (!isAlwaysOn(name) && !options.some((option) => option.name === name)) {
       options.push({ name, description });
     }
   }
@@ -59,8 +70,9 @@ export function availablePlugins(env: Environment = process.env): PluginOption[]
 export type CheckedPlugins = { ok: true; plugins: string[] } | { ok: false; error: string };
 
 /**
- * A form that sends none ticks none. Otherwise each value has to be one of `allowed`, and what is kept is the
- * distinct names in code-point order, so the same set is always stored, and passed to the pod, the same way.
+ * A form that sends none ticks none. Otherwise each value has to be one of `allowed` or always on, and what is kept is
+ * the distinct names in code-point order, leaving out the always-on ones, so the same set is always stored, and passed
+ * to the pod, the same way.
  *
  * `allowed` is a function because reading the hub's offer list can throw on a malformed `VIRTUAL_AGENT_PLUGINS`, and
  * nothing that ticks no plugins needs the list to be readable. Creating a virtual agent is the case that matters:
@@ -80,6 +92,9 @@ export function checkPlugins(raw: unknown, allowed: () => readonly string[]): Ch
     if (!PLUGIN_NAME.test(name)) {
       return { ok: false, error: "a plugin name is lowercase letters, digits and hyphens" };
     }
+    if (isAlwaysOn(name)) {
+      continue;
+    }
     if (!offered.includes(name)) {
       return { ok: false, error: `${name} is not a plugin this hub offers` };
     }
@@ -93,6 +108,14 @@ export function checkPlugins(raw: unknown, allowed: () => readonly string[]): Ch
 
 export function samePlugins(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((name, index) => name === b[index]);
+}
+
+/**
+ * What a save stores: the names chosen, with the always-on ones the row already has, which no form shows or sends,
+ * kept so that saving neither drops them from an older pod client nor restarts the pod for a change it would not see.
+ */
+export function withStoredAlwaysOn(stored: readonly string[], chosen: readonly string[]): string[] {
+  return [...new Set([...chosen, ...stored.filter(isAlwaysOn)])].sort(byCodePoint);
 }
 
 /** What is stored, which the database only checks is an array, as the names in it. */

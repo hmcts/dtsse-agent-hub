@@ -11,7 +11,6 @@ import {
   buildFailure,
   createDeckBuildRunner,
   type DeckBuildDeps,
-  NOT_LOADED,
   parseDeckBuildFrame,
   runDeckBuild,
   STILL_PREPARING,
@@ -154,17 +153,24 @@ describe("runDeckBuild", () => {
     expect(answerOf(frame.job_id)?.error).toBe(TOO_SLOW);
   });
 
-  it("should not run anything when the owner has not ticked the slides plugin", async () => {
+  it("should build the version when the owner has not ticked the slides plugin, which every pod loads", async () => {
     // Arrange
     const frame = asked();
-    const { deps: d, calls } = deps(() => ({ code: 0, stdout: "{}", stderr: "" }), { env: { AGENT_HUB_PLUGINS: "welsh" } });
+    const { deps: d, calls } = deps(
+      ({ args }) => {
+        fs.writeFileSync(args[3] as string, PPTX);
+        return { code: 0, stdout: JSON.stringify({ out: args[3] }), stderr: "" };
+      },
+      { env: { AGENT_HUB_PLUGINS: "welsh" } }
+    );
 
     // Act
     await runDeckBuild(d, frame);
 
     // Assert
-    expect(calls).toEqual([]);
-    expect(answerOf(frame.job_id)?.error).toBe(NOT_LOADED);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.cmd).toBe(path.join(d.workspace, "..", "slides-copy", "scripts", "slides"));
+    expect(answerOf(frame.job_id)).toEqual({ virtual_id: VID, job_id: frame.job_id, pptx: PPTX });
   });
 
   it("should answer with why when the hub no longer has the build to read", async () => {

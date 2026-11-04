@@ -43,7 +43,7 @@ export function tmuxName(conversationId: string): string {
 // `model` is what `launcherModel` gave — a bare family alias — quoted for the same shell, so whatever the hub sends
 // is one argument and nothing in it is read as a glob. Without one the session runs on hai's default for the route.
 //
-// `pluginDirs` are the pod's copies of the plugins this package carries that the owner ticked, each a
+// `pluginDirs` are the pod's copies of the plugins this package carries that it loads, always-on or ticked, each a
 // `--plugin-dir`, quoted as the prompt file is. hai loads the workspace marketplace's itself, and skips these names,
 // which that marketplace does not list.
 export function claudeCommand(sessionId: string, resume: boolean, model: string | null = null, pluginDirs: readonly string[] = []): string {

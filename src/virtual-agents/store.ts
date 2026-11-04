@@ -9,7 +9,7 @@ import { CLAIM_TIMEOUT_MS, diskExpiresAt } from "./cleanup.ts";
 import { hashLaunchToken, isWellFormedLaunchToken, launchTokenMatches, mintLaunchToken, withoutLaunchTokens } from "./launch-token.ts";
 import { afterApplyError, awaitsOwner, nextStatus, type Observation, type PodPhase, type VirtualAgentDesired, type VirtualAgentStatus } from "./lifecycle.ts";
 import { checkName, createRefusal } from "./limits.ts";
-import { availablePlugins, checkPlugins, samePlugins, storedPlugins } from "./plugins.ts";
+import { availablePlugins, checkPlugins, MAX_PLUGINS, samePlugins, storedPlugins, withStoredAlwaysOn } from "./plugins.ts";
 import { normalisePorts, samePorts } from "./ports.ts";
 import { diskTtlDays, type GatewaySettings, gatewaySettings, orchestratorLeaseSeconds } from "./settings.ts";
 import { checkSize, sizeChangeRefusal, type VirtualAgentSize } from "./size.ts";
@@ -361,7 +361,8 @@ export async function setVirtualAgentSize(prisma: PrismaClient, actorOid: string
 
 /**
  * The plugins the pod loads, any of those `VIRTUAL_AGENT_PLUGINS` offers. A name no longer offered may be kept, so the
- * owner can save other changes without first unticking it, but not added. A change bumps `generation` and
+ * owner can save other changes without first unticking it, but not added. An always-on plugin is never offered, and
+ * one the row already has is kept whatever the form sends (`withStoredAlwaysOn`). A change bumps `generation` and
  * `pod_generation`, as a resize does, so the orchestrator applies the StatefulSet with the new `AGENT_HUB_PLUGINS`:
  * a running pod is replaced, and the conversation continues on its disk; a stopped one picks the change up when it
  * next starts. Refused while the agent is being deleted; someone other than the owner is told there is no such agent.
@@ -387,13 +388,17 @@ export async function setVirtualAgentPlugins(
     if (!checked.ok) {
       throw new HttpError(400, checked.error);
     }
-    if (samePlugins(row.plugins, checked.plugins)) {
+    const next = withStoredAlwaysOn(row.plugins, checked.plugins);
+    if (next.length > MAX_PLUGINS) {
+      throw new HttpError(400, `a virtual agent has at most ${MAX_PLUGINS} plugins`);
+    }
+    if (samePlugins(row.plugins, next)) {
       return row;
     }
     const updated = toRow(
       await tx.virtualAgent.update({
         where: { id },
-        data: { plugins: checked.plugins, ...NO_TOKEN, ...POD_CHANGE, ...NO_MEMORY_REPORT, ...noClientClaim(), updatedAt: now },
+        data: { plugins: next, ...NO_TOKEN, ...POD_CHANGE, ...NO_MEMORY_REPORT, ...noClientClaim(), updatedAt: now },
         select: SELECT
       })
     );

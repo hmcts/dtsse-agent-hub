@@ -392,7 +392,7 @@ describe("a version the person wrote", () => {
       }),
       { params: Promise.resolve({ id: mine.virtualAgentId }) }
     );
-    const row = await prisma.virtualAgent.update({ where: { id: mine.virtualAgentId }, data: { plugins: ["slides"] }, select: { generation: true } });
+    const row = await prisma.virtualAgent.findUniqueOrThrow({ where: { id: mine.virtualAgentId }, select: { generation: true } });
     await prisma.virtualAgent.update({
       where: { id: mine.virtualAgentId },
       data: { observedGeneration: row.generation, status: "running", clientFeatures: ["deck-build"] }

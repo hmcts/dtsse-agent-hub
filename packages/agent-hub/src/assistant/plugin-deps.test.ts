@@ -7,9 +7,9 @@ const install = (name: string) => `/workspace/.agent-hub-plugins/${name}-0123456
 const ok = () => vi.fn(async () => ({ code: 0, stdout: "", stderr: "" }));
 
 describe("prepareBundled", () => {
-  it("should run the pod's copy of scripts/slides deps when slides is ticked", async () => {
+  it("should run the pod's copy of scripts/slides deps when slides is not ticked", async () => {
     const run = ok();
-    await prepareBundled("slides", { run, env: { AGENT_HUB_PLUGINS: "pcs,slides", HOME: "/home/agent" }, workspace: WS, install });
+    await prepareBundled("slides", { run, env: { AGENT_HUB_PLUGINS: "pcs", HOME: "/home/agent" }, workspace: WS, install });
     expect(run).toHaveBeenCalledTimes(1);
     expect(run).toHaveBeenCalledWith(join(install("slides"), "scripts", "slides"), ["deps"], {
       env: expect.objectContaining({ HOME: "/home/agent" }),
@@ -17,10 +17,10 @@ describe("prepareBundled", () => {
     });
   });
 
-  it("should run nothing and make no copy when slides is not ticked", async () => {
+  it("should run nothing and make no copy when welsh is not ticked", async () => {
     const run = ok();
     const copy = vi.fn(install);
-    await prepareBundled("slides", { run, env: { AGENT_HUB_PLUGINS: "welsh" }, workspace: WS, install: copy });
+    await prepareBundled("welsh", { run, env: { AGENT_HUB_PLUGINS: "slides" }, workspace: WS, install: copy });
     expect(run).not.toHaveBeenCalled();
     expect(copy).not.toHaveBeenCalled();
   });

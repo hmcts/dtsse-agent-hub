@@ -10,9 +10,9 @@ import { materialise } from "../cli/deck.ts";
 import type { Env } from "../env.ts";
 import { withRetry } from "../retry.ts";
 import type { Run } from "./lookups.ts";
-import { bundledScript, MIN_RUN_MS, readyWithin, reason, safeSay } from "./plugin-deps.ts";
+import { alwaysOnScript, MIN_RUN_MS, readyWithin, reason, safeSay } from "./plugin-deps.ts";
 
-/** The plugin that carries `scripts/slides`, and the name the owner ticks. */
+/** The plugin that carries `scripts/slides`, which every pod loads (`ALWAYS_ON_PLUGINS`). */
 export const SLIDES_PLUGIN = "slides";
 
 /** Under the hub's 15 minutes for a build, so an answer is never thrown away. */
@@ -24,8 +24,6 @@ const MAX_ERROR = 2000;
 
 const UUID_RE = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
 
-export const NOT_LOADED =
-  "Slides is not turned on for your assistant. Tick it in Settings, under Tools. If you have just ticked it, your assistant is restarting to load it: try again in a minute or two.";
 export const TOO_SLOW = "Building the slides took too long. Try again.";
 /** What a build answers when the slides tools' first install has taken so long that the build could not finish in time. */
 export const STILL_PREPARING = "Your assistant is still setting up the slides tools. Try again in a few minutes.";
@@ -129,10 +127,7 @@ async function buildIn(
   deadline: number,
   clock: () => number
 ): Promise<{ pptx: Uint8Array } | { error: string }> {
-  const script = bundledScript(SLIDES_PLUGIN, deps.workspace, deps.env, deps.install);
-  if (script === null) {
-    return { error: NOT_LOADED };
-  }
+  const script = alwaysOnScript(SLIDES_PLUGIN, deps.workspace, deps.install);
   const build = await deps.api.deckBuild(deps.id, frame.job_id);
   if (build.version !== frame.version || build.conversation_id !== frame.conversation_id) {
     return { error: "The hub sent a different version from the one asked for. Try again." };
