@@ -4,7 +4,7 @@ HMCTS-branded PowerPoint decks from an outline. The `/slides:deck` skill asks wh
 how long it should be, writes an outline, and runs `scripts/slides build`, which turns the outline into a `.pptx`.
 
 The agent hub carries the plugin and puts it on the virtual agent of anyone who ticks **HMCTS slide decks** in the
-CFT Workspace's Settings, under Tools. In a conversation the skill then publishes the deck with `agent-hub deck put`,
+CFT Workspace's Settings, under Plugins. In a conversation the skill then publishes the deck with `agent-hub deck put`,
 and the person sees its slides beside the chat and downloads the `.pptx` from there (the Decks section of
 `docs/agent-api.md`).
 

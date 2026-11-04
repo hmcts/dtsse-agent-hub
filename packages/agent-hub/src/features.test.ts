@@ -34,7 +34,7 @@ describe("CLIENT_FEATURES", () => {
    * restart — which it will not, the claim being missing from the published client. `stop`, `attachments` and
    * `files` are quieter: the feature is withheld and nothing says so, which is why these two are worth the words and
    * those three are covered by being on the list at all. `model-alias` is quiet the same way, except that
-   * what is withheld is a reassurance: the Model section tells the person their choice waits for the next start,
+   * what is withheld is a reassurance: the Assistant section's model choice tells the person their choice waits for the next start,
    * which is wrong for a pod running this build.
    * `github-lookups` is misdiagnosed as `lookups` is, for the GitHub repository and Project searches alone.
    * `deck-build` is misdiagnosed the same way: the slides panel says the assistant needs an update to build an older

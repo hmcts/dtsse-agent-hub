@@ -73,8 +73,8 @@ test.describe("routes @regression", () => {
     ["/virtual", "assistant"],
     ["/hub/virtual", "assistant"],
     ["/hub/virtual/0f8a6a1e-0000-4000-8000-000000000001", "assistant"],
-    ["/settings/credentials", "credentials"],
-    ["/hub/settings/credentials", "credentials"]
+    ["/settings/credentials", "connections"],
+    ["/hub/settings/credentials", "connections"]
   ];
   for (const [from, section] of RETIRED) {
     test(`should redirect the retired ${from} to the Assistant's ${section} settings @regression`, async ({ request }) => {

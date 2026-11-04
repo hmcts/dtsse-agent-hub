@@ -324,7 +324,7 @@ export const WELSH_PLUGIN = "welsh";
 
 /** What a job answers when its owner has not ticked the plugin, which is the only way a pod has the tools. */
 export const NOT_LOADED =
-  "Welsh translations is not turned on for your assistant. Tick it in Settings, under Tools. If you have just ticked it, your assistant is restarting to load it: try again in a minute or two.";
+  "Welsh translations is not turned on for your assistant. Tick it in Settings, under Plugins. If you have just ticked it, your assistant is restarting to load it: try again in a minute or two.";
 
 /** What a job answers when the tools' first install has taken so long that the job could not finish in time. */
 export const STILL_PREPARING = "Your assistant is still setting up the Welsh tools. Try again in a few minutes.";

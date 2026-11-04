@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import * as heartbeatRoute from "../../src/app/api/agent/[agentId]/heartbeat/route.ts";
 import * as registerRoute from "../../src/app/api/agent/register/route.ts";
 import * as claimRoute from "../../src/app/api/orchestrator/claim/route.ts";
 import * as liveRoute from "../../src/app/api/orchestrator/live/route.ts";
@@ -10,7 +9,6 @@ import { APPLY_FAILURES_BEFORE_FAILED } from "../../src/virtual-agents/lifecycle
 import { MAX_VIRTUAL_AGENTS_PER_USER } from "../../src/virtual-agents/limits.ts";
 import {
   createVirtualAgent,
-  renameVirtualAgent,
   reportPorts,
   reportStatus,
   setDesired,
@@ -19,7 +17,7 @@ import {
   type VirtualAgentRow
 } from "../../src/virtual-agents/store.ts";
 import { neededCredentials } from "../../src/virtual-agents/views.ts";
-import { connect, insertAgent, insertUser, prisma } from "./database.ts";
+import { insertAgent, insertUser, prisma } from "./database.ts";
 import { jsonOf } from "./routes.ts";
 import {
   ALICE,
@@ -195,18 +193,6 @@ describe("the Assistant's settings for its agent", () => {
     expect(await assistantAgent({ ...BOB, tid: "dev", modelRoute: "gateway" })).toBeUndefined();
   });
 
-  it("should rename the owner's agent through the action, and answer as for no such agent when someone else tries", async () => {
-    const agent = await create(ALICE, "assistant");
-    actAs("alice");
-
-    expect(await actions.renameVirtualAgent(form({ id: agent.id, name: "mine" }))).toEqual({ ok: true, confirmation: "Renamed to mine" });
-    expect((await row(agent.id)).name).toBe("mine");
-    expect(await actions.renameVirtualAgent(form({ id: "", name: "x" }))).toEqual({ ok: false, error: "no virtual agent was named" });
-    actAs("bob");
-    expect(await actions.renameVirtualAgent(form({ id: agent.id, name: "bobs" }))).toEqual({ ok: false, error: "no such virtual agent" });
-    expect((await row(agent.id)).name).toBe("mine");
-  });
-
   it("should clear the old pod's reported ports and its run of apply errors when the owner restarts it", async () => {
     const { id, token } = await started(ALICE, "assistant");
     expect((await ports(id, token, { ports: [3000], local_only: [5173] })).status).toBe(204);
@@ -245,12 +231,11 @@ describe("the Assistant's settings for its agent", () => {
     expect((await row(id)).podGeneration).toBe(before.podGeneration);
   });
 
-  it("should refuse a rename and a restart with a sentence when virtual agents are off", async () => {
+  it("should refuse a restart with a sentence when virtual agents are off", async () => {
     const agent = await create(ALICE, "assistant");
     vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "");
     actAs("alice");
 
-    expect(await actions.renameVirtualAgent(form({ id: agent.id, name: "x" }))).toMatchObject({ ok: false, error: expect.stringContaining("not available") });
     expect(await actions.restartVirtualAgent(form({ id: agent.id }))).toMatchObject({ ok: false, error: expect.stringContaining("not available") });
   });
 });
@@ -300,91 +285,6 @@ describe("a stored Claude token for the own-licence route", () => {
     expect(await jsonOf(await pod(credentialRoute.GET, token, `/api/virtual/${id}/credentials/claude`, { virtualAgentId: id, kind: "claude" }))).toEqual({
       value: CLAUDE
     });
-  });
-});
-
-describe("renaming a virtual agent", () => {
-  it("should rename the virtual agent and its session, keep its pod's names and tell the owner's streams when the owner renames it", async () => {
-    const { id, token } = await started(ALICE, "pcs-api");
-    const { agent_id } = await jsonOf(await register(token, "va-session-1"));
-    const before = await row(id);
-    const listener = await connect();
-    try {
-      const payloads: string[] = [];
-      listener.on("notification", (message) => payloads.push(message.payload ?? ""));
-      await listener.query("LISTEN hub_events");
-
-      await expect(renameVirtualAgent(prisma, ALICE.oid, id, " PCS-Frontend ")).resolves.toMatchObject({ name: "pcs-frontend" });
-
-      await expect
-        .poll(() => payloads.map((payload) => JSON.parse(payload)))
-        .toContainEqual({ type: "virtual_agent", virtual_agent_id: id, owner_oid: ALICE.oid });
-    } finally {
-      await listener.end();
-    }
-    const after = await row(id);
-    expect(after).toMatchObject({ name: "pcs-frontend", statefulsetName: before.statefulsetName, pvcName: before.pvcName, generation: before.generation });
-    expect((await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).name).toBe("pcs-frontend");
-  });
-
-  it("should keep the new name through the session's next heartbeat when it still calls itself by the old one", async () => {
-    const { id, token } = await started(ALICE, "pcs-api");
-    const { agent_id } = await jsonOf(await register(token, "va-session-1"));
-    await renameVirtualAgent(prisma, ALICE.oid, id, "jerry");
-
-    const response = await pod(heartbeatRoute.POST, token, `/api/agent/${agent_id}/heartbeat`, { agentId: agent_id }, "POST", {
-      status: "busy",
-      name: "pcs-api"
-    });
-
-    expect(response.status).toBe(204);
-    expect((await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).name).toBe("jerry");
-  });
-
-  it("should refuse with the name rule's sentence and change nothing when the name is invalid", async () => {
-    const agent = await create(ALICE, "pcs-api");
-
-    await expect(renameVirtualAgent(prisma, ALICE.oid, agent.id, "not_a name")).rejects.toMatchObject({
-      status: 400,
-      message: "a name is lowercase letters, digits and hyphens, starting and ending with a letter or digit"
-    });
-    await expect(renameVirtualAgent(prisma, ALICE.oid, agent.id, "")).rejects.toMatchObject({ status: 400 });
-    expect((await row(agent.id)).name).toBe("pcs-api");
-  });
-
-  it("should refuse with a sentence naming the clash when the owner already has a virtual agent of that name", async () => {
-    const agent = await create(ALICE, "pcs-api");
-    await create(ALICE, "jerry");
-
-    await expect(renameVirtualAgent(prisma, ALICE.oid, agent.id, "jerry")).rejects.toMatchObject({ message: "you already have a virtual agent called jerry" });
-    expect((await row(agent.id)).name).toBe("pcs-api");
-  });
-
-  it("should let the name match another person's virtual agent when only they have it", async () => {
-    const agent = await create(ALICE, "pcs-api");
-    await create(BOB, "jerry");
-
-    await expect(renameVirtualAgent(prisma, ALICE.oid, agent.id, "jerry")).resolves.toMatchObject({ name: "jerry" });
-  });
-
-  it("should answer as for no such agent and change nothing when someone other than the owner renames it", async () => {
-    const agent = await create(ALICE, "pcs-api");
-
-    await expect(renameVirtualAgent(prisma, BOB.oid, agent.id, "bobs")).rejects.toMatchObject({ status: 404, message: "no such virtual agent" });
-    expect((await row(agent.id)).name).toBe("pcs-api");
-  });
-
-  it("should refuse a rename when the agent is being deleted", async () => {
-    const agent = await create(ALICE, "pcs-api");
-    await setDesired(prisma, ALICE.oid, agent.id, "deleted");
-
-    await expect(renameVirtualAgent(prisma, ALICE.oid, agent.id, "jerry")).rejects.toMatchObject({ status: 409 });
-  });
-
-  it("should change nothing and succeed when the name is the one it already has", async () => {
-    const agent = await create(ALICE, "pcs-api");
-
-    await expect(renameVirtualAgent(prisma, ALICE.oid, agent.id, "PCS-API")).resolves.toMatchObject({ name: "pcs-api" });
   });
 });
 

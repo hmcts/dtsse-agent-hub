@@ -10,6 +10,19 @@ async function settings(page: Page, section: string): Promise<void> {
   await page.getByRole("tablist", { name: "Settings sections" }).getByRole("tab", { name: section }).click();
 }
 
+/**
+ * The id of the virtual agent the Assistant section manages, read from the restart question, which is the one place
+ * the page carries it: the name every assistant starts with is the same, so it cannot tell two people's apart.
+ */
+async function managedAgentId(page: Page): Promise<string> {
+  await settings(page, "Assistant");
+  await page.getByRole("button", { name: "Restart your assistant" }).click();
+  const id = await page.getByRole("form", { name: "Restart your assistant" }).locator('input[name="id"]').inputValue();
+  await page.getByRole("dialog", { name: "Settings" }).getByRole("button", { name: "Cancel" }).click();
+  await page.keyboard.press("Escape");
+  return id;
+}
+
 test.describe("virtual agents @regression", () => {
   test("should open the Assistant section of its settings when an old virtual agents address is visited @regression", async ({ browser, baseURL, request }) => {
     const persona = chatPersona("va-old");
@@ -31,10 +44,10 @@ test.describe("virtual agents @regression", () => {
 
   /**
    * The Assistant's own agent through its settings: made on the first visit, a sign-in its pod relays, the web
-   * servers it reports, a rename and a restart. The pod is stood in for with the orchestrator's development header,
+   * servers it reports, and a restart. The pod is stood in for with the orchestrator's development header,
    * which only a development build accepts; anywhere else the parts that need a pod are left out.
    */
-  test("should show the Assistant's agent, a sign-in and web servers its pod relays, and rename and restart it, when its settings are opened @regression", async ({
+  test("should show the Assistant's agent, a sign-in and web servers its pod relays, and restart it, when its settings are opened @regression", async ({
     browser,
     baseURL,
     request
@@ -50,7 +63,7 @@ test.describe("virtual agents @regression", () => {
 
       await settings(page, "Assistant");
       await expect(page.getByRole("heading", { name: "Your assistant" })).toBeVisible();
-      await expect(page.getByLabel("Name")).toHaveValue("assistant");
+      await expect(page.getByRole("dialog", { name: "Settings" }).getByText("assistant", { exact: true })).toBeVisible();
 
       const claim = await request.post("/api/orchestrator/claim", { headers: { "x-dev-orchestrator": "e2e" }, data: { cluster: "e2e" } });
       if (claim.status() === 200) {
@@ -80,11 +93,6 @@ test.describe("virtual agents @regression", () => {
         await page.getByRole("tablist", { name: "Settings sections" }).getByRole("tab", { name: "Assistant" }).click();
       }
 
-      const renamed = unique("mine").toLowerCase();
-      await page.getByLabel("Name").fill(renamed);
-      await page.getByRole("button", { name: "Rename" }).click();
-      await expect(page.getByRole("form", { name: "Rename your assistant" }).getByRole("status")).toHaveText(`Renamed to ${renamed}`);
-
       const restart = page.getByRole("button", { name: "Restart your assistant" });
       if ((await restart.count()) > 0) {
         await restart.click();
@@ -97,7 +105,7 @@ test.describe("virtual agents @regression", () => {
     }
   });
 
-  test("should keep one person's assistant and chats from another when both use the Assistant @regression", async ({ browser, baseURL, request }) => {
+  test("should keep one person's chats and agents from another when both use the Assistant @regression", async ({ browser, baseURL, request }) => {
     const ownerPersona = chatPersona("va-owner");
     const name = unique("laptop");
     const agent = await registerAgent(request, ownerPersona, name);
@@ -113,11 +121,7 @@ test.describe("virtual agents @regression", () => {
       test.skip(response?.status() === 404, ASSISTANT_OFF);
       await dismissGettingReady(page);
       const path = await openLocalChat(page, name);
-      const renamed = unique("owners").toLowerCase();
-      await settings(page, "Assistant");
-      await page.getByLabel("Name").fill(renamed);
-      await page.getByRole("button", { name: "Rename" }).click();
-      await expect(page.getByRole("form", { name: "Rename your assistant" }).getByRole("status")).toHaveText(`Renamed to ${renamed}`);
+      const ownersAssistant = await managedAgentId(page);
 
       const theirs = await other.newPage();
       expect((await theirs.goto(path))?.status()).toBe(404);
@@ -125,8 +129,9 @@ test.describe("virtual agents @regression", () => {
       expect(new URL(theirs.url()).pathname).toBe("/hub");
       await theirs.goto("/assistant");
       await dismissGettingReady(theirs);
-      await settings(theirs, "Assistant");
-      await expect(theirs.getByLabel("Name")).not.toHaveValue(renamed);
+      const theirAssistant = await managedAgentId(theirs);
+      expect(theirAssistant).not.toBe("");
+      expect(theirAssistant).not.toBe(ownersAssistant);
     } finally {
       await owner.close();
       await other.close();

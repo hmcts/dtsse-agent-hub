@@ -107,7 +107,7 @@ device code in the background while Claude runs. Relaying spends the request. Ei
 per boot, so one that runs out unused is not offered again until the agent next starts, which on `own_licence` also
 needs the owner to ask again. There the Assistant raises an ask about Azure only while that code is live.
 
-A Jenkins API token (`jenkins`) is optional on either route: pasted under Credentials in the Assistant's settings, it enables an agent's Jenkins
+A Jenkins API token (`jenkins`) is optional on either route: pasted under Connections in the Assistant's settings, it enables an agent's Jenkins
 tools, and an agent starts without it. Jenkins also needs Azure connected, because the owner's Entra object id, which
 Jenkins keys them on, is read with `az`. Like a GitHub token, only the owner's own virtual agent reads it back.
 
@@ -177,7 +177,7 @@ before the change is made; the disk is kept. The size also sets how many CFT Wor
 once (`CONVERSATION_SESSIONS`), and the Assistant's settings show each size's cap and memory beside the figures its pod
 reports for itself.
 
-**Plugins.** An owner ticks any of the workspace plugins `VIRTUAL_AGENT_PLUGINS` offers, up to 20, under Tools in
+**Plugins.** An owner ticks any of the workspace plugins `VIRTUAL_AGENT_PLUGINS` offers, up to 20, under Plugins in
 the Assistant's settings. The orchestrator passes the names to the pod as `AGENT_HUB_PLUGINS`, comma-separated, and
 `hai` loads each from the checkout with `--plugin-dir`. A plugin the pod client carries in its own `plugins/` directory (`welsh`, `slides`) is copied onto the pod's disk instead and loaded into each conversation session; see Plugins in [`agent-api.md`](agent-api.md). A change bumps `generation` and `pod_generation`, so a running
 pod is replaced and the conversation continues; a stopped agent loads them when it next starts. A ticked plugin the hub

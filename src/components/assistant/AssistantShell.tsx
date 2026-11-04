@@ -150,7 +150,7 @@ export function AssistantShell({
   exports?: AssistantExportDefaults;
   /** How the footer's settings reads the person's shared chats once its Sharing section opens, and changes who each is shared with. */
   sharing?: AssistantSharing;
-  /** The virtual agent the Assistant runs on, which the footer's settings renames and restarts and lists the web servers of. */
+  /** The virtual agent the Assistant runs on, which the footer's settings restarts and lists the web servers of. */
   agent?: AssistantAgentSettings;
   /** The git identity the person's agents commit as, which the footer's settings shows and changes. */
   git?: AssistantGitIdentity;
