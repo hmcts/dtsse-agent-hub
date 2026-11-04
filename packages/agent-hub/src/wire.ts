@@ -310,6 +310,8 @@ export type TopicsResponse = { topics: TopicSummary[] };
 export type AgentsResponse = { agents: AgentSummary[] };
 export type TranscriptResponse = { accepted: number };
 export type CredentialResponse = { value: string };
+/** A Microsoft Graph access token minted from the owner's Microsoft 365 connection; see "Microsoft 365" in docs/agent-api.md. */
+export type MicrosoftTokenResponse = { access_token: string; expires_at: string; permissions: string[] };
 export type LoginCodeResponse = { code: string };
 /** Whether the owner has asked for a sign-in of this kind; see `GET /api/virtual/{id}/login/{kind}`. */
 export type SignInRequestResponse = { requested: boolean };

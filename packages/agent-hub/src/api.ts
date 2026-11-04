@@ -34,6 +34,7 @@ import type {
   MemoryReportBody,
   MessageResponse,
   MessagesResponse,
+  MicrosoftTokenResponse,
   PostBody,
   RegisterBody,
   RegisterResponse,
@@ -157,6 +158,11 @@ export type Api = {
   myCredential: (kind: CredentialKind) => Promise<string | null>;
   putMyCredential: (kind: CredentialKind, value: string) => Promise<null>;
   deleteMyCredential: (kind: CredentialKind) => Promise<null>;
+  /**
+   * A Graph access token for the owner (a pod, given its agent id) or for the person calling (`null`), minted by the hub
+   * from their Microsoft 365 connection. The connection itself never leaves the hub.
+   */
+  microsoftToken: (id: string | null) => Promise<MicrosoftTokenResponse>;
   loginPrompt: (id: string, kind: CredentialKind, body: LoginPromptBody) => Promise<null>;
   loginCode: (id: string, kind: CredentialKind) => Promise<string | null>;
   /**
@@ -368,6 +374,7 @@ export function createApi({
     myCredential: async (kind) => (await nullOn404(request<CredentialResponse>("GET", `/api/agent/credentials/${k(kind)}`)))?.value ?? null,
     putMyCredential: (kind, value) => request<null>("PUT", `/api/agent/credentials/${k(kind)}`, { value }),
     deleteMyCredential: (kind) => request<null>("DELETE", `/api/agent/credentials/${k(kind)}`),
+    microsoftToken: (id) => request<MicrosoftTokenResponse>("GET", id === null ? "/api/agent/microsoft/token" : v(id, "microsoft/token")),
     loginPrompt: (id, kind, body) => request<null>("POST", v(id, `login/${k(kind)}`), body),
     loginCode: async (id, kind) => (await request<LoginCodeResponse | null>("GET", v(id, `login/${k(kind)}/code`)))?.code ?? null,
     signInRequested: async (id, kind) => {
