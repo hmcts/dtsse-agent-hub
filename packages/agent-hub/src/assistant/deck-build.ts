@@ -10,7 +10,7 @@ import { materialise } from "../cli/deck.ts";
 import type { Env } from "../env.ts";
 import { withRetry } from "../retry.ts";
 import type { Run } from "./lookups.ts";
-import { bundledScript } from "./plugin-deps.ts";
+import { bundledScript, MIN_RUN_MS, readyWithin, reason, safeSay } from "./plugin-deps.ts";
 
 /** The plugin that carries `scripts/slides`, and the name the owner ticks. */
 export const SLIDES_PLUGIN = "slides";
@@ -27,6 +27,8 @@ const UUID_RE = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
 export const NOT_LOADED =
   "Slides is not turned on for your assistant. Tick it in Settings, under Tools. If you have just ticked it, your assistant is restarting to load it: try again in a minute or two.";
 export const TOO_SLOW = "Building the slides took too long. Try again.";
+/** What a build answers when the slides tools' first install has taken so long that the build could not finish in time. */
+export const STILL_PREPARING = "Your assistant is still setting up the slides tools. Try again in a few minutes.";
 
 export type DeckBuildFrame = { job_id: string; conversation_id: string; version: number };
 
@@ -79,30 +81,44 @@ export type DeckBuildDeps = {
   /** The cft-workspace checkout; the pod's plugin copies sit beside it. */
   workspace: string;
   install?: (name: string, workspace: string) => string;
+  /** Settles once the slides tools' dependencies are installed, or the attempt has failed: the pod's start-up `prepareEach`. */
+  ready?: Promise<void>;
   say?: (message: string) => void;
   /** Milliseconds since the epoch, for the build's budget; a test passes its own. */
   clock?: () => number;
   budgetMs?: number;
 };
 
-/** Builds one version and answers the hub with the .pptx or why there is none. Never throws. */
+/** Builds one version, once the slides tools are installed, and answers the hub with the .pptx or why there is none. Never throws. */
 export async function runDeckBuild(deps: DeckBuildDeps, frame: DeckBuildFrame): Promise<void> {
-  const say = deps.say ?? (() => {});
+  const say = safeSay(deps.say);
   const clock = deps.clock ?? Date.now;
   const deadline = clock() + (deps.budgetMs ?? BUILD_BUDGET_MS);
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "deck-build-"));
+  let dir: string | undefined;
   let answer: { pptx: Uint8Array } | { error: string };
   try {
-    answer = await buildIn(deps, frame, dir, deadline, clock);
+    // The wait for the tools' first install comes out of the build's budget, so wait and build end inside the hub's limit.
+    if (await readyWithin(deps.ready, deadline - clock() - MIN_RUN_MS)) {
+      dir = fs.mkdtempSync(path.join(tmpdir(), "deck-build-"));
+      answer = await buildIn(deps, frame, dir, deadline, clock);
+    } else {
+      answer = { error: STILL_PREPARING };
+    }
   } catch (e) {
-    answer = { error: clip(`This version could not be built: ${(e as Error).message}`) };
+    answer = { error: clip(`This version could not be built: ${reason(e)}`) };
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    if (dir !== undefined) {
+      try {
+        fs.rmSync(dir, { recursive: true, force: true });
+      } catch (e) {
+        say(`deck build ${frame.job_id}: could not remove ${dir}: ${reason(e)}`);
+      }
+    }
   }
   try {
     await withRetry(() => deps.api.putDeckBuild(deps.id, frame.job_id, answer), { attempts: 2 });
   } catch (e) {
-    say(`deck build ${frame.job_id}: could not answer it: ${(e as Error).message}`);
+    say(`deck build ${frame.job_id}: could not answer it: ${reason(e)}`);
   }
 }
 
@@ -153,7 +169,7 @@ export type DeckBuildRunner = {
 
 /** Runs builds beside the supervisor, one at a time in the order they came, since each is a whole Node process. */
 export function createDeckBuildRunner(deps: DeckBuildDeps): DeckBuildRunner {
-  const say = deps.say ?? (() => {});
+  const say = safeSay(deps.say);
   let chain: Promise<void> = Promise.resolve();
   return {
     deckBuild(data) {
@@ -164,7 +180,10 @@ export function createDeckBuildRunner(deps: DeckBuildDeps): DeckBuildRunner {
       }
       // The budget runs from the frame's arrival, so a build that waited behind others still answers inside the hub's 15 minutes.
       const arrived = (deps.clock ?? Date.now)();
-      chain = chain.then(() => runDeckBuild({ ...deps, budgetMs: (deps.budgetMs ?? BUILD_BUDGET_MS) - ((deps.clock ?? Date.now)() - arrived) }, frame));
+      // Each link catches its own failure, so one build that throws neither skips the builds behind it nor goes unhandled.
+      chain = chain
+        .then(() => runDeckBuild({ ...deps, budgetMs: (deps.budgetMs ?? BUILD_BUDGET_MS) - ((deps.clock ?? Date.now)() - arrived) }, frame))
+        .catch((e: unknown) => say(`deck build ${frame.job_id} failed: ${reason(e)}`));
     },
     idle: () => chain
   };

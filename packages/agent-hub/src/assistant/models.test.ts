@@ -1,8 +1,8 @@
 // The model a conversation's session runs on: the id's shape, what the launcher is given for it, and the `/model`
 // switch the bridge makes before delivering a message that asks for another.
 import fs from "node:fs";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { type TempClaudeHome, tempClaudeHome } from "../__fixtures__/claude-home.ts";
+import { describe, expect, it } from "vitest";
+import { useTempClaudeHome } from "../__fixtures__/claude-home.ts";
 import { fakeTmux } from "../__fixtures__/fake-tmux.ts";
 import { ensureStateDir, readText } from "../session.ts";
 import { launcherModel, modelPath, parseModel, switchModel } from "./models.ts";
@@ -10,27 +10,7 @@ import { tmuxName } from "./tmux.ts";
 
 const CONVERSATION = "0f8a6a1e-1234-4000-8000-000000000001";
 
-let home: TempClaudeHome;
-const savedEnv: Record<string, string | undefined> = {};
-
-beforeAll(() => {
-  home = tempClaudeHome();
-  for (const key of ["HOME", "CLAUDE_CONFIG_DIR"]) {
-    savedEnv[key] = process.env[key];
-  }
-  Object.assign(process.env, home.env);
-});
-
-afterAll(() => {
-  for (const [key, value] of Object.entries(savedEnv)) {
-    if (value === undefined) {
-      delete process.env[key];
-    } else {
-      process.env[key] = value;
-    }
-  }
-  home.cleanup();
-});
+useTempClaudeHome();
 
 let sessions = 0;
 function session(): string {

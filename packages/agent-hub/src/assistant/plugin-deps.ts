@@ -49,13 +49,51 @@ export async function prepareBundled(name: string, deps: PrepareDeps): Promise<v
 
 /**
  * Runs `prepareBundled` for each of `names` in turn, so their installs do not compete with each other, and starts
- * none once `signal` has aborted. Never throws.
+ * none once `signal` has aborted. Answers, by name, a promise that settles once that plugin's install has finished,
+ * failed or been skipped, which is what a job using the plugin waits on; none rejects.
  */
-export async function prepareEach(names: readonly string[], deps: PrepareDeps, signal?: AbortSignal): Promise<void> {
+export function prepareEach(names: readonly string[], deps: PrepareDeps, signal?: AbortSignal): ReadonlyMap<string, Promise<void>> {
+  const settled = new Map<string, Promise<void>>();
+  let previous: Promise<void> = Promise.resolve();
   for (const name of names) {
-    if (signal?.aborted) {
-      return;
-    }
-    await prepareBundled(name, deps);
+    previous = previous.then(() => (signal?.aborted ? undefined : prepareBundled(name, deps)));
+    settled.set(name, previous);
+  }
+  return settled;
+}
+
+/** Least time worth starting a job with, once the wait for its plugin's install is over. */
+export const MIN_RUN_MS = 30_000;
+
+/** Settles true once `ready` does, or false at `ms`, whichever is first; true at once when there is nothing to wait on. */
+export async function readyWithin(ready: Promise<void> | undefined, ms: number): Promise<boolean> {
+  if (ready === undefined) {
+    return true;
+  }
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<boolean>((resolve) => {
+    timer = setTimeout(() => resolve(false), Math.max(0, ms));
+  });
+  try {
+    return await Promise.race([ready.then(() => true), late]);
+  } finally {
+    clearTimeout(timer);
   }
 }
+
+/**
+ * A job's `say`, made unable to throw: it only reports, and a logger that fails must not leave a job unanswered or
+ * reject its runner's queue.
+ */
+export function safeSay(say: ((message: string) => void) | undefined): (message: string) => void {
+  return (message) => {
+    try {
+      say?.(message);
+    } catch {
+      // Reporting failed; there is nowhere left to report it.
+    }
+  };
+}
+
+/** What went wrong, for a message: an error's own message, or whatever was thrown. */
+export const reason = (e: unknown): string => (e instanceof Error ? e.message : String(e));

@@ -27,7 +27,12 @@ export const MAX_DECK_BUILD_ERROR = 2000;
 export type DeckBuildStatus = "pending" | "done" | "failed" | "timeout";
 
 /** What asking for a build answers: the bytes are there already, a build to read back, or why none was started. */
-export type DeckBuildRequest = { status: "ready" } | { status: "pending"; job_id: string } | { status: "waking" } | { status: "unsupported" };
+export type DeckBuildRequest =
+  | { status: "ready" }
+  | { status: "pending"; job_id: string }
+  | { status: "waking" }
+  | { status: "unsupported" }
+  | { status: "no_pod" };
 
 /** What reading a build back answers. */
 export interface DeckBuildView {

@@ -177,6 +177,17 @@ async function pod<P>(handler: Handler<P>, token: string, path: string, params: 
   return await handler(request, { params: Promise.resolve(params) });
 }
 
+/** Answers build `jobId` of `of` as its pod does, with `PUT /api/virtual/{id}/deck-builds/{jobId}`. */
+function podAnswer(of: Chat, token: string, jobId: string) {
+  return (init: { body: BodyInit; type: string }) =>
+    pod(
+      podBuildRoute.PUT,
+      token,
+      `/api/virtual/${of.virtualAgentId}/deck-builds/${jobId}`,
+      { virtualAgentId: of.virtualAgentId, jobId },
+      { method: "PUT", ...init }
+    );
+}
 describe("a deck's history in the browser", () => {
   it("should list every kept version newest first, saying which can be downloaded, to the owner and a share's reader", async () => {
     // Arrange
@@ -292,6 +303,55 @@ describe("restoring a deck version", () => {
     expect(await assistantFrame(prisma, mine.agentId)).toMatchObject({ deck_version: 3, deck_updated_by: "user" });
   });
 
+  it("should keep the .pptx kept with the third-newest version when restoring it, though the write moves it out of the latest 3", async () => {
+    // Arrange
+    const { mine } = await deckOf(3);
+
+    // Act
+    actAs("alice");
+    const restored = await deckActions.restoreDeckVersion({ conversationId: mine.id, version: 1, baseVersion: 3 });
+
+    // Assert
+    expect(restored).toEqual({ ok: true, restored: true, version: 4 });
+    const pptxOf = async (version: number) =>
+      (await prisma.assistantDeckVersion.findUniqueOrThrow({ where: { conversationId_version: { conversationId: mine.id, version } } })).pptx;
+    expect(Buffer.from((await pptxOf(4))!)).toEqual(PPTX);
+    expect(await pptxOf(1)).toBeNull();
+    expect((await readDeck(prisma, mine.id)).pptx).toBe(true);
+    const file = await download("alice", mine.id, 4);
+    expect(Buffer.from(await file.arrayBuffer())).toEqual(PPTX);
+  });
+
+  it("should keep a .pptx built on request for the third-newest version when restoring it", async () => {
+    // Arrange
+    const { mine } = await deckOf(3);
+    await prisma.assistantDeckVersion.update({ where: { conversationId_version: { conversationId: mine.id, version: 1 } }, data: { pptx: null } });
+    await prisma.assistantDeckBuild.create({ data: { conversationId: mine.id, version: 1, status: "done", pptx: BUILT, finishedAt: new Date() } });
+
+    // Act
+    actAs("alice");
+    const restored = await deckActions.restoreDeckVersion({ conversationId: mine.id, version: 1, baseVersion: 3 });
+
+    // Assert
+    expect(restored).toEqual({ ok: true, restored: true, version: 4 });
+    const kept = await prisma.assistantDeckVersion.findUniqueOrThrow({ where: { conversationId_version: { conversationId: mine.id, version: 4 } } });
+    expect(Buffer.from(kept.pptx!)).toEqual(BUILT);
+  });
+
+  it("should restore with no .pptx when the restored version has none kept or built", async () => {
+    // Arrange
+    const { mine } = await deckOf(3);
+    await prisma.assistantDeckBuild.create({ data: { conversationId: mine.id, version: 2, status: "failed", error: "nope", finishedAt: new Date() } });
+
+    // Act
+    actAs("alice");
+    const restored = await deckActions.restoreDeckVersion({ conversationId: mine.id, version: 2, baseVersion: 3 });
+
+    // Assert
+    expect(restored).toEqual({ ok: true, restored: true, version: 4 });
+    expect((await readDeck(prisma, mine.id)).pptx).toBe(false);
+  });
+
   it("should write nothing and say what is there now when the deck moved on since the base", async () => {
     // Arrange
     const { mine } = await deckOf(3);
@@ -372,17 +432,7 @@ describe("building an older version's .pptx", () => {
     const named = await picture(sha);
     const unnamed = await picture(other);
     const pending = await jsonOf(await buildOf("alice", mine.id, jobId));
-    const answered = await pod(
-      podBuildRoute.PUT,
-      token,
-      `/api/virtual/${mine.virtualAgentId}/deck-builds/${jobId}`,
-      { virtualAgentId: mine.virtualAgentId, jobId },
-      {
-        method: "PUT",
-        body: new Uint8Array(BUILT),
-        type: "application/octet-stream"
-      }
-    );
+    const answered = await podAnswer(mine, token, jobId)({ body: new Uint8Array(BUILT), type: "application/octet-stream" });
 
     // Assert
     expect(asked.headers.get("cache-control")).toBe("no-store");
@@ -437,14 +487,7 @@ describe("building an older version's .pptx", () => {
     const { mine } = await deckOf(4);
     const token = await podFor(mine);
     const { job_id: jobId } = await jsonOf<{ job_id: string }>(await prepare("alice", mine.id, 1));
-    const answer = (init: { body: BodyInit; type: string }) =>
-      pod(
-        podBuildRoute.PUT,
-        token,
-        `/api/virtual/${mine.virtualAgentId}/deck-builds/${jobId}`,
-        { virtualAgentId: mine.virtualAgentId, jobId },
-        { method: "PUT", ...init }
-      );
+    const answer = podAnswer(mine, token, jobId);
 
     // Act
     const failed = await answer({ body: JSON.stringify({ error: "This version could not be built: slide 2: too many bullets" }), type: "application/json" });
@@ -469,14 +512,7 @@ describe("building an older version's .pptx", () => {
     const { mine } = await deckOf(4);
     const token = await podFor(mine);
     const { job_id: jobId } = await jsonOf<{ job_id: string }>(await prepare("alice", mine.id, 1));
-    const answer = (init: { body: BodyInit; type: string }) =>
-      pod(
-        podBuildRoute.PUT,
-        token,
-        `/api/virtual/${mine.virtualAgentId}/deck-builds/${jobId}`,
-        { virtualAgentId: mine.virtualAgentId, jobId },
-        { method: "PUT", ...init }
-      );
+    const answer = podAnswer(mine, token, jobId);
 
     // Act and assert
     expect((await answer({ body: new Uint8Array([1, 2, 3, 4]), type: "application/octet-stream" })).status).toBe(400);
@@ -604,6 +640,19 @@ describe("the deck build's gate", () => {
 
     // Assert
     expect(answer).toEqual({ status: "unsupported" });
+    expect(await prisma.assistantDeckBuild.count()).toBe(0);
+  });
+
+  it("should answer no_pod, recording nothing, for a local session's chat", async () => {
+    // Arrange
+    const { mine } = await deckOf(4);
+    await prisma.assistantConversation.update({ where: { id: mine.id }, data: { virtualAgentId: null } });
+
+    // Act
+    const answer = await jsonOf(await prepare("alice", mine.id, 1));
+
+    // Assert
+    expect(answer).toEqual({ status: "no_pod" });
     expect(await prisma.assistantDeckBuild.count()).toBe(0);
   });
 

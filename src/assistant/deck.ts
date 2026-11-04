@@ -140,9 +140,11 @@ function compareBytes(a: Uint8Array, b: Uint8Array): number {
   return a.length - b.length;
 }
 
-/** A NUL, or half of a surrogate pair: text a jsonb cannot hold, which Postgres refuses as the row is written. */
-// biome-ignore lint/suspicious/noControlCharactersInRegex: a NUL is what Postgres refuses, so it is what this finds
-const UNSTORABLE_RE = /\u0000|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+/** Half of a surrogate pair, which a jsonb cannot hold. */
+const LONE_SURROGATE_RE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+
+/** Whether Postgres refuses this text as a jsonb is written: it holds a NUL, or half of a surrogate pair. */
+const unstorable = (text: string): boolean => text.includes(String.fromCharCode(0)) || LONE_SURROGATE_RE.test(text);
 
 /**
  * `value` as Postgres prints a jsonb, which is what the column's CHECK measures: `", "` between items, `": "` after a
@@ -151,7 +153,7 @@ const UNSTORABLE_RE = /\u0000|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\ud
  */
 export function jsonbText(value: unknown): string | undefined {
   if (typeof value === "string") {
-    return UNSTORABLE_RE.test(value) ? undefined : JSON.stringify(value);
+    return unstorable(value) ? undefined : JSON.stringify(value);
   }
   if (Array.isArray(value)) {
     const items = value.map(jsonbText);
@@ -161,7 +163,7 @@ export function jsonbText(value: unknown): string | undefined {
     const entries = Object.entries(value)
       .filter(([, item]) => item !== undefined)
       .map(([key, item]) => ({ key, bytes: utf8.encode(key), text: jsonbText(item) }));
-    if (entries.some((entry) => entry.text === undefined || UNSTORABLE_RE.test(entry.key))) {
+    if (entries.some((entry) => entry.text === undefined || unstorable(entry.key))) {
       return undefined;
     }
     entries.sort((a, b) => a.bytes.length - b.bytes.length || compareBytes(a.bytes, b.bytes));

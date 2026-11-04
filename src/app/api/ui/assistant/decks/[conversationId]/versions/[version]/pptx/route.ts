@@ -21,7 +21,8 @@ export async function GET(request: NextRequest, context: { params: Promise<{ con
   }
   return await uiRefusals("deck download", async () => {
     const { conversationId, version } = await context.params;
-    const file = /^[1-9]\d{0,8}$/.test(version) ? await deckPptx(viewer, conversationId, Number(version)) : undefined;
+    const number = versionParam(version);
+    const file = number === undefined ? undefined : await deckPptx(viewer, conversationId, number);
     if (file === undefined) {
       return errorResponse(404, "that version of the slides has no .pptx");
     }

@@ -11,7 +11,7 @@ import type { Env } from "../env.ts";
 import { withRetry } from "../retry.ts";
 import type { WelshAnswer } from "../wire.ts";
 import type { Run } from "./lookups.ts";
-import { bundledScript } from "./plugin-deps.ts";
+import { bundledScript, MIN_RUN_MS, readyWithin, reason, safeSay } from "./plugin-deps.ts";
 
 export const WELSH_KINDS = [
   "info",
@@ -336,9 +336,6 @@ export const STILL_PREPARING = "Your assistant is still setting up the Welsh too
  */
 export const JOB_BUDGET_MS = 14 * 60_000;
 
-/** Least time worth starting a job with, once the wait for the install is over. */
-const MIN_RUN_MS = 30_000;
-
 /** Why the script failed, in at most `MAX_DETAIL` characters: its own message, without the usage line or a stack. */
 export function failureDetail(stderr: string, code: number): string {
   if (code === 127) {
@@ -362,7 +359,7 @@ export type WelshDeps = {
   env: Env;
   /** The cft-workspace checkout; `$VIRTUAL_AGENT_WORKSPACE` in a pod. */
   workspace: string;
-  /** Settles once the tools' dependencies are installed, or the attempt has failed: the pod's start-up `prepareBundled`. */
+  /** Settles once the tools' dependencies are installed, or the attempt has failed: the pod's start-up `prepareEach`. */
   ready?: Promise<void>;
   /** Makes the pod's copy of a bundled plugin; a test passes one that makes it somewhere of its own. */
   install?: (name: string, workspace: string) => string;
@@ -372,48 +369,42 @@ export type WelshDeps = {
   clock?: () => number;
   /** How long a job has from when it arrives; `JOB_BUDGET_MS` unless a test says otherwise. */
   budgetMs?: number;
+  /** How a retry of the job's answer waits; a real sleep unless a test passes its own. */
+  retryWait?: (ms: number) => Promise<void>;
 };
-
-/** Settles true once `ready` does, or false at `ms`, whichever is first. */
-async function readyWithin(ready: Promise<void> | undefined, ms: number): Promise<boolean> {
-  if (ready === undefined) {
-    return true;
-  }
-  let timer: NodeJS.Timeout | undefined;
-  const late = new Promise<boolean>((resolve) => {
-    timer = setTimeout(() => resolve(false), Math.max(0, ms));
-  });
-  try {
-    return await Promise.race([ready.then(() => true), late]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
 /** Runs one job and answers it, uploading the spreadsheets it made first. Never throws. */
 export async function runWelsh(deps: WelshDeps, frame: WelshFrame): Promise<void> {
-  const say = deps.say ?? (() => {});
+  const say = safeSay(deps.say);
   const clock = deps.clock ?? Date.now;
   const deadline = clock() + (deps.budgetMs ?? JOB_BUDGET_MS);
-  const dir = mkdtempSync(join(tmpdir(), "welsh-job-"));
+  let dir: string | undefined;
   let answer: WelshAnswer;
   try {
     // The wait for the tools' first install comes out of the job's budget, so job and wait end inside the hub's limit.
     const ready = await readyWithin(deps.ready, deadline - clock() - MIN_RUN_MS);
     const left = deadline - clock();
-    answer =
-      ready && left >= MIN_RUN_MS
-        ? await runIn(deps, frame, welshPaths(dir, frame), Math.min(TIMEOUT_MS[frame.kind], left))
-        : { error: "failed", detail: STILL_PREPARING };
+    if (ready && left >= MIN_RUN_MS) {
+      dir = mkdtempSync(join(tmpdir(), "welsh-job-"));
+      answer = await runIn(deps, frame, welshPaths(dir, frame), Math.min(TIMEOUT_MS[frame.kind], left));
+    } else {
+      answer = { error: "failed", detail: STILL_PREPARING };
+    }
   } catch (e) {
-    answer = { error: "failed", detail: `That did not work: ${(e as Error).message}`.slice(0, MAX_DETAIL) };
+    answer = { error: "failed", detail: `That did not work: ${reason(e)}`.slice(0, MAX_DETAIL) };
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    if (dir !== undefined) {
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch (e) {
+        say(`welsh ${frame.job_id}: could not remove ${dir}: ${reason(e)}`);
+      }
+    }
   }
   try {
-    await withRetry(() => deps.api.putWelsh(deps.id, frame.job_id, answer), { attempts: 2 });
+    await withRetry(() => deps.api.putWelsh(deps.id, frame.job_id, answer), { attempts: 2, wait: deps.retryWait });
   } catch (e) {
-    say(`welsh ${frame.job_id}: could not answer it: ${(e as Error).message}`);
+    say(`welsh ${frame.job_id}: could not answer it: ${reason(e)}`);
   }
 }
 
@@ -493,12 +484,15 @@ export type WelshRunner = {
  * may clone, branch and push, and two at once in one checkout would get in each other's way.
  */
 export function createWelshRunner(deps: WelshDeps & { maxQuick?: number }): WelshRunner {
-  const say = deps.say ?? (() => {});
+  const say = safeSay(deps.say);
   const maxQuick = deps.maxQuick ?? MAX_RUNNING_QUICK;
   const quick: WelshFrame[] = [];
   let quickRunning = 0;
   let long: Promise<void> = Promise.resolve();
   const running = new Set<Promise<void>>();
+
+  // runWelsh never throws, but a job that did must neither stop the long jobs queued behind it nor go unhandled.
+  const settle = (frame: WelshFrame, job: () => Promise<void>): Promise<void> => job().catch((e: unknown) => say(`welsh ${frame.job_id} failed: ${reason(e)}`));
 
   const track = (job: Promise<void>) => {
     running.add(job);
@@ -510,7 +504,7 @@ export function createWelshRunner(deps: WelshDeps & { maxQuick?: number }): Wels
       const frame = quick.shift() as WelshFrame;
       quickRunning++;
       track(
-        runWelsh(deps, frame).finally(() => {
+        settle(frame, () => runWelsh(deps, frame)).finally(() => {
           quickRunning--;
           pumpQuick();
         })
@@ -529,7 +523,7 @@ export function createWelshRunner(deps: WelshDeps & { maxQuick?: number }): Wels
         quick.push(frame);
         pumpQuick();
       } else {
-        long = long.then(() => runWelsh(deps, frame));
+        long = long.then(() => settle(frame, () => runWelsh(deps, frame)));
         track(long);
       }
     },
