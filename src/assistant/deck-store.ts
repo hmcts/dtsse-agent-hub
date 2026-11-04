@@ -1,4 +1,5 @@
 import { HttpError } from "../agent-api/http.ts";
+import { clientPrisma } from "../store/client-namespace.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { announce, type ConversationRow } from "./conversation-row.ts";
 import {
@@ -13,7 +14,7 @@ import {
   outlineAssets,
   withSlideIds
 } from "./deck.ts";
-import { DECK_BUILD_KEEP_MS } from "./deck-build.ts";
+import { heldBuildSince } from "./deck-build.ts";
 
 /**
  * A conversation's slide deck, written in versions the way its document is (`artefact-store.ts`): a write names the
@@ -38,7 +39,7 @@ export interface Deck {
   revision: number;
   updatedBy: DeckAuthor | null;
   updatedAt: Date | null;
-  /** Whether the hub holds the latest version's .pptx. */
+  /** Whether the latest version's .pptx can be downloaded (`pptxHeld`). */
   pptx: boolean;
 }
 
@@ -52,13 +53,25 @@ export function deckAuthor(row: { deckUpdatedBy: string | null }): DeckAuthor | 
   return author(row.deckUpdatedBy);
 }
 
-export async function readDeck(db: Database, conversationId: string): Promise<Deck> {
+/**
+ * Whether the deck version aliased `v` has a .pptx to download: kept with it, or built on request and still held. The
+ * one rule every read of a version's .pptx flag uses.
+ */
+export function pptxHeld(now: Date) {
+  return clientPrisma().sql`(v.pptx IS NOT NULL OR EXISTS (
+    SELECT 1 FROM assistant_deck_build b
+     WHERE b.conversation_id = v.conversation_id AND b.version = v.version AND b.status = 'done' AND b.pptx IS NOT NULL
+       AND b.created_at >= ${heldBuildSince(now)}
+  ))`;
+}
+
+export async function readDeck(db: Database, conversationId: string, now: Date = new Date()): Promise<Deck> {
   const row = await db.assistantConversation.findUnique({ where: { id: conversationId }, select: DECK_SELECT });
   if (row === null || row.deckVersion === 0) {
     return { ...EMPTY_DECK, revision: row?.deckRevision ?? 0 };
   }
   const [latest] = await db.$queryRaw<{ outline: DeckOutline; pptx: boolean }[]>`
-    SELECT outline, pptx IS NOT NULL AS pptx FROM assistant_deck_version WHERE conversation_id = ${conversationId}::uuid AND version = ${row.deckVersion}::int
+    SELECT v.outline, ${pptxHeld(now)} AS pptx FROM assistant_deck_version v WHERE v.conversation_id = ${conversationId}::uuid AND v.version = ${row.deckVersion}::int
   `;
   return {
     title: row.deckTitle,
@@ -97,8 +110,25 @@ export class DeckAssetsMissing extends HttpError {
   }
 }
 
+/** A kept version to restore has gone. Nothing is written. */
+export class DeckVersionGone extends Error {
+  constructor(version: number) {
+    super(`the deck does not keep version ${version}`);
+  }
+}
+
+/** Version `version`'s outline, read under the conversation's lock. */
+async function keptOutline(db: Database, conversationId: string, version: number): Promise<DeckOutline> {
+  await lockConversation(db, conversationId);
+  const row = await db.assistantDeckVersion.findUnique({ where: { conversationId_version: { conversationId, version } }, select: { outline: true } });
+  if (row === null) {
+    throw new DeckVersionGone(version);
+  }
+  return row.outline as unknown as DeckOutline;
+}
+
 /** Locks the conversation's row for the rest of the transaction, which is what every deck write queues on. */
-async function lockConversation(db: Database, conversationId: string): Promise<boolean> {
+export async function lockConversation(db: Database, conversationId: string): Promise<boolean> {
   const rows = await db.$queryRaw<{ found: number }[]>`SELECT 1 AS found FROM assistant_conversation WHERE id = ${conversationId}::uuid FOR UPDATE`;
   return rows.length > 0;
 }
@@ -154,17 +184,28 @@ export async function requireHeldAssets(db: Database, conversationId: string, ou
  *
  * A deck is something in the chat, so the first one records the conversation's first content, as a document does.
  *
- * `pptxOf` names a version with the same outline, whose .pptx (kept with it, or built on request and not yet swept)
- * the new version starts with. It is copied before the retention runs, which may drop the old version's own.
+ * `{restore: N}` writes version N's outline again, with the .pptx the hub holds of it (kept with it, or built on request
+ * and still held), both read under the conversation's lock, so the retention of a concurrent write or picture upload
+ * cannot drop them between the read and the write (`DeckVersionGone` when it already has). The .pptx is copied before
+ * this write's own retention runs, which may drop the old version's.
  */
 export async function writeDeck(
   prisma: PrismaClient,
   conversation: Pick<ConversationRow, "id" | "virtualAgentId" | "ownerOid">,
-  write: { outline: DeckOutline; baseVersion: number; baseRevision?: number; by: DeckAuthor; summary: string | null; editorOid?: string; pptxOf?: number },
+  write: {
+    outline: DeckOutline | { restore: number };
+    baseVersion: number;
+    baseRevision?: number;
+    by: DeckAuthor;
+    summary: string | null;
+    editorOid?: string;
+  },
   now: Date = new Date()
 ): Promise<{ version: number; revision: number; outline: DeckOutline }> {
-  const outline = withSlideIds(write.outline);
   return await prisma.$transaction(async (tx) => {
+    const source = write.outline;
+    const pptxOf = "restore" in source ? source.restore : undefined;
+    const outline = "restore" in source ? await keptOutline(tx, conversation.id, source.restore) : withSlideIds(source);
     const updated = await tx.$queryRaw<{ version: number; revision: number }[]>`
       UPDATE assistant_conversation
          SET deck_title = ${outline.title},
@@ -180,20 +221,20 @@ export async function writeDeck(
     `;
     const [row] = updated;
     if (row === undefined) {
-      throw new DeckConflict(await readDeck(tx, conversation.id));
+      throw new DeckConflict(await readDeck(tx, conversation.id, now));
     }
     await requireHeldAssets(tx, conversation.id, outline);
     await tx.$executeRaw`
       INSERT INTO assistant_deck_version (conversation_id, version, outline, by, summary, created_at, editor_oid)
       VALUES (${conversation.id}::uuid, ${row.version}::int, ${JSON.stringify(outline)}::jsonb, ${write.by}, ${write.summary}, ${now}, ${write.editorOid ?? null})
     `;
-    if (write.pptxOf !== undefined) {
+    if (pptxOf !== undefined) {
       await tx.$executeRaw`
         UPDATE assistant_deck_version SET pptx = COALESCE(
-          (SELECT pptx FROM assistant_deck_version WHERE conversation_id = ${conversation.id}::uuid AND version = ${write.pptxOf}::int),
+          (SELECT pptx FROM assistant_deck_version WHERE conversation_id = ${conversation.id}::uuid AND version = ${pptxOf}::int),
           (SELECT pptx FROM assistant_deck_build
-            WHERE conversation_id = ${conversation.id}::uuid AND version = ${write.pptxOf}::int AND status = 'done' AND pptx IS NOT NULL
-              AND created_at >= ${new Date(now.getTime() - DECK_BUILD_KEEP_MS)}
+            WHERE conversation_id = ${conversation.id}::uuid AND version = ${pptxOf}::int AND status = 'done' AND pptx IS NOT NULL
+              AND created_at >= ${heldBuildSince(now)}
             ORDER BY created_at DESC, id ASC LIMIT 1)
         )
          WHERE conversation_id = ${conversation.id}::uuid AND version = ${row.version}::int
@@ -320,9 +361,12 @@ export async function holdsDeckAsset(db: Database, conversationId: string, sha25
   return (await db.assistantDeckAsset.count({ where: { conversationId, sha256 } })) > 0;
 }
 
-/** Each picture's size in pixels, so the browser can keep its room before it has loaded. */
-export async function deckAssetSizes(db: Database, conversationId: string): Promise<Record<string, { width: number; height: number }>> {
-  const rows = await db.assistantDeckAsset.findMany({ where: { conversationId }, select: { sha256: true, width: true, height: true } });
+/** Each picture's size in pixels, or only those of `only`, so the browser can keep its room before it has loaded. */
+export async function deckAssetSizes(db: Database, conversationId: string, only?: string[]): Promise<Record<string, { width: number; height: number }>> {
+  const rows = await db.assistantDeckAsset.findMany({
+    where: { conversationId, ...(only === undefined ? {} : { sha256: { in: only } }) },
+    select: { sha256: true, width: true, height: true }
+  });
   return Object.fromEntries(rows.map((row) => [row.sha256, { width: row.width, height: row.height }]));
 }
 
@@ -356,17 +400,6 @@ export async function putDeckPptx(
     await announce(tx, conversation);
     return "stored";
   });
-}
-
-export async function readDeckPptx(db: Database, conversationId: string, version: number): Promise<{ title: string; bytes: Uint8Array } | undefined> {
-  const row = await db.assistantDeckVersion.findUnique({
-    where: { conversationId_version: { conversationId, version } },
-    select: { pptx: true, outline: true }
-  });
-  if (row?.pptx === null || row?.pptx === undefined) {
-    return undefined;
-  }
-  return { title: (row.outline as unknown as DeckOutline).title, bytes: row.pptx };
 }
 
 /**
@@ -411,14 +444,14 @@ export interface DeckView {
   revision?: number;
   updatedBy: DeckAuthor | null;
   updatedAt: string | null;
-  /** Whether the latest version's .pptx can be downloaded. */
+  /** Whether the latest version's .pptx can be downloaded (`pptxHeld`). */
   pptx: boolean;
   /** Each picture's size in pixels, by digest. */
   sizes: Record<string, { width: number; height: number }>;
 }
 
-export async function deckView(db: Database, conversationId: string): Promise<DeckView | null> {
-  const deck = await readDeck(db, conversationId);
+export async function deckView(db: Database, conversationId: string, now: Date = new Date()): Promise<DeckView | null> {
+  const deck = await readDeck(db, conversationId, now);
   if (deck.outline === null) {
     return null;
   }
@@ -444,7 +477,7 @@ export interface DeckSummary {
   version: number;
   revision: number;
   updatedBy: DeckAuthor | null;
-  /** Whether the latest version's .pptx can be downloaded. */
+  /** Whether the latest version's .pptx can be downloaded (`pptxHeld`). */
   pptx: boolean;
 }
 
@@ -452,13 +485,14 @@ export interface DeckSummary {
 export async function deckSummary(
   db: Database,
   conversationId: string,
-  row: { deckTitle: string | null; deckVersion: number; deckRevision: number; deckUpdatedBy: string | null }
+  row: { deckTitle: string | null; deckVersion: number; deckRevision: number; deckUpdatedBy: string | null },
+  now: Date = new Date()
 ): Promise<DeckSummary | null> {
   if (row.deckVersion === 0 || row.deckTitle === null) {
     return null;
   }
   const [latest] = await db.$queryRaw<{ pptx: boolean }[]>`
-    SELECT pptx IS NOT NULL AS pptx FROM assistant_deck_version WHERE conversation_id = ${conversationId}::uuid AND version = ${row.deckVersion}::int
+    SELECT ${pptxHeld(now)} AS pptx FROM assistant_deck_version v WHERE v.conversation_id = ${conversationId}::uuid AND v.version = ${row.deckVersion}::int
   `;
   return { title: row.deckTitle, version: row.deckVersion, revision: row.deckRevision, updatedBy: author(row.deckUpdatedBy), pptx: latest?.pptx ?? false };
 }

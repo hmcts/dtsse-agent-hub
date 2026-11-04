@@ -2,7 +2,7 @@ import type { PrismaClient } from "../store/prisma.ts";
 import { announce, type ConversationRow } from "./conversation-row.ts";
 import { type DeckOutline, withSlideIds } from "./deck.ts";
 import { AMENDED_BUILD_ERROR, amends, editSummary } from "./deck-edit.ts";
-import { type Deck, DeckConflict, prune, readDeck, requireHeldAssets, writeDeck } from "./deck-store.ts";
+import { type Deck, DeckConflict, lockConversation, prune, readDeck, requireHeldAssets, writeDeck } from "./deck-store.ts";
 
 /**
  * The owner's save of their deck from the web UI's editor. Saves in quick succession amend the person's own latest
@@ -28,11 +28,11 @@ async function amendLatest(
   now: Date
 ): Promise<DeckEditResult | { base: DeckOutline | undefined }> {
   return await prisma.$transaction(async (tx) => {
-    const [row] = await tx.$queryRaw<{ version: number; revision: number }[]>`
-      SELECT deck_version AS version, deck_revision AS revision FROM assistant_conversation WHERE id = ${conversation.id}::uuid FOR UPDATE
-    `;
+    await lockConversation(tx, conversation.id);
+    const held = await tx.assistantConversation.findUnique({ where: { id: conversation.id }, select: { deckVersion: true, deckRevision: true } });
+    const row = held === null ? undefined : { version: held.deckVersion, revision: held.deckRevision };
     if (row === undefined || row.version !== edit.baseVersion || row.revision !== edit.baseRevision) {
-      return { saved: false, current: await readDeck(tx, conversation.id) };
+      return { saved: false, current: await readDeck(tx, conversation.id, now) };
     }
     const latest =
       row.version === 0

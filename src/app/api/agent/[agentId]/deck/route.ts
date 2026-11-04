@@ -3,7 +3,7 @@ import { ownedAgentRoute } from "@/agent-api/route";
 import { requireConversationOfAgent } from "@/assistant/conversation-store";
 import { checkOutline, deckPutBody } from "@/assistant/deck";
 import { versionParam } from "@/assistant/deck-build";
-import { readDeckVersion } from "@/assistant/deck-history-store";
+import { readDeckVersionOutline } from "@/assistant/deck-history-store";
 import { type Deck, DeckConflict, readDeck, writeDeck } from "@/assistant/deck-store";
 import { prisma } from "@/store/prisma";
 
@@ -33,7 +33,7 @@ export const GET = ownedAgentRoute<{ agentId: string }>(async ({ agent, request 
   if (version === undefined) {
     throw new HttpError(400, "the version must be a whole number from 1");
   }
-  const [found, latest] = await Promise.all([readDeckVersion(prisma, conversation.id, version), readDeck(prisma, conversation.id)]);
+  const [found, latest] = await Promise.all([readDeckVersionOutline(prisma, conversation.id, version), readDeck(prisma, conversation.id)]);
   if (found === undefined) {
     throw new HttpError(404, `the deck does not keep version ${version}`);
   }

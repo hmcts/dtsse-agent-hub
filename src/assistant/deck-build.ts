@@ -19,6 +19,9 @@ export const DECK_BUILD_TIMEOUT_MS = 15 * 60_000;
  */
 export const DECK_BUILD_KEEP_MS = 24 * 60 * 60_000;
 
+/** The oldest a build can have been asked for and still be held: the one rule for whether a built .pptx is there. */
+export const heldBuildSince = (now: Date): Date => new Date(now.getTime() - DECK_BUILD_KEEP_MS);
+
 /** The finished builds a conversation keeps, newest first, so asking for every version in turn holds at most this many. */
 export const DECK_BUILDS_KEPT = 10;
 
@@ -32,6 +35,7 @@ export type DeckBuildRequest =
   | { status: "pending"; job_id: string }
   | { status: "waking" }
   | { status: "unsupported" }
+  | { status: "assistant_gone" }
   | { status: "no_pod" };
 
 /** What reading a build back answers. */

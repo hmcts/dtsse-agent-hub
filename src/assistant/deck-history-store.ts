@@ -1,8 +1,9 @@
+import { clientPrisma } from "../store/client-namespace.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import type { ConversationRow } from "./conversation-row.ts";
 import { type DeckOutline, outlineAssets } from "./deck.ts";
-import { DECK_BUILD_KEEP_MS } from "./deck-build.ts";
-import { type DeckAuthor, DeckConflict, deckAssetSizes, deckAuthor, writeDeck } from "./deck-store.ts";
+import { heldBuildSince } from "./deck-build.ts";
+import { DeckAssetsMissing, type DeckAuthor, DeckConflict, DeckVersionGone, deckAssetSizes, deckAuthor, pptxHeld, writeDeck } from "./deck-store.ts";
 
 /**
  * A deck's kept versions as the browser looks back through them: the list, one version's outline, the .pptx of any
@@ -18,47 +19,60 @@ export interface DeckVersionEntry {
   created_at: string;
   /** When it was last written: an amend's time, or `created_at` for a version never amended. */
   updated_at: string;
-  /** Whether a .pptx of this version can be downloaded now: kept with it, or built on request and not yet swept. */
+  /** Whether a .pptx of this version can be downloaded now (`pptxHeld`). */
   pptx: boolean;
 }
 
-/** One kept version, outline and all, as the slide viewer draws it. */
-export interface DeckVersionView extends DeckVersionEntry {
+/** One kept version with its outline, as the agent API reads it. */
+export interface DeckVersionOutline extends DeckVersionEntry {
   title: string;
   outline: DeckOutline;
+}
+
+/** One kept version, outline and all, as the slide viewer draws it. */
+export interface DeckVersionView extends DeckVersionOutline {
   /** Each picture this version names that the deck still holds, by digest. */
   sizes: Record<string, { width: number; height: number }>;
 }
 
-const freshSince = (now: Date): Date => new Date(now.getTime() - DECK_BUILD_KEEP_MS);
-
 const byOf = (value: string): DeckAuthor => deckAuthor({ deckUpdatedBy: value }) ?? "agent";
 
-/** The deck's kept versions, newest first, or only `version` when it is a number; the .pptx is tested for, never read. */
-async function versionEntries(db: Database, conversationId: string, version: number | null, now: Date): Promise<DeckVersionEntry[]> {
-  const rows = await db.$queryRaw<{ version: number; by: string; summary: string | null; created_at: Date; updated_at: Date; pptx: boolean }[]>`
-    SELECT v.version, v.by, v.summary, v.created_at, COALESCE(v.updated_at, v.created_at) AS updated_at,
-           (v.pptx IS NOT NULL OR EXISTS (
-             SELECT 1 FROM assistant_deck_build b
-              WHERE b.conversation_id = v.conversation_id AND b.version = v.version AND b.status = 'done' AND b.created_at >= ${freshSince(now)}
-           )) AS pptx
+interface VersionRow {
+  version: number;
+  by: string;
+  summary: string | null;
+  created_at: Date;
+  updated_at: Date;
+  pptx: boolean;
+  outline: DeckOutline | null;
+}
+
+/**
+ * The deck's kept versions, newest first, or only `version` when it is a number, with its outline; the .pptx is tested
+ * for, never read, and the list carries no outlines.
+ */
+async function versionRows(db: Database, conversationId: string, version: number | null, now: Date): Promise<VersionRow[]> {
+  const { sql } = clientPrisma();
+  return await db.$queryRaw<VersionRow[]>`
+    SELECT v.version, v.by, v.summary, v.created_at, COALESCE(v.updated_at, v.created_at) AS updated_at, ${pptxHeld(now)} AS pptx, ${version === null ? sql`NULL::jsonb` : sql`v.outline`} AS outline
       FROM assistant_deck_version v
      WHERE v.conversation_id = ${conversationId}::uuid AND (${version}::int IS NULL OR v.version = ${version}::int)
      ORDER BY v.version DESC
   `;
-  return rows.map((row) => ({
-    version: row.version,
-    by: byOf(row.by),
-    summary: row.summary,
-    created_at: row.created_at.toISOString(),
-    updated_at: row.updated_at.toISOString(),
-    pptx: row.pptx
-  }));
 }
+
+const entryOf = (row: VersionRow): DeckVersionEntry => ({
+  version: row.version,
+  by: byOf(row.by),
+  summary: row.summary,
+  created_at: row.created_at.toISOString(),
+  updated_at: row.updated_at.toISOString(),
+  pptx: row.pptx
+});
 
 /** Every kept version of the deck, newest first; empty for a conversation with none. */
 export async function listDeckVersions(db: Database, conversationId: string, now: Date = new Date()): Promise<DeckVersionEntry[]> {
-  return await versionEntries(db, conversationId, null, now);
+  return (await versionRows(db, conversationId, null, now)).map(entryOf);
 }
 
 /** One kept version as the history lists it, or `undefined` for one the deck does not keep. */
@@ -68,21 +82,31 @@ export async function readDeckVersionEntry(
   version: number,
   now: Date = new Date()
 ): Promise<DeckVersionEntry | undefined> {
-  const [entry] = await versionEntries(db, conversationId, version, now);
-  return entry;
+  const [row] = await versionRows(db, conversationId, version, now);
+  return row === undefined ? undefined : entryOf(row);
 }
 
-/** One kept version, or `undefined` for one the deck does not keep. */
-export async function readDeckVersion(db: Database, conversationId: string, version: number, now: Date = new Date()): Promise<DeckVersionView | undefined> {
-  const entry = await readDeckVersionEntry(db, conversationId, version, now);
-  const row = await db.assistantDeckVersion.findUnique({ where: { conversationId_version: { conversationId, version } }, select: { outline: true } });
-  if (entry === undefined || row === null) {
+/** One kept version with its outline, or `undefined` for one the deck does not keep. */
+export async function readDeckVersionOutline(
+  db: Database,
+  conversationId: string,
+  version: number,
+  now: Date = new Date()
+): Promise<DeckVersionOutline | undefined> {
+  const [row] = await versionRows(db, conversationId, version, now);
+  if (row?.outline === null || row?.outline === undefined) {
     return undefined;
   }
-  const outline = row.outline as unknown as DeckOutline;
-  const named = new Set(outlineAssets(outline));
-  const sizes = Object.fromEntries(Object.entries(await deckAssetSizes(db, conversationId)).filter(([sha]) => named.has(sha)));
-  return { ...entry, title: outline.title, outline, sizes };
+  return { ...entryOf(row), title: row.outline.title, outline: row.outline };
+}
+
+/** One kept version with the sizes of the pictures it names, or `undefined` for one the deck does not keep. */
+export async function readDeckVersion(db: Database, conversationId: string, version: number, now: Date = new Date()): Promise<DeckVersionView | undefined> {
+  const found = await readDeckVersionOutline(db, conversationId, version, now);
+  if (found === undefined) {
+    return undefined;
+  }
+  return { ...found, sizes: await deckAssetSizes(db, conversationId, outlineAssets(found.outline)) };
 }
 
 /**
@@ -104,7 +128,7 @@ export async function readVersionPptx(
     return { title, bytes: row.pptx };
   }
   const built = await db.assistantDeckBuild.findFirst({
-    where: { conversationId, version, status: "done", createdAt: { gte: freshSince(now) } },
+    where: { conversationId, version, status: "done", createdAt: { gte: heldBuildSince(now) } },
     orderBy: [{ createdAt: "desc" }, { id: "asc" }],
     select: { pptx: true }
   });
@@ -120,6 +144,7 @@ export type RestoreResult =
   | { restored: true; version: number }
   | { restored: false; current: { version: number; updatedBy: DeckAuthor | null } }
   | { restored: false; missing: true }
+  | { restored: false; picturesGone: true }
   | { restored: false; latest: true };
 
 /**
@@ -129,7 +154,9 @@ export type RestoreResult =
  *
  * The outline is the same, so a .pptx the hub holds for the old version is the new version's too, and is kept with
  * it: the person sees the restored version as built straight away, rather than waiting for the session to rebuild it.
- * It is copied in the write's own transaction, before the write's retention can drop the old version's.
+ * The outline and the .pptx are read under the write's own lock (`writeDeck`), so a concurrent write or picture upload
+ * cannot drop the version between the read and the write: one that already has is `missing`. A version naming a
+ * picture the hub no longer holds is `picturesGone`.
  */
 export async function restoreDeckVersion(
   prisma: PrismaClient,
@@ -140,30 +167,28 @@ export async function restoreDeckVersion(
   if (restore.version === restore.baseVersion) {
     return { restored: false, latest: true };
   }
-  const source = await prisma.assistantDeckVersion.findUnique({
-    where: { conversationId_version: { conversationId: conversation.id, version: restore.version } },
-    select: { outline: true }
-  });
-  if (source === null) {
-    return { restored: false, missing: true };
-  }
   let written: { version: number };
   try {
     written = await writeDeck(
       prisma,
       conversation,
       {
-        outline: source.outline as unknown as DeckOutline,
+        outline: { restore: restore.version },
         baseVersion: restore.baseVersion,
         by: "user",
-        summary: `Restored version ${restore.version}`,
-        pptxOf: restore.version
+        summary: `Restored version ${restore.version}`
       },
       now
     );
   } catch (error) {
     if (error instanceof DeckConflict) {
       return { restored: false, current: { version: error.current.version, updatedBy: error.current.updatedBy } };
+    }
+    if (error instanceof DeckVersionGone) {
+      return { restored: false, missing: true };
+    }
+    if (error instanceof DeckAssetsMissing) {
+      return { restored: false, picturesGone: true };
     }
     throw error;
   }

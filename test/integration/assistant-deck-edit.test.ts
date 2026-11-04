@@ -13,7 +13,7 @@ import { assetRef, type DeckOutline, imageInfo, KEEP_VERSIONS } from "../../src/
 import { answerDeckBuild, readDeckBuild } from "../../src/assistant/deck-build-store.ts";
 import { AMEND_WINDOW_MS, AMENDED_BUILD_ERROR } from "../../src/assistant/deck-edit.ts";
 import { saveDeckEdit } from "../../src/assistant/deck-edit-store.ts";
-import { listDeckVersions } from "../../src/assistant/deck-history-store.ts";
+import { listDeckVersions, readDeckVersionOutline } from "../../src/assistant/deck-history-store.ts";
 import { putDeckAsset, putDeckPptx, readDeck, writeDeck } from "../../src/assistant/deck-store.ts";
 import { assistantFrame } from "../../src/assistant/frame.ts";
 import { devIdentity } from "../../src/viewer/identity.ts";
@@ -215,6 +215,7 @@ describe("saving the deck from the editor", () => {
     await save(mine, outline("Edited"), { version: 1, revision: 1 });
     actAs("alice");
     expect(await deckActions.restoreDeckVersion({ conversationId: mine.id, version: 1, baseVersion: 2 })).toMatchObject({ restored: true, version: 3 });
+    expect(await readDeck(prisma, mine.id)).toMatchObject({ version: 3, revision: 3 });
     const restored = outline("Ways of working");
 
     // Act
@@ -421,6 +422,7 @@ describe("a version the person wrote", () => {
       data: { conversationId: mine.id, version: 2, status: "done", pptx: PPTX, finishedAt: new Date() },
       select: { id: true }
     });
+    const heldBefore = (await readDeck(prisma, mine.id)).pptx;
 
     // Act
     await save(mine, outline("Mine, amended"), { version: 2, revision: 2 });
@@ -436,7 +438,10 @@ describe("a version the person wrote", () => {
     });
     expect(await prisma.assistantDeckBuild.findUnique({ where: { id: finished.id } })).toBeNull();
     expect(await prisma.assistantDeckBuild.findUniqueOrThrow({ where: { id: asked.job_id }, select: { pptx: true } })).toEqual({ pptx: null });
+    expect(heldBefore).toBe(true);
     expect((await listDeckVersions(prisma, mine.id))[0]).toMatchObject({ version: 2, by: "user", pptx: false });
+    expect((await readDeck(prisma, mine.id)).pptx).toBe(false);
+    expect(await readDeckVersionOutline(prisma, mine.id, 2)).toMatchObject({ version: 2, pptx: false });
   });
 });
 

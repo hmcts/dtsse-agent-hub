@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { buildStatus, DECK_BUILD_TIMEOUT_MS, deckBuildErrorBody, MAX_DECK_BUILD_ERROR, versionParam } from "./deck-build.ts";
+import {
+  buildStatus,
+  DECK_BUILD_KEEP_MS,
+  DECK_BUILD_TIMEOUT_MS,
+  deckBuildErrorBody,
+  heldBuildSince,
+  MAX_DECK_BUILD_ERROR,
+  versionParam
+} from "./deck-build.ts";
 
 describe("buildStatus", () => {
   const asked = new Date("2026-11-03T09:00:00.000Z");
@@ -14,6 +22,14 @@ describe("buildStatus", () => {
     expect(buildStatus({ status: "done", createdAt: asked }, later(DECK_BUILD_TIMEOUT_MS * 10))).toBe("done");
     expect(buildStatus({ status: "failed", createdAt: asked }, later(0))).toBe("failed");
     expect(buildStatus({ status: "timeout", createdAt: asked }, later(0))).toBe("timeout");
+  });
+});
+
+describe("heldBuildSince", () => {
+  it("should hold a build for a day from when it was asked for", () => {
+    const now = new Date("2026-11-04T09:00:00.000Z");
+    expect(heldBuildSince(now).getTime()).toBe(now.getTime() - DECK_BUILD_KEEP_MS);
+    expect(heldBuildSince(now).toISOString()).toBe("2026-11-03T09:00:00.000Z");
   });
 });
 

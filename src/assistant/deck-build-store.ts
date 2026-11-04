@@ -1,24 +1,23 @@
 import { canChangeDeck } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
-import { podGate } from "../agents/client-features.ts";
+import { podReady } from "../agents/pod-ready.ts";
 import { isUuid } from "../agents/store.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
-import { setDesired } from "../virtual-agents/store.ts";
 import { findAssistantWithClaims } from "./assistant-store.ts";
-import { assetSha, type DeckOutline } from "./deck.ts";
+import type { DeckOutline } from "./deck.ts";
 import {
   buildStatus,
-  DECK_BUILD_KEEP_MS,
   DECK_BUILD_TIMEOUT_MS,
   DECK_BUILDS_KEPT,
   type DeckBuildRequest,
   type DeckBuildView,
+  heldBuildSince,
   SLIDES_NOT_TURNED_ON,
   SLIDES_PLUGIN
 } from "./deck-build.ts";
 import { readDeckVersionEntry } from "./deck-history-store.ts";
-import { readDeckAsset } from "./deck-store.ts";
+import { type DeckAsset, lockConversation } from "./deck-store.ts";
 import { accessToConversation } from "./shares.ts";
 
 /**
@@ -28,15 +27,10 @@ import { accessToConversation } from "./shares.ts";
  *
  * A row is pending until the pod answers, or until `DECK_BUILD_TIMEOUT_MS` has passed, after which it reads as timed
  * out whatever it still says and the pod's late answer is ignored. The sweep writes that down and deletes builds older
- * than `DECK_BUILD_KEEP_MS`; nothing relies on it having run, since every read checks the clock itself.
+ * than `DECK_BUILD_KEEP_MS` (`heldBuildSince`); nothing relies on it having run, since every read checks the clock itself.
  */
 
 const pendingSince = (now: Date): Date => new Date(now.getTime() - DECK_BUILD_TIMEOUT_MS);
-
-/** The conversation's row, locked for the rest of the transaction, as every deck write takes it. */
-async function lockConversation(db: Database, conversationId: string): Promise<void> {
-  await db.$queryRaw`SELECT 1 FROM assistant_conversation WHERE id = ${conversationId}::uuid FOR UPDATE`;
-}
 
 /** Writes down the conversation's builds that have run out of time, so the partial unique index lets another start. */
 async function expire(db: Database, conversationId: string | null, now: Date): Promise<number> {
@@ -88,25 +82,17 @@ export async function requestDeckBuild(
     return { status: "no_pod" };
   }
   const found = await findAssistantWithClaims(prisma, viewerOid);
+  // The chat's assistant has been replaced by another, which has none of its sessions.
   if (found === undefined || found.assistant.id !== conversation.virtualAgentId) {
-    return { status: "unsupported" };
+    return { status: "assistant_gone" };
   }
-  const { assistant, claims } = found;
+  const { assistant } = found;
   if (!assistant.plugins.includes(SLIDES_PLUGIN)) {
     throw new HttpError(409, SLIDES_NOT_TURNED_ON);
   }
-  if (assistant.desired === "stopped") {
-    await setDesired(prisma, viewerOid, assistant.id, "running", now);
-    return { status: "waking" };
-  }
-  const gate = podGate({ status: assistant.status, ...claims }, "deck-build");
-  if (gate !== "ok") {
-    return { status: gate };
-  }
-  // The pod running now is the one about to be replaced, as just after a plugin is ticked; asked now, its build would
-  // be lost with it.
-  if (assistant.generation > assistant.observedGeneration) {
-    return { status: "waking" };
+  const ready = await podReady(prisma, viewerOid, found, "deck-build", now);
+  if (ready !== "ok") {
+    return { status: ready };
   }
   const id = await prisma.$transaction(async (tx) => {
     await lockConversation(tx, conversationId);
@@ -141,7 +127,7 @@ export async function readDeckBuild(
     where: { id: jobId },
     select: { id: true, conversationId: true, version: true, status: true, error: true, createdAt: true }
   });
-  if (row === null || row.conversationId !== conversationId || row.createdAt < new Date(now.getTime() - DECK_BUILD_KEEP_MS)) {
+  if (row === null || row.conversationId !== conversationId || row.createdAt < heldBuildSince(now)) {
     return undefined;
   }
   const status = buildStatus(row, now);
@@ -195,11 +181,31 @@ export async function podDeckBuild(
     : { job_id: row.id, conversation_id: row.conversationId, version: row.version, outline: version.outline as unknown as DeckOutline };
 }
 
-/** One picture a pending build's outline names; nothing else of the deck's. */
-export async function podDeckBuildAsset(db: Database, virtualAgentId: string, jobId: string, sha256: string, now: Date = new Date()) {
-  const build = await podDeckBuild(db, virtualAgentId, jobId, now);
-  const named = build?.outline.slides.some((one) => one.layout === "HMCTS_IMAGE" && assetSha(one.image.asset) === sha256) === true;
-  return build === undefined || !named ? undefined : await readDeckAsset(db, build.conversation_id, sha256);
+/**
+ * One picture a pending build's outline names; nothing else of the deck's. The build, its outline and the picture are
+ * read in one query, as a pod fetches every picture of a build in turn.
+ */
+export async function podDeckBuildAsset(
+  db: Database,
+  virtualAgentId: string,
+  jobId: string,
+  sha256: string,
+  now: Date = new Date()
+): Promise<DeckAsset | undefined> {
+  if (!isUuid(jobId)) {
+    return undefined;
+  }
+  const [asset] = await db.$queryRaw<DeckAsset[]>`
+    SELECT a.mime, a.bytes
+      FROM assistant_deck_build b
+      JOIN assistant_conversation c ON c.id = b.conversation_id
+      JOIN assistant_deck_version v ON v.conversation_id = b.conversation_id AND v.version = b.version
+      JOIN assistant_deck_asset a ON a.conversation_id = b.conversation_id AND a.sha256 = ${sha256}
+     WHERE b.id = ${jobId}::uuid AND c.virtual_agent_id = ${virtualAgentId}::uuid
+       AND b.status = 'pending' AND b.created_at > ${pendingSince(now)}
+       AND jsonb_path_exists(v.outline, '$.slides[*].image.asset ? (@ == $ref)', jsonb_build_object('ref', 'sha256:' || a.sha256))
+  `;
+  return asset;
 }
 
 export type DeckBuildAnswer = { pptx: Uint8Array } | { error: string };
@@ -256,7 +262,7 @@ export async function sweepDeckBuilds(prisma: PrismaClient, now: Date = new Date
       return undefined;
     }
     const timedOut = await expire(tx, null, now);
-    const { count: deleted } = await tx.assistantDeckBuild.deleteMany({ where: { createdAt: { lt: new Date(now.getTime() - DECK_BUILD_KEEP_MS) } } });
+    const { count: deleted } = await tx.assistantDeckBuild.deleteMany({ where: { createdAt: { lt: heldBuildSince(now) } } });
     return { timedOut, deleted };
   });
 }
