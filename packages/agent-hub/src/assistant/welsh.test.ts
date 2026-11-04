@@ -257,6 +257,24 @@ describe("runWelsh", () => {
     expect(answers).toEqual([{ id: JOB, body: { result: { summary: { toWlu: 3 }, message: "3 new for the WLU." } } }]);
   });
 
+  it("should answer the job as failed, and run nothing, when its working directory cannot be made", async () => {
+    // Arrange
+    const { d, answers } = deps();
+    const frame = parseWelshFrame({ job_id: JOB, kind: "scan", product: "cath", args: {} });
+    vi.stubEnv("TMPDIR", "/nonexistent/welsh-tmp");
+
+    // Act
+    try {
+      await runWelsh(d, frame as NonNullable<typeof frame>);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+
+    // Assert
+    expect(d.run).not.toHaveBeenCalled();
+    expect(answers).toEqual([{ id: JOB, body: { error: "failed", detail: expect.stringMatching(/^That did not work: ENOENT/) } }]);
+  });
+
   it("should fetch the uploaded return first and give the script its path", async () => {
     // Arrange
     let seen = "";
@@ -432,6 +450,25 @@ describe("createWelshRunner", () => {
     expect(at("start story")).toBeGreaterThan(at("end scan"));
     expect(order).toHaveLength(6);
     expect(say).toHaveBeenCalledWith(expect.stringMatching(/ignoring a Welsh job/));
+  });
+
+  it("should still run the long jobs queued behind one that throws", async () => {
+    // Arrange
+    const { d, api, answers } = deps({ run: vi.fn(async () => ({ code: 0, stdout: "{}", stderr: "" })) });
+    api.putWelsh.mockRejectedValueOnce(new Error("hub away")).mockRejectedValueOnce(new Error("hub away"));
+    const say = vi.fn(() => {
+      throw new Error("logger broke");
+    });
+    const runner = createWelshRunner({ ...d, say });
+
+    // Act
+    runner.welsh({ job_id: JOB, kind: "scan", product: "cath", args: {} });
+    runner.welsh({ job_id: FILE, kind: "scan", product: "cath", args: {} });
+    await runner.idle().catch(() => {});
+
+    // Assert
+    expect(d.run).toHaveBeenCalledTimes(2);
+    expect(answers.map((a) => a.id)).toContain(FILE);
   });
 });
 

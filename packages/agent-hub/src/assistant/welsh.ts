@@ -406,9 +406,10 @@ export async function runWelsh(deps: WelshDeps, frame: WelshFrame): Promise<void
   const say = deps.say ?? (() => {});
   const clock = deps.clock ?? Date.now;
   const deadline = clock() + (deps.budgetMs ?? JOB_BUDGET_MS);
-  const dir = mkdtempSync(join(tmpdir(), "welsh-job-"));
+  let dir: string | undefined;
   let answer: WelshAnswer;
   try {
+    dir = mkdtempSync(join(tmpdir(), "welsh-job-"));
     // The wait for the tools' first install comes out of the job's budget, so job and wait end inside the hub's limit.
     const ready = await readyWithin(deps.ready, deadline - clock() - MIN_RUN_MS);
     const left = deadline - clock();
@@ -419,7 +420,13 @@ export async function runWelsh(deps: WelshDeps, frame: WelshFrame): Promise<void
   } catch (e) {
     answer = { error: "failed", detail: `That did not work: ${(e as Error).message}`.slice(0, MAX_DETAIL) };
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    if (dir !== undefined) {
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch (e) {
+        say(`welsh ${frame.job_id}: could not remove ${dir}: ${(e as Error).message}`);
+      }
+    }
   }
   try {
     await withRetry(() => deps.api.putWelsh(deps.id, frame.job_id, answer), { attempts: 2 });
@@ -566,7 +573,16 @@ export function createWelshRunner(deps: WelshDeps & { maxQuick?: number }): Wels
         quick.push(frame);
         pumpQuick();
       } else {
-        long = long.then(() => runWelsh(deps, frame));
+        // Each link catches its own failure, so one job that throws cannot stop the ones queued behind it.
+        long = long
+          .then(() => runWelsh(deps, frame))
+          .catch((e: unknown) => {
+            try {
+              say(`welsh ${frame.job_id} failed: ${(e as Error).message}`);
+            } catch {
+              // Saying so failed too; the queue still moves on.
+            }
+          });
         track(long);
       }
     },
