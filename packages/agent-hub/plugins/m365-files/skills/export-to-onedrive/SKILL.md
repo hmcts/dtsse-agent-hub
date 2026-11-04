@@ -1,6 +1,6 @@
 ---
 name: export-to-onedrive
-description: Save a document, the conversation's shared document, a report or a generated file to the owner's own OneDrive, in its "Agent Hub" folder, through agent-hub's Microsoft 365 connection. Use when the user asks "save this to my OneDrive", "export the document as Word", "put the deck in OneDrive", or "share this as a file".
+description: Save a document or file to the person's own OneDrive, when they ask.
 ---
 
 # Export to the owner's OneDrive

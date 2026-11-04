@@ -1,6 +1,6 @@
 ---
 name: teams-chats
-description: Read the owner's own Microsoft Teams chats and the channels of teams they belong to, through agent-hub's Microsoft 365 connection. Use when the user asks "what did X say in Teams", "catch me up on the release chat", "what's been said in the CaTH channel today", "find the Teams message about Y". Read-only; never posts.
+description: Read the person's Teams chats and channel messages (read-only).
 ---
 
 # Read Teams chats and channels

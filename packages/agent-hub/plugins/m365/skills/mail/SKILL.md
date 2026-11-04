@@ -1,6 +1,6 @@
 ---
 name: mail
-description: Search and read the owner's own Outlook mail through agent-hub's Microsoft 365 connection. Use when the user asks "what did X email me about", "find the email about the release", "summarise my unread mail", "what's in my inbox", "did anyone reply about Y", or wants an email quoted or summarised. Read-only; never sends.
+description: Search and read the person's own Outlook mail (read-only).
 ---
 
 # Read the owner's mail

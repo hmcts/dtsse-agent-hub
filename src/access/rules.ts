@@ -214,7 +214,8 @@ export function canVirtualAgentStoreCredential(kind: string): boolean {
 /**
  * Whether a credential of `kind` is one only the hub itself writes, from a sign-in the person makes in the web UI, so
  * that no route takes a pasted or uploaded value of it: their Microsoft 365 connection, whose refresh token comes from
- * the hub's own code exchange (`/auth/microsoft/callback`) and nowhere else. Deleting one is still the person's.
+ * the hub's own code exchange in `/auth/callback`, for a connect begun at `/auth/microsoft/connect`, and nowhere
+ * else. Deleting one is still the person's.
  */
 export function isHubIssuedCredential(kind: string): boolean {
   return kind === "microsoft";

@@ -406,7 +406,8 @@ Created through `hmcts/central-app-registration`. It needs:
 - for Microsoft 365, the delegated Graph permissions `Mail.Read`, `Calendars.Read`, `Files.ReadWrite`, `Files.Read.All`,
   `Sites.Read.All`, `Chat.Read`, `ChannelMessage.Read.All`, `OnlineMeetings.Read`, `OnlineMeetingTranscript.Read.All`
   and `offline_access`, with tenant admin consent, since HMCTS.NET lets people consent to `User.Read` alone. Only a
-  person who presses Connect is asked for them; see "Microsoft 365" in `docs/agent-api.md`. Connect needs the client
+  person who presses Connect is asked for them; see "Microsoft 365" in `docs/agent-api.md`. The connect sign-in sends `prompt=select_account`
+  rather than `prompt=consent`, since the permissions are admin-consented and a non-admin cannot consent to them. Connect needs the client
   secret, so it works where the web sign-in does (AAT), and the token routes answer `503` without it.
 
 A v2 access token's `aud` is the application's client id, so the service accepts that as well as

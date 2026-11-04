@@ -64,8 +64,13 @@ set `AGENT_HUB_INVOKED_AS` before calling to have that spelling quoted instead.
 
 `agent-hub m365` reads the owner's own Microsoft 365 through Microsoft Graph: mail, calendar, Teams chats and channels,
 meetings and their transcripts, and OneDrive and SharePoint files (`agent-hub m365 help`). It works only once they have
-pressed Connect for Microsoft 365 in the CFT Workspace's settings. It asks the hub for a short-lived access token each
-time — its virtual agent's route in a pod, the person's own otherwise — and never holds the connection itself. It is
+pressed Connect for Microsoft 365 in the Assistant's settings. It gets a short-lived access token from the hub — its
+virtual agent's route in a pod, the person's own otherwise — and never holds the connection itself. It keeps the token
+in memory and in a 0600 file per agent, `m365-token-<agent>.json` under the agent-hub state directory, until two
+minutes before it expires. `files search` uses Microsoft Search, which covers OneDrive, SharePoint, Teams and files
+shared with the person (`--mine` keeps to their own OneDrive); `calendar` follows Graph's pages up to 200 events; an
+answer too long for the output cap drops whole items or cuts the longest text and stays valid JSON; and a download is
+aborted as soon as it passes 25 MB. `credentials delete microsoft` disconnects. It is
 read-only but for `files upload`, into their OneDrive's `Agent Hub` folder, and every answer leads with a notice that
 the content is untrusted data.
 The `m365` and `m365-files` plugins in `plugins/` are the skills that drive it, and every pod loads them, like `slides`.

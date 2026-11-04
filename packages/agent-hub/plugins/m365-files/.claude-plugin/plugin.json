@@ -1,6 +1,8 @@
 {
   "name": "m365-files",
-  "description": "Find, read and attach the person's OneDrive and SharePoint files, and export documents to their OneDrive, through agent-hub once they press Connect for Microsoft 365 in the Assistant's settings",
+  "description": "Your OneDrive and SharePoint files, once Microsoft 365 is connected",
   "version": "0.1.0",
-  "author": { "name": "DTSSE team" }
+  "author": {
+    "name": "DTSSE team"
+  }
 }

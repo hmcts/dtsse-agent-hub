@@ -1,6 +1,6 @@
 ---
 name: meeting-transcripts
-description: Find a Teams meeting the owner attended and read its transcript, through agent-hub's Microsoft 365 connection, to summarise it or pull out decisions and actions. Use when the user asks "summarise this morning's standup", "what were the actions from the refinement session", "what did we decide in yesterday's meeting with X", or "get me the transcript of the 2pm".
+description: Find a Teams meeting's transcript and summarise it, or pull out decisions and actions.
 ---
 
 # Summarise a meeting from its transcript
