@@ -14,15 +14,15 @@ import {
   warmConversation
 } from "@/app/_actions/assistant";
 import { deleteAllAssistantFiles, deleteAssistantFile } from "@/app/_actions/assistant-files";
-import { readAssistantAgent, readGitIdentity } from "@/app/_actions/assistant-settings";
-import { clearGitIdentity, removeCredential, resetClaudeMd, saveClaudeMd, saveCredential, saveGitIdentity } from "@/app/_actions/credentials";
+import { readAssistantAgent } from "@/app/_actions/assistant-settings";
+import { removeCredential, resetClaudeMd, saveClaudeMd, saveCredential } from "@/app/_actions/credentials";
 import { restoreDeckVersion, saveDeck } from "@/app/_actions/decks";
 import { saveExportDefaults } from "@/app/_actions/export-defaults";
 import { offerChatFork, withdrawChatFork } from "@/app/_actions/forks";
 import { answerAgentQuestion } from "@/app/_actions/questions";
 import { shareChat, unshareChat } from "@/app/_actions/shares";
 import { deleteTemplate, saveTemplate } from "@/app/_actions/templates";
-import { reconnectSignIn, renameVirtualAgent, resizeVirtualAgent, restartVirtualAgent, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
+import { reconnectSignIn, resizeVirtualAgent, restartVirtualAgent, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
 import { SHARING_SETTINGS } from "@/app/assistant/sharing";
 import { connectionsData } from "@/assistant/connections";
 import { savedCredentialsData } from "@/assistant/saved-credentials";
@@ -123,8 +123,7 @@ export default async function ConversationPage({
       model={model === undefined ? undefined : { ...model, save: saveAssistantModel }}
       exports={{ defaults, save: saveExportDefaults, access: jira }}
       sharing={SHARING_SETTINGS}
-      agent={{ load: readAssistantAgent, rename: renameVirtualAgent, restart: restartVirtualAgent }}
-      git={{ load: readGitIdentity, save: saveGitIdentity, clear: clearGitIdentity }}
+      agent={{ load: readAssistantAgent, restart: restartVirtualAgent }}
       tokens={{ ...savedCredentialsData(home.credentials, home.assistant.modelRoute), save: saveCredential, remove: removeCredential }}
     >
       {/* `local` so a chat on the person's own computer is not held behind credentials only a pod needs. */}

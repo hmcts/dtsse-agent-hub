@@ -5,10 +5,11 @@ const ASSISTANT_OFF = "the Assistant runs on a virtual agent, which is off on th
 
 /**
  * A person's credentials, in the Assistant's settings. `/hub/settings/credentials`, where the published client's pod
- * boot messages send people to paste a GitHub token, lands on the Credentials section; `routes.spec.ts` checks the redirect itself.
+ * boot messages send people to paste a GitHub token, lands on the Connections section; `routes.spec.ts` checks the redirect
+ * itself.
  */
 test.describe("credentials @smoke", () => {
-  test("should open the Assistant's settings at Credentials when the old credentials address is visited @smoke @regression", async ({
+  test("should open the Assistant's settings at Connections when the old credentials address is visited @smoke @regression", async ({
     browser,
     baseURL,
     request
@@ -22,8 +23,8 @@ test.describe("credentials @smoke", () => {
       test.skip(new URL(page.url()).pathname === "/hub", ASSISTANT_OFF);
       expect(response?.status()).toBe(200);
 
-      await expect(page.getByRole("dialog", { name: "Settings" }).getByRole("heading", { name: "Credentials" })).toBeVisible();
-      expect(new URL(page.url()).search).toBe("?settings=credentials");
+      await expect(page.getByRole("dialog", { name: "Settings" }).getByRole("heading", { name: "Saved credentials" })).toBeVisible();
+      expect(new URL(page.url()).search).toBe("?settings=connections");
       await page.keyboard.press("Escape");
       await expect(page).toHaveURL((url) => url.search === "");
     } finally {
@@ -37,7 +38,7 @@ test.describe("credentials @smoke", () => {
     const context = await asPersona(browser, persona, baseURL!);
     try {
       const page = await context.newPage();
-      const response = await page.goto("/assistant?settings=credentials");
+      const response = await page.goto("/assistant?settings=connections");
       test.skip(response?.status() === 404, ASSISTANT_OFF);
       const dialog = page.getByRole("dialog", { name: "Settings" });
       // Previews and the -staging release have sign-in off, so credentials are unavailable there.

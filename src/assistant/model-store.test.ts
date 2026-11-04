@@ -71,8 +71,8 @@ describe("saveAssistantModel", () => {
 });
 
 /**
- * The pod claim the Model section reads, which comes from the virtual agent's current agent — the supervisor's own
- * registration — as the Files and Size sections' reports do.
+ * The pod claim the model setting reads, which comes from the virtual agent's current agent — the supervisor's own
+ * registration — as the Files section's and the size's reports do.
  */
 function podStub(clientFeatures: unknown, owner = ALICE) {
   return {

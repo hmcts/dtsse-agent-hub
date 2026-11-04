@@ -23,12 +23,11 @@ import { AgentSettings, type AssistantAgentSettings } from "@/components/assista
 import { type AssistantClaudeMd, ClaudeMd } from "@/components/assistant/ClaudeMdSettings";
 import { type AssistantExportDefaults, ExportSettings } from "@/components/assistant/ExportSettings";
 import { type AssistantFiles, Files } from "@/components/assistant/FileSettings";
-import { type AssistantGitIdentity, GitIdentity } from "@/components/assistant/GitIdentitySettings";
 import { SETTINGS_TWO_PANE_MIN_WIDTH } from "@/components/assistant/layout";
-import { type AssistantModelSetting, ModelSettings } from "@/components/assistant/ModelSettings";
+import type { AssistantModelSetting } from "@/components/assistant/ModelSettings";
 import { PortSettings } from "@/components/assistant/PortSettings";
 import { type AssistantSharing, Sharing } from "@/components/assistant/SharingSettings";
-import { type AssistantSize, Size } from "@/components/assistant/SizeSettings";
+import type { AssistantSize } from "@/components/assistant/SizeSettings";
 import { type AssistantTemplates, Templates } from "@/components/assistant/TemplateSettings";
 import { ThemeSwitch } from "@/components/assistant/ThemeSwitch";
 import { type AssistantTokens, TokenSettings } from "@/components/assistant/TokenSettings";
@@ -65,7 +64,6 @@ interface SettingsView {
   exports: AssistantExportDefaults | undefined;
   sharing: AssistantSharing | undefined;
   agent: AssistantAgentSettings | undefined;
-  git: AssistantGitIdentity | undefined;
   tokens: AssistantTokens | undefined;
 }
 
@@ -234,17 +232,42 @@ function Appearance({ theme }: { theme: Theme }) {
   );
 }
 
-function Connections({ list, access, connect, unavailable, warning }: Pick<SettingsView, "list" | "access" | "connect" | "unavailable" | "warning">) {
+/** Whether the page passed any sign-in, or a reason it has none to show. */
+function hasSignIns(view: SettingsView): boolean {
+  return view.list.length > 0 || view.unavailable !== null;
+}
+
+/** Whether the page passed any saved credential, or a reason it cannot show them. */
+function hasTokens(view: SettingsView): boolean {
+  return view.tokens !== undefined && (view.tokens.rows.length > 0 || view.tokens.unavailable !== null);
+}
+
+/**
+ * The person's sign-ins, then the credentials saved for them beneath: one section, because both are how the assistant
+ * reaches the services it works with, and a pasted token is the other way of connecting one.
+ */
+function Connections({ view }: { view: SettingsView }) {
   return (
-    <section aria-labelledby="assistant-settings-connections" className="flex flex-col gap-2.5">
-      <h3 id="assistant-settings-connections" className="text-sm font-semibold">
-        Connections
-      </h3>
+    <section aria-labelledby="assistant-settings-connections" className="flex flex-col gap-5">
+      <div className="flex flex-col gap-2.5">
+        <h3 id="assistant-settings-connections" className="text-sm font-semibold">
+          Connections
+        </h3>
+        {hasSignIns(view) ? <SignIns {...view} /> : null}
+      </div>
+      {view.tokens !== undefined && hasTokens(view) ? <TokenSettings tokens={view.tokens} /> : null}
+    </section>
+  );
+}
+
+function SignIns({ list, access, connect, unavailable, warning }: Pick<SettingsView, "list" | "access" | "connect" | "unavailable" | "warning">) {
+  return (
+    <>
       {warning === null ? null : (
         <div className="flex flex-col gap-1 rounded-[10px] border border-asst-warn bg-asst-raised px-3.5 py-3">
           <p className="text-[13px] font-semibold text-asst-text">{warning}</p>
           {/*
-           * This section lists where each sign-in stands and nothing more, so it says where to go and not what will
+           * The list says where each sign-in stands and nothing more, so this says where to go and not what will
            * be there. What is above the chats is whichever ask applies — the accounts to connect on a first visit, a
            * code to type, or a lapsed sign-in to ask for again — and promising one of the three would be wrong for
            * the other two.
@@ -266,7 +289,7 @@ function Connections({ list, access, connect, unavailable, warning }: Pick<Setti
           ))}
         </ul>
       )}
-    </section>
+    </>
   );
 }
 
@@ -280,13 +303,13 @@ function Plugins({ plugins }: { plugins: AssistantPlugins }) {
   return (
     <section aria-labelledby="assistant-settings-plugins" className="flex flex-col gap-2.5">
       <h3 id="assistant-settings-plugins" className="text-sm font-semibold">
-        Team tools
+        Plugins
       </h3>
       <p className="text-pretty text-[13px] text-asst-muted">
-        Extra skills your assistant can use for a team's own work.{" "}
+        Plugins add skills your assistant can use, such as a team's own tools for its work.{" "}
         {plugins.podRunning ? "Saving restarts your assistant; your chats are kept." : "Your assistant loads them the next time it starts."}
       </p>
-      <ActionForm action={plugins.save} label="Change your assistant's team tools" keepValues className="flex flex-col gap-2.5">
+      <ActionForm action={plugins.save} label="Change your assistant's plugins" keepValues className="flex flex-col gap-2.5">
         <input type="hidden" name="id" value={plugins.assistantId} />
         <ul className="flex flex-col overflow-hidden rounded-[10px] border border-asst-line">
           {choices.map((choice) => (
@@ -312,7 +335,7 @@ function Plugins({ plugins }: { plugins: AssistantPlugins }) {
           type="submit"
           className="self-start rounded-[10px] bg-asst-accent px-3.5 py-2 text-[13px] font-semibold text-asst-ink hover:bg-asst-accent-hover"
         >
-          Save team tools
+          Save plugins
         </button>
       </ActionForm>
     </section>
@@ -326,8 +349,8 @@ type SettingsGroup = "General" | "Agent" | null;
  * One section of the dialog: the label the navigation shows for it, the group it sits under, whether the page passed
  * anything for it to show, and its panel.
  *
- * A section is a row of `SECTIONS` and nothing else — its own component file, one field of `SettingsView`, and one
- * entry here — so adding or removing one never touches the navigation, the focus trap or the layout.
+ * A section is a row of `SECTIONS` and nothing else — its own component file, the fields of `SettingsView` it reads,
+ * and one entry here — so adding or removing one never touches the navigation, the focus trap or the layout.
  */
 interface SettingsSection {
   id: string;
@@ -349,15 +372,8 @@ const SECTIONS: readonly SettingsSection[] = [
     id: "connections",
     label: "Connections",
     group: "General",
-    shown: (view) => view.list.length > 0 || view.unavailable !== null,
-    panel: (view) => <Connections list={view.list} access={view.access} connect={view.connect} unavailable={view.unavailable} warning={view.warning} />
-  },
-  {
-    id: "credentials",
-    label: "Credentials",
-    group: "General",
-    shown: (view) => view.tokens !== undefined && (view.tokens.rows.length > 0 || view.tokens.unavailable !== null),
-    panel: (view) => (view.tokens === undefined ? null : <TokenSettings tokens={view.tokens} />)
+    shown: (view) => hasSignIns(view) || hasTokens(view),
+    panel: (view) => <Connections view={view} />
   },
   {
     id: "templates",
@@ -384,16 +400,8 @@ const SECTIONS: readonly SettingsSection[] = [
     id: "assistant",
     label: "Assistant",
     group: "Agent",
-    shown: (view) => view.agent !== undefined,
-    panel: (view) => (view.agent === undefined ? null : <AgentSettings settings={view.agent} />)
-  },
-  {
-    id: "model",
-    label: "Model",
-    // With the agent, because it is the one choice about how the agent answers rather than about this screen.
-    group: "Agent",
-    shown: (view) => view.model !== undefined,
-    panel: (view) => (view.model === undefined ? null : <ModelSettings model={view.model} />)
+    shown: (view) => view.agent !== undefined || view.model !== undefined || view.size !== undefined,
+    panel: (view) => <AgentSettings agent={view.agent} model={view.model} size={view.size} />
   },
   {
     id: "claude-md",
@@ -403,29 +411,13 @@ const SECTIONS: readonly SettingsSection[] = [
     panel: (view) => (view.claudeMd === undefined ? null : <ClaudeMd claudeMd={view.claudeMd} />)
   },
   {
-    id: "git",
-    label: "Git identity",
-    group: "Agent",
-    shown: (view) => view.git !== undefined,
-    panel: (view) => (view.git === undefined ? null : <GitIdentity git={view.git} />)
-  },
-  {
-    id: "tools",
-    label: "Tools",
+    id: "plugins",
+    label: "Plugins",
     group: "Agent",
     // Nothing at all when the hub offers no plugin and the assistant loads none: a navigation item leading to an
     // empty panel is worse than no item, and `pluginChoices` is the one place that decides what there is to tick.
     shown: (view) => view.plugins !== undefined && pluginChoices(view.plugins.available, view.plugins.checked).length > 0,
     panel: (view) => (view.plugins === undefined ? null : <Plugins plugins={view.plugins} />)
-  },
-  {
-    id: "size",
-    label: "Size",
-    // With the agent rather than on its own, because what it changes is how much the agent has to work with — and
-    // the memory figures it shows are only readable as "room for another chat", which is an agent fact.
-    group: "Agent",
-    shown: (view) => view.size !== undefined,
-    panel: (view) => (view.size === undefined ? null : <Size size={view.size} />)
   },
   {
     id: "ports",
@@ -442,6 +434,12 @@ const SECTIONS: readonly SettingsSection[] = [
     panel: (view) => (view.files === undefined ? null : <Files files={view.files} />)
   }
 ];
+
+/**
+ * Section ids an address may still carry for a section that now holds what they named. A pod on an older client links
+ * its owner to `?settings=credentials` to paste a token, and that box is in Connections.
+ */
+const SECTION_ALIASES: ReadonlyMap<string, string> = new Map([["credentials", "connections"]]);
 
 /**
  * Whether the dialog has room for its navigation beside a section.
@@ -637,7 +635,8 @@ function focusNavigation(dialog: HTMLElement | null): void {
  * into it as it opens and stays in it while it is open; closing it, by Escape, the close button or the page behind
  * it, puts focus back on the cog, which is what `onClose` is for.
  */
-function Dialog({ view, onClose, initial = null }: { view: SettingsView; onClose: () => void; initial?: string | null }) {
+function Dialog({ view, onClose, initial: named = null }: { view: SettingsView; onClose: () => void; initial?: string | null }) {
+  const initial = named === null ? null : (SECTION_ALIASES.get(named) ?? named);
   const panel = useRef<HTMLDivElement>(null);
   const prefix = useId();
   const wide = useTwoPane();
@@ -784,7 +783,6 @@ export function AssistantSettings({
   exports,
   sharing,
   agent,
-  git,
   tokens
 }: {
   theme?: Theme;
@@ -802,7 +800,6 @@ export function AssistantSettings({
   exports?: AssistantExportDefaults;
   sharing?: AssistantSharing;
   agent?: AssistantAgentSettings;
-  git?: AssistantGitIdentity;
   tokens?: AssistantTokens;
 }) {
   // `get` is the first value, so an address carrying the parameter twice still names one section.
@@ -830,8 +827,8 @@ export function AssistantSettings({
   const access = data === undefined ? null : modelAccess(data.route, list);
   const warning = connectionsWarning(list);
   const memory = size === undefined ? null : memoryWarning(memoryPressure(size.view.use, size.view.openChats, size.view.size));
-  // In the order the dialog's sections come — Connections under General, then Size under Agent — so the name reads as
-  // a route through it. Empty is no mark at all.
+  // In the order the dialog's sections come — Connections under General, then the size in Assistant under Agent — so
+  // the name reads as a route through it. Empty is no mark at all.
   const attention = [warning, memory].filter((reason): reason is string => reason !== null);
 
   /**
@@ -931,7 +928,6 @@ export function AssistantSettings({
                 exports,
                 sharing,
                 agent,
-                git,
                 tokens
               }}
               // Remounted for a section the address names while the dialog is already open, so it opens on that one.

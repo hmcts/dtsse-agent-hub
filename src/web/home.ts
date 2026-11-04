@@ -100,7 +100,7 @@ const VIRTUAL_AGENT_PAGES = /^\/virtual(?:\/[^/]+)?$/;
 /** The other retired pages, as `retiredPath` sees them with any `/hub` taken off. */
 const RETIRED_PAGES = new Map<string, string>([
   ["/access", SHARED_CHATS],
-  ["/settings/credentials", assistantSettingsPath("credentials")]
+  ["/settings/credentials", assistantSettingsPath("connections")]
 ]);
 
 /**
@@ -112,11 +112,11 @@ const RETIRED_PAGES = new Map<string, string>([
  * - `/assistant/shared` goes there too, an address bookmarked and pasted for the list of shared chats. The
  *   `/assistant/shared/{id}` pages under it are a recipient's view of one chat, and are not retired.
  * - `/virtual` and `/virtual/{id}` go to the Assistant section of its settings: the Assistant's agent is the one
- *   virtual agent a person has, and its settings are where it is renamed, restarted and its web servers opened.
+ *   virtual agent a person has, and its settings are where it is restarted and its web servers opened.
  *   `/virtual/{id}/ports/{port}` is not one of these: it is the viewer's old ticket route, which `movedPortTicketPath`
  *   sends on with its query.
- * - `/settings/credentials` goes to Credentials, where a token is pasted, so a pod's boot message linking either address
- *   reaches the same box.
+ * - `/settings/credentials` goes to Connections, where a token is pasted, so a pod's boot message linking either
+ *   address reaches the same box.
  *
  * Both the bare address and the `/hub` one for the hub's pages, because each existed under both and both were pasted
  * into tickets. Checked ahead of `movedHubPath`, which would otherwise send the bare one to a page that is no longer

@@ -40,7 +40,6 @@ import { hasWelshPlugin } from "../assistant/welsh.ts";
 import { findChannel, listChannels } from "../channels/store.ts";
 import { credentialBackend } from "../credentials/backend.ts";
 import { DEFAULT_CLAUDE_MD } from "../credentials/claude-md.ts";
-import { type GitIdentity, readGitIdentity } from "../credentials/git-identity.ts";
 import type { CredentialKind } from "../credentials/names.ts";
 import { type CredentialStatus, credentialStatus, ownerRefusal, readCredential } from "../credentials/store.ts";
 import { type LoadedThreadMessage, loadReplies, loadThreadMessage, type ThreadMessage } from "../messages/direct-thread.ts";
@@ -98,7 +97,7 @@ export type CredentialSettings = { modelRoute: ModelRoute; claudeTokenUsable: bo
 
 /**
  * What the viewer has stored, as metadata: nothing here carries a credential's value. Their CLAUDE.md and git identity
- * are not among them; `claudeMdSettings` and `gitIdentitySettings` read those for their own forms.
+ * are not among them: `claudeMdSettings` reads the CLAUDE.md for its own form, and the git identity has no form.
  *
  * `modelRoute` is the viewer's own, which is what a new agent of theirs would be created on; `claudeTokenUsable`
  * answers the one question that route is not enough for, because it is the agents' routes that decide whether a
@@ -144,22 +143,6 @@ export async function claudeMdSettings(viewer: Identity): Promise<ClaudeMdSettin
     text: stored ?? DEFAULT_CLAUDE_MD,
     updatedAt: stored === undefined ? null : (status?.updatedAt.toISOString() ?? null)
   };
-}
-
-export type GitIdentitySettings = { available: true; stored: boolean; identity: GitIdentity } | { available: false; reason: string };
-
-/** The viewer's own git identity override for editing, which `canOwnerReadCredential` lets them read back. */
-export async function gitIdentitySettings(viewer: Identity): Promise<GitIdentitySettings> {
-  const backend = credentialBackend(prisma);
-  if (!backend.available) {
-    return { available: false, reason: backend.reason };
-  }
-  const refusal = ownerRefusal(backend.store, viewer.oid);
-  if (refusal !== undefined || !canOwnerReadCredential("git_identity")) {
-    return { available: false, reason: refusal?.message ?? "your git identity cannot be shown" };
-  }
-  const stored = await readCredential(prisma, backend.store, viewer.oid, "git_identity");
-  return { available: true, stored: stored !== undefined, identity: readGitIdentity(stored) };
 }
 
 export interface MessagePageView {
@@ -336,9 +319,9 @@ export async function assistantHasWelsh(viewer: Identity): Promise<boolean> {
 }
 
 /**
- * How much the viewer's assistant has to work with, for the settings dialog's Size section: its size, what its pod
+ * How much the viewer's assistant has to work with, for the settings dialog's size part: its size, what its pod
  * reports about its memory, and how many chats have a session on it. `undefined` when they have no assistant at all,
- * which is the one case the section is not offered.
+ * which is the one case it is not shown.
  *
  * Its own read rather than part of `openAssistant`, as the files are: only the settings dialog uses it, and it costs a
  * second query over the viewer's conversations. The owner check is the store's, through `isOwner`.
@@ -380,7 +363,7 @@ export async function assistantAgent(viewer: Viewer): Promise<AssistantAgent | u
 /**
  * The Claude model the viewer's chats run on, for the settings to show and change, with whether their assistant's pod
  * can act on a choice yet. `undefined` when they have no assistant at all, which is the one case the section is not
- * offered — as the Files and Size sections are not.
+ * offered — as the Files section and the size are not.
  */
 export async function assistantModel(viewer: Viewer): Promise<AssistantModelChoice | undefined> {
   const assistant = await findAssistant(prisma, viewer.oid);

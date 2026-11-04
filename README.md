@@ -83,7 +83,7 @@ Every `/assistant` page is not found while virtual agents are off.
 **Retired addresses redirect**, with the rules in `src/web/home.ts`:
 
 - `/hub/virtual` and `/hub/virtual/[id]` go to `/assistant?settings=assistant`, and `/hub/settings/credentials` to
-  `/assistant?settings=credentials`. `/access`, `/hub/access` and `/assistant/shared` go to
+  `/assistant?settings=connections`. `/access`, `/hub/access` and `/assistant/shared` go to
   `/assistant?settings=sharing`. Each answers in one hop from the proxy (`retiredPath`), from the bare address as from
   the `/hub` one, and goes to `/hub` instead when virtual agents are off. These drop their query, so one carrying its
   own `?settings=` cannot override the section.
@@ -193,17 +193,13 @@ directly with `?settings=<id>`:
 | Id | Label | What it holds |
 | --- | --- | --- |
 | `appearance` | Appearance | light, dark, or the device's setting |
-| `connections` | Connections | the sign-ins (GitHub, Azure, Atlassian and the rest) |
-| `credentials` | Credentials | paste a GitHub, Jenkins or, on your own licence, Claude token; remove any saved credential |
+| `connections` | Connections | the sign-ins (GitHub, Azure, Atlassian and the rest), then the saved credentials: paste a GitHub, Jenkins or, on your own licence, Claude token; remove any saved credential. `?settings=credentials`, which older pod clients link, opens it too |
 | `templates` | Templates | saved prompts |
 | `exports` | Jira & Confluence | export defaults |
 | `sharing` | Sharing | the chats you have shared or offered to fork, and those shared with or offered to you |
-| `assistant` | Assistant | its name, and a restart |
-| `model` | Model | the Claude model for every chat |
+| `assistant` | Assistant | where its agent stands and a restart, the Claude model for every chat, and its size with the memory its pod reports |
 | `claude-md` | Claude.md | the CLAUDE.md every virtual agent of yours writes before Claude starts |
-| `git` | Git identity | the name and email its commits use |
-| `tools` | Tools | the workspace plugins it loads |
-| `size` | Size | its size, and the memory its pod reports |
+| `plugins` | Plugins | the workspace plugins it loads |
 | `ports` | Web servers | the web servers its pod reports |
 | `files` | Files | the files the pod holds, and deleting them |
 

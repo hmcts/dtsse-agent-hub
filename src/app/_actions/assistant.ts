@@ -276,7 +276,7 @@ export async function setConversationProduct(input: { conversationId: unknown; p
  *
  * The confirmation says the choice is saved and nothing about when it takes effect, because that depends on the pod:
  * one on a client predating the family aliases drops this id and runs hai's default until it restarts. When it does,
- * the Model section is what says so — it reads the pod's `model-alias` claim, which the action does not.
+ * the model setting is what says so — it reads the pod's `model-alias` claim, which the action does not.
  */
 export async function saveAssistantModel(form: FormData): Promise<ActionResult<{ confirmation: string }>> {
   return await runAction<{ confirmation: string }>("save assistant model", async () => {

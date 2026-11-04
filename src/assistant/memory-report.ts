@@ -4,7 +4,7 @@ import { describeSize } from "./upload-report.ts";
 
 /**
  * What the pod says about its own memory, whether that is close enough to its ceiling to be worth telling the person
- * about, and the sentences the settings' Size section says either way. Pure, and shared by the pod-facing route, the
+ * about, and the sentences the settings' size part says either way. Pure, and shared by the pod-facing route, the
  * store and the UI, so there is one answer to every question about the pod's memory — and the words are here beside
  * the rules they describe, so a threshold and the sentence about it cannot drift.
  *
@@ -82,7 +82,7 @@ type NoMemoryReport =
   /** It is running and has simply not reported yet; the first one comes within the reconcile interval. */
   | "waiting";
 
-/** What the Size section knows about the pod's memory: a report, or why there is none. */
+/** What the size setting knows about the pod's memory: a report, or why there is none. */
 export type MemoryUse =
   | {
       reported: true;
@@ -217,7 +217,7 @@ export function chatCapacity(reportedMax: number | null, size: VirtualAgentSize,
 }
 
 /**
- * The sentence the Size section says about the size the person is on.
+ * The sentence the size setting says about the size the person is on.
  *
  * Worded here beside `chatCapacity`, as `memoryAdvice` is beside its threshold, because which sentence is said *is*
  * the rule: a pod with no honest answer for what it runs now — it has not reported, or it is not running — has to be

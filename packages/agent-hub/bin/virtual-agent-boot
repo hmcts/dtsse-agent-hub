@@ -349,7 +349,7 @@ if [[ -n "$github_missing" ]]; then
     # three. The client has already reported the accurate reason as the sign-in's own detail; this adds the
     # remedy, which is the same whichever of them happened.
     if [[ "$asked" -eq 1 ]]; then
-        report awaiting_credentials "github: this agent is not signed in to GitHub yet. Paste a GitHub token at $HUB/assistant?settings=credentials, or restart the assistant from its settings to be sent another code."
+        report awaiting_credentials "github: this agent is not signed in to GitHub yet. Paste a GitHub token at $HUB/assistant?settings=connections, or restart the assistant from its settings to be sent another code."
         log "github sign-in did not finish; waiting for a stored GitHub token rather than asking again"
         refused="$github_refused"
         until token=$(github_credential) && [[ -n "$token" ]] && gh_login_with_token "$token"; do
@@ -357,7 +357,7 @@ if [[ -n "$github_missing" ]]; then
             # while the one already known refused is not. Without this the owner is left watching the message
             # that asked them for the token they just gave, or the one that asked for any token at all.
             if [[ -n "${token:-}" && "$refused" != "$token" ]]; then
-                report awaiting_credentials "github: GitHub refused the stored token. Paste a current one with the user:email scope at $HUB/assistant?settings=credentials."
+                report awaiting_credentials "github: GitHub refused the stored token. Paste a current one with the user:email scope at $HUB/assistant?settings=connections."
                 refused="$token"
             fi
             sleep_interruptibly 30

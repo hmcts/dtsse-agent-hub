@@ -404,7 +404,7 @@ every call between the two is pod to hub. The pod reports, as it does for its di
   running**, since a session starting or ending steps `anon_bytes` by about one conversation. The 10 minutes is the
   longest the hub goes without a fresh figure.
 - The hub's figures are always *as of* `memory_reported_at` and the UI says when rather than presenting them as
-  current. `anon_bytes` is what the warning below is computed from. `peak_bytes` leads the Size section as what the
+  current. `anon_bytes` is what the warning below is computed from. `peak_bytes` leads the size setting as what the
   pod reached at its busiest, and nothing is warned on it: nothing resets it while the pod lives, so a threshold
   crossed once would stay crossed for ever.
 - A report **notifies nobody**, for the reasons a disk report does not: it is read by the owner's own settings, and
@@ -436,7 +436,7 @@ back. Those paths drop its **launch token** in the same breath, so it cannot, an
 its replacement both holding a valid token over the handover. The starting path has no token to drop.
 
 **The window this leaves.** A pod reports phase `running` before it starts its supervisor, so between those two the
-row is running with no report at all, which the Size section says plainly. What is not closed is a pod replaced
+row is running with no report at all, which the size setting says plainly. What is not closed is a pod replaced
 without the hub asking — the kubelet restarting one after the OOM kill this warning is about, where no row changed at
 all. The pod sends its first report as it boots rather than a tick later, so that window is the new supervisor's boot
 rather than ten minutes, but it is a window.
@@ -445,7 +445,7 @@ rather than ten minutes, but it is a window.
 is not a session they chose to share.
 
 **An older client.** Gated on the `memory-anon` client feature below: a pod that does not claim it sends no
-`anon_bytes`, which this route refuses, so for the purposes of the Size section it reports nothing at all. Either
+`anon_bytes`, which this route refuses, so for the purposes of the size setting it reports nothing at all. Either
 way the settings say it cannot report yet, rather than showing it as `0`, which would read as an idle pod. A pod takes
 the current client when it boots, so this reaches a pod at its next start.
 
@@ -461,13 +461,13 @@ wake, with `resume` true. The turn in flight is.
 
 **A GitHub token, an Azure token cache, a Claude token, a Jenkins API token or an Atlassian sign-in can never be read back by a person through any API**, this one or the web UI's, the owner included. `GET` on those kinds answers `405`: a person can replace or delete them, never see them. Their one read is `GET /api/virtual/{id}/credentials/{kind}`, by the owner's own virtual agent with its launch token.
 
-**`claude_md` and `git_identity` are the only kinds their owner can read back**, with `GET /api/agent/credentials/{kind}` and their own delegated token, because the page that edits each has to show it. No model credential is readable by anyone: the `gateway` route stores none at all, and a Claude token is write-only like every other sign-in. A launch token cannot use this route (`403`), and the owner's virtual agent reads any kind through `GET /api/virtual/{id}/credentials/{kind}`. No value is ever logged.
+**`claude_md` and `git_identity` are the only kinds their owner can read back**, with `GET /api/agent/credentials/{kind}` and their own delegated token, because changing either starts from what is stored: the CLAUDE.md in the Assistant's settings, the git identity through this API, which no page edits. No model credential is readable by anyone: the `gateway` route stores none at all, and a Claude token is write-only like every other sign-in. A launch token cannot use this route (`403`), and the owner's virtual agent reads any kind through `GET /api/virtual/{id}/credentials/{kind}`. No value is ever logged.
 
 **`claude_md` is the owner's own CLAUDE.md**, which every one of their virtual agents writes to `~/.claude/CLAUDE.md` (Claude Code's user-level memory file) before each start of Claude. It is not a sign-in, but it is kept with the credentials, in the same vault, because people may put private context in it. Its owner reads it back with `GET /api/agent/credentials/claude_md`, and the Assistant's settings show it for editing, so anyone holding that person's agent-hub token can read it too. Nothing stored answers `404` there. The owner's virtual agent reads it with `GET /api/virtual/{id}/credentials/claude_md`, which answers `200` with the default text `You are running in a pod in Preview and connected via the agent hub.` when nothing is stored, so every pod writes one. Only the owner changes it: a pod's `PUT` gives `403`.
 
-**`git_identity` is the owner's optional override of the git `user.name` and `user.email` their virtual agents commit as.** Without one, each pod sets `user.name` to the owner's GitHub profile name (or login) and `user.email` to their HMCTS email when GitHub has it as a verified or public email of their account, otherwise their GitHub noreply address. A field the override sets replaces that default; one it leaves out keeps it. Its owner reads it back with `GET /api/agent/credentials/git_identity`, and the Assistant's settings show it for editing; nothing stored answers `404`. The owner's virtual agent reads it with `GET /api/virtual/{id}/credentials/git_identity`, which answers `404` when nothing is stored, and the pod then uses the defaults. Only the owner changes it: a pod's `PUT` gives `403`, so one agent cannot make the others commit as someone else.
+**`git_identity` is the owner's optional override of the git `user.name` and `user.email` their virtual agents commit as.** Without one, each pod sets `user.name` to the owner's GitHub profile name (or login) and `user.email` to their HMCTS email when GitHub has it as a verified or public email of their account, otherwise their GitHub noreply address. A field the override sets replaces that default; one it leaves out keeps it. Its owner sets it with `PUT /api/agent/credentials/git_identity`, reads it back with `GET` (nothing stored answers `404`) and removes it with `DELETE`; the Assistant's settings do not show it. The owner's virtual agent reads it with `GET /api/virtual/{id}/credentials/git_identity`, which answers `404` when nothing is stored, and the pod then uses the defaults. Only the owner changes it: a pod's `PUT` gives `403`, so one agent cannot make the others commit as someone else.
 
-The Credentials section of the Assistant's settings shows only whether each kind is stored and, for an Azure token cache or an Atlassian sign-in, the account it holds; it pastes a GitHub token, a Jenkins API token or, for someone with an agent on their own licence, a Claude token, and removes any of the five. It never shows a value. The CLAUDE.md and the git identity are not in that list: each has a section of its own in the same dialog that shows and edits it and deletes it to go back to the default. The CLAUDE.md section says it is used by all of the person's chats and that a chat picks a change up when its session next starts.
+The saved credentials in the Connections section of the Assistant's settings show only whether each kind is stored and, for an Azure token cache or an Atlassian sign-in, the account it holds; they paste a GitHub token, a Jenkins API token or, for someone with an agent on their own licence, a Claude token, and remove any of the five. They never show a value. The CLAUDE.md and the git identity are not in that list: the CLAUDE.md has a section of its own in the same dialog that shows and edits it and deletes it to go back to the default, and the git identity is set through the API alone. The CLAUDE.md section says it is used by all of the person's chats and that a chat picks a change up when its session next starts.
 
 | `kind` | `value` |
 |---|---|
@@ -708,7 +708,7 @@ the same time and a count is a third place to remember. The list is the record.
   is a bare family alias — `sonnet` or `opus` — that this client hands to both unchanged. Read from the pod's claim
   (see A pod's claim), as `files` and `memory-anon` are, since the supervisor is what starts a session. **No write is gated on it**: a
   person's model setting is theirs to save whenever they like, and the hub sends `model` to every session either way.
-  What it gates is one sentence in the settings' Model section, which says the choice is picked up at the assistant's
+  What it gates is one sentence in the settings' model part, which says the choice is picked up at the assistant's
   next start when its pod did not claim it — so the confirmation of a save says the choice is stored and not that it
   is in force. Either half of the pair can be the older one and neither starts a session on a model that fails: a
   client that predates the aliases refuses one, and this client refuses the versioned id a hub that predates them
@@ -734,7 +734,7 @@ the same time and a count is a third place to remember. The list is the record.
   build for a pod that has not claimed it with `unsupported`, and sends it no frame.
 - `memory-anon`, because their supervisor reads its own container cgroup and reports it
   (`PUT /api/virtual/{id}/memory`), including `memory.stat`'s `anon` line as `anon_bytes`, which that route requires.
-  **This is the name the Size section gates on**, so that it can word a pod that cannot report as an older version
+  **This is the name the size setting gates on**, so that it can word a pod that cannot report as an older version
   rather than as a pod that has gone quiet. Read from
   the pod's claim, since the supervisor is what reports.
 
@@ -834,7 +834,7 @@ All of `/api/virtual/**` and `/api/orchestrator/**` answer `404` unless the serv
 
 **The GitHub sign-in.** A pod with no usable stored `github` token relays `gh auth login` device codes to its owner, at most three of them, whatever ended the one before: a code that reached its `expires_in` unused means they were not there yet, and a poll GitHub answered with a fault got no verdict out of them at all, so both earn the next code. Whichever it was, the sign-in ends with `POST login/github/failed` — `expired` for the first, `failed` for the rest — so the code is withdrawn from the owner's screen rather than left there to be entered to no effect.
 
-With none of them completed the pod reports `awaiting_credentials`, naming both ways on — a token pasted under Credentials in the Assistant's settings, or restarting the agent for another code — and then watches for a stored token rather than offering more codes, reporting again if GitHub refuses one that is pasted but not the one that was already refused when it started.
+With none of them completed the pod reports `awaiting_credentials`, naming both ways on — a token pasted under Connections in the Assistant's settings, or restarting the agent for another code — and then watches for a stored token rather than offering more codes, reporting again if GitHub refuses one that is pasted but not the one that was already refused when it started.
 
 Codes are a minute apart (`AGENT_HUB_GITHUB_SIGN_IN_GAP_MS`, less whatever the attempt itself took, so one that ran its code out adds nothing), because an attempt that fails on the poll is over in seconds and three of those back to back are the same fault three times rather than three chances at it.
 

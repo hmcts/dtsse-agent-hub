@@ -195,18 +195,6 @@ describe("the Assistant's settings for its agent", () => {
     expect(await assistantAgent({ ...BOB, tid: "dev", modelRoute: "gateway" })).toBeUndefined();
   });
 
-  it("should rename the owner's agent through the action, and answer as for no such agent when someone else tries", async () => {
-    const agent = await create(ALICE, "assistant");
-    actAs("alice");
-
-    expect(await actions.renameVirtualAgent(form({ id: agent.id, name: "mine" }))).toEqual({ ok: true, confirmation: "Renamed to mine" });
-    expect((await row(agent.id)).name).toBe("mine");
-    expect(await actions.renameVirtualAgent(form({ id: "", name: "x" }))).toEqual({ ok: false, error: "no virtual agent was named" });
-    actAs("bob");
-    expect(await actions.renameVirtualAgent(form({ id: agent.id, name: "bobs" }))).toEqual({ ok: false, error: "no such virtual agent" });
-    expect((await row(agent.id)).name).toBe("mine");
-  });
-
   it("should clear the old pod's reported ports and its run of apply errors when the owner restarts it", async () => {
     const { id, token } = await started(ALICE, "assistant");
     expect((await ports(id, token, { ports: [3000], local_only: [5173] })).status).toBe(204);
@@ -245,12 +233,11 @@ describe("the Assistant's settings for its agent", () => {
     expect((await row(id)).podGeneration).toBe(before.podGeneration);
   });
 
-  it("should refuse a rename and a restart with a sentence when virtual agents are off", async () => {
+  it("should refuse a restart with a sentence when virtual agents are off", async () => {
     const agent = await create(ALICE, "assistant");
     vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "");
     actAs("alice");
 
-    expect(await actions.renameVirtualAgent(form({ id: agent.id, name: "x" }))).toMatchObject({ ok: false, error: expect.stringContaining("not available") });
     expect(await actions.restartVirtualAgent(form({ id: agent.id }))).toMatchObject({ ok: false, error: expect.stringContaining("not available") });
   });
 });

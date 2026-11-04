@@ -195,7 +195,7 @@ const POD_CHANGE = { generation: { increment: 1 }, podGeneration: { increment: 1
  * supervisor, so there is a window where the row is running and the figures are the dead pod's.
  *
  * **Not applied when stopping, deleting, or on the sweep's auto-stop**, though all three bump `pod_generation`: there
- * the figures are the last thing anyone measured and the Size section says as much, which is the whole reason they
+ * the figures are the last thing anyone measured and the size setting says as much, which is the whole reason they
  * are kept. So the rule is not "whatever bumps `pod_generation`" — it is whatever asks for a pod to come up.
  *
  * Clearing is not enough on its own where the pod being replaced is still running, because it can report again and

@@ -17,7 +17,7 @@ export async function readAssistantModel(db: Database, ownerOid: string): Promis
   return isKnownModel(row?.model) ? row.model : DEFAULT_MODEL;
 }
 
-/** What the settings' Model section is given: the stored choice, and whether the pod holding it can act on one. */
+/** What the settings' model part is given: the stored choice, and whether the pod holding it can act on one. */
 export interface AssistantModelChoice {
   model: string;
   /**
@@ -31,7 +31,7 @@ export interface AssistantModelChoice {
  * Their choice and whether their assistant's pod can act on it.
  *
  * `honoured` is the pod's claim (`podSupports`), because the supervisor is what starts a session on the model, as the
- * Files and Size sections read their own reports from it. A pod runs whatever client it booted with, so this is per pod and changes when it
+ * Files section and the size read their own reports from it. A pod runs whatever client it booted with, so this is per pod and changes when it
  * restarts; nothing is gated on it, since a choice saved now is honoured by whatever starts next.
  */
 export async function assistantModelChoice(prisma: PrismaClient, ownerOid: string, virtualAgentId: string): Promise<AssistantModelChoice> {
