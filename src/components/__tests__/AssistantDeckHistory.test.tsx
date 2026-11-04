@@ -632,7 +632,7 @@ describe("DeckDownload", () => {
 
   it("should show the hub's refusal, and a fault, as a failure to try again", async () => {
     // Arrange
-    serving({ [POST]: { status: 409, body: { error: "turn on Slides in Settings, under Tools, first" } } });
+    serving({ [POST]: { status: 409, body: { error: "turn on Slides in Settings, under Plugins, first" } } });
     shown();
 
     // Act
@@ -640,7 +640,7 @@ describe("DeckDownload", () => {
     await settle();
 
     // Assert
-    expect(screen.getByRole("alert").textContent).toBe("turn on Slides in Settings, under Tools, firstTry again");
+    expect(screen.getByRole("alert").textContent).toBe("turn on Slides in Settings, under Plugins, firstTry again");
 
     // Arrange
     vi.stubGlobal(

@@ -773,7 +773,7 @@ describe("the deck build's gate", () => {
 
     // Assert
     expect(refused.status).toBe(409);
-    expect((await jsonOf(refused)).error).toBe("turn on Slides in Settings, under Tools, first");
+    expect((await jsonOf(refused)).error).toBe("turn on Slides in Settings, under Plugins, first");
   });
 
   it("should answer 404 with virtual agents off", async () => {

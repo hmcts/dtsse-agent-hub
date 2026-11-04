@@ -47,7 +47,7 @@ function TurnOn() {
       </h2>
       <p className="text-pretty text-[13px] text-asst-body">
         Your assistant does this work with the Welsh translations tool, which is not turned on for it yet. Go back to CFT Workspace, open Settings at the bottom
-        of the sidebar, and tick Welsh translations under Tools. Your assistant restarts to load it, and keeps your chats.
+        of the sidebar, and tick Welsh translations under Plugins. Your assistant restarts to load it, and keeps your chats.
       </p>
     </section>
   );

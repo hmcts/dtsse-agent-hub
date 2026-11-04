@@ -267,7 +267,7 @@ PR previews (`values.preview.template.yaml`) and the pipeline's temporary `-stag
 ### Credentials locally
 
 Without `CREDENTIALS_VAULT_URL`, a process outside production keeps credentials in the `dev_credential_value` table,
-each value AES-256-GCM sealed under a key derived from `SESSION_SECRET`, so set one to use the Assistant's Credentials settings or
+each value AES-256-GCM sealed under a key derived from `SESSION_SECRET`, so set one to use the saved credentials in the Assistant's Connections settings or
 `PUT /api/agent/credentials/{kind}` under `yarn dev`:
 
 ```bash
@@ -357,7 +357,7 @@ rest of this suite it has taken 80s and more, which is what the longer timeout i
   deleted credential is recoverable by the hub's identity for a week and then gone. Saving a credential whose name is
   still soft-deleted recovers it and then writes the new value. Its URL is written to `dtsse-{env}` as
   `agent-hub-credentials-vault-url`, which the chart mounts as `CREDENTIALS_VAULT_URL`. A process without it keeps no
-  credentials in production, and says so in the Assistant's Credentials settings rather than failing to start.
+  credentials in production, and says so in the Assistant's Connections settings rather than failing to start.
 - **Orchestrator identity** (AAT only): `dtsse-agent-hub-orchestrator-aat-mi` in `managed-identities-aat-rg`, in
   `infrastructure/orchestrator.tf`. Its outputs are the client id, for the orchestrator's ServiceAccount annotation,
   and the principal id, for the hub's `ORCHESTRATOR_OIDS`. It has no Azure role assignments: all it does is sign in to

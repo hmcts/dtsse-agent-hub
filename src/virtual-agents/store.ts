@@ -282,38 +282,6 @@ export async function setDesired(
 }
 
 /**
- * Gives the virtual agent a new name, and its sessions with it, since a heartbeat would otherwise put the old one
- * back. The StatefulSet and disk are named from the id, so the pod is not touched. The owner's `user` row is held as
- * in a create, so a rename and a create of the same name cannot both pass the check.
- */
-export async function renameVirtualAgent(prisma: PrismaClient, actorOid: string, id: string, name: unknown, now: Date = new Date()): Promise<VirtualAgentRow> {
-  const checked = checkName(name);
-  if (!checked.ok) {
-    throw new HttpError(400, checked.error);
-  }
-  return await prisma.$transaction(async (tx) => {
-    const row = await lockVirtualAgent(tx, id);
-    if (row === undefined || !canManageVirtualAgent(actorOid, row)) {
-      throw new HttpError(404, "no such virtual agent");
-    }
-    if (row.desired === "deleted") {
-      throw new HttpError(409, "that virtual agent is being deleted");
-    }
-    if (row.name === checked.name) {
-      return row;
-    }
-    await lockOwner(tx, row.ownerOid);
-    if ((await tx.virtualAgent.count({ where: { ownerOid: row.ownerOid, name: checked.name } })) > 0) {
-      throw new HttpError(409, `you already have a virtual agent called ${checked.name}`);
-    }
-    const updated = toRow(await tx.virtualAgent.update({ where: { id }, data: { name: checked.name, updatedAt: now }, select: SELECT }));
-    await tx.agent.updateMany({ where: { virtualAgentId: id }, data: { name: checked.name } });
-    await announce(tx, id, row.ownerOid);
-    return updated;
-  });
-}
-
-/**
  * A new size, bumping `generation` and `pod_generation` so the orchestrator applies the StatefulSet again with its
  * resources: a running pod is replaced, which ends the sessions on it, and a stopped one comes back at the new size.
  * Refused only while the agent is being deleted, per `sizeChangeRefusal`; someone other than the owner is told there

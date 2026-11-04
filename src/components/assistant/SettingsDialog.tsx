@@ -238,8 +238,8 @@ function hasSignIns(view: SettingsView): boolean {
 }
 
 /** Whether the page passed any saved credential, or a reason it cannot show them. */
-function hasTokens(view: SettingsView): boolean {
-  return view.tokens !== undefined && (view.tokens.rows.length > 0 || view.tokens.unavailable !== null);
+function hasTokens(tokens: AssistantTokens | undefined): tokens is AssistantTokens {
+  return tokens !== undefined && (tokens.rows.length > 0 || tokens.unavailable !== null);
 }
 
 /**
@@ -255,7 +255,7 @@ function Connections({ view }: { view: SettingsView }) {
         </h3>
         {hasSignIns(view) ? <SignIns {...view} /> : null}
       </div>
-      {view.tokens !== undefined && hasTokens(view) ? <TokenSettings tokens={view.tokens} /> : null}
+      {hasTokens(view.tokens) ? <TokenSettings tokens={view.tokens} /> : null}
     </section>
   );
 }
@@ -372,7 +372,7 @@ const SECTIONS: readonly SettingsSection[] = [
     id: "connections",
     label: "Connections",
     group: "General",
-    shown: (view) => hasSignIns(view) || hasTokens(view),
+    shown: (view) => hasSignIns(view) || hasTokens(view.tokens),
     panel: (view) => <Connections view={view} />
   },
   {
@@ -436,10 +436,18 @@ const SECTIONS: readonly SettingsSection[] = [
 ];
 
 /**
- * Section ids an address may still carry for a section that now holds what they named. A pod on an older client links
- * its owner to `?settings=credentials` to paste a token, and that box is in Connections.
+ * Section ids an address may carry that name part of another section, mapped to the section that holds it, so a saved
+ * link or a pod on an older client still lands where the thing it named is: a pasted token is in Connections; the
+ * model, the size and the agent itself are in Assistant; the plugins are in Plugins. The git identity has no section,
+ * and `git` opens Assistant, the nearest thing to it.
  */
-const SECTION_ALIASES: ReadonlyMap<string, string> = new Map([["credentials", "connections"]]);
+const SECTION_ALIASES: ReadonlyMap<string, string> = new Map([
+  ["credentials", "connections"],
+  ["model", "assistant"],
+  ["size", "assistant"],
+  ["git", "assistant"],
+  ["tools", "plugins"]
+]);
 
 /**
  * Whether the dialog has room for its navigation beside a section.

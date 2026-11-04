@@ -162,7 +162,7 @@ because it may hold private context, and its owner can read it back. With nothin
 "You are running in a pod in Preview and connected via the agent hub."; "Reset to the default" deletes the stored text.
 
 A virtual agent commits as its owner's GitHub profile name and their HMCTS email when it is on their GitHub account,
-otherwise their GitHub noreply address. The owner can override either with `PUT /api/agent/credentials/git_identity` (JSON `{name, email}`), which no page
+otherwise their GitHub noreply address. The owner can override either with `PUT /api/agent/credentials/git_identity` (JSON `{name, email}`; `agent-hub credentials set git_identity` sends it from stdin), which no page
 of the Assistant edits; a pod reads it but cannot change it, and `DELETE` on the same address goes back to the default.
 
 ## Sizes, plugins and web ports

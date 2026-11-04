@@ -8,7 +8,7 @@ import { z } from "zod";
 /** The slides plugin, which the owner ticks and a pod needs to build anything. */
 export const SLIDES_PLUGIN = "slides";
 
-export const SLIDES_NOT_TURNED_ON = "turn on Slides in Settings, under Tools, first";
+export const SLIDES_NOT_TURNED_ON = "turn on Slides in Settings, under Plugins, first";
 
 /** How long the hub waits for the pod's answer; the pod gives itself 14 minutes, so an answer is never thrown away. */
 export const DECK_BUILD_TIMEOUT_MS = 15 * 60_000;

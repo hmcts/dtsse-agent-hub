@@ -187,7 +187,7 @@ describe("welsh jobs", () => {
 
     // Assert
     expect(job.status).toBe(409);
-    expect(await jsonOf(job)).toEqual({ error: "turn on Welsh translations in Settings, under Tools, first" });
+    expect(await jsonOf(job)).toEqual({ error: "turn on Welsh translations in Settings, under Plugins, first" });
     expect(uploaded.status).toBe(409);
     expect(await prisma.assistantWelshJob.count()).toBe(0);
     expect(await prisma.assistantWelshFile.count()).toBe(0);

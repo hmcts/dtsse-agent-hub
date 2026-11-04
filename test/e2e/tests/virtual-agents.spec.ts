@@ -10,6 +10,19 @@ async function settings(page: Page, section: string): Promise<void> {
   await page.getByRole("tablist", { name: "Settings sections" }).getByRole("tab", { name: section }).click();
 }
 
+/**
+ * The id of the virtual agent the Assistant section manages, read from the restart question, which is the one place
+ * the page carries it: the name every assistant starts with is the same, so it cannot tell two people's apart.
+ */
+async function managedAgentId(page: Page): Promise<string> {
+  await settings(page, "Assistant");
+  await page.getByRole("button", { name: "Restart your assistant" }).click();
+  const id = await page.getByRole("form", { name: "Restart your assistant" }).locator('input[name="id"]').inputValue();
+  await page.getByRole("dialog", { name: "Settings" }).getByRole("button", { name: "Cancel" }).click();
+  await page.keyboard.press("Escape");
+  return id;
+}
+
 test.describe("virtual agents @regression", () => {
   test("should open the Assistant section of its settings when an old virtual agents address is visited @regression", async ({ browser, baseURL, request }) => {
     const persona = chatPersona("va-old");
@@ -108,11 +121,17 @@ test.describe("virtual agents @regression", () => {
       test.skip(response?.status() === 404, ASSISTANT_OFF);
       await dismissGettingReady(page);
       const path = await openLocalChat(page, name);
+      const ownersAssistant = await managedAgentId(page);
 
       const theirs = await other.newPage();
       expect((await theirs.goto(path))?.status()).toBe(404);
       await theirs.goto(`/hub/agents/${agent}`);
       expect(new URL(theirs.url()).pathname).toBe("/hub");
+      await theirs.goto("/assistant");
+      await dismissGettingReady(theirs);
+      const theirAssistant = await managedAgentId(theirs);
+      expect(theirAssistant).not.toBe("");
+      expect(theirAssistant).not.toBe(ownersAssistant);
     } finally {
       await owner.close();
       await other.close();

@@ -391,6 +391,27 @@ describe("the Assistant's settings deep link", () => {
     expect(within(nav()).getByRole("tab", { name: "Connections" }).getAttribute("aria-selected")).toBe("true");
   });
 
+  it.each([
+    ["model", "Assistant"],
+    ["size", "Assistant"],
+    ["git", "Assistant"],
+    ["tools", "Plugins"]
+  ])("should open at the section that holds it when ?settings= names %s", async (named, section) => {
+    land(`/assistant?settings=${named}`);
+    await act(async () => {
+      render(
+        <AssistantSettings
+          now={Date.now()}
+          connections={connections(["github"])}
+          agent={agentSettings()}
+          plugins={{ assistantId: ID, available: [{ name: "pcs", description: "" }], checked: [], podRunning: true, save: ok() }}
+        />
+      );
+    });
+
+    expect(within(nav()).getByRole("tab", { name: section }).getAttribute("aria-selected")).toBe("true");
+  });
+
   it("should open at the first section when ?settings= names one it does not offer", () => {
     land("/assistant?settings=nothing-here");
     render(page());
