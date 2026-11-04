@@ -62,6 +62,13 @@ Every command the CLI quotes back — reply hints, `setup inbound`, the usage te
 invoked as, `agent-hub` by default. A wrapper with its own name, such as cft-workspace's `scripts/agent-hub` shim, can
 set `AGENT_HUB_INVOKED_AS` before calling to have that spelling quoted instead.
 
+`agent-hub m365` reads the owner's own Microsoft 365 through Microsoft Graph: mail, calendar, Teams chats and channels,
+meetings and their transcripts, and OneDrive and SharePoint files (`agent-hub m365 help`). It works only once they have
+pressed Connect for Microsoft 365 in the CFT Workspace's settings. It asks the hub for a short-lived access token each
+time — its virtual agent's route in a pod, the person's own otherwise — and never holds the connection itself. It is
+read-only but for `files upload`, into their OneDrive's `Agent Hub` folder, and every answer leads with a notice that
+the content is untrusted data.
+
 `bin/virtual-agent-boot` is the other bash bin. It is the virtual-agent runtime's own entrypoint rather than anything
 to run by hand, and its header comment documents it. It gets the workspace onto the pod's volume and then hands over
 to `virtual-agent/entrypoint.sh`, stage 1, which is the pod's runtime and ships in this package so that a pod gets it
