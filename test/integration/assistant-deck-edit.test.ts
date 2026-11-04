@@ -1,79 +1,31 @@
-// The owner's edits to a deck in the web UI, through Postgres: the save action, the amend of their own latest version
-// against a new version, the conflicts, who is refused, what the session's frame and the agent API then say, the
-// build of a version the person wrote, and the retention with amends in it.
-import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
 import { describe, expect, it, vi } from "vitest";
 import * as deckRoute from "../../src/app/api/agent/[agentId]/deck/route.ts";
 import * as claimRoute from "../../src/app/api/orchestrator/claim/route.ts";
 import * as observedRoute from "../../src/app/api/orchestrator/virtual-agents/[id]/observed/route.ts";
 import * as pptxRoute from "../../src/app/api/ui/assistant/decks/[conversationId]/versions/[version]/pptx/route.ts";
-import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
-import { assetRef, type DeckOutline, imageInfo, KEEP_VERSIONS } from "../../src/assistant/deck.ts";
+import { assetRef, type DeckOutline, KEEP_VERSIONS } from "../../src/assistant/deck.ts";
 import { answerDeckBuild, readDeckBuild } from "../../src/assistant/deck-build-store.ts";
 import { AMEND_WINDOW_MS, AMENDED_BUILD_ERROR } from "../../src/assistant/deck-edit.ts";
 import { saveDeckEdit } from "../../src/assistant/deck-edit-store.ts";
 import { listDeckVersions, readDeckVersionOutline } from "../../src/assistant/deck-history-store.ts";
-import { putDeckAsset, putDeckPptx, readDeck, writeDeck } from "../../src/assistant/deck-store.ts";
+import { putDeckPptx, readDeck, writeDeck } from "../../src/assistant/deck-store.ts";
 import { assistantFrame } from "../../src/assistant/frame.ts";
-import { devIdentity } from "../../src/viewer/identity.ts";
 import { assistantSuite } from "./assistant-suite.ts";
-import { type Person, prisma } from "./database.ts";
+import { prisma } from "./database.ts";
+import { ALICE, BOB, CAROL, type Chat, chat, PPTX, png, store } from "./deck-chats.ts";
 import { jsonOf } from "./routes.ts";
 
 vi.mock("next/headers", async () => (await import("./web-session.ts")).nextHeadersMock());
 vi.mock("next/cache", async () => (await import("./web-session.ts")).nextCacheMock());
 
 const { actAs } = await import("./web-session.ts");
-const assistantActions = await import("../../src/app/_actions/assistant.ts");
+const _assistantActions = await import("../../src/app/_actions/assistant.ts");
 const deckActions = await import("../../src/app/_actions/decks.ts");
 const shareActions = await import("../../src/app/_actions/shares.ts");
 const forkActions = await import("../../src/app/_actions/forks.ts");
 
-function persona(name: string): Person {
-  const identity = devIdentity(name);
-  return { oid: identity.oid, name: identity.name, email: identity.email! };
-}
-
-const ALICE = persona("alice");
-const BOB = persona("bob");
-const CAROL = persona("carol");
-
 assistantSuite([ALICE, BOB, CAROL]);
-
-const viewerOf = (who: Person) => ({ ...who, tid: "dev", modelRoute: "own-licence" as const });
-const PPTX = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00]);
-
-interface Chat {
-  id: string;
-  agentId: string;
-  virtualAgentId: string;
-  row: { id: string; virtualAgentId: string | null; ownerOid: string };
-}
-
-async function chat(): Promise<Chat> {
-  actAs("alice");
-  await ensureAssistant(prisma, viewerOf(ALICE));
-  const started = await assistantActions.startConversation({ product: "general", body: "Make me some slides" });
-  const id = (started as { ok: true; id: string }).id;
-  const row = await prisma.assistantConversation.findUniqueOrThrow({ where: { id }, select: { agentId: true, virtualAgentId: true, ownerOid: true } });
-  return { id, agentId: row.agentId!, virtualAgentId: row.virtualAgentId!, row: { id, virtualAgentId: row.virtualAgentId, ownerOid: row.ownerOid } };
-}
-
-function png(seed: number): Buffer {
-  const bytes = Buffer.alloc(64);
-  bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
-  bytes.writeUInt32BE(640, 16);
-  bytes.writeUInt32BE(320, 20);
-  bytes.writeUInt32BE(seed, 28);
-  return bytes;
-}
-
-async function store(of: Chat, bytes: Buffer): Promise<string> {
-  const sha = createHash("sha256").update(bytes).digest("hex");
-  await putDeckAsset(prisma, of.id, sha, bytes, imageInfo(bytes)!);
-  return sha;
-}
 
 function outline(title: string, pictures: string[] = []): DeckOutline {
   return {
