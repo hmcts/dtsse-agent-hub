@@ -256,6 +256,24 @@ describe("runWelsh", () => {
     expect(answers).toEqual([{ id: JOB, body: { result: { summary: { toWlu: 3 }, message: "3 new for the WLU." } } }]);
   });
 
+  it("should answer the job as failed, and run nothing, when its working directory cannot be made", async () => {
+    // Arrange
+    const { d, answers } = deps();
+    const frame = parseWelshFrame({ job_id: JOB, kind: "scan", product: "cath", args: {} });
+    vi.stubEnv("TMPDIR", "/nonexistent/welsh-tmp");
+
+    // Act
+    try {
+      await runWelsh(d, frame as NonNullable<typeof frame>);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+
+    // Assert
+    expect(d.run).not.toHaveBeenCalled();
+    expect(answers).toEqual([{ id: JOB, body: { error: "failed", detail: expect.stringMatching(/^That did not work: ENOENT/) } }]);
+  });
+
   it("should fetch the uploaded return first and give the script its path", async () => {
     // Arrange
     let seen = "";
@@ -351,6 +369,22 @@ describe("runWelsh", () => {
     expect(answers[0]?.body).toEqual({ error: "failed", detail: STILL_PREPARING });
   });
 
+  it("should say the tools are still being set up, not that the directory failed, when a job never gets to run", async () => {
+    // Arrange
+    const { d, answers } = deps({ ready: new Promise<void>(() => {}), budgetMs: 30_000 });
+    vi.stubEnv("TMPDIR", "/nonexistent/welsh-tmp");
+
+    // Act
+    try {
+      await runWelsh(d, parseWelshFrame({ job_id: JOB, kind: "info", product: "cath", args: {} }) as NonNullable<ReturnType<typeof parseWelshFrame>>);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+
+    // Assert
+    expect(answers[0]?.body).toEqual({ error: "failed", detail: STILL_PREPARING });
+  });
+
   it("should answer failed with the reason rather than throw when the plugin cannot be copied onto the pod", async () => {
     const { d, answers } = deps({
       install: () => {
@@ -409,6 +443,30 @@ describe("createWelshRunner", () => {
     expect(at("start story")).toBeGreaterThan(at("end scan"));
     expect(order).toHaveLength(6);
     expect(say).toHaveBeenCalledWith(expect.stringMatching(/ignoring a Welsh job/));
+  });
+
+  it.each([
+    ["long", "scan"],
+    ["quick", "search"]
+  ] as const)("should settle cleanly and still answer the next %s job, when a job's answer fails and so does the logger", async (_kind, kind) => {
+    // Arrange
+    const { d, api, answers } = deps({ run: vi.fn(async () => ({ code: 0, stdout: "{}", stderr: "" })), retryWait: async () => {} });
+    api.putWelsh.mockRejectedValueOnce(new Error("hub away")).mockRejectedValueOnce(new Error("hub away"));
+    const say = vi.fn(() => {
+      throw new Error("logger broke");
+    });
+    const runner = createWelshRunner({ ...d, say, maxQuick: 1 });
+    const args = kind === "search" ? { query: "x" } : {};
+
+    // Act
+    runner.welsh({ job_id: JOB, kind, product: "cath", args });
+    runner.welsh({ job_id: FILE, kind, product: "cath", args });
+    await runner.idle();
+
+    // Assert
+    expect(d.run).toHaveBeenCalledTimes(2);
+    expect(say).toHaveBeenCalledWith(expect.stringMatching(/could not answer it: hub away/));
+    expect(answers.map((a) => a.id)).toEqual([FILE]);
   });
 });
 
