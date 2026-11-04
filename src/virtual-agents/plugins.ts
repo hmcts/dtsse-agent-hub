@@ -11,10 +11,10 @@ import type { Environment } from "./settings.ts";
  */
 
 /**
- * The plugins every pod loads without being ticked, as the pod client's own `ALWAYS_ON_PLUGINS` does
+ * The plugins every pod loads without being ticked, mirroring the pod client's own `ALWAYS_ON_PLUGINS`
  * (`packages/agent-hub/src/virtual/bundled-plugins.ts`). Slides is one because the Assistant's slides panel, history,
- * editing and builds depend on it. None is offered, and a form's value naming one is not stored; one a row already
- * has is kept, since a pod whose client predates always-on plugins loads it only because it is named.
+ * editing and builds depend on it. None is offered or stored; every claim adds them to the plugins it hands the
+ * orchestrator (`podPlugins`), so a pod on a client that loads only what `AGENT_HUB_PLUGINS` names loads them too.
  */
 export const ALWAYS_ON_PLUGINS: readonly string[] = ["slides"];
 
@@ -75,8 +75,9 @@ export type CheckedPlugins = { ok: true; plugins: string[] } | { ok: false; erro
  * to the pod, the same way.
  *
  * `allowed` is a function because reading the hub's offer list can throw on a malformed `VIRTUAL_AGENT_PLUGINS`, and
- * nothing that ticks no plugins needs the list to be readable. Creating a virtual agent is the case that matters:
- * every Assistant creates one, so evaluating the list eagerly failed people who had asked for no plugins at all.
+ * nothing that ticks no plugins, or only always-on ones, needs the list to be readable. Creating a virtual agent is
+ * the case that matters: every Assistant creates one, so evaluating the list eagerly failed people who had asked for
+ * no plugins at all.
  */
 export function checkPlugins(raw: unknown, allowed: () => readonly string[]): CheckedPlugins {
   if (raw === undefined || raw === null) {
@@ -85,7 +86,7 @@ export function checkPlugins(raw: unknown, allowed: () => readonly string[]): Ch
   if (!Array.isArray(raw)) {
     return { ok: false, error: "plugins are a list of names" };
   }
-  const offered = raw.length === 0 ? [] : allowed();
+  let offered: readonly string[] | undefined;
   const names = new Set<string>();
   for (const value of raw) {
     const name = typeof value === "string" ? value.trim().toLowerCase() : "";
@@ -95,6 +96,7 @@ export function checkPlugins(raw: unknown, allowed: () => readonly string[]): Ch
     if (isAlwaysOn(name)) {
       continue;
     }
+    offered ??= allowed();
     if (!offered.includes(name)) {
       return { ok: false, error: `${name} is not a plugin this hub offers` };
     }
@@ -110,12 +112,17 @@ export function samePlugins(a: readonly string[], b: readonly string[]): boolean
   return a.length === b.length && a.every((name, index) => name === b[index]);
 }
 
+/** The names that are the owner's choice, leaving out any always-on one a row still holds. */
+export function tickedPlugins(stored: readonly string[]): string[] {
+  return stored.filter((name) => !isAlwaysOn(name));
+}
+
 /**
- * What a save stores: the names chosen, with the always-on ones the row already has, which no form shows or sends,
- * kept so that saving neither drops them from an older pod client nor restarts the pod for a change it would not see.
+ * What a claim hands the orchestrator for `AGENT_HUB_PLUGINS`: the stored names and the always-on ones, distinct and
+ * in code-point order, so a row that still holds an always-on name gives the same list as one that does not.
  */
-export function withStoredAlwaysOn(stored: readonly string[], chosen: readonly string[]): string[] {
-  return [...new Set([...chosen, ...stored.filter(isAlwaysOn)])].sort(byCodePoint);
+export function podPlugins(stored: readonly string[]): string[] {
+  return [...new Set([...stored, ...ALWAYS_ON_PLUGINS])].sort(byCodePoint);
 }
 
 /** What is stored, which the database only checks is an array, as the names in it. */

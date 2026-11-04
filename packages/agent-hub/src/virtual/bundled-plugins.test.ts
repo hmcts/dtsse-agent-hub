@@ -10,10 +10,12 @@ import {
   bundledPluginDir,
   installBundled,
   installLoaded,
+  isAlwaysOn,
   loadedBundled,
   PACKAGE_PLUGINS,
   pluginCacheRoot,
   pluginVersion,
+  SLIDES_PLUGIN,
   tickedBundled
 } from "./bundled-plugins.ts";
 
@@ -55,7 +57,9 @@ describe("bundled plugins", () => {
   });
 
   it("should load slides whether or not it is ticked", () => {
-    expect(ALWAYS_ON_PLUGINS).toEqual(["slides"]);
+    expect(ALWAYS_ON_PLUGINS).toEqual([SLIDES_PLUGIN]);
+    expect(isAlwaysOn("slides")).toBe(true);
+    expect(isAlwaysOn("welsh")).toBe(false);
     expect(loadedBundled({})).toEqual(["slides"]);
     expect(loadedBundled({ AGENT_HUB_PLUGINS: "pcs" })).toEqual(["slides"]);
   });

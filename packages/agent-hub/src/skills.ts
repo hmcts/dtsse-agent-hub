@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Env } from "./env.ts";
 import { claudeHome, projectDir, readJson, sha256 } from "./session.ts";
-import { ALWAYS_ON_PLUGINS, BUNDLED_PLUGINS, bundledDirsOf } from "./virtual/bundled-plugins.ts";
+import { ALWAYS_ON_PLUGINS, BUNDLED_PLUGINS, bundledDirsOf, isAlwaysOn } from "./virtual/bundled-plugins.ts";
 
 export const MAX_SKILLS = 200;
 export const MAX_SKILL_NAME = 100;
@@ -193,20 +193,28 @@ function bundledCopy(name: string, env: Env): PluginInstall | null {
   return null;
 }
 
-// The plugins a virtual agent's sessions load with --plugin-dir: each name in AGENT_HUB_PLUGINS, which its owner
-// ticked, and then each always-on plugin, resolved through this checkout's marketplace.json, as hai does, or for a
-// plugin this package carries, the copy the session was started with, so only a session that loads one lists its
-// skills. A name neither has is skipped, as hai skips it.
+// The plugins a virtual agent's sessions load with --plugin-dir. First each ticked name in AGENT_HUB_PLUGINS,
+// resolved through this checkout's marketplace.json, as hai does, or for a plugin this package carries, the copy the
+// session was started with, so only a session that loads one lists its skills; a name neither has is skipped, as hai
+// skips it. Then each always-on plugin, only ever as the copy the session was started with: the pod's main session is
+// given none and loads none, whatever the marketplace lists or AGENT_HUB_PLUGINS names.
 export function hubPlugins({ project, env = process.env }: { project: string; env?: Env }): PluginInstall[] {
-  const ticked = String(env.AGENT_HUB_PLUGINS || "")
-    .split(",")
-    .map((n) => n.trim())
-    .filter(Boolean);
-  const names = [...new Set([...ticked, ...ALWAYS_ON_PLUGINS])];
+  const ticked = [
+    ...new Set(
+      String(env.AGENT_HUB_PLUGINS || "")
+        .split(",")
+        .map((n) => n.trim())
+        .filter((n) => n !== "" && !isAlwaysOn(n))
+    )
+  ];
+  const alwaysOn = ALWAYS_ON_PLUGINS.map((name) => bundledCopy(name, env)).filter((copy): copy is PluginInstall => copy !== null);
+  if (!ticked.length) {
+    return alwaysOn;
+  }
   const read = asRecord(readJson(path.join(project, ".claude-plugin", "marketplace.json")))?.plugins;
   const listed = Array.isArray(read) ? read : null;
   const out: PluginInstall[] = [];
-  for (const name of names) {
+  for (const name of ticked) {
     const bundled = bundledCopy(name, env);
     if (bundled !== null) {
       out.push(bundled);
@@ -222,7 +230,7 @@ export function hubPlugins({ project, env = process.env }: { project: string; en
     }
     out.push({ name: pluginName(dir, name), dir });
   }
-  return out;
+  return [...out, ...alwaysOn];
 }
 
 // Where an enabled plugin is installed, from installed_plugins.json: a user-scope install, or a project- or

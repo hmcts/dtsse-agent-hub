@@ -5,10 +5,10 @@ import type { Api } from "../api.ts";
 import { RAPID_CLOSE_MS, type ReconnectDecision, reconnectDelay } from "../reconnect.ts";
 import { createSseParser, type SseEvent } from "../sse.ts";
 import { atlassianLogin } from "../virtual/atlassian.ts";
-import { installBundled, installLoaded, loadedBundled } from "../virtual/bundled-plugins.ts";
+import { installBundled, installLoaded, loadedBundled, SLIDES_PLUGIN } from "../virtual/bundled-plugins.ts";
 import { run } from "../virtual/process.ts";
 import { deleteUploads, readDeleteUploads, reconcileUploads } from "./attachments.ts";
-import { createDeckBuildRunner, SLIDES_PLUGIN } from "./deck-build.ts";
+import { createDeckBuildRunner } from "./deck-build.ts";
 import { type DiskFs, reportUploads } from "./disk.ts";
 import { createLookupRunner, type LookupDeps, type Run } from "./lookups.ts";
 import { type MemoryFs, reportMemory } from "./memory.ts";
@@ -110,7 +110,9 @@ export async function runAssistantSupervisor({
     install
   };
   // Every loaded bundled plugin's dependencies are installed as the pod starts, so its first use does not wait on npm.
-  // Welsh's runs first and alone, and the others follow it one at a time. Welsh jobs wait for the Welsh install and
+  // That includes slides on every pod, whether or not its owner ever makes a deck: otherwise the model's first
+  // `slides build` would run the npm install inside its own tool call. Welsh's runs first and alone, and the others
+  // follow it one at a time. Welsh jobs wait for the Welsh install and
   // deck builds for the slides one, within their own time limits; a session's own run of a plugin's script installs
   // if its install is not done. None starts once the supervisor is stopping.
   const stopped = new AbortController();

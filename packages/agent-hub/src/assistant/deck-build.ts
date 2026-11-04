@@ -9,11 +9,9 @@ import type { Api } from "../api.ts";
 import { materialise } from "../cli/deck.ts";
 import type { Env } from "../env.ts";
 import { withRetry } from "../retry.ts";
+import { SLIDES_PLUGIN } from "../virtual/bundled-plugins.ts";
 import type { Run } from "./lookups.ts";
 import { alwaysOnScript, MIN_RUN_MS, readyWithin, reason, safeSay } from "./plugin-deps.ts";
-
-/** The plugin that carries `scripts/slides`, which every pod loads (`ALWAYS_ON_PLUGINS`). */
-export const SLIDES_PLUGIN = "slides";
 
 /** Under the hub's 15 minutes for a build, so an answer is never thrown away. */
 export const BUILD_BUDGET_MS = 14 * 60_000;

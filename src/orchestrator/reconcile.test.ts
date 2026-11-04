@@ -854,6 +854,18 @@ describe("exposed ports", () => {
     expect({ sts: t.store.statefulsets.get(STS), service: t.store.services.get(STS), ingress: t.store.ingresses.get(STS) }).toEqual(before);
   });
 
+  it("should keep the running pod when a claim at the same pod generation adds an always-on plugin to its plugins", async () => {
+    const t = setup([[agent({ plugins: ["pcs"], launch_token: "ahv_new" })], [agent({ plugins: ["pcs", "slides"], generation: 2, pod_generation: 1 })]]);
+    await t.pass();
+    const running = t.store.statefulsets.get(STS);
+
+    expect(await t.pass()).toMatchObject({ claimed: 1, errors: 0 });
+
+    expect(t.calls.filter((call) => call === `apply statefulsets ${STS}`)).toHaveLength(1);
+    expect(t.store.statefulsets.get(STS)).toBe(running);
+    expect(envOf(running).AGENT_HUB_PLUGINS).toBe("pcs");
+  });
+
   it("should apply the StatefulSet again when the claim moves the pod generation", async () => {
     const t = setup([[agent({ launch_token: "ahv_new" })], [agent({ generation: 2, pod_generation: 2 })]]);
     await t.pass();

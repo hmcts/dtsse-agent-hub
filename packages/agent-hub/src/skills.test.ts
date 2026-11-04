@@ -3,7 +3,7 @@
 // and stores its hash; it is in `agent.test.ts`, beside the module it belongs to.
 import fs from "node:fs";
 import path from "node:path";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { type TempClaudeHome, tempClaudeHome } from "./__fixtures__/claude-home.ts";
 import { collectSkills, enabledPlugins, hubPlugins, parseFrontmatter, pluginInstalls, skillFrom, skillsHash } from "./skills.ts";
 import { BUNDLED_DIRS_VAR, installBundled } from "./virtual/bundled-plugins.ts";
@@ -306,6 +306,52 @@ describe("hubPlugins", () => {
     expect(main).toEqual([]);
     expect(conversation).toEqual([{ name: "slides", dir }]);
     expect(ticked).toEqual([{ name: "slides", dir }]);
+  });
+
+  it("should not read the marketplace when AGENT_HUB_PLUGINS names only always-on plugins", () => {
+    // Arrange
+    const l = layout();
+    const dir = installBundled("slides", l.project);
+    const read = vi.spyOn(fs, "readFileSync");
+
+    // Act
+    const found = hubPlugins({ project: l.project, env: { AGENT_HUB_PLUGINS: "slides", [BUNDLED_DIRS_VAR]: dir } });
+    const marketplace = path.join(l.project, ".claude-plugin", "marketplace.json");
+
+    // Assert
+    expect(found).toEqual([{ name: "slides", dir }]);
+    expect(read.mock.calls.some(([file]) => file === marketplace)).toBe(false);
+    read.mockRestore();
+  });
+
+  it("should not resolve slides through the marketplace when the session was given no bundled copies", () => {
+    // Arrange
+    const l = layout();
+    marketplacePlugin(l, "slides", { skills: [["deck", "name: deck\ndescription: Make a deck"]] });
+    marketplacePlugin(l, "pcs");
+
+    // Act
+    const main = hubPlugins({ project: l.project, env: { AGENT_HUB_PLUGINS: "pcs,slides" } });
+
+    // Assert
+    expect(main.map((plugin) => plugin.name)).toEqual(["pcs"]);
+  });
+
+  it("should list the ticked plugins and then the always-on ones when a conversation session loads both", () => {
+    // Arrange
+    const l = layout();
+    const slides = installBundled("slides", l.project);
+    const welsh = installBundled("welsh", l.project);
+    const dirs = [slides, welsh].join(path.delimiter);
+
+    // Act
+    const found = hubPlugins({ project: l.project, env: { AGENT_HUB_PLUGINS: "slides,welsh,welsh", [BUNDLED_DIRS_VAR]: dirs } });
+
+    // Assert
+    expect(found).toEqual([
+      { name: "welsh", dir: welsh },
+      { name: "slides", dir: slides }
+    ]);
   });
 
   it("should skip an entry whose source is missing when the marketplace is malformed", () => {
