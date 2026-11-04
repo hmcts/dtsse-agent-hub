@@ -12,6 +12,11 @@
       "name": "welsh",
       "source": "./packages/agent-hub/plugins/welsh",
       "description": "Welsh translations for any CFT service, with no machine translation: catalogue search, missing-Welsh scans, Welsh Language Unit spreadsheets, PRs and Jira story sections"
+    },
+    {
+      "name": "slides",
+      "source": "./packages/agent-hub/plugins/slides",
+      "description": "HMCTS-branded PowerPoint decks from an outline: real slide masters with placeholders, so the deck stays editable and on-brand"
     }
   ]
 }

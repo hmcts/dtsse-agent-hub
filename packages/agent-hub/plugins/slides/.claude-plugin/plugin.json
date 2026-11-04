@@ -1,0 +1,6 @@
+{
+  "name": "slides",
+  "description": "HMCTS-branded PowerPoint decks from an outline: real slide masters with placeholders, so the deck stays editable and on-brand",
+  "version": "0.1.0",
+  "author": { "name": "DTSSE team" }
+}

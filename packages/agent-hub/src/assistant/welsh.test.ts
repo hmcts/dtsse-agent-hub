@@ -8,7 +8,6 @@ import {
   fitResult,
   NOT_LOADED,
   parseWelshFrame,
-  prepareWelsh,
   runWelsh,
   STILL_PREPARING,
   signInNeeded,
@@ -405,28 +404,6 @@ describe("runWelsh", () => {
       parseWelshFrame({ job_id: JOB, kind: "import", product: "cath", args: { file_id: FILE } }) as NonNullable<ReturnType<typeof parseWelshFrame>>
     );
     expect(answers[0]?.body).toEqual({ error: "failed", detail: "That did not work: 404 no such file" });
-  });
-});
-
-describe("prepareWelsh", () => {
-  it("should install the tools' dependencies ahead of any job when the owner ticked the plugin", async () => {
-    const run = vi.fn(async () => ({ code: 0, stdout: "", stderr: "" }));
-    await prepareWelsh({ run, env: TICKED, workspace: WS, install });
-    expect(run).toHaveBeenCalledWith(join(COPY, "scripts", "welsh"), ["deps"], {
-      env: expect.objectContaining({ CFT_WELSH_WORKSPACE: WS }),
-      timeoutMs: 15 * 60_000
-    });
-  });
-
-  it("should do nothing when the plugin is not ticked, and say rather than throw when the install fails", async () => {
-    const idle = vi.fn(async () => ({ code: 0, stdout: "", stderr: "" }));
-    await prepareWelsh({ run: idle, env: { AGENT_HUB_PLUGINS: "pcs" }, workspace: WS, install });
-    expect(idle).not.toHaveBeenCalled();
-
-    const said: string[] = [];
-    const failing = vi.fn(async () => ({ code: 1, stdout: "", stderr: "npm ERR! network" }));
-    await prepareWelsh({ run: failing, env: TICKED, workspace: WS, install, say: (m) => said.push(m) });
-    expect(said).toEqual(["welsh: could not install the tools' dependencies (exit 1): npm ERR! network"]);
   });
 });
 

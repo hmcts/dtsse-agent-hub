@@ -5,14 +5,15 @@ import type { Api } from "../api.ts";
 import { RAPID_CLOSE_MS, type ReconnectDecision, reconnectDelay } from "../reconnect.ts";
 import { createSseParser, type SseEvent } from "../sse.ts";
 import { atlassianLogin } from "../virtual/atlassian.ts";
-import { installBundled, installTicked } from "../virtual/bundled-plugins.ts";
+import { installBundled, installTicked, tickedBundled } from "../virtual/bundled-plugins.ts";
 import { run } from "../virtual/process.ts";
 import { deleteUploads, readDeleteUploads, reconcileUploads } from "./attachments.ts";
 import { type DiskFs, reportUploads } from "./disk.ts";
 import { createLookupRunner, type LookupDeps, type Run } from "./lookups.ts";
 import { type MemoryFs, reportMemory } from "./memory.ts";
+import { prepareBundled, prepareEach } from "./plugin-deps.ts";
 import { type AssistantSupervisor, type CreateAssistantSupervisorOptions, createAssistantSupervisor, idleMinutes } from "./supervisor.ts";
-import { createWelshRunner, prepareWelsh, type WelshDeps } from "./welsh.ts";
+import { createWelshRunner, WELSH_PLUGIN, type WelshDeps } from "./welsh.ts";
 
 const TICK_MS = 2000;
 const STREAM_IDLE_MS = 45000;
@@ -35,8 +36,8 @@ export type RunAssistantSupervisorOptions = Omit<CreateAssistantSupervisorOption
   /** How lookups run twg and sign it in; a test passes its own rather than a twg on PATH. */
   lookups?: Partial<LookupDeps>;
   /**
-   * How Welsh jobs run the welsh plugin's scripts/welsh, the cft-workspace checkout they work on, and how the pod's
-   * copy of a bundled plugin is made; a test passes its own.
+   * How Welsh jobs run the welsh plugin's scripts/welsh, and the start-up installs run each bundled plugin's `deps`;
+   * the cft-workspace checkout they work on; and how the pod's copy of a bundled plugin is made. A test passes its own.
    */
   welsh?: { run?: Run; workspace?: string; install?: (name: string, workspace: string) => string };
   /** Stops the supervisor, as SIGTERM and SIGINT do; a test owns neither signal. */
@@ -92,7 +93,20 @@ export async function runAssistantSupervisor({
     workspace,
     install
   };
-  const welsh = createWelshRunner({ ...welshOptions, ready: prepareWelsh(welshOptions) });
+  // Every ticked bundled plugin's dependencies are installed as the pod starts, so its first use does not wait on npm.
+  // Welsh jobs wait for the Welsh install, so none spends its own time limit on it, and it runs first and alone. The
+  // others follow it one at a time; nothing waits on them, and a session's own run of a plugin's script installs if
+  // its install is not done. None starts once the supervisor is stopping.
+  const stopped = new AbortController();
+  const ready = prepareBundled(WELSH_PLUGIN, welshOptions);
+  const welsh = createWelshRunner({ ...welshOptions, ready });
+  void ready.then(() =>
+    prepareEach(
+      tickedBundled(env).filter((name) => name !== WELSH_PLUGIN),
+      welshOptions,
+      stopped.signal
+    )
+  );
   const uploads = {
     api,
     id,
@@ -138,6 +152,7 @@ export async function runAssistantSupervisor({
   let wake: (() => void) | null = null;
   const onSignal = () => {
     stopping = true;
+    stopped.abort();
     controller?.abort();
     wake?.();
   };

@@ -33,10 +33,17 @@ function workspace(): string {
 }
 
 describe("bundled plugins", () => {
-  it("should carry the welsh plugin in the package itself", () => {
-    expect(BUNDLED_PLUGINS).toEqual(["welsh"]);
-    expect(fs.existsSync(path.join(PACKAGE_PLUGINS, "welsh", ".claude-plugin", "plugin.json"))).toBe(true);
-    expect(fs.existsSync(path.join(PACKAGE_PLUGINS, "welsh", "scripts", "welsh"))).toBe(true);
+  it.each(["welsh", "slides"])("should carry the %s plugin in the package itself", (name) => {
+    expect(BUNDLED_PLUGINS).toContain(name);
+    expect(fs.existsSync(path.join(PACKAGE_PLUGINS, name, ".claude-plugin", "plugin.json"))).toBe(true);
+    expect(fs.existsSync(path.join(PACKAGE_PLUGINS, name, "scripts", name))).toBe(true);
+  });
+
+  it("should list every plugin it carries in the repository's marketplace, for anyone to install", () => {
+    const marketplace = JSON.parse(fs.readFileSync(path.join(PACKAGE_PLUGINS, "..", "..", "..", ".claude-plugin", "marketplace.json"), "utf8"));
+    expect(marketplace.plugins.map((plugin: { name: string; source: string }) => [plugin.name, plugin.source])).toEqual(
+      BUNDLED_PLUGINS.map((name) => [name, `./packages/agent-hub/plugins/${name}`])
+    );
   });
 
   it("should pick out only the ticked names this package carries", () => {
@@ -126,5 +133,23 @@ describe("bundled plugins", () => {
     );
     expect(dirs).toEqual([]);
     expect(said).toEqual(["plugin welsh: could not copy it onto this pod: ENOSPC"]);
+  });
+});
+
+describe("the bundled plugins' scripts", () => {
+  /** A plugin's wrapper from `set -euo pipefail` on, its own name made generic: its install, lock and marker logic. */
+  const logicOf = (name: string): string => {
+    const script = fs.readFileSync(path.join(PACKAGE_PLUGINS, name, "scripts", name), "utf8");
+    const start = script.indexOf("set -euo pipefail");
+    expect(start, `${name}'s wrapper sets -euo pipefail`).toBeGreaterThan(-1);
+    return script.slice(start).replaceAll(name, "<plugin>");
+  };
+
+  it("should install, lock and mark done the same way in every plugin's wrapper", () => {
+    // Each plugin carries its own copy, since it is installed and copied to pods by itself, so the copies are kept in step here.
+    const [first, ...rest] = BUNDLED_PLUGINS;
+    for (const name of rest) {
+      expect(logicOf(name), `scripts/${name} against scripts/${first}`).toBe(logicOf(first as string));
+    }
   });
 });
