@@ -8,11 +8,12 @@ import type { ModelRoute } from "../viewer/identity.ts";
  *
  * Pasted is what `saveCredential` accepts: a GitHub token, a Jenkins API token, and a Claude token while any agent of
  * the person's is on their own licence. The Azure token cache and the Atlassian sign-in only ever come from a pod's
- * own device-code sign-in, so they are removed here and never pasted. Every stored one can be removed.
+ * own device-code sign-in, and a Microsoft 365 connection only from the hub's own Connect, so they are removed here and
+ * never pasted. Every stored one can be removed.
  */
 
 /** The kinds the section is about: every credential but the CLAUDE.md and the git identity, which have sections of their own. */
-export const SAVED_KINDS = ["github", "azure", "claude", "jenkins", "atlassian"] as const satisfies readonly CredentialKind[];
+export const SAVED_KINDS = ["github", "azure", "claude", "jenkins", "atlassian", "microsoft"] as const satisfies readonly CredentialKind[];
 
 export type SavedKind = (typeof SAVED_KINDS)[number];
 
@@ -21,7 +22,8 @@ const TITLES: Record<SavedKind, string> = {
   azure: "Azure sign-in",
   claude: "Claude token",
   jenkins: "Jenkins API token",
-  atlassian: "Atlassian sign-in"
+  atlassian: "Atlassian sign-in",
+  microsoft: "Microsoft 365 connection"
 };
 
 export interface SavedCredential {
@@ -47,6 +49,9 @@ function removeQuestion(kind: SavedKind, route: ModelRoute): string {
   }
   if (kind === "azure" && route === "gateway") {
     return `${ask} Your assistant reaches Claude through it, so it cannot answer again until you sign in to Azure again.`;
+  }
+  if (kind === "microsoft") {
+    return `${ask} Your agents can no longer read your mail, calendar, Teams chats, meetings or files until you connect again.`;
   }
   if (kind === "github") {
     return `${ask} Your assistant cannot reach GitHub until you paste a new token or sign in to GitHub again.`;

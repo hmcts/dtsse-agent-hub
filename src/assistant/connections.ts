@@ -69,7 +69,11 @@ export const CONNECTORS = {
   // Neither is a sign-in: both are kept beside them because they may hold private context, and there is nothing to
   // connect for either, so no surface offers a row for them.
   claude_md: null,
-  git_identity: null
+  git_identity: null,
+  // A connection, but not one the assistant signs in to or relays a code for: the person connects it in the hub's own
+  // browser sign-in, and nothing waits on it, so it has a row of its own in settings (`MicrosoftRow`) rather than one of
+  // these, which every rule here reads as a relayed or pasted sign-in.
+  microsoft: null
 } as const satisfies Record<CredentialKind, Connector | null>;
 
 /** The kinds `CONNECTORS` words, so reading one of those needs no cast and no fallback for a kind it does not. */

@@ -1,4 +1,4 @@
-import { canVirtualAgentStoreCredential } from "@/access/rules";
+import { canPodReadCredential, canVirtualAgentStoreCredential, isHubIssuedCredential } from "@/access/rules";
 import { HttpError, json, noContent, parse, readJson } from "@/agent-api/http";
 import { virtualRoute } from "@/agent-api/route";
 import { DEFAULT_CLAUDE_MD } from "@/credentials/claude-md";
@@ -14,11 +14,15 @@ export const dynamic = "force-dynamic";
 
 /**
  * The one path that reads every kind of credential's value back: the owner's own virtual agent, with its launch
- * token, fetching what it needs to act for them. No person, and no other agent of theirs, can call it. A CLAUDE.md
+ * token, fetching what it needs to act for them, except a Microsoft 365 connection (`canPodReadCredential`). No person,
+ * and no other agent of theirs, can call it. A CLAUDE.md
  * the owner has not written is the default, so every pod writes one.
  */
 export const GET = virtualRoute<{ virtualAgentId: string; kind: string }>(async ({ virtualAgent, params }) => {
   const kind = pathKind(params.kind);
+  if (!canPodReadCredential(kind)) {
+    throw new HttpError(403, "a Microsoft 365 connection stays in the hub: get an access token from /api/virtual/{id}/microsoft/token");
+  }
   const value = await readCredential(prisma, requireStore(prisma), virtualAgent.ownerOid, kind);
   if (value === undefined) {
     if (kind === "claude_md") {
@@ -36,6 +40,9 @@ export const GET = virtualRoute<{ virtualAgentId: string; kind: string }>(async 
  */
 export const PUT = virtualRoute<{ virtualAgentId: string; kind: string }>(async ({ virtualAgent, request, params }) => {
   const kind = pathKind(params.kind);
+  if (isHubIssuedCredential(kind)) {
+    throw new HttpError(403, "a Microsoft 365 connection is made by its owner, with Connect in the CFT Workspace's settings");
+  }
   if (!canVirtualAgentStoreCredential(kind)) {
     throw new HttpError(403, `only its owner can change their ${kind === "claude_md" ? "CLAUDE.md" : "git identity"}, in the CFT Workspace's settings`);
   }

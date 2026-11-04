@@ -19,7 +19,7 @@ describe("savedCredentials", () => {
 
   it("should offer removal of every stored kind, and never a paste for a sign-in a pod makes, when all are stored", () => {
     const rows = savedCredentials(
-      ["github", "azure", "claude", "jenkins", "atlassian"].map((kind) => stored(kind as CredentialKind)),
+      ["github", "azure", "claude", "jenkins", "atlassian", "microsoft"].map((kind) => stored(kind as CredentialKind)),
       "gateway",
       false
     );
@@ -29,7 +29,8 @@ describe("savedCredentials", () => {
       ["azure", true, false],
       ["claude", true, false],
       ["jenkins", true, true],
-      ["atlassian", true, false]
+      ["atlassian", true, false],
+      ["microsoft", true, false]
     ]);
   });
 
@@ -43,7 +44,8 @@ describe("savedCredentials", () => {
     ["github", "gateway", "cannot reach GitHub until you paste a new token or sign in to GitHub again"],
     ["azure", "own-licence", "stops using it the next time it starts"],
     ["claude", "gateway", "stops using it the next time it starts"],
-    ["atlassian", "gateway", "stops using it the next time it starts"]
+    ["atlassian", "gateway", "stops using it the next time it starts"],
+    ["microsoft", "gateway", "can no longer read your mail, calendar, Teams chats, meetings or files"]
   ] as const)("should say what removing a %s credential ends when the assistant is on the %s route", (kind, route, words) => {
     expect(savedCredentials([stored(kind)], route, true).find((row) => row.kind === kind)?.removeQuestion).toContain(words);
   });

@@ -197,6 +197,7 @@ export function replyRoute(sender: AgentRef, message: MessageRef): ReplyRoute {
  * acts as the person in GitHub, Azure, Claude, Jenkins or Atlassian, so it stays write-only.
  */
 export function canOwnerReadCredential(kind: string): boolean {
+  // A Microsoft 365 connection is write-only like every sign-in: the person gets access tokens from it, not the token.
   return kind === "claude_md" || kind === "git_identity";
 }
 
@@ -207,7 +208,26 @@ export function canOwnerReadCredential(kind: string): boolean {
  * has to, again each time `twg` replaces the refresh token in it.
  */
 export function canVirtualAgentStoreCredential(kind: string): boolean {
-  return kind !== "claude_md" && kind !== "git_identity";
+  return kind !== "claude_md" && kind !== "git_identity" && !isHubIssuedCredential(kind);
+}
+
+/**
+ * Whether a credential of `kind` is one only the hub itself writes, from a sign-in the person makes in the web UI, so
+ * that no route takes a pasted or uploaded value of it: their Microsoft 365 connection, whose refresh token comes from
+ * the hub's own code exchange (`/auth/microsoft/callback`) and nowhere else. Deleting one is still the person's.
+ */
+export function isHubIssuedCredential(kind: string): boolean {
+  return kind === "microsoft";
+}
+
+/**
+ * Whether a virtual agent's pod may read its owner's stored credential of `kind` back. Every kind but a Microsoft 365
+ * connection: that refresh token, with the client secret it is redeemed with, stays in the hub, and a pod is given
+ * only a short-lived Graph access token minted from it (`GET /api/virtual/{id}/microsoft/token`), so a pod that is
+ * compromised loses at most an hour's access rather than a token that lasts until the person disconnects.
+ */
+export function canPodReadCredential(kind: string): boolean {
+  return kind !== "microsoft";
 }
 
 export type UploadState = "pending" | "stored" | "fetched" | "expired";

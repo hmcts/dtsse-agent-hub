@@ -120,7 +120,7 @@ describe("isConnection", () => {
     expect(isConnection(kind)).toBe(true);
   });
 
-  it.each(["claude_md", "git_identity"] as const)("should not count %s as a sign-in when asked", (kind) => {
+  it.each(["claude_md", "git_identity", "microsoft"] as const)("should not count %s as a sign-in when asked", (kind) => {
     expect(isConnection(kind)).toBe(false);
   });
 
