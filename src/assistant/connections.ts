@@ -2,6 +2,7 @@ import type { CredentialKind } from "../credentials/names.ts";
 import type { CredentialStatus } from "../credentials/store.ts";
 import type { ModelRoute } from "../viewer/identity.ts";
 import type { LoginView } from "../virtual-agents/logins.ts";
+import { assistantSettingsPath } from "../web/home.ts";
 import type { ConnectionsAsk } from "./onboarding.ts";
 
 /**
@@ -655,5 +656,29 @@ export function signInPrompt(list: readonly Connection[]): ConnectionsPrompt | n
       ? `Your assistant is waiting for you to sign in to ${names}.`
       : `Your assistant could not sign in to ${names}, and is not asking again by itself.`,
     action: "Show the sign-in"
+  };
+}
+
+/**
+ * The person's Microsoft 365 connection as settings shows it, or `null` where the hub cannot read their credentials and
+ * so does not know. A row of its own rather than a `Connection`: it is made in the hub's own browser sign-in, not
+ * relayed by a pod or pasted, and nothing waits on it, so none of the rules above about asking apply.
+ */
+export interface MicrosoftConnection {
+  stored: boolean;
+  accountLabel: string | null;
+  /** Where Connect goes: the hub's connect sign-in, which returns to this section. */
+  connectPath: string;
+}
+
+export function microsoftConnection(data: ConnectionsData | undefined): MicrosoftConnection | null {
+  if (data === undefined || data.unavailable !== null) {
+    return null;
+  }
+  const status = data.statuses.find((candidate) => candidate.kind === "microsoft");
+  return {
+    stored: status?.stored === true,
+    accountLabel: status?.accountLabel ?? null,
+    connectPath: `/auth/microsoft/connect?${new URLSearchParams({ redirect: assistantSettingsPath("connections") })}`
   };
 }

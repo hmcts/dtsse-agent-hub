@@ -9,7 +9,9 @@ import {
   checklistState,
   connections,
   connectionsWarning,
+  type MicrosoftConnection,
   type ModelAccess,
+  microsoftConnection,
   modelAccess,
   modelAccessAfter,
   offersConnect
@@ -54,6 +56,8 @@ interface SettingsView {
   /** How this person's agents reach Claude, where that is not one of `list`'s own rows. */
   access: ModelAccess | null;
   connect: AssistantConnect | undefined;
+  /** The person's Microsoft 365 connection, or `null` where the hub cannot read their credentials. */
+  microsoft: MicrosoftConnection | null;
   unavailable: string | null;
   warning: string | null;
   plugins: AssistantPlugins | undefined;
@@ -220,6 +224,68 @@ function Row({ row, connect }: { row: Connection | ModelAccess; connect?: Assist
   );
 }
 
+/**
+ * Microsoft 365, which the person connects themselves in a browser sign-in of the hub's rather than through their
+ * assistant: Connect is a link to it, not a restart. Disconnecting deletes the connection, which is `removeCredential`,
+ * and needs no restart either, since agents ask the hub for a token each time and are refused from then on.
+ */
+function MicrosoftRow({ connection, remove }: { connection: MicrosoftConnection; remove: FormAction | undefined }) {
+  const [asking, setAsking] = useState(false);
+  return (
+    <ul aria-label="Microsoft 365" className="flex flex-col overflow-hidden rounded-[10px] border border-asst-line">
+      <li className="flex flex-wrap items-center gap-3 px-3.5 py-3">
+        <span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-asst-active text-xs font-semibold">
+          M
+        </span>
+        <div className="flex min-w-0 flex-1 flex-col leading-tight">
+          <span className="truncate text-sm font-medium">Microsoft 365</span>
+          <span className="truncate text-xs text-asst-muted">
+            {connection.accountLabel ?? "Your mail, calendar, Teams chats and meetings, and OneDrive and SharePoint files (optional)"}
+          </span>
+        </div>
+        <span className={`shrink-0 text-xs font-medium ${connection.stored ? "text-asst-ok" : "text-asst-muted"}`}>
+          {connection.stored ? "Connected" : "Not connected"}
+        </span>
+        {connection.stored ? (
+          remove === undefined || asking ? null : (
+            <button
+              type="button"
+              onClick={() => setAsking(true)}
+              className="shrink-0 rounded-[9px] border border-asst-line px-3 py-1 text-xs font-medium text-asst-muted hover:text-asst-text"
+            >
+              Disconnect
+            </button>
+          )
+        ) : (
+          <a
+            href={connection.connectPath}
+            aria-label="Connect Microsoft 365"
+            className="shrink-0 rounded-[9px] border border-asst-accent-line px-3 py-1 text-xs font-medium text-asst-accent-soft hover:bg-asst-accent hover:text-asst-ink"
+          >
+            Connect
+          </a>
+        )}
+        {connection.stored && remove !== undefined && asking ? (
+          <ActionForm action={remove} label="Disconnect Microsoft 365" onSuccess={() => setAsking(false)} className="flex basis-full flex-col gap-2 pt-1">
+            <input type="hidden" name="kind" value="microsoft" />
+            <p className="text-pretty text-[13px] font-semibold text-asst-text">
+              Disconnect Microsoft 365? Your agents can no longer read your mail, calendar, Teams chats, meetings or files until you connect again.
+            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <button type="submit" className="shrink-0 rounded-[10px] bg-asst-error px-3.5 py-2 text-[13px] font-semibold text-asst-ink">
+                Disconnect
+              </button>
+              <button type="button" onClick={() => setAsking(false)} className="shrink-0 text-[13px] font-medium text-asst-muted hover:text-asst-text">
+                Cancel
+              </button>
+            </div>
+          </ActionForm>
+        ) : null}
+      </li>
+    </ul>
+  );
+}
+
 function Appearance({ theme }: { theme: Theme }) {
   return (
     <section aria-labelledby="assistant-settings-appearance" className="flex flex-col gap-2.5">
@@ -234,7 +300,15 @@ function Appearance({ theme }: { theme: Theme }) {
   );
 }
 
-function Connections({ list, access, connect, unavailable, warning }: Pick<SettingsView, "list" | "access" | "connect" | "unavailable" | "warning">) {
+function Connections({
+  list,
+  access,
+  connect,
+  microsoft,
+  remove,
+  unavailable,
+  warning
+}: Pick<SettingsView, "list" | "access" | "connect" | "microsoft" | "unavailable" | "warning"> & { remove: FormAction | undefined }) {
   return (
     <section aria-labelledby="assistant-settings-connections" className="flex flex-col gap-2.5">
       <h3 id="assistant-settings-connections" className="text-sm font-semibold">
@@ -266,6 +340,7 @@ function Connections({ list, access, connect, unavailable, warning }: Pick<Setti
           ))}
         </ul>
       )}
+      {microsoft === null ? null : <MicrosoftRow connection={microsoft} remove={remove} />}
     </section>
   );
 }
@@ -349,8 +424,18 @@ const SECTIONS: readonly SettingsSection[] = [
     id: "connections",
     label: "Connections",
     group: "General",
-    shown: (view) => view.list.length > 0 || view.unavailable !== null,
-    panel: (view) => <Connections list={view.list} access={view.access} connect={view.connect} unavailable={view.unavailable} warning={view.warning} />
+    shown: (view) => view.list.length > 0 || view.microsoft !== null || view.unavailable !== null,
+    panel: (view) => (
+      <Connections
+        list={view.list}
+        access={view.access}
+        connect={view.connect}
+        microsoft={view.microsoft}
+        remove={view.tokens?.remove}
+        unavailable={view.unavailable}
+        warning={view.warning}
+      />
+    )
   },
   {
     id: "credentials",
@@ -920,6 +1005,7 @@ export function AssistantSettings({
                 list,
                 access,
                 connect,
+                microsoft: microsoftConnection(data),
                 unavailable: data?.unavailable ?? null,
                 warning,
                 plugins,

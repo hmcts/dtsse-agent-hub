@@ -1680,12 +1680,14 @@ describe("the Assistant's settings navigation", () => {
     expect(document.activeElement).toBe(items[0]);
   });
 
-  // Connections is a list and nothing else, so without a focusable panel a keyboard could not reach or scroll it.
-  it("should make the panel itself a tab stop when the section it holds has no control of its own", () => {
+  // Connections is mostly a list, so without a focusable panel a keyboard could not reach or scroll it; Microsoft 365's
+  // Connect is the one control in it when nothing else is offered.
+  it("should make the panel itself a tab stop, before the Microsoft 365 Connect, when Connections is open", () => {
     open({}, "Connections");
     const items = stops();
 
-    expect(items.at(-1)).toBe(screen.getByRole("tabpanel"));
+    expect(items.at(-2)).toBe(screen.getByRole("tabpanel"));
+    expect(items.at(-1)).toBe(screen.getByRole("link", { name: "Connect Microsoft 365" }));
   });
 });
 
@@ -3033,4 +3035,38 @@ describe("the Assistant's Sharing section", () => {
     expect(results.violations.map((violation) => `${violation.id}: ${violation.nodes.map((node) => node.html).join(" ")}`)).toEqual([]);
     root.remove();
   }, 20_000);
+});
+
+describe("AssistantSettings Microsoft 365", () => {
+  it("should link Connect to the hub's connect sign-in, coming back to Connections, when nothing is connected", () => {
+    open({}, "Connections");
+
+    expect(screen.getByRole("link", { name: "Connect Microsoft 365" }).getAttribute("href")).toBe(
+      "/auth/microsoft/connect?redirect=%2Fassistant%3Fsettings%3Dconnections"
+    );
+    expect(within(screen.getByRole("list", { name: "Microsoft 365" })).getByText("Not connected")).toBeTruthy();
+  });
+
+  it("should name the account and disconnect through removeCredential when one is connected", async () => {
+    const remove = vi.fn(async () => ({ ok: true as const }));
+    const connected = data([...ALL_SIGNED_IN, "microsoft"]);
+    connected.statuses = connected.statuses.map((row) => (row.kind === "microsoft" ? status("microsoft", "a.person@hmcts.net") : row));
+    open({ connections: connected, tokens: { rows: [], unavailable: null, save: vi.fn(), remove } }, "Connections");
+    const row = within(screen.getByRole("list", { name: "Microsoft 365" }));
+
+    expect(row.getByText("a.person@hmcts.net")).toBeTruthy();
+    fireEvent.click(row.getByRole("button", { name: "Disconnect" }));
+    await act(async () => {
+      fireEvent.click(row.getAllByRole("button", { name: "Disconnect" })[0] as HTMLElement);
+    });
+
+    expect(remove).toHaveBeenCalledOnce();
+    expect((remove.mock.calls[0] as unknown as [FormData])[0].get("kind")).toBe("microsoft");
+  });
+
+  it("should leave Microsoft 365 out when the hub cannot read the person's credentials", () => {
+    open({ connections: data([], [], "no store") }, "Connections");
+
+    expect(screen.queryByRole("list", { name: "Microsoft 365" })).toBeNull();
+  });
 });
