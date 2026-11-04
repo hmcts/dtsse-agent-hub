@@ -56,28 +56,30 @@ describe("bundled plugins", () => {
     expect(tickedBundled({})).toEqual([]);
   });
 
-  it("should load slides whether or not it is ticked", () => {
-    expect(ALWAYS_ON_PLUGINS).toEqual([SLIDES_PLUGIN]);
+  it("should load slides and the Microsoft 365 plugins whether or not they are ticked", () => {
+    expect(ALWAYS_ON_PLUGINS).toEqual([SLIDES_PLUGIN, "m365", "m365-files"]);
     expect(isAlwaysOn("slides")).toBe(true);
+    expect(isAlwaysOn("m365")).toBe(true);
+    expect(isAlwaysOn("m365-files")).toBe(true);
     expect(isAlwaysOn("welsh")).toBe(false);
-    expect(loadedBundled({})).toEqual(["slides"]);
-    expect(loadedBundled({ AGENT_HUB_PLUGINS: "pcs" })).toEqual(["slides"]);
+    expect(loadedBundled({})).toEqual(["slides", "m365", "m365-files"]);
+    expect(loadedBundled({ AGENT_HUB_PLUGINS: "pcs" })).toEqual(["slides", "m365", "m365-files"]);
   });
 
-  it("should load welsh only when it is ticked, and slides once when it is ticked too", () => {
-    expect(loadedBundled({ AGENT_HUB_PLUGINS: "pcs,welsh" })).toEqual(["slides", "welsh"]);
-    expect(loadedBundled({ AGENT_HUB_PLUGINS: "slides,welsh" })).toEqual(["slides", "welsh"]);
-    expect(loadedBundled({ AGENT_HUB_PLUGINS: "slides" })).toEqual(["slides"]);
+  it("should load welsh only when it is ticked, and an always-on one once when it is ticked too", () => {
+    expect(loadedBundled({ AGENT_HUB_PLUGINS: "pcs,welsh" })).toEqual(["slides", "m365", "m365-files", "welsh"]);
+    expect(loadedBundled({ AGENT_HUB_PLUGINS: "slides,m365,welsh" })).toEqual(["slides", "m365", "m365-files", "welsh"]);
+    expect(loadedBundled({ AGENT_HUB_PLUGINS: "slides" })).toEqual(["slides", "m365", "m365-files"]);
   });
 
-  it("should copy slides onto the pod when nothing is ticked", () => {
+  it("should copy the always-on plugins onto the pod when nothing is ticked", () => {
     const copied: string[] = [];
     const dirs = installLoaded({}, "/workspace/cft-workspace", undefined, (name) => {
       copied.push(name);
       return `/copies/${name}`;
     });
-    expect(copied).toEqual(["slides"]);
-    expect(dirs).toEqual(["/copies/slides"]);
+    expect(copied).toEqual(["slides", "m365", "m365-files"]);
+    expect(dirs).toEqual(["/copies/slides", "/copies/m365", "/copies/m365-files"]);
   });
 
   it("should keep the copies beside the workspace, on the same disk", () => {
@@ -162,7 +164,7 @@ describe("bundled plugins", () => {
         return `/copies/${name}`;
       }
     );
-    expect(dirs).toEqual(["/copies/slides"]);
+    expect(dirs).toEqual(["/copies/slides", "/copies/m365", "/copies/m365-files"]);
     expect(said).toEqual(["plugin welsh: could not copy it onto this pod: ENOSPC"]);
   });
 });
@@ -177,8 +179,9 @@ describe("the bundled plugins' scripts", () => {
   };
 
   it("should install, lock and mark done the same way in every plugin's wrapper", () => {
-    // Each plugin carries its own copy, since it is installed and copied to pods by itself, so the copies are kept in step here.
-    const [first, ...rest] = BUNDLED_PLUGINS;
+    // Each plugin carries its own copy, since it is installed and copied to pods by itself, so the copies are kept in step
+    // here. The Microsoft 365 plugins are skills alone and carry no wrapper.
+    const [first, ...rest] = BUNDLED_PLUGINS.filter((name) => fs.existsSync(path.join(PACKAGE_PLUGINS, name, "scripts", name)));
     for (const name of rest) {
       expect(logicOf(name), `scripts/${name} against scripts/${first}`).toBe(logicOf(first as string));
     }

@@ -142,7 +142,7 @@ describe("m365", () => {
   it("should send the person to Connect when the hub says Microsoft 365 is not connected", async () => {
     const { cli } = cliWith(vi.fn(async () => Promise.reject(Object.assign(new Error("404"), { status: 404 }))));
 
-    await expect(m365Command()(cli, ["mail", "list"])).rejects.toThrow("press Connect");
+    await expect(m365Command()(cli, ["mail", "list"])).rejects.toThrow("click Connect for Microsoft 365");
   });
 
   it("should ask Graph for the week ahead when calendar is given no times", async () => {

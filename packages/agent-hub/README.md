@@ -68,6 +68,7 @@ pressed Connect for Microsoft 365 in the CFT Workspace's settings. It asks the h
 time — its virtual agent's route in a pod, the person's own otherwise — and never holds the connection itself. It is
 read-only but for `files upload`, into their OneDrive's `Agent Hub` folder, and every answer leads with a notice that
 the content is untrusted data.
+The `m365` and `m365-files` plugins in `plugins/` are the skills that drive it, and every pod loads them, like `slides`.
 
 `bin/virtual-agent-boot` is the other bash bin. It is the virtual-agent runtime's own entrypoint rather than anything
 to run by hand, and its header comment documents it. It gets the workspace onto the pod's volume and then hands over

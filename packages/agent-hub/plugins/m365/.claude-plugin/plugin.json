@@ -1,0 +1,6 @@
+{
+  "name": "m365",
+  "description": "The person's own Microsoft 365 through agent-hub: mail, calendar, Teams chats and channels, and meeting transcripts, once they press Connect for Microsoft 365 in the Assistant's settings",
+  "version": "0.1.0",
+  "author": { "name": "DTSSE team" }
+}

@@ -5,7 +5,7 @@
     "email": "hmcts@justice.gov.uk"
   },
   "metadata": {
-    "description": "Plugins the agent hub puts on virtual agents, slides on every one and the others for people who tick them, and that anyone can install into Claude Code beside a cft-workspace checkout."
+    "description": "Plugins the agent hub puts on virtual agents: slides, m365 and m365-files on every one, and the others for people who tick them. Anyone can also install them into Claude Code beside a cft-workspace checkout."
   },
   "plugins": [
     {
@@ -17,6 +17,16 @@
       "name": "slides",
       "source": "./packages/agent-hub/plugins/slides",
       "description": "HMCTS-branded PowerPoint decks from an outline: real slide masters with placeholders, so the deck stays editable and on-brand"
+    },
+    {
+      "name": "m365",
+      "source": "./packages/agent-hub/plugins/m365",
+      "description": "The person's own Microsoft 365 through agent-hub: mail, calendar, Teams chats and channels, and meeting transcripts, once they have connected it. Read-only"
+    },
+    {
+      "name": "m365-files",
+      "source": "./packages/agent-hub/plugins/m365-files",
+      "description": "OneDrive and SharePoint files through agent-hub: find, read and attach them, and export documents to the person's OneDrive"
     }
   ]
 }

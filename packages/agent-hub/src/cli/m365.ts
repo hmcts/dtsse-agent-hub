@@ -464,10 +464,10 @@ const AREAS: Record<string, (ask: Ask, now: number) => Promise<string>> = {
 function tokenAdvice(error: unknown): Error {
   const status = (error as { status?: unknown })?.status;
   if (status === 404) {
-    return new Error("Microsoft 365 is not connected: press Connect for it under Connections in the CFT Workspace's settings");
+    return new Error("Microsoft 365 is not connected: click Connect for Microsoft 365 under Connections in the Assistant's settings");
   }
   if (status === 409) {
-    return new Error("the Microsoft 365 connection has lapsed: connect it again under Connections in the CFT Workspace's settings");
+    return new Error("the Microsoft 365 connection has lapsed: click Connect for Microsoft 365 under Connections in the Assistant's settings");
   }
   return error instanceof Error ? error : new Error(String(error));
 }
