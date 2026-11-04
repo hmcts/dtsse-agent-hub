@@ -181,6 +181,9 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
     case "assistant_welsh":
     case "assistant_welsh_answered":
       return undefined;
+    // An instruction to the pod; the slides panel reads its own build back.
+    case "assistant_deck_build":
+      return undefined;
     case "resync":
       return RESYNC;
   }

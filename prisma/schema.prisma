@@ -589,6 +589,7 @@ model AssistantConversation {
   copies       AssistantConversation[] @relation("forkedFrom")
   deckVersions AssistantDeckVersion[]
   deckAssets   AssistantDeckAsset[]
+  deckBuilds   AssistantDeckBuild[]
 
   @@index([ownerOid, lastActiveAt(sort: Desc)], map: "assistant_conversation_owner_active_idx")
   @@map("assistant_conversation")
@@ -626,6 +627,26 @@ model AssistantDeckAsset {
 
   @@id([conversationId, sha256])
   @@map("assistant_deck_asset")
+}
+
+/// A .pptx the conversation's pod built on the owner's request from a version that keeps none, kept 24 hours. At most
+/// one pending per (conversation, version): a partial unique index in the migration, which this schema cannot express.
+model AssistantDeckBuild {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversationId String    @map("conversation_id") @db.Uuid
+  version        Int
+  /// pending, done, failed or timeout.
+  status         String    @default("pending")
+  error          String?
+  pptx           Bytes?
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  finishedAt     DateTime? @map("finished_at") @db.Timestamptz(6)
+
+  conversation AssistantConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, version, createdAt(sort: Desc)], map: "assistant_deck_build_conversation_idx")
+  @@index([createdAt], map: "assistant_deck_build_created_at_idx")
+  @@map("assistant_deck_build")
 }
 
 /// A read-only share of one conversation with one named person. The list of rows is the whole of the access: a link

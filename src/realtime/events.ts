@@ -84,6 +84,11 @@ export type HubEvent =
   /** The pod answered the job, so a request waiting for it can read the answer. */
   | { type: "assistant_welsh_answered"; job_id: string; virtual_agent_id: string; owner_oid: string }
   /**
+   * The owner asked for an older version of a conversation's deck to be built, so `virtual_agent_id`'s pod should build
+   * it. Sent once, as `assistant_welsh` is: a build lost while the listener was down times out, and the person asks again.
+   */
+  | { type: "assistant_deck_build"; job_id: string; virtual_agent_id: string; owner_oid: string }
+  /**
    * Published in-process only, when the listener reconnects. NOTIFYs sent while it was disconnected are lost, so
    * every stream re-reads its queued deliveries.
    */
@@ -179,6 +184,7 @@ export function decodeEvent(payload: string | undefined): NotifiedEvent | undefi
       return isId(event.lookup_id) && isId(event.virtual_agent_id) && isId(event.owner_oid)
         ? { type: event.type, lookup_id: event.lookup_id, virtual_agent_id: event.virtual_agent_id, owner_oid: event.owner_oid }
         : undefined;
+    case "assistant_deck_build":
     case "assistant_welsh":
     case "assistant_welsh_answered":
       return isId(event.job_id) && isId(event.virtual_agent_id) && isId(event.owner_oid)

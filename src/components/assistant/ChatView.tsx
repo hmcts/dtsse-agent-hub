@@ -28,6 +28,7 @@ import { Mark, SidebarToggle } from "@/components/assistant/AssistantShell";
 import { ChatMenu } from "@/components/assistant/ChatMenu";
 import { Composer } from "@/components/assistant/Composer";
 import type { ExportToConfluenceAction } from "@/components/assistant/ConfluenceExport";
+import type { RestoreDeckAction } from "@/components/assistant/DeckHistory";
 import { DeckPanel, type SlideAsk } from "@/components/assistant/DeckPanel";
 import { ticketsOffered } from "@/components/assistant/ExportFooter";
 import { ForkedThread } from "@/components/assistant/ForkedThread";
@@ -59,6 +60,8 @@ export interface ChatActions {
   /** Left out, a person whose ticket tool is GitHub is offered no ticket export. */
   exportToGithub?: ExportToGithubAction;
   exportToConfluence?: ExportToConfluenceAction;
+  /** Left out, the slides panel offers no restore of an older version. */
+  restoreDeck?: RestoreDeckAction;
 }
 
 /**
@@ -694,6 +697,7 @@ export function ChatView({
           onClose={() => setPanel(null)}
           narrow={narrow}
           announce={arrivals.announce}
+          restore={actions.restoreDeck}
           onAsk={(next) => {
             setAsk(next);
             // On a narrow screen the panel covers the chat, so it gives way to the composer the question is typed in.

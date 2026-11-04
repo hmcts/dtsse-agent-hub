@@ -73,11 +73,11 @@ function recordedVersion(dir: string): number | undefined {
 }
 
 /**
- * Downloads every picture the outline names into `dir/assets/`, and answers the outline with each `asset` replaced
- * by the picture's path relative to `outline.json`. A picture already there with the right digest is not fetched
- * again.
+ * Downloads every picture the outline names into `dir/assets/` with `fetchAsset`, and answers the outline with each
+ * `asset` replaced by the picture's path relative to `outline.json`. A picture already there with the right digest is
+ * not fetched again. A session's `deck get` and the supervisor's deck builds both write a deck out this way.
  */
-async function materialise(api: Api, agentId: string, outline: DeckOutline, dir: string): Promise<DeckOutline> {
+export async function materialise(fetchAsset: (sha: string) => Promise<Uint8Array>, outline: DeckOutline, dir: string): Promise<DeckOutline> {
   const assets = path.join(dir, "assets");
   const fetched = new Map<string, string>();
   const slides: DeckSlide[] = [];
@@ -93,7 +93,7 @@ async function materialise(api: Api, agentId: string, outline: DeckOutline, dir:
       if (existing !== undefined && sha256(fs.readFileSync(path.join(assets, existing))) === sha) {
         relative = `assets/${existing}`;
       } else {
-        const bytes = await api.deckAsset(agentId, sha);
+        const bytes = await fetchAsset(sha);
         fs.mkdirSync(assets, { recursive: true });
         const name = `${sha}.${pictureExtension(bytes)}`;
         fs.writeFileSync(path.join(assets, name), bytes);
@@ -107,11 +107,11 @@ async function materialise(api: Api, agentId: string, outline: DeckOutline, dir:
   return { ...outline, slides };
 }
 
-function getArgs(argv: string[]): { json: boolean; slide: string | undefined } {
+function getArgs(argv: string[]): { json: boolean; slide: string | undefined; version: number | undefined } {
   const json = argv.includes("--json");
   const { flags, rest } = parseFlags(
     argv.filter((a) => a !== "--json"),
-    ["slide"]
+    ["slide", "version"]
   );
   if (rest.length) {
     throw new UsageError(`unexpected argument: ${rest[0]}`);
@@ -119,24 +119,37 @@ function getArgs(argv: string[]): { json: boolean; slide: string | undefined } {
   if (flags.slide !== undefined && !SLIDE_ID_RE.test(flags.slide)) {
     throw new UsageError("--slide takes a slide's id, such as s_ab12");
   }
-  return { json, slide: flags.slide };
+  // Mirrors the hub's `versionParam` (src/assistant/deck-build.ts), which the client cannot import.
+  if (flags.version !== undefined && !/^[1-9]\d{0,8}$/.test(flags.version)) {
+    throw new UsageError("--version takes a version number from 1");
+  }
+  return { json, slide: flags.slide, version: flags.version === undefined ? undefined : Number(flags.version) };
 }
 
 async function getDeck(cli: Cli, argv: string[]): Promise<number> {
-  const { json, slide } = getArgs(argv);
+  const { json, slide, version } = getArgs(argv);
   const agent = requireAgent(requireSessionId(cli.env));
   const api = cli.api();
-  const deck = await api.getDeck(agent.agent_id).catch(noDeck);
+  const deck = await api.getDeck(agent.agent_id, version).catch((e: unknown) => {
+    if (version !== undefined && e instanceof ApiError && e.status === 404 && agent.conversation_id) {
+      throw new Error(`the slide deck does not keep version ${version}; the hub keeps the latest 100`);
+    }
+    return noDeck(e);
+  });
   if (deck.outline === null) {
     cli.printError(`agent-hub: the conversation has no slide deck yet (version ${deck.version})`);
     return slide === undefined ? 0 : 1;
   }
   const dir = deckDir(cli, agent.conversation_id ?? agent.agent_id);
   fs.mkdirSync(dir, { recursive: true });
-  const outline = await materialise(api, agent.agent_id, deck.outline, dir);
-  const file = path.join(dir, "outline.json");
+  const outline = await materialise((sha) => api.deckAsset(agent.agent_id, sha), deck.outline, dir);
+  // An older version is written beside the working copy rather than over it.
+  const file = path.join(dir, version === undefined ? "outline.json" : `outline-v${deck.version}.json`);
   fs.writeFileSync(file, `${JSON.stringify(outline, null, 2)}\n`);
-  recordVersion(dir, deck.version);
+  // The recorded version is what the working copy builds on, so reading an older version leaves it alone.
+  if (version === undefined) {
+    recordVersion(dir, deck.version);
+  }
   if (slide !== undefined) {
     const index = (outline.slides ?? []).findIndex((one) => one.id === slide);
     if (index === -1) {
@@ -148,7 +161,24 @@ async function getDeck(cli: Cli, argv: string[]): Promise<number> {
     return 0;
   }
   if (json) {
-    cli.print(JSON.stringify({ title: deck.title, version: deck.version, updated_by: deck.updated_by, pptx: deck.pptx, dir, outline: file }));
+    cli.print(
+      JSON.stringify({
+        title: deck.title,
+        version: deck.version,
+        updated_by: deck.updated_by,
+        pptx: deck.pptx,
+        dir,
+        outline: file,
+        ...(deck.latest_version === undefined ? {} : { latest_version: deck.latest_version })
+      })
+    );
+    return 0;
+  }
+  if (deck.latest_version !== undefined && deck.latest_version !== deck.version) {
+    cli.print(
+      `agent-hub: wrote version ${deck.version} of the slide deck, which is not the latest (version ${deck.latest_version}), to ${file}, with its pictures beside it`
+    );
+    cli.print(`To bring it back, build it with slides build, then publish it with ${CLI} deck put ${file} --pptx <deck.pptx> --base ${deck.latest_version}`);
     return 0;
   }
   cli.print(`agent-hub: wrote version ${deck.version} of the slide deck to ${file}, with its pictures beside it`);

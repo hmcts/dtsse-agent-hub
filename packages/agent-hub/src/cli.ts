@@ -57,11 +57,12 @@ export const USAGE = `usage: ${CLI} <command> [args]
   artefact put [--title T] [--base N]
                               replace the document with markdown read from stdin; --base is the version
                               it was edited from (read first when omitted), and a newer one is refused
-  deck get [--json] [--slide ID]
+  deck get [--json] [--slide ID] [--version N]
                               in a CFT Workspace conversation: write its slide deck's outline to
                               ~/.agent-hub/decks/<conversation>/outline.json with its pictures beside it,
                               ready for slides build, and the version it read beside them; --slide
-                              prints one slide, by its id
+                              prints one slide, by its id; --version writes an older kept version
+                              to outline-vN.json beside it instead
   deck put <outline.json> [--pptx deck.pptx] [--base N] [--summary S]
                               upload the outline's pictures, publish the outline as the deck's next
                               version and then the .pptx built from it; --base is the version it was

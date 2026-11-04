@@ -11,7 +11,7 @@ import type { Env } from "../env.ts";
 import { withRetry } from "../retry.ts";
 import type { WelshAnswer } from "../wire.ts";
 import type { Run } from "./lookups.ts";
-import { bundledScript } from "./plugin-deps.ts";
+import { bundledScript, MIN_RUN_MS, readyWithin, reason, safeSay } from "./plugin-deps.ts";
 
 export const WELSH_KINDS = [
   "info",
@@ -336,9 +336,6 @@ export const STILL_PREPARING = "Your assistant is still setting up the Welsh too
  */
 export const JOB_BUDGET_MS = 14 * 60_000;
 
-/** Least time worth starting a job with, once the wait for the install is over. */
-const MIN_RUN_MS = 30_000;
-
 /** Why the script failed, in at most `MAX_DETAIL` characters: its own message, without the usage line or a stack. */
 export function failureDetail(stderr: string, code: number): string {
   if (code === 127) {
@@ -362,7 +359,7 @@ export type WelshDeps = {
   env: Env;
   /** The cft-workspace checkout; `$VIRTUAL_AGENT_WORKSPACE` in a pod. */
   workspace: string;
-  /** Settles once the tools' dependencies are installed, or the attempt has failed: the pod's start-up `prepareBundled`. */
+  /** Settles once the tools' dependencies are installed, or the attempt has failed: the pod's start-up `prepareEach`. */
   ready?: Promise<void>;
   /** Makes the pod's copy of a bundled plugin; a test passes one that makes it somewhere of its own. */
   install?: (name: string, workspace: string) => string;
@@ -375,38 +372,6 @@ export type WelshDeps = {
   /** How a retry of the job's answer waits; a real sleep unless a test passes its own. */
   retryWait?: (ms: number) => Promise<void>;
 };
-
-/** Settles true once `ready` does, or false at `ms`, whichever is first. */
-async function readyWithin(ready: Promise<void> | undefined, ms: number): Promise<boolean> {
-  if (ready === undefined) {
-    return true;
-  }
-  let timer: NodeJS.Timeout | undefined;
-  const late = new Promise<boolean>((resolve) => {
-    timer = setTimeout(() => resolve(false), Math.max(0, ms));
-  });
-  try {
-    return await Promise.race([ready.then(() => true), late]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/**
- * The deps' `say`, made unable to throw: it only reports, and a logger that fails must not leave a job unanswered or
- * reject the runner's queue.
- */
-function safeSay(say: ((message: string) => void) | undefined): (message: string) => void {
-  return (message) => {
-    try {
-      say?.(message);
-    } catch {
-      // Reporting failed; there is nowhere left to report it.
-    }
-  };
-}
-
-const reason = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 /** Runs one job and answers it, uploading the spreadsheets it made first. Never throws. */
 export async function runWelsh(deps: WelshDeps, frame: WelshFrame): Promise<void> {

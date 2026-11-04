@@ -381,7 +381,8 @@ describe("DeckPanel", () => {
       <DeckPanel conversationId={CONVERSATION} deck={summary({ pptx: false })} onClose={() => undefined} narrow={false} announce={() => undefined} />
     );
     await settle();
-    expect(screen.getByText("Not built yet")).toBeTruthy();
+    // The owner may have their pod build one meanwhile.
+    expect(screen.getByRole("button", { name: "Prepare .pptx" })).toBeTruthy();
 
     rerender(<DeckPanel conversationId={CONVERSATION} deck={summary({ pptx: true })} onClose={() => undefined} narrow={false} announce={() => undefined} />);
     await settle();

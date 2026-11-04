@@ -14,7 +14,17 @@
  * `ClientFeature` in the service's `src/agents/client-features.ts`, which gates on the same names and cannot import
  * from here; keep the two in step, so a name only one side knows is a type error on that side.
  */
-export type ClientFeature = "attachments" | "files" | "github-lookups" | "lookups" | "memory-anon" | "model-alias" | "stop" | "welsh" | "welsh-review";
+export type ClientFeature =
+  | "attachments"
+  | "deck-build"
+  | "files"
+  | "github-lookups"
+  | "lookups"
+  | "memory-anon"
+  | "model-alias"
+  | "stop"
+  | "welsh"
+  | "welsh-review";
 
 /**
  * What this build claims. A name belongs here only once this client reads the field it names, and in the same change
@@ -55,6 +65,10 @@ export type ClientFeature = "attachments" | "files" | "github-lookups" | "lookup
  * them on this name and answers `unsupported`, which the page reads as "needs an update", rather than a job that
  * times out.
  *
+ * `deck-build` is claimed because the assistant supervisor answers the sessions stream's `deck_build` frame, building
+ * one version of a conversation's deck with the slides plugin's `scripts/slides build` and uploading the .pptx. The hub
+ * gates on it, answering `unsupported` to a pod that did not claim it, which the slides panel words as needing an update.
+ *
  * `memory-anon` is claimed because the assistant supervisor reads its own container's memory cgroup and reports it,
  * including `anon_bytes` from `memory.stat`, which the hub's memory route requires and computes its low-memory
  * warning from. This is the name the current hub gates the Size section on, so that it can tell a pod that cannot
@@ -68,6 +82,7 @@ export type ClientFeature = "attachments" | "files" | "github-lookups" | "lookup
  */
 export const CLIENT_FEATURES: readonly ClientFeature[] = [
   "attachments",
+  "deck-build",
   "files",
   "github-lookups",
   "lookups",

@@ -49,6 +49,9 @@ function stubApi(overrides: Partial<SupervisorApi> = {}): SupervisorApi {
     putWelsh: async () => null,
     putWelshFile: async () => ({ file_id: "f" }),
     welshFile: async () => new Uint8Array(),
+    deckBuild: async () => Promise.reject(new Error("no builds here")),
+    deckBuildAsset: async () => new Uint8Array(),
+    putDeckBuild: async () => null,
     putMemory: async () => null,
     sessionsStream: async () => new Response("", { status: 200 }),
     ...overrides
@@ -114,6 +117,33 @@ function installsHoldingWelsh(ran: PluginRun[], welshInstall: { wait: Promise<vo
     }
     return { code: 0, stdout: "", stderr: "" };
   };
+}
+
+/**
+ * Plugin runs that succeed and are recorded in `ran`, each `deps` install only once `install` opens, and each `build`
+ * writing `pptx` where it is told to.
+ */
+function buildsWriting(pptx: Buffer, ran: PluginRun[], install?: { wait: Promise<void> }) {
+  return async (cmd: string, args: string[]) => {
+    ran.push({ cmd, args });
+    if (args[0] === "deps") {
+      await install?.wait;
+    }
+    if (args[0] === "build") {
+      fs.writeFileSync(args[3] as string, pptx);
+    }
+    return { code: 0, stdout: "{}", stderr: "" };
+  };
+}
+
+/** Asks the pod to build version 2 of a one-slide deck in `conversationId`. */
+function askDeckBuild(hub: MockHub, jobId: string, conversationId: string): void {
+  hub.sendDeckBuild(VID, jobId, {
+    conversation_id: conversationId,
+    version: 2,
+    outline: { title: "Ways of working", slides: [{ id: "why", layout: "HMCTS_SECTION", title: "Why" }] },
+    assets: {}
+  });
 }
 
 /** A cgroup whose `memory.stat` reports 1.6 GiB of anonymous memory, and whose every other file reads 4096. */
@@ -196,6 +226,75 @@ describe("runAssistantSupervisor", () => {
       expect(ran[1]?.cmd).toBe(plugins.script("welsh"));
       expect(ran[1]?.args.at(-1)).toBe("back");
     } finally {
+      await assistant.stop();
+      await hub.close();
+      plugins.cleanup();
+    }
+  });
+
+  it("should build a deck version on the sessions stream with the slides plugin's script and send the .pptx", async () => {
+    // Arrange
+    fs.rmSync(path.join(hubHome(), "virtual"), { recursive: true, force: true });
+    const { hub, api } = await mockHub();
+    const jobId = "7d2a9e3c-1111-4222-8333-444455556666";
+    const plugins = pluginWorkspace("slides-ws-");
+    const pptx = Buffer.from([0x50, 0x4b, 0x03, 0x04, 1]);
+    const ran: PluginRun[] = [];
+    const assistant = supervise({
+      api,
+      env: { AGENT_HUB_PLUGINS: "slides" },
+      welsh: { workspace: plugins.workspace, install: plugins.copy, run: buildsWriting(pptx, ran) }
+    });
+
+    try {
+      await waitUntil(() => hub.sessionStreams.has(VID), "the sessions stream to open");
+
+      // Act
+      askDeckBuild(hub, jobId, "0f8a6a1e-0000-4000-8000-0000000000c2");
+
+      // Assert
+      await waitUntil(() => hub.deckBuildAnswers.length === 1, "the deck build to be answered");
+      expect(hub.deckBuildAnswers[0]).toEqual({ virtual_id: VID, job_id: jobId, pptx });
+      expect(ran.find((one) => one.args[0] === "build")?.cmd).toBe(plugins.script("slides"));
+    } finally {
+      await assistant.stop();
+      await hub.close();
+      plugins.cleanup();
+    }
+  });
+
+  it("should start a deck build only once the slides plugin's dependencies are installed", async () => {
+    // Arrange
+    fs.rmSync(path.join(hubHome(), "virtual"), { recursive: true, force: true });
+    const { hub, api } = await mockHub();
+    const jobId = "7d2a9e3c-1111-4222-8333-444455557777";
+    const plugins = pluginWorkspace("slides-ws-");
+    const pptx = Buffer.from([0x50, 0x4b, 0x03, 0x04, 2]);
+    const ran: PluginRun[] = [];
+    const install = gate();
+    const assistant = supervise({
+      api,
+      env: { AGENT_HUB_PLUGINS: "slides" },
+      welsh: { workspace: plugins.workspace, install: plugins.copy, run: buildsWriting(pptx, ran, install) }
+    });
+
+    try {
+      await waitUntil(() => hub.sessionStreams.has(VID), "the sessions stream to open");
+
+      // Act
+      askDeckBuild(hub, jobId, "0f8a6a1e-0000-4000-8000-0000000000c3");
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const before = ran.map((one) => one.args[0]);
+      install.open();
+
+      // Assert
+      expect(before).toEqual(["deps"]);
+      expect(hub.deckBuildAnswers).toEqual([]);
+      await waitUntil(() => hub.deckBuildAnswers.length === 1, "the deck build to be answered");
+      expect(hub.deckBuildAnswers[0]).toEqual({ virtual_id: VID, job_id: jobId, pptx });
+      expect(ran.map((one) => one.args[0])).toEqual(["deps", "build"]);
+    } finally {
+      install.open();
       await assistant.stop();
       await hub.close();
       plugins.cleanup();

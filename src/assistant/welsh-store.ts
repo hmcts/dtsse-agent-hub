@@ -1,11 +1,10 @@
 import { isOwner } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
-import { podGate } from "../agents/client-features.ts";
+import { podReady } from "../agents/pod-ready.ts";
 import { isUuid } from "../agents/store.ts";
 import type { EventHub } from "../realtime/hub.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
-import { setDesired } from "../virtual-agents/store.ts";
 import { findAssistant, findAssistantWithClaims } from "./assistant-store.ts";
 import {
   fileIdsOf,
@@ -51,7 +50,7 @@ export async function askWelsh(prisma: PrismaClient, question: WelshQuestion, no
   if (found === undefined || !isOwner(question.viewerOid, found.assistant)) {
     throw new HttpError(404, "you have no assistant to run that with yet");
   }
-  const { assistant, claims } = found;
+  const { assistant } = found;
   if (!hasWelshPlugin(assistant)) {
     throw new HttpError(409, WELSH_NOT_TURNED_ON);
   }
@@ -61,18 +60,9 @@ export async function askWelsh(prisma: PrismaClient, question: WelshQuestion, no
   if (files.some((file) => file === null || !isOwner(question.viewerOid, file) || file.jobId !== null)) {
     throw new HttpError(404, "that spreadsheet is not there any more; upload it again");
   }
-  if (assistant.desired === "stopped") {
-    await setDesired(prisma, question.viewerOid, assistant.id, "running", now);
-    return { answer: { status: "waking" } };
-  }
-  const gate = podGate({ status: assistant.status, ...claims }, welshFeature(question.kind));
-  if (gate !== "ok") {
-    return { answer: { status: gate } };
-  }
-  // A change the orchestrator has not applied yet, such as the plugin just ticked, means the pod running now is the old
-  // one and is about to be replaced: asked now, it would say Welsh is not turned on. It is starting again instead.
-  if (assistant.generation > assistant.observedGeneration) {
-    return { answer: { status: "waking" } };
+  const ready = await podReady(prisma, question.viewerOid, found, welshFeature(question.kind), now);
+  if (ready !== "ok") {
+    return { answer: { status: ready } };
   }
   const id = await prisma.$transaction(async (tx) => {
     // The assistant's rows are taken one job at a time, so two tabs cannot both find room under the limit.

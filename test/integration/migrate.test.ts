@@ -159,6 +159,7 @@ describe("migrate", () => {
       "assistant_conversation_fork",
       "assistant_conversation_share",
       "assistant_deck_asset",
+      "assistant_deck_build",
       "assistant_deck_version",
       "assistant_export_default",
       "assistant_lookup",
