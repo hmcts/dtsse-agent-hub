@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { afterAll, beforeAll } from "vitest";
 
 export type TempClaudeHome = {
   root: string;
@@ -25,6 +26,39 @@ export function tempClaudeHome({ userSettings = { crossSessionInbound: "accept" 
     hub: path.join(claude, "agent-hub"),
     env: { HOME: root, CLAUDE_CONFIG_DIR: claude },
     cleanup: () => fs.rmSync(root, { recursive: true, force: true })
+  };
+}
+
+// A temp Claude home for every test in the calling file, with HOME and CLAUDE_CONFIG_DIR pointed at it and put back
+// afterwards. The getter is only valid once the file's beforeAll has run.
+export function useTempClaudeHome(): () => TempClaudeHome {
+  let home: TempClaudeHome | undefined;
+  const savedEnv: Record<string, string | undefined> = {};
+
+  beforeAll(() => {
+    home = tempClaudeHome();
+    for (const key of ["HOME", "CLAUDE_CONFIG_DIR"]) {
+      savedEnv[key] = process.env[key];
+    }
+    Object.assign(process.env, home.env);
+  });
+
+  afterAll(() => {
+    for (const [key, value] of Object.entries(savedEnv)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+    home?.cleanup();
+  });
+
+  return () => {
+    if (!home) {
+      throw new Error("the temp Claude home is only made in beforeAll");
+    }
+    return home;
   };
 }
 
