@@ -2,7 +2,16 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 import * as credentialRoute from "../../src/app/api/agent/credentials/[kind]/route.ts";
 import { credentialBackend } from "../../src/credentials/backend.ts";
 import { DEFAULT_CLAUDE_MD } from "../../src/credentials/claude-md.ts";
-import { credentialStatus, deleteCredential, putCredential, readCredential, type SecretStore } from "../../src/credentials/store.ts";
+import {
+  credentialStatus,
+  deleteCredential,
+  deleteCredentialIf,
+  putCredential,
+  readCredential,
+  readCredentialVersion,
+  replaceCredentialIf,
+  type SecretStore
+} from "../../src/credentials/store.ts";
 import { devIdentity } from "../../src/viewer/identity.ts";
 import { createVirtualAgent, setDesired } from "../../src/virtual-agents/store.ts";
 import { connect, insertUser, type Person, person, prisma, resetDatabase } from "./database.ts";
@@ -828,5 +837,74 @@ describe("a git identity", () => {
       ok: false,
       error: expect.stringContaining("can be pasted here")
     });
+  });
+});
+
+describe("a Microsoft 365 connection's conditional writes", () => {
+  const connection = (refresh: string) => JSON.stringify({ refresh_token: refresh, account: "alice@hmcts.net", scope: "Mail.Read" });
+  const target = { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "microsoft" as const };
+
+  async function connected(refresh = "first-refresh"): Promise<Date> {
+    await insertUser(ALICE);
+    await putCredential(prisma, localStore(), { ...target, value: connection(refresh), via: "web" });
+    return (await readCredentialVersion(prisma, localStore(), ALICE.oid, "microsoft"))!.updatedAt;
+  }
+
+  it("should keep a rotated refresh token when the connection is still the one read", async () => {
+    const read = await connected();
+
+    expect(await replaceCredentialIf(prisma, localStore(), { ...target, value: connection("rotated"), via: "pod" }, read)).toMatchObject({ written: true });
+    expect(await readCredential(prisma, localStore(), ALICE.oid, "microsoft")).toBe(connection("rotated"));
+  });
+
+  it("should let a disconnect win and write nothing back when the disconnect lands before the rotation", async () => {
+    const read = await connected();
+    await deleteCredential(prisma, localStore(), target);
+
+    expect(await replaceCredentialIf(prisma, localStore(), { ...target, value: connection("rotated"), via: "pod" }, read)).toEqual({
+      written: false,
+      reason: "gone"
+    });
+    expect((await credentialStatus(prisma, ALICE.oid)).find((row) => row.kind === "microsoft")?.stored).toBe(false);
+  });
+
+  it("should let a disconnect win when it lands after the rotation", async () => {
+    const read = await connected();
+    await replaceCredentialIf(prisma, localStore(), { ...target, value: connection("rotated"), via: "pod" }, read);
+    await deleteCredential(prisma, localStore(), target);
+
+    expect((await credentialStatus(prisma, ALICE.oid)).find((row) => row.kind === "microsoft")?.stored).toBe(false);
+    expect(await readCredential(prisma, localStore(), ALICE.oid, "microsoft")).toBeUndefined();
+  });
+
+  it("should end disconnected whichever commits first when a disconnect and a rotation run at once", async () => {
+    const read = await connected();
+
+    await Promise.all([
+      replaceCredentialIf(prisma, localStore(), { ...target, value: connection("rotated"), via: "pod" }, read),
+      deleteCredential(prisma, localStore(), target)
+    ]);
+
+    expect((await credentialStatus(prisma, ALICE.oid)).find((row) => row.kind === "microsoft")?.stored).toBe(false);
+  });
+
+  it("should not overwrite a connection made again since the one read", async () => {
+    const read = await connected();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await putCredential(prisma, localStore(), { ...target, value: connection("reconnected"), via: "web" });
+
+    expect(await replaceCredentialIf(prisma, localStore(), { ...target, value: connection("rotated"), via: "pod" }, read)).toEqual({
+      written: false,
+      reason: "changed"
+    });
+    expect(await deleteCredentialIf(prisma, localStore(), target, read)).toBe(false);
+    expect(await readCredential(prisma, localStore(), ALICE.oid, "microsoft")).toBe(connection("reconnected"));
+  });
+
+  it("should delete a refused connection when it is still the one read", async () => {
+    const read = await connected();
+
+    expect(await deleteCredentialIf(prisma, localStore(), target, read)).toBe(true);
+    expect(await readCredential(prisma, localStore(), ALICE.oid, "microsoft")).toBeUndefined();
   });
 });
