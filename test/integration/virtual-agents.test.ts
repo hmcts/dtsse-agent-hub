@@ -417,7 +417,7 @@ describe("a virtual agent's plugins", () => {
 
     expect(await row(id)).toMatchObject({ plugins: ["dtsse"], generation: before.generation + 1, podGeneration: before.podGeneration + 1 });
     expect((await claim()).find((entry) => entry.id === id)).toMatchObject({
-      plugins: ["dtsse", "slides"],
+      plugins: ["dtsse", "m365", "m365-files", "slides"],
       generation: before.generation + 1,
       pod_generation: before.podGeneration + 1
     });

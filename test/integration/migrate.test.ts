@@ -375,14 +375,14 @@ describe("the bedrock migration", () => {
     // `migrate()` applies every migration from this one on, so what is asserted is the state at head rather than the
     // one this migration left: `20261107090000_bedrock_gone` moves the renamed row back to `gateway`, and
     // `20261120090000_credential_kind_rebuilt` and `20261121090000_virtual_agent_enums_rebuilt` take the value out of both
-    // enums again.
+    // enums again. `20261201090000_microsoft_credential` adds `microsoft` to `credential_kind` after that.
     const agents = await query<{ name: string; model_route: string }>(RENAME, `SELECT name, model_route::text FROM "virtual_agent" ORDER BY name`);
     expect(agents).toEqual([
       { name: "on-gateway", model_route: "gateway" },
       { name: "own", model_route: "own_licence" }
     ]);
     expect([...(await enumLabels(RENAME, "credential_kind")), ...(await enumLabels(RENAME, "model_route"))]).toEqual([
-      { type: "credential_kind", labels: "github,azure,claude,jenkins,claude_md,git_identity,atlassian" },
+      { type: "credential_kind", labels: "github,azure,claude,jenkins,claude_md,git_identity,atlassian,microsoft" },
       { type: "model_route", labels: "gateway,own_licence" }
     ]);
   });
@@ -878,8 +878,10 @@ describe("the credential kind rebuild migration", () => {
 
     expect(await query(KINDS, `SELECT kind::text FROM "credential"`)).toEqual([{ kind: "github" }]);
     expect(await query(KINDS, `SELECT kind::text FROM "virtual_agent_login"`)).toEqual([{ kind: "github" }]);
+    // At head, as `migrate()` applies every migration from this one on: the rebuilt type, without `bedrock`, and the
+    // `microsoft` that `20261201090000_microsoft_credential` adds after it.
     expect(await enumLabels(KINDS, "credential_kind")).toEqual([
-      { type: "credential_kind", labels: "github,azure,claude,jenkins,claude_md,git_identity,atlassian" }
+      { type: "credential_kind", labels: "github,azure,claude,jenkins,claude_md,git_identity,atlassian,microsoft" }
     ]);
   });
 });

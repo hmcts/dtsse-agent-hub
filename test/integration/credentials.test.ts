@@ -352,7 +352,8 @@ describe("reading credentials back", () => {
       ["jenkins", false],
       ["claude_md", false],
       ["git_identity", false],
-      ["atlassian", false]
+      ["atlassian", false],
+      ["microsoft", false]
     ]);
     expect(JSON.stringify(statuses)).not.toContain(GITHUB);
     expect(JSON.stringify(statuses)).not.toContain(AZURE);
@@ -703,7 +704,7 @@ describe("a CLAUDE.md", () => {
 
     const settings = await credentialSettings({ ...devIdentity("alice"), modelRoute: "gateway" });
 
-    expect(settings.available && settings.statuses.map((status) => status.kind)).toEqual(["github", "azure", "claude", "jenkins", "atlassian"]);
+    expect(settings.available && settings.statuses.map((status) => status.kind)).toEqual(["github", "azure", "claude", "jenkins", "atlassian", "microsoft"]);
   });
 
   it("should not be pasteable as an ordinary credential when the credentials form names it", async () => {
@@ -827,7 +828,7 @@ describe("a git identity", () => {
 
     const settings = await credentialSettings({ ...devIdentity("alice"), modelRoute: "gateway" });
 
-    expect(settings.available && settings.statuses.map((status) => status.kind)).toEqual(["github", "azure", "claude", "jenkins", "atlassian"]);
+    expect(settings.available && settings.statuses.map((status) => status.kind)).toEqual(["github", "azure", "claude", "jenkins", "atlassian", "microsoft"]);
   });
 
   it("should not be pasteable as an ordinary credential when the credentials form names it", async () => {
