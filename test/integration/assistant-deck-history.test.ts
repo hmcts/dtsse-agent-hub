@@ -9,6 +9,7 @@ import * as deckRoute from "../../src/app/api/agent/[agentId]/deck/route.ts";
 import * as claimRoute from "../../src/app/api/orchestrator/claim/route.ts";
 import * as observedRoute from "../../src/app/api/orchestrator/virtual-agents/[id]/observed/route.ts";
 import * as buildRoute from "../../src/app/api/ui/assistant/decks/[conversationId]/builds/[jobId]/route.ts";
+import * as deckUiRoute from "../../src/app/api/ui/assistant/decks/[conversationId]/route.ts";
 import * as pptxRoute from "../../src/app/api/ui/assistant/decks/[conversationId]/versions/[version]/pptx/route.ts";
 import * as versionRoute from "../../src/app/api/ui/assistant/decks/[conversationId]/versions/[version]/route.ts";
 import * as versionsRoute from "../../src/app/api/ui/assistant/decks/[conversationId]/versions/route.ts";
@@ -17,9 +18,16 @@ import * as podBuildRoute from "../../src/app/api/virtual/[virtualAgentId]/deck-
 import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
 import { assetRef, type DeckOutline, imageInfo } from "../../src/assistant/deck.ts";
 import { DECK_BUILD_KEEP_MS, DECK_BUILD_TIMEOUT_MS, DECK_BUILDS_KEPT } from "../../src/assistant/deck-build.ts";
-import { answerDeckBuild, pendingDeckBuild, readDeckBuild, requestDeckBuild, sweepDeckBuilds } from "../../src/assistant/deck-build-store.ts";
-import { listDeckVersions } from "../../src/assistant/deck-history-store.ts";
-import { putDeckAsset, putDeckPptx, readDeck, writeDeck } from "../../src/assistant/deck-store.ts";
+import {
+  answerDeckBuild,
+  pendingDeckBuild,
+  podDeckBuildAsset,
+  readDeckBuild,
+  requestDeckBuild,
+  sweepDeckBuilds
+} from "../../src/assistant/deck-build-store.ts";
+import { listDeckVersions, restoreDeckVersion } from "../../src/assistant/deck-history-store.ts";
+import { deckSummary, deckView, putDeckAsset, putDeckPptx, readDeck, writeDeck } from "../../src/assistant/deck-store.ts";
 import { assistantFrame } from "../../src/assistant/frame.ts";
 import { devIdentity } from "../../src/viewer/identity.ts";
 import { assistantSuite } from "./assistant-suite.ts";
@@ -397,7 +405,49 @@ describe("restoring a deck version", () => {
     const refused = await deckActions.restoreDeckVersion({ conversationId: mine.id, version: 1, baseVersion: 2 });
 
     // Assert
-    expect(refused).toMatchObject({ ok: false, error: expect.stringContaining("names pictures the hub does not hold") });
+    expect(refused).toEqual({ ok: false, error: "Version 1's pictures are no longer held, so it can't be restored." });
+    expect((await readDeck(prisma, mine.id)).version).toBe(2);
+  });
+
+  it("should answer that the version is not there, not ask for its pictures, when a write drops it while the restore waits for the lock", async () => {
+    // Arrange
+    const { mine, sha } = await deckOf(2);
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let dropped!: () => void;
+    const droppedYet = new Promise<void>((resolve) => {
+      dropped = resolve;
+    });
+    // What an upload's makeRoom does under the conversation's lock: version 1 and the picture only it names go.
+    const upload = prisma.$transaction(
+      async (tx) => {
+        await tx.$queryRaw`SELECT 1 FROM assistant_conversation WHERE id = ${mine.id}::uuid FOR UPDATE`;
+        await tx.assistantDeckVersion.delete({ where: { conversationId_version: { conversationId: mine.id, version: 1 } } });
+        await tx.assistantDeckAsset.delete({ where: { conversationId_sha256: { conversationId: mine.id, sha256: sha } } });
+        dropped();
+        await released;
+      },
+      { timeout: 15_000 }
+    );
+    await droppedYet;
+
+    // Act
+    const restoring = restoreDeckVersion(prisma, mine.row, { version: 1, baseVersion: 2 });
+    await vi.waitFor(
+      async () => {
+        const [waiting] = await prisma.$queryRaw<{ count: number }[]>`SELECT count(*)::int AS count FROM pg_locks WHERE NOT granted`;
+        expect(waiting?.count).toBeGreaterThan(0);
+      },
+      { timeout: 5000, interval: 20 }
+    );
+    release();
+    await upload;
+    const restored = await restoring;
+
+    // Assert
+    expect(restored).toEqual({ restored: false, missing: true });
     expect((await readDeck(prisma, mine.id)).version).toBe(2);
   });
 });
@@ -608,6 +658,60 @@ describe("building an older version's .pptx", () => {
     expect(kept.map((row) => row.version).sort((a, b) => a - b)).toEqual(Array.from({ length: DECK_BUILDS_KEPT }, (_, index) => index + 2));
   });
 
+  it("should offer the latest version's .pptx once a build of it is done, to the owner, a share's reader and the session", async () => {
+    // Arrange
+    const { mine } = await deckOf(4);
+    await podFor(mine);
+    actAs("alice");
+    await shareActions.shareChat({ conversationId: mine.id, recipientOid: BOB.oid });
+    const { job_id: jobId } = await jsonOf<{ job_id: string }>(await prepare("alice", mine.id, 4));
+    const before = await deckView(prisma, mine.id);
+
+    // Act
+    await answerDeckBuild(prisma, mine.virtualAgentId, jobId, { pptx: BUILT });
+
+    // Assert
+    expect(before?.pptx).toBe(false);
+    const panel = (as: string) => browser(deckUiRoute.GET, as, base(mine.id), { conversationId: mine.id });
+    expect(await jsonOf(await panel("alice"))).toMatchObject({ version: 4, pptx: true });
+    expect(await jsonOf(await panel("bob"))).toMatchObject({ version: 4, pptx: true });
+    expect((await readDeck(prisma, mine.id)).pptx).toBe(true);
+    expect(await deckSummary(prisma, mine.id, { deckTitle: "v4", deckVersion: 4, deckUpdatedBy: "user" })).toMatchObject({ pptx: true });
+    expect((await listDeckVersions(prisma, mine.id))[0]).toMatchObject({ version: 4, pptx: true });
+    // A day on, the build is no longer held, by every one of them alike.
+    const dayOn = new Date(Date.now() + DECK_BUILD_KEEP_MS + 60_000);
+    expect((await readDeck(prisma, mine.id, dayOn)).pptx).toBe(false);
+    expect((await deckView(prisma, mine.id, dayOn))?.pptx).toBe(false);
+    expect((await listDeckVersions(prisma, mine.id, dayOn))[0]?.pptx).toBe(false);
+  });
+
+  it("should give the pod a picture only while its build is pending, and only to the build's own assistant", async () => {
+    // Arrange
+    const { mine, sha } = await deckOf(4);
+    await podFor(mine);
+    const { job_id: jobId } = await jsonOf<{ job_id: string }>(await prepare("alice", mine.id, 1));
+    actAs("bob");
+    await ensureAssistant(prisma, viewerOf(BOB));
+    const bobs = await prisma.virtualAgent.findFirstOrThrow({ where: { ownerOid: BOB.oid }, select: { id: true } });
+    const late = new Date(Date.now() + DECK_BUILD_TIMEOUT_MS + 1000);
+
+    // Act
+    const pending = await podDeckBuildAsset(prisma, mine.virtualAgentId, jobId, sha);
+    const timedOut = await podDeckBuildAsset(prisma, mine.virtualAgentId, jobId, sha, late);
+    const another = await podDeckBuildAsset(prisma, bobs.id, jobId, sha);
+    const notAJob = await podDeckBuildAsset(prisma, mine.virtualAgentId, "not-a-job", sha);
+    await answerDeckBuild(prisma, mine.virtualAgentId, jobId, { error: "no" });
+    const answered = await podDeckBuildAsset(prisma, mine.virtualAgentId, jobId, sha);
+
+    // Assert
+    expect(pending?.mime).toBe("image/png");
+    expect(Buffer.from(pending!.bytes)).toEqual(png(1));
+    expect(timedOut).toBeUndefined();
+    expect(another).toBeUndefined();
+    expect(notAJob).toBeUndefined();
+    expect(answered).toBeUndefined();
+  });
+
   it("should answer ready, recording nothing, for a version the hub already holds a .pptx of", async () => {
     // Arrange
     const { mine } = await deckOf(2);
@@ -640,6 +744,21 @@ describe("the deck build's gate", () => {
 
     // Assert
     expect(answer).toEqual({ status: "unsupported" });
+    expect(await prisma.assistantDeckBuild.count()).toBe(0);
+  });
+
+  it("should answer assistant_gone, recording nothing, for a chat whose assistant has been replaced", async () => {
+    // Arrange
+    const { mine } = await deckOf(4);
+    await podFor(mine);
+    await prisma.virtualAgent.update({ where: { id: mine.virtualAgentId }, data: { desired: "deleted" } });
+    await ensureAssistant(prisma, viewerOf(ALICE));
+
+    // Act
+    const answer = await jsonOf(await prepare("alice", mine.id, 1));
+
+    // Assert
+    expect(answer).toEqual({ status: "assistant_gone" });
     expect(await prisma.assistantDeckBuild.count()).toBe(0);
   });
 

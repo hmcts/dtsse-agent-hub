@@ -46,6 +46,9 @@ export async function restoreDeckVersion(input: { conversationId: unknown; versi
     if ("latest" in result) {
       return { ok: false, error: "that is already the latest version" };
     }
+    if ("picturesGone" in result) {
+      return { ok: false, error: `Version ${version}'s pictures are no longer held, so it can't be restored.` };
+    }
     return { ok: true, ...result };
   });
 }

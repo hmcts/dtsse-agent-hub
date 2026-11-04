@@ -5,7 +5,7 @@ import type { RestoreDeckResult } from "@/app/_actions/decks";
 import { DECK_BUILD_TIMEOUT_MS, type DeckBuildRequest, type DeckBuildView } from "@/assistant/deck-build";
 import { type DeckDiff, diffDecks, diffSummary, type FieldChange, type SlideDiff, type WordPart } from "@/assistant/deck-diff";
 import type { DeckVersionEntry, DeckVersionView } from "@/assistant/deck-history-store";
-import type { DeckView } from "@/assistant/deck-store";
+import type { DeckAuthor, DeckView } from "@/assistant/deck-store";
 import {
   DeckViewer,
   deckAssetUrl,
@@ -157,17 +157,19 @@ function download(href: string): void {
 
 type Building = { state: "idle" } | { state: "asking" } | { state: "preparing"; jobId: string } | { state: "ready" } | { state: "failed"; message: string };
 
-const NOT_STARTED: Record<"waking" | "unsupported" | "no_pod", string> = {
+const NOT_STARTED: Record<"waking" | "unsupported" | "assistant_gone" | "no_pod", string> = {
   waking: "Your assistant is starting up. Try again in a minute.",
   unsupported: "Your assistant needs an update before it can build this version. It gets one the next time it restarts.",
+  assistant_gone: "This chat's assistant has been replaced, so older versions can't be prepared here.",
   no_pod: "Older versions can only be prepared in a chat that runs on your assistant in the hub, not in a chat from your own machine."
 };
 
 /**
  * One version's .pptx: a download when the hub holds it, and otherwise, for the owner, a build by their pod, read back
  * until it is ready and then downloaded. Anyone else is told it is not available. The latest version's own session
- * builds and uploads it, so the owner is offered a build of it only once `LATEST_BUILD_GRACE_MS` has passed since it
- * was written without one arriving.
+ * builds and uploads it when the assistant wrote it, so the owner is offered a build of such a version only once
+ * `LATEST_BUILD_GRACE_MS` has passed since it was written without one arriving. A version the person wrote, such as a
+ * restore, has no session building it.
  */
 export function DeckDownload({
   conversationId,
@@ -176,6 +178,7 @@ export function DeckDownload({
   canBuild,
   latest,
   writtenAt = null,
+  writtenBy = null,
   announce,
   pollMs = BUILD_POLL_MS
 }: {
@@ -187,12 +190,14 @@ export function DeckDownload({
   latest: boolean;
   /** When the version was written, which is when its session started building it. */
   writtenAt?: string | null;
+  /** Who wrote the version: only a version the assistant wrote has a session building it. */
+  writtenBy?: DeckAuthor | null;
   announce: (text: string) => void;
   pollMs?: number;
 }) {
   const [building, setBuilding] = useState<Building>({ state: "idle" });
   const href = deckPptxUrl(conversationId, version);
-  const sessionBuildsUntil = latest && writtenAt !== null ? Date.parse(writtenAt) + LATEST_BUILD_GRACE_MS : 0;
+  const sessionBuildsUntil = latest && writtenBy === "agent" && writtenAt !== null ? Date.parse(writtenAt) + LATEST_BUILD_GRACE_MS : 0;
   const [, rerender] = useState(0);
 
   useEffect(() => {
@@ -213,7 +218,7 @@ export function DeckDownload({
         setBuilding({ state: "ready" });
         announce(`Version ${version} is ready to download`);
         download(href);
-      } else if (answer.status !== "pending") {
+      } else {
         const message = answer.status === "timeout" ? "Building this version took too long." : (answer.error ?? "This version could not be built.");
         setBuilding({ state: "failed", message });
         announce(`Version ${version} could not be prepared`);
@@ -223,48 +228,63 @@ export function DeckDownload({
   );
 
   // Read back until the build finishes, but no longer than the hub waits for it, and not past a build that has gone or
-  // a run of failed reads: each of those stops, says so, and offers another try.
+  // a run of failed reads: each of those stops, says so, and offers another try. One read at a time, the next
+  // scheduled once the last has answered, so a slow answer is never overtaken and the build finishes once.
   useEffect(() => {
     if (building.state !== "preparing") {
       return;
     }
-    let stopped = false;
+    const controller = new AbortController();
+    let done = false;
     let failures = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const started = Date.now();
-    const stop = (message: string) => {
-      stopped = true;
-      clearInterval(timer);
-      setBuilding({ state: "failed", message });
-      announce(`Version ${version} could not be prepared`);
+    const end = (then: () => void) => {
+      if (!done) {
+        done = true;
+        then();
+      }
     };
-    const timer = setInterval(() => {
+    const stop = (message: string) =>
+      end(() => {
+        setBuilding({ state: "failed", message });
+        announce(`Version ${version} could not be prepared`);
+      });
+    const read = async (): Promise<void> => {
       if (Date.now() - started >= DECK_BUILD_TIMEOUT_MS) {
         stop("Building this version took too long.");
         return;
       }
-      readJson<DeckBuildView>(deckBuildUrl(conversationId, building.jobId)).then(
-        (answer) => {
-          if (!stopped) {
-            failures = 0;
-            finished(answer);
-          }
-        },
-        (error: unknown) => {
-          if (stopped) {
-            return;
-          }
-          failures += 1;
-          if (error instanceof ReadFailed && error.status === 404) {
-            stop("This build is no longer there.");
-          } else if (failures >= BUILD_POLL_FAILURES) {
-            stop("Could not check on this build.");
-          }
+      try {
+        const answer = await readJson<DeckBuildView>(deckBuildUrl(conversationId, building.jobId), controller.signal);
+        if (controller.signal.aborted) {
+          return;
         }
-      );
-    }, pollMs);
+        failures = 0;
+        if (answer.status !== "pending") {
+          end(() => finished(answer));
+          return;
+        }
+      } catch (error) {
+        if (controller.signal.aborted) {
+          return;
+        }
+        failures += 1;
+        if (error instanceof ReadFailed && error.status === 404) {
+          stop("This build is no longer there.");
+          return;
+        }
+        if (failures >= BUILD_POLL_FAILURES) {
+          stop("Could not check on this build.");
+          return;
+        }
+      }
+      timer = setTimeout(() => void read(), pollMs);
+    };
+    timer = setTimeout(() => void read(), pollMs);
     return () => {
-      stopped = true;
-      clearInterval(timer);
+      controller.abort();
+      clearTimeout(timer);
     };
   }, [announce, building, conversationId, finished, pollMs, version]);
 
@@ -758,6 +778,7 @@ export function DeckHistory({
               canBuild={owner}
               latest={viewing === null}
               writtenAt={view.updatedAt}
+              writtenBy={view.updatedBy}
               announce={announce}
             />
           }

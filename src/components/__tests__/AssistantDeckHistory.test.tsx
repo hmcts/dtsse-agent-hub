@@ -596,6 +596,7 @@ describe("DeckDownload", () => {
   it.each([
     ["waking", "Your assistant is starting up. Try again in a minute."],
     ["unsupported", "Your assistant needs an update before it can build this version. It gets one the next time it restarts."],
+    ["assistant_gone", "This chat's assistant has been replaced, so older versions can't be prepared here."],
     ["no_pod", "Older versions can only be prepared in a chat that runs on your assistant in the hub, not in a chat from your own machine."]
   ])("should say why nothing was started when the hub answers %s", async (status, words) => {
     // Arrange
@@ -653,6 +654,63 @@ describe("DeckDownload", () => {
         await vi.advanceTimersByTimeAsync(ms);
       });
     };
+
+    /** A build whose every read back takes `ms` to answer `done`, with the signal each read was made with. */
+    async function slowly(ms: number) {
+      vi.useFakeTimers();
+      const signals: AbortSignal[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (_url: string, init?: RequestInit) => {
+          if (init?.method === "POST") {
+            return new Response(JSON.stringify({ status: "pending", job_id: JOB }));
+          }
+          signals.push(init!.signal!);
+          return await new Promise<Response>((resolve) => {
+            setTimeout(() => resolve(new Response(JSON.stringify({ status: "done", job_id: JOB, version: 5 }))), ms);
+          });
+        })
+      );
+      const announce = vi.fn();
+      const view = render(<DeckDownload conversationId={CONVERSATION} version={5} pptx={false} canBuild latest={false} announce={announce} pollMs={2000} />);
+      fireEvent.click(screen.getByRole("button", { name: "Prepare .pptx" }));
+      await settle();
+      return { announce, signals, view };
+    }
+
+    it("should not read again while a slow read is unanswered, and download once when it answers", async () => {
+      // Arrange
+      const { announce, signals } = await slowly(7000);
+
+      // Act
+      await tick(2000);
+      await tick(6000);
+      const waiting = signals.length;
+      await tick(1000);
+      await tick(10_000);
+
+      // Assert
+      expect(waiting).toBe(1);
+      expect(signals).toHaveLength(1);
+      expect(clicked).toEqual([deckPptxUrl(CONVERSATION, 5)]);
+      expect(announce.mock.calls.filter(([text]) => text === "Version 5 is ready to download")).toHaveLength(1);
+      expect(screen.getByRole("link", { name: "Download .pptx" })).toBeTruthy();
+    });
+
+    it("should abort a read still unanswered when it is taken off the page, and not download", async () => {
+      // Arrange
+      const { signals, view } = await slowly(7000);
+      await tick(2000);
+
+      // Act
+      view.unmount();
+      await tick(20_000);
+
+      // Assert
+      expect(signals).toHaveLength(1);
+      expect(signals[0]!.aborted).toBe(true);
+      expect(clicked).toEqual([]);
+    });
 
     it("should stop, and offer another try, when the build has gone", async () => {
       // Arrange
@@ -737,7 +795,7 @@ describe("DeckDownload", () => {
     it("should say the assistant is building it, with no build to start, until two minutes after it was written", async () => {
       // Arrange
       vi.useFakeTimers({ now: new Date("2026-11-03T09:01:00.000Z") });
-      shown({ latest: true, writtenAt: "2026-11-03T09:00:00.000Z" });
+      shown({ latest: true, writtenBy: "agent", writtenAt: "2026-11-03T09:00:00.000Z" });
 
       // Assert
       expect(screen.getByText("The assistant is building this")).toBeTruthy();
@@ -758,7 +816,7 @@ describe("DeckDownload", () => {
       vi.useFakeTimers({ now: new Date("2026-11-03T09:05:00.000Z") });
 
       // Act
-      shown({ latest: true, writtenAt: "2026-11-03T09:00:00.000Z" });
+      shown({ latest: true, writtenBy: "agent", writtenAt: "2026-11-03T09:00:00.000Z" });
 
       // Assert
       expect(screen.getByRole("button", { name: "Prepare .pptx" })).toBeTruthy();
@@ -773,6 +831,18 @@ describe("DeckDownload", () => {
 
       // Assert
       expect(screen.getByRole("button", { name: "Prepare .pptx" })).toBeTruthy();
+    });
+
+    it("should offer a build of it straight away when the person wrote it, as a restore, which no session builds", () => {
+      // Arrange
+      vi.useFakeTimers({ now: new Date("2026-11-03T09:00:30.000Z") });
+
+      // Act
+      shown({ latest: true, writtenBy: "user", writtenAt: "2026-11-03T09:00:00.000Z" });
+
+      // Assert
+      expect(screen.getByRole("button", { name: "Prepare .pptx" })).toBeTruthy();
+      expect(screen.queryByText("The assistant is building this")).toBeNull();
     });
   });
 });
