@@ -92,7 +92,7 @@ async function putArtefact(cli: Cli, agentId: string, flags: Record<string, stri
     if (!(e instanceof ApiError && e.status === 409)) {
       return notConversation(e);
     }
-    printConflict(cli, base, e.body?.current);
+    printConflict(cli, base, e.body?.current as Artefact | undefined);
     return 1;
   }
   return 0;

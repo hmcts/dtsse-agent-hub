@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ArtefactSnapshot, SaveArtefactResult } from "@/app/_actions/assistant";
+import { fileName } from "@/assistant/downloads";
 import { AssistantMarkdown } from "@/components/assistant/AssistantMarkdown";
 import { useSidebarWidth } from "@/components/assistant/AssistantShell";
 import { ConfluenceBanner, type ConfluenceExportProps } from "@/components/assistant/ConfluenceExport";
@@ -21,6 +22,17 @@ export type SaveArtefactAction = (input: {
   markdown: unknown;
   baseVersion: unknown;
 }) => Promise<ActionResult<SaveArtefactResult>>;
+
+/**
+ * An edit the panel was closed on whose save then failed or found a newer version, handed to the page so it can open
+ * the document again with the edit, and with the conflict to settle when there is one, rather than lose it.
+ */
+export interface UnsavedDraft {
+  title: string;
+  markdown: string;
+  base: number;
+  conflict: ArtefactSnapshot | null;
+}
 
 /** A pause in typing this long saves the document. */
 const SAVE_AFTER_MS = 1000;
@@ -64,28 +76,21 @@ export function format(
   return { text: `${text.slice(0, lineStart)}${marked}${text.slice(end)}`, start: lineStart, end: lineStart + marked.length };
 }
 
-/**
- * Windows refuses these as the part before the first dot, whatever follows it, so `NUL.txt` is as unusable as `NUL`
- * and both download under the fallback name.
- */
-const RESERVED_NAMES = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
-/** Long enough for any title worth reading in a downloads list, short enough to leave room in a path. */
-const NAME_LIMIT = 80;
+/** A save that threw, as a server action does when the network drops, is a save that failed. */
+async function settled(saving: Promise<ActionResult<SaveArtefactResult>>): Promise<ActionResult<SaveArtefactResult>> {
+  try {
+    return await saving;
+  } catch {
+    return { ok: false, error: "could not save" };
+  }
+}
 
-/**
- * The download's filename: the document's title, with everything a Windows, macOS or Linux filename cannot hold
- * taken out. A title that is only punctuation, or is a name Windows reserves, falls back to `document`.
- */
-export function fileName(title: string, extension: string): string {
-  const cleaned = title
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: a filename cannot hold them, which is why they go
-    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, " ")
-    .replace(/\s+/g, " ")
-    .slice(0, NAME_LIMIT)
-    // Leading and trailing dots and spaces are stripped by Windows and hide a file on Unix, so they go here instead.
-    .replace(/^[\s.]+|[\s.]+$/g, "");
-  const stem = cleaned.split(".")[0] ?? "";
-  return `${cleaned === "" || RESERVED_NAMES.test(stem) ? "document" : cleaned}.${extension}`;
+/** The edit to give back to the page when its save, settled after the panel closed, did not land; `null` when it did. */
+function unsavedDraft(edit: { title: string; markdown: string; base: number }, result: ActionResult<SaveArtefactResult>): UnsavedDraft | null {
+  if (result.ok && result.saved) {
+    return null;
+  }
+  return { ...edit, conflict: result.ok ? result.current : null };
 }
 
 /** Downloads `text` as `name`, through the one mechanism a browser gives a page: a blob URL on a clicked anchor. */
@@ -195,8 +200,9 @@ export function starterDocument(productLabel: string): string {
 
 /**
  * The conversation's one document, beside the chat. The person edits it as markdown or reads it rendered, and it
- * saves itself after each pause. The assistant can write it too: an update from it is taken in at once unless the
- * person has unsaved changes, when they choose between the assistant's version and their own.
+ * saves itself after each pause, and as the panel closes. The assistant can write it too: an update from it is taken
+ * in at once unless the person has unsaved changes, when they choose between the assistant's version and their own.
+ * A save that settles after the panel has gone, and does not land, comes back to the page through `onUnsaved`.
  */
 export function ArtefactPanel({
   conversationId,
@@ -207,7 +213,10 @@ export function ArtefactPanel({
   narrow,
   jira,
   github,
-  confluence
+  confluence,
+  onBusy,
+  draft,
+  onUnsaved
 }: {
   conversationId: string;
   artefact: ArtefactSnapshot;
@@ -215,19 +224,27 @@ export function ArtefactPanel({
   save: SaveArtefactAction;
   onClose: () => void;
   narrow: boolean;
+  /** Told whether the person has edits not yet saved, or a conflict to settle, which taking the panel away would cut short. */
+  onBusy?: (busy: boolean) => void;
   /** The export to Jira, below the document; left out, the panel has none. */
   jira?: JiraExportProps;
   /** The export to GitHub, in place of the Jira one for a person whose ticket tool is GitHub. */
   github?: GithubExportProps;
   /** The publish to Confluence, beside the Jira export; left out, the panel has none. */
   confluence?: ConfluenceExportProps;
+  /** An edit a closed panel could not save, to open with in place of the saved document. Read as the panel mounts. */
+  draft?: UnsavedDraft;
+  /** Told of an edit the panel was closed on whose save failed or found a newer version, once that save settles. */
+  onUnsaved?: (draft: UnsavedDraft) => void;
 }) {
-  const [title, setTitle] = useState(artefact.title ?? "Untitled document");
-  const [markdown, setMarkdown] = useState(artefact.version === 0 ? starterDocument(productLabel) : artefact.markdown);
-  const [base, setBase] = useState(artefact.version);
-  const [state, setState] = useState<SaveState>(artefact.version === 0 ? "draft" : "saved");
-  const [mode, setMode] = useState<"edit" | "preview">(artefact.version === 0 ? "edit" : "preview");
-  const [conflict, setConflict] = useState<ArtefactSnapshot | null>(null);
+  const [title, setTitle] = useState(draft?.title ?? artefact.title ?? "Untitled document");
+  const [markdown, setMarkdown] = useState(draft?.markdown ?? (artefact.version === 0 ? starterDocument(productLabel) : artefact.markdown));
+  const [base, setBase] = useState(draft?.base ?? artefact.version);
+  const [state, setState] = useState<SaveState>(
+    draft === undefined ? (artefact.version === 0 ? "draft" : "saved") : draft.conflict === null ? "failed" : "unsaved"
+  );
+  const [mode, setMode] = useState<"edit" | "preview">(draft !== undefined || artefact.version === 0 ? "edit" : "preview");
+  const [conflict, setConflict] = useState<ArtefactSnapshot | null>(draft?.conflict ?? null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [printing, setPrinting] = useState(false);
   const sidebarWidth = useSidebarWidth();
@@ -245,6 +262,19 @@ export function ArtefactPanel({
   const dirty = state === "unsaved" || state === "failed" || state === "saving";
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const busy = dirty || conflict !== null;
+  /**
+   * The edit the panel would save as it closes: one not yet saved, or whose save failed, with no conflict in the way.
+   * A conflict is the person's to settle, so closing on one saves nothing over the newer version.
+   */
+  const unsaved = useRef<{ title: string; markdown: string; base: number } | null>(null);
+  unsaved.current = (state === "unsaved" || state === "failed") && conflict === null ? { title, markdown, base } : null;
+  // Read by the closing save, which runs once, so a page that hands down new functions on each render cannot set it off.
+  const closing = useRef({ conversationId, save, onBusy, onUnsaved });
+  closing.current = { conversationId, save, onBusy, onUnsaved };
+  const mounted = useRef(true);
+
+  useEffect(() => closing.current.onBusy?.(busy), [busy]);
 
   /**
    * Printing is what makes a PDF here: the sheet is mounted on the body, where `@media print` in `globals.css` hides
@@ -290,7 +320,15 @@ export function ArtefactPanel({
 
   async function persist(next: { title: string; markdown: string; base: number }): Promise<void> {
     setState("saving");
-    const result = await save({ conversationId, title: next.title, markdown: next.markdown, baseVersion: next.base });
+    const result = await settled(save({ conversationId, title: next.title, markdown: next.markdown, baseVersion: next.base }));
+    // Closed while it was in flight: the page is the only one left to keep an edit that did not land.
+    if (!mounted.current) {
+      const lost = unsavedDraft(next, result);
+      if (lost !== null) {
+        closing.current.onUnsaved?.(lost);
+      }
+      return;
+    }
     if (!result.ok) {
       setState("failed");
       return;
@@ -319,17 +357,30 @@ export function ArtefactPanel({
     }
   }
 
-  useEffect(
-    () => () => {
+  // Closing, by the person or by the page opening the slides in its place, saves the edit the pause would have.
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
       if (timer.current !== null) {
         clearTimeout(timer.current);
       }
       if (noticeTimer.current !== null) {
         clearTimeout(noticeTimer.current);
       }
-    },
-    []
-  );
+      const pending = unsaved.current;
+      const { conversationId: id, save: saveNow, onBusy: told } = closing.current;
+      if (pending !== null) {
+        void settled(saveNow({ conversationId: id, title: pending.title, markdown: pending.markdown, baseVersion: pending.base })).then((result) => {
+          const lost = unsavedDraft(pending, result);
+          if (lost !== null) {
+            closing.current.onUnsaved?.(lost);
+          }
+        });
+      }
+      told?.(false);
+    };
+  }, []);
 
   /** Says what happened only once it has: a tick and an announcement are the whole acknowledgement, so they must be true. */
   async function copy(): Promise<void> {

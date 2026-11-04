@@ -26,6 +26,7 @@ WORKDIR /app
 
 COPY --chown=hmcts:hmcts tsconfig.json tsconfig.cli.json next.config.mjs biome.json prisma.config.ts postcss.config.mjs ./
 COPY --chown=hmcts:hmcts src ./src
+COPY --chown=hmcts:hmcts public ./public
 COPY --chown=hmcts:hmcts prisma ./prisma
 
 RUN yarn db:generate
@@ -48,6 +49,8 @@ RUN yarn workspaces focus --production 2>/dev/null || yarn install --immutable
 
 COPY --from=build --chown=hmcts:hmcts /app/.next/standalone ./
 COPY --from=build --chown=hmcts:hmcts /app/.next/static ./.next/static
+# The standalone server serves public/ only from beside itself.
+COPY --from=build --chown=hmcts:hmcts /app/public ./public
 COPY --from=build --chown=hmcts:hmcts /app/dist ./dist
 COPY --from=build --chown=hmcts:hmcts /app/prisma ./prisma
 COPY --from=build --chown=hmcts:hmcts /app/src/store/generated ./src/store/generated

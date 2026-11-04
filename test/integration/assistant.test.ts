@@ -658,7 +658,9 @@ describe("conversations", () => {
       product_label: "General",
       model: "sonnet",
       artefact_version: 0,
-      artefact_updated_by: null
+      artefact_updated_by: null,
+      deck_version: 0,
+      deck_updated_by: null
     };
 
     // A wake is "this conversation needs a session", so there is no message whose files the field could name.
@@ -1172,7 +1174,9 @@ describe("artefacts", () => {
     const registered = await jsonOf(await register(token, "not-a-conversation"));
 
     expect(assistantId).toBeDefined();
-    expect((await pod(artefactRoute.GET, token, `/api/agent/${registered.agent_id}/artefact`, { agentId: registered.agent_id })).status).toBe(404);
+    const refused = await pod(artefactRoute.GET, token, `/api/agent/${registered.agent_id}/artefact`, { agentId: registered.agent_id });
+    expect(refused.status).toBe(404);
+    expect(await jsonOf(refused)).toEqual({ error: "that agent is not an assistant conversation's" });
   });
 });
 
@@ -1351,7 +1355,9 @@ describe("jira export", () => {
     const exportId = await currentExport(id);
     const { agent_id: plain } = await jsonOf<{ agent_id: string }>(await register(token, "plain-session"));
 
-    expect((await report(token, plain, { export_id: exportId, key: "VIBE-1" })).status).toBe(404);
+    const jiraRefused = await report(token, plain, { export_id: exportId, key: "VIBE-1" });
+    expect(jiraRefused.status).toBe(404);
+    expect(await jsonOf(jiraRefused)).toEqual({ error: "that agent is not an assistant conversation's" });
     expect((await report(token, agentId, { export_id: exportId, key: "not a key" })).status).toBe(400);
   });
 });
@@ -1566,7 +1572,9 @@ describe("github export", () => {
     const exportId = await currentExport(id);
     const { agent_id: plain } = await jsonOf<{ agent_id: string }>(await register(token, "plain-session"));
 
-    expect((await report(token, plain, { export_id: exportId, number: 1 })).status).toBe(404);
+    const githubRefused = await report(token, plain, { export_id: exportId, number: 1 });
+    expect(githubRefused.status).toBe(404);
+    expect(await jsonOf(githubRefused)).toEqual({ error: "that agent is not an assistant conversation's" });
     expect((await report(token, agentId, { export_id: exportId, number: 0 })).status).toBe(400);
     expect((await report(token, agentId, { export_id: exportId, number: "42" })).status).toBe(400);
     expect((await report(token, agentId, { export_id: exportId, number: 1, project_error: "x".repeat(301) })).status).toBe(400);
@@ -1686,7 +1694,9 @@ describe("confluence export", () => {
     await actions.exportArtefactToConfluence({ conversationId: id, parent: PARENT });
     const { agent_id: plain } = await jsonOf<{ agent_id: string }>(await register(token, "plain-session"));
 
-    expect((await report(token, plain, { export_id: await currentExport(id), page_id: "1" })).status).toBe(404);
+    const confluenceRefused = await report(token, plain, { export_id: await currentExport(id), page_id: "1" });
+    expect(confluenceRefused.status).toBe(404);
+    expect(await jsonOf(confluenceRefused)).toEqual({ error: "that agent is not an assistant conversation's" });
     expect((await report(token, agentId, { export_id: await currentExport(id), page_id: "not-a-page" })).status).toBe(400);
   });
 });

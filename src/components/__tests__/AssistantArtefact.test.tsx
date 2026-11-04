@@ -4,7 +4,8 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ArtefactSnapshot, SaveArtefactResult } from "@/app/_actions/assistant";
-import { ArtefactPanel, fileName, format, type SaveArtefactAction, starterDocument } from "@/components/assistant/ArtefactPanel";
+import { fileName } from "@/assistant/downloads";
+import { ArtefactPanel, format, type SaveArtefactAction, starterDocument, type UnsavedDraft } from "@/components/assistant/ArtefactPanel";
 import type { ActionResult } from "@/web/action";
 
 const CONVERSATION = "22222222-2222-2222-2222-222222222222";
@@ -153,6 +154,173 @@ describe("ArtefactPanel saving", () => {
     await pause();
 
     expect(saveState()).toContain("Could not save");
+  });
+});
+
+describe("ArtefactPanel closing", () => {
+  it("should save the edit the pause has not saved yet, once, when the panel closes", async () => {
+    vi.useFakeTimers();
+    const save = saving({ ok: true, saved: true, version: 3 });
+    const { unmount } = render(panel(snapshot(), save));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    edit("# Mine");
+
+    unmount();
+    await pause();
+
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save).toHaveBeenCalledWith({ conversationId: CONVERSATION, title: "Story", markdown: "# Mine", baseVersion: 2 });
+  });
+
+  it("should save again as it closes when the last save failed", async () => {
+    vi.useFakeTimers();
+    const save = saving({ ok: false, error: "down" }, { ok: true, saved: true, version: 3 });
+    const { unmount } = render(panel(snapshot(), save));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    edit("# Mine");
+    await pause();
+    expect(saveState()).toContain("Could not save");
+
+    unmount();
+
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(save).toHaveBeenLastCalledWith(expect.objectContaining({ markdown: "# Mine", baseVersion: 2 }));
+  });
+
+  it("should save nothing as it closes when everything is saved, or when a conflict is the person's to settle", async () => {
+    vi.useFakeTimers();
+    const save = saving({ ok: true, saved: false, current: snapshot({ markdown: "# Theirs", version: 3, updatedBy: "agent" }) });
+    const first = render(panel(snapshot(), save));
+    first.unmount();
+    expect(save).not.toHaveBeenCalled();
+
+    const second = render(panel(snapshot(), save));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    edit("# Mine");
+    await pause();
+    expect(screen.getByRole("alert")).toBeTruthy();
+    second.unmount();
+
+    expect(save).toHaveBeenCalledTimes(1);
+  });
+
+  it("should hand the page the edit, with no conflict, when the save it makes as it closes fails or throws", async () => {
+    vi.useFakeTimers();
+    for (const save of [saving({ ok: false, error: "down" }), vi.fn<SaveArtefactAction>(async () => Promise.reject(new Error("offline")))]) {
+      const onUnsaved = vi.fn<(draft: UnsavedDraft) => void>();
+      const { unmount } = render(panel(snapshot(), save, { onUnsaved }));
+      fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+      edit("# Mine");
+
+      unmount();
+      await pause(0);
+
+      expect(onUnsaved).toHaveBeenCalledExactlyOnceWith({ title: "Story", markdown: "# Mine", base: 2, conflict: null });
+    }
+  });
+
+  it("should hand the page the edit and the newer version, when the save it makes as it closes finds one", async () => {
+    vi.useFakeTimers();
+    const theirs = snapshot({ markdown: "# Theirs", version: 3, updatedBy: "agent" });
+    const onUnsaved = vi.fn<(draft: UnsavedDraft) => void>();
+    const { unmount } = render(panel(snapshot(), saving({ ok: true, saved: false, current: theirs }), { onUnsaved }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    edit("# Mine");
+
+    unmount();
+    await pause(0);
+
+    expect(onUnsaved).toHaveBeenCalledExactlyOnceWith({ title: "Story", markdown: "# Mine", base: 2, conflict: theirs });
+  });
+
+  it("should hand the page nothing when the save it makes as it closes lands", async () => {
+    vi.useFakeTimers();
+    const onUnsaved = vi.fn<(draft: UnsavedDraft) => void>();
+    const { unmount } = render(panel(snapshot(), saving({ ok: true, saved: true, version: 3 }), { onUnsaved }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    edit("# Mine");
+
+    unmount();
+    await pause(0);
+
+    expect(onUnsaved).not.toHaveBeenCalled();
+  });
+
+  it("should hand the page the edit when a save already in flight as it closes then fails", async () => {
+    vi.useFakeTimers();
+    let answer: (result: ActionResult<SaveArtefactResult>) => void = () => undefined;
+    const save = vi.fn<SaveArtefactAction>(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        })
+    );
+    const onUnsaved = vi.fn<(draft: UnsavedDraft) => void>();
+    const { unmount } = render(panel(snapshot(), save, { onUnsaved }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    edit("# Mine");
+    await pause();
+    expect(saveState()).toContain("Saving");
+
+    unmount();
+    await act(async () => {
+      answer({ ok: false, error: "down" });
+    });
+
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(onUnsaved).toHaveBeenCalledExactlyOnceWith({ title: "Story", markdown: "# Mine", base: 2, conflict: null });
+  });
+
+  it("should open on the draft it is handed, editing, with the conflict to settle when it has one", () => {
+    const theirs = snapshot({ markdown: "# Theirs", version: 3, updatedBy: "agent" });
+    render(panel(theirs, saving(), { draft: { title: "Mine", markdown: "# Mine", base: 2, conflict: theirs } }));
+
+    expect(box().value).toBe("# Mine");
+    expect((screen.getByRole("textbox", { name: "Document title" }) as HTMLInputElement).value).toBe("Mine");
+    expect(screen.getByRole("alert").textContent).toContain("The assistant has changed this document.");
+  });
+
+  it("should open on the draft it is handed saying it could not save, when the draft has no conflict", () => {
+    render(panel(snapshot(), saving(), { draft: { title: "Story", markdown: "# Mine", base: 2, conflict: null } }));
+
+    expect(box().value).toBe("# Mine");
+    expect(saveState()).toContain("Could not save");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("should not save on a re-render that hands it new functions", async () => {
+    vi.useFakeTimers();
+    const save = saving();
+    const { rerender } = render(panel(snapshot(), save, { onBusy: () => undefined }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    edit("# Mine");
+
+    rerender(panel(snapshot(), save, { onBusy: () => undefined, onClose: () => undefined }));
+
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it("should tell the page it is busy while an edit is unsaved or a conflict is showing, and not once it closes", async () => {
+    vi.useFakeTimers();
+    const onBusy = vi.fn<(busy: boolean) => void>();
+    const save = saving({ ok: true, saved: false, current: snapshot({ markdown: "# Theirs", version: 3, updatedBy: "agent" }) });
+    const { unmount } = render(panel(snapshot(), save, { onBusy }));
+    expect(onBusy).toHaveBeenLastCalledWith(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    edit("# Mine");
+    expect(onBusy).toHaveBeenLastCalledWith(true);
+    await pause();
+    expect(screen.getByRole("alert")).toBeTruthy();
+    expect(onBusy).toHaveBeenLastCalledWith(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Use theirs" }));
+    expect(onBusy).toHaveBeenLastCalledWith(false);
+
+    edit("# Again");
+    expect(onBusy).toHaveBeenLastCalledWith(true);
+    unmount();
+    expect(onBusy).toHaveBeenLastCalledWith(false);
   });
 });
 

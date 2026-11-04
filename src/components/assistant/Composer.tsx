@@ -121,7 +121,8 @@ export function Composer({
   attached,
   skills = [],
   dropZone,
-  filler
+  filler,
+  reference
 }: {
   templates: readonly Template[];
   /** Resolves to an error to show, or `null` once sent, which clears the box and its attachments. */
@@ -144,6 +145,11 @@ export function Composer({
   dropZone?: RefObject<HTMLElement | null>;
   /** Filled in with what lets the page put a template in the box, as the new-chat screen's starter cards do. */
   filler?: Ref<ComposerFiller>;
+  /**
+   * What the next message is about, shown as a chip the person can take off: a slide of the deck they asked about.
+   * The page puts the words in front of the message as it sends it; the box holds only what the person types.
+   */
+  reference?: { label: string; onRemove: () => void };
 }) {
   const { body: text, setBody: setText, discard } = useDraft({ kind: "assistant-draft", viewerOid, draftId });
   const [sending, setSending] = useState(false);
@@ -225,6 +231,14 @@ export function Composer({
       setMenu("closed");
     }
   }, [skillMenu.open]);
+
+  // Asking about a slide is asking a question, so the box is where the person is sent to type it.
+  const referenced = reference?.label;
+  useEffect(() => {
+    if (referenced !== undefined) {
+      box.current?.focus();
+    }
+  }, [referenced]);
 
   const attachable = offerFiles && (conversationId !== undefined || openConversation !== undefined) && !disabled;
 
@@ -457,6 +471,23 @@ export function Composer({
         className={`relative flex flex-col gap-2 rounded-2xl border bg-asst-field p-2.5 focus-within:border-asst-accent-line ${dragging && attachable ? "border-asst-accent" : "border-asst-line"}`}
       >
         {dragging && attachable ? <p className="text-center text-[13px] text-asst-accent-soft">Drop your files here to attach them</p> : null}
+        {reference === undefined ? null : (
+          <div className={`${chip} self-start`}>
+            <span className="shrink-0 text-asst-muted">Asking about</span>
+            <span className="max-w-[260px] truncate">{reference.label}</span>
+            <button
+              type="button"
+              aria-label={`Stop asking about ${reference.label}`}
+              onClick={() => {
+                reference.onRemove();
+                box.current?.focus();
+              }}
+              className="shrink-0 text-base leading-none text-asst-faint hover:text-asst-text"
+            >
+              ×
+            </button>
+          </div>
+        )}
         {attachments.length === 0 ? null : (
           <ul aria-label="Attached files" className="flex flex-wrap gap-2">
             {attachments.map((file) => (

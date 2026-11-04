@@ -17,6 +17,7 @@ import type { ConfluenceExportView } from "./confluence.ts";
 import { readConfluenceExport } from "./confluence-store.ts";
 import type { ConversationRow, ProductChange, SessionState, StopMark } from "./conversation-row.ts";
 import { type ConversationListRow, hasLocalConversation, listConversations, unsentConversation } from "./conversation-store.ts";
+import { DECK_SELECT, type DeckSummary, deckSummary } from "./deck-store.ts";
 import { FORKED_SELECT, type ForkedView, forkedView } from "./forks.ts";
 import type { GithubExportView } from "./github.ts";
 import { readGithubExport } from "./github-store.ts";
@@ -255,6 +256,8 @@ export interface ConversationView {
   sessionState: SessionState | null;
   sessionDetail: string | null;
   artefact: { title: string | null; markdown: string; version: number; updatedBy: Artefact["updatedBy"]; updatedAt: string | null };
+  /** The latest version of the conversation's slide deck, without its outline, which the panel reads; `null` while it has none. */
+  deck: DeckSummary | null;
   jira: JiraExportView;
   github: GithubExportView;
   confluence: ConfluenceExportView;
@@ -277,15 +280,20 @@ export async function conversationView(db: Database, conversation: ConversationR
   // The ref carries the agent's id and its owner and nothing else, because that is all either read asks of it: the
   // literals are not a claim about the agent that some rule elsewhere has to keep agreeing with.
   const agent = { id: agentId, ownerOid: conversation.ownerOid };
-  const [current, artefact, jira, github, confluence, page, questions, fork] = await Promise.all([
+  // The fork's columns and the deck's are one read, and only the .pptx probe waits for it.
+  const forkAndDeck = async () => {
+    const row = await db.assistantConversation.findUnique({ where: { id: conversation.id }, select: { ...FORKED_SELECT, ...DECK_SELECT } });
+    return { fork: row, deck: row === null ? null : await deckSummary(db, conversation.id, row) };
+  };
+  const [current, artefact, { fork, deck }, jira, github, confluence, page, questions] = await Promise.all([
     db.agent.findUnique({ where: { id: agentId }, select: { status: true, skills: true, clientFeatures: true, repo: true, branch: true } }),
     readArtefact(db, conversation.id),
+    forkAndDeck(),
     readJiraExport(db, conversation.id),
     readGithubExport(db, conversation.id),
     readConfluenceExport(db, conversation.id),
     agentConversation(db, conversation.ownerOid, agent),
-    agentQuestions(db, conversation.ownerOid, agent),
-    db.assistantConversation.findUnique({ where: { id: conversation.id }, select: FORKED_SELECT })
+    agentQuestions(db, conversation.ownerOid, agent)
   ]);
   return {
     id: conversation.id,
@@ -303,6 +311,7 @@ export async function conversationView(db: Database, conversation: ConversationR
     sessionState: conversation.sessionState,
     sessionDetail: conversation.sessionDetail,
     artefact: { ...artefact, updatedAt: artefact.updatedAt?.toISOString() ?? null },
+    deck,
     jira,
     github,
     confluence,

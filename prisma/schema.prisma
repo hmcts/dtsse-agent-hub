@@ -519,6 +519,12 @@ model AssistantConversation {
   /// user or agent.
   artefactUpdatedBy String?   @map("artefact_updated_by")
   artefactUpdatedAt DateTime? @map("artefact_updated_at") @db.Timestamptz(6)
+  /// The latest version of the conversation's slide deck, 0 before there is one. See src/assistant/deck-store.ts.
+  deckVersion       Int       @default(0) @map("deck_version")
+  deckTitle         String?   @map("deck_title")
+  /// user or agent.
+  deckUpdatedBy     String?   @map("deck_updated_by")
+  deckUpdatedAt     DateTime? @map("deck_updated_at") @db.Timestamptz(6)
   jiraExportId      String?   @map("jira_export_id") @db.Uuid
   jiraProject       String?   @map("jira_project")
   /// pending, done or failed; null before the first export.
@@ -581,9 +587,45 @@ model AssistantConversation {
   forks        AssistantConversationFork[]
   forkedFrom   AssistantConversation?  @relation("forkedFrom", fields: [forkedFromId], references: [id], onDelete: SetNull)
   copies       AssistantConversation[] @relation("forkedFrom")
+  deckVersions AssistantDeckVersion[]
+  deckAssets   AssistantDeckAsset[]
 
   @@index([ownerOid, lastActiveAt(sort: Desc)], map: "assistant_conversation_owner_active_idx")
   @@map("assistant_conversation")
+}
+
+/// One version of a conversation's slide deck outline. The latest 100 are kept, and the latest 3 keep their .pptx.
+model AssistantDeckVersion {
+  conversationId String   @map("conversation_id") @db.Uuid
+  version        Int
+  /// The outline, in src/assistant/deck.ts's shape.
+  outline        Json
+  /// user or agent.
+  by             String
+  summary        String?
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  pptx           Bytes?
+
+  conversation AssistantConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@id([conversationId, version])
+  @@map("assistant_deck_version")
+}
+
+/// A picture a deck's outline names by its SHA-256. Its type and size are read from the bytes.
+model AssistantDeckAsset {
+  conversationId String   @map("conversation_id") @db.Uuid
+  sha256         String
+  mime           String
+  bytes          Bytes
+  width          Int
+  height         Int
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  conversation AssistantConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@id([conversationId, sha256])
+  @@map("assistant_deck_asset")
 }
 
 /// A read-only share of one conversation with one named person. The list of rows is the whole of the access: a link

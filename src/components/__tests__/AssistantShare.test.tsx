@@ -442,6 +442,7 @@ function view(overrides: Partial<SharedConversationView> = {}): SharedConversati
     ],
     earlierHidden: false,
     document: null,
+    deck: null,
     access: "reader",
     forked: null,
     fork: null,
@@ -521,6 +522,31 @@ describe("SharedChat", () => {
     render(<SharedChat view={view()} />);
 
     expect(screen.queryByRole("heading", { name: "Draft order" })).toBeNull();
+  });
+
+  it("should show the deck read-only, with no way to ask about a slide, when the chat has one", async () => {
+    const outline = {
+      title: "Ways of working",
+      outline: { title: "Ways of working", slides: [{ id: "s_0001", layout: "HMCTS_SECTION" as const, title: "Why it matters" }] },
+      version: 2,
+      updatedBy: "agent" as const,
+      updatedAt: "2026-11-03T09:00:00.000Z",
+      pptx: true,
+      sizes: {}
+    };
+    const reads = vi.fn(async (_url: string) => new Response(JSON.stringify(outline)));
+    vi.stubGlobal("fetch", reads);
+    render(<SharedChat view={view({ deck: { title: "Ways of working", version: 2, updatedBy: "agent", pptx: true } })} />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(reads).toHaveBeenCalledWith(`/api/ui/assistant/decks/${view().id}`, expect.objectContaining({ cache: "no-store" }));
+
+    expect(screen.getByRole("heading", { level: 2, name: "Ways of working" })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Slide 1 of 2: Ways of working" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Download .pptx" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Ask about this slide" })).toBeNull();
   });
 });
 

@@ -1,6 +1,6 @@
-import { HttpError, noContent, parse, readJson } from "@/agent-api/http";
+import { noContent, parse, readJson } from "@/agent-api/http";
 import { ownedAgentRoute } from "@/agent-api/route";
-import { conversationOfAgent } from "@/assistant/conversation-store";
+import { requireConversationOfAgent } from "@/assistant/conversation-store";
 import { recordJiraExport } from "@/assistant/jira-store";
 import { jiraExportReportBody } from "@/assistant/schemas";
 import { prisma } from "@/store/prisma";
@@ -11,10 +11,7 @@ export const dynamic = "force-dynamic";
 /** A conversation's session reporting its Jira export: the issue key it created with `twg`, or why it could not. */
 export const PUT = ownedAgentRoute<{ agentId: string }>(async ({ agent, request }) => {
   const body = parse(jiraExportReportBody, await readJson(request));
-  const conversation = await conversationOfAgent(prisma, agent.id);
-  if (conversation === undefined) {
-    throw new HttpError(404, "that agent is not an assistant conversation's");
-  }
+  const conversation = await requireConversationOfAgent(prisma, agent.id);
   await recordJiraExport(prisma, conversation, body);
   return noContent();
 });

@@ -8,6 +8,7 @@ import type { ModelRoute } from "../viewer/identity.ts";
 import { ensureAssistant } from "./assistant-store.ts";
 import { announce, ConversationNotFound, storedHistory, storedStops } from "./conversation-row.ts";
 import { createConversationAgent } from "./conversation-store.ts";
+import { copyDeck } from "./deck-store.ts";
 import { FORK_CONTEXT_FILE_NAME, FORK_CONTEXT_MEDIA_TYPE, FORKED_SELECT, forkContextMarkdown, forkedView, forkThread } from "./forks.ts";
 import { hasPod } from "./pods.ts";
 import { productLabel } from "./products.ts";
@@ -154,9 +155,9 @@ async function sourceThread(
 
 /**
  * Takes the viewer's own copy of a conversation they were offered, and answers its id: a new conversation on their own
- * assistant, with the source's words, its document and where it came from. Taking it again answers the copy they
- * already have, so a second press or a second tab does not make a second one; once they delete it, taking it again
- * makes a new one from the chat as it is then.
+ * assistant, with the source's words, its document, its latest deck and where it came from. Taking it again answers
+ * the copy they already have, so a second press or a second tab does not make a second one; once they delete it,
+ * taking it again makes a new one from the chat as it is then.
  *
  * Their assistant is set up if they have none, because continuing in their own Assistant is what they asked for —
  * unlike a share page, which a recipient reads without one.
@@ -238,6 +239,9 @@ export async function acceptFork(prisma: PrismaClient, viewer: { oid: string; mo
              forked_earlier_hidden = ${earlierHidden}
        WHERE id = ${created.id}::uuid
     `;
+    // The latest deck, with its pictures and its .pptx, as the copy's version 1: said to be the person's for the same
+    // reason as the document above.
+    await copyDeck(tx, id, created.id, now);
     await createConversationAgent(tx, created);
     await announce(tx, created);
     return created.id;

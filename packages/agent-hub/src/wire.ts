@@ -48,8 +48,13 @@ export type DirectCandidate = {
 export type ApiErrorBody = {
   error?: string;
   candidates?: DirectCandidate[];
-  /** A `409` from `putArtefact`: the document as `getArtefact` returns it, to merge the refused change into. */
-  current?: Artefact;
+  /**
+   * A `409` from `putArtefact`: the document as `getArtefact` returns it, to merge the refused change into; from
+   * `putDeck`, the deck as `getDeck` returns it.
+   */
+  current?: Artefact | Deck;
+  /** A `400` from `putDeck`: the pictures the outline names that the hub does not hold. */
+  missing?: string[];
 };
 
 export type AgentSummary = {
@@ -223,6 +228,34 @@ export type ArtefactBody = {
 };
 
 export type ArtefactResponse = { version: number };
+
+/**
+ * A conversation's slide deck, as `GET …/deck` returns it: an outline in the slides plugin's shape whose pictures are
+ * `{asset: "sha256:<hex>"}` rather than paths. Kept as `unknown` here, because the hub checks it and the plugin
+ * builds it; this client only moves it and rewrites its pictures.
+ */
+export type Deck = {
+  title: string | null;
+  outline: DeckOutline | null;
+  version: number;
+  updated_by: "user" | "agent" | null;
+  updated_at: string | null;
+  pptx: boolean;
+};
+
+export type DeckImage = { asset?: string; path?: string; alt?: string; decorative?: boolean };
+export type DeckSlide = { id?: string; layout?: string; title?: string; image?: DeckImage; [field: string]: unknown };
+export type DeckOutline = { title?: string; slides?: DeckSlide[]; [field: string]: unknown };
+
+export type DeckBody = {
+  outline: DeckOutline;
+  base_version: number;
+  summary?: string;
+};
+
+export type DeckResponse = { version: number; outline: DeckOutline };
+
+export type DeckAssetResponse = { asset: string };
 
 /** One conversation of a virtual agent, as `conversations` lists them for the uploads reconciliation. */
 export type ConversationSummary = { id: string };

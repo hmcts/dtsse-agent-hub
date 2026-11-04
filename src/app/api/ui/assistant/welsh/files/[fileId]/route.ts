@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { errorResponse } from "@/agent-api/http";
+import { attachmentDisposition } from "@/assistant/downloads";
 import { ownerFile } from "@/assistant/welsh-store";
 import { prisma } from "@/store/prisma";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
@@ -25,14 +26,12 @@ export async function GET(request: NextRequest, context: { params: Promise<{ fil
     if (file === undefined) {
       return errorResponse(404, "that spreadsheet is not there any more");
     }
-    // The stored name allows accented letters, so the plain `filename` is an ASCII stand-in and `filename*` the real one.
-    const ascii = file.name.replace(/[^\x20-\x7e]|["\\]/g, "_");
     return new Response(Buffer.from(file.bytes), {
       headers: {
         "content-type": XLSX,
         "content-length": String(file.bytes.length),
         "x-content-type-options": "nosniff",
-        "content-disposition": `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(file.name)}`,
+        "content-disposition": attachmentDisposition(file.name),
         "cache-control": "no-store"
       }
     });

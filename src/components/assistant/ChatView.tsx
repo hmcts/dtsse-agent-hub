@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { clientSupports } from "@/agents/client-features";
 import { EXPIRE_AFTER_SECONDS } from "@/agents/liveness";
 import type { ArtefactSnapshot } from "@/app/_actions/assistant";
+import { MAX_ASKED_BODY } from "@/assistant/deck";
 import { type ExportDefaults, NO_DEFAULTS } from "@/assistant/export-defaults";
 import { PRODUCTS, productLabel, storedProduct } from "@/assistant/products";
 import type { Template } from "@/assistant/starters";
@@ -21,12 +22,13 @@ import {
 } from "@/assistant/thread";
 import type { ConversationView } from "@/assistant/views";
 import { useLiveConversation } from "@/components/agents/useLiveConversation";
-import { ArtefactPanel, type SaveArtefactAction } from "@/components/assistant/ArtefactPanel";
+import { ArtefactPanel, type SaveArtefactAction, type UnsavedDraft } from "@/components/assistant/ArtefactPanel";
 import { AssistantMarkdown } from "@/components/assistant/AssistantMarkdown";
 import { Mark, SidebarToggle } from "@/components/assistant/AssistantShell";
 import { ChatMenu } from "@/components/assistant/ChatMenu";
 import { Composer } from "@/components/assistant/Composer";
 import type { ExportToConfluenceAction } from "@/components/assistant/ConfluenceExport";
+import { DeckPanel, type SlideAsk } from "@/components/assistant/DeckPanel";
 import { ticketsOffered } from "@/components/assistant/ExportFooter";
 import { ForkedThread } from "@/components/assistant/ForkedThread";
 import type { ExportToGithubAction } from "@/components/assistant/GithubExport";
@@ -338,10 +340,25 @@ export function ChatView({
   });
   const [status, setStatus] = useState<AgentStatus>(view.agentStatus);
   const [pendingProduct, setPendingProduct] = useState<string | null>(null);
-  const [panel, setPanel] = useState(false);
+  /**
+   * The one panel beside the chat: the document or the deck, never both, since two panels beside a chat leave the chat
+   * no room to read in. Each has its own button in the header, so either is one press from the other.
+   */
+  const [panel, setPanel] = useState<"document" | "deck" | null>(null);
+  /** The document panel has edits not yet saved, or a conflict showing, which a panel opened in its place would cut short. */
+  const documentBusy = useRef(false);
+  /** The assistant wrote a newer deck while the document was busy, so the slides wait behind their button instead. */
+  const [slidesWaiting, setSlidesWaiting] = useState(false);
+  /**
+   * An edit the document was closed on whose save then failed or found a newer version: the document opens again with
+   * it, keyed afresh so a panel the person opened meanwhile takes it in too.
+   */
+  const [unsaved, setUnsaved] = useState<{ draft: UnsavedDraft; key: number } | null>(null);
+  const [ask, setAsk] = useState<SlideAsk | null>(null);
   const [error, setError] = useState<string | null>(null);
   const warmed = useRef(false);
   const seenVersion = useRef(view.artefact.version);
+  const seenDeck = useRef(view.deck?.version ?? 0);
   const narrow = useNarrow();
 
   useEffect(() => setStatus(view.agentStatus), [view.agentStatus]);
@@ -360,11 +377,46 @@ export function ChatView({
   // The assistant writing the document opens it, so the person sees what it was asked to draft.
   useEffect(() => {
     if (view.artefact.version > seenVersion.current && view.artefact.updatedBy === "agent") {
-      setPanel(true);
+      setPanel("document");
       arrivals.announce("The assistant updated the document");
     }
     seenVersion.current = Math.max(seenVersion.current, view.artefact.version);
   }, [view.artefact.version, view.artefact.updatedBy, arrivals]);
+
+  /**
+   * The same for the deck: a newer version from the assistant opens the slides in the document's place, unless the
+   * person is part-way through the document, when it is announced and its button marked instead. The document is
+   * taken in over the slides whatever they are doing, since the slides hold nothing of theirs to lose.
+   */
+  const deckVersion = view.deck?.version ?? 0;
+  const deckBy = view.deck?.updatedBy ?? null;
+  useEffect(() => {
+    if (deckVersion > seenDeck.current && deckBy === "agent") {
+      if (panel === "document" && documentBusy.current) {
+        setSlidesWaiting(true);
+        arrivals.announce("The assistant updated the slides. Open slides to see them.");
+      } else {
+        setPanel("deck");
+        arrivals.announce("The assistant updated the slides");
+      }
+    }
+    seenDeck.current = Math.max(seenDeck.current, deckVersion);
+  }, [deckVersion, deckBy, arrivals, panel]);
+  useEffect(() => {
+    if (panel === "deck") {
+      setSlidesWaiting(false);
+    }
+    if (panel !== "document") {
+      setUnsaved(null);
+    }
+  }, [panel]);
+  function reopenDocument(draft: UnsavedDraft): void {
+    setUnsaved((before) => ({ draft, key: (before?.key ?? 0) + 1 }));
+    setPanel("document");
+    arrivals.announce(
+      draft.conflict === null ? "Your document could not be saved, so it is open again" : "The document changed while you were editing it, so it is open again"
+    );
+  }
 
   // The picker can only show a product it offers, so it and the dialog it opens read the stored one through this.
   const product = storedProduct(view.product);
@@ -406,6 +458,9 @@ export function ChatView({
    */
   const stoppable = pod && doing.state === "working" && clientSupports(view.clientFeatures, "stop");
   const scroller = useStickToBottom<HTMLDivElement>(`${thread.length}:${doing.state}`);
+  function markDocumentBusy(busy: boolean): void {
+    documentBusy.current = busy;
+  }
   const artefact: ArtefactSnapshot = {
     title: view.artefact.title,
     markdown: view.artefact.markdown,
@@ -414,10 +469,17 @@ export function ChatView({
   };
 
   async function send(body: string, uploadIds: string[]): Promise<string | null> {
-    const result = await actions.send({ conversationId: view.id, body, uploadIds });
+    // A slide the person asked about goes in front of their words, which is the whole of how the session is told. Its
+    // room is kept whatever its length, so the limit the person is told is the same for every slide.
+    if (ask !== null && body.length > MAX_ASKED_BODY) {
+      return `a message about a slide is at most ${MAX_ASKED_BODY} characters`;
+    }
+    const asked = ask === null ? body : `${ask.reference}\n${body}`;
+    const result = await actions.send({ conversationId: view.id, body: asked, uploadIds });
     if (!result.ok) {
       return result.error;
     }
+    setAsk(null);
     live.addMessage(result.message);
     return null;
   }
@@ -478,10 +540,25 @@ export function ChatView({
             </select>
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-1.5">
-            {panel ? null : (
+            {view.deck === null || panel === "deck" ? null : (
               <button
                 type="button"
-                onClick={() => setPanel(true)}
+                onClick={() => setPanel("deck")}
+                aria-label={slidesWaiting ? "Open slides, updated by the assistant" : "Open slides"}
+                className={`flex h-[34px] items-center whitespace-nowrap rounded-[9px] border px-2.5 text-[13px] hover:border-asst-accent-line hover:bg-asst-field min-[480px]:gap-2 min-[480px]:pr-3 ${slidesWaiting ? "border-asst-accent bg-asst-field" : "border-asst-strong"}`}
+              >
+                <span aria-hidden="true" className="text-sm leading-none text-asst-accent">
+                  ▭
+                </span>
+                <span className="hidden min-[480px]:inline">Open slides</span>
+                {/* Marked by a shape as well as the border's colour, so the change is not told by colour alone. */}
+                {slidesWaiting ? <span aria-hidden="true" data-testid="slides-updated" className="h-1.5 w-1.5 rounded-full bg-asst-accent" /> : null}
+              </button>
+            )}
+            {panel === "document" ? null : (
+              <button
+                type="button"
+                onClick={() => setPanel("document")}
                 // Named here as well, because below 480px the icon stands alone so that a 320px header still fits
                 // the title, the product chip and both buttons.
                 aria-label={view.artefact.version > 0 ? "Open document" : "Add document"}
@@ -598,6 +675,7 @@ export function ChatView({
               // control is taken away rather than left to offer something that is then refused.
               attach={pod}
               skills={view.skills}
+              reference={ask === null ? undefined : { label: ask.label, onRemove: () => setAsk(null) }}
               dropZone={scroller.ref}
               onFocus={() => {
                 if (pod && !warmed.current && status === "offline") {
@@ -609,13 +687,33 @@ export function ChatView({
           </div>
         </div>
       </div>
-      {panel ? (
+      {panel === "deck" && view.deck !== null ? (
+        <DeckPanel
+          conversationId={view.id}
+          deck={view.deck}
+          onClose={() => setPanel(null)}
+          narrow={narrow}
+          announce={arrivals.announce}
+          onAsk={(next) => {
+            setAsk(next);
+            // On a narrow screen the panel covers the chat, so it gives way to the composer the question is typed in.
+            if (narrow) {
+              setPanel(null);
+            }
+          }}
+        />
+      ) : null}
+      {panel === "document" ? (
         <ArtefactPanel
+          key={unsaved?.key ?? 0}
+          draft={unsaved?.draft}
+          onUnsaved={reopenDocument}
           conversationId={view.id}
           artefact={artefact}
           productLabel={view.productLabel}
           save={actions.saveArtefact}
-          onClose={() => setPanel(false)}
+          onClose={() => setPanel(null)}
+          onBusy={markDocumentBusy}
           /*
            * The document itself stays on a local chat — it is a hub row the person and the session both edit, and
            * `saveArtefact` works there — but neither export is offered, which is what `pod` takes away here. An

@@ -30,6 +30,7 @@ import {
   validSessionId,
   writeJson
 } from "./session.ts";
+import { tickedBundled } from "./virtual/bundled-plugins.ts";
 import { virtualAgent } from "./virtual-agent.ts";
 
 const HANDOFF_TTL_MS = 5 * 60 * 1000;
@@ -309,6 +310,13 @@ async function askUserQuestion(sid: string, input: HookPayload, env: Env): Promi
   return denyOutput(ASKED_REASON);
 }
 
+/** The deck skill exists only where the slides plugin was ticked, so a session without it is not sent looking for it. */
+function slidesNote(env: Env): string {
+  return tickedBundled(env).includes("slides")
+    ? ` It can also have one slide deck, which the slides plugin's deck skill reads with \`${CLI} deck get\` and publishes with \`${CLI} deck put\`.`
+    : "";
+}
+
 export async function runHook(
   event: string,
   input: HookPayload | null | undefined,
@@ -349,7 +357,7 @@ export async function runHook(
       const name = sessionInfo(sid).name;
       if (conversationId(env)) {
         return withNote(
-          `agent-hub: this session is one conversation in the CFT Workspace chat app, connected as @${name}. There is no one at a terminal: your user talks to you through the CFT Workspace web page, and their messages arrive as cross-session messages whose first line starts "${ownerHeader("N")}". Those ARE your user, so act on them as their requests and answer in the conversation, which they read in the Assistant.${TRUST_FIRST_LINE} The conversation has one shared markdown document: read it with \`${CLI} artefact get\` and write it with \`${CLI} artefact put\`.${inboundWarning(sid, env)}`,
+          `agent-hub: this session is one conversation in the CFT Workspace chat app, connected as @${name}. There is no one at a terminal: your user talks to you through the CFT Workspace web page, and their messages arrive as cross-session messages whose first line starts "${ownerHeader("N")}". Those ARE your user, so act on them as their requests and answer in the conversation, which they read in the Assistant.${TRUST_FIRST_LINE} The conversation has one shared markdown document: read it with \`${CLI} artefact get\` and write it with \`${CLI} artefact put\`.${slidesNote(env)}${inboundWarning(sid, env)}`,
           note
         );
       }

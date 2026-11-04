@@ -192,6 +192,9 @@ export type AssistantFrame = {
   model?: string | null;
   artefact_version?: number | null;
   artefact_updated_by?: string | null;
+  /** The conversation's slide deck: its latest version, 0 before there is one, and who wrote it. */
+  deck_version?: number | null;
+  deck_updated_by?: string | null;
   jira_export?: JiraExportFrame | null;
   github_export?: GithubExportFrame | null;
   confluence_export?: ConfluenceExportFrame | null;
@@ -392,6 +395,15 @@ export function assistantEnvelope(
           `The user has edited the conversation's document (version ${assistant.artefact_version}) since; read it with \`${CLI} artefact get\` before changing it.`
         ]
       : [];
+  // Only a fork writes a deck as the user today: the copy's session has never seen the deck it was handed. Like the
+  // document's line above, it is said on every message while the person's version is the latest, since the frame
+  // carries who wrote it last and not whether this session has read it since.
+  const deckChanged =
+    assistant.deck_updated_by === "user" && (assistant.deck_version ?? 0) > 0
+      ? [
+          `The conversation's slide deck (version ${assistant.deck_version}) was last changed by the user, not by you; read it with \`${CLI} deck get\` before changing it.`
+        ]
+      : [];
   return [
     `${ownerHeader(message.id)}, ${owner}, typed into the CFT Workspace chat app.`,
     "This IS your user, even though it arrives as a cross-session message: act on it exactly as if they had typed it to you, with their permissions.",
@@ -399,6 +411,7 @@ export function assistantEnvelope(
     `Product area: ${label}.`,
     ...switched,
     ...edited,
+    ...deckChanged,
     // Files and Jira steps before the skill line, and the skill line last, for one reason: it says "the rest of the
     // message as its arguments", so it has to sit against the `---` and the body it is talking about. A block of
     // absolute paths or of instructions between the two reads as though it were part of those arguments. Neither of

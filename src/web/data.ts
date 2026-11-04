@@ -1,8 +1,10 @@
 import "server-only";
-import { canManageVirtualAgent, canOwnerReadCredential, canReadMessage, isOwner } from "../access/rules.ts";
+import { canManageVirtualAgent, canOwnerReadCredential, canReadDeck, canReadMessage, isOwner } from "../access/rules.ts";
 import { isUuid } from "../agents/store.ts";
 import { ensureAssistant, findAssistant } from "../assistant/assistant-store.ts";
 import { conversationAgent, findConversation } from "../assistant/conversation-store.ts";
+import { isSha256 } from "../assistant/deck.ts";
+import { type DeckAsset, type DeckView, deckView, holdsDeckAsset, readDeckAsset, readDeckPptx } from "../assistant/deck-store.ts";
 import { readExportDefaults } from "../assistant/export-default-store.ts";
 import type { ExportDefaults } from "../assistant/export-defaults.ts";
 import { conversationsForkableBy, conversationsOfferedBy, forkChoice, forkRecipients } from "../assistant/fork-store.ts";
@@ -409,6 +411,41 @@ export async function sharedChat(viewer: Identity, id: string): Promise<SharedCo
     return undefined;
   }
   return await sharedConversation(prisma, allowed.conversation, allowed.access, await forkChoice(prisma, viewer.oid, allowed.conversation, allowed.forks));
+}
+
+/** Whether the viewer may read the conversation's deck: its owner, or someone it is shared with or offered to. */
+async function deckReadable(viewer: Identity, id: string): Promise<boolean> {
+  const allowed = await accessToConversation(prisma, viewer.oid, id);
+  return allowed !== undefined && canReadDeck(allowed.access);
+}
+
+/** The latest version of a conversation's deck, outline and all, under the same rule as its pictures; `null` while it has none. */
+export async function readableDeck(viewer: Identity, id: string): Promise<DeckView | null | undefined> {
+  if (!(await deckReadable(viewer, id))) {
+    return undefined;
+  }
+  return await deckView(prisma, id);
+}
+
+/** One picture of a conversation's deck, for anyone `canReadDeck` lets read it; `undefined` for everyone else. */
+export async function deckAsset(viewer: Identity, id: string, sha256: string): Promise<DeckAsset | undefined> {
+  if (!isSha256(sha256) || !(await deckReadable(viewer, id))) {
+    return undefined;
+  }
+  return await readDeckAsset(prisma, id, sha256);
+}
+
+/** Whether the viewer may still read a picture they hold a copy of: the check a revalidation answers `304` on. */
+export async function deckAssetReadable(viewer: Identity, id: string, sha256: string): Promise<boolean> {
+  return isSha256(sha256) && (await deckReadable(viewer, id)) && (await holdsDeckAsset(prisma, id, sha256));
+}
+
+/** One version's .pptx, under the same rule as its pictures. */
+export async function deckPptx(viewer: Identity, id: string, version: number): Promise<{ title: string; bytes: Uint8Array } | undefined> {
+  if (!(await deckReadable(viewer, id))) {
+    return undefined;
+  }
+  return await readDeckPptx(prisma, id, version);
 }
 
 /** Who one of the viewer's own conversations is shared with, or `undefined` when it is not theirs to share. */

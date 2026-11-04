@@ -4,6 +4,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Skill } from "@/agents/skills";
+import { MAX_ASKED_BODY, MAX_SLIDE_REFERENCE } from "@/assistant/deck";
 import { STARTERS, TEMPLATES } from "@/assistant/starters";
 import { WARMING_QUIPS } from "@/assistant/thread";
 import type { ConversationView } from "@/assistant/views";
@@ -119,6 +120,7 @@ function conversation(overrides: Partial<ConversationView> = {}): ConversationVi
     sessionState: null,
     sessionDetail: null,
     artefact: { title: null, markdown: "", version: 0, updatedBy: null, updatedAt: null },
+    deck: null,
     jira: { status: "none" },
     github: { status: "none" },
     confluence: { status: "none" },
@@ -1945,5 +1947,243 @@ describe("Composer and the model", () => {
 
     expect(screen.queryByRole("menuitem", { name: /^Model/ })).toBeNull();
     expect(screen.queryByRole("menu", { name: "Models" })).toBeNull();
+  });
+});
+
+describe("ChatView slides", () => {
+  const OUTLINE = {
+    title: "Ways of working",
+    slides: [
+      { id: "s_0001", layout: "HMCTS_SECTION" as const, title: "Why it matters" },
+      { id: "s_ab12", layout: "HMCTS_CONTENT" as const, title: "Releases take three weeks", bullets: ["Build"] }
+    ]
+  };
+  const DECK: NonNullable<ConversationView["deck"]> = { title: "Ways of working", version: 7, updatedBy: "user", pptx: false };
+  const WRITTEN = { title: "Story", markdown: "x", version: 1, updatedBy: "user" as const, updatedAt: "2026-10-21T09:00:00.000Z" };
+
+  beforeEach(() => {
+    // The panel reads the outline itself, from the deck route, as it opens.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ ...DECK, outline: OUTLINE, updatedAt: "2026-11-03T09:00:00.000Z", sizes: {} })))
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  async function openSlides(name = "Open slides"): Promise<void> {
+    fireEvent.click(screen.getByRole("button", { name }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
+
+  function chat(view: Partial<ConversationView>, chatActions: ChatActions = actions()) {
+    return <ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation(view)} templates={TEMPLATES} actions={chatActions} />;
+  }
+
+  async function announced(): Promise<string[]> {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    return screen.getAllByTestId("arrivals").map((region) => region.textContent ?? "");
+  }
+
+  it("should offer the slides only once there is a deck, and open them in place of the document", async () => {
+    const { rerender } = render(chat({}));
+    expect(screen.queryByRole("button", { name: "Open slides" })).toBeNull();
+
+    rerender(chat({ deck: DECK, artefact: WRITTEN }));
+    fireEvent.click(screen.getByRole("button", { name: "Open document" }));
+    expect(screen.getByRole("region", { name: "Document" })).toBeTruthy();
+
+    await openSlides();
+    expect(screen.getByRole("region", { name: "Slides" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Document" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open slides" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close slides" }));
+    expect(screen.queryByRole("region", { name: "Slides" })).toBeNull();
+  });
+
+  it("should open the slides and say so when the assistant writes a newer version, and not for the person's own", async () => {
+    vi.useFakeTimers();
+    const { rerender } = render(chat({ deck: DECK }));
+    expect(screen.queryByRole("region", { name: "Slides" })).toBeNull();
+
+    rerender(chat({ deck: { ...DECK, version: 8, updatedBy: "agent" } }));
+
+    expect(await announced()).toContain("The assistant updated the slides");
+    expect(screen.getByRole("region", { name: "Slides" })).toBeTruthy();
+  });
+
+  it("should open the slides in the document's place when the assistant writes a newer deck and the document has nothing unsaved", async () => {
+    vi.useFakeTimers();
+    const { rerender } = render(chat({ deck: DECK, artefact: WRITTEN }));
+    fireEvent.click(screen.getByRole("button", { name: "Open document" }));
+
+    rerender(chat({ deck: { ...DECK, version: 8, updatedBy: "agent" }, artefact: WRITTEN }));
+    await announced();
+
+    expect(screen.getByRole("region", { name: "Slides" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Document" })).toBeNull();
+  });
+
+  it("should leave the document open, say the slides changed and mark their button, when the assistant writes a newer deck mid-edit", async () => {
+    vi.useFakeTimers();
+    const chatActions = actions();
+    const { rerender } = render(chat({ deck: DECK, artefact: WRITTEN }, chatActions));
+    fireEvent.click(screen.getByRole("button", { name: "Open document" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Document, in markdown" }), { target: { value: "x and more" } });
+
+    rerender(chat({ deck: { ...DECK, version: 8, updatedBy: "agent" }, artefact: WRITTEN }, chatActions));
+
+    expect(await announced()).toContain("The assistant updated the slides. Open slides to see them.");
+    expect(screen.getByRole("region", { name: "Document" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Slides" })).toBeNull();
+    expect(screen.getByTestId("slides-updated")).toBeTruthy();
+
+    // The pause saved the edit, so the document is no longer busy, but the update already waits behind its button.
+    expect(chatActions.saveArtefact).toHaveBeenCalledWith(expect.objectContaining({ markdown: "x and more" }));
+    await openSlides("Open slides, updated by the assistant");
+    expect(screen.getByRole("region", { name: "Slides" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close slides" }));
+    expect(screen.getByRole("button", { name: "Open slides" })).toBeTruthy();
+    expect(screen.queryByTestId("slides-updated")).toBeNull();
+  });
+
+  it("should save the person's edit rather than drop it when they open the slides before the pause has saved it", async () => {
+    const chatActions = actions();
+    render(chat({ deck: DECK, artefact: WRITTEN }, chatActions));
+    fireEvent.click(screen.getByRole("button", { name: "Open document" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Document, in markdown" }), { target: { value: "x, edited" } });
+
+    await openSlides();
+
+    expect(chatActions.saveArtefact).toHaveBeenCalledTimes(1);
+    expect(chatActions.saveArtefact).toHaveBeenCalledWith({ conversationId: CONVERSATION, title: "Story", markdown: "x, edited", baseVersion: 1 });
+  });
+
+  it("should open the document again with the edit, saying it could not save, when the save made as it closed fails", async () => {
+    const saveArtefact = vi.fn(async () => ({ ok: false as const, error: "down" }));
+    render(chat({ deck: DECK, artefact: WRITTEN }, actions({ saveArtefact })));
+    fireEvent.click(screen.getByRole("button", { name: "Open document" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Document, in markdown" }), { target: { value: "x, edited" } });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Close document" }));
+    });
+
+    expect(saveArtefact).toHaveBeenCalledTimes(1);
+    const reopened = screen.getByRole("region", { name: "Document" });
+    expect((within(reopened).getByRole("textbox", { name: "Document, in markdown" }) as HTMLTextAreaElement).value).toBe("x, edited");
+    expect(
+      within(reopened)
+        .getAllByRole("status")
+        .map((status) => status.textContent)
+    ).toContain("Could not save; keep typing to try again");
+  });
+
+  it("should open the document again with the edit and the conflict banner, in the slides' place, when the save made as it closed finds a newer version", async () => {
+    const theirs = { title: "Story", markdown: "theirs", version: 2, updatedBy: "agent" as const };
+    const saveArtefact = vi.fn(async () => ({ ok: true as const, saved: false as const, current: theirs }));
+    render(chat({ deck: DECK, artefact: WRITTEN }, actions({ saveArtefact })));
+    fireEvent.click(screen.getByRole("button", { name: "Open document" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Document, in markdown" }), { target: { value: "x, edited" } });
+
+    await openSlides();
+
+    expect(screen.queryByRole("region", { name: "Slides" })).toBeNull();
+    const reopened = screen.getByRole("region", { name: "Document" });
+    expect((within(reopened).getByRole("textbox", { name: "Document, in markdown" }) as HTMLTextAreaElement).value).toBe("x, edited");
+    expect(within(reopened).getByRole("alert").textContent).toContain("The assistant has changed this document.");
+
+    // Keeping theirs settles it, and closing then saves nothing more.
+    fireEvent.click(within(reopened).getByRole("button", { name: "Use theirs" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close document" }));
+    expect(screen.queryByRole("region", { name: "Document" })).toBeNull();
+    expect(saveArtefact).toHaveBeenCalledTimes(1);
+  });
+
+  it("should put the slide in front of the message as it is sent, and drop it afterwards, when the person asks about a slide", async () => {
+    const send = vi.fn(async () => ({ ok: true as const, message: message("99", { body: "sent" }) }));
+    render(chat({ deck: DECK }, actions({ send })));
+    await openSlides();
+    fireEvent.click(within(screen.getByRole("list", { name: "Slide thumbnails" })).getByRole("button", { name: "Slide 3: Releases take three weeks" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Ask about this slide" }));
+    expect(screen.getByRole("button", { name: "Stop asking about Slide 3: Releases take three weeks" })).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Message" }));
+    await type("Is this still true?");
+
+    expect(send).toHaveBeenCalledWith({
+      conversationId: CONVERSATION,
+      body: '[Slide 3 of "Ways of working" v7, id s_ab12: "Releases take three weeks"]\nIs this still true?',
+      uploadIds: []
+    });
+    expect(screen.queryByRole("button", { name: /Stop asking about/ })).toBeNull();
+  });
+
+  it("should send the message as typed once the person takes the slide off it", async () => {
+    const send = vi.fn(async () => ({ ok: true as const, message: message("99", { body: "sent" }) }));
+    render(chat({ deck: DECK }, actions({ send })));
+    await openSlides();
+    fireEvent.click(screen.getByRole("button", { name: "Ask about this slide" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop asking about Slide 1: Ways of working" }));
+    await type("Hello");
+
+    expect(send).toHaveBeenCalledWith({ conversationId: CONVERSATION, body: "Hello", uploadIds: [] });
+  });
+
+  it("should refuse words past the room the slide leaves, sending nothing, and send words that fill it, when the person asks about a slide", async () => {
+    const send = vi.fn(async () => ({ ok: true as const, message: message("99", { body: "sent" }) }));
+    render(chat({ deck: { ...DECK, title: "D".repeat(200) } }, actions({ send })));
+    await openSlides();
+    fireEvent.click(screen.getByRole("button", { name: "Ask about this slide" }));
+
+    await type("x".repeat(MAX_ASKED_BODY + 1));
+
+    expect(send).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toBe(`a message about a slide is at most ${MAX_ASKED_BODY} characters`);
+
+    await type("x".repeat(MAX_ASKED_BODY));
+
+    expect(send).toHaveBeenCalledTimes(1);
+    const sent = (send.mock.calls[0] as unknown as [{ body: string }])[0].body;
+    expect(sent.length).toBeLessThanOrEqual(MAX_SLIDE_REFERENCE + 1 + MAX_ASKED_BODY);
+    expect(sent.endsWith(`]\n${"x".repeat(MAX_ASKED_BODY)}`)).toBe(true);
+  });
+
+  it("should keep the slide on the message when the send is refused", async () => {
+    const send = vi.fn(async () => ({ ok: false as const, error: "Could not send" }));
+    render(chat({ deck: DECK }, actions({ send })));
+    await openSlides();
+    fireEvent.click(screen.getByRole("button", { name: "Ask about this slide" }));
+
+    await type("Hello");
+
+    expect(screen.getByRole("button", { name: "Stop asking about Slide 1: Ways of working" })).toBeTruthy();
+  });
+
+  it("should give the chat back to the composer when the slides cover it on a narrow screen", async () => {
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      writable: true,
+      value: () => ({ matches: true, addEventListener: () => undefined, removeEventListener: () => undefined })
+    });
+    render(chat({ deck: DECK }));
+    await openSlides();
+
+    fireEvent.click(screen.getByRole("button", { name: "Ask about this slide" }));
+
+    expect(screen.queryByRole("region", { name: "Slides" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Stop asking about Slide 1: Ways of working" })).toBeTruthy();
   });
 });

@@ -25,6 +25,8 @@ export default defineConfig({
       include: ["src/**"],
       exclude: [
         "src/store/generated/**",
+        // The slides plugin's own file, copied byte for byte, and tested by the plugin's suite: see slides/masters.test.ts.
+        "src/assistant/slides/masters.ts",
         "src/instrumentation.ts",
         "src/instrumentation-node.ts",
         "src/app/**",
@@ -70,6 +72,7 @@ export default defineConfig({
         "src/assistant/export-default-store.ts",
         "src/assistant/fork-store.ts",
         "src/assistant/artefact-store.ts",
+        "src/assistant/deck-store.ts",
         "src/assistant/assistant-store.ts",
         "src/assistant/conversation-store.ts",
         "src/assistant/first-content.ts",
