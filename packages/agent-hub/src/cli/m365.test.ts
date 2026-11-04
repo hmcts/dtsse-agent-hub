@@ -444,3 +444,169 @@ describe("credentials for a Microsoft 365 connection", () => {
     expect(deleteMyCredential).toHaveBeenCalledWith("microsoft");
   });
 });
+
+describe("m365 chats, channels and meetings", () => {
+  const messages = {
+    value: [
+      {
+        id: "c1",
+        createdDateTime: "2026-12-01T08:00:00Z",
+        from: { user: { displayName: "A Person" } },
+        body: { contentType: "html", content: "<p>Ship it &amp; tell me</p>" }
+      },
+      { id: "c2", from: null, body: { contentType: "text", content: "plain" } }
+    ]
+  };
+  const expected = [
+    { id: "c1", at: "2026-12-01T08:00:00Z", from: "A Person", text: "Ship it & tell me" },
+    { id: "c2", at: null, from: null, text: "plain" }
+  ];
+
+  async function run(args: string[], body: unknown) {
+    const fetchImpl = graphAnswering(body);
+    const { cli, out } = cliWith(vi.fn(async () => TOKEN));
+    await fresh(fetchImpl as unknown as typeof fetch)(cli, args);
+    return { url: askedFor(fetchImpl), data: JSON.parse(out.join("")).data };
+  }
+
+  it("should list the person's chats, newest first, when asked", async () => {
+    const { url, data } = await run(["chats", "list", "--top", "2"], {
+      value: [{ id: "19:a", topic: "Release", chatType: "group", lastUpdatedDateTime: "t" }, { id: "19:b" }]
+    });
+
+    expect(url.pathname).toBe("/v1.0/me/chats");
+    expect(url.searchParams.get("$orderby")).toBe("lastMessagePreview/createdDateTime desc");
+    expect(data).toEqual([
+      { id: "19:a", topic: "Release", type: "group", updated: "t" },
+      { id: "19:b", topic: null, type: null, updated: null }
+    ]);
+  });
+
+  it("should read one chat's messages as text, HTML turned into words, when asked", async () => {
+    const { url, data } = await run(["chats", "messages", "19:a@thread.v2"], messages);
+
+    expect(url.pathname).toBe("/v1.0/me/chats/19%3Aa%40thread.v2/messages");
+    expect(data).toEqual(expected);
+  });
+
+  it("should list the teams the person is in when asked", async () => {
+    const { url, data } = await run(["teams", "list"], { value: [{ id: "t1", displayName: "CaTH" }, { id: "t2" }] });
+
+    expect(url.pathname).toBe("/v1.0/me/joinedTeams");
+    expect(data).toEqual([
+      { id: "t1", name: "CaTH" },
+      { id: "t2", name: "" }
+    ]);
+  });
+
+  it("should list a team's channels and read a channel's messages when asked", async () => {
+    expect((await run(["channels", "list", "t1"], { value: [{ id: "ch1", displayName: "General" }, { id: "ch2" }] })).data).toEqual([
+      { id: "ch1", name: "General" },
+      { id: "ch2", name: "" }
+    ]);
+    const { url, data } = await run(["channels", "messages", "t1", "ch1"], messages);
+
+    expect(url.pathname).toBe("/v1.0/teams/t1/channels/ch1/messages");
+    expect(data).toEqual(expected);
+  });
+
+  it("should find the online meeting a join link is for, quoting the link for Graph's filter", async () => {
+    const { url, data } = await run(["meetings", "find", "https://teams.example/l/meetup-join/it's"], {
+      value: [{ id: "m1", subject: "Standup", startDateTime: "s", endDateTime: "e" }, { id: "m2" }]
+    });
+
+    expect(url.searchParams.get("$filter")).toBe("JoinWebUrl eq 'https://teams.example/l/meetup-join/it''s'");
+    expect(data).toEqual([
+      { id: "m1", subject: "Standup", start: "s", end: "e" },
+      { id: "m2", subject: "", start: null, end: null }
+    ]);
+  });
+
+  it("should list a meeting's transcripts when asked", async () => {
+    const { url, data } = await run(["transcripts", "list", "m1"], { value: [{ id: "t1", createdDateTime: "c" }, { id: "t2" }] });
+
+    expect(url.pathname).toBe("/v1.0/me/onlineMeetings/m1/transcripts");
+    expect(data).toEqual([
+      { id: "t1", created: "c" },
+      { id: "t2", created: null }
+    ]);
+  });
+
+  it.each([
+    [["chats", "nope"], "chats takes list or messages"],
+    [["teams", "nope"], "teams takes list"],
+    [["channels", "nope"], "channels takes list or messages"],
+    [["meetings", "nope"], "meetings takes find"],
+    [["transcripts", "nope"], "transcripts takes list or get"]
+  ])("should say what %j takes when the action is wrong", async (args, words) => {
+    const { cli } = cliWith(vi.fn(async () => TOKEN));
+
+    await expect(fresh(graphAnswering({ value: [] }) as unknown as typeof fetch)(cli, args)).rejects.toThrow(words);
+  });
+});
+
+describe("m365 files get", () => {
+  it("should download a file to --out when it is within the cap", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "m365-get-"));
+    const fetchImpl = vi.fn(async () => new Response(new Uint8Array([1, 2, 3])));
+    const { cli, out } = cliWith(
+      vi.fn(async () => TOKEN),
+      {},
+      dir
+    );
+
+    await fresh(fetchImpl as unknown as typeof fetch)(cli, ["files", "get", "d1", "i1", "--out", "sub/file.bin"]);
+
+    expect(String(fetchImpl.mock.calls[0]?.[0])).toBe("https://graph.microsoft.com/v1.0/drives/d1/items/i1/content");
+    expect([...fs.readFileSync(path.join(dir, "sub", "file.bin"))]).toEqual([1, 2, 3]);
+    expect(JSON.parse(out.join("")).data).toEqual({ written: path.join(dir, "sub", "file.bin"), bytes: 3 });
+  });
+
+  it("should refuse a file whose content-length is over the cap before reading any of it", async () => {
+    const fetchImpl = vi.fn(async () => new Response("x", { headers: { "content-length": String(30 * 1024 * 1024) } }));
+    const { cli } = cliWith(vi.fn(async () => TOKEN));
+
+    await expect(fresh(fetchImpl as unknown as typeof fetch)(cli, ["files", "get", "d1", "i1", "--out", "x"])).rejects.toThrow("over the");
+  });
+
+  it("should abort a download that runs past the cap when content-length did not say so", async () => {
+    let aborted = false;
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      init?.signal?.addEventListener("abort", () => {
+        aborted = true;
+      });
+      const chunk = new Uint8Array(8 * 1024 * 1024);
+      return new Response(
+        new ReadableStream({
+          pull(controller) {
+            controller.enqueue(chunk);
+          }
+        })
+      );
+    });
+    const { cli } = cliWith(vi.fn(async () => TOKEN));
+
+    await expect(fresh(fetchImpl as unknown as typeof fetch)(cli, ["files", "get", "d1", "i1", "--out", "x"])).rejects.toThrow("over the");
+    expect(aborted).toBe(true);
+  });
+
+  it("should still refuse the file when cancelling the stream fails", async () => {
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new Uint8Array(6));
+      },
+      cancel() {
+        throw new Error("already gone");
+      }
+    });
+
+    await expect(readCapped(body, 10, vi.fn())).rejects.toThrow("over the 10 bytes");
+  });
+
+  it("should need --out, and a drive and an item id", async () => {
+    const { cli } = cliWith(vi.fn(async () => TOKEN));
+
+    await expect(fresh(graphAnswering({}) as unknown as typeof fetch)(cli, ["files", "get", "d1", "i1"])).rejects.toThrow("--out");
+    await expect(fresh(graphAnswering({}) as unknown as typeof fetch)(cli, ["files", "get", "d1"])).rejects.toThrow("drive id and an item id");
+  });
+});
