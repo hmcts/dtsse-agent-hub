@@ -2,9 +2,11 @@
 
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { DeckSnapshot, SaveDeckResult } from "@/app/_actions/decks";
-import { type DeckOutline, type DeckSlide, jsonbText, plannable } from "@/assistant/deck";
+import { type DeckOutline, type DeckSlide, MAX_SLIDES, plannable } from "@/assistant/deck";
+import { sameOutline } from "@/assistant/deck-edit";
 import type { DeckView } from "@/assistant/deck-store";
-import { type PlannedSlide, plan } from "@/assistant/slides/masters";
+import { lint, type PlannedSlide, plan } from "@/assistant/slides/masters";
+import { backgroundSrc, deckAssetUrl } from "@/components/assistant/deck-addresses";
 import {
   blankSlide,
   blockingProblem,
@@ -23,13 +25,16 @@ import {
   layoutsFor,
   moveSlide,
   nestBullets,
+  type Problem,
   removeAt,
   setLevel,
   setText,
-  slideWarnings
+  slideWarnings,
+  TOO_MANY_SLIDES
 } from "@/components/assistant/deck-editing";
 import { SlideCanvas, slideTitle } from "@/components/assistant/SlideCanvas";
 import type { ActionResult } from "@/web/action";
+import { ACTION_FAULT } from "@/web/action-fault";
 
 export type SaveDeckAction = (input: {
   conversationId: unknown;
@@ -53,6 +58,8 @@ export interface UnsavedDeckDraft {
   outline: DeckOutline;
   base: DeckBase;
   conflict: DeckSnapshot | null;
+  /** What the hub said when it refused the save, if it did. */
+  error?: string;
 }
 
 /** A pause in editing this long saves the deck, as it does the document. */
@@ -66,22 +73,35 @@ const box = "rounded-lg border border-asst-strong bg-asst-field px-2.5 py-1.5 te
 const field = `w-full ${box}`;
 const labelClass = "text-[13px] font-medium text-asst-text";
 
-const backgroundSrc = (image: string): string => `/assistant/slides/${image}`;
-
-function assetUrl(conversationId: string, sha256: string): string {
-  return `/api/ui/assistant/decks/${encodeURIComponent(conversationId)}/assets/${sha256}`;
-}
-
-const same = (a: DeckOutline | null, b: DeckOutline | null): boolean => jsonbText(a) === jsonbText(b);
-
 type Bullet = string | { text: string; bullets?: string[] };
+
+/** A save that never reached the hub, which trying again may get through. */
+const NOT_REACHED = "the save did not reach the hub; try again";
 
 async function settled(saving: Promise<ActionResult<SaveDeckResult>>): Promise<ActionResult<SaveDeckResult>> {
   try {
     return await saving;
   } catch {
-    return { ok: false, error: "could not save" };
+    return { ok: false, error: NOT_REACHED };
   }
+}
+
+/** A save the hub refused or never got, and whether trying again could help: not for a refusal, which says why. */
+interface Failure {
+  message: string;
+  retry: boolean;
+}
+
+const failureOf = (error: string): Failure => ({ message: error, retry: error === ACTION_FAULT || error === NOT_REACHED });
+
+/** The draft a save that did not land leaves, with the hub's words when it refused it. */
+function lostDraft(outline: DeckOutline, base: DeckBase, result: ActionResult<SaveDeckResult>): UnsavedDeckDraft {
+  return {
+    outline,
+    base,
+    conflict: result.ok && !result.saved ? result.current : null,
+    ...(result.ok ? {} : { error: result.error })
+  };
 }
 
 function snapshotOf(deck: DeckView): DeckSnapshot {
@@ -408,6 +428,7 @@ export function DeckEditor({
   onDone,
   onBusy,
   draft,
+  onDraftTaken,
   onUnsaved,
   narrow = false
 }: {
@@ -422,17 +443,15 @@ export function DeckEditor({
   onBusy?: (busy: boolean) => void;
   /** An edit a closed editor could not save, to open with in place of the latest version. Read as the editor mounts. */
   draft?: UnsavedDeckDraft;
+  /** Told once the editor has taken `draft`, so the page hands it to no later editor. */
+  onDraftTaken?: () => void;
   onUnsaved?: (draft: UnsavedDeckDraft) => void;
   narrow?: boolean;
 }) {
   const [outline, setOutline] = useState<DeckOutline>(draft?.outline ?? deck.outline);
   const [base, setBase] = useState<DeckBase>(draft?.base ?? { version: deck.version, revision: deck.revision ?? 0 });
-  const [state, setState] = useState<SaveState>(() => {
-    if (draft === undefined) {
-      return "saved";
-    }
-    return blockingProblem(draft.outline) !== null ? "invalid" : draft.conflict === null ? "failed" : "unsaved";
-  });
+  const [state, setState] = useState<SaveState>(draft === undefined ? "saved" : draft.conflict === null ? "failed" : "unsaved");
+  const [failure, setFailure] = useState<Failure | null>(draft?.error === undefined ? null : failureOf(draft.error));
   const [conflict, setConflict] = useState<DeckSnapshot | null>(draft?.conflict ?? null);
   const [chosen, setChosen] = useState(0);
   const [confirming, setConfirming] = useState(false);
@@ -446,15 +465,34 @@ export function DeckEditor({
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const baseNow = useRef(base);
   baseNow.current = base;
+  /**
+   * The outline of the version the edit was made from, which an edit typed and then undone is compared with, so it
+   * saves nothing. Unknown for a handed-back edit on a version the editor has not read, which then always saves.
+   */
+  const baseOutline = useRef<DeckOutline | null>(
+    draft === undefined ? deck.outline : deck.version === draft.base.version && (deck.revision ?? 0) === draft.base.revision ? deck.outline : null
+  );
   const outlineNow = useRef(outline);
   outlineNow.current = outline;
+  const deckNow = useRef(deck);
+  deckNow.current = deck;
   const inFlight = useRef(false);
   const queued = useRef(false);
   const mounted = useRef(true);
   const discarded = useRef(false);
-  const problem = useMemo(() => blockingProblem(outline), [outline]);
+  // The outline's check, made once for each outline however many places ask: the render, a save and the close.
+  const checked = useRef<{ outline: DeckOutline; problem: Problem | null } | null>(null);
+  const problemOf = (next: DeckOutline): Problem | null => {
+    if (checked.current?.outline !== next) {
+      checked.current = { outline: next, problem: blockingProblem(next) };
+    }
+    return checked.current.problem;
+  };
+  const problem = problemOf(outline);
+  // An outline with a gap in it cannot save, whatever was last said of the one before it.
+  const status: SaveState = problem === null ? state : "invalid";
   // A save in flight counts: an update arriving before its reply would otherwise replace what is being saved.
-  const dirty = state === "unsaved" || state === "failed" || state === "saving" || state === "invalid";
+  const dirty = status === "unsaved" || status === "failed" || status === "saving" || status === "invalid";
   const busy = dirty || conflict !== null;
   const unsaved = useRef<UnsavedDeckDraft | null>(null);
   // An edit waiting on the choice between it and a newer version is not saved as the editor closes, which the newer
@@ -462,7 +500,7 @@ export function DeckEditor({
   unsaved.current =
     conflict !== null
       ? { outline, base, conflict }
-      : state === "unsaved" || state === "failed" || state === "invalid"
+      : status === "unsaved" || status === "failed" || status === "invalid"
         ? { outline, base, conflict: null }
         : null;
   const closing = useRef({ conversationId, save, onBusy, onUnsaved });
@@ -471,16 +509,27 @@ export function DeckEditor({
   const total = outline.slides.length + 1;
   const at = Math.min(chosen, total - 1);
   const slide = at === 0 ? undefined : outline.slides[at - 1];
+  const full = outline.slides.length >= MAX_SLIDES;
 
   const drawn = useMemo(() => {
-    const src = (sha: string) => assetUrl(conversationId, sha);
+    const src = (sha: string) => deckAssetUrl(conversationId, sha);
     const sizes = Object.fromEntries(Object.entries(deck.sizes).map(([sha, size]) => [src(sha), size]));
     const planned = plannable(outline, src);
     return { slides: plan(planned), sizes, plannable: planned };
   }, [conversationId, outline, deck.sizes]);
-  const warnings = useMemo(() => slideWarnings(drawn.plannable, at), [drawn.plannable, at]);
+  // The whole deck is linted once for each outline, since a title the same as another slide's is a warning on both;
+  // moving between slides only picks that slide's out.
+  const issues = useMemo(() => lint(drawn.plannable), [drawn.plannable]);
+  const warnings = useMemo(() => slideWarnings(issues, at), [issues, at]);
 
   useEffect(() => closing.current.onBusy?.(busy), [busy]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: taken once, as the editor mounts, as the draft itself is
+  useEffect(() => {
+    if (draft !== undefined) {
+      onDraftTaken?.();
+    }
+  }, []);
 
   // Focus goes where the last operation said, once the render that made the element there has committed.
   useLayoutEffect(() => {
@@ -498,17 +547,30 @@ export function DeckEditor({
     focusing.current = key;
   };
 
+  function stopTimer(): void {
+    if (timer.current !== null) {
+      clearTimeout(timer.current);
+      timer.current = null;
+    }
+  }
+
   async function persist(next: DeckOutline): Promise<void> {
-    if (blockingProblem(next) !== null) {
-      setState("invalid");
+    if (problemOf(next) !== null) {
+      setState("unsaved");
       return;
     }
     if (inFlight.current) {
       queued.current = true;
       return;
     }
+    if (sameOutline(next, baseOutline.current)) {
+      setState("saved");
+      setFailure(null);
+      return;
+    }
     inFlight.current = true;
     setState("saving");
+    setFailure(null);
     const from = baseNow.current;
     const result = await settled(closing.current.save({ conversationId, outline: next, baseVersion: from.version, baseRevision: from.revision }));
     inFlight.current = false;
@@ -518,6 +580,7 @@ export function DeckEditor({
     }
     if (!result.ok) {
       setState("failed");
+      setFailure(failureOf(result.error));
       return;
     }
     if (!result.saved) {
@@ -528,8 +591,9 @@ export function DeckEditor({
     }
     const moved = { version: result.version, revision: result.revision };
     baseNow.current = moved;
+    baseOutline.current = next;
     setBase(moved);
-    if (queued.current || !same(outlineNow.current, next)) {
+    if (queued.current || !sameOutline(outlineNow.current, next)) {
       queued.current = false;
       void persist(outlineNow.current);
       return;
@@ -547,21 +611,21 @@ export function DeckEditor({
     const { onUnsaved: lost, save: saveNow } = closing.current;
     if (!(result.ok && result.saved)) {
       if (!discarded.current) {
-        lost?.({ outline: latest, base: from, conflict: result.ok && !result.saved ? result.current : null });
+        lost?.(lostDraft(latest, from, result));
       }
       return;
     }
-    if (discarded.current || same(latest, next)) {
+    if (discarded.current || sameOutline(latest, next)) {
       return;
     }
     const moved = { version: result.version, revision: result.revision };
-    if (blockingProblem(latest) !== null) {
+    if (problemOf(latest) !== null) {
       lost?.({ outline: latest, base: moved, conflict: null });
       return;
     }
     void settled(saveNow({ conversationId, outline: latest, baseVersion: moved.version, baseRevision: moved.revision })).then((again) => {
       if (!(again.ok && again.saved)) {
-        lost?.({ outline: latest, base: moved, conflict: again.ok && !again.saved ? again.current : null });
+        lost?.(lostDraft(latest, moved, again));
       }
     });
   }
@@ -569,34 +633,43 @@ export function DeckEditor({
   function edited(next: DeckOutline): void {
     setOutline(next);
     outlineNow.current = next;
-    setState(blockingProblem(next) === null ? "unsaved" : "invalid");
     setLeaving(false);
-    if (timer.current !== null) {
-      clearTimeout(timer.current);
+    setFailure(null);
+    stopTimer();
+    if (conflict === null && !inFlight.current && sameOutline(next, baseOutline.current)) {
+      setState("saved");
+      return;
     }
+    setState("unsaved");
     if (conflict === null) {
       timer.current = setTimeout(() => void persist(outlineNow.current), SAVE_AFTER_MS);
     }
   }
 
-  // The assistant, or this person in another tab, saved a newer version or revision.
+  // The assistant, or this person in another tab, saved a newer version or revision. Keyed on the numbers, not the
+  // deck object, so a render that brings the same version again does not run it.
+  const deckRevision = deck.revision ?? 0;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the deck and the outline are read through refs, so only a newer version, a moved base or a settled save makes this worth running again
   useEffect(() => {
     if (inFlight.current) {
       return;
     }
-    const revision = deck.revision ?? 0;
-    if (deck.version < base.version || (deck.version === base.version && revision <= base.revision)) {
+    const arrived = deckNow.current;
+    if (deck.version < base.version || (deck.version === base.version && deckRevision <= base.revision)) {
       return;
     }
-    if (dirty && !same(deck.outline, outline)) {
-      setConflict(snapshotOf(deck));
+    if (dirty && !sameOutline(arrived.outline, outlineNow.current)) {
+      setConflict(snapshotOf(arrived));
       return;
     }
-    setOutline(deck.outline);
-    setBase({ version: deck.version, revision });
+    stopTimer();
+    baseOutline.current = arrived.outline;
+    setOutline(arrived.outline);
+    setBase({ version: arrived.version, revision: deckRevision });
     setState("saved");
+    setFailure(null);
     setConflict(null);
-  }, [deck, base, dirty, outline]);
+  }, [deck.version, deckRevision, base, dirty]);
 
   // Closing, by Done, by the person or by the page, saves the edit the pause would have.
   useEffect(() => {
@@ -609,13 +682,14 @@ export function DeckEditor({
       const pending = unsaved.current;
       const { conversationId: id, save: saveNow, onBusy: told, onUnsaved: lost } = closing.current;
       if (pending !== null && !discarded.current && !inFlight.current) {
-        if (pending.conflict !== null || blockingProblem(pending.outline) !== null) {
+        const problemNow = checked.current?.outline === pending.outline ? checked.current.problem : blockingProblem(pending.outline);
+        if (pending.conflict !== null || problemNow !== null) {
           lost?.(pending);
         } else {
           void settled(saveNow({ conversationId: id, outline: pending.outline, baseVersion: pending.base.version, baseRevision: pending.base.revision })).then(
             (result) => {
               if (!(result.ok && result.saved)) {
-                lost?.({ ...pending, conflict: result.ok && !result.saved ? result.current : null });
+                lost?.(lostDraft(pending.outline, pending.base, result));
               }
             }
           );
@@ -650,6 +724,9 @@ export function DeckEditor({
   }
 
   function addSlide(): void {
+    if (full) {
+      return;
+    }
     const added = blankSlide(addLayout, freshId(outline.slides));
     // After the current slide: the title slide is 0 here, so the current slide is the outline's `at - 1`.
     const where = at;
@@ -661,7 +738,7 @@ export function DeckEditor({
   }
 
   function duplicate(): void {
-    if (slide === undefined) {
+    if (slide === undefined || full) {
       return;
     }
     const copy = { ...structuredClone(slide), id: freshId(outline.slides) };
@@ -706,21 +783,30 @@ export function DeckEditor({
     setNextLayout(null);
   }
 
+  // Either choice settles the conflict, so a save the pause had queued for the edit before it is dropped: after Use
+  // theirs it would write theirs again as the person's, and Keep mine saves at once.
   function takeTheirs(current: DeckSnapshot): void {
+    stopTimer();
+    queued.current = false;
     if (current.outline !== null) {
       setOutline(current.outline);
       outlineNow.current = current.outline;
     }
+    baseOutline.current = current.outline;
     const moved = { version: current.version, revision: current.revision };
     baseNow.current = moved;
     setBase(moved);
     setConflict(null);
     setChoosing(false);
     setState("saved");
+    setFailure(null);
     announce(`Showing version ${current.version}`);
   }
 
   function keepMine(current: DeckSnapshot): void {
+    stopTimer();
+    queued.current = false;
+    baseOutline.current = current.outline;
     const moved = { version: current.version, revision: current.revision };
     baseNow.current = moved;
     setBase(moved);
@@ -736,7 +822,7 @@ export function DeckEditor({
       announce("Choose Use theirs or Keep mine before you finish editing");
       return;
     }
-    if (problem !== null && state === "invalid") {
+    if (problem !== null) {
       setLeaving(true);
       return;
     }
@@ -756,9 +842,10 @@ export function DeckEditor({
     saved: "Saved",
     saving: "Saving…",
     unsaved: "Not saved yet",
-    failed: "Could not save",
+    failed: failure === null ? "Could not save" : `Could not save: ${failure.message}`,
     invalid: `Not saved: ${problem?.message ?? ""}`
-  }[state];
+  }[status];
+  const fullId = useId();
   const planned = drawn.slides[at] as PlannedSlide;
   const choices = slide === undefined ? [] : layoutsFor(slide).filter((one) => one.layout !== slide.layout);
   const preview = slide !== undefined && nextLayout !== null ? changeLayout(slide, nextLayout) : null;
@@ -771,11 +858,11 @@ export function DeckEditor({
         </button>
         <span
           role="status"
-          className={`min-w-0 text-xs ${state === "failed" || state === "invalid" ? "text-asst-error" : state === "saved" ? "text-asst-ok" : "text-asst-faint"}`}
+          className={`min-w-0 text-xs ${status === "failed" || status === "invalid" ? "text-asst-error" : status === "saved" ? "text-asst-ok" : "text-asst-faint"}`}
         >
           {saveLabel}
         </span>
-        {state === "failed" ? (
+        {status === "failed" && (failure === null || failure.retry) ? (
           <button type="button" onClick={() => void persist(outline)} className={button}>
             Try again
           </button>
@@ -891,7 +978,7 @@ export function DeckEditor({
               <button type="button" data-focus="move-down" disabled={at >= outline.slides.length} onClick={() => move(at + 1, "button")} className={button}>
                 Move down
               </button>
-              <button type="button" onClick={duplicate} className={button}>
+              <button type="button" disabled={full} aria-describedby={full ? fullId : undefined} onClick={duplicate} className={button}>
                 Duplicate
               </button>
               <button
@@ -949,7 +1036,7 @@ export function DeckEditor({
             />
           )}
           <div className="flex flex-wrap items-end gap-2 border-t border-asst-field pt-3">
-            <AddSlide layout={addLayout} onLayout={setAddLayout} onAdd={addSlide} after={at + 1} />
+            <AddSlide layout={addLayout} onLayout={setAddLayout} onAdd={addSlide} after={at + 1} full={full ? fullId : undefined} />
           </div>
         </div>
       </div>
@@ -1008,16 +1095,19 @@ function LayoutChange({
   );
 }
 
+/** `full`: the id of the reason no slide can be added, when the deck is at its most slides. */
 function AddSlide({
   layout,
   onLayout,
   onAdd,
-  after
+  after,
+  full
 }: {
   layout: Exclude<Layout, "HMCTS_IMAGE">;
   onLayout: (layout: Exclude<Layout, "HMCTS_IMAGE">) => void;
   onAdd: () => void;
   after: number;
+  full?: string;
 }) {
   const id = useId();
   return (
@@ -1034,9 +1124,21 @@ function AddSlide({
           ))}
         </select>
       </div>
-      <button type="button" onClick={onAdd} aria-label={`Add slide after slide ${after}`} className={button}>
+      <button
+        type="button"
+        disabled={full !== undefined}
+        aria-describedby={full}
+        onClick={onAdd}
+        aria-label={`Add slide after slide ${after}`}
+        className={button}
+      >
         Add slide
       </button>
+      {full === undefined ? null : (
+        <p id={full} className="basis-full text-[12px] text-asst-muted">
+          {TOO_MANY_SLIDES}, so no more can be added or duplicated. Delete one to make room.
+        </p>
+      )}
     </>
   );
 }

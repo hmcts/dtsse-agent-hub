@@ -1,15 +1,16 @@
 /**
  * @vitest-environment jsdom
  */
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, renderHook, screen, within } from "@testing-library/react";
 import axe from "axe-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DeckSnapshot, SaveDeckResult } from "@/app/_actions/decks";
-import { assetRef, type DeckOutline } from "@/assistant/deck";
+import { assetRef, type DeckOutline, MAX_SLIDES } from "@/assistant/deck";
 import type { DeckSummary, DeckView } from "@/assistant/deck-store";
 import { DeckEditor, SAVE_AFTER_MS, type SaveDeckAction, type UnsavedDeckDraft } from "@/components/assistant/DeckEditor";
-import { DeckPanel, SharedDeck } from "@/components/assistant/DeckPanel";
+import { DeckPanel, SharedDeck, useDeckView } from "@/components/assistant/DeckPanel";
 import type { ActionResult } from "@/web/action";
+import { ACTION_FAULT } from "@/web/action-fault";
 
 const CONVERSATION = "22222222-2222-2222-2222-222222222222";
 const SHA = "c".repeat(64);
@@ -61,7 +62,7 @@ function saving(...answers: Saved[]) {
   return vi.fn<SaveDeckAction>(async () => (answers.length > 1 ? answers.shift() : answers[0]) as Saved);
 }
 
-const SAVED: Saved = { ok: true, saved: true, version: 8, revision: 10, amended: false };
+const SAVED: Saved = { ok: true, saved: true, version: 8, revision: 10, amended: false, unchanged: false };
 
 function editor(props: Partial<React.ComponentProps<typeof DeckEditor>> = {}) {
   const announce = vi.fn<(text: string) => void>();
@@ -139,12 +140,12 @@ describe("DeckEditor", () => {
 
   it("should say it could not save, and save again on Try again", async () => {
     vi.useFakeTimers();
-    const save = saving({ ok: false, error: "down" }, SAVED);
+    const save = saving({ ok: false, error: ACTION_FAULT }, SAVED);
     editor({ save });
 
     fireEvent.change(screen.getByRole("textbox", { name: "Deck title" }), { target: { value: "Ways of shipping" } });
     await pause();
-    expect(screen.getByText("Could not save")).toBeTruthy();
+    expect(screen.getByText(`Could not save: ${ACTION_FAULT}`)).toBeTruthy();
 
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Try again" }));
@@ -249,8 +250,16 @@ describe("DeckEditor", () => {
     expect(document.activeElement).toBe(slide(4));
     await pause();
 
+    // Deleting the copy leaves the deck as it was read, which is nothing to save.
+    expect(save).not.toHaveBeenCalled();
+    expect(screen.getByRole("status").textContent).toBe("Saved");
+
+    fireEvent.click(slide(2));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete slide" }));
+    await pause();
     const ids = savedOutline(save).slides.map((one) => one.id);
-    expect(ids).toEqual(["s_0001", "s_ab12", "s_0003", "s_0004", "s_0005"]);
+    expect(ids).toEqual(["s_ab12", "s_0003", "s_0004", "s_0005"]);
   });
 
   it("should move a slide with Move up and Move down, keeping focus on a button that can still move it", () => {
@@ -320,7 +329,7 @@ describe("DeckEditor", () => {
   it("should offer the assistant's version or the person's own when a save finds a newer one, keeping theirs on the newer base", async () => {
     vi.useFakeTimers();
     const theirs: DeckSnapshot = { title: "Theirs", outline: outline({ title: "Theirs" }), version: 8, revision: 10, updatedBy: "agent" };
-    const save = saving({ ok: true, saved: false, current: theirs }, { ok: true, saved: true, version: 9, revision: 11, amended: false });
+    const save = saving({ ok: true, saved: false, current: theirs }, { ok: true, saved: true, version: 9, revision: 11, amended: false, unchanged: false });
     editor({ save });
 
     fireEvent.change(screen.getByRole("textbox", { name: "Deck title" }), { target: { value: "Mine" } });
@@ -348,6 +357,108 @@ describe("DeckEditor", () => {
     expect((screen.getByRole("textbox", { name: "Deck title" }) as HTMLInputElement).value).toBe("Theirs");
     expect(screen.getByText("Saved")).toBeTruthy();
     expect(save).toHaveBeenCalledTimes(1);
+  });
+
+  it("should save nothing after Use theirs, when it is chosen inside the pause after an edit", async () => {
+    vi.useFakeTimers();
+    const save = saving(SAVED);
+    const props = { conversationId: CONVERSATION, save, announce: vi.fn(), onDone: vi.fn() };
+    const { rerender } = render(<DeckEditor {...props} deck={deck()} />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Deck title" }), { target: { value: "Mine" } });
+    rerender(<DeckEditor {...props} deck={deck({ version: 8, revision: 10, outline: outline({ title: "Theirs" }), updatedBy: "agent" })} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Use theirs" }));
+    await pause();
+    await pause();
+
+    expect(save).not.toHaveBeenCalled();
+    expect((screen.getByRole("textbox", { name: "Deck title" }) as HTMLInputElement).value).toBe("Theirs");
+    expect(screen.getByRole("status").textContent).toBe("Saved");
+  });
+
+  it("should save nothing, and say it is saved, when an edit is typed and then undone", async () => {
+    vi.useFakeTimers();
+    const onBusy = vi.fn<(busy: boolean) => void>();
+    const { save } = editor({ onBusy });
+    const title = screen.getByRole("textbox", { name: "Deck title" });
+
+    fireEvent.change(title, { target: { value: "Ways of workingx" } });
+    expect(screen.getByRole("status").textContent).toBe("Not saved yet");
+    fireEvent.change(title, { target: { value: "Ways of working" } });
+    await pause();
+
+    expect(save).not.toHaveBeenCalled();
+    expect(screen.getByRole("status").textContent).toBe("Saved");
+    expect(onBusy).toHaveBeenLastCalledWith(false);
+  });
+
+  it("should save nothing when an optional field is filled in and then emptied again", async () => {
+    vi.useFakeTimers();
+    const { save } = editor();
+    const notes = screen.getByRole("textbox", { name: "Speaker notes (optional)" });
+
+    fireEvent.change(notes, { target: { value: "A" } });
+    fireEvent.change(notes, { target: { value: "" } });
+    await pause();
+
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it("should show the hub's reason, and offer no Try again, when the save is refused for something trying again cannot fix", async () => {
+    vi.useFakeTimers();
+    const refusal = "the slides name a picture that is no longer kept; remove it, then they will save";
+    editor({ save: saving({ ok: false, error: refusal }) });
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Deck title" }), { target: { value: "Ways of shipping" } });
+    await pause();
+
+    expect(screen.getByRole("status").textContent).toBe(`Could not save: ${refusal}`);
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+  });
+
+  it("should offer Try again when the save did not reach the hub", async () => {
+    vi.useFakeTimers();
+    editor({ save: vi.fn<SaveDeckAction>(async () => Promise.reject(new Error("offline"))) });
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Deck title" }), { target: { value: "Ways of shipping" } });
+    await pause();
+
+    expect(screen.getByRole("status").textContent).toMatch(/^Could not save: the save did not reach the hub/);
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+  });
+
+  it("should open a handed-back edit the hub refused with its reason, and no Try again", () => {
+    const error = "the slides name a picture that is no longer kept; remove it, then they will save";
+    editor({ draft: { outline: outline({ title: "Mine" }), base: { version: 7, revision: 9 }, conflict: null, error } });
+
+    expect(screen.getByRole("status").textContent).toBe(`Could not save: ${error}`);
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+  });
+
+  it("should not add or duplicate a slide past the most a deck holds, saying why", () => {
+    const slides = Array.from({ length: MAX_SLIDES }, (_, index) => ({ id: `s_${index}`, layout: "HMCTS_SECTION" as const, title: `Slide ${index}` }));
+    editor({ deck: deck({ outline: outline({ slides }), sizes: {} }) });
+    fireEvent.click(slide(2));
+
+    const add = screen.getByRole("button", { name: "Add slide after slide 2" }) as HTMLButtonElement;
+    const copy = screen.getByRole("button", { name: "Duplicate" }) as HTMLButtonElement;
+    expect(add.disabled).toBe(true);
+    expect(copy.disabled).toBe(true);
+    const reason = screen.getByText(/^A deck holds at most 100 slides after the title slide, so no more can be added or duplicated/);
+    expect(add.getAttribute("aria-describedby")).toBe(reason.id);
+    expect(copy.getAttribute("aria-describedby")).toBe(reason.id);
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete slide" }));
+    expect((screen.getByRole("button", { name: /^Add slide after slide/ }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByText(/^A deck holds at most/)).toBeNull();
+  });
+
+  it("should say a deck over the most slides holds too many, not that it needs one", () => {
+    const slides = Array.from({ length: MAX_SLIDES + 1 }, (_, index) => ({ id: `s_${index}`, layout: "HMCTS_SECTION" as const, title: `Slide ${index}` }));
+    editor({ draft: { outline: outline({ slides }), base: { version: 7, revision: 9 }, conflict: null } });
+
+    expect(screen.getByRole("status").textContent).toBe("Not saved: A deck holds at most 100 slides after the title slide");
   });
 
   it("should take in a newer version as it arrives when nothing is unsaved, and offer it against an unsaved edit", () => {
@@ -390,7 +501,12 @@ describe("DeckEditor", () => {
       });
 
       expect(save).toHaveBeenCalledTimes(1);
-      expect(onUnsaved).toHaveBeenCalledExactlyOnceWith({ outline: { ...outline(), title: "Mine" }, base: { version: 7, revision: 9 }, conflict });
+      expect(onUnsaved).toHaveBeenCalledExactlyOnceWith({
+        outline: { ...outline(), title: "Mine" },
+        base: { version: 7, revision: 9 },
+        conflict,
+        ...(answer.ok ? {} : { error: "down" })
+      });
     }
   });
 
@@ -545,6 +661,58 @@ describe("DeckPanel's editing", () => {
     await settle();
 
     expect((screen.getByRole("textbox", { name: "Deck title" }) as HTMLInputElement).value).toBe("Mine");
+  });
+
+  it("should hand the editor the same deck on a re-render with the same version and revision, so its arrival check does not run again", async () => {
+    serve();
+    const { result, rerender } = renderHook(({ summary }) => useDeckView(summary, CONVERSATION), { initialProps: { summary: SUMMARY } });
+    await settle();
+    const first = result.current.deck;
+
+    rerender({ summary: { ...SUMMARY } });
+
+    expect(first).not.toBeNull();
+    expect(result.current.deck).toBe(first);
+    rerender({ summary: { ...SUMMARY, pptx: false } });
+    expect(result.current.deck).not.toBe(first);
+    expect(result.current.deck?.pptx).toBe(false);
+  });
+
+  it("should open a handed-back edit in the first editor only, so Edit slides after Done starts from the latest version", async () => {
+    vi.useFakeTimers();
+    serve();
+    const onDraftTaken = vi.fn();
+    const save = saving({ ok: false, error: ACTION_FAULT }, SAVED);
+    render(
+      <DeckPanel
+        conversationId={CONVERSATION}
+        deck={SUMMARY}
+        onClose={vi.fn()}
+        narrow={false}
+        announce={vi.fn()}
+        save={save}
+        draft={{ outline: outline({ title: "Mine" }), base: { version: 7, revision: 9 }, conflict: null }}
+        onDraftTaken={onDraftTaken}
+      />
+    );
+    await settle();
+    expect(onDraftTaken).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    });
+    expect(save).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    });
+    expect(screen.getByRole("status").textContent).toBe("Saved");
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit slides" }));
+
+    expect((screen.getByRole("textbox", { name: "Deck title" }) as HTMLInputElement).value).toBe("Ways of working");
+    expect(screen.getByRole("status").textContent).toBe("Saved");
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+    expect(onDraftTaken).toHaveBeenCalledTimes(1);
   });
 
   it("should read the outline again when the revision moves on with the version unchanged", async () => {

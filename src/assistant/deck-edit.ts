@@ -39,6 +39,18 @@ export function amends(latest: AmendableVersion | null, editorOid: string, now: 
 
 const canonical = (value: unknown): string => jsonbText(value) ?? "";
 
+/**
+ * Whether two outlines say the same thing, field for field, whatever order their keys are in: an edit typed and then
+ * undone is no change, and saving it would write a version the session is told the person made.
+ */
+export function sameOutline(a: DeckOutline | null | undefined, b: DeckOutline | null | undefined): boolean {
+  if (a === null || a === undefined || b === null || b === undefined) {
+    return false;
+  }
+  const text = jsonbText(a);
+  return text !== undefined && text === jsonbText(b);
+}
+
 const byId = (slides: readonly DeckSlide[]): Map<string | undefined, string> => new Map(slides.map((slide) => [slide.id, canonical(slide)]));
 
 /**

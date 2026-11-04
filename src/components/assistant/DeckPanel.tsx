@@ -7,6 +7,7 @@ import { masterNamed, type PlannedSlide, plan } from "@/assistant/slides/masters
 import { useSidebarWidth } from "@/components/assistant/AssistantShell";
 import { DeckEditor, type SaveDeckAction, type UnsavedDeckDraft } from "@/components/assistant/DeckEditor";
 import { DeckHistory, type RestoreDeckAction } from "@/components/assistant/DeckHistory";
+import { backgroundSrc, deckAssetUrl, deckPptxUrl, deckUrl } from "@/components/assistant/deck-addresses";
 import { ARTEFACT_MIN_WIDTH, ARTEFACT_WIDTH, CHAT_MIN_WIDTH } from "@/components/assistant/layout";
 import { nestRuns, SlideCanvas, slideTitle } from "@/components/assistant/SlideCanvas";
 import { useResizableWidth } from "@/components/assistant/useResizableWidth";
@@ -14,23 +15,7 @@ import { AnnouncerRegion, useAnnouncer } from "@/components/live/Announcer";
 import { ScrollPane } from "@/components/Markup";
 import { DownloadIcon } from "@/components/sidebar/icons";
 
-/** Where the browser reads a deck's outline, its pictures and its .pptx: `src/app/api/ui/assistant/decks/`. */
-export function deckUrl(conversationId: string): string {
-  return `/api/ui/assistant/decks/${encodeURIComponent(conversationId)}`;
-}
-
-export function deckAssetUrl(conversationId: string, sha256: string): string {
-  return `/api/ui/assistant/decks/${encodeURIComponent(conversationId)}/assets/${sha256}`;
-}
-
-export function deckPptxUrl(conversationId: string, version: number): string {
-  return `/api/ui/assistant/decks/${encodeURIComponent(conversationId)}/versions/${version}/pptx`;
-}
-
 const button = "flex h-[30px] shrink-0 items-center gap-1.5 rounded-lg border border-asst-strong px-2.5 text-[13px] hover:bg-asst-field disabled:opacity-40";
-
-/** The masters' artwork, which `public/assistant/slides/` serves as the plugin ships it. */
-const backgroundSrc = (image: string): string => `/assistant/slides/${image}`;
 
 /** A slide the person has asked about: the words their message will start with, and the chip's short name for it. */
 export interface SlideAsk {
@@ -67,7 +52,11 @@ export function useDeckView(deck: DeckSummary, conversationId: string): { deck: 
     return () => controller.abort();
   }, [conversationId, version, revision, attempt]);
   // A .pptx arrives after its version's outline and changes nothing in it, so the page's word on it is taken as it is.
-  const shown = read.deck !== null && read.deck.version === version && (read.deck.revision ?? revision) === revision ? { ...read.deck, pptx } : read.deck;
+  // The same object comes back until the read or that word changes, so what is keyed on the deck does not run again.
+  const shown = useMemo(
+    () => (read.deck !== null && read.deck.version === version && (read.deck.revision ?? revision) === revision ? { ...read.deck, pptx } : read.deck),
+    [read.deck, version, revision, pptx]
+  );
   return { deck: shown, failed: read.failed, retry: () => setAttempt((count) => count + 1) };
 }
 
@@ -470,7 +459,8 @@ export function DeckViewer({
  *
  * With `save`, which only the chat's owner is handed, "Edit slides" turns the panel into the editor on the latest
  * version, and Done turns it back. An edit the editor could not save comes back through `onUnsaved`, and the page
- * opens the panel again with it as `draft`, straight into the editor.
+ * opens the panel again with it as `draft`, straight into the editor, which takes it once (`onDraftTaken`): every
+ * later "Edit slides" starts from the latest version.
  */
 export function DeckPanel({
   conversationId,
@@ -483,6 +473,7 @@ export function DeckPanel({
   save,
   onBusy,
   draft,
+  onDraftTaken,
   onUnsaved
 }: {
   conversationId: string;
@@ -496,10 +487,13 @@ export function DeckPanel({
   save?: SaveDeckAction;
   onBusy?: (busy: boolean) => void;
   draft?: UnsavedDeckDraft;
+  onDraftTaken?: () => void;
   onUnsaved?: (draft: UnsavedDeckDraft) => void;
 }) {
   const view = useDeckView(deck, conversationId);
   const [editing, setEditing] = useState(draft !== undefined);
+  // Held here as well as by the page, so no editor but the first is handed it, whoever renders the panel.
+  const [handed, setHanded] = useState(draft);
   const editable = save !== undefined && view.deck !== null;
   const sidebarWidth = useSidebarWidth();
   const resize = useResizableWidth({
@@ -563,7 +557,11 @@ export function DeckPanel({
             announce("Finished editing the slides");
           }}
           onBusy={onBusy}
-          draft={draft}
+          draft={handed}
+          onDraftTaken={() => {
+            setHanded(undefined);
+            onDraftTaken?.();
+          }}
           onUnsaved={onUnsaved}
           narrow={narrow}
         />

@@ -1,5 +1,6 @@
-import { type DeckOutline, type DeckSlide, deckOutline, newSlideId } from "@/assistant/deck";
-import { type Issue, lint, masterNamed, type Outline, type PlaceholderSpec } from "@/assistant/slides/masters";
+import { type DeckOutline, type DeckSlide, deckOutline, MAX_SLIDES, newSlideId } from "@/assistant/deck";
+import type { Issue, PlaceholderSpec } from "@/assistant/slides/masters";
+import { masterNamed } from "@/assistant/slides/masters";
 
 /**
  * The editor's changes to an outline, as pure functions over it, so `DeckEditor` is the screen and these are the
@@ -205,6 +206,8 @@ function editorLine(slide: DeckSlide | undefined, field: string, item: number, c
   return typeof child === "number" ? `${before + child + 2}, nested,` : `${before + 1}`;
 }
 
+export const TOO_MANY_SLIDES = `A deck holds at most ${MAX_SLIDES} slides after the title slide`;
+
 /**
  * The first thing that would stop the outline saving, said for a person: an empty title or bullet above all, which
  * are what editing makes, then anything else the hub's check refuses. `null` when it would save.
@@ -223,7 +226,10 @@ export function blockingProblem(outline: DeckOutline): Problem | null {
   const line = onSlide && typeof item === "number" ? editorLine(outline.slides[path[1] as number], field, item, path[5]) : undefined;
   const where = slide === 0 ? "The title slide" : `Slide ${slide + 1}`;
   if (!onSlide && field === "slides") {
-    return { slide: 0, message: "The deck needs at least one slide after the title slide" };
+    if (issue?.code === "too_big") {
+      return { slide: 0, message: TOO_MANY_SLIDES };
+    }
+    return { slide: 0, message: issue?.code === "too_small" ? "The deck needs at least one slide after the title slide" : `The deck: ${issue?.message}` };
   }
   if (field === "image") {
     return { slide, message: `${where}: give the picture alt text, or mark it decorative` };
@@ -249,11 +255,12 @@ export interface FieldWarning {
 const WHERE_RE = /^(?:outline|slides\[(\d+)\])\.(\w+)(?: item (\d+))?$/;
 
 /**
- * The plugin's own warnings (`lint` in `slides/masters.ts`) for the slide at `slide`, 0 being the title slide, so
- * the editor shows the same words over a limit that `slides build` prints. They never stop a save.
+ * The plugin's own warnings (`lint` in `slides/masters.ts`, run once over the whole deck) for the slide at `slide`,
+ * 0 being the title slide, so the editor shows the same words over a limit that `slides build` prints. They never
+ * stop a save.
  */
-export function slideWarnings(outline: Outline, slide: number): FieldWarning[] {
-  return lint(outline).flatMap((issue: Issue) => {
+export function slideWarnings(issues: readonly Issue[], slide: number): FieldWarning[] {
+  return issues.flatMap((issue: Issue) => {
     const match = WHERE_RE.exec(issue.where);
     if (match === null) {
       return [];

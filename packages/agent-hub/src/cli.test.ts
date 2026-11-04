@@ -1780,6 +1780,53 @@ describe("artefact, in an assistant conversation", () => {
       expect(hub.decks.get(agentId)?.outline?.title).toBe("Ways of shipping");
     });
 
+    it("should put an older version back with --base naming the latest, sending no revision, when deck get --version wrote it", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      const first = outline({ asset: `sha256:${digest(PNG)}` });
+      hub.writeDeckAsUser(agentId, first, { [digest(PNG)]: PNG });
+      for (let version = 2; version <= 7; version += 1) {
+        hub.writeDeckAsUser(agentId, { ...first, title: `Version ${version}` });
+      }
+      hub.amendDeckAsUser(agentId, { ...first, title: "Version 7, amended" });
+      expect((await cli(["deck", "get"], { sid })).code).toBe(0);
+      const dir = path.join(home.root, ".agent-hub", "decks", `0f8a6a1e-0000-4000-8000-${String(nextSession).padStart(12, "0")}`);
+      expect(fs.readFileSync(path.join(dir, "version"), "utf8")).toBe("7\n");
+      expect(fs.readFileSync(path.join(dir, "revision"), "utf8")).toBe("8\n");
+      hub.writeDeckAsUser(agentId, { ...first, title: "Version 8" });
+      hub.writeDeckAsUser(agentId, { ...first, title: "Version 9" });
+      const older = await cli(["deck", "get", "--version", "3"], { sid });
+      expect(older.text()).toMatch(/deck put .*outline-v3\.json --pptx <deck\.pptx> --base 9/);
+
+      // Act
+      const r = await cli(["deck", "put", path.join(dir, "outline-v3.json"), "--base", "9"], { sid });
+
+      // Assert
+      expect(r.code, r.errors.join("\n")).toBe(0);
+      const body = calls(agentId, "PUT", "").find((c) => c.path === `/api/agent/${agentId}/deck`)?.body as Record<string, unknown>;
+      expect(body).toMatchObject({ base_version: 9 });
+      expect(body).not.toHaveProperty("base_revision");
+      expect(hub.decks.get(agentId)).toMatchObject({ version: 10, outline: { title: "Version 3" } });
+    });
+
+    it("should say the deck moved on, not that the user changed the version, when an explicit --base is behind", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      hub.writeDeckAsUser(agentId, outline({ asset: `sha256:${digest(PNG)}` }), { [digest(PNG)]: PNG });
+      hub.writeDeckAsUser(agentId, outline({ asset: `sha256:${digest(PNG)}` }));
+      expect((await cli(["deck", "get"], { sid })).code).toBe(0);
+      const dir = path.join(home.root, ".agent-hub", "decks", `0f8a6a1e-0000-4000-8000-${String(nextSession).padStart(12, "0")}`);
+
+      // Act
+      const r = await cli(["deck", "put", path.join(dir, "outline.json"), "--base", "1"], { sid });
+
+      // Assert
+      expect(r.code).toBe(1);
+      expect(r.errors.join("\n")).toMatch(/changed since version 1: it is now version 2, last written by the user\. Nothing was saved\./);
+      expect(r.errors.join("\n")).not.toMatch(/the user has changed version/);
+      expect(calls(agentId, "PUT", "").find((c) => c.path === `/api/agent/${agentId}/deck`)?.body).not.toHaveProperty("base_revision");
+    });
+
     it("should record the revision each put answers, and send it with --base too", async () => {
       // Arrange
       const { sid, agentId } = await session();

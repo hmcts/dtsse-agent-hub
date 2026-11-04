@@ -64,15 +64,15 @@ export interface DeckSnapshot {
   updatedBy: DeckAuthor | null;
 }
 
-export type SaveDeckResult = { saved: true; version: number; revision: number; amended: boolean } | { saved: false; current: DeckSnapshot };
+export type SaveDeckResult = { saved: true; version: number; revision: number; amended: boolean; unchanged: boolean } | { saved: false; current: DeckSnapshot };
 
 const NOT_THERE: { ok: false; error: string } = { ok: false, error: "those slides are not there" };
 
 /**
  * The owner's save of their deck from the slides panel's editor, if the deck is still at `baseVersion` and
  * `baseRevision`; otherwise nothing is written and the deck as it is now comes back, for the panel to offer it or the
- * person's own edit on top of it. A save soon after their last amends that version (`saveDeckEdit`). The session
- * learns of it from its next message's envelope.
+ * person's own edit on top of it. A save soon after their last amends that version (`saveDeckEdit`), and one the same as
+ * the version it was made from writes nothing (`unchanged`). The session learns of it from its next message's envelope.
  */
 export async function saveDeck(input: {
   conversationId: unknown;
@@ -111,6 +111,6 @@ export async function saveDeck(input: {
       const { title, outline, version, revision, updatedBy } = result.current;
       return { ok: true, saved: false, current: { title, outline, version, revision, updatedBy } };
     }
-    return { ok: true, saved: true, version: result.version, revision: result.revision, amended: result.amended };
+    return { ok: true, saved: true, version: result.version, revision: result.revision, amended: result.amended, unchanged: result.unchanged };
   });
 }

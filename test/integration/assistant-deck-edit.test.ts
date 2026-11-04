@@ -134,10 +134,48 @@ describe("saving the deck from the editor", () => {
     const saved = await save(mine, edited, { version: 1, revision: 1 });
 
     // Assert
-    expect(saved).toEqual({ ok: true, saved: true, version: 2, revision: 2, amended: false });
+    expect(saved).toEqual({ ok: true, saved: true, version: 2, revision: 2, amended: false, unchanged: false });
     expect(await readDeck(prisma, mine.id)).toMatchObject({ version: 2, revision: 2, updatedBy: "user", outline: edited, pptx: false });
     expect(await versionRow(mine, 2)).toMatchObject({ by: "user", summary: "Edited slides", editorOid: ALICE.oid, updatedAt: null });
     expect(await assistantFrame(prisma, mine.agentId)).toMatchObject({ deck_version: 2, deck_updated_by: "user", deck_revision: 2, deck_agent_version: 1 });
+  });
+
+  it("should write nothing, keeping the session's .pptx and its word on the deck, when the outline is the same as its base", async () => {
+    // Arrange
+    const mine = await agentDeck();
+    const same = outline("Ways of working");
+    // The same outline with its keys in another order, as a browser may send it.
+    const reordered = { slides: same.slides.map((slide) => Object.fromEntries(Object.entries(slide).reverse())), title: same.title } as DeckOutline;
+
+    // Act
+    const saved = await save(mine, reordered, { version: 1, revision: 1 });
+
+    // Assert
+    expect(saved).toEqual({ ok: true, saved: true, version: 1, revision: 1, amended: false, unchanged: true });
+    expect(await readDeck(prisma, mine.id)).toMatchObject({ version: 1, revision: 1, updatedBy: "agent", pptx: true });
+    expect(await prisma.assistantDeckVersion.count({ where: { conversationId: mine.id } })).toBe(1);
+    expect(await assistantFrame(prisma, mine.agentId)).toMatchObject({ deck_version: 1, deck_revision: 1, deck_updated_by: "agent" });
+  });
+
+  it("should not amend the person's own version, or move its revision on, when the save is the same as it", async () => {
+    // Arrange
+    const mine = await agentDeck();
+    const start = new Date();
+    await saveDeckEdit(prisma, mine.row, { outline: outline("Mine"), baseVersion: 1, baseRevision: 1, editorOid: ALICE.oid }, start);
+    await putDeckPptx(prisma, mine.row, 2, PPTX);
+
+    // Act
+    const again = await saveDeckEdit(
+      prisma,
+      mine.row,
+      { outline: outline("Mine"), baseVersion: 2, baseRevision: 2, editorOid: ALICE.oid },
+      new Date(start.getTime() + 1000)
+    );
+
+    // Assert
+    expect(again).toMatchObject({ saved: true, version: 2, revision: 2, amended: false, unchanged: true });
+    expect((await versionRow(mine, 2)).updatedAt).toBeNull();
+    expect(await readDeck(prisma, mine.id)).toMatchObject({ version: 2, revision: 2, pptx: true });
   });
 
   it("should amend the person's own latest version in place, moving only the revision on, when they save again soon after", async () => {
@@ -222,7 +260,7 @@ describe("saving the deck from the editor", () => {
     const reordered = await save(mine, { ...restored, slides: [...restored.slides].reverse() }, { version: 3, revision: 3 });
 
     // Assert
-    expect(reordered).toEqual({ ok: true, saved: true, version: 4, revision: 4, amended: false });
+    expect(reordered).toEqual({ ok: true, saved: true, version: 4, revision: 4, amended: false, unchanged: false });
     expect((await versionRow(mine, 4)).summary).toBe("Reordered slides");
     expect((await versionRow(mine, 3)).editorOid).toBeNull();
   });
@@ -256,7 +294,7 @@ describe("saving the deck from the editor", () => {
 
     // Assert
     expect(refused).toMatchObject({ saved: false });
-    expect(kept).toEqual({ ok: true, saved: true, version: 3, revision: 3, amended: false });
+    expect(kept).toEqual({ ok: true, saved: true, version: 3, revision: 3, amended: false, unchanged: false });
     expect(await assistantFrame(prisma, mine.agentId)).toMatchObject({ deck_agent_version: 2 });
   });
 
@@ -375,7 +413,7 @@ describe("the session after the person's edit", () => {
 
     // Assert
     expect(forked).toMatchObject({ version: 1, revision: 1, updatedBy: "user", title: "Mine, amended" });
-    expect(edited).toEqual({ ok: true, saved: true, version: 2, revision: 2, amended: false });
+    expect(edited).toEqual({ ok: true, saved: true, version: 2, revision: 2, amended: false, unchanged: false });
   });
 });
 

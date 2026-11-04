@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { assetRef, type DeckOutline, type DeckSlide } from "@/assistant/deck";
-import type { Outline } from "@/assistant/slides/masters";
+import { assetRef, type DeckOutline, type DeckSlide, MAX_SLIDES } from "@/assistant/deck";
+import { lint, type Outline } from "@/assistant/slides/masters";
 import {
   blankSlide,
   blockingProblem,
@@ -17,7 +17,8 @@ import {
   nestBullets,
   removeAt,
   setLevel,
-  slideWarnings
+  slideWarnings,
+  TOO_MANY_SLIDES
 } from "./deck-editing.ts";
 
 const SHA = "a".repeat(64);
@@ -189,11 +190,20 @@ describe("blockingProblem", () => {
     });
   });
 
+  it("should say how many slides a deck holds, not that it needs one, when it has too many", () => {
+    const slides = Array.from({ length: MAX_SLIDES + 1 }, (_, index) => ({ ...section, id: `s${index}` }));
+
+    expect(blockingProblem(deck(slides))).toEqual({ slide: 0, message: TOO_MANY_SLIDES });
+    expect(TOO_MANY_SLIDES).toBe("A deck holds at most 100 slides after the title slide");
+    expect(blockingProblem(deck(slides.slice(0, MAX_SLIDES)))).toBeNull();
+  });
+
   it("should pass on anything else the hub's check refuses", () => {
     expect(blockingProblem(deck([{ ...picture, image: { asset: assetRef(SHA), alt: "" } }]))?.message).toBe(
       "Slide 2: give the picture alt text, or mark it decorative"
     );
     expect(blockingProblem(deck([]))?.message).toBe("The deck needs at least one slide after the title slide");
+    expect(blockingProblem(deck([section, { ...section, id: "s" }]))?.message).toBe("The deck: two slides have the same id");
     expect(blockingProblem(deck([{ ...content, notes: "x".repeat(10_001) }]))?.message).toMatch(/^Slide 2: the speaker notes /);
     expect(blockingProblem({ title: "Deck", slides: [content], extra: 1 } as unknown as DeckOutline)?.message).toMatch(/^The title slide: /);
   });
@@ -209,12 +219,12 @@ describe("slideWarnings", () => {
   };
 
   it("should put the plugin's warnings against the slide and field they are about, a bullet's by its line", () => {
-    expect(slideWarnings(outline, 0)).toEqual([{ field: "title", message: expect.stringMatching(/the placeholder fits 1 line/) }]);
-    expect(slideWarnings(outline, 1)).toEqual([
+    expect(slideWarnings(lint(outline), 0)).toEqual([{ field: "title", message: expect.stringMatching(/the placeholder fits 1 line/) }]);
+    expect(slideWarnings(lint(outline), 1)).toEqual([
       { field: "title", message: "has 9 words; the placeholder fits 8" },
       { field: "bullets", item: 0, message: "has 9 words; keep a bullet to 7" }
     ]);
-    expect(slideWarnings(outline, 2).map((one) => one.field)).toEqual(["title", "title"]);
+    expect(slideWarnings(lint(outline), 2).map((one) => one.field)).toEqual(["title", "title"]);
   });
 });
 

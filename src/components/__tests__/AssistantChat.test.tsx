@@ -10,11 +10,13 @@ import { WARMING_QUIPS } from "@/assistant/thread";
 import type { ConversationView } from "@/assistant/views";
 import { type ChatActions, ChatView, QUIP_INTERVAL_MS } from "@/components/assistant/ChatView";
 import { Composer } from "@/components/assistant/Composer";
+import { SAVE_AFTER_MS } from "@/components/assistant/DeckEditor";
 import { EmptyChat, type EmptyChatActions, NEW_CHAT_DRAFT } from "@/components/assistant/EmptyChat";
 import { draftKey } from "@/components/useDraft";
 import type { ThreadMessage } from "@/messages/direct-thread";
 import type { QuestionView } from "@/questions/views";
 import type { ConversationPage, TranscriptEntryView } from "@/transcripts/conversation";
+import { ACTION_FAULT } from "@/web/action-fault";
 
 const AGENT = "11111111-1111-1111-1111-111111111111";
 const CONVERSATION = "22222222-2222-2222-2222-222222222222";
@@ -2150,6 +2152,115 @@ describe("ChatView slides", () => {
     expect(saveDeck).toHaveBeenCalledTimes(1);
     expect((screen.getByRole("textbox", { name: "Deck title" }) as HTMLInputElement).value).toBe("Mine");
     expect(await announced()).toContain("Your slides could not be saved, so they are open again");
+  });
+
+  it("should open the slides' editor on the latest version, with no trace of the handed-back edit, after it saves and Done is pressed", async () => {
+    vi.useFakeTimers();
+    const saveDeck = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false as const, error: "down" })
+      .mockResolvedValueOnce({ ok: false as const, error: ACTION_FAULT })
+      .mockResolvedValue({ ok: true as const, saved: true as const, version: 8, revision: 8, amended: false, unchanged: false });
+    const chatActions = actions({ saveDeck });
+    const { rerender } = render(chat({ deck: DECK }, chatActions));
+    await openSlides();
+    fireEvent.click(screen.getByRole("button", { name: "Edit slides" }));
+    await announced();
+    fireEvent.change(screen.getByRole("textbox", { name: "Deck title" }), { target: { value: "Mine" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Close slides" }));
+    });
+    expect((screen.getByRole("textbox", { name: "Deck title" }) as HTMLInputElement).value).toBe("Mine");
+
+    // A failed save, then Try again, which saves.
+    fireEvent.change(screen.getByRole("textbox", { name: "Deck title" }), { target: { value: "Mine!" } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SAVE_AFTER_MS);
+    });
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    });
+    expect(saveDeck).toHaveBeenCalledTimes(3);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({ ...DECK, version: 8, revision: 8, outline: { ...OUTLINE, title: "Mine!" }, updatedAt: "2026-11-03T09:01:00.000Z", sizes: {} })
+          )
+      )
+    );
+    rerender(chat({ deck: { ...DECK, version: 8, revision: 8 } }, chatActions));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit slides" }));
+
+    expect((screen.getByRole("textbox", { name: "Deck title" }) as HTMLInputElement).value).toBe("Mine!");
+    expect(screen.getByText("Editing version 8")).toBeTruthy();
+    const toolbar = screen.getByRole("toolbar", { name: "Editing slides" });
+    expect(within(toolbar).getByRole("status").textContent).toBe("Saved");
+    expect(within(toolbar).queryByRole("button", { name: "Try again" })).toBeNull();
+    expect(saveDeck).toHaveBeenCalledTimes(3);
+  });
+
+  it("should keep the document open, mark the slides' button and keep the edit for them, when the slides' closing save fails mid-edit of the document", async () => {
+    vi.useFakeTimers();
+    let answer: (result: { ok: false; error: string }) => void = () => undefined;
+    const saveDeck = vi.fn(() => new Promise<{ ok: false; error: string }>((resolve) => (answer = resolve)));
+    const saveArtefact = vi.fn(() => new Promise<never>(() => undefined));
+    render(chat({ deck: DECK, artefact: WRITTEN }, actions({ saveDeck, saveArtefact })));
+    await openSlides();
+    fireEvent.click(screen.getByRole("button", { name: "Edit slides" }));
+    await announced();
+    fireEvent.change(screen.getByRole("textbox", { name: "Deck title" }), { target: { value: "Mine" } });
+    fireEvent.click(screen.getByRole("button", { name: "Open document" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Document, in markdown" }), { target: { value: "x, edited" } });
+
+    await act(async () => {
+      answer({ ok: false, error: "down" });
+    });
+
+    expect(await announced()).toContain("Your slides could not be saved. Open slides to see your changes.");
+    expect(screen.getByRole("region", { name: "Document" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Slides" })).toBeNull();
+    expect(screen.getByTestId("slides-unsaved")).toBeTruthy();
+
+    await openSlides("Open slides, with your unsaved changes");
+    expect((screen.getByRole("textbox", { name: "Deck title" }) as HTMLInputElement).value).toBe("Mine");
+    expect(screen.queryByTestId("slides-unsaved")).toBeNull();
+  });
+
+  it("should keep the slides' editor open, mark the document's button and keep the edit for it, when the document's closing save fails mid-edit of the slides", async () => {
+    vi.useFakeTimers();
+    let answer: (result: { ok: false; error: string }) => void = () => undefined;
+    const saveArtefact = vi.fn(() => new Promise<{ ok: false; error: string }>((resolve) => (answer = resolve)));
+    const saveDeck = vi.fn(() => new Promise<never>(() => undefined));
+    render(chat({ deck: DECK, artefact: WRITTEN }, actions({ saveDeck, saveArtefact })));
+    fireEvent.click(screen.getByRole("button", { name: "Open document" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Document, in markdown" }), { target: { value: "x, edited" } });
+    await openSlides();
+    fireEvent.click(screen.getByRole("button", { name: "Edit slides" }));
+    await announced();
+    fireEvent.change(screen.getByRole("textbox", { name: "Deck title" }), { target: { value: "Mine" } });
+
+    await act(async () => {
+      answer({ ok: false, error: "down" });
+    });
+
+    expect(await announced()).toContain("Your document could not be saved. Open document to see your changes.");
+    expect(screen.getByRole("toolbar", { name: "Editing slides" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Document" })).toBeNull();
+    expect(screen.getByTestId("document-unsaved")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open document, with your unsaved changes" }));
+    const reopened = screen.getByRole("region", { name: "Document" });
+    expect((within(reopened).getByRole("textbox", { name: "Document, in markdown" }) as HTMLTextAreaElement).value).toBe("x, edited");
   });
 
   it("should put the slide in front of the message as it is sent, and drop it afterwards, when the person asks about a slide", async () => {

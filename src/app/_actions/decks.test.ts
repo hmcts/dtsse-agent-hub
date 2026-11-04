@@ -28,9 +28,9 @@ beforeEach(() => {
 describe("saveDeck", () => {
   it("should save the owner's outline as theirs, from the version and revision they name", async () => {
     access.mockResolvedValue({ conversation: CONVERSATION, access: "owner" });
-    saveDeckEdit.mockResolvedValue({ saved: true, version: 3, revision: 6, outline: OUTLINE, amended: true });
+    saveDeckEdit.mockResolvedValue({ saved: true, version: 3, revision: 6, outline: OUTLINE, amended: true, unchanged: false });
 
-    expect(await saveDeck(input())).toEqual({ ok: true, saved: true, version: 3, revision: 6, amended: true });
+    expect(await saveDeck(input())).toEqual({ ok: true, saved: true, version: 3, revision: 6, amended: true, unchanged: false });
     expect(saveDeckEdit).toHaveBeenCalledWith({}, CONVERSATION, { outline: OUTLINE, baseVersion: 3, baseRevision: 5, editorOid: "alice-oid" });
   });
 

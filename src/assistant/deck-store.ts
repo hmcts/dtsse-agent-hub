@@ -192,58 +192,68 @@ export async function requireHeldAssets(db: Database, conversationId: string, ou
 export async function writeDeck(
   prisma: PrismaClient,
   conversation: Pick<ConversationRow, "id" | "virtualAgentId" | "ownerOid">,
-  write: {
-    outline: DeckOutline | { restore: number };
-    baseVersion: number;
-    baseRevision?: number;
-    by: DeckAuthor;
-    summary: string | null;
-    editorOid?: string;
-  },
+  write: DeckWrite,
   now: Date = new Date()
 ): Promise<{ version: number; revision: number; outline: DeckOutline }> {
-  return await prisma.$transaction(async (tx) => {
-    const source = write.outline;
-    const pptxOf = "restore" in source ? source.restore : undefined;
-    const outline = "restore" in source ? await keptOutline(tx, conversation.id, source.restore) : withSlideIds(source);
-    const updated = await tx.$queryRaw<{ version: number; revision: number }[]>`
-      UPDATE assistant_conversation
-         SET deck_title = ${outline.title},
-             deck_version = deck_version + 1,
-             deck_revision = deck_revision + 1,
-             deck_updated_by = ${write.by},
-             deck_updated_at = ${now},
-             first_content_at = COALESCE(first_content_at, ${now}),
-             updated_at = ${now}
-       WHERE id = ${conversation.id}::uuid AND deck_version = ${write.baseVersion}::int
-         AND (${write.baseRevision ?? null}::int IS NULL OR deck_revision = ${write.baseRevision ?? null}::int)
-      RETURNING deck_version AS version, deck_revision AS revision
-    `;
-    const [row] = updated;
-    if (row === undefined) {
-      throw new DeckConflict(await readDeck(tx, conversation.id, now));
-    }
-    await requireHeldAssets(tx, conversation.id, outline);
+  return await prisma.$transaction(async (tx) => await writeDeckIn(tx, conversation, write, now));
+}
+
+export interface DeckWrite {
+  outline: DeckOutline | { restore: number };
+  baseVersion: number;
+  baseRevision?: number;
+  by: DeckAuthor;
+  summary: string | null;
+  editorOid?: string;
+}
+
+/** `writeDeck` in a transaction the caller holds, for a write that has read what it builds on under the same lock. */
+export async function writeDeckIn(
+  tx: Database,
+  conversation: Pick<ConversationRow, "id" | "virtualAgentId" | "ownerOid">,
+  write: DeckWrite,
+  now: Date
+): Promise<{ version: number; revision: number; outline: DeckOutline }> {
+  const source = write.outline;
+  const pptxOf = "restore" in source ? source.restore : undefined;
+  const outline = "restore" in source ? await keptOutline(tx, conversation.id, source.restore) : withSlideIds(source);
+  const updated = await tx.$queryRaw<{ version: number; revision: number }[]>`
+    UPDATE assistant_conversation
+       SET deck_title = ${outline.title},
+           deck_version = deck_version + 1,
+           deck_revision = deck_revision + 1,
+           deck_updated_by = ${write.by},
+           deck_updated_at = ${now},
+           first_content_at = COALESCE(first_content_at, ${now}),
+           updated_at = ${now}
+     WHERE id = ${conversation.id}::uuid AND deck_version = ${write.baseVersion}::int
+       AND (${write.baseRevision ?? null}::int IS NULL OR deck_revision = ${write.baseRevision ?? null}::int)
+    RETURNING deck_version AS version, deck_revision AS revision
+  `;
+  const [row] = updated;
+  if (row === undefined) {
+    throw new DeckConflict(await readDeck(tx, conversation.id, now));
+  }
+  await requireHeldAssets(tx, conversation.id, outline);
+  await tx.$executeRaw`
+    INSERT INTO assistant_deck_version (conversation_id, version, outline, by, summary, created_at, editor_oid)
+    VALUES (${conversation.id}::uuid, ${row.version}::int, ${JSON.stringify(outline)}::jsonb, ${write.by}, ${write.summary}, ${now}, ${write.editorOid ?? null})
+  `;
+  if (pptxOf !== undefined) {
     await tx.$executeRaw`
-      INSERT INTO assistant_deck_version (conversation_id, version, outline, by, summary, created_at, editor_oid)
-      VALUES (${conversation.id}::uuid, ${row.version}::int, ${JSON.stringify(outline)}::jsonb, ${write.by}, ${write.summary}, ${now}, ${write.editorOid ?? null})
+      UPDATE assistant_deck_version SET pptx = COALESCE(
+        (SELECT pptx FROM assistant_deck_version WHERE conversation_id = ${conversation.id}::uuid AND version = ${pptxOf}::int),
+        (SELECT pptx FROM assistant_deck_build
+          WHERE conversation_id = ${conversation.id}::uuid AND version = ${pptxOf}::int AND status = 'done' AND pptx IS NOT NULL
+            AND created_at >= ${heldBuildSince(now)}
+          ORDER BY created_at DESC, id ASC LIMIT 1)
+      )
+       WHERE conversation_id = ${conversation.id}::uuid AND version = ${row.version}::int
     `;
-    if (pptxOf !== undefined) {
-      await tx.$executeRaw`
-        UPDATE assistant_deck_version SET pptx = COALESCE(
-          (SELECT pptx FROM assistant_deck_version WHERE conversation_id = ${conversation.id}::uuid AND version = ${pptxOf}::int),
-          (SELECT pptx FROM assistant_deck_build
-            WHERE conversation_id = ${conversation.id}::uuid AND version = ${pptxOf}::int AND status = 'done' AND pptx IS NOT NULL
-              AND created_at >= ${heldBuildSince(now)}
-            ORDER BY created_at DESC, id ASC LIMIT 1)
-        )
-         WHERE conversation_id = ${conversation.id}::uuid AND version = ${row.version}::int
-      `;
-    }
-    await prune(tx, conversation.id, row.version, now);
-    await announce(tx, conversation);
-    return { version: row.version, revision: row.revision, outline };
-  });
+  }
+  await prune(tx, conversation.id, row.version, now);
+  await announce(tx, conversation);
+  return { version: row.version, revision: row.revision, outline };
 }
 
 export type AssetWrite = "stored" | "held" | "deck_full" | "held_full";

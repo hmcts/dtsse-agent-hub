@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DeckOutline } from "./deck.ts";
-import { AMEND_WINDOW_MS, amends, EDITED_SUMMARY, editSummary, REORDERED_SUMMARY, sessionBuildsIt } from "./deck-edit.ts";
+import { AMEND_WINDOW_MS, amends, EDITED_SUMMARY, editSummary, REORDERED_SUMMARY, sameOutline, sessionBuildsIt } from "./deck-edit.ts";
 
 const NOW = new Date("2026-11-04T10:00:00.000Z");
 const ago = (ms: number) => new Date(NOW.getTime() - ms);
@@ -34,6 +34,26 @@ describe("amends", () => {
   it("should write a new version when there is none yet, or the clock says the latest is from the future", () => {
     expect(amends(null, ALICE, NOW)).toBe(false);
     expect(amends({ by: "user", editorOid: ALICE, createdAt: new Date(NOW.getTime() + 1000) }, ALICE, NOW)).toBe(false);
+  });
+});
+
+describe("sameOutline", () => {
+  it("should be the same outline whatever order its keys are in", () => {
+    const reordered = { slides: deck.slides.map((slide) => Object.fromEntries(Object.entries(slide).reverse())), title: deck.title } as DeckOutline;
+
+    expect(sameOutline(deck, reordered)).toBe(true);
+    expect(sameOutline(deck, structuredClone(deck))).toBe(true);
+  });
+
+  it("should be a change when any field, the slides' order or an optional field differs", () => {
+    expect(sameOutline(deck, { ...deck, title: "Ways of shipping" })).toBe(false);
+    expect(sameOutline(deck, { ...deck, slides: [...deck.slides].reverse() })).toBe(false);
+    expect(sameOutline(deck, { ...deck, subtitle: "" })).toBe(false);
+  });
+
+  it("should be a change when there is no outline to compare with", () => {
+    expect(sameOutline(undefined, deck)).toBe(false);
+    expect(sameOutline(deck, null)).toBe(false);
   });
 });
 

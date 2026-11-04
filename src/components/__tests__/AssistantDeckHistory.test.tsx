@@ -17,7 +17,8 @@ import {
   LATEST_BUILD_GRACE_MS,
   type RestoreDeckAction
 } from "@/components/assistant/DeckHistory";
-import { deckPptxUrl, SharedDeck } from "@/components/assistant/DeckPanel";
+import { SharedDeck } from "@/components/assistant/DeckPanel";
+import { deckPptxUrl } from "@/components/assistant/deck-addresses";
 
 const CONVERSATION = "22222222-2222-2222-2222-222222222222";
 const SHA = "c".repeat(64);

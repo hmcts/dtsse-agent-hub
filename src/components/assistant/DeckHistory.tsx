@@ -7,16 +7,8 @@ import { type DeckDiff, diffDecks, diffSummary, type FieldChange, type SlideDiff
 import { sessionBuildsIt } from "@/assistant/deck-edit";
 import type { DeckVersionEntry, DeckVersionView } from "@/assistant/deck-history-store";
 import type { DeckView } from "@/assistant/deck-store";
-import {
-  DeckViewer,
-  deckAssetUrl,
-  deckPptxUrl,
-  deckUrl,
-  type PlannedDeck,
-  planDeck,
-  type SlideAsk,
-  unknownLayoutMessage
-} from "@/components/assistant/DeckPanel";
+import { DeckViewer, type PlannedDeck, planDeck, type SlideAsk, unknownLayoutMessage } from "@/components/assistant/DeckPanel";
+import { backgroundSrc, deckAssetUrl, deckPptxUrl, deckUrl } from "@/components/assistant/deck-addresses";
 import { SlideCanvas } from "@/components/assistant/SlideCanvas";
 import { ScrollPane } from "@/components/Markup";
 import { DownloadIcon } from "@/components/sidebar/icons";
@@ -45,8 +37,6 @@ export function deckBuildUrl(conversationId: string, jobId: string): string {
 export type RestoreDeckAction = (input: { conversationId: unknown; version: unknown; baseVersion: unknown }) => Promise<ActionResult<RestoreDeckResult>>;
 
 const button = "flex h-[30px] shrink-0 items-center gap-1.5 rounded-lg border border-asst-strong px-2.5 text-[13px] hover:bg-asst-field disabled:opacity-40";
-
-const backgroundSrc = (image: string): string => `/assistant/slides/${image}`;
 
 /** How often a build being prepared is read back. */
 export const BUILD_POLL_MS = 2000;
