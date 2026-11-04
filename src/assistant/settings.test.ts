@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { VIRTUAL_AGENT_STATUSES, type VirtualAgentStatus } from "../virtual-agents/lifecycle.ts";
-import { assistantPluginsData } from "./settings.ts";
+import { assistantPluginsData, pluginChoices } from "./settings.ts";
 
 const ID = "0f8a6a1e-0000-4000-8000-000000000001";
 const OFFERED = [
@@ -42,5 +42,15 @@ describe("assistantPluginsData", () => {
       checked: [],
       podRunning: true
     });
+  });
+});
+
+describe("pluginChoices", () => {
+  it("should show a ticked name the hub no longer offers, but not a stored slides, which every pod loads", () => {
+    expect(pluginChoices(OFFERED, ["civil", "pcs", "slides"])).toEqual([
+      { name: "pcs", description: "PCS team workflows", offered: true },
+      { name: "dtsse", description: "", offered: true },
+      { name: "civil", description: "", offered: false }
+    ]);
   });
 });

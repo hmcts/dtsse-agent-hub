@@ -9,7 +9,7 @@ import { CLAIM_TIMEOUT_MS, diskExpiresAt } from "./cleanup.ts";
 import { hashLaunchToken, isWellFormedLaunchToken, launchTokenMatches, mintLaunchToken, withoutLaunchTokens } from "./launch-token.ts";
 import { afterApplyError, awaitsOwner, nextStatus, type Observation, type PodPhase, type VirtualAgentDesired, type VirtualAgentStatus } from "./lifecycle.ts";
 import { checkName, createRefusal } from "./limits.ts";
-import { availablePlugins, checkPlugins, samePlugins, storedPlugins } from "./plugins.ts";
+import { availablePlugins, checkPlugins, podPlugins, samePlugins, storedPlugins, tickedPlugins } from "./plugins.ts";
 import { normalisePorts, samePorts } from "./ports.ts";
 import { diskTtlDays, type GatewaySettings, gatewaySettings, orchestratorLeaseSeconds } from "./settings.ts";
 import { checkSize, sizeChangeRefusal, type VirtualAgentSize } from "./size.ts";
@@ -329,7 +329,10 @@ export async function setVirtualAgentSize(prisma: PrismaClient, actorOid: string
 
 /**
  * The plugins the pod loads, any of those `VIRTUAL_AGENT_PLUGINS` offers. A name no longer offered may be kept, so the
- * owner can save other changes without first unticking it, but not added. A change bumps `generation` and
+ * owner can save other changes without first unticking it, but not added. An always-on plugin is never offered or
+ * stored. A save whose ticked names are the ones the row already has writes nothing, even to a row that still holds an
+ * always-on name: every claim adds it anyway (`podPlugins`), and leaving it is what a hub rolled back to one that
+ * stores it reads. Only a change rewrites the names, without any always-on one. A change bumps `generation` and
  * `pod_generation`, as a resize does, so the orchestrator applies the StatefulSet with the new `AGENT_HUB_PLUGINS`:
  * a running pod is replaced, and the conversation continues on its disk; a stopped one picks the change up when it
  * next starts. Refused while the agent is being deleted; someone other than the owner is told there is no such agent.
@@ -355,7 +358,7 @@ export async function setVirtualAgentPlugins(
     if (!checked.ok) {
       throw new HttpError(400, checked.error);
     }
-    if (samePlugins(row.plugins, checked.plugins)) {
+    if (samePlugins(tickedPlugins(row.plugins), checked.plugins)) {
       return row;
     }
     const updated = toRow(
@@ -549,7 +552,7 @@ export interface ClaimedVirtualAgent {
   model_route: StoredRoute;
   size: VirtualAgentSize;
   exposed_ports: number[];
-  /** The plugins the pod loads, in code-point order; empty for none. */
+  /** The plugins the pod loads: the stored ones and the always-on ones (`podPlugins`), in code-point order. */
   plugins: string[];
   owner: { oid: string };
   /** Only when this claim minted one. It is never stored and never returned again. */
@@ -766,7 +769,7 @@ export async function claimVirtualAgents(prisma: PrismaClient, cluster: string, 
         model_route: row.model_route,
         size: row.size,
         exposed_ports: row.exposed_ports,
-        plugins: storedPlugins(row.plugins),
+        plugins: podPlugins(storedPlugins(row.plugins)),
         owner: { oid: row.owner_oid },
         ...(launchToken === undefined ? {} : { launch_token: launchToken }),
         ...(gateway === undefined ? {} : { gateway }),

@@ -5,10 +5,10 @@ import type { Api } from "../api.ts";
 import { RAPID_CLOSE_MS, type ReconnectDecision, reconnectDelay } from "../reconnect.ts";
 import { createSseParser, type SseEvent } from "../sse.ts";
 import { atlassianLogin } from "../virtual/atlassian.ts";
-import { installBundled, installTicked, tickedBundled } from "../virtual/bundled-plugins.ts";
+import { installBundled, installLoaded, loadedBundled, SLIDES_PLUGIN } from "../virtual/bundled-plugins.ts";
 import { run } from "../virtual/process.ts";
 import { deleteUploads, readDeleteUploads, reconcileUploads } from "./attachments.ts";
-import { createDeckBuildRunner, SLIDES_PLUGIN } from "./deck-build.ts";
+import { createDeckBuildRunner } from "./deck-build.ts";
 import { type DiskFs, reportUploads } from "./disk.ts";
 import { createLookupRunner, type LookupDeps, type Run } from "./lookups.ts";
 import { type MemoryFs, reportMemory } from "./memory.ts";
@@ -84,9 +84,9 @@ export async function runAssistantSupervisor({
   ...options
 }: RunAssistantSupervisorOptions): Promise<void> {
   const workspace = welshDeps.workspace ?? env.VIRTUAL_AGENT_WORKSPACE ?? "/workspace/cft-workspace";
-  // Each session loads the ticked plugins this package carries; copying one is quick once its version is on disk.
+  // Each session loads the always-on and ticked plugins this package carries; copying one is quick once its version is on disk.
   const install = welshDeps.install ?? installBundled;
-  const pluginDirs = () => installTicked(env, workspace, say, install);
+  const pluginDirs = () => installLoaded(env, workspace, say, install);
   const supervisor: AssistantSupervisor = createAssistantSupervisor({ api, id, env, say, pluginDirs, ...options });
   // Lookups run beside the supervisor rather than on its chain: see `createLookupRunner`.
   const lookups = createLookupRunner({
@@ -109,12 +109,14 @@ export async function runAssistantSupervisor({
     workspace,
     install
   };
-  // Every ticked bundled plugin's dependencies are installed as the pod starts, so its first use does not wait on npm.
-  // Welsh's runs first and alone, and the others follow it one at a time. Welsh jobs wait for the Welsh install and
+  // Every loaded bundled plugin's dependencies are installed as the pod starts, so its first use does not wait on npm.
+  // That includes slides on every pod, whether or not its owner ever makes a deck: otherwise the model's first
+  // `slides build` would run the npm install inside its own tool call. Welsh's runs first and alone, and the others
+  // follow it one at a time. Welsh jobs wait for the Welsh install and
   // deck builds for the slides one, within their own time limits; a session's own run of a plugin's script installs
   // if its install is not done. None starts once the supervisor is stopping.
   const stopped = new AbortController();
-  const installs = prepareEach([WELSH_PLUGIN, ...tickedBundled(env).filter((name) => name !== WELSH_PLUGIN)], welshOptions, stopped.signal);
+  const installs = prepareEach([WELSH_PLUGIN, ...loadedBundled(env).filter((name) => name !== WELSH_PLUGIN)], welshOptions, stopped.signal);
   const welsh = createWelshRunner({ ...welshOptions, ready: installs.get(WELSH_PLUGIN) });
   // Deck builds run beside the supervisor as well, on the same runner and workspace as the Welsh jobs: a build is a
   // minute of Node that no wake should wait behind.

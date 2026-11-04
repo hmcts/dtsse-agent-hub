@@ -1,6 +1,6 @@
-// The plugins this package carries in its own `plugins/` directory, which the hub puts on a virtual agent whose
-// owner ticked them: the hub offers them in VIRTUAL_AGENT_PLUGINS beside the workspace marketplace's, and the
-// orchestrator passes the ticked names as AGENT_HUB_PLUGINS either way.
+// The plugins this package carries in its own `plugins/` directory. Every pod loads the always-on ones; any other
+// only on a virtual agent whose owner ticked it, which the hub offers in VIRTUAL_AGENT_PLUGINS beside the workspace
+// marketplace's, the orchestrator passing the ticked names as AGENT_HUB_PLUGINS either way.
 //
 // A pod runs each from a copy on its own disk rather than from the package. The package sits under the global
 // node_modules, where Node will not run TypeScript, and a client upgrade replaces it, taking any dependencies a
@@ -12,8 +12,20 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Env } from "../env.ts";
 
-/** The plugins in this package, by the name the owner ticks. */
+/** The plugins in this package, by name. */
 export const BUNDLED_PLUGINS: readonly string[] = ["welsh", "slides"];
+
+/** The plugin that carries `scripts/slides`, which deck builds run. */
+export const SLIDES_PLUGIN = "slides";
+
+/**
+ * The bundled plugins every pod loads, ticked or not. Slides is one because the Assistant's own UI (the slides panel,
+ * a deck's history, editing and builds) depends on it, so a pod without it would break a screen the person still sees.
+ * The hub mirrors this list in `src/virtual-agents/plugins.ts`.
+ */
+export const ALWAYS_ON_PLUGINS: readonly string[] = [SLIDES_PLUGIN];
+
+export const isAlwaysOn = (name: string): boolean => ALWAYS_ON_PLUGINS.includes(name);
 
 /** The package's own copies: `plugins/<name>`, the same distance from `src/` and `dist/`. */
 export const PACKAGE_PLUGINS = fileURLToPath(new URL("../../plugins/", import.meta.url));
@@ -44,17 +56,17 @@ export function pluginCacheRoot(workspace: string): string {
 }
 
 /**
- * The copies of every ticked bundled plugin, made where missing, for a pod's sessions to load. A plugin that cannot
- * be copied is said and left out rather than stopping the pod: its owner's chats still run, without it.
+ * The copies of every bundled plugin the pod loads, made where missing, for its sessions to load. A plugin that
+ * cannot be copied is said and left out rather than stopping the pod: its owner's chats still run, without it.
  */
-export function installTicked(
+export function installLoaded(
   env: Env,
   workspace: string,
   say: (message: string) => void = () => {},
   install: (name: string, workspace: string) => string = installBundled
 ): string[] {
   const dirs: string[] = [];
-  for (const name of tickedBundled(env)) {
+  for (const name of loadedBundled(env)) {
     try {
       dirs.push(install(name, workspace));
     } catch (e) {
@@ -62,6 +74,11 @@ export function installTicked(
     }
   }
   return dirs;
+}
+
+/** The bundled plugins a pod loads: the always-on ones, then the ticked ones not among them. */
+export function loadedBundled(env: Env): string[] {
+  return [...ALWAYS_ON_PLUGINS, ...tickedBundled(env).filter((name) => !isAlwaysOn(name))];
 }
 
 /** The bundled plugins among AGENT_HUB_PLUGINS, in the order they are named there. */

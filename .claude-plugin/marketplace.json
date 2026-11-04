@@ -5,7 +5,7 @@
     "email": "hmcts@justice.gov.uk"
   },
   "metadata": {
-    "description": "Plugins the agent hub puts on the virtual agents of people who tick them, and that anyone can install into Claude Code beside a cft-workspace checkout."
+    "description": "Plugins the agent hub puts on virtual agents, slides on every one and the others for people who tick them, and that anyone can install into Claude Code beside a cft-workspace checkout."
   },
   "plugins": [
     {

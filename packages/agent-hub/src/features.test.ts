@@ -19,7 +19,7 @@ describe("CLIENT_FEATURES", () => {
   // an assertion below, which the per-name list cannot, and which is how this file came to claim a standard it did
   // not meet.
   it("should hold every feature this build claims, so a name dropped in a merge fails here", () => {
-    expect(CLIENT_FEATURES).toHaveLength(10);
+    expect(CLIENT_FEATURES).toHaveLength(11);
   });
 
   /**
@@ -39,11 +39,22 @@ describe("CLIENT_FEATURES", () => {
    * `github-lookups` is misdiagnosed as `lookups` is, for the GitHub repository and Project searches alone.
    * `deck-build` is misdiagnosed the same way: the slides panel says the assistant needs an update to build an older
    * version's .pptx.
+   * `slides-always-on` is worse: the slides panel tells a person with nothing ticked to restart their assistant to
+   * build a version, and a restart does not change the answer.
    */
-  it.each(["attachments", "deck-build", "files", "github-lookups", "lookups", "memory-anon", "model-alias", "stop", "welsh", "welsh-review"])(
-    "should claim %s",
-    (feature) => {
-      expect(CLIENT_FEATURES).toContain(feature);
-    }
-  );
+  it.each([
+    "attachments",
+    "deck-build",
+    "files",
+    "github-lookups",
+    "lookups",
+    "memory-anon",
+    "model-alias",
+    "slides-always-on",
+    "stop",
+    "welsh",
+    "welsh-review"
+  ])("should claim %s", (feature) => {
+    expect(CLIENT_FEATURES).toContain(feature);
+  });
 });

@@ -30,7 +30,8 @@ import {
   validSessionId,
   writeJson
 } from "./session.ts";
-import { tickedBundled } from "./virtual/bundled-plugins.ts";
+import { bundledCopy } from "./skills.ts";
+import { SLIDES_PLUGIN } from "./virtual/bundled-plugins.ts";
 import { virtualAgent } from "./virtual-agent.ts";
 
 const HANDOFF_TTL_MS = 5 * 60 * 1000;
@@ -310,11 +311,14 @@ async function askUserQuestion(sid: string, input: HookPayload, env: Env): Promi
   return denyOutput(ASKED_REASON);
 }
 
-/** The deck skill exists only where the slides plugin was ticked, so a session without it is not sent looking for it. */
+/**
+ * The deck skill exists only in a session started with the pod's copy of the slides plugin, so a session whose copy
+ * could not be made is not sent looking for it.
+ */
 function slidesNote(env: Env): string {
-  return tickedBundled(env).includes("slides")
-    ? ` It can also have one slide deck, which the slides plugin's deck skill reads with \`${CLI} deck get\` and publishes with \`${CLI} deck put\`.`
-    : "";
+  return bundledCopy(SLIDES_PLUGIN, env) === null
+    ? ""
+    : ` It can also have one slide deck, which the slides plugin's deck skill reads with \`${CLI} deck get\` and publishes with \`${CLI} deck put\`.`;
 }
 
 export async function runHook(

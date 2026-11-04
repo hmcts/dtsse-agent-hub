@@ -3,7 +3,7 @@
 // `deps`, which installs them under a lock and does nothing else.
 import { join } from "node:path";
 import type { Env } from "../env.ts";
-import { installBundled, tickedBundled } from "../virtual/bundled-plugins.ts";
+import { installBundled, loadedBundled, SLIDES_PLUGIN } from "../virtual/bundled-plugins.ts";
 import type { Run } from "./lookups.ts";
 
 /** Long enough for a first install of a plugin's dependencies on a pod's network. */
@@ -20,17 +20,23 @@ export type PrepareDeps = {
 };
 
 /**
- * The pod's copy of a bundled plugin's `scripts/<name>`, made on first use. Null when the owner has not ticked the
- * plugin, so a pod runs a plugin's script only for someone who asked for it.
+ * The pod's copy of a bundled plugin's `scripts/<name>`, made on first use. Null when the pod does not load the
+ * plugin, which for one that is not always on means its owner has not ticked it, so a pod runs a plugin's script
+ * only for someone who asked for it.
  */
 export function bundledScript(name: string, workspace: string, env: Env, install: (name: string, workspace: string) => string = installBundled): string | null {
-  if (!tickedBundled(env).includes(name)) {
+  if (!loadedBundled(env).includes(name)) {
     return null;
   }
   return join(install(name, workspace), "scripts", name);
 }
 
-/** Runs a ticked bundled plugin's `scripts/<name> deps`. Never throws: a failure is said, and the next run of the script installs again. */
+/** The pod's copy of the slides plugin's `scripts/slides`, made on first use. Every pod loads slides, so there is always one. */
+export function slidesScript(workspace: string, install: (name: string, workspace: string) => string = installBundled): string {
+  return join(install(SLIDES_PLUGIN, workspace), "scripts", SLIDES_PLUGIN);
+}
+
+/** Runs a loaded bundled plugin's `scripts/<name> deps`. Never throws: a failure is said, and the next run of the script installs again. */
 export async function prepareBundled(name: string, deps: PrepareDeps): Promise<void> {
   const say = deps.say ?? (() => {});
   try {

@@ -1,5 +1,33 @@
 import { describe, expect, it, vi } from "vitest";
-import { availablePlugins, checkPlugins, MAX_PLUGINS, PluginConfigurationError, samePlugins, storedPlugins } from "./plugins.ts";
+import {
+  ALWAYS_ON_PLUGINS,
+  availablePlugins,
+  checkPlugins,
+  isAlwaysOn,
+  MAX_PLUGINS,
+  PluginConfigurationError,
+  podPlugins,
+  samePlugins,
+  storedPlugins,
+  tickedPlugins
+} from "./plugins.ts";
+
+describe("ALWAYS_ON_PLUGINS", () => {
+  it("should hold slides and not welsh", () => {
+    expect(ALWAYS_ON_PLUGINS).toEqual(["slides"]);
+    expect(isAlwaysOn("slides")).toBe(true);
+    expect(isAlwaysOn("welsh")).toBe(false);
+  });
+
+  it("should be the pod client's own list when the hub adds it to a claim", async () => {
+    // Two copies, because the hub does not depend on the client package: the hub's decides what a claim carries, and
+    // the client's what a pod loads. Imported by URL so that the hub's typecheck does not take in the client's sources.
+    const client: { ALWAYS_ON_PLUGINS: readonly string[] } = await import(
+      new URL("../../packages/agent-hub/src/virtual/bundled-plugins.ts", import.meta.url).href
+    );
+    expect(ALWAYS_ON_PLUGINS).toEqual(client.ALWAYS_ON_PLUGINS);
+  });
+});
 
 describe("availablePlugins", () => {
   it.each([{}, { VIRTUAL_AGENT_PLUGINS: "" }, { VIRTUAL_AGENT_PLUGINS: " , ," }])("should offer none when the variable is %j", (env) => {
@@ -16,6 +44,12 @@ describe("availablePlugins", () => {
 
   it("should keep the first entry when a name is repeated", () => {
     expect(availablePlugins({ VIRTUAL_AGENT_PLUGINS: "pcs=first,pcs=second" })).toEqual([{ name: "pcs", description: "first" }]);
+  });
+
+  it("should not offer slides when the configuration still names it", () => {
+    expect(availablePlugins({ VIRTUAL_AGENT_PLUGINS: "welsh=Welsh translations,slides=HMCTS slide decks" })).toEqual([
+      { name: "welsh", description: "Welsh translations" }
+    ]);
   });
 
   it.each(["PCS", "-pcs", "pcs team", "=no name", "pcs/x"])("should refuse the configuration when it names %j", (entry) => {
@@ -36,6 +70,11 @@ describe("checkPlugins", () => {
 
   it("should refuse a name the hub does not offer", () => {
     expect(checkPlugins(["pcs", "civil"], () => OFFERED)).toEqual({ ok: false, error: "civil is not a plugin this hub offers" });
+  });
+
+  it("should accept slides and store it no more when the form sends it, though the hub does not offer it", () => {
+    expect(checkPlugins(["slides", "pcs"], () => OFFERED)).toEqual({ ok: true, plugins: ["pcs"] });
+    expect(checkPlugins(["slides"], () => OFFERED)).toEqual({ ok: true, plugins: [] });
   });
 
   it.each([[["pcs team"]], [[""]], [[3]], [[{}]]])("should refuse %j when it is not a list of plugin names", (raw) => {
@@ -64,6 +103,22 @@ describe("checkPlugins", () => {
     expect(offered).not.toHaveBeenCalled();
   });
 
+  it("should not read the hub's offer list when the form sends only always-on plugins", () => {
+    const offered = vi.fn(() => {
+      throw new PluginConfigurationError('VIRTUAL_AGENT_PLUGINS has "Not A Plugin Name", which is not a plugin name');
+    });
+
+    expect(checkPlugins(["slides"], offered)).toEqual({ ok: true, plugins: [] });
+    expect(offered).not.toHaveBeenCalled();
+  });
+
+  it("should read the hub's offer list once however many names are ticked", () => {
+    const offered = vi.fn(() => OFFERED);
+
+    expect(checkPlugins(["slides", "pcs", "dtsse"], offered)).toEqual({ ok: true, plugins: ["dtsse", "pcs"] });
+    expect(offered).toHaveBeenCalledTimes(1);
+  });
+
   it("should read the hub's offer list, and fail with it, once a name is actually ticked", () => {
     const offered = () => {
       throw new PluginConfigurationError('VIRTUAL_AGENT_PLUGINS has "Not A Plugin Name", which is not a plugin name');
@@ -85,6 +140,25 @@ describe("samePlugins", () => {
     expect(samePlugins(["dtsse", "pcs"], ["dtsse", "pcs"])).toBe(true);
     expect(samePlugins(["dtsse", "pcs"], ["dtsse"])).toBe(false);
     expect(samePlugins([], [])).toBe(true);
+  });
+});
+
+describe("tickedPlugins", () => {
+  it("should leave out an always-on name a row still holds and keep the rest in order", () => {
+    expect(tickedPlugins(["pcs", "slides", "welsh"])).toEqual(["pcs", "welsh"]);
+    expect(tickedPlugins(["slides"])).toEqual([]);
+    expect(tickedPlugins([])).toEqual([]);
+  });
+});
+
+describe("podPlugins", () => {
+  it("should add slides to what is stored, once and in code-point order", () => {
+    expect(podPlugins([])).toEqual(["slides"]);
+    expect(podPlugins(["pcs", "welsh"])).toEqual(["pcs", "slides", "welsh"]);
+  });
+
+  it("should give the same list when a row still holds slides", () => {
+    expect(podPlugins(["pcs", "slides"])).toEqual(podPlugins(["pcs"]));
   });
 });
 

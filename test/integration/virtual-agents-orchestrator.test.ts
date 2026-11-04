@@ -152,7 +152,7 @@ describe("POST /api/orchestrator/claim", () => {
       model_route: "own_licence",
       size: "small",
       exposed_ports: [],
-      plugins: [],
+      plugins: ["slides"],
       owner: { oid: ALICE.oid },
       launch_token: expect.stringMatching(/^ahv_[A-Za-z0-9_-]{43}$/)
     });

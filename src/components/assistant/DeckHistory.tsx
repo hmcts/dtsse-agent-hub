@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import type { RestoreDeckResult } from "@/app/_actions/decks";
 import { DECK_BUILD_TIMEOUT_MS, type DeckBuildRequest, type DeckBuildView } from "@/assistant/deck-build";
@@ -13,6 +14,7 @@ import { SlideCanvas } from "@/components/assistant/SlideCanvas";
 import { ScrollPane } from "@/components/Markup";
 import { DownloadIcon } from "@/components/sidebar/icons";
 import type { ActionResult } from "@/web/action";
+import { SETTINGS_PARAMETER } from "@/web/home";
 
 /**
  * A deck's kept versions, beside the latest one the panel shows: a list to pick one from, that version shown read-only
@@ -149,14 +151,23 @@ function download(href: string): void {
   link.remove();
 }
 
-type Building = { state: "idle" } | { state: "asking" } | { state: "preparing"; jobId: string } | { state: "ready" } | { state: "failed"; message: string };
+type Building =
+  | { state: "idle" }
+  | { state: "asking" }
+  | { state: "preparing"; jobId: string }
+  | { state: "ready" }
+  | { state: "failed"; message: string; restart?: boolean };
 
-const NOT_STARTED: Record<"waking" | "unsupported" | "assistant_gone" | "no_pod", string> = {
+const NOT_STARTED: Record<"waking" | "unsupported" | "restart_needed" | "assistant_gone" | "no_pod", string> = {
   waking: "Your assistant is starting up. Try again in a minute.",
   unsupported: "Your assistant needs an update before it can build this version. It gets one the next time it restarts.",
+  restart_needed: "Restart your assistant to load the slide tools, then try again.",
   assistant_gone: "This chat's assistant has been replaced, so older versions can't be prepared here.",
   no_pod: "Older versions can only be prepared in a chat that runs on your assistant in the hub, not in a chat from your own machine."
 };
+
+/** The settings' Assistant section, where the restart is, opened over this chat rather than in place of it. */
+export const RESTART_IN_SETTINGS = `?${new URLSearchParams({ [SETTINGS_PARAMETER]: "assistant" })}`;
 
 /**
  * One version's .pptx: a download when the hub holds it, and otherwise, for the owner, a build by their pod, read back
@@ -298,7 +309,7 @@ export function DeckDownload({
         setBuilding({ state: "preparing", jobId: answer.job_id });
         announce(`Preparing version ${version}`);
       } else {
-        setBuilding({ state: "failed", message: NOT_STARTED[answer.status] });
+        setBuilding({ state: "failed", message: NOT_STARTED[answer.status], restart: answer.status === "restart_needed" });
       }
     } catch {
       setBuilding({ state: "failed", message: "This version could not be prepared." });
@@ -331,6 +342,11 @@ export function DeckDownload({
     return (
       <span role="alert" className="flex flex-wrap items-center gap-1.5 text-[13px] text-asst-error">
         {building.message}
+        {building.restart === true ? (
+          <Link href={RESTART_IN_SETTINGS} className="text-asst-accent underline hover:text-asst-accent-hover">
+            Restart it in Settings
+          </Link>
+        ) : null}
         <button type="button" onClick={() => void prepare()} className={button}>
           Try again
         </button>

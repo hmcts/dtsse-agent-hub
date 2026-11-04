@@ -5,6 +5,7 @@ import * as liveRoute from "../../src/app/api/orchestrator/live/route.ts";
 import * as credentialRoute from "../../src/app/api/virtual/[virtualAgentId]/credentials/[kind]/route.ts";
 import * as codeRoute from "../../src/app/api/virtual/[virtualAgentId]/login/[kind]/code/route.ts";
 import { putCredential } from "../../src/credentials/store.ts";
+import { byCodePoint } from "../../src/topics/slug.ts";
 import { APPLY_FAILURES_BEFORE_FAILED } from "../../src/virtual-agents/lifecycle.ts";
 import { MAX_VIRTUAL_AGENTS_PER_USER } from "../../src/virtual-agents/limits.ts";
 import {
@@ -379,7 +380,7 @@ describe("a virtual agent's plugins", () => {
     const created = await createWith(["wa", "pcs"]);
 
     expect(created.plugins).toEqual(["pcs", "wa"]);
-    expect((await claim()).find((entry) => entry.id === created.id)).toMatchObject({ plugins: ["pcs", "wa"] });
+    expect((await claim()).find((entry) => entry.id === created.id)).toMatchObject({ plugins: ["pcs", "slides", "wa"] });
   });
 
   it("should create an agent with no plugins when none are ticked", async () => {
@@ -416,7 +417,7 @@ describe("a virtual agent's plugins", () => {
 
     expect(await row(id)).toMatchObject({ plugins: ["dtsse"], generation: before.generation + 1, podGeneration: before.podGeneration + 1 });
     expect((await claim()).find((entry) => entry.id === id)).toMatchObject({
-      plugins: ["dtsse"],
+      plugins: ["dtsse", "slides"],
       generation: before.generation + 1,
       pod_generation: before.podGeneration + 1
     });
@@ -478,9 +479,74 @@ describe("a virtual agent's plugins", () => {
     vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "dtsse");
 
     expect((await setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, ["pcs", "dtsse"])).plugins).toEqual(["dtsse", "pcs"]);
-    expect((await claim()).find((entry) => entry.id === agent.id)).toMatchObject({ plugins: ["dtsse", "pcs"] });
+    expect((await claim()).find((entry) => entry.id === agent.id)).toMatchObject({ plugins: ["dtsse", "pcs", "slides"] });
     await setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, ["dtsse"]);
     await expect(setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, ["dtsse", "pcs"])).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("should create an agent without slides when the request names it, since every pod loads it", async () => {
+    expect((await createWith(["slides", "pcs"])).plugins).toEqual(["pcs"]);
+  });
+
+  it("should claim an agent with nothing ticked with slides, which every pod loads", async () => {
+    const created = await createWith([]);
+
+    expect(created.plugins).toEqual([]);
+    expect((await claim()).find((entry) => entry.id === created.id)).toMatchObject({ plugins: ["slides"] });
+  });
+
+  it("should write nothing and bump nothing on a save whose ticked plugins are unchanged when the row still holds slides", async () => {
+    const { id } = await started(ALICE, "pcs-api");
+    await prisma.virtualAgent.update({ where: { id }, data: { plugins: ["pcs", "slides"] } });
+    const before = await prisma.virtualAgent.findUniqueOrThrow({ where: { id } });
+    actAs("alice");
+
+    expect(await actions.setVirtualAgentPlugins(ticked({ id }, ["pcs"]))).toEqual({ ok: true, confirmation: "Its plugins are unchanged" });
+
+    expect(await prisma.virtualAgent.findUniqueOrThrow({ where: { id } })).toEqual(before);
+    expect((await claim()).some((entry) => entry.id === id)).toBe(false);
+  });
+
+  it("should strip a stored slides on a save that changes the ticked plugins, and claim the agent with slides added back", async () => {
+    const { id } = await started(ALICE, "pcs-api");
+    await prisma.virtualAgent.update({ where: { id }, data: { plugins: ["pcs", "slides"] } });
+    const before = await row(id);
+    actAs("alice");
+
+    expect(await actions.setVirtualAgentPlugins(ticked({ id }, ["dtsse"]))).toEqual({ ok: true, confirmation: "pcs-api is restarting with its new plugins" });
+
+    expect(await row(id)).toMatchObject({ plugins: ["dtsse"], generation: before.generation + 1, podGeneration: before.podGeneration + 1 });
+    expect((await claim()).find((entry) => entry.id === id)).toMatchObject({ plugins: ["dtsse", "slides"] });
+  });
+
+  it("should claim a row that still holds slides with it once", async () => {
+    const agent = await createWith(["pcs"]);
+    await prisma.virtualAgent.update({ where: { id: agent.id }, data: { plugins: ["pcs", "slides"] } });
+
+    expect((await claim()).find((entry) => entry.id === agent.id)).toMatchObject({ plugins: ["pcs", "slides"] });
+  });
+
+  it("should neither add nor refuse slides when the form sends it for an agent that has none stored", async () => {
+    const agent = await createWith(["pcs"]);
+
+    expect(await setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, ["pcs", "slides"])).toMatchObject({ plugins: ["pcs"], generation: agent.generation });
+  });
+
+  it("should store every offered plugin when the most an agent may have are ticked and the row still holds slides", async () => {
+    const many = Array.from({ length: 20 }, (_, index) => `p-${index}`);
+    vi.stubEnv("VIRTUAL_AGENT_PLUGINS", many.join(","));
+    const agent = await createWith([]);
+    await prisma.virtualAgent.update({ where: { id: agent.id }, data: { plugins: ["slides"] } });
+
+    expect((await setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, many)).plugins).toEqual([...many].sort(byCodePoint));
+    expect((await row(agent.id)).plugins).toEqual([...many].sort(byCodePoint));
+  });
+
+  it("should accept slides alone while the hub's plugin configuration is malformed", async () => {
+    const agent = await createWith([]);
+    vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "Not A Plugin Name");
+
+    expect(await setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, ["slides"])).toMatchObject({ plugins: [], generation: agent.generation });
   });
 
   it("should refuse someone other than the owner as if there were no such agent", async () => {
