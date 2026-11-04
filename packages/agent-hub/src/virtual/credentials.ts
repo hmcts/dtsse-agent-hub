@@ -4,7 +4,7 @@ import type { Api } from "../api.ts";
 import { readStdinText } from "../cli/command.ts";
 import { withRetry } from "../retry.ts";
 import type { CredentialKind } from "../wire.ts";
-import { CREDENTIAL_KINDS } from "../wire.ts";
+import { POD_CREDENTIAL_KINDS } from "../wire.ts";
 import { EXIT_NO_CREDENTIAL } from "./phases.ts";
 
 /** The kinds agent-hub gives back to their owner, not only to the owner's virtual agents. */
@@ -13,12 +13,12 @@ export const OWNER_READABLE: readonly CredentialKind[] = ["claude_md", "git_iden
 // `Array.prototype.includes` does not narrow, so a kind read off argv reaches `Api`, whose credential calls
 // take the union rather than a string, only through a type predicate.
 export function isCredentialKind(value: unknown): value is CredentialKind {
-  return typeof value === "string" && (CREDENTIAL_KINDS as readonly string[]).includes(value);
+  return typeof value === "string" && (POD_CREDENTIAL_KINDS as readonly string[]).includes(value);
 }
 
 export function requireCredentialKind(value: unknown): CredentialKind {
   if (!isCredentialKind(value)) {
-    throw new Error(`credential kind must be one of ${CREDENTIAL_KINDS.join(", ")}`);
+    throw new Error(`credential kind must be one of ${POD_CREDENTIAL_KINDS.join(", ")}`);
   }
   return value;
 }

@@ -7,6 +7,12 @@ import type { NameSource } from "./session.ts";
 /** The credential kinds `docs/agent-api.md` defines; any other gives 404. */
 export const CREDENTIAL_KINDS = ["github", "azure", "claude", "jenkins", "atlassian", "claude_md", "git_identity", "microsoft"] as const;
 
+/**
+ * The kinds a pod reads and stores through its own routes: all but a Microsoft 365 connection, which the hub keeps to
+ * itself and hands a pod only access tokens from.
+ */
+export const POD_CREDENTIAL_KINDS = CREDENTIAL_KINDS.filter((kind) => kind !== "microsoft");
+
 export type CredentialKind = (typeof CREDENTIAL_KINDS)[number];
 
 /** The phases a pod may report with `POST /api/virtual/{id}/status`. */
