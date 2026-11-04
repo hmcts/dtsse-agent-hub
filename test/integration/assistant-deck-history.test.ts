@@ -292,6 +292,55 @@ describe("restoring a deck version", () => {
     expect(await assistantFrame(prisma, mine.agentId)).toMatchObject({ deck_version: 3, deck_updated_by: "user" });
   });
 
+  it("should keep the .pptx kept with the third-newest version when restoring it, though the write moves it out of the latest 3", async () => {
+    // Arrange
+    const { mine } = await deckOf(3);
+
+    // Act
+    actAs("alice");
+    const restored = await deckActions.restoreDeckVersion({ conversationId: mine.id, version: 1, baseVersion: 3 });
+
+    // Assert
+    expect(restored).toEqual({ ok: true, restored: true, version: 4 });
+    const pptxOf = async (version: number) =>
+      (await prisma.assistantDeckVersion.findUniqueOrThrow({ where: { conversationId_version: { conversationId: mine.id, version } } })).pptx;
+    expect(Buffer.from((await pptxOf(4))!)).toEqual(PPTX);
+    expect(await pptxOf(1)).toBeNull();
+    expect((await readDeck(prisma, mine.id)).pptx).toBe(true);
+    const file = await download("alice", mine.id, 4);
+    expect(Buffer.from(await file.arrayBuffer())).toEqual(PPTX);
+  });
+
+  it("should keep a .pptx built on request for the third-newest version when restoring it", async () => {
+    // Arrange
+    const { mine } = await deckOf(3);
+    await prisma.assistantDeckVersion.update({ where: { conversationId_version: { conversationId: mine.id, version: 1 } }, data: { pptx: null } });
+    await prisma.assistantDeckBuild.create({ data: { conversationId: mine.id, version: 1, status: "done", pptx: BUILT, finishedAt: new Date() } });
+
+    // Act
+    actAs("alice");
+    const restored = await deckActions.restoreDeckVersion({ conversationId: mine.id, version: 1, baseVersion: 3 });
+
+    // Assert
+    expect(restored).toEqual({ ok: true, restored: true, version: 4 });
+    const kept = await prisma.assistantDeckVersion.findUniqueOrThrow({ where: { conversationId_version: { conversationId: mine.id, version: 4 } } });
+    expect(Buffer.from(kept.pptx!)).toEqual(BUILT);
+  });
+
+  it("should restore with no .pptx when the restored version has none kept or built", async () => {
+    // Arrange
+    const { mine } = await deckOf(3);
+    await prisma.assistantDeckBuild.create({ data: { conversationId: mine.id, version: 2, status: "failed", error: "nope", finishedAt: new Date() } });
+
+    // Act
+    actAs("alice");
+    const restored = await deckActions.restoreDeckVersion({ conversationId: mine.id, version: 2, baseVersion: 3 });
+
+    // Assert
+    expect(restored).toEqual({ ok: true, restored: true, version: 4 });
+    expect((await readDeck(prisma, mine.id)).pptx).toBe(false);
+  });
+
   it("should write nothing and say what is there now when the deck moved on since the base", async () => {
     // Arrange
     const { mine } = await deckOf(3);
@@ -604,6 +653,19 @@ describe("the deck build's gate", () => {
 
     // Assert
     expect(answer).toEqual({ status: "unsupported" });
+    expect(await prisma.assistantDeckBuild.count()).toBe(0);
+  });
+
+  it("should answer no_pod, recording nothing, for a local session's chat", async () => {
+    // Arrange
+    const { mine } = await deckOf(4);
+    await prisma.assistantConversation.update({ where: { id: mine.id }, data: { virtualAgentId: null } });
+
+    // Act
+    const answer = await jsonOf(await prepare("alice", mine.id, 1));
+
+    // Assert
+    expect(answer).toEqual({ status: "no_pod" });
     expect(await prisma.assistantDeckBuild.count()).toBe(0);
   });
 

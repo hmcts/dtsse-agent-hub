@@ -119,6 +119,7 @@ function getArgs(argv: string[]): { json: boolean; slide: string | undefined; ve
   if (flags.slide !== undefined && !SLIDE_ID_RE.test(flags.slide)) {
     throw new UsageError("--slide takes a slide's id, such as s_ab12");
   }
+  // Mirrors the hub's `versionParam` (src/assistant/deck-build.ts), which the client cannot import.
   if (flags.version !== undefined && !/^[1-9]\d{0,8}$/.test(flags.version)) {
     throw new UsageError("--version takes a version number from 1");
   }

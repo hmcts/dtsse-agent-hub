@@ -13,6 +13,7 @@ import {
   outlineAssets,
   withSlideIds
 } from "./deck.ts";
+import { DECK_BUILD_KEEP_MS } from "./deck-build.ts";
 
 /**
  * A conversation's slide deck, written in versions the way its document is (`artefact-store.ts`): a write names the
@@ -121,11 +122,14 @@ async function deleteUnnamedAssets(db: Database, conversationId: string, now: Da
  * every picture the outline names must already be held (`DeckAssetsMissing`).
  *
  * A deck is something in the chat, so the first one records the conversation's first content, as a document does.
+ *
+ * `pptxOf` names a version with the same outline, whose .pptx (kept with it, or built on request and not yet swept)
+ * the new version starts with. It is copied before the retention runs, which may drop the old version's own.
  */
 export async function writeDeck(
   prisma: PrismaClient,
   conversation: Pick<ConversationRow, "id" | "virtualAgentId" | "ownerOid">,
-  write: { outline: DeckOutline; baseVersion: number; by: DeckAuthor; summary: string | null },
+  write: { outline: DeckOutline; baseVersion: number; by: DeckAuthor; summary: string | null; pptxOf?: number },
   now: Date = new Date()
 ): Promise<{ version: number; outline: DeckOutline }> {
   const outline = withSlideIds(write.outline);
@@ -160,6 +164,18 @@ export async function writeDeck(
       INSERT INTO assistant_deck_version (conversation_id, version, outline, by, summary, created_at)
       VALUES (${conversation.id}::uuid, ${row.version}::int, ${JSON.stringify(outline)}::jsonb, ${write.by}, ${write.summary}, ${now})
     `;
+    if (write.pptxOf !== undefined) {
+      await tx.$executeRaw`
+        UPDATE assistant_deck_version SET pptx = COALESCE(
+          (SELECT pptx FROM assistant_deck_version WHERE conversation_id = ${conversation.id}::uuid AND version = ${write.pptxOf}::int),
+          (SELECT pptx FROM assistant_deck_build
+            WHERE conversation_id = ${conversation.id}::uuid AND version = ${write.pptxOf}::int AND status = 'done' AND pptx IS NOT NULL
+              AND created_at >= ${new Date(now.getTime() - DECK_BUILD_KEEP_MS)}
+            ORDER BY created_at DESC, id ASC LIMIT 1)
+        )
+         WHERE conversation_id = ${conversation.id}::uuid AND version = ${row.version}::int
+      `;
+    }
     await prune(tx, conversation.id, row.version, now);
     await announce(tx, conversation);
     return { version: row.version, outline };

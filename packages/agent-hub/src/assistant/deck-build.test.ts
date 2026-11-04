@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { createMockHub, type MockHub } from "../__fixtures__/mock-hub.ts";
 import { createApi } from "../api.ts";
 import {
@@ -14,6 +14,7 @@ import {
   NOT_LOADED,
   parseDeckBuildFrame,
   runDeckBuild,
+  STILL_PREPARING,
   TOO_SLOW
 } from "./deck-build.ts";
 import type { RunResult } from "./lookups.ts";
@@ -37,6 +38,10 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await hub.close();
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 const OUTLINE = {
@@ -232,6 +237,68 @@ describe("runDeckBuild", () => {
   });
 });
 
+describe("runDeckBuild and the slides tools' install", () => {
+  it("should wait for the slides tools' install before it builds", async () => {
+    // Arrange
+    const frame = asked();
+    let finishInstall = () => {};
+    const ready = new Promise<void>((resolve) => {
+      finishInstall = resolve;
+    });
+    const { deps: d, calls } = deps(
+      ({ args }) => {
+        fs.writeFileSync(args[3] as string, PPTX);
+        return { code: 0, stdout: "{}", stderr: "" };
+      },
+      { ready }
+    );
+
+    // Act
+    const building = runDeckBuild(d, frame);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const before = calls.length;
+    finishInstall();
+    await building;
+
+    // Assert
+    expect(before).toBe(0);
+    expect(calls).toHaveLength(1);
+    expect(answerOf(frame.job_id)).toEqual({ virtual_id: VID, job_id: frame.job_id, pptx: PPTX });
+  });
+
+  it("should take the wait for the install out of the build's own time limit", async () => {
+    // Arrange
+    const frame = asked();
+    let now = 0;
+    const { deps: d, calls } = deps(() => ({ code: 2, stdout: JSON.stringify({ errors: ["x"] }), stderr: "" }), {
+      clock: () => now,
+      budgetMs: 100_000,
+      ready: Promise.resolve().then(() => {
+        now += 40_000;
+      })
+    });
+
+    // Act
+    await runDeckBuild(d, frame);
+
+    // Assert
+    expect(calls[0]?.timeoutMs).toBe(60_000);
+  });
+
+  it("should say the tools are still being set up, and run nothing, when the install leaves under 30 seconds of the build's time", async () => {
+    // Arrange
+    const frame = asked();
+    const { deps: d, calls } = deps(() => ({ code: 0, stdout: "{}", stderr: "" }), { budgetMs: 30_050, ready: new Promise<void>(() => {}) });
+
+    // Act
+    await runDeckBuild(d, frame);
+
+    // Assert
+    expect(calls).toEqual([]);
+    expect(answerOf(frame.job_id)?.error).toBe(STILL_PREPARING);
+  });
+});
+
 describe("buildFailure", () => {
   it("should say the tools could not start when the script is not there", () => {
     expect(buildFailure("", "", 127)).toMatch(/could not start the slides tools/);
@@ -307,6 +374,52 @@ describe("createDeckBuildRunner", () => {
     expect(answerOf(first.job_id)?.error).toMatch(/nope/);
     expect(answerOf(second.job_id)?.error).toMatch(/nope/);
     expect(said).toEqual([`ignoring a deck build that is not one: ${JSON.stringify({ job_id: "nope" })}`]);
+  });
+
+  it("should answer a build with why when its working directory cannot be made, and still run the next", async () => {
+    // Arrange
+    const first = asked();
+    const second = asked();
+    const { deps: d, calls } = deps(({ args }) => {
+      fs.writeFileSync(args[3] as string, PPTX);
+      return { code: 0, stdout: "{}", stderr: "" };
+    });
+    vi.spyOn(fs, "mkdtempSync").mockImplementationOnce(() => {
+      throw new Error("ENOSPC: no space left on device");
+    });
+    const runner = createDeckBuildRunner(d);
+
+    // Act
+    runner.deckBuild(first);
+    runner.deckBuild(second);
+    await runner.idle();
+
+    // Assert
+    expect(answerOf(first.job_id)?.error).toBe("This version could not be built: ENOSPC: no space left on device");
+    expect(calls).toHaveLength(1);
+    expect(answerOf(second.job_id)).toEqual({ virtual_id: VID, job_id: second.job_id, pptx: PPTX });
+  });
+
+  it("should say a build that throws and still run the next, without the chain rejecting", async () => {
+    // Arrange
+    const said: string[] = [];
+    const first = asked();
+    const second = asked();
+    const { deps: d, calls } = deps(() => ({ code: 2, stdout: JSON.stringify({ errors: ["x"] }), stderr: "" }), { say: (message) => said.push(message) });
+    vi.spyOn(fs, "rmSync").mockImplementationOnce(() => {
+      throw new Error("EBUSY");
+    });
+    const runner = createDeckBuildRunner(d);
+
+    // Act
+    runner.deckBuild(first);
+    runner.deckBuild(second);
+    await expect(runner.idle()).resolves.toBeUndefined();
+
+    // Assert
+    expect(said).toEqual([`deck build ${first.job_id} failed: EBUSY`]);
+    expect(calls).toHaveLength(2);
+    expect(answerOf(second.job_id)?.error).toMatch(/x/);
   });
 
   it("should take the time a build waited behind another out of its own", async () => {

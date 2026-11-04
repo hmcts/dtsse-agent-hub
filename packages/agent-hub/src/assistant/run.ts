@@ -8,11 +8,11 @@ import { atlassianLogin } from "../virtual/atlassian.ts";
 import { installBundled, installTicked, tickedBundled } from "../virtual/bundled-plugins.ts";
 import { run } from "../virtual/process.ts";
 import { deleteUploads, readDeleteUploads, reconcileUploads } from "./attachments.ts";
-import { createDeckBuildRunner } from "./deck-build.ts";
+import { createDeckBuildRunner, SLIDES_PLUGIN } from "./deck-build.ts";
 import { type DiskFs, reportUploads } from "./disk.ts";
 import { createLookupRunner, type LookupDeps, type Run } from "./lookups.ts";
 import { type MemoryFs, reportMemory } from "./memory.ts";
-import { prepareBundled, prepareEach } from "./plugin-deps.ts";
+import { prepareEach } from "./plugin-deps.ts";
 import { type AssistantSupervisor, type CreateAssistantSupervisorOptions, createAssistantSupervisor, idleMinutes } from "./supervisor.ts";
 import { createWelshRunner, WELSH_PLUGIN, type WelshDeps } from "./welsh.ts";
 
@@ -110,22 +110,15 @@ export async function runAssistantSupervisor({
     install
   };
   // Every ticked bundled plugin's dependencies are installed as the pod starts, so its first use does not wait on npm.
-  // Welsh jobs wait for the Welsh install, so none spends its own time limit on it, and it runs first and alone. The
-  // others follow it one at a time; nothing waits on them, and a session's own run of a plugin's script installs if
-  // its install is not done. None starts once the supervisor is stopping.
+  // Welsh's runs first and alone, and the others follow it one at a time. Welsh jobs wait for the Welsh install and
+  // deck builds for the slides one, within their own time limits; a session's own run of a plugin's script installs
+  // if its install is not done. None starts once the supervisor is stopping.
   const stopped = new AbortController();
-  const ready = prepareBundled(WELSH_PLUGIN, welshOptions);
-  const welsh = createWelshRunner({ ...welshOptions, ready });
+  const installs = prepareEach([WELSH_PLUGIN, ...tickedBundled(env).filter((name) => name !== WELSH_PLUGIN)], welshOptions, stopped.signal);
+  const welsh = createWelshRunner({ ...welshOptions, ready: installs.get(WELSH_PLUGIN) });
   // Deck builds run beside the supervisor as well, on the same runner and workspace as the Welsh jobs: a build is a
   // minute of Node that no wake should wait behind.
-  const deckBuilds = createDeckBuildRunner({ ...welshOptions, api });
-  void ready.then(() =>
-    prepareEach(
-      tickedBundled(env).filter((name) => name !== WELSH_PLUGIN),
-      welshOptions,
-      stopped.signal
-    )
-  );
+  const deckBuilds = createDeckBuildRunner({ ...welshOptions, api, ready: installs.get(SLIDES_PLUGIN) });
   const uploads = {
     api,
     id,

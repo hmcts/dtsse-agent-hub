@@ -17,7 +17,7 @@ import {
   SLIDES_NOT_TURNED_ON,
   SLIDES_PLUGIN
 } from "./deck-build.ts";
-import { readVersionPptx } from "./deck-history-store.ts";
+import { readDeckVersionEntry } from "./deck-history-store.ts";
 import { readDeckAsset } from "./deck-store.ts";
 import { accessToConversation } from "./shares.ts";
 
@@ -51,7 +51,8 @@ async function expire(db: Database, conversationId: string | null, now: Date): P
 /**
  * Asks the conversation's pod to build `version`, or joins the build of it already running. Only the owner may ask
  * (`canChangeDeck`): a reader is refused, and anyone else finds nothing, as the reads do. Nothing is recorded when the
- * .pptx is already there, when the pod cannot be asked now, or when its client cannot build.
+ * .pptx is already there, when the pod cannot be asked now, when its client cannot build, or when the conversation is a
+ * local session's, which has no pod.
  */
 export async function requestDeckBuild(
   prisma: PrismaClient,
@@ -67,11 +68,11 @@ export async function requestDeckBuild(
   if (!canChangeDeck(allowed.access)) {
     throw new HttpError(403, "only the person whose chat this is can prepare its slides");
   }
-  const kept = await prisma.assistantDeckVersion.count({ where: { conversationId, version } });
-  if (kept === 0) {
+  const kept = await readDeckVersionEntry(prisma, conversationId, version, now);
+  if (kept === undefined) {
     throw new HttpError(404, "that version of the slides is not there");
   }
-  if ((await readVersionPptx(prisma, conversationId, version, now)) !== undefined) {
+  if (kept.pptx) {
     return { status: "ready" };
   }
   const running = await prisma.assistantDeckBuild.findFirst({
@@ -82,8 +83,12 @@ export async function requestDeckBuild(
     return { status: "pending", job_id: running.id };
   }
   const { conversation } = allowed;
+  // A local session's conversation has no pod to build on, and never will.
+  if (conversation.virtualAgentId === null) {
+    return { status: "no_pod" };
+  }
   const found = await findAssistantWithClaims(prisma, viewerOid);
-  if (conversation.virtualAgentId === null || found === undefined || found.assistant.id !== conversation.virtualAgentId) {
+  if (found === undefined || found.assistant.id !== conversation.virtualAgentId) {
     return { status: "unsupported" };
   }
   const { assistant, claims } = found;

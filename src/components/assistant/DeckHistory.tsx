@@ -2,13 +2,20 @@
 
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import type { RestoreDeckResult } from "@/app/_actions/decks";
-import { plannable } from "@/assistant/deck";
-import type { DeckBuildRequest, DeckBuildView } from "@/assistant/deck-build";
+import { DECK_BUILD_TIMEOUT_MS, type DeckBuildRequest, type DeckBuildView } from "@/assistant/deck-build";
 import { type DeckDiff, diffDecks, diffSummary, type FieldChange, type SlideDiff, type WordPart } from "@/assistant/deck-diff";
 import type { DeckVersionEntry, DeckVersionView } from "@/assistant/deck-history-store";
 import type { DeckView } from "@/assistant/deck-store";
-import { type PlannedSlide, plan } from "@/assistant/slides/masters";
-import { DeckViewer, deckAssetUrl, deckPptxUrl, deckUrl, type SlideAsk } from "@/components/assistant/DeckPanel";
+import {
+  DeckViewer,
+  deckAssetUrl,
+  deckPptxUrl,
+  deckUrl,
+  type PlannedDeck,
+  planDeck,
+  type SlideAsk,
+  unknownLayoutMessage
+} from "@/components/assistant/DeckPanel";
 import { SlideCanvas } from "@/components/assistant/SlideCanvas";
 import { ScrollPane } from "@/components/Markup";
 import { DownloadIcon } from "@/components/sidebar/icons";
@@ -43,10 +50,28 @@ const backgroundSrc = (image: string): string => `/assistant/slides/${image}`;
 /** How often a build being prepared is read back. */
 export const BUILD_POLL_MS = 2000;
 
+/** Reads of a build that fail one after another before the page stops asking and says so. */
+export const BUILD_POLL_FAILURES = 5;
+
+/**
+ * How long after the latest version was written its own session is taken to have stopped building its .pptx, so the
+ * owner is offered a build of their own rather than one beside the upload already on its way.
+ */
+export const LATEST_BUILD_GRACE_MS = 2 * 60_000;
+
+class ReadFailed extends Error {
+  readonly status: number;
+
+  constructor(url: string, status: number) {
+    super(`${url} answered ${status}`);
+    this.status = status;
+  }
+}
+
 async function readJson<T>(url: string, signal?: AbortSignal): Promise<T> {
   const response = await fetch(url, { cache: "no-store", signal });
   if (!response.ok) {
-    throw new Error(`${url} answered ${response.status}`);
+    throw new ReadFailed(url, response.status);
   }
   return (await response.json()) as T;
 }
@@ -132,14 +157,17 @@ function download(href: string): void {
 
 type Building = { state: "idle" } | { state: "asking" } | { state: "preparing"; jobId: string } | { state: "ready" } | { state: "failed"; message: string };
 
-const NOT_STARTED: Record<"waking" | "unsupported", string> = {
+const NOT_STARTED: Record<"waking" | "unsupported" | "no_pod", string> = {
   waking: "Your assistant is starting up. Try again in a minute.",
-  unsupported: "Your assistant needs an update before it can build this version. It gets one the next time it restarts."
+  unsupported: "Your assistant needs an update before it can build this version. It gets one the next time it restarts.",
+  no_pod: "Older versions can only be prepared in a chat that runs on your assistant in the hub, not in a chat from your own machine."
 };
 
 /**
  * One version's .pptx: a download when the hub holds it, and otherwise, for the owner, a build by their pod, read back
- * until it is ready and then downloaded. Anyone else is told it is not available.
+ * until it is ready and then downloaded. Anyone else is told it is not available. The latest version's own session
+ * builds and uploads it, so the owner is offered a build of it only once `LATEST_BUILD_GRACE_MS` has passed since it
+ * was written without one arriving.
  */
 export function DeckDownload({
   conversationId,
@@ -147,6 +175,7 @@ export function DeckDownload({
   pptx,
   canBuild,
   latest,
+  writtenAt = null,
   announce,
   pollMs = BUILD_POLL_MS
 }: {
@@ -156,11 +185,24 @@ export function DeckDownload({
   canBuild: boolean;
   /** The latest version, which the session builds itself, says "Not built yet" rather than "Not available". */
   latest: boolean;
+  /** When the version was written, which is when its session started building it. */
+  writtenAt?: string | null;
   announce: (text: string) => void;
   pollMs?: number;
 }) {
   const [building, setBuilding] = useState<Building>({ state: "idle" });
   const href = deckPptxUrl(conversationId, version);
+  const sessionBuildsUntil = latest && writtenAt !== null ? Date.parse(writtenAt) + LATEST_BUILD_GRACE_MS : 0;
+  const [, rerender] = useState(0);
+
+  useEffect(() => {
+    const wait = sessionBuildsUntil - Date.now();
+    if (pptx || wait <= 0) {
+      return;
+    }
+    const timer = setTimeout(() => rerender((count) => count + 1), wait);
+    return () => clearTimeout(timer);
+  }, [pptx, sessionBuildsUntil]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: another version starts again from what the hub holds of it
   useEffect(() => setBuilding({ state: "idle" }), [conversationId, version]);
@@ -180,26 +222,51 @@ export function DeckDownload({
     [announce, href, version]
   );
 
+  // Read back until the build finishes, but no longer than the hub waits for it, and not past a build that has gone or
+  // a run of failed reads: each of those stops, says so, and offers another try.
   useEffect(() => {
     if (building.state !== "preparing") {
       return;
     }
     let stopped = false;
+    let failures = 0;
+    const started = Date.now();
+    const stop = (message: string) => {
+      stopped = true;
+      clearInterval(timer);
+      setBuilding({ state: "failed", message });
+      announce(`Version ${version} could not be prepared`);
+    };
     const timer = setInterval(() => {
+      if (Date.now() - started >= DECK_BUILD_TIMEOUT_MS) {
+        stop("Building this version took too long.");
+        return;
+      }
       readJson<DeckBuildView>(deckBuildUrl(conversationId, building.jobId)).then(
         (answer) => {
           if (!stopped) {
+            failures = 0;
             finished(answer);
           }
         },
-        () => undefined
+        (error: unknown) => {
+          if (stopped) {
+            return;
+          }
+          failures += 1;
+          if (error instanceof ReadFailed && error.status === 404) {
+            stop("This build is no longer there.");
+          } else if (failures >= BUILD_POLL_FAILURES) {
+            stop("Could not check on this build.");
+          }
+        }
       );
     }, pollMs);
     return () => {
       stopped = true;
       clearInterval(timer);
     };
-  }, [building, conversationId, finished, pollMs]);
+  }, [announce, building, conversationId, finished, pollMs, version]);
 
   async function prepare(): Promise<void> {
     setBuilding({ state: "asking" });
@@ -234,6 +301,9 @@ export function DeckDownload({
   }
   if (!canBuild) {
     return <span className="text-[13px] text-asst-muted">{latest ? "Not built yet" : "Not available"}</span>;
+  }
+  if (building.state === "idle" && Date.now() < sessionBuildsUntil) {
+    return <span className="text-[13px] text-asst-muted">The assistant is building this</span>;
   }
   if (building.state === "asking" || building.state === "preparing") {
     return (
@@ -391,8 +461,8 @@ function Mark({ status, moved }: { status: Exclude<SlideDiff["status"], "same">;
   );
 }
 
-function slidesOf(conversationId: string, view: DeckView): PlannedSlide[] {
-  return plan(plannable(view.outline, (sha) => deckAssetUrl(conversationId, sha)));
+function slidesOf(conversationId: string, view: DeckView): PlannedDeck {
+  return planDeck(view.outline, (sha) => deckAssetUrl(conversationId, sha));
 }
 
 function sizesOf(conversationId: string, view: DeckView) {
@@ -416,15 +486,22 @@ function where(slide: SlideDiff): string {
  */
 export function DeckCompare({ conversationId, older, latest, onBack }: { conversationId: string; older: DeckView; latest: DeckView; onBack: () => void }) {
   const diff: DeckDiff = useMemo(() => diffDecks(older.outline, latest.outline), [older.outline, latest.outline]);
-  const drawn = useMemo(
-    () => ({
-      older: slidesOf(conversationId, older),
-      latest: slidesOf(conversationId, latest),
+  const drawn = useMemo(() => {
+    const olderPlan = slidesOf(conversationId, older);
+    const latestPlan = slidesOf(conversationId, latest);
+    // A version whose layout the viewer no longer has is compared in words alone, without its slides drawn.
+    const unknown = [
+      ...(olderPlan.slides === null ? [unknownLayoutMessage(older.version, olderPlan.unknownLayout)] : []),
+      ...(latestPlan.slides === null ? [unknownLayoutMessage(latest.version, latestPlan.unknownLayout)] : [])
+    ];
+    return {
+      older: olderPlan.slides ?? [],
+      latest: latestPlan.slides ?? [],
       olderSizes: sizesOf(conversationId, older),
-      latestSizes: sizesOf(conversationId, latest)
-    }),
-    [conversationId, older, latest]
-  );
+      latestSizes: sizesOf(conversationId, latest),
+      unknown
+    };
+  }, [conversationId, older, latest]);
   const shown = diff.slides.filter((slide) => slide.status !== "same");
   const canvas = (side: "older" | "latest", index: number) => {
     const slides = side === "older" ? drawn.older : drawn.latest;
@@ -452,6 +529,11 @@ export function DeckCompare({ conversationId, older, latest, onBack }: { convers
           Back to version {older.version}
         </button>
       </div>
+      {drawn.unknown.length === 0 ? null : (
+        <p role="alert" className="mb-3 text-[13px] text-asst-error">
+          {drawn.unknown.join(" ")} Its slides are compared in words only.
+        </p>
+      )}
       <p className="mb-3 text-[13px] text-asst-body">{diffSummary(diff)}.</p>
       <ol aria-label="Differences" className="flex flex-col gap-4">
         {diff.deck.length === 0 ? null : (
@@ -567,9 +649,11 @@ export function DeckHistory({
     setRestoring(true);
     setRefusal(null);
     try {
-      const result = await restoreAction({ conversationId, version, baseVersion: latest.version });
-      if (!result.ok) {
-        setRefusal(result.error);
+      const result = await restoreAction({ conversationId, version, baseVersion: latest.version }).catch(() => undefined);
+      if (result === undefined) {
+        setRefusal(`Couldn't restore version ${version}. Try again.`);
+      } else if (!result.ok) {
+        setRefusal(`Couldn't restore version ${version}: ${result.error}`);
       } else if (result.restored) {
         announce(`Restored version ${version} as version ${result.version}`);
         setPicked(null);
@@ -673,6 +757,7 @@ export function DeckHistory({
               pptx={view.pptx}
               canBuild={owner}
               latest={viewing === null}
+              writtenAt={view.updatedAt}
               announce={announce}
             />
           }

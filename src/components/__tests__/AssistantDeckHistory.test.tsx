@@ -7,7 +7,16 @@ import { assetRef, type DeckOutline } from "@/assistant/deck";
 import type { DeckBuildView } from "@/assistant/deck-build";
 import type { DeckVersionEntry, DeckVersionView } from "@/assistant/deck-history-store";
 import type { DeckView } from "@/assistant/deck-store";
-import { DeckDownload, DeckHistory, deckBuildUrl, deckVersionsUrl, deckVersionUrl, type RestoreDeckAction } from "@/components/assistant/DeckHistory";
+import {
+  BUILD_POLL_FAILURES,
+  DeckDownload,
+  DeckHistory,
+  deckBuildUrl,
+  deckVersionsUrl,
+  deckVersionUrl,
+  LATEST_BUILD_GRACE_MS,
+  type RestoreDeckAction
+} from "@/components/assistant/DeckHistory";
 import { deckPptxUrl, SharedDeck } from "@/components/assistant/DeckPanel";
 
 const CONVERSATION = "22222222-2222-2222-2222-222222222222";
@@ -364,7 +373,27 @@ describe("DeckHistory's older version", () => {
     });
 
     // Assert
-    expect(screen.getByRole("alert").textContent).toBe("that version of the slides is not there");
+    expect(screen.getByRole("alert").textContent).toBe("Couldn't restore version 5: that version of the slides is not there");
+  });
+
+  it("should say the restore failed when the action throws, and offer it again", async () => {
+    // Arrange
+    routes();
+    const restore = vi.fn<RestoreDeckAction>(async () => Promise.reject(new Error("An unexpected response was received from the server.")));
+    history({ restore });
+    await openHistory();
+    fireEvent.click(screen.getByRole("button", { name: /^Version 5/ }));
+    await settle();
+
+    // Act
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Restore this version" }));
+    });
+
+    // Assert
+    expect(screen.getByRole("alert").textContent).toBe("Couldn't restore version 5. Try again.");
+    expect((screen.getByRole("button", { name: "Restore this version" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByText("Viewing version 5 (not the latest)")).toBeTruthy();
   });
 
   it("should offer someone it is shared with the history but no restore and no build", async () => {
@@ -403,6 +432,68 @@ describe("DeckHistory's older version", () => {
     expect(screen.getByText("Viewing version 5 (not the latest)")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Restore this version" })).toBeNull();
     expect(screen.getByText("Not available")).toBeTruthy();
+  });
+});
+
+describe("DeckHistory with a layout the viewer no longer has", () => {
+  const STALE_OUTLINE = {
+    title: "Ways of working",
+    slides: [
+      { id: "why", layout: "HMCTS_SECTION", title: "Why it matters" },
+      { id: "quote", layout: "HMCTS_QUOTE", title: "In their words", quote: "Ship small", bullets: ["Often", { text: "Safely", bullets: ["With tests"] }] }
+    ]
+  } as unknown as DeckOutline;
+
+  it("should say which layout an older version uses that the viewer cannot draw, and show its slides as text", async () => {
+    // Arrange
+    serving({
+      [`GET ${deckVersionsUrl(CONVERSATION)}`]: { body: VERSIONS },
+      [`GET ${deckVersionUrl(CONVERSATION, 5)}`]: { body: old(5, { outline: STALE_OUTLINE }) }
+    });
+    history();
+    await openHistory();
+
+    // Act
+    fireEvent.click(screen.getByRole("button", { name: /^Version 5/ }));
+    await settle();
+
+    // Assert
+    expect(screen.getByRole("alert").textContent).toBe("Version 5 uses a layout this viewer no longer has (HMCTS_QUOTE). Its slides are shown as text.");
+    const text = screen.getByRole("list", { name: "Slides as text" });
+    expect(within(text).getByText("In their words").textContent).toBe("Slide 3: In their words");
+    expect(within(text).getByText("Ship small")).toBeTruthy();
+    expect(within(text).getByText("With tests")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Back to latest" })).toBeTruthy();
+  });
+
+  it("should compare such a version in words, without drawing its slides", async () => {
+    // Arrange
+    serving({
+      [`GET ${deckVersionsUrl(CONVERSATION)}`]: { body: VERSIONS },
+      [`GET ${deckVersionUrl(CONVERSATION, 5)}`]: { body: old(5, { outline: STALE_OUTLINE }) }
+    });
+    history();
+    await openHistory();
+    fireEvent.click(screen.getByRole("button", { name: /^Version 5/ }));
+    await settle();
+
+    // Act
+    fireEvent.click(screen.getByRole("button", { name: "Compare with latest" }));
+
+    // Assert
+    expect(screen.getByRole("alert").textContent).toBe(
+      "Version 5 uses a layout this viewer no longer has (HMCTS_QUOTE). Its slides are compared in words only."
+    );
+    expect(screen.getByRole("list", { name: "Differences" })).toBeTruthy();
+  });
+
+  it("should show the latest version as text too when it is the one using such a layout", () => {
+    // Arrange and act
+    history({ latest: latest({ outline: STALE_OUTLINE }) });
+
+    // Assert
+    expect(screen.getByRole("alert").textContent).toContain("Version 7 uses a layout this viewer no longer has (HMCTS_QUOTE).");
+    expect(screen.getByRole("button", { name: "History" })).toBeTruthy();
   });
 });
 
@@ -504,7 +595,8 @@ describe("DeckDownload", () => {
 
   it.each([
     ["waking", "Your assistant is starting up. Try again in a minute."],
-    ["unsupported", "Your assistant needs an update before it can build this version. It gets one the next time it restarts."]
+    ["unsupported", "Your assistant needs an update before it can build this version. It gets one the next time it restarts."],
+    ["no_pod", "Older versions can only be prepared in a chat that runs on your assistant in the hub, not in a chat from your own machine."]
   ])("should say why nothing was started when the hub answers %s", async (status, words) => {
     // Arrange
     serving({ [POST]: { body: { status } } });
@@ -542,5 +634,145 @@ describe("DeckDownload", () => {
 
     // Assert
     expect(screen.getByRole("alert").textContent).toBe("This version could not be prepared.Try again");
+  });
+
+  describe("reading a build back", () => {
+    async function start(poll: Answer) {
+      vi.useFakeTimers();
+      const reads = serving({ [POST]: { body: { status: "pending", job_id: JOB } }, [POLL]: poll });
+      const announce = vi.fn();
+      const view = render(<DeckDownload conversationId={CONVERSATION} version={5} pptx={false} canBuild latest={false} announce={announce} pollMs={2000} />);
+      fireEvent.click(screen.getByRole("button", { name: "Prepare .pptx" }));
+      await settle();
+      const polls = () => reads.mock.calls.filter(([url]) => url === deckBuildUrl(CONVERSATION, JOB)).length;
+      return { announce, polls, view };
+    }
+
+    const tick = async (ms: number) => {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(ms);
+      });
+    };
+
+    it("should stop, and offer another try, when the build has gone", async () => {
+      // Arrange
+      const { announce, polls } = await start({ status: 404, body: { error: "not found" } });
+
+      // Act
+      await tick(2000);
+      await tick(10_000);
+
+      // Assert
+      expect(polls()).toBe(1);
+      expect(screen.getByRole("alert").textContent).toBe("This build is no longer there.Try again");
+      expect(announce).toHaveBeenLastCalledWith("Version 5 could not be prepared");
+    });
+
+    it("should stop after reads fail one after another, but not before", async () => {
+      // Arrange
+      const { polls } = await start({ status: 500, body: { error: "boom" } });
+
+      // Act
+      await tick(2000 * (BUILD_POLL_FAILURES - 1));
+      const before = screen.queryByRole("alert");
+      await tick(2000);
+      await tick(10_000);
+
+      // Assert
+      expect(before).toBeNull();
+      expect(polls()).toBe(BUILD_POLL_FAILURES);
+      expect(screen.getByRole("alert").textContent).toBe("Could not check on this build.Try again");
+    });
+
+    it("should count only failures in a row", async () => {
+      // Arrange
+      let read = 0;
+      await start(() => {
+        read += 1;
+        return read % BUILD_POLL_FAILURES === 0 ? { body: { status: "pending", job_id: JOB, version: 5 } } : { status: 500, body: { error: "boom" } };
+      });
+
+      // Act
+      await tick(2000 * BUILD_POLL_FAILURES * 2);
+
+      // Assert
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(screen.getByRole("status").textContent).toBe("Preparing…");
+    });
+
+    it("should stop once it has waited as long as the hub does, 15 minutes", async () => {
+      // Arrange
+      const { polls } = await start({ body: { status: "pending", job_id: JOB, version: 5 } });
+
+      // Act
+      await tick(15 * 60_000 - 2000);
+      const before = screen.queryByRole("alert");
+      await tick(2000);
+      const asked = polls();
+      await tick(10_000);
+
+      // Assert
+      expect(before).toBeNull();
+      expect(screen.getByRole("alert").textContent).toBe("Building this version took too long.Try again");
+      expect(polls()).toBe(asked);
+    });
+
+    it("should stop reading when it is taken off the page", async () => {
+      // Arrange
+      const { polls, view } = await start({ body: { status: "pending", job_id: JOB, version: 5 } });
+      await tick(2000);
+      const asked = polls();
+
+      // Act
+      view.unmount();
+      await tick(20_000);
+
+      // Assert
+      expect(asked).toBe(1);
+      expect(polls()).toBe(1);
+    });
+  });
+
+  describe("the latest version", () => {
+    it("should say the assistant is building it, with no build to start, until two minutes after it was written", async () => {
+      // Arrange
+      vi.useFakeTimers({ now: new Date("2026-11-03T09:01:00.000Z") });
+      shown({ latest: true, writtenAt: "2026-11-03T09:00:00.000Z" });
+
+      // Assert
+      expect(screen.getByText("The assistant is building this")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Prepare .pptx" })).toBeNull();
+
+      // Act
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(LATEST_BUILD_GRACE_MS / 2);
+      });
+
+      // Assert
+      expect(screen.getByRole("button", { name: "Prepare .pptx" })).toBeTruthy();
+      expect(screen.queryByText("The assistant is building this")).toBeNull();
+    });
+
+    it("should offer a build of it straight away when it was written more than two minutes ago", () => {
+      // Arrange
+      vi.useFakeTimers({ now: new Date("2026-11-03T09:05:00.000Z") });
+
+      // Act
+      shown({ latest: true, writtenAt: "2026-11-03T09:00:00.000Z" });
+
+      // Assert
+      expect(screen.getByRole("button", { name: "Prepare .pptx" })).toBeTruthy();
+    });
+
+    it("should offer a build of an older version however recently it was written", () => {
+      // Arrange
+      vi.useFakeTimers({ now: new Date("2026-11-03T09:00:30.000Z") });
+
+      // Act
+      shown({ latest: false, writtenAt: "2026-11-03T09:00:00.000Z" });
+
+      // Assert
+      expect(screen.getByRole("button", { name: "Prepare .pptx" })).toBeTruthy();
+    });
   });
 });

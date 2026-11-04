@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { plannable, slideReference } from "@/assistant/deck";
+import { type DeckOutline, plannable, slideReference } from "@/assistant/deck";
 import type { DeckSummary, DeckView } from "@/assistant/deck-store";
-import { type PlannedSlide, plan } from "@/assistant/slides/masters";
+import { masterNamed, type PlannedSlide, plan } from "@/assistant/slides/masters";
 import { useSidebarWidth } from "@/components/assistant/AssistantShell";
 import { DeckHistory, type RestoreDeckAction } from "@/components/assistant/DeckHistory";
 import { ARTEFACT_MIN_WIDTH, ARTEFACT_WIDTH, CHAT_MIN_WIDTH } from "@/components/assistant/layout";
@@ -106,13 +106,110 @@ function DeckBehind({ shown, latest, failed, retry }: { shown: DeckView | null; 
   );
 }
 
+/** The slides `plan` lays an outline out as, or, when it cannot, the layout it does not know. */
+export type PlannedDeck = { slides: PlannedSlide[]; unknownLayout?: undefined } | { slides: null; unknownLayout: string };
+
+/**
+ * `plan`, for an outline that may be older than the masters: a version written before a layout was dropped from
+ * `masters.ts` still reads, so the viewer says which layout it cannot draw rather than failing as a whole.
+ */
+export function planDeck(outline: DeckOutline, src: (sha: string) => string): PlannedDeck {
+  try {
+    return { slides: plan(plannable(outline, src)) };
+  } catch (error) {
+    const unknown = outline.slides.find((one) => masterNamed(one.layout)?.inSlides !== true)?.layout;
+    return { slides: null, unknownLayout: unknown ?? (error instanceof Error ? error.message : String(error)) };
+  }
+}
+
+export function unknownLayoutMessage(version: number, layout: string): string {
+  return `Version ${version} uses a layout this viewer no longer has (${layout}).`;
+}
+
 /** The deck's slides as `plan` lays them out, with each picture's address and size. */
-function useSlides(conversationId: string, deck: DeckView): { slides: PlannedSlide[]; sizes: Record<string, { width: number; height: number }> } {
+function useSlides(conversationId: string, deck: DeckView): { planned: PlannedDeck; sizes: Record<string, { width: number; height: number }> } {
   return useMemo(() => {
     const src = (sha: string) => deckAssetUrl(conversationId, sha);
     const sizes = Object.fromEntries(Object.entries(deck.sizes).map(([sha, size]) => [src(sha), size]));
-    return { slides: plan(plannable(deck.outline, src)), sizes };
+    return { planned: planDeck(deck.outline, src), sizes };
   }, [conversationId, deck.outline, deck.sizes]);
+}
+
+type Bulleted = string | { text: string; bullets?: string[] };
+
+const isBullets = (value: unknown): value is Bulleted[] =>
+  Array.isArray(value) &&
+  value.every((one) => typeof one === "string" || (typeof one === "object" && one !== null && typeof (one as { text?: unknown }).text === "string"));
+
+/**
+ * An outline as text straight from its fields, for a version `plan` cannot lay out: the words of a slide whose layout
+ * the viewer no longer has are still there to read, in the order the outline gives them.
+ */
+function OutlineText({ outline, headingLevel }: { outline: DeckOutline; headingLevel: 2 | 3 | 4 }) {
+  const Heading = `h${headingLevel}` as const;
+  const slides: Record<string, unknown>[] = [
+    { title: outline.title, subtitle: outline.subtitle, notes: outline.notes },
+    ...outline.slides.map((one) => one as unknown as Record<string, unknown>)
+  ];
+  return (
+    <ol aria-label="Slides as text" className="flex flex-col gap-6">
+      {slides.map((slide, index) => (
+        <li key={typeof slide.id === "string" ? slide.id : `slide-${index}`} className="flex flex-col gap-2">
+          <Heading className="text-[15px] font-semibold text-asst-text">
+            <span className="text-asst-muted">Slide {index + 1}: </span>
+            {typeof slide.title === "string" ? slide.title : ""}
+          </Heading>
+          {Object.entries(slide).map(([field, value]) => {
+            if (field === "id" || field === "layout" || field === "title" || field === "notes") {
+              return null;
+            }
+            if (typeof value === "string") {
+              return (
+                <p key={field} className="text-[13px] text-asst-body">
+                  {value}
+                </p>
+              );
+            }
+            if (isBullets(value)) {
+              return (
+                <ul key={field} className="ml-5 list-disc text-[13px] text-asst-body">
+                  {value.map((item, i) => {
+                    const text = typeof item === "string" ? item : item.text;
+                    const children = typeof item === "string" ? [] : (item.bullets ?? []);
+                    return (
+                      <li key={`${i}-${text}`}>
+                        {text}
+                        {children.length === 0 ? null : (
+                          <ul className="ml-5 list-[circle]">
+                            {children.map((child, j) => (
+                              <li key={`${j}-${child}`}>{child}</li>
+                            ))}
+                          </ul>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              );
+            }
+            const alt = typeof value === "object" && value !== null ? (value as { alt?: unknown; decorative?: unknown }) : undefined;
+            return alt !== undefined && alt.decorative !== true && typeof alt.alt === "string" ? (
+              <p key={field} className="text-[13px] text-asst-body">
+                <span className="text-asst-muted">Picture: </span>
+                {alt.alt}
+              </p>
+            ) : null;
+          })}
+          {typeof slide.notes === "string" ? (
+            <p className="whitespace-pre-wrap text-[13px] text-asst-muted">
+              <span className="font-medium">Speaker notes: </span>
+              {slide.notes}
+            </p>
+          ) : null}
+        </li>
+      ))}
+    </ol>
+  );
 }
 
 /**
@@ -207,10 +304,39 @@ export function DeckViewer({
   /** What stands for the .pptx in place of the link to the one the hub holds. */
   download?: React.ReactNode;
 }) {
-  const { slides, sizes } = useSlides(conversationId, deck);
+  const { planned, sizes } = useSlides(conversationId, deck);
   const [chosen, setChosen] = useState(0);
   const [text, setText] = useState(false);
   const rail = useRef<(HTMLButtonElement | null)[]>([]);
+  const pptxControl =
+    download ??
+    (deck.pptx ? (
+      <a href={deckPptxUrl(conversationId, deck.version)} download className={`${button} no-underline`}>
+        <DownloadIcon />
+        Download .pptx
+      </a>
+    ) : (
+      <span className="text-[13px] text-asst-muted">Not built yet</span>
+    ));
+
+  if (planned.slides === null) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div role="toolbar" aria-label="Slides" className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-asst-field px-3 py-1.5">
+          {tools}
+          <span className="ml-auto text-xs text-asst-faint">Version {deck.version}</span>
+          {pptxControl}
+        </div>
+        <ScrollPane as="section" label="Deck as text" className="min-h-0 flex-1 overflow-y-auto px-[22px] py-5">
+          <p role="alert" className="mb-4 text-[13px] text-asst-error">
+            {unknownLayoutMessage(deck.version, planned.unknownLayout)} Its slides are shown as text.
+          </p>
+          <OutlineText outline={deck.outline} headingLevel={headingLevel} />
+        </ScrollPane>
+      </div>
+    );
+  }
+  const slides = planned.slides;
   // A newer version may have fewer slides than the one being looked at.
   const at = Math.min(chosen, slides.length - 1);
   const slide = slides[at] as PlannedSlide;
@@ -263,15 +389,7 @@ export function DeckViewer({
         )}
         {tools}
         <span className="ml-auto text-xs text-asst-faint">Version {deck.version}</span>
-        {download ??
-          (deck.pptx ? (
-            <a href={deckPptxUrl(conversationId, deck.version)} download className={`${button} no-underline`}>
-              <DownloadIcon />
-              Download .pptx
-            </a>
-          ) : (
-            <span className="text-[13px] text-asst-muted">Not built yet</span>
-          ))}
+        {pptxControl}
       </div>
       {text ? (
         <ScrollPane as="section" label="Deck as text" className="min-h-0 flex-1 overflow-y-auto px-[22px] py-5">
