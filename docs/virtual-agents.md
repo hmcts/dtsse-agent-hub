@@ -24,7 +24,7 @@ the `-staging` release.
 | `ORCHESTRATOR_LEASE_SECONDS` | `120` | Seconds after its holder's last claim that the orchestrator lease may pass to another cluster |
 | `VIRTUAL_AGENT_PUBLIC_DOMAIN` | `preview.platform.hmcts.net` | The domain a reported port's URL is under, as `https://<statefulset_name>-<port>.<domain>`; the orchestrator reads it too |
 | `AGENT_HUB_VIEWER_HOST` | none | The viewer's own host, as `agent-hub-viewer.aat.platform.hmcts.net`, which serves each port to its owner off the VPN. It also needs `SESSION_SECRET` and `ENTRA_REDIRECT_URI`, whose origin is where it sends a person to sign in. With none, owners get the VPN URLs alone |
-| `VIRTUAL_AGENT_PLUGINS` | none | The plugins an owner can tick, from the workspace marketplace or carried by the pod client in `packages/agent-hub/plugins/` (`welsh`, `slides`), comma-separated `name` or `name=description`, as `pcs=PCS team workflows,dtsse=DTSSE docs`. A name is lowercase letters, digits and hyphens; any other makes the pages that read it fail. With none, the Assistant's settings offer no plugins |
+| `VIRTUAL_AGENT_PLUGINS` | none | The plugins an owner can tick, from the workspace marketplace or carried by the pod client in `packages/agent-hub/plugins/` (`welsh`), comma-separated `name` or `name=description`, as `pcs=PCS team workflows,dtsse=DTSSE docs`. A name is lowercase letters, digits and hyphens; any other makes the pages that read it fail. An always-on plugin (`slides`) is never offered, even when named here, since every pod loads it. With none, the Assistant's settings offer no plugins |
 | `AI_GATEWAY_APIM_KEY` | none | The HMCTS AI Gateway's APIM subscription key, from the `dtsse` vault, and the whole of what this hub holds about the gateway: `hai` resolves the host, the Entra scope, the `apiKeyHelper` and the model ids in the pod, and this key is the one value it cannot fetch there. Each claim for a running `gateway` agent carries it to the orchestrator, which puts it in that pod and no other. Without it a claim for such an agent is refused, so a deployment with nobody on the gateway needs none |
 
 
@@ -107,7 +107,7 @@ device code in the background while Claude runs. Relaying spends the request. Ei
 per boot, so one that runs out unused is not offered again until the agent next starts, which on `own_licence` also
 needs the owner to ask again. There the Assistant raises an ask about Azure only while that code is live.
 
-A Jenkins API token (`jenkins`) is optional on either route: pasted under Credentials in the Assistant's settings, it enables an agent's Jenkins
+A Jenkins API token (`jenkins`) is optional on either route: pasted under Connections in the Assistant's settings, it enables an agent's Jenkins
 tools, and an agent starts without it. Jenkins also needs Azure connected, because the owner's Entra object id, which
 Jenkins keys them on, is read with `az`. Like a GitHub token, only the owner's own virtual agent reads it back.
 
@@ -177,9 +177,9 @@ before the change is made; the disk is kept. The size also sets how many CFT Wor
 once (`CONVERSATION_SESSIONS`), and the Assistant's settings show each size's cap and memory beside the figures its pod
 reports for itself.
 
-**Plugins.** An owner ticks any of the workspace plugins `VIRTUAL_AGENT_PLUGINS` offers, up to 20, under Tools in
+**Plugins.** An owner ticks any of the workspace plugins `VIRTUAL_AGENT_PLUGINS` offers, up to 20, under Plugins in
 the Assistant's settings. The orchestrator passes the names to the pod as `AGENT_HUB_PLUGINS`, comma-separated, and
-`hai` loads each from the checkout with `--plugin-dir`. A plugin the pod client carries in its own `plugins/` directory (`welsh`, `slides`) is copied onto the pod's disk instead and loaded into each conversation session; see Plugins in [`agent-api.md`](agent-api.md). A change bumps `generation` and `pod_generation`, so a running
+`hai` loads each from the checkout with `--plugin-dir`. A plugin the pod client carries in its own `plugins/` directory (`welsh`, `slides`) is copied onto the pod's disk instead and loaded into each conversation session; see Plugins in [`agent-api.md`](agent-api.md). `slides` is always on, because the Assistant's slides panel, history, editing and builds depend on it: the settings do not show it, it is never stored (an agent that still has it keeps it until a save changes its ticked plugins, which stores them without it; a save that changes none writes nothing), and every claim adds it to the plugins the orchestrator puts in `AGENT_HUB_PLUGINS`, so a pod loads it whichever client it runs. Adding it bumps no generation, so no running pod is replaced for it: a pod started before the hub added it, on a client that loads it only when it is named, gets it when its StatefulSet is next applied (a restart, a stop and start, a resize or a change of plugins), and until then the hub answers a deck build on it with `restart_needed`, which the page words as restarting the assistant to load the slide tools. A pod shows it is on a client that loads `slides` by itself by claiming the `slides-always-on` client feature. A change bumps `generation` and `pod_generation`, so a running
 pod is replaced and the conversation continues; a stopped agent loads them when it next starts. A ticked plugin the hub
 no longer offers stays on the agent until its owner unticks it, and is shown as no longer offered; the pod skips any
 name its checkout does not have.

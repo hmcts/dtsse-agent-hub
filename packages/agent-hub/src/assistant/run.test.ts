@@ -221,10 +221,11 @@ describe("runAssistantSupervisor", () => {
       // Assert
       await waitUntil(() => hub.welshAnswers.length === 1, "the Welsh job to be answered");
       expect(hub.welshAnswers[0]).toEqual({ virtual_id: VID, job_id: jobId, body: { result: { total: 0, hits: [], message: "0 match(es)" } } });
-      // The tools' dependencies are installed as the supervisor starts, ahead of the job.
+      // The tools' dependencies are installed as the supervisor starts, ahead of the job; slides' follow Welsh's.
       expect(ran[0]).toEqual({ cmd: plugins.script("welsh"), args: ["deps"] });
-      expect(ran[1]?.cmd).toBe(plugins.script("welsh"));
-      expect(ran[1]?.args.at(-1)).toBe("back");
+      const job = ran.find((one) => one.args[0] !== "deps");
+      expect(job?.cmd).toBe(plugins.script("welsh"));
+      expect(job?.args.at(-1)).toBe("back");
     } finally {
       await assistant.stop();
       await hub.close();
@@ -232,7 +233,7 @@ describe("runAssistantSupervisor", () => {
     }
   });
 
-  it("should build a deck version on the sessions stream with the slides plugin's script and send the .pptx", async () => {
+  it("should build a deck version on the sessions stream with the slides plugin's script and send the .pptx when slides is not ticked", async () => {
     // Arrange
     fs.rmSync(path.join(hubHome(), "virtual"), { recursive: true, force: true });
     const { hub, api } = await mockHub();
@@ -242,7 +243,7 @@ describe("runAssistantSupervisor", () => {
     const ran: PluginRun[] = [];
     const assistant = supervise({
       api,
-      env: { AGENT_HUB_PLUGINS: "slides" },
+      env: { AGENT_HUB_PLUGINS: "welsh" },
       welsh: { workspace: plugins.workspace, install: plugins.copy, run: buildsWriting(pptx, ran) }
     });
 
@@ -301,7 +302,7 @@ describe("runAssistantSupervisor", () => {
     }
   });
 
-  it("should install the slides plugin's dependencies as it starts when slides is ticked, and keep running when that fails", async () => {
+  it("should install the slides plugin's dependencies as it starts though slides is not ticked, and keep running when that fails", async () => {
     // Arrange
     fs.rmSync(path.join(hubHome(), "virtual"), { recursive: true, force: true });
     const { hub, api } = await mockHub();
@@ -312,7 +313,7 @@ describe("runAssistantSupervisor", () => {
     // Act
     const assistant = supervise({
       api,
-      env: { AGENT_HUB_PLUGINS: "slides" },
+      env: { AGENT_HUB_PLUGINS: "" },
       say: (m) => said.push(m),
       welsh: {
         workspace: plugins.workspace,
@@ -404,6 +405,34 @@ describe("runAssistantSupervisor", () => {
       expect(ran).toEqual([{ cmd: plugins.script("welsh"), args: ["deps"] }]);
     } finally {
       welshInstall.open();
+      await assistant.stop();
+      await hub.close();
+      plugins.cleanup();
+    }
+  });
+
+  it("should start a session with the slides plugin's copy as a --plugin-dir when nothing is ticked", async () => {
+    // Arrange
+    fs.rmSync(path.join(hubHome(), "virtual"), { recursive: true, force: true });
+    const { hub, api } = await mockHub();
+    const tmux = fakeTmux();
+    const plugins = pluginWorkspace("slides-dir-ws-");
+    hub.sendWake(VID, conversation());
+
+    // Act
+    const assistant = supervise({
+      api,
+      tmux,
+      env: { AGENT_HUB_PLUGINS: "" },
+      welsh: { workspace: plugins.workspace, install: plugins.copy, run: async () => ({ code: 0, stdout: "", stderr: "" }) }
+    });
+
+    try {
+      // Assert
+      await waitUntil(() => tmux.starts().length === 1, "the wake to start a session");
+      expect(tmux.starts()[0]?.command).toContain(`--plugin-dir '${plugins.copy("slides")}'`);
+      expect(tmux.starts()[0]?.command).not.toContain(plugins.copy("welsh"));
+    } finally {
       await assistant.stop();
       await hub.close();
       plugins.cleanup();

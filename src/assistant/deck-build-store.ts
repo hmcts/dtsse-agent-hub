@@ -1,21 +1,14 @@
 import { canChangeDeck } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
+import { podSupports } from "../agents/client-features.ts";
 import { podReady } from "../agents/pod-ready.ts";
 import { isUuid } from "../agents/store.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
+import { SLIDES_PLUGIN } from "../virtual-agents/plugins.ts";
 import { findAssistantWithClaims } from "./assistant-store.ts";
 import type { DeckOutline } from "./deck.ts";
-import {
-  buildStatus,
-  DECK_BUILD_TIMEOUT_MS,
-  DECK_BUILDS_KEPT,
-  type DeckBuildRequest,
-  type DeckBuildView,
-  heldBuildSince,
-  SLIDES_NOT_TURNED_ON,
-  SLIDES_PLUGIN
-} from "./deck-build.ts";
+import { buildStatus, DECK_BUILD_TIMEOUT_MS, DECK_BUILDS_KEPT, type DeckBuildRequest, type DeckBuildView, heldBuildSince } from "./deck-build.ts";
 import { readDeckVersionEntry } from "./deck-history-store.ts";
 import { type DeckAsset, lockConversation } from "./deck-store.ts";
 import { accessToConversation } from "./shares.ts";
@@ -45,8 +38,8 @@ async function expire(db: Database, conversationId: string | null, now: Date): P
 /**
  * Asks the conversation's pod to build `version`, or joins the build of it already running. Only the owner may ask
  * (`canChangeDeck`): a reader is refused, and anyone else finds nothing, as the reads do. Nothing is recorded when the
- * .pptx is already there, when the pod cannot be asked now, when its client cannot build, or when the conversation is a
- * local session's, which has no pod.
+ * .pptx is already there, when the pod cannot be asked now, when its client cannot build or has not loaded the slides
+ * tools and will not until it restarts, or when the conversation is a local session's, which has no pod.
  */
 export async function requestDeckBuild(
   prisma: PrismaClient,
@@ -87,12 +80,13 @@ export async function requestDeckBuild(
     return { status: "assistant_gone" };
   }
   const { assistant } = found;
-  if (!assistant.plugins.includes(SLIDES_PLUGIN)) {
-    throw new HttpError(409, SLIDES_NOT_TURNED_ON);
-  }
   const ready = await podReady(prisma, viewerOid, found, "deck-build", now);
   if (ready !== "ok") {
     return { status: ready };
+  }
+  // A pod whose client does not load slides by itself has the tools only if its stored plugins named it as it started.
+  if (!podSupports(found.claims, "slides-always-on") && !assistant.plugins.includes(SLIDES_PLUGIN)) {
+    return { status: "restart_needed" };
   }
   const id = await prisma.$transaction(async (tx) => {
     await lockConversation(tx, conversationId);

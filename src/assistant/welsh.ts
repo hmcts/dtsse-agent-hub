@@ -24,7 +24,7 @@ export function hasWelshPlugin(virtualAgent: { plugins: readonly string[] }): bo
 }
 
 /** What a Welsh job or upload is refused with when the person's assistant has not got the plugin ticked. */
-export const WELSH_NOT_TURNED_ON = "turn on Welsh translations in Settings, under Tools, first";
+export const WELSH_NOT_TURNED_ON = "turn on Welsh translations in Settings, under Plugins, first";
 
 const WELSH_KINDS = [
   "info",

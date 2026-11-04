@@ -584,7 +584,7 @@ function plugins(overrides: Partial<AssistantPlugins> = {}): AssistantPlugins {
   return { assistantId: ASSISTANT_ID, available: OFFERED, checked: [], podRunning: true, save: ok(), ...overrides };
 }
 
-const FORM = "Change your assistant's team tools";
+const FORM = "Change your assistant's plugins";
 
 function connectWith(overrides: Partial<{ running: boolean; reconnect: FormAction }> = {}) {
   return { assistantId: ASSISTANT_ID, running: true, reconnect: ok(), ...overrides };
@@ -823,13 +823,13 @@ describe("connecting Azure from the Assistant's settings", () => {
   });
 });
 
-describe("the Assistant's team tools", () => {
-  it("should offer no Tools section when the hub offers none and the assistant loads none", () => {
+describe("the Assistant's plugins", () => {
+  it("should offer no Plugins section when the hub offers none and the assistant loads none", () => {
     open({ plugins: plugins({ available: [] }) });
 
-    expect(sections()).not.toContain("Tools");
+    expect(sections()).not.toContain("Plugins");
     expect(screen.queryByRole("form", { name: FORM })).toBeNull();
-    expect(screen.queryByRole("heading", { name: "Team tools" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Plugins" })).toBeNull();
   });
 
   // `assistantPluginsData` gives nothing when `VIRTUAL_AGENT_PLUGINS` is malformed, rather than an empty list: the
@@ -838,12 +838,12 @@ describe("the Assistant's team tools", () => {
   it("should show nothing at all when the page passes no plugins", () => {
     open({ plugins: undefined });
 
-    expect(sections()).not.toContain("Tools");
-    expect(screen.queryByRole("heading", { name: "Team tools" })).toBeNull();
+    expect(sections()).not.toContain("Plugins");
+    expect(screen.queryByRole("heading", { name: "Plugins" })).toBeNull();
     expect(screen.queryByText(/No longer offered/)).toBeNull();
   });
 
-  it("should still offer the appearance and the connections when there are no team tools to show", () => {
+  it("should still offer the appearance and the connections when there are no plugins to show", () => {
     open({ plugins: undefined });
 
     expect(sections()).toEqual(["Appearance", "Connections", "Sharing"]);
@@ -852,28 +852,28 @@ describe("the Assistant's team tools", () => {
     expect(screen.getByRole("list", { name: "Connections" })).toBeTruthy();
   });
 
-  it("should describe each tool in the hub's own words, with its name underneath, when it opens", () => {
-    open({ plugins: plugins() }, "Tools");
+  it("should describe each plugin in the hub's own words, with its name underneath, when it opens", () => {
+    open({ plugins: plugins() }, "Plugins");
     const items = within(screen.getByRole("form", { name: FORM })).getAllByRole("listitem");
 
     expect(items.map((item) => item.textContent)).toEqual(["PCS team workflowspcs", "dtsse"]);
   });
 
-  it("should tick the tools the assistant already loads when it opens", () => {
-    open({ plugins: plugins({ checked: ["pcs"] }) }, "Tools");
+  it("should tick the plugins the assistant already loads when it opens", () => {
+    open({ plugins: plugins({ checked: ["pcs"] }) }, "Plugins");
 
     expect((screen.getByRole("checkbox", { name: /pcs/ }) as HTMLInputElement).checked).toBe(true);
     expect((screen.getByRole("checkbox", { name: /dtsse/ }) as HTMLInputElement).checked).toBe(false);
   });
 
   it("should say a save restarts the assistant and keeps the chats when its pod is up", () => {
-    open({ plugins: plugins() }, "Tools");
+    open({ plugins: plugins() }, "Plugins");
 
     expect(screen.getByText(/Saving restarts your assistant; your chats are kept\./)).toBeTruthy();
   });
 
   it("should say the assistant picks them up at its next start when its pod is not up", () => {
-    open({ plugins: plugins({ podRunning: false }) }, "Tools");
+    open({ plugins: plugins({ podRunning: false }) }, "Plugins");
 
     expect(screen.getByText(/Your assistant loads them the next time it starts\./)).toBeTruthy();
     expect(screen.queryByText(/Saving restarts/)).toBeNull();
@@ -881,7 +881,7 @@ describe("the Assistant's team tools", () => {
 
   it("should send the assistant's own id and the newly ticked names to the hub's plugins action when saved", async () => {
     const save = ok();
-    open({ plugins: plugins({ checked: ["pcs"], save }) }, "Tools");
+    open({ plugins: plugins({ checked: ["pcs"], save }) }, "Plugins");
 
     fireEvent.click(screen.getByRole("checkbox", { name: /dtsse/ }));
     await act(async () => {
@@ -893,9 +893,9 @@ describe("the Assistant's team tools", () => {
     expect(screen.getByRole("status").textContent).toBe("Your assistant is restarting with its new plugins");
   });
 
-  it("should send no tools when the person unticks every one", async () => {
+  it("should send no plugins when the person unticks every one", async () => {
     const save = ok();
-    open({ plugins: plugins({ checked: ["pcs"], save }) }, "Tools");
+    open({ plugins: plugins({ checked: ["pcs"], save }) }, "Plugins");
 
     fireEvent.click(screen.getByRole("checkbox", { name: /pcs/ }));
     await act(async () => {
@@ -905,19 +905,19 @@ describe("the Assistant's team tools", () => {
     expect((save.mock.calls[0] as unknown as [FormData])[0].getAll("plugins")).toEqual([]);
   });
 
-  it("should keep a ticked tool the hub no longer offers, so the person can untick it", () => {
-    open({ plugins: plugins({ checked: ["civil", "pcs"] }) }, "Tools");
+  it("should keep a ticked plugin the hub no longer offers, so the person can untick it", () => {
+    open({ plugins: plugins({ checked: ["civil", "pcs"] }) }, "Plugins");
 
     expect((screen.getByRole("checkbox", { name: /civil/ }) as HTMLInputElement).checked).toBe(true);
     expect(screen.getByText("No longer offered. Untick it to stop using it.")).toBeTruthy();
     expect(screen.getAllByRole("checkbox").map((box) => (box as HTMLInputElement).value)).toEqual(["pcs", "dtsse", "civil"]);
   });
 
-  it("should keep its own tools in the dialog's focus trap when it is open", () => {
-    open({ plugins: plugins() }, "Tools");
+  it("should keep its own controls in the dialog's focus trap when it is open", () => {
+    open({ plugins: plugins() }, "Plugins");
     const items = stops();
 
-    expect(items.at(-1)).toBe(screen.getByRole("button", { name: "Save team tools" }));
+    expect(items.at(-1)).toBe(screen.getByRole("button", { name: "Save plugins" }));
   });
 });
 
@@ -1186,12 +1186,12 @@ describe("the Assistant's own templates", () => {
   it("should offer every section the page passes, each in the focus trap, when they are all passed", () => {
     open({ plugins: plugins(), claudeMd: claudeMd(), templates: templates({ mine: [row("Stand-up")] }) });
 
-    expect(sections()).toEqual(["Appearance", "Connections", "Templates", "Sharing", "Claude.md", "Tools"]);
+    expect(sections()).toEqual(["Appearance", "Connections", "Templates", "Sharing", "Claude.md", "Plugins"]);
     expect(screen.getByRole("radiogroup", { name: "Appearance" })).toBeTruthy();
     go("Connections");
     expect(screen.getByRole("list", { name: "Connections" })).toBeTruthy();
     for (const [section, form, last] of [
-      ["Tools", "Change your assistant's team tools", "Save team tools"],
+      ["Plugins", "Change your assistant's plugins", "Save plugins"],
       ["Claude.md", "Save your CLAUDE.md", "Save your CLAUDE.md"],
       ["Templates", "Save a new template", LAST_COPY]
     ] as const) {
@@ -1230,15 +1230,15 @@ function modelPanel(): HTMLElement {
 }
 
 describe("the Assistant's model", () => {
-  it("should offer no Model section when the page passes none", () => {
+  it("should offer no Assistant section for a model alone when the page passes none", () => {
     open({ model: undefined });
 
-    expect(sections()).not.toContain("Model");
+    expect(sections()).not.toContain("Assistant");
     expect(screen.queryByRole("heading", { name: "Model" })).toBeNull();
   });
 
   it("should offer Sonnet and Opus, with what each is for and no version, when it is shown", () => {
-    open({ model: modelSetting() }, "Model");
+    open({ model: modelSetting() }, "Assistant");
     const choices = within(screen.getByRole("form", { name: MODEL_FORM })).getAllByRole("radio");
 
     expect(choices.map((choice) => choice.getAttribute("value"))).toEqual(["sonnet", "opus"]);
@@ -1248,14 +1248,14 @@ describe("the Assistant's model", () => {
   });
 
   it("should check the model the person is on when it is shown", () => {
-    open({ model: modelSetting({ model: "opus" }) }, "Model");
+    open({ model: modelSetting({ model: "opus" }) }, "Assistant");
 
     expect((within(screen.getByRole("form", { name: MODEL_FORM })).getByRole("radio", { name: /^Opus/ }) as HTMLInputElement).checked).toBe(true);
   });
 
   // One setting for every chat, which people read a settings dialog as being about the chat they opened it from.
   it("should say it applies to all of their chats, and when a change reaches one, whenever it is shown", () => {
-    open({ model: modelSetting() }, "Model");
+    open({ model: modelSetting() }, "Assistant");
 
     expect(modelPanel().textContent).toContain("This applies to all of your chats");
     expect(modelPanel().textContent).toContain("takes the change with your next message");
@@ -1263,7 +1263,7 @@ describe("the Assistant's model", () => {
 
   it("should save the model the person picks and say so when they submit it", async () => {
     const save = vi.fn(async () => ({ ok: true as const, confirmation: "Opus saved as the model for your chats" }));
-    open({ model: modelSetting({ save }) }, "Model");
+    open({ model: modelSetting({ save }) }, "Assistant");
 
     fireEvent.click(within(screen.getByRole("form", { name: MODEL_FORM })).getByRole("radio", { name: /^Opus/ }));
     await act(async () => {
@@ -1279,7 +1279,7 @@ describe("the Assistant's model", () => {
   // show a selection that is not in force.
   it("should say why and put the radios back to the stored choice when the save is refused", async () => {
     const save = vi.fn(async () => ({ ok: false as const, error: "pick a model from the list" }));
-    open({ model: modelSetting({ save }) }, "Model");
+    open({ model: modelSetting({ save }) }, "Assistant");
 
     fireEvent.click(within(screen.getByRole("form", { name: MODEL_FORM })).getByRole("radio", { name: /^Opus/ }));
     await act(async () => {
@@ -1294,7 +1294,7 @@ describe("the Assistant's model", () => {
   it("should follow the stored choice when the server sends another one while the dialog is open", () => {
     const { rerender } = render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} model={modelSetting()} />);
     fireEvent.click(cog());
-    go("Model");
+    go("Assistant");
     expect(checkedModel()).toBe("sonnet");
 
     rerender(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} model={modelSetting({ model: "opus" })} />);
@@ -1303,7 +1303,7 @@ describe("the Assistant's model", () => {
   });
 
   it("should say the assistant takes the choice at its next start, and still offer it, when its pod cannot honour it", () => {
-    open({ model: modelSetting({ honoured: false }) }, "Model");
+    open({ model: modelSetting({ honoured: false }) }, "Assistant");
 
     expect(modelPanel().textContent).toContain("Your assistant picks your choice up the next time it starts");
     expect(
@@ -1315,15 +1315,15 @@ describe("the Assistant's model", () => {
   });
 
   it("should say nothing about the next start when its pod honours the choice now", () => {
-    open({ model: modelSetting({ honoured: true }) }, "Model");
+    open({ model: modelSetting({ honoured: true }) }, "Assistant");
 
     expect(modelPanel().textContent).not.toContain("next time it starts");
   });
 
-  it("should sit under Agent, above the CLAUDE.md, and leave the other sections reachable when it is shown", () => {
-    open({ model: modelSetting(), claudeMd: claudeMd(), plugins: plugins() }, "Model");
+  it("should sit in the Assistant section, above the CLAUDE.md, and leave the other sections reachable when it is shown", () => {
+    open({ model: modelSetting(), claudeMd: claudeMd(), plugins: plugins() }, "Assistant");
 
-    expect(sections()).toEqual(["Appearance", "Connections", "Sharing", "Model", "Claude.md", "Tools"]);
+    expect(sections()).toEqual(["Appearance", "Connections", "Sharing", "Assistant", "Claude.md", "Plugins"]);
     expect(screen.getByRole("heading", { name: "Model" })).toBeTruthy();
     go("Claude.md");
     expect(screen.getByRole("heading", { name: "Your CLAUDE.md" })).toBeTruthy();
@@ -1362,12 +1362,12 @@ describe("the Assistant's CLAUDE.md", () => {
   });
 
   // The navigation's own label is the person's word for it; the section's heading is the file's.
-  it("should sit under Agent, beside the tools, and leave the other sections reachable when it is shown", () => {
+  it("should sit under Agent, beside the plugins, and leave the other sections reachable when it is shown", () => {
     open({ claudeMd: claudeMd(), plugins: plugins() }, "Claude.md");
 
-    expect(sections()).toEqual(["Appearance", "Connections", "Sharing", "Claude.md", "Tools"]);
+    expect(sections()).toEqual(["Appearance", "Connections", "Sharing", "Claude.md", "Plugins"]);
     expect(screen.getByRole("heading", { name: "Your CLAUDE.md" })).toBeTruthy();
-    go("Tools");
+    go("Plugins");
     expect(screen.getByRole("form", { name: FORM })).toBeTruthy();
     go("Appearance");
     expect(screen.getByRole("radiogroup", { name: "Appearance" })).toBeTruthy();
@@ -1569,16 +1569,16 @@ describe("the Assistant's settings navigation", () => {
   it("should gather the sections under the headings they belong to when it opens", () => {
     open(everything());
 
-    expect(sections()).toEqual(["Appearance", "Connections", "Templates", "Sharing", "Model", "Claude.md", "Tools", "Size", "Files"]);
-    expect(nav().textContent).toBe("GeneralAppearanceConnectionsTemplatesSharingAgentModelClaude.mdToolsSizeFiles");
+    expect(sections()).toEqual(["Appearance", "Connections", "Templates", "Sharing", "Assistant", "Claude.md", "Plugins", "Files"]);
+    expect(nav().textContent).toBe("GeneralAppearanceConnectionsTemplatesSharingAgentAssistantClaude.mdPluginsFiles");
   });
 
   // A tablist owns tabs and nothing else, so the two group headings are shown rather than announced, and the panel's
-  // own heading is what says in full what a short label like "Tools" stands for.
+  // own heading is what says in full what a short label like "Claude.md" stands for.
   it("should keep its group headings out of what a screen reader is read when it opens", () => {
     open(everything());
 
-    expect(within(nav()).getAllByRole("tab")).toHaveLength(9);
+    expect(within(nav()).getAllByRole("tab")).toHaveLength(8);
     for (const group of ["General", "Agent"]) {
       expect(within(nav()).getByText(group).getAttribute("aria-hidden")).toBe("true");
     }
@@ -1703,7 +1703,7 @@ describe("the Assistant's settings on a narrow screen", () => {
       within(screen.getByRole("list", { name: "Settings sections" }))
         .getAllByRole("button")
         .map((item) => item.textContent)
-    ).toEqual(["Appearance", "Connections", "Templates", "Sharing", "Model", "Claude.md", "Tools", "Size", "Files"]);
+    ).toEqual(["Appearance", "Connections", "Templates", "Sharing", "Assistant", "Claude.md", "Plugins", "Files"]);
     expect(screen.queryByRole("radiogroup", { name: "Appearance" })).toBeNull();
   });
 
@@ -1746,7 +1746,7 @@ describe("the Assistant's settings on a narrow screen", () => {
   it("should still close on Escape, and put focus back on the cog, when a section is open", () => {
     narrow();
     open(everything());
-    fireEvent.click(screen.getByRole("button", { name: "Tools" }));
+    fireEvent.click(screen.getByRole("button", { name: "Plugins" }));
 
     fireEvent.keyDown(document, { key: "Escape" });
 
@@ -1856,7 +1856,7 @@ async function auditOpenDialog(section?: string): Promise<void> {
 describe("the Assistant's settings accessibility", () => {
   afterEach(wideAgain);
 
-  for (const section of ["Appearance", "Claude.md", "Tools", "Connections", "Templates"]) {
+  for (const section of ["Appearance", "Claude.md", "Plugins", "Connections", "Templates", "Assistant"]) {
     it(`should raise no WCAG A or AA violations with ${section} open`, async () => {
       await auditOpenDialog(section);
     }, 20_000);
@@ -1917,7 +1917,7 @@ describe("the Assistant's files", () => {
   it("should offer Files as its own section, after the agent's own, when the page passes it", () => {
     open({ ...everything(), files: files() });
 
-    expect(sections()).toEqual(["Appearance", "Connections", "Templates", "Sharing", "Model", "Claude.md", "Tools", "Size", "Files"]);
+    expect(sections()).toEqual(["Appearance", "Connections", "Templates", "Sharing", "Assistant", "Claude.md", "Plugins", "Files"]);
   });
 
   // Two figures, never one: the uploads are a share of a volume the repository clones are on too, and the second
@@ -2358,19 +2358,35 @@ describe("the Assistant's size", () => {
   it("should show nothing at all when the page passes no size", () => {
     open({ files: files(), size: undefined });
 
-    expect(sections()).not.toContain("Size");
+    expect(sections()).not.toContain("Assistant");
     expect(screen.queryByRole("heading", { name: "Size" })).toBeNull();
   });
 
-  it("should offer Size under Agent, after the tools, when the page passes it", () => {
+  it("should offer the size in the Assistant section, under Agent, when the page passes it", () => {
     open(everything());
 
-    expect(sections()).toEqual(["Appearance", "Connections", "Templates", "Sharing", "Model", "Claude.md", "Tools", "Size", "Files"]);
+    expect(sections()).toEqual(["Appearance", "Connections", "Templates", "Sharing", "Assistant", "Claude.md", "Plugins", "Files"]);
+  });
+
+  it("should put the model and then the size under the one Assistant heading when both are passed", () => {
+    open({ model: modelSetting(), size: size() }, "Assistant");
+    const panel = screen.getByRole("tabpanel");
+
+    expect(
+      within(panel)
+        .getAllByRole("heading", { level: 3 })
+        .map((heading) => heading.textContent)
+    ).toEqual(["Your assistant"]);
+    expect(
+      within(panel)
+        .getAllByRole("heading", { level: 4 })
+        .map((heading) => heading.textContent)
+    ).toEqual(["Model", "Size"]);
   });
 
   // The figures a person reads, not a read-back of the constants they come from.
   it("should say the size it is on with what that size gives", () => {
-    open({ size: size() }, "Size");
+    open({ size: size() }, "Assistant");
 
     expect(panel().textContent).toContain("You are on small: 4 chats at once, 4Gi–8Gi of memory.");
     expect(panel().textContent).not.toContain("from its next restart");
@@ -2380,14 +2396,14 @@ describe("the Assistant's size", () => {
   // every running pod on the old one, and at its cap the pod stops an idle session to make room rather than queueing
   // — so offering the higher figure here would invite someone to end a chat they never closed.
   it("should say what the pod runs now, and what a restart would change it to, when it is behind its size's cap", () => {
-    open({ size: size({ capacity: { now: 3, fromRestart: 4 } }) }, "Size");
+    open({ size: size({ capacity: { now: 3, fromRestart: 4 } }) }, "Assistant");
 
     expect(panel().textContent).toContain("You are on small: 3 chats at once, 4Gi–8Gi of memory. It holds 4 chats at once from its next restart.");
   });
 
   // A pod that has not reported gets no current figure at all: the cap is what it will be given, not what it has.
   it("should claim no current figure, and name the cap a restart gives, when the pod has reported nothing", () => {
-    open({ size: size({ capacity: { now: undefined, fromRestart: 4 } }) }, "Size");
+    open({ size: size({ capacity: { now: undefined, fromRestart: 4 } }) }, "Assistant");
 
     expect(panel().textContent).toContain("You are on small, with 4Gi–8Gi of memory. It holds 4 chats at once from its next restart.");
     // The dropdown still describes each size's cap, which is what a change would give; nothing says the pod's own.
@@ -2397,7 +2413,7 @@ describe("the Assistant's size", () => {
   // The peak leads because it is the fuller account of what the pod has had to hold; the figure beside it is the part
   // that cannot be reclaimed, which is what the warning is computed from and what a chat adds to.
   it("should give the peak against the limit, what it is holding of that, and when the pod last looked", () => {
-    open({ size: size({ use: use(4 * CONVERSATION_MEMORY_BYTES) }) }, "Size");
+    open({ size: size({ use: use(4 * CONVERSATION_MEMORY_BYTES) }) }, "Assistant");
 
     expect(panel().textContent).toContain("8 GB of 8 GB at its busiest");
     expect(panel().textContent).toContain("Holding 5.4 GB right now");
@@ -2408,13 +2424,13 @@ describe("the Assistant's size", () => {
   // warning was computed from another. In gigabytes to two places, not `describeSize`'s tenth of a megabyte, which
   // would claim a precision the one measurement behind the figure cannot support.
   it("should say what a chat costs from the same figure the warning uses when the pod has reported", () => {
-    open({ size: size({ use: use(4 * CONVERSATION_MEMORY_BYTES) }) }, "Size");
+    open({ size: size({ use: use(4 * CONVERSATION_MEMORY_BYTES) }) }, "Assistant");
 
     expect(panel().textContent).toContain("about 0.65 GB of it for each chat open.");
   });
 
   it("should say the figures will not move while the assistant is stopped", () => {
-    open({ size: size({ use: use(4 * CONVERSATION_MEMORY_BYTES, { stopped: true }) }) }, "Size");
+    open({ size: size({ use: use(4 * CONVERSATION_MEMORY_BYTES, { stopped: true }) }) }, "Assistant");
 
     expect(panel().textContent).toContain("Your assistant is stopped. Last reported");
   });
@@ -2423,7 +2439,7 @@ describe("the Assistant's size", () => {
   // `chatCapacity` giving a stopped pod no `now` is for.
   it("should claim no current chats beside the sentence saying the assistant is stopped", () => {
     const stopped = { use: use(4 * CONVERSATION_MEMORY_BYTES, { stopped: true }), capacity: { now: undefined, fromRestart: 4 } };
-    open({ size: size(stopped) }, "Size");
+    open({ size: size(stopped) }, "Assistant");
 
     expect(panel().textContent).toContain("Your assistant is stopped. Last reported");
     expect(panel().textContent).toContain("You are on small, with 4Gi–8Gi of memory. It holds 4 chats at once from its next restart.");
@@ -2436,14 +2452,14 @@ describe("the Assistant's size", () => {
     ["not_running", "stopped, so there is nothing using memory and nothing to report"],
     ["waiting", "has not reported its memory yet"]
   ] as const)("should say it cannot tell, rather than show a figure, when the reason is %s", (reason, said) => {
-    open({ size: size({ use: { reported: false, reason } }) }, "Size");
+    open({ size: size({ use: { reported: false, reason } }) }, "Assistant");
 
     expect(panel().textContent).toContain(said);
     expect(panel().textContent).not.toContain("at its busiest");
   });
 
   it.each(["older_client", "not_running", "waiting"] as const)("should raise no warning when it cannot tell (%s)", (reason) => {
-    open({ size: size({ use: { reported: false, reason } }) }, "Size");
+    open({ size: size({ use: { reported: false, reason } }) }, "Assistant");
 
     expect(panel().textContent).not.toContain("low on memory");
     expect(cog().getAttribute("aria-label")).toBe("Settings");
@@ -2451,13 +2467,13 @@ describe("the Assistant's size", () => {
 
   // The threshold: exactly one conversation's worth of headroom still has room for the chat about to be opened.
   it("should raise no warning when what it cannot reclaim leaves room for exactly one more chat", () => {
-    open({ size: size({ use: use(CONVERSATION_MEMORY_BYTES) }) }, "Size");
+    open({ size: size({ use: use(CONVERSATION_MEMORY_BYTES) }) }, "Assistant");
 
     expect(panel().textContent).not.toContain("low on memory");
   });
 
   it("should warn, and name the size to move to, when what it cannot reclaim leaves a byte less than one more chat", () => {
-    open({ size: size({ use: use(CONVERSATION_MEMORY_BYTES - 1), openChats: 3 }) }, "Size");
+    open({ size: size({ use: use(CONVERSATION_MEMORY_BYTES - 1), openChats: 3 }) }, "Assistant");
 
     expect(panel().textContent).toContain("Your assistant is low on memory");
     expect(panel().textContent).toContain("Move up to medium below for 8Gi–16Gi of memory and 6 chats at once. Closing a chat frees about 0.65 GB of it.");
@@ -2465,14 +2481,14 @@ describe("the Assistant's size", () => {
 
   // A pod's chats cannot reach this threshold, so closing one is given as a quantity and never as the remedy.
   it("should not tell the person to close a chat when it warns", () => {
-    open({ size: size({ use: use(0), openChats: 1 }) }, "Size");
+    open({ size: size({ use: use(0), openChats: 1 }) }, "Assistant");
 
     expect(panel().textContent).toContain("Move up to medium below");
     expect(panel().textContent).not.toContain("close a chat you have finished with");
   });
 
   it("should offer no bigger size on the largest size there is when a chat is open", () => {
-    open({ size: size({ use: use(0), size: "large", openChats: 3 }) }, "Size");
+    open({ size: size({ use: use(0), size: "large", openChats: 3 }) }, "Assistant");
 
     expect(panel().textContent).toContain("This is the largest size there is. Closing a chat frees about 0.65 GB of it.");
     expect(panel().textContent).not.toContain("Move up to");
@@ -2480,7 +2496,7 @@ describe("the Assistant's size", () => {
 
   // With nothing open, what closing a chat would free is a fact about nothing.
   it("should leave the per-chat figure out on the largest size when no chat is open", () => {
-    open({ size: size({ use: use(0), size: "large", openChats: 0 }) }, "Size");
+    open({ size: size({ use: use(0), size: "large", openChats: 0 }) }, "Assistant");
 
     expect(panel().textContent).toContain("Your assistant is low on memory");
     expect(panel().textContent).not.toContain("Closing a chat");
@@ -2503,7 +2519,7 @@ describe("the Assistant's size", () => {
   });
 
   it("should offer every size with its chats and memory, and start on the one it is", () => {
-    open({ size: size() }, "Size");
+    open({ size: size() }, "Assistant");
     const select = screen.getByLabelText("Choose a size") as HTMLSelectElement;
 
     expect([...select.options].map((option) => option.textContent)).toEqual([
@@ -2518,7 +2534,7 @@ describe("the Assistant's size", () => {
   // A change restarts the pod, so what it ends is said before the person commits, not after.
   it("should post nothing, and say what a change ends, until the person confirms", () => {
     const save = vi.fn(async () => ({ ok: true as const, confirmation: "done" }));
-    open({ size: size({ openChats: 3 }, save) }, "Size");
+    open({ size: size({ openChats: 3 }, save) }, "Assistant");
 
     fireEvent.change(screen.getByLabelText("Choose a size"), { target: { value: "medium" } });
     fireEvent.click(screen.getByRole("button", { name: "Change to medium" }));
@@ -2533,7 +2549,7 @@ describe("the Assistant's size", () => {
     [1, "the one chat you have open"],
     [0, "whatever it is working on"]
   ])("should count the chats a change ends when %i are open", (openChats, said) => {
-    open({ size: size({ openChats }) }, "Size");
+    open({ size: size({ openChats }) }, "Assistant");
 
     fireEvent.change(screen.getByLabelText("Choose a size"), { target: { value: "large" } });
     fireEvent.click(screen.getByRole("button", { name: "Change to large" }));
@@ -2542,7 +2558,7 @@ describe("the Assistant's size", () => {
   });
 
   it("should promise the new size at the next start, and not a restart, when no pod is up", () => {
-    open({ size: size({ rollsPod: false }) }, "Size");
+    open({ size: size({ rollsPod: false }) }, "Assistant");
 
     fireEvent.change(screen.getByLabelText("Choose a size"), { target: { value: "medium" } });
     fireEvent.click(screen.getByRole("button", { name: "Change to medium" }));
@@ -2553,7 +2569,7 @@ describe("the Assistant's size", () => {
 
   it("should send the assistant's id and the size chosen when the person confirms", async () => {
     const save = vi.fn(async () => ({ ok: true as const, confirmation: "Restarting at medium." }));
-    open({ size: size({}, save) }, "Size");
+    open({ size: size({}, save) }, "Assistant");
     fireEvent.change(screen.getByLabelText("Choose a size"), { target: { value: "medium" } });
     fireEvent.click(screen.getByRole("button", { name: "Change to medium" }));
 
@@ -2566,7 +2582,7 @@ describe("the Assistant's size", () => {
 
   it("should put the question away, having posted nothing, when the person cancels", () => {
     const save = vi.fn(async () => ({ ok: true as const, confirmation: "done" }));
-    open({ size: size({}, save) }, "Size");
+    open({ size: size({}, save) }, "Assistant");
     fireEvent.change(screen.getByLabelText("Choose a size"), { target: { value: "medium" } });
     fireEvent.click(screen.getByRole("button", { name: "Change to medium" }));
 
@@ -2578,7 +2594,7 @@ describe("the Assistant's size", () => {
 
   // A different size is a different question, so an answer already on the screen stops being the one asked.
   it("should take the question back when the person changes the size they are asking about", () => {
-    open({ size: size() }, "Size");
+    open({ size: size() }, "Assistant");
     fireEvent.change(screen.getByLabelText("Choose a size"), { target: { value: "medium" } });
     fireEvent.click(screen.getByRole("button", { name: "Change to medium" }));
 
@@ -2590,7 +2606,7 @@ describe("the Assistant's size", () => {
 
   it("should show the action's own refusal, rather than deciding for itself, when a change is refused", async () => {
     const save = vi.fn(async () => ({ ok: false as const, error: "that virtual agent is being deleted" }));
-    open({ size: size({}, save) }, "Size");
+    open({ size: size({}, save) }, "Assistant");
     fireEvent.change(screen.getByLabelText("Choose a size"), { target: { value: "medium" } });
     fireEvent.click(screen.getByRole("button", { name: "Change to medium" }));
 
@@ -2600,14 +2616,14 @@ describe("the Assistant's size", () => {
   });
 
   it("should say why, and offer no form, when the size cannot be changed at all", () => {
-    open({ size: size({ refusal: "that virtual agent is being deleted" }) }, "Size");
+    open({ size: size({ refusal: "that virtual agent is being deleted" }) }, "Assistant");
 
     expect(panel().textContent).toContain("The size cannot be changed just now: that virtual agent is being deleted.");
     expect(screen.queryByRole("form", { name: CHANGE_FORM })).toBeNull();
   });
 
   it("should keep its own controls in the dialog's focus trap when it is open", () => {
-    open({ size: size() }, "Size");
+    open({ size: size() }, "Assistant");
     const items = stops();
 
     expect(items).toContain(screen.getByLabelText("Choose a size"));
@@ -2615,7 +2631,7 @@ describe("the Assistant's size", () => {
   });
 
   it("should raise no WCAG A or AA violations with Size open", async () => {
-    await auditOpenDialog("Size");
+    await auditOpenDialog("Assistant");
   }, 20_000);
 });
 

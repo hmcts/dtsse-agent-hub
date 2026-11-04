@@ -3,7 +3,7 @@ import type { CredentialStatus } from "../credentials/store.ts";
 import type { ModelRoute } from "../viewer/identity.ts";
 
 /**
- * The person's saved credentials as the Assistant's Credentials section lists them: which can be pasted, which can
+ * The person's saved credentials as the Assistant's Connections section lists them: which can be pasted, which can
  * be removed, and what removing each ends. Pure, so the rules are tested apart from the form.
  *
  * Pasted is what `saveCredential` accepts: a GitHub token, a Jenkins API token, and a Claude token while any agent of

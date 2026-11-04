@@ -83,7 +83,7 @@ Every `/assistant` page is not found while virtual agents are off.
 **Retired addresses redirect**, with the rules in `src/web/home.ts`:
 
 - `/hub/virtual` and `/hub/virtual/[id]` go to `/assistant?settings=assistant`, and `/hub/settings/credentials` to
-  `/assistant?settings=credentials`. `/access`, `/hub/access` and `/assistant/shared` go to
+  `/assistant?settings=connections`. `/access`, `/hub/access` and `/assistant/shared` go to
   `/assistant?settings=sharing`. Each answers in one hop from the proxy (`retiredPath`), from the bare address as from
   the `/hub` one, and goes to `/hub` instead when virtual agents are off. These drop their query, so one carrying its
   own `?settings=` cannot override the section.
@@ -193,17 +193,14 @@ directly with `?settings=<id>`:
 | Id | Label | What it holds |
 | --- | --- | --- |
 | `appearance` | Appearance | light, dark, or the device's setting |
-| `connections` | Connections | the sign-ins (GitHub, Azure, Atlassian and the rest) |
-| `credentials` | Credentials | paste a GitHub, Jenkins or, on your own licence, Claude token; remove any saved credential |
+| `connections` | Connections | the sign-ins (GitHub, Azure, Atlassian and the rest), then the saved credentials: paste a GitHub, Jenkins or, on your own licence, Claude token; remove any saved credential. `?settings=credentials`, which older pod clients link, opens it too |
 | `templates` | Templates | saved prompts |
 | `exports` | Jira & Confluence | export defaults |
 | `sharing` | Sharing | the chats you have shared or offered to fork, and those shared with or offered to you |
-| `assistant` | Assistant | its name, and a restart |
-| `model` | Model | the Claude model for every chat |
+| `assistant` | Assistant | where its agent stands and a restart, the Claude model for every chat, and its size with the memory its pod reports |
 | `claude-md` | Claude.md | the CLAUDE.md every virtual agent of yours writes before Claude starts |
 | `git` | Git identity | the name and email its commits use |
-| `tools` | Tools | the workspace plugins it loads |
-| `size` | Size | its size, and the memory its pod reports |
+| `plugins` | Plugins | the workspace plugins it loads |
 | `ports` | Web servers | the web servers its pod reports |
 | `files` | Files | the files the pod holds, and deleting them |
 
@@ -271,7 +268,7 @@ PR previews (`values.preview.template.yaml`) and the pipeline's temporary `-stag
 ### Credentials locally
 
 Without `CREDENTIALS_VAULT_URL`, a process outside production keeps credentials in the `dev_credential_value` table,
-each value AES-256-GCM sealed under a key derived from `SESSION_SECRET`, so set one to use the Assistant's Credentials settings or
+each value AES-256-GCM sealed under a key derived from `SESSION_SECRET`, so set one to use the saved credentials in the Assistant's Connections settings or
 `PUT /api/agent/credentials/{kind}` under `yarn dev`:
 
 ```bash
@@ -361,7 +358,7 @@ rest of this suite it has taken 80s and more, which is what the longer timeout i
   deleted credential is recoverable by the hub's identity for a week and then gone. Saving a credential whose name is
   still soft-deleted recovers it and then writes the new value. Its URL is written to `dtsse-{env}` as
   `agent-hub-credentials-vault-url`, which the chart mounts as `CREDENTIALS_VAULT_URL`. A process without it keeps no
-  credentials in production, and says so in the Assistant's Credentials settings rather than failing to start.
+  credentials in production, and says so in the Assistant's Connections settings rather than failing to start.
 - **Orchestrator identity** (AAT only): `dtsse-agent-hub-orchestrator-aat-mi` in `managed-identities-aat-rg`, in
   `infrastructure/orchestrator.tf`. Its outputs are the client id, for the orchestrator's ServiceAccount annotation,
   and the principal id, for the hub's `ORCHESTRATOR_OIDS`. It has no Azure role assignments: all it does is sign in to

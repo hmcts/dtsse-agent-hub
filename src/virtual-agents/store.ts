@@ -9,7 +9,7 @@ import { CLAIM_TIMEOUT_MS, diskExpiresAt } from "./cleanup.ts";
 import { hashLaunchToken, isWellFormedLaunchToken, launchTokenMatches, mintLaunchToken, withoutLaunchTokens } from "./launch-token.ts";
 import { afterApplyError, awaitsOwner, nextStatus, type Observation, type PodPhase, type VirtualAgentDesired, type VirtualAgentStatus } from "./lifecycle.ts";
 import { checkName, createRefusal } from "./limits.ts";
-import { availablePlugins, checkPlugins, samePlugins, storedPlugins } from "./plugins.ts";
+import { availablePlugins, checkPlugins, podPlugins, samePlugins, storedPlugins, tickedPlugins } from "./plugins.ts";
 import { normalisePorts, samePorts } from "./ports.ts";
 import { diskTtlDays, type GatewaySettings, gatewaySettings, orchestratorLeaseSeconds } from "./settings.ts";
 import { checkSize, sizeChangeRefusal, type VirtualAgentSize } from "./size.ts";
@@ -195,7 +195,7 @@ const POD_CHANGE = { generation: { increment: 1 }, podGeneration: { increment: 1
  * supervisor, so there is a window where the row is running and the figures are the dead pod's.
  *
  * **Not applied when stopping, deleting, or on the sweep's auto-stop**, though all three bump `pod_generation`: there
- * the figures are the last thing anyone measured and the Size section says as much, which is the whole reason they
+ * the figures are the last thing anyone measured and the size setting says as much, which is the whole reason they
  * are kept. So the rule is not "whatever bumps `pod_generation`" — it is whatever asks for a pod to come up.
  *
  * Clearing is not enough on its own where the pod being replaced is still running, because it can report again and
@@ -282,38 +282,6 @@ export async function setDesired(
 }
 
 /**
- * Gives the virtual agent a new name, and its sessions with it, since a heartbeat would otherwise put the old one
- * back. The StatefulSet and disk are named from the id, so the pod is not touched. The owner's `user` row is held as
- * in a create, so a rename and a create of the same name cannot both pass the check.
- */
-export async function renameVirtualAgent(prisma: PrismaClient, actorOid: string, id: string, name: unknown, now: Date = new Date()): Promise<VirtualAgentRow> {
-  const checked = checkName(name);
-  if (!checked.ok) {
-    throw new HttpError(400, checked.error);
-  }
-  return await prisma.$transaction(async (tx) => {
-    const row = await lockVirtualAgent(tx, id);
-    if (row === undefined || !canManageVirtualAgent(actorOid, row)) {
-      throw new HttpError(404, "no such virtual agent");
-    }
-    if (row.desired === "deleted") {
-      throw new HttpError(409, "that virtual agent is being deleted");
-    }
-    if (row.name === checked.name) {
-      return row;
-    }
-    await lockOwner(tx, row.ownerOid);
-    if ((await tx.virtualAgent.count({ where: { ownerOid: row.ownerOid, name: checked.name } })) > 0) {
-      throw new HttpError(409, `you already have a virtual agent called ${checked.name}`);
-    }
-    const updated = toRow(await tx.virtualAgent.update({ where: { id }, data: { name: checked.name, updatedAt: now }, select: SELECT }));
-    await tx.agent.updateMany({ where: { virtualAgentId: id }, data: { name: checked.name } });
-    await announce(tx, id, row.ownerOid);
-    return updated;
-  });
-}
-
-/**
  * A new size, bumping `generation` and `pod_generation` so the orchestrator applies the StatefulSet again with its
  * resources: a running pod is replaced, which ends the sessions on it, and a stopped one comes back at the new size.
  * Refused only while the agent is being deleted, per `sizeChangeRefusal`; someone other than the owner is told there
@@ -361,7 +329,10 @@ export async function setVirtualAgentSize(prisma: PrismaClient, actorOid: string
 
 /**
  * The plugins the pod loads, any of those `VIRTUAL_AGENT_PLUGINS` offers. A name no longer offered may be kept, so the
- * owner can save other changes without first unticking it, but not added. A change bumps `generation` and
+ * owner can save other changes without first unticking it, but not added. An always-on plugin is never offered or
+ * stored. A save whose ticked names are the ones the row already has writes nothing, even to a row that still holds an
+ * always-on name: every claim adds it anyway (`podPlugins`), and leaving it is what a hub rolled back to one that
+ * stores it reads. Only a change rewrites the names, without any always-on one. A change bumps `generation` and
  * `pod_generation`, as a resize does, so the orchestrator applies the StatefulSet with the new `AGENT_HUB_PLUGINS`:
  * a running pod is replaced, and the conversation continues on its disk; a stopped one picks the change up when it
  * next starts. Refused while the agent is being deleted; someone other than the owner is told there is no such agent.
@@ -387,7 +358,7 @@ export async function setVirtualAgentPlugins(
     if (!checked.ok) {
       throw new HttpError(400, checked.error);
     }
-    if (samePlugins(row.plugins, checked.plugins)) {
+    if (samePlugins(tickedPlugins(row.plugins), checked.plugins)) {
       return row;
     }
     const updated = toRow(
@@ -581,7 +552,7 @@ export interface ClaimedVirtualAgent {
   model_route: StoredRoute;
   size: VirtualAgentSize;
   exposed_ports: number[];
-  /** The plugins the pod loads, in code-point order; empty for none. */
+  /** The plugins the pod loads: the stored ones and the always-on ones (`podPlugins`), in code-point order. */
   plugins: string[];
   owner: { oid: string };
   /** Only when this claim minted one. It is never stored and never returned again. */
@@ -798,7 +769,7 @@ export async function claimVirtualAgents(prisma: PrismaClient, cluster: string, 
         model_route: row.model_route,
         size: row.size,
         exposed_ports: row.exposed_ports,
-        plugins: storedPlugins(row.plugins),
+        plugins: podPlugins(storedPlugins(row.plugins)),
         owner: { oid: row.owner_oid },
         ...(launchToken === undefined ? {} : { launch_token: launchToken }),
         ...(gateway === undefined ? {} : { gateway }),

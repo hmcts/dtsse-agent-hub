@@ -28,6 +28,7 @@ export type ClientFeature =
   | "lookups"
   | "memory-anon"
   | "model-alias"
+  | "slides-always-on"
   | "stop"
   | "welsh"
   | "welsh-review";

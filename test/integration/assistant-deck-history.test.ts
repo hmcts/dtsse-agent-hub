@@ -105,10 +105,10 @@ async function orchestrator<P>(handler: Handler<P>, path: string, params: P, bod
 }
 
 /**
- * The chat's pod claimed and started by the orchestrator, with the launch token it sends, the slides plugin ticked
- * and applied, and a claim of `features` of its own.
+ * The chat's pod claimed and started by the orchestrator, with the launch token it sends, and a claim of `features`
+ * of its own.
  */
-async function podFor(of: Chat, features: string[] = ["deck-build"]): Promise<string> {
+async function podFor(of: Chat, features: string[] = ["deck-build", "slides-always-on"]): Promise<string> {
   const claim = await orchestrator(claimRoute.POST, "/api/orchestrator/claim", {}, { cluster: "preview-01" });
   const claimed = (await jsonOf<{ virtual_agents: { id: string; generation: number; launch_token: string | null }[] }>(claim)).virtual_agents.find(
     (entry) => entry.id === of.virtualAgentId
@@ -119,7 +119,7 @@ async function podFor(of: Chat, features: string[] = ["deck-build"]): Promise<st
     { id: of.virtualAgentId },
     { generation: claimed.generation, replicas_ready: 1, pod_phase: "Running" }
   );
-  const row = await prisma.virtualAgent.update({ where: { id: of.virtualAgentId }, data: { plugins: ["slides"] }, select: { generation: true } });
+  const row = await prisma.virtualAgent.findUniqueOrThrow({ where: { id: of.virtualAgentId }, select: { generation: true } });
   await prisma.virtualAgent.update({
     where: { id: of.virtualAgentId },
     data: { observedGeneration: row.generation, status: "running", clientFeatures: features }
@@ -762,18 +762,46 @@ describe("the deck build's gate", () => {
     expect(await prisma.assistantDeckBuild.count()).toBe(0);
   });
 
-  it("should refuse with 409 when the assistant does not have the slides plugin ticked", async () => {
+  it("should record the build when the pod's client loads slides by itself and the assistant has no plugins stored", async () => {
     // Arrange
     const { mine } = await deckOf(4);
     await podFor(mine);
     await prisma.virtualAgent.update({ where: { id: mine.virtualAgentId }, data: { plugins: [] } });
 
     // Act
-    const refused = await prepare("alice", mine.id, 1);
+    const answer = await jsonOf<{ status: string; job_id: string }>(await prepare("alice", mine.id, 1));
 
     // Assert
-    expect(refused.status).toBe(409);
-    expect((await jsonOf(refused)).error).toBe("turn on Slides in Settings, under Tools, first");
+    expect(answer).toEqual({ status: "pending", job_id: expect.any(String) });
+    expect(await prisma.assistantDeckBuild.count()).toBe(1);
+  });
+
+  it("should answer restart_needed and record nothing when the pod's client does not load slides by itself and none is stored", async () => {
+    // Arrange
+    const { mine } = await deckOf(4);
+    await podFor(mine, ["deck-build"]);
+    await prisma.virtualAgent.update({ where: { id: mine.virtualAgentId }, data: { plugins: ["pcs"] } });
+
+    // Act
+    const answer = await jsonOf(await prepare("alice", mine.id, 1));
+
+    // Assert
+    expect(answer).toEqual({ status: "restart_needed" });
+    expect(await prisma.assistantDeckBuild.count()).toBe(0);
+  });
+
+  it("should record the build when the pod's client does not load slides by itself but the assistant still has slides stored", async () => {
+    // Arrange
+    const { mine } = await deckOf(4);
+    await podFor(mine, ["deck-build"]);
+    await prisma.virtualAgent.update({ where: { id: mine.virtualAgentId }, data: { plugins: ["pcs", "slides"] } });
+
+    // Act
+    const answer = await jsonOf<{ status: string; job_id: string }>(await prepare("alice", mine.id, 1));
+
+    // Assert
+    expect(answer).toEqual({ status: "pending", job_id: expect.any(String) });
+    expect(await prisma.assistantDeckBuild.count()).toBe(1);
   });
 
   it("should answer 404 with virtual agents off", async () => {

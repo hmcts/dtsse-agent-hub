@@ -72,7 +72,6 @@ function agent(overrides: Partial<AssistantAgent> = {}): AssistantAgent {
 function agentSettings(overrides: Partial<AssistantAgent> | null = {}, actions: Partial<Omit<AssistantAgentSettings, "load">> = {}): AssistantAgentSettings {
   return {
     load: vi.fn(async () => (overrides === null ? null : agent(overrides))),
-    rename: ok("Renamed"),
     restart: ok("Restarting. Your chats are kept."),
     ...actions
   };
@@ -125,20 +124,20 @@ function sent(action: ReturnType<typeof ok>): FormData {
 }
 
 describe("the Assistant's settings for managing its agent", () => {
-  it("should offer credentials with the connections and the agent's sections with the rest of the agent's when every one is given", async () => {
+  it("should offer the saved credentials within Connections and the agent's sections after it when every one is given", async () => {
     await open({ agent: agentSettings(), git: git(), tokens: tokens() });
 
     expect(
       within(nav())
         .getAllByRole("tab")
         .map((tab) => tab.textContent)
-    ).toEqual(["Appearance", "Connections", "Credentials", "Assistant", "Git identity", "Web servers"]);
+    ).toEqual(["Appearance", "Connections", "Assistant", "Git identity", "Web servers"]);
   });
 
-  it("should offer none of them when the page gives none", async () => {
+  it("should offer none of the agent's sections when the page gives none", async () => {
     await open();
 
-    for (const name of ["Assistant", "Credentials", "Git identity", "Web servers"]) {
+    for (const name of ["Assistant", "Git identity", "Web servers"]) {
       expect(within(nav()).queryByRole("tab", { name })).toBeNull();
     }
   });
@@ -151,14 +150,21 @@ describe("the Assistant's settings for managing its agent", () => {
     expect(agentLoad.load).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: /^Settings/ }));
+    await act(async () => {
+      fireEvent.click(within(nav()).getByRole("tab", { name: "Connections" }));
+    });
     expect(agentLoad.load).not.toHaveBeenCalled();
     expect(gitLoad.load).not.toHaveBeenCalled();
     await act(async () => {
       fireEvent.click(within(nav()).getByRole("tab", { name: "Git identity" }));
     });
-
     expect(gitLoad.load).toHaveBeenCalledTimes(1);
     expect(agentLoad.load).not.toHaveBeenCalled();
+    await act(async () => {
+      fireEvent.click(within(nav()).getByRole("tab", { name: "Assistant" }));
+    });
+
+    expect(agentLoad.load).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -227,17 +233,11 @@ describe("the Assistant's own agent", () => {
     expect(screen.getByText(/nothing to restart/)).toBeTruthy();
   });
 
-  it("should send the agent and the new name when it is renamed, and show the refusal when the name is taken", async () => {
-    const rename = vi.fn<FormAction>(async () => ({ ok: false as const, error: "you already have a virtual agent called jerry" }));
-    await open({ agent: agentSettings({}, { rename }) }, "Assistant");
+  it("should offer no way to rename the agent when its section is open", async () => {
+    await open({ agent: agentSettings() }, "Assistant");
 
-    const name = screen.getByLabelText("Name") as HTMLInputElement;
-    expect(name.value).toBe("assistant");
-    fireEvent.change(name, { target: { value: "jerry" } });
-    await submit("Rename your assistant");
-
-    expect([sent(rename).get("id"), sent(rename).get("name")]).toEqual([ID, "jerry"]);
-    expect(screen.getByRole("alert").textContent).toContain("you already have a virtual agent called jerry");
+    expect(screen.queryByRole("form", { name: /Rename/ })).toBeNull();
+    expect(screen.queryByLabelText("Name")).toBeNull();
   });
 });
 
@@ -315,9 +315,9 @@ describe("the Assistant's git identity", () => {
 
 describe("the Assistant's saved credentials", () => {
   it("should offer to paste a GitHub token and remove every stored credential, sign-ins among them, when all are stored", async () => {
-    await open({ tokens: tokens([status("github"), status("azure", "alice@hmcts.net"), status("atlassian")], {}, "gateway") }, "Credentials");
+    await open({ tokens: tokens([status("github"), status("azure", "alice@hmcts.net"), status("atlassian")], {}, "gateway") }, "Connections");
 
-    const rows = within(screen.getByRole("list", { name: "Credentials" })).getAllByRole("listitem");
+    const rows = within(screen.getByRole("list", { name: "Saved credentials" })).getAllByRole("listitem");
     expect(rows.map((row) => row.querySelector(".font-medium")?.textContent)).toEqual([
       "GitHub token",
       "Azure sign-in",
@@ -334,7 +334,7 @@ describe("the Assistant's saved credentials", () => {
 
   it("should send the kind and the new value when a GitHub token is pasted, and say so after the form has closed", async () => {
     const save = ok();
-    await open({ tokens: tokens([], { save }) }, "Credentials");
+    await open({ tokens: tokens([], { save }) }, "Connections");
 
     fireEvent.click(screen.getByRole("button", { name: "Add your GitHub token" }));
     fireEvent.change(screen.getByLabelText("GitHub token"), { target: { value: "ghp_11aa" } });
@@ -347,7 +347,7 @@ describe("the Assistant's saved credentials", () => {
 
   it("should say the assistant cannot answer without it, and send the kind once confirmed, when the model's token is removed", async () => {
     const remove = ok();
-    await open({ tokens: tokens([status("claude")], { remove }) }, "Credentials");
+    await open({ tokens: tokens([status("claude")], { remove }) }, "Connections");
 
     fireEvent.click(screen.getByRole("button", { name: "Remove your Claude token" }));
     expect(screen.getByText(/it cannot answer again until you paste a new one/)).toBeTruthy();
@@ -359,9 +359,29 @@ describe("the Assistant's saved credentials", () => {
   });
 
   it("should say why the credentials cannot be shown when the hub cannot read them", async () => {
-    await open({ tokens: { ...tokens(), rows: [], unavailable: "no credential store is configured" } }, "Credentials");
+    await open({ tokens: { ...tokens(), rows: [], unavailable: "no credential store is configured" } }, "Connections");
 
     expect(screen.getByText("Your credentials cannot be shown: no credential store is configured")).toBeTruthy();
+  });
+
+  it("should put the saved credentials under the sign-ins as a part of Connections when both are given", async () => {
+    await open({ tokens: tokens() }, "Connections");
+
+    expect(screen.getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent)).toEqual(["Connections"]);
+    expect(screen.getByRole("heading", { level: 4, name: "Saved credentials" })).toBeTruthy();
+    expect(screen.getByRole("list", { name: "Connections" })).toBeTruthy();
+    expect(screen.getByRole("list", { name: "Saved credentials" })).toBeTruthy();
+  });
+
+  it("should offer Connections for the saved credentials alone when the page gives no sign-ins", async () => {
+    render(<AssistantSettings now={Date.now()} tokens={tokens()} />);
+    fireEvent.click(screen.getByRole("button", { name: /^Settings/ }));
+    await act(async () => {
+      fireEvent.click(within(nav()).getByRole("tab", { name: "Connections" }));
+    });
+
+    expect(screen.queryByRole("list", { name: "Connections" })).toBeNull();
+    expect(screen.getByRole("list", { name: "Saved credentials" })).toBeTruthy();
   });
 });
 
@@ -405,19 +425,49 @@ describe("the Assistant's settings deep link", () => {
   });
 
   it("should open at the section ?settings= names, and take the parameter out of the address once closed, when the page loads", async () => {
-    land("/assistant?settings=credentials&x=1");
+    land("/assistant?settings=connections&x=1");
     await act(async () => {
       render(page());
     });
 
     expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy();
-    expect(within(nav()).getByRole("tab", { name: "Credentials" }).getAttribute("aria-selected")).toBe("true");
-    expect(`${window.location.pathname}${window.location.search}`).toBe("/assistant?settings=credentials&x=1");
+    expect(within(nav()).getByRole("tab", { name: "Connections" }).getAttribute("aria-selected")).toBe("true");
+    expect(`${window.location.pathname}${window.location.search}`).toBe("/assistant?settings=connections&x=1");
 
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Close settings" }));
 
     expect(`${window.location.pathname}${window.location.search}`).toBe("/assistant?x=1");
     expect(router.search).toBe("?x=1");
+  });
+
+  // A pod on an older client still links its owner to `?settings=credentials` to paste a token.
+  it("should open at Connections when ?settings= names the credentials section", async () => {
+    land("/assistant?settings=credentials");
+    await act(async () => {
+      render(page());
+    });
+
+    expect(within(nav()).getByRole("tab", { name: "Connections" }).getAttribute("aria-selected")).toBe("true");
+  });
+
+  it.each([
+    ["model", "Assistant"],
+    ["size", "Assistant"],
+    ["tools", "Plugins"]
+  ])("should open at the section that holds it when ?settings= names %s", async (named, section) => {
+    land(`/assistant?settings=${named}`);
+    await act(async () => {
+      render(
+        <AssistantSettings
+          now={Date.now()}
+          connections={connections(["github"])}
+          agent={agentSettings()}
+          plugins={{ assistantId: ID, available: [{ name: "pcs", description: "" }], checked: [], podRunning: true, save: ok() }}
+        />
+      );
+    });
+
+    expect(within(nav()).getByRole("tab", { name: section }).getAttribute("aria-selected")).toBe("true");
   });
 
   it("should open at the first section when ?settings= names one it does not offer", () => {
@@ -433,26 +483,26 @@ describe("the Assistant's settings deep link", () => {
     const { rerender } = render(page());
     expect(screen.queryByRole("dialog")).toBeNull();
 
-    navigate("/assistant?settings=credentials");
+    navigate("/assistant?settings=connections");
     await act(async () => {
       rerender(page());
     });
 
     expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy();
-    expect(within(nav()).getByRole("tab", { name: "Credentials" }).getAttribute("aria-selected")).toBe("true");
-    expect(`${window.location.pathname}${window.location.search}`).toBe("/assistant?settings=credentials");
+    expect(within(nav()).getByRole("tab", { name: "Connections" }).getAttribute("aria-selected")).toBe("true");
+    expect(`${window.location.pathname}${window.location.search}`).toBe("/assistant?settings=connections");
   });
 
   // The router has to hear the parameter go, or the same link names what it already holds and changes nothing.
   it("should open again when the same link is followed after the dialog it opened was closed", async () => {
-    land("/assistant?settings=credentials");
+    land("/assistant?settings=connections");
     const { rerender } = render(page());
     await act(async () => {
       fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Close settings" }));
     });
     expect(screen.queryByRole("dialog")).toBeNull();
 
-    navigate("/assistant?settings=credentials");
+    navigate("/assistant?settings=connections");
     await act(async () => {
       rerender(page());
     });

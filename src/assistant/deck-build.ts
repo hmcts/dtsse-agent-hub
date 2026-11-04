@@ -1,14 +1,10 @@
 import { z } from "zod";
 
 /**
- * A .pptx built on the owner's request from a deck version that keeps none, by the conversation's own pod: only the
- * pod has the slides plugin, so the hub never builds one itself. See "Deck builds" in docs/agent-api.md.
+ * A .pptx built on the owner's request from a deck version that keeps none, by the conversation's own pod: only a
+ * pod has the slides plugin, which every pod loads, so the hub never builds one itself. See "Deck builds" in
+ * docs/agent-api.md.
  */
-
-/** The slides plugin, which the owner ticks and a pod needs to build anything. */
-export const SLIDES_PLUGIN = "slides";
-
-export const SLIDES_NOT_TURNED_ON = "turn on Slides in Settings, under Tools, first";
 
 /** How long the hub waits for the pod's answer; the pod gives itself 14 minutes, so an answer is never thrown away. */
 export const DECK_BUILD_TIMEOUT_MS = 15 * 60_000;
@@ -35,6 +31,7 @@ export type DeckBuildRequest =
   | { status: "pending"; job_id: string }
   | { status: "waking" }
   | { status: "unsupported" }
+  | { status: "restart_needed" }
   | { status: "assistant_gone" }
   | { status: "no_pod" };
 

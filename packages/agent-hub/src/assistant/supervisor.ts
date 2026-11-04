@@ -138,8 +138,8 @@ export type CreateAssistantSupervisorOptions = {
   /** When this supervisor started, which bounds how old a `busy` it will believe is; a test passes its own. */
   bootedAt?: number;
   /**
-   * The pod's copies of the ticked plugins this package carries, which every session loads. Asked as each session
-   * starts, so a copy that failed once is tried again rather than lost until the pod restarts.
+   * The pod's copies of the always-on and ticked plugins this package carries, which every session loads. Asked as
+   * each session starts, so a copy that failed once is tried again rather than lost until the pod restarts.
    */
   pluginDirs?: () => readonly string[];
 };

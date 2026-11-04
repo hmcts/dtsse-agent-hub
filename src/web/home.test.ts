@@ -88,8 +88,8 @@ describe("retiredPath", () => {
     ["/virtual", "/assistant?settings=assistant"],
     ["/hub/virtual", "/assistant?settings=assistant"],
     ["/hub/virtual/0f8a", "/assistant?settings=assistant"],
-    ["/settings/credentials", "/assistant?settings=credentials"],
-    ["/hub/settings/credentials", "/assistant?settings=credentials"]
+    ["/settings/credentials", "/assistant?settings=connections"],
+    ["/hub/settings/credentials", "/assistant?settings=connections"]
   ])("should send %s to %s when virtual agents are on", (pathname, to) => {
     expect(retiredPath(pathname, true)).toBe(to);
   });

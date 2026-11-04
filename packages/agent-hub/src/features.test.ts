@@ -19,7 +19,7 @@ describe("CLIENT_FEATURES", () => {
   // an assertion below, which the per-name list cannot, and which is how this file came to claim a standard it did
   // not meet.
   it("should hold every feature this build claims, so a name dropped in a merge fails here", () => {
-    expect(CLIENT_FEATURES).toHaveLength(10);
+    expect(CLIENT_FEATURES).toHaveLength(11);
   });
 
   /**
@@ -34,16 +34,27 @@ describe("CLIENT_FEATURES", () => {
    * restart — which it will not, the claim being missing from the published client. `stop`, `attachments` and
    * `files` are quieter: the feature is withheld and nothing says so, which is why these two are worth the words and
    * those three are covered by being on the list at all. `model-alias` is quiet the same way, except that
-   * what is withheld is a reassurance: the Model section tells the person their choice waits for the next start,
+   * what is withheld is a reassurance: the Assistant section's model choice tells the person their choice waits for the next start,
    * which is wrong for a pod running this build.
    * `github-lookups` is misdiagnosed as `lookups` is, for the GitHub repository and Project searches alone.
    * `deck-build` is misdiagnosed the same way: the slides panel says the assistant needs an update to build an older
    * version's .pptx.
+   * `slides-always-on` is worse: the slides panel tells a person with nothing ticked to restart their assistant to
+   * build a version, and a restart does not change the answer.
    */
-  it.each(["attachments", "deck-build", "files", "github-lookups", "lookups", "memory-anon", "model-alias", "stop", "welsh", "welsh-review"])(
-    "should claim %s",
-    (feature) => {
-      expect(CLIENT_FEATURES).toContain(feature);
-    }
-  );
+  it.each([
+    "attachments",
+    "deck-build",
+    "files",
+    "github-lookups",
+    "lookups",
+    "memory-anon",
+    "model-alias",
+    "slides-always-on",
+    "stop",
+    "welsh",
+    "welsh-review"
+  ])("should claim %s", (feature) => {
+    expect(CLIENT_FEATURES).toContain(feature);
+  });
 });

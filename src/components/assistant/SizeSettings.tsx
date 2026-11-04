@@ -213,7 +213,7 @@ function Change({
 }
 
 /**
- * The Size section of the Assistant's settings.
+ * The size part of the Assistant section of the settings.
  *
  * It is the one place the Assistant says how much its pod has and how much of it is gone, and the one place a person
  * can do anything about either. The warning above the choice is deliberately next to the thing that answers it.
@@ -223,9 +223,9 @@ export function Size({ size }: Readonly<{ size: AssistantSize }>) {
   const pressure = memoryPressure(view.use, view.openChats, view.size);
   return (
     <section aria-labelledby="assistant-settings-size" className="flex flex-col gap-2.5">
-      <h3 id="assistant-settings-size" className="text-sm font-semibold">
+      <h4 id="assistant-settings-size" className="text-[13px] font-semibold">
         Size
-      </h3>
+      </h4>
       <p className="text-pretty text-[13px] text-asst-muted">
         How much your assistant has to work with. A bigger assistant holds more chats at once and has more memory for each of them; it costs more to run, so
         take the size you need. {sizeSentence(view.size, view.capacity)}

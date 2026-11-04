@@ -630,9 +630,9 @@ describe("DeckDownload", () => {
     expect(screen.getByRole("alert").textContent).toBe(`${words}Try again`);
   });
 
-  it("should show the hub's refusal, and a fault, as a failure to try again", async () => {
+  it("should say to restart the assistant, and link to the restart in its settings, when the hub answers restart_needed", async () => {
     // Arrange
-    serving({ [POST]: { status: 409, body: { error: "turn on Slides in Settings, under Tools, first" } } });
+    serving({ [POST]: { body: { status: "restart_needed" } } });
     shown();
 
     // Act
@@ -640,7 +640,21 @@ describe("DeckDownload", () => {
     await settle();
 
     // Assert
-    expect(screen.getByRole("alert").textContent).toBe("turn on Slides in Settings, under Tools, firstTry again");
+    expect(screen.getByRole("alert").textContent).toBe("Restart your assistant to load the slide tools, then try again.Restart it in SettingsTry again");
+    expect(screen.getByRole("link", { name: "Restart it in Settings" }).getAttribute("href")).toBe("?settings=assistant");
+  });
+
+  it("should show the hub's refusal, and a fault, as a failure to try again", async () => {
+    // Arrange
+    serving({ [POST]: { status: 409, body: { error: "turn on Slides in Settings, under Plugins, first" } } });
+    shown();
+
+    // Act
+    fireEvent.click(screen.getByRole("button", { name: "Prepare .pptx" }));
+    await settle();
+
+    // Assert
+    expect(screen.getByRole("alert").textContent).toBe("turn on Slides in Settings, under Plugins, firstTry again");
 
     // Arrange
     vi.stubGlobal(

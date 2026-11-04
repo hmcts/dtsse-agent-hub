@@ -117,9 +117,9 @@ export function TokenSettings({ tokens }: { tokens: AssistantTokens }) {
   const [said, setSaid] = useState<string | null>(null);
   return (
     <section aria-labelledby="assistant-settings-tokens" className="flex flex-col gap-2.5">
-      <h3 id="assistant-settings-tokens" className="text-sm font-semibold">
-        Credentials
-      </h3>
+      <h4 id="assistant-settings-tokens" className="text-[13px] font-semibold">
+        Saved credentials
+      </h4>
       <p className="text-pretty text-[13px] text-asst-muted">
         Paste a token your assistant asked for, or remove one it has saved. A saved value is never shown again. Sign-ins your assistant makes for itself can
         only be removed here, not pasted.
@@ -130,7 +130,7 @@ export function TokenSettings({ tokens }: { tokens: AssistantTokens }) {
         </p>
       )}
       {tokens.unavailable === null ? (
-        <ul aria-label="Credentials" className="flex flex-col overflow-hidden rounded-[10px] border border-asst-line">
+        <ul aria-label="Saved credentials" className="flex flex-col overflow-hidden rounded-[10px] border border-asst-line">
           {tokens.rows.map((row) => (
             <Row key={row.kind} row={row} tokens={tokens} onDone={setSaid} />
           ))}

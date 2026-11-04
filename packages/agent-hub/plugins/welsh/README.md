@@ -8,7 +8,7 @@ them) use it to:
 - add Welsh content to Jira stories
 
 The agent hub carries the plugin and puts it on the virtual agent of anyone who ticks **Welsh translations** in the
-CFT Workspace's Settings, under Tools.
+CFT Workspace's Settings, under Plugins.
 
 ## Nothing here translates
 

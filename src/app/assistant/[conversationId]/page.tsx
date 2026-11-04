@@ -22,7 +22,7 @@ import { offerChatFork, withdrawChatFork } from "@/app/_actions/forks";
 import { answerAgentQuestion } from "@/app/_actions/questions";
 import { shareChat, unshareChat } from "@/app/_actions/shares";
 import { deleteTemplate, saveTemplate } from "@/app/_actions/templates";
-import { reconnectSignIn, renameVirtualAgent, resizeVirtualAgent, restartVirtualAgent, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
+import { reconnectSignIn, resizeVirtualAgent, restartVirtualAgent, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
 import { SHARING_SETTINGS } from "@/app/assistant/sharing";
 import { connectionsData } from "@/assistant/connections";
 import { savedCredentialsData } from "@/assistant/saved-credentials";
@@ -123,7 +123,7 @@ export default async function ConversationPage({
       model={model === undefined ? undefined : { ...model, save: saveAssistantModel }}
       exports={{ defaults, save: saveExportDefaults, access: jira }}
       sharing={SHARING_SETTINGS}
-      agent={{ load: readAssistantAgent, rename: renameVirtualAgent, restart: restartVirtualAgent }}
+      agent={{ load: readAssistantAgent, restart: restartVirtualAgent }}
       git={{ load: readGitIdentity, save: saveGitIdentity, clear: clearGitIdentity }}
       tokens={{ ...savedCredentialsData(home.credentials, home.assistant.modelRoute), save: saveCredential, remove: removeCredential }}
     >
