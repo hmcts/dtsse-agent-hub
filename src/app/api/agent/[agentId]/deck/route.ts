@@ -42,7 +42,7 @@ export const GET = ownedAgentRoute<{ agentId: string }>(async ({ agent, request 
     outline: found.outline,
     version: found.version,
     updated_by: found.by,
-    updated_at: found.created_at,
+    updated_at: found.updated_at,
     pptx: found.pptx,
     latest_version: latest.version
   });

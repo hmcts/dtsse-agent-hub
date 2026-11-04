@@ -51,11 +51,6 @@ describe("editSummary", () => {
     expect(editSummary(deck, deck)).toBe(EDITED_SUMMARY);
     expect(editSummary(undefined, deck)).toBe(EDITED_SUMMARY);
   });
-
-  it("should line slides without an id up by their place", () => {
-    const plain: DeckOutline = { title: "T", slides: [{ layout: "HMCTS_SECTION", title: "One" }] };
-    expect(editSummary(plain, plain)).toBe(EDITED_SUMMARY);
-  });
 });
 
 describe("sessionBuildsIt", () => {

@@ -72,8 +72,12 @@ export function insertAfter(items: readonly EditBullet[], at: number, level: 0 |
 
 /** Removing a bullet brings the lines nested under it out to the top level, since nothing is left for them to nest under. */
 export function removeAt(items: readonly EditBullet[], at: number): EditBullet[] {
-  const rest = items.filter((_, index) => index !== at);
-  return rest.map((item, index) => (index === 0 && item.level === 1 ? { ...item, level: 0 } : item));
+  if (items[at]?.level !== 0) {
+    return items.filter((_, index) => index !== at);
+  }
+  const next = items.findIndex((item, index) => index > at && item.level === 0);
+  const end = next === -1 ? items.length : next;
+  return items.flatMap((item, index) => (index === at ? [] : index > at && index < end ? [{ ...item, level: 0 as const }] : [item]));
 }
 
 /** An id no slide of the deck has, in the form the hub gives one (`withSlideIds`). */
@@ -192,6 +196,16 @@ const FIELD_WORDS: Record<string, string> = {
 };
 
 /**
+ * A bullet numbered the way the editor labels its line, counting nested lines in the flat list: "3", or "2, nested,"
+ * for the `child`th line under the outline's `item`th bullet.
+ */
+function editorLine(slide: DeckSlide | undefined, field: string, item: number, child: PropertyKey | undefined): string {
+  const list = ((slide as Record<string, unknown> | undefined)?.[field] ?? []) as Bullet[];
+  const before = flatBullets(list.slice(0, item)).length;
+  return typeof child === "number" ? `${before + child + 2}, nested,` : `${before + 1}`;
+}
+
+/**
  * The first thing that would stop the outline saving, said for a person: an empty title or bullet above all, which
  * are what editing makes, then anything else the hub's check refuses. `null` when it would save.
  */
@@ -206,6 +220,7 @@ export function blockingProblem(outline: DeckOutline): Problem | null {
   const slide = onSlide ? (path[1] as number) + 1 : 0;
   const field = String(onSlide ? path[2] : path[0]);
   const item = onSlide ? path[3] : path[1];
+  const line = onSlide && typeof item === "number" ? editorLine(outline.slides[path[1] as number], field, item, path[5]) : undefined;
   const where = slide === 0 ? "The title slide" : `Slide ${slide + 1}`;
   if (!onSlide && field === "slides") {
     return { slide: 0, message: "The deck needs at least one slide after the title slide" };
@@ -215,8 +230,8 @@ export function blockingProblem(outline: DeckOutline): Problem | null {
   }
   const empty = issue?.message === "must be non-empty text";
   const words = FIELD_WORDS[field];
-  if (empty && words !== undefined && typeof item === "number") {
-    return { slide, message: `${where}: ${words === "bullets" ? "bullet" : `${words} bullet`} ${item + 1} is empty` };
+  if (empty && words !== undefined && line !== undefined) {
+    return { slide, message: `${where}: ${words === "bullets" ? "bullet" : `${words} bullet`} ${line} is empty` };
   }
   if (empty && words !== undefined) {
     return { slide, message: `${where}: the ${words} is empty` };

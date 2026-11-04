@@ -45,8 +45,8 @@ Also ask for any pictures they want used, as files. Don't start the outline unti
    you at a slide. Outside a conversation there is nowhere to publish, and the command says so. For an outline
    `agent-hub deck get` wrote (below), `deck put` sends the version `deck get` read as `--base` by itself, so a
    newer version the person wrote meanwhile is refused rather than overwritten; don't pass `--base` yourself.
-   - "the deck has changed since version N": someone else wrote a newer version. Start again from
-     `agent-hub deck get`, make your change to that, build it, and put it with the `--base` the message gives.
+   - "the deck has changed since version N": someone else wrote a newer version. Run `agent-hub deck get`, make
+     your change to the outline it writes, build it, and put again.
    - "the user has changed version N of the deck since you read it": the person edited the slides in the web UI
      after your `deck get`. Run `agent-hub deck get` again, make your change to their version, build it and put it.
    - "a conversation holds at most … bytes of pictures": the latest 3 versions, which the hub never deletes to make

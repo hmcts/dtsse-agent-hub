@@ -77,11 +77,14 @@ async function readJson<T>(url: string, signal?: AbortSignal): Promise<T> {
   return (await response.json()) as T;
 }
 
-/** The kept versions, read when the list opens and again whenever the latest version moves on while it is open. */
-function useVersions(conversationId: string, latest: number, open: boolean) {
+/**
+ * The kept versions, read when the list opens and again whenever the latest version or the revision moves on while it
+ * is open: an amend keeps the version and changes its summary and .pptx.
+ */
+function useVersions(conversationId: string, latest: number, revision: number, open: boolean) {
   const [state, setState] = useState<{ versions: DeckVersionEntry[] | null; failed: boolean }>({ versions: null, failed: false });
   const [attempt, setAttempt] = useState(0);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: a newer latest version, or another attempt, is what makes the list worth reading again
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a newer latest version or revision, or another attempt, is what makes the list worth reading again
   useEffect(() => {
     if (!open) {
       return;
@@ -96,7 +99,7 @@ function useVersions(conversationId: string, latest: number, open: boolean) {
       }
     );
     return () => controller.abort();
-  }, [conversationId, latest, open, attempt]);
+  }, [conversationId, latest, revision, open, attempt]);
   return { ...state, retry: () => setAttempt((count) => count + 1) };
 }
 
@@ -130,7 +133,7 @@ function asView(version: DeckVersionView): DeckView {
     outline: version.outline,
     version: version.version,
     updatedBy: version.by,
-    updatedAt: version.created_at,
+    updatedAt: version.updated_at,
     pptx: version.pptx,
     sizes: version.sizes
   };
@@ -386,7 +389,7 @@ function VersionList({
                   {entry.version === latest ? " (latest)" : ""}
                 </span>
                 <span className="text-asst-muted">
-                  {who(entry.by, owner)}, {when(entry.created_at)}
+                  {who(entry.by, owner)}, {when(entry.updated_at)}
                 </span>
                 {entry.summary === null ? null : <span className="text-asst-body">{entry.summary}</span>}
               </button>
@@ -615,7 +618,7 @@ export function DeckHistory({
   const [restoring, setRestoring] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
   const listId = useId();
-  const versions = useVersions(conversationId, latest.version, open);
+  const versions = useVersions(conversationId, latest.version, latest.revision ?? 0, open);
   const viewing = picked !== null && picked !== latest.version ? picked : null;
   const older = useVersion(conversationId, viewing);
 

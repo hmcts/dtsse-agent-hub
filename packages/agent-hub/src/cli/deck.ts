@@ -4,6 +4,7 @@
 // build` runs on it unchanged, and `put` turns the paths back into uploaded pictures before it sends the outline.
 // `get` also records the version and revision it wrote, which `put` sends as its base for an outline in that directory,
 // so a version someone else wrote in between, or the person's amend of the one read, is refused rather than overwritten.
+// The revision is sent with an explicit `--base` too: only the hub can tell whether it still goes with that version.
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -387,17 +388,19 @@ async function uploadPictures(api: Api, agentId: string, outline: DeckOutline, b
   return { ...outline, slides };
 }
 
-/** Says why a put was refused for a newer version, or for an amend of the one read, and how to put the change again on top of it. */
+/**
+ * Says why a put was refused for a newer version, or for an amend of the one read, and how to put the change again on
+ * top of it: by reading it again, which records the version and revision the next put sends, never by naming a
+ * `--base`, which would leave the revision behind.
+ */
 function printConflict(cli: Cli, base: number, current: Deck | undefined, baseRevision: number | undefined): void {
   const by = current?.updated_by ? `, last written by ${current.updated_by === "user" ? "the user" : "this conversation"}` : "";
   if (current?.version === base && baseRevision !== undefined) {
     cli.printError(`agent-hub deck: the user has changed version ${base} of the deck since you read it. Nothing was saved.`);
-    cli.printError(`Read it with ${CLI} deck get, make your change to that, build it, and put it again.`);
-    return;
+  } else {
+    cli.printError(`agent-hub deck: the deck has changed since version ${base}: it is now version ${current?.version ?? "?"}${by}. Nothing was saved.`);
   }
-  const again = current?.version === undefined ? "" : ` with --base ${current.version}`;
-  cli.printError(`agent-hub deck: the deck has changed since version ${base}: it is now version ${current?.version ?? "?"}${by}. Nothing was saved.`);
-  cli.printError(`Read it with ${CLI} deck get, make your change to that, build it, and put it again${again}.`);
+  cli.printError(`Run ${CLI} deck get, make your change to the outline it writes, build it, and put again.`);
 }
 
 /**
@@ -432,8 +435,8 @@ async function putDeck(cli: Cli, argv: string[]): Promise<number> {
   // An outline `get` wrote is a change to the version it read; any other is a new deck, put on whatever is there.
   const recorded = fromGet ? recordedVersion(dir) : undefined;
   const base = flags.base !== undefined ? Number(flags.base) : recorded !== undefined ? recorded : (await api.getDeck(agent.agent_id).catch(noDeck)).version;
-  // Only the revision `get` read with that version: one taken from the hub now would let the put over an amend it never saw.
-  const baseRevision = flags.base === undefined && recorded !== undefined ? recordedRevision(dir) : undefined;
+  // Only the revision `get` read: one taken from the hub now would let the put over an amend it never saw.
+  const baseRevision = recorded !== undefined ? recordedRevision(dir) : undefined;
   const outline = await uploadPictures(api, agent.agent_id, local, path.dirname(outlineFile)).catch(noDeck);
   let written: DeckResponse;
   try {

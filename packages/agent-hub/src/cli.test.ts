@@ -1761,7 +1761,26 @@ describe("artefact, in an assistant conversation", () => {
       expect(hub.decks.get(agentId)?.outline?.title).toBe("Ways of shipping");
     });
 
-    it("should record the revision each put answers, and send none with --base", async () => {
+    it("should refuse a put with --base when the user amended the version deck get read", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      hub.writeDeckAsUser(agentId, outline({ asset: `sha256:${digest(PNG)}` }), { [digest(PNG)]: PNG });
+      expect((await cli(["deck", "get"], { sid })).code).toBe(0);
+      const dir = path.join(home.root, ".agent-hub", "decks", `0f8a6a1e-0000-4000-8000-${String(nextSession).padStart(12, "0")}`);
+      hub.amendDeckAsUser(agentId, { ...outline({ asset: `sha256:${digest(PNG)}` }), title: "Ways of shipping" });
+
+      // Act
+      const r = await cli(["deck", "put", path.join(dir, "outline.json"), "--base", "1"], { sid });
+
+      // Assert
+      expect(r.code).toBe(1);
+      expect(r.errors.join("\n")).toMatch(/the user has changed version 1 of the deck since you read it\. Nothing was saved\./);
+      expect(r.errors.join("\n")).toMatch(/Run agent-hub deck get, make your change to the outline it writes, build it, and put again\./);
+      expect(calls(agentId, "PUT", "").find((c) => c.path === `/api/agent/${agentId}/deck`)?.body).toMatchObject({ base_version: 1, base_revision: 1 });
+      expect(hub.decks.get(agentId)?.outline?.title).toBe("Ways of shipping");
+    });
+
+    it("should record the revision each put answers, and send it with --base too", async () => {
       // Arrange
       const { sid, agentId } = await session();
       hub.writeDeckAsUser(agentId, outline({ asset: `sha256:${digest(PNG)}` }), { [digest(PNG)]: PNG });
@@ -1780,7 +1799,7 @@ describe("artefact, in an assistant conversation", () => {
         .filter((c) => c.path === `/api/agent/${agentId}/deck`)
         .map((c) => c.body);
       expect(bodies[0]).toMatchObject({ base_version: 1, base_revision: 1 });
-      expect(bodies[1]).not.toHaveProperty("base_revision");
+      expect(bodies[1]).toMatchObject({ base_version: 2, base_revision: 2 });
     });
 
     it("should write the latest version and print what changed since the version asked for, slide by slide, when deck get has --diff-from", async () => {
@@ -1899,7 +1918,8 @@ describe("artefact, in an assistant conversation", () => {
       // Assert
       expect(r.code).toBe(1);
       expect(r.errors.join("\n")).toMatch(/changed since version 1: it is now version 2, last written by the user\. Nothing was saved\./);
-      expect(r.errors.join("\n")).toMatch(/deck get, make your change to that, build it, and put it again with --base 2/);
+      expect(r.errors.join("\n")).toMatch(/Run agent-hub deck get, make your change to the outline it writes, build it, and put again\./);
+      expect(r.errors.join("\n")).not.toMatch(/--base/);
       expect(calls(agentId, "PUT", "/versions/")).toHaveLength(0);
     });
 

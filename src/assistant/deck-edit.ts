@@ -13,6 +13,9 @@ export const AMEND_WINDOW_MS = 10 * 60_000;
 export const EDITED_SUMMARY = "Edited slides";
 export const REORDERED_SUMMARY = "Reordered slides";
 
+/** What a build still being prepared when its version is amended fails with, since it would show the words before. */
+export const AMENDED_BUILD_ERROR = "The slides changed while this was being prepared. Prepare it again.";
+
 /** The latest version, as the amend rule reads it. */
 export interface AmendableVersion {
   by: string;
@@ -36,7 +39,7 @@ export function amends(latest: AmendableVersion | null, editorOid: string, now: 
 
 const canonical = (value: unknown): string => jsonbText(value) ?? "";
 
-const byId = (slides: readonly DeckSlide[]): Map<string, string> => new Map(slides.map((slide, index) => [slide.id ?? `#${index}`, canonical(slide)]));
+const byId = (slides: readonly DeckSlide[]): Map<string | undefined, string> => new Map(slides.map((slide) => [slide.id, canonical(slide)]));
 
 /**
  * What a version written from the editor says changed against the version the edits started from: `Reordered slides`
@@ -51,7 +54,7 @@ export function editSummary(before: DeckOutline | undefined, after: DeckOutline)
   const was = byId(before.slides);
   const now = byId(after.slides);
   const sameSlides = was.size === now.size && [...now].every(([id, text]) => was.get(id) === text);
-  const order = (slides: readonly DeckSlide[]) => slides.map((slide, index) => slide.id ?? `#${index}`).join("\n");
+  const order = (slides: readonly DeckSlide[]) => slides.map((slide) => slide.id).join("\n");
   return deckSame && sameSlides && order(before.slides) !== order(after.slides) ? REORDERED_SUMMARY : EDITED_SUMMARY;
 }
 

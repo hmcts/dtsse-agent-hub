@@ -61,6 +61,24 @@ describe("bullets", () => {
     ]);
     expect(nestBullets([{ text: "Orphan", level: 1 }])).toEqual(["Orphan"]);
   });
+
+  it("should bring the removed bullet's nested lines out to the top level when it is mid-list", () => {
+    const items = flatBullets([
+      { text: "A", bullets: ["a1"] },
+      { text: "B", bullets: ["b1"] }
+    ]);
+    expect(removeAt(items, 2)).toEqual([
+      { text: "A", level: 0 },
+      { text: "a1", level: 1 },
+      { text: "b1", level: 0 }
+    ]);
+    expect(nestBullets(removeAt(items, 2))).toEqual([{ text: "A", bullets: ["a1"] }, "b1"]);
+  });
+
+  it("should leave the other lines as they are when a nested line is removed", () => {
+    const items = flatBullets([{ text: "A", bullets: ["a1", "a2"] }, "B"]);
+    expect(nestBullets(removeAt(items, 1))).toEqual([{ text: "A", bullets: ["a2"] }, "B"]);
+  });
 });
 
 describe("slides", () => {
@@ -153,6 +171,22 @@ describe("blockingProblem", () => {
     expect(blockingProblem(deck([{ ...content, bullets: ["One", ""] }]))).toEqual({ slide: 1, message: "Slide 2: bullet 2 is empty" });
     expect(blockingProblem(deck([{ ...columns, right: [""] }]))).toEqual({ slide: 1, message: "Slide 2: right column bullet 1 is empty" });
     expect(blockingProblem(deck([{ ...closing, subtitle: "" }]))).toEqual({ slide: 1, message: "Slide 2: the subtitle is empty" });
+  });
+
+  it("should number an empty top-level bullet as the editor labels it when a bullet before it has nested lines", () => {
+    const bullets = [{ text: "One", bullets: ["One a"] }, ""];
+    expect(blockingProblem(deck([{ ...content, bullets }]))).toEqual({ slide: 1, message: "Slide 2: bullet 3 is empty" });
+    const text = ["One", { text: " ", bullets: ["Two a"] }];
+    expect(blockingProblem(deck([{ ...content, bullets: text }]))).toEqual({ slide: 1, message: "Slide 2: bullet 2 is empty" });
+  });
+
+  it("should number an empty nested bullet as the editor labels it", () => {
+    const left = ["One", { text: "Two", bullets: ["Two a", ""] }];
+    expect(blockingProblem(deck([{ ...columns, left }]))).toEqual({ slide: 1, message: "Slide 2: left column bullet 4, nested, is empty" });
+    expect(blockingProblem(deck([{ ...content, bullets: [{ text: "One", bullets: [""] }] }]))).toEqual({
+      slide: 1,
+      message: "Slide 2: bullet 2, nested, is empty"
+    });
   });
 
   it("should pass on anything else the hub's check refuses", () => {

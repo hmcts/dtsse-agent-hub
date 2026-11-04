@@ -394,6 +394,50 @@ describe("DeckEditor", () => {
     }
   });
 
+  it("should hand the edit back with the newer version, without saving, when it closes while the choice between them shows", async () => {
+    vi.useFakeTimers();
+    const theirs: DeckSnapshot = { title: "Theirs", outline: outline({ title: "Theirs" }), version: 8, revision: 10, updatedBy: "agent" };
+    const onUnsaved = vi.fn<(draft: UnsavedDeckDraft) => void>();
+    const { unmount, save } = editor({ onUnsaved, save: saving({ ok: true, saved: false, current: theirs }) });
+    fireEvent.change(screen.getByRole("textbox", { name: "Deck title" }), { target: { value: "Mine" } });
+    await pause();
+    expect(screen.getByRole("alert").textContent).toContain("The assistant has changed these slides.");
+
+    await act(async () => {
+      unmount();
+    });
+
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(onUnsaved).toHaveBeenCalledExactlyOnceWith({ outline: { ...outline(), title: "Mine" }, base: { version: 7, revision: 9 }, conflict: theirs });
+  });
+
+  it("should offer the choice again on a handed-back edit with a newer version, and hand it back again when closed", async () => {
+    const theirs: DeckSnapshot = { title: "Theirs", outline: outline({ title: "Theirs" }), version: 8, revision: 10, updatedBy: "agent" };
+    const draft: UnsavedDeckDraft = { outline: outline({ title: "Mine" }), base: { version: 7, revision: 9 }, conflict: theirs };
+    const onUnsaved = vi.fn<(draft: UnsavedDeckDraft) => void>();
+    const { unmount, save } = editor({ draft, onUnsaved });
+    expect(screen.getByRole("alert").textContent).toContain("The assistant has changed these slides.");
+
+    await act(async () => {
+      unmount();
+    });
+
+    expect(save).not.toHaveBeenCalled();
+    expect(onUnsaved).toHaveBeenCalledExactlyOnceWith(draft);
+  });
+
+  it("should ask the person to choose, on Done while the choice between versions shows, and not leave", () => {
+    const theirs: DeckSnapshot = { title: "Theirs", outline: outline({ title: "Theirs" }), version: 8, revision: 10, updatedBy: "agent" };
+    const { onDone, announce } = editor({ draft: { outline: outline({ title: "Mine" }), base: { version: 7, revision: 9 }, conflict: theirs } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+    expect(onDone).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toContain("Choose one before you finish editing.");
+    expect(announce).toHaveBeenCalledWith("Choose Use theirs or Keep mine before you finish editing");
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Keep mine" }));
+  });
+
   it("should hand back an edit that cannot be saved as it closes, without trying", async () => {
     const onUnsaved = vi.fn<(draft: UnsavedDeckDraft) => void>();
     const { unmount, save } = editor({ onUnsaved });

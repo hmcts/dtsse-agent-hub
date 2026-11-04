@@ -51,6 +51,18 @@ export interface AssistantFrame {
   attachments?: FrameAttachment[];
 }
 
+/**
+ * The newest kept version the session wrote, read from the versions only when the person wrote the latest: when the
+ * session did, it is the latest, and with no version or no author there is none. Every message is framed, so this
+ * keeps the common case to no query.
+ */
+function agentVersionOf(db: Database, conversationId: string, version: number, by: "user" | "agent" | null): Promise<number> | number {
+  if (version > 0 && by === "user") {
+    return newestAgentVersion(db, conversationId);
+  }
+  return version > 0 && by === "agent" ? version : 0;
+}
+
 /** `messageId` is the direct being framed, which is what the attachments hang off. */
 export async function assistantFrame(db: Database, agentId: string, messageId?: bigint): Promise<AssistantFrame | undefined> {
   const row = await db.agent.findUnique({
@@ -69,22 +81,28 @@ export async function assistantFrame(db: Database, agentId: string, messageId?: 
   const jira = pendingJiraExport(conversation);
   const github = pendingGithubExport(conversation);
   const confluence = pendingConfluenceExport(conversation);
+  const deckBy = deckAuthor(conversation);
+  const [model, agentVersion, attachments] = await Promise.all([
+    readAssistantModel(db, conversation.ownerOid),
+    agentVersionOf(db, conversation.id, conversation.deckVersion, deckBy),
+    messageId === undefined ? undefined : frameAttachments(db, messageId)
+  ]);
   return {
     conversation_id: conversation.id,
     // What the conversation is stored as, not what the picker can show: this is the subject the session has been
     // working in, and a product dropped from the list still names it. `productLabel` falls back to the slug.
     product: conversation.product,
     product_label: productLabel(conversation.product),
-    model: await readAssistantModel(db, conversation.ownerOid),
+    model,
     artefact_version: artefact.version,
     artefact_updated_by: artefact.updatedBy,
     deck_version: conversation.deckVersion,
-    deck_updated_by: deckAuthor(conversation),
+    deck_updated_by: deckBy,
     deck_revision: conversation.deckRevision,
-    deck_agent_version: await newestAgentVersion(db, conversation.id),
+    deck_agent_version: agentVersion,
     ...(jira === undefined ? {} : { jira_export: jira }),
     ...(github === undefined ? {} : { github_export: github }),
     ...(confluence === undefined ? {} : { confluence_export: confluence }),
-    ...(messageId === undefined ? {} : { attachments: await frameAttachments(db, messageId) })
+    ...(attachments === undefined ? {} : { attachments })
   };
 }

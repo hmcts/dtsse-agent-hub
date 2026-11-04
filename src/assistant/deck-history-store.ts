@@ -16,6 +16,8 @@ export interface DeckVersionEntry {
   by: DeckAuthor;
   summary: string | null;
   created_at: string;
+  /** When it was last written: an amend's time, or `created_at` for a version never amended. */
+  updated_at: string;
   /** Whether a .pptx of this version can be downloaded now: kept with it, or built on request and not yet swept. */
   pptx: boolean;
 }
@@ -34,8 +36,8 @@ const byOf = (value: string): DeckAuthor => deckAuthor({ deckUpdatedBy: value })
 
 /** The deck's kept versions, newest first, or only `version` when it is a number; the .pptx is tested for, never read. */
 async function versionEntries(db: Database, conversationId: string, version: number | null, now: Date): Promise<DeckVersionEntry[]> {
-  const rows = await db.$queryRaw<{ version: number; by: string; summary: string | null; created_at: Date; pptx: boolean }[]>`
-    SELECT v.version, v.by, v.summary, v.created_at,
+  const rows = await db.$queryRaw<{ version: number; by: string; summary: string | null; created_at: Date; updated_at: Date; pptx: boolean }[]>`
+    SELECT v.version, v.by, v.summary, v.created_at, COALESCE(v.updated_at, v.created_at) AS updated_at,
            (v.pptx IS NOT NULL OR EXISTS (
              SELECT 1 FROM assistant_deck_build b
               WHERE b.conversation_id = v.conversation_id AND b.version = v.version AND b.status = 'done' AND b.created_at >= ${freshSince(now)}
@@ -44,7 +46,14 @@ async function versionEntries(db: Database, conversationId: string, version: num
      WHERE v.conversation_id = ${conversationId}::uuid AND (${version}::int IS NULL OR v.version = ${version}::int)
      ORDER BY v.version DESC
   `;
-  return rows.map((row) => ({ version: row.version, by: byOf(row.by), summary: row.summary, created_at: row.created_at.toISOString(), pptx: row.pptx }));
+  return rows.map((row) => ({
+    version: row.version,
+    by: byOf(row.by),
+    summary: row.summary,
+    created_at: row.created_at.toISOString(),
+    updated_at: row.updated_at.toISOString(),
+    pptx: row.pptx
+  }));
 }
 
 /** Every kept version of the deck, newest first; empty for a conversation with none. */

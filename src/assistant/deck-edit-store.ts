@@ -1,7 +1,7 @@
 import type { PrismaClient } from "../store/prisma.ts";
 import { announce, type ConversationRow } from "./conversation-row.ts";
 import { type DeckOutline, withSlideIds } from "./deck.ts";
-import { amends, editSummary } from "./deck-edit.ts";
+import { AMENDED_BUILD_ERROR, amends, editSummary } from "./deck-edit.ts";
 import { type Deck, DeckConflict, prune, readDeck, requireHeldAssets, writeDeck } from "./deck-store.ts";
 
 /**
@@ -17,8 +17,9 @@ type Conversation = Pick<ConversationRow, "id" | "virtualAgentId" | "ownerOid">;
 
 /**
  * The amend, inside one transaction holding the conversation's row: the version's outline and summary replaced, its
- * .pptx and every build of it dropped, since they show what it said before, and the retention applied, which frees
- * pictures the amend stopped naming. A save that is not an amend answers `{base}`, the outline it builds on.
+ * .pptx and its finished builds dropped, since they show what it said before, a build still pending failed so the
+ * panel's poll says so and the pod's answer to it is ignored, and the retention applied, which frees pictures the
+ * amend stopped naming. A save that is not an amend answers `{base}`, the outline it builds on.
  */
 async function amendLatest(
   prisma: PrismaClient,
@@ -54,7 +55,13 @@ async function amendLatest(
          SET outline = ${JSON.stringify(edit.outline)}::jsonb, summary = ${summary}, updated_at = ${now}, pptx = NULL
        WHERE conversation_id = ${conversation.id}::uuid AND version = ${row.version}::int
     `;
-    await tx.$executeRaw`DELETE FROM assistant_deck_build WHERE conversation_id = ${conversation.id}::uuid AND version = ${row.version}::int`;
+    await tx.$executeRaw`
+      DELETE FROM assistant_deck_build WHERE conversation_id = ${conversation.id}::uuid AND version = ${row.version}::int AND status <> 'pending'
+    `;
+    await tx.$executeRaw`
+      UPDATE assistant_deck_build SET status = 'failed', error = ${AMENDED_BUILD_ERROR}, finished_at = ${now}
+       WHERE conversation_id = ${conversation.id}::uuid AND version = ${row.version}::int AND status = 'pending'
+    `;
     const [moved] = await tx.$queryRaw<{ revision: number }[]>`
       UPDATE assistant_conversation
          SET deck_title = ${edit.outline.title},

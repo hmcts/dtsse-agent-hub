@@ -10,7 +10,8 @@ import * as observedRoute from "../../src/app/api/orchestrator/virtual-agents/[i
 import * as pptxRoute from "../../src/app/api/ui/assistant/decks/[conversationId]/versions/[version]/pptx/route.ts";
 import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
 import { assetRef, type DeckOutline, imageInfo, KEEP_VERSIONS } from "../../src/assistant/deck.ts";
-import { AMEND_WINDOW_MS } from "../../src/assistant/deck-edit.ts";
+import { answerDeckBuild, readDeckBuild } from "../../src/assistant/deck-build-store.ts";
+import { AMEND_WINDOW_MS, AMENDED_BUILD_ERROR } from "../../src/assistant/deck-edit.ts";
 import { saveDeckEdit } from "../../src/assistant/deck-edit-store.ts";
 import { listDeckVersions } from "../../src/assistant/deck-history-store.ts";
 import { putDeckAsset, putDeckPptx, readDeck, writeDeck } from "../../src/assistant/deck-store.ts";
@@ -163,10 +164,31 @@ describe("saving the deck from the editor", () => {
     expect(row.createdAt.getTime()).toBeLessThan(later.getTime());
     expect(row.pptx).toBeNull();
     expect((row.outline as unknown as DeckOutline).subtitle).toBe("Two");
-    expect(await prisma.assistantDeckBuild.findUnique({ where: { id: pending.id } })).toBeNull();
+    expect(await prisma.assistantDeckBuild.findUniqueOrThrow({ where: { id: pending.id }, select: { status: true, error: true } })).toEqual({
+      status: "failed",
+      error: AMENDED_BUILD_ERROR
+    });
     expect(await readDeck(prisma, mine.id)).toMatchObject({ version: 2, revision: 3, title: "Ways of shipping", updatedBy: "user" });
     expect(await prisma.assistantDeckVersion.count({ where: { conversationId: mine.id } })).toBe(2);
     expect(await assistantFrame(prisma, mine.agentId)).toMatchObject({ deck_version: 2, deck_revision: 3, deck_updated_by: "user" });
+  });
+
+  it("should report an amended version's last write as its updated_at, and a version never amended's first", async () => {
+    // Arrange
+    const mine = await agentDeck();
+    const first = new Date(Date.now() - 120_000);
+    await saveDeckEdit(prisma, mine.row, { outline: outline("Mine"), baseVersion: 1, baseRevision: 1, editorOid: ALICE.oid }, first);
+    const later = new Date(first.getTime() + 60_000);
+    await saveDeckEdit(prisma, mine.row, { outline: outline("Mine, amended"), baseVersion: 2, baseRevision: 2, editorOid: ALICE.oid }, later);
+
+    // Act
+    const listed = await listDeckVersions(prisma, mine.id);
+    const asked = await jsonOf<{ updated_at: string }>(await agent(deckRoute.GET, `/api/agent/${mine.agentId}/deck?version=2`, { agentId: mine.agentId }));
+
+    // Assert
+    expect(listed[0]).toMatchObject({ version: 2, created_at: first.toISOString(), updated_at: later.toISOString() });
+    expect(listed[1]!.updated_at).toBe(listed[1]!.created_at);
+    expect(asked.updated_at).toBe(later.toISOString());
   });
 
   it("should write a new version rather than amend once the person's version is 10 minutes old", async () => {
@@ -357,7 +379,7 @@ describe("the session after the person's edit", () => {
 });
 
 describe("a version the person wrote", () => {
-  it("should be built on request, latest as it is, and its build dropped when the person amends it", async () => {
+  it("should be built on request, latest as it is, and its pending build failed and its finished ones dropped when the person amends it", async () => {
     // Arrange
     const mine = await agentDeck();
     const claim = await claimRoute.POST(
@@ -394,13 +416,26 @@ describe("a version the person wrote", () => {
         { params: Promise.resolve({ conversationId: mine.id, version: "2" }) }
       );
 
-    // Act
     const asked = await jsonOf<{ status: string; job_id: string }>(await prepare());
+    const finished = await prisma.assistantDeckBuild.create({
+      data: { conversationId: mine.id, version: 2, status: "done", pptx: PPTX, finishedAt: new Date() },
+      select: { id: true }
+    });
+
+    // Act
     await save(mine, outline("Mine, amended"), { version: 2, revision: 2 });
+    await answerDeckBuild(prisma, mine.virtualAgentId, asked.job_id, { pptx: PPTX });
 
     // Assert
     expect(asked.status).toBe("pending");
-    expect(await prisma.assistantDeckBuild.count({ where: { conversationId: mine.id } })).toBe(0);
+    expect(await readDeckBuild(prisma, ALICE.oid, mine.id, asked.job_id)).toEqual({
+      status: "failed",
+      job_id: asked.job_id,
+      version: 2,
+      error: AMENDED_BUILD_ERROR
+    });
+    expect(await prisma.assistantDeckBuild.findUnique({ where: { id: finished.id } })).toBeNull();
+    expect(await prisma.assistantDeckBuild.findUniqueOrThrow({ where: { id: asked.job_id }, select: { pptx: true } })).toEqual({ pptx: null });
     expect((await listDeckVersions(prisma, mine.id))[0]).toMatchObject({ version: 2, by: "user", pptx: false });
   });
 });

@@ -45,8 +45,9 @@ export interface DeckBase {
 }
 
 /**
- * An edit the editor was closed on that did not save: its save failed, found a newer version, or could not be made
- * because the outline had a gap in it. Handed to the page, which opens the slides again with it rather than lose it.
+ * An edit the editor was closed on that did not save: its save failed, found a newer version, could not be made
+ * because the outline had a gap in it, or was waiting on the person's choice between it and a newer version. Handed
+ * to the page, which opens the slides again with it, and with the choice still to make, rather than lose it.
  */
 export interface UnsavedDeckDraft {
   outline: DeckOutline;
@@ -436,6 +437,7 @@ export function DeckEditor({
   const [chosen, setChosen] = useState(0);
   const [confirming, setConfirming] = useState(false);
   const [leaving, setLeaving] = useState(false);
+  const [choosing, setChoosing] = useState(false);
   const [addLayout, setAddLayout] = useState<Exclude<Layout, "HMCTS_IMAGE">>("HMCTS_CONTENT");
   const [nextLayout, setNextLayout] = useState<Layout | null>(null);
   const [dragging, setDragging] = useState<number | null>(null);
@@ -455,7 +457,14 @@ export function DeckEditor({
   const dirty = state === "unsaved" || state === "failed" || state === "saving" || state === "invalid";
   const busy = dirty || conflict !== null;
   const unsaved = useRef<UnsavedDeckDraft | null>(null);
-  unsaved.current = (state === "unsaved" || state === "failed" || state === "invalid") && conflict === null ? { outline, base, conflict: null } : null;
+  // An edit waiting on the choice between it and a newer version is not saved as the editor closes, which the newer
+  // version would refuse, but handed back with that version so the choice is offered again.
+  unsaved.current =
+    conflict !== null
+      ? { outline, base, conflict }
+      : state === "unsaved" || state === "failed" || state === "invalid"
+        ? { outline, base, conflict: null }
+        : null;
   const closing = useRef({ conversationId, save, onBusy, onUnsaved });
   closing.current = { conversationId, save, onBusy, onUnsaved };
 
@@ -600,7 +609,7 @@ export function DeckEditor({
       const pending = unsaved.current;
       const { conversationId: id, save: saveNow, onBusy: told, onUnsaved: lost } = closing.current;
       if (pending !== null && !discarded.current && !inFlight.current) {
-        if (blockingProblem(pending.outline) !== null) {
+        if (pending.conflict !== null || blockingProblem(pending.outline) !== null) {
           lost?.(pending);
         } else {
           void settled(saveNow({ conversationId: id, outline: pending.outline, baseVersion: pending.base.version, baseRevision: pending.base.revision })).then(
@@ -706,6 +715,7 @@ export function DeckEditor({
     baseNow.current = moved;
     setBase(moved);
     setConflict(null);
+    setChoosing(false);
     setState("saved");
     announce(`Showing version ${current.version}`);
   }
@@ -715,10 +725,17 @@ export function DeckEditor({
     baseNow.current = moved;
     setBase(moved);
     setConflict(null);
+    setChoosing(false);
     void persist(outlineNow.current);
   }
 
   function done(): void {
+    if (conflict !== null) {
+      setChoosing(true);
+      focus("keep-mine");
+      announce("Choose Use theirs or Keep mine before you finish editing");
+      return;
+    }
     if (problem !== null && state === "invalid") {
       setLeaving(true);
       return;
@@ -769,13 +786,14 @@ export function DeckEditor({
         <div role="alert" className="flex shrink-0 flex-wrap items-center gap-2 border-b border-asst-field bg-asst-raised px-4 py-2.5 text-[13px]">
           <span className="min-w-0 flex-1">
             {conflict.updatedBy === "agent" ? "The assistant has changed these slides." : "These slides were changed somewhere else."} Use that version, or keep
-            yours?
+            yours?{choosing ? " Choose one before you finish editing." : ""}
           </span>
           <button type="button" onClick={() => takeTheirs(conflict)} className="rounded-lg border border-asst-strong px-3 py-1 hover:bg-asst-active">
             Use theirs
           </button>
           <button
             type="button"
+            data-focus="keep-mine"
             onClick={() => keepMine(conflict)}
             className="rounded-lg bg-asst-accent px-3 py-1 font-semibold text-asst-ink hover:bg-asst-accent-hover"
           >

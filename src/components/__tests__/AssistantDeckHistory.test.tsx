@@ -71,9 +71,9 @@ function latest(overrides: Partial<DeckView> = {}): DeckView {
 }
 
 const VERSIONS: DeckVersionEntry[] = [
-  { version: 7, by: "agent", summary: "Added the pipeline", created_at: "2026-11-03T09:00:00.000Z", pptx: true },
-  { version: 6, by: "user", summary: "Restored version 4", created_at: "2026-11-02T15:30:00.000Z", pptx: false },
-  { version: 5, by: "agent", summary: null, created_at: "2026-11-01T10:00:00.000Z", pptx: false }
+  { version: 7, by: "agent", summary: "Added the pipeline", created_at: "2026-11-03T09:00:00.000Z", updated_at: "2026-11-03T09:00:00.000Z", pptx: true },
+  { version: 6, by: "user", summary: "Restored version 4", created_at: "2026-11-02T15:30:00.000Z", updated_at: "2026-11-02T15:30:00.000Z", pptx: false },
+  { version: 5, by: "agent", summary: null, created_at: "2026-11-01T10:00:00.000Z", updated_at: "2026-11-01T10:00:00.000Z", pptx: false }
 ];
 
 function old(version = 5, overrides: Partial<DeckVersionView> = {}): DeckVersionView {
@@ -168,6 +168,24 @@ describe("DeckHistory's list", () => {
 
     // Assert
     expect(screen.getAllByRole("button", { name: /^Version / })).toHaveLength(3);
+  });
+
+  it("should read the list again when the latest version is amended, its number staying the same", async () => {
+    // Arrange
+    const amended: DeckVersionEntry[] = [{ ...VERSIONS[0]!, by: "user", summary: "Reordered slides", pptx: false }, ...VERSIONS.slice(1)];
+    let calls = 0;
+    const reads = serving({ [`GET ${deckVersionsUrl(CONVERSATION)}`]: () => ({ body: calls++ === 0 ? VERSIONS : amended }) });
+    const { rerender } = render(<DeckHistory conversationId={CONVERSATION} latest={latest({ revision: 3 })} announce={vi.fn()} owner />);
+    await openHistory();
+    expect(screen.getAllByRole("button", { name: /^Version 7/ })[0]?.textContent).toContain("Added the pipeline");
+
+    // Act
+    rerender(<DeckHistory conversationId={CONVERSATION} latest={latest({ revision: 4, updatedBy: "user", pptx: false })} announce={vi.fn()} owner />);
+    await settle();
+
+    // Assert
+    expect(reads).toHaveBeenCalledTimes(2);
+    expect(screen.getAllByRole("button", { name: /^Version 7/ })[0]?.textContent).toContain("Reordered slides");
   });
 
   it("should close the list again, and say so", async () => {

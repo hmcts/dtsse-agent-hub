@@ -69,7 +69,9 @@ export const USAGE = `usage: ${CLI} <command> [args]
                               version and then the .pptx built from it; --base is the version it was
                               changed from, and a newer one is refused. Omitted, it is the version deck
                               get recorded for an outline in its directory, or the hub's current one
-                              for an outline anywhere else
+                              for an outline anywhere else. For an outline in that directory the
+                              revision deck get recorded is sent either way, so an amend made since is
+                              refused
   deck pptx <deck.pptx> --version N
                               send the .pptx built from version N alone, for a deck put that published
                               the outline but could not send its .pptx
