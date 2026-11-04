@@ -5,7 +5,7 @@ import { DEFAULT_SIZE, isVirtualAgentSize, sizeChangeRefusal, sizeChangeRollsPod
 import { type ChatCapacity, chatCapacity, type MemoryReport, type MemoryUse, memoryUse } from "./memory-report.ts";
 
 /**
- * The memory of a person's assistant's pod: what the pod reported, and the two other facts the Size section needs to
+ * The memory of a person's assistant's pod: what the pod reported, and the two other facts the size setting needs to
  * say anything useful about it — the size it is running at, and how many chats have a session on it now.
  *
  * **The hub cannot see a pod's memory**: every call between the two is pod to hub, so the pod reports and this is the
@@ -13,7 +13,7 @@ import { type ChatCapacity, chatCapacity, type MemoryReport, type MemoryUse, mem
  * not what they cost on the day.
  */
 
-/** What the settings' Size section is given beside its own report. */
+/** What the settings' size part is given beside its own report. */
 export interface AssistantMemory {
   use: MemoryUse;
   size: VirtualAgentSize;

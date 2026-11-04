@@ -17,7 +17,7 @@ export interface AssistantModelSetting {
 }
 
 /**
- * The Model section of the Assistant's settings.
+ * The model part of the Assistant section of the settings.
  *
  * One choice for every chat, new and existing, rather than one per chat: which model answers is a preference about how
  * a person likes to work, not a property of a subject they are working on. It says so in plain words, and says when a
@@ -38,9 +38,9 @@ export function ModelSettings({ model }: Readonly<{ model: AssistantModelSetting
   useEffect(() => setChosen(model.model), [model.model]);
   return (
     <section aria-labelledby="assistant-settings-model" className="flex flex-col gap-2.5">
-      <h3 id="assistant-settings-model" className="text-sm font-semibold">
+      <h4 id="assistant-settings-model" className="text-[13px] font-semibold">
         Model
-      </h3>
+      </h4>
       <p className="text-pretty text-[13px] text-asst-muted">
         Which Claude model answers you. This applies to all of your chats. A chat writing an answer finishes it on the model it started, and takes the change
         with your next message.

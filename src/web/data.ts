@@ -336,9 +336,9 @@ export async function assistantHasWelsh(viewer: Identity): Promise<boolean> {
 }
 
 /**
- * How much the viewer's assistant has to work with, for the settings dialog's Size section: its size, what its pod
+ * How much the viewer's assistant has to work with, for the settings dialog's size part: its size, what its pod
  * reports about its memory, and how many chats have a session on it. `undefined` when they have no assistant at all,
- * which is the one case the section is not offered.
+ * which is the one case it is not shown.
  *
  * Its own read rather than part of `openAssistant`, as the files are: only the settings dialog uses it, and it costs a
  * second query over the viewer's conversations. The owner check is the store's, through `isOwner`.
@@ -380,7 +380,7 @@ export async function assistantAgent(viewer: Viewer): Promise<AssistantAgent | u
 /**
  * The Claude model the viewer's chats run on, for the settings to show and change, with whether their assistant's pod
  * can act on a choice yet. `undefined` when they have no assistant at all, which is the one case the section is not
- * offered — as the Files and Size sections are not.
+ * offered — as the Files section and the size are not.
  */
 export async function assistantModel(viewer: Viewer): Promise<AssistantModelChoice | undefined> {
   const assistant = await findAssistant(prisma, viewer.oid);

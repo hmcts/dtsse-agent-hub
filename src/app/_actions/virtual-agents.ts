@@ -9,22 +9,15 @@ import { requireViewer } from "@/viewer/current";
 import { isSignInKind, reconnectSignIn as reconnect, SIGN_IN_TITLES, storePastedCode } from "@/virtual-agents/logins";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
 import { sizeChangeRollsPod } from "@/virtual-agents/size";
-import {
-  findVirtualAgent,
-  renameVirtualAgent as rename,
-  restartVirtualAgent as restart,
-  setVirtualAgentPlugins as setPlugins,
-  setVirtualAgentSize
-} from "@/virtual-agents/store";
+import { findVirtualAgent, restartVirtualAgent as restart, setVirtualAgentPlugins as setPlugins, setVirtualAgentSize } from "@/virtual-agents/store";
 import { type ActionResult, runAction, text } from "@/web/action";
 
 /**
- * Renaming, restarting and resizing the signed-in person's own virtual agents and choosing their plugins, which the
- * Assistant's settings post to; having one sign in again, which they and the getting-ready screen (`AssistantGate`)
- * post to; and pasting a login code back to one, which only the getting-ready screen does. The owner is always the
- * session's identity; an id from the form names an agent, and `renameVirtualAgent`, `restartVirtualAgent`,
- * `setVirtualAgentSize`, `setVirtualAgentPlugins`, `storePastedCode` and `reconnectSignIn` refuse one that is not the
- * viewer's.
+ * Restarting and resizing the signed-in person's own virtual agents and choosing their plugins, which the Assistant's
+ * settings post to; having one sign in again, which they and the getting-ready screen (`AssistantGate`) post to; and
+ * pasting a login code back to one, which only the getting-ready screen does. The owner is always the session's
+ * identity; an id from the form names an agent, and `restartVirtualAgent`, `setVirtualAgentSize`,
+ * `setVirtualAgentPlugins`, `storePastedCode` and `reconnectSignIn` refuse one that is not the viewer's.
  */
 
 const OFF: { ok: false; error: string } = { ok: false, error: "virtual agents are not available on this deployment" };
@@ -32,26 +25,6 @@ const OFF: { ok: false; error: string } = { ok: false, error: "virtual agents ar
 /** Every Assistant page, since each one renders the settings these change. */
 function revalidate(): void {
   revalidatePath("/assistant", "layout");
-}
-
-/**
- * A new name for the virtual agent and its sessions. Its pod, disk and chats are named from its id, so nothing they
- * hold changes and nothing restarts.
- */
-export async function renameVirtualAgent(form: FormData): Promise<ActionResult<{ confirmation: string }>> {
-  return await runAction<{ confirmation: string }>("rename virtual agent", async () => {
-    if (!virtualAgentsEnabled()) {
-      return OFF;
-    }
-    const viewer = await requireViewer();
-    const id = text(form.get("id"));
-    if (id === "") {
-      return { ok: false, error: "no virtual agent was named" };
-    }
-    const row = await rename(prisma, viewer.oid, id, form.get("name"));
-    revalidate();
-    return { ok: true, confirmation: `Renamed to ${row.name}` };
-  });
 }
 
 /**

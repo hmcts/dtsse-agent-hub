@@ -195,7 +195,7 @@ const POD_CHANGE = { generation: { increment: 1 }, podGeneration: { increment: 1
  * supervisor, so there is a window where the row is running and the figures are the dead pod's.
  *
  * **Not applied when stopping, deleting, or on the sweep's auto-stop**, though all three bump `pod_generation`: there
- * the figures are the last thing anyone measured and the Size section says as much, which is the whole reason they
+ * the figures are the last thing anyone measured and the size setting says as much, which is the whole reason they
  * are kept. So the rule is not "whatever bumps `pod_generation`" — it is whatever asks for a pod to come up.
  *
  * Clearing is not enough on its own where the pod being replaced is still running, because it can report again and
@@ -276,38 +276,6 @@ export async function setDesired(
         select: SELECT
       })
     );
-    await announce(tx, id, row.ownerOid);
-    return updated;
-  });
-}
-
-/**
- * Gives the virtual agent a new name, and its sessions with it, since a heartbeat would otherwise put the old one
- * back. The StatefulSet and disk are named from the id, so the pod is not touched. The owner's `user` row is held as
- * in a create, so a rename and a create of the same name cannot both pass the check.
- */
-export async function renameVirtualAgent(prisma: PrismaClient, actorOid: string, id: string, name: unknown, now: Date = new Date()): Promise<VirtualAgentRow> {
-  const checked = checkName(name);
-  if (!checked.ok) {
-    throw new HttpError(400, checked.error);
-  }
-  return await prisma.$transaction(async (tx) => {
-    const row = await lockVirtualAgent(tx, id);
-    if (row === undefined || !canManageVirtualAgent(actorOid, row)) {
-      throw new HttpError(404, "no such virtual agent");
-    }
-    if (row.desired === "deleted") {
-      throw new HttpError(409, "that virtual agent is being deleted");
-    }
-    if (row.name === checked.name) {
-      return row;
-    }
-    await lockOwner(tx, row.ownerOid);
-    if ((await tx.virtualAgent.count({ where: { ownerOid: row.ownerOid, name: checked.name } })) > 0) {
-      throw new HttpError(409, `you already have a virtual agent called ${checked.name}`);
-    }
-    const updated = toRow(await tx.virtualAgent.update({ where: { id }, data: { name: checked.name, updatedAt: now }, select: SELECT }));
-    await tx.agent.updateMany({ where: { virtualAgentId: id }, data: { name: checked.name } });
     await announce(tx, id, row.ownerOid);
     return updated;
   });

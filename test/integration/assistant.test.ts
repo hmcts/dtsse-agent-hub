@@ -619,7 +619,7 @@ describe("conversations", () => {
     expect((await pendingWakes(prisma, assistantId)).map((wake) => wake.model)).toEqual(["sonnet"]);
   });
 
-  // Whether the Model section can promise the choice is in force now, read from the pod's own session rather than a
+  // Whether the Assistant section's model choice can promise the choice is in force now, read from the pod's own session rather than a
   // conversation's: the supervisor is what starts a session on the model. Nothing is gated on it.
   it("should report the choice honoured once the pod's own session claims the family aliases", async () => {
     const { token, claimed } = await startedAssistant();
@@ -635,7 +635,7 @@ describe("conversations", () => {
     expect(await assistantModel(VIEWER)).toEqual({ model: "sonnet", honoured: false });
   });
 
-  it("should offer no Model section to somebody with no assistant at all", async () => {
+  it("should offer no model choice to somebody with no assistant at all", async () => {
     await insertUser(ALICE);
 
     expect(await assistantModel(VIEWER)).toBeUndefined();
