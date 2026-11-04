@@ -126,7 +126,7 @@ describe("m365", () => {
     expect(url.pathname).toBe("/v1.0/me/mailFolders/inbox/messages");
     expect(url.searchParams.get("$top")).toBe("3");
     expect(url.searchParams.get("$select")).toContain("subject");
-    expect((fetchImpl.mock.calls[0]?.[1]?.headers as Record<string, string>).Authorization).toBe("Bearer graph-access");
+    expect(((fetchImpl.mock.calls[0]?.[1]?.headers ?? {}) as Record<string, string>).Authorization).toBe("Bearer graph-access");
     expect(JSON.parse(out.join(""))).toMatchObject({ notice: UNTRUSTED, data: [{ id: "m1", subject: "Release", from: "A <a@x>" }] });
   });
 
