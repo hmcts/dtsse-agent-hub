@@ -548,7 +548,7 @@ describe("m365 chats, channels and meetings", () => {
 describe("m365 files get", () => {
   it("should download a file to --out when it is within the cap", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "m365-get-"));
-    const fetchImpl = vi.fn(async () => new Response(new Uint8Array([1, 2, 3])));
+    const fetchImpl = vi.fn(async (_url: string, _init?: RequestInit) => new Response(new Uint8Array([1, 2, 3])));
     const { cli, out } = cliWith(
       vi.fn(async () => TOKEN),
       {},
