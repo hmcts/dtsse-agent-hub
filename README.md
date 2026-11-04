@@ -199,6 +199,7 @@ directly with `?settings=<id>`:
 | `sharing` | Sharing | the chats you have shared or offered to fork, and those shared with or offered to you |
 | `assistant` | Assistant | where its agent stands and a restart, the Claude model for every chat, and its size with the memory its pod reports |
 | `claude-md` | Claude.md | the CLAUDE.md every virtual agent of yours writes before Claude starts |
+| `git` | Git identity | the name and email its commits use |
 | `plugins` | Plugins | the workspace plugins it loads |
 | `ports` | Web servers | the web servers its pod reports |
 | `files` | Files | the files the pod holds, and deleting them |

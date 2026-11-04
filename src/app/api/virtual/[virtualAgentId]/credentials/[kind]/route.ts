@@ -37,12 +37,7 @@ export const GET = virtualRoute<{ virtualAgentId: string; kind: string }>(async 
 export const PUT = virtualRoute<{ virtualAgentId: string; kind: string }>(async ({ virtualAgent, request, params }) => {
   const kind = pathKind(params.kind);
   if (!canVirtualAgentStoreCredential(kind)) {
-    throw new HttpError(
-      403,
-      kind === "claude_md"
-        ? "only its owner can change their CLAUDE.md, in the CFT Workspace's settings"
-        : "only its owner can set their git identity, with agent-hub credentials set git_identity on their own computer"
-    );
+    throw new HttpError(403, `only its owner can change their ${kind === "claude_md" ? "CLAUDE.md" : "git identity"}, in the CFT Workspace's settings`);
   }
   const { value } = parse(credentialValueBody, await readJson(request));
   const owner = virtualAgent.ownerOid;

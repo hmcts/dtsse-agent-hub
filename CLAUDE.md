@@ -34,7 +34,7 @@ contract changes. Running virtual agents is [`docs/virtual-agents.md`](docs/virt
 | `src/agents/`, `src/topics/`, `src/messages/`, `src/users/` | Feature stores |
 | `src/questions/` | `AskUserQuestion` questions the client's hook intercepts: limits, answers (`questions.ts`, pure), store and views. The card is `components/questions/` |
 | `src/transcripts/` | Uploaded session transcripts: schema and limits, store, retention sweep, and the conversation view |
-| `src/credentials/` | Per-person credentials, CLAUDE.md and git identity: value checks, Key Vault and local encrypted stores, metadata rows. The git identity has no settings UI; its owner sets it through `/api/agent/credentials/{kind}` |
+| `src/credentials/` | Per-person credentials, CLAUDE.md and git identity: value checks, Key Vault and local encrypted stores, metadata rows |
 | `src/virtual-agents/` | Virtual agents: flag and settings, lifecycle, limits, launch tokens, plugins, store, sign-ins, sweep and views |
 | `src/assistant/`, `src/app/assistant/` | The CFT Workspace. Stores by concern (`conversation-row.ts`, `assistant-store.ts`, `conversation-store.ts`, `local-chat-store.ts`, `session-store.ts`, `artefact-store.ts`, `search-store.ts`, …), each beside a pure `<name>.ts`: exports, lookups, uploads, shares, forks, models, memory, templates, Welsh. Settings are `components/assistant/SettingsDialog.tsx` |
 | `src/port-viewer/` | The viewer that serves virtual agents' web servers on `AGENT_HUB_VIEWER_HOST`, and the ticket route `/assistant/ports/{id}/{port}` hands out |

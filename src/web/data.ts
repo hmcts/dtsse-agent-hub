@@ -40,6 +40,7 @@ import { hasWelshPlugin } from "../assistant/welsh.ts";
 import { findChannel, listChannels } from "../channels/store.ts";
 import { credentialBackend } from "../credentials/backend.ts";
 import { DEFAULT_CLAUDE_MD } from "../credentials/claude-md.ts";
+import { type GitIdentity, readGitIdentity } from "../credentials/git-identity.ts";
 import type { CredentialKind } from "../credentials/names.ts";
 import { type CredentialStatus, credentialStatus, ownerRefusal, readCredential } from "../credentials/store.ts";
 import { type LoadedThreadMessage, loadReplies, loadThreadMessage, type ThreadMessage } from "../messages/direct-thread.ts";
@@ -97,7 +98,7 @@ export type CredentialSettings = { modelRoute: ModelRoute; claudeTokenUsable: bo
 
 /**
  * What the viewer has stored, as metadata: nothing here carries a credential's value. Their CLAUDE.md and git identity
- * are not among them: `claudeMdSettings` reads the CLAUDE.md for its own form, and the git identity has no form.
+ * are not among them; `claudeMdSettings` and `gitIdentitySettings` read those for their own forms.
  *
  * `modelRoute` is the viewer's own, which is what a new agent of theirs would be created on; `claudeTokenUsable`
  * answers the one question that route is not enough for, because it is the agents' routes that decide whether a
@@ -143,6 +144,22 @@ export async function claudeMdSettings(viewer: Identity): Promise<ClaudeMdSettin
     text: stored ?? DEFAULT_CLAUDE_MD,
     updatedAt: stored === undefined ? null : (status?.updatedAt.toISOString() ?? null)
   };
+}
+
+export type GitIdentitySettings = { available: true; stored: boolean; identity: GitIdentity } | { available: false; reason: string };
+
+/** The viewer's own git identity override for editing, which `canOwnerReadCredential` lets them read back. */
+export async function gitIdentitySettings(viewer: Identity): Promise<GitIdentitySettings> {
+  const backend = credentialBackend(prisma);
+  if (!backend.available) {
+    return { available: false, reason: backend.reason };
+  }
+  const refusal = ownerRefusal(backend.store, viewer.oid);
+  if (refusal !== undefined || !canOwnerReadCredential("git_identity")) {
+    return { available: false, reason: refusal?.message ?? "your git identity cannot be shown" };
+  }
+  const stored = await readCredential(prisma, backend.store, viewer.oid, "git_identity");
+  return { available: true, stored: stored !== undefined, identity: readGitIdentity(stored) };
 }
 
 export interface MessagePageView {

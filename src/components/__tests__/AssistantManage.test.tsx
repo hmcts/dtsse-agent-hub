@@ -7,12 +7,13 @@ import type { ConnectionsData } from "@/assistant/connections";
 import { savedCredentials } from "@/assistant/saved-credentials";
 import type { FormAction } from "@/components/ActionForm";
 import type { AssistantAgentSettings } from "@/components/assistant/AgentSettings";
+import type { AssistantGitIdentity } from "@/components/assistant/GitIdentitySettings";
 import { AssistantSettings } from "@/components/assistant/SettingsDialog";
 import { type AssistantTokens, TokenSettings } from "@/components/assistant/TokenSettings";
 import { SETTLE_MS } from "@/components/live/useSettled";
 import type { CredentialKind } from "@/credentials/names";
 import type { CredentialStatus } from "@/credentials/store";
-import type { AssistantAgent } from "@/web/data";
+import type { AssistantAgent, GitIdentitySettings } from "@/web/data";
 
 /** The sections of the Assistant's settings that manage the virtual agent it runs on, and the person's own values. */
 
@@ -76,6 +77,19 @@ function agentSettings(overrides: Partial<AssistantAgent> | null = {}, actions: 
   };
 }
 
+function gitSettings(stored: boolean): GitIdentitySettings {
+  return { available: true, stored, identity: stored ? { name: "Alice Example", email: "alice@example.com" } : {} };
+}
+
+function git(settings: GitIdentitySettings = gitSettings(false), actions: Partial<Omit<AssistantGitIdentity, "load">> = {}): AssistantGitIdentity {
+  return {
+    load: vi.fn(async () => settings),
+    save: ok("Your git identity is saved"),
+    clear: ok("Your virtual agents are back to the default git identity"),
+    ...actions
+  };
+}
+
 function tokens(
   statuses: CredentialStatus[] = [status("github"), status("claude")],
   actions: Partial<AssistantTokens> = {},
@@ -111,33 +125,40 @@ function sent(action: ReturnType<typeof ok>): FormData {
 
 describe("the Assistant's settings for managing its agent", () => {
   it("should offer the saved credentials within Connections and the agent's sections after it when every one is given", async () => {
-    await open({ agent: agentSettings(), tokens: tokens() });
+    await open({ agent: agentSettings(), git: git(), tokens: tokens() });
 
     expect(
       within(nav())
         .getAllByRole("tab")
         .map((tab) => tab.textContent)
-    ).toEqual(["Appearance", "Connections", "Assistant", "Web servers"]);
+    ).toEqual(["Appearance", "Connections", "Assistant", "Git identity", "Web servers"]);
   });
 
   it("should offer none of the agent's sections when the page gives none", async () => {
     await open();
 
-    for (const name of ["Assistant", "Web servers"]) {
+    for (const name of ["Assistant", "Git identity", "Web servers"]) {
       expect(within(nav()).queryByRole("tab", { name })).toBeNull();
     }
   });
 
   // Nothing is read for a dialog the person has not opened, nor for a section they have not opened in it.
-  it("should read the agent only when its section is opened", async () => {
+  it("should read the agent and the git identity only when their sections are opened", async () => {
     const agentLoad = agentSettings();
-    render(<AssistantSettings now={Date.now()} connections={connections(["github"])} agent={agentLoad} />);
+    const gitLoad = git();
+    render(<AssistantSettings now={Date.now()} connections={connections(["github"])} agent={agentLoad} git={gitLoad} />);
     expect(agentLoad.load).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: /^Settings/ }));
     await act(async () => {
       fireEvent.click(within(nav()).getByRole("tab", { name: "Connections" }));
     });
+    expect(agentLoad.load).not.toHaveBeenCalled();
+    expect(gitLoad.load).not.toHaveBeenCalled();
+    await act(async () => {
+      fireEvent.click(within(nav()).getByRole("tab", { name: "Git identity" }));
+    });
+    expect(gitLoad.load).toHaveBeenCalledTimes(1);
     expect(agentLoad.load).not.toHaveBeenCalled();
     await act(async () => {
       fireEvent.click(within(nav()).getByRole("tab", { name: "Assistant" }));
@@ -251,6 +272,44 @@ describe("the Assistant's web servers", () => {
     await open({ agent: agentSettings({ desired: "stopped", status: "stopped" }) }, "Web servers");
 
     expect(screen.getByText("None while your assistant is stopped.")).toBeTruthy();
+  });
+});
+
+describe("the Assistant's git identity", () => {
+  it("should send the name and email when they are saved, and read it again after", async () => {
+    const settings = git(gitSettings(false), { save: ok("Your git identity is saved") });
+    await open({ git: settings }, "Git identity");
+
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Alice Example" } });
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "alice@example.com" } });
+    await submit("Save your git identity");
+
+    expect([sent(settings.save as ReturnType<typeof ok>).get("name"), sent(settings.save as ReturnType<typeof ok>).get("email")]).toEqual([
+      "Alice Example",
+      "alice@example.com"
+    ]);
+    expect(screen.getByRole("status").textContent).toBe("Your git identity is saved");
+    expect(settings.load).toHaveBeenCalledTimes(2);
+  });
+
+  it("should show what is stored, and empty the fields and say so when it goes back to the default", async () => {
+    const clear = ok("Your virtual agents are back to the default git identity");
+    await open({ git: git(gitSettings(true), { clear }) }, "Git identity");
+
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Alice Example");
+    expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe("alice@example.com");
+    await submit("Go back to the default git identity");
+
+    expect(clear).toHaveBeenCalledTimes(1);
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("");
+    expect(screen.getAllByText("Your virtual agents are back to the default git identity").length).toBeGreaterThan(0);
+  });
+
+  it("should say why it cannot be shown when the hub cannot read it", async () => {
+    await open({ git: git({ available: false, reason: "no credential store is configured" }) }, "Git identity");
+
+    expect(screen.getByText("Your git identity cannot be shown: no credential store is configured")).toBeTruthy();
+    expect(screen.queryByRole("form")).toBeNull();
   });
 });
 
@@ -394,7 +453,6 @@ describe("the Assistant's settings deep link", () => {
   it.each([
     ["model", "Assistant"],
     ["size", "Assistant"],
-    ["git", "Assistant"],
     ["tools", "Plugins"]
   ])("should open at the section that holds it when ?settings= names %s", async (named, section) => {
     land(`/assistant?settings=${named}`);

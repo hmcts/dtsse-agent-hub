@@ -23,6 +23,7 @@ import { AgentSettings, type AssistantAgentSettings } from "@/components/assista
 import { type AssistantClaudeMd, ClaudeMd } from "@/components/assistant/ClaudeMdSettings";
 import { type AssistantExportDefaults, ExportSettings } from "@/components/assistant/ExportSettings";
 import { type AssistantFiles, Files } from "@/components/assistant/FileSettings";
+import { type AssistantGitIdentity, GitIdentity } from "@/components/assistant/GitIdentitySettings";
 import { SETTINGS_TWO_PANE_MIN_WIDTH } from "@/components/assistant/layout";
 import type { AssistantModelSetting } from "@/components/assistant/ModelSettings";
 import { PortSettings } from "@/components/assistant/PortSettings";
@@ -64,6 +65,7 @@ interface SettingsView {
   exports: AssistantExportDefaults | undefined;
   sharing: AssistantSharing | undefined;
   agent: AssistantAgentSettings | undefined;
+  git: AssistantGitIdentity | undefined;
   tokens: AssistantTokens | undefined;
 }
 
@@ -411,6 +413,13 @@ const SECTIONS: readonly SettingsSection[] = [
     panel: (view) => (view.claudeMd === undefined ? null : <ClaudeMd claudeMd={view.claudeMd} />)
   },
   {
+    id: "git",
+    label: "Git identity",
+    group: "Agent",
+    shown: (view) => view.git !== undefined,
+    panel: (view) => (view.git === undefined ? null : <GitIdentity git={view.git} />)
+  },
+  {
     id: "plugins",
     label: "Plugins",
     group: "Agent",
@@ -438,14 +447,12 @@ const SECTIONS: readonly SettingsSection[] = [
 /**
  * Section ids an address may carry that name part of another section, mapped to the section that holds it, so a saved
  * link or a pod on an older client still lands where the thing it named is: a pasted token is in Connections; the
- * model, the size and the agent itself are in Assistant; the plugins are in Plugins. The git identity has no section,
- * and `git` opens Assistant, the nearest thing to it.
+ * model, the size and the agent itself are in Assistant; the plugins are in Plugins.
  */
 const SECTION_ALIASES: ReadonlyMap<string, string> = new Map([
   ["credentials", "connections"],
   ["model", "assistant"],
   ["size", "assistant"],
-  ["git", "assistant"],
   ["tools", "plugins"]
 ]);
 
@@ -791,6 +798,7 @@ export function AssistantSettings({
   exports,
   sharing,
   agent,
+  git,
   tokens
 }: {
   theme?: Theme;
@@ -808,6 +816,7 @@ export function AssistantSettings({
   exports?: AssistantExportDefaults;
   sharing?: AssistantSharing;
   agent?: AssistantAgentSettings;
+  git?: AssistantGitIdentity;
   tokens?: AssistantTokens;
 }) {
   // `get` is the first value, so an address carrying the parameter twice still names one section.
@@ -936,6 +945,7 @@ export function AssistantSettings({
                 exports,
                 sharing,
                 agent,
+                git,
                 tokens
               }}
               // Remounted for a section the address names while the dialog is already open, so it opens on that one.

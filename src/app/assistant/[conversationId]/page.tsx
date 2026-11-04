@@ -14,8 +14,8 @@ import {
   warmConversation
 } from "@/app/_actions/assistant";
 import { deleteAllAssistantFiles, deleteAssistantFile } from "@/app/_actions/assistant-files";
-import { readAssistantAgent } from "@/app/_actions/assistant-settings";
-import { removeCredential, resetClaudeMd, saveClaudeMd, saveCredential } from "@/app/_actions/credentials";
+import { readAssistantAgent, readGitIdentity } from "@/app/_actions/assistant-settings";
+import { clearGitIdentity, removeCredential, resetClaudeMd, saveClaudeMd, saveCredential, saveGitIdentity } from "@/app/_actions/credentials";
 import { restoreDeckVersion, saveDeck } from "@/app/_actions/decks";
 import { saveExportDefaults } from "@/app/_actions/export-defaults";
 import { offerChatFork, withdrawChatFork } from "@/app/_actions/forks";
@@ -124,6 +124,7 @@ export default async function ConversationPage({
       exports={{ defaults, save: saveExportDefaults, access: jira }}
       sharing={SHARING_SETTINGS}
       agent={{ load: readAssistantAgent, restart: restartVirtualAgent }}
+      git={{ load: readGitIdentity, save: saveGitIdentity, clear: clearGitIdentity }}
       tokens={{ ...savedCredentialsData(home.credentials, home.assistant.modelRoute), save: saveCredential, remove: removeCredential }}
     >
       {/* `local` so a chat on the person's own computer is not held behind credentials only a pod needs. */}

@@ -15,6 +15,7 @@ import type { AssistantClaudeMd } from "@/components/assistant/ClaudeMdSettings"
 import { ConversationSearch } from "@/components/assistant/ConversationSearch";
 import type { AssistantExportDefaults } from "@/components/assistant/ExportSettings";
 import type { AssistantFiles } from "@/components/assistant/FileSettings";
+import type { AssistantGitIdentity } from "@/components/assistant/GitIdentitySettings";
 import { LiveLocalSessions } from "@/components/assistant/LiveLocalSessions";
 import { besideSidebar, SIDEBAR_DRAWER_MAX_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_WIDTH } from "@/components/assistant/layout";
 import type { AssistantModelSetting } from "@/components/assistant/ModelSettings";
@@ -116,6 +117,7 @@ export function AssistantShell({
   exports,
   sharing,
   agent,
+  git,
   tokens,
   actions,
   children
@@ -150,6 +152,8 @@ export function AssistantShell({
   sharing?: AssistantSharing;
   /** The virtual agent the Assistant runs on, which the footer's settings restarts and lists the web servers of. */
   agent?: AssistantAgentSettings;
+  /** The git identity the person's agents commit as, which the footer's settings shows and changes. */
+  git?: AssistantGitIdentity;
   /** How the footer's settings replaces and removes a pasted token. */
   tokens?: AssistantTokens;
   /** Given, every row offers an options menu; left out, the rows are links alone. */
@@ -355,6 +359,7 @@ export function AssistantShell({
               exports={exports}
               sharing={sharing}
               agent={agent}
+              git={git}
               tokens={tokens}
             />
           </div>

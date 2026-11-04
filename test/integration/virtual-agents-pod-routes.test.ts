@@ -595,7 +595,7 @@ describe("/api/virtual/{id}/credentials/{kind}", () => {
     });
 
     expect(response.status).toBe(403);
-    expect((await jsonOf(response)).error).toBe("only its owner can set their git identity, with agent-hub credentials set git_identity on their own computer");
+    expect((await jsonOf(response)).error).toContain("git identity");
     expect(await prisma.credential.count()).toBe(0);
   });
 
