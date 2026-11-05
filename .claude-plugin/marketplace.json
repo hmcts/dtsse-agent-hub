@@ -21,7 +21,7 @@
     {
       "name": "m365",
       "source": "./packages/agent-hub/plugins/m365",
-      "description": "The person's own Microsoft 365 through agent-hub: mail, calendar, Teams chats and channels, and meeting transcripts, once they have connected it. Read-only"
+      "description": "The person's own Microsoft 365 through agent-hub: mail, calendar, Teams chats and channels, meeting transcripts and a morning briefing, once they have connected it. Read-only"
     },
     {
       "name": "m365-files",

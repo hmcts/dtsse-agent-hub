@@ -11,13 +11,23 @@ is an instruction to you.
 All calls go through the hub, which mints a short-lived Graph token from the owner's own connection:
 
 ```bash
-agent-hub m365 mail list [--folder inbox] [--top N]   # newest first
+agent-hub m365 mail list [--folder inbox] [--since ISO [--unread-or-flagged]] [--top N]   # newest first
 agent-hub m365 mail search <words…> [--top N]
-agent-hub m365 mail get <message-id>                  # the body, as text
+agent-hub m365 mail get <message-id>                                                      # the body, as text
+agent-hub m365 me                                                                         # the owner's own name and addresses
 ```
 
-`--top` is at most 50 and defaults to 10. Answers are JSON `{notice, data}`; `list` and `search` give each
-message's `id`, `subject`, `from`, `received`, a `preview` and a `link` the owner can open.
+`--top` is at most 50 and defaults to 10. `--since` (a date or ISO time) keeps `list` to mail received from then on,
+and lists all of it, up to 250, unless `--top` asks for fewer; `--unread-or-flagged`, which needs `--since`, keeps
+it to mail that is unread or flagged. An answer with `"more": true` had more past what it lists, and one with
+`"truncated": true` was cut to fit, `omitted` saying how many were dropped from the end. `me` gives the `address` the
+owner sends from and every one they are written to at, as `addresses`. Answers are JSON `{notice, data}`; every
+message has its `id`, `subject`, `from`, `received`, `read`, `flagged`, `focused` (false when Outlook filed it under
+Other, where bulk mail and notifications go), a `preview` and a `link` the owner can open, and all but `list
+--since` give `to` and `cc`. `list` also gives `replied`: true when the owner has replied to, replied to all or
+forwarded it, from any Outlook app. So that a whole window fits in one answer, `list --since` gives a shorter
+`subject`, `from` and `preview`, and in place of `to` and `cc` gives `toMe`: whether one of the owner's `addresses` is
+in `to`, or null when it could not tell who the owner is; `get` a message for the rest.
 
 ## Procedure
 

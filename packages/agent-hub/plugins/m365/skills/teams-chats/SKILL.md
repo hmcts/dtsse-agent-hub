@@ -16,7 +16,10 @@ agent-hub m365 channels list <team-id>
 agent-hub m365 channels messages <team-id> <channel-id> [--top N]
 ```
 
-`--top` is at most 50. Messages come back newest first with `from`, `at` and `text` (HTML turned into text).
+`--top` is at most 50. Messages come back newest first with `from`, `fromId`, `at`, `type` (`message` for someone
+writing, anything else for Teams' own events), `mentions` (each `{id, name}`) and `text` (HTML turned into text).
+`chats list` gives each chat's `last` message the same way, cut short, so you can see who spoke last without opening
+it; `agent-hub m365 me` gives the owner's own `id` to compare `fromId` and `mentions` with.
 
 ## Procedure
 

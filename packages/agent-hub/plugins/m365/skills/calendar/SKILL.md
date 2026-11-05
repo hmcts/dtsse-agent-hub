@@ -13,8 +13,10 @@ agent-hub m365 calendar [--from ISO] [--to ISO]
 ```
 
 Without times it covers now to seven days on. It lists up to 200 events; an answer with `"more": true` stopped there, so narrow the range. Times are a date (`2026-12-03`) or an ISO time; answers are in UTC,
-so convert to UK time (GMT or BST) when you tell the owner. Each event has `subject`, `start`, `end`, `organizer`,
-`location`, a `preview` of the invitation and, for a Teams meeting, its `joinUrl`.
+so convert to UK time (GMT or BST) when you tell the owner. Each event has `subject`, `start`, `end`, `isAllDay`,
+`organizer`, `location`, a `preview` of the invitation and, for a Teams meeting, its `joinUrl`. An all-day event's
+`start` and `end` are dates, `end` the day after its last, and are not converted; one whose dates fall outside the
+day asked about can still be listed for a range that starts or ends near midnight, so check its dates.
 
 ## Procedure
 

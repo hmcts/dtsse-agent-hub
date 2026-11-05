@@ -10,10 +10,12 @@ import { AssistantMarkdown } from "@/components/assistant/AssistantMarkdown";
 import { AssistantRefresh } from "@/components/assistant/AssistantRefresh";
 import { AssistantShell, SidebarToggle } from "@/components/assistant/AssistantShell";
 import { ProductSelect } from "@/components/assistant/ProductSelect";
+import type { ActionResult } from "@/web/action";
 
 const refresh = vi.fn();
+const push = vi.fn();
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ refresh }),
+  useRouter: () => ({ refresh, push }),
   usePathname: () => "/assistant",
   useSearchParams: () => new URLSearchParams(window.location.search)
 }));
@@ -53,6 +55,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   refresh.mockReset();
+  push.mockReset();
   hubHandlers.clear();
   vi.useRealTimers();
 });
@@ -247,6 +250,117 @@ describe("AssistantShell", () => {
         .getAllByRole("menuitem")
         .map((item) => item.getAttribute("href"))
     ).toEqual(["/assistant/scheduled"]);
+  });
+
+  it("should offer the morning briefing first when the page says it is offered", () => {
+    render(shell({ briefing: true, start: vi.fn() }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
+
+    expect(
+      within(screen.getByRole("menu", { name: "Workflows" }))
+        .getAllByRole("menuitem")
+        .map((item) => item.querySelector("span")?.textContent)
+    ).toEqual(["Morning briefing", "Scheduled"]);
+  });
+
+  it("should not offer the morning briefing when the page does not say it is offered", () => {
+    render(shell({ welsh: true, start: vi.fn() }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
+
+    expect(screen.queryByRole("menuitem", { name: /Morning briefing/ })).toBeNull();
+  });
+
+  it("should not offer the morning briefing when the page gives no way to start a chat", () => {
+    render(shell({ briefing: true }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
+
+    expect(screen.queryByRole("menuitem", { name: /Morning briefing/ })).toBeNull();
+  });
+
+  it("should start a chat running the briefing skill on the default product and open it when the briefing is chosen", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-05T07:45:00Z"));
+    const start = vi.fn().mockResolvedValue({ ok: true, id: "new-chat" });
+    render(shell({ briefing: true, start }));
+    fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("menuitem", { name: /Morning briefing/ }));
+    });
+    vi.useRealTimers();
+
+    expect(start).toHaveBeenCalledWith({ product: "general", title: "Morning briefing, Thursday 5 November", body: "/m365:morning-briefing 2026-11-05" });
+    expect(push).toHaveBeenCalledWith("/assistant/new-chat");
+    expect(screen.queryByRole("menu", { name: "Workflows" })).toBeNull();
+  });
+
+  it("should keep the menu open and say why when the hub refuses to start the briefing", async () => {
+    const start = vi.fn().mockResolvedValue({ ok: false, error: "Your assistant needs you to sign in first." });
+    render(shell({ briefing: true, start }));
+    fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("menuitem", { name: /Morning briefing/ }));
+    });
+
+    expect(push).not.toHaveBeenCalled();
+    expect(within(screen.getByRole("menu", { name: "Workflows" })).getByRole("alert").textContent).toBe("Your assistant needs you to sign in first.");
+    expect(screen.getByRole("menuitem", { name: /Morning briefing/ }).hasAttribute("disabled")).toBe(false);
+  });
+
+  it("should keep the menu open and say the hub was not reached when starting the briefing rejects", async () => {
+    const start = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
+    render(shell({ briefing: true, start }));
+    fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("menuitem", { name: /Morning briefing/ }));
+    });
+
+    expect(push).not.toHaveBeenCalled();
+    expect(within(screen.getByRole("menu", { name: "Workflows" })).getByRole("alert").textContent).toBe(
+      "that could not be done; check your connection and try again"
+    );
+    expect(screen.getByRole("menuitem", { name: /Morning briefing/ }).hasAttribute("disabled")).toBe(false);
+  });
+
+  it.each([
+    ["opened a chat", { ok: true, id: "new-chat" }],
+    ["was refused", { ok: false, error: "Your assistant needs you to sign in first." }]
+  ] satisfies [string, ActionResult<{ id: string }>][])(
+    "should neither navigate nor show an error when the menu was dismissed before the briefing start it was waiting on %s",
+    async (_, answer) => {
+      let settle: (value: ActionResult<{ id: string }>) => void = () => undefined;
+      const start = vi.fn(() => new Promise<ActionResult<{ id: string }>>((resolve) => (settle = resolve)));
+      render(shell({ briefing: true, start }));
+      fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: /Morning briefing/ }));
+
+      fireEvent.keyDown(document, { key: "Escape" });
+      await act(async () => settle(answer));
+      fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
+
+      expect(push).not.toHaveBeenCalled();
+      expect(within(screen.getByRole("menu", { name: "Workflows" })).queryByRole("alert")).toBeNull();
+    }
+  );
+
+  it("should neither navigate nor show an error when the menu was dismissed before the briefing start it was waiting on rejected", async () => {
+    let fail: (reason: unknown) => void = () => undefined;
+    const start = vi.fn(() => new Promise<ActionResult<{ id: string }>>((_, reject) => (fail = reject)));
+    render(shell({ briefing: true, start }));
+    fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Morning briefing/ }));
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await act(async () => fail(new TypeError("Failed to fetch")));
+    fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
+
+    expect(push).not.toHaveBeenCalled();
+    expect(within(screen.getByRole("menu", { name: "Workflows" })).queryByRole("alert")).toBeNull();
   });
 
   it("should close the workflows menu and return focus to the plus when Escape is pressed", () => {
