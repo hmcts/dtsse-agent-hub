@@ -207,6 +207,8 @@ export type ConfluencePageFound = {
   space_key: string;
   space_name: string;
   ancestors: string[];
+  /** The page's opening words, as Confluence's search gives them, which tell it from another page of the same title. */
+  excerpt?: string;
 };
 
 /** The answer to one Welsh translation job: what scripts/welsh printed, or why it did not run. */
