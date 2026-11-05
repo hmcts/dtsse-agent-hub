@@ -156,12 +156,6 @@ re-measured on 1.3.9. If the drop list is short on a new version, the code dies 
 screen counts down from five: `twgLoginExpired` reads twg's own error code, so the expiry is still reported as an
 expiry and the owner is still told the code ran out. Only the clock is wrong.
 
-The same bump can take away a command the pod runs, and unit tests fake twg, so none of them would notice: the
-Assistant's lookups run `twg jira space query`, `twg confluence search query` and `twg confluence space list`, and
-the exports `twg jira workitem create` and `twg confluence content create`, and the welsh plugin `twg jira workitem
-get` and `twg jira workitem update` (see "Atlassian lookups" in [agent-api.md](agent-api.md)). Check each against the
-new twg's `--help` and its JSON output.
-
 Each person also has a CLAUDE.md (`claude_md`), edited under Claude.md in the Assistant's settings, which every one of
 their virtual agents writes to `~/.claude/CLAUDE.md` before each start of Claude. It is kept in the credentials store
 because it may hold private context, and its owner can read it back. With nothing stored a pod gets the default,
