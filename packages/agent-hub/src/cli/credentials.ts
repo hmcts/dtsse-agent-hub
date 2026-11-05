@@ -2,7 +2,7 @@
 import { execFile } from "node:child_process";
 import { type Api, ApiError } from "../api.ts";
 import { withRetry } from "../retry.ts";
-import { EXIT_NO_CREDENTIAL, isCredentialKind, OWNER_READABLE } from "../virtual/index.ts";
+import { EXIT_NO_CREDENTIAL, OWNER_READABLE } from "../virtual/index.ts";
 import { virtualAgent } from "../virtual-agent.ts";
 import { CREDENTIAL_KINDS, type CredentialKind } from "../wire.ts";
 import { type Cli, type Command, UsageError } from "./command.ts";
@@ -21,6 +21,12 @@ function ghToken(): Promise<string> {
 
 type CredentialAction = "get" | "set" | "delete";
 
+// Every kind, a Microsoft 365 connection included, which a person can delete; `Array.prototype.includes` does not
+// narrow, so the kind reaches the hub client only through this predicate.
+function isCredentialKind(value: unknown): value is CredentialKind {
+  return typeof value === "string" && (CREDENTIAL_KINDS as readonly string[]).includes(value);
+}
+
 /** A pod, with its agent id; null for a person, who has an identity of their own and uses the person routes. */
 type Pod = { id: string } | null;
 
@@ -31,7 +37,6 @@ function credentialArgs(argv: string[]): { action: CredentialAction; kind: Crede
   if (action !== "get" && action !== "set" && action !== "delete") {
     throw new UsageError("credentials takes get, set or delete");
   }
-  // `Array.prototype.includes` does not narrow, so the kind reaches the hub client only through the predicate.
   if (!isCredentialKind(kind)) {
     throw new UsageError(`credential kind must be one of ${CREDENTIAL_KINDS.join(", ")}`);
   }
@@ -40,6 +45,12 @@ function credentialArgs(argv: string[]): { action: CredentialAction; kind: Crede
   }
   if (fromGh && (action !== "set" || kind !== "github")) {
     throw new UsageError("--from-gh only goes with credentials set github");
+  }
+  // The hub keeps a Microsoft 365 connection to itself: it is made with Connect and never read back or uploaded.
+  if (kind === "microsoft" && action !== "delete") {
+    throw new UsageError(
+      "a Microsoft 365 connection is made with Connect in the Assistant's settings and is never read back; credentials delete microsoft disconnects it"
+    );
   }
   return { action, kind, fromGh };
 }

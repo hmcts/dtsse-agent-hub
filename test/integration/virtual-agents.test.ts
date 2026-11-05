@@ -380,7 +380,7 @@ describe("a virtual agent's plugins", () => {
     const created = await createWith(["wa", "pcs"]);
 
     expect(created.plugins).toEqual(["pcs", "wa"]);
-    expect((await claim()).find((entry) => entry.id === created.id)).toMatchObject({ plugins: ["pcs", "slides", "wa"] });
+    expect((await claim()).find((entry) => entry.id === created.id)).toMatchObject({ plugins: ["m365", "m365-files", "pcs", "slides", "wa"] });
   });
 
   it("should create an agent with no plugins when none are ticked", async () => {
@@ -417,7 +417,7 @@ describe("a virtual agent's plugins", () => {
 
     expect(await row(id)).toMatchObject({ plugins: ["dtsse"], generation: before.generation + 1, podGeneration: before.podGeneration + 1 });
     expect((await claim()).find((entry) => entry.id === id)).toMatchObject({
-      plugins: ["dtsse", "slides"],
+      plugins: ["dtsse", "m365", "m365-files", "slides"],
       generation: before.generation + 1,
       pod_generation: before.podGeneration + 1
     });
@@ -479,7 +479,7 @@ describe("a virtual agent's plugins", () => {
     vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "dtsse");
 
     expect((await setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, ["pcs", "dtsse"])).plugins).toEqual(["dtsse", "pcs"]);
-    expect((await claim()).find((entry) => entry.id === agent.id)).toMatchObject({ plugins: ["dtsse", "pcs", "slides"] });
+    expect((await claim()).find((entry) => entry.id === agent.id)).toMatchObject({ plugins: ["dtsse", "m365", "m365-files", "pcs", "slides"] });
     await setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, ["dtsse"]);
     await expect(setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, ["dtsse", "pcs"])).rejects.toMatchObject({ status: 400 });
   });
@@ -492,7 +492,7 @@ describe("a virtual agent's plugins", () => {
     const created = await createWith([]);
 
     expect(created.plugins).toEqual([]);
-    expect((await claim()).find((entry) => entry.id === created.id)).toMatchObject({ plugins: ["slides"] });
+    expect((await claim()).find((entry) => entry.id === created.id)).toMatchObject({ plugins: ["m365", "m365-files", "slides"] });
   });
 
   it("should write nothing and bump nothing on a save whose ticked plugins are unchanged when the row still holds slides", async () => {
@@ -516,14 +516,14 @@ describe("a virtual agent's plugins", () => {
     expect(await actions.setVirtualAgentPlugins(ticked({ id }, ["dtsse"]))).toEqual({ ok: true, confirmation: "pcs-api is restarting with its new plugins" });
 
     expect(await row(id)).toMatchObject({ plugins: ["dtsse"], generation: before.generation + 1, podGeneration: before.podGeneration + 1 });
-    expect((await claim()).find((entry) => entry.id === id)).toMatchObject({ plugins: ["dtsse", "slides"] });
+    expect((await claim()).find((entry) => entry.id === id)).toMatchObject({ plugins: ["dtsse", "m365", "m365-files", "slides"] });
   });
 
   it("should claim a row that still holds slides with it once", async () => {
     const agent = await createWith(["pcs"]);
     await prisma.virtualAgent.update({ where: { id: agent.id }, data: { plugins: ["pcs", "slides"] } });
 
-    expect((await claim()).find((entry) => entry.id === agent.id)).toMatchObject({ plugins: ["pcs", "slides"] });
+    expect((await claim()).find((entry) => entry.id === agent.id)).toMatchObject({ plugins: ["m365", "m365-files", "pcs", "slides"] });
   });
 
   it("should neither add nor refuse slides when the form sends it for an agent that has none stored", async () => {

@@ -1,9 +1,10 @@
 // Installing a bundled plugin's own dependencies as the pod starts, so the first use of the plugin, by a hub job or
 // by the model running its script, does not wait on an npm install. Each bundled plugin's `scripts/<name>` takes
 // `deps`, which installs them under a lock and does nothing else.
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { Env } from "../env.ts";
-import { installBundled, loadedBundled, SLIDES_PLUGIN } from "../virtual/bundled-plugins.ts";
+import { installBundled, loadedBundled, PACKAGE_PLUGINS, SLIDES_PLUGIN } from "../virtual/bundled-plugins.ts";
 import type { Run } from "./lookups.ts";
 
 /** Long enough for a first install of a plugin's dependencies on a pod's network. */
@@ -36,9 +37,20 @@ export function slidesScript(workspace: string, install: (name: string, workspac
   return join(install(SLIDES_PLUGIN, workspace), "scripts", SLIDES_PLUGIN);
 }
 
-/** Runs a loaded bundled plugin's `scripts/<name> deps`. Never throws: a failure is said, and the next run of the script installs again. */
+/**
+ * Whether this package's copy of a bundled plugin has a `scripts/<name>` to install dependencies for. The Microsoft 365
+ * plugins are skills alone, with no script and nothing to install.
+ */
+export function hasBundledScript(name: string, root: string = PACKAGE_PLUGINS): boolean {
+  return existsSync(join(root, name, "scripts", name));
+}
+
+/** Runs a loaded bundled plugin's `scripts/<name> deps`, where it has one. Never throws: a failure is said, and the next run of the script installs again. */
 export async function prepareBundled(name: string, deps: PrepareDeps): Promise<void> {
   const say = deps.say ?? (() => {});
+  if (!hasBundledScript(name)) {
+    return;
+  }
   try {
     const script = bundledScript(name, deps.workspace, deps.env, deps.install);
     if (script === null) {

@@ -10,6 +10,7 @@ import {
   CONNECTORS,
   type Connection,
   type ConnectionState,
+  type ConnectionsData,
   canSignInAgain,
   checklistState,
   codeCollectable,
@@ -24,6 +25,7 @@ import {
   inWords,
   isConnection,
   lapsedSinceStored,
+  microsoftConnection,
   modelAccess,
   modelAccessAfter,
   needsPerson,
@@ -120,7 +122,7 @@ describe("isConnection", () => {
     expect(isConnection(kind)).toBe(true);
   });
 
-  it.each(["claude_md", "git_identity"] as const)("should not count %s as a sign-in when asked", (kind) => {
+  it.each(["claude_md", "git_identity", "microsoft"] as const)("should not count %s as a sign-in when asked", (kind) => {
     expect(isConnection(kind)).toBe(false);
   });
 
@@ -1089,5 +1091,34 @@ describe("inWords", () => {
     [["A", "B", "C"], "A, B and C"]
   ])("should read %j as %j", (names, expected) => {
     expect(inWords(names)).toBe(expected);
+  });
+});
+
+describe("microsoftConnection", () => {
+  const data = (statuses: ConnectionsData["statuses"], unavailable: string | null = null): ConnectionsData => ({
+    route: "gateway",
+    kinds: [],
+    statuses,
+    logins: [],
+    unavailable
+  });
+
+  it("should offer Connect, coming back to the Connections section, when nothing is stored", () => {
+    expect(microsoftConnection(data([]))).toEqual({
+      stored: false,
+      accountLabel: null,
+      connectPath: "/auth/microsoft/connect",
+      returnTo: "/assistant?settings=connections"
+    });
+  });
+
+  it("should name the account when a connection is stored", () => {
+    const status = { kind: "microsoft" as const, stored: true, accountLabel: "a.person@hmcts.net", updatedAt: "2026-12-01T09:00:00.000Z" };
+    expect(microsoftConnection(data([status]))).toMatchObject({ stored: true, accountLabel: "a.person@hmcts.net" });
+  });
+
+  it("should say nothing when the hub cannot read the credentials", () => {
+    expect(microsoftConnection(data([], "no store"))).toBeNull();
+    expect(microsoftConnection(undefined)).toBeNull();
   });
 });

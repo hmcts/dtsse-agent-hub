@@ -5,20 +5,43 @@ const discovery = vi.hoisted(() => vi.fn());
 const buildAuthorizationUrl = vi.hoisted(() => vi.fn());
 const authorizationCodeGrant = vi.hoisted(() => vi.fn());
 const calculatePKCECodeChallenge = vi.hoisted(() => vi.fn());
+const refreshTokenGrant = vi.hoisted(() => vi.fn());
+const ResponseBodyError = vi.hoisted(
+  () =>
+    class extends Error {
+      error: string;
+      constructor(error: string) {
+        super(`Entra answered ${error}`);
+        this.error = error;
+      }
+    }
+);
 
 vi.mock("openid-client", () => ({
   discovery,
   buildAuthorizationUrl,
   authorizationCodeGrant,
   calculatePKCECodeChallenge,
+  refreshTokenGrant,
+  ResponseBodyError,
   randomState: () => "a-state",
   randomNonce: () => "a-nonce",
   randomPKCECodeVerifier: () => "a-verifier"
 }));
 
-const { authorizationUrl, beginSignIn, completeSignIn, configuration, forgetDiscovery, readSignIn, sealSignIn, SignInFailed, signOutUrl } = await import(
-  "./entra.ts"
-);
+const {
+  authorizationUrl,
+  beginSignIn,
+  completeMicrosoftConnect,
+  completeSignIn,
+  configuration,
+  forgetDiscovery,
+  readSignIn,
+  refreshMicrosoftToken,
+  sealSignIn,
+  SignInFailed,
+  signOutUrl
+} = await import("./entra.ts");
 
 const SETTINGS: AuthSettings = {
   tenantId: "a-tenant",
@@ -100,6 +123,7 @@ describe("authorizationUrl", () => {
     const url = await authorizationUrl(SETTINGS, beginSignIn("/"));
 
     expect(url.searchParams.get("scope")).toBe("openid profile email");
+    expect(url.searchParams.get("prompt")).toBeNull();
   });
 
   it("should carry the redirect uri, state and nonce", async () => {
@@ -233,5 +257,78 @@ describe("discovery failure", () => {
     discovery.mockResolvedValue(discovered());
     await expect(configuration(SETTINGS)).resolves.toBeDefined();
     expect(discovery).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("connecting Microsoft 365", () => {
+  const CURRENT = new URL("https://agent-hub.example/auth/callback?code=a-code&state=a-state");
+  const SESSION = { oid: "0000-oid", tid: "a-tenant" };
+
+  function granted(claims: Record<string, unknown>, tokens: Record<string, unknown> = {}) {
+    authorizationCodeGrant.mockResolvedValue({ claims: () => claims, refresh_token: "a-refresh", scope: "Mail.Read offline_access", ...tokens });
+  }
+
+  it("should keep its purpose through the sealed cookie, so the callback knows to connect rather than sign in", async () => {
+    const signIn = beginSignIn("/assistant", "microsoft");
+
+    expect(await readSignIn(await sealSignIn(signIn, SETTINGS.sessionSecret), SETTINGS.sessionSecret)).toEqual({ ...signIn, purpose: "microsoft" });
+  });
+
+  it("should ask for Graph and a refresh token only when the sign-in is a connect", async () => {
+    const url = await authorizationUrl(SETTINGS, beginSignIn("/", "microsoft"));
+
+    expect(url.searchParams.get("scope")).toContain("https://graph.microsoft.com/Mail.Read");
+    expect(url.searchParams.get("scope")).toContain("offline_access");
+    expect(url.searchParams.get("redirect_uri")).toBe(SETTINGS.redirectUri);
+    expect(url.searchParams.get("prompt")).toBe("select_account");
+  });
+
+  it("should keep the refresh token, the account and the scope granted when the signed-in person connects", async () => {
+    granted({ ...SESSION, preferred_username: "a.person@hmcts.net" });
+
+    expect(await completeMicrosoftConnect(SETTINGS, CURRENT, beginSignIn("/", "microsoft"), SESSION)).toEqual({
+      refreshToken: "a-refresh",
+      account: "a.person@hmcts.net",
+      scope: "Mail.Read offline_access"
+    });
+  });
+
+  it("should refuse a connection when the Microsoft account is somebody other than the person signed in", async () => {
+    granted({ oid: "someone-else", tid: "a-tenant" });
+
+    await expect(completeMicrosoftConnect(SETTINGS, CURRENT, beginSignIn("/", "microsoft"), SESSION)).rejects.toThrow(SignInFailed);
+  });
+
+  it("should refuse a connection when Entra sends no refresh token", async () => {
+    granted(SESSION, { refresh_token: undefined });
+
+    await expect(completeMicrosoftConnect(SETTINGS, CURRENT, beginSignIn("/", "microsoft"), SESSION)).rejects.toThrow("no refresh token");
+  });
+});
+
+describe("refreshMicrosoftToken", () => {
+  it("should hand back the access token and the refresh token Entra rotated to when the refresh works", async () => {
+    refreshTokenGrant.mockResolvedValue({ access_token: "an-access", expiresIn: () => 3599, scope: "Mail.Read", refresh_token: "a-new-refresh" });
+
+    expect(await refreshMicrosoftToken(SETTINGS, "a-refresh")).toEqual({
+      ok: true,
+      accessToken: "an-access",
+      expiresIn: 3599,
+      scope: "Mail.Read",
+      refreshToken: "a-new-refresh"
+    });
+    expect(refreshTokenGrant).toHaveBeenCalledWith(expect.anything(), "a-refresh", { scope: expect.stringContaining("offline_access") });
+  });
+
+  it("should ask for a reconnect when Entra will no longer redeem the refresh token", async () => {
+    refreshTokenGrant.mockRejectedValue(new ResponseBodyError("invalid_grant"));
+
+    expect(await refreshMicrosoftToken(SETTINGS, "a-refresh")).toMatchObject({ ok: false, failure: "reconnect" });
+  });
+
+  it("should call it unavailable when the refresh fails for any other reason", async () => {
+    refreshTokenGrant.mockRejectedValue(new Error("socket hang up"));
+
+    expect(await refreshMicrosoftToken(SETTINGS, "a-refresh")).toMatchObject({ ok: false, failure: "unavailable" });
   });
 });

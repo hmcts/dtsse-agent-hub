@@ -5,7 +5,13 @@
 import type { NameSource } from "./session.ts";
 
 /** The credential kinds `docs/agent-api.md` defines; any other gives 404. */
-export const CREDENTIAL_KINDS = ["github", "azure", "claude", "jenkins", "atlassian", "claude_md", "git_identity"] as const;
+export const CREDENTIAL_KINDS = ["github", "azure", "claude", "jenkins", "atlassian", "claude_md", "git_identity", "microsoft"] as const;
+
+/**
+ * The kinds a pod reads and stores through its own routes: all but a Microsoft 365 connection, which the hub keeps to
+ * itself and hands a pod only access tokens from.
+ */
+export const POD_CREDENTIAL_KINDS = CREDENTIAL_KINDS.filter((kind) => kind !== "microsoft");
 
 export type CredentialKind = (typeof CREDENTIAL_KINDS)[number];
 
@@ -310,6 +316,8 @@ export type TopicsResponse = { topics: TopicSummary[] };
 export type AgentsResponse = { agents: AgentSummary[] };
 export type TranscriptResponse = { accepted: number };
 export type CredentialResponse = { value: string };
+/** A Microsoft Graph access token minted from the owner's Microsoft 365 connection; see "Microsoft 365" in docs/agent-api.md. */
+export type MicrosoftTokenResponse = { access_token: string; expires_at: string; permissions: string[] };
 export type LoginCodeResponse = { code: string };
 /** Whether the owner has asked for a sign-in of this kind; see `GET /api/virtual/{id}/login/{kind}`. */
 export type SignInRequestResponse = { requested: boolean };

@@ -9,7 +9,9 @@ import {
   checklistState,
   connections,
   connectionsWarning,
+  type MicrosoftConnection,
   type ModelAccess,
+  microsoftConnection,
   modelAccess,
   modelAccessAfter,
   offersConnect
@@ -32,6 +34,7 @@ import type { AssistantSize } from "@/components/assistant/SizeSettings";
 import { type AssistantTemplates, Templates } from "@/components/assistant/TemplateSettings";
 import { ThemeSwitch } from "@/components/assistant/ThemeSwitch";
 import { type AssistantTokens, TokenSettings } from "@/components/assistant/TokenSettings";
+import { CONNECT_OUTCOME_PARAMETER, CONNECT_OUTCOME_WORDS, isConnectOutcome } from "@/microsoft/microsoft";
 import { SETTINGS_PARAMETER, withoutSettingsParameter } from "@/web/home";
 
 /**
@@ -54,6 +57,8 @@ interface SettingsView {
   /** How this person's agents reach Claude, where that is not one of `list`'s own rows. */
   access: ModelAccess | null;
   connect: AssistantConnect | undefined;
+  /** The person's Microsoft 365 connection, or `null` where the hub cannot read their credentials. */
+  microsoft: MicrosoftConnection | null;
   unavailable: string | null;
   warning: string | null;
   plugins: AssistantPlugins | undefined;
@@ -78,8 +83,17 @@ interface SettingsView {
  * the navigation is a roving tabindex, and all but one of its buttons are deliberately not tab stops. The trap below
  * reads only the two ends of the list and those are the close button and the open section's last control either way,
  * with the navigation between them — so this is about the constant meaning what it says, not about fixing the wrap.
+ * A hidden input is left out for the same reason: Tab never lands on one, and a form posting a hidden field (Microsoft
+ * 365's Connect) would otherwise be counted as a stop.
  */
-export const FOCUSABLE = ["a[href]", "button:not([disabled])", "input:not([disabled])", "select:not([disabled])", "textarea:not([disabled])", "[tabindex]"]
+export const FOCUSABLE = [
+  "a[href]",
+  "button:not([disabled])",
+  'input:not([disabled]):not([type="hidden"])',
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "[tabindex]"
+]
   .map((selector) => `${selector}:not([tabindex="-1"])`)
   .join(", ");
 
@@ -220,6 +234,78 @@ function Row({ row, connect }: { row: Connection | ModelAccess; connect?: Assist
   );
 }
 
+/**
+ * Microsoft 365, which the person connects themselves in a browser sign-in of the hub's rather than through their
+ * assistant: Connect posts to it (a form rather than a link, so only this page can start one), not a restart. A connect
+ * that came back without a connection says so here, from the address it returned to. Disconnecting deletes the connection, which is `removeCredential`,
+ * and needs no restart either, since agents ask the hub for a token each time and are refused from then on.
+ */
+function MicrosoftRow({ connection, remove }: { connection: MicrosoftConnection; remove: FormAction | undefined }) {
+  const [asking, setAsking] = useState(false);
+  const outcome = useSearchParams().get(CONNECT_OUTCOME_PARAMETER);
+  return (
+    <ul aria-label="Microsoft 365" className="flex flex-col overflow-hidden rounded-[10px] border border-asst-line">
+      <li className="flex flex-wrap items-center gap-3 px-3.5 py-3">
+        <span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-asst-active text-xs font-semibold">
+          M
+        </span>
+        <div className="flex min-w-0 flex-1 flex-col leading-tight">
+          <span className="truncate text-sm font-medium">Microsoft 365</span>
+          <span className="truncate text-xs text-asst-muted">
+            {connection.accountLabel ?? "Your mail, calendar, Teams chats and meetings, and OneDrive and SharePoint files (optional)"}
+          </span>
+        </div>
+        <span className={`shrink-0 text-xs font-medium ${connection.stored ? "text-asst-ok" : "text-asst-muted"}`}>
+          {connection.stored ? "Connected" : "Not connected"}
+        </span>
+        {connection.stored ? (
+          remove === undefined || asking ? null : (
+            <button
+              type="button"
+              onClick={() => setAsking(true)}
+              className="shrink-0 rounded-[9px] border border-asst-line px-3 py-1 text-xs font-medium text-asst-muted hover:text-asst-text"
+            >
+              Disconnect
+            </button>
+          )
+        ) : (
+          <form method="post" action={connection.connectPath} className="shrink-0">
+            <input type="hidden" name="redirect" value={connection.returnTo} />
+            <button
+              type="submit"
+              aria-label="Connect Microsoft 365"
+              className="shrink-0 rounded-[9px] border border-asst-accent-line px-3 py-1 text-xs font-medium text-asst-accent-soft hover:bg-asst-accent hover:text-asst-ink"
+            >
+              Connect
+            </button>
+          </form>
+        )}
+        {connection.stored && remove !== undefined && asking ? (
+          <ActionForm action={remove} label="Disconnect Microsoft 365" onSuccess={() => setAsking(false)} className="flex basis-full flex-col gap-2 pt-1">
+            <input type="hidden" name="kind" value="microsoft" />
+            <p className="text-pretty text-[13px] font-semibold text-asst-text">
+              Disconnect Microsoft 365? Your agents can no longer read your mail, calendar, Teams chats, meetings or files until you connect again.
+            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <button type="submit" className="shrink-0 rounded-[10px] bg-asst-error px-3.5 py-2 text-[13px] font-semibold text-asst-ink">
+                Disconnect
+              </button>
+              <button type="button" onClick={() => setAsking(false)} className="shrink-0 text-[13px] font-medium text-asst-muted hover:text-asst-text">
+                Cancel
+              </button>
+            </div>
+          </ActionForm>
+        ) : null}
+        {!connection.stored && isConnectOutcome(outcome) ? (
+          <p role="status" className="basis-full text-pretty text-[13px] text-asst-warn">
+            {CONNECT_OUTCOME_WORDS[outcome]}
+          </p>
+        ) : null}
+      </li>
+    </ul>
+  );
+}
+
 function Appearance({ theme }: { theme: Theme }) {
   return (
     <section aria-labelledby="assistant-settings-appearance" className="flex flex-col gap-2.5">
@@ -234,9 +320,9 @@ function Appearance({ theme }: { theme: Theme }) {
   );
 }
 
-/** Whether the page passed any sign-in, or a reason it has none to show. */
+/** Whether the page passed any sign-in, Microsoft 365 included, or a reason it has none to show. */
 function hasSignIns(view: SettingsView): boolean {
-  return view.list.length > 0 || view.unavailable !== null;
+  return view.list.length > 0 || view.microsoft !== null || view.unavailable !== null;
 }
 
 /** Whether the page passed any saved credential, or a reason it cannot show them. */
@@ -262,7 +348,15 @@ function Connections({ view }: { view: SettingsView }) {
   );
 }
 
-function SignIns({ list, access, connect, unavailable, warning }: Pick<SettingsView, "list" | "access" | "connect" | "unavailable" | "warning">) {
+function SignIns({
+  list,
+  access,
+  connect,
+  microsoft,
+  tokens,
+  unavailable,
+  warning
+}: Pick<SettingsView, "list" | "access" | "connect" | "microsoft" | "tokens" | "unavailable" | "warning">) {
   return (
     <>
       {warning === null ? null : (
@@ -291,6 +385,7 @@ function SignIns({ list, access, connect, unavailable, warning }: Pick<SettingsV
           ))}
         </ul>
       )}
+      {microsoft === null ? null : <MicrosoftRow connection={microsoft} remove={tokens?.remove} />}
     </>
   );
 }
@@ -934,6 +1029,7 @@ export function AssistantSettings({
                 list,
                 access,
                 connect,
+                microsoft: microsoftConnection(data),
                 unavailable: data?.unavailable ?? null,
                 warning,
                 plugins,

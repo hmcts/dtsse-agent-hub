@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { canOwnerReadCredential, canUseCredentialRoutes } from "@/access/rules";
+import { canOwnerReadCredential, canUseCredentialRoutes, isHubIssuedCredential } from "@/access/rules";
 import { HttpError, json, noContent, parse, readJson } from "@/agent-api/http";
 import { agentRoute } from "@/agent-api/route";
 import type { Caller } from "@/agent-auth/authenticate";
@@ -55,6 +55,9 @@ export const GET = agentRoute<{ kind: string }>(async ({ caller, params }) => {
 export const PUT = agentRoute<{ kind: string }>(async ({ caller, request, params }) => {
   personal(caller);
   const kind = kindOf(params.kind);
+  if (isHubIssuedCredential(kind)) {
+    throw new HttpError(403, "a Microsoft 365 connection is made with Connect in the CFT Workspace's settings, not uploaded");
+  }
   const { value } = parse(credentialBody, await readJson(request));
   if (kind === "azure") {
     const owned = checkAzureCacheOwner(value, caller.oid, process.env.ENTRA_TENANT_ID);

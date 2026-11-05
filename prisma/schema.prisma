@@ -54,6 +54,7 @@ enum CredentialKind {
   claude_md
   git_identity
   atlassian
+  microsoft
 
   @@map("credential_kind")
 }

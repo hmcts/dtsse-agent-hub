@@ -15,6 +15,7 @@ import {
   canOpenVirtualAgentPort,
   canOwnerReadCredential,
   canPersonDirectAgent,
+  canPodReadCredential,
   canReadDeck,
   canReadMessage,
   canRemoveUploadFromDisk,
@@ -26,6 +27,7 @@ import {
   canVirtualAgentStoreCredential,
   canWriteUpload,
   conversationAccess,
+  isHubIssuedCredential,
   isOwner,
   isPodConversationAgent,
   MAX_PEOPLE_SUGGESTIONS,
@@ -415,6 +417,30 @@ describe("canVirtualAgentStoreCredential", () => {
 
   it("should refuse a pod when it would change its owner's git identity", () => {
     expect(canVirtualAgentStoreCredential("git_identity")).toBe(false);
+  });
+
+  it("should refuse a pod when it would write a Microsoft 365 connection, which only the hub writes", () => {
+    expect(canVirtualAgentStoreCredential("microsoft")).toBe(false);
+  });
+});
+
+describe("isHubIssuedCredential", () => {
+  it("should count a Microsoft 365 connection as written by the hub alone when asked", () => {
+    expect(isHubIssuedCredential("microsoft")).toBe(true);
+  });
+
+  it.each(["github", "azure", "claude", "jenkins", "atlassian", "claude_md", "git_identity"])("should not count %s as hub-issued when asked", (kind) => {
+    expect(isHubIssuedCredential(kind)).toBe(false);
+  });
+});
+
+describe("canPodReadCredential", () => {
+  it("should keep a Microsoft 365 connection from a pod when it asks for the value", () => {
+    expect(canPodReadCredential("microsoft")).toBe(false);
+  });
+
+  it.each(["github", "azure", "claude", "jenkins", "atlassian", "claude_md", "git_identity"])("should let a pod read its owner's %s when it asks", (kind) => {
+    expect(canPodReadCredential(kind)).toBe(true);
   });
 });
 
