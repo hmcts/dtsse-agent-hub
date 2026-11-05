@@ -672,7 +672,24 @@ describe("ChatView on a session too old for plain prompts", () => {
     expect(screen.queryByTestId("restart-needed")).toBeNull();
   });
 
-  it("should re-read the page for the new session's claim when a session starts", () => {
+  // A restarted pod's session can register straight to idle, with no offline status in between.
+  it("should re-read the page for the new claim when the session registers, from idle as from offline", () => {
+    render(
+      <ChatView
+        jira={NO_JIRA}
+        viewerOid={VIEWER}
+        view={conversation({ agentStatus: "idle", clientFeatures: ["stop"] })}
+        templates={TEMPLATES}
+        actions={actions()}
+      />
+    );
+
+    emit("agent_status", { agent_id: AGENT, status: "idle", registered: true });
+
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("should not re-read the page when an old session only turns busy or idle", () => {
     render(
       <ChatView
         jira={NO_JIRA}
@@ -684,22 +701,16 @@ describe("ChatView on a session too old for plain prompts", () => {
     );
 
     emit("agent_status", { agent_id: AGENT, status: "idle" });
+    emit("agent_status", { agent_id: AGENT, status: "busy" });
+    emit("agent_status", { agent_id: AGENT, status: "idle" });
 
-    expect(refresh).toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
   });
 
-  it("should not re-read the page when a session that claims plain-prompt starts", () => {
-    render(
-      <ChatView
-        jira={NO_JIRA}
-        viewerOid={VIEWER}
-        view={conversation({ agentStatus: "offline", clientFeatures: ["plain-prompt"] })}
-        templates={TEMPLATES}
-        actions={actions()}
-      />
-    );
+  it("should not re-read the page when a session that claims plain-prompt registers", () => {
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ clientFeatures: ["plain-prompt"] })} templates={TEMPLATES} actions={actions()} />);
 
-    emit("agent_status", { agent_id: AGENT, status: "idle" });
+    emit("agent_status", { agent_id: AGENT, status: "idle", registered: true });
 
     expect(refresh).not.toHaveBeenCalled();
   });

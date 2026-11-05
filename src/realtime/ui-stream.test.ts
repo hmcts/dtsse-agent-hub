@@ -129,6 +129,16 @@ describe("selectFrame", () => {
     expect(frame).toBe(`event: agent_status\ndata: ${JSON.stringify({ agent_id: AGENT.id, status: "busy", conversation_id: null })}\n\n`);
   });
 
+  it("should say a status came from a registration when it did", async () => {
+    const frame = await selectFrame(
+      { type: "agent_status", agent_id: AGENT.id, owner_oid: VIEWER, status: "idle", local_conversation_id: null, registered: true },
+      THREAD,
+      sources()
+    );
+
+    expect(frame).toBe(`event: agent_status\ndata: ${JSON.stringify({ agent_id: AGENT.id, status: "idle", conversation_id: null, registered: true })}\n\n`);
+  });
+
   it.each<[string, UiWatch]>([
     ["no agent is watched", TOPICS],
     ["another of the viewer's agents is watched", { ...THREAD, agent: { id: "agent-other", ownerOid: VIEWER } }],

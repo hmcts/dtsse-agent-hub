@@ -106,8 +106,14 @@ const gaps = (calls: RecordedCall[]) => calls.slice(1).map((c, i) => (c.at ?? 0)
 type StartBridgeOptions = Omit<RunBridgeOptions, "sid" | "api" | "deliver"> & { env?: Env };
 
 // Registers an agent on a fresh mock hub and runs a bridge for it until `stop` is called. `env` adds to the
-// bridge's environment; `savedAgent` adds fields to the agent.json it starts from.
-async function startBridge(hubOptions: MockHubOptions, { env: extraEnv, ...bridgeOptions }: StartBridgeOptions = {}, savedAgent: Record<string, unknown> = {}) {
+// bridge's environment; `savedAgent` adds fields to the agent.json it starts from, and `status` is the session's status
+// file as the bridge starts.
+async function startBridge(
+  hubOptions: MockHubOptions,
+  { env: extraEnv, ...bridgeOptions }: StartBridgeOptions = {},
+  savedAgent: Record<string, unknown> = {},
+  status?: "busy" | "idle"
+) {
   const hub = createMockHub({ pingMs: 5000, ...hubOptions });
   const url = await hub.listen();
   const api = createApi({ baseUrl: url, devUser: DEV_USER });
@@ -116,6 +122,9 @@ async function startBridge(hubOptions: MockHubOptions, { env: extraEnv, ...bridg
   ensureStateDir(sid);
   fs.writeFileSync(statePath(sid, "enabled"), "");
   writeJson(statePath(sid, "agent.json"), { agent_id: agentId, session_id: sid, name: sid, client_features: [...CLIENT_FEATURES], ...savedAgent });
+  if (status !== undefined) {
+    fs.writeFileSync(statePath(sid, "status"), `${status}\n`);
+  }
   const socketWrites: string[] = [];
   const deliver = async (_socketPath: string | null | undefined, _token: string | null | undefined, content: string) => {
     socketWrites.push(content);
@@ -808,19 +817,41 @@ describe("runBridge", () => {
   it.each([
     ["an older client's claim", { client_features: ["stop"] }],
     ["no claim at all", { client_features: undefined }]
-  ])("should register again with this build's claim before streaming when the saved agent was registered with %s", async (_what, saved) => {
+  ])("should register again with this build's claim on its first heartbeat when the saved agent was registered with %s", async (_what, saved) => {
     // Arrange
     const bridge = await startBridge({}, {}, saved);
     const registers = () => bridge.hub.calls.filter((c) => c.path === "/api/agent/register");
 
     try {
       // Act
-      await waitUntil(() => bridge.streamOpens().length >= 1, "the first stream");
+      await waitUntil(() => registers().length >= 2, "the second registration");
 
       // Assert
       expect(registers()).toHaveLength(2);
       expect(registers()[1]?.body.client_features).toEqual([...CLIENT_FEATURES]);
       expect(JSON.parse(fs.readFileSync(statePath(bridge.sid, "agent.json"), "utf8")).client_features).toEqual([...CLIENT_FEATURES]);
+    } finally {
+      await bridge.stop();
+    }
+  });
+
+  // A registration sets the agent idle, which would tell the hub a session in the middle of a turn has stopped.
+  it("should wait for the session to go idle before registering again when it starts busy", async () => {
+    // Arrange
+    const bridge = await startBridge({}, {}, { client_features: ["stop"] }, "busy");
+    const registers = () => bridge.hub.calls.filter((c) => c.path === "/api/agent/register");
+    const beats = () => bridge.hub.calls.filter((c) => c.path === `/api/agent/${bridge.agentId}/heartbeat`);
+
+    try {
+      await waitUntil(() => beats().length >= 3, "three busy heartbeats");
+      expect(registers()).toHaveLength(1);
+
+      // Act
+      fs.writeFileSync(statePath(bridge.sid, "status"), "idle\n");
+      await waitUntil(() => registers().length >= 2, "the registration once idle");
+
+      // Assert
+      expect(registers()[1]?.body.client_features).toEqual([...CLIENT_FEATURES]);
     } finally {
       await bridge.stop();
     }
@@ -1143,7 +1174,7 @@ describe("runBridge", () => {
 
       // Assert
       expect(bridge.socketWrites[0]).toContain(
-        "\nThe message below starts with /cft-explain: run the cft-explain skill with the rest of it as its arguments.\n"
+        "\nThe message starts with /cft-explain: run the cft-explain skill with the rest of the message as its arguments.\n"
       );
       expect(bridge.socketWrites[1]).not.toMatch(/skill/);
     } finally {

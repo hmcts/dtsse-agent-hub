@@ -381,11 +381,12 @@ export function ChatView({
   const narrow = useNarrow();
 
   useEffect(() => setStatus(view.agentStatus), [view.agentStatus]);
-  useHubEvent<{ agent_id: string; status: AgentStatus }>("agent_status", ({ agent_id, status: next }) => {
+  useHubEvent<{ agent_id: string; status: AgentStatus; registered?: boolean }>("agent_status", ({ agent_id, status: next, registered }) => {
     if (agent_id === view.agentId) {
-      // The claim is read with the page, so a session that has just started, which registered a claim of its own, is
-      // read again rather than shown the restart note an earlier session's claim called for.
-      if (status === "offline" && next !== "offline" && !clientSupports(view.clientFeatures, "plain-prompt")) {
+      // The claim is read with the page and replaced only by a registration, so a session that registers while the
+      // restart note is up is read again for its new claim. A restarted pod's session can register straight to idle,
+      // with no offline status before it, so the status alone cannot say when.
+      if (registered === true && !clientSupports(view.clientFeatures, "plain-prompt")) {
         router.refresh();
       }
       setStatus(next);

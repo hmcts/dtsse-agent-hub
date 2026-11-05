@@ -24,6 +24,13 @@ describe("encodeEvent and decodeEvent", () => {
     });
   });
 
+  it("should keep a registration's flag on a status and drop anything else in its place", () => {
+    const status = { type: "agent_status", agent_id: "a", owner_oid: "o", status: "idle", local_conversation_id: null };
+
+    expect(decodeEvent(JSON.stringify({ ...status, registered: true }))).toEqual({ ...status, registered: true });
+    expect(decodeEvent(JSON.stringify({ ...status, registered: "yes" }))).toEqual(status);
+  });
+
   it.each([
     ["no payload", undefined],
     ["something that is not JSON", "{"],

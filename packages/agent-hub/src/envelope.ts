@@ -174,10 +174,10 @@ export function ownerLaptopEnvelope(message: EnvelopeMessage, { skills, reads = 
   ].join("\n");
 }
 
-// The laptop envelope's, for the reason `promptSkillLine` is said in a conversation: a socket-delivered message is
-// queued with `skipSlashCommands`, so this sentence is the only thing that runs the skill.
-const ownerSkillLine = (name: string) =>
-  `It starts with /${name}: run the ${name} skill with the rest of the message as its arguments, as if your user had typed it.`;
+// Said for an owner's message the CFT Workspace's "/" autocomplete started with a skill, in a laptop envelope and in a
+// conversation's context alike. A socket-delivered message is queued with `skipSlashCommands`, so Claude Code never
+// resolves the slash command itself and this sentence is the only thing that runs the skill.
+const ownerSkillLine = (name: string) => `The message starts with /${name}: run the ${name} skill with the rest of the message as its arguments.`;
 
 /**
  * The `assistant` object on a `direct` frame to one of a virtual agent's CFT Workspace conversations: the
@@ -408,18 +408,42 @@ export function contextOpen(id: string): string {
 /** What closes it. The person's words follow after a blank line. */
 export const CONTEXT_CLOSE = `</${CONTEXT_TAG}>`;
 
-// Said for a message the CFT Workspace's "/" autocomplete started with a skill. A socket-delivered message is queued
-// with `skipSlashCommands`, so Claude Code never resolves the slash command itself and this sentence is the only
-// thing that runs the skill.
-const promptSkillLine = (name: string) => `The message below starts with /${name}: run the ${name} skill with the rest of it as its arguments.`;
+const STALE = "treat earlier product-specific assumptions as stale.";
+
+/**
+ * What the session is told of the product area. `previousProduct` null is no record of an earlier message, so this is
+ * the first one this session is delivered and the area is named whatever it is. With a record, a change is said —
+ * including to and from no product, compared as the values they are — and no change says nothing, so a conversation
+ * with no product chosen is not told so on every message.
+ */
+function productLine(assistant: AssistantFrame, previousProduct: AssistantProduct | null): string | null {
+  const product = assistant.product ?? null;
+  const label = assistant.product_label || product;
+  if (previousProduct === null) {
+    return `Product area: ${label ?? "not chosen"}.`;
+  }
+  const previous = previousProduct.product;
+  if (previous === product) {
+    return null;
+  }
+  const previousLabel = previousProduct.product_label || previous;
+  if (product === null) {
+    return `The user has cleared the product context, which was ${previousLabel}; ${STALE}`;
+  }
+  if (previous === null) {
+    return `The user has just chosen ${label} as the product context; ${STALE}`;
+  }
+  return `The user has just switched the product context from ${previousLabel} to ${label}; ${STALE}`;
+}
 
 /**
  * What the CFT Workspace knows about a conversation's message that the person did not type: the product area, a
  * document or deck the person changed, the files attached and an export waiting on this session. `assistant` is null
  * for a frame the client could not read, which leaves only the skill line.
  *
- * The product area is said on the first message this session is delivered, and again only when it changes: a
- * session carries it from there, and saying it on every message is noise around words that should read as typed.
+ * The product area is said on the first message this session is delivered, and again only when it changes
+ * (`productLine`): a session carries it from there, and saying it on every message is noise around words that should
+ * read as typed.
  *
  * The skill line is last, nearest the words it is about; the attachment and export lines are facts and procedures
  * that stand on their own wherever they sit, so a message that is both `/skill` and a file reads as: here is the
@@ -433,14 +457,9 @@ export function assistantContextLines(
 ): string[] {
   const lines: string[] = [];
   if (assistant !== null) {
-    const label = assistant.product_label || assistant.product || "not chosen";
-    const previous = previousProduct?.product || null;
-    if (previous === null) {
-      lines.push(`Product area: ${label}.`);
-    } else if (assistant.product && previous !== assistant.product) {
-      lines.push(
-        `The user has just switched the product context from ${previousProduct?.product_label || previous} to ${label}; treat earlier product-specific assumptions as stale.`
-      );
+    const product = productLine(assistant, previousProduct);
+    if (product !== null) {
+      lines.push(product);
     }
     if (assistant.artefact_updated_by === "user") {
       lines.push(
@@ -461,7 +480,7 @@ export function assistantContextLines(
   if (assistant?.confluence_export) {
     lines.push(...confluenceExportLines(assistant.confluence_export));
   }
-  lines.push(...skillLine(message.body, skills, promptSkillLine));
+  lines.push(...skillLine(message.body, skills, ownerSkillLine));
   return lines;
 }
 

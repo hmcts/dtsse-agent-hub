@@ -252,6 +252,23 @@ export async function runBridge({
     heartbeat().catch((e) => log(sid, `heartbeat error: ${(e as Error).message}`));
   }
 
+  /**
+   * Registers again when the saved registration was made by a build with other `client_features`, which a resumed
+   * session finds on its volume, so the hub stops reading the older client's claim. Only while the session is idle:
+   * a registration sets the agent `idle`, and the name and its source it sends are the ones every heartbeat sends.
+   */
+  async function reportFeatures(): Promise<void> {
+    if (!agent?.agent_id || claimsCurrentFeatures(agent) || readStatus(sid) !== "idle") {
+      return;
+    }
+    try {
+      agent = (await registerAgent(api, sid, { cwd: agent.cwd, env, collectSkills: listSkills })).agent;
+      log(sid, "registered again to report this client's features");
+    } catch (e) {
+      log(sid, `could not register this client's features: ${(e as Error).message}`);
+    }
+  }
+
   async function heartbeat(): Promise<void> {
     const reason = shouldStop();
     if (reason) {
@@ -261,6 +278,7 @@ export async function runBridge({
     if (holding) {
       inboundOpen();
     }
+    await reportFeatures();
     const current = agent;
     if (!current?.agent_id) {
       return;
@@ -467,7 +485,7 @@ export async function runBridge({
     const afterClean = clean;
     clean = false;
     try {
-      if (!agent?.agent_id || !claimsCurrentFeatures(agent)) {
+      if (!agent?.agent_id) {
         agent = (await registerAgent(api, sid, { cwd: agent?.cwd, env, collectSkills: listSkills })).agent;
       }
       controller = new AbortController();

@@ -24,9 +24,10 @@ export type HubEvent =
   /**
    * `owner_oid`'s agent changed status. `local_conversation_id` is the listed chat with no pod whose current session
    * it is, so the sidebar can recolour that chat's mark without a read per event; null for every other agent
-   * (`localConversationSql`).
+   * (`localConversationSql`). `registered` is true for the status a registration sets, which is also when the agent's
+   * `client_features` are replaced, so a page showing what its client claims knows to read it again.
    */
-  | { type: "agent_status"; agent_id: string; owner_oid: string; status: AgentStatus; local_conversation_id: string | null }
+  | { type: "agent_status"; agent_id: string; owner_oid: string; status: AgentStatus; local_conversation_id: string | null; registered?: true }
   /** The skills `owner_oid`'s agent reported changed. Never carries the list, which only some viewers may see. */
   | { type: "agent_skills"; agent_id: string; owner_oid: string }
   /**
@@ -147,7 +148,8 @@ export function decodeEvent(payload: string | undefined): NotifiedEvent | undefi
             agent_id: event.agent_id,
             owner_oid: event.owner_oid,
             status: event.status as AgentStatus,
-            local_conversation_id: event.local_conversation_id ?? null
+            local_conversation_id: event.local_conversation_id ?? null,
+            ...(event.registered === true ? { registered: true as const } : {})
           }
         : undefined;
     case "agent_skills":

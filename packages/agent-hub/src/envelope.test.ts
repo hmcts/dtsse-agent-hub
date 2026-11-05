@@ -103,7 +103,7 @@ describe("ownerLaptopEnvelope", () => {
     // Assert
     const lines = text.split("\n");
     expect(lines[lines.indexOf("---") - 1]).toBe(
-      "It starts with /pcs:start-env: run the pcs:start-env skill with the rest of the message as its arguments, as if your user had typed it."
+      "The message starts with /pcs:start-env: run the pcs:start-env skill with the rest of the message as its arguments."
     );
     expect(ownerLaptopEnvelope(ownMessage)).not.toMatch(/skill/);
   });
@@ -307,7 +307,10 @@ describe("assistantPrompt", () => {
     const text = assistantPrompt(personMessage, pcs, samePcs);
 
     // Assert
-    const [entry] = toEntries({ type: "user", uuid: "u1", timestamp: "2026-10-21T10:00:00Z", message: { role: "user", content: text } });
+    const [entry] = toEntries(
+      { type: "user", uuid: "u1", timestamp: "2026-10-21T10:00:00Z", message: { role: "user", content: text } },
+      { conversation: true }
+    );
     expect(entry?.message_id).toBe("42");
   });
 
@@ -322,6 +325,25 @@ describe("assistantPrompt", () => {
     expect(context(assistantPrompt(personMessage, pcs, null))).toEqual(["Product area: Possession claims."]);
     expect(context(assistantPrompt(personMessage, pcs, samePcs))).toEqual([]);
     expect(context(assistantPrompt({ id: "7", body: "hello" }, {}))).toEqual(["Product area: not chosen."]);
+  });
+
+  it("should say the product was cleared, and earlier assumptions are stale, when the previous message had one and this has none", () => {
+    // Act & Assert
+    expect(context(assistantPrompt(personMessage, { ...pcs, product: null, product_label: null }, samePcs))).toEqual([
+      "The user has cleared the product context, which was Possession claims; treat earlier product-specific assumptions as stale."
+    ]);
+  });
+
+  it("should say a product was chosen, and earlier assumptions are stale, when the previous message had none", () => {
+    // Act & Assert
+    expect(context(assistantPrompt(personMessage, pcs, { product: null, product_label: null }))).toEqual([
+      "The user has just chosen Possession claims as the product context; treat earlier product-specific assumptions as stale."
+    ]);
+  });
+
+  it("should say nothing of the product on later messages when none has been chosen", () => {
+    // Act & Assert
+    expect(context(assistantPrompt(personMessage, { ...pcs, product: null, product_label: null }, { product: null, product_label: null }))).toEqual([]);
   });
 
   it("should say the product context changed when the previous message was about another product", () => {
@@ -514,7 +536,7 @@ describe("assistantPrompt", () => {
     );
 
     // Assert
-    expect(lines.at(-1)).toMatch(/^The message below starts with \/cft-explain:/);
+    expect(lines.at(-1)).toMatch(/^The message starts with \/cft-explain:/);
     expect(lines.indexOf("- /workspace/uploads/c1/u1-letter.pdf (application/pdf, 1 KB)")).toBeLessThan(
       lines.findIndex((line) => line.startsWith("The user has asked you to export"))
     );
@@ -575,7 +597,7 @@ describe("assistantPrompt", () => {
     const text = assistantPrompt({ ...personMessage, body: "/cft-explain what is CDAM?" }, pcs, samePcs, { skills: new Set(["cft-explain"]) });
 
     // Assert
-    expect(context(text)).toEqual(["The message below starts with /cft-explain: run the cft-explain skill with the rest of it as its arguments."]);
+    expect(context(text)).toEqual(["The message starts with /cft-explain: run the cft-explain skill with the rest of the message as its arguments."]);
     expect(text.endsWith(`${CONTEXT_CLOSE}\n\n/cft-explain what is CDAM?`)).toBe(true);
   });
 
@@ -598,7 +620,7 @@ describe("assistantPrompt", () => {
     );
 
     // Assert: both instructions are there, the skill line last, and the paths above it.
-    expect(lines.at(-1)).toBe("The message below starts with /cft-explain: run the cft-explain skill with the rest of it as its arguments.");
+    expect(lines.at(-1)).toBe("The message starts with /cft-explain: run the cft-explain skill with the rest of the message as its arguments.");
     expect(lines.indexOf("- /workspace/uploads/c1/u1-letter.pdf (application/pdf, 1 KB)")).toBeLessThan(lines.length - 1);
   });
 

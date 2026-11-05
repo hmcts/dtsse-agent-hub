@@ -6,7 +6,7 @@ import { type Api, ApiError } from "./api.ts";
 import type { Env } from "./env.ts";
 import { CONTEXT_TAG } from "./envelope.ts";
 import { findSecret } from "./secret-scan.ts";
-import { log, readJson, removeFile, statePath, transcriptPath, writeJson } from "./session.ts";
+import { conversationId, log, readJson, removeFile, statePath, transcriptPath, writeJson } from "./session.ts";
 import type { TranscriptEntry } from "./wire.ts";
 
 export const MAX_CONTENT_BYTES = 16384;
@@ -17,8 +17,11 @@ export const BACKFILL_BYTES = 2 * 1024 * 1024;
 const READ_BYTES = 1024 * 1024;
 const SCAN_BYTES = 64 * 1024;
 const KEY_RE = /^[A-Za-z0-9:_-]{1,200}$/;
-// A delivered message's first line: a laptop or peer envelope's header, or a conversation prompt's context block.
-const DIRECT_RE = new RegExp(`^(?:\\[agent-hub\\] Direct message #(\\d+) |<${CONTEXT_TAG} message="(\\d+)">)`);
+// A delivered message's first line: an envelope's header, in any session.
+const DIRECT_RE = /^\[agent-hub\] Direct message #(\d+) /;
+// A conversation prompt's context block, which only a conversation's session is delivered: anywhere else the same
+// words opening a prompt are something its user typed.
+const CONTEXT_RE = new RegExp(`^<${CONTEXT_TAG} message="(\\d+)">`);
 const STATE_FILE = "transcript-sync.json";
 const OFF_FILE = "transcript-off";
 export const UNAVAILABLE_PAUSE_MS = 10 * 60 * 1000;
@@ -74,10 +77,12 @@ function textParts(content: unknown): string {
     .join("\n");
 }
 
-function directId(text: string): string | null {
-  const match = DIRECT_RE.exec(text);
-  return match?.[1] ?? match?.[2] ?? null;
+function directId(text: string, conversation: boolean): string | null {
+  return DIRECT_RE.exec(text)?.[1] ?? (conversation ? (CONTEXT_RE.exec(text)?.[1] ?? null) : null);
 }
+
+/** What reading a transcript line depends on beyond the line: whether the session is a CFT Workspace conversation. */
+export type ToEntriesOptions = { conversation?: boolean };
 
 /**
  * The line Claude Code writes where a turn the user interrupted stopped. It is `type: "user"` and carries no
@@ -95,7 +100,7 @@ function interruptNotice(text: string): boolean {
  * The entries one transcript line maps to, before secret scanning and truncation. The line is whatever Claude
  * Code appended to the JSONL, so every field it is read for is checked.
  */
-export function toEntries(line: unknown): ScrubbedEntry[] {
+export function toEntries(line: unknown, { conversation = false }: ToEntriesOptions = {}): ScrubbedEntry[] {
   const raw = asRecord(line);
   if (!raw || raw.isSidechain) {
     return [];
@@ -119,7 +124,7 @@ export function toEntries(line: unknown): ScrubbedEntry[] {
     message_id: messageId,
     occurred_at: occurredAt
   });
-  const userText = (index: number, text: string) => entry(index, "user", { text }, directId(text));
+  const userText = (index: number, text: string) => entry(index, "user", { text }, directId(text, conversation));
 
   if (type === "user" && raw.isCompactSummary) {
     const text = typeof content === "string" ? content : textParts(content);
@@ -224,7 +229,7 @@ export function scrub(entry: ScrubbedEntry, { patterns, limit = MAX_CONTENT_BYTE
   return { ...entry, content: fitted, truncated: true };
 }
 
-export type ParseLinesOptions = {
+export type ParseLinesOptions = ToEntriesOptions & {
   base?: number;
   patterns?: RegExp[];
 };
@@ -233,7 +238,7 @@ export type ParseLinesOptions = {
  * Splits complete JSONL lines into scrubbed entries, each with the byte offset of the line it came
  * from (`base` is the offset of the first byte of `text`). A trailing partial line is ignored.
  */
-export function parseLines(text: string | Buffer, { base = 0, patterns }: ParseLinesOptions = {}): ParsedLines {
+export function parseLines(text: string | Buffer, { base = 0, patterns, conversation }: ParseLinesOptions = {}): ParsedLines {
   const buf = Buffer.isBuffer(text) ? text : Buffer.from(text, "utf8");
   const items: TranscriptItem[] = [];
   let start = 0;
@@ -248,7 +253,7 @@ export function parseLines(text: string | Buffer, { base = 0, patterns }: ParseL
     } catch {
       continue;
     }
-    for (const entry of toEntries(line)) {
+    for (const entry of toEntries(line, { conversation })) {
       items.push({ start: base + start, entry: scrub(entry, { patterns }) });
     }
   }
@@ -519,7 +524,7 @@ export function createTranscriptSync({
       if (!chunk) {
         break;
       }
-      const { items, end } = parseLines(chunk, { base: state.offset, patterns });
+      const { items, end } = parseLines(chunk, { base: state.offset, patterns, conversation: conversationId(env) !== null });
       const batches = batchItems(items, { sid });
       for (const [i, batch] of batches.entries()) {
         if (Date.now() >= deadline || transcriptOff(sid, env)) {

@@ -137,7 +137,14 @@ export async function registerAgent(prisma: PrismaClient, owner: Caller, registr
     if (agent === undefined) {
       throw new SessionOwnedElsewhere("that session id is registered to someone else");
     }
-    await notify(tx, { type: "agent_status", agent_id: agent.id, owner_oid: owner.oid, status: "idle", local_conversation_id: agent.local_conversation_id });
+    await notify(tx, {
+      type: "agent_status",
+      agent_id: agent.id,
+      owner_oid: owner.oid,
+      status: "idle",
+      local_conversation_id: agent.local_conversation_id,
+      registered: true
+    });
     if (existing?.id === agent.id && registration.skills !== undefined && skillsChanged(storedSkills(existing.skills), normaliseSkills(registration.skills))) {
       await notify(tx, { type: "agent_skills", agent_id: agent.id, owner_oid: owner.oid });
     }
