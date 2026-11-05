@@ -143,7 +143,7 @@ export async function registerAgent(prisma: PrismaClient, owner: Caller, registr
       owner_oid: owner.oid,
       status: "idle",
       local_conversation_id: agent.local_conversation_id,
-      registered: true
+      client_features: registration.clientFeatures ?? null
     });
     if (existing?.id === agent.id && registration.skills !== undefined && skillsChanged(storedSkills(existing.skills), normaliseSkills(registration.skills))) {
       await notify(tx, { type: "agent_skills", agent_id: agent.id, owner_oid: owner.oid });
@@ -238,6 +238,11 @@ async function lockAgent(
  * under another name. `skills`, sent only when the session's list changed, replaces the stored list, and is announced
  * when it differs from it, so an open agent page re-reads its composer's "/" autocomplete.
  *
+ * `clientFeatures`, sent until the hub has taken the claim of the build that is running, replaces the stored claim and
+ * nothing else, and is announced with the status whether or not that changed, so a page showing what the session's
+ * client claims has it at once. A resumed session finds its predecessor's registration and does not register again,
+ * so this is how its claim reaches the hub.
+ *
  * `nameSource` is stored with the name and only when the name is, so a heartbeat that reports no name says nothing
  * about where the stored one came from. That is what lets a `/rename` part-way through a session reach the hub
  * within a heartbeat, which is the whole reason a chat on somebody's own computer can keep the name they chose.
@@ -248,7 +253,8 @@ export async function heartbeat(
   status: Exclude<AgentStatus, "offline">,
   name: string | null,
   skills?: Skill[],
-  nameSource?: NameSource
+  nameSource?: NameSource,
+  clientFeatures?: string[]
 ): Promise<void> {
   await prisma.$transaction(async (tx) => {
     const before = await lockAgent(tx, agentId);
@@ -262,11 +268,19 @@ export async function heartbeat(
         lastHeartbeatAt: new Date(),
         endedAt: null,
         ...(skills === undefined ? {} : { skills: skills.map(({ name, description }) => ({ name, description })) }),
+        ...(clientFeatures === undefined ? {} : { clientFeatures: [...clientFeatures] }),
         ...(before.virtualName !== null ? { name: before.virtualName } : name === null ? {} : { name, nameSource: nameSourceOf(nameSource) })
       }
     });
-    if (before.status !== status) {
-      await notify(tx, { type: "agent_status", agent_id: agentId, owner_oid: before.ownerOid, status, local_conversation_id: before.localConversationId });
+    if (before.status !== status || clientFeatures !== undefined) {
+      await notify(tx, {
+        type: "agent_status",
+        agent_id: agentId,
+        owner_oid: before.ownerOid,
+        status,
+        local_conversation_id: before.localConversationId,
+        ...(clientFeatures === undefined ? {} : { client_features: clientFeatures })
+      });
     }
     if (skills !== undefined && skillsChanged(before.skills, normaliseSkills(skills))) {
       await notify(tx, { type: "agent_skills", agent_id: agentId, owner_oid: before.ownerOid });

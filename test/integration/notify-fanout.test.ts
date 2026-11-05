@@ -112,6 +112,18 @@ describe("NOTIFY fan-out between pods", () => {
     expect(pods[0]!.events).toEqual([{ type: "agent_status", agent_id: agent, owner_oid: ALICE.oid, status: "busy", local_conversation_id: null }]);
   });
 
+  // The chat follows the claim from these, so a heartbeat that writes one announces it whether or not the status moved.
+  it("should announce a heartbeat's claim with its status, changed or not", async () => {
+    const agent = await settled(await insertAgent(ALICE, "alice"), ALICE.oid, "alice");
+
+    await heartbeat(prisma, agent, "idle", null, undefined, undefined, ["plain-prompt"]);
+
+    await until(() => pods[0]!.events.length >= 1);
+    expect(pods[0]!.events).toEqual([
+      { type: "agent_status", agent_id: agent, owner_oid: ALICE.oid, status: "idle", local_conversation_id: null, client_features: ["plain-prompt"] }
+    ]);
+  });
+
   it("should name a listed laptop chat on every status its current session announces, and no chat for any other agent", async () => {
     const hourAgo = new Date(Date.now() - 3_600_000);
     const laptop = await settled(await insertAgent(ALICE, "laptop"), ALICE.oid, "laptop");
@@ -211,8 +223,8 @@ describe("a status announced with a newly linked chat", () => {
     await registerAgent(prisma, caller, registration);
 
     const expected: HubEvent[] = [
-      { type: "agent_status", agent_id: id, owner_oid: ALICE.oid, status: "idle", local_conversation_id: null, registered: true },
-      { type: "agent_status", agent_id: id, owner_oid: ALICE.oid, status: "idle", local_conversation_id: chat, registered: true }
+      { type: "agent_status", agent_id: id, owner_oid: ALICE.oid, status: "idle", local_conversation_id: null, client_features: null },
+      { type: "agent_status", agent_id: id, owner_oid: ALICE.oid, status: "idle", local_conversation_id: chat, client_features: null }
     ];
     await until(() => pods[0]!.events.length >= expected.length);
     expect(pods[0]!.events).toEqual(expected);

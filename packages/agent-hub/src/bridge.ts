@@ -11,10 +11,10 @@ import { createTmux, type Tmux } from "./assistant/tmux.ts";
 import { peerOf, recordDirect } from "./directs.ts";
 import type { Env } from "./env.ts";
 import { type AssistantFrame, type AttachmentOutcome, chooseEnvelope, routeDelivery, type SessionKind } from "./envelope.ts";
+import { CLIENT_FEATURES } from "./features.ts";
 import { asRecord, parseAssistantFrame, parseAssistantProduct, parseDirectEventMessage } from "./frames.ts";
 import { describeInbound, type InboundOptions, type InboundResult, inboundAccepted, inboundFix } from "./inbound.ts";
 import { RAPID_CLOSE_MS, type ReconnectDecision, reconnectDelay } from "./reconnect.ts";
-import { retryableByStatus } from "./retry.ts";
 import { acquirePidFile, conversationId, isEnabled, log, pidAlive, readJson, readText, releasePidFile, sessionInfo, statePath, writeJson } from "./session.ts";
 import { collectSkills, type SkillListing, skillsHash } from "./skills.ts";
 import { deliverToSocket, NO_MESSAGING_TOKEN } from "./socket.ts";
@@ -244,9 +244,6 @@ export async function runBridge({
     return null;
   }
 
-  let featuresRun: Promise<void> | null = null;
-  let featuresRefused = false;
-
   // The status the hub last heard, so a turn starting or ending is sent at once rather than on the next heartbeat.
   let sentStatus: "busy" | "idle" | null = null;
   function statusChanged(): void {
@@ -254,39 +251,6 @@ export async function runBridge({
       return;
     }
     heartbeat().catch((e) => log(sid, `heartbeat error: ${(e as Error).message}`));
-  }
-
-  /**
-   * Registers again when the saved registration was made by a build with other `client_features`, which a resumed
-   * session finds on its volume, so the hub stops reading the older client's claim. Only while the session is idle:
-   * a registration sets the agent `idle`, and the name and its source it sends are the ones every heartbeat sends.
-   *
-   * One at a time: the timer and a status change can both be heartbeating, and the second waits for the first's
-   * registration, so neither sends its status until the registration's `idle` has landed and both read the status
-   * afresh after it. A refusal no retry can change, such as a session registered to another owner, ends the attempts
-   * for the life of this bridge.
-   */
-  function reportFeatures(): Promise<void> {
-    if (featuresRun) {
-      return featuresRun;
-    }
-    const current = agent;
-    if (featuresRefused || !current?.agent_id || claimsCurrentFeatures(current) || readStatus(sid) !== "idle") {
-      return Promise.resolve();
-    }
-    featuresRun = registerAgent(api, sid, { cwd: current.cwd, env, collectSkills: listSkills })
-      .then(({ agent: registered }) => {
-        agent = registered;
-        log(sid, "registered again to report this client's features");
-      })
-      .catch((e) => {
-        featuresRefused = !retryableByStatus(e);
-        log(sid, `could not register this client's features: ${(e as Error).message}${featuresRefused ? "; not trying again" : ""}`);
-      })
-      .finally(() => {
-        featuresRun = null;
-      });
-    return featuresRun;
   }
 
   async function heartbeat(): Promise<void> {
@@ -298,13 +262,15 @@ export async function runBridge({
     if (holding) {
       inboundOpen();
     }
-    await reportFeatures();
     const current = agent;
     if (!current?.agent_id) {
       return;
     }
     const agentId = current.agent_id;
     const skills = changedSkills();
+    // Sent until the hub has taken this build's claim, which a resumed session, finding its predecessor's
+    // registration on disk and so never registering, has no other way to report.
+    const features = claimsCurrentFeatures(current) ? null : [...CLIENT_FEATURES];
     const status = readStatus(sid);
     sentStatus = status;
     try {
@@ -312,12 +278,23 @@ export async function runBridge({
       // the person says what it is, and the service keeps the chat in the Assistant on that name rather than on the
       // session's first prompt. Reading them apart would let a rename arrive as a name of unknown origin.
       const session = sessionInfo(sid, env);
-      await api.heartbeat(agentId, { status, name: session.name, name_source: session.nameSource, ...(skills ? { skills } : {}) });
+      await api.heartbeat(agentId, {
+        status,
+        name: session.name,
+        name_source: session.nameSource,
+        ...(skills ? { skills } : {}),
+        ...(features ? { client_features: features } : {})
+      });
+      if (skills || features) {
+        const taken = { ...(skills ? { skills_hash: skillsHash(skills) } : {}), ...(features ? { client_features: features } : {}) };
+        agent = { ...current, ...taken };
+        writeJson(statePath(sid, "agent.json"), { ...(loadAgent(sid) || agent), ...taken });
+      }
       if (skills) {
-        const hash = skillsHash(skills);
-        agent = { ...current, skills_hash: hash };
-        writeJson(statePath(sid, "agent.json"), { ...(loadAgent(sid) || agent), skills_hash: hash });
         log(sid, `sent ${skills.length} skills`);
+      }
+      if (features) {
+        log(sid, "sent this client's features");
       }
     } catch (e) {
       if (skills) {

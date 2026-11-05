@@ -672,55 +672,50 @@ describe("ChatView on a session too old for plain prompts", () => {
     expect(screen.queryByTestId("restart-needed")).toBeNull();
   });
 
-  // A restarted pod's session can register straight to idle, with no offline status in between.
-  it("should re-read the page for the new claim when the session registers, from idle as from offline", () => {
-    render(
-      <ChatView
-        jira={NO_JIRA}
-        viewerOid={VIEWER}
-        view={conversation({ agentStatus: "idle", clientFeatures: ["stop"] })}
-        templates={TEMPLATES}
-        actions={actions()}
-      />
-    );
+  // The claim rides on the status frame it was written with, so the note follows it with no re-read of the page.
+  it("should take the note down when a frame carries a claim with plain-prompt, without re-reading the page", () => {
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ clientFeatures: ["stop"] })} templates={TEMPLATES} actions={actions()} />);
+    expect(screen.getByTestId("restart-needed")).toBeTruthy();
 
-    emit("agent_status", { agent_id: AGENT, status: "idle", registered: true });
+    emit("agent_status", { agent_id: AGENT, status: "idle", client_features: ["plain-prompt", "stop"] });
 
-    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("restart-needed")).toBeNull();
+    expect(refresh).not.toHaveBeenCalled();
   });
 
-  it("should not re-read the page when an old session only turns busy or idle", () => {
+  it("should never show the note for a session that comes online already claiming plain-prompt", () => {
     render(
       <ChatView
         jira={NO_JIRA}
         viewerOid={VIEWER}
-        view={conversation({ agentStatus: "offline", clientFeatures: ["stop"] })}
+        view={conversation({ agentStatus: "offline", clientFeatures: null })}
         templates={TEMPLATES}
         actions={actions()}
       />
     );
+    expect(screen.queryByTestId("restart-needed")).toBeNull();
 
-    emit("agent_status", { agent_id: AGENT, status: "idle" });
+    emit("agent_status", { agent_id: AGENT, status: "idle", client_features: ["plain-prompt"] });
+
+    expect(screen.queryByTestId("restart-needed")).toBeNull();
+  });
+
+  it("should show the note when a later claim leaves plain-prompt out", () => {
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ clientFeatures: ["plain-prompt"] })} templates={TEMPLATES} actions={actions()} />);
+    expect(screen.queryByTestId("restart-needed")).toBeNull();
+
+    emit("agent_status", { agent_id: AGENT, status: "idle", client_features: null });
+
+    expect(screen.getByTestId("restart-needed")).toBeTruthy();
+  });
+
+  it("should keep the claim it has when a frame carries none", () => {
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ clientFeatures: ["plain-prompt"] })} templates={TEMPLATES} actions={actions()} />);
+
     emit("agent_status", { agent_id: AGENT, status: "busy" });
     emit("agent_status", { agent_id: AGENT, status: "idle" });
 
-    expect(refresh).not.toHaveBeenCalled();
-  });
-
-  it("should not re-read the page when the session of a chat with no pod registers", () => {
-    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ local: true, clientFeatures: null })} templates={TEMPLATES} actions={actions()} />);
-
-    emit("agent_status", { agent_id: AGENT, status: "idle", registered: true });
-
-    expect(refresh).not.toHaveBeenCalled();
-  });
-
-  it("should not re-read the page when a session that claims plain-prompt registers", () => {
-    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ clientFeatures: ["plain-prompt"] })} templates={TEMPLATES} actions={actions()} />);
-
-    emit("agent_status", { agent_id: AGENT, status: "idle", registered: true });
-
-    expect(refresh).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("restart-needed")).toBeNull();
   });
 });
 

@@ -378,7 +378,7 @@ export function parseAgent(value: unknown): StoredAgent | null {
 /**
  * Whether the hub holds this build's claim for a saved agent: the registration was made with the same
  * `client_features`. A session resumed after its pod or laptop took a newer client finds the older client's
- * registration on disk, and the bridge registers again rather than leave the hub reading that client's claim.
+ * registration on disk, and the bridge sends this build's claim on its heartbeats until the hub has taken it.
  */
 export function claimsCurrentFeatures(agent: StoredAgent | null): boolean {
   const claimed = agent?.client_features;

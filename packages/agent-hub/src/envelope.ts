@@ -421,6 +421,13 @@ export const CONTEXT_CLOSE = `</${CONTEXT_TAG}>`;
 const STALE = "treat earlier product-specific assumptions as stale.";
 
 /**
+ * The first line of every conversation's context, for the reason the product area is on every message: the
+ * SessionStart context that says the same can be lost to a compaction, and answering by a CLI reply is the one
+ * mistake that leaves the person with no answer at all.
+ */
+export const ANSWER_HERE = `Answer in this conversation, not with \`${CLI} reply\` or SendMessage.`;
+
+/**
  * What the session is told of the product area: the area on every message, because a line said once is lost to a
  * compaction or a resumed session, and a line saying it changed when `previousProduct`, the last message's record,
  * names another, comparing the values with no product included. With no record there is nothing to have changed from.
@@ -443,9 +450,9 @@ function productLines(assistant: AssistantFrame, previousProduct: AssistantProdu
 }
 
 /**
- * What the CFT Workspace knows about a conversation's message that the person did not type: the product area, a
- * document or deck the person changed, the files attached and an export waiting on this session. `assistant` is null
- * for a frame the client could not read, which leaves only the skill line.
+ * What the CFT Workspace knows about a conversation's message that the person did not type, after `ANSWER_HERE`: the
+ * product area, a document or deck the person changed, the files attached and an export waiting on this session.
+ * `assistant` is null for a frame the client could not read, which leaves `ANSWER_HERE` and the skill line.
  *
  * The skill line is last, nearest the words it is about; the attachment and export lines are facts and procedures
  * that stand on their own wherever they sit, so a message that is both `/skill` and a file reads as: here is the
@@ -457,7 +464,7 @@ export function assistantContextLines(
   previousProduct: AssistantProduct | null = null,
   { skills, attachments }: AssistantEnvelopeOptions = {}
 ): string[] {
-  const lines: string[] = [];
+  const lines: string[] = [ANSWER_HERE];
   if (assistant !== null) {
     lines.push(...productLines(assistant, previousProduct));
     if (assistant.artefact_updated_by === "user") {

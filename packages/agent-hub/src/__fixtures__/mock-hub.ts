@@ -895,6 +895,13 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
         }
         agent.skills = body.skills;
       }
+      if (body.client_features !== undefined) {
+        const features = storedClientFeatures(body.client_features);
+        if (features === "too many") {
+          return send(res, 400, { error: "client_features: at most 50" });
+        }
+        agent.client_features = features;
+      }
       Object.assign(agent, { status: body.status, name: body.name || agent.name, last_heartbeat_at: new Date().toISOString() });
       return send(res, 204);
     }

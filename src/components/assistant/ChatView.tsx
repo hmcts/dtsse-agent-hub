@@ -347,6 +347,12 @@ export function ChatView({
     onReply: () => arrivals.announce("New reply from the assistant")
   });
   const [status, setStatus] = useState<AgentStatus>(view.agentStatus);
+  /**
+   * What the session's client claims, as the page read it and then as every `agent_status` frame that carries a claim
+   * says: one does whenever the claim is written, by a registration or a heartbeat, in the same frame as the status it
+   * goes with, so the two change together. A `resync` after a dropped stream re-reads the page, which resets it.
+   */
+  const [claim, setClaim] = useState<string[] | null>(view.clientFeatures);
   const [pendingProduct, setPendingProduct] = useState<string | null>(null);
   /**
    * The one panel beside the chat: the document or the deck, never both, since two panels beside a chat leave the chat
@@ -382,15 +388,13 @@ export function ChatView({
   const narrow = useNarrow();
 
   useEffect(() => setStatus(view.agentStatus), [view.agentStatus]);
-  useHubEvent<{ agent_id: string; status: AgentStatus; registered?: boolean }>("agent_status", ({ agent_id, status: next, registered }) => {
-    if (agent_id === view.agentId) {
-      // The claim is read with the page and replaced only by a registration, so a session that registers while the
-      // restart note is up is read again for its new claim. A restarted pod's session can register straight to idle,
-      // with no offline status before it, so the status alone cannot say when. Only a pod's chat shows the note.
-      if (registered === true && !view.local && !clientSupports(view.clientFeatures, "plain-prompt")) {
-        router.refresh();
+  useEffect(() => setClaim(view.clientFeatures), [view.clientFeatures]);
+  useHubEvent<{ agent_id: string; status: AgentStatus; client_features?: string[] | null }>("agent_status", (frame) => {
+    if (frame.agent_id === view.agentId) {
+      if (frame.client_features !== undefined) {
+        setClaim(frame.client_features);
       }
-      setStatus(next);
+      setStatus(frame.status);
     }
   });
   // The frame carries the agent id alone, so a question asked, or answered in another tab, is read with the page.
@@ -518,12 +522,12 @@ export function ChatView({
    * interrupt is an `assistant_stop` to the conversation's pod, so `stopAnswer` answers `nothing-running` for a
    * conversation that has none. Without this the button would be offered on every local chat and do nothing at all.
    */
-  const stoppable = pod && doing.state === "working" && clientSupports(view.clientFeatures, "stop");
+  const stoppable = pod && doing.state === "working" && clientSupports(claim, "stop");
   /**
    * A pod session on a client older than `plain-prompt` wraps the person's words in an envelope, and can take them for
    * somebody else's. Only a restart of the assistant gives the session the current client, so that is what is offered.
    */
-  const restartNeeded = pod && sessionLacks(view.clientFeatures, status, "plain-prompt");
+  const restartNeeded = pod && sessionLacks(claim, status, "plain-prompt");
   const scroller = useStickToBottom<HTMLDivElement>(`${thread.length}:${doing.state}`);
   function markDocumentBusy(busy: boolean): void {
     documentBusy.current = busy;

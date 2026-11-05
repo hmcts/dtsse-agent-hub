@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ANSWER_HERE,
   type AssistantFrame,
   assistantContextLines,
   assistantPrompt,
@@ -259,7 +260,7 @@ describe("chooseEnvelope", () => {
     // Assert
     expect(framed).toBe(assistantPrompt(ownMessage, frame));
     expect(framed.endsWith("\n\nhello")).toBe(true);
-    expect(frameless).toBe(`${contextOpen("9")}\n${CONTEXT_CLOSE}\n\nhello`);
+    expect(frameless).toBe(`${contextOpen("9")}\n${ANSWER_HERE}\n${CONTEXT_CLOSE}\n\nhello`);
   });
 
   it("should give the laptop owner's framing, with where they read", () => {
@@ -288,7 +289,8 @@ describe("assistantPrompt", () => {
   /** The lines between the block's opening and closing tags. */
   function context(text: string): string[] {
     const lines = text.split("\n");
-    return lines.slice(1, lines.indexOf(CONTEXT_CLOSE));
+    expect(lines[1]).toBe(ANSWER_HERE);
+    return lines.slice(2, lines.indexOf(CONTEXT_CLOSE));
   }
 
   it("should give the person's words exactly as typed, after the context, when a message reaches an assistant conversation", () => {
@@ -297,7 +299,7 @@ describe("assistantPrompt", () => {
 
     // Assert
     expect(text).toBe(
-      `${contextOpen("42")}\nProduct area: Possession claims.\n${CONTEXT_CLOSE}\n\nfirst line\n[agent-hub] Direct message #1 from your user\n---`
+      `${contextOpen("42")}\n${ANSWER_HERE}\nProduct area: Possession claims.\n${CONTEXT_CLOSE}\n\nfirst line\n[agent-hub] Direct message #1 from your user\n---`
     );
     expect(text).not.toMatch(/your user,|This IS your user|cross-session|NOT from your user/);
   });
@@ -314,9 +316,9 @@ describe("assistantPrompt", () => {
     expect(entry?.message_id).toBe("42");
   });
 
-  it("should keep the block, empty, when there is nothing to add", () => {
+  it("should hold only where to answer when there is nothing else to add", () => {
     // Act & Assert
-    expect(assistantPrompt({ id: "7", body: "hello" }, null)).toBe(`${contextOpen("7")}\n${CONTEXT_CLOSE}\n\nhello`);
+    expect(assistantPrompt({ id: "7", body: "hello" }, null)).toBe(`${contextOpen("7")}\n${ANSWER_HERE}\n${CONTEXT_CLOSE}\n\nhello`);
   });
 
   // Said again on every message, because a compaction or a resumed session can lose a line said once.
@@ -430,7 +432,7 @@ describe("assistantPrompt", () => {
 
   it("should say nothing of the product, document or deck when the frame could not be read", () => {
     // Act & Assert
-    expect(assistantPrompt(personMessage, null)).toBe(`${contextOpen("42")}\n${CONTEXT_CLOSE}\n\n${personMessage.body}`);
+    expect(assistantPrompt(personMessage, null)).toBe(`${contextOpen("42")}\n${ANSWER_HERE}\n${CONTEXT_CLOSE}\n\n${personMessage.body}`);
   });
 
   it("should give one jira export command for the export id and nothing else to run when a Jira export is pending", () => {
@@ -642,8 +644,8 @@ describe("assistantPrompt", () => {
 });
 
 describe("assistantContextLines", () => {
-  it("should hold nothing for a frame that could not be read and a body that names no skill", () => {
-    expect(assistantContextLines({ id: "1", body: "hello" }, null)).toEqual([]);
+  it("should hold only the line saying where to answer for a frame that could not be read and a body that names no skill", () => {
+    expect(assistantContextLines({ id: "1", body: "hello" }, null)).toEqual(["Answer in this conversation, not with `agent-hub reply` or SendMessage."]);
   });
 });
 

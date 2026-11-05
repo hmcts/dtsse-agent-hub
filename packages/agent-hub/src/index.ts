@@ -154,6 +154,7 @@ export type {
   SessionKind
 } from "./envelope.ts";
 export {
+  ANSWER_HERE,
   assistantContextLines,
   assistantPrompt,
   attachmentLines,

@@ -24,10 +24,19 @@ export type HubEvent =
   /**
    * `owner_oid`'s agent changed status. `local_conversation_id` is the listed chat with no pod whose current session
    * it is, so the sidebar can recolour that chat's mark without a read per event; null for every other agent
-   * (`localConversationSql`). `registered` is true for the status a registration sets, which is also when the agent's
-   * `client_features` are replaced, so a page showing what its client claims knows to read it again.
+   * (`localConversationSql`). `client_features` is present whenever the agent's claim was written, by a registration
+   * or a heartbeat that reported one, and is the claim as stored, `null` for a client that claimed nothing; a page
+   * showing what the client claims takes it from here rather than reading the agent again. A claim is at most 50 short
+   * names, well inside the NOTIFY payload's 8000 bytes.
    */
-  | { type: "agent_status"; agent_id: string; owner_oid: string; status: AgentStatus; local_conversation_id: string | null; registered?: true }
+  | {
+      type: "agent_status";
+      agent_id: string;
+      owner_oid: string;
+      status: AgentStatus;
+      local_conversation_id: string | null;
+      client_features?: string[] | null;
+    }
   /** The skills `owner_oid`'s agent reported changed. Never carries the list, which only some viewers may see. */
   | { type: "agent_skills"; agent_id: string; owner_oid: string }
   /**
@@ -109,6 +118,11 @@ function isOptionalId(value: unknown): value is string | null {
   return value === null || isId(value);
 }
 
+// Read as the store wrote it: a list of names, which a subscriber only compares against the feature it needs.
+function isClaim(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((name) => typeof name === "string");
+}
+
 const STATUSES: readonly string[] = ["busy", "idle", "offline"];
 const DELIVERED_STATES: readonly string[] = ["delivered", "expired"];
 
@@ -149,7 +163,7 @@ export function decodeEvent(payload: string | undefined): NotifiedEvent | undefi
             owner_oid: event.owner_oid,
             status: event.status as AgentStatus,
             local_conversation_id: event.local_conversation_id ?? null,
-            ...(event.registered === true ? { registered: true as const } : {})
+            ...(event.client_features === null || isClaim(event.client_features) ? { client_features: event.client_features } : {})
           }
         : undefined;
     case "agent_skills":

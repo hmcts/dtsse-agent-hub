@@ -116,6 +116,8 @@ export type HeartbeatBody = {
   /** Where `name` came from; read as `derived` when left out, and ignored by a heartbeat that sends no `name`. */
   name_source?: NameSource;
   skills?: Skill[];
+  /** This build's claim, sent until the hub has taken it; it replaces the stored claim and nothing else. */
+  client_features?: string[];
 };
 
 export type PostBody = {

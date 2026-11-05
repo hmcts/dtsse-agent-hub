@@ -129,14 +129,19 @@ describe("selectFrame", () => {
     expect(frame).toBe(`event: agent_status\ndata: ${JSON.stringify({ agent_id: AGENT.id, status: "busy", conversation_id: null })}\n\n`);
   });
 
-  it("should say a status came from a registration when it did", async () => {
+  it.each([
+    ["a list", ["plain-prompt"]],
+    ["null, for a client that claimed nothing", null]
+  ])("should pass on the claim a status carries when it is %s", async (_what, claim) => {
     const frame = await selectFrame(
-      { type: "agent_status", agent_id: AGENT.id, owner_oid: VIEWER, status: "idle", local_conversation_id: null, registered: true },
+      { type: "agent_status", agent_id: AGENT.id, owner_oid: VIEWER, status: "idle", local_conversation_id: null, client_features: claim },
       THREAD,
       sources()
     );
 
-    expect(frame).toBe(`event: agent_status\ndata: ${JSON.stringify({ agent_id: AGENT.id, status: "idle", conversation_id: null, registered: true })}\n\n`);
+    expect(frame).toBe(
+      `event: agent_status\ndata: ${JSON.stringify({ agent_id: AGENT.id, status: "idle", conversation_id: null, client_features: claim })}\n\n`
+    );
   });
 
   it.each<[string, UiWatch]>([

@@ -16,7 +16,7 @@ import { tmuxName } from "./assistant/tmux.ts";
 import { type RunBridgeOptions, runBridge, sessionKind } from "./bridge.ts";
 import { readDirects } from "./directs.ts";
 import type { Env } from "./env.ts";
-import { CONTEXT_CLOSE, contextOpen } from "./envelope.ts";
+import { ANSWER_HERE, CONTEXT_CLOSE, contextOpen } from "./envelope.ts";
 import { CLIENT_FEATURES } from "./features.ts";
 import {
   parseAssistantFrame,
@@ -110,13 +110,11 @@ type StartBridgeOptions = Omit<RunBridgeOptions, "sid" | "api" | "deliver"> & {
 };
 
 // Registers an agent on a fresh mock hub and runs a bridge for it until `stop` is called. `env` adds to the
-// bridge's environment; `savedAgent` adds fields to the agent.json it starts from, and `status` is the session's status
-// file as the bridge starts.
+// bridge's environment; `savedAgent` adds fields to the agent.json it starts from.
 async function startBridge(
   hubOptions: MockHubOptions,
   { env: extraEnv, wrapApi, ...bridgeOptions }: StartBridgeOptions = {},
-  savedAgent: Record<string, unknown> = {},
-  status?: "busy" | "idle"
+  savedAgent: Record<string, unknown> = {}
 ) {
   const hub = createMockHub({ pingMs: 5000, ...hubOptions });
   const url = await hub.listen();
@@ -126,9 +124,6 @@ async function startBridge(
   ensureStateDir(sid);
   fs.writeFileSync(statePath(sid, "enabled"), "");
   writeJson(statePath(sid, "agent.json"), { agent_id: agentId, session_id: sid, name: sid, client_features: [...CLIENT_FEATURES], ...savedAgent });
-  if (status !== undefined) {
-    fs.writeFileSync(statePath(sid, "status"), `${status}\n`);
-  }
   const socketWrites: string[] = [];
   const deliver = async (_socketPath: string | null | undefined, _token: string | null | undefined, content: string) => {
     socketWrites.push(content);
@@ -816,133 +811,81 @@ describe("runBridge", () => {
     }
   });
 
-  // A resumed session finds the registration an older client made on the volume, and the hub would go on reading
-  // that client's claim.
+  // A resumed session finds the registration an older client made on the volume and never registers, so the hub would
+  // go on reading that client's claim.
   it.each([
     ["an older client's claim", { client_features: ["stop"] }],
     ["no claim at all", { client_features: undefined }]
-  ])("should register again with this build's claim on its first heartbeat when the saved agent was registered with %s", async (_what, saved) => {
+  ])("should send this build's claim on heartbeats until the hub takes it when the saved agent was registered with %s", async (_what, saved) => {
     // Arrange
     const bridge = await startBridge({}, {}, saved);
-    const registers = () => bridge.hub.calls.filter((c) => c.path === "/api/agent/register");
+    const beats = () => bridge.hub.calls.filter((c) => c.path === `/api/agent/${bridge.agentId}/heartbeat`);
 
     try {
       // Act
-      await waitUntil(() => registers().length >= 2, "the second registration");
+      await waitUntil(() => beats().length >= 3, "three heartbeats");
 
       // Assert
-      expect(registers()).toHaveLength(2);
-      expect(registers()[1]?.body.client_features).toEqual([...CLIENT_FEATURES]);
+      expect(beats()[0]?.body.client_features).toEqual([...CLIENT_FEATURES]);
+      expect(
+        beats()
+          .slice(1)
+          .every((c) => c.body.client_features === undefined)
+      ).toBe(true);
+      expect(bridge.hub.agents.get(bridge.agentId)?.client_features).toEqual([...CLIENT_FEATURES]);
       expect(JSON.parse(fs.readFileSync(statePath(bridge.sid, "agent.json"), "utf8")).client_features).toEqual([...CLIENT_FEATURES]);
+      expect(bridge.hub.calls.filter((c) => c.path === "/api/agent/register")).toHaveLength(1);
     } finally {
       await bridge.stop();
     }
   });
 
-  // A registration sets the agent idle, which would tell the hub a session in the middle of a turn has stopped.
-  it("should wait for the session to go idle before registering again when it starts busy", async () => {
+  it("should keep sending the claim while the hub refuses the heartbeat", async () => {
     // Arrange
-    const bridge = await startBridge({}, {}, { client_features: ["stop"] }, "busy");
-    const registers = () => bridge.hub.calls.filter((c) => c.path === "/api/agent/register");
-    const beats = () => bridge.hub.calls.filter((c) => c.path === `/api/agent/${bridge.agentId}/heartbeat`);
-
-    try {
-      await waitUntil(() => beats().length >= 3, "three busy heartbeats");
-      expect(registers()).toHaveLength(1);
-
-      // Act
-      fs.writeFileSync(statePath(bridge.sid, "status"), "idle\n");
-      await waitUntil(() => registers().length >= 2, "the registration once idle");
-
-      // Assert
-      expect(registers()[1]?.body.client_features).toEqual([...CLIENT_FEATURES]);
-    } finally {
-      await bridge.stop();
-    }
-  });
-
-  it("should give up registering again, and say so once, when the hub refuses the registration for good", async () => {
-    // Arrange
-    let attempts = 0;
+    let refusals = 2;
+    const sent: (string[] | undefined)[] = [];
     const bridge = await startBridge(
       {},
       {
         wrapApi: (api) => ({
           ...api,
-          register: async () => {
-            attempts++;
-            throw new ApiError(409, { error: "that session id is registered to someone else" }, "POST", "/api/agent/register");
+          heartbeat: async (id, body) => {
+            sent.push(body.client_features);
+            if (refusals > 0) {
+              refusals--;
+              throw new ApiError(400, { error: "client_features: at most 50" }, "POST", `/api/agent/${id}/heartbeat`);
+            }
+            return await api.heartbeat(id, body);
           }
         })
       },
       { client_features: ["stop"] }
     );
-    const beats = () => bridge.hub.calls.filter((c) => c.path === `/api/agent/${bridge.agentId}/heartbeat`);
 
     try {
       // Act
-      await waitUntil(() => beats().length >= 4, "four heartbeats");
+      await waitUntil(() => sent.length >= 4, "four heartbeats");
 
       // Assert
-      expect(attempts).toBe(1);
-      expect(bridge.logText().match(/not trying again/g)).toHaveLength(1);
+      expect(sent.slice(0, 3)).toEqual([[...CLIENT_FEATURES], [...CLIENT_FEATURES], [...CLIENT_FEATURES]]);
+      expect(sent[3]).toBeUndefined();
+      expect(bridge.logText()).toMatch(/heartbeat failed: POST .*heartbeat failed: 400/);
     } finally {
       await bridge.stop();
     }
   });
 
-  // The timer and a status change both heartbeat, and a turn can start while the registration is on its way.
-  it("should register once when heartbeats overlap, and send the status as it is once the registration has landed", async () => {
-    // Arrange
-    let release: () => void = () => {};
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    let attempts = 0;
-    const bridge = await startBridge(
-      {},
-      {
-        wrapApi: (api) => ({
-          ...api,
-          register: async (body) => {
-            attempts++;
-            await gate;
-            return await api.register(body);
-          }
-        })
-      },
-      { client_features: ["stop"] }
-    );
-    const registers = () => bridge.hub.calls.filter((c) => c.path === "/api/agent/register");
-    const beats = () => bridge.hub.calls.filter((c) => c.path === `/api/agent/${bridge.agentId}/heartbeat`);
-
-    try {
-      await waitUntil(() => attempts >= 1, "the registration to start");
-      fs.writeFileSync(statePath(bridge.sid, "status"), "busy\n");
-      await new Promise((resolve) => setTimeout(resolve, 400));
-
-      // Act
-      release();
-      await waitUntil(() => beats().length >= 2, "heartbeats after the registration");
-
-      // Assert
-      expect(attempts).toBe(1);
-      expect(registers()).toHaveLength(2);
-      expect(beats().map((c) => c.body.status)).toEqual(beats().map(() => "busy"));
-    } finally {
-      await bridge.stop();
-    }
-  });
-
-  it("should not register again when the saved agent was registered with this build's claim", async () => {
+  it("should send no claim when the saved agent was registered with this build's", async () => {
     // Arrange
     const bridge = await startBridge({});
+    const beats = () => bridge.hub.calls.filter((c) => c.path === `/api/agent/${bridge.agentId}/heartbeat`);
 
     try {
       // Act
-      await waitUntil(() => bridge.streamOpens().length >= 1, "the first stream");
+      await waitUntil(() => beats().length >= 2, "two heartbeats");
 
       // Assert
+      expect(beats().every((c) => c.body.client_features === undefined)).toBe(true);
       expect(bridge.hub.calls.filter((c) => c.path === "/api/agent/register")).toHaveLength(1);
     } finally {
       await bridge.stop();
@@ -1042,7 +985,7 @@ describe("runBridge", () => {
 
       // Assert
       const [one, two] = bridge.socketWrites as [string, string];
-      expect(one).toBe(`${contextOpen(first.id)}\nProduct area: Possession claims.\n${CONTEXT_CLOSE}\n\nwhat is a possession claim?`);
+      expect(one).toBe(`${contextOpen(first.id)}\n${ANSWER_HERE}\nProduct area: Possession claims.\n${CONTEXT_CLOSE}\n\nwhat is a possession claim?`);
       expect(two).toMatch(/\nProduct area: Core Case Data\.\n/);
       expect(two).toMatch(/switched the product context from Possession claims to Core Case Data/);
       expect(two.endsWith(`${CONTEXT_CLOSE}\n\nand in CCD?`)).toBe(true);
@@ -1073,8 +1016,8 @@ describe("runBridge", () => {
 
       // Assert
       const [one, two] = bridge.socketWrites as [string, string];
-      expect(one).toBe(`${contextOpen(missing.id)}\n${CONTEXT_CLOSE}\n\nno frame`);
-      expect(two).toBe(`${contextOpen(unreadable.id)}\n${CONTEXT_CLOSE}\n\na frame that is not an object`);
+      expect(one).toBe(`${contextOpen(missing.id)}\n${ANSWER_HERE}\n${CONTEXT_CLOSE}\n\nno frame`);
+      expect(two).toBe(`${contextOpen(unreadable.id)}\n${ANSWER_HERE}\n${CONTEXT_CLOSE}\n\na frame that is not an object`);
       expect(readDirects(bridge.sid)).toEqual([]);
       expect(fs.existsSync(statePath(bridge.sid, "assistant-product.json"))).toBe(false);
     } finally {

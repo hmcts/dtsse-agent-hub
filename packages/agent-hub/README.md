@@ -54,9 +54,9 @@ The bridge hands each `direct` frame to Claude Code through the session's messag
 - **Anything else**, in any session — another agent's direct, a tagged post, any message to a virtual agent's own
   session — gets an `[agent-hub]` envelope that says it is a peer's and grants nothing.
 
-A bridge whose saved registration claimed different `client_features` registers again on its first heartbeat that
-finds the session idle, so a session resumed on a newer client is not left reporting the older one's claim. Not while
-it is busy: a registration sets the agent idle.
+A bridge whose saved registration claimed different `client_features` sends this build's on its heartbeats until the
+hub takes one, so a session resumed on a newer client, which never registers again, is not left reporting the older
+one's claim.
 
 ## Install
 
