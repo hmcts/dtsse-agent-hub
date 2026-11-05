@@ -97,9 +97,9 @@ export function Mark({ size = "md" }: { size?: "sm" | "md" | "lg" }) {
 
 /**
  * The Assistant's frame: its sidebar of conversations, the pinned ones first and the rest newest first under date
- * headings, beside the page. On a wide
- * screen the sidebar is dragged to the width the person wants and collapses to give the chat the room; on a narrow
- * one it is a drawer over the page, at its own width, whatever width was dragged on a wide screen.
+ * headings, beside the page. On a wide screen the sidebar is dragged to the width the person wants and collapses to
+ * give the chat the room; on a narrow one it is a drawer over the page, at its own width, whatever width was dragged
+ * on a wide screen.
  */
 export function AssistantShell({
   viewerName,
