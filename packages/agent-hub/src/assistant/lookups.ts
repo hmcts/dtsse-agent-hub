@@ -181,11 +181,11 @@ export function parseJiraProjects(stdout: string): JiraProjectFound[] | null {
 function unescapeHtml(text: string): string {
   const named: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
   return text.replace(/&(?:#(\d{1,7})|#x([0-9a-f]{1,6})|([a-z]{2,6}));/gi, (entity, dec?: string, hex?: string, name?: string) => {
-    const code = dec !== undefined ? Number(dec) : hex !== undefined ? Number.parseInt(hex, 16) : null;
-    if (code !== null) {
-      return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : entity;
+    if (dec === undefined && hex === undefined) {
+      return named[(name as string).toLowerCase()] ?? entity;
     }
-    return named[(name as string).toLowerCase()] ?? entity;
+    const code = dec === undefined ? Number.parseInt(hex as string, 16) : Number(dec);
+    return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : entity;
   });
 }
 
@@ -316,12 +316,8 @@ export type LookupDeps = {
   spaces?: SpaceCache;
 };
 
-/**
- * The pages of a Confluence search with their spaces' ids and names, reading in one `space list` only the spaces not
- * already known, and only when there is time left before `deadline`. A page whose space is not known is left out;
- * only when that leaves none is the lookup said to have failed, and why.
- */
-async function withSpaces(deps: LookupDeps, hits: ConfluenceHit[], spaces: SpaceCache, deadline: number): Promise<LookupAnswer> {
+/** The spaces the hits are in that are not yet known: each as a hit spells it, by lower-cased key. */
+function missingSpaces(hits: ConfluenceHit[], spaces: SpaceCache): Map<string, string> {
   const missing = new Map<string, string>();
   for (const hit of hits) {
     const lower = hit.space_key.toLowerCase();
@@ -329,26 +325,46 @@ async function withSpaces(deps: LookupDeps, hits: ConfluenceHit[], spaces: Space
       missing.set(lower, hit.space_key);
     }
   }
-  let unread: string | null = null;
-  if (missing.size > 0) {
-    const left = deadline - Date.now();
-    if (left < MIN_SPACE_TIMEOUT_MS) {
-      unread = TOO_SLOW;
-    } else {
-      const listed = await deps.run("twg", spaceArgs([...missing.values()]), { env: deps.env, timeoutMs: left });
-      if (twgSignedOut(listed)) {
-        return { error: "signed_out" };
-      }
-      const read = listed.code === 0 ? parseConfluenceSpaces(listed.stdout) : null;
-      if (read === null) {
-        unread = failure(listed, "confluence_page");
-      } else {
-        for (const [lower, space] of read) {
-          spaces.set(lower, space);
-        }
-      }
-    }
+  return missing;
+}
+
+type SpacesRead = { signedOut: true } | { signedOut: false; unread: string | null };
+
+/**
+ * Reads the missing spaces into `spaces` in one `space list`, when there is time left before `deadline`; `unread` is
+ * why they could not be read, or null when they were.
+ */
+async function readSpaces(deps: LookupDeps, missing: Map<string, string>, spaces: SpaceCache, deadline: number): Promise<SpacesRead> {
+  const left = deadline - Date.now();
+  if (left < MIN_SPACE_TIMEOUT_MS) {
+    return { signedOut: false, unread: TOO_SLOW };
   }
+  const listed = await deps.run("twg", spaceArgs([...missing.values()]), { env: deps.env, timeoutMs: left });
+  if (twgSignedOut(listed)) {
+    return { signedOut: true };
+  }
+  const read = listed.code === 0 ? parseConfluenceSpaces(listed.stdout) : null;
+  if (read === null) {
+    return { signedOut: false, unread: failure(listed, "confluence_page") };
+  }
+  for (const [lower, space] of read) {
+    spaces.set(lower, space);
+  }
+  return { signedOut: false, unread: null };
+}
+
+/**
+ * The pages of a Confluence search with their spaces' ids and names, reading in one `space list` only the spaces not
+ * already known, and only when there is time left before `deadline`. A page whose space is not known is left out;
+ * only when that leaves none is the lookup said to have failed, and why.
+ */
+async function withSpaces(deps: LookupDeps, hits: ConfluenceHit[], spaces: SpaceCache, deadline: number): Promise<LookupAnswer> {
+  const missing = missingSpaces(hits, spaces);
+  const read: SpacesRead = missing.size > 0 ? await readSpaces(deps, missing, spaces, deadline) : { signedOut: false, unread: null };
+  if (read.signedOut) {
+    return { error: "signed_out" };
+  }
+  const unread = read.unread;
   const pages = confluencePages(hits, spaces);
   return pages.length > 0 ? { results: pages } : { error: "failed", detail: unread ?? NO_SPACES };
 }

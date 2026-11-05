@@ -102,6 +102,28 @@ function frame(overrides: Partial<LookupFrame> = {}): LookupFrame {
   return { lookup_id: LOOKUP, kind: "confluence_page", query: "case flags", space: null, owner: null, sign_in: false, ...overrides };
 }
 
+/** The answers one runner gives to two lookups of `kind`, the second sent once the first is answered. */
+async function answersToTwoLookups(run: Run, kind: LookupFrame["kind"], queries: [string, string]): Promise<LookupAnswer[]> {
+  const answers: LookupAnswer[] = [];
+  const runner = createLookupRunner({
+    api: {
+      putLookup: async (_va, _id, body) => {
+        answers.push(body);
+        return null;
+      }
+    },
+    id: "va-1",
+    env: {},
+    run,
+    login: async () => true
+  });
+  for (const [n, query] of queries.entries()) {
+    runner.lookup({ lookup_id: `5b0e7c1a-1111-4222-8333-44445555666${n + 1}`, kind, query });
+    await runner.idle();
+  }
+  return answers;
+}
+
 describe("parseLookupFrame", () => {
   it("should keep a lookup when every value is one the hub would send", () => {
     // Act & Assert
@@ -607,26 +629,10 @@ describe("runLookup for GitHub", () => {
 
   it("should ask for the person's accounts once for every search a runner makes", async () => {
     // Arrange
-    const answers: LookupAnswer[] = [];
     const run = vi.fn<Run>(async (_cmd, args) => (args[0] === "api" ? { code: 0, stdout: "hmcts\n", stderr: "" } : { code: 0, stdout: REPOS, stderr: "" }));
-    const runner = createLookupRunner({
-      api: {
-        putLookup: async (_va, _id, body) => {
-          answers.push(body);
-          return null;
-        }
-      },
-      id: "va-1",
-      env: {},
-      run,
-      login: async () => true
-    });
 
     // Act
-    runner.lookup({ lookup_id: "5b0e7c1a-1111-4222-8333-444455556661", kind: "github_repo", query: "cft" });
-    await runner.idle();
-    runner.lookup({ lookup_id: "5b0e7c1a-1111-4222-8333-444455556662", kind: "github_repo", query: "ccd" });
-    await runner.idle();
+    const answers = await answersToTwoLookups(run, "github_repo", ["cft", "ccd"]);
 
     // Assert
     expect(answers).toHaveLength(2);
@@ -683,25 +689,9 @@ describe("createLookupRunner", () => {
   it("should read each Confluence space once for every search a runner makes", async () => {
     // Arrange
     const run = vi.fn<Run>(async (_cmd, args) => ({ code: 0, stdout: args[1] === "search" ? confluenceOutput([PAGE_RESULT]) : SPACES_OUTPUT, stderr: "" }));
-    const answers: LookupAnswer[] = [];
-    const runner = createLookupRunner({
-      api: {
-        putLookup: async (_va, _id, body) => {
-          answers.push(body);
-          return null;
-        }
-      },
-      id: "va-1",
-      env: {},
-      run,
-      login: async () => true
-    });
 
     // Act
-    runner.lookup({ lookup_id: "5b0e7c1a-1111-4222-8333-444455556661", kind: "confluence_page", query: "spec" });
-    await runner.idle();
-    runner.lookup({ lookup_id: "5b0e7c1a-1111-4222-8333-444455556662", kind: "confluence_page", query: "assistant" });
-    await runner.idle();
+    const answers = await answersToTwoLookups(run, "confluence_page", ["spec", "assistant"]);
 
     // Assert
     expect(answers).toEqual([
