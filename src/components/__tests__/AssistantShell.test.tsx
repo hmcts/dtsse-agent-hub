@@ -12,8 +12,9 @@ import { AssistantShell, SidebarToggle } from "@/components/assistant/AssistantS
 import { ProductSelect } from "@/components/assistant/ProductSelect";
 
 const refresh = vi.fn();
+const push = vi.fn();
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ refresh }),
+  useRouter: () => ({ refresh, push }),
   usePathname: () => "/assistant",
   useSearchParams: () => new URLSearchParams(window.location.search)
 }));
@@ -53,6 +54,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   refresh.mockReset();
+  push.mockReset();
   hubHandlers.clear();
   vi.useRealTimers();
 });
@@ -247,6 +249,65 @@ describe("AssistantShell", () => {
         .getAllByRole("menuitem")
         .map((item) => item.getAttribute("href"))
     ).toEqual(["/assistant/scheduled"]);
+  });
+
+  it("should offer the morning briefing first when the person has connected Microsoft 365", () => {
+    render(shell({ microsoft: true, start: vi.fn() }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
+
+    expect(
+      within(screen.getByRole("menu", { name: "Workflows" }))
+        .getAllByRole("menuitem")
+        .map((item) => item.querySelector("span")?.textContent)
+    ).toEqual(["Morning briefing", "Scheduled"]);
+  });
+
+  it("should not offer the morning briefing when the person has not connected Microsoft 365", () => {
+    render(shell({ welsh: true, start: vi.fn() }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
+
+    expect(screen.queryByRole("menuitem", { name: /Morning briefing/ })).toBeNull();
+  });
+
+  it("should not offer the morning briefing when the page gives no way to start a chat", () => {
+    render(shell({ microsoft: true }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
+
+    expect(screen.queryByRole("menuitem", { name: /Morning briefing/ })).toBeNull();
+  });
+
+  it("should start a chat running the briefing skill on the default product and open it when the briefing is chosen", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-05T07:45:00Z"));
+    const start = vi.fn().mockResolvedValue({ ok: true, id: "new-chat" });
+    render(shell({ microsoft: true, start }));
+    fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("menuitem", { name: /Morning briefing/ }));
+    });
+    vi.useRealTimers();
+
+    expect(start).toHaveBeenCalledWith({ product: "general", title: "Morning briefing, Thursday 5 November", body: "/m365:morning-briefing 2026-11-05" });
+    expect(push).toHaveBeenCalledWith("/assistant/new-chat");
+    expect(screen.queryByRole("menu", { name: "Workflows" })).toBeNull();
+  });
+
+  it("should keep the menu open and say why when the briefing cannot start", async () => {
+    const start = vi.fn().mockResolvedValue({ ok: false, error: "Your assistant needs you to sign in first." });
+    render(shell({ microsoft: true, start }));
+    fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("menuitem", { name: /Morning briefing/ }));
+    });
+
+    expect(push).not.toHaveBeenCalled();
+    expect(within(screen.getByRole("menu", { name: "Workflows" })).getByRole("alert").textContent).toBe("Your assistant needs you to sign in first.");
+    expect(screen.getByRole("menuitem", { name: /Morning briefing/ }).hasAttribute("disabled")).toBe(false);
   });
 
   it("should close the workflows menu and return focus to the plus when Escape is pressed", () => {

@@ -122,8 +122,12 @@ async function send(oid: string, conversation: ConversationRow, typed: string, u
   });
 }
 
-/** A new conversation, started with its first message: a starter card's prompt, or what the person typed. */
-export async function startConversation(input: { product: unknown; body: unknown }): Promise<ActionResult<{ id: string }>> {
+/**
+ * A new conversation, started with its first message: a starter card's prompt, what the person typed, or a workflow's
+ * prompt such as the morning briefing's. `title` names it where the first message would make a poor name, as a
+ * skill's invocation does; left out, the first message names it.
+ */
+export async function startConversation(input: { product: unknown; body: unknown; title?: unknown }): Promise<ActionResult<{ id: string }>> {
   return await runAction<{ id: string }>("start conversation", async () => {
     if (!virtualAgentsEnabled()) {
       return OFF;
@@ -136,7 +140,7 @@ export async function startConversation(input: { product: unknown; body: unknown
     if (typeof body !== "string") {
       return body;
     }
-    const conversation = await createConversation(prisma, viewer.oid, { product: input.product });
+    const conversation = await createConversation(prisma, viewer.oid, { product: input.product, title: text(input.title) });
     await send(viewer.oid, conversation, body);
     revalidatePath("/assistant");
     return { ok: true, id: conversation.id };

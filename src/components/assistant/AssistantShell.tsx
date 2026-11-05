@@ -25,7 +25,7 @@ import type { AssistantSize } from "@/components/assistant/SizeSettings";
 import type { AssistantTemplates } from "@/components/assistant/TemplateSettings";
 import type { AssistantTokens } from "@/components/assistant/TokenSettings";
 import { useResizableWidth } from "@/components/assistant/useResizableWidth";
-import { WorkflowsMenu } from "@/components/assistant/WorkflowsMenu";
+import { type StartChatAction, WorkflowsMenu } from "@/components/assistant/WorkflowsMenu";
 import type { ActionResult } from "@/web/action";
 
 /** What a sidebar row's options menu does. The pages pass the same server actions the chat's own header uses. */
@@ -109,6 +109,8 @@ export function AssistantShell({
   now,
   plugins,
   welsh = false,
+  microsoft = false,
+  start,
   model,
   claudeMd,
   templates,
@@ -137,6 +139,10 @@ export function AssistantShell({
   plugins?: AssistantPlugins;
   /** Their assistant has the Welsh plugin ticked, so the way to the Welsh page is shown. */
   welsh?: boolean;
+  /** They have connected Microsoft 365, so the morning briefing is offered. */
+  microsoft?: boolean;
+  /** How the morning briefing starts its chat; without it, the briefing is not offered. */
+  start?: StartChatAction;
   /** The Claude model the person's chats run on, which the footer's settings shows and changes. */
   model?: AssistantModelSetting;
   /** The person's own CLAUDE.md, which the footer's settings shows and edits. */
@@ -264,8 +270,8 @@ export function AssistantShell({
               </span>
               New chat
             </Link>
-            {/* The workflows a person can open beside their chats, each its own page, behind one plus. */}
-            <WorkflowsMenu welsh={welsh} />
+            {/* The workflows a person can open beside their chats, behind one plus. */}
+            <WorkflowsMenu welsh={welsh} microsoft={microsoft} start={start} />
           </div>
           <LiveLocalSessions served={served}>
             <ConversationSearch>

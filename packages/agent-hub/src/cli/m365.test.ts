@@ -12,15 +12,18 @@ import {
   graphUrl,
   htmlToText,
   isoTime,
+  LAST_VERB,
   M365_USAGE,
   MAX_EVENTS,
   MAX_OUTPUT,
   MAX_TOP,
   m365Command,
   readCapped,
+  repliedTo,
   searchHits,
   TOKEN_MARGIN_MS,
   tokenFile,
+  tokenIdentity,
   topOf,
   UNTRUSTED,
   UPLOAD_FOLDER,
@@ -445,21 +448,166 @@ describe("credentials for a Microsoft 365 connection", () => {
   });
 });
 
+describe("repliedTo", () => {
+  it("should be true when Outlook recorded a reply or a reply to all", () => {
+    expect(repliedTo({ singleValueExtendedProperties: [{ id: LAST_VERB, value: "102" }] })).toBe(true);
+    expect(repliedTo({ singleValueExtendedProperties: [{ id: "integer 0x1081", value: "103" }] })).toBe(true);
+  });
+
+  it("should be false when the message was only forwarded or never acted on", () => {
+    expect(repliedTo({ singleValueExtendedProperties: [{ id: LAST_VERB, value: "104" }] })).toBe(false);
+    expect(repliedTo({ singleValueExtendedProperties: [] })).toBe(false);
+    expect(repliedTo({})).toBe(false);
+  });
+});
+
+/** A JWT-shaped token carrying `claims`, unsigned, since only its payload is read. */
+function jwt(claims: Record<string, unknown>): string {
+  return `e30.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.sig`;
+}
+
+describe("tokenIdentity", () => {
+  it("should read the person's id, name and sign-in name from the token's claims when it is a JWT", () => {
+    expect(tokenIdentity(jwt({ oid: "o-1", name: "Alice Smith", upn: "alice@justice.gov.uk", email: "other@x" }))).toEqual({
+      id: "o-1",
+      name: "Alice Smith",
+      address: "alice@justice.gov.uk"
+    });
+  });
+
+  it("should fall back through the other claims that name an account when there is no upn", () => {
+    expect(tokenIdentity(jwt({ oid: "o-1", preferred_username: "alice@x" })).address).toBe("alice@x");
+    expect(tokenIdentity(jwt({ unique_name: "", email: "alice@y" })).address).toBe("alice@y");
+  });
+
+  it("should be all nulls when the token cannot be read as a JWT", () => {
+    const none = { id: null, name: null, address: null };
+    expect(tokenIdentity("opaque")).toEqual(none);
+    expect(tokenIdentity("a.not-json.b")).toEqual(none);
+    expect(tokenIdentity(`a.${Buffer.from("[1]").toString("base64url")}.b`)).toEqual(none);
+  });
+});
+
+describe("m365 me", () => {
+  it("should answer from the token's claims alone when they name the person", async () => {
+    const fetchImpl = graphAnswering({ value: [] });
+    const token = { ...TOKEN, access_token: jwt({ oid: "o-1", name: "Alice Smith", upn: "alice@x" }) };
+    const { cli, out } = cliWith(vi.fn(async () => token));
+
+    await fresh(fetchImpl as unknown as typeof fetch)(cli, ["me"]);
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(JSON.parse(out.join("")).data).toEqual({ id: "o-1", name: "Alice Smith", address: "alice@x" });
+  });
+
+  it("should take the name and address from the newest sent message when the token does not give them", async () => {
+    const fetchImpl = graphAnswering({ value: [{ id: "s1", from: { emailAddress: { name: "Alice Smith", address: "alice@x" } } }] });
+    const { cli, out } = cliWith(vi.fn(async () => TOKEN));
+
+    await fresh(fetchImpl as unknown as typeof fetch)(cli, ["me"]);
+
+    const url = askedFor(fetchImpl);
+    expect(url.pathname).toBe("/v1.0/me/mailFolders/sentitems/messages");
+    expect(url.searchParams.get("$top")).toBe("1");
+    expect(JSON.parse(out.join("")).data).toEqual({ id: null, name: "Alice Smith", address: "alice@x" });
+  });
+
+  it("should answer nulls when the token names nobody and nothing has been sent", async () => {
+    const { cli, out } = cliWith(vi.fn(async () => TOKEN));
+
+    await fresh(graphAnswering({ value: [] }) as unknown as typeof fetch)(cli, ["me"]);
+
+    expect(JSON.parse(out.join("")).data).toEqual({ id: null, name: null, address: null });
+  });
+});
+
+describe("m365 mail list", () => {
+  const message = {
+    id: "m1",
+    subject: "Can you review?",
+    from: { emailAddress: { name: "Bob", address: "bob@x" } },
+    toRecipients: [{ emailAddress: { name: "Alice", address: "alice@x" } }],
+    ccRecipients: [{ emailAddress: { address: "team@x" } }],
+    receivedDateTime: "2026-12-01T08:00:00Z",
+    isRead: false,
+    flag: { flagStatus: "flagged" },
+    inferenceClassification: "focused",
+    singleValueExtendedProperties: [{ id: LAST_VERB, value: "102" }]
+  };
+
+  it("should say who it was to, whether it is read, flagged, focused and replied to when it lists mail", async () => {
+    const fetchImpl = graphAnswering({ value: [message, { id: "m2" }] });
+    const { cli, out } = cliWith(vi.fn(async () => TOKEN));
+
+    await fresh(fetchImpl as unknown as typeof fetch)(cli, ["mail", "list"]);
+
+    const url = askedFor(fetchImpl);
+    expect(url.searchParams.get("$select")?.split(",")).toEqual(
+      expect.arrayContaining(["toRecipients", "ccRecipients", "isRead", "flag", "inferenceClassification"])
+    );
+    expect(url.searchParams.get("$expand")).toBe(`singleValueExtendedProperties($filter=id eq '${LAST_VERB}')`);
+    expect(url.searchParams.get("$filter")).toBeNull();
+    expect(JSON.parse(out.join("")).data).toEqual([
+      expect.objectContaining({ to: ["Alice <alice@x>"], cc: ["<team@x>"], read: false, flagged: true, focused: true, replied: true }),
+      expect.objectContaining({ to: [], cc: [], read: false, flagged: false, focused: null, replied: false })
+    ]);
+  });
+
+  it("should ask only for mail received since a time when given --since", async () => {
+    const fetchImpl = graphAnswering({ value: [] });
+    const { cli } = cliWith(vi.fn(async () => TOKEN));
+
+    await fresh(fetchImpl as unknown as typeof fetch)(cli, ["mail", "list", "--since", "2026-11-30"]);
+
+    const url = askedFor(fetchImpl);
+    expect(url.searchParams.get("$filter")).toBe("receivedDateTime ge 2026-11-30T00:00:00.000Z");
+    expect(url.searchParams.get("$orderby")).toBe("receivedDateTime desc");
+  });
+
+  it("should refuse a --since that is not a time", async () => {
+    const { cli } = cliWith(vi.fn(async () => TOKEN));
+
+    await expect(fresh(graphAnswering({ value: [] }) as unknown as typeof fetch)(cli, ["mail", "list", "--since", "yesterday"])).rejects.toThrow(
+      "--since must be a date or time"
+    );
+  });
+
+  it("should say there is more when Graph has another page past --top", async () => {
+    const fetchImpl = graphAnswering({ value: [message], "@odata.nextLink": "https://graph.microsoft.com/v1.0/me/next" });
+    const { cli, out } = cliWith(vi.fn(async () => TOKEN));
+
+    await fresh(fetchImpl as unknown as typeof fetch)(cli, ["mail", "list", "--top", "1"]);
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(out.join(""))).toMatchObject({ truncated: true, more: true });
+  });
+});
+
 describe("m365 chats, channels and meetings", () => {
   const messages = {
     value: [
       {
         id: "c1",
         createdDateTime: "2026-12-01T08:00:00Z",
-        from: { user: { displayName: "A Person" } },
+        messageType: "message",
+        from: { user: { id: "u-a", displayName: "A Person" } },
+        mentions: [{ mentioned: { user: { id: "u-me", displayName: "Me" } } }, { mentioned: { conversation: {} } }],
         body: { contentType: "html", content: "<p>Ship it &amp; tell me</p>" }
       },
       { id: "c2", from: null, body: { contentType: "text", content: "plain" } }
     ]
   };
   const expected = [
-    { id: "c1", at: "2026-12-01T08:00:00Z", from: "A Person", text: "Ship it & tell me" },
-    { id: "c2", at: null, from: null, text: "plain" }
+    {
+      id: "c1",
+      at: "2026-12-01T08:00:00Z",
+      from: "A Person",
+      fromId: "u-a",
+      type: "message",
+      mentions: [{ id: "u-me", name: "Me" }],
+      text: "Ship it & tell me"
+    },
+    { id: "c2", at: null, from: null, fromId: null, type: null, mentions: [], text: "plain" }
   ];
 
   async function run(args: string[], body: unknown) {
@@ -471,14 +619,34 @@ describe("m365 chats, channels and meetings", () => {
 
   it("should list the person's chats, newest first, when asked", async () => {
     const { url, data } = await run(["chats", "list", "--top", "2"], {
-      value: [{ id: "19:a", topic: "Release", chatType: "group", lastUpdatedDateTime: "t" }, { id: "19:b" }]
+      value: [
+        {
+          id: "19:a",
+          topic: "Release",
+          chatType: "group",
+          lastUpdatedDateTime: "t",
+          lastMessagePreview: {
+            createdDateTime: "2026-12-01T08:30:00Z",
+            messageType: "message",
+            from: { user: { id: "u-a", displayName: "A Person" } },
+            body: { contentType: "html", content: `<p>${"x".repeat(600)}</p>` }
+          }
+        },
+        { id: "19:b" }
+      ]
     });
 
     expect(url.pathname).toBe("/v1.0/me/chats");
     expect(url.searchParams.get("$orderby")).toBe("lastMessagePreview/createdDateTime desc");
     expect(data).toEqual([
-      { id: "19:a", topic: "Release", type: "group", updated: "t" },
-      { id: "19:b", topic: null, type: null, updated: null }
+      {
+        id: "19:a",
+        topic: "Release",
+        type: "group",
+        updated: "t",
+        last: { at: "2026-12-01T08:30:00Z", from: "A Person", fromId: "u-a", type: "message", text: capText("x".repeat(600), 500) }
+      },
+      { id: "19:b", topic: null, type: null, updated: null, last: null }
     ]);
   });
 

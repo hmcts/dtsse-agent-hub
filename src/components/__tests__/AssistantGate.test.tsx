@@ -94,6 +94,7 @@ function home(chat: AssistantHome["chat"], stored: CredentialStatus[] = [], over
     conversations: [],
     plugins: null,
     welsh: false,
+    microsoft: false,
     chat
   };
 }

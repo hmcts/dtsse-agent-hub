@@ -10,6 +10,7 @@ import {
   saveAssistantModel,
   sendAssistantMessage,
   setConversationProduct,
+  startConversation,
   stopAssistantAnswer,
   warmConversation
 } from "@/app/_actions/assistant";
@@ -116,6 +117,8 @@ export default async function ConversationPage({
       now={Date.now()}
       plugins={pluginSettings}
       welsh={home.welsh}
+      microsoft={home.microsoft}
+      start={startConversation}
       claudeMd={{ settings: claudeMd, save: saveClaudeMd, reset: resetClaudeMd }}
       templates={{ mine, save: saveTemplate, remove: deleteTemplate }}
       files={files === undefined ? undefined : { view: files, remove: deleteAssistantFile, removeAll: deleteAllAssistantFiles }}

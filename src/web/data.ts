@@ -235,6 +235,11 @@ export interface AssistantHome {
   plugins: { available: PluginOption[]; checked: string[] } | null;
   /** Its assistant has the Welsh plugin ticked, so the sidebar offers the Welsh page; read from the row, not the offer. */
   welsh: boolean;
+  /**
+   * The person has connected Microsoft 365 (the `microsoft` credential is stored), so the sidebar offers the morning
+   * briefing, which reads it. A connection Microsoft then refuses is the briefing's to report, in its own section.
+   */
+  microsoft: boolean;
   /** Whether the page may render the chat, or only the getting-ready screen; see `chatGate`. */
   chat: ChatGate;
 }
@@ -290,6 +295,7 @@ export async function openAssistant(viewer: Viewer): Promise<AssistantHome> {
     conversations,
     plugins: pluginSettings(assistant),
     welsh: hasWelshPlugin(assistant),
+    microsoft: storedKinds(credentials).has("microsoft"),
     chat: chatGateOf(summary.toChat, credentials)
   };
 }
