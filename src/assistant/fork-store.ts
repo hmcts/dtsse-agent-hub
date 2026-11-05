@@ -262,7 +262,7 @@ export async function forkContextPending(db: Database, conversationId: string): 
  * and answers whether it did. Every later message, and every conversation that is not a copy, attaches nothing.
  *
  * A file rather than words in the message, because the message is what the person typed and what their thread shows,
- * and because the pod already fetches a message's files to its disk before it delivers it and the envelope names
+ * and because the pod already fetches a message's files to its disk before it delivers it and the prompt's context names
  * them by path — so this reaches the session through a route every current client takes, with no new frame field
  * for an older one to drop. The claim is the `UPDATE`, so two messages sent at once attach it once between them.
  *

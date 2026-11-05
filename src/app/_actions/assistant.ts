@@ -71,7 +71,7 @@ async function gated(viewer: Viewer, conversation: ConversationRow): Promise<boo
 
 /**
  * The message body, or the refusal. A message of files and no words is a message: handing the assistant a document is
- * a whole ask on its own, and the envelope names the files whether or not anything was typed. Only a message that is
+ * a whole ask on its own, and the prompt's context names the files whether or not anything was typed. Only a message that is
  * empty of both is nothing to send.
  */
 function checkBody(raw: unknown, attachments: number): string | { ok: false; error: string } {

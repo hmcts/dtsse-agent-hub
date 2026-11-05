@@ -60,9 +60,10 @@ declare module "pod-client" {
     root?: string;
     say?: (message: string) => void;
   }): Promise<AttachmentOutcome[]>;
-  export function assistantEnvelope(
+  export const CONTEXT_CLOSE: string;
+  export function assistantPrompt(
     message: EnvelopeMessage,
-    assistant?: AssistantFrame,
+    assistant: AssistantFrame | null,
     previousProduct?: { product: string | null; label: string | null } | null,
     options?: { skills?: ReadonlySet<string>; attachments?: readonly AttachmentOutcome[] }
   ): string;

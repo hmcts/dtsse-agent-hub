@@ -1,8 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { clientSupports } from "@/agents/client-features";
+import { clientSupports, sessionLacks } from "@/agents/client-features";
 import { EXPIRE_AFTER_SECONDS } from "@/agents/liveness";
 import type { ArtefactSnapshot } from "@/app/_actions/assistant";
 import { MAX_ASKED_BODY } from "@/assistant/deck";
@@ -45,6 +46,7 @@ import type { ThreadMessage } from "@/messages/direct-thread";
 import type { AgentStatus } from "@/realtime/events";
 import type { ActionResult } from "@/web/action";
 import { duration } from "@/web/format";
+import { RESTART_IN_SETTINGS } from "@/web/home";
 
 export interface ChatActions {
   send: (input: { conversationId: unknown; body: unknown; uploadIds: unknown }) => Promise<ActionResult<{ message: ThreadMessage }>>;
@@ -345,6 +347,12 @@ export function ChatView({
     onReply: () => arrivals.announce("New reply from the assistant")
   });
   const [status, setStatus] = useState<AgentStatus>(view.agentStatus);
+  /**
+   * What the session's client claims, as the page read it and then as every `agent_status` frame that carries a claim
+   * says: one does whenever the claim is written, by a registration or a heartbeat, in the same frame as the status it
+   * goes with, so the two change together. A `resync` after a dropped stream re-reads the page, which resets it.
+   */
+  const [claim, setClaim] = useState<string[] | null>(view.clientFeatures);
   const [pendingProduct, setPendingProduct] = useState<string | null>(null);
   /**
    * The one panel beside the chat: the document or the deck, never both, since two panels beside a chat leave the chat
@@ -380,9 +388,13 @@ export function ChatView({
   const narrow = useNarrow();
 
   useEffect(() => setStatus(view.agentStatus), [view.agentStatus]);
-  useHubEvent<{ agent_id: string; status: AgentStatus }>("agent_status", ({ agent_id, status: next }) => {
-    if (agent_id === view.agentId) {
-      setStatus(next);
+  useEffect(() => setClaim(view.clientFeatures), [view.clientFeatures]);
+  useHubEvent<{ agent_id: string; status: AgentStatus; client_features?: string[] | null }>("agent_status", (frame) => {
+    if (frame.agent_id === view.agentId) {
+      if (frame.client_features !== undefined) {
+        setClaim(frame.client_features);
+      }
+      setStatus(frame.status);
     }
   });
   // The frame carries the agent id alone, so a question asked, or answered in another tab, is read with the page.
@@ -510,7 +522,12 @@ export function ChatView({
    * interrupt is an `assistant_stop` to the conversation's pod, so `stopAnswer` answers `nothing-running` for a
    * conversation that has none. Without this the button would be offered on every local chat and do nothing at all.
    */
-  const stoppable = pod && doing.state === "working" && clientSupports(view.clientFeatures, "stop");
+  const stoppable = pod && doing.state === "working" && clientSupports(claim, "stop");
+  /**
+   * A pod session on a client older than `plain-prompt` wraps the person's words in an envelope, and can take them for
+   * somebody else's. Only a restart of the assistant gives the session the current client, so that is what is offered.
+   */
+  const restartNeeded = pod && sessionLacks(claim, status, "plain-prompt");
   const scroller = useStickToBottom<HTMLDivElement>(`${thread.length}:${doing.state}`);
   function markDocumentBusy(busy: boolean): void {
     documentBusy.current = busy;
@@ -739,6 +756,15 @@ export function ChatView({
               for a chat with no pod.
             */}
             <SessionNote notice={notice} />
+            {restartNeeded ? (
+              <p data-testid="restart-needed" className="pb-2 text-center text-[13px] text-asst-muted">
+                This chat is running on an older version of your assistant, which can mistake your messages for someone else's.{" "}
+                <Link href={RESTART_IN_SETTINGS} className="text-asst-accent underline hover:text-asst-accent-hover">
+                  Restart it in Settings
+                </Link>{" "}
+                to update it.
+              </p>
+            ) : null}
             <Composer
               templates={templates}
               viewerOid={viewerOid}

@@ -92,7 +92,7 @@ export function parseDirectEventMessage(value: unknown): DirectEventMessage | nu
 }
 
 /**
- * The `assistant` object on a `direct` frame, or null when the frame carries none. Every field the envelope and
+ * The `assistant` object on a `direct` frame, or null when the frame carries none. Every field the prompt and
  * the recorded product read is listed here, so a hub that sends one this client does not know about is the only
  * way a field goes missing.
  */
@@ -116,7 +116,7 @@ export function parseAssistantFrame(value: unknown): AssistantFrame | null {
     github_export: parseGithubExportFrame(raw.github_export),
     confluence_export: parseConfluenceExportFrame(raw.confluence_export),
     // Left as it came: `readAttachments`, at the point of delivery, is what decides which entries this client will
-    // fetch and what the envelope says about the rest, so checking them here would only do it twice.
+    // fetch and what the prompt says about the rest, so checking them here would only do it twice.
     attachments: raw.attachments
   };
 }

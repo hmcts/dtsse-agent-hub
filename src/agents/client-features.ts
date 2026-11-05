@@ -28,6 +28,7 @@ export type ClientFeature =
   | "lookups"
   | "memory-anon"
   | "model-alias"
+  | "plain-prompt"
   | "slides-always-on"
   | "stop"
   | "welsh"
@@ -121,4 +122,14 @@ export function podGate(pod: PodClaims & { status: string }, feature: ClientFeat
     return "waking";
   }
   return claim.includes(feature) ? "ok" : "unsupported";
+}
+
+/**
+ * Whether a conversation's session is running on a client known to be too old for `feature`: its agent is not
+ * offline, and the claim its session registered with leaves the feature out, a client that claimed nothing included.
+ * An offline agent is not, whatever it claimed: the claim is never cleared, so it is only a fact about the session
+ * while one runs, and the next session to start registers its own.
+ */
+export function sessionLacks(stored: unknown, status: string, feature: ClientFeature): boolean {
+  return status !== "offline" && !clientSupports(stored, feature);
 }

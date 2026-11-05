@@ -116,6 +116,11 @@ export type HeartbeatBody = {
   /** Where `name` came from; read as `derived` when left out, and ignored by a heartbeat that sends no `name`. */
   name_source?: NameSource;
   skills?: Skill[];
+  /**
+   * This build's claim, sent until the hub has taken it, which only a `HeartbeatResponse` naming the same features
+   * says: a hub from before the field drops it and still answers `204`. It replaces the stored claim and nothing else.
+   */
+  client_features?: string[];
 };
 
 export type PostBody = {
@@ -308,6 +313,8 @@ export type MemoryReportBody = {
 };
 
 export type RegisterResponse = { agent_id: string; name: string };
+/** A heartbeat that sent `client_features` is answered with the claim as stored; one that did not, with no body. */
+export type HeartbeatResponse = { client_features: string[] | null };
 export type MessageResponse = { message: Message };
 export type MessagesResponse = { messages: Message[] };
 export type FeedResponse = { messages: Message[]; cursor: string };

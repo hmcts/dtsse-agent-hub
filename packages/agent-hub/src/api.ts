@@ -25,6 +25,7 @@ import type {
   FeedResponse,
   GithubExportReport,
   HeartbeatBody,
+  HeartbeatResponse,
   JiraExportReport,
   LoginCodeResponse,
   LoginCompleteBody,
@@ -136,7 +137,7 @@ export type Api = {
   baseUrl: string;
   headers: (extra?: Record<string, string>) => Promise<Record<string, string>>;
   register: (body: RegisterBody) => Promise<RegisterResponse>;
-  heartbeat: (id: string, body: HeartbeatBody) => Promise<null>;
+  heartbeat: (id: string, body: HeartbeatBody) => Promise<HeartbeatResponse | null>;
   offline: (id: string, opts?: RequestOptions) => Promise<null>;
   ack: (id: string, messageId: string) => Promise<null>;
   feed: (id: string, params?: FeedParams) => Promise<FeedResponse>;
@@ -348,7 +349,7 @@ export function createApi({
     baseUrl: base,
     headers,
     register: (body) => request<RegisterResponse>("POST", "/api/agent/register", body),
-    heartbeat: (id, body) => request<null>("POST", `${a(id)}/heartbeat`, body),
+    heartbeat: (id, body) => request<HeartbeatResponse | null>("POST", `${a(id)}/heartbeat`, body),
     offline: (id, opts) => request<null>("POST", `${a(id)}/offline`, undefined, opts),
     ack: (id, messageId) => request<null>("POST", `${a(id)}/deliveries/${encodeURIComponent(messageId)}/ack`),
     feed: (id, { since, limit } = {}) => request<FeedResponse>("GET", `${a(id)}/feed${qs({ since, limit })}`),
