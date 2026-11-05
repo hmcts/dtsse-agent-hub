@@ -1953,7 +1953,17 @@ describe("EmptyChat", () => {
     expect(push).toHaveBeenCalledWith("/assistant/abc");
   });
 
-  it("should offer no skill list when the person types a slash, because a new chat has no session yet", () => {
+  it("should offer the pod's skills when the person types a slash", () => {
+    const skills = [{ name: "cft-explain", description: "Answer a what is X question" }];
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} skills={skills} actions={emptyActions(vi.fn())} />);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Message" }), { target: { value: "/" } });
+
+    expect(screen.getByRole("listbox", { name: "Skills" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: /cft-explain/ })).toBeTruthy();
+  });
+
+  it("should offer no skill list when the person types a slash and the pod has reported no skills", () => {
     render(
       <EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(vi.fn(async () => ({ ok: true as const, id: "abc" })))} />
     );

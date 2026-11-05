@@ -4,11 +4,10 @@ import { type RefObject, useId, useLayoutEffect, useRef, useState } from "react"
 import { matchSkills, pickSkill, type Skill, skillQuery } from "@/agents/skills";
 
 /**
- * The one "/" autocomplete over a session's skills, shared by the hub's direct-message box and the Assistant's
- * composer. The combobox semantics live here because they are what the two surfaces have to agree on and what a
- * second copy would drift from: the `aria-expanded`/`aria-controls`/`aria-activedescendant` trio on the box, the
- * `listbox` and `option` roles, and the keys that move, pick and dismiss. A `SkillMenuTheme` carries only what they
- * are each free to differ on — their own tokens, type scale and where the list sits.
+ * The "/" autocomplete over a session's skills, used by the Assistant's composer in a conversation and on the new-chat
+ * screen. It holds the combobox semantics: the `aria-expanded`/`aria-controls`/`aria-activedescendant` trio on the
+ * box, the `listbox` and `option` roles, and the keys that move, pick and dismiss. A `SkillMenuTheme` carries the
+ * look — the composer's tokens, type scale and where the list sits.
  *
  * The matching itself is `src/agents/skills.ts`, which is pure and is where the server reads the same shapes from.
  */

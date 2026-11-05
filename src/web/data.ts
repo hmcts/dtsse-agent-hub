@@ -1,5 +1,6 @@
 import "server-only";
 import { canManageVirtualAgent, canOwnerReadCredential, canReadDeck, canReadMessage, isOwner } from "../access/rules.ts";
+import type { Skill } from "../agents/skills.ts";
 import { isUuid } from "../agents/store.ts";
 import { ensureAssistant, findAssistant } from "../assistant/assistant-store.ts";
 import { offersBriefing } from "../assistant/briefing.ts";
@@ -243,6 +244,8 @@ export interface AssistantHome {
    * in its own section.
    */
   briefing: boolean;
+  /** The pod's skills (`podSkills`), which the new chat offers on "/" before it has a session of its own to ask. */
+  skills: Skill[];
   /** Whether the page may render the chat, or only the getting-ready screen; see `chatGate`. */
   chat: ChatGate;
 }
@@ -304,6 +307,7 @@ export async function openAssistant(viewer: Viewer): Promise<AssistantHome> {
     plugins: pluginSettings(assistant),
     welsh: hasWelshPlugin(assistant),
     briefing: offersBriefing(stored, skills),
+    skills,
     chat: chatGateOf(summary.toChat, credentials, stored)
   };
 }

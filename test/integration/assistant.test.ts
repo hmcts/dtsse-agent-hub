@@ -481,12 +481,13 @@ describe("conversations", () => {
     expect(await assistantConversation({ ...BOB, tid: "dev", modelRoute: "gateway" }, id)).toBeUndefined();
   });
 
-  it("should carry the session's skills to the conversation page, and none before a session registers", async () => {
+  it("should carry the session's skills to the conversation page and the new chat, and none before a session registers", async () => {
     const { token } = await startedAssistant();
     const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
     const { sessionId } = await sessionOf(id);
 
     expect((await assistantConversation(VIEWER, id))?.skills).toEqual([]);
+    expect((await openAssistant(VIEWER)).skills).toEqual([]);
     await register(token, sessionId, id, {
       skills: [
         { name: "cft-how-to", description: "Find a how-to recipe" },
@@ -495,6 +496,10 @@ describe("conversations", () => {
     });
 
     expect((await assistantConversation(VIEWER, id))?.skills).toEqual([
+      { name: "cft-explain", description: "Answer a what is X question" },
+      { name: "cft-how-to", description: "Find a how-to recipe" }
+    ]);
+    expect((await openAssistant(VIEWER)).skills).toEqual([
       { name: "cft-explain", description: "Answer a what is X question" },
       { name: "cft-how-to", description: "Find a how-to recipe" }
     ]);
