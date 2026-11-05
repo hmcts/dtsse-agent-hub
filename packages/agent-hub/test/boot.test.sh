@@ -303,14 +303,14 @@ seed_github_when_asked() {
 }
 
 # The whole of what an owner who does not complete the sign-in goes through. The pod starts with a stored token
-# GitHub has already refused, so the codes are relayed; they go unanswered and the pod asks for a token instead,
-# in `awaiting_credentials`, the phase that puts the owner on the screen with the box to paste one into. Its
-# first pass re-reads the same refused token and must say nothing, or it replaces the message it has just sent
-# with one about a token the owner did not paste. The next token they paste is also refused, which does have to
-# be reported, and the one after it gets the pod booting — so exactly one refusal is reported, not two.
+# GitHub has already refused, so the codes are relayed; they go unanswered and the pod says to restart for another
+# code, in `awaiting_credentials`, while it watches for a token stored some other way. Its first pass re-reads the
+# same refused token and must say nothing, or it replaces the message it has just sent with one about a token
+# nobody stored. The next token stored is also refused, which does have to be reported, and the one after it gets
+# the pod booting — so exactly one refusal is reported, not two.
 #
 # An `rc 137` here is that silence breaking rather than a slow machine: the extra report overwrites the detail
-# the seeder waits for, so nothing is ever pasted and the boot runs until the watchdog kills it. The case takes
+# the seeder waits for, so nothing is ever stored and the boot runs until the watchdog kills it. The case takes
 # about a second and a half of the watchdog's thirty, so a timeout is not what a 137 means.
 case_sign_in_not_completed() {
     setup sign-in-not-completed
@@ -319,7 +319,7 @@ case_sign_in_not_completed() {
         # A second of the wait loop, whose sleep is the 0.05s fake, is twenty-odd passes over the refused token
         # already stored. Without it the next token could arrive before the first pass and the silence this
         # asserts would be silence about nothing.
-        seed_github_when_asked 'Paste a GitHub token at' "$STALE_TOKEN" && "$REAL_SLEEP" 1 &&
+        seed_github_when_asked 'not signed in to GitHub yet' "$STALE_TOKEN" && "$REAL_SLEEP" 1 &&
             seed_github "$OTHER_STALE_TOKEN" &&
             seed_github_when_asked 'refused the stored token' "$GOOD_TOKEN"
     ) &
@@ -334,11 +334,13 @@ case_sign_in_not_completed() {
         ok "stops asking, signs in with the token that works and boots on" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
     [ "$(hub '.prompts | length')" -eq 3 ] && ok "relays its budget of codes, and none while waiting" || no "prompts: $(hub -c '.prompts')"
     [ "$(hub '.loginFailures[0].state')" = failed ] && ok "tells the hub the sign-in did not complete" || no "loginFailures: $(hub -c '.loginFailures')"
-    # `failed` would route an onboarded owner to the warming-up screen, which offers no box to paste a token in.
+    # `failed` would route an onboarded owner to the warming-up screen, off the one that says what to do.
     [ "$(hub '[.status[] | select(.phase == "failed")] | length')" -eq 0 ] &&
-        ok "never fails the agent, which would route the owner off the screen that has the token form" || no "status: $(hub -c '.status')"
-    hub '.status[] | select(.phase == "awaiting_credentials") | .detail' | grep -q 'Paste a GitHub token at' &&
-        ok "asks for a token in the phase that offers one" || no "status: $(hub -c '.status')"
+        ok "never fails the agent, which would route the owner off the screen that says what to do" || no "status: $(hub -c '.status')"
+    hub '.status[] | select(.phase == "awaiting_credentials") | .detail' | grep -q 'Restart the assistant from its settings at .*settings=assistant to be sent another code' &&
+        ok "says to restart the assistant for another code, in the phase that waits on the owner" || no "status: $(hub -c '.status')"
+    [ "$(hub '[.status[] | select(.detail != null) | select(.detail | test("Paste"))] | length')" -eq 0 ] &&
+        ok "asks nobody to paste a GitHub token, which the settings have no box for" || no "status: $(hub -c '.status')"
     # $EXIT_NO_CREDENTIAL also covers an owner who entered a code and had the token it granted refused or lost on
     # the way to being stored, so a message here about what they did not do is false for two of the three ways
     # in. The remedy is the same for all of them; the diagnosis is the client's, and it has already reported it.
@@ -346,7 +348,7 @@ case_sign_in_not_completed() {
         [ "$(hub '[.status[] | select(.detail != null) | select(.detail | test("nobody completed"))] | length')" -eq 0 ] &&
         ok "says the condition rather than blaming the owner for a sign-in they may have completed" || no "status: $(hub -c '.status')"
     [ "$(hub '[.status[] | select(.detail != null) | select(.detail | test("refused the stored token"))] | length')" -eq 1 ] &&
-        ok "reports the token the owner pasted, and not the one already known refused" || no "status: $(hub -c '.status')"
+        ok "reports the token stored since, and not the one already known refused" || no "status: $(hub -c '.status')"
     grep -q 'GitHub answered access_denied' "$C/out" && ok "logs what GitHub answered" || no "the refusal was not logged: $(grep 'github:' "$C/out")"
 }
 
@@ -373,8 +375,8 @@ EOF
         ok "rides out a client failure that is not the owner's and signs in after it" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
     [ "$(cat "$C/client-calls")" -eq 3 ] && ok "retries the sign-in rather than giving up on the first failure" || no "client calls: $(cat "$C/client-calls")"
     grep -q 'github sign-in failed (exit 1); retrying in 30s' "$C/out" && ok "logs the exit code it is retrying" || no "retry not logged: $(grep 'github sign-in' "$C/out")"
-    [ "$(hub '[.status[] | select(.detail != null) | select(.detail | test("Paste a GitHub token"))] | length')" -eq 0 ] &&
-        ok "never asks the owner for a token over a fault of its own" || no "status: $(hub -c '.status')"
+    [ "$(hub '[.status[] | select(.detail != null) | select(.detail | test("not signed in to GitHub yet"))] | length')" -eq 0 ] &&
+        ok "never sends the owner to restart over a fault of its own" || no "status: $(hub -c '.status')"
 }
 
 case_stored_token_no_access() {
