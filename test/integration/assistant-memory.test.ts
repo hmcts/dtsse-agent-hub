@@ -9,7 +9,7 @@ import { createConversation } from "../../src/assistant/conversation-store.ts";
 import { assistantMemory, reportMemoryUse } from "../../src/assistant/memory.ts";
 import { CONVERSATION_MEMORY_BYTES, memoryPressure } from "../../src/assistant/memory-report.ts";
 import { reportSessions } from "../../src/assistant/session-store.ts";
-import { claimVirtualAgents, observeVirtualAgent, restartVirtualAgent, setDesired, setVirtualAgentPlugins } from "../../src/virtual-agents/store.ts";
+import { changeVirtualAgentPod, claimVirtualAgents, observeVirtualAgent, restartVirtualAgent, setDesired } from "../../src/virtual-agents/store.ts";
 import { assistantSize } from "../../src/web/data.ts";
 import { ALICE, BOB, form, podFixture, viewer } from "./assistant-pod.ts";
 import { type Person, prisma, resetDatabase } from "./database.ts";
@@ -266,7 +266,7 @@ describe("the memory report of a pod the hub replaces", () => {
     vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "pcs=PCS team workflows");
     const assistant = await reportedAtItsCeiling();
 
-    await setVirtualAgentPlugins(prisma, ALICE.oid, assistant, ["pcs"]);
+    await changeVirtualAgentPod(prisma, ALICE.oid, assistant, { plugins: ["pcs"] });
 
     expect(await stored(assistant)).toEqual(CLEARED);
   });

@@ -577,7 +577,8 @@ describe("the Assistant's settings dialog", () => {
     fireEvent.click(cog());
     go("Connections");
 
-    expect(screen.getByText("Your credentials cannot be shown: the credentials Key Vault is not configured")).toBeTruthy();
+    expect(screen.getByText("the credentials Key Vault is not configured")).toBeTruthy();
+    expect(screen.queryByText(/Your credentials cannot be shown/)).toBeNull();
     expect(screen.queryByRole("list", { name: "Connections" })).toBeNull();
   });
 
@@ -2185,7 +2186,7 @@ describe("the Assistant's ticket and Confluence defaults", () => {
       githubProject: null,
       confluence: null
     });
-    expect(screen.getByText("Your changes are saved")).toBeTruthy();
+    expect(screen.getByText("Your ticket and Confluence defaults are saved")).toBeTruthy();
     expect(refresh).toHaveBeenCalled();
   });
 
@@ -2265,7 +2266,7 @@ describe("the Assistant's ticket and Confluence defaults", () => {
       githubProject: { owner: "hmcts", number: 12, title: "CFT roadmap" },
       confluence: null
     });
-    expect(screen.getByText("Your changes are saved")).toBeTruthy();
+    expect(screen.getByText("Your ticket and Confluence defaults are saved")).toBeTruthy();
   });
 
   it("should drop the Project when the person clears the repository it went with", async () => {
@@ -3267,11 +3268,12 @@ describe("the settings dialog's one Save", () => {
     fireEvent.change(notes(), { target: { value: "# Me\u0007" } });
     await saveSettings();
 
-    expect(
-      within(screen.getByRole("dialog"))
-        .getAllByRole("alert")
-        .map((alert) => alert.textContent)
-    ).toEqual([refused, "Claude.md could not be saved. Your changes are kept, and each section says why."]);
+    const alerts = within(screen.getByRole("dialog")).getAllByRole("alert");
+    expect(alerts[0]?.textContent).toBe(refused);
+    expect([...(alerts[1]?.querySelectorAll("p") ?? [])].map((line) => line.textContent)).toEqual([
+      "Opus saved as the model for your chats",
+      "Claude.md could not be saved. Your changes are kept, and each section says why."
+    ]);
     expect(notes().value).toBe("# Me\u0007");
     expect(within(nav()).getByRole("tab", { name: "Claude.md, unsaved changes" })).toBeTruthy();
     expect(within(nav()).getByRole("tab", { name: "Assistant" })).toBeTruthy();
@@ -3337,5 +3339,113 @@ describe("a saved template's row", () => {
     expect(item.className).toContain("items-center");
     expect(remove.closest("form")?.className).toContain("flex");
     expect(remove.className).toBe(edit.className);
+  });
+});
+
+describe("the settings dialog's drafts across a save and the address", () => {
+  function page(theme: string): HTMLElement {
+    const root = document.createElement("div");
+    root.className = "asst-theme";
+    root.dataset.theme = theme;
+    document.body.append(root);
+    return root;
+  }
+
+  // The cookie and the page are the saved appearance from then on, so picking the one the dialog opened on is a change.
+  it("should measure a change against the appearance last saved, and discard back to it, when one has been saved", async () => {
+    const root = page("system");
+    open({ theme: "system" });
+
+    fireEvent.click(screen.getByRole("radio", { name: "Dark" }));
+    await saveSettings();
+    fireEvent.click(screen.getByRole("radio", { name: "Match my device" }));
+
+    expect(saveButton().hasAttribute("disabled")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+    expect(root.dataset.theme).toBe("dark");
+    expect(screen.getByRole("radio", { name: "Dark" }).getAttribute("aria-checked")).toBe("true");
+    expect(document.cookie).toContain("asst_theme=dark");
+    root.remove();
+  });
+
+  // Until the page's refresh lands its props still say the old size, so the dialog's own save is what is stored.
+  it("should show a saved size as the one the person is on before the page's refresh lands", async () => {
+    open({ size: size({ rollsPod: false }) }, "Assistant");
+
+    fireEvent.change(screen.getByLabelText("Choose a size"), { target: { value: "medium" } });
+    await saveSettings();
+
+    expect((screen.getByLabelText("Choose a size") as HTMLSelectElement).value).toBe("medium");
+    expect(panel().textContent).toContain("This is the size you are on.");
+    expect(saveButton().hasAttribute("disabled")).toBe(true);
+  });
+
+  it("should ask before the back button closes a dialog the address opened with changes in it", async () => {
+    window.history.replaceState(null, "", "/assistant");
+    window.history.pushState(null, "", "/assistant?settings=claude-md");
+    const { rerender } = render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} claudeMd={claudeMd()} />);
+    await act(async () => undefined);
+    fireEvent.change(notes(), { target: { value: "# Me" } });
+
+    window.history.replaceState(null, "", "/assistant");
+    rerender(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} claudeMd={claudeMd()} />);
+
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(screen.getByText("Discard your unsaved changes to Claude.md?")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Discard and close" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("should keep the changes when the address names another section while the dialog is open", async () => {
+    window.history.replaceState(null, "", "/assistant?settings=claude-md");
+    const props = { now: Date.now(), connections: data(ALL_SIGNED_IN), claudeMd: claudeMd(), model: modelSetting() };
+    const { rerender } = render(<AssistantSettings {...props} />);
+    await act(async () => undefined);
+    fireEvent.change(notes(), { target: { value: "# Me" } });
+
+    window.history.pushState(null, "", "/assistant?settings=assistant");
+    await act(async () => {
+      rerender(<AssistantSettings {...props} />);
+    });
+
+    expect(selected()).toBe("Assistant");
+    expect(within(nav()).getByRole("tab", { name: "Claude.md, unsaved changes" })).toBeTruthy();
+    go("Claude.md");
+    expect(notes().value).toBe("# Me");
+  });
+
+  it("should stay open, asking nothing, when the person tries to close it while a save is in flight", async () => {
+    let finish: (value: { ok: true; confirmation: string }) => void = () => undefined;
+    const pending = vi.fn<FormAction>(() => new Promise((resolve) => (finish = resolve)));
+    open({ claudeMd: claudeMd({ save: pending }) }, "Claude.md");
+    fireEvent.change(notes(), { target: { value: "# Me" } });
+    fireEvent.click(saveButton());
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.click(screen.getAllByRole("button", { name: "Close settings" })[0] as HTMLElement);
+
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(screen.queryByText(/Discard your unsaved changes/)).toBeNull();
+    await act(async () => finish({ ok: true, confirmation: SAVED }));
+    expect(screen.getByRole("status").textContent).toBe(SAVED);
+  });
+
+  it("should acknowledge every setting a save stored, in its action's words or its own", async () => {
+    const root = page("system");
+    open({
+      theme: "system",
+      model: modelSetting({ save: vi.fn(async () => ({ ok: true as const, confirmation: "Opus saved as the model for your chats" })) })
+    });
+
+    fireEvent.click(screen.getByRole("radio", { name: "Dark" }));
+    go("Assistant");
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: MODEL_FORM })).getByRole("radio", { name: /^Opus/ }));
+    await saveSettings();
+
+    expect([...screen.getByRole("status").querySelectorAll("p")].map((line) => line.textContent)).toEqual([
+      "Your appearance is saved",
+      "Opus saved as the model for your chats"
+    ]);
+    root.remove();
   });
 });

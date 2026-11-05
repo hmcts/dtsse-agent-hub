@@ -128,7 +128,7 @@ function Change({ size, rollsPod }: Readonly<{ size: string; rollsPod: boolean }
         ))}
       </select>
       <p className="text-[13px] text-asst-muted">
-        {chosen.value === size
+        {chosen.unchanged
           ? "This is the size you are on."
           : rollsPod
             ? `Saving changes it to ${chosen.value} and restarts your assistant. Your chats are all kept and carry on where they left off.`

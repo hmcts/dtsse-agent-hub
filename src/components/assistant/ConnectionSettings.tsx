@@ -1,12 +1,13 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { useEffect, useId, useRef, useState } from "react";
+import { useId, useState } from "react";
 import { type ConnectionRow, connectionRows } from "@/assistant/connection-rows";
 import type { Connection, ConnectionState, MicrosoftConnection, ModelAccess } from "@/assistant/connections";
 import { offersConnect } from "@/assistant/connections";
 import type { SavedCredential } from "@/assistant/saved-credentials";
 import { ActionForm, type FormAction } from "@/components/ActionForm";
+import { useFocusOnMount } from "@/components/assistant/useFocusOnMount";
 import { CONNECT_OUTCOME_PARAMETER, CONNECT_OUTCOME_WORDS, isConnectOutcome } from "@/microsoft/microsoft";
 import type { ModelRoute } from "@/viewer/identity";
 
@@ -85,15 +86,6 @@ function connectWords(name: string, stored: boolean, running: boolean): { questi
       : `Have your assistant ask you to sign in to ${name}? It is stopped, so it asks when it next starts.`,
     confirm: `Connect ${name}`
   };
-}
-
-/** Focuses the element the ref is on as it mounts, so the person is taken to the question they opened. */
-function useFocusOnMount<T extends HTMLElement>() {
-  const ref = useRef<T>(null);
-  useEffect(() => {
-    ref.current?.focus();
-  }, []);
-  return ref;
 }
 
 /**
@@ -326,7 +318,6 @@ export function hasConnections(view: ConnectionsView): boolean {
 export function Connections({ view }: { view: ConnectionsView }) {
   // Said by the section rather than the row: a removed credential that cannot be pasted has no row once it is gone.
   const [said, setSaid] = useState<string | null>(null);
-  const unavailable = view.tokens?.unavailable ?? view.unavailable;
   const rows = connectionRows(view.list, view.access, view.tokens?.rows ?? [], view.microsoft, view.route);
   return (
     <section aria-labelledby="assistant-settings-connections" className="flex flex-col gap-2.5">
@@ -352,7 +343,9 @@ export function Connections({ view }: { view: ConnectionsView }) {
           </p>
         </div>
       )}
-      {unavailable === null ? null : <p className="text-[13px] text-asst-error">Your credentials cannot be shown: {unavailable}</p>}
+      {/* Two reads that fail apart: the sign-ins the assistant asks for, and the credentials saved for the person. */}
+      {view.unavailable === null ? null : <p className="text-[13px] text-asst-error">{view.unavailable}</p>}
+      {view.tokens?.unavailable == null ? null : <p className="text-[13px] text-asst-error">Your credentials cannot be shown: {view.tokens.unavailable}</p>}
       {said === null ? null : (
         <p role="status" className="text-[13px] text-asst-ok">
           {said}

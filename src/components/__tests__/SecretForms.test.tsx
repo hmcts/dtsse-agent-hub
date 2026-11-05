@@ -136,7 +136,7 @@ describe("a form carrying a credential", () => {
 
   // The text itself is sent by the dialog's Save, which calls the action rather than submitting a form.
   it("should post the CLAUDE.md reset form", () => {
-    const drafts = { drafts: {}, errors: {}, saves: 0, change: vi.fn(), settle: vi.fn() };
+    const drafts = { drafts: {}, saved: {}, errors: {}, saves: 0, change: vi.fn(), settle: vi.fn() };
     const { container } = render(
       <SettingsDrafts.Provider value={drafts}>
         <ClaudeMd claudeMd={{ settings: { available: true, stored: true, text: "# Me", updatedAt: "2026-10-05T09:00:00.000Z" }, save: ok(), reset: ok() }} />

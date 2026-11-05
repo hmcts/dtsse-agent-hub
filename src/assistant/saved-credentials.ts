@@ -9,8 +9,9 @@ import type { ModelRoute } from "../viewer/identity.ts";
  * The settings paste a Jenkins API token, and a Claude token while any agent of the person's is on their own licence.
  * GitHub, the Azure token cache and the Atlassian sign-in only ever come from a pod's own device-code sign-in here, and
  * a Microsoft 365 connection only from the hub's own Connect, so they are removed here and never pasted. Every stored
- * one can be removed. `saveCredential` still accepts a GitHub token, because the published client's boot script tells
- * an owner whose device sign-in did not finish to paste one; the settings offer no box for it.
+ * one can be removed. `saveCredential` still accepts a GitHub token, which the boot script of a client published before
+ * the settings dropped the box tells an owner to paste when their device sign-in does not finish; the settings offer no
+ * box for it.
  */
 
 /** The kinds the section is about: every credential but the CLAUDE.md and the git identity, which have sections of their own. */

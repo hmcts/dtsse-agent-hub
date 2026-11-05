@@ -281,49 +281,6 @@ export async function setDesired(
   });
 }
 
-/**
- * A new size, bumping `generation` and `pod_generation` so the orchestrator applies the StatefulSet again with its
- * resources: a running pod is replaced, which ends the sessions on it, and a stopped one comes back at the new size.
- * Refused only while the agent is being deleted, per `sizeChangeRefusal`; someone other than the owner is told there
- * is no such agent.
- *
- * **The launch token goes too**, as it does on a stop, a restart, a takeover and the sweep's auto-stop. Keeping it had
- * two costs: the outgoing pod and its replacement would both hold a *valid* one over the handover, since nothing
- * mints a replacement while the agent is `running` with a token it still has; and the old supervisor would go on
- * reporting, putting the figures this just cleared back — with the **old size's limit** beside them, which is a
- * ceiling the warning would then measure against.
- *
- * It is not free. The pod's last Atlassian cache sync runs on SIGTERM through this token, so a sign-in refreshed in
- * the minutes before a resize is lost and the owner signs in to Jira again. What makes that acceptable is that it was
- * already lost on every other replacement the hub initiates — all four of those paths drop the token — so this makes
- * resize and plugins consistent with them rather than inventing a new loss. Narrowing it is its own change.
- */
-export async function setVirtualAgentSize(prisma: PrismaClient, actorOid: string, id: string, size: unknown, now: Date = new Date()): Promise<VirtualAgentRow> {
-  return (await changeVirtualAgentPod(prisma, actorOid, id, { size }, now)).row;
-}
-
-/**
- * The plugins the pod loads, any of those `VIRTUAL_AGENT_PLUGINS` offers. A name no longer offered may be kept, so the
- * owner can save other changes without first unticking it, but not added. An always-on plugin is never offered or
- * stored. A save whose ticked names are the ones the row already has writes nothing, even to a row that still holds an
- * always-on name: every claim adds it anyway (`podPlugins`), and leaving it is what a hub rolled back to one that
- * stores it reads. Only a change rewrites the names, without any always-on one. A change bumps `generation` and
- * `pod_generation`, as a resize does, so the orchestrator applies the StatefulSet with the new `AGENT_HUB_PLUGINS`:
- * a running pod is replaced, and the conversation continues on its disk; a stopped one picks the change up when it
- * next starts. Refused while the agent is being deleted; someone other than the owner is told there is no such agent.
- *
- * The launch token and the memory report go with it, for the reasons under `setVirtualAgentSize`.
- */
-export async function setVirtualAgentPlugins(
-  prisma: PrismaClient,
-  actorOid: string,
-  id: string,
-  plugins: unknown,
-  now: Date = new Date()
-): Promise<VirtualAgentRow> {
-  return (await changeVirtualAgentPod(prisma, actorOid, id, { plugins }, now)).row;
-}
-
 /** What `changeVirtualAgentPod` is asked to change. A key that is absent is left as it is. */
 export interface PodChange {
   size?: unknown;
@@ -337,12 +294,30 @@ export interface PodChanged {
 }
 
 /**
- * A new size, new plugins, or both, in one write. Both are in the pod template, so either bumps `generation` and
- * `pod_generation` and replaces a running pod. Both in one transaction bump them once, so a person who changes both in
- * the settings dialog has their pod replaced once: two writes would replace it twice whenever the orchestrator applied
- * between them. The rules are those `setVirtualAgentSize` and `setVirtualAgentPlugins` describe: a bad size or plugin
- * writes nothing, either is refused while the agent is being deleted, and someone other than the owner is told there
- * is no such agent.
+ * A new size, new plugins, or both, in one write. Both are in the pod template, so a change bumps `generation` and
+ * `pod_generation` and the orchestrator applies the StatefulSet again: a running pod is replaced, which ends the
+ * sessions on it while the conversations continue on its disk, and a stopped one comes back with the change. Both in
+ * one transaction bump them once, so a person who changes both in the settings dialog has their pod replaced once:
+ * two writes would replace it twice whenever the orchestrator applied between them. A bad size or plugin writes
+ * nothing, either is refused while the agent is being deleted (`sizeChangeRefusal`), and someone other than the owner
+ * is told there is no such agent.
+ *
+ * **Plugins** are any of those `VIRTUAL_AGENT_PLUGINS` offers. A name no longer offered may be kept, so the owner can
+ * save other changes without first unticking it, but not added. An always-on plugin is never offered or stored. Ticked
+ * names that are the ones the row already has write nothing, even to a row that still holds an always-on name: every
+ * claim adds it anyway (`podPlugins`), and leaving it is what a hub rolled back to one that stores it reads. Only a
+ * change rewrites the names, without any always-on one.
+ *
+ * **The launch token goes too**, as it does on a stop, a restart, a takeover and the sweep's auto-stop. Keeping it had
+ * two costs: the outgoing pod and its replacement would both hold a *valid* one over the handover, since nothing
+ * mints a replacement while the agent is `running` with a token it still has; and the old supervisor would go on
+ * reporting, putting the memory figures this clears back — with the **old size's limit** beside them, which is a
+ * ceiling the warning would then measure against.
+ *
+ * It is not free. The pod's last Atlassian cache sync runs on SIGTERM through this token, so a sign-in refreshed in
+ * the minutes before a change is lost and the owner signs in to Jira again. What makes that acceptable is that it was
+ * already lost on every other replacement the hub initiates — all four of those paths drop the token — so this is
+ * consistent with them rather than a new loss. Narrowing it is its own change.
  */
 export async function changeVirtualAgentPod(
   prisma: PrismaClient,

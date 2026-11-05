@@ -621,3 +621,19 @@ describe("a removed credential's confirmation", () => {
     expect(screen.getByRole("status").textContent).toBe("Your Atlassian sign-in is removed");
   });
 });
+
+describe("the Connections section when the hub cannot read", () => {
+  // Two reads that fail apart, so each says its own reason in its own words.
+  it("should say why the sign-ins and why the saved credentials cannot be shown when both fail", async () => {
+    await open(
+      {
+        connections: { route: "own-licence", kinds: ["github"], statuses: [], logins: [], unavailable: "the sign-ins could not be read" },
+        tokens: { ...tokens(), rows: [], unavailable: "no credential store is configured" }
+      },
+      "Connections"
+    );
+
+    expect(screen.getByText("the sign-ins could not be read")).toBeTruthy();
+    expect(screen.getByText("Your credentials cannot be shown: no credential store is configured")).toBeTruthy();
+  });
+});

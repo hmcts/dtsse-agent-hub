@@ -8,15 +8,7 @@ import { putCredential } from "../../src/credentials/store.ts";
 import { byCodePoint } from "../../src/topics/slug.ts";
 import { APPLY_FAILURES_BEFORE_FAILED } from "../../src/virtual-agents/lifecycle.ts";
 import { MAX_VIRTUAL_AGENTS_PER_USER } from "../../src/virtual-agents/limits.ts";
-import {
-  createVirtualAgent,
-  reportPorts,
-  reportStatus,
-  setDesired,
-  setVirtualAgentPlugins,
-  setVirtualAgentSize,
-  type VirtualAgentRow
-} from "../../src/virtual-agents/store.ts";
+import { changeVirtualAgentPod, createVirtualAgent, reportPorts, reportStatus, setDesired, type VirtualAgentRow } from "../../src/virtual-agents/store.ts";
 import { neededCredentials } from "../../src/virtual-agents/views.ts";
 import { insertAgent, insertUser, prisma } from "./database.ts";
 import { jsonOf } from "./routes.ts";
@@ -322,7 +314,7 @@ describe("a virtual agent's size", () => {
     await observe(id, { generation: stopping.generation, replicas_ready: 0 });
     expect((await row(id)).status).toBe("stopped");
 
-    await setVirtualAgentSize(prisma, ALICE.oid, id, "large");
+    await changeVirtualAgentPod(prisma, ALICE.oid, id, { size: "large" });
 
     expect((await claim()).find((entry) => entry.id === id)).toMatchObject({ size: "large", desired: "stopped", generation: stopping.generation + 1 });
   });
@@ -344,14 +336,14 @@ describe("a virtual agent's size", () => {
   it("should refuse someone other than the owner as if there were no such agent", async () => {
     const agent = await create(ALICE, "pcs-api");
 
-    await expect(setVirtualAgentSize(prisma, BOB.oid, agent.id, "large")).rejects.toMatchObject({ status: 404 });
-    await expect(setVirtualAgentSize(prisma, ALICE.oid, agent.id, "huge")).rejects.toMatchObject({ status: 400 });
+    await expect(changeVirtualAgentPod(prisma, BOB.oid, agent.id, { size: "large" })).rejects.toMatchObject({ status: 404 });
+    await expect(changeVirtualAgentPod(prisma, ALICE.oid, agent.id, { size: "huge" })).rejects.toMatchObject({ status: 400 });
   });
 
   it("should leave the generation alone when the size is the one it has", async () => {
     const agent = await create(ALICE, "pcs-api");
 
-    expect(await setVirtualAgentSize(prisma, ALICE.oid, agent.id, "small")).toMatchObject({ generation: agent.generation });
+    expect((await changeVirtualAgentPod(prisma, ALICE.oid, agent.id, { size: "small" })).row).toMatchObject({ generation: agent.generation });
   });
 });
 
@@ -468,13 +460,13 @@ describe("a virtual agent's plugins", () => {
   it("should clear every plugin when none are ticked", async () => {
     const agent = await createWith(["pcs", "wa"]);
 
-    expect(await setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, [])).toMatchObject({ plugins: [], generation: agent.generation + 1 });
+    expect((await changeVirtualAgentPod(prisma, ALICE.oid, agent.id, { plugins: [] })).row).toMatchObject({ plugins: [], generation: agent.generation + 1 });
   });
 
   it("should refuse a plugin the hub does not offer with 400, and change nothing", async () => {
     const agent = await create(ALICE, "pcs-api");
 
-    await expect(setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, ["civil"])).rejects.toMatchObject({ status: 400 });
+    await expect(changeVirtualAgentPod(prisma, ALICE.oid, agent.id, { plugins: ["civil"] })).rejects.toMatchObject({ status: 400 });
     expect(await row(agent.id)).toMatchObject({ plugins: [], generation: agent.generation });
   });
 
@@ -485,14 +477,14 @@ describe("a virtual agent's plugins", () => {
     const agent = await createWith(["pcs"]);
     vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "Not A Plugin Name");
 
-    expect(await setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, [])).toMatchObject({ plugins: [] });
+    expect((await changeVirtualAgentPod(prisma, ALICE.oid, agent.id, { plugins: [] })).row).toMatchObject({ plugins: [] });
   });
 
   it("should fail to tick a plugin while the hub's plugin configuration is malformed", async () => {
     const agent = await createWith(["pcs"]);
     vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "Not A Plugin Name");
 
-    await expect(setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, ["pcs", "dtsse"])).rejects.toThrow("VIRTUAL_AGENT_PLUGINS");
+    await expect(changeVirtualAgentPod(prisma, ALICE.oid, agent.id, { plugins: ["pcs", "dtsse"] })).rejects.toThrow("VIRTUAL_AGENT_PLUGINS");
     expect((await row(agent.id)).plugins).toEqual(["pcs"]);
   });
 
@@ -500,10 +492,10 @@ describe("a virtual agent's plugins", () => {
     const agent = await createWith(["pcs"]);
     vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "dtsse");
 
-    expect((await setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, ["pcs", "dtsse"])).plugins).toEqual(["dtsse", "pcs"]);
+    expect((await changeVirtualAgentPod(prisma, ALICE.oid, agent.id, { plugins: ["pcs", "dtsse"] })).row.plugins).toEqual(["dtsse", "pcs"]);
     expect((await claim()).find((entry) => entry.id === agent.id)).toMatchObject({ plugins: ["dtsse", "m365", "m365-files", "pcs", "slides"] });
-    await setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, ["dtsse"]);
-    await expect(setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, ["dtsse", "pcs"])).rejects.toMatchObject({ status: 400 });
+    await changeVirtualAgentPod(prisma, ALICE.oid, agent.id, { plugins: ["dtsse"] });
+    await expect(changeVirtualAgentPod(prisma, ALICE.oid, agent.id, { plugins: ["dtsse", "pcs"] })).rejects.toMatchObject({ status: 400 });
   });
 
   it("should create an agent without slides when the request names it, since every pod loads it", async () => {
@@ -551,7 +543,10 @@ describe("a virtual agent's plugins", () => {
   it("should neither add nor refuse slides when the form sends it for an agent that has none stored", async () => {
     const agent = await createWith(["pcs"]);
 
-    expect(await setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, ["pcs", "slides"])).toMatchObject({ plugins: ["pcs"], generation: agent.generation });
+    expect((await changeVirtualAgentPod(prisma, ALICE.oid, agent.id, { plugins: ["pcs", "slides"] })).row).toMatchObject({
+      plugins: ["pcs"],
+      generation: agent.generation
+    });
   });
 
   it("should store every offered plugin when the most an agent may have are ticked and the row still holds slides", async () => {
@@ -560,7 +555,7 @@ describe("a virtual agent's plugins", () => {
     const agent = await createWith([]);
     await prisma.virtualAgent.update({ where: { id: agent.id }, data: { plugins: ["slides"] } });
 
-    expect((await setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, many)).plugins).toEqual([...many].sort(byCodePoint));
+    expect((await changeVirtualAgentPod(prisma, ALICE.oid, agent.id, { plugins: many })).row.plugins).toEqual([...many].sort(byCodePoint));
     expect((await row(agent.id)).plugins).toEqual([...many].sort(byCodePoint));
   });
 
@@ -568,13 +563,16 @@ describe("a virtual agent's plugins", () => {
     const agent = await createWith([]);
     vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "Not A Plugin Name");
 
-    expect(await setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, ["slides"])).toMatchObject({ plugins: [], generation: agent.generation });
+    expect((await changeVirtualAgentPod(prisma, ALICE.oid, agent.id, { plugins: ["slides"] })).row).toMatchObject({
+      plugins: [],
+      generation: agent.generation
+    });
   });
 
   it("should refuse someone other than the owner as if there were no such agent", async () => {
     const agent = await create(ALICE, "pcs-api");
 
-    await expect(setVirtualAgentPlugins(prisma, BOB.oid, agent.id, ["pcs"])).rejects.toMatchObject({ status: 404 });
+    await expect(changeVirtualAgentPod(prisma, BOB.oid, agent.id, { plugins: ["pcs"] })).rejects.toMatchObject({ status: 404 });
     expect((await row(agent.id)).plugins).toEqual([]);
   });
 
@@ -582,7 +580,7 @@ describe("a virtual agent's plugins", () => {
     const agent = await create(ALICE, "pcs-api");
     await setDesired(prisma, ALICE.oid, agent.id, "deleted");
 
-    await expect(setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, ["pcs"])).rejects.toMatchObject({ status: 409 });
+    await expect(changeVirtualAgentPod(prisma, ALICE.oid, agent.id, { plugins: ["pcs"] })).rejects.toMatchObject({ status: 409 });
   });
 
   it("should refuse the plugins action when virtual agents are off", async () => {

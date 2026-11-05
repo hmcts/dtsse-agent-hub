@@ -22,7 +22,16 @@ import { type AssistantSharing, Sharing } from "@/components/assistant/SharingSe
 import type { AssistantSize } from "@/components/assistant/SizeSettings";
 import { type AssistantTemplates, Templates } from "@/components/assistant/TemplateSettings";
 import { keepTheme, showTheme, ThemeChoice } from "@/components/assistant/ThemeSwitch";
-import { type DraftKey, type Drafts, SettingsDrafts, type SettingsDraftsContext, useSettingsDraft } from "@/components/assistant/useSettingsDraft";
+import { useFocusOnMount } from "@/components/assistant/useFocusOnMount";
+import {
+  type DraftKey,
+  type DraftStore,
+  SettingsDrafts,
+  type SettingsDraftsContext,
+  useDraftStore,
+  useSettingsDraft,
+  type Values
+} from "@/components/assistant/useSettingsDraft";
 import { useEndSession } from "@/components/live/HubStream";
 import { sessionEnded } from "@/components/live/session";
 import type { ActionResult } from "@/web/action";
@@ -518,9 +527,16 @@ function focusNavigation(dialog: HTMLElement | null): void {
 
 type SaveResult = ActionResult<object & { confirmation?: string }>;
 
-/** One server action the Save runs, and the drafts it stores. */
+/** What the last save said: a line for each thing it stored, then what it could not; `ok` when it stored them all. */
+interface Said {
+  ok: boolean;
+  lines: { ok: boolean; text: string }[];
+}
+
+/** One server action the Save runs, the drafts it stores, and what is said for it when its action confirms nothing. */
 interface SaveTask {
   keys: DraftKey[];
+  done: string;
   run: () => Promise<SaveResult>;
 }
 
@@ -540,21 +556,22 @@ function formOf(fields: Record<string, string | readonly string[]>): FormData {
  * transaction and so replaces a running pod once for the two. The appearance is the browser's own cookie and needs no
  * server.
  */
-function saveTasks(view: SettingsView, dirty: Drafts): SaveTask[] {
+function saveTasks(view: SettingsView, dirty: Values): SaveTask[] {
   const tasks: SaveTask[] = [];
   const { theme, model, size, plugins, claudeMd, git, exports } = dirty;
   if (theme !== undefined) {
     tasks.push({
       keys: ["theme"],
+      done: "Your appearance is saved",
       run: async () => {
-        keepTheme(theme.value);
+        keepTheme(theme);
         return { ok: true };
       }
     });
   }
   if (model !== undefined && view.model !== undefined) {
     const save = view.model.save;
-    tasks.push({ keys: ["model"], run: () => save(formOf({ model: model.value })) });
+    tasks.push({ keys: ["model"], done: "Your model is saved", run: () => save(formOf({ model })) });
   }
   const pod = view.size ?? view.plugins;
   const sizing = size !== undefined && view.size !== undefined ? size : undefined;
@@ -562,53 +579,41 @@ function saveTasks(view: SettingsView, dirty: Drafts): SaveTask[] {
   if (pod !== undefined && (sizing !== undefined || plugging !== undefined)) {
     tasks.push({
       keys: [...(sizing === undefined ? [] : ["size" as const]), ...(plugging === undefined ? [] : ["plugins" as const])],
+      done: "Your assistant's size and plugins are saved",
       run: () =>
         pod.save(
           formOf({
             id: pod.assistantId,
-            ...(sizing === undefined ? {} : { size: sizing.value }),
-            ...(plugging === undefined ? {} : { pluginsChosen: "true", plugins: plugging.value })
+            ...(sizing === undefined ? {} : { size: sizing }),
+            ...(plugging === undefined ? {} : { pluginsChosen: "true", plugins: plugging })
           })
         )
     });
   }
   if (claudeMd !== undefined && view.claudeMd !== undefined) {
     const save = view.claudeMd.save;
-    tasks.push({ keys: ["claudeMd"], run: () => save(formOf({ value: claudeMd.value })) });
+    tasks.push({ keys: ["claudeMd"], done: "Your CLAUDE.md is saved", run: () => save(formOf({ value: claudeMd })) });
   }
   if (git !== undefined && view.git !== undefined) {
     const save = view.git.save;
-    tasks.push({ keys: ["git"], run: () => save(formOf(git.value)) });
+    tasks.push({ keys: ["git"], done: "Your git identity is saved", run: () => save(formOf(git)) });
   }
   if (exports !== undefined && view.exports !== undefined) {
     const save = view.exports.save;
-    tasks.push({ keys: ["exports"], run: () => save(exports.value) });
+    tasks.push({ keys: ["exports"], done: "Your ticket and Confluence defaults are saved", run: () => save(exports) });
   }
   return tasks;
-}
-
-/** The drafts still to be saved: a draft an action has settled, or a save has stored, is shown but not sent again. */
-function dirtyDrafts(drafts: Drafts): Drafts {
-  return Object.fromEntries(Object.entries(drafts).filter(([, draft]) => draft?.dirty === true));
 }
 
 /**
  * What saving does to a pod that is up: a change of size or of plugins replaces it, and the Save asks once, naming
  * both, before it does.
  */
-function restartsFor(view: SettingsView, dirty: Drafts): string[] {
+function restartsFor(view: SettingsView, dirty: Values): string[] {
   return [
     dirty.size !== undefined && view.size?.view.rollsPod === true ? "size" : null,
     dirty.plugins !== undefined && view.plugins?.podRunning === true ? "plugins" : null
   ].filter((change): change is string => change !== null);
-}
-
-function useFocusOnMount<T extends HTMLElement>() {
-  const ref = useRef<T>(null);
-  useEffect(() => {
-    ref.current?.focus();
-  }, []);
-  return ref;
 }
 
 const PRIMARY = "shrink-0 rounded-[10px] bg-asst-accent px-3.5 py-2 text-[13px] font-semibold text-asst-ink hover:bg-asst-accent-hover disabled:opacity-40";
@@ -662,7 +667,7 @@ function Footer({
   onCancel
 }: {
   unsaved: readonly string[];
-  said: { ok: boolean; lines: string[] } | null;
+  said: Said | null;
   saving: boolean;
   asking: "restart" | "close" | null;
   restarts: readonly string[];
@@ -696,9 +701,11 @@ function Footer({
       {said === null ? (
         <p className="min-w-0 flex-1 text-[13px] text-asst-muted">{unsaved.length === 0 ? null : `Unsaved changes in ${inWords(unsaved)}.`}</p>
       ) : (
-        <div role={said.ok ? "status" : "alert"} className={`min-w-0 flex-1 text-[13px] ${said.ok ? "text-asst-ok" : "text-asst-error"}`}>
+        <div role={said.ok ? "status" : "alert"} className="min-w-0 flex-1 text-[13px]">
           {said.lines.map((line) => (
-            <p key={line}>{line}</p>
+            <p key={line.text} className={line.ok ? "text-asst-ok" : "text-asst-error"}>
+              {line.text}
+            </p>
           ))}
         </div>
       )}
@@ -720,10 +727,23 @@ function Footer({
  * Escape, the close button or the page behind it, puts focus back on the cog, which is what `onClose` is for. Closing
  * with changes still to save asks first.
  *
- * The drafts are held here rather than by the sections, because only the open section is rendered and a draft kept in
- * one would go as the person moved to another. A section never opened has no draft, and so adds nothing to a save.
+ * The drafts are `store`'s, which `AssistantSettings` holds (see `useDraftStore`). A section never opened has no
+ * draft, and so adds nothing to a save.
  */
-function Dialog({ view, onClose, initial: named = null }: { view: SettingsView; onClose: () => void; initial?: string | null }) {
+function Dialog({
+  view,
+  store,
+  closeAsked,
+  onClose,
+  initial: named = null
+}: {
+  view: SettingsView;
+  store: DraftStore;
+  /** Counts the closes asked of the dialog from outside it, by the address losing its section, which it answers as it would its own. */
+  closeAsked: number;
+  onClose: () => void;
+  initial?: string | null;
+}) {
   const initial = named === null ? null : (SECTION_ALIASES.get(named) ?? named);
   const panel = useRef<HTMLDivElement>(null);
   const saveButton = useRef<HTMLButtonElement>(null);
@@ -732,13 +752,10 @@ function Dialog({ view, onClose, initial: named = null }: { view: SettingsView; 
   const router = useRouter();
   const endSession = useEndSession();
   const items = SECTIONS.filter((item) => item.shown(view));
-  const [drafts, setDrafts] = useState<Drafts>({});
-  const [errors, setErrors] = useState<Partial<Record<DraftKey, string>>>({});
-  const [saves, setSaves] = useState(0);
   const [saving, setSaving] = useState(false);
   const [asking, setAsking] = useState<"restart" | "close" | null>(null);
-  const [said, setSaid] = useState<{ ok: boolean; lines: string[] } | null>(null);
-  const dirty = dirtyDrafts(drafts);
+  const [said, setSaid] = useState<Said | null>(null);
+  const dirty = store.drafts;
   const unsavedIn = (item: SettingsSection) => (item.drafts ?? []).some((key) => dirty[key] !== undefined);
   const unsaved = items.filter(unsavedIn).map((item) => item.label);
   const restarts = restartsFor(view, dirty);
@@ -755,43 +772,30 @@ function Dialog({ view, onClose, initial: named = null }: { view: SettingsView; 
   const showing = useRef({ wide, section });
 
   const context: SettingsDraftsContext = {
-    drafts,
-    errors,
-    saves,
+    ...store,
     change: (key, value, stored) => {
-      setDrafts((last) => {
-        const { [key]: _, ...rest } = last;
-        return stored ? rest : { ...rest, [key]: { value, dirty: true } };
-      });
-      setErrors(({ [key]: _, ...rest }) => rest);
+      store.change(key, value, stored);
       setSaid(null);
       // A different change is a different question, so a restart already being asked about stops being the one asked.
       setAsking((last) => (last === "restart" ? null : last));
-    },
-    settle: (key, value) => {
-      setDrafts((last) => ({ ...last, [key]: { value, dirty: false } }));
-      setErrors(({ [key]: _, ...rest }) => rest);
     }
   };
-
-  /** Puts the page back to the appearance it had, when a choice was only being shown and not kept. */
-  const unshown = useRef(() => {});
-  unshown.current = () => {
-    if (dirty.theme !== undefined) {
-      showTheme(view.theme);
-    }
-  };
-  useEffect(() => () => unshown.current(), []);
 
   function discard(): void {
-    unshown.current();
-    setDrafts((last) => Object.fromEntries(Object.entries(last).filter(([, draft]) => draft?.dirty !== true)));
-    setErrors({});
+    // A picked appearance is shown before it is saved, so throwing it away puts back the one last kept.
+    if (dirty.theme !== undefined) {
+      showTheme(store.saved.theme ?? view.theme);
+    }
+    store.discard();
     setSaid(null);
     setAsking(null);
   }
 
+  // Nothing closes the dialog while a save is in flight: its answers, and any refusal, are said in it.
   function requestClose(): void {
+    if (saving) {
+      return;
+    }
     if (Object.keys(dirty).length > 0) {
       setAsking("close");
       return;
@@ -824,28 +828,28 @@ function Dialog({ view, onClose, initial: named = null }: { view: SettingsView; 
     }
     const stored = results.filter(({ result }) => result?.ok === true).flatMap(({ task }) => task.keys);
     const refused = results.flatMap(({ task, result }) => (result === null || result.ok ? [] : task.keys.map((key) => [key, result.error] as const)));
-    // A draft the person changed again while the save was in flight is theirs still to save.
-    setDrafts((last) =>
-      Object.fromEntries(
-        Object.entries(last).map(([key, draft]) => [
-          key,
-          stored.includes(key as DraftKey) && draft === sent[key as DraftKey] ? { ...draft, dirty: false } : draft
-        ])
-      )
-    );
-    setErrors(Object.fromEntries(refused));
+    store.commit(sent, stored, refused);
     if (stored.length > 0) {
-      setSaves((count) => count + 1);
       router.refresh();
     }
-    const confirmations = results.flatMap(({ result }) => (result?.ok === true && result.confirmation ? [result.confirmation] : []));
+    // Every task that stored something is acknowledged, in its action's words where it has them.
+    const lines = results.flatMap(({ task, result }) => (result?.ok === true ? [{ ok: true, text: result.confirmation || task.done }] : []));
     const notSaved = items.filter((item) => (item.drafts ?? []).some((key) => refused.some(([refusedKey]) => refusedKey === key))).map((item) => item.label);
     setSaid(
       refused.length === 0
-        ? { ok: true, lines: confirmations.length === 0 ? ["Your changes are saved"] : confirmations }
-        : { ok: false, lines: [`${inWords(notSaved)} could not be saved. Your changes are kept, and each section says why.`] }
+        ? { ok: true, lines }
+        : { ok: false, lines: [...lines, { ok: false, text: `${inWords(notSaved)} could not be saved. Your changes are kept, and each section says why.` }] }
     );
   }
+
+  const askedBefore = useRef(closeAsked);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: answers a new ask only, with the dialog as it stands then
+  useEffect(() => {
+    if (askedBefore.current !== closeAsked) {
+      askedBefore.current = closeAsked;
+      requestClose();
+    }
+  }, [closeAsked]);
 
   useEffect(() => {
     // The navigation, so what has focus says where in the settings the person is rather than only how to leave.
@@ -971,6 +975,8 @@ function Dialog({ view, onClose, initial: named = null }: { view: SettingsView; 
             saving={saving}
             asking={asking}
             restarts={restarts}
+            // The size's read is the one count of open chats the page passes. It is absent only where there is no
+            // agent of the person's to count for, and no count reads as whatever the assistant is working on.
             openChats={view.size?.view.openChats ?? 0}
             saveButton={saveButton}
             onSave={(confirmed) => void save(confirmed)}
@@ -1046,10 +1052,20 @@ export function AssistantSettings({
   useEffect(() => {
     setNow(Date.now());
   }, []);
-  // The appearance the switch starts from. `ThemeSwitch` writes the person's choice to the cookie and to the theme
+  // The appearance the switch starts from. The dialog's Save writes the person's choice to the cookie and to the theme
   // root, not to the server tree, so `theme` keeps the value the page was rendered with and the dialog, which
   // unmounts when it closes, would otherwise reopen showing a choice the page has moved on from.
   const [shownTheme, setShownTheme] = useState<Theme>(theme);
+  const store = useDraftStore();
+  const [closeAsked, setCloseAsked] = useState(0);
+  // A picked appearance is shown before it is saved, so a page that goes while one is unsaved puts back the one kept.
+  const unshown = useRef(() => {});
+  unshown.current = () => {
+    if (store.drafts.theme !== undefined) {
+      showTheme(store.saved.theme ?? shownTheme);
+    }
+  };
+  useEffect(() => () => unshown.current(), []);
 
   const list = connections(data, checklistState, now);
   // Only ever a status, so it is left out of the warning and of the badge: the sign-in it is read from is in `list`
@@ -1079,7 +1095,10 @@ export function AssistantSettings({
 
   function show(section: string | null): void {
     setNow(Date.now());
-    setShownTheme(shownNow());
+    // Read only as the dialog opens: one already open may be showing an appearance the person has not saved.
+    if (!open) {
+      setShownTheme(shownNow());
+    }
     setOpening(section);
     setOpen(true);
   }
@@ -1088,7 +1107,9 @@ export function AssistantSettings({
   // read on the client, so opening and closing the dialog never re-renders the page on the server. Opened after the
   // first render rather than in it, because the dialog is portalled into the theme root and the server has no document
   // to find one in. Shut by the address too, so the back button closes a dialog the address opened, with focus back on
-  // the cog as any other close leaves it; one the cog opened is left alone.
+  // the cog as any other close leaves it, and asks first as any other close does when there are changes to save; one
+  // the cog opened is left alone. A second section named while it is open remounts the dialog there, and the drafts,
+  // which are held here, go with it.
   // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the address alone, since `show` reads the page as it stands when the address changes
   useEffect(() => {
     if (addressed !== null) {
@@ -1096,12 +1117,12 @@ export function AssistantSettings({
       show(addressed);
     } else if (fromAddress.current) {
       fromAddress.current = false;
-      setOpen(false);
-      cog.current?.focus();
+      setCloseAsked((count) => count + 1);
     }
   }, [addressed]);
 
   function close(): void {
+    store.reset();
     setOpen(false);
     cog.current?.focus();
     // Replaced rather than navigated, which Next keeps `useSearchParams` in step with, so a reload does not open the
@@ -1166,6 +1187,8 @@ export function AssistantSettings({
               // Remounted for a section the address names while the dialog is already open, so it opens on that one.
               key={opening ?? ""}
               initial={opening}
+              store={store}
+              closeAsked={closeAsked}
               onClose={close}
             />,
             themeRoot()
