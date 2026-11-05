@@ -151,13 +151,18 @@ export interface Shown {
 
 /**
  * An answer as the commands print it: the notice first, so a reader meets it before any of the content. It is always
- * valid JSON within `MAX_OUTPUT`. One over it drops whole items from the end of a list, saying how many as `omitted`,
- * or cuts the longest text in an object (a mail body) with `capText`; either way `truncated` is `true`. One the command
- * knows is only part of what there is says so with `more` as well.
+ * valid JSON within `MAX_OUTPUT`, indented when that fits and on one line when only that does, since indenting a long
+ * list costs a large share of it. One over it even then drops whole items from the end of a list, saying how many as
+ * `omitted`, or cuts the longest text in an object (a mail body) with `capText`; either way `truncated` is `true`. One
+ * the command knows is only part of what there is says so with `more` as well.
  */
 export function answer(data: unknown, partial: Shown = {}): string {
   const extra = partial.more === true ? { truncated: true, more: true } : {};
-  const print = (shown: unknown, cut: Record<string, unknown> = {}) => JSON.stringify({ notice: UNTRUSTED, ...extra, ...cut, data: shown }, null, 2);
+  const indented = JSON.stringify({ notice: UNTRUSTED, ...extra, data }, null, 2);
+  if (indented.length <= MAX_OUTPUT) {
+    return indented;
+  }
+  const print = (shown: unknown, cut: Record<string, unknown> = {}) => JSON.stringify({ notice: UNTRUSTED, ...extra, ...cut, data: shown });
   const whole = print(data);
   if (whole.length <= MAX_OUTPUT) {
     return whole;
@@ -306,6 +311,7 @@ type Message = {
   id: string;
   subject?: string;
   from?: Person;
+  sender?: Person;
   receivedDateTime?: string;
   bodyPreview?: string;
   body?: { content?: string };
@@ -337,13 +343,48 @@ const TEXT_BODY = { Prefer: 'outlook.body-content-type="text"' };
  * from it. Graph has no property of its own for "replied", and reading this one needs only Mail.Read.
  */
 export const LAST_VERB = "Integer 0x1081";
-/** Its values for a reply and a reply to all; 104 is a forward, which is not an answer to the sender. */
-const REPLY_VERBS = new Set(["102", "103"]);
+/**
+ * Its values for a reply (102), a reply to all (103) and a forward (104). A forward counts as acted on: the property
+ * holds only the last of them, so a message replied to and then forwarded reads as 104.
+ */
+const ACTED_VERBS = new Set(["102", "103", "104"]);
 
-/** Whether a message has been replied to, from `LAST_VERB`; false when it was never acted on. */
-export function repliedTo(message: Pick<Message, "singleValueExtendedProperties">): boolean {
+/** Whether a message has been replied to or forwarded, from `LAST_VERB`; false when it was never acted on. */
+export function repliedOrForwarded(message: Pick<Message, "singleValueExtendedProperties">): boolean {
   const verb = (message.singleValueExtendedProperties ?? []).find((property) => property.id?.toLowerCase() === LAST_VERB.toLowerCase());
-  return verb?.value !== undefined && REPLY_VERBS.has(verb.value);
+  return verb?.value !== undefined && ACTED_VERBS.has(verb.value);
+}
+
+/** At most `max` characters, ending in an ellipsis when cut: for a list's short fields, where `capText`'s note would cost more than it saves. */
+function clip(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+}
+
+/** The most of a subject, sender and preview `mail list --since` prints, so `MAX_SINCE` messages fit in `MAX_OUTPUT`. */
+const SINCE_SUBJECT = 80;
+const SINCE_FROM = 60;
+const SINCE_PREVIEW = 80;
+
+/**
+ * A message as `mail list --since` prints it: what a window's triage needs and no more, so a whole window fits in one
+ * answer. In place of the recipient lists, `toMe` says whether one of the owner's `addresses` is in `to`, null when
+ * there are none to compare.
+ */
+function windowSummary(message: Message, owner: readonly string[]) {
+  const mine = new Set(owner.map((address) => address.toLowerCase()));
+  return {
+    id: message.id,
+    subject: clip(message.subject ?? "", SINCE_SUBJECT),
+    from: clip(who(message.from) ?? "", SINCE_FROM) || null,
+    toMe: mine.size === 0 ? null : (message.toRecipients ?? []).some((person) => mine.has(person.emailAddress?.address?.toLowerCase() ?? "")),
+    received: message.receivedDateTime ?? null,
+    read: message.isRead === true,
+    flagged: message.flag?.flagStatus === "flagged",
+    focused: message.inferenceClassification === undefined ? null : message.inferenceClassification === "focused",
+    replied: repliedOrForwarded(message),
+    preview: clip(message.bodyPreview ?? "", SINCE_PREVIEW),
+    link: message.webLink ?? null
+  };
 }
 
 function mailSummary(message: Message) {
@@ -421,12 +462,16 @@ export type Me = Identity & { addresses: string[] };
  * The sender of the person's newest sent message, or null when there is none or Graph would not say: throttled,
  * unavailable, or no mailbox (a 404). Only a token Graph refuses outright (401) is an error, since every other command
  * would fail on it too.
+ *
+ * `sender` is the mailbox that sent it and `from` whom it was sent as: they differ for a message the person sent on
+ * behalf of someone else, where `from` is that other person, so `sender` is read and `from` only when it is missing.
  */
 async function newestSender(graph: Graph): Promise<{ name: string | null; address: string | null } | null> {
   try {
-    const sent = await graph.json<List<Message>>("/me/mailFolders/sentitems/messages?$top=1&$select=from&$orderby=sentDateTime desc");
-    const from = sent.value[0]?.from?.emailAddress;
-    return from === undefined ? null : { name: from.name || null, address: from.address || null };
+    const sent = await graph.json<List<Message>>("/me/mailFolders/sentitems/messages?$top=1&$select=sender,from&$orderby=sentDateTime desc");
+    const newest = sent.value[0];
+    const by = newest?.sender?.emailAddress?.address ? newest.sender.emailAddress : newest?.from?.emailAddress;
+    return by === undefined ? null : { name: by.name || null, address: by.address || null };
   } catch (error) {
     if (error instanceof GraphError && error.status !== 401) {
       return null;
@@ -442,15 +487,18 @@ async function newestSender(graph: Graph): Promise<{ name: string | null; addres
  * `addresses` holds both where they differ, as mail sent to the sign-in name reaches the same mailbox. The profile
  * would say all of this, but reading it needs User.Read, which the connection does not ask for.
  */
-async function me({ graph, token }: Ask): Promise<string> {
+async function whoIs(graph: Graph, token: MicrosoftTokenResponse): Promise<Me> {
   const claimed = tokenIdentity(token.access_token);
   const sender = await newestSender(graph);
   const address = sender?.address ?? claimed.address;
   const addresses = [address, claimed.address].filter(
     (candidate, index, all): candidate is string => candidate !== null && all.findIndex((other) => other?.toLowerCase() === candidate.toLowerCase()) === index
   );
-  const identity: Me = { id: claimed.id, name: claimed.name ?? sender?.name ?? null, address, addresses };
-  return answer(identity);
+  return { id: claimed.id, name: claimed.name ?? sender?.name ?? null, address, addresses };
+}
+
+async function me({ graph, token }: Ask): Promise<string> {
+  return answer(await whoIs(graph, token));
 }
 
 type Ask = { graph: Graph; rest: string[]; flags: Record<string, string>; cli: Cli; token: MicrosoftTokenResponse };
@@ -462,23 +510,26 @@ function need(rest: string[], count: number, what: string): string[] {
   return rest;
 }
 
-async function mail({ graph, rest, flags }: Ask): Promise<string> {
+async function mail({ graph, rest, flags, token }: Ask): Promise<string> {
   const [action, ...words] = rest;
   const top = topOf(flags.top);
   if (action === "list") {
     const folder = flags.folder ?? "inbox";
     const filter = mailFilter(flags);
-    // A window is listed whole, up to MAX_SINCE, unless --top asks for fewer: newest first, a capped list of a busy
-    // window would lose its oldest day.
-    const cap = flags.since !== undefined && flags.top === undefined ? MAX_SINCE : top;
     const replied = `&$expand=${encodeURIComponent(`singleValueExtendedProperties($filter=id eq ${odata(LAST_VERB)})`)}`;
-    const { items, more } = await pages<Message>(
-      graph,
-      `/me/mailFolders/${seg(folder)}/messages?$top=${Math.min(cap, MAX_TOP)}&$select=${MAIL_FIELDS}${filter}&$orderby=receivedDateTime desc${replied}`,
-      cap
-    );
+    const listing = (count: number) =>
+      `/me/mailFolders/${seg(folder)}/messages?$top=${count}&$select=${MAIL_FIELDS}${filter}&$orderby=receivedDateTime desc${replied}`;
+    if (flags.since === undefined) {
+      const list = await graph.json<List<Message>>(listing(top));
+      return answer(list.value.map((message) => ({ ...mailSummary(message), replied: repliedOrForwarded(message) })));
+    }
+    // A window is listed whole, up to MAX_SINCE, unless --top asks for fewer: newest first, a capped list of a busy
+    // window would lose its oldest day. Graph's messages take a $top of up to 1000, so one page of the whole cap is
+    // asked for, and further pages are followed only if Graph sends fewer.
+    const cap = flags.top === undefined ? MAX_SINCE : top;
+    const [{ items, more }, owner] = await Promise.all([pages<Message>(graph, listing(cap), cap), whoIs(graph, token)]);
     return answer(
-      items.map((message) => ({ ...mailSummary(message), replied: repliedTo(message) })),
+      items.map((message) => windowSummary(message, owner.addresses)),
       { more }
     );
   }
@@ -523,6 +574,7 @@ type Event = {
   end?: { dateTime?: string; timeZone?: string };
   organizer?: Person;
   location?: { displayName?: string };
+  isAllDay?: boolean;
   isOnlineMeeting?: boolean;
   onlineMeeting?: { joinUrl?: string } | null;
   bodyPreview?: string;
@@ -538,10 +590,21 @@ export function isoTime(value: string, flag: string): string {
   return new Date(time).toISOString();
 }
 
+/**
+ * An event's `start` and `end`, and `isAllDay`. A timed event's are UTC times, as the `Prefer` header asks. An all-day
+ * event's are calendar dates, `end` the day after its last: Graph gives them as midnight in the zone the header names,
+ * which converted from UTC to UK time in summer would land on the evening of the day before, so the time is dropped.
+ */
+export function eventTimes(event: Pick<Event, "start" | "end" | "isAllDay">): { start: string | null; end: string | null; isAllDay: boolean } {
+  const allDay = event.isAllDay === true;
+  const at = (time: string | undefined) => (time === undefined ? null : allDay ? time.slice(0, 10) : time);
+  return { start: at(event.start?.dateTime), end: at(event.end?.dateTime), isAllDay: allDay };
+}
+
 async function calendar({ graph, flags }: Ask, now: number): Promise<string> {
   const from = flags.from === undefined ? new Date(now).toISOString() : isoTime(flags.from, "from");
   const to = flags.to === undefined ? new Date(now + 7 * 24 * 3600 * 1000).toISOString() : isoTime(flags.to, "to");
-  const fields = "id,subject,start,end,organizer,location,isOnlineMeeting,onlineMeeting,bodyPreview,webLink";
+  const fields = "id,subject,start,end,isAllDay,organizer,location,isOnlineMeeting,onlineMeeting,bodyPreview,webLink";
   const { items, more } = await pages<Event>(
     graph,
     `/me/calendarView?startDateTime=${encodeURIComponent(from)}&endDateTime=${encodeURIComponent(to)}&$top=${MAX_TOP}&$select=${fields}&$orderby=start/dateTime`,
@@ -552,8 +615,7 @@ async function calendar({ graph, flags }: Ask, now: number): Promise<string> {
     items.map((event) => ({
       id: event.id,
       subject: event.subject ?? "",
-      start: event.start?.dateTime ?? null,
-      end: event.end?.dateTime ?? null,
+      ...eventTimes(event),
       organizer: who(event.organizer),
       location: event.location?.displayName ?? null,
       joinUrl: event.isOnlineMeeting ? (event.onlineMeeting?.joinUrl ?? null) : null,

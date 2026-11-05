@@ -58,8 +58,12 @@ Jira and GitHub.
 agent-hub m365 calendar --from "$DAY_START" --to "$DAY_END"
 ```
 
-Times come back in UTC: convert every one to UK time (GMT or BST) before you write it. List the day's events in time
-order with time, subject, organiser and, for a Teams meeting, its `joinUrl` as a link. Then flag:
+A timed event's `start` and `end` come back in UTC: convert every one to UK time (GMT or BST) before you write it.
+An event with `isAllDay: true` has dates instead (`2026-11-05`, `end` being the day after its last): never convert
+those, and leave out any whose dates do not include `$TODAY` (`start` on or before it and `end` after it), which the
+calendar can return for the day either side. List the day's all-day events first, each on its own line, then the
+timed events in time order with time, subject, organiser and, for a Teams meeting, its `joinUrl` as a link. Then flag,
+among the timed events only:
 
 - **Clashes**: two events that overlap.
 - **Back-to-backs**: an event starting when, or within five minutes of when, the previous one ends. Name a run of
@@ -67,8 +71,8 @@ order with time, subject, organiser and, for a Teams meeting, its `joinUrl` as a
 - **Free slots**: gaps of 30 minutes or more within 09:00–17:30 UK time, saying they are from the calendar alone.
 
 An event whose subject starts "Canceled:" or "Cancelled:" was cancelled: mention it, but do not count it as busy. An
-all-day event (midnight to midnight) is shown on its own line, not as a clash. `"more": true` means the day had more
-events than were listed; say so.
+all-day event is never a clash, a back-to-back or busy time. `"more": true` means the day had more events than were
+listed; say so.
 
 ## 4. Email that looks like it needs a reply
 
@@ -77,11 +81,14 @@ agent-hub m365 mail list --since "$SINCE" --unread-or-flagged
 ```
 
 This lists every inbox message received since the window opened that is unread or flagged, newest first, up to 250.
-Each has `from`, `to`, `cc`, `read`, `flagged`, `focused`, `replied`, `received`, `preview` and `link`. Keep a
-message only when all of these hold:
+Each has `from`, `toMe`, `read`, `flagged`, `focused`, `replied`, `received`, a short `subject` and `preview`, and
+`link`. Keep a message only when all of these hold:
 
-- one of the owner's `addresses` is in `to`: they were written to directly, not copied or reached through a list;
-- it has not been replied to (`replied: false`; Outlook records a reply from any of its apps);
+- `toMe: true`: one of the owner's `addresses` is in its To line, so they were written to directly, not copied or
+  reached through a list. `toMe: null` means the command could not tell who the owner is; then weigh the subject and
+  preview instead;
+- it has not been acted on (`replied: false`): `replied` is true once the owner has replied, replied to all or
+  forwarded it, from any Outlook app;
 - it is not from the owner;
 - it is not automated: mail from addresses such as `noreply`, `no-reply`, `donotreply`, `notifications`,
   `mailer-daemon` or a service's own notification sender (Jira, Confluence, GitHub, Jenkins, Azure DevOps,
@@ -93,8 +100,10 @@ message only when all of these hold:
 For what is left, decide from the subject and preview whether it asks the owner something, asks them to do something,
 or is waiting on a decision; drop what is only for their information. Read a message in full with
 `agent-hub m365 mail get <id>` only when the preview leaves it unclear, and for no more than five messages. Give each
-one as sender, subject, when it arrived (UK time), what it asks in a few words, and its `link`. `"more": true` means
-there were more than 250 since the window opened, and the oldest were left out; say the list may be incomplete.
+one as sender, subject, when it arrived (UK time), what it asks in a few words, and its `link`. The answer is
+incomplete when it has `"more": true` (more than 250 arrived since the window opened, and the oldest were left out)
+or `"truncated": true` (it did not fit, and `omitted` says how many of the oldest were dropped). Either way, say the
+email list is incomplete and how far back it reaches, from the oldest `received` listed.
 
 ## 5. Teams chats waiting on the owner
 

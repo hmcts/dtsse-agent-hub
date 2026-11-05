@@ -10,6 +10,7 @@ import { AssistantMarkdown } from "@/components/assistant/AssistantMarkdown";
 import { AssistantRefresh } from "@/components/assistant/AssistantRefresh";
 import { AssistantShell, SidebarToggle } from "@/components/assistant/AssistantShell";
 import { ProductSelect } from "@/components/assistant/ProductSelect";
+import type { ActionResult } from "@/web/action";
 
 const refresh = vi.fn();
 const push = vi.fn();
@@ -324,6 +325,42 @@ describe("AssistantShell", () => {
       "that could not be done; check your connection and try again"
     );
     expect(screen.getByRole("menuitem", { name: /Morning briefing/ }).hasAttribute("disabled")).toBe(false);
+  });
+
+  it.each([
+    ["opened a chat", { ok: true, id: "new-chat" }],
+    ["was refused", { ok: false, error: "Your assistant needs you to sign in first." }]
+  ] satisfies [string, ActionResult<{ id: string }>][])(
+    "should neither navigate nor show an error when the menu was dismissed before the briefing start it was waiting on %s",
+    async (_, answer) => {
+      let settle: (value: ActionResult<{ id: string }>) => void = () => undefined;
+      const start = vi.fn(() => new Promise<ActionResult<{ id: string }>>((resolve) => (settle = resolve)));
+      render(shell({ briefing: true, start }));
+      fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: /Morning briefing/ }));
+
+      fireEvent.keyDown(document, { key: "Escape" });
+      await act(async () => settle(answer));
+      fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
+
+      expect(push).not.toHaveBeenCalled();
+      expect(within(screen.getByRole("menu", { name: "Workflows" })).queryByRole("alert")).toBeNull();
+    }
+  );
+
+  it("should neither navigate nor show an error when the menu was dismissed before the briefing start it was waiting on rejected", async () => {
+    let fail: (reason: unknown) => void = () => undefined;
+    const start = vi.fn(() => new Promise<ActionResult<{ id: string }>>((_, reject) => (fail = reject)));
+    render(shell({ briefing: true, start }));
+    fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Morning briefing/ }));
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await act(async () => fail(new TypeError("Failed to fetch")));
+    fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
+
+    expect(push).not.toHaveBeenCalled();
+    expect(within(screen.getByRole("menu", { name: "Workflows" })).queryByRole("alert")).toBeNull();
   });
 
   it("should close the workflows menu and return focus to the plus when Escape is pressed", () => {

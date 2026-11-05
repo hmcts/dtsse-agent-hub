@@ -129,13 +129,15 @@ export async function assistantSummary(db: Database, assistant: VirtualAgentRow,
 }
 
 /**
- * The skills the assistant's pod reports, as the newest of its sessions to report in gave them: the same list the
+ * The skills the assistant's pod reports, as the newest of its sessions to report any gave them: the same list the
  * composer's "/" menu offers in that session's chat. Every session on a pod loads the plugins the pod booted with, so
- * the newest stands for the pod running now. Empty until a session has registered.
+ * the newest stands for the pod running now. A conversation's agent is created with no skills and a fresh heartbeat
+ * before its session registers, so a row with none is passed over rather than read as a pod that has none. Empty
+ * until a session has reported its skills.
  */
 export async function podSkills(db: Database, assistant: Pick<VirtualAgentRow, "id" | "ownerOid">): Promise<Skill[]> {
   const newest = await db.agent.findFirst({
-    where: { ownerOid: assistant.ownerOid, virtualAgentId: assistant.id },
+    where: { ownerOid: assistant.ownerOid, virtualAgentId: assistant.id, NOT: { skills: { equals: [] } } },
     orderBy: { lastHeartbeatAt: "desc" },
     select: { skills: true }
   });

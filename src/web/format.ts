@@ -42,31 +42,32 @@ function parse(iso: string): Date | undefined {
   return Number.isNaN(date.getTime()) ? undefined : date;
 }
 
-/** The UK calendar day as days since the epoch, so two instants either side of a clock change compare by date. */
-function ukDay(date: Date | number): number {
-  const parts = CALENDAR_DAY.formatToParts(date);
-  const part = (type: Intl.DateTimeFormatPartTypes): number => Number(parts.find((candidate) => candidate.type === type)?.value);
-  return Date.UTC(part("year"), part("month") - 1, part("day")) / DAY_MS;
+/** The parts `format` gives an instant, looked up by type: "" for one it does not give. */
+function partsOf(format: Intl.DateTimeFormat, date: Date | number): (type: Intl.DateTimeFormatPartTypes) => string {
+  const parts = format.formatToParts(date);
+  return (type) => parts.find((candidate) => candidate.type === type)?.value ?? "";
 }
 
-function partOf(parts: Intl.DateTimeFormatPart[], type: Intl.DateTimeFormatPartTypes): string {
-  return parts.find((candidate) => candidate.type === type)?.value ?? "";
+/** The UK calendar day as days since the epoch, so two instants either side of a clock change compare by date. */
+function ukDay(date: Date | number): number {
+  const part = partsOf(CALENDAR_DAY, date);
+  return Date.UTC(Number(part("year")), Number(part("month")) - 1, Number(part("day"))) / DAY_MS;
 }
 
 /** The UK calendar day as `YYYY-MM-DD`. */
 export function ukIsoDate(date: Date | number): string {
-  const parts = CALENDAR_DAY.formatToParts(date);
-  return `${partOf(parts, "year")}-${partOf(parts, "month").padStart(2, "0")}-${partOf(parts, "day").padStart(2, "0")}`;
+  const part = partsOf(CALENDAR_DAY, date);
+  return `${part("year")}-${part("month").padStart(2, "0")}-${part("day").padStart(2, "0")}`;
 }
 
 /** The UK calendar day as a person reads it, "Thursday 5 November": joined from its parts, so no locale's comma. */
 export function ukLongDate(date: Date | number): string {
-  const parts = LONG_DAY.formatToParts(date);
-  return `${partOf(parts, "weekday")} ${partOf(parts, "day")} ${partOf(parts, "month")}`;
+  const part = partsOf(LONG_DAY, date);
+  return `${part("weekday")} ${part("day")} ${part("month")}`;
 }
 
 function ukYear(date: Date | number): string {
-  return CALENDAR_DAY.formatToParts(date).find((part) => part.type === "year")?.value ?? "";
+  return partsOf(CALENDAR_DAY, date)("year");
 }
 
 /** "29 Sept, 15:05", with the year when it is not this year's. */

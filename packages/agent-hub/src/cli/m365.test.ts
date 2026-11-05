@@ -9,6 +9,7 @@ import {
   answer,
   capText,
   drivePath,
+  eventTimes,
   graphUrl,
   htmlToText,
   isoTime,
@@ -20,7 +21,7 @@ import {
   MAX_TOP,
   m365Command,
   readCapped,
-  repliedTo,
+  repliedOrForwarded,
   searchHits,
   TOKEN_MARGIN_MS,
   tokenFile,
@@ -355,6 +356,41 @@ describe("m365 files search", () => {
   });
 });
 
+describe("eventTimes", () => {
+  it("should keep a timed event's UTC times when it is not all day", () => {
+    expect(eventTimes({ start: { dateTime: "2026-07-01T08:30:00.0000000" }, end: { dateTime: "2026-07-01T09:00:00.0000000" } })).toEqual({
+      start: "2026-07-01T08:30:00.0000000",
+      end: "2026-07-01T09:00:00.0000000",
+      isAllDay: false
+    });
+  });
+
+  it("should give an all-day event's dates, not midnight UTC, when it is all day", () => {
+    expect(eventTimes({ isAllDay: true, start: { dateTime: "2026-07-01T00:00:00.0000000" }, end: { dateTime: "2026-07-02T00:00:00.0000000" } })).toEqual({
+      start: "2026-07-01",
+      end: "2026-07-02",
+      isAllDay: true
+    });
+  });
+});
+
+describe("m365 calendar", () => {
+  it("should ask Graph for isAllDay and times in UTC, and print whether each event is all day", async () => {
+    const fetchImpl = graphAnswering({
+      value: [
+        { id: "e1", subject: "Leave", isAllDay: true, start: { dateTime: "2026-07-01T00:00:00.0000000" }, end: { dateTime: "2026-07-02T00:00:00.0000000" } }
+      ]
+    });
+    const { cli, out } = cliWith(vi.fn(async () => TOKEN));
+
+    await fresh(fetchImpl as unknown as typeof fetch)(cli, ["calendar", "--from", "2026-06-30T23:00:00Z", "--to", "2026-07-01T23:00:00Z"]);
+
+    expect(askedFor(fetchImpl).searchParams.get("$select")?.split(",")).toContain("isAllDay");
+    expect(((fetchImpl.mock.calls[0]?.[1]?.headers ?? {}) as Record<string, string>).Prefer).toBe('outlook.timezone="UTC"');
+    expect(JSON.parse(out.join("")).data).toEqual([expect.objectContaining({ id: "e1", start: "2026-07-01", end: "2026-07-02", isAllDay: true })]);
+  });
+});
+
 describe("m365 calendar paging", () => {
   it("should follow Graph's next-page links and say there is more when it stops at its cap", async () => {
     const page = (n: number, next: boolean) => ({
@@ -449,16 +485,20 @@ describe("credentials for a Microsoft 365 connection", () => {
   });
 });
 
-describe("repliedTo", () => {
+describe("repliedOrForwarded", () => {
   it("should be true when Outlook recorded a reply or a reply to all", () => {
-    expect(repliedTo({ singleValueExtendedProperties: [{ id: LAST_VERB, value: "102" }] })).toBe(true);
-    expect(repliedTo({ singleValueExtendedProperties: [{ id: "integer 0x1081", value: "103" }] })).toBe(true);
+    expect(repliedOrForwarded({ singleValueExtendedProperties: [{ id: LAST_VERB, value: "102" }] })).toBe(true);
+    expect(repliedOrForwarded({ singleValueExtendedProperties: [{ id: "integer 0x1081", value: "103" }] })).toBe(true);
   });
 
-  it("should be false when the message was only forwarded or never acted on", () => {
-    expect(repliedTo({ singleValueExtendedProperties: [{ id: LAST_VERB, value: "104" }] })).toBe(false);
-    expect(repliedTo({ singleValueExtendedProperties: [] })).toBe(false);
-    expect(repliedTo({})).toBe(false);
+  it("should be true when the last thing done was a forward, which is all a reply then a forward leaves", () => {
+    expect(repliedOrForwarded({ singleValueExtendedProperties: [{ id: LAST_VERB, value: "104" }] })).toBe(true);
+  });
+
+  it("should be false when the message was never acted on", () => {
+    expect(repliedOrForwarded({ singleValueExtendedProperties: [] })).toBe(false);
+    expect(repliedOrForwarded({ singleValueExtendedProperties: [{ id: LAST_VERB, value: "0" }] })).toBe(false);
+    expect(repliedOrForwarded({})).toBe(false);
   });
 });
 
@@ -502,11 +542,35 @@ describe("m365 me", () => {
     const url = askedFor(fetchImpl);
     expect(url.pathname).toBe("/v1.0/me/mailFolders/sentitems/messages");
     expect(url.searchParams.get("$top")).toBe("1");
+    expect(url.searchParams.get("$select")?.split(",")).toEqual(expect.arrayContaining(["sender", "from"]));
     expect(JSON.parse(out.join("")).data).toEqual({
       id: "o-1",
       name: "Alice S",
       address: "Alice.Smith@justice.gov.uk",
       addresses: ["Alice.Smith@justice.gov.uk", "alice@x.onmicrosoft.com"]
+    });
+  });
+
+  it("should take the address of the mailbox that sent it when the newest sent message was sent on behalf of someone else", async () => {
+    const onBehalf = {
+      value: [
+        {
+          id: "s1",
+          from: { emailAddress: { name: "Head of Service", address: "head.of.service@justice.gov.uk" } },
+          sender: { emailAddress: { name: "Alice Smith", address: "alice.smith@justice.gov.uk" } }
+        }
+      ]
+    };
+    const token = { ...TOKEN, access_token: jwt({ oid: "o-1", upn: "alice@x.onmicrosoft.com" }) };
+    const { cli, out } = cliWith(vi.fn(async () => token));
+
+    await fresh(graphAnswering(onBehalf) as unknown as typeof fetch)(cli, ["me"]);
+
+    expect(JSON.parse(out.join("")).data).toEqual({
+      id: "o-1",
+      name: "Alice Smith",
+      address: "alice.smith@justice.gov.uk",
+      addresses: ["alice.smith@justice.gov.uk", "alice@x.onmicrosoft.com"]
     });
   });
 
@@ -562,6 +626,11 @@ describe("m365 me", () => {
   });
 });
 
+/** The calls that listed the inbox, leaving out `me`'s read of sent mail that `--since` makes beside them. */
+function inboxCalls(fetchImpl: ReturnType<typeof graphAnswering>): URL[] {
+  return fetchImpl.mock.calls.map((call) => new URL(String(call[0]))).filter((url) => url.pathname.startsWith("/v1.0/me/mailFolders/inbox/"));
+}
+
 describe("m365 mail list", () => {
   const message = {
     id: "m1",
@@ -605,18 +674,26 @@ describe("m365 mail list", () => {
     expect(url.searchParams.get("$orderby")).toBe("receivedDateTime desc");
   });
 
-  it("should list the whole window over Graph's pages up to MAX_SINCE when given --since without --top", async () => {
-    const page = (n: number) => ({
-      value: Array.from({ length: n }, (_, i) => ({ id: `m${i}` })),
+  it("should ask for the whole of MAX_SINCE in one request when given --since without --top", async () => {
+    const fetchImpl = graphAnswering({ value: [] });
+    const { cli } = cliWith(vi.fn(async () => TOKEN));
+
+    await fresh(fetchImpl as unknown as typeof fetch)(cli, ["mail", "list", "--since", "2026-11-27"]);
+
+    expect(inboxCalls(fetchImpl).map((url) => url.searchParams.get("$top"))).toEqual([String(MAX_SINCE)]);
+  });
+
+  it("should follow Graph's pages up to MAX_SINCE and say there is more when Graph sends fewer per page than asked", async () => {
+    const page = {
+      value: Array.from({ length: 100 }, (_, i) => ({ id: `m${i}` })),
       "@odata.nextLink": "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?$skiptoken=x"
-    });
-    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(page(MAX_TOP))));
+    };
+    const fetchImpl = graphAnswering(page);
     const { cli, out } = cliWith(vi.fn(async () => TOKEN));
 
     await fresh(fetchImpl as unknown as typeof fetch)(cli, ["mail", "list", "--since", "2026-11-27"]);
 
-    expect(new URL(String((fetchImpl.mock.calls[0] as unknown[])[0])).searchParams.get("$top")).toBe(String(MAX_TOP));
-    expect(fetchImpl).toHaveBeenCalledTimes(MAX_SINCE / MAX_TOP);
+    expect(inboxCalls(fetchImpl)).toHaveLength(Math.ceil(MAX_SINCE / 100));
     expect(JSON.parse(out.join(""))).toMatchObject({ truncated: true, more: true });
     expect(JSON.parse(out.join("")).data).toHaveLength(MAX_SINCE);
   });
@@ -627,7 +704,64 @@ describe("m365 mail list", () => {
 
     await fresh(fetchImpl as unknown as typeof fetch)(cli, ["mail", "list", "--since", "2026-11-30", "--top", "1"]);
 
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(inboxCalls(fetchImpl).map((url) => url.searchParams.get("$top"))).toEqual(["1"]);
+  });
+
+  it("should say whether the owner was written to directly, in place of the recipient lists, when given --since", async () => {
+    const token = { ...TOKEN, access_token: jwt({ oid: "o-1", upn: "Alice@X" }) };
+    const fetchImpl = graphAnswering({ value: [message, { ...message, id: "m2", toRecipients: [{ emailAddress: { address: "team@x" } }] }] });
+    const { cli, out } = cliWith(vi.fn(async () => token));
+
+    await fresh(fetchImpl as unknown as typeof fetch)(cli, ["mail", "list", "--since", "2026-11-30"]);
+
+    const [first, second] = JSON.parse(out.join("")).data;
+    expect(first).toEqual({
+      id: "m1",
+      subject: "Can you review?",
+      from: "Bob <bob@x>",
+      toMe: true,
+      received: "2026-12-01T08:00:00Z",
+      read: false,
+      flagged: true,
+      focused: true,
+      replied: true,
+      preview: "",
+      link: null
+    });
+    expect(second).toMatchObject({ id: "m2", toMe: false });
+  });
+
+  it("should fit MAX_SINCE large messages in one answer with none omitted when given --since", async () => {
+    const id =
+      "AAMkAGVmMDEzMTM4LTZmYWUtNDdkNC1hMDZiLTU1OGY5OTZhYmY4OABGAAAAAAAiQ8W967B7TKBjgx9rVEURBwAiIsqMbYjsT5e-T7KzowPTAAAAAAEMAAAiIsqMbYjsT5e-T7KzowPTAAAYbvZaAAA=";
+    const person = (n: number) => ({
+      emailAddress: { name: `Firstname${n} Middlename-Lastname`, address: `firstname${n}.middlename-lastname@justice.gov.uk` }
+    });
+    const large = (n: number) => ({
+      id: `${id}${n}`,
+      subject: "s".repeat(400),
+      from: person(n),
+      toRecipients: Array.from({ length: 40 }, (_, i) => person(i)),
+      ccRecipients: Array.from({ length: 40 }, (_, i) => person(i)),
+      receivedDateTime: "2026-12-01T08:00:00Z",
+      bodyPreview: "p".repeat(255),
+      webLink: `https://outlook.office365.com/owa/?ItemID=${encodeURIComponent(id)}&exvsurl=1&viewmodel=ReadMessageItem`,
+      isRead: false,
+      flag: { flagStatus: "flagged" },
+      inferenceClassification: "focused",
+      singleValueExtendedProperties: [{ id: LAST_VERB, value: "104" }]
+    });
+    const fetchImpl = graphAnswering({ value: Array.from({ length: MAX_SINCE }, (_, n) => large(n)) });
+    const { cli, out } = cliWith(vi.fn(async () => TOKEN));
+
+    await fresh(fetchImpl as unknown as typeof fetch)(cli, ["mail", "list", "--since", "2026-11-30"]);
+
+    const printed = out.join("");
+    const parsed = JSON.parse(printed);
+    expect(printed.length).toBeLessThanOrEqual(MAX_OUTPUT + 1);
+    expect(parsed.truncated).toBeUndefined();
+    expect(parsed.omitted).toBeUndefined();
+    expect(parsed.data).toHaveLength(MAX_SINCE);
   });
 
   it("should ask only for unread or flagged mail, after the time it orders by, when given --unread-or-flagged", async () => {
@@ -657,14 +791,17 @@ describe("m365 mail list", () => {
     );
   });
 
-  it("should say there is more when Graph has another page past --top", async () => {
+  it("should list one page and not say it is incomplete when a plain list has more past --top", async () => {
     const fetchImpl = graphAnswering({ value: [message], "@odata.nextLink": "https://graph.microsoft.com/v1.0/me/next" });
     const { cli, out } = cliWith(vi.fn(async () => TOKEN));
 
     await fresh(fetchImpl as unknown as typeof fetch)(cli, ["mail", "list", "--top", "1"]);
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(out.join(""))).toMatchObject({ truncated: true, more: true });
+    expect(askedFor(fetchImpl).searchParams.get("$top")).toBe("1");
+    const parsed = JSON.parse(out.join(""));
+    expect(parsed.truncated).toBeUndefined();
+    expect(parsed.more).toBeUndefined();
   });
 });
 

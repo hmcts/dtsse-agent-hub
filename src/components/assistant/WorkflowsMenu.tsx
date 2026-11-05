@@ -6,12 +6,10 @@ import { useCallback, useRef, useState } from "react";
 import { briefingRequest } from "@/assistant/briefing";
 import { useDismiss } from "@/components/assistant/useDismiss";
 import type { ActionResult } from "@/web/action";
+import { ACTION_UNREACHABLE } from "@/web/action-fault";
 
 /** `startConversation`: a new chat and its first message, which is how the morning briefing is run. */
 export type StartChatAction = (input: { product: unknown; body: unknown; title?: unknown }) => Promise<ActionResult<{ id: string }>>;
-
-/** What a briefing that never reached the hub says, in the words the fork button uses for the same failure. */
-const UNREACHABLE = "that could not be done; check your connection and try again";
 
 /** One workflow the menu offers: its own page, so a link. */
 type Workflow = { href: string; label: string; hint: string };
@@ -36,27 +34,38 @@ export function WorkflowsMenu({ welsh = false, briefing = false, start }: Readon
   const [error, setError] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
+  // Which start the menu is waiting on. Closing it moves this on, so a start that answers after the person dismissed
+  // the menu neither shows an error in a menu they closed nor takes them to a chat they have moved away from.
+  const attempt = useRef(0);
   const workflows = welsh ? [WELSH, SCHEDULED] : [SCHEDULED];
 
   const close = useCallback(() => {
     if (ref.current?.contains(document.activeElement)) {
       trigger.current?.focus();
     }
+    attempt.current += 1;
     setOpen(false);
     setError(null);
   }, []);
 
   async function startBriefing(begin: StartChatAction): Promise<void> {
+    attempt.current += 1;
+    const mine = attempt.current;
     setStarting(true);
     setError(null);
     let result: ActionResult<{ id: string }>;
     try {
       result = await begin(briefingRequest(new Date()));
     } catch {
-      setError(UNREACHABLE);
+      if (attempt.current === mine) {
+        setError(ACTION_UNREACHABLE);
+      }
       return;
     } finally {
       setStarting(false);
+    }
+    if (attempt.current !== mine) {
+      return;
     }
     if (!result.ok) {
       // Left open with the reason, so the person can see why nothing opened and try again.
