@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { age, duration, fullInstant, instant } from "./format.ts";
+import { age, duration, fullInstant, instant, ukIsoDate, ukLongDate } from "./format.ts";
 
 const NOW = Date.parse("2026-09-29T14:05:00.000Z");
 
@@ -112,5 +112,25 @@ describe("duration", () => {
     [1, "1 second"]
   ])("should print %i seconds as %s when given that length", (seconds, expected) => {
     expect(duration(seconds)).toBe(expected);
+  });
+});
+
+describe("ukIsoDate", () => {
+  it("should give the UK date when UTC is still on the day before during British Summer Time", () => {
+    expect(ukIsoDate(new Date("2026-06-30T23:30:00Z"))).toBe("2026-07-01");
+  });
+
+  it("should give the same date as UTC when the UK is on GMT", () => {
+    expect(ukIsoDate(new Date("2026-11-05T23:30:00Z"))).toBe("2026-11-05");
+  });
+});
+
+describe("ukLongDate", () => {
+  it("should name the weekday, day and month without a comma when given an instant", () => {
+    expect(ukLongDate(new Date("2026-11-05T09:00:00Z"))).toBe("Thursday 5 November");
+  });
+
+  it("should name the UK's day when UTC is still on the day before", () => {
+    expect(ukLongDate(new Date("2026-06-30T23:30:00Z"))).toBe("Wednesday 1 July");
   });
 });

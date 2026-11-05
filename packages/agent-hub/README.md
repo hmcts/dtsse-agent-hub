@@ -68,8 +68,9 @@ pressed Connect for Microsoft 365 in the Assistant's settings. It gets a short-l
 virtual agent's route in a pod, the person's own otherwise — and never holds the connection itself. It keeps the token
 in memory and in a 0600 file per agent, `m365-token-<agent>.json` under the agent-hub state directory, until two
 minutes before it expires. `files search` uses Microsoft Search, which covers OneDrive, SharePoint, Teams and files
-shared with the person (`--mine` keeps to their own OneDrive); `me` says who the connection is for; `mail list` says
-whether each message is read, flagged, focused and replied to, and `--since` keeps to mail received after a time;
+shared with the person (`--mine` keeps to their own OneDrive); `me` says who the connection is for, its address from the newest sent message; `mail list`
+says whether each message is read, flagged, focused and replied to, `--since` lists all mail received after a time,
+up to 250, and `--unread-or-flagged` keeps that to unread or flagged mail;
 `chats list` gives each chat's last message and who sent it; `calendar` follows Graph's pages up to 200 events; an
 answer too long for the output cap drops whole items or cuts the longest text and stays valid JSON; and a download is
 aborted as soon as it passes 25 MB. `credentials delete microsoft` disconnects. It is

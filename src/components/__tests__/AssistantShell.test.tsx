@@ -251,8 +251,8 @@ describe("AssistantShell", () => {
     ).toEqual(["/assistant/scheduled"]);
   });
 
-  it("should offer the morning briefing first when the person has connected Microsoft 365", () => {
-    render(shell({ microsoft: true, start: vi.fn() }));
+  it("should offer the morning briefing first when the page says it is offered", () => {
+    render(shell({ briefing: true, start: vi.fn() }));
 
     fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
 
@@ -263,7 +263,7 @@ describe("AssistantShell", () => {
     ).toEqual(["Morning briefing", "Scheduled"]);
   });
 
-  it("should not offer the morning briefing when the person has not connected Microsoft 365", () => {
+  it("should not offer the morning briefing when the page does not say it is offered", () => {
     render(shell({ welsh: true, start: vi.fn() }));
 
     fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
@@ -272,7 +272,7 @@ describe("AssistantShell", () => {
   });
 
   it("should not offer the morning briefing when the page gives no way to start a chat", () => {
-    render(shell({ microsoft: true }));
+    render(shell({ briefing: true }));
 
     fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
 
@@ -283,7 +283,7 @@ describe("AssistantShell", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-11-05T07:45:00Z"));
     const start = vi.fn().mockResolvedValue({ ok: true, id: "new-chat" });
-    render(shell({ microsoft: true, start }));
+    render(shell({ briefing: true, start }));
     fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
 
     await act(async () => {
@@ -296,9 +296,9 @@ describe("AssistantShell", () => {
     expect(screen.queryByRole("menu", { name: "Workflows" })).toBeNull();
   });
 
-  it("should keep the menu open and say why when the briefing cannot start", async () => {
+  it("should keep the menu open and say why when the hub refuses to start the briefing", async () => {
     const start = vi.fn().mockResolvedValue({ ok: false, error: "Your assistant needs you to sign in first." });
-    render(shell({ microsoft: true, start }));
+    render(shell({ briefing: true, start }));
     fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
 
     await act(async () => {
@@ -307,6 +307,22 @@ describe("AssistantShell", () => {
 
     expect(push).not.toHaveBeenCalled();
     expect(within(screen.getByRole("menu", { name: "Workflows" })).getByRole("alert").textContent).toBe("Your assistant needs you to sign in first.");
+    expect(screen.getByRole("menuitem", { name: /Morning briefing/ }).hasAttribute("disabled")).toBe(false);
+  });
+
+  it("should keep the menu open and say the hub was not reached when starting the briefing rejects", async () => {
+    const start = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
+    render(shell({ briefing: true, start }));
+    fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("menuitem", { name: /Morning briefing/ }));
+    });
+
+    expect(push).not.toHaveBeenCalled();
+    expect(within(screen.getByRole("menu", { name: "Workflows" })).getByRole("alert").textContent).toBe(
+      "that could not be done; check your connection and try again"
+    );
     expect(screen.getByRole("menuitem", { name: /Morning briefing/ }).hasAttribute("disabled")).toBe(false);
   });
 

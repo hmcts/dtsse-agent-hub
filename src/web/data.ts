@@ -2,6 +2,7 @@ import "server-only";
 import { canManageVirtualAgent, canOwnerReadCredential, canReadDeck, canReadMessage, isOwner } from "../access/rules.ts";
 import { isUuid } from "../agents/store.ts";
 import { ensureAssistant, findAssistant } from "../assistant/assistant-store.ts";
+import { offersBriefing } from "../assistant/briefing.ts";
 import { conversationAgent, findConversation } from "../assistant/conversation-store.ts";
 import { isSha256 } from "../assistant/deck.ts";
 import { type DeckVersionEntry, type DeckVersionView, listDeckVersions, readDeckVersion, readVersionPptx } from "../assistant/deck-history-store.ts";
@@ -33,6 +34,7 @@ import {
   type ConversationView,
   conversationGroups,
   conversationView,
+  podSkills,
   type UnsentChat,
   unsentChat
 } from "../assistant/views.ts";
@@ -236,10 +238,11 @@ export interface AssistantHome {
   /** Its assistant has the Welsh plugin ticked, so the sidebar offers the Welsh page; read from the row, not the offer. */
   welsh: boolean;
   /**
-   * The person has connected Microsoft 365 (the `microsoft` credential is stored), so the sidebar offers the morning
-   * briefing, which reads it. A connection Microsoft then refuses is the briefing's to report, in its own section.
+   * The sidebar offers the morning briefing (`offersBriefing`): the `microsoft` credential is stored and the pod's
+   * skills (`podSkills`) include the one that runs it. A connection Microsoft then refuses is the briefing's to report,
+   * in its own section.
    */
-  microsoft: boolean;
+  briefing: boolean;
   /** Whether the page may render the chat, or only the getting-ready screen; see `chatGate`. */
   chat: ChatGate;
 }
@@ -248,8 +251,8 @@ function storedKinds(credentials: CredentialSettings): Set<CredentialKind> {
   return new Set(credentials.available ? credentials.statuses.filter((status) => status.stored).map((status) => status.kind) : []);
 }
 
-function chatGateOf(toChat: readonly CredentialKind[], credentials: CredentialSettings): ChatGate {
-  return chatGate(toChat, storedKinds(credentials), credentials.available ? null : credentials.reason);
+function chatGateOf(toChat: readonly CredentialKind[], credentials: CredentialSettings, stored = storedKinds(credentials)): ChatGate {
+  return chatGate(toChat, stored, credentials.available ? null : credentials.reason);
 }
 
 /**
@@ -287,16 +290,21 @@ function pluginSettings(assistant: { plugins: string[] }): AssistantHome["plugin
  */
 export async function openAssistant(viewer: Viewer): Promise<AssistantHome> {
   const assistant = await ensureAssistant(prisma, viewer);
-  const [credentials, conversations] = await Promise.all([credentialSettings(viewer), conversationGroups(prisma, viewer.oid)]);
-  const summary = await assistantSummary(prisma, assistant, storedKinds(credentials));
+  const [credentials, conversations, skills] = await Promise.all([
+    credentialSettings(viewer),
+    conversationGroups(prisma, viewer.oid),
+    podSkills(prisma, assistant)
+  ]);
+  const stored = storedKinds(credentials);
+  const summary = await assistantSummary(prisma, assistant, stored);
   return {
     assistant: summary,
     credentials,
     conversations,
     plugins: pluginSettings(assistant),
     welsh: hasWelshPlugin(assistant),
-    microsoft: storedKinds(credentials).has("microsoft"),
-    chat: chatGateOf(summary.toChat, credentials)
+    briefing: offersBriefing(stored, skills),
+    chat: chatGateOf(summary.toChat, credentials, stored)
   };
 }
 

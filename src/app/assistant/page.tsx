@@ -84,7 +84,7 @@ export default async function AssistantPage() {
       now={Date.now()}
       plugins={pluginSettings}
       welsh={home.welsh}
-      microsoft={home.microsoft}
+      briefing={home.briefing}
       start={startConversation}
       claudeMd={{ settings: claudeMd, save: saveClaudeMd, reset: resetClaudeMd }}
       templates={{ mine, save: saveTemplate, remove: deleteTemplate }}

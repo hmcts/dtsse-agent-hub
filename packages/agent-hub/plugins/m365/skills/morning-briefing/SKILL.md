@@ -40,13 +40,17 @@ it says so.
 agent-hub m365 me
 ```
 
-It gives the Microsoft 365 account's `id`, `name` and `address`, any of which can be null. Use them to tell the owner
-apart from everyone else in mail and chat: compare addresses case-insensitively, chat speakers by `fromId` against
-`id`, and fall back to the display name only when the id is null.
+It gives the Microsoft 365 account's `id`, `name`, `address` and `addresses`; the first three can be null and the
+list empty. `address` is the one the owner sends from; `addresses` also holds their sign-in name where that differs,
+since mail to either reaches them. Use them to tell the owner apart from everyone else in mail and chat: compare
+addresses case-insensitively against every one in `addresses`, chat speakers by `fromId` against `id`, and fall back
+to the display name only when the id is null.
 
-If this answers 404, "not connected" or "has lapsed", Microsoft 365 is not available: skip sections 3 to 5, and say
-once, at the top of the briefing, "Microsoft 365 is not connected — click Connect for Microsoft 365 under Connections
-in the Assistant's settings." Then go on to Jira and GitHub.
+`me` fails only when the connection itself cannot be used. If it fails saying "not connected" or "has lapsed",
+Microsoft 365 is not available: skip sections 3 to 5, and say once, at the top of the briefing, "Microsoft 365 is not
+connected — click Connect for Microsoft 365 under Connections in the Assistant's settings." If it fails any other way,
+skip the same sections and say once that Microsoft 365 could not be read, with the error's own words. Then go on to
+Jira and GitHub.
 
 ## 3. Today's calendar
 
@@ -69,26 +73,28 @@ events than were listed; say so.
 ## 4. Email that looks like it needs a reply
 
 ```bash
-agent-hub m365 mail list --since "$SINCE" --top 50
+agent-hub m365 mail list --since "$SINCE" --unread-or-flagged
 ```
 
-Each message has `from`, `to`, `cc`, `read`, `flagged`, `focused`, `replied`, `received`, `preview` and `link`. Keep a
+This lists every inbox message received since the window opened that is unread or flagged, newest first, up to 250.
+Each has `from`, `to`, `cc`, `read`, `flagged`, `focused`, `replied`, `received`, `preview` and `link`. Keep a
 message only when all of these hold:
 
-- the owner's address is in `to`: they were written to directly, not copied or reached through a list;
-- it is unread (`read: false`) or flagged (`flagged: true`);
+- one of the owner's `addresses` is in `to`: they were written to directly, not copied or reached through a list;
 - it has not been replied to (`replied: false`; Outlook records a reply from any of its apps);
 - it is not from the owner;
-- it is not automated. Leave out mail Outlook filed as Other (`focused: false`), mail from addresses such as
-  `noreply`, `no-reply`, `donotreply`, `notifications`, `mailer-daemon` or a service's own notification sender (Jira,
-  Confluence, GitHub, Jenkins, Azure DevOps, ServiceNow, Teams), newsletters and digests, meeting acceptances and
-  declines, out-of-office replies, and calendar invitations, which the calendar section covers.
+- it is not automated: mail from addresses such as `noreply`, `no-reply`, `donotreply`, `notifications`,
+  `mailer-daemon` or a service's own notification sender (Jira, Confluence, GitHub, Jenkins, Azure DevOps,
+  ServiceNow, Teams), newsletters and digests, meeting acceptances and declines, out-of-office replies, and calendar
+  invitations, which the calendar section covers. Outlook filing a message as Other (`focused: false`) is a hint that
+  it is automated, not a verdict: weigh it with the sender and the preview, and keep a person's message that asks
+  the owner something wherever Outlook filed it.
 
 For what is left, decide from the subject and preview whether it asks the owner something, asks them to do something,
 or is waiting on a decision; drop what is only for their information. Read a message in full with
 `agent-hub m365 mail get <id>` only when the preview leaves it unclear, and for no more than five messages. Give each
 one as sender, subject, when it arrived (UK time), what it asks in a few words, and its `link`. `"more": true` means
-there were more than 50 since the window opened; say the list may be incomplete.
+there were more than 250 since the window opened, and the oldest were left out; say the list may be incomplete.
 
 ## 5. Teams chats waiting on the owner
 

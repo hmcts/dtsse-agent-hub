@@ -10,6 +10,9 @@ import type { ActionResult } from "@/web/action";
 /** `startConversation`: a new chat and its first message, which is how the morning briefing is run. */
 export type StartChatAction = (input: { product: unknown; body: unknown; title?: unknown }) => Promise<ActionResult<{ id: string }>>;
 
+/** What a briefing that never reached the hub says, in the words the fork button uses for the same failure. */
+const UNREACHABLE = "that could not be done; check your connection and try again";
+
 /** One workflow the menu offers: its own page, so a link. */
 type Workflow = { href: string; label: string; hint: string };
 
@@ -18,14 +21,15 @@ const SCHEDULED: Workflow = { href: "/assistant/scheduled", label: "Scheduled", 
 
 /**
  * The sidebar's plus: the workflows a person can open beside their chats. Morning briefing is offered only to someone
- * who has connected Microsoft 365, which most of it reads, and is not a page: it starts a chat whose first message
- * runs the briefing, the same way the new-chat screen starts one, and opens it. Welsh translations is offered only to
- * someone whose assistant has the plugin that runs it; Scheduled is offered to everyone.
+ * who has connected Microsoft 365, which most of it reads, and whose pod has the skill that runs it; it is not a page:
+ * it starts a chat whose first message runs the briefing, the same way the new-chat screen starts one, and opens it.
+ * Welsh translations is offered only to someone whose assistant has the plugin that runs it; Scheduled is offered to
+ * everyone.
  *
  * Dismissed by Escape or a click outside, in the same shape as the chat menu: closing from the keyboard puts focus
  * back on the trigger, while a click elsewhere leaves focus where the click put it.
  */
-export function WorkflowsMenu({ welsh = false, microsoft = false, start }: Readonly<{ welsh?: boolean; microsoft?: boolean; start?: StartChatAction }>) {
+export function WorkflowsMenu({ welsh = false, briefing = false, start }: Readonly<{ welsh?: boolean; briefing?: boolean; start?: StartChatAction }>) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -42,12 +46,15 @@ export function WorkflowsMenu({ welsh = false, microsoft = false, start }: Reado
     setError(null);
   }, []);
 
-  async function briefing(begin: StartChatAction): Promise<void> {
+  async function startBriefing(begin: StartChatAction): Promise<void> {
     setStarting(true);
     setError(null);
     let result: ActionResult<{ id: string }>;
     try {
       result = await begin(briefingRequest(new Date()));
+    } catch {
+      setError(UNREACHABLE);
+      return;
     } finally {
       setStarting(false);
     }
@@ -82,12 +89,12 @@ export function WorkflowsMenu({ welsh = false, microsoft = false, start }: Reado
           aria-label="Workflows"
           className="absolute right-0 top-[calc(100%+6px)] z-30 flex w-[240px] flex-col gap-0.5 rounded-xl border border-asst-strong bg-asst-hover p-1.5 shadow-2xl"
         >
-          {microsoft && start !== undefined ? (
+          {briefing && start !== undefined ? (
             <button
               type="button"
               role="menuitem"
               disabled={starting}
-              onClick={() => void briefing(start)}
+              onClick={() => void startBriefing(start)}
               className="flex flex-col gap-0.5 rounded-lg px-2.5 py-2 text-left hover:bg-asst-active disabled:opacity-60"
             >
               <span className="text-sm">{starting ? "Starting your briefing…" : "Morning briefing"}</span>

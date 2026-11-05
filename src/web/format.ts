@@ -31,6 +31,8 @@ const FULL = new Intl.DateTimeFormat("en-GB", {
 
 const CALENDAR_DAY = new Intl.DateTimeFormat("en-GB", { timeZone: ZONE, year: "numeric", month: "numeric", day: "numeric" });
 
+const LONG_DAY = new Intl.DateTimeFormat("en-GB", { timeZone: ZONE, weekday: "long", day: "numeric", month: "long" });
+
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
@@ -45,6 +47,22 @@ function ukDay(date: Date | number): number {
   const parts = CALENDAR_DAY.formatToParts(date);
   const part = (type: Intl.DateTimeFormatPartTypes): number => Number(parts.find((candidate) => candidate.type === type)?.value);
   return Date.UTC(part("year"), part("month") - 1, part("day")) / DAY_MS;
+}
+
+function partOf(parts: Intl.DateTimeFormatPart[], type: Intl.DateTimeFormatPartTypes): string {
+  return parts.find((candidate) => candidate.type === type)?.value ?? "";
+}
+
+/** The UK calendar day as `YYYY-MM-DD`. */
+export function ukIsoDate(date: Date | number): string {
+  const parts = CALENDAR_DAY.formatToParts(date);
+  return `${partOf(parts, "year")}-${partOf(parts, "month").padStart(2, "0")}-${partOf(parts, "day").padStart(2, "0")}`;
+}
+
+/** The UK calendar day as a person reads it, "Thursday 5 November": joined from its parts, so no locale's comma. */
+export function ukLongDate(date: Date | number): string {
+  const parts = LONG_DAY.formatToParts(date);
+  return `${partOf(parts, "weekday")} ${partOf(parts, "day")} ${partOf(parts, "month")}`;
 }
 
 function ukYear(date: Date | number): string {

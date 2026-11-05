@@ -185,10 +185,10 @@ Conversations section of [`docs/agent-api.md`](docs/agent-api.md#conversations).
   ordinary message.
 - **Templates** are a person's saved prompts.
 - **The sidebar's plus** offers workflows beside the chats: Scheduled to everyone, Welsh translations to someone whose
-  assistant has the `welsh` plugin, and, once they have connected Microsoft 365, Morning briefing. That one is not a
-  page: it starts a chat on the default product whose first message runs the `m365` plugin's `morning-briefing`
-  skill (`src/assistant/briefing.ts`), which reads today's calendar, mail and Teams waiting on them, their Jira and their
-  GitHub, and opens it.
+  assistant has the `welsh` plugin, and, once they have connected Microsoft 365 and their pod reports the skill,
+  Morning briefing. That one is not a page: it starts a chat on the default product whose first message runs the
+  `m365` plugin's `morning-briefing` skill (`src/assistant/briefing.ts`), which reads today's calendar, mail and
+  Teams waiting on them, their Jira and their GitHub, and opens it.
 - **The thread** shows only what the person and the assistant said (`src/assistant/thread.ts`); tool calls become one
   line of what it is doing.
 

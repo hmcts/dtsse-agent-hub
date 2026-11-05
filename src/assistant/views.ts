@@ -128,6 +128,20 @@ export async function assistantSummary(db: Database, assistant: VirtualAgentRow,
   };
 }
 
+/**
+ * The skills the assistant's pod reports, as the newest of its sessions to report in gave them: the same list the
+ * composer's "/" menu offers in that session's chat. Every session on a pod loads the plugins the pod booted with, so
+ * the newest stands for the pod running now. Empty until a session has registered.
+ */
+export async function podSkills(db: Database, assistant: Pick<VirtualAgentRow, "id" | "ownerOid">): Promise<Skill[]> {
+  const newest = await db.agent.findFirst({
+    where: { ownerOid: assistant.ownerOid, virtualAgentId: assistant.id },
+    orderBy: { lastHeartbeatAt: "desc" },
+    select: { skills: true }
+  });
+  return storedSkills(newest?.skills);
+}
+
 type LinkRow = Pick<ConversationListRow, "id" | "title" | "product" | "lastActiveAt" | "virtualAgentId" | "agentStatus" | "sessionState">;
 
 /** `anyLocal` is `hasLocalConversation`'s answer for the whole of the person's list; see `ConversationMark`. */

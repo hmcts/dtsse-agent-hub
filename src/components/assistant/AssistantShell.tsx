@@ -109,7 +109,7 @@ export function AssistantShell({
   now,
   plugins,
   welsh = false,
-  microsoft = false,
+  briefing = false,
   start,
   model,
   claudeMd,
@@ -139,8 +139,8 @@ export function AssistantShell({
   plugins?: AssistantPlugins;
   /** Their assistant has the Welsh plugin ticked, so the way to the Welsh page is shown. */
   welsh?: boolean;
-  /** They have connected Microsoft 365, so the morning briefing is offered. */
-  microsoft?: boolean;
+  /** They have connected Microsoft 365 and their pod has the skill that runs it, so the morning briefing is offered. */
+  briefing?: boolean;
   /** How the morning briefing starts its chat; without it, the briefing is not offered. */
   start?: StartChatAction;
   /** The Claude model the person's chats run on, which the footer's settings shows and changes. */
@@ -271,7 +271,7 @@ export function AssistantShell({
               New chat
             </Link>
             {/* The workflows a person can open beside their chats, behind one plus. */}
-            <WorkflowsMenu welsh={welsh} microsoft={microsoft} start={start} />
+            <WorkflowsMenu welsh={welsh} briefing={briefing} start={start} />
           </div>
           <LiveLocalSessions served={served}>
             <ConversationSearch>

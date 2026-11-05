@@ -7,7 +7,7 @@ Microsoft 365 connection (the Microsoft 365 section of `docs/agent-api.md`). The
 `morning-briefing` draws on the others for a summary of the person's day: today's calendar, the mail and Teams chats
 that look like they are waiting on them, and, through their own `twg` and `gh` sign-ins, their open Jira work and
 recent comments for them, and their GitHub issues and pull requests. The Assistant's sidebar plus starts a chat with
-it for anyone who has connected Microsoft 365. Unlike the other skills it carries on when Microsoft 365 is not
+it for anyone who has connected Microsoft 365 and whose pod reports the skill. Unlike the other skills it carries on when Microsoft 365 is not
 connected, saying so in a line, because Jira and GitHub can still be read.
 
 The agent hub carries the plugin and puts it on every virtual agent, with nothing to tick. The opt-in is pressing
