@@ -37,7 +37,7 @@ afterEach(() => {
 });
 
 function link(id: string, title: string): ConversationLink {
-  return { id, title, product: "ccd", productLabel: "CCD", lastActiveAt: "2026-10-21T09:00:00.000Z", mark: null };
+  return { id, title, product: "ccd", productLabel: "CCD", lastActiveAt: "2026-10-21T09:00:00.000Z", pinnedAt: null, mark: null };
 }
 
 function ok() {
@@ -45,7 +45,7 @@ function ok() {
 }
 
 function actions(overrides: Partial<ConversationActions> = {}): ConversationActions {
-  return { rename: ok(), remove: ok(), ...overrides };
+  return { rename: ok(), pin: ok(), remove: ok(), ...overrides };
 }
 
 /** The sidebar with two chats, the second of which, "Story draft", is the one open. */
@@ -166,6 +166,64 @@ describe("AssistantShell conversation menu", () => {
     });
 
     expect(within(row("Event help")).getByRole("alert").textContent).toBe("a title is 1 to 200 characters");
+  });
+
+  it("should pin the chat and close the menu when the person picks Pin from a row", async () => {
+    const pin = ok();
+    render(shell({ actions: actions({ pin }) }));
+
+    openMenu("Event help");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+    });
+
+    expect(pin).toHaveBeenCalledWith({ conversationId: "a", pinned: true });
+    expect(refresh).toHaveBeenCalled();
+    expect(screen.queryByRole("menu", { name: "Options for Event help" })).toBeNull();
+  });
+
+  it("should offer Unpin and unpin the chat when the row's chat is pinned", async () => {
+    const pin = ok();
+    render(
+      <AssistantShell
+        now={Date.now()}
+        viewerName="Alice Smith"
+        groups={[
+          { label: "Pinned", items: [{ ...link("a", "Event help"), pinnedAt: "2026-10-21T08:00:00.000Z" }] },
+          { label: "Today", items: [link("b", "Story draft")] }
+        ]}
+        activeId="b"
+        actions={actions({ pin })}
+      >
+        <p>page</p>
+      </AssistantShell>
+    );
+
+    expect(screen.getByRole("heading", { name: "Pinned" })).toBeTruthy();
+    openMenu("Event help");
+    expect(screen.queryByRole("menuitem", { name: "Pin" })).toBeNull();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("menuitem", { name: "Unpin" }));
+    });
+
+    expect(pin).toHaveBeenCalledWith({ conversationId: "a", pinned: false });
+  });
+
+  it("should show no Pinned heading when no chat is pinned", () => {
+    render(shell({ actions: actions() }));
+
+    expect(screen.queryByRole("heading", { name: "Pinned" })).toBeNull();
+  });
+
+  it("should show the refusal beside the chat when it cannot be pinned", async () => {
+    render(shell({ actions: actions({ pin: vi.fn(async () => ({ ok: false as const, error: "no such conversation" })) }) }));
+
+    openMenu("Event help");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+    });
+
+    expect(within(row("Event help")).getByRole("alert").textContent).toBe("no such conversation");
   });
 
   it("should ask before deleting and do nothing when the person backs out", async () => {

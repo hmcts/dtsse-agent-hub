@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import {
   deleteConversation,
   openConversation,
+  pinConversation,
   renameConversation,
   saveAssistantModel,
   sendAssistantMessage,
@@ -48,7 +49,7 @@ const CHAT_ACTIONS: EmptyChatActions = {
 };
 
 /** What a conversation's row in the sidebar offers. */
-const ROW_ACTIONS: ConversationActions = { rename: renameConversation, remove: deleteConversation };
+const ROW_ACTIONS: ConversationActions = { rename: renameConversation, pin: pinConversation, remove: deleteConversation };
 
 /** A new chat. Opening it creates the viewer's assistant on their first visit, and starts it whenever it is stopped. */
 export default async function AssistantPage() {

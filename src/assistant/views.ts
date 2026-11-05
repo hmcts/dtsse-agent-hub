@@ -16,12 +16,12 @@ import { type Artefact, readArtefact } from "./artefact-store.ts";
 import type { ConfluenceExportView } from "./confluence.ts";
 import { readConfluenceExport } from "./confluence-store.ts";
 import type { ConversationRow, ProductChange, SessionState, StopMark } from "./conversation-row.ts";
-import { type ConversationListRow, hasLocalConversation, listConversations, unsentConversation } from "./conversation-store.ts";
+import { type ConversationListRow, hasLocalConversation, listConversations, sidebarConversations, unsentConversation } from "./conversation-store.ts";
 import { DECK_SELECT, type DeckSummary, deckSummary } from "./deck-store.ts";
 import { FORKED_SELECT, type ForkedView, forkedView } from "./forks.ts";
 import type { GithubExportView } from "./github.ts";
 import { readGithubExport } from "./github-store.ts";
-import { type DateGroup, groupByDate } from "./grouping.ts";
+import { groupForSidebar, type SidebarGroup } from "./grouping.ts";
 import type { JiraExportView } from "./jira.ts";
 import { readJiraExport } from "./jira-store.ts";
 import { LOCAL_SESSION, type LocalSession } from "./local-session.ts";
@@ -103,6 +103,8 @@ export interface ConversationLink {
   product: string;
   productLabel: string;
   lastActiveAt: string;
+  /** When the owner pinned it, which puts it in the sidebar's Pinned section; null while it is not pinned. */
+  pinnedAt: string | null;
   mark: ConversationMark;
 }
 
@@ -138,7 +140,7 @@ function markOf(row: LinkRow, anyLocal: boolean): ConversationMark {
   return anyLocal ? { where: "assistant", session: podSessionOf(row.agentStatus, row.sessionState) } : null;
 }
 
-function toLink(row: LinkRow, anyLocal: boolean): ConversationLink {
+function toLink(row: LinkRow, anyLocal: boolean): Omit<ConversationLink, "pinnedAt"> {
   return {
     id: row.id,
     title: row.title ?? UNTITLED,
@@ -149,24 +151,34 @@ function toLink(row: LinkRow, anyLocal: boolean): ConversationLink {
   };
 }
 
+function listLink(row: ConversationListRow, anyLocal: boolean): ConversationLink {
+  return { ...toLink(row, anyLocal), pinnedAt: row.pinnedAt?.toISOString() ?? null };
+}
+
 /** The chats running on one of the owner's virtual agents, for its page in the hub. */
 export async function conversationLinks(db: Database, ownerOid: string, virtualAgentId: string): Promise<ConversationLink[]> {
   // Every chat here runs on the pod being asked about, so none of them is local; the question is still asked,
   // because `mark` is a statement about the person's list and not about the page that happens to be reading it.
   const [rows, anyLocal] = await Promise.all([listConversations(db, ownerOid, 200, virtualAgentId), hasLocalConversation(db, ownerOid)]);
-  return rows.map((row) => toLink(row, anyLocal));
+  return rows.map((row) => listLink(row, anyLocal));
 }
 
-export async function conversationGroups(db: Database, ownerOid: string, now: Date = new Date()): Promise<{ label: DateGroup; items: ConversationLink[] }[]> {
-  const [rows, anyLocal] = await Promise.all([listConversations(db, ownerOid), hasLocalConversation(db, ownerOid)]);
-  return groupByDate(
-    rows.map((row) => toLink(row, anyLocal)),
+export async function conversationGroups(
+  db: Database,
+  ownerOid: string,
+  now: Date = new Date()
+): Promise<{ label: SidebarGroup; items: ConversationLink[] }[]> {
+  const [{ pinned, recent }, anyLocal] = await Promise.all([sidebarConversations(db, ownerOid), hasLocalConversation(db, ownerOid)]);
+  return groupForSidebar(
+    [...pinned, ...recent].map((row) => listLink(row, anyLocal)),
     (link) => new Date(link.lastActiveAt),
+    (link) => link.pinnedAt !== null,
     now
   );
 }
 
-export interface ConversationMatch extends ConversationLink {
+/** A search result, which says nothing of pinning: the results are one list in order of activity. */
+export interface ConversationMatch extends Omit<ConversationLink, "pinnedAt"> {
   /** Why the chat matched, when its title does not already show it: the words around the match in one message. */
   snippet: string | null;
 }
@@ -220,6 +232,8 @@ export interface ConversationView {
   title: string;
   product: string;
   productLabel: string;
+  /** Whether the owner pinned it, so its options menu offers Unpin rather than Pin. */
+  pinned: boolean;
   productHistory: ProductChange[];
   /** Every answer the person stopped, so the thread shows where each one was cut off. */
   stopHistory: StopMark[];
@@ -300,6 +314,7 @@ export async function conversationView(db: Database, conversation: ConversationR
     title: conversation.title ?? UNTITLED,
     product: conversation.product,
     productLabel: productLabel(conversation.product),
+    pinned: conversation.pinnedAt !== null,
     productHistory: conversation.productHistory,
     stopHistory: conversation.stopHistory,
     local: !hasPod(conversation),

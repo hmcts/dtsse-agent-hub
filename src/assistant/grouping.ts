@@ -41,3 +41,28 @@ export function groupByDate<T>(items: readonly T[], at: (item: T) => Date, now: 
     return grouped === undefined ? [] : [{ label, items: grouped }];
   });
 }
+
+export const PINNED = "Pinned";
+
+/** A heading in the sidebar: the Pinned section, then the date groups. */
+export type SidebarGroup = typeof PINNED | DateGroup;
+
+/**
+ * The sidebar's sections: the pinned items, then every other item under its date group, each in the order given — the
+ * caller's, which for the sidebar is the database's: most recently pinned first, and most recently active first. A
+ * pinned item is in Pinned alone, and the section is left out while nothing is pinned.
+ */
+export function groupForSidebar<T>(
+  items: readonly T[],
+  at: (item: T) => Date,
+  isPinned: (item: T) => boolean,
+  now: Date
+): { label: SidebarGroup; items: T[] }[] {
+  const pinned: T[] = [];
+  const rest: T[] = [];
+  for (const item of items) {
+    (isPinned(item) ? pinned : rest).push(item);
+  }
+  const section: { label: SidebarGroup; items: T[] }[] = pinned.length === 0 ? [] : [{ label: PINNED, items: pinned }];
+  return [...section, ...groupByDate(rest, at, now)];
+}

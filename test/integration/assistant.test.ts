@@ -20,7 +20,14 @@ import * as statusRoute from "../../src/app/api/virtual/[virtualAgentId]/status/
 import { writeArtefact } from "../../src/assistant/artefact-store.ts";
 import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
 import { CONFLUENCE_EXPORT_TIMEOUT_MS } from "../../src/assistant/confluence.ts";
-import { createConversation, findConversation, hasLocalConversation, listConversations } from "../../src/assistant/conversation-store.ts";
+import {
+  createConversation,
+  findConversation,
+  hasLocalConversation,
+  listConversations,
+  pinConversation,
+  sidebarConversations
+} from "../../src/assistant/conversation-store.ts";
 import { readExportDefaults, saveExportDefaults } from "../../src/assistant/export-default-store.ts";
 import { assistantFrame } from "../../src/assistant/frame.ts";
 import { GITHUB_EXPORT_TIMEOUT_MS } from "../../src/assistant/github.ts";
@@ -698,6 +705,77 @@ describe("conversations", () => {
     expect(await prisma.assistantConversation.count()).toBe(0);
     expect(await prisma.agent.count({ where: { id: agentId } })).toBe(0);
     expect(await prisma.message.count({ where: { kind: "direct" } })).toBe(0);
+  });
+
+  it("should pin and unpin a conversation, list it under Pinned alone while pinned, and back under its date when not", async () => {
+    await startedAssistant();
+    const first = ((await actions.startConversation({ product: "general", body: "first" })) as { id: string }).id;
+    const second = ((await actions.startConversation({ product: "general", body: "second" })) as { id: string }).id;
+    const sections = async () => (await openAssistant(VIEWER)).conversations.map((group) => [group.label, group.items.map((item) => item.id)]);
+
+    expect(await sections()).toEqual([["Today", [second, first]]]);
+
+    expect(await actions.pinConversation({ conversationId: first, pinned: true })).toEqual({ ok: true });
+    expect((await findConversation(prisma, ALICE.oid, first))!.pinnedAt).toEqual(expect.any(Date));
+    expect(await sections()).toEqual([
+      ["Pinned", [first]],
+      ["Today", [second]]
+    ]);
+
+    expect(await actions.pinConversation({ conversationId: second, pinned: true })).toEqual({ ok: true });
+    expect(await sections()).toEqual([["Pinned", [second, first]]]);
+
+    expect(await actions.pinConversation({ conversationId: second, pinned: false })).toEqual({ ok: true });
+    expect((await findConversation(prisma, ALICE.oid, second))!.pinnedAt).toBeNull();
+    expect(await sections()).toEqual([
+      ["Pinned", [first]],
+      ["Today", [second]]
+    ]);
+    expect((await assistantConversation(VIEWER, first))!.pinned).toBe(true);
+    expect((await assistantConversation(VIEWER, second))!.pinned).toBe(false);
+    expect((await searchConversations(prisma, ALICE.oid, "first")).map((match) => match.id)).toEqual([first]);
+  });
+
+  it("should keep the time a conversation was first pinned when it is pinned again", async () => {
+    await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+    const pinnedAt = new Date("2026-10-21T08:00:00.000Z");
+
+    await pinConversation(prisma, ALICE.oid, id, true, pinnedAt);
+    await pinConversation(prisma, ALICE.oid, id, true, new Date("2026-10-22T08:00:00.000Z"));
+
+    expect((await findConversation(prisma, ALICE.oid, id))!.pinnedAt).toEqual(pinnedAt);
+  });
+
+  it("should read pinned conversations apart from the limit, so recent unpinned ones still fill it however many are pinned", async () => {
+    await startedAssistant();
+    const start = async (body: string, lastActiveAt: string) => {
+      const id = ((await actions.startConversation({ product: "general", body })) as { id: string }).id;
+      await prisma.assistantConversation.update({ where: { id }, data: { lastActiveAt: new Date(lastActiveAt) } });
+      return id;
+    };
+    const oldest = await start("oldest", "2026-01-01T00:00:00.000Z");
+    const older = await start("older", "2026-02-01T00:00:00.000Z");
+    const newer = await start("newer", "2026-03-01T00:00:00.000Z");
+    const newest = await start("newest", "2026-04-01T00:00:00.000Z");
+    await pinConversation(prisma, ALICE.oid, older, true, new Date("2026-10-01T00:00:00.000Z"));
+    await pinConversation(prisma, ALICE.oid, oldest, true, new Date("2026-10-02T00:00:00.000Z"));
+    const ids = (rows: { id: string }[]) => rows.map((row) => row.id);
+
+    const sidebar = await sidebarConversations(prisma, ALICE.oid, 2);
+
+    expect(ids(sidebar.pinned)).toEqual([oldest, older]);
+    expect(ids(sidebar.recent)).toEqual([newest, newer]);
+    expect(ids(await listConversations(prisma, ALICE.oid, 2))).toEqual([newest, newer]);
+  });
+
+  it("should refuse to pin someone else's conversation, or one with no pinned state given", async () => {
+    await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+
+    expect(await actions.pinConversation({ conversationId: id, pinned: "yes" })).toEqual({ ok: false, error: "say whether the chat is pinned" });
+    await expect(pinConversation(prisma, BOB.oid, id, true)).rejects.toThrow("no such conversation");
+    expect((await findConversation(prisma, ALICE.oid, id))!.pinnedAt).toBeNull();
   });
 
   /**

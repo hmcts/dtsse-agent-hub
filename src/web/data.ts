@@ -9,7 +9,7 @@ import { type DeckAsset, type DeckView, deckView, holdsDeckAsset, readDeckAsset 
 import { readExportDefaults } from "../assistant/export-default-store.ts";
 import type { ExportDefaults } from "../assistant/export-defaults.ts";
 import { conversationsForkableBy, conversationsOfferedBy, forkChoice, forkRecipients } from "../assistant/fork-store.ts";
-import type { DateGroup } from "../assistant/grouping.ts";
+import type { SidebarGroup } from "../assistant/grouping.ts";
 import { type AssistantMemory, assistantMemory } from "../assistant/memory.ts";
 import { type AssistantModelChoice, assistantModelChoice } from "../assistant/model-store.ts";
 import { type ChatGate, chatCredentials, chatGate } from "../assistant/onboarding.ts";
@@ -227,7 +227,7 @@ async function virtualAddress(viewer: Identity, virtualAgentId: string): Promise
 export interface AssistantHome {
   assistant: AssistantSummary;
   credentials: CredentialSettings;
-  conversations: { label: DateGroup; items: ConversationLink[] }[];
+  conversations: { label: SidebarGroup; items: ConversationLink[] }[];
   /**
    * The workspace plugins this hub offers, and the ones the viewer's assistant loads; `null` when the configuration
    * cannot be read, which is not the same as its offering nothing.

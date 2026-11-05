@@ -10,6 +10,7 @@ import {
   conversationAgent,
   createConversation,
   findConversation,
+  pinConversation as pin,
   deleteConversation as remove,
   renameConversation as rename,
   setProduct
@@ -297,6 +298,18 @@ export async function renameConversation(input: { conversationId: unknown; title
     }
     const viewer = await requireViewer();
     await rename(prisma, viewer.oid, text(input.conversationId), text(input.title));
+    revalidatePath("/assistant");
+    return { ok: true };
+  });
+}
+
+export async function pinConversation(input: { conversationId: unknown; pinned: unknown }): Promise<ActionResult> {
+  return await runAction("pin conversation", async () => {
+    if (!virtualAgentsEnabled()) {
+      return OFF;
+    }
+    const viewer = await requireViewer();
+    await pin(prisma, viewer.oid, text(input.conversationId), input.pinned);
     revalidatePath("/assistant");
     return { ok: true };
   });

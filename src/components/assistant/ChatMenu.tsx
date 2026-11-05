@@ -48,9 +48,9 @@ function room(element: HTMLElement): { above: number; below: number; beside: num
 const LOCAL_DELETE_NOTE = "The session on your computer will not come back to your chats, even if you resume it. A new session starts a new chat.";
 
 /**
- * A conversation's options: share it read-only, offer it to be forked, rename it, or delete it and its document. Shown from the chat's
- * header for the open conversation and from every row of the sidebar, so the destructive confirmation is written
- * once.
+ * A conversation's options: share it read-only, offer it to be forked, pin it above the date groups or unpin it,
+ * rename it, or delete it and its document. Shown from the chat's header for the open conversation and from every row
+ * of the sidebar, so the destructive confirmation is written once.
  *
  * Share and Fork are links rather than panes of their own: the dialog lives at the chat's own address, so it can be reached
  * from anywhere and the browser's back button closes it.
@@ -63,6 +63,8 @@ export function ChatMenu({
   title,
   shareHref,
   forkHref,
+  pinned,
+  onPin,
   onRename,
   onDelete,
   onOpen,
@@ -75,6 +77,10 @@ export function ChatMenu({
   shareHref: string;
   /** Where the dialog offering this chat to be forked is. */
   forkHref: string;
+  /** Whether the chat is pinned, which makes the item Unpin. */
+  pinned: boolean;
+  /** Called with the state the person asked for: true to pin, false to unpin. */
+  onPin: (pinned: boolean) => Promise<void>;
   onRename: (title: string) => Promise<void>;
   onDelete: () => Promise<void>;
   /** Called as the menu opens, so whatever is shown about the last attempt can be dropped. */
@@ -133,7 +139,7 @@ export function ChatMenu({
   }
 
   /**
-   * Runs one of the two actions. An action answers its own refusal, which belongs beside the chat rather than in a
+   * Runs one of the actions. An action answers its own refusal, which belongs beside the chat rather than in a
    * panel over it, so the panel closes on any answer at all and stays open only when none arrived.
    */
   async function run(what: string, work: () => Promise<void>): Promise<void> {
@@ -176,6 +182,9 @@ export function ChatMenu({
               <Link href={forkHref} role="menuitem" className={item} onClick={close}>
                 Fork
               </Link>
+              <button type="button" role="menuitem" className={item} onClick={() => void run(pinned ? "unpin" : "pin", () => onPin(!pinned))}>
+                {pinned ? "Unpin" : "Pin"}
+              </button>
               <button
                 type="button"
                 role="menuitem"
