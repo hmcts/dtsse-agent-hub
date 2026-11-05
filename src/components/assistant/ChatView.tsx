@@ -53,6 +53,7 @@ export interface ChatActions {
   stop: (input: { conversationId: unknown }) => Promise<ActionResult<{ stopped: boolean }>>;
   setProduct: (input: { conversationId: unknown; product: unknown }) => Promise<ActionResult>;
   rename: (input: { conversationId: unknown; title: unknown }) => Promise<ActionResult>;
+  pin: (input: { conversationId: unknown; pinned: unknown }) => Promise<ActionResult>;
   remove: (input: { conversationId: unknown }) => Promise<ActionResult>;
   /** The person's answer to a question the assistant asked with its own question tool. */
   answerQuestion: AnswerQuestionAction;
@@ -651,6 +652,12 @@ export function ChatView({
               shareHref={`/assistant/${view.id}?share=1`}
               local={view.local}
               forkHref={`/assistant/${view.id}?fork=1`}
+              pinned={view.pinned}
+              onPin={async (pinned) => {
+                const result = await actions.pin({ conversationId: view.id, pinned });
+                setError(result.ok ? null : result.error);
+                router.refresh();
+              }}
               onRename={async (title) => {
                 const result = await actions.rename({ conversationId: view.id, title });
                 setError(result.ok ? null : result.error);

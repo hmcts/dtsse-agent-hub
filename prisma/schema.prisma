@@ -578,6 +578,8 @@ model AssistantConversation {
   /// When something was first said or written in the conversation; null while it is empty, which leaves it out of the
   /// sidebar and the search. Set once and never cleared: see announceFirstContent in src/assistant/first-content.ts.
   firstContentAt        DateTime? @map("first_content_at") @db.Timestamptz(6)
+  /// When the person pinned it above the sidebar's date groups; null while it is not pinned. See src/assistant/grouping.ts.
+  pinnedAt              DateTime? @map("pinned_at") @db.Timestamptz(6)
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
 

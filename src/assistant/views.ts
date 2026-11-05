@@ -21,7 +21,7 @@ import { DECK_SELECT, type DeckSummary, deckSummary } from "./deck-store.ts";
 import { FORKED_SELECT, type ForkedView, forkedView } from "./forks.ts";
 import type { GithubExportView } from "./github.ts";
 import { readGithubExport } from "./github-store.ts";
-import { type DateGroup, groupByDate } from "./grouping.ts";
+import { groupForSidebar, type SidebarGroup } from "./grouping.ts";
 import type { JiraExportView } from "./jira.ts";
 import { readJiraExport } from "./jira-store.ts";
 import { LOCAL_SESSION, type LocalSession } from "./local-session.ts";
@@ -103,6 +103,8 @@ export interface ConversationLink {
   product: string;
   productLabel: string;
   lastActiveAt: string;
+  /** When the owner pinned it, which puts it in the sidebar's Pinned section; null while it is not pinned. */
+  pinnedAt: string | null;
   mark: ConversationMark;
 }
 
@@ -128,7 +130,7 @@ export async function assistantSummary(db: Database, assistant: VirtualAgentRow,
   };
 }
 
-type LinkRow = Pick<ConversationListRow, "id" | "title" | "product" | "lastActiveAt" | "virtualAgentId" | "agentStatus" | "sessionState">;
+type LinkRow = Pick<ConversationListRow, "id" | "title" | "product" | "lastActiveAt" | "pinnedAt" | "virtualAgentId" | "agentStatus" | "sessionState">;
 
 /** `anyLocal` is `hasLocalConversation`'s answer for the whole of the person's list; see `ConversationMark`. */
 function markOf(row: LinkRow, anyLocal: boolean): ConversationMark {
@@ -145,6 +147,7 @@ function toLink(row: LinkRow, anyLocal: boolean): ConversationLink {
     product: row.product,
     productLabel: productLabel(row.product),
     lastActiveAt: row.lastActiveAt.toISOString(),
+    pinnedAt: row.pinnedAt?.toISOString() ?? null,
     mark: markOf(row, anyLocal)
   };
 }
@@ -157,11 +160,16 @@ export async function conversationLinks(db: Database, ownerOid: string, virtualA
   return rows.map((row) => toLink(row, anyLocal));
 }
 
-export async function conversationGroups(db: Database, ownerOid: string, now: Date = new Date()): Promise<{ label: DateGroup; items: ConversationLink[] }[]> {
+export async function conversationGroups(
+  db: Database,
+  ownerOid: string,
+  now: Date = new Date()
+): Promise<{ label: SidebarGroup; items: ConversationLink[] }[]> {
   const [rows, anyLocal] = await Promise.all([listConversations(db, ownerOid), hasLocalConversation(db, ownerOid)]);
-  return groupByDate(
+  return groupForSidebar(
     rows.map((row) => toLink(row, anyLocal)),
     (link) => new Date(link.lastActiveAt),
+    (link) => (link.pinnedAt === null ? null : new Date(link.pinnedAt)),
     now
   );
 }
@@ -220,6 +228,8 @@ export interface ConversationView {
   title: string;
   product: string;
   productLabel: string;
+  /** Whether the owner pinned it, so its options menu offers Unpin rather than Pin. */
+  pinned: boolean;
   productHistory: ProductChange[];
   /** Every answer the person stopped, so the thread shows where each one was cut off. */
   stopHistory: StopMark[];
@@ -300,6 +310,7 @@ export async function conversationView(db: Database, conversation: ConversationR
     title: conversation.title ?? UNTITLED,
     product: conversation.product,
     productLabel: productLabel(conversation.product),
+    pinned: conversation.pinnedAt !== null,
     productHistory: conversation.productHistory,
     stopHistory: conversation.stopHistory,
     local: !hasPod(conversation),

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dateGroup, groupByDate } from "./grouping.ts";
+import { dateGroup, groupByDate, groupForSidebar } from "./grouping.ts";
 
 // 10:00 BST on 21 October 2026.
 const NOW = new Date("2026-10-21T09:00:00.000Z");
@@ -33,5 +33,61 @@ describe("groupByDate", () => {
       { label: "Today", items: [items[0], items[2]] },
       { label: "Previous 7 days", items: [items[1]] }
     ]);
+  });
+});
+
+describe("groupForSidebar", () => {
+  const at = (item: { at: string }) => new Date(item.at);
+  const pinnedAt = (item: { pinnedAt: string | null }) => (item.pinnedAt === null ? null : new Date(item.pinnedAt));
+
+  it("should leave out the Pinned section when nothing is pinned", () => {
+    const items = [
+      { id: "a", at: "2026-10-21T08:00:00.000Z", pinnedAt: null },
+      { id: "b", at: "2026-10-19T08:00:00.000Z", pinnedAt: null }
+    ];
+
+    expect(groupForSidebar(items, at, pinnedAt, NOW)).toEqual([
+      { label: "Today", items: [items[0]] },
+      { label: "Previous 7 days", items: [items[1]] }
+    ]);
+  });
+
+  it("should put a pinned item in Pinned above the date groups and not also in its date group when it is pinned", () => {
+    const items = [
+      { id: "a", at: "2026-10-21T08:00:00.000Z", pinnedAt: null },
+      { id: "b", at: "2026-10-21T07:00:00.000Z", pinnedAt: "2026-10-21T08:30:00.000Z" },
+      { id: "c", at: "2026-08-01T08:00:00.000Z", pinnedAt: null }
+    ];
+
+    expect(groupForSidebar(items, at, pinnedAt, NOW)).toEqual([
+      { label: "Pinned", items: [items[1]] },
+      { label: "Today", items: [items[0]] },
+      { label: "Older", items: [items[2]] }
+    ]);
+  });
+
+  it("should order Pinned by when each was pinned, most recent first, whatever their activity", () => {
+    const items = [
+      { id: "active-pinned-first", at: "2026-10-21T08:00:00.000Z", pinnedAt: "2026-10-01T08:00:00.000Z" },
+      { id: "old-pinned-last", at: "2026-08-01T08:00:00.000Z", pinnedAt: "2026-10-20T08:00:00.000Z" },
+      { id: "between", at: "2026-10-19T08:00:00.000Z", pinnedAt: "2026-10-10T08:00:00.000Z" }
+    ];
+
+    expect(groupForSidebar(items, at, pinnedAt, NOW)).toEqual([{ label: "Pinned", items: [items[1], items[2], items[0]] }]);
+  });
+
+  it("should keep the items' own order when two were pinned at the same moment", () => {
+    const items = [
+      { id: "a", at: "2026-10-19T08:00:00.000Z", pinnedAt: "2026-10-20T08:00:00.000Z" },
+      { id: "b", at: "2026-10-21T08:00:00.000Z", pinnedAt: "2026-10-20T08:00:00.000Z" }
+    ];
+
+    expect(groupForSidebar(items, at, pinnedAt, NOW)).toEqual([{ label: "Pinned", items: [items[0], items[1]] }]);
+  });
+
+  it("should put an unpinned item back under its date group when it is no longer pinned", () => {
+    const items = [{ id: "a", at: "2026-10-19T08:00:00.000Z", pinnedAt: null }];
+
+    expect(groupForSidebar(items, at, pinnedAt, NOW)).toEqual([{ label: "Previous 7 days", items: [items[0]] }]);
   });
 });

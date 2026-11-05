@@ -11,7 +11,7 @@ import { DEFAULT_PRODUCT, isProduct } from "./products.ts";
 import { messageTitle, TITLE_MAX, type TitleSource } from "./titles.ts";
 
 /**
- * The CFT Workspace's conversations: reading, listing, creating, renaming and removing them.
+ * The CFT Workspace's conversations: reading, listing, creating, renaming, pinning and removing them.
  *
  * A conversation's agent is created with it, offline and with a session id the hub chose, so a message can queue for
  * it before any session runs. The pod's supervisor starts a session under that id when the conversation is woken,
@@ -60,7 +60,8 @@ export async function listConversations(db: Database, ownerOid: string, limit = 
       ...(virtualAgentId === undefined ? {} : { virtualAgentId })
     },
     select: { ...SELECT, agent: { select: { status: true } } },
-    orderBy: [{ lastActiveAt: "desc" }, { id: "asc" }],
+    // Pinned first, so a pinned chat that has not been active for a long time is never cut off by `limit`.
+    orderBy: [{ pinnedAt: { sort: "desc", nulls: "last" } }, { lastActiveAt: "desc" }, { id: "asc" }],
     take: limit
   });
   return rows.map(({ agent, ...row }) => ({ ...toRow(row), agentStatus: agent?.status ?? "offline" }));
@@ -224,6 +225,28 @@ export async function renameConversation(prisma: PrismaClient, ownerOid: string,
     // `user` is what makes this the last word on the title: nothing the hub derives replaces one a person chose.
     await tx.assistantConversation.update({ where: { id }, data: { title: trimmed, titleSource: "user" satisfies TitleSource, updatedAt: new Date() } });
     await announce(tx, conversation);
+  });
+}
+
+/**
+ * Pins the conversation above the sidebar's date groups, or unpins it. Pinning one already pinned keeps the time it
+ * was first pinned, so its place in the Pinned section does not move on a repeated request from another tab.
+ */
+export async function pinConversation(prisma: PrismaClient, ownerOid: string, id: string, pinned: unknown, now: Date = new Date()): Promise<void> {
+  if (typeof pinned !== "boolean") {
+    throw new HttpError(400, "say whether the chat is pinned");
+  }
+  const conversation = await findConversation(prisma, ownerOid, id);
+  if (conversation === undefined) {
+    throw new ConversationNotFound();
+  }
+  await prisma.$transaction(async (tx) => {
+    const changed = pinned
+      ? await tx.$executeRaw`UPDATE assistant_conversation SET pinned_at = ${now}, updated_at = ${now} WHERE id = ${id}::uuid AND pinned_at IS NULL`
+      : await tx.$executeRaw`UPDATE assistant_conversation SET pinned_at = NULL, updated_at = ${now} WHERE id = ${id}::uuid AND pinned_at IS NOT NULL`;
+    if (changed > 0) {
+      await announce(tx, conversation);
+    }
   });
 }
 

@@ -11,7 +11,7 @@ const push = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push, refresh: () => undefined }), usePathname: () => "/assistant" }));
 
 function match(id: string, title: string, snippet: string | null = null): ConversationMatch {
-  return { id, title, product: "pcs", productLabel: "Possession Claims (PCS)", lastActiveAt: "2026-10-24T09:00:00.000Z", mark: null, snippet };
+  return { id, title, product: "pcs", productLabel: "Possession Claims (PCS)", lastActiveAt: "2026-10-24T09:00:00.000Z", pinnedAt: null, mark: null, snippet };
 }
 
 /** A result that is a chat on the person's own computer, with the state of its session. */

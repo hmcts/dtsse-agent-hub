@@ -111,6 +111,7 @@ function conversation(overrides: Partial<ConversationView> = {}): ConversationVi
     title: "Writing a story",
     product: "ccd",
     productLabel: "CCD",
+    pinned: false,
     productHistory: [],
     stopHistory: [],
     local: false,
@@ -149,6 +150,7 @@ function actions(overrides: Partial<ChatActions> = {}): ChatActions {
     stop: vi.fn(async () => ({ ok: true as const, stopped: true })),
     setProduct: ok(),
     rename: ok(),
+    pin: ok(),
     remove: ok(),
     answerQuestion: ok(),
     saveArtefact: vi.fn(async () => ({ ok: true as const, saved: true as const, version: 1 })),
@@ -1193,6 +1195,32 @@ describe("ChatView menu", () => {
     expect(rename).toHaveBeenCalledWith({ conversationId: CONVERSATION, title: "Renamed" });
     expect(refresh).toHaveBeenCalled();
     expect(screen.queryByRole("textbox", { name: "Chat name" })).toBeNull();
+  });
+
+  it("should pin the chat when the person picks Pin from the options menu", async () => {
+    const pin = ok();
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions({ pin })} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Chat options" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+    });
+
+    expect(pin).toHaveBeenCalledWith({ conversationId: CONVERSATION, pinned: true });
+    expect(refresh).toHaveBeenCalled();
+  });
+
+  it("should offer Unpin and unpin the chat when it is pinned", async () => {
+    const pin = ok();
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ pinned: true })} templates={TEMPLATES} actions={actions({ pin })} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Chat options" }));
+    expect(screen.queryByRole("menuitem", { name: "Pin" })).toBeNull();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("menuitem", { name: "Unpin" }));
+    });
+
+    expect(pin).toHaveBeenCalledWith({ conversationId: CONVERSATION, pinned: false });
   });
 
   it("should delete the chat and go to a new chat when the person confirms the delete", async () => {
