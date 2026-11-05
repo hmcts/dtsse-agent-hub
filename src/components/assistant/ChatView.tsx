@@ -30,7 +30,7 @@ import { ChatMenu } from "@/components/assistant/ChatMenu";
 import { Composer } from "@/components/assistant/Composer";
 import type { ExportToConfluenceAction } from "@/components/assistant/ConfluenceExport";
 import type { SaveDeckAction, UnsavedDeckDraft } from "@/components/assistant/DeckEditor";
-import { RESTART_IN_SETTINGS, type RestoreDeckAction } from "@/components/assistant/DeckHistory";
+import type { RestoreDeckAction } from "@/components/assistant/DeckHistory";
 import { DeckPanel, type SlideAsk } from "@/components/assistant/DeckPanel";
 import { ticketsOffered } from "@/components/assistant/ExportFooter";
 import { ForkedThread } from "@/components/assistant/ForkedThread";
@@ -46,6 +46,7 @@ import type { ThreadMessage } from "@/messages/direct-thread";
 import type { AgentStatus } from "@/realtime/events";
 import type { ActionResult } from "@/web/action";
 import { duration } from "@/web/format";
+import { RESTART_IN_SETTINGS } from "@/web/home";
 
 export interface ChatActions {
   send: (input: { conversationId: unknown; body: unknown; uploadIds: unknown }) => Promise<ActionResult<{ message: ThreadMessage }>>;
@@ -385,8 +386,8 @@ export function ChatView({
     if (agent_id === view.agentId) {
       // The claim is read with the page and replaced only by a registration, so a session that registers while the
       // restart note is up is read again for its new claim. A restarted pod's session can register straight to idle,
-      // with no offline status before it, so the status alone cannot say when.
-      if (registered === true && !clientSupports(view.clientFeatures, "plain-prompt")) {
+      // with no offline status before it, so the status alone cannot say when. Only a pod's chat shows the note.
+      if (registered === true && !view.local && !clientSupports(view.clientFeatures, "plain-prompt")) {
         router.refresh();
       }
       setStatus(next);

@@ -14,6 +14,7 @@ import { type AssistantFrame, type AttachmentOutcome, chooseEnvelope, routeDeliv
 import { asRecord, parseAssistantFrame, parseAssistantProduct, parseDirectEventMessage } from "./frames.ts";
 import { describeInbound, type InboundOptions, type InboundResult, inboundAccepted, inboundFix } from "./inbound.ts";
 import { RAPID_CLOSE_MS, type ReconnectDecision, reconnectDelay } from "./reconnect.ts";
+import { retryableByStatus } from "./retry.ts";
 import { acquirePidFile, conversationId, isEnabled, log, pidAlive, readJson, readText, releasePidFile, sessionInfo, statePath, writeJson } from "./session.ts";
 import { collectSkills, type SkillListing, skillsHash } from "./skills.ts";
 import { deliverToSocket, NO_MESSAGING_TOKEN } from "./socket.ts";
@@ -243,6 +244,9 @@ export async function runBridge({
     return null;
   }
 
+  let featuresRun: Promise<void> | null = null;
+  let featuresRefused = false;
+
   // The status the hub last heard, so a turn starting or ending is sent at once rather than on the next heartbeat.
   let sentStatus: "busy" | "idle" | null = null;
   function statusChanged(): void {
@@ -256,17 +260,33 @@ export async function runBridge({
    * Registers again when the saved registration was made by a build with other `client_features`, which a resumed
    * session finds on its volume, so the hub stops reading the older client's claim. Only while the session is idle:
    * a registration sets the agent `idle`, and the name and its source it sends are the ones every heartbeat sends.
+   *
+   * One at a time: the timer and a status change can both be heartbeating, and the second waits for the first's
+   * registration, so neither sends its status until the registration's `idle` has landed and both read the status
+   * afresh after it. A refusal no retry can change, such as a session registered to another owner, ends the attempts
+   * for the life of this bridge.
    */
-  async function reportFeatures(): Promise<void> {
-    if (!agent?.agent_id || claimsCurrentFeatures(agent) || readStatus(sid) !== "idle") {
-      return;
+  function reportFeatures(): Promise<void> {
+    if (featuresRun) {
+      return featuresRun;
     }
-    try {
-      agent = (await registerAgent(api, sid, { cwd: agent.cwd, env, collectSkills: listSkills })).agent;
-      log(sid, "registered again to report this client's features");
-    } catch (e) {
-      log(sid, `could not register this client's features: ${(e as Error).message}`);
+    const current = agent;
+    if (featuresRefused || !current?.agent_id || claimsCurrentFeatures(current) || readStatus(sid) !== "idle") {
+      return Promise.resolve();
     }
+    featuresRun = registerAgent(api, sid, { cwd: current.cwd, env, collectSkills: listSkills })
+      .then(({ agent: registered }) => {
+        agent = registered;
+        log(sid, "registered again to report this client's features");
+      })
+      .catch((e) => {
+        featuresRefused = !retryableByStatus(e);
+        log(sid, `could not register this client's features: ${(e as Error).message}${featuresRefused ? "; not trying again" : ""}`);
+      })
+      .finally(() => {
+        featuresRun = null;
+      });
+    return featuresRun;
   }
 
   async function heartbeat(): Promise<void> {

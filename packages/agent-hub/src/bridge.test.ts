@@ -10,7 +10,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type TempClaudeHome, tempClaudeHome } from "./__fixtures__/claude-home.ts";
 import { createMockHub, type MockHubOptions, type RecordedCall } from "./__fixtures__/mock-hub.ts";
-import { createApi } from "./api.ts";
+import { type Api, ApiError, createApi } from "./api.ts";
 import { modelPath } from "./assistant/models.ts";
 import { tmuxName } from "./assistant/tmux.ts";
 import { type RunBridgeOptions, runBridge, sessionKind } from "./bridge.ts";
@@ -103,14 +103,18 @@ async function waitUntil(fn: () => boolean, what: string, timeoutMs = 8000): Pro
 
 const gaps = (calls: RecordedCall[]) => calls.slice(1).map((c, i) => (c.at ?? 0) - ((calls[i] as RecordedCall).at ?? 0));
 
-type StartBridgeOptions = Omit<RunBridgeOptions, "sid" | "api" | "deliver"> & { env?: Env };
+type StartBridgeOptions = Omit<RunBridgeOptions, "sid" | "api" | "deliver"> & {
+  env?: Env;
+  /** Stands in for some of the bridge's API calls; the setup's own registration goes to the mock hub as it is. */
+  wrapApi?: (api: Api) => Api;
+};
 
 // Registers an agent on a fresh mock hub and runs a bridge for it until `stop` is called. `env` adds to the
 // bridge's environment; `savedAgent` adds fields to the agent.json it starts from, and `status` is the session's status
 // file as the bridge starts.
 async function startBridge(
   hubOptions: MockHubOptions,
-  { env: extraEnv, ...bridgeOptions }: StartBridgeOptions = {},
+  { env: extraEnv, wrapApi, ...bridgeOptions }: StartBridgeOptions = {},
   savedAgent: Record<string, unknown> = {},
   status?: "busy" | "idle"
 ) {
@@ -130,7 +134,7 @@ async function startBridge(
     socketWrites.push(content);
   };
   const env = { ...process.env, AGENT_HUB_CLAUDE_PID: String(process.pid), CLAUDE_CODE_MESSAGING_TOKEN: "tok", ...extraEnv };
-  const running = runBridge({ sid, env, api, deliver, heartbeatMs: 100, ...bridgeOptions });
+  const running = runBridge({ sid, env, api: wrapApi ? wrapApi(api) : api, deliver, heartbeatMs: 100, ...bridgeOptions });
   const streamOpens = () => hub.calls.filter((c) => c.method === "GET" && c.path === `/api/agent/${agentId}/stream`);
   return {
     hub,
@@ -857,6 +861,79 @@ describe("runBridge", () => {
     }
   });
 
+  it("should give up registering again, and say so once, when the hub refuses the registration for good", async () => {
+    // Arrange
+    let attempts = 0;
+    const bridge = await startBridge(
+      {},
+      {
+        wrapApi: (api) => ({
+          ...api,
+          register: async () => {
+            attempts++;
+            throw new ApiError(409, { error: "that session id is registered to someone else" }, "POST", "/api/agent/register");
+          }
+        })
+      },
+      { client_features: ["stop"] }
+    );
+    const beats = () => bridge.hub.calls.filter((c) => c.path === `/api/agent/${bridge.agentId}/heartbeat`);
+
+    try {
+      // Act
+      await waitUntil(() => beats().length >= 4, "four heartbeats");
+
+      // Assert
+      expect(attempts).toBe(1);
+      expect(bridge.logText().match(/not trying again/g)).toHaveLength(1);
+    } finally {
+      await bridge.stop();
+    }
+  });
+
+  // The timer and a status change both heartbeat, and a turn can start while the registration is on its way.
+  it("should register once when heartbeats overlap, and send the status as it is once the registration has landed", async () => {
+    // Arrange
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let attempts = 0;
+    const bridge = await startBridge(
+      {},
+      {
+        wrapApi: (api) => ({
+          ...api,
+          register: async (body) => {
+            attempts++;
+            await gate;
+            return await api.register(body);
+          }
+        })
+      },
+      { client_features: ["stop"] }
+    );
+    const registers = () => bridge.hub.calls.filter((c) => c.path === "/api/agent/register");
+    const beats = () => bridge.hub.calls.filter((c) => c.path === `/api/agent/${bridge.agentId}/heartbeat`);
+
+    try {
+      await waitUntil(() => attempts >= 1, "the registration to start");
+      fs.writeFileSync(statePath(bridge.sid, "status"), "busy\n");
+      await new Promise((resolve) => setTimeout(resolve, 400));
+
+      // Act
+      release();
+      await waitUntil(() => beats().length >= 2, "heartbeats after the registration");
+
+      // Assert
+      expect(attempts).toBe(1);
+      expect(registers()).toHaveLength(2);
+      expect(beats().map((c) => c.body.status)).toEqual(beats().map(() => "busy"));
+    } finally {
+      await bridge.stop();
+    }
+  });
+
   it("should not register again when the saved agent was registered with this build's claim", async () => {
     // Arrange
     const bridge = await startBridge({});
@@ -966,7 +1043,7 @@ describe("runBridge", () => {
       // Assert
       const [one, two] = bridge.socketWrites as [string, string];
       expect(one).toBe(`${contextOpen(first.id)}\nProduct area: Possession claims.\n${CONTEXT_CLOSE}\n\nwhat is a possession claim?`);
-      expect(two).not.toMatch(/Product area:/);
+      expect(two).toMatch(/\nProduct area: Core Case Data\.\n/);
       expect(two).toMatch(/switched the product context from Possession claims to Core Case Data/);
       expect(two.endsWith(`${CONTEXT_CLOSE}\n\nand in CCD?`)).toBe(true);
       expect(two).toMatch(/edited the conversation's document \(version 2\)/);
@@ -1174,7 +1251,7 @@ describe("runBridge", () => {
 
       // Assert
       expect(bridge.socketWrites[0]).toContain(
-        "\nThe message starts with /cft-explain: run the cft-explain skill with the rest of the message as its arguments.\n"
+        "\nThe message below starts with /cft-explain: run the cft-explain skill with the rest of the message as its arguments.\n"
       );
       expect(bridge.socketWrites[1]).not.toMatch(/skill/);
     } finally {

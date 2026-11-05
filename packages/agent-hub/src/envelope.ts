@@ -168,16 +168,26 @@ export function ownerLaptopEnvelope(message: EnvelopeMessage, { skills, reads = 
     reads
       ? `They read this session's transcript in the CFT Workspace chat app, so answer here in the conversation and they will see it; a \`${CLI} reply\` would only repeat it. They may be at this terminal as well, which shows the same conversation, so there is no other session to reply to.`
       : `This session's transcript is not uploaded, so an answer here does not reach them in the CFT Workspace chat app: reply with \`${CLI} reply ${message.id} "<text>"\`.`,
-    ...skillLine(message.body, skills, ownerSkillLine),
+    ...skillLine(message.body, skills, laptopSkillLine),
     "---",
     quoteBody(message.body)
   ].join("\n");
 }
 
-// Said for an owner's message the CFT Workspace's "/" autocomplete started with a skill, in a laptop envelope and in a
-// conversation's context alike. A socket-delivered message is queued with `skipSlashCommands`, so Claude Code never
-// resolves the slash command itself and this sentence is the only thing that runs the skill.
-const ownerSkillLine = (name: string) => `The message starts with /${name}: run the ${name} skill with the rest of the message as its arguments.`;
+/**
+ * What is said for an owner's message the CFT Workspace's "/" autocomplete started with a skill, in a laptop envelope
+ * and in a conversation's context alike. A socket-delivered message is queued with `skipSlashCommands`, so Claude Code
+ * never resolves the slash command itself and this sentence is the only thing that runs the skill. `subject` names the
+ * message where the sentence sits, and `clause` is added before the full stop.
+ */
+function ownerSkillLine(subject: string, clause = ""): (name: string) => string {
+  return (name) => `${subject} starts with /${name}: run the ${name} skill with the rest of the message as its arguments${clause}.`;
+}
+
+// Inside the envelope, where its user's words are framed as a message that reached this session from elsewhere.
+const laptopSkillLine = ownerSkillLine("It", ", as if your user had typed it");
+// Above the words, which are the prompt exactly as typed.
+const promptSkillLine = ownerSkillLine("The message below");
 
 /**
  * The `assistant` object on a `direct` frame to one of a virtual agent's CFT Workspace conversations: the
@@ -411,39 +421,31 @@ export const CONTEXT_CLOSE = `</${CONTEXT_TAG}>`;
 const STALE = "treat earlier product-specific assumptions as stale.";
 
 /**
- * What the session is told of the product area. `previousProduct` null is no record of an earlier message, so this is
- * the first one this session is delivered and the area is named whatever it is. With a record, a change is said —
- * including to and from no product, compared as the values they are — and no change says nothing, so a conversation
- * with no product chosen is not told so on every message.
+ * What the session is told of the product area: the area on every message, because a line said once is lost to a
+ * compaction or a resumed session, and a line saying it changed when `previousProduct`, the last message's record,
+ * names another, comparing the values with no product included. With no record there is nothing to have changed from.
  */
-function productLine(assistant: AssistantFrame, previousProduct: AssistantProduct | null): string | null {
+function productLines(assistant: AssistantFrame, previousProduct: AssistantProduct | null): string[] {
   const product = assistant.product ?? null;
   const label = assistant.product_label || product;
-  if (previousProduct === null) {
-    return `Product area: ${label ?? "not chosen"}.`;
+  const area = `Product area: ${label ?? "not chosen"}.`;
+  if (previousProduct === null || previousProduct.product === product) {
+    return [area];
   }
-  const previous = previousProduct.product;
-  if (previous === product) {
-    return null;
-  }
-  const previousLabel = previousProduct.product_label || previous;
+  const previousLabel = previousProduct.product_label || previousProduct.product;
   if (product === null) {
-    return `The user has cleared the product context, which was ${previousLabel}; ${STALE}`;
+    return [area, `The user has cleared the product context, which was ${previousLabel}; ${STALE}`];
   }
-  if (previous === null) {
-    return `The user has just chosen ${label} as the product context; ${STALE}`;
+  if (previousProduct.product === null) {
+    return [area, `The user has just chosen ${label} as the product context; ${STALE}`];
   }
-  return `The user has just switched the product context from ${previousLabel} to ${label}; ${STALE}`;
+  return [area, `The user has just switched the product context from ${previousLabel} to ${label}; ${STALE}`];
 }
 
 /**
  * What the CFT Workspace knows about a conversation's message that the person did not type: the product area, a
  * document or deck the person changed, the files attached and an export waiting on this session. `assistant` is null
  * for a frame the client could not read, which leaves only the skill line.
- *
- * The product area is said on the first message this session is delivered, and again only when it changes
- * (`productLine`): a session carries it from there, and saying it on every message is noise around words that should
- * read as typed.
  *
  * The skill line is last, nearest the words it is about; the attachment and export lines are facts and procedures
  * that stand on their own wherever they sit, so a message that is both `/skill` and a file reads as: here is the
@@ -457,10 +459,7 @@ export function assistantContextLines(
 ): string[] {
   const lines: string[] = [];
   if (assistant !== null) {
-    const product = productLine(assistant, previousProduct);
-    if (product !== null) {
-      lines.push(product);
-    }
+    lines.push(...productLines(assistant, previousProduct));
     if (assistant.artefact_updated_by === "user") {
       lines.push(
         `The user has edited the conversation's document (version ${assistant.artefact_version}) since; read it with \`${CLI} artefact get\` before changing it.`
@@ -480,7 +479,7 @@ export function assistantContextLines(
   if (assistant?.confluence_export) {
     lines.push(...confluenceExportLines(assistant.confluence_export));
   }
-  lines.push(...skillLine(message.body, skills, ownerSkillLine));
+  lines.push(...skillLine(message.body, skills, promptSkillLine));
   return lines;
 }
 

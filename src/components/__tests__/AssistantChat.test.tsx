@@ -707,6 +707,14 @@ describe("ChatView on a session too old for plain prompts", () => {
     expect(refresh).not.toHaveBeenCalled();
   });
 
+  it("should not re-read the page when the session of a chat with no pod registers", () => {
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ local: true, clientFeatures: null })} templates={TEMPLATES} actions={actions()} />);
+
+    emit("agent_status", { agent_id: AGENT, status: "idle", registered: true });
+
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
   it("should not re-read the page when a session that claims plain-prompt registers", () => {
     render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ clientFeatures: ["plain-prompt"] })} templates={TEMPLATES} actions={actions()} />);
 

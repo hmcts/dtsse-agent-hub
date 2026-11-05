@@ -103,7 +103,7 @@ describe("ownerLaptopEnvelope", () => {
     // Assert
     const lines = text.split("\n");
     expect(lines[lines.indexOf("---") - 1]).toBe(
-      "The message starts with /pcs:start-env: run the pcs:start-env skill with the rest of the message as its arguments."
+      "It starts with /pcs:start-env: run the pcs:start-env skill with the rest of the message as its arguments, as if your user had typed it."
     );
     expect(ownerLaptopEnvelope(ownMessage)).not.toMatch(/skill/);
   });
@@ -316,20 +316,21 @@ describe("assistantPrompt", () => {
 
   it("should keep the block, empty, when there is nothing to add", () => {
     // Act & Assert
-    expect(assistantPrompt(personMessage, pcs, samePcs)).toBe(`${contextOpen("42")}\n${CONTEXT_CLOSE}\n\nCan you draft user stories for paying a fee?`);
     expect(assistantPrompt({ id: "7", body: "hello" }, null)).toBe(`${contextOpen("7")}\n${CONTEXT_CLOSE}\n\nhello`);
   });
 
-  it("should say the product area on the first message and not again while it stays the same", () => {
+  // Said again on every message, because a compaction or a resumed session can lose a line said once.
+  it("should say the product area on every message, the first and those after it", () => {
     // Act & Assert
     expect(context(assistantPrompt(personMessage, pcs, null))).toEqual(["Product area: Possession claims."]);
-    expect(context(assistantPrompt(personMessage, pcs, samePcs))).toEqual([]);
+    expect(context(assistantPrompt(personMessage, pcs, samePcs))).toEqual(["Product area: Possession claims."]);
     expect(context(assistantPrompt({ id: "7", body: "hello" }, {}))).toEqual(["Product area: not chosen."]);
   });
 
   it("should say the product was cleared, and earlier assumptions are stale, when the previous message had one and this has none", () => {
     // Act & Assert
     expect(context(assistantPrompt(personMessage, { ...pcs, product: null, product_label: null }, samePcs))).toEqual([
+      "Product area: not chosen.",
       "The user has cleared the product context, which was Possession claims; treat earlier product-specific assumptions as stale."
     ]);
   });
@@ -337,13 +338,16 @@ describe("assistantPrompt", () => {
   it("should say a product was chosen, and earlier assumptions are stale, when the previous message had none", () => {
     // Act & Assert
     expect(context(assistantPrompt(personMessage, pcs, { product: null, product_label: null }))).toEqual([
+      "Product area: Possession claims.",
       "The user has just chosen Possession claims as the product context; treat earlier product-specific assumptions as stale."
     ]);
   });
 
-  it("should say nothing of the product on later messages when none has been chosen", () => {
+  it("should say only that none is chosen on later messages when none has been", () => {
     // Act & Assert
-    expect(context(assistantPrompt(personMessage, { ...pcs, product: null, product_label: null }, { product: null, product_label: null }))).toEqual([]);
+    expect(context(assistantPrompt(personMessage, { ...pcs, product: null, product_label: null }, { product: null, product_label: null }))).toEqual([
+      "Product area: not chosen."
+    ]);
   });
 
   it("should say the product context changed when the previous message was about another product", () => {
@@ -352,6 +356,7 @@ describe("assistantPrompt", () => {
 
     // Assert
     expect(context(text)).toEqual([
+      "Product area: Core Case Data.",
       "The user has just switched the product context from Possession claims to Core Case Data; treat earlier product-specific assumptions as stale."
     ]);
   });
@@ -536,7 +541,7 @@ describe("assistantPrompt", () => {
     );
 
     // Assert
-    expect(lines.at(-1)).toMatch(/^The message starts with \/cft-explain:/);
+    expect(lines.at(-1)).toMatch(/^The message below starts with \/cft-explain:/);
     expect(lines.indexOf("- /workspace/uploads/c1/u1-letter.pdf (application/pdf, 1 KB)")).toBeLessThan(
       lines.findIndex((line) => line.startsWith("The user has asked you to export"))
     );
@@ -597,7 +602,10 @@ describe("assistantPrompt", () => {
     const text = assistantPrompt({ ...personMessage, body: "/cft-explain what is CDAM?" }, pcs, samePcs, { skills: new Set(["cft-explain"]) });
 
     // Assert
-    expect(context(text)).toEqual(["The message starts with /cft-explain: run the cft-explain skill with the rest of the message as its arguments."]);
+    expect(context(text)).toEqual([
+      "Product area: Possession claims.",
+      "The message below starts with /cft-explain: run the cft-explain skill with the rest of the message as its arguments."
+    ]);
     expect(text.endsWith(`${CONTEXT_CLOSE}\n\n/cft-explain what is CDAM?`)).toBe(true);
   });
 
@@ -620,7 +628,7 @@ describe("assistantPrompt", () => {
     );
 
     // Assert: both instructions are there, the skill line last, and the paths above it.
-    expect(lines.at(-1)).toBe("The message starts with /cft-explain: run the cft-explain skill with the rest of the message as its arguments.");
+    expect(lines.at(-1)).toBe("The message below starts with /cft-explain: run the cft-explain skill with the rest of the message as its arguments.");
     expect(lines.indexOf("- /workspace/uploads/c1/u1-letter.pdf (application/pdf, 1 KB)")).toBeLessThan(lines.length - 1);
   });
 

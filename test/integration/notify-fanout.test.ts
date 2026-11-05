@@ -211,8 +211,8 @@ describe("a status announced with a newly linked chat", () => {
     await registerAgent(prisma, caller, registration);
 
     const expected: HubEvent[] = [
-      { type: "agent_status", agent_id: id, owner_oid: ALICE.oid, status: "idle", local_conversation_id: null },
-      { type: "agent_status", agent_id: id, owner_oid: ALICE.oid, status: "idle", local_conversation_id: chat }
+      { type: "agent_status", agent_id: id, owner_oid: ALICE.oid, status: "idle", local_conversation_id: null, registered: true },
+      { type: "agent_status", agent_id: id, owner_oid: ALICE.oid, status: "idle", local_conversation_id: chat, registered: true }
     ];
     await until(() => pods[0]!.events.length >= expected.length);
     expect(pods[0]!.events).toEqual(expected);

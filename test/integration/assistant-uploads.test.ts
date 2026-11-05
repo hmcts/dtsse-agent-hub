@@ -1462,7 +1462,7 @@ describe("a file from the browser to the session's prompt", () => {
     // Assert: both instructions present, the skill line last, the real path above it.
     const lines = content.split("\n");
     const close = lines.indexOf(CONTEXT_CLOSE);
-    expect(lines[close - 1]).toBe("The message starts with /cft-explain: run the cft-explain skill with the rest of the message as its arguments.");
+    expect(lines[close - 1]).toBe("The message below starts with /cft-explain: run the cft-explain skill with the rest of the message as its arguments.");
     const written = path.join(root, conversation.id, `${uploadId}-letter.pdf`);
     expect(lines.indexOf(`- ${written} (application/pdf, 1 KB)`)).toBeLessThan(close - 1);
     expect(content.endsWith(`${CONTEXT_CLOSE}\n\n/cft-explain what does this say?`)).toBe(true);

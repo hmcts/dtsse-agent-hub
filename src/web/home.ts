@@ -41,6 +41,9 @@ export function movedHubPath(pathname: string): string | undefined {
  */
 export const SETTINGS_PARAMETER = "settings";
 
+/** The settings' Assistant section, where the restart is, opened over the page it is on rather than in place of it. */
+export const RESTART_IN_SETTINGS = `?${new URLSearchParams({ [SETTINGS_PARAMETER]: "assistant" })}`;
+
 export function assistantSettingsPath(section: string): string {
   return `${ASSISTANT}?${new URLSearchParams({ [SETTINGS_PARAMETER]: section })}`;
 }
