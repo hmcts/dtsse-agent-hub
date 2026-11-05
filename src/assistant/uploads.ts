@@ -144,7 +144,7 @@ export type UploadRefusal =
  *
  * Every message in the hub has words, and not only by convention: `message_body_present` is a `CHECK (length(body) >
  * 0)` on the `message` table, which protects every topic post and every agent's direct as well, and is not worth
- * loosening for this one case. A body of nothing would be no use to the session either — `assistantEnvelope` ends
+ * loosening for this one case. A body of nothing would be no use to the session either — `assistantPrompt` ends
  * with it, so the session would be handed paths and no ask.
  *
  * So the hub writes the obvious sentence instead. It is true, it is what attaching a file means, and it is what the
@@ -154,7 +154,7 @@ export type UploadRefusal =
  * and may never read closely, and a body outlives the file: the chips beside it are the names, and they are the
  * owner's to see, while a read-only share of the conversation shows the words and not the files. Naming them here
  * would put a file name in a message that a share then carries. The session is not short of them either — the
- * envelope lists every attachment with its name and its path.
+ * prompt's context lists every attachment with its name and its path.
  */
 export function attachedBody(names: readonly string[]): string {
   if (names.length === 0) {

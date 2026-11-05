@@ -22,6 +22,7 @@ export type ClientFeature =
   | "lookups"
   | "memory-anon"
   | "model-alias"
+  | "plain-prompt"
   | "slides-always-on"
   | "stop"
   | "welsh"
@@ -81,6 +82,11 @@ export type ClientFeature =
  * setting is theirs to save whenever they like. What reads it is the Assistant section's model choice, which says their choice
  * waits for the assistant's next start when its pod's own session did not claim it.
  *
+ * `plain-prompt` is claimed because the bridge delivers the owner's message to a conversation's session as their own
+ * prompt, with the frame's context in a block before it, rather than in an envelope. Read from the conversation's own
+ * agent, since a session keeps the bridge it started with: the chat says its assistant needs a restart while its
+ * session runs on a client that has not claimed it.
+ *
  * `slides-always-on` is claimed because this build loads the slides plugin on every pod (`ALWAYS_ON_PLUGINS`) whatever
  * `AGENT_HUB_PLUGINS` names, and builds a deck without checking that it was ticked. A pod on an older build has the
  * slides tools only when its `AGENT_HUB_PLUGINS` named `slides` as it started, so the hub answers a deck build for one
@@ -94,6 +100,7 @@ export const CLIENT_FEATURES: readonly ClientFeature[] = [
   "lookups",
   "memory-anon",
   "model-alias",
+  "plain-prompt",
   "slides-always-on",
   "stop",
   "welsh",

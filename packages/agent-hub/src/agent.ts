@@ -324,6 +324,8 @@ export type StoredAgent = {
   handed_off_from?: string;
   /** Set only for a pod's CFT Workspace conversation session, which registers with it. */
   conversation_id?: string;
+  /** The `client_features` this registration claimed, which is what the hub holds for the session until the next. */
+  client_features?: string[];
 };
 
 /** What `registerAgent` writes: a saved agent the hub has answered for. */
@@ -368,8 +370,19 @@ export function parseAgent(value: unknown): StoredAgent | null {
     topics: asStrings(raw.topics),
     pending_subscribe: asStrings(raw.pending_subscribe),
     handed_off_from: asString(raw.handed_off_from),
-    conversation_id: asString(raw.conversation_id)
+    conversation_id: asString(raw.conversation_id),
+    client_features: asStrings(raw.client_features)
   };
+}
+
+/**
+ * Whether the hub holds this build's claim for a saved agent: the registration was made with the same
+ * `client_features`. A session resumed after its pod or laptop took a newer client finds the older client's
+ * registration on disk, and the bridge registers again rather than leave the hub reading that client's claim.
+ */
+export function claimsCurrentFeatures(agent: StoredAgent | null): boolean {
+  const claimed = agent?.client_features;
+  return claimed !== undefined && claimed.length === CLIENT_FEATURES.length && CLIENT_FEATURES.every((feature) => claimed.includes(feature));
 }
 
 export function loadAgent(sid: string): StoredAgent | null {
@@ -411,7 +424,8 @@ export async function registerAgent(api: Pick<Api, "register" | "subscribe">, si
     cwd: meta.cwd,
     claude_pid: sessionInfo(sid).pid || previous.claude_pid || null,
     registered_at: new Date().toISOString(),
-    skills_hash: skillsHash(skills)
+    skills_hash: skillsHash(skills),
+    client_features: [...CLIENT_FEATURES]
   };
   if (conversation) {
     agent.conversation_id = conversation;

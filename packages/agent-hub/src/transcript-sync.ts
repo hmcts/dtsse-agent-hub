@@ -4,6 +4,7 @@
 import fs from "node:fs";
 import { type Api, ApiError } from "./api.ts";
 import type { Env } from "./env.ts";
+import { CONTEXT_TAG } from "./envelope.ts";
 import { findSecret } from "./secret-scan.ts";
 import { log, readJson, removeFile, statePath, transcriptPath, writeJson } from "./session.ts";
 import type { TranscriptEntry } from "./wire.ts";
@@ -16,7 +17,8 @@ export const BACKFILL_BYTES = 2 * 1024 * 1024;
 const READ_BYTES = 1024 * 1024;
 const SCAN_BYTES = 64 * 1024;
 const KEY_RE = /^[A-Za-z0-9:_-]{1,200}$/;
-const DIRECT_RE = /^\[agent-hub\] Direct message #(\d+) /;
+// A delivered message's first line: a laptop or peer envelope's header, or a conversation prompt's context block.
+const DIRECT_RE = new RegExp(`^(?:\\[agent-hub\\] Direct message #(\\d+) |<${CONTEXT_TAG} message="(\\d+)">)`);
 const STATE_FILE = "transcript-sync.json";
 const OFF_FILE = "transcript-off";
 export const UNAVAILABLE_PAUSE_MS = 10 * 60 * 1000;
@@ -73,7 +75,8 @@ function textParts(content: unknown): string {
 }
 
 function directId(text: string): string | null {
-  return DIRECT_RE.exec(text)?.[1] ?? null;
+  const match = DIRECT_RE.exec(text);
+  return match?.[1] ?? match?.[2] ?? null;
 }
 
 /**

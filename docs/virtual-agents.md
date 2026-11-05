@@ -199,6 +199,16 @@ as `X-Forwarded-Prefix`, and WebSockets are not forwarded. [`agent-api.md`](agen
 Front Door (`azure-platform-terraform`, `environments/stg/stg.tfvars`) and both DNS zones carry the host, and the
 chart adds it to the Ingress as `additionalIngressHosts`.
 
+## Client updates
+
+A pod installs the current published client when it boots and keeps it until it is replaced, and each conversation's
+session keeps the bridge it started with, so a fix to the client reaches a running assistant only once it restarts.
+The hub reads what each client can do from its `client_features` (see Client features in
+[`agent-api.md`](agent-api.md#client-features)). Where a running client's claim leaves out something the person would
+otherwise be told is working, the Assistant says the assistant needs a restart and links to it in the settings'
+Assistant section: a deck build on a pod without `slides-always-on`, and a chat whose session has not claimed
+`plain-prompt`, which wraps the person's messages in an `[agent-hub]` envelope and can take them for someone else's.
+
 ## Standing in for the orchestrator locally
 
 A pasted sign-in code is sealed under a key derived from `SESSION_SECRET`, so virtual agents need it set, as the viewer

@@ -9,7 +9,7 @@ import fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { NextRequest } from "next/server";
-import { assistantEnvelope, type EnvelopeMessage, fetchAttachments, type PodApi, parseAssistantFrame, parseAttachments } from "pod-client";
+import { assistantPrompt, CONTEXT_CLOSE, type EnvelopeMessage, fetchAttachments, type PodApi, parseAssistantFrame, parseAttachments } from "pod-client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as attachmentFetchedRoute from "../../src/app/api/agent/[agentId]/attachments/[uploadId]/fetched/route.ts";
 import * as attachmentPartRoute from "../../src/app/api/agent/[agentId]/attachments/[uploadId]/parts/[index]/route.ts";
@@ -1231,12 +1231,12 @@ describe("the hub's memory", () => {
  * The hub's tests above stop at the `direct` frame; the client's tests in `packages/agent-hub` start from a frame a
  * test wrote and an `api` a test stubbed. So a file had never been carried the whole way: through the browser-facing
  * routes, onto a message, out in a real frame, through the client's own parser, down the pod-facing routes and onto a
- * disk, and finally named in the envelope the session reads. Each end agreed with its own idea of the contract.
+ * disk, and finally named in the prompt the session reads. Each end agreed with its own idea of the contract.
  *
  * `api` here calls the route handlers directly rather than over HTTP, which is the only part that is not real — the
- * frame, the parse, the part fetching, the fetched report, the bytes on disk and the envelope all are.
+ * frame, the parse, the part fetching, the fetched report, the bytes on disk and the prompt all are.
  */
-describe("a file from the browser to the session's envelope", () => {
+describe("a file from the browser to the session's prompt", () => {
   /** An `Api` whose two attachment calls are the hub's real pod-facing routes, with the pod's own launch token. */
   function podApi(token: string): PodApi {
     return {
@@ -1300,12 +1300,12 @@ describe("a file from the browser to the session's envelope", () => {
     const { agentId, sessionId } = await sessionOf(conversation.id);
     await register(token, sessionId, conversation.id);
 
-    // Act: exactly what the bridge does on a `direct` — parse the frame (`frames.ts`), fetch what it names, then build the envelope.
+    // Act: exactly what the bridge does on a `direct` — parse the frame (`frames.ts`), fetch what it names, then build the prompt.
     const frame = await frameFor(token, agentId);
     const assistant = parseAssistantFrame(frame.assistant);
     const attachments = parseAttachments(assistant?.attachments);
     const outcomes = await fetchAttachments({ api: podApi(token), agentId, conversationId: conversation.id, attachments, root });
-    const content = assistantEnvelope(frame.message, assistant ?? {}, null, { attachments: outcomes });
+    const content = assistantPrompt(frame.message, assistant, null, { attachments: outcomes });
 
     // Assert: the client was willing to act on the frame the route really produced.
     expect(attachments).toEqual([{ uploadId, name: "my_scanned_letter.pdf", bytes: bytes.byteLength, mediaType: "application/pdf", parts: 2 }]);
@@ -1319,7 +1319,7 @@ describe("a file from the browser to the session's envelope", () => {
     expect(onDisk[PART_BYTES]).toBe(7);
     expect(onDisk[onDisk.byteLength - 1]).toBe(255);
 
-    // The envelope names that absolute path, which is the session's only route to the bytes: the message is delivered
+    // The prompt names that absolute path, which is the session's only route to the bytes: the message is delivered
     // over the messaging socket with `skipAttachments`, so an `@name` in the body would be inert.
     expect(content).toContain(written);
     expect(content).toContain("already saved on this machine");
@@ -1352,7 +1352,7 @@ describe("a file from the browser to the session's envelope", () => {
       attachments: parseAttachments(assistant?.attachments),
       root
     });
-    const content = assistantEnvelope(frame.message, assistant ?? {}, null, { attachments: outcomes });
+    const content = assistantPrompt(frame.message, assistant, null, { attachments: outcomes });
 
     // Assert: said so rather than dropped, because a silent omission leaves the person believing their file was read.
     expect(outcomes[0]).toMatchObject({ name: "letter.pdf", error: expect.stringContaining("404") });
@@ -1379,9 +1379,9 @@ describe("a file from the browser to the session's envelope", () => {
     const assistant = parseAssistantFrame(frame.assistant);
     const attachments = parseAttachments(assistant?.attachments);
     const outcomes = await fetchAttachments({ api: podApi(token), agentId, conversationId: conversation.id, attachments, root });
-    const content = assistantEnvelope(frame.message, assistant ?? {}, null, { attachments: outcomes });
+    const content = assistantPrompt(frame.message, assistant, null, { attachments: outcomes });
 
-    // Assert: the expiry is narrated. The envelope names the file and says it could not be retrieved, so the session
+    // Assert: the expiry is narrated. The prompt names the file and says it could not be retrieved, so the session
     // cannot answer as though it had read it — and the message itself is still delivered.
     expect(content).toContain("A file the user attached could not be retrieved and is not on this machine: scan.png.");
     expect(content).toContain("ask them to attach it again");
@@ -1418,7 +1418,7 @@ describe("a file from the browser to the session's envelope", () => {
       attachments: parseAttachments(assistant?.attachments),
       root
     });
-    const content = assistantEnvelope(frame.message, assistant ?? {}, null, { attachments: outcomes });
+    const content = assistantPrompt(frame.message, assistant, null, { attachments: outcomes });
 
     // Assert
     expect(outcomes.map((outcome) => outcome.name)).toEqual(names);
@@ -1436,9 +1436,8 @@ describe("a file from the browser to the session's envelope", () => {
   });
 
   it("should name the real path above the skill line when the message is both a slash command and a file", async () => {
-    // The two features meet here. Skills and attachments both reach the envelope through its options, and the order
-    // is a decision: the skill line says "the rest of the message as its arguments", so it sits against the body
-    // and the paths go above it. This checks that against a frame the route really built and a file really on disk,
+    // The two features meet here. Skills and attachments both reach the prompt's context through its options, and the
+    // order is a decision: the skill line is about the words below it, so it sits last and the paths go above it. This checks that against a frame the route really built and a file really on disk,
     // rather than against hand-written outcomes.
     // Arrange
     const { token } = await startedAssistant();
@@ -1458,23 +1457,21 @@ describe("a file from the browser to the session's envelope", () => {
       attachments: parseAttachments(assistant?.attachments),
       root
     });
-    const content = assistantEnvelope(frame.message, assistant ?? {}, null, { skills: new Set(["cft-explain"]), attachments: outcomes });
+    const content = assistantPrompt(frame.message, assistant, null, { skills: new Set(["cft-explain"]), attachments: outcomes });
 
     // Assert: both instructions present, the skill line last, the real path above it.
     const lines = content.split("\n");
-    const sep = lines.indexOf("---");
-    expect(lines[sep - 1]).toBe(
-      "It starts with /cft-explain: run the cft-explain skill with the rest of the message as its arguments, as if your user had typed it."
-    );
+    const close = lines.indexOf(CONTEXT_CLOSE);
+    expect(lines[close - 1]).toBe("The message below starts with /cft-explain: run the cft-explain skill with the rest of it as its arguments.");
     const written = path.join(root, conversation.id, `${uploadId}-letter.pdf`);
-    expect(lines.indexOf(`- ${written} (application/pdf, 1 KB)`)).toBeLessThan(sep - 1);
-    expect(content.endsWith("\n---\n/cft-explain what does this say?")).toBe(true);
+    expect(lines.indexOf(`- ${written} (application/pdf, 1 KB)`)).toBeLessThan(close - 1);
+    expect(content.endsWith(`${CONTEXT_CLOSE}\n\n/cft-explain what does this say?`)).toBe(true);
     // And the file really is on disk at the path the session is told to read.
     expect((await fs.readFile(written)).byteLength).toBe(16);
   });
 
   it("should name the file to the session when the message carried no words at all", async () => {
-    // Arrange: a message of files and nothing typed, which `checkBody` allows and the envelope has to stand up to.
+    // Arrange: a message of files and nothing typed, which `checkBody` allows and the prompt has to stand up to.
     const { token } = await startedAssistant();
     const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
     const uploadId = await upload(conversation.id, "letter.pdf", filled(12, 4));
@@ -1492,14 +1489,14 @@ describe("a file from the browser to the session's envelope", () => {
       attachments: parseAttachments(assistant?.attachments),
       root
     });
-    const content = assistantEnvelope(frame.message, assistant ?? {}, null, { attachments: outcomes });
+    const content = assistantPrompt(frame.message, assistant, null, { attachments: outcomes });
 
     // Assert: the session gets the paths and a body saying what to do with them, rather than paths and silence.
     expect(sent).toMatchObject({ ok: true });
     expect(content).toContain(path.join(root, conversation.id, `${uploadId}-letter.pdf`));
     expect(content).toContain("already saved on this machine");
     expect(content).toContain("I have attached a file. Please take a look.");
-    // The body counts the files; the names reach the session through the envelope above, never through a message
+    // The body counts the files; the names reach the session through the context above, never through a message
     // body that a read-only share of the conversation would carry.
     expect(content.slice(content.indexOf("I have attached"))).not.toContain("letter.pdf");
     // And the chat is named after the file, since there are no words to name it after.
@@ -1523,7 +1520,7 @@ describe("a file from the browser to the session's envelope", () => {
     const frame = await frameFor(token, agentId);
     const assistant = parseAssistantFrame(frame.assistant);
     const unreadable = parseAttachments(undefined);
-    const content = assistantEnvelope(frame.message, assistant ?? {}, null, { attachments: unreadable });
+    const content = assistantPrompt(frame.message, assistant, null, { attachments: unreadable });
 
     // Assert: the hub did send them, and an old client still says not a word about a file it never fetched.
     expect(parseAttachments(assistant?.attachments)).toHaveLength(1);

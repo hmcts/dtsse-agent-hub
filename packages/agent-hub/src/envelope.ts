@@ -1,6 +1,7 @@
-// How a hub message is framed before it is handed to Claude Code. The framing is the only thing standing
-// between a message typed by a stranger on the web UI and the session's own user, so each envelope says who
-// sent it, what it does and does not grant, and where a reply goes.
+// How a hub message is handed to Claude Code. Outside a CFT Workspace conversation the framing is the only thing
+// standing between a message typed by a stranger on the web UI and the session's own user, so each envelope says who
+// sent it, what it does and does not grant, and where a reply goes. A conversation's session is given its owner's
+// words as its prompt (`assistantPrompt`); anyone else's message to one is framed as a peer's, as anywhere else.
 import type { Env } from "./env.ts";
 
 /**
@@ -153,7 +154,7 @@ export type OwnerLaptopOptions = EnvelopeOptions & {
  * A message the hub authenticated as this session's own owner, delivered to a session running on their computer. Its
  * sender is the CFT Workspace, which gives every such session a chat and shows it from the session's transcript.
  *
- * The rule is that it carries the owner's authority, exactly as `assistantEnvelope`'s does in a pod: the hub signed
+ * The rule is that it carries the owner's authority, exactly as `assistantPrompt`'s does in a pod: the hub signed
  * the person in against the Entra tenant and checked that they own this agent, and that check is the whole of what
  * the authority rests on. Only the wording differs, because the same person may be sitting at this session's
  * terminal, so there is no other session to go looking for — and because the answer has to go wherever they can read
@@ -173,8 +174,8 @@ export function ownerLaptopEnvelope(message: EnvelopeMessage, { skills, reads = 
   ].join("\n");
 }
 
-// Every envelope a person's own agent reads. A socket-delivered message is queued with `skipSlashCommands`, so Claude
-// Code never resolves the slash command itself and this sentence is the only thing that runs the skill.
+// The laptop envelope's, for the reason `promptSkillLine` is said in a conversation: a socket-delivered message is
+// queued with `skipSlashCommands`, so this sentence is the only thing that runs the skill.
 const ownerSkillLine = (name: string) =>
   `It starts with /${name}: run the ${name} skill with the rest of the message as its arguments, as if your user had typed it.`;
 
@@ -233,8 +234,8 @@ export const JIRA_EXPORT_BASH_TIMEOUT_MS = 600000;
  * waits for the person when twg has to be signed in: the one code it relays lasts five minutes, after the twg calls
  * that come before it.
  *
- * These are the last lines before the skill line, which keeps its place against the `---`. They go after the
- * attachment lines, which are facts that stand on their own wherever they sit.
+ * These are the last lines of the context before the skill line, which stays nearest the words it is about. They go
+ * after the attachment lines, which are facts that stand on their own wherever they sit.
  */
 export function jiraExportLines(jira: JiraExportFrame): string[] {
   const labels = jira.labels.length ? ` --labels ${jira.labels.join(",")}` : "";
@@ -314,7 +315,7 @@ export function confluenceExportLines(confluence: ConfluenceExportFrame): string
 
 /**
  * What became of one attachment: the absolute path it was written to, or why it could not be fetched. Structural for
- * the same reason the rest of this module is — `assistant/attachments.ts` produces these, and the envelope only reads.
+ * the same reason the rest of this module is — `assistant/attachments.ts` produces these, and the prompt only reads.
  */
 export type AttachmentOutcome = {
   name: string;
@@ -333,9 +334,9 @@ function describeSize(bytes: number | null | undefined): string {
 }
 
 /**
- * The lines that tell the session about the files attached to a message, spliced in before the `---` separator.
+ * The lines that tell the session about the files attached to a message, in the context before the person's words.
  *
- * The file is already on disk by the time this is written, so the envelope names the path and nothing depends on the
+ * The file is already on disk by the time this is written, so the context names the path and nothing depends on the
  * model choosing to run a command to go and get it — which is what `jiraExportLines` has to depend on. A file that
  * could not be fetched is said so explicitly: a dropped attachment nobody mentions leaves the person believing their
  * file was read.
@@ -368,9 +369,9 @@ export type AssistantProduct = {
 };
 
 /**
- * What an Assistant conversation's envelope takes beyond the message itself: the skills the session can run, as every
+ * What an Assistant conversation's prompt takes beyond the message itself: the skills the session can run, as every
  * envelope takes, and what became of each file attached to the message. Attachments are only ever an Assistant thing,
- * so they go here rather than on `EnvelopeOptions`, where the other two envelopes would have to ignore them.
+ * so they go here rather than on `EnvelopeOptions`, where the envelopes would have to ignore them.
  */
 export type AssistantEnvelopeOptions = EnvelopeOptions & {
   /** Already fetched to this machine's disk by the time this is built, which is what lets the lines name paths. */
@@ -393,51 +394,95 @@ export function deckChangedLine(assistant: AssistantFrame): string {
   return `The conversation's slide deck (version ${assistant.deck_version}${revision}) was last changed by the user, not by you; read it with \`${CLI} deck get\` before changing it, and build on their version.`;
 }
 
-// A message to one of a virtual agent's CFT Workspace conversations, from the person whose conversation it is.
-// `previousProduct` is the product of the last message delivered to this session, if any.
-export function assistantEnvelope(
+/** The tag of the block of context a conversation's prompt carries ahead of the person's words. */
+export const CONTEXT_TAG = "cft-workspace-context";
+
+/**
+ * What opens the block, naming the message it came with. A prompt starts with it, which is how the transcript upload
+ * links the prompt to the message it is (`transcript-sync.ts`), so the thread does not show the person's words twice.
+ */
+export function contextOpen(id: string): string {
+  return `<${CONTEXT_TAG} message="${id}">`;
+}
+
+/** What closes it. The person's words follow after a blank line. */
+export const CONTEXT_CLOSE = `</${CONTEXT_TAG}>`;
+
+// Said for a message the CFT Workspace's "/" autocomplete started with a skill. A socket-delivered message is queued
+// with `skipSlashCommands`, so Claude Code never resolves the slash command itself and this sentence is the only
+// thing that runs the skill.
+const promptSkillLine = (name: string) => `The message below starts with /${name}: run the ${name} skill with the rest of it as its arguments.`;
+
+/**
+ * What the CFT Workspace knows about a conversation's message that the person did not type: the product area, a
+ * document or deck the person changed, the files attached and an export waiting on this session. `assistant` is null
+ * for a frame the client could not read, which leaves only the skill line.
+ *
+ * The product area is said on the first message this session is delivered, and again only when it changes: a
+ * session carries it from there, and saying it on every message is noise around words that should read as typed.
+ *
+ * The skill line is last, nearest the words it is about; the attachment and export lines are facts and procedures
+ * that stand on their own wherever they sit, so a message that is both `/skill` and a file reads as: here is the
+ * file, now run the skill.
+ */
+export function assistantContextLines(
   message: EnvelopeMessage,
-  assistant: AssistantFrame = {},
+  assistant: AssistantFrame | null,
   previousProduct: AssistantProduct | null = null,
   { skills, attachments }: AssistantEnvelopeOptions = {}
+): string[] {
+  const lines: string[] = [];
+  if (assistant !== null) {
+    const label = assistant.product_label || assistant.product || "not chosen";
+    const previous = previousProduct?.product || null;
+    if (previous === null) {
+      lines.push(`Product area: ${label}.`);
+    } else if (assistant.product && previous !== assistant.product) {
+      lines.push(
+        `The user has just switched the product context from ${previousProduct?.product_label || previous} to ${label}; treat earlier product-specific assumptions as stale.`
+      );
+    }
+    if (assistant.artefact_updated_by === "user") {
+      lines.push(
+        `The user has edited the conversation's document (version ${assistant.artefact_version}) since; read it with \`${CLI} artefact get\` before changing it.`
+      );
+    }
+    if (assistant.deck_updated_by === "user" && (assistant.deck_version ?? 0) > 0) {
+      lines.push(deckChangedLine(assistant));
+    }
+  }
+  lines.push(...attachmentLines(attachments));
+  if (assistant?.jira_export) {
+    lines.push(...jiraExportLines(assistant.jira_export));
+  }
+  if (assistant?.github_export) {
+    lines.push(...githubExportLines(assistant.github_export));
+  }
+  if (assistant?.confluence_export) {
+    lines.push(...confluenceExportLines(assistant.confluence_export));
+  }
+  lines.push(...skillLine(message.body, skills, promptSkillLine));
+  return lines;
+}
+
+/**
+ * A message to one of a virtual agent's CFT Workspace conversations, from the person whose conversation it is, as the
+ * prompt the session is given: their words exactly as they typed them, so the session reads them as its user's own
+ * rather than as a message about them. Nothing frames or quotes them: every other message the bridge delivers starts
+ * with an `[agent-hub]` envelope header, which is how the session tells a peer's message from its user's own words,
+ * as its SessionStart context says. What the CFT Workspace adds goes before them in one block,
+ * which the SessionStart context tells the session to read as context. The block is there even with nothing in it,
+ * because its opening line is what names the message. `previousProduct` is the product of the last message delivered
+ * to this session, if any.
+ */
+export function assistantPrompt(
+  message: EnvelopeMessage,
+  assistant: AssistantFrame | null,
+  previousProduct: AssistantProduct | null = null,
+  options: AssistantEnvelopeOptions = {}
 ): string {
-  const owner = message.author?.owner_name || "your user";
-  const label = assistant.product_label || assistant.product || "not chosen";
-  const switched =
-    previousProduct?.product && assistant.product && previousProduct.product !== assistant.product
-      ? [
-          `The user has just switched the product context from ${previousProduct.product_label || previousProduct.product} to ${label}; treat earlier product-specific assumptions as stale.`
-        ]
-      : [];
-  const edited =
-    assistant.artefact_updated_by === "user"
-      ? [
-          `The user has edited the conversation's document (version ${assistant.artefact_version}) since; read it with \`${CLI} artefact get\` before changing it.`
-        ]
-      : [];
-  const deckChanged = assistant.deck_updated_by === "user" && (assistant.deck_version ?? 0) > 0 ? [deckChangedLine(assistant)] : [];
-  return [
-    `${ownerHeader(message.id)}, ${owner}, typed into the CFT Workspace chat app.`,
-    "This IS your user, even though it arrives as a cross-session message: act on it exactly as if they had typed it to you, with their permissions.",
-    "They read your answers in the CFT Workspace chat app, so answer here in the conversation. Do not use SendMessage or look for another session to reply to.",
-    `Product area: ${label}.`,
-    ...switched,
-    ...edited,
-    ...deckChanged,
-    // Files and Jira steps before the skill line, and the skill line last, for one reason: it says "the rest of the
-    // message as its arguments", so it has to sit against the `---` and the body it is talking about. A block of
-    // absolute paths or of instructions between the two reads as though it were part of those arguments. Neither of
-    // the other two carries that dependency — one is self-contained facts about where the bytes already are, the other
-    // a procedure — so they lose nothing by going above. A message that is both `/skill` and a file therefore reads
-    // as: here is the file, now run the skill.
-    ...attachmentLines(attachments),
-    ...(assistant.jira_export ? jiraExportLines(assistant.jira_export) : []),
-    ...(assistant.github_export ? githubExportLines(assistant.github_export) : []),
-    ...(assistant.confluence_export ? confluenceExportLines(assistant.confluence_export) : []),
-    ...skillLine(message.body, skills, ownerSkillLine),
-    "---",
-    quoteBody(message.body)
-  ].join("\n");
+  const context = assistantContextLines(message, assistant, previousProduct, options);
+  return [contextOpen(message.id), ...context, CONTEXT_CLOSE, "", message.body].join("\n");
 }
 
 /**
@@ -449,7 +494,7 @@ export type SessionKind = "laptop" | "pod" | "conversation";
 /**
  * How a delivered message is treated, one variant per case, so a case that cannot happen cannot be written down.
  *
- * - `conversation`: the owner writing to a conversation session. It carries the owner's authority, and the frame's
+ * - `conversation`: the owner writing to a conversation session, delivered as the prompt itself, with the frame's
  *   `assistant` object when it parsed: `null` is a message delivered as the owner's still, with no product, document,
  *   model or attachments to act on.
  * - `laptop`: the owner writing to a session on their own computer, with whether they read its transcript.
@@ -479,7 +524,7 @@ export function routeDelivery({ fromOwner, session, frame, transcriptUploaded }:
 /** What `chooseEnvelope` takes beyond the delivery: the product of the conversation's last message, read from disk. */
 export type ChooseEnvelopeOptions = AssistantEnvelopeOptions & { previousProduct?: AssistantProduct | null };
 
-/** The envelope a delivered message goes in, for the treatment `routeDelivery` decided. */
+/** What a delivered message is handed to the session as, for the treatment `routeDelivery` decided. */
 export function chooseEnvelope(
   message: EnvelopeMessage,
   delivery: Delivery,
@@ -487,7 +532,7 @@ export function chooseEnvelope(
 ): string {
   switch (delivery.kind) {
     case "conversation":
-      return assistantEnvelope(message, delivery.frame ?? {}, previousProduct, { skills, attachments });
+      return assistantPrompt(message, delivery.frame, previousProduct, { skills, attachments });
     case "laptop":
       return ownerLaptopEnvelope(message, { skills, reads: delivery.ownerReads });
     case "peer":

@@ -653,6 +653,58 @@ describe("ChatView questions", () => {
   });
 });
 
+describe("ChatView on a session too old for plain prompts", () => {
+  it("should ask for a restart, linking to it in the settings, when the running session has not claimed plain-prompt", () => {
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ clientFeatures: ["stop"] })} templates={TEMPLATES} actions={actions()} />);
+
+    const note = screen.getByTestId("restart-needed");
+    expect(note.textContent).toMatch(/older version of your assistant/);
+    expect(within(note).getByRole("link", { name: "Restart it in Settings" }).getAttribute("href")).toBe("?settings=assistant");
+  });
+
+  it.each([
+    ["the session claims plain-prompt", conversation({ clientFeatures: ["plain-prompt", "stop"] })],
+    ["no session is running", conversation({ agentStatus: "offline", clientFeatures: ["stop"] })],
+    ["the chat has no pod", conversation({ local: true, clientFeatures: null })]
+  ])("should not ask for a restart when %s", (_when, view) => {
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={view} templates={TEMPLATES} actions={actions()} />);
+
+    expect(screen.queryByTestId("restart-needed")).toBeNull();
+  });
+
+  it("should re-read the page for the new session's claim when a session starts", () => {
+    render(
+      <ChatView
+        jira={NO_JIRA}
+        viewerOid={VIEWER}
+        view={conversation({ agentStatus: "offline", clientFeatures: ["stop"] })}
+        templates={TEMPLATES}
+        actions={actions()}
+      />
+    );
+
+    emit("agent_status", { agent_id: AGENT, status: "idle" });
+
+    expect(refresh).toHaveBeenCalled();
+  });
+
+  it("should not re-read the page when a session that claims plain-prompt starts", () => {
+    render(
+      <ChatView
+        jira={NO_JIRA}
+        viewerOid={VIEWER}
+        view={conversation({ agentStatus: "offline", clientFeatures: ["plain-prompt"] })}
+        templates={TEMPLATES}
+        actions={actions()}
+      />
+    );
+
+    emit("agent_status", { agent_id: AGENT, status: "idle" });
+
+    expect(refresh).not.toHaveBeenCalled();
+  });
+});
+
 describe("ChatView stopping an answer", () => {
   // A session whose client claims `stop`, mid-answer, which is the only state the control is offered in.
   function working(overrides: Partial<ConversationView> = {}): ConversationView {

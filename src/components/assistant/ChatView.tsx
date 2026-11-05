@@ -1,8 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { clientSupports } from "@/agents/client-features";
+import { clientSupports, sessionLacks } from "@/agents/client-features";
 import { EXPIRE_AFTER_SECONDS } from "@/agents/liveness";
 import type { ArtefactSnapshot } from "@/app/_actions/assistant";
 import { MAX_ASKED_BODY } from "@/assistant/deck";
@@ -29,7 +30,7 @@ import { ChatMenu } from "@/components/assistant/ChatMenu";
 import { Composer } from "@/components/assistant/Composer";
 import type { ExportToConfluenceAction } from "@/components/assistant/ConfluenceExport";
 import type { SaveDeckAction, UnsavedDeckDraft } from "@/components/assistant/DeckEditor";
-import type { RestoreDeckAction } from "@/components/assistant/DeckHistory";
+import { RESTART_IN_SETTINGS, type RestoreDeckAction } from "@/components/assistant/DeckHistory";
 import { DeckPanel, type SlideAsk } from "@/components/assistant/DeckPanel";
 import { ticketsOffered } from "@/components/assistant/ExportFooter";
 import { ForkedThread } from "@/components/assistant/ForkedThread";
@@ -382,6 +383,11 @@ export function ChatView({
   useEffect(() => setStatus(view.agentStatus), [view.agentStatus]);
   useHubEvent<{ agent_id: string; status: AgentStatus }>("agent_status", ({ agent_id, status: next }) => {
     if (agent_id === view.agentId) {
+      // The claim is read with the page, so a session that has just started, which registered a claim of its own, is
+      // read again rather than shown the restart note an earlier session's claim called for.
+      if (status === "offline" && next !== "offline" && !clientSupports(view.clientFeatures, "plain-prompt")) {
+        router.refresh();
+      }
       setStatus(next);
     }
   });
@@ -511,6 +517,11 @@ export function ChatView({
    * conversation that has none. Without this the button would be offered on every local chat and do nothing at all.
    */
   const stoppable = pod && doing.state === "working" && clientSupports(view.clientFeatures, "stop");
+  /**
+   * A pod session on a client older than `plain-prompt` wraps the person's words in an envelope, and can take them for
+   * somebody else's. Only a restart of the assistant gives the session the current client, so that is what is offered.
+   */
+  const restartNeeded = pod && sessionLacks(view.clientFeatures, status, "plain-prompt");
   const scroller = useStickToBottom<HTMLDivElement>(`${thread.length}:${doing.state}`);
   function markDocumentBusy(busy: boolean): void {
     documentBusy.current = busy;
@@ -739,6 +750,15 @@ export function ChatView({
               for a chat with no pod.
             */}
             <SessionNote notice={notice} />
+            {restartNeeded ? (
+              <p data-testid="restart-needed" className="pb-2 text-center text-[13px] text-asst-muted">
+                This chat is running on an older version of your assistant, which can mistake your messages for someone else's.{" "}
+                <Link href={RESTART_IN_SETTINGS} className="text-asst-accent underline hover:text-asst-accent-hover">
+                  Restart it in Settings
+                </Link>{" "}
+                to update it.
+              </p>
+            ) : null}
             <Composer
               templates={templates}
               viewerOid={viewerOid}

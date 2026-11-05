@@ -16,6 +16,7 @@ import { tmuxName } from "./assistant/tmux.ts";
 import { type RunBridgeOptions, runBridge, sessionKind } from "./bridge.ts";
 import { readDirects } from "./directs.ts";
 import type { Env } from "./env.ts";
+import { CONTEXT_CLOSE, contextOpen } from "./envelope.ts";
 import { CLIENT_FEATURES } from "./features.ts";
 import {
   parseAssistantFrame,
@@ -114,7 +115,7 @@ async function startBridge(hubOptions: MockHubOptions, { env: extraEnv, ...bridg
   const { agent_id: agentId } = await api.register({ session_id: sid, name: sid, name_source: "derived", client_features: [...CLIENT_FEATURES] });
   ensureStateDir(sid);
   fs.writeFileSync(statePath(sid, "enabled"), "");
-  writeJson(statePath(sid, "agent.json"), { agent_id: agentId, session_id: sid, name: sid, ...savedAgent });
+  writeJson(statePath(sid, "agent.json"), { agent_id: agentId, session_id: sid, name: sid, client_features: [...CLIENT_FEATURES], ...savedAgent });
   const socketWrites: string[] = [];
   const deliver = async (_socketPath: string | null | undefined, _token: string | null | undefined, content: string) => {
     socketWrites.push(content);
@@ -802,6 +803,44 @@ describe("runBridge", () => {
     }
   });
 
+  // A resumed session finds the registration an older client made on the volume, and the hub would go on reading
+  // that client's claim.
+  it.each([
+    ["an older client's claim", { client_features: ["stop"] }],
+    ["no claim at all", { client_features: undefined }]
+  ])("should register again with this build's claim before streaming when the saved agent was registered with %s", async (_what, saved) => {
+    // Arrange
+    const bridge = await startBridge({}, {}, saved);
+    const registers = () => bridge.hub.calls.filter((c) => c.path === "/api/agent/register");
+
+    try {
+      // Act
+      await waitUntil(() => bridge.streamOpens().length >= 1, "the first stream");
+
+      // Assert
+      expect(registers()).toHaveLength(2);
+      expect(registers()[1]?.body.client_features).toEqual([...CLIENT_FEATURES]);
+      expect(JSON.parse(fs.readFileSync(statePath(bridge.sid, "agent.json"), "utf8")).client_features).toEqual([...CLIENT_FEATURES]);
+    } finally {
+      await bridge.stop();
+    }
+  });
+
+  it("should not register again when the saved agent was registered with this build's claim", async () => {
+    // Arrange
+    const bridge = await startBridge({});
+
+    try {
+      // Act
+      await waitUntil(() => bridge.streamOpens().length >= 1, "the first stream");
+
+      // Assert
+      expect(bridge.hub.calls.filter((c) => c.path === "/api/agent/register")).toHaveLength(1);
+    } finally {
+      await bridge.stop();
+    }
+  });
+
   it("should hold direct messages unacked, log it once and deliver them once accepted, when Claude Code would hold them", async () => {
     await withoutUserSettings(async () => {
       // Arrange
@@ -877,7 +916,7 @@ describe("runBridge", () => {
     });
   });
 
-  it("should frame messages for the assistant, and say when the product changed, when direct frames carry assistant", async () => {
+  it("should give the assistant the person's words as its prompt, and say when the product changed, when direct frames carry assistant", async () => {
     // Arrange
     const bridge = await startBridge({ pingMs: 5000 }, { env: { ...VIRTUAL, AGENT_HUB_CONVERSATION_ID: "c1" } });
     const assistant = { conversation_id: "c1", product: "pcs", product_label: "Possession claims", artefact_version: 0, artefact_updated_by: null };
@@ -895,11 +934,10 @@ describe("runBridge", () => {
 
       // Assert
       const [one, two] = bridge.socketWrites as [string, string];
-      expect(one).toMatch(new RegExp(`^\\[agent-hub\\] Direct message #${first.id} from your user, Me Tester, `));
-      expect(one).toMatch(/\nProduct area: Possession claims\.\n/);
-      expect(one).not.toMatch(/switched/);
-      expect(two).toMatch(/\nProduct area: Core Case Data\.\n/);
+      expect(one).toBe(`${contextOpen(first.id)}\nProduct area: Possession claims.\n${CONTEXT_CLOSE}\n\nwhat is a possession claim?`);
+      expect(two).not.toMatch(/Product area:/);
       expect(two).toMatch(/switched the product context from Possession claims to Core Case Data/);
+      expect(two.endsWith(`${CONTEXT_CLOSE}\n\nand in CCD?`)).toBe(true);
       expect(two).toMatch(/edited the conversation's document \(version 2\)/);
       expect(JSON.parse(fs.readFileSync(statePath(bridge.sid, "assistant-product.json"), "utf8"))).toEqual({
         product: "ccd",
@@ -910,7 +948,7 @@ describe("runBridge", () => {
     }
   });
 
-  it("should keep the owner's framing in a conversation, and keep the message out of the direct thread, when its frame is missing or unreadable", async () => {
+  it("should still give a conversation the owner's words as its prompt, and keep the message out of the direct thread, when its frame is missing or unreadable", async () => {
     // Arrange
     const bridge = await startBridge({ pingMs: 5000 }, { env: { ...VIRTUAL, AGENT_HUB_CONVERSATION_ID: "c1" } });
 
@@ -927,12 +965,8 @@ describe("runBridge", () => {
 
       // Assert
       const [one, two] = bridge.socketWrites as [string, string];
-      expect(one).toMatch(new RegExp(`^\\[agent-hub\\] Direct message #${missing.id} from your user, Me Tester, typed into the CFT Workspace chat app\\.`));
-      expect(two).toMatch(new RegExp(`^\\[agent-hub\\] Direct message #${unreadable.id} from your user, Me Tester, typed into the CFT Workspace chat app\\.`));
-      for (const text of [one, two]) {
-        expect(text).toMatch(/This IS your user/);
-        expect(text).not.toMatch(/NOT from your user/);
-      }
+      expect(one).toBe(`${contextOpen(missing.id)}\n${CONTEXT_CLOSE}\n\nno frame`);
+      expect(two).toBe(`${contextOpen(unreadable.id)}\n${CONTEXT_CLOSE}\n\na frame that is not an object`);
       expect(readDirects(bridge.sid)).toEqual([]);
       expect(fs.existsSync(statePath(bridge.sid, "assistant-product.json"))).toBe(false);
     } finally {
@@ -940,7 +974,7 @@ describe("runBridge", () => {
     }
   });
 
-  it("should record a peer's direct in a conversation's direct thread, as anywhere else", async () => {
+  it("should frame a peer's direct to a conversation as a peer's and record it in the direct thread, as anywhere else", async () => {
     // Arrange
     const bridge = await startBridge({ pingMs: 5000 }, { env: { ...VIRTUAL, AGENT_HUB_CONVERSATION_ID: "c1" } });
 
@@ -952,6 +986,7 @@ describe("runBridge", () => {
       await waitUntil(() => bridge.socketWrites.length >= 1, "the message");
 
       // Assert
+      expect(bridge.socketWrites[0]).toMatch(new RegExp(`^\\[agent-hub\\] Direct message #${peer.id} from Pat Peer`));
       expect(bridge.socketWrites[0]).toMatch(/NOT from your user/);
       expect(readDirects(bridge.sid).map((entry) => entry.id)).toEqual([peer.id]);
     } finally {
@@ -1070,7 +1105,7 @@ describe("runBridge", () => {
 
     // Assert
     expect(delivered).toMatch(/could not be retrieved and is not on this machine: scan\.png/);
-    expect(delivered).toMatch(/\n---\nwhat does this say\?$/);
+    expect(delivered.endsWith(`${CONTEXT_CLOSE}\n\nwhat does this say?`)).toBe(true);
   });
 
   it("should say the file could not be retrieved when the frame names one but no conversation to fetch it for", async () => {
@@ -1086,7 +1121,7 @@ describe("runBridge", () => {
     // file left out would read as though nothing had been attached, which is the one thing this must not do.
     expect(delivered).toMatch(/could not be retrieved and is not on this machine: scan\.png/);
     expect(delivered).toMatch(/ask them to attach it again/);
-    expect(delivered).toMatch(/\n---\nwhat does this say\?$/);
+    expect(delivered.endsWith(`${CONTEXT_CLOSE}\n\nwhat does this say?`)).toBe(true);
   });
 
   it("should ask the assistant conversation to run the skill when the user's message starts with one the session has", async () => {
@@ -1107,7 +1142,9 @@ describe("runBridge", () => {
       await waitUntil(() => bridge.socketWrites.length >= 2, "the second message");
 
       // Assert
-      expect(bridge.socketWrites[0]).toMatch(/\nIt starts with \/cft-explain: run the cft-explain skill with the rest of the message as its arguments/);
+      expect(bridge.socketWrites[0]).toContain(
+        "\nThe message below starts with /cft-explain: run the cft-explain skill with the rest of it as its arguments.\n"
+      );
       expect(bridge.socketWrites[1]).not.toMatch(/skill/);
     } finally {
       await bridge.stop();

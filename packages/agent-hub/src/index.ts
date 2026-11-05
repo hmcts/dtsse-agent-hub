@@ -154,12 +154,16 @@ export type {
   SessionKind
 } from "./envelope.ts";
 export {
-  assistantEnvelope,
+  assistantContextLines,
+  assistantPrompt,
   attachmentLines,
   CLI,
+  CONTEXT_CLOSE,
+  CONTEXT_TAG,
   chooseEnvelope,
   cliName,
   confluenceExportLines,
+  contextOpen,
   describeAuthor,
   directEnvelope,
   formatMessage,

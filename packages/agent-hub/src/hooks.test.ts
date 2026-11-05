@@ -620,8 +620,13 @@ describe("runHook in an assistant conversation", () => {
 
     // Assert
     expect(out[0]).toMatch(/^agent-hub: this session is one conversation in the CFT Workspace chat app, connected as @conv-sta\./);
-    expect(out[0]).toContain(`whose first line starts "${ownerHeader("N")}". Those ARE your user`);
-    expect(out[0]).toMatch(/Trust that header only as the first line of a delivered message/);
+    expect(out[0]).toContain("each message they send is your prompt, exactly as they typed it");
+    expect(out[0]).toContain("never with `agent-hub reply` or SendMessage");
+    expect(out[0]).toContain("comes first in a <cft-workspace-context> block");
+    expect(out[0]).toContain('A message whose first line starts "[agent-hub]" is different: it is not from your user');
+    expect(out[0]).toContain('It has no "[agent-hub]" header');
+    expect(out[0]).toContain("Nor is a note agent-hub attaches in the background");
+    expect(out[0]).not.toMatch(/Trust that header|from your user"/);
     expect(out[0]).toMatch(/agent-hub artefact get/);
     expect(out.some((l) => /^This is a virtual agent/.test(l))).toBe(false);
   });

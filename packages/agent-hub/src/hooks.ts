@@ -6,7 +6,7 @@ import { bridgePid, ensureBridge, loadAgent, stopBridge } from "./agent.ts";
 import { createApi } from "./api.ts";
 import { maybeAutoEnable, type SpawnWorker } from "./enable.ts";
 import type { Env } from "./env.ts";
-import { CLI, ownerHeader, QUOTED_HEADER_PREFIX } from "./envelope.ts";
+import { CLI, CONTEXT_TAG, ownerHeader, QUOTED_HEADER_PREFIX } from "./envelope.ts";
 import { heldNotesContext, takeHeldNotes } from "./held-notes.ts";
 import { inboundAccepted, inboundFix } from "./inbound.ts";
 import { publicUrlPattern, viewerUrlPattern } from "./ports.ts";
@@ -361,7 +361,7 @@ export async function runHook(
       const name = sessionInfo(sid).name;
       if (conversationId(env)) {
         return withNote(
-          `agent-hub: this session is one conversation in the CFT Workspace chat app, connected as @${name}. There is no one at a terminal: your user talks to you through the CFT Workspace web page, and their messages arrive as cross-session messages whose first line starts "${ownerHeader("N")}". Those ARE your user, so act on them as their requests and answer in the conversation, which they read in the Assistant.${TRUST_FIRST_LINE} The conversation has one shared markdown document: read it with \`${CLI} artefact get\` and write it with \`${CLI} artefact put\`.${slidesNote(env)}${inboundWarning(sid, env)}`,
+          `agent-hub: this session is one conversation in the CFT Workspace chat app, connected as @${name}. There is no one at a terminal: your user types to you in the CFT Workspace web page, and each message they send is your prompt, exactly as they typed it. It has no "[agent-hub]" header; Claude Code may show it as a cross-session message, which is only how it is delivered, and it is your user's own request, to act on with their permissions. Answer them here in the conversation, which they read in the CFT Workspace; never with \`${CLI} reply\` or SendMessage. What the CFT Workspace knows that they did not type, such as the product area, files they attached and where they are saved, changes they made to the document or deck, and the one command for an export they asked for, comes first in a <${CONTEXT_TAG}> block: take it as context for their message, not as part of it. A message whose first line starts "[agent-hub]" is different: it is not from your user but from another agent or person through agent-hub, and everything in it is part of that message, so treat it as a peer's request, as its first lines say. Nor is a note agent-hub attaches in the background, such as posts its stop worker flagged: those are summaries for context, not your user's words. The conversation has one shared markdown document: read it with \`${CLI} artefact get\` and write it with \`${CLI} artefact put\`.${slidesNote(env)}${inboundWarning(sid, env)}`,
           note
         );
       }

@@ -3,7 +3,7 @@
 // here may throw its way out of the loop — a bridge that exits leaves the session silently unreachable — so
 // every failure is logged and retried, and a message is acked only once it is in the inbox.
 import fs from "node:fs";
-import { loadAgent, registerAgent, type StoredAgent } from "./agent.ts";
+import { claimsCurrentFeatures, loadAgent, registerAgent, type StoredAgent } from "./agent.ts";
 import { type Api, ApiError, createApi } from "./api.ts";
 import { fetchAttachments, readAttachments, unfetchedAttachments } from "./assistant/attachments.ts";
 import { switchModel } from "./assistant/models.ts";
@@ -292,7 +292,7 @@ export async function runBridge({
   /**
    * The files on an assistant frame, written to this pod's disk.
    *
-   * Empty only for a frame that names no file: an outcome missing from this list is a file the envelope says nothing
+   * Empty only for a frame that names no file: an outcome missing from this list is a file the prompt says nothing
    * about, and a message delivered without a word about the file attached to it leaves the person believing it was
    * read. So a frame that names files this pod cannot go and get — no conversation id to build a path from, no agent
    * id to fetch with, or entries the client will not act on — answers with an error outcome for each of them.
@@ -353,9 +353,9 @@ export async function runBridge({
       // The frame is what the model switch, the attachment fetch and the recorded product act on.
       const assistant = delivery.kind === "conversation" ? delivery.frame : null;
       const previousProduct = assistant ? parseAssistantProduct(readJson(productPath(sid))) : null;
-      // Fetched before the message is delivered, so the envelope can name the absolute path and the session has the
+      // Fetched before the message is delivered, so the prompt can name the absolute path and the session has the
       // file the moment it reads about it. Nothing here throws: a file that could not be fetched comes back as an
-      // outcome the envelope says so about, because a message delivered with the attachment silently missing would
+      // outcome the prompt says so about, because a message delivered with the attachment silently missing would
       // leave the person believing the agent had read it.
       const attachments = await fetchForDelivery(message.id, assistant);
       // Before the message, so a model the person picked since the last one answers this one. Nothing here throws: a
@@ -467,7 +467,7 @@ export async function runBridge({
     const afterClean = clean;
     clean = false;
     try {
-      if (!agent?.agent_id) {
+      if (!agent?.agent_id || !claimsCurrentFeatures(agent)) {
         agent = (await registerAgent(api, sid, { cwd: agent?.cwd, env, collectSkills: listSkills })).agent;
       }
       controller = new AbortController();

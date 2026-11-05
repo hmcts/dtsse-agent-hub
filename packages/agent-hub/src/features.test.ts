@@ -19,7 +19,7 @@ describe("CLIENT_FEATURES", () => {
   // an assertion below, which the per-name list cannot, and which is how this file came to claim a standard it did
   // not meet.
   it("should hold every feature this build claims, so a name dropped in a merge fails here", () => {
-    expect(CLIENT_FEATURES).toHaveLength(11);
+    expect(CLIENT_FEATURES).toHaveLength(12);
   });
 
   /**
@@ -41,6 +41,7 @@ describe("CLIENT_FEATURES", () => {
    * version's .pptx.
    * `slides-always-on` is worse: the slides panel tells a person with nothing ticked to restart their assistant to
    * build a version, and a restart does not change the answer.
+   * `plain-prompt` is the same: every chat on this build tells its person to restart their assistant, for ever.
    */
   it.each([
     "attachments",
@@ -50,6 +51,7 @@ describe("CLIENT_FEATURES", () => {
     "lookups",
     "memory-anon",
     "model-alias",
+    "plain-prompt",
     "slides-always-on",
     "stop",
     "welsh",
