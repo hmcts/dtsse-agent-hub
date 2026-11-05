@@ -55,7 +55,7 @@ The bridge hands each `direct` frame to Claude Code through the session's messag
   session — gets an `[agent-hub]` envelope that says it is a peer's and grants nothing.
 
 A bridge whose saved registration claimed different `client_features` sends this build's on its heartbeats until the
-hub takes one, so a session resumed on a newer client, which never registers again, is not left reporting the older
+hub's answer names the same claim (a hub that drops the field answers a bare `204`, which is not taken), so a session resumed on a newer client, which never registers again, is not left reporting the older
 one's claim.
 
 ## Install

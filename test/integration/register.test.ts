@@ -173,7 +173,10 @@ describe("POST /api/agent/register", () => {
       call(heartbeat, { as: ALICE, path: `/api/agent/${agent_id}/heartbeat`, method: "POST", params: { agentId: agent_id }, body });
     const stored = async () => (await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).clientFeatures;
 
-    expect((await beat({ status: "busy", client_features: ["stop", "plain-prompt", "stop"] })).status).toBe(204);
+    const taken = await beat({ status: "busy", client_features: ["stop", "plain-prompt", "stop"] });
+    expect(taken.status).toBe(200);
+    // Answered with the claim as stored, which is how a client tells this hub from one that drops the field.
+    expect(await jsonOf(taken)).toEqual({ client_features: ["plain-prompt", "stop"] });
     expect(await stored()).toEqual(["plain-prompt", "stop"]);
     expect((await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).status).toBe("busy");
 

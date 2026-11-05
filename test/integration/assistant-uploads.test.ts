@@ -1437,8 +1437,9 @@ describe("a file from the browser to the session's prompt", () => {
 
   it("should name the real path above the skill line when the message is both a slash command and a file", async () => {
     // The two features meet here. Skills and attachments both reach the prompt's context through its options, and the
-    // order is a decision: the skill line is about the words below it, so it sits last and the paths go above it. This checks that against a frame the route really built and a file really on disk,
-    // rather than against hand-written outcomes.
+    // order is a decision: the skill line is about the words below it, so it sits last and the paths go above it.
+    // This checks that against a frame the route really built and a file really on disk, rather than against
+    // hand-written outcomes.
     // Arrange
     const { token } = await startedAssistant();
     const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });

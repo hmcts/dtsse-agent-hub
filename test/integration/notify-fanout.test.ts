@@ -112,15 +112,17 @@ describe("NOTIFY fan-out between pods", () => {
     expect(pods[0]!.events).toEqual([{ type: "agent_status", agent_id: agent, owner_oid: ALICE.oid, status: "busy", local_conversation_id: null }]);
   });
 
-  // The chat follows the claim from these, so a heartbeat that writes one announces it whether or not the status moved.
-  it("should announce a heartbeat's claim with its status, changed or not", async () => {
+  // The chat follows the claim from these, so a heartbeat that changes it announces it even with the status unmoved.
+  it("should announce a heartbeat's claim when it changed the stored one, and not when it sent the same again", async () => {
     const agent = await settled(await insertAgent(ALICE, "alice"), ALICE.oid, "alice");
 
-    await heartbeat(prisma, agent, "idle", null, undefined, undefined, ["plain-prompt"]);
+    await heartbeat(prisma, agent, "idle", null, undefined, undefined, ["plain-prompt", "stop"]);
+    await heartbeat(prisma, agent, "idle", null, undefined, undefined, ["plain-prompt", "stop"]);
 
     await until(() => pods[0]!.events.length >= 1);
+    await new Promise((resolve) => setTimeout(resolve, 200));
     expect(pods[0]!.events).toEqual([
-      { type: "agent_status", agent_id: agent, owner_oid: ALICE.oid, status: "idle", local_conversation_id: null, client_features: ["plain-prompt"] }
+      { type: "agent_status", agent_id: agent, owner_oid: ALICE.oid, status: "idle", local_conversation_id: null, client_features: ["plain-prompt", "stop"] }
     ]);
   });
 

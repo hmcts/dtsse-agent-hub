@@ -8,6 +8,7 @@ import { notify } from "../realtime/notify.ts";
 import { likeLiteral } from "../store/like.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { upsertUser } from "../users/store.ts";
+import { storedClientFeatures } from "./client-features.ts";
 import { isUuid } from "./ids.ts";
 import { type NameSource, nameSourceOf } from "./name-source.ts";
 import { normaliseSkills, type Skill, skillsChanged, storedSkills } from "./skills.ts";
@@ -186,7 +187,7 @@ export async function findAgent(db: Database, id: string): Promise<AgentRow | un
   return { ...agent, ownerOnly: isPodConversationAgent(row) };
 }
 
-/** Locks the agent's row for the rest of the transaction, and reads what a status or skills change is compared against. */
+/** Locks the agent's row for the rest of the transaction, and reads what a status, skills or claim change is compared against. */
 async function lockAgent(
   db: Database,
   agentId: string
@@ -199,6 +200,7 @@ async function lockAgent(
       name: string;
       needsLocalChat: boolean;
       localConversationId: string | null;
+      clientFeatures: string[] | null;
     }
   | undefined
 > {
@@ -211,9 +213,10 @@ async function lockAgent(
       name: string;
       needs_local_chat: boolean;
       local_conversation_id: string | null;
+      client_features: unknown;
     }[]
   >`
-    SELECT a.status::text AS status, a.owner_oid, v.name AS virtual_name, a.skills, a.name,
+    SELECT a.status::text AS status, a.owner_oid, v.name AS virtual_name, a.skills, a.name, a.client_features,
            ${needsLocalChatSql("a")} AS needs_local_chat, ${localConversationSql("a")} AS local_conversation_id
       FROM agent a LEFT JOIN virtual_agent v ON v.id = a.virtual_agent_id
      WHERE a.id = ${agentId}::uuid
@@ -228,7 +231,8 @@ async function lockAgent(
         skills: storedSkills(row.skills),
         name: row.name,
         needsLocalChat: row.needs_local_chat,
-        localConversationId: row.local_conversation_id
+        localConversationId: row.local_conversation_id,
+        clientFeatures: storedClientFeatures(row.client_features)
       };
 }
 
@@ -239,9 +243,10 @@ async function lockAgent(
  * when it differs from it, so an open agent page re-reads its composer's "/" autocomplete.
  *
  * `clientFeatures`, sent until the hub has taken the claim of the build that is running, replaces the stored claim and
- * nothing else, and is announced with the status whether or not that changed, so a page showing what the session's
- * client claims has it at once. A resumed session finds its predecessor's registration and does not register again,
- * so this is how its claim reaches the hub.
+ * nothing else, and is announced with the status when either changed, so a page showing what the session's client
+ * claims has it at once. A resumed session finds its predecessor's registration and does not register again, so this
+ * is how its claim reaches the hub. The claim as stored is the answer, `undefined` for a heartbeat that sent none, which
+ * is what the client checks before it counts the claim as taken.
  *
  * `nameSource` is stored with the name and only when the name is, so a heartbeat that reports no name says nothing
  * about where the stored one came from. That is what lets a `/rename` part-way through a session reach the hub
@@ -255,11 +260,11 @@ export async function heartbeat(
   skills?: Skill[],
   nameSource?: NameSource,
   clientFeatures?: string[]
-): Promise<void> {
-  await prisma.$transaction(async (tx) => {
+): Promise<string[] | undefined> {
+  return await prisma.$transaction(async (tx) => {
     const before = await lockAgent(tx, agentId);
     if (before === undefined) {
-      return;
+      return undefined;
     }
     await tx.agent.update({
       where: { id: agentId },
@@ -272,7 +277,9 @@ export async function heartbeat(
         ...(before.virtualName !== null ? { name: before.virtualName } : name === null ? {} : { name, nameSource: nameSourceOf(nameSource) })
       }
     });
-    if (before.status !== status || clientFeatures !== undefined) {
+    // Both lists are normalised, so sorted and de-duplicated, and compare as they stand.
+    const claimChanged = clientFeatures !== undefined && JSON.stringify(before.clientFeatures) !== JSON.stringify(clientFeatures);
+    if (before.status !== status || claimChanged) {
       await notify(tx, {
         type: "agent_status",
         agent_id: agentId,
@@ -294,6 +301,7 @@ export async function heartbeat(
       // client has just worked out a better one, and the chat made here would otherwise be named the worse of them.
       await linkLocalSession(tx, { ownerOid: before.ownerOid, agentId, name: name ?? before.name });
     }
+    return clientFeatures === undefined ? undefined : [...clientFeatures];
   });
 }
 

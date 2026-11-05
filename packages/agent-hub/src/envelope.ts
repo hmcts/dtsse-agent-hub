@@ -174,20 +174,13 @@ export function ownerLaptopEnvelope(message: EnvelopeMessage, { skills, reads = 
   ].join("\n");
 }
 
-/**
- * What is said for an owner's message the CFT Workspace's "/" autocomplete started with a skill, in a laptop envelope
- * and in a conversation's context alike. A socket-delivered message is queued with `skipSlashCommands`, so Claude Code
- * never resolves the slash command itself and this sentence is the only thing that runs the skill. `subject` names the
- * message where the sentence sits, and `clause` is added before the full stop.
- */
-function ownerSkillLine(subject: string, clause = ""): (name: string) => string {
-  return (name) => `${subject} starts with /${name}: run the ${name} skill with the rest of the message as its arguments${clause}.`;
-}
-
-// Inside the envelope, where its user's words are framed as a message that reached this session from elsewhere.
-const laptopSkillLine = ownerSkillLine("It", ", as if your user had typed it");
-// Above the words, which are the prompt exactly as typed.
-const promptSkillLine = ownerSkillLine("The message below");
+// Said for an owner's message the CFT Workspace's "/" autocomplete started with a skill, in a laptop envelope and in a
+// conversation's context alike. A socket-delivered message is queued with `skipSlashCommands`, so Claude Code never
+// resolves the slash command itself and this sentence is the only thing that runs the skill. The laptop's is inside
+// the envelope that frames its user's words; the conversation's sits above the words, which are the prompt as typed.
+const laptopSkillLine = (name: string) =>
+  `It starts with /${name}: run the ${name} skill with the rest of the message as its arguments, as if your user had typed it.`;
+const promptSkillLine = (name: string) => `The message below starts with /${name}: run the ${name} skill with the rest of the message as its arguments.`;
 
 /**
  * The `assistant` object on a `direct` frame to one of a virtual agent's CFT Workspace conversations: the

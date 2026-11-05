@@ -486,6 +486,7 @@ export type {
   DirectCandidate,
   FeedResponse,
   HeartbeatBody,
+  HeartbeatResponse,
   JiraProjectFound,
   LoginCompleteBody,
   LoginFailedBody,

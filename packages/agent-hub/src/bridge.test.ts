@@ -840,6 +840,25 @@ describe("runBridge", () => {
     }
   });
 
+  // The client is published on merge, so a pod can boot on it before the hub that reads the field is deployed.
+  it("should keep sending the claim, and record nothing, while the hub answers as one that drops the field", async () => {
+    // Arrange
+    const bridge = await startBridge({ heartbeatDropsClaim: true }, {}, { client_features: ["stop"] });
+    const beats = () => bridge.hub.calls.filter((c) => c.path === `/api/agent/${bridge.agentId}/heartbeat`);
+
+    try {
+      // Act
+      await waitUntil(() => beats().length >= 3, "three heartbeats");
+
+      // Assert
+      expect(beats().every((c) => JSON.stringify(c.body.client_features) === JSON.stringify([...CLIENT_FEATURES]))).toBe(true);
+      expect(JSON.parse(fs.readFileSync(statePath(bridge.sid, "agent.json"), "utf8")).client_features).toEqual(["stop"]);
+      expect(bridge.logText().match(/the hub did not confirm this client's features/g)).toHaveLength(1);
+    } finally {
+      await bridge.stop();
+    }
+  });
+
   it("should keep sending the claim while the hub refuses the heartbeat", async () => {
     // Arrange
     let refusals = 2;

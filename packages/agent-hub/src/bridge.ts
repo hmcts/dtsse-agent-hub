@@ -25,6 +25,11 @@ import { virtualAgent } from "./virtual-agent.ts";
 // Acked ids are remembered so a replay that races the ack is not written to the inbox twice.
 const DELIVERED_MEMORY = 1000;
 
+/** Whether `answer`, as untrusted as any response, names exactly `names`, in any order. */
+function sameNames(answer: unknown, names: readonly string[]): boolean {
+  return Array.isArray(answer) && answer.length === names.length && names.every((name) => answer.includes(name));
+}
+
 export function readStatus(sid: string): "busy" | "idle" {
   return readText(statePath(sid, "status")) === "busy" ? "busy" : "idle";
 }
@@ -244,6 +249,9 @@ export async function runBridge({
     return null;
   }
 
+  // Said once, since a hub that drops the claim answers every heartbeat the same way until it is upgraded.
+  let unconfirmedSaid = false;
+
   // The status the hub last heard, so a turn starting or ending is sent at once rather than on the next heartbeat.
   let sentStatus: "busy" | "idle" | null = null;
   function statusChanged(): void {
@@ -278,22 +286,28 @@ export async function runBridge({
       // the person says what it is, and the service keeps the chat in the Assistant on that name rather than on the
       // session's first prompt. Reading them apart would let a rename arrive as a name of unknown origin.
       const session = sessionInfo(sid, env);
-      await api.heartbeat(agentId, {
+      const answer = await api.heartbeat(agentId, {
         status,
         name: session.name,
         name_source: session.nameSource,
         ...(skills ? { skills } : {}),
         ...(features ? { client_features: features } : {})
       });
-      if (skills || features) {
-        const taken = { ...(skills ? { skills_hash: skillsHash(skills) } : {}), ...(features ? { client_features: features } : {}) };
+      // Taken only when the hub says it stored these names: one from before the field drops it and still answers 204.
+      const claimed = features !== null && sameNames(answer?.client_features, features) ? features : null;
+      if (features && !claimed && !unconfirmedSaid) {
+        unconfirmedSaid = true;
+        log(sid, "the hub did not confirm this client's features; sending them with every heartbeat until it does");
+      }
+      if (skills || claimed) {
+        const taken = { ...(skills ? { skills_hash: skillsHash(skills) } : {}), ...(claimed ? { client_features: claimed } : {}) };
         agent = { ...current, ...taken };
         writeJson(statePath(sid, "agent.json"), { ...(loadAgent(sid) || agent), ...taken });
       }
       if (skills) {
         log(sid, `sent ${skills.length} skills`);
       }
-      if (features) {
+      if (claimed) {
         log(sid, "sent this client's features");
       }
     } catch (e) {
