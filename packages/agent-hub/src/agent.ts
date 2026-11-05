@@ -10,7 +10,7 @@ import os from "node:os";
 import path from "node:path";
 import type { Api } from "./api.ts";
 import type { Env } from "./env.ts";
-import { CLIENT_FEATURES } from "./features.ts";
+import { CLIENT_FEATURES, sameFeatures } from "./features.ts";
 import { sleep } from "./retry.ts";
 import {
   conversationId,
@@ -381,8 +381,7 @@ export function parseAgent(value: unknown): StoredAgent | null {
  * registration on disk, and the bridge sends this build's claim on its heartbeats until the hub has taken it.
  */
 export function claimsCurrentFeatures(agent: StoredAgent | null): boolean {
-  const claimed = agent?.client_features;
-  return claimed !== undefined && claimed.length === CLIENT_FEATURES.length && CLIENT_FEATURES.every((feature) => claimed.includes(feature));
+  return sameFeatures(agent?.client_features);
 }
 
 export function loadAgent(sid: string): StoredAgent | null {

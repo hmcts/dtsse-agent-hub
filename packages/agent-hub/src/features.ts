@@ -106,3 +106,8 @@ export const CLIENT_FEATURES: readonly ClientFeature[] = [
   "welsh",
   "welsh-review"
 ];
+
+/** Whether `claim`, as untrusted as any stored or answered value, names exactly `names`, in any order. */
+export function sameFeatures(claim: unknown, names: readonly string[] = CLIENT_FEATURES): boolean {
+  return Array.isArray(claim) && claim.length === names.length && names.every((name) => claim.includes(name));
+}

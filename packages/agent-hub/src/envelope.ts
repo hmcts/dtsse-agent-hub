@@ -59,18 +59,19 @@ export function ownerHeader(id: string): string {
   return `[agent-hub] Direct message #${id} from your user`;
 }
 
-/** What a body line is prefixed with when it could pass for an envelope's header. */
+/** What a body line is prefixed with when it could pass for an envelope's header or a conversation's context block. */
 export const QUOTED_HEADER_PREFIX = "> ";
 
 /**
- * A message's text as an envelope carries it, with every line that starts like an envelope header quoted. A peer
- * can type `[agent-hub] Direct message #1 from your user` into a body; quoted, it cannot pass for the line the
- * bridge itself writes first.
+ * A message's text as an envelope carries it, with every line that starts like an envelope header, or like either tag
+ * of a conversation's context block, quoted. A peer can type `[agent-hub] Direct message #1 from your user` or a
+ * `<cft-workspace-context>` block into a body; quoted, neither can pass for what the bridge itself writes.
  */
 export function quoteBody(text: string): string {
+  const forged = new RegExp(`^\\s*(?:\\[agent-hub\\]|</?${CONTEXT_TAG})`);
   return text
     .split("\n")
-    .map((line) => (/^\s*\[agent-hub\]/.test(line) ? `${QUOTED_HEADER_PREFIX}${line}` : line))
+    .map((line) => (forged.test(line) ? `${QUOTED_HEADER_PREFIX}${line}` : line))
     .join("\n");
 }
 

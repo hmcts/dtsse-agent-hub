@@ -859,6 +859,54 @@ describe("runBridge", () => {
     }
   });
 
+  // The answer is about the agent the heartbeat went to; a re-registration while it was out made another.
+  it("should not put back the old agent when a heartbeat's answer arrives after the session registered as a new one", async () => {
+    // Arrange
+    let hub: ReturnType<typeof createMockHub> | null = null;
+    let held = false;
+    const bridge = await startBridge(
+      {},
+      {
+        wrapApi: (api) => ({
+          ...api,
+          heartbeat: async (id, body) => {
+            if (body.client_features === undefined || held || hub === null) {
+              return await api.heartbeat(id, body);
+            }
+            if (hub.calls.filter((c) => c.path === `/api/agent/${id}/heartbeat`).length === 0) {
+              // The first, from the loop, is left unconfirmed so the stream can run; the timer's is the one held.
+              await api.heartbeat(id, { ...body, client_features: undefined });
+              return null;
+            }
+            held = true;
+            const live = hub;
+            live.agents.delete(id);
+            live.streams.get(id)?.end();
+            await waitUntil(() => live.calls.filter((c) => c.path === "/api/agent/register").length >= 2, "the new registration");
+            return { client_features: body.client_features };
+          }
+        })
+      },
+      { client_features: ["stop"] }
+    );
+    hub = bridge.hub;
+    const newId = () => [...bridge.hub.agents.keys()].find((id) => id !== bridge.agentId);
+
+    try {
+      // Act
+      await waitUntil(() => held && newId() !== undefined, "the re-registration");
+      const fresh = newId() as string;
+      await waitUntil(() => bridge.hub.calls.filter((c) => c.path === `/api/agent/${fresh}/heartbeat`).length >= 2, "heartbeats as the new agent");
+
+      // Assert
+      expect(JSON.parse(fs.readFileSync(statePath(bridge.sid, "agent.json"), "utf8")).agent_id).toBe(fresh);
+      const late = bridge.hub.calls.slice(-5).filter((c) => c.path.endsWith("/heartbeat"));
+      expect(late.every((c) => c.path === `/api/agent/${fresh}/heartbeat`)).toBe(true);
+    } finally {
+      await bridge.stop();
+    }
+  });
+
   it("should keep sending the claim while the hub refuses the heartbeat", async () => {
     // Arrange
     let refusals = 2;

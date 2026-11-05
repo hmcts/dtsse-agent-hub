@@ -11,7 +11,7 @@ import { createTmux, type Tmux } from "./assistant/tmux.ts";
 import { peerOf, recordDirect } from "./directs.ts";
 import type { Env } from "./env.ts";
 import { type AssistantFrame, type AttachmentOutcome, chooseEnvelope, routeDelivery, type SessionKind } from "./envelope.ts";
-import { CLIENT_FEATURES } from "./features.ts";
+import { CLIENT_FEATURES, sameFeatures } from "./features.ts";
 import { asRecord, parseAssistantFrame, parseAssistantProduct, parseDirectEventMessage } from "./frames.ts";
 import { describeInbound, type InboundOptions, type InboundResult, inboundAccepted, inboundFix } from "./inbound.ts";
 import { RAPID_CLOSE_MS, type ReconnectDecision, reconnectDelay } from "./reconnect.ts";
@@ -24,11 +24,6 @@ import { virtualAgent } from "./virtual-agent.ts";
 
 // Acked ids are remembered so a replay that races the ack is not written to the inbox twice.
 const DELIVERED_MEMORY = 1000;
-
-/** Whether `answer`, as untrusted as any response, names exactly `names`, in any order. */
-function sameNames(answer: unknown, names: readonly string[]): boolean {
-  return Array.isArray(answer) && answer.length === names.length && names.every((name) => answer.includes(name));
-}
 
 export function readStatus(sid: string): "busy" | "idle" {
   return readText(statePath(sid, "status")) === "busy" ? "busy" : "idle";
@@ -294,15 +289,18 @@ export async function runBridge({
         ...(features ? { client_features: features } : {})
       });
       // Taken only when the hub says it stored these names: one from before the field drops it and still answers 204.
-      const claimed = features !== null && sameNames(answer?.client_features, features) ? features : null;
+      const claimed = features !== null && sameFeatures(answer?.client_features, features) ? features : null;
       if (features && !claimed && !unconfirmedSaid) {
         unconfirmedSaid = true;
         log(sid, "the hub did not confirm this client's features; sending them with every heartbeat until it does");
       }
-      if (skills || claimed) {
+      // Into the live agent, and only while it is the one this heartbeat was for: a re-registration while the heartbeat
+      // was out gives the session a new agent, which this heartbeat's answer says nothing about and must not undo.
+      if ((skills || claimed) && agent?.agent_id === agentId) {
         const taken = { ...(skills ? { skills_hash: skillsHash(skills) } : {}), ...(claimed ? { client_features: claimed } : {}) };
-        agent = { ...current, ...taken };
-        writeJson(statePath(sid, "agent.json"), { ...(loadAgent(sid) || agent), ...taken });
+        agent = { ...agent, ...taken };
+        const saved = loadAgent(sid);
+        writeJson(statePath(sid, "agent.json"), { ...(saved?.agent_id === agentId ? saved : agent), ...taken });
       }
       if (skills) {
         log(sid, `sent ${skills.length} skills`);
