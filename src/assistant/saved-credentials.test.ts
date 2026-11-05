@@ -8,13 +8,13 @@ function stored(kind: CredentialKind): CredentialStatus {
 }
 
 describe("savedCredentials", () => {
-  it("should offer a paste for a GitHub and a Jenkins token, and for a Claude token only where one is any use, when nothing is stored", () => {
+  // GitHub is connected by its device sign-in alone, so with nothing stored it has nothing here to offer.
+  it("should offer a paste for a Jenkins token, and for a Claude token only where one is any use, and none for GitHub, when nothing is stored", () => {
     expect(savedCredentials([], "own-licence", true).map((row) => [row.kind, row.pasteable])).toEqual([
-      ["github", true],
       ["claude", true],
       ["jenkins", true]
     ]);
-    expect(savedCredentials([], "gateway", false).map((row) => row.kind)).toEqual(["github", "jenkins"]);
+    expect(savedCredentials([], "gateway", false).map((row) => row.kind)).toEqual(["jenkins"]);
   });
 
   it("should offer removal of every stored kind, and never a paste for a sign-in a pod makes, when all are stored", () => {
@@ -25,7 +25,7 @@ describe("savedCredentials", () => {
     );
 
     expect(rows.map((row) => [row.kind, row.stored, row.pasteable])).toEqual([
-      ["github", true, true],
+      ["github", true, false],
       ["azure", true, false],
       ["claude", true, false],
       ["jenkins", true, true],
@@ -35,13 +35,13 @@ describe("savedCredentials", () => {
   });
 
   it("should leave out the CLAUDE.md and the git identity when they are stored, since they have sections of their own", () => {
-    expect(savedCredentials([stored("claude_md"), stored("git_identity")], "gateway", false).map((row) => row.kind)).toEqual(["github", "jenkins"]);
+    expect(savedCredentials([stored("claude_md"), stored("git_identity")], "gateway", false).map((row) => row.kind)).toEqual(["jenkins"]);
   });
 
   it.each([
     ["claude", "own-licence", "cannot answer again until you paste a new one"],
     ["azure", "gateway", "cannot answer again until you sign in to Azure again"],
-    ["github", "gateway", "cannot reach GitHub until you paste a new token or sign in to GitHub again"],
+    ["github", "gateway", "cannot reach GitHub until you sign in to GitHub again"],
     ["azure", "own-licence", "stops using it the next time it starts"],
     ["claude", "gateway", "stops using it the next time it starts"],
     ["atlassian", "gateway", "stops using it the next time it starts"],

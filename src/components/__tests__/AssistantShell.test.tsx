@@ -61,7 +61,7 @@ afterEach(() => {
 });
 
 function link(id: string, title: string, mark: ConversationMark = null): ConversationLink {
-  return { id, title, product: "ccd", productLabel: "CCD", lastActiveAt: "2026-10-21T09:00:00.000Z", mark };
+  return { id, title, product: "ccd", productLabel: "CCD", lastActiveAt: "2026-10-21T09:00:00.000Z", pinnedAt: null, mark };
 }
 
 /** A chat on the person's own computer, whose session is in one of the three states its mark carries. */

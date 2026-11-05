@@ -53,6 +53,9 @@ afterEach(() => {
 });
 
 const KINDS: CredentialKind[] = ["github", "azure", "claude", "jenkins", "atlassian"];
+
+/** The Microsoft 365 row, last in the list, as it reads with nothing connected: its own Connect, and no restart. */
+const MICROSOFT_ROW = "MMicrosoft 365Your mail, calendar, Teams chats and meetings, and OneDrive and SharePoint files (optional)Not connectedConnect";
 const ALL_SIGNED_IN: CredentialKind[] = ["github", "azure", "claude", "atlassian"];
 
 /** When a stored credential was saved, and a sign-in either side of it, so the two can be ordered on purpose. */
@@ -108,9 +111,21 @@ function sections(): string[] {
     .map((tab) => tab.textContent ?? "");
 }
 
-/** Opens the section the navigation calls `label`, as clicking it does. */
+/** Opens the section the navigation calls `label`, as clicking it does, whether or not it holds unsaved changes. */
 function go(label: string): void {
-  fireEvent.click(within(nav()).getByRole("tab", { name: label }));
+  fireEvent.click(within(nav()).getByRole("tab", { name: (name) => name === label || name === `${label}, unsaved changes` }));
+}
+
+/** The dialog's one Save, which stores every section's changes. */
+function saveButton(): HTMLElement {
+  return within(screen.getByRole("dialog")).getByRole("button", { name: "Save" });
+}
+
+/** Presses the dialog's Save and waits for the actions it runs. */
+async function saveSettings(): Promise<void> {
+  await act(async () => {
+    fireEvent.click(saveButton());
+  });
 }
 
 /**
@@ -459,6 +474,7 @@ describe("the Assistant's settings dialog", () => {
     const root = themed({}, "system");
     fireEvent.click(cog());
     fireEvent.click(screen.getByRole("radio", { name: "Dark" }));
+    fireEvent.click(saveButton());
     fireEvent.keyDown(document, { key: "Escape" });
 
     fireEvent.click(cog());
@@ -469,7 +485,7 @@ describe("the Assistant's settings dialog", () => {
     root.remove();
   });
 
-  it("should offer the appearance the person chose, and switch it, from its new home in the dialog", () => {
+  it("should show the appearance the person picks at once, and keep it only when they save", () => {
     const page = document.createElement("div");
     page.className = "asst-theme";
     page.dataset.theme = "system";
@@ -480,7 +496,25 @@ describe("the Assistant's settings dialog", () => {
     fireEvent.click(within(appearance).getByRole("radio", { name: "Dark" }));
 
     expect(page.dataset.theme).toBe("dark");
+    expect(document.cookie).not.toContain("asst_theme=dark");
+    fireEvent.click(saveButton());
     expect(document.cookie).toContain("asst_theme=dark");
+    page.remove();
+  });
+
+  it("should put the page back to the appearance it had when the person discards the one they picked", () => {
+    const page = document.createElement("div");
+    page.className = "asst-theme";
+    page.dataset.theme = "light";
+    document.body.append(page);
+    open({ theme: "light" });
+
+    fireEvent.click(screen.getByRole("radio", { name: "Dark" }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+
+    expect(page.dataset.theme).toBe("light");
+    expect(screen.getByRole("radio", { name: "Light" }).getAttribute("aria-checked")).toBe("true");
+    expect(document.cookie).not.toContain("asst_theme=dark");
     page.remove();
   });
 
@@ -512,7 +546,8 @@ describe("the Assistant's settings dialog", () => {
       "AzAzureYour HMCTS account, for pipelines and environments (optional)Waiting for you",
       "CClaudeYour Claude licenceConnected",
       "JJenkinsBuilds and pipelines on Jenkins (optional)Last sign-in failed",
-      "AAtlassianJira tickets and Confluence pages (optional)Sign-in expired"
+      "AAtlassianJira tickets and Confluence pages (optional)Sign-in expired",
+      MICROSOFT_ROW
     ]);
   });
 
@@ -527,7 +562,7 @@ describe("the Assistant's settings dialog", () => {
     go("Connections");
     const rows = within(screen.getByRole("list", { name: "Connections" })).getAllByRole("listitem");
 
-    expect(rows).toHaveLength(KINDS.length);
+    expect(rows).toHaveLength(KINDS.length + 1);
     expect(screen.getByRole("list", { name: "Connections" }).textContent).not.toContain("CLAUDE.md");
   });
 
@@ -543,6 +578,7 @@ describe("the Assistant's settings dialog", () => {
     go("Connections");
 
     expect(screen.getByText("the credentials Key Vault is not configured")).toBeTruthy();
+    expect(screen.queryByText(/Your credentials cannot be shown/)).toBeNull();
     expect(screen.queryByRole("list", { name: "Connections" })).toBeNull();
   });
 
@@ -584,7 +620,7 @@ function plugins(overrides: Partial<AssistantPlugins> = {}): AssistantPlugins {
   return { assistantId: ASSISTANT_ID, available: OFFERED, checked: [], podRunning: true, save: ok(), ...overrides };
 }
 
-const FORM = "Change your assistant's plugins";
+const PLUGINS = "Your assistant's plugins";
 
 function connectWith(overrides: Partial<{ running: boolean; reconnect: FormAction }> = {}) {
   return { assistantId: ASSISTANT_ID, running: true, reconnect: ok(), ...overrides };
@@ -638,7 +674,8 @@ describe("how the Assistant's settings say its agents reach Claude", () => {
       "CClaudeThrough the HMCTS AI Gateway, on your Azure sign-inConnected",
       "AzAzureYour HMCTS account, which your agents reach Claude on, as well as your pipelines and environmentsConnected",
       "JJenkinsBuilds and pipelines on Jenkins (optional)Not connected",
-      "AAtlassianJira tickets and Confluence pages (optional)Not connected"
+      "AAtlassianJira tickets and Confluence pages (optional)Not connected",
+      MICROSOFT_ROW
     ]);
   });
 
@@ -809,11 +846,11 @@ describe("connecting Azure from the Assistant's settings", () => {
     expect(within(azureRow()).queryByRole("button")).toBeNull();
   });
 
-  it("should offer a connect for nothing but GitHub and Azure", () => {
+  it("should offer a connect for nothing but GitHub, Azure and Microsoft 365", () => {
     open({ connections: data([]), connect: connectWith() }, "Connections");
 
     const buttons = within(screen.getByRole("list", { name: "Connections" })).getAllByRole("button");
-    expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual(["Connect GitHub", "Connect Azure"]);
+    expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual(["Connect GitHub", "Connect Azure", "Connect Microsoft 365"]);
   });
 
   it("should only say where Azure stands when the page gives no way to connect it", () => {
@@ -828,7 +865,7 @@ describe("the Assistant's plugins", () => {
     open({ plugins: plugins({ available: [] }) });
 
     expect(sections()).not.toContain("Plugins");
-    expect(screen.queryByRole("form", { name: FORM })).toBeNull();
+    expect(screen.queryByRole("list", { name: PLUGINS })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Plugins" })).toBeNull();
   });
 
@@ -854,7 +891,7 @@ describe("the Assistant's plugins", () => {
 
   it("should describe each plugin in the hub's own words, with its name underneath, when it opens", () => {
     open({ plugins: plugins() }, "Plugins");
-    const items = within(screen.getByRole("form", { name: FORM })).getAllByRole("listitem");
+    const items = within(screen.getByRole("list", { name: PLUGINS })).getAllByRole("listitem");
 
     expect(items.map((item) => item.textContent)).toEqual(["PCS team workflowspcs", "dtsse"]);
   });
@@ -879,30 +916,40 @@ describe("the Assistant's plugins", () => {
     expect(screen.queryByText(/Saving restarts/)).toBeNull();
   });
 
-  it("should send the assistant's own id and the newly ticked names to the hub's plugins action when saved", async () => {
+  it("should send the assistant's own id and the newly ticked names to the hub's pod action when the save is confirmed", async () => {
     const save = ok();
     open({ plugins: plugins({ checked: ["pcs"], save }) }, "Plugins");
 
     fireEvent.click(screen.getByRole("checkbox", { name: /dtsse/ }));
+    await saveSettings();
+    expect(save).not.toHaveBeenCalled();
     await act(async () => {
-      fireEvent.submit(screen.getByRole("form", { name: FORM }));
+      fireEvent.click(screen.getByRole("button", { name: "Save and restart" }));
     });
 
     const sent = (save.mock.calls[0] as unknown as [FormData])[0];
-    expect([sent.get("id"), sent.getAll("plugins")]).toEqual([ASSISTANT_ID, ["pcs", "dtsse"]]);
+    expect([sent.get("id"), sent.has("pluginsChosen"), sent.getAll("plugins"), sent.has("size")]).toEqual([ASSISTANT_ID, true, ["pcs", "dtsse"], false]);
     expect(screen.getByRole("status").textContent).toBe("Your assistant is restarting with its new plugins");
   });
 
-  it("should send no plugins when the person unticks every one", async () => {
+  it("should send no plugins, but say the plugins were chosen, when the person unticks every one", async () => {
     const save = ok();
-    open({ plugins: plugins({ checked: ["pcs"], save }) }, "Plugins");
+    open({ plugins: plugins({ checked: ["pcs"], save, podRunning: false }) }, "Plugins");
 
     fireEvent.click(screen.getByRole("checkbox", { name: /pcs/ }));
-    await act(async () => {
-      fireEvent.submit(screen.getByRole("form", { name: FORM }));
-    });
+    await saveSettings();
 
-    expect((save.mock.calls[0] as unknown as [FormData])[0].getAll("plugins")).toEqual([]);
+    const sent = (save.mock.calls[0] as unknown as [FormData])[0];
+    expect([sent.has("pluginsChosen"), sent.getAll("plugins")]).toEqual([true, []]);
+  });
+
+  it("should leave nothing to save when the person ticks a plugin and unticks it again", () => {
+    open({ plugins: plugins({ checked: ["pcs"] }) }, "Plugins");
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /dtsse/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /dtsse/ }));
+
+    expect(saveButton().hasAttribute("disabled")).toBe(true);
   });
 
   it("should keep a ticked plugin the hub no longer offers, so the person can untick it", () => {
@@ -913,11 +960,13 @@ describe("the Assistant's plugins", () => {
     expect(screen.getAllByRole("checkbox").map((box) => (box as HTMLInputElement).value)).toEqual(["pcs", "dtsse", "civil"]);
   });
 
-  it("should keep its own controls in the dialog's focus trap when it is open", () => {
+  it("should keep its own controls in the dialog's focus trap, and then the Save, when it holds a change", () => {
     open({ plugins: plugins() }, "Plugins");
+    fireEvent.click(screen.getByRole("checkbox", { name: /dtsse/ }));
     const items = stops();
 
-    expect(items.at(-1)).toBe(screen.getByRole("button", { name: "Save plugins" }));
+    expect(items).toContain(screen.getByRole("checkbox", { name: /dtsse/ }));
+    expect(items.at(-1)).toBe(saveButton());
   });
 });
 
@@ -1190,15 +1239,16 @@ describe("the Assistant's own templates", () => {
     expect(screen.getByRole("radiogroup", { name: "Appearance" })).toBeTruthy();
     go("Connections");
     expect(screen.getByRole("list", { name: "Connections" })).toBeTruthy();
-    for (const [section, form, last] of [
-      ["Plugins", "Change your assistant's plugins", "Save plugins"],
-      ["Claude.md", "Save your CLAUDE.md", "Save your CLAUDE.md"],
-      ["Templates", "Save a new template", LAST_COPY]
-    ] as const) {
+    const shown: [string, () => HTMLElement, () => HTMLElement][] = [
+      ["Plugins", () => screen.getByRole("checkbox", { name: /pcs/ }), () => screen.getByRole("checkbox", { name: /dtsse/ })],
+      ["Claude.md", () => screen.getByLabelText("CLAUDE.md"), () => screen.getByLabelText("CLAUDE.md")],
+      ["Templates", () => screen.getByRole("button", { name: "Save template" }), () => screen.getByRole("button", { name: LAST_COPY })]
+    ];
+    for (const [section, first, last] of shown) {
       go(section);
       const items = stops();
-      expect(items).toContain(screen.getByRole("form", { name: form }).querySelector("button[type='submit']"));
-      expect(items.at(-1)).toBe(screen.getByRole("button", { name: last }));
+      expect(items).toContain(first());
+      expect(items.at(-1)).toBe(last());
     }
   });
 });
@@ -1214,9 +1264,9 @@ function modelSetting(overrides: Partial<AssistantModelSetting> = {}): Assistant
   };
 }
 
-/** The radio the form shows as the one in force. */
+/** The radio the section shows as the one chosen. */
 function checkedModel(): string | null {
-  const form = screen.getByRole("form", { name: MODEL_FORM });
+  const form = screen.getByRole("radiogroup", { name: MODEL_FORM });
   return (
     within(form)
       .getAllByRole("radio")
@@ -1239,7 +1289,7 @@ describe("the Assistant's model", () => {
 
   it("should offer Sonnet and Opus, with what each is for and no version, when it is shown", () => {
     open({ model: modelSetting() }, "Assistant");
-    const choices = within(screen.getByRole("form", { name: MODEL_FORM })).getAllByRole("radio");
+    const choices = within(screen.getByRole("radiogroup", { name: MODEL_FORM })).getAllByRole("radio");
 
     expect(choices.map((choice) => choice.getAttribute("value"))).toEqual(["sonnet", "opus"]);
     expect(modelPanel().textContent).toContain("Fast and capable, for most work");
@@ -1250,7 +1300,7 @@ describe("the Assistant's model", () => {
   it("should check the model the person is on when it is shown", () => {
     open({ model: modelSetting({ model: "opus" }) }, "Assistant");
 
-    expect((within(screen.getByRole("form", { name: MODEL_FORM })).getByRole("radio", { name: /^Opus/ }) as HTMLInputElement).checked).toBe(true);
+    expect((within(screen.getByRole("radiogroup", { name: MODEL_FORM })).getByRole("radio", { name: /^Opus/ }) as HTMLInputElement).checked).toBe(true);
   });
 
   // One setting for every chat, which people read a settings dialog as being about the chat they opened it from.
@@ -1261,33 +1311,32 @@ describe("the Assistant's model", () => {
     expect(modelPanel().textContent).toContain("takes the change with your next message");
   });
 
-  it("should save the model the person picks and say so when they submit it", async () => {
+  it("should save the model the person picks and say so when they press Save", async () => {
     const save = vi.fn(async () => ({ ok: true as const, confirmation: "Opus saved as the model for your chats" }));
     open({ model: modelSetting({ save }) }, "Assistant");
 
-    fireEvent.click(within(screen.getByRole("form", { name: MODEL_FORM })).getByRole("radio", { name: /^Opus/ }));
-    await act(async () => {
-      fireEvent.submit(screen.getByRole("form", { name: MODEL_FORM }));
-    });
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: MODEL_FORM })).getByRole("radio", { name: /^Opus/ }));
+    expect(save).not.toHaveBeenCalled();
+    await saveSettings();
 
     expect(save).toHaveBeenCalledTimes(1);
     expect((save.mock.calls[0] as unknown as [FormData])[0].get("model")).toBe("opus");
     expect(screen.getByRole("status").textContent).toBe("Opus saved as the model for your chats");
   });
 
-  // A refused save stored nothing, so the pick never became the choice: leaving it checked beside the refusal would
-  // show a selection that is not in force.
-  it("should say why and put the radios back to the stored choice when the save is refused", async () => {
+  // A refused save stored nothing, so the pick is still the person's to save: it stays chosen, and still unsaved,
+  // beside the refusal.
+  it("should say why beside the model, and keep the pick unsaved, when the save is refused", async () => {
     const save = vi.fn(async () => ({ ok: false as const, error: "pick a model from the list" }));
     open({ model: modelSetting({ save }) }, "Assistant");
 
-    fireEvent.click(within(screen.getByRole("form", { name: MODEL_FORM })).getByRole("radio", { name: /^Opus/ }));
-    await act(async () => {
-      fireEvent.submit(screen.getByRole("form", { name: MODEL_FORM }));
-    });
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: MODEL_FORM })).getByRole("radio", { name: /^Opus/ }));
+    await saveSettings();
 
-    expect(screen.getByRole("alert").textContent).toBe("pick a model from the list");
-    expect(checkedModel()).toBe("sonnet");
+    expect(within(modelPanel()).getByRole("alert").textContent).toBe("pick a model from the list");
+    expect(checkedModel()).toBe("opus");
+    expect(within(nav()).getByRole("tab", { name: "Assistant, unsaved changes" })).toBeTruthy();
+    expect(saveButton().hasAttribute("disabled")).toBe(false);
   });
 
   // Another tab, or the page's own revalidation, changes the stored choice under an open dialog.
@@ -1307,11 +1356,10 @@ describe("the Assistant's model", () => {
 
     expect(modelPanel().textContent).toContain("Your assistant picks your choice up the next time it starts");
     expect(
-      within(screen.getByRole("form", { name: MODEL_FORM }))
+      within(screen.getByRole("radiogroup", { name: MODEL_FORM }))
         .getAllByRole("radio")
         .every((radio) => !(radio as HTMLInputElement).disabled)
     ).toBe(true);
-    expect(screen.getByRole("button", { name: "Save model" })).toBeTruthy();
   });
 
   it("should say nothing about the next start when its pod honours the choice now", () => {
@@ -1332,7 +1380,6 @@ describe("the Assistant's model", () => {
 
 const SAVED = "Your CLAUDE.md is saved. Each agent uses it from its next Claude start";
 const RESET = "Your CLAUDE.md is back to the default";
-const SAVE_FORM = "Save your CLAUDE.md";
 const RESET_FORM = "Reset your CLAUDE.md to the default";
 
 function saved(confirmation: string) {
@@ -1358,7 +1405,7 @@ describe("the Assistant's CLAUDE.md", () => {
 
     expect(sections()).not.toContain("Claude.md");
     expect(screen.queryByRole("heading", { name: "Your CLAUDE.md" })).toBeNull();
-    expect(screen.queryByRole("form", { name: SAVE_FORM })).toBeNull();
+    expect(screen.queryByLabelText("CLAUDE.md")).toBeNull();
   });
 
   // The navigation's own label is the person's word for it; the section's heading is the file's.
@@ -1368,7 +1415,7 @@ describe("the Assistant's CLAUDE.md", () => {
     expect(sections()).toEqual(["Appearance", "Connections", "Sharing", "Claude.md", "Plugins"]);
     expect(screen.getByRole("heading", { name: "Your CLAUDE.md" })).toBeTruthy();
     go("Plugins");
-    expect(screen.getByRole("form", { name: FORM })).toBeTruthy();
+    expect(screen.getByRole("list", { name: PLUGINS })).toBeTruthy();
     go("Appearance");
     expect(screen.getByRole("radiogroup", { name: "Appearance" })).toBeTruthy();
   });
@@ -1408,7 +1455,7 @@ describe("the Assistant's CLAUDE.md", () => {
     open({ claudeMd: claudeMd({ save }) }, "Claude.md");
 
     fireEvent.change(notes(), { target: { value: "# Me\n\nAlways British English." } });
-    await submit(SAVE_FORM);
+    await saveSettings();
 
     expect((save.mock.calls[0] as unknown as [FormData])[0].get("value")).toBe("# Me\n\nAlways British English.");
     expect(screen.getByRole("status").textContent).toBe(SAVED);
@@ -1422,9 +1469,12 @@ describe("the Assistant's CLAUDE.md", () => {
     const save = vi.fn(async () => ({ ok: false as const, error: refused }));
     open({ claudeMd: claudeMd({ save }) }, "Claude.md");
 
-    await submit(SAVE_FORM);
+    fireEvent.change(notes(), { target: { value: "# Me\u0007" } });
+    await saveSettings();
 
-    expect(screen.getByRole("alert").textContent).toBe(refused);
+    const section = screen.getByRole("region", { name: "Your CLAUDE.md" });
+    expect(within(section).getByRole("alert").textContent).toBe(refused);
+    expect(notes().value).toBe("# Me\u0007");
     expect(screen.queryByRole("status")).toBeNull();
   });
 
@@ -1461,7 +1511,7 @@ describe("the Assistant's CLAUDE.md", () => {
     open({ claudeMd: claudeMd({ settings: { available: false, reason: "the credentials Key Vault is not configured" } }) }, "Claude.md");
 
     expect(screen.getByText(/the credentials Key Vault is not configured/)).toBeTruthy();
-    expect(screen.queryByRole("form", { name: SAVE_FORM })).toBeNull();
+    expect(screen.queryByLabelText("CLAUDE.md")).toBeNull();
   });
 
   it("should describe the editor to a screen reader by its label, how it stands and its count, when it is shown", () => {
@@ -1481,14 +1531,15 @@ describe("the Assistant's CLAUDE.md", () => {
     expect(items.at(-1)).toBe(screen.getByRole("button", { name: "Reset to the default" }));
   });
 
-  it("should wrap focus from its last control back to the start of the dialog when the person tabs off the end", () => {
+  it("should wrap focus from the Save back to the start of the dialog when the person tabs off the end with a change made", () => {
     open({ claudeMd: claudeMd() }, "Claude.md");
+    fireEvent.change(notes(), { target: { value: "# Me" } });
     const items = stops();
     items.at(-1)?.focus();
 
     fireEvent.keyDown(document, { key: "Tab" });
 
-    expect(items.at(-1)).toBe(screen.getByRole("button", { name: SAVE_FORM }));
+    expect(items.at(-1)).toBe(saveButton());
     expect(document.activeElement).toBe(items[0]);
   });
 });
@@ -1786,7 +1837,7 @@ describe("the Assistant's settings across a change of width", () => {
 
     act(() => resize(1024));
 
-    expect(within(nav()).getByRole("tab", { name: "Claude.md" }).getAttribute("aria-selected")).toBe("true");
+    expect(within(nav()).getByRole("tab", { name: "Claude.md, unsaved changes" }).getAttribute("aria-selected")).toBe("true");
     expect(notes().value).toBe("# Me\n\nHalf a thought");
   });
 
@@ -2124,7 +2175,7 @@ describe("the Assistant's ticket and Confluence defaults", () => {
     });
     fireEvent.click(screen.getByRole("option"));
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Save defaults" }));
+      fireEvent.click(saveButton());
     });
     vi.useRealTimers();
 
@@ -2135,7 +2186,7 @@ describe("the Assistant's ticket and Confluence defaults", () => {
       githubProject: null,
       confluence: null
     });
-    expect(screen.getByText("Your defaults are saved")).toBeTruthy();
+    expect(screen.getByText("Your ticket and Confluence defaults are saved")).toBeTruthy();
     expect(refresh).toHaveBeenCalled();
   });
 
@@ -2145,10 +2196,10 @@ describe("the Assistant's ticket and Confluence defaults", () => {
     });
     open({ exports }, "Tickets & Confluence");
 
-    expect((screen.getByRole("button", { name: "Save defaults" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((saveButton() as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Clear" }));
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Save defaults" }));
+      fireEvent.click(saveButton());
     });
 
     expect(exports.save).toHaveBeenCalledWith({ ticketTool: "jira", jira: null, github: null, githubProject: null, confluence: null });
@@ -2201,7 +2252,7 @@ describe("the Assistant's ticket and Confluence defaults", () => {
     await pick("GitHub repository", /GitHub repositories for your default/, "cft", /hmcts\/cft-workspace/);
     await pick("GitHub Project", /hmcts's GitHub Projects/, "roadmap", /CFT roadmap/);
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Save defaults" }));
+      fireEvent.click(saveButton());
     });
     vi.useRealTimers();
 
@@ -2215,7 +2266,7 @@ describe("the Assistant's ticket and Confluence defaults", () => {
       githubProject: { owner: "hmcts", number: 12, title: "CFT roadmap" },
       confluence: null
     });
-    expect(screen.getByText("Your defaults are saved")).toBeTruthy();
+    expect(screen.getByText("Your ticket and Confluence defaults are saved")).toBeTruthy();
   });
 
   it("should drop the Project when the person clears the repository it went with", async () => {
@@ -2234,7 +2285,7 @@ describe("the Assistant's ticket and Confluence defaults", () => {
     // Act
     fireEvent.click(within(screen.getByRole("group", { name: "GitHub repository" })).getByRole("button", { name: "Clear" }));
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Save defaults" }));
+      fireEvent.click(saveButton());
     });
 
     // Assert
@@ -2252,7 +2303,7 @@ describe("the Assistant's ticket and Confluence defaults", () => {
     // Act
     fireEvent.click(screen.getByRole("radio", { name: "Jira" }));
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Save defaults" }));
+      fireEvent.click(saveButton());
     });
 
     // Assert
@@ -2330,8 +2381,6 @@ function use(headroom: number, overrides: Partial<Extract<MemoryUse, { reported:
     ...overrides
   };
 }
-
-const CHANGE_FORM = "Change the size of your assistant";
 
 function size(overrides: Partial<AssistantMemory> = {}, save: FormAction = vi.fn(async () => ({ ok: true as const, confirmation: "done" }))): AssistantSize {
   return {
@@ -2532,17 +2581,18 @@ describe("the Assistant's size", () => {
   });
 
   // A change restarts the pod, so what it ends is said before the person commits, not after.
-  it("should post nothing, and say what a change ends, until the person confirms", () => {
+  it("should post nothing, and say what a change ends, until the person confirms the save", () => {
     const save = vi.fn(async () => ({ ok: true as const, confirmation: "done" }));
     open({ size: size({ openChats: 3 }, save) }, "Assistant");
 
     fireEvent.change(screen.getByLabelText("Choose a size"), { target: { value: "medium" } });
-    fireEvent.click(screen.getByRole("button", { name: "Change to medium" }));
+    expect(panel().textContent).toContain("Saving changes it to medium and restarts your assistant.");
+    fireEvent.click(saveButton());
 
     expect(save).not.toHaveBeenCalled();
-    expect(screen.getByText("Change to medium? Your assistant restarts, which stops all 3 chats you have open.")).toBeTruthy();
-    expect(panel().textContent).toContain("Only what one of them was working on at the moment you change is lost");
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Change size and restart" }));
+    expect(screen.getByText("Save and restart your assistant? Changing its size restarts it, which stops all 3 chats you have open.")).toBeTruthy();
+    expect(screen.getByRole("dialog").textContent).toContain("Only what one of them was working on at the moment you save is lost");
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Cancel" }));
   });
 
   it.each([
@@ -2552,74 +2602,80 @@ describe("the Assistant's size", () => {
     open({ size: size({ openChats }) }, "Assistant");
 
     fireEvent.change(screen.getByLabelText("Choose a size"), { target: { value: "large" } });
-    fireEvent.click(screen.getByRole("button", { name: "Change to large" }));
+    fireEvent.click(saveButton());
 
-    expect(screen.getByText(`Change to large? Your assistant restarts, which stops ${said}.`)).toBeTruthy();
+    expect(screen.getByText(`Save and restart your assistant? Changing its size restarts it, which stops ${said}.`)).toBeTruthy();
   });
 
-  it("should promise the new size at the next start, and not a restart, when no pod is up", () => {
-    open({ size: size({ rollsPod: false }) }, "Assistant");
+  it("should promise the new size at the next start, and save without asking, when no pod is up", async () => {
+    const save = vi.fn(async () => ({ ok: true as const, confirmation: "It starts at medium the next time it runs." }));
+    open({ size: size({ rollsPod: false }, save) }, "Assistant");
 
     fireEvent.change(screen.getByLabelText("Choose a size"), { target: { value: "medium" } });
-    fireEvent.click(screen.getByRole("button", { name: "Change to medium" }));
+    expect(panel().textContent).toContain("Saving changes it to medium. Your assistant starts at the new size the next time you use it.");
+    await saveSettings();
 
-    expect(screen.getByText("Change to medium? Your assistant starts at the new size the next time you use it.")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Change size" })).toBeTruthy();
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "Save and restart" })).toBeNull();
   });
 
-  it("should send the assistant's id and the size chosen when the person confirms", async () => {
+  it("should send the assistant's id and the size chosen, and no plugins, when the person confirms", async () => {
     const save = vi.fn(async () => ({ ok: true as const, confirmation: "Restarting at medium." }));
     open({ size: size({}, save) }, "Assistant");
     fireEvent.change(screen.getByLabelText("Choose a size"), { target: { value: "medium" } });
-    fireEvent.click(screen.getByRole("button", { name: "Change to medium" }));
+    fireEvent.click(saveButton());
 
-    await submit(CHANGE_FORM);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save and restart" }));
+    });
 
     const sent = (save.mock.calls[0] as unknown as [FormData])[0];
-    expect([sent.get("id"), sent.get("size")]).toEqual(["0f8a6a1e-0000-4000-8000-0000000000aa", "medium"]);
+    expect([sent.get("id"), sent.get("size"), sent.has("pluginsChosen")]).toEqual(["0f8a6a1e-0000-4000-8000-0000000000aa", "medium", false]);
     expect(screen.getByRole("status").textContent).toBe("Restarting at medium.");
   });
 
-  it("should put the question away, having posted nothing, when the person cancels", () => {
+  it("should put the question away, having posted nothing and kept the change, when the person cancels", () => {
     const save = vi.fn(async () => ({ ok: true as const, confirmation: "done" }));
     open({ size: size({}, save) }, "Assistant");
     fireEvent.change(screen.getByLabelText("Choose a size"), { target: { value: "medium" } });
-    fireEvent.click(screen.getByRole("button", { name: "Change to medium" }));
+    fireEvent.click(saveButton());
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
-    expect(screen.getByRole("button", { name: "Change to medium" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Save and restart" })).toBeNull();
+    expect((screen.getByLabelText("Choose a size") as HTMLSelectElement).value).toBe("medium");
     expect(save).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(saveButton());
   });
 
   // A different size is a different question, so an answer already on the screen stops being the one asked.
   it("should take the question back when the person changes the size they are asking about", () => {
     open({ size: size() }, "Assistant");
     fireEvent.change(screen.getByLabelText("Choose a size"), { target: { value: "medium" } });
-    fireEvent.click(screen.getByRole("button", { name: "Change to medium" }));
+    fireEvent.click(saveButton());
 
     fireEvent.change(screen.getByLabelText("Choose a size"), { target: { value: "large" } });
 
-    expect(screen.queryByRole("button", { name: "Change size and restart" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Change to large" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Save and restart" })).toBeNull();
+    expect(saveButton().hasAttribute("disabled")).toBe(false);
   });
 
-  it("should show the action's own refusal, rather than deciding for itself, when a change is refused", async () => {
+  it("should show the action's own refusal beside the size, rather than deciding for itself, when a change is refused", async () => {
     const save = vi.fn(async () => ({ ok: false as const, error: "that virtual agent is being deleted" }));
-    open({ size: size({}, save) }, "Assistant");
+    open({ size: size({ rollsPod: false }, save) }, "Assistant");
     fireEvent.change(screen.getByLabelText("Choose a size"), { target: { value: "medium" } });
-    fireEvent.click(screen.getByRole("button", { name: "Change to medium" }));
 
-    await submit(CHANGE_FORM);
+    await saveSettings();
 
-    expect(screen.getByRole("alert").textContent).toBe("that virtual agent is being deleted");
+    expect(within(panel()).getByRole("alert").textContent).toBe("that virtual agent is being deleted");
+    expect((screen.getByLabelText("Choose a size") as HTMLSelectElement).value).toBe("medium");
   });
 
-  it("should say why, and offer no form, when the size cannot be changed at all", () => {
+  it("should say why, and offer no choice, when the size cannot be changed at all", () => {
     open({ size: size({ refusal: "that virtual agent is being deleted" }) }, "Assistant");
 
     expect(panel().textContent).toContain("The size cannot be changed just now: that virtual agent is being deleted.");
-    expect(screen.queryByRole("form", { name: CHANGE_FORM })).toBeNull();
+    expect(screen.queryByLabelText("Choose a size")).toBeNull();
   });
 
   it("should keep its own controls in the dialog's focus trap when it is open", () => {
@@ -3061,7 +3117,7 @@ describe("AssistantSettings Microsoft 365", () => {
     expect(form.getAttribute("method")).toBe("post");
     expect(form.getAttribute("action")).toBe("/auth/microsoft/connect");
     expect(new FormData(form).get("redirect")).toBe("/assistant?settings=connections");
-    expect(within(screen.getByRole("list", { name: "Microsoft 365" })).getByText("Not connected")).toBeTruthy();
+    expect(within(connectionRow("Microsoft 365")).getByText("Not connected")).toBeTruthy();
   });
 
   it("should name the account and disconnect through removeCredential when one is connected", async () => {
@@ -3069,7 +3125,7 @@ describe("AssistantSettings Microsoft 365", () => {
     const connected = data([...ALL_SIGNED_IN, "microsoft"]);
     connected.statuses = connected.statuses.map((row) => (row.kind === "microsoft" ? status("microsoft", "a.person@hmcts.net") : row));
     open({ connections: connected, tokens: { rows: [], unavailable: null, save: vi.fn(), remove } }, "Connections");
-    const row = within(screen.getByRole("list", { name: "Microsoft 365" }));
+    const row = within(connectionRow("Microsoft 365"));
 
     expect(row.getByText("a.person@hmcts.net")).toBeTruthy();
     fireEvent.click(row.getByRole("button", { name: "Disconnect" }));
@@ -3085,12 +3141,311 @@ describe("AssistantSettings Microsoft 365", () => {
     window.history.replaceState(null, "", "/assistant?settings=connections&microsoft=cancelled");
     open({}, "Connections");
 
-    expect(within(screen.getByRole("list", { name: "Microsoft 365" })).getByRole("status").textContent).toContain("wasn't connected");
+    expect(within(connectionRow("Microsoft 365")).getByRole("status").textContent).toContain("wasn't connected");
+  });
+
+  // A row of the one Connections list, laid out as every other row is, rather than a list of its own.
+  it("should list Microsoft 365 last, as a row of the Connections list, when the hub can read the person's credentials", () => {
+    open({}, "Connections");
+
+    expect(connectionRows().at(-1)).toBe(MICROSOFT_ROW);
+    expect(screen.getAllByRole("list").filter((list) => list.closest("[role=dialog]") !== null && list.getAttribute("aria-label") === "Microsoft 365")).toEqual(
+      []
+    );
   });
 
   it("should leave Microsoft 365 out when the hub cannot read the person's credentials", () => {
     open({ connections: data([], [], "no store") }, "Connections");
 
-    expect(screen.queryByRole("list", { name: "Microsoft 365" })).toBeNull();
+    expect(screen.queryByText("Microsoft 365")).toBeNull();
+  });
+});
+
+describe("the settings dialog's one Save", () => {
+  function confirmed(confirmation: string) {
+    return vi.fn<FormAction>(async () => ({ ok: true as const, confirmation }));
+  }
+
+  function chooseOpus(): void {
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: MODEL_FORM })).getByRole("radio", { name: /^Opus/ }));
+  }
+
+  it("should offer a Save that does nothing, and no way to discard, when nothing has changed", () => {
+    open({ model: modelSetting() }, "Assistant");
+
+    expect(saveButton().hasAttribute("disabled")).toBe(true);
+    expect(screen.queryByRole("button", { name: "Discard changes" })).toBeNull();
+  });
+
+  it("should keep a change, and mark its section, while the person moves to another section and back", () => {
+    open({ claudeMd: claudeMd(), model: modelSetting() }, "Claude.md");
+
+    fireEvent.change(notes(), { target: { value: "# Me\n\nHalf a thought" } });
+    go("Assistant");
+    chooseOpus();
+    go("Claude.md");
+
+    expect(notes().value).toBe("# Me\n\nHalf a thought");
+    expect(within(nav()).getByRole("tab", { name: "Claude.md, unsaved changes" })).toBeTruthy();
+    expect(within(nav()).getByRole("tab", { name: "Assistant, unsaved changes" })).toBeTruthy();
+    expect(screen.getByText("Unsaved changes in Assistant and Claude.md.")).toBeTruthy();
+  });
+
+  it("should leave nothing to save when the person puts a setting back as it was", () => {
+    open({ claudeMd: claudeMd() }, "Claude.md");
+
+    fireEvent.change(notes(), { target: { value: "# Me" } });
+    fireEvent.change(notes(), { target: { value: DEFAULT_CLAUDE_MD } });
+
+    expect(saveButton().hasAttribute("disabled")).toBe(true);
+    expect(within(nav()).getByRole("tab", { name: "Claude.md" })).toBeTruthy();
+  });
+
+  it("should run only the actions of the settings that changed when Save is pressed", async () => {
+    const model = modelSetting({ save: confirmed("Opus saved as the model for your chats") });
+    const notesSave = confirmed(SAVED);
+    const pod = confirmed("done");
+    open({ model, claudeMd: claudeMd({ save: notesSave }), size: size({}, pod), plugins: plugins({ save: pod }) }, "Assistant");
+
+    chooseOpus();
+    await saveSettings();
+
+    expect(model.save).toHaveBeenCalledTimes(1);
+    expect(notesSave).not.toHaveBeenCalled();
+    expect(pod).not.toHaveBeenCalled();
+    expect(screen.getByRole("status").textContent).toBe("Opus saved as the model for your chats");
+    expect(saveButton().hasAttribute("disabled")).toBe(true);
+    expect(within(nav()).getByRole("tab", { name: "Assistant" })).toBeTruthy();
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  // A section the person never opened read nothing and changed nothing, so there is nothing of it to send.
+  it("should send nothing for a section the person never opened", async () => {
+    const git = { load: vi.fn(async () => ({ available: true as const, stored: false, identity: {} })), save: confirmed("saved"), clear: confirmed("cleared") };
+    open({ model: modelSetting(), git }, "Assistant");
+
+    chooseOpus();
+    await saveSettings();
+
+    expect(git.load).not.toHaveBeenCalled();
+    expect(git.save).not.toHaveBeenCalled();
+  });
+
+  // Both are in the pod template, so each would replace the pod: one question and one action is one restart.
+  it("should ask once, and send the size and the plugins in one action, when both would restart the pod", async () => {
+    const pod = confirmed("Restarting at medium with its new plugins.");
+    open({ size: size({ openChats: 2 }, pod), plugins: plugins({ save: pod }) }, "Assistant");
+
+    fireEvent.change(screen.getByLabelText("Choose a size"), { target: { value: "medium" } });
+    go("Plugins");
+    fireEvent.click(screen.getByRole("checkbox", { name: /pcs/ }));
+    fireEvent.click(saveButton());
+
+    expect(screen.getByText("Save and restart your assistant? Changing its size and plugins restarts it, which stops all 2 chats you have open.")).toBeTruthy();
+    expect(pod).not.toHaveBeenCalled();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save and restart" }));
+    });
+
+    expect(pod).toHaveBeenCalledTimes(1);
+    const sent = (pod.mock.calls[0] as unknown as [FormData])[0];
+    expect([sent.get("id"), sent.get("size"), sent.has("pluginsChosen"), sent.getAll("plugins")]).toEqual([
+      "0f8a6a1e-0000-4000-8000-0000000000aa",
+      "medium",
+      true,
+      ["pcs"]
+    ]);
+    expect(screen.getByRole("status").textContent).toBe("Restarting at medium with its new plugins.");
+  });
+
+  it("should save the rest, and keep the refused one unsaved with its reason, when one of the saves is refused", async () => {
+    const model = modelSetting({ save: confirmed("Opus saved as the model for your chats") });
+    const refused = "your CLAUDE.md can only hold printable text, tabs and new lines";
+    open({ model, claudeMd: claudeMd({ save: vi.fn(async () => ({ ok: false as const, error: refused })) }) }, "Assistant");
+
+    chooseOpus();
+    go("Claude.md");
+    fireEvent.change(notes(), { target: { value: "# Me\u0007" } });
+    await saveSettings();
+
+    const alerts = within(screen.getByRole("dialog")).getAllByRole("alert");
+    expect(alerts[0]?.textContent).toBe(refused);
+    expect([...(alerts[1]?.querySelectorAll("p") ?? [])].map((line) => line.textContent)).toEqual([
+      "Opus saved as the model for your chats",
+      "Claude.md could not be saved. Your changes are kept, and each section says why."
+    ]);
+    expect(notes().value).toBe("# Me\u0007");
+    expect(within(nav()).getByRole("tab", { name: "Claude.md, unsaved changes" })).toBeTruthy();
+    expect(within(nav()).getByRole("tab", { name: "Assistant" })).toBeTruthy();
+  });
+
+  it("should ask before closing with unsaved changes, and keep them when the person keeps editing", () => {
+    open({ claudeMd: claudeMd() }, "Claude.md");
+    fireEvent.change(notes(), { target: { value: "# Me" } });
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.getByText("Discard your unsaved changes to Claude.md?")).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Keep editing" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(notes().value).toBe("# Me");
+  });
+
+  it("should put the question away, and leave the dialog open, when Escape is pressed while it is asked", () => {
+    open({ claudeMd: claudeMd() }, "Claude.md");
+    fireEvent.change(notes(), { target: { value: "# Me" } });
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Close settings" }));
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.queryByText("Discard your unsaved changes to Claude.md?")).toBeNull();
+    expect(screen.getByRole("dialog")).toBeTruthy();
+  });
+
+  it("should close, saving nothing, when the person discards their changes to close", () => {
+    const notesSave = confirmed(SAVED);
+    open({ claudeMd: claudeMd({ save: notesSave }) }, "Claude.md");
+    fireEvent.change(notes(), { target: { value: "# Me" } });
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Close settings" })[0] as HTMLElement);
+    fireEvent.click(screen.getByRole("button", { name: "Discard and close" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(notesSave).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(cog());
+  });
+
+  it("should close without asking once the changes are saved", async () => {
+    open({ claudeMd: claudeMd() }, "Claude.md");
+    fireEvent.change(notes(), { target: { value: "# Me" } });
+    await saveSettings();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+describe("a saved template's row", () => {
+  // jsdom lays nothing out, so this is the cause rather than the effect: Delete's form is a flex box, as the row is, so
+  // its button is not set on a line of the row's larger text below where Edit sits.
+  it("should give Edit and Delete the same box, centred on the row, when it lists one", () => {
+    open({ templates: templates({ mine: [row("Stand-up")] }) }, "Templates");
+    const item = within(screen.getByRole("list", { name: "Your templates" })).getByRole("listitem");
+    const edit = within(item).getByRole("button", { name: "Edit Stand-up" });
+    const remove = within(item).getByRole("button", { name: "Delete Stand-up" });
+
+    expect(item.className).toContain("items-center");
+    expect(remove.closest("form")?.className).toContain("flex");
+    expect(remove.className).toBe(edit.className);
+  });
+});
+
+describe("the settings dialog's drafts across a save and the address", () => {
+  function page(theme: string): HTMLElement {
+    const root = document.createElement("div");
+    root.className = "asst-theme";
+    root.dataset.theme = theme;
+    document.body.append(root);
+    return root;
+  }
+
+  // The cookie and the page are the saved appearance from then on, so picking the one the dialog opened on is a change.
+  it("should measure a change against the appearance last saved, and discard back to it, when one has been saved", async () => {
+    const root = page("system");
+    open({ theme: "system" });
+
+    fireEvent.click(screen.getByRole("radio", { name: "Dark" }));
+    await saveSettings();
+    fireEvent.click(screen.getByRole("radio", { name: "Match my device" }));
+
+    expect(saveButton().hasAttribute("disabled")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+    expect(root.dataset.theme).toBe("dark");
+    expect(screen.getByRole("radio", { name: "Dark" }).getAttribute("aria-checked")).toBe("true");
+    expect(document.cookie).toContain("asst_theme=dark");
+    root.remove();
+  });
+
+  // Until the page's refresh lands its props still say the old size, so the dialog's own save is what is stored.
+  it("should show a saved size as the one the person is on before the page's refresh lands", async () => {
+    open({ size: size({ rollsPod: false }) }, "Assistant");
+
+    fireEvent.change(screen.getByLabelText("Choose a size"), { target: { value: "medium" } });
+    await saveSettings();
+
+    expect((screen.getByLabelText("Choose a size") as HTMLSelectElement).value).toBe("medium");
+    expect(panel().textContent).toContain("This is the size you are on.");
+    expect(saveButton().hasAttribute("disabled")).toBe(true);
+  });
+
+  it("should ask before the back button closes a dialog the address opened with changes in it", async () => {
+    window.history.replaceState(null, "", "/assistant");
+    window.history.pushState(null, "", "/assistant?settings=claude-md");
+    const { rerender } = render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} claudeMd={claudeMd()} />);
+    await act(async () => undefined);
+    fireEvent.change(notes(), { target: { value: "# Me" } });
+
+    window.history.replaceState(null, "", "/assistant");
+    rerender(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} claudeMd={claudeMd()} />);
+
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(screen.getByText("Discard your unsaved changes to Claude.md?")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Discard and close" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("should keep the changes when the address names another section while the dialog is open", async () => {
+    window.history.replaceState(null, "", "/assistant?settings=claude-md");
+    const props = { now: Date.now(), connections: data(ALL_SIGNED_IN), claudeMd: claudeMd(), model: modelSetting() };
+    const { rerender } = render(<AssistantSettings {...props} />);
+    await act(async () => undefined);
+    fireEvent.change(notes(), { target: { value: "# Me" } });
+
+    window.history.pushState(null, "", "/assistant?settings=assistant");
+    await act(async () => {
+      rerender(<AssistantSettings {...props} />);
+    });
+
+    expect(selected()).toBe("Assistant");
+    expect(within(nav()).getByRole("tab", { name: "Claude.md, unsaved changes" })).toBeTruthy();
+    go("Claude.md");
+    expect(notes().value).toBe("# Me");
+  });
+
+  it("should stay open, asking nothing, when the person tries to close it while a save is in flight", async () => {
+    let finish: (value: { ok: true; confirmation: string }) => void = () => undefined;
+    const pending = vi.fn<FormAction>(() => new Promise((resolve) => (finish = resolve)));
+    open({ claudeMd: claudeMd({ save: pending }) }, "Claude.md");
+    fireEvent.change(notes(), { target: { value: "# Me" } });
+    fireEvent.click(saveButton());
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.click(screen.getAllByRole("button", { name: "Close settings" })[0] as HTMLElement);
+
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(screen.queryByText(/Discard your unsaved changes/)).toBeNull();
+    await act(async () => finish({ ok: true, confirmation: SAVED }));
+    expect(screen.getByRole("status").textContent).toBe(SAVED);
+  });
+
+  it("should acknowledge every setting a save stored, in its action's words or its own", async () => {
+    const root = page("system");
+    open({
+      theme: "system",
+      model: modelSetting({ save: vi.fn(async () => ({ ok: true as const, confirmation: "Opus saved as the model for your chats" })) })
+    });
+
+    fireEvent.click(screen.getByRole("radio", { name: "Dark" }));
+    go("Assistant");
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: MODEL_FORM })).getByRole("radio", { name: /^Opus/ }));
+    await saveSettings();
+
+    expect([...screen.getByRole("status").querySelectorAll("p")].map((line) => line.textContent)).toEqual([
+      "Your appearance is saved",
+      "Opus saved as the model for your chats"
+    ]);
+    root.remove();
   });
 });

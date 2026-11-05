@@ -3,7 +3,7 @@
 // here may throw its way out of the loop — a bridge that exits leaves the session silently unreachable — so
 // every failure is logged and retried, and a message is acked only once it is in the inbox.
 import fs from "node:fs";
-import { loadAgent, registerAgent, type StoredAgent } from "./agent.ts";
+import { claimsCurrentFeatures, loadAgent, registerAgent, type StoredAgent } from "./agent.ts";
 import { type Api, ApiError, createApi } from "./api.ts";
 import { fetchAttachments, readAttachments, unfetchedAttachments } from "./assistant/attachments.ts";
 import { switchModel } from "./assistant/models.ts";
@@ -11,6 +11,7 @@ import { createTmux, type Tmux } from "./assistant/tmux.ts";
 import { peerOf, recordDirect } from "./directs.ts";
 import type { Env } from "./env.ts";
 import { type AssistantFrame, type AttachmentOutcome, chooseEnvelope, routeDelivery, type SessionKind } from "./envelope.ts";
+import { CLIENT_FEATURES, sameFeatures } from "./features.ts";
 import { asRecord, parseAssistantFrame, parseAssistantProduct, parseDirectEventMessage } from "./frames.ts";
 import { describeInbound, type InboundOptions, type InboundResult, inboundAccepted, inboundFix } from "./inbound.ts";
 import { RAPID_CLOSE_MS, type ReconnectDecision, reconnectDelay } from "./reconnect.ts";
@@ -243,6 +244,9 @@ export async function runBridge({
     return null;
   }
 
+  // Said once, since a hub that drops the claim answers every heartbeat the same way until it is upgraded.
+  let unconfirmedSaid = false;
+
   // The status the hub last heard, so a turn starting or ending is sent at once rather than on the next heartbeat.
   let sentStatus: "busy" | "idle" | null = null;
   function statusChanged(): void {
@@ -267,6 +271,9 @@ export async function runBridge({
     }
     const agentId = current.agent_id;
     const skills = changedSkills();
+    // Sent until the hub has taken this build's claim, which a resumed session, finding its predecessor's
+    // registration on disk and so never registering, has no other way to report.
+    const features = claimsCurrentFeatures(current) ? null : [...CLIENT_FEATURES];
     const status = readStatus(sid);
     sentStatus = status;
     try {
@@ -274,12 +281,32 @@ export async function runBridge({
       // the person says what it is, and the service keeps the chat in the Assistant on that name rather than on the
       // session's first prompt. Reading them apart would let a rename arrive as a name of unknown origin.
       const session = sessionInfo(sid, env);
-      await api.heartbeat(agentId, { status, name: session.name, name_source: session.nameSource, ...(skills ? { skills } : {}) });
+      const answer = await api.heartbeat(agentId, {
+        status,
+        name: session.name,
+        name_source: session.nameSource,
+        ...(skills ? { skills } : {}),
+        ...(features ? { client_features: features } : {})
+      });
+      // Taken only when the hub says it stored these names: one from before the field drops it and still answers 204.
+      const claimed = features !== null && sameFeatures(answer?.client_features, features) ? features : null;
+      if (features && !claimed && !unconfirmedSaid) {
+        unconfirmedSaid = true;
+        log(sid, "the hub did not confirm this client's features; sending them with every heartbeat until it does");
+      }
+      // Into the live agent, and only while it is the one this heartbeat was for: a re-registration while the heartbeat
+      // was out gives the session a new agent, which this heartbeat's answer says nothing about and must not undo.
+      if ((skills || claimed) && agent?.agent_id === agentId) {
+        const taken = { ...(skills ? { skills_hash: skillsHash(skills) } : {}), ...(claimed ? { client_features: claimed } : {}) };
+        agent = { ...agent, ...taken };
+        const saved = loadAgent(sid);
+        writeJson(statePath(sid, "agent.json"), { ...(saved?.agent_id === agentId ? saved : agent), ...taken });
+      }
       if (skills) {
-        const hash = skillsHash(skills);
-        agent = { ...current, skills_hash: hash };
-        writeJson(statePath(sid, "agent.json"), { ...(loadAgent(sid) || agent), skills_hash: hash });
         log(sid, `sent ${skills.length} skills`);
+      }
+      if (claimed) {
+        log(sid, "sent this client's features");
       }
     } catch (e) {
       if (skills) {
@@ -292,7 +319,7 @@ export async function runBridge({
   /**
    * The files on an assistant frame, written to this pod's disk.
    *
-   * Empty only for a frame that names no file: an outcome missing from this list is a file the envelope says nothing
+   * Empty only for a frame that names no file: an outcome missing from this list is a file the prompt says nothing
    * about, and a message delivered without a word about the file attached to it leaves the person believing it was
    * read. So a frame that names files this pod cannot go and get — no conversation id to build a path from, no agent
    * id to fetch with, or entries the client will not act on — answers with an error outcome for each of them.
@@ -353,9 +380,9 @@ export async function runBridge({
       // The frame is what the model switch, the attachment fetch and the recorded product act on.
       const assistant = delivery.kind === "conversation" ? delivery.frame : null;
       const previousProduct = assistant ? parseAssistantProduct(readJson(productPath(sid))) : null;
-      // Fetched before the message is delivered, so the envelope can name the absolute path and the session has the
+      // Fetched before the message is delivered, so the prompt can name the absolute path and the session has the
       // file the moment it reads about it. Nothing here throws: a file that could not be fetched comes back as an
-      // outcome the envelope says so about, because a message delivered with the attachment silently missing would
+      // outcome the prompt says so about, because a message delivered with the attachment silently missing would
       // leave the person believing the agent had read it.
       const attachments = await fetchForDelivery(message.id, assistant);
       // Before the message, so a model the person picked since the last one answers this one. Nothing here throws: a

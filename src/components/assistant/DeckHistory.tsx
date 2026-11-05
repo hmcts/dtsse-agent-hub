@@ -14,7 +14,7 @@ import { SlideCanvas } from "@/components/assistant/SlideCanvas";
 import { ScrollPane } from "@/components/Markup";
 import { DownloadIcon } from "@/components/sidebar/icons";
 import type { ActionResult } from "@/web/action";
-import { SETTINGS_PARAMETER } from "@/web/home";
+import { RESTART_IN_SETTINGS } from "@/web/home";
 
 /**
  * A deck's kept versions, beside the latest one the panel shows: a list to pick one from, that version shown read-only
@@ -165,9 +165,6 @@ const NOT_STARTED: Record<"waking" | "unsupported" | "restart_needed" | "assista
   assistant_gone: "This chat's assistant has been replaced, so older versions can't be prepared here.",
   no_pod: "Older versions can only be prepared in a chat that runs on your assistant in the hub, not in a chat from your own machine."
 };
-
-/** The settings' Assistant section, where the restart is, opened over this chat rather than in place of it. */
-export const RESTART_IN_SETTINGS = `?${new URLSearchParams({ [SETTINGS_PARAMETER]: "assistant" })}`;
 
 /**
  * One version's .pptx: a download when the hub holds it, and otherwise, for the owner, a build by their pod, read back

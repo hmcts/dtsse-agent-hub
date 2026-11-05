@@ -154,12 +154,17 @@ export type {
   SessionKind
 } from "./envelope.ts";
 export {
-  assistantEnvelope,
+  ANSWER_HERE,
+  assistantContextLines,
+  assistantPrompt,
   attachmentLines,
   CLI,
+  CONTEXT_CLOSE,
+  CONTEXT_TAG,
   chooseEnvelope,
   cliName,
   confluenceExportLines,
+  contextOpen,
   describeAuthor,
   directEnvelope,
   formatMessage,
@@ -481,6 +486,7 @@ export type {
   DirectCandidate,
   FeedResponse,
   HeartbeatBody,
+  HeartbeatResponse,
   JiraProjectFound,
   LoginCompleteBody,
   LoginFailedBody,

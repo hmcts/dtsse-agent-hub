@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ConnectionsData } from "@/assistant/connections";
-import type { DateGroup } from "@/assistant/grouping";
+import type { SidebarGroup } from "@/assistant/grouping";
 import type { LocalSession } from "@/assistant/local-session";
 import type { Theme } from "@/assistant/theme";
 import type { ConversationLink } from "@/assistant/views";
@@ -12,6 +12,7 @@ import type { AssistantAgentSettings } from "@/components/assistant/AgentSetting
 import { ChatMark } from "@/components/assistant/ChatMark";
 import { ChatMenu } from "@/components/assistant/ChatMenu";
 import type { AssistantClaudeMd } from "@/components/assistant/ClaudeMdSettings";
+import type { AssistantTokens } from "@/components/assistant/ConnectionSettings";
 import { ConversationSearch } from "@/components/assistant/ConversationSearch";
 import type { AssistantExportDefaults } from "@/components/assistant/ExportSettings";
 import type { AssistantFiles } from "@/components/assistant/FileSettings";
@@ -23,7 +24,6 @@ import { type AssistantConnect, type AssistantPlugins, AssistantSettings } from 
 import type { AssistantSharing } from "@/components/assistant/SharingSettings";
 import type { AssistantSize } from "@/components/assistant/SizeSettings";
 import type { AssistantTemplates } from "@/components/assistant/TemplateSettings";
-import type { AssistantTokens } from "@/components/assistant/TokenSettings";
 import { useResizableWidth } from "@/components/assistant/useResizableWidth";
 import { type StartChatAction, WorkflowsMenu } from "@/components/assistant/WorkflowsMenu";
 import type { ActionResult } from "@/web/action";
@@ -31,6 +31,7 @@ import type { ActionResult } from "@/web/action";
 /** What a sidebar row's options menu does. The pages pass the same server actions the chat's own header uses. */
 export interface ConversationActions {
   rename: (input: { conversationId: unknown; title: unknown }) => Promise<ActionResult>;
+  pin: (input: { conversationId: unknown; pinned: unknown }) => Promise<ActionResult>;
   remove: (input: { conversationId: unknown }) => Promise<ActionResult>;
 }
 
@@ -95,9 +96,10 @@ export function Mark({ size = "md" }: { size?: "sm" | "md" | "lg" }) {
 }
 
 /**
- * The Assistant's frame: its sidebar of conversations, newest first under date headings, beside the page. On a wide
- * screen the sidebar is dragged to the width the person wants and collapses to give the chat the room; on a narrow
- * one it is a drawer over the page, at its own width, whatever width was dragged on a wide screen.
+ * The Assistant's frame: its sidebar of conversations, the pinned ones first and the rest newest first under date
+ * headings, beside the page. On a wide screen the sidebar is dragged to the width the person wants and collapses to
+ * give the chat the room; on a narrow one it is a drawer over the page, at its own width, whatever width was dragged
+ * on a wide screen.
  */
 export function AssistantShell({
   viewerName,
@@ -125,7 +127,7 @@ export function AssistantShell({
   children
 }: {
   viewerName: string;
-  groups: { label: DateGroup; items: ConversationLink[] }[];
+  groups: { label: SidebarGroup; items: ConversationLink[] }[];
   activeId: string | null;
   /** The appearance the person chose, which the switch in the footer's settings starts from. */
   theme?: Theme;
@@ -308,7 +310,13 @@ export function AssistantShell({
                               triggerClassName={`flex h-7 w-7 items-center justify-center rounded-md text-base leading-none text-asst-muted hover:bg-asst-field hover:text-asst-text group-hover:opacity-100 group-focus-within:opacity-100 max-md:opacity-100 ${
                                 item.id === activeId ? "" : "opacity-0"
                               }`}
+                              pinned={item.pinnedAt !== null}
                               onOpen={() => setFailed(null)}
+                              onPin={async (pinned) => {
+                                const result = await actions.pin({ conversationId: item.id, pinned });
+                                setFailed(result.ok ? null : { id: item.id, error: result.error });
+                                router.refresh();
+                              }}
                               onRename={async (title) => {
                                 const result = await actions.rename({ conversationId: item.id, title });
                                 setFailed(result.ok ? null : { id: item.id, error: result.error });

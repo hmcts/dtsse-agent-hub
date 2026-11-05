@@ -8,15 +8,7 @@ import { putCredential } from "../../src/credentials/store.ts";
 import { byCodePoint } from "../../src/topics/slug.ts";
 import { APPLY_FAILURES_BEFORE_FAILED } from "../../src/virtual-agents/lifecycle.ts";
 import { MAX_VIRTUAL_AGENTS_PER_USER } from "../../src/virtual-agents/limits.ts";
-import {
-  createVirtualAgent,
-  reportPorts,
-  reportStatus,
-  setDesired,
-  setVirtualAgentPlugins,
-  setVirtualAgentSize,
-  type VirtualAgentRow
-} from "../../src/virtual-agents/store.ts";
+import { changeVirtualAgentPod, createVirtualAgent, reportPorts, reportStatus, setDesired, type VirtualAgentRow } from "../../src/virtual-agents/store.ts";
 import { neededCredentials } from "../../src/virtual-agents/views.ts";
 import { insertAgent, insertUser, prisma } from "./database.ts";
 import { jsonOf } from "./routes.ts";
@@ -265,7 +257,7 @@ describe("with virtual agents off", () => {
   it("should refuse every action with a sentence saying so", async () => {
     actAs("alice");
 
-    expect(await actions.resizeVirtualAgent(form({ id: "x", size: "medium" }))).toMatchObject({ ok: false, error: expect.stringContaining("not available") });
+    expect(await actions.saveVirtualAgentPod(form({ id: "x", size: "medium" }))).toMatchObject({ ok: false, error: expect.stringContaining("not available") });
     expect(await actions.pasteLoginCode(form({ id: "x", kind: "claude", code: "c" }))).toMatchObject({ ok: false });
   });
 
@@ -305,7 +297,7 @@ describe("a virtual agent's size", () => {
     const agent = await create(ALICE, "pcs-api");
     actAs("alice");
 
-    expect(await actions.resizeVirtualAgent(form({ id: agent.id, size: "medium" }))).toEqual({
+    expect(await actions.saveVirtualAgentPod(form({ id: agent.id, size: "medium" }))).toEqual({
       ok: true,
       confirmation: "It starts at medium the next time it runs."
     });
@@ -322,7 +314,7 @@ describe("a virtual agent's size", () => {
     await observe(id, { generation: stopping.generation, replicas_ready: 0 });
     expect((await row(id)).status).toBe("stopped");
 
-    await setVirtualAgentSize(prisma, ALICE.oid, id, "large");
+    await changeVirtualAgentPod(prisma, ALICE.oid, id, { size: "large" });
 
     expect((await claim()).find((entry) => entry.id === id)).toMatchObject({ size: "large", desired: "stopped", generation: stopping.generation + 1 });
   });
@@ -334,7 +326,7 @@ describe("a virtual agent's size", () => {
     const before = await row(id);
     actAs("alice");
 
-    expect(await actions.resizeVirtualAgent(form({ id, size: "large" }))).toEqual({
+    expect(await actions.saveVirtualAgentPod(form({ id, size: "large" }))).toEqual({
       ok: true,
       confirmation: "Restarting at large. Your chats are kept, and anything one of them was working on has stopped."
     });
@@ -344,14 +336,14 @@ describe("a virtual agent's size", () => {
   it("should refuse someone other than the owner as if there were no such agent", async () => {
     const agent = await create(ALICE, "pcs-api");
 
-    await expect(setVirtualAgentSize(prisma, BOB.oid, agent.id, "large")).rejects.toMatchObject({ status: 404 });
-    await expect(setVirtualAgentSize(prisma, ALICE.oid, agent.id, "huge")).rejects.toMatchObject({ status: 400 });
+    await expect(changeVirtualAgentPod(prisma, BOB.oid, agent.id, { size: "large" })).rejects.toMatchObject({ status: 404 });
+    await expect(changeVirtualAgentPod(prisma, ALICE.oid, agent.id, { size: "huge" })).rejects.toMatchObject({ status: 400 });
   });
 
   it("should leave the generation alone when the size is the one it has", async () => {
     const agent = await create(ALICE, "pcs-api");
 
-    expect(await setVirtualAgentSize(prisma, ALICE.oid, agent.id, "small")).toMatchObject({ generation: agent.generation });
+    expect((await changeVirtualAgentPod(prisma, ALICE.oid, agent.id, { size: "small" })).row).toMatchObject({ generation: agent.generation });
   });
 });
 
@@ -361,6 +353,7 @@ describe("a virtual agent's plugins", () => {
   /** A form as the plugin checkboxes send it: one `plugins` field per ticked box. */
   function ticked(values: Record<string, string>, plugins: readonly string[]): FormData {
     const data = form(values);
+    data.append("pluginsChosen", "true");
     for (const name of plugins) {
       data.append("plugins", name);
     }
@@ -413,7 +406,7 @@ describe("a virtual agent's plugins", () => {
     const before = await row(id);
     actAs("alice");
 
-    expect(await actions.setVirtualAgentPlugins(ticked({ id }, ["dtsse"]))).toEqual({ ok: true, confirmation: "pcs-api is restarting with its new plugins" });
+    expect(await actions.saveVirtualAgentPod(ticked({ id }, ["dtsse"]))).toEqual({ ok: true, confirmation: "pcs-api is restarting with its new plugins" });
 
     expect(await row(id)).toMatchObject({ plugins: ["dtsse"], generation: before.generation + 1, podGeneration: before.podGeneration + 1 });
     expect((await claim()).find((entry) => entry.id === id)).toMatchObject({
@@ -428,31 +421,52 @@ describe("a virtual agent's plugins", () => {
     await setDesired(prisma, ALICE.oid, id, "stopped");
     actAs("alice");
 
-    expect(await actions.setVirtualAgentPlugins(ticked({ id }, ["pcs"]))).toEqual({
+    expect(await actions.saveVirtualAgentPod(ticked({ id }, ["pcs"]))).toEqual({
       ok: true,
       confirmation: "pcs-api loads its new plugins when it next starts"
     });
     expect((await row(id)).plugins).toEqual(["pcs"]);
   });
 
+  // The settings dialog saves both at once: one write is one replacement of the pod, where two could be two.
+  it("should change a running agent's size and plugins in one write, bumping both generations once", async () => {
+    const { id } = await started(ALICE, "pcs-api");
+    const before = await row(id);
+    actAs("alice");
+
+    expect(await actions.saveVirtualAgentPod(ticked({ id, size: "large" }, ["dtsse"]))).toMatchObject({ ok: true });
+
+    expect(await row(id)).toMatchObject({ size: "large", plugins: ["dtsse"], generation: before.generation + 1, podGeneration: before.podGeneration + 1 });
+  });
+
+  it("should write neither when the plugins are refused alongside a new size", async () => {
+    const { id } = await started(ALICE, "pcs-api");
+    const before = await row(id);
+    actAs("alice");
+
+    expect(await actions.saveVirtualAgentPod(ticked({ id, size: "large" }, ["civil"]))).toMatchObject({ ok: false });
+
+    expect(await row(id)).toMatchObject({ size: before.size, plugins: before.plugins, generation: before.generation });
+  });
+
   it("should leave the generations alone and say so when the set is the one it has", async () => {
     const agent = await createWith(["pcs"]);
     actAs("alice");
 
-    expect(await actions.setVirtualAgentPlugins(ticked({ id: agent.id }, ["pcs"]))).toEqual({ ok: true, confirmation: "Its plugins are unchanged" });
+    expect(await actions.saveVirtualAgentPod(ticked({ id: agent.id }, ["pcs"]))).toEqual({ ok: true, confirmation: "Its plugins are unchanged" });
     expect(await row(agent.id)).toMatchObject({ generation: agent.generation, podGeneration: agent.podGeneration });
   });
 
   it("should clear every plugin when none are ticked", async () => {
     const agent = await createWith(["pcs", "wa"]);
 
-    expect(await setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, [])).toMatchObject({ plugins: [], generation: agent.generation + 1 });
+    expect((await changeVirtualAgentPod(prisma, ALICE.oid, agent.id, { plugins: [] })).row).toMatchObject({ plugins: [], generation: agent.generation + 1 });
   });
 
   it("should refuse a plugin the hub does not offer with 400, and change nothing", async () => {
     const agent = await create(ALICE, "pcs-api");
 
-    await expect(setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, ["civil"])).rejects.toMatchObject({ status: 400 });
+    await expect(changeVirtualAgentPod(prisma, ALICE.oid, agent.id, { plugins: ["civil"] })).rejects.toMatchObject({ status: 400 });
     expect(await row(agent.id)).toMatchObject({ plugins: [], generation: agent.generation });
   });
 
@@ -463,14 +477,14 @@ describe("a virtual agent's plugins", () => {
     const agent = await createWith(["pcs"]);
     vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "Not A Plugin Name");
 
-    expect(await setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, [])).toMatchObject({ plugins: [] });
+    expect((await changeVirtualAgentPod(prisma, ALICE.oid, agent.id, { plugins: [] })).row).toMatchObject({ plugins: [] });
   });
 
   it("should fail to tick a plugin while the hub's plugin configuration is malformed", async () => {
     const agent = await createWith(["pcs"]);
     vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "Not A Plugin Name");
 
-    await expect(setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, ["pcs", "dtsse"])).rejects.toThrow("VIRTUAL_AGENT_PLUGINS");
+    await expect(changeVirtualAgentPod(prisma, ALICE.oid, agent.id, { plugins: ["pcs", "dtsse"] })).rejects.toThrow("VIRTUAL_AGENT_PLUGINS");
     expect((await row(agent.id)).plugins).toEqual(["pcs"]);
   });
 
@@ -478,10 +492,10 @@ describe("a virtual agent's plugins", () => {
     const agent = await createWith(["pcs"]);
     vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "dtsse");
 
-    expect((await setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, ["pcs", "dtsse"])).plugins).toEqual(["dtsse", "pcs"]);
+    expect((await changeVirtualAgentPod(prisma, ALICE.oid, agent.id, { plugins: ["pcs", "dtsse"] })).row.plugins).toEqual(["dtsse", "pcs"]);
     expect((await claim()).find((entry) => entry.id === agent.id)).toMatchObject({ plugins: ["dtsse", "m365", "m365-files", "pcs", "slides"] });
-    await setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, ["dtsse"]);
-    await expect(setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, ["dtsse", "pcs"])).rejects.toMatchObject({ status: 400 });
+    await changeVirtualAgentPod(prisma, ALICE.oid, agent.id, { plugins: ["dtsse"] });
+    await expect(changeVirtualAgentPod(prisma, ALICE.oid, agent.id, { plugins: ["dtsse", "pcs"] })).rejects.toMatchObject({ status: 400 });
   });
 
   it("should create an agent without slides when the request names it, since every pod loads it", async () => {
@@ -501,7 +515,7 @@ describe("a virtual agent's plugins", () => {
     const before = await prisma.virtualAgent.findUniqueOrThrow({ where: { id } });
     actAs("alice");
 
-    expect(await actions.setVirtualAgentPlugins(ticked({ id }, ["pcs"]))).toEqual({ ok: true, confirmation: "Its plugins are unchanged" });
+    expect(await actions.saveVirtualAgentPod(ticked({ id }, ["pcs"]))).toEqual({ ok: true, confirmation: "Its plugins are unchanged" });
 
     expect(await prisma.virtualAgent.findUniqueOrThrow({ where: { id } })).toEqual(before);
     expect((await claim()).some((entry) => entry.id === id)).toBe(false);
@@ -513,7 +527,7 @@ describe("a virtual agent's plugins", () => {
     const before = await row(id);
     actAs("alice");
 
-    expect(await actions.setVirtualAgentPlugins(ticked({ id }, ["dtsse"]))).toEqual({ ok: true, confirmation: "pcs-api is restarting with its new plugins" });
+    expect(await actions.saveVirtualAgentPod(ticked({ id }, ["dtsse"]))).toEqual({ ok: true, confirmation: "pcs-api is restarting with its new plugins" });
 
     expect(await row(id)).toMatchObject({ plugins: ["dtsse"], generation: before.generation + 1, podGeneration: before.podGeneration + 1 });
     expect((await claim()).find((entry) => entry.id === id)).toMatchObject({ plugins: ["dtsse", "m365", "m365-files", "slides"] });
@@ -529,7 +543,10 @@ describe("a virtual agent's plugins", () => {
   it("should neither add nor refuse slides when the form sends it for an agent that has none stored", async () => {
     const agent = await createWith(["pcs"]);
 
-    expect(await setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, ["pcs", "slides"])).toMatchObject({ plugins: ["pcs"], generation: agent.generation });
+    expect((await changeVirtualAgentPod(prisma, ALICE.oid, agent.id, { plugins: ["pcs", "slides"] })).row).toMatchObject({
+      plugins: ["pcs"],
+      generation: agent.generation
+    });
   });
 
   it("should store every offered plugin when the most an agent may have are ticked and the row still holds slides", async () => {
@@ -538,7 +555,7 @@ describe("a virtual agent's plugins", () => {
     const agent = await createWith([]);
     await prisma.virtualAgent.update({ where: { id: agent.id }, data: { plugins: ["slides"] } });
 
-    expect((await setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, many)).plugins).toEqual([...many].sort(byCodePoint));
+    expect((await changeVirtualAgentPod(prisma, ALICE.oid, agent.id, { plugins: many })).row.plugins).toEqual([...many].sort(byCodePoint));
     expect((await row(agent.id)).plugins).toEqual([...many].sort(byCodePoint));
   });
 
@@ -546,13 +563,16 @@ describe("a virtual agent's plugins", () => {
     const agent = await createWith([]);
     vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "Not A Plugin Name");
 
-    expect(await setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, ["slides"])).toMatchObject({ plugins: [], generation: agent.generation });
+    expect((await changeVirtualAgentPod(prisma, ALICE.oid, agent.id, { plugins: ["slides"] })).row).toMatchObject({
+      plugins: [],
+      generation: agent.generation
+    });
   });
 
   it("should refuse someone other than the owner as if there were no such agent", async () => {
     const agent = await create(ALICE, "pcs-api");
 
-    await expect(setVirtualAgentPlugins(prisma, BOB.oid, agent.id, ["pcs"])).rejects.toMatchObject({ status: 404 });
+    await expect(changeVirtualAgentPod(prisma, BOB.oid, agent.id, { plugins: ["pcs"] })).rejects.toMatchObject({ status: 404 });
     expect((await row(agent.id)).plugins).toEqual([]);
   });
 
@@ -560,14 +580,14 @@ describe("a virtual agent's plugins", () => {
     const agent = await create(ALICE, "pcs-api");
     await setDesired(prisma, ALICE.oid, agent.id, "deleted");
 
-    await expect(setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, ["pcs"])).rejects.toMatchObject({ status: 409 });
+    await expect(changeVirtualAgentPod(prisma, ALICE.oid, agent.id, { plugins: ["pcs"] })).rejects.toMatchObject({ status: 409 });
   });
 
   it("should refuse the plugins action when virtual agents are off", async () => {
     vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "");
     actAs("alice");
 
-    expect(await actions.setVirtualAgentPlugins(ticked({ id: "x" }, ["pcs"]))).toMatchObject({ ok: false, error: expect.stringContaining("not available") });
+    expect(await actions.saveVirtualAgentPod(ticked({ id: "x" }, ["pcs"]))).toMatchObject({ ok: false, error: expect.stringContaining("not available") });
   });
 
   it("should refuse more plugins than the most an agent may have in the database too, whatever writes it", async () => {
@@ -657,7 +677,7 @@ describe("/hub/agents/{id}", () => {
     const agent = await create(ALICE, "pcs-api");
     actAs("alice");
 
-    await actions.resizeVirtualAgent(form({ id: agent.id, size: "medium" }));
+    await actions.saveVirtualAgentPod(form({ id: agent.id, size: "medium" }));
 
     expect(revalidated).toContain("/assistant");
     expect(revalidated.some((path) => path.startsWith("/hub/agents"))).toBe(false);

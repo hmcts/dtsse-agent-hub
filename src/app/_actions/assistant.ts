@@ -10,6 +10,7 @@ import {
   conversationAgent,
   createConversation,
   findConversation,
+  pinConversation as pin,
   deleteConversation as remove,
   renameConversation as rename,
   setProduct
@@ -71,7 +72,7 @@ async function gated(viewer: Viewer, conversation: ConversationRow): Promise<boo
 
 /**
  * The message body, or the refusal. A message of files and no words is a message: handing the assistant a document is
- * a whole ask on its own, and the envelope names the files whether or not anything was typed. Only a message that is
+ * a whole ask on its own, and the prompt's context names the files whether or not anything was typed. Only a message that is
  * empty of both is nothing to send.
  */
 function checkBody(raw: unknown, attachments: number): string | { ok: false; error: string } {
@@ -301,6 +302,18 @@ export async function renameConversation(input: { conversationId: unknown; title
     }
     const viewer = await requireViewer();
     await rename(prisma, viewer.oid, text(input.conversationId), text(input.title));
+    revalidatePath("/assistant");
+    return { ok: true };
+  });
+}
+
+export async function pinConversation(input: { conversationId: unknown; pinned: unknown }): Promise<ActionResult> {
+  return await runAction("pin conversation", async () => {
+    if (!virtualAgentsEnabled()) {
+      return OFF;
+    }
+    const viewer = await requireViewer();
+    await pin(prisma, viewer.oid, text(input.conversationId), input.pinned);
     revalidatePath("/assistant");
     return { ok: true };
   });

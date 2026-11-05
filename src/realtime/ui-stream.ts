@@ -19,7 +19,8 @@ import { type OnOpen, type Send, sseEvent } from "./sse.ts";
  *   chats on their own computer, when the viewer owns it. `conversation_id` names that chat, or is null for any other
  *   agent. The Assistant's chat shows from it whether its session is working, and the sidebar and its search recolour
  *   a local chat's laptop mark from it. One frame serves both, so a local chat that is also the open one is sent one
- *   frame, and the chat is named from the NOTIFY itself rather than read per event.
+ *   frame, and the chat is named from the NOTIFY itself rather than read per event. `client_features` is there
+ *   whenever the claim was written, which is how the chat keeps the restart note in step without re-reading.
  * - `direct` and `delivery`: a message in the watched agent's thread, or a change to its delivery, when the viewer
  *   can still see that agent and read that message.
  * - `transcript`: the watched agent's transcript has new entries, up to `last_id`, when the viewer may still read
@@ -105,7 +106,12 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
       }
       return sseEvent({
         event: "agent_status",
-        data: JSON.stringify({ agent_id: event.agent_id, status: event.status, conversation_id: event.local_conversation_id })
+        data: JSON.stringify({
+          agent_id: event.agent_id,
+          status: event.status,
+          conversation_id: event.local_conversation_id,
+          ...(event.client_features === undefined ? {} : { client_features: event.client_features })
+        })
       });
     }
     case "direct": {

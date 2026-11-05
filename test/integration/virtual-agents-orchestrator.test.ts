@@ -6,12 +6,12 @@ import { byCodePoint } from "../../src/topics/slug.ts";
 import { APPLY_FAILURES_BEFORE_FAILED } from "../../src/virtual-agents/lifecycle.ts";
 import {
   type ClaimedVirtualAgent,
+  changeVirtualAgentPod,
   claimVirtualAgents,
   findVirtualAgent,
   observeVirtualAgent,
   recordApplyError,
-  setDesired,
-  setVirtualAgentSize
+  setDesired
 } from "../../src/virtual-agents/store.ts";
 import { prisma } from "./database.ts";
 import { call, jsonOf } from "./routes.ts";
@@ -521,7 +521,7 @@ describe("POST /api/orchestrator/virtual-agents/{id}/apply-failed", () => {
   it("should ignore an error about a generation older than the latest", async () => {
     const agent = await create(ALICE, "pcs-api");
     await claim();
-    await setVirtualAgentSize(prisma, ALICE.oid, agent.id, "large");
+    await changeVirtualAgentPod(prisma, ALICE.oid, agent.id, { size: "large" });
 
     expect((await applyFailed(agent.id, { generation: 1, error: ERROR })).status).toBe(204);
     expect(await row(agent.id)).toMatchObject({ statusDetail: null, applyFailures: 0 });

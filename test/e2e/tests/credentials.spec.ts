@@ -4,9 +4,8 @@ import { asPersona, chatPersona, connectForChat } from "./hub";
 const ASSISTANT_OFF = "the Assistant runs on a virtual agent, which is off on this deployment";
 
 /**
- * A person's credentials, in the Assistant's settings. `/hub/settings/credentials`, where the published client's pod
- * boot messages send people to paste a GitHub token, lands on the Connections section; `routes.spec.ts` checks the redirect
- * itself.
+ * A person's credentials, in the Assistant's settings. `/hub/settings/credentials`, which older pod clients link, lands on
+ * the Connections section; `routes.spec.ts` checks the redirect itself.
  */
 test.describe("credentials @smoke", () => {
   test("should open the Assistant's settings at Connections when the old credentials address is visited @smoke @regression", async ({
@@ -23,7 +22,7 @@ test.describe("credentials @smoke", () => {
       test.skip(new URL(page.url()).pathname === "/hub", ASSISTANT_OFF);
       expect(response?.status()).toBe(200);
 
-      await expect(page.getByRole("dialog", { name: "Settings" }).getByRole("heading", { name: "Saved credentials" })).toBeVisible();
+      await expect(page.getByRole("dialog", { name: "Settings" }).getByRole("heading", { name: "Connections" })).toBeVisible();
       expect(new URL(page.url()).search).toBe("?settings=connections");
       await page.keyboard.press("Escape");
       await expect(page).toHaveURL((url) => url.search === "");
@@ -47,7 +46,7 @@ test.describe("credentials @smoke", () => {
       const token = `sk-ant-oat-${persona.replaceAll("-", "")}${"a".repeat(24)}`;
       await dialog.getByRole("button", { name: "Replace your Claude token" }).click();
       await dialog.getByLabel("New Claude token").fill(token);
-      await dialog.getByRole("button", { name: "Save" }).click();
+      await dialog.getByRole("button", { name: "Save token" }).click();
       await expect(dialog.getByRole("status").filter({ hasText: "Your Claude token is saved" })).toBeVisible();
       expect(await page.content()).not.toContain(token);
 

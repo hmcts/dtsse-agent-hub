@@ -41,6 +41,23 @@ in `bin/agent-hub` carries its own copy of it in bash and prints that whenever t
 killed, or prints nothing; the CLI prints it from the `catch` around its own `hook` command, which is where a stdin
 body that is not JSON lands. `src/bin.test.ts` holds the bash copy in step with `UNDELIVERED_REASON`.
 
+## Delivering messages
+
+The bridge hands each `direct` frame to Claude Code through the session's messaging socket, in the form
+`routeDelivery` in `src/envelope.ts` decides:
+
+- **A CFT Workspace conversation** is given its owner's message as its prompt, exactly as they typed it, after a
+  `<cft-workspace-context message="{id}">` block holding what the person did not type: the product area, files
+  attached, changes to the document or deck, export steps, and the skill to run for a leading `/skill`. A client that
+  does this claims `plain-prompt`; the CFT Workspace asks the owner to restart an assistant whose session has not.
+- **A session on the owner's own computer** gets their message in an `[agent-hub]` envelope that says it is theirs.
+- **Anything else**, in any session — another agent's direct, a tagged post, any message to a virtual agent's own
+  session — gets an `[agent-hub]` envelope that says it is a peer's and grants nothing.
+
+A bridge whose saved registration claimed different `client_features` sends this build's on its heartbeats until the
+hub's answer names the same claim (a hub that drops the field answers a bare `204`, which is not taken), so a session resumed on a newer client, which never registers again, is not left reporting the older
+one's claim.
+
 ## Install
 
 ```sh

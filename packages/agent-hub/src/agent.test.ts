@@ -14,6 +14,7 @@ import { createMockHub } from "./__fixtures__/mock-hub.ts";
 import {
   autoTopics,
   bridgePid,
+  claimsCurrentFeatures,
   cloneDir,
   ensureBridge,
   gatherMetadata,
@@ -428,6 +429,17 @@ describe("parseAgent", () => {
   });
 });
 
+describe("claimsCurrentFeatures", () => {
+  it("should be true only when the saved registration claimed exactly this build's features", () => {
+    // Act & Assert
+    expect(claimsCurrentFeatures(parseAgent({ client_features: [...CLIENT_FEATURES].reverse() }))).toBe(true);
+    expect(claimsCurrentFeatures(parseAgent({ client_features: CLIENT_FEATURES.slice(1) }))).toBe(false);
+    expect(claimsCurrentFeatures(parseAgent({ client_features: [...CLIENT_FEATURES.slice(1), "something-else"] }))).toBe(false);
+    expect(claimsCurrentFeatures(parseAgent({ agent_id: "a-1" }))).toBe(false);
+    expect(claimsCurrentFeatures(null)).toBe(false);
+  });
+});
+
 describe("loadAgent", () => {
   it("should be null when there is no agent file, and the saved agent when there is", () => {
     // Arrange
@@ -527,6 +539,7 @@ describe("registerAgent", () => {
       // Assert
       expect(registrations().map((call) => call.body.client_features)).toEqual([[...CLIENT_FEATURES], [...CLIENT_FEATURES]]);
       expect(hub.agents.get(agent.agent_id)?.client_features).toEqual([...CLIENT_FEATURES]);
+      expect(claimsCurrentFeatures(loadAgent("features-register"))).toBe(true);
     } finally {
       await hub.close();
     }

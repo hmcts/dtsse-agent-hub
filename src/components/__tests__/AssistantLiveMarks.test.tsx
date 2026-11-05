@@ -60,7 +60,7 @@ afterEach(() => {
 });
 
 function local(id: string, title: string, session: LocalSession): ConversationLink {
-  return { id, title, product: "ccd", productLabel: "CCD", lastActiveAt: "2026-10-21T09:00:00.000Z", mark: { where: "computer", session } };
+  return { id, title, product: "ccd", productLabel: "CCD", lastActiveAt: "2026-10-21T09:00:00.000Z", pinnedAt: null, mark: { where: "computer", session } };
 }
 
 function shell(items: ConversationLink[]) {

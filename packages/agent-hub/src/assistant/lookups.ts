@@ -1,8 +1,9 @@
 // The supervisor's half of a lookup: a search of the owner's Jira or Confluence, run with their own twg sign-in, or
 // of their GitHub repositories or Projects with gh (`github-lookups.ts`), for the CFT Workspace's document panel and
-// settings to pick where a document goes. Fixed and read-only:
-// one `twg api` GET whose every value is checked and passed as its own argument, never through a shell, and an answer
-// cut down to the fields the hub accepts. See "Atlassian lookups" in dtsse-agent-hub's docs/agent-api.md.
+// settings to pick where a document goes. Fixed and read-only: `twg jira space query`, or `twg confluence search
+// query` and then `twg confluence space list` for the spaces of the pages it found, each value checked and passed as
+// its own argument, never through a shell, and an answer cut down to the fields the hub accepts. See "Atlassian
+// lookups" in dtsse-agent-hub's docs/agent-api.md.
 import type { Api } from "../api.ts";
 import type { Env } from "../env.ts";
 import { GITHUB_OWNER_RE } from "../github.ts";
@@ -29,24 +30,26 @@ export type RunResult = { code: number; stdout: string; stderr: string };
 export type Run = (cmd: string, args: string[], opts: { env: Env; timeoutMs: number }) => Promise<RunResult>;
 
 export const MAX_LOOKUP_RESULTS = 10;
-export const MAX_ANCESTORS = 8;
 /** At most two twg searches at once: the pod is also running the person's sessions, and typing makes many. */
 export const MAX_RUNNING_LOOKUPS = 2;
-// The hub stops waiting after 10 seconds; a search still running past this is one nobody is waiting for.
+// The hub stops waiting after 10 seconds; a search still running past this is one nobody is waiting for. A Confluence
+// search's two twg calls share it.
 const SEARCH_TIMEOUT_MS = 12000;
+const MIN_SPACE_TIMEOUT_MS = 1000;
 const WHOAMI_TIMEOUT_MS = 30000;
 const MAX_WORDS = 6;
 const MAX_WORD = 40;
 const MAX_TITLE = 255;
 const MAX_NAME = 200;
 const MAX_DETAIL = 300;
-// What twg 1.3.3 exits with when it has no usable sign-in.
+// What twg exits with when it has no usable sign-in, from 1.3.3 to at least 1.3.9.
 const TWG_EXIT_AUTH = 77;
 
 const LOOKUP_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SPACE_KEY_RE = /^~?[A-Za-z0-9_-]{1,100}$/;
 const NUMERIC_ID_RE = /^[0-9]{1,20}$/;
 const PROJECT_RE = /^[A-Z][A-Z0-9_]{1,9}$/;
+const JSON_OUTPUT = ["-o", "json", "--output-summary=none"];
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
@@ -115,31 +118,19 @@ export function confluenceCql(query: string, space: string | null): string | nul
   return `type = page${scope} AND title ~ "${words.map((word) => `${word}*`).join(" ")}"`;
 }
 
-/** The `twg` arguments for a Jira or Confluence lookup, or null when there is nothing worth searching for. */
+/** The `twg` arguments for a Jira or Confluence lookup's search, or null when there is nothing worth searching for. */
 export function lookupArgs(frame: Pick<LookupFrame, "kind" | "query" | "space">): string[] | null {
-  const tail = ["-o", "json", "--output-summary=none"];
   if (frame.kind === "jira_project") {
     const words = searchWords(frame.query);
-    return words.length === 0
-      ? null
-      : ["api", "jira:/rest/api/3/project/search", "-X", "GET", "-f", `query=${words.join(" ")}`, "-f", `maxResults=${MAX_LOOKUP_RESULTS}`, ...tail];
+    return words.length === 0 ? null : ["jira", "space", "query", `--query=${words.join(" ")}`, `--limit=${MAX_LOOKUP_RESULTS}`, ...JSON_OUTPUT];
   }
   const cql = confluenceCql(frame.query, frame.space);
-  return cql === null
-    ? null
-    : [
-        "api",
-        "confluence:/wiki/rest/api/search",
-        "-X",
-        "GET",
-        "-f",
-        `cql=${cql}`,
-        "-f",
-        `limit=${MAX_LOOKUP_RESULTS}`,
-        "-f",
-        "expand=content.ancestors,content.space",
-        ...tail
-      ];
+  return cql === null ? null : ["confluence", "search", "query", `--cql=${cql}`, `--limit=${MAX_LOOKUP_RESULTS}`, ...JSON_OUTPUT];
+}
+
+/** The `twg` arguments that read the spaces a Confluence search found pages in, for the ids and names it does not give. */
+export function spaceArgs(keys: string[]): string[] {
+  return ["confluence", "space", "list", `--keys=${keys.join(",")}`, `--limit=${MAX_LOOKUP_RESULTS}`, ...JSON_OUTPUT];
 }
 
 function shortText(value: unknown, max: number): string | null {
@@ -150,27 +141,24 @@ function shortText(value: unknown, max: number): string | null {
   return text === "" ? null : text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
-/** The body of a `twg api` answer and its HTTP status, or null when the output is not one. */
-function apiBody(stdout: string): { status: number; body: Record<string, unknown> } | null {
-  let parsed: unknown;
+/** The `data` of a twg JSON answer, or undefined when the output is not one or is twg's `{ok: false, error}`. */
+function twgData(stdout: string): unknown {
   try {
-    parsed = JSON.parse(stdout);
+    const parsed = asRecord(JSON.parse(stdout));
+    return parsed?.ok === false ? undefined : parsed?.data;
   } catch {
-    return null;
+    return undefined;
   }
-  const data = asRecord(asRecord(parsed)?.data);
-  const body = asRecord(data?.body);
-  return data && body && typeof data.status === "number" ? { status: data.status, body } : null;
 }
 
-/** The projects in Jira's `project/search` answer, as the hub accepts them. */
+/** The projects in `twg jira space query`'s answer, as the hub accepts them. */
 export function parseJiraProjects(stdout: string): JiraProjectFound[] | null {
-  const answer = apiBody(stdout);
-  if (answer?.status !== 200 || !Array.isArray(answer.body.values)) {
+  const projects = asRecord(twgData(stdout))?.projects;
+  if (!Array.isArray(projects)) {
     return null;
   }
   const found: JiraProjectFound[] = [];
-  for (const value of answer.body.values) {
+  for (const value of projects) {
     const raw = asRecord(value);
     const name = shortText(raw?.name, MAX_NAME);
     if (raw && typeof raw.key === "string" && PROJECT_RE.test(raw.key) && name !== null) {
@@ -180,39 +168,67 @@ export function parseJiraProjects(stdout: string): JiraProjectFound[] | null {
   return found.slice(0, MAX_LOOKUP_RESULTS);
 }
 
-/** The pages in Confluence's `search` answer, as the hub accepts them: anything not quite a page is left out. */
-export function parseConfluencePages(stdout: string): ConfluencePageFound[] | null {
-  const answer = apiBody(stdout);
-  if (answer?.status !== 200 || !Array.isArray(answer.body.results)) {
+/** A page `twg confluence search query` found: its space only by key, which is all the search gives of it. */
+export type ConfluenceHit = { id: string; title: string; space_key: string };
+
+/** The pages in `twg confluence search query`'s answer: anything not quite a page is left out. */
+export function parseConfluenceHits(stdout: string): ConfluenceHit[] | null {
+  const results = asRecord(twgData(stdout))?.results;
+  if (!Array.isArray(results)) {
     return null;
   }
-  const found: ConfluencePageFound[] = [];
-  for (const value of answer.body.results) {
-    const content = asRecord(asRecord(value)?.content);
-    const space = asRecord(content?.space);
+  const found: ConfluenceHit[] = [];
+  for (const value of results) {
+    const result = asRecord(value);
+    const content = asRecord(result?.content);
     const title = shortText(content?.title, MAX_TITLE);
-    const spaceName = shortText(space?.name, MAX_NAME);
-    const spaceId = typeof space?.id === "number" ? String(space.id) : space?.id;
+    const spacePath = asRecord(content?._expandable)?.space;
+    const spaceUrl = asRecord(result?.resultGlobalContainer)?.displayUrl;
+    const spaceKey =
+      (typeof spacePath === "string" ? /^\/rest\/api\/space\/([^/]+)$/.exec(spacePath)?.[1] : undefined) ??
+      (typeof spaceUrl === "string" ? /^\/spaces\/([^/]+)$/.exec(spaceUrl)?.[1] : undefined);
     if (
       content?.type !== "page" ||
       typeof content.id !== "string" ||
       !NUMERIC_ID_RE.test(content.id) ||
       title === null ||
-      typeof spaceId !== "string" ||
-      !NUMERIC_ID_RE.test(spaceId) ||
-      typeof space?.key !== "string" ||
-      !SPACE_KEY_RE.test(space.key) ||
-      spaceName === null
+      spaceKey === undefined ||
+      !SPACE_KEY_RE.test(spaceKey)
     ) {
       continue;
     }
-    const ancestors = (Array.isArray(content.ancestors) ? content.ancestors : [])
-      .map((ancestor) => shortText(asRecord(ancestor)?.title, MAX_TITLE))
-      .filter((ancestor): ancestor is string => ancestor !== null)
-      .slice(-MAX_ANCESTORS);
-    found.push({ id: content.id, title, space_id: spaceId, space_key: space.key, space_name: spaceName, ancestors });
+    found.push({ id: content.id, title, space_key: spaceKey });
   }
   return found.slice(0, MAX_LOOKUP_RESULTS);
+}
+
+/** The id and name of each space in `twg confluence space list`'s answer, by key. */
+export function parseConfluenceSpaces(stdout: string): Map<string, { id: string; name: string }> | null {
+  const spaces = twgData(stdout);
+  if (!Array.isArray(spaces)) {
+    return null;
+  }
+  const found = new Map<string, { id: string; name: string }>();
+  for (const value of spaces) {
+    const raw = asRecord(value);
+    const id = typeof raw?.id === "number" ? String(raw.id) : raw?.id;
+    const name = shortText(raw?.name, MAX_NAME);
+    if (typeof raw?.key === "string" && typeof id === "string" && NUMERIC_ID_RE.test(id) && name !== null) {
+      found.set(raw.key, { id, name });
+    }
+  }
+  return found;
+}
+
+/**
+ * The pages a search found, as the hub accepts them, each with its space's id and name; a page in a space that was not
+ * read is left out. twg 1.3.9 has no command that gives a page's ancestors, so a page is placed by its space alone.
+ */
+export function confluencePages(hits: ConfluenceHit[], spaces: Map<string, { id: string; name: string }>): ConfluencePageFound[] {
+  return hits.flatMap((hit) => {
+    const space = spaces.get(hit.space_key);
+    return space ? [{ id: hit.id, title: hit.title, space_id: space.id, space_key: hit.space_key, space_name: space.name, ancestors: [] }] : [];
+  });
 }
 
 /** Whether twg failed for want of a sign-in, which the person can fix, rather than for some other reason. */
@@ -221,9 +237,7 @@ export function twgSignedOut(result: RunResult): boolean {
     return true;
   }
   try {
-    const parsed = asRecord(JSON.parse(result.stdout));
-    const error = asRecord(parsed?.error);
-    return error?.code === "AUTH_REQUIRED" || asRecord(parsed?.data)?.status === 401;
+    return asRecord(asRecord(JSON.parse(result.stdout))?.error)?.code === "AUTH_REQUIRED";
   } catch {
     return false;
   }
@@ -237,8 +251,7 @@ function failure(result: RunResult, kind: "jira_project" | "confluence_page"): s
   }
   let message: unknown;
   try {
-    const parsed = asRecord(JSON.parse(result.stdout));
-    message = asRecord(parsed?.error)?.message ?? asRecord(asRecord(parsed?.data)?.body)?.message;
+    message = asRecord(asRecord(JSON.parse(result.stdout))?.error)?.message;
   } catch {}
   const why =
     typeof message === "string" && message.trim() !== "" ? `${where} could not search that: ${message.trim()}` : `${where} could not be searched just now.`;
@@ -272,12 +285,30 @@ export async function runLookup(deps: LookupDeps, frame: LookupFrame): Promise<L
   if (args === null) {
     return { results: [] };
   }
+  const kind = frame.kind;
+  const deadline = Date.now() + SEARCH_TIMEOUT_MS;
   const result = await deps.run("twg", args, { env: deps.env, timeoutMs: SEARCH_TIMEOUT_MS });
   if (twgSignedOut(result)) {
     return { error: "signed_out" };
   }
-  const results = frame.kind === "jira_project" ? parseJiraProjects(result.stdout) : parseConfluencePages(result.stdout);
-  return result.code === 0 && results !== null ? { results } : { error: "failed", detail: failure(result, frame.kind as "jira_project" | "confluence_page") };
+  if (kind === "jira_project") {
+    const projects = result.code === 0 ? parseJiraProjects(result.stdout) : null;
+    return projects !== null ? { results: projects } : { error: "failed", detail: failure(result, kind) };
+  }
+  const hits = result.code === 0 ? parseConfluenceHits(result.stdout) : null;
+  if (hits === null) {
+    return { error: "failed", detail: failure(result, kind) };
+  }
+  const keys = [...new Set(hits.map((hit) => hit.space_key))];
+  if (keys.length === 0) {
+    return { results: [] };
+  }
+  const listed = await deps.run("twg", spaceArgs(keys), { env: deps.env, timeoutMs: Math.max(deadline - Date.now(), MIN_SPACE_TIMEOUT_MS) });
+  if (twgSignedOut(listed)) {
+    return { error: "signed_out" };
+  }
+  const spaces = listed.code === 0 ? parseConfluenceSpaces(listed.stdout) : null;
+  return spaces !== null ? { results: confluencePages(hits, spaces) } : { error: "failed", detail: failure(listed, kind) };
 }
 
 export type LookupRunnerOptions = LookupDeps & {

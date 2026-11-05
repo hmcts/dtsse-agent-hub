@@ -164,6 +164,31 @@ describe("POST /api/agent/register", () => {
     expect(await stored()).toBeNull();
   });
 
+  // A resumed session finds its predecessor's registration and never registers, so a heartbeat is how its claim arrives.
+  it("should replace the stored features with a heartbeat's, and leave them alone on a heartbeat that sends none", async () => {
+    const { agent_id } = await jsonOf(
+      await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body: { ...REGISTRATION, client_features: ["stop"] } })
+    );
+    const beat = (body: Record<string, unknown>) =>
+      call(heartbeat, { as: ALICE, path: `/api/agent/${agent_id}/heartbeat`, method: "POST", params: { agentId: agent_id }, body });
+    const stored = async () => (await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).clientFeatures;
+
+    const taken = await beat({ status: "busy", client_features: ["stop", "plain-prompt", "stop"] });
+    expect(taken.status).toBe(200);
+    // Answered with the claim as stored, which is how a client tells this hub from one that drops the field.
+    expect(await jsonOf(taken)).toEqual({ client_features: ["plain-prompt", "stop"] });
+    expect(await stored()).toEqual(["plain-prompt", "stop"]);
+    expect((await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).status).toBe("busy");
+
+    expect((await beat({ status: "idle" })).status).toBe(204);
+    expect(await stored()).toEqual(["plain-prompt", "stop"]);
+
+    const over = await beat({ status: "idle", client_features: [...Array(51).keys()].map((index) => `f${index}`) });
+    expect(over.status).toBe(400);
+    expect((await jsonOf(over)).error).toMatch(/client_features/);
+    expect(await stored()).toEqual(["plain-prompt", "stop"]);
+  });
+
   it("should refuse a registration reporting more features than the cap, which is what bounds the column", async () => {
     const body = { ...REGISTRATION, client_features: [...Array(51).keys()].map((index) => `f${index}`) };
 

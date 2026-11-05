@@ -111,6 +111,7 @@ function conversation(overrides: Partial<ConversationView> = {}): ConversationVi
     title: "Writing a story",
     product: "ccd",
     productLabel: "CCD",
+    pinned: false,
     productHistory: [],
     stopHistory: [],
     local: false,
@@ -149,6 +150,7 @@ function actions(overrides: Partial<ChatActions> = {}): ChatActions {
     stop: vi.fn(async () => ({ ok: true as const, stopped: true })),
     setProduct: ok(),
     rename: ok(),
+    pin: ok(),
     remove: ok(),
     answerQuestion: ok(),
     saveArtefact: vi.fn(async () => ({ ok: true as const, saved: true as const, version: 1 })),
@@ -650,6 +652,72 @@ describe("ChatView questions", () => {
     emit("agent_question", { agent_id: AGENT });
 
     expect(refresh).toHaveBeenCalled();
+  });
+});
+
+describe("ChatView on a session too old for plain prompts", () => {
+  it("should ask for a restart, linking to it in the settings, when the running session has not claimed plain-prompt", () => {
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ clientFeatures: ["stop"] })} templates={TEMPLATES} actions={actions()} />);
+
+    const note = screen.getByTestId("restart-needed");
+    expect(note.textContent).toMatch(/older version of your assistant/);
+    expect(within(note).getByRole("link", { name: "Restart it in Settings" }).getAttribute("href")).toBe("?settings=assistant");
+  });
+
+  it.each([
+    ["the session claims plain-prompt", conversation({ clientFeatures: ["plain-prompt", "stop"] })],
+    ["no session is running", conversation({ agentStatus: "offline", clientFeatures: ["stop"] })],
+    ["the chat has no pod", conversation({ local: true, clientFeatures: null })]
+  ])("should not ask for a restart when %s", (_when, view) => {
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={view} templates={TEMPLATES} actions={actions()} />);
+
+    expect(screen.queryByTestId("restart-needed")).toBeNull();
+  });
+
+  // The claim rides on the status frame it was written with, so the note follows it with no re-read of the page.
+  it("should take the note down when a frame carries a claim with plain-prompt, without re-reading the page", () => {
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ clientFeatures: ["stop"] })} templates={TEMPLATES} actions={actions()} />);
+    expect(screen.getByTestId("restart-needed")).toBeTruthy();
+
+    emit("agent_status", { agent_id: AGENT, status: "idle", client_features: ["plain-prompt", "stop"] });
+
+    expect(screen.queryByTestId("restart-needed")).toBeNull();
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("should never show the note for a session that comes online already claiming plain-prompt", () => {
+    render(
+      <ChatView
+        jira={NO_JIRA}
+        viewerOid={VIEWER}
+        view={conversation({ agentStatus: "offline", clientFeatures: null })}
+        templates={TEMPLATES}
+        actions={actions()}
+      />
+    );
+    expect(screen.queryByTestId("restart-needed")).toBeNull();
+
+    emit("agent_status", { agent_id: AGENT, status: "idle", client_features: ["plain-prompt"] });
+
+    expect(screen.queryByTestId("restart-needed")).toBeNull();
+  });
+
+  it("should show the note when a later claim leaves plain-prompt out", () => {
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ clientFeatures: ["plain-prompt"] })} templates={TEMPLATES} actions={actions()} />);
+    expect(screen.queryByTestId("restart-needed")).toBeNull();
+
+    emit("agent_status", { agent_id: AGENT, status: "idle", client_features: null });
+
+    expect(screen.getByTestId("restart-needed")).toBeTruthy();
+  });
+
+  it("should keep the claim it has when a frame carries none", () => {
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ clientFeatures: ["plain-prompt"] })} templates={TEMPLATES} actions={actions()} />);
+
+    emit("agent_status", { agent_id: AGENT, status: "busy" });
+    emit("agent_status", { agent_id: AGENT, status: "idle" });
+
+    expect(screen.queryByTestId("restart-needed")).toBeNull();
   });
 });
 
@@ -1193,6 +1261,32 @@ describe("ChatView menu", () => {
     expect(rename).toHaveBeenCalledWith({ conversationId: CONVERSATION, title: "Renamed" });
     expect(refresh).toHaveBeenCalled();
     expect(screen.queryByRole("textbox", { name: "Chat name" })).toBeNull();
+  });
+
+  it("should pin the chat when the person picks Pin from the options menu", async () => {
+    const pin = ok();
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions({ pin })} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Chat options" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+    });
+
+    expect(pin).toHaveBeenCalledWith({ conversationId: CONVERSATION, pinned: true });
+    expect(refresh).toHaveBeenCalled();
+  });
+
+  it("should offer Unpin and unpin the chat when it is pinned", async () => {
+    const pin = ok();
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ pinned: true })} templates={TEMPLATES} actions={actions({ pin })} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Chat options" }));
+    expect(screen.queryByRole("menuitem", { name: "Pin" })).toBeNull();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("menuitem", { name: "Unpin" }));
+    });
+
+    expect(pin).toHaveBeenCalledWith({ conversationId: CONVERSATION, pinned: false });
   });
 
   it("should delete the chat and go to a new chat when the person confirms the delete", async () => {

@@ -198,12 +198,21 @@ export type MockHubOptions = {
   reconnectEvent?: boolean;
   replayAcked?: boolean;
   launchTokens?: Record<string, LaunchToken>;
+  /** Answer a heartbeat as a hub from before its `client_features`: the field dropped, and a bare 204. */
+  heartbeatDropsClaim?: boolean;
 };
 
 // `maxLifetimeMs` ends each stream like the service does, with `event: reconnect` unless
 // `reconnectEvent` is false. `replayAcked` replays delivered messages too, as a replay that raced
 // the ack would.
-export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEvent = true, replayAcked = false, launchTokens = {} }: MockHubOptions = {}) {
+export function createMockHub({
+  pingMs = 15000,
+  maxLifetimeMs = 0,
+  reconnectEvent = true,
+  replayAcked = false,
+  launchTokens = {},
+  heartbeatDropsClaim = false
+}: MockHubOptions = {}) {
   const options = { maxLifetimeMs, reconnectEvent, replayAcked };
   const failures: { stream: number[]; ack: number[]; transcript: number[]; credential: number[]; status: number[]; pptx: number[] } = {
     pptx: [],
@@ -895,8 +904,16 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
         }
         agent.skills = body.skills;
       }
+      const claimed = body.client_features !== undefined && !heartbeatDropsClaim;
+      if (claimed) {
+        const features = storedClientFeatures(body.client_features);
+        if (features === "too many") {
+          return send(res, 400, { error: "client_features: at most 50" });
+        }
+        agent.client_features = features;
+      }
       Object.assign(agent, { status: body.status, name: body.name || agent.name, last_heartbeat_at: new Date().toISOString() });
-      return send(res, 204);
+      return claimed ? send(res, 200, { client_features: agent.client_features ?? null }) : send(res, 204);
     }
     if (req.method === "POST" && action === "offline") {
       agent.status = "offline";
