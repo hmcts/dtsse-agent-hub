@@ -9,7 +9,7 @@ import { createConversation } from "../../src/assistant/conversation-store.ts";
 import { assistantMemory, reportMemoryUse } from "../../src/assistant/memory.ts";
 import { CONVERSATION_MEMORY_BYTES, memoryPressure } from "../../src/assistant/memory-report.ts";
 import { reportSessions } from "../../src/assistant/session-store.ts";
-import { claimVirtualAgents, observeVirtualAgent, restartVirtualAgent, setDesired, setVirtualAgentPlugins } from "../../src/virtual-agents/store.ts";
+import { changeVirtualAgentPod, claimVirtualAgents, observeVirtualAgent, restartVirtualAgent, setDesired } from "../../src/virtual-agents/store.ts";
 import { assistantSize } from "../../src/web/data.ts";
 import { ALICE, BOB, form, podFixture, viewer } from "./assistant-pod.ts";
 import { type Person, prisma, resetDatabase } from "./database.ts";
@@ -256,7 +256,7 @@ describe("the memory report of a pod the hub replaces", () => {
     const assistant = await reportedAtItsCeiling();
     actAs("alice");
 
-    expect(await actions.resizeVirtualAgent(form({ id: assistant, size: "medium" }))).toMatchObject({ ok: true });
+    expect(await actions.saveVirtualAgentPod(form({ id: assistant, size: "medium" }))).toMatchObject({ ok: true });
 
     expect(await stored(assistant)).toEqual(CLEARED);
     expect((await assistantMemory(prisma, ALICE.oid, assistant))?.use).toEqual({ reported: false, reason: "waiting" });
@@ -266,7 +266,7 @@ describe("the memory report of a pod the hub replaces", () => {
     vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "pcs=PCS team workflows");
     const assistant = await reportedAtItsCeiling();
 
-    await setVirtualAgentPlugins(prisma, ALICE.oid, assistant, ["pcs"]);
+    await changeVirtualAgentPod(prisma, ALICE.oid, assistant, { plugins: ["pcs"] });
 
     expect(await stored(assistant)).toEqual(CLEARED);
   });
@@ -368,7 +368,7 @@ describe("how many chats an assistant says it runs", () => {
     await reportSessions(prisma, assistant, { sessions: [], max: 4 });
     actAs("alice");
 
-    expect(await actions.resizeVirtualAgent(form({ id: assistant, size: "medium" }))).toMatchObject({ ok: true });
+    expect(await actions.saveVirtualAgentPod(form({ id: assistant, size: "medium" }))).toMatchObject({ ok: true });
 
     expect((await assistantMemory(prisma, ALICE.oid, assistant))?.capacity).toEqual({ now: undefined, fromRestart: 6 });
   });
@@ -381,7 +381,7 @@ describe("changing an assistant's size from its settings", () => {
     const before = await prisma.virtualAgent.findUniqueOrThrow({ where: { id: assistant }, select: { podGeneration: true } });
     actAs("alice");
 
-    expect(await actions.resizeVirtualAgent(form({ id: assistant, size: "medium" }))).toEqual({
+    expect(await actions.saveVirtualAgentPod(form({ id: assistant, size: "medium" }))).toEqual({
       ok: true,
       confirmation: "Restarting at medium. Your chats are kept, and anything one of them was working on has stopped."
     });
@@ -400,7 +400,7 @@ describe("changing an assistant's size from its settings", () => {
     await assistantOf(ALICE);
     actAs("alice");
 
-    expect(await actions.resizeVirtualAgent(form({ id: theirs, size: "large" }))).toMatchObject({ ok: false });
+    expect(await actions.saveVirtualAgentPod(form({ id: theirs, size: "large" }))).toMatchObject({ ok: false });
     expect((await prisma.virtualAgent.findUniqueOrThrow({ where: { id: theirs }, select: { size: true } })).size).toBe("small");
   });
 });

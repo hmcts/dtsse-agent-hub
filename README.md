@@ -193,7 +193,7 @@ directly with `?settings=<id>`:
 | Id | Label | What it holds |
 | --- | --- | --- |
 | `appearance` | Appearance | light, dark, or the device's setting |
-| `connections` | Connections | the sign-ins (GitHub, Azure, Atlassian and the rest), then the saved credentials: paste a GitHub, Jenkins or, on your own licence, Claude token; remove any saved credential. `?settings=credentials`, which older pod clients link, opens it too |
+| `connections` | Connections | one row per service (GitHub, Azure, Claude, Jenkins, Atlassian, Microsoft 365), each with all of its actions: connect or sign in again (GitHub is connected by its device sign-in only), paste a Jenkins or, on your own licence, Claude token, and remove what is saved. `?settings=credentials`, which older pod clients link, opens it too |
 | `templates` | Templates | saved prompts |
 | `exports` | Jira & Confluence | export defaults |
 | `sharing` | Sharing | the chats you have shared or offered to fork, and those shared with or offered to you |
@@ -204,7 +204,13 @@ directly with `?settings=<id>`:
 | `ports` | Web servers | the web servers its pod reports |
 | `files` | Files | the files the pod holds, and deleting them |
 
-A section is offered only when the page has something for it. There is no stop and no delete, because opening the Assistant would start or create the agent again; the
+A section is offered only when the page has something for it. The settings values — the appearance, the model, the size, the
+plugins, the CLAUDE.md, the git identity and the Jira and Confluence defaults — are kept as drafts while the person
+moves between sections and stored by the dialog's one Save, which runs only the actions for what changed and marks the
+sections still holding changes; closing with changes asks first. The size and the plugins go in one action,
+`saveVirtualAgentPod`, so changing both asks once and restarts the pod once. Everything else (connecting, pasting or
+removing a credential, templates, files, a restart, a reset to the default) is an action its own button does at once.
+There is no stop and no delete, because opening the Assistant would start or create the agent again; the
 idle sweep stops it when nobody is using it.
 
 **Open:** people who already had a second or third virtual agent keep them, still counted against the limit of 3, and

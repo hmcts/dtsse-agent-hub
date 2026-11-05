@@ -12,6 +12,7 @@ import type { AssistantAgentSettings } from "@/components/assistant/AgentSetting
 import { ChatMark } from "@/components/assistant/ChatMark";
 import { ChatMenu } from "@/components/assistant/ChatMenu";
 import type { AssistantClaudeMd } from "@/components/assistant/ClaudeMdSettings";
+import type { AssistantTokens } from "@/components/assistant/ConnectionSettings";
 import { ConversationSearch } from "@/components/assistant/ConversationSearch";
 import type { AssistantExportDefaults } from "@/components/assistant/ExportSettings";
 import type { AssistantFiles } from "@/components/assistant/FileSettings";
@@ -23,7 +24,6 @@ import { type AssistantConnect, type AssistantPlugins, AssistantSettings } from 
 import type { AssistantSharing } from "@/components/assistant/SharingSettings";
 import type { AssistantSize } from "@/components/assistant/SizeSettings";
 import type { AssistantTemplates } from "@/components/assistant/TemplateSettings";
-import type { AssistantTokens } from "@/components/assistant/TokenSettings";
 import { useResizableWidth } from "@/components/assistant/useResizableWidth";
 import { WorkflowsMenu } from "@/components/assistant/WorkflowsMenu";
 import type { ActionResult } from "@/web/action";

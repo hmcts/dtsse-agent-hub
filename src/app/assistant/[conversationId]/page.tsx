@@ -22,7 +22,7 @@ import { offerChatFork, withdrawChatFork } from "@/app/_actions/forks";
 import { answerAgentQuestion } from "@/app/_actions/questions";
 import { shareChat, unshareChat } from "@/app/_actions/shares";
 import { deleteTemplate, saveTemplate } from "@/app/_actions/templates";
-import { reconnectSignIn, resizeVirtualAgent, restartVirtualAgent, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
+import { reconnectSignIn, restartVirtualAgent, saveVirtualAgentPod } from "@/app/_actions/virtual-agents";
 import { SHARING_SETTINGS } from "@/app/assistant/sharing";
 import { connectionsData } from "@/assistant/connections";
 import { savedCredentialsData } from "@/assistant/saved-credentials";
@@ -103,7 +103,7 @@ export default async function ConversationPage({
     login: home.assistant.logins.find((login) => login.kind === "atlassian") ?? null
   };
   const plugins = assistantPluginsData(home.assistant, home.plugins);
-  const pluginSettings = plugins && { ...plugins, save: setVirtualAgentPlugins };
+  const pluginSettings = plugins && { ...plugins, save: saveVirtualAgentPod };
   return (
     <AssistantShell
       viewerName={viewer.name}
@@ -119,7 +119,7 @@ export default async function ConversationPage({
       claudeMd={{ settings: claudeMd, save: saveClaudeMd, reset: resetClaudeMd }}
       templates={{ mine, save: saveTemplate, remove: deleteTemplate }}
       files={files === undefined ? undefined : { view: files, remove: deleteAssistantFile, removeAll: deleteAllAssistantFiles }}
-      size={size === undefined ? undefined : { view: size, assistantId: home.assistant.id, save: resizeVirtualAgent }}
+      size={size === undefined ? undefined : { view: size, assistantId: home.assistant.id, save: saveVirtualAgentPod }}
       model={model === undefined ? undefined : { ...model, save: saveAssistantModel }}
       exports={{ defaults, save: saveExportDefaults, access: jira }}
       sharing={SHARING_SETTINGS}
