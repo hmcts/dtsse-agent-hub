@@ -299,32 +299,7 @@ export async function setDesired(
  * resize and plugins consistent with them rather than inventing a new loss. Narrowing it is its own change.
  */
 export async function setVirtualAgentSize(prisma: PrismaClient, actorOid: string, id: string, size: unknown, now: Date = new Date()): Promise<VirtualAgentRow> {
-  const checked = checkSize(size);
-  if (!checked.ok) {
-    throw new HttpError(400, checked.error);
-  }
-  return await prisma.$transaction(async (tx) => {
-    const row = await lockVirtualAgent(tx, id);
-    if (row === undefined || !canManageVirtualAgent(actorOid, row)) {
-      throw new HttpError(404, "no such virtual agent");
-    }
-    const refusal = sizeChangeRefusal(row);
-    if (refusal !== undefined) {
-      throw new HttpError(409, refusal);
-    }
-    if (row.size === checked.size) {
-      return row;
-    }
-    const updated = toRow(
-      await tx.virtualAgent.update({
-        where: { id },
-        data: { size: checked.size, ...NO_TOKEN, ...POD_CHANGE, ...NO_MEMORY_REPORT, ...noClientClaim(), updatedAt: now },
-        select: SELECT
-      })
-    );
-    await announce(tx, id, row.ownerOid);
-    return updated;
-  });
+  return (await changeVirtualAgentPod(prisma, actorOid, id, { size }, now)).row;
 }
 
 /**
@@ -346,30 +321,80 @@ export async function setVirtualAgentPlugins(
   plugins: unknown,
   now: Date = new Date()
 ): Promise<VirtualAgentRow> {
+  return (await changeVirtualAgentPod(prisma, actorOid, id, { plugins }, now)).row;
+}
+
+/** What `changeVirtualAgentPod` is asked to change. A key that is absent is left as it is. */
+export interface PodChange {
+  size?: unknown;
+  plugins?: unknown;
+}
+
+export interface PodChanged {
+  row: VirtualAgentRow;
+  resized: boolean;
+  replugged: boolean;
+}
+
+/**
+ * A new size, new plugins, or both, in one write. Both are in the pod template, so either bumps `generation` and
+ * `pod_generation` and replaces a running pod. Both in one transaction bump them once, so a person who changes both in
+ * the settings dialog has their pod replaced once: two writes would replace it twice whenever the orchestrator applied
+ * between them. The rules are those `setVirtualAgentSize` and `setVirtualAgentPlugins` describe: a bad size or plugin
+ * writes nothing, either is refused while the agent is being deleted, and someone other than the owner is told there
+ * is no such agent.
+ */
+export async function changeVirtualAgentPod(
+  prisma: PrismaClient,
+  actorOid: string,
+  id: string,
+  change: PodChange,
+  now: Date = new Date()
+): Promise<PodChanged> {
+  const checkedSize = "size" in change ? checkSize(change.size) : undefined;
+  if (checkedSize !== undefined && !checkedSize.ok) {
+    throw new HttpError(400, checkedSize.error);
+  }
+  const size = checkedSize?.ok === true ? checkedSize.size : undefined;
   return await prisma.$transaction(async (tx) => {
     const row = await lockVirtualAgent(tx, id);
     if (row === undefined || !canManageVirtualAgent(actorOid, row)) {
       throw new HttpError(404, "no such virtual agent");
     }
-    if (row.desired === "deleted") {
-      throw new HttpError(409, "that virtual agent is being deleted");
+    const refusal = sizeChangeRefusal(row);
+    if (refusal !== undefined) {
+      throw new HttpError(409, refusal);
     }
-    const checked = checkPlugins(plugins, () => [...offeredPlugins(), ...row.plugins]);
-    if (!checked.ok) {
-      throw new HttpError(400, checked.error);
+    let plugins: string[] | undefined;
+    if ("plugins" in change) {
+      const checked = checkPlugins(change.plugins, () => [...offeredPlugins(), ...row.plugins]);
+      if (!checked.ok) {
+        throw new HttpError(400, checked.error);
+      }
+      plugins = samePlugins(tickedPlugins(row.plugins), checked.plugins) ? undefined : checked.plugins;
     }
-    if (samePlugins(tickedPlugins(row.plugins), checked.plugins)) {
-      return row;
+    const resized = size !== undefined && size !== row.size;
+    const replugged = plugins !== undefined;
+    if (!resized && !replugged) {
+      return { row, resized, replugged };
     }
     const updated = toRow(
       await tx.virtualAgent.update({
         where: { id },
-        data: { plugins: checked.plugins, ...NO_TOKEN, ...POD_CHANGE, ...NO_MEMORY_REPORT, ...noClientClaim(), updatedAt: now },
+        data: {
+          ...(resized ? { size } : {}),
+          ...(replugged ? { plugins } : {}),
+          ...NO_TOKEN,
+          ...POD_CHANGE,
+          ...NO_MEMORY_REPORT,
+          ...noClientClaim(),
+          updatedAt: now
+        },
         select: SELECT
       })
     );
     await announce(tx, id, row.ownerOid);
-    return updated;
+    return { row: updated, resized, replugged };
   });
 }
 

@@ -13,7 +13,7 @@ import { readAssistantAgent, readGitIdentity } from "@/app/_actions/assistant-se
 import { clearGitIdentity, removeCredential, resetClaudeMd, saveClaudeMd, saveCredential, saveGitIdentity } from "@/app/_actions/credentials";
 import { saveExportDefaults } from "@/app/_actions/export-defaults";
 import { deleteTemplate, saveTemplate } from "@/app/_actions/templates";
-import { reconnectSignIn, resizeVirtualAgent, restartVirtualAgent, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
+import { reconnectSignIn, restartVirtualAgent, saveVirtualAgentPod } from "@/app/_actions/virtual-agents";
 import { SHARING_SETTINGS } from "@/app/assistant/sharing";
 import { connectionsData } from "@/assistant/connections";
 import { savedCredentialsData } from "@/assistant/saved-credentials";
@@ -71,7 +71,7 @@ export default async function AssistantPage() {
     login: home.assistant.logins.find((login) => login.kind === "atlassian") ?? null
   };
   const plugins = assistantPluginsData(home.assistant, home.plugins);
-  const pluginSettings = plugins && { ...plugins, save: setVirtualAgentPlugins };
+  const pluginSettings = plugins && { ...plugins, save: saveVirtualAgentPod };
   return (
     <AssistantShell
       viewerName={viewer.name}
@@ -87,7 +87,7 @@ export default async function AssistantPage() {
       claudeMd={{ settings: claudeMd, save: saveClaudeMd, reset: resetClaudeMd }}
       templates={{ mine, save: saveTemplate, remove: deleteTemplate }}
       files={files === undefined ? undefined : { view: files, remove: deleteAssistantFile, removeAll: deleteAllAssistantFiles }}
-      size={size === undefined ? undefined : { view: size, assistantId: home.assistant.id, save: resizeVirtualAgent }}
+      size={size === undefined ? undefined : { view: size, assistantId: home.assistant.id, save: saveVirtualAgentPod }}
       model={model === undefined ? undefined : { ...model, save: saveAssistantModel }}
       exports={{ defaults, save: saveExportDefaults, access: atlassian }}
       sharing={SHARING_SETTINGS}

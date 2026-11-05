@@ -1,28 +1,17 @@
 "use client";
 
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Fragment, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import {
-  type Connection,
-  type ConnectionsData,
-  checklistState,
-  connections,
-  connectionsWarning,
-  type MicrosoftConnection,
-  type ModelAccess,
-  microsoftConnection,
-  modelAccess,
-  modelAccessAfter,
-  offersConnect
-} from "@/assistant/connections";
-import { memoryPressure, memoryWarning } from "@/assistant/memory-report";
+import { type ConnectionsData, checklistState, connections, connectionsWarning, inWords, microsoftConnection, modelAccess } from "@/assistant/connections";
+import { memoryPressure, memoryWarning, restartQuestion } from "@/assistant/memory-report";
 import type { AssistantPluginsData } from "@/assistant/settings";
 import { pluginChoices } from "@/assistant/settings";
 import { type Theme, themeOf } from "@/assistant/theme";
-import { ActionForm, type FormAction } from "@/components/ActionForm";
+import type { FormAction } from "@/components/ActionForm";
 import { AgentSettings, type AssistantAgentSettings } from "@/components/assistant/AgentSettings";
 import { type AssistantClaudeMd, ClaudeMd } from "@/components/assistant/ClaudeMdSettings";
+import { type AssistantConnect, type AssistantTokens, Connections, type ConnectionsView, hasConnections } from "@/components/assistant/ConnectionSettings";
 import { type AssistantExportDefaults, ExportSettings } from "@/components/assistant/ExportSettings";
 import { type AssistantFiles, Files } from "@/components/assistant/FileSettings";
 import { type AssistantGitIdentity, GitIdentity } from "@/components/assistant/GitIdentitySettings";
@@ -32,35 +21,20 @@ import { PortSettings } from "@/components/assistant/PortSettings";
 import { type AssistantSharing, Sharing } from "@/components/assistant/SharingSettings";
 import type { AssistantSize } from "@/components/assistant/SizeSettings";
 import { type AssistantTemplates, Templates } from "@/components/assistant/TemplateSettings";
-import { ThemeSwitch } from "@/components/assistant/ThemeSwitch";
-import { type AssistantTokens, TokenSettings } from "@/components/assistant/TokenSettings";
-import { CONNECT_OUTCOME_PARAMETER, CONNECT_OUTCOME_WORDS, isConnectOutcome } from "@/microsoft/microsoft";
+import { keepTheme, showTheme, ThemeChoice } from "@/components/assistant/ThemeSwitch";
+import { type DraftKey, type Drafts, SettingsDrafts, type SettingsDraftsContext, useSettingsDraft } from "@/components/assistant/useSettingsDraft";
+import { useEndSession } from "@/components/live/HubStream";
+import { sessionEnded } from "@/components/live/session";
+import type { ActionResult } from "@/web/action";
 import { SETTINGS_PARAMETER, withoutSettingsParameter } from "@/web/home";
 
-/**
- * What a row needs to connect a sign-in the assistant makes only on request: the assistant it restarts and the action
- * that does it, `reconnectSignIn`, which the getting-ready screen's Connect and "Sign in again" post to as well.
- */
-export interface AssistantConnect {
-  assistantId: string;
-  /** Whether it is meant to be running, which is whether connecting restarts it now or asks when it next starts. */
-  running: boolean;
-  reconnect: FormAction;
-}
+export type { AssistantConnect } from "@/components/assistant/ConnectionSettings";
 
-/** The plugins the dialog shows, with the action it posts a change to, `setVirtualAgentPlugins`. */
+/** The plugins the dialog shows, with the action its Save sends a change to, `saveVirtualAgentPod`. */
 export type AssistantPlugins = AssistantPluginsData & { save: FormAction };
 
-interface SettingsView {
+interface SettingsView extends ConnectionsView {
   theme: Theme;
-  list: Connection[];
-  /** How this person's agents reach Claude, where that is not one of `list`'s own rows. */
-  access: ModelAccess | null;
-  connect: AssistantConnect | undefined;
-  /** The person's Microsoft 365 connection, or `null` where the hub cannot read their credentials. */
-  microsoft: MicrosoftConnection | null;
-  unavailable: string | null;
-  warning: string | null;
   plugins: AssistantPlugins | undefined;
   model: AssistantModelSetting | undefined;
   claudeMd: AssistantClaudeMd | undefined;
@@ -71,7 +45,6 @@ interface SettingsView {
   sharing: AssistantSharing | undefined;
   agent: AssistantAgentSettings | undefined;
   git: AssistantGitIdentity | undefined;
-  tokens: AssistantTokens | undefined;
 }
 
 /**
@@ -107,19 +80,6 @@ export const FOCUSABLE = [
  */
 const SETTINGS_TWO_PANE = `(min-width: ${SETTINGS_TWO_PANE_MIN_WIDTH}px)`;
 
-const STATE_CLASS: Record<Connection["state"], string> = {
-  connected: "text-asst-ok",
-  // The person has sent the code back and the pod has yet to collect it, so there is nothing for them to do.
-  finishing: "text-asst-muted",
-  // A relayed sign-in is a wait on the person whether or not a credential sits behind it: a pod relays a code
-  // because it cannot finish without them, so it is coloured as something to do rather than as a quiet renewal.
-  refreshing: "text-asst-accent-soft",
-  "signing-in": "text-asst-accent-soft",
-  expired: "text-asst-warn",
-  failed: "text-asst-error",
-  waiting: "text-asst-muted"
-};
-
 /**
  * Eight teeth around a hub, every vertex on one of two radii about (10, 10) — 7.5 at a tooth tip, 5.6 at a root — so
  * the outline is concentric with the hub circle and the whole glyph is square in its viewBox. The rest is the
@@ -143,170 +103,12 @@ function CogIcon() {
   );
 }
 
-/** What connecting asks first and what its button says, by whether a saved sign-in goes and whether it restarts. */
-function connectWords(name: string, stored: boolean, running: boolean): { question: string; confirm: string } {
-  if (stored) {
-    return {
-      question: running
-        ? `Delete your saved ${name} sign-in, which all your virtual agents use, and restart your assistant so it asks you to sign in again? Your chats are kept.`
-        : `Delete your saved ${name} sign-in, which all your virtual agents use? Your assistant is stopped, so it asks you to sign in when it next starts.`,
-      confirm: `Sign in to ${name}`
-    };
-  }
-  return {
-    question: running
-      ? `Restart your assistant so it asks you to sign in to ${name}? Your chats are kept.`
-      : `Have your assistant ask you to sign in to ${name}? It is stopped, so it asks when it next starts.`,
-    confirm: `Connect ${name}`
-  };
-}
-
 /**
- * Connecting a sign-in made on request. Its pod relays one only as it starts, and off the `gateway` route only once
- * asked, so connecting is `reconnectSignIn`: record the ask and restart. Behind a confirmation because the restart ends whatever the
- * assistant is doing, and because a lapsed sign-in with a value saved deletes the one all their agents use. The code
- * then arrives where every relayed code does, above the chats.
+ * The appearance, shown on the page as soon as the person picks one so they can see it, and kept for the next page
+ * only by the dialog's Save. Discarding the change puts the page back as it was.
  */
-function Connect({ row, connect, stored }: { row: Connection; connect: AssistantConnect; stored: boolean }) {
-  const [asking, setAsking] = useState(false);
-  const confirm = useRef<HTMLButtonElement>(null);
-  const words = connectWords(row.name, stored, connect.running);
-
-  useEffect(() => {
-    if (asking) {
-      confirm.current?.focus();
-    }
-  }, [asking]);
-
-  if (!asking) {
-    return (
-      <button
-        type="button"
-        onClick={() => setAsking(true)}
-        aria-label={`Connect ${row.name}`}
-        className="shrink-0 rounded-[9px] border border-asst-accent-line px-3 py-1 text-xs font-medium text-asst-accent-soft hover:bg-asst-accent hover:text-asst-ink"
-      >
-        {row.state === "waiting" ? "Connect" : "Sign in again"}
-      </button>
-    );
-  }
-  return (
-    <ActionForm action={connect.reconnect} label={`Connect ${row.name}`} className="flex basis-full flex-col gap-2 pt-1">
-      <input type="hidden" name="id" value={connect.assistantId} />
-      <input type="hidden" name="kind" value={row.kind} />
-      <p className="text-pretty text-[13px] font-semibold text-asst-text">{words.question}</p>
-      <div className="flex flex-wrap items-center gap-3">
-        <button
-          ref={confirm}
-          type="submit"
-          className={`shrink-0 rounded-[10px] px-3.5 py-2 text-[13px] font-semibold ${stored ? "bg-asst-error text-asst-ink" : "bg-asst-accent text-asst-ink hover:bg-asst-accent-hover"}`}
-        >
-          {words.confirm}
-        </button>
-        <button type="button" onClick={() => setAsking(false)} className="shrink-0 text-[13px] font-medium text-asst-muted hover:text-asst-text">
-          Cancel
-        </button>
-      </div>
-    </ActionForm>
-  );
-}
-
-/**
- * One row of the Connections list: a sign-in of the person's, or the derived model-access row, which has no
- * credential of its own and so neither an account to name nor anything to press.
- */
-function Row({ row, connect }: { row: Connection | ModelAccess; connect?: AssistantConnect }) {
-  const credential = "kind" in row ? row : undefined;
-  return (
-    <li className="flex flex-wrap items-center gap-3 border-b border-asst-line px-3.5 py-3 last:border-b-0">
-      <span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-asst-active text-xs font-semibold">
-        {row.initial}
-      </span>
-      <div className="flex min-w-0 flex-1 flex-col leading-tight">
-        <span className="truncate text-sm font-medium">{row.name}</span>
-        <span className="truncate text-xs text-asst-muted">{credential?.accountLabel ?? row.desc}</span>
-      </div>
-      <span className={`shrink-0 text-xs font-medium ${STATE_CLASS[row.state]}`}>{row.detail}</span>
-      {connect !== undefined && credential !== undefined && offersConnect(credential) ? (
-        <Connect row={credential} connect={connect} stored={credential.stored} />
-      ) : null}
-    </li>
-  );
-}
-
-/**
- * Microsoft 365, which the person connects themselves in a browser sign-in of the hub's rather than through their
- * assistant: Connect posts to it (a form rather than a link, so only this page can start one), not a restart. A connect
- * that came back without a connection says so here, from the address it returned to. Disconnecting deletes the connection, which is `removeCredential`,
- * and needs no restart either, since agents ask the hub for a token each time and are refused from then on.
- */
-function MicrosoftRow({ connection, remove }: { connection: MicrosoftConnection; remove: FormAction | undefined }) {
-  const [asking, setAsking] = useState(false);
-  const outcome = useSearchParams().get(CONNECT_OUTCOME_PARAMETER);
-  return (
-    <ul aria-label="Microsoft 365" className="flex flex-col overflow-hidden rounded-[10px] border border-asst-line">
-      <li className="flex flex-wrap items-center gap-3 px-3.5 py-3">
-        <span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-asst-active text-xs font-semibold">
-          M
-        </span>
-        <div className="flex min-w-0 flex-1 flex-col leading-tight">
-          <span className="truncate text-sm font-medium">Microsoft 365</span>
-          <span className="truncate text-xs text-asst-muted">
-            {connection.accountLabel ?? "Your mail, calendar, Teams chats and meetings, and OneDrive and SharePoint files (optional)"}
-          </span>
-        </div>
-        <span className={`shrink-0 text-xs font-medium ${connection.stored ? "text-asst-ok" : "text-asst-muted"}`}>
-          {connection.stored ? "Connected" : "Not connected"}
-        </span>
-        {connection.stored ? (
-          remove === undefined || asking ? null : (
-            <button
-              type="button"
-              onClick={() => setAsking(true)}
-              className="shrink-0 rounded-[9px] border border-asst-line px-3 py-1 text-xs font-medium text-asst-muted hover:text-asst-text"
-            >
-              Disconnect
-            </button>
-          )
-        ) : (
-          <form method="post" action={connection.connectPath} className="shrink-0">
-            <input type="hidden" name="redirect" value={connection.returnTo} />
-            <button
-              type="submit"
-              aria-label="Connect Microsoft 365"
-              className="shrink-0 rounded-[9px] border border-asst-accent-line px-3 py-1 text-xs font-medium text-asst-accent-soft hover:bg-asst-accent hover:text-asst-ink"
-            >
-              Connect
-            </button>
-          </form>
-        )}
-        {connection.stored && remove !== undefined && asking ? (
-          <ActionForm action={remove} label="Disconnect Microsoft 365" onSuccess={() => setAsking(false)} className="flex basis-full flex-col gap-2 pt-1">
-            <input type="hidden" name="kind" value="microsoft" />
-            <p className="text-pretty text-[13px] font-semibold text-asst-text">
-              Disconnect Microsoft 365? Your agents can no longer read your mail, calendar, Teams chats, meetings or files until you connect again.
-            </p>
-            <div className="flex flex-wrap items-center gap-3">
-              <button type="submit" className="shrink-0 rounded-[10px] bg-asst-error px-3.5 py-2 text-[13px] font-semibold text-asst-ink">
-                Disconnect
-              </button>
-              <button type="button" onClick={() => setAsking(false)} className="shrink-0 text-[13px] font-medium text-asst-muted hover:text-asst-text">
-                Cancel
-              </button>
-            </div>
-          </ActionForm>
-        ) : null}
-        {!connection.stored && isConnectOutcome(outcome) ? (
-          <p role="status" className="basis-full text-pretty text-[13px] text-asst-warn">
-            {CONNECT_OUTCOME_WORDS[outcome]}
-          </p>
-        ) : null}
-      </li>
-    </ul>
-  );
-}
-
 function Appearance({ theme }: { theme: Theme }) {
+  const chosen = useSettingsDraft("theme", theme);
   return (
     <section aria-labelledby="assistant-settings-appearance" className="flex flex-col gap-2.5">
       <h3 id="assistant-settings-appearance" className="text-sm font-semibold">
@@ -314,80 +116,21 @@ function Appearance({ theme }: { theme: Theme }) {
       </h3>
       <div className="flex items-center justify-between gap-3">
         <p className="text-[13px] text-asst-muted">Light, dark, or whatever your device is set to.</p>
-        <ThemeSwitch initial={theme} />
+        <ThemeChoice
+          theme={chosen.value}
+          onChoose={(next) => {
+            chosen.set(next);
+            showTheme(next);
+          }}
+        />
       </div>
     </section>
   );
 }
 
-/** Whether the page passed any sign-in, Microsoft 365 included, or a reason it has none to show. */
-function hasSignIns(view: SettingsView): boolean {
-  return view.list.length > 0 || view.microsoft !== null || view.unavailable !== null;
-}
-
-/** Whether the page passed any saved credential, or a reason it cannot show them. */
-function hasTokens(tokens: AssistantTokens | undefined): tokens is AssistantTokens {
-  return tokens !== undefined && (tokens.rows.length > 0 || tokens.unavailable !== null);
-}
-
-/**
- * The person's sign-ins, then the credentials saved for them beneath: one section, because both are how the assistant
- * reaches the services it works with, and a pasted token is the other way of connecting one.
- */
-function Connections({ view }: { view: SettingsView }) {
-  return (
-    <section aria-labelledby="assistant-settings-connections" className="flex flex-col gap-5">
-      <div className="flex flex-col gap-2.5">
-        <h3 id="assistant-settings-connections" className="text-sm font-semibold">
-          Connections
-        </h3>
-        {hasSignIns(view) ? <SignIns {...view} /> : null}
-      </div>
-      {hasTokens(view.tokens) ? <TokenSettings tokens={view.tokens} /> : null}
-    </section>
-  );
-}
-
-function SignIns({
-  list,
-  access,
-  connect,
-  microsoft,
-  tokens,
-  unavailable,
-  warning
-}: Pick<SettingsView, "list" | "access" | "connect" | "microsoft" | "tokens" | "unavailable" | "warning">) {
-  return (
-    <>
-      {warning === null ? null : (
-        <div className="flex flex-col gap-1 rounded-[10px] border border-asst-warn bg-asst-raised px-3.5 py-3">
-          <p className="text-[13px] font-semibold text-asst-text">{warning}</p>
-          {/*
-           * The list says where each sign-in stands and nothing more, so this says where to go and not what will
-           * be there. What is above the chats is whichever ask applies — the accounts to connect on a first visit, a
-           * code to type, or a lapsed sign-in to ask for again — and promising one of the three would be wrong for
-           * the other two.
-           */}
-          <p className="text-pretty text-[13px] text-asst-body">
-            Your assistant cannot use these until you have signed in. Close this and the message above your chats takes you to them. You can carry on chatting
-            either way.
-          </p>
-        </div>
-      )}
-      {unavailable === null ? null : <p className="text-[13px] text-asst-error">{unavailable}</p>}
-      {list.length === 0 ? null : (
-        <ul aria-label="Connections" className="flex flex-col overflow-hidden rounded-[10px] border border-asst-line">
-          {list.map((row, index) => (
-            <Fragment key={row.kind}>
-              <Row row={row} connect={connect} />
-              {access !== null && modelAccessAfter(index) ? <Row row={access} /> : null}
-            </Fragment>
-          ))}
-        </ul>
-      )}
-      {microsoft === null ? null : <MicrosoftRow connection={microsoft} remove={tokens?.remove} />}
-    </>
-  );
+/** Whether two lists of ticked names are the same set, whatever order they were ticked in. */
+function samePlugins(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((name) => b.includes(name));
 }
 
 /**
@@ -397,6 +140,11 @@ function SignIns({
  */
 function Plugins({ plugins }: { plugins: AssistantPlugins }) {
   const choices = pluginChoices(plugins.available, plugins.checked);
+  // Only the names there is a box for: an always-on name the row still holds is kept by any save, as `pluginChoices` says.
+  const stored = plugins.checked.filter((name) => choices.some((choice) => choice.name === name));
+  const ticked = useSettingsDraft("plugins", stored, samePlugins);
+  const toggle = (name: string, on: boolean) =>
+    ticked.set(choices.map((choice) => choice.name).filter((candidate) => (candidate === name ? on : ticked.value.includes(candidate))));
   return (
     <section aria-labelledby="assistant-settings-plugins" className="flex flex-col gap-2.5">
       <h3 id="assistant-settings-plugins" className="text-sm font-semibold">
@@ -406,35 +154,32 @@ function Plugins({ plugins }: { plugins: AssistantPlugins }) {
         Plugins add skills your assistant can use, such as a team's own tools for its work.{" "}
         {plugins.podRunning ? "Saving restarts your assistant; your chats are kept." : "Your assistant loads them the next time it starts."}
       </p>
-      <ActionForm action={plugins.save} label="Change your assistant's plugins" keepValues className="flex flex-col gap-2.5">
-        <input type="hidden" name="id" value={plugins.assistantId} />
-        <ul className="flex flex-col overflow-hidden rounded-[10px] border border-asst-line">
-          {choices.map((choice) => (
-            <li key={choice.name} className="border-b border-asst-line last:border-b-0">
-              <label className="flex cursor-pointer items-start gap-3 px-3.5 py-3 hover:bg-asst-active">
-                <input
-                  type="checkbox"
-                  name="plugins"
-                  value={choice.name}
-                  defaultChecked={plugins.checked.includes(choice.name)}
-                  className="mt-0.5 h-4 w-4 shrink-0 accent-asst-accent"
-                />
-                <span className="flex min-w-0 flex-col leading-tight">
-                  <span className="text-sm font-medium">{choice.description === "" ? choice.name : choice.description}</span>
-                  {choice.description === "" ? null : <span className="font-plex-mono text-xs text-asst-muted">{choice.name}</span>}
-                  {choice.offered ? null : <span className="text-xs text-asst-warn">No longer offered. Untick it to stop using it.</span>}
-                </span>
-              </label>
-            </li>
-          ))}
-        </ul>
-        <button
-          type="submit"
-          className="self-start rounded-[10px] bg-asst-accent px-3.5 py-2 text-[13px] font-semibold text-asst-ink hover:bg-asst-accent-hover"
-        >
-          Save plugins
-        </button>
-      </ActionForm>
+      <ul aria-label="Your assistant's plugins" className="flex flex-col overflow-hidden rounded-[10px] border border-asst-line">
+        {choices.map((choice) => (
+          <li key={choice.name} className="border-b border-asst-line last:border-b-0">
+            <label className="flex cursor-pointer items-start gap-3 px-3.5 py-3 hover:bg-asst-active">
+              <input
+                type="checkbox"
+                name="plugins"
+                value={choice.name}
+                checked={ticked.value.includes(choice.name)}
+                onChange={(event) => toggle(choice.name, event.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-asst-accent"
+              />
+              <span className="flex min-w-0 flex-col leading-tight">
+                <span className="text-sm font-medium">{choice.description === "" ? choice.name : choice.description}</span>
+                {choice.description === "" ? null : <span className="font-plex-mono text-xs text-asst-muted">{choice.name}</span>}
+                {choice.offered ? null : <span className="text-xs text-asst-warn">No longer offered. Untick it to stop using it.</span>}
+              </span>
+            </label>
+          </li>
+        ))}
+      </ul>
+      {ticked.error === null ? null : (
+        <p role="alert" className="text-xs text-asst-error">
+          {ticked.error}
+        </p>
+      )}
     </section>
   );
 }
@@ -444,7 +189,7 @@ type SettingsGroup = "General" | "Agent" | null;
 
 /**
  * One section of the dialog: the label the navigation shows for it, the group it sits under, whether the page passed
- * anything for it to show, and its panel.
+ * anything for it to show, its panel, and the settings in it that the dialog's Save stores.
  *
  * A section is a row of `SECTIONS` and nothing else — its own component file, the fields of `SettingsView` it reads,
  * and one entry here — so adding or removing one never touches the navigation, the focus trap or the layout.
@@ -455,6 +200,7 @@ interface SettingsSection {
   group: SettingsGroup;
   shown: (view: SettingsView) => boolean;
   panel: (view: SettingsView) => ReactNode;
+  drafts?: readonly DraftKey[];
 }
 
 /**
@@ -464,12 +210,12 @@ interface SettingsSection {
  * before it: a group split in two would be announced twice and read as two different things.
  */
 const SECTIONS: readonly SettingsSection[] = [
-  { id: "appearance", label: "Appearance", group: "General", shown: () => true, panel: (view) => <Appearance theme={view.theme} /> },
+  { id: "appearance", label: "Appearance", group: "General", shown: () => true, panel: (view) => <Appearance theme={view.theme} />, drafts: ["theme"] },
   {
     id: "connections",
     label: "Connections",
     group: "General",
-    shown: (view) => hasSignIns(view) || hasTokens(view.tokens),
+    shown: hasConnections,
     panel: (view) => <Connections view={view} />
   },
   {
@@ -484,7 +230,8 @@ const SECTIONS: readonly SettingsSection[] = [
     label: "Tickets & Confluence",
     group: "General",
     shown: (view) => view.exports !== undefined,
-    panel: (view) => (view.exports === undefined ? null : <ExportSettings exports={view.exports} />)
+    panel: (view) => (view.exports === undefined ? null : <ExportSettings exports={view.exports} />),
+    drafts: ["exports"]
   },
   {
     id: "sharing",
@@ -498,21 +245,24 @@ const SECTIONS: readonly SettingsSection[] = [
     label: "Assistant",
     group: "Agent",
     shown: (view) => view.agent !== undefined || view.model !== undefined || view.size !== undefined,
-    panel: (view) => <AgentSettings agent={view.agent} model={view.model} size={view.size} />
+    panel: (view) => <AgentSettings agent={view.agent} model={view.model} size={view.size} />,
+    drafts: ["model", "size"]
   },
   {
     id: "claude-md",
     label: "Claude.md",
     group: "Agent",
     shown: (view) => view.claudeMd !== undefined,
-    panel: (view) => (view.claudeMd === undefined ? null : <ClaudeMd claudeMd={view.claudeMd} />)
+    panel: (view) => (view.claudeMd === undefined ? null : <ClaudeMd claudeMd={view.claudeMd} />),
+    drafts: ["claudeMd"]
   },
   {
     id: "git",
     label: "Git identity",
     group: "Agent",
     shown: (view) => view.git !== undefined,
-    panel: (view) => (view.git === undefined ? null : <GitIdentity git={view.git} />)
+    panel: (view) => (view.git === undefined ? null : <GitIdentity git={view.git} />),
+    drafts: ["git"]
   },
   {
     id: "plugins",
@@ -521,7 +271,8 @@ const SECTIONS: readonly SettingsSection[] = [
     // Nothing at all when the hub offers no plugin and the assistant loads none: a navigation item leading to an
     // empty panel is worse than no item, and `pluginChoices` is the one place that decides what there is to tick.
     shown: (view) => view.plugins !== undefined && pluginChoices(view.plugins.available, view.plugins.checked).length > 0,
-    panel: (view) => (view.plugins === undefined ? null : <Plugins plugins={view.plugins} />)
+    panel: (view) => (view.plugins === undefined ? null : <Plugins plugins={view.plugins} />),
+    drafts: ["plugins"]
   },
   {
     id: "ports",
@@ -594,6 +345,19 @@ function BackIcon() {
   );
 }
 
+/**
+ * The mark on a section holding changes the Save has not stored. A dot for the eye and words for a screen reader, which
+ * become part of the section's name, so the mark does not depend on seeing it.
+ */
+function Unsaved() {
+  return (
+    <>
+      <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-asst-accent" />
+      <span className="sr-only">, unsaved changes</span>
+    </>
+  );
+}
+
 const NAV_ITEM = "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] leading-tight";
 const GROUP_LABEL = "px-3 pb-1 pt-2.5 text-[11px] font-semibold uppercase tracking-wide text-asst-muted not-first:mt-4 first:pt-0";
 
@@ -610,12 +374,14 @@ function Nav({
   items,
   section,
   onSelect,
+  unsaved,
   tabId,
   panelId
 }: {
   items: readonly SettingsSection[];
   section: string;
   onSelect: (id: string) => void;
+  unsaved: (item: SettingsSection) => boolean;
   tabId: (id: string) => string;
   panelId: string;
 }) {
@@ -675,6 +441,7 @@ function Nav({
             className={`${NAV_ITEM} ${item.id === section ? "bg-asst-active font-semibold text-asst-text" : "text-asst-body hover:bg-asst-hover hover:text-asst-text"}`}
           >
             <span className="min-w-0 flex-1 truncate">{item.label}</span>
+            {unsaved(item) ? <Unsaved /> : null}
           </button>
         </Fragment>
       ))}
@@ -687,7 +454,15 @@ function Nav({
  * with a way back to the list. A real list rather than a tablist, because that is what it behaves like — nothing is
  * selected while the list is showing, and opening a section replaces it.
  */
-function SectionList({ items, onSelect }: { items: readonly SettingsSection[]; onSelect: (id: string) => void }) {
+function SectionList({
+  items,
+  onSelect,
+  unsaved
+}: {
+  items: readonly SettingsSection[];
+  onSelect: (id: string) => void;
+  unsaved: (item: SettingsSection) => boolean;
+}) {
   return (
     <ul aria-label="Settings sections" className="flex shrink-0 flex-col gap-0.5 overflow-y-auto">
       {items.map((item, index) => (
@@ -705,6 +480,7 @@ function SectionList({ items, onSelect }: { items: readonly SettingsSection[]; o
               className={`${NAV_ITEM} text-asst-body hover:bg-asst-hover hover:text-asst-text`}
             >
               <span className="min-w-0 flex-1 truncate">{item.label}</span>
+              {unsaved(item) ? <Unsaved /> : null}
               <Chevron />
             </button>
           </li>
@@ -740,17 +516,232 @@ function focusNavigation(dialog: HTMLElement | null): void {
   (dialog?.querySelector<HTMLElement>(NAV_ENTRY) ?? dialog?.querySelector<HTMLElement>(FOCUSABLE))?.focus();
 }
 
+type SaveResult = ActionResult<object & { confirmation?: string }>;
+
+/** One server action the Save runs, and the drafts it stores. */
+interface SaveTask {
+  keys: DraftKey[];
+  run: () => Promise<SaveResult>;
+}
+
+function formOf(fields: Record<string, string | readonly string[]>): FormData {
+  const form = new FormData();
+  for (const [name, value] of Object.entries(fields)) {
+    for (const one of typeof value === "string" ? [value] : value) {
+      form.append(name, one);
+    }
+  }
+  return form;
+}
+
 /**
- * The settings themselves, over the page: a navigation of the sections and the one the person has open. Focus moves
- * into it as it opens and stays in it while it is open; closing it, by Escape, the close button or the page behind
- * it, puts focus back on the cog, which is what `onClose` is for.
+ * The server actions that store the drafts still to be saved, each through the action its section always used, and
+ * only for what changed. The size and the plugins are one task, because `saveVirtualAgentPod` writes both in one
+ * transaction and so replaces a running pod once for the two. The appearance is the browser's own cookie and needs no
+ * server.
+ */
+function saveTasks(view: SettingsView, dirty: Drafts): SaveTask[] {
+  const tasks: SaveTask[] = [];
+  const { theme, model, size, plugins, claudeMd, git, exports } = dirty;
+  if (theme !== undefined) {
+    tasks.push({
+      keys: ["theme"],
+      run: async () => {
+        keepTheme(theme.value);
+        return { ok: true };
+      }
+    });
+  }
+  if (model !== undefined && view.model !== undefined) {
+    const save = view.model.save;
+    tasks.push({ keys: ["model"], run: () => save(formOf({ model: model.value })) });
+  }
+  const pod = view.size ?? view.plugins;
+  const sizing = size !== undefined && view.size !== undefined ? size : undefined;
+  const plugging = plugins !== undefined && view.plugins !== undefined ? plugins : undefined;
+  if (pod !== undefined && (sizing !== undefined || plugging !== undefined)) {
+    tasks.push({
+      keys: [...(sizing === undefined ? [] : ["size" as const]), ...(plugging === undefined ? [] : ["plugins" as const])],
+      run: () =>
+        pod.save(
+          formOf({
+            id: pod.assistantId,
+            ...(sizing === undefined ? {} : { size: sizing.value }),
+            ...(plugging === undefined ? {} : { pluginsChosen: "true", plugins: plugging.value })
+          })
+        )
+    });
+  }
+  if (claudeMd !== undefined && view.claudeMd !== undefined) {
+    const save = view.claudeMd.save;
+    tasks.push({ keys: ["claudeMd"], run: () => save(formOf({ value: claudeMd.value })) });
+  }
+  if (git !== undefined && view.git !== undefined) {
+    const save = view.git.save;
+    tasks.push({ keys: ["git"], run: () => save(formOf(git.value)) });
+  }
+  if (exports !== undefined && view.exports !== undefined) {
+    const save = view.exports.save;
+    tasks.push({ keys: ["exports"], run: () => save(exports.value) });
+  }
+  return tasks;
+}
+
+/** The drafts still to be saved: a draft an action has settled, or a save has stored, is shown but not sent again. */
+function dirtyDrafts(drafts: Drafts): Drafts {
+  return Object.fromEntries(Object.entries(drafts).filter(([, draft]) => draft?.dirty === true));
+}
+
+/**
+ * What saving does to a pod that is up: a change of size or of plugins replaces it, and the Save asks once, naming
+ * both, before it does.
+ */
+function restartsFor(view: SettingsView, dirty: Drafts): string[] {
+  return [
+    dirty.size !== undefined && view.size?.view.rollsPod === true ? "size" : null,
+    dirty.plugins !== undefined && view.plugins?.podRunning === true ? "plugins" : null
+  ].filter((change): change is string => change !== null);
+}
+
+function useFocusOnMount<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+  useEffect(() => {
+    ref.current?.focus();
+  }, []);
+  return ref;
+}
+
+const PRIMARY = "shrink-0 rounded-[10px] bg-asst-accent px-3.5 py-2 text-[13px] font-semibold text-asst-ink hover:bg-asst-accent-hover disabled:opacity-40";
+const SECONDARY = "shrink-0 rounded-[10px] border border-asst-strong px-3 py-2 text-[13px] hover:bg-asst-active";
+
+function Question({
+  children,
+  confirm,
+  cancel,
+  onConfirm,
+  onCancel
+}: {
+  children: ReactNode;
+  confirm: string;
+  cancel: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  // The way back is focused rather than the way on: both questions are there to stop something the person may not mean.
+  const back = useFocusOnMount<HTMLButtonElement>();
+  return (
+    <div className="flex w-full flex-col gap-2">
+      {children}
+      <div className="flex flex-wrap items-center justify-end gap-3">
+        <button ref={back} type="button" onClick={onCancel} className={SECONDARY}>
+          {cancel}
+        </button>
+        <button type="button" onClick={onConfirm} className={PRIMARY}>
+          {confirm}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The footer every section shares: what is waiting to be saved, or what the last save said, and the one Save and the
+ * way to throw the changes away. Its two questions take its place while they are asked.
+ */
+function Footer({
+  unsaved,
+  said,
+  saving,
+  asking,
+  restarts,
+  openChats,
+  saveButton,
+  onSave,
+  onDiscard,
+  onClose,
+  onCancel
+}: {
+  unsaved: readonly string[];
+  said: { ok: boolean; lines: string[] } | null;
+  saving: boolean;
+  asking: "restart" | "close" | null;
+  restarts: readonly string[];
+  openChats: number;
+  saveButton: React.RefObject<HTMLButtonElement | null>;
+  onSave: (confirmed: boolean) => void;
+  onDiscard: () => void;
+  onClose: () => void;
+  onCancel: () => void;
+}) {
+  if (asking === "restart") {
+    return (
+      <Question confirm="Save and restart" cancel="Cancel" onConfirm={() => onSave(true)} onCancel={onCancel}>
+        <p className="text-pretty text-[13px] font-semibold">{restartQuestion(restarts, openChats)}</p>
+        <p className="text-pretty text-[13px] text-asst-body">
+          Your chats are all kept and carry on where they left off. Only what one of them was working on at the moment you save is lost.
+        </p>
+      </Question>
+    );
+  }
+  if (asking === "close") {
+    return (
+      <Question confirm="Discard and close" cancel="Keep editing" onConfirm={onClose} onCancel={onCancel}>
+        <p className="text-pretty text-[13px] font-semibold">Discard your unsaved changes to {inWords(unsaved)}?</p>
+      </Question>
+    );
+  }
+  return (
+    <div className="flex w-full flex-wrap items-center gap-3">
+      {/* What the last save said is announced; what is waiting to be saved is not, since it changes as the person types. */}
+      {said === null ? (
+        <p className="min-w-0 flex-1 text-[13px] text-asst-muted">{unsaved.length === 0 ? null : `Unsaved changes in ${inWords(unsaved)}.`}</p>
+      ) : (
+        <div role={said.ok ? "status" : "alert"} className={`min-w-0 flex-1 text-[13px] ${said.ok ? "text-asst-ok" : "text-asst-error"}`}>
+          {said.lines.map((line) => (
+            <p key={line}>{line}</p>
+          ))}
+        </div>
+      )}
+      {unsaved.length === 0 ? null : (
+        <button type="button" onClick={onDiscard} disabled={saving} className={SECONDARY}>
+          Discard changes
+        </button>
+      )}
+      <button ref={saveButton} type="button" onClick={() => onSave(false)} disabled={unsaved.length === 0 || saving} className={PRIMARY}>
+        {saving ? "Saving…" : "Save"}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * The settings themselves, over the page: a navigation of the sections, the one the person has open, and one Save for
+ * every setting in all of them. Focus moves into it as it opens and stays in it while it is open; closing it, by
+ * Escape, the close button or the page behind it, puts focus back on the cog, which is what `onClose` is for. Closing
+ * with changes still to save asks first.
+ *
+ * The drafts are held here rather than by the sections, because only the open section is rendered and a draft kept in
+ * one would go as the person moved to another. A section never opened has no draft, and so adds nothing to a save.
  */
 function Dialog({ view, onClose, initial: named = null }: { view: SettingsView; onClose: () => void; initial?: string | null }) {
   const initial = named === null ? null : (SECTION_ALIASES.get(named) ?? named);
   const panel = useRef<HTMLDivElement>(null);
+  const saveButton = useRef<HTMLButtonElement>(null);
   const prefix = useId();
   const wide = useTwoPane();
+  const router = useRouter();
+  const endSession = useEndSession();
   const items = SECTIONS.filter((item) => item.shown(view));
+  const [drafts, setDrafts] = useState<Drafts>({});
+  const [errors, setErrors] = useState<Partial<Record<DraftKey, string>>>({});
+  const [saves, setSaves] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const [asking, setAsking] = useState<"restart" | "close" | null>(null);
+  const [said, setSaid] = useState<{ ok: boolean; lines: string[] } | null>(null);
+  const dirty = dirtyDrafts(drafts);
+  const unsavedIn = (item: SettingsSection) => (item.drafts ?? []).some((key) => dirty[key] !== undefined);
+  const unsaved = items.filter(unsavedIn).map((item) => item.label);
+  const restarts = restartsFor(view, dirty);
   // Nothing open is the narrow interface showing its list. Wide has no such state: it always has a section beside the
   // navigation, so a chosen section that the page has stopped passing anything for falls back to the first offered one.
   // A section the address names is open from the start at either width, which on the narrow one is drilled into.
@@ -763,10 +754,115 @@ function Dialog({ view, onClose, initial: named = null }: { view: SettingsView; 
   const open = items.find((item) => item.id === section);
   const showing = useRef({ wide, section });
 
+  const context: SettingsDraftsContext = {
+    drafts,
+    errors,
+    saves,
+    change: (key, value, stored) => {
+      setDrafts((last) => {
+        const { [key]: _, ...rest } = last;
+        return stored ? rest : { ...rest, [key]: { value, dirty: true } };
+      });
+      setErrors(({ [key]: _, ...rest }) => rest);
+      setSaid(null);
+      // A different change is a different question, so a restart already being asked about stops being the one asked.
+      setAsking((last) => (last === "restart" ? null : last));
+    },
+    settle: (key, value) => {
+      setDrafts((last) => ({ ...last, [key]: { value, dirty: false } }));
+      setErrors(({ [key]: _, ...rest }) => rest);
+    }
+  };
+
+  /** Puts the page back to the appearance it had, when a choice was only being shown and not kept. */
+  const unshown = useRef(() => {});
+  unshown.current = () => {
+    if (dirty.theme !== undefined) {
+      showTheme(view.theme);
+    }
+  };
+  useEffect(() => () => unshown.current(), []);
+
+  function discard(): void {
+    unshown.current();
+    setDrafts((last) => Object.fromEntries(Object.entries(last).filter(([, draft]) => draft?.dirty !== true)));
+    setErrors({});
+    setSaid(null);
+    setAsking(null);
+  }
+
+  function requestClose(): void {
+    if (Object.keys(dirty).length > 0) {
+      setAsking("close");
+      return;
+    }
+    onClose();
+  }
+
+  async function save(confirmed: boolean): Promise<void> {
+    if (!confirmed && restarts.length > 0) {
+      setAsking("restart");
+      return;
+    }
+    const sent = dirty;
+    setAsking(null);
+    setSaving(true);
+    setSaid(null);
+    const results = await Promise.all(
+      saveTasks(view, sent).map(async (task) => {
+        try {
+          return { task, result: await task.run() };
+        } catch {
+          return { task, result: (await sessionEnded()) ? null : ({ ok: false, error: "that could not be done; try again" } as const) };
+        }
+      })
+    );
+    setSaving(false);
+    if (results.some(({ result }) => result === null)) {
+      endSession();
+      return;
+    }
+    const stored = results.filter(({ result }) => result?.ok === true).flatMap(({ task }) => task.keys);
+    const refused = results.flatMap(({ task, result }) => (result === null || result.ok ? [] : task.keys.map((key) => [key, result.error] as const)));
+    // A draft the person changed again while the save was in flight is theirs still to save.
+    setDrafts((last) =>
+      Object.fromEntries(
+        Object.entries(last).map(([key, draft]) => [
+          key,
+          stored.includes(key as DraftKey) && draft === sent[key as DraftKey] ? { ...draft, dirty: false } : draft
+        ])
+      )
+    );
+    setErrors(Object.fromEntries(refused));
+    if (stored.length > 0) {
+      setSaves((count) => count + 1);
+      router.refresh();
+    }
+    const confirmations = results.flatMap(({ result }) => (result?.ok === true && result.confirmation ? [result.confirmation] : []));
+    const notSaved = items.filter((item) => (item.drafts ?? []).some((key) => refused.some(([refusedKey]) => refusedKey === key))).map((item) => item.label);
+    setSaid(
+      refused.length === 0
+        ? { ok: true, lines: confirmations.length === 0 ? ["Your changes are saved"] : confirmations }
+        : { ok: false, lines: [`${inWords(notSaved)} could not be saved. Your changes are kept, and each section says why.`] }
+    );
+  }
+
   useEffect(() => {
     // The navigation, so what has focus says where in the settings the person is rather than only how to leave.
     focusNavigation(panel.current);
   }, []);
+
+  useEffect(() => {
+    // A question in the footer is replaced by the buttons it stood in for as it is answered, and the button focus was
+    // on goes with it: Save, where it can take focus, or the navigation.
+    if (asking === null && !saving && !panel.current?.contains(document.activeElement)) {
+      if (saveButton.current !== null && !saveButton.current.disabled) {
+        saveButton.current.focus();
+      } else {
+        focusNavigation(panel.current);
+      }
+    }
+  }, [asking, saving]);
 
   useEffect(() => {
     const moved = showing.current.wide !== wide || showing.current.section !== section;
@@ -784,6 +880,10 @@ function Dialog({ view, onClose, initial: named = null }: { view: SettingsView; 
     focusNavigation(panel.current);
   }, [wide, section]);
 
+  // Escape answers what is asked: a question in the footer is put away, and otherwise the dialog is closed.
+  const onEscape = useRef(() => {});
+  onEscape.current = () => (asking === null ? requestClose() : setAsking(null));
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -791,7 +891,7 @@ function Dialog({ view, onClose, initial: named = null }: { view: SettingsView; 
         // the next stop after `document`, so the dialog would otherwise take the whole sidebar with it — and the cog
         // focus is handed back to goes `inert` with it, which drops focus to the body.
         event.stopPropagation();
-        onClose();
+        onEscape.current();
         return;
       }
       const items = event.key === "Tab" ? [...(panel.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])] : [];
@@ -807,11 +907,11 @@ function Dialog({ view, onClose, initial: named = null }: { view: SettingsView; 
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, []);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-5 font-plex text-[15px] leading-normal text-asst-text">
-      <button type="button" aria-label="Close settings" onClick={onClose} className="absolute inset-0 bg-black/60" />
+      <button type="button" aria-label="Close settings" onClick={requestClose} className="absolute inset-0 bg-black/60" />
       <div
         ref={panel}
         role="dialog"
@@ -827,7 +927,7 @@ function Dialog({ view, onClose, initial: named = null }: { view: SettingsView; 
           </h2>
           <button
             type="button"
-            onClick={onClose}
+            onClick={requestClose}
             aria-label="Close settings"
             className="-mr-1.5 -mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-asst-muted hover:bg-asst-active hover:text-asst-text"
           >
@@ -843,9 +943,9 @@ function Dialog({ view, onClose, initial: named = null }: { view: SettingsView; 
          */}
         <div className={`flex min-h-0 flex-1 ${wide ? "gap-4" : "flex-col gap-3.5"}`}>
           {wide ? (
-            <Nav items={items} section={section ?? ""} onSelect={setChosen} tabId={tabId} panelId={panelId} />
+            <Nav items={items} section={section ?? ""} onSelect={setChosen} unsaved={unsavedIn} tabId={tabId} panelId={panelId} />
           ) : section === null ? (
-            <SectionList items={items} onSelect={setChosen} />
+            <SectionList items={items} onSelect={setChosen} unsaved={unsavedIn} />
           ) : (
             <BackToList onBack={() => setChosen(null)} />
           )}
@@ -860,9 +960,27 @@ function Dialog({ view, onClose, initial: named = null }: { view: SettingsView; 
               // the focus ring says `outline-solid` as well.
               className="flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto pr-0.5 outline-hidden focus-visible:outline-solid focus-visible:outline-1 focus-visible:outline-asst-accent-line"
             >
-              {open?.panel(view) ?? null}
+              <SettingsDrafts.Provider value={context}>{open?.panel(view) ?? null}</SettingsDrafts.Provider>
             </div>
           )}
+        </div>
+        <div className="flex shrink-0 border-t border-asst-line pt-3.5">
+          <Footer
+            unsaved={unsaved}
+            said={said}
+            saving={saving}
+            asking={asking}
+            restarts={restarts}
+            openChats={view.size?.view.openChats ?? 0}
+            saveButton={saveButton}
+            onSave={(confirmed) => void save(confirmed)}
+            onDiscard={discard}
+            onClose={() => {
+              discard();
+              onClose();
+            }}
+            onCancel={() => setAsking(null)}
+          />
         </div>
       </div>
     </div>
@@ -1030,6 +1148,7 @@ export function AssistantSettings({
                 access,
                 connect,
                 microsoft: microsoftConnection(data),
+                route: data?.route ?? "own-licence",
                 unavailable: data?.unavailable ?? null,
                 warning,
                 plugins,

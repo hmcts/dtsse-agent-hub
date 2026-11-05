@@ -9,10 +9,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { savedCredentials } from "@/assistant/saved-credentials";
 import { ActionForm } from "@/components/ActionForm";
 import { ClaudeMd } from "@/components/assistant/ClaudeMdSettings";
-import { TokenSettings } from "@/components/assistant/TokenSettings";
+import { Connections, type ConnectionsView } from "@/components/assistant/ConnectionSettings";
+import { SettingsDrafts } from "@/components/assistant/useSettingsDraft";
 import type { CredentialStatus } from "@/credentials/store";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }), usePathname: () => "/assistant" }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }),
+  usePathname: () => "/assistant",
+  useSearchParams: () => new URLSearchParams()
+}));
 vi.mock("@/components/live/HubStream", () => ({ useEndSession: () => () => undefined }));
 
 afterEach(() => {
@@ -31,6 +36,20 @@ function stored(kind: CredentialStatus["kind"]): CredentialStatus {
 
 function missing(kind: CredentialStatus["kind"]): CredentialStatus {
   return { kind, stored: false, accountLabel: null, updatedAt: null };
+}
+
+/** The Connections section with only saved credentials to list. */
+function credentials(rows: ReturnType<typeof savedCredentials>): ConnectionsView {
+  return {
+    list: [],
+    access: null,
+    connect: undefined,
+    microsoft: null,
+    route: "own-licence",
+    unavailable: null,
+    warning: null,
+    tokens: { rows, unavailable: null, save: ok(), remove: ok() }
+  };
 }
 
 /** Where a browser goes when the form is submitted natively, with no script to intercept it. */
@@ -90,14 +109,12 @@ describe("a form carrying a credential", () => {
 
   it("should post every paste form in the Assistant's settings, with the value hidden, when each is opened", () => {
     const rows = savedCredentials([stored("github"), stored("claude"), missing("jenkins")], "own-licence", true);
-    const { container } = render(<TokenSettings tokens={{ rows, unavailable: null, save: ok(), remove: ok() }} />);
-    fireEvent.click(screen.getByRole("button", { name: "Replace your GitHub token" }));
+    const { container } = render(<Connections view={credentials(rows)} />);
     fireEvent.click(screen.getByRole("button", { name: "Replace your Claude token" }));
     fireEvent.click(screen.getByRole("button", { name: "Add your Jenkins API token" }));
     fill(container);
 
     expect([...container.querySelectorAll("form")].filter(carriesSecret).map((form) => form.getAttribute("aria-label"))).toEqual([
-      "Save your GitHub token",
       "Save your Claude token",
       "Save your Jenkins API token"
     ]);
@@ -110,19 +127,23 @@ describe("a form carrying a credential", () => {
 
   it("should post the remove form in the Assistant's settings", () => {
     const rows = savedCredentials([stored("claude")], "own-licence", true);
-    const { container } = render(<TokenSettings tokens={{ rows, unavailable: null, save: ok(), remove: ok() }} />);
+    const { container } = render(<Connections view={credentials(rows)} />);
     fireEvent.click(screen.getByRole("button", { name: "Remove your Claude token" }));
 
     expect(screen.getByRole("form", { name: "Remove your Claude token" })).toBeTruthy();
     expectEveryFormPosts(container);
   });
 
-  it("should post the CLAUDE.md save and reset forms", () => {
+  // The text itself is sent by the dialog's Save, which calls the action rather than submitting a form.
+  it("should post the CLAUDE.md reset form", () => {
+    const drafts = { drafts: {}, errors: {}, saves: 0, change: vi.fn(), settle: vi.fn() };
     const { container } = render(
-      <ClaudeMd claudeMd={{ settings: { available: true, stored: true, text: "# Me", updatedAt: "2026-10-05T09:00:00.000Z" }, save: ok(), reset: ok() }} />
+      <SettingsDrafts.Provider value={drafts}>
+        <ClaudeMd claudeMd={{ settings: { available: true, stored: true, text: "# Me", updatedAt: "2026-10-05T09:00:00.000Z" }, save: ok(), reset: ok() }} />
+      </SettingsDrafts.Provider>
     );
 
-    expect(container.querySelectorAll("form")).toHaveLength(2);
+    expect(container.querySelectorAll("form")).toHaveLength(1);
     expectEveryFormPosts(container);
   });
 });

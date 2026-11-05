@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useId } from "react";
 import type { AssistantMemory } from "@/assistant/memory";
 import {
   describeChatCost,
@@ -11,12 +11,12 @@ import {
   memoryPressure,
   memoryWarning,
   offerMemory,
-  sizeChangeQuestion,
   sizeOffers,
   sizeSentence
 } from "@/assistant/memory-report";
 import { describeSize } from "@/assistant/upload-report";
-import { ActionForm, type FormAction } from "@/components/ActionForm";
+import type { FormAction } from "@/components/ActionForm";
+import { useSettingsDraft } from "@/components/assistant/useSettingsDraft";
 import { Timestamp } from "@/components/time/Timestamp";
 
 /**
@@ -31,11 +31,9 @@ import { Timestamp } from "@/components/time/Timestamp";
 export interface AssistantSize {
   view: AssistantMemory;
   assistantId: string;
-  /** `resizeVirtualAgent`, which re-reads the viewer. */
+  /** `saveVirtualAgentPod`, which the dialog's Save sends the size with the plugins, so a change of both restarts once. */
   save: FormAction;
 }
-
-const LINK = "text-xs text-asst-muted underline hover:text-asst-text";
 
 /** Why there are no figures, in words that do not read as "your assistant is using nothing". */
 const NO_REPORT: Record<Exclude<MemoryUse, { reported: true }>["reason"], string> = {
@@ -94,95 +92,21 @@ function Warning({ pressure }: Readonly<{ pressure: MemoryPressure }>) {
 }
 
 /**
- * The question, and the two ways out of it.
+ * Choosing a size, which the dialog's Save sends.
  *
- * Its own component because it mounts exactly when the person asks, which is what puts focus on the confirming
- * button: a dialog people arrow and tab around has to say where the answer went.
- */
-function Confirm({ chosen, rollsPod, openChats, onCancel }: Readonly<{ chosen: string; rollsPod: boolean; openChats: number; onCancel: () => void }>) {
-  const confirm = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    confirm.current?.focus();
-  }, []);
-
-  return (
-    <>
-      <p className="text-[13px] font-semibold">{sizeChangeQuestion(chosen, rollsPod, openChats)}</p>
-      {rollsPod ? (
-        <p className="text-pretty text-[13px] text-asst-body">
-          Your chats are all kept and carry on where they left off. Only what one of them was working on at the moment you change is lost.
-        </p>
-      ) : null}
-      <div className="flex items-center gap-3">
-        <button
-          ref={confirm}
-          type="submit"
-          className="rounded-[10px] bg-asst-accent px-3.5 py-2 text-[13px] font-semibold text-asst-ink hover:bg-asst-accent-hover"
-        >
-          {rollsPod ? "Change size and restart" : "Change size"}
-        </button>
-        <button type="button" onClick={onCancel} className={LINK}>
-          Cancel
-        </button>
-      </div>
-    </>
-  );
-}
-
-/**
- * Changing the size, behind a confirmation.
- *
- * Asked for rather than done on one submit, in the shape `DeleteEverything` asks: the size is in the pod template, so
- * a change replaces the pod, and every chat with a session running on it stops where it is. The question counts those
- * chats, because that is the part worth being sure about.
+ * The size is in the pod template, so a change replaces a running pod and every chat with a session running on it
+ * stops where it is. What that ends is asked once by the Save, beside anything else the same save restarts the pod
+ * for; this says only whether it will restart.
  *
  * It **proceeds** once the person says so, rather than refusing while a chat is working. A pod is short of memory
  * precisely when chats are running on it, so a refusal would withhold the setting exactly where it is needed; and the
- * work is theirs to interrupt. What it owes them is the cost in plain words before they commit, which is this.
- *
- * The question stays open after a successful post, because closing it would unmount the form that had just been
- * submitted. What takes it away is the section re-rendering at the new size.
+ * work is theirs to interrupt.
  */
-function Change({
-  size,
-  assistantId,
-  save,
-  rollsPod,
-  openChats
-}: Readonly<{
-  size: string;
-  assistantId: string;
-  save: FormAction;
-  rollsPod: boolean;
-  openChats: number;
-}>) {
-  const [chosen, setChosen] = useState(size);
-  const [asking, setAsking] = useState(false);
+function Change({ size, rollsPod }: Readonly<{ size: string; rollsPod: boolean }>) {
+  const chosen = useSettingsDraft("size", size);
   const id = useId();
-
-  /** What sits under the picker: nothing to do, the question, or the way into it. */
-  function below() {
-    if (chosen === size) {
-      return <p className="text-[13px] text-asst-muted">This is the size you are on.</p>;
-    }
-    if (asking) {
-      return <Confirm chosen={chosen} rollsPod={rollsPod} openChats={openChats} onCancel={() => setAsking(false)} />;
-    }
-    return (
-      <button
-        type="button"
-        onClick={() => setAsking(true)}
-        className="self-start rounded-[10px] border border-asst-strong px-3.5 py-2 text-[13px] font-semibold text-asst-text hover:bg-asst-active"
-      >
-        Change to {chosen}
-      </button>
-    );
-  }
-
   return (
-    <ActionForm action={save} label="Change the size of your assistant" keepValues className="flex flex-col gap-2.5">
-      <input type="hidden" name="id" value={assistantId} />
+    <div className="flex flex-col gap-2.5">
       {/* Named for the choice rather than "Size", which is the section's own heading and would be a second thing of
           that name for anyone reading by label. */}
       <label htmlFor={`${id}-size`} className="text-[13px] font-medium">
@@ -191,12 +115,8 @@ function Change({
       <select
         id={`${id}-size`}
         name="size"
-        value={chosen}
-        onChange={(event) => {
-          setChosen(event.target.value);
-          // A different size is a different question, so an answer already on the screen stops being the one asked.
-          setAsking(false);
-        }}
+        value={chosen.value}
+        onChange={(event) => chosen.set(event.target.value)}
         className="rounded-lg border border-asst-strong bg-asst-field px-2.5 py-2 text-[13px] text-asst-text outline-hidden focus:border-asst-accent-line"
       >
         {/* Each size as it would be after the change, so these are the constants rather than what the pod in front
@@ -207,8 +127,19 @@ function Change({
           </option>
         ))}
       </select>
-      {below()}
-    </ActionForm>
+      <p className="text-[13px] text-asst-muted">
+        {chosen.value === size
+          ? "This is the size you are on."
+          : rollsPod
+            ? `Saving changes it to ${chosen.value} and restarts your assistant. Your chats are all kept and carry on where they left off.`
+            : `Saving changes it to ${chosen.value}. Your assistant starts at the new size the next time you use it.`}
+      </p>
+      {chosen.error === null ? null : (
+        <p role="alert" className="text-xs text-asst-error">
+          {chosen.error}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -219,7 +150,7 @@ function Change({
  * can do anything about either. The warning above the choice is deliberately next to the thing that answers it.
  */
 export function Size({ size }: Readonly<{ size: AssistantSize }>) {
-  const { view, assistantId, save } = size;
+  const { view } = size;
   const pressure = memoryPressure(view.use, view.openChats, view.size);
   return (
     <section aria-labelledby="assistant-settings-size" className="flex flex-col gap-2.5">
@@ -233,7 +164,7 @@ export function Size({ size }: Readonly<{ size: AssistantSize }>) {
       <Use use={view.use} />
       {pressure === undefined ? null : <Warning pressure={pressure} />}
       {view.refusal === undefined ? (
-        <Change size={view.size} assistantId={assistantId} save={save} rollsPod={view.rollsPod} openChats={view.openChats} />
+        <Change size={view.size} rollsPod={view.rollsPod} />
       ) : (
         <p className="text-[13px] text-asst-muted">The size cannot be changed just now: {view.refusal}.</p>
       )}

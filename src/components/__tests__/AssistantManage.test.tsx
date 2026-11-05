@@ -7,9 +7,9 @@ import type { ConnectionsData } from "@/assistant/connections";
 import { savedCredentials } from "@/assistant/saved-credentials";
 import type { FormAction } from "@/components/ActionForm";
 import type { AssistantAgentSettings } from "@/components/assistant/AgentSettings";
+import { type AssistantTokens, Connections, type ConnectionsView } from "@/components/assistant/ConnectionSettings";
 import type { AssistantGitIdentity } from "@/components/assistant/GitIdentitySettings";
 import { AssistantSettings } from "@/components/assistant/SettingsDialog";
-import { type AssistantTokens, TokenSettings } from "@/components/assistant/TokenSettings";
 import { SETTLE_MS } from "@/components/live/useSettled";
 import type { CredentialKind } from "@/credentials/names";
 import type { CredentialStatus } from "@/credentials/store";
@@ -124,7 +124,7 @@ function sent(action: ReturnType<typeof ok>): FormData {
 }
 
 describe("the Assistant's settings for managing its agent", () => {
-  it("should offer the saved credentials within Connections and the agent's sections after it when every one is given", async () => {
+  it("should offer the saved credentials within Connections, with no section of their own, and the agent's sections after it", async () => {
     await open({ agent: agentSettings(), git: git(), tokens: tokens() });
 
     expect(
@@ -276,13 +276,15 @@ describe("the Assistant's web servers", () => {
 });
 
 describe("the Assistant's git identity", () => {
-  it("should send the name and email when they are saved, and read it again after", async () => {
+  it("should send the name and email when the dialog is saved, and read it again after", async () => {
     const settings = git(gitSettings(false), { save: ok("Your git identity is saved") });
     await open({ git: settings }, "Git identity");
 
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Alice Example" } });
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "alice@example.com" } });
-    await submit("Save your git identity");
+    await act(async () => {
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }));
+    });
 
     expect([sent(settings.save as ReturnType<typeof ok>).get("name"), sent(settings.save as ReturnType<typeof ok>).get("email")]).toEqual([
       "Alice Example",
@@ -313,36 +315,76 @@ describe("the Assistant's git identity", () => {
   });
 });
 
-describe("the Assistant's saved credentials", () => {
-  it("should offer to paste a GitHub token and remove every stored credential, sign-ins among them, when all are stored", async () => {
+/** The name of each row of the Connections list, in the order the person reads them. */
+function rowNames(): string[] {
+  return within(screen.getByRole("list", { name: "Connections" }))
+    .getAllByRole("listitem")
+    .map((row) => row.querySelector(".font-medium")?.textContent ?? "");
+}
+
+function rowOf(name: string): HTMLElement {
+  const row = within(screen.getByRole("list", { name: "Connections" }))
+    .getAllByRole("listitem")
+    .find((item) => item.querySelector(".font-medium")?.textContent === name);
+  if (row === undefined) {
+    throw new Error(`no ${name} row`);
+  }
+  return row;
+}
+
+describe("the Assistant's Connections, one row per service", () => {
+  it("should list each service once, with its sign-in's and its saved credential's actions on the one row, when both are given", async () => {
+    await open(
+      {
+        connect: { assistantId: ID, running: true, reconnect: ok() },
+        tokens: tokens([status("github"), status("claude")])
+      },
+      "Connections"
+    );
+
+    expect(rowNames()).toEqual(["GitHub", "Claude", "Jenkins", "Microsoft 365"]);
+    expect(
+      within(rowOf("GitHub"))
+        .getAllByRole("button")
+        .map((button) => button.getAttribute("aria-label"))
+    ).toEqual(["Connect GitHub", "Remove your GitHub token"]);
+    expect(within(rowOf("Jenkins")).getByRole("button", { name: "Add your Jenkins API token" })).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Saved credentials" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Saved credentials" })).toBeNull();
+  });
+
+  it("should offer to remove every stored credential, sign-ins among them, and to paste none of the sign-ins, when all are stored", async () => {
     await open({ tokens: tokens([status("github"), status("azure", "alice@hmcts.net"), status("atlassian")], {}, "gateway") }, "Connections");
 
-    const rows = within(screen.getByRole("list", { name: "Saved credentials" })).getAllByRole("listitem");
-    expect(rows.map((row) => row.querySelector(".font-medium")?.textContent)).toEqual([
-      "GitHub token",
-      "Azure sign-in",
-      "Jenkins API token",
-      "Atlassian sign-in"
-    ]);
-    expect(screen.getByRole("button", { name: "Replace your GitHub token" })).toBeTruthy();
+    expect(rowNames()).toEqual(["GitHub", "Claude", "Jenkins", "Azure", "Atlassian", "Microsoft 365"]);
     for (const kind of ["GitHub token", "Azure sign-in", "Atlassian sign-in"]) {
       expect(screen.getByRole("button", { name: `Remove your ${kind}` })).toBeTruthy();
     }
-    expect(screen.queryByRole("button", { name: /(Add|Replace) your (Azure|Atlassian)/ })).toBeNull();
-    expect(screen.getByText(/alice@hmcts\.net/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /(Add|Replace) your (GitHub|Azure|Atlassian)/ })).toBeNull();
+    expect(within(rowOf("Azure")).getByText("alice@hmcts.net")).toBeTruthy();
   });
 
-  it("should send the kind and the new value when a GitHub token is pasted, and say so after the form has closed", async () => {
+  it("should send the kind and the new value when a Jenkins API token is pasted, and say so after the form has closed", async () => {
     const save = ok();
     await open({ tokens: tokens([], { save }) }, "Connections");
 
-    fireEvent.click(screen.getByRole("button", { name: "Add your GitHub token" }));
-    fireEvent.change(screen.getByLabelText("GitHub token"), { target: { value: "ghp_11aa" } });
-    await submit("Save your GitHub token");
+    fireEvent.click(screen.getByRole("button", { name: "Add your Jenkins API token" }));
+    fireEvent.change(screen.getByLabelText("Jenkins API token"), { target: { value: "11a2b3c4d5e6f708192a" } });
+    await submit("Save your Jenkins API token");
 
-    expect([sent(save).get("kind"), sent(save).get("value")]).toEqual(["github", "ghp_11aa"]);
-    expect(screen.queryByRole("form", { name: "Save your GitHub token" })).toBeNull();
-    expect(screen.getByRole("status").textContent).toBe("Your GitHub token is saved");
+    expect([sent(save).get("kind"), sent(save).get("value")]).toEqual(["jenkins", "11a2b3c4d5e6f708192a"]);
+    expect(screen.queryByRole("form", { name: "Save your Jenkins API token" })).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe("Your Jenkins API token is saved");
+  });
+
+  // Pasting a token is an action, done at once, and not a setting the dialog's Save waits for.
+  it("should leave the dialog's Save with nothing to save when a token is pasted", async () => {
+    await open({ tokens: tokens([]) }, "Connections");
+
+    fireEvent.click(screen.getByRole("button", { name: "Add your Jenkins API token" }));
+    fireEvent.change(screen.getByLabelText("Jenkins API token"), { target: { value: "11a2b3c4d5e6f708192a" } });
+
+    expect(within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }).hasAttribute("disabled")).toBe(true);
   });
 
   it("should say the assistant cannot answer without it, and send the kind once confirmed, when the model's token is removed", async () => {
@@ -364,15 +406,6 @@ describe("the Assistant's saved credentials", () => {
     expect(screen.getByText("Your credentials cannot be shown: no credential store is configured")).toBeTruthy();
   });
 
-  it("should put the saved credentials under the sign-ins as a part of Connections when both are given", async () => {
-    await open({ tokens: tokens() }, "Connections");
-
-    expect(screen.getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent)).toEqual(["Connections"]);
-    expect(screen.getByRole("heading", { level: 4, name: "Saved credentials" })).toBeTruthy();
-    expect(screen.getByRole("list", { name: "Connections" })).toBeTruthy();
-    expect(screen.getByRole("list", { name: "Saved credentials" })).toBeTruthy();
-  });
-
   it("should offer Connections for the saved credentials alone when the page gives no sign-ins", async () => {
     render(<AssistantSettings now={Date.now()} tokens={tokens()} />);
     fireEvent.click(screen.getByRole("button", { name: /^Settings/ }));
@@ -380,8 +413,28 @@ describe("the Assistant's saved credentials", () => {
       fireEvent.click(within(nav()).getByRole("tab", { name: "Connections" }));
     });
 
-    expect(screen.queryByRole("list", { name: "Connections" })).toBeNull();
-    expect(screen.getByRole("list", { name: "Saved credentials" })).toBeTruthy();
+    expect(rowNames()).toEqual(["GitHub", "Claude", "Jenkins"]);
+  });
+
+  // On the gateway route the model-access row is Claude, so a Claude token still saved from the other route is
+  // removed from that row rather than from a second one named Claude.
+  it("should put a saved Claude token on the one Claude row when the agents reach Claude through the gateway", async () => {
+    await open(
+      {
+        connections: {
+          route: "gateway",
+          kinds: ["github", "azure"],
+          statuses: [status("github"), status("azure"), status("claude")],
+          logins: [],
+          unavailable: null
+        },
+        tokens: tokens([status("github"), status("azure"), status("claude")], {}, "gateway")
+      },
+      "Connections"
+    );
+
+    expect(rowNames()).toEqual(["GitHub", "Claude", "Azure", "Jenkins", "Microsoft 365"]);
+    expect(within(rowOf("Claude")).getByRole("button", { name: "Remove your Claude token" })).toBeTruthy();
   });
 });
 
@@ -549,17 +602,22 @@ describe("how often the settings read", () => {
   });
 });
 
+/** The Connections section with only saved credentials to list. */
+function credentialsOnly(saved: AssistantTokens): ConnectionsView {
+  return { list: [], access: null, connect: undefined, microsoft: null, route: "gateway", unavailable: null, warning: null, tokens: saved };
+}
+
 describe("a removed credential's confirmation", () => {
   it("should still say an Atlassian sign-in was removed when its row has gone", async () => {
     const remove = ok();
     const statuses = [status("github"), status("atlassian")];
-    const { rerender } = render(<TokenSettings tokens={tokens(statuses, { remove }, "gateway")} />);
+    const { rerender } = render(<Connections view={credentialsOnly(tokens(statuses, { remove }, "gateway"))} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Remove your Atlassian sign-in" }));
     await submit("Remove your Atlassian sign-in");
-    rerender(<TokenSettings tokens={tokens([status("github")], { remove }, "gateway")} />);
+    rerender(<Connections view={credentialsOnly(tokens([status("github")], { remove }, "gateway"))} />);
 
-    expect(screen.queryByText("Atlassian sign-in")).toBeNull();
+    expect(screen.queryByText("Atlassian")).toBeNull();
     expect(screen.getByRole("status").textContent).toBe("Your Atlassian sign-in is removed");
   });
 });
