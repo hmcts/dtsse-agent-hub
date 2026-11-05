@@ -77,9 +77,10 @@ function rememberProduct(viewerOid: string, product: string): void {
  * `unsent` — authoritative, because the bytes are already there — and the product comes back with them, from the
  * conversation's own row when there is one and from `sessionStorage` when there is not.
  *
- * This screen has no session to report a skill list, so its "/" list is the pod's (`podSkills`): every session on a pod
- * loads the plugins it booted with, so the chat this starts will have the same skills. Before any session on the pod
- * has reported its skills the list is empty and the box is a plain one.
+ * This screen has no session to report a skill list, so its "/" list is the pod's (`podSkills`): the newest list a
+ * session of the pod's current boot reported, which is what every session on that boot loads, the one this chat
+ * starts included. Until a session of the current boot has reported its skills the list is empty and the box is a
+ * plain one. The page re-reads it when one of the viewer's sessions reports a changed list.
  */
 export function EmptyChat({
   starters,
@@ -92,7 +93,7 @@ export function EmptyChat({
   starters: readonly Starter[];
   templates: readonly Template[];
   /** What "/" offers: the skills the viewer's pod reported. */
-  skills?: readonly Skill[];
+  skills: readonly Skill[];
   /** Who is reading, which the composer keys its draft on. */
   viewerOid: string;
   /** The conversation this screen already opened for a file and never sent, if there is one. */

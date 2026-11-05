@@ -25,8 +25,10 @@ import { type OnOpen, type Send, sseEvent } from "./sse.ts";
  *   can still see that agent and read that message.
  * - `transcript`: the watched agent's transcript has new entries, up to `last_id`, when the viewer may still read
  *   it. Only the id is sent; the page reads the entries through `/api/ui/agents/{id}/transcript`.
- * - `agent_skills`: the watched agent reported a changed list of skills, when the viewer may see them. Only the id is
- *   sent; the page re-reads, which hands its composer the new list.
+ * - `agent_skills`: the watched agent reported a changed list of skills, when the viewer may see them; or, on a page
+ *   watching no agent, any of the viewer's own agents did, which is how the Assistant's new-chat screen keeps the
+ *   pod's list (`podSkills`) current. A page watching an agent hears only that agent's, so a conversation is not
+ *   re-read for a sibling session. Only the id is sent; the page re-reads, which hands its composer the new list.
  * - `agent_question`: the watched agent asked a question, or one of its questions was answered, when the viewer can
  *   still see that agent. Only the id is sent; the page re-reads, which hands the thread the cards.
  * - `virtual_agent`: one of the viewer's own virtual agents changed, so the Assistant re-reads its page, its sign-in
@@ -144,7 +146,9 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
     }
     case "agent_skills": {
       const agent = watch.agent;
-      if (agent === null || event.agent_id !== agent.id || !isOwner(sources.viewerOid, agent)) {
+      const shown =
+        agent === null ? isOwner(sources.viewerOid, { ownerOid: event.owner_oid }) : event.agent_id === agent.id && isOwner(sources.viewerOid, agent);
+      if (!shown) {
         return undefined;
       }
       return sseEvent({ event: "agent_skills", data: JSON.stringify({ agent_id: event.agent_id }) });

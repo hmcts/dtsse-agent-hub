@@ -1910,7 +1910,7 @@ describe("Composer draft", () => {
 describe("EmptyChat", () => {
   it("should fill the box with the card's template and send nothing when the person picks a starter card", () => {
     const start = vi.fn(async () => ({ ok: true as const, id: "abc" }));
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} skills={[]} actions={emptyActions(start)} />);
 
     fireEvent.click(starterCard("Create user story"));
 
@@ -1920,7 +1920,7 @@ describe("EmptyChat", () => {
   });
 
   it("should focus the box with the first gap selected when the person picks a starter card", () => {
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(vi.fn())} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} skills={[]} actions={emptyActions(vi.fn())} />);
 
     fireEvent.click(starterCard("Create user story"));
 
@@ -1931,7 +1931,7 @@ describe("EmptyChat", () => {
   });
 
   it("should swap one card's template for another's when the first was left untouched", () => {
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(vi.fn())} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} skills={[]} actions={emptyActions(vi.fn())} />);
 
     fireEvent.click(starterCard("Create user story"));
     fireEvent.click(starterCard("Research"));
@@ -1941,7 +1941,7 @@ describe("EmptyChat", () => {
 
   it("should start a conversation with the filled template and the chosen product when the person sends it", async () => {
     const start = vi.fn(async () => ({ ok: true as const, id: "abc" }));
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} skills={[]} actions={emptyActions(start)} />);
     fireEvent.change(screen.getByRole("combobox", { name: "Product" }), { target: { value: "pcs" } });
     fireEvent.click(starterCard("Analysis"));
 
@@ -1965,7 +1965,13 @@ describe("EmptyChat", () => {
 
   it("should offer no skill list when the person types a slash and the pod has reported no skills", () => {
     render(
-      <EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(vi.fn(async () => ({ ok: true as const, id: "abc" })))} />
+      <EmptyChat
+        viewerOid={VIEWER}
+        starters={STARTERS}
+        templates={TEMPLATES}
+        skills={[]}
+        actions={emptyActions(vi.fn(async () => ({ ok: true as const, id: "abc" })))}
+      />
     );
 
     fireEvent.change(screen.getByRole("textbox", { name: "Message" }), { target: { value: "/" } });
@@ -1977,7 +1983,7 @@ describe("EmptyChat", () => {
 
   it("should start with the default product when the person has not chosen one", async () => {
     const start = vi.fn(async () => ({ ok: true as const, id: "abc" }));
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} skills={[]} actions={emptyActions(start)} />);
 
     expect((screen.getByRole("combobox", { name: "Product" }) as HTMLSelectElement).value).toBe("general");
     await type("my own words");
@@ -1989,11 +1995,11 @@ describe("EmptyChat", () => {
   it("should keep what was typed in the new chat when the person goes away and comes back", () => {
     const start = vi.fn(async () => ({ ok: true as const, id: "abc" }));
     const box = () => screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} skills={[]} actions={emptyActions(start)} />);
     fireEvent.change(box(), { target: { value: "a thought I have not finished" } });
 
     cleanup();
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} skills={[]} actions={emptyActions(start)} />);
 
     expect(box().value).toBe("a thought I have not finished");
     expect(sessionStorage.getItem(draftKey("assistant-draft", VIEWER, NEW_CHAT_DRAFT))).toBe("a thought I have not finished");
@@ -2001,7 +2007,7 @@ describe("EmptyChat", () => {
 
   it("should forget the new chat's draft once the first message has created the conversation", async () => {
     const start = vi.fn(async () => ({ ok: true as const, id: "abc" }));
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} skills={[]} actions={emptyActions(start)} />);
 
     await type("my own words");
 
@@ -2016,13 +2022,13 @@ describe("EmptyChat", () => {
       fireEvent.change(screen.getByRole("textbox", { name: "Message" }), { target: { value: "my own words and a second thought" } });
       return { ok: true as const, id: "abc" };
     });
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} skills={[]} actions={emptyActions(start)} />);
 
     await type("my own words");
 
     expect(sessionStorage.getItem(draftKey("assistant-draft", VIEWER, NEW_CHAT_DRAFT))).toBe(" and a second thought");
     cleanup();
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} skills={[]} actions={emptyActions(start)} />);
     expect((screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement).value).toBe(" and a second thought");
   });
 
@@ -2030,7 +2036,7 @@ describe("EmptyChat", () => {
     // A click on a card is too easy to make by accident to cost the person their words.
     const start = vi.fn(async () => ({ ok: true as const, id: "abc" }));
     const filled = `a thought I have not finished\n\n${starterText("Research")}`;
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} skills={[]} actions={emptyActions(start)} />);
     fireEvent.change(newChatBox(), { target: { value: "a thought I have not finished" } });
 
     fireEvent.click(starterCard("Research"));
@@ -2039,7 +2045,7 @@ describe("EmptyChat", () => {
     expect(newChatBox().selectionStart).toBe(filled.indexOf("…"));
     expect(start).not.toHaveBeenCalled();
     cleanup();
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} skills={[]} actions={emptyActions(start)} />);
     expect(newChatBox().value).toBe(filled);
   });
 });

@@ -139,7 +139,7 @@ export function Composer({
   attach?: boolean;
   /** Files the hub is already holding for the next message, shown as chips again on a remount of the screen. */
   attached?: readonly MessageAttachment[];
-  /** The conversation's session's skills, offered when the message starts with "/". */
+  /** The skills offered when the message starts with "/": the conversation's (`ConversationView.skills`), or the pod's on the new-chat screen. */
   skills?: readonly Skill[];
   dropZone?: RefObject<HTMLElement | null>;
   /** Filled in with what lets the page put a template in the box, as the new-chat screen's starter cards do. */

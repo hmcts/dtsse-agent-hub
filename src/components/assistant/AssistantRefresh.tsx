@@ -6,7 +6,7 @@ import { useSettled } from "@/components/live/useSettled";
 
 /**
  * Re-renders the Assistant's server components when the viewer's assistant, one of their conversations, or the skills
- * the open conversation's session offers changes: the events carry only ids, so the page reads what changed itself.
+ * the page's composer offers change: the events carry only ids, so the page reads what changed itself.
  * Every one of them is refreshed here rather than where it is shown, so a cold chat coming up — which reports its
  * status, its skills and its conversation from the one transaction — re-reads the page once.
  *
@@ -18,7 +18,8 @@ export function AssistantRefresh() {
   const { settle: refresh } = useSettled(() => router.refresh());
   useHubEvent("assistant_conversation", refresh);
   useHubEvent("virtual_agent", refresh);
-  // Unfiltered: the stream only carries skills for the agent the tab watches, which is the open conversation's.
+  // Unfiltered: the stream scopes it, to the open conversation's agent on its page, and to any of the viewer's own
+  // agents on a page watching none, which is how the new-chat screen's pod list stays current.
   useHubEvent("agent_skills", refresh);
   return null;
 }

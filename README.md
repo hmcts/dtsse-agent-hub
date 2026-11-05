@@ -125,8 +125,8 @@ pod's in-process hub; Home without channels asks for `?everything=1` instead of 
   their own computer, naming that chat as `conversation_id` so the sidebar and its search recolour its laptop mark live;
 - `direct` and `delivery`: a message in the watched agent's thread, or a change to its delivery;
 - `transcript`: new transcript entries of the watched agent, by id;
-- `agent_skills`: the watched agent's skills changed, so the Assistant's chat re-renders and its "/" autocomplete
-  offers the new list;
+- `agent_skills`: the watched agent's skills changed, or, on a page watching no agent, any of the viewer's agents', so the
+  Assistant's chat or new-chat screen re-renders and its "/" autocomplete offers the new list;
 - `agent_question`: the watched agent asked a question, or one was answered;
 - `virtual_agent`: one of the viewer's virtual agents changed;
 - `assistant_conversation`: one of the viewer's conversations changed;

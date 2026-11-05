@@ -133,16 +133,30 @@ export async function assistantSummary(db: Database, assistant: VirtualAgentRow,
 /**
  * The skills the assistant's pod reports, as the newest of its sessions to report any gave them: the same list the
  * composer's "/" menu offers in that session's chat. Every session on a pod loads the plugins the pod booted with, so
- * the newest stands for the pod running now. A conversation's agent is created with no skills and a fresh heartbeat
- * before its session registers, so a row with none is passed over rather than read as a pod that has none. Empty
- * until a session has reported its skills.
+ * the newest stands for the pod running now.
+ *
+ * While the pod holds a launch token, only a session heard from since it was minted counts. A pod boots on a token
+ * minted for it, and every path that replaces a pod — a restart, a change of size or plugins, a stop, a takeover —
+ * drops the token first, which shuts the old pod's sessions out. So a session heard from since the mint is one of this
+ * boot's, and one from an earlier boot, with the plugins that boot loaded, is passed over. With no token the pod is
+ * stopped or not yet claimed, and the newest session of any boot stands for the next one: an idle or evening stop
+ * changes no plugins, and the briefing and the new chat's list would otherwise vanish every time the pod sleeps.
+ *
+ * A conversation's agent is created with no skills and a fresh heartbeat before its session registers, so a row with
+ * none is passed over rather than read as a pod that has none. Empty until a session has reported its skills.
  */
 export async function podSkills(db: Database, assistant: Pick<VirtualAgentRow, "id" | "ownerOid">): Promise<Skill[]> {
-  const newest = await db.agent.findFirst({
-    where: { ownerOid: assistant.ownerOid, virtualAgentId: assistant.id, NOT: { skills: { equals: [] } } },
-    orderBy: { lastHeartbeatAt: "desc" },
-    select: { skills: true }
-  });
+  const [newest] = await db.$queryRaw<{ skills: unknown }[]>`
+    SELECT a.skills
+      FROM agent a
+      JOIN virtual_agent v ON v.id = a.virtual_agent_id
+     WHERE v.id = ${assistant.id}::uuid
+       AND a.owner_oid = ${assistant.ownerOid}
+       AND a.skills <> '[]'::jsonb
+       AND (v.launch_token_issued_at IS NULL OR a.last_heartbeat_at >= v.launch_token_issued_at)
+     ORDER BY a.last_heartbeat_at DESC
+     LIMIT 1
+  `;
   return storedSkills(newest?.skills);
 }
 
@@ -268,9 +282,10 @@ export interface ConversationView {
    */
   repoBase: string | null;
   /**
-   * What the composer's "/" autocomplete offers: the skills the conversation's session reported. Empty until one has
-   * registered, so a chat whose assistant is not running yet gets no list. No access check guards it, unlike the
-   * hub's agent page: a conversation is only ever read by its owner, who is the only person who can message it.
+   * What the composer's "/" autocomplete offers: the skills the conversation's session reported, or, on a pod before
+   * that session has reported any, the pod's (`podSkills`), which its session will load too. A chat on a laptop has
+   * no pod to ask, so it has none until its session reports them. No access check guards it, unlike the hub's agent
+   * page: a conversation is only ever read by its owner, who is the only person who can message it.
    */
   skills: Skill[];
   /**
@@ -325,6 +340,9 @@ export async function conversationView(db: Database, conversation: ConversationR
     agentConversation(db, conversation.ownerOid, agent),
     agentQuestions(db, conversation.ownerOid, agent)
   ]);
+  const ownSkills = storedSkills(current?.skills);
+  const skills =
+    ownSkills.length === 0 && hasPod(conversation) ? await podSkills(db, { id: conversation.virtualAgentId, ownerOid: conversation.ownerOid }) : ownSkills;
   return {
     id: conversation.id,
     title: conversation.title ?? UNTITLED,
@@ -337,7 +355,7 @@ export async function conversationView(db: Database, conversation: ConversationR
     agentId,
     agentStatus: current?.status ?? "offline",
     repoBase: repoFileBase(current?.repo ?? null, current?.branch ?? null),
-    skills: storedSkills(current?.skills),
+    skills,
     clientFeatures: storedClientFeatures(current?.clientFeatures),
     sessionState: conversation.sessionState,
     sessionDetail: conversation.sessionDetail,
