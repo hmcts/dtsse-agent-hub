@@ -2,7 +2,7 @@ import "server-only";
 import { canManageVirtualAgent, canOwnerReadCredential, canReadDeck, canReadMessage, isOwner } from "../access/rules.ts";
 import type { Skill } from "../agents/skills.ts";
 import { isUuid } from "../agents/store.ts";
-import { assistantClaims, ensureAssistant, findAssistant } from "../assistant/assistant-store.ts";
+import { ensureAssistantWithClaims, findAssistant } from "../assistant/assistant-store.ts";
 import { offersBriefing } from "../assistant/briefing.ts";
 import { conversationAgent, findConversation } from "../assistant/conversation-store.ts";
 import { isSha256 } from "../assistant/deck.ts";
@@ -240,7 +240,7 @@ export interface AssistantHome {
   welsh: boolean;
   /**
    * The sidebar offers the morning briefing (`offersBriefing`): the `microsoft` credential is stored and the pod's
-   * client claims `morning-briefing` (`assistantClaims`). A connection Microsoft then refuses is the briefing's to
+   * client claims `morning-briefing` (`podSupports`). A connection Microsoft then refuses is the briefing's to
    * report, in its own section.
    */
   briefing: boolean;
@@ -292,12 +292,11 @@ function pluginSettings(assistant: { plugins: string[] }): AssistantHome["plugin
  * warming up while they sign in or type; what it still needs from them; and their conversations.
  */
 export async function openAssistant(viewer: Viewer): Promise<AssistantHome> {
-  const assistant = await ensureAssistant(prisma, viewer);
-  const [credentials, conversations, skills, claims] = await Promise.all([
+  const { assistant, claims } = await ensureAssistantWithClaims(prisma, viewer);
+  const [credentials, conversations, skills] = await Promise.all([
     credentialSettings(viewer),
     conversationGroups(prisma, viewer.oid),
-    podSkills(prisma, assistant),
-    assistantClaims(prisma, assistant.id)
+    podSkills(prisma, assistant)
   ]);
   const stored = storedKinds(credentials);
   const summary = await assistantSummary(prisma, assistant, stored);

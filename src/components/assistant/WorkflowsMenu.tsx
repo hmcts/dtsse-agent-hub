@@ -19,7 +19,7 @@ const SCHEDULED: Workflow = { href: "/assistant/scheduled", label: "Scheduled", 
 
 /**
  * The sidebar's plus: the workflows a person can open beside their chats. Morning briefing is offered only to someone
- * who has connected Microsoft 365, which most of it reads, and whose pod claims the skill that runs it
+ * who has connected Microsoft 365, which most of it reads, and whose pod's client claims `morning-briefing`
  * (`offersBriefing`). It is not a page: it starts a chat whose first message runs the briefing, the same way the
  * new-chat screen starts one, and opens it.
  * Welsh translations is offered only to someone whose assistant has the plugin that runs it; Scheduled is offered to
