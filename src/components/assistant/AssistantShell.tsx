@@ -141,7 +141,7 @@ export function AssistantShell({
   plugins?: AssistantPlugins;
   /** Their assistant has the Welsh plugin ticked, so the way to the Welsh page is shown. */
   welsh?: boolean;
-  /** They have connected Microsoft 365 and their pod has the skill that runs it, so the morning briefing is offered. */
+  /** They have connected Microsoft 365 and their pod's client claims `morning-briefing`, so the morning briefing is offered. */
   briefing?: boolean;
   /** How the morning briefing starts its chat; without it, the briefing is not offered. */
   start?: StartChatAction;

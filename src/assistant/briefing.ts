@@ -1,4 +1,4 @@
-import type { Skill } from "../agents/skills.ts";
+import { type PodClaims, podSupports } from "../agents/client-features.ts";
 import type { CredentialKind } from "../credentials/names.ts";
 import { ukIsoDate, ukLongDate } from "../web/format.ts";
 import { DEFAULT_PRODUCT } from "./products.ts";
@@ -20,9 +20,15 @@ export function briefingRequest(now: Date): { product: string; title: string; bo
 }
 
 /**
- * Whether the sidebar offers the briefing: Microsoft 365 is connected, which most of it reads, and the pod reports the
- * skill, so the chat it starts has something to run. A pod that has not reported its skills yet is not offered it.
+ * Whether the sidebar offers the briefing: Microsoft 365 is connected, which most of it reads, and the pod's client
+ * claims `morning-briefing` (`podSupports`), so the chat it starts has the skill to run. A client ships the skill with
+ * the claim, in the m365 plugin every conversation session loads.
+ *
+ * The pod's claim rather than the skills its sessions report: the pod's main session is not given the bundled plugins,
+ * so until a conversation session starts the pod reports none of their skills, and the item that starts that session
+ * would never appear. A stopped pod is read through its main-session agent's last claim, so an idle or evening stop
+ * does not hide it; a pod that has claimed nothing yet is not offered it.
  */
-export function offersBriefing(stored: ReadonlySet<CredentialKind>, podSkills: readonly Skill[]): boolean {
-  return stored.has("microsoft") && podSkills.some((skill) => skill.name === BRIEFING_SKILL);
+export function offersBriefing(stored: ReadonlySet<CredentialKind>, claims: PodClaims): boolean {
+  return stored.has("microsoft") && podSupports(claims, "morning-briefing");
 }

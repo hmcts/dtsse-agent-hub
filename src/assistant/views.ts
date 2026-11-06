@@ -140,7 +140,7 @@ export async function assistantSummary(db: Database, assistant: VirtualAgentRow,
  * drops the token first, which shuts the old pod's sessions out. So a session heard from since the mint is one of this
  * boot's, and one from an earlier boot, with the plugins that boot loaded, is passed over. With no token the pod is
  * stopped or not yet claimed, and the newest session of any boot stands for the next one: an idle or evening stop
- * changes no plugins, and the briefing and the new chat's list would otherwise vanish every time the pod sleeps.
+ * changes no plugins, and the new chat's list would otherwise vanish every time the pod sleeps.
  *
  * A conversation's agent is created with no skills and a fresh heartbeat before its session registers, so a row with
  * none is passed over rather than read as a pod that has none. Empty until a session has reported its skills.

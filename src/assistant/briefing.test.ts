@@ -29,21 +29,25 @@ describe("briefingRequest", () => {
 
 describe("offersBriefing", () => {
   const connected = new Set<CredentialKind>(["microsoft"]);
-  const briefingSkill = { name: BRIEFING_SKILL, description: "" };
+  const claiming = { clientFeatures: ["files", "morning-briefing"], agent: null };
 
-  it("should offer the briefing when Microsoft 365 is connected and the pod reports the skill", () => {
-    expect(offersBriefing(connected, [{ name: "m365:mail", description: "" }, briefingSkill])).toBe(true);
+  it("should offer the briefing when Microsoft 365 is connected and the pod claims the feature", () => {
+    expect(offersBriefing(connected, claiming)).toBe(true);
   });
 
-  it("should not offer the briefing when the pod does not report the skill", () => {
-    expect(offersBriefing(connected, [{ name: "m365:mail", description: "" }])).toBe(false);
+  it("should offer the briefing when the pod has no claim of its own and its main-session agent claims the feature", () => {
+    expect(offersBriefing(connected, { clientFeatures: null, agent: { clientFeatures: ["morning-briefing"] } })).toBe(true);
   });
 
-  it("should not offer the briefing when no session has reported the pod's skills yet", () => {
-    expect(offersBriefing(connected, [])).toBe(false);
+  it("should not offer the briefing when the pod's claim leaves the feature out", () => {
+    expect(offersBriefing(connected, { clientFeatures: ["files"], agent: { clientFeatures: ["morning-briefing"] } })).toBe(false);
+  });
+
+  it("should not offer the briefing when the pod has claimed nothing yet", () => {
+    expect(offersBriefing(connected, { clientFeatures: null, agent: null })).toBe(false);
   });
 
   it("should not offer the briefing when Microsoft 365 is not connected", () => {
-    expect(offersBriefing(new Set<CredentialKind>(["github"]), [briefingSkill])).toBe(false);
+    expect(offersBriefing(new Set<CredentialKind>(["github"]), claiming)).toBe(false);
   });
 });

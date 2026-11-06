@@ -22,6 +22,7 @@ export type ClientFeature =
   | "lookups"
   | "memory-anon"
   | "model-alias"
+  | "morning-briefing"
   | "plain-prompt"
   | "slides-always-on"
   | "stop"
@@ -82,6 +83,12 @@ export type ClientFeature =
  * setting is theirs to save whenever they like. What reads it is the Assistant section's model choice, which says their choice
  * waits for the assistant's next start when its pod's own session did not claim it.
  *
+ * `morning-briefing` is claimed because this build carries the m365 plugin's `morning-briefing` skill and loads the
+ * m365 plugin into every conversation session whatever `AGENT_HUB_PLUGINS` names (`ALWAYS_ON_PLUGINS`). The hub offers
+ * Morning briefing in the Assistant's sidebar only to a pod that claimed it, since the chat it starts runs
+ * `/m365:morning-briefing`. A claim rather than the pod's reported skills, because the pod's main session is not given
+ * the bundled plugins and reports none of their skills, and a pod may have no conversation session yet.
+ *
  * `plain-prompt` is claimed because the bridge delivers the owner's message to a conversation's session as their own
  * prompt, with the frame's context in a block before it, rather than in an envelope. Read from the conversation's own
  * agent, since a session keeps the bridge it started with: the chat says its assistant needs a restart while its
@@ -100,6 +107,7 @@ export const CLIENT_FEATURES: readonly ClientFeature[] = [
   "lookups",
   "memory-anon",
   "model-alias",
+  "morning-briefing",
   "plain-prompt",
   "slides-always-on",
   "stop",
