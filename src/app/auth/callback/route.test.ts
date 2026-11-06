@@ -25,9 +25,9 @@ const ENV = {
 };
 const SETTINGS = "/assistant?settings=connections";
 
-async function callback(query: string): Promise<Response> {
+async function callback(query: string, aiGateway = true): Promise<Response> {
   const signIn = await sealSignIn(beginSignIn(SETTINGS, "microsoft"), SECRET);
-  const session = await sealSession({ oid: "an-oid", tid: "a-tenant", name: "A Person", aiGateway: false }, SECRET);
+  const session = await sealSession({ oid: "an-oid", tid: "a-tenant", name: "A Person", aiGateway }, SECRET);
   return await GET(new NextRequest(`${HUB}/auth/callback?${query}`, { headers: { cookie: `ah_sign_in=${signIn}; ${SESSION_COOKIE}=${session}` } }));
 }
 
@@ -83,5 +83,14 @@ describe("the callback completing a Microsoft 365 connect", () => {
 
     expect((await callback("code=a-code&state=a-state")).headers.get("location")).toBe(`${SETTINGS}&microsoft=failed`);
     expect(putCredential).not.toHaveBeenCalled();
+  });
+
+  it("should go back to settings saying it is unavailable, exchanging nothing and keeping nothing, when the person is not an AI Gateway user", async () => {
+    const response = await callback("code=a-code&state=a-state", false);
+
+    expect(response.headers.get("location")).toBe(`${SETTINGS}&microsoft=unavailable`);
+    expect(completeMicrosoftConnect).not.toHaveBeenCalled();
+    expect(putCredential).not.toHaveBeenCalled();
+    expect(clearsSignIn(response)).toBe(true);
   });
 });

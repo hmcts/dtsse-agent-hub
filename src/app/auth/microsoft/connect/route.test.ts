@@ -19,7 +19,17 @@ const ENV = {
   SESSION_SECRET: SECRET
 };
 
-async function connect({ site = "same-origin", origin = HUB, signedIn = true }: { site?: string | null; origin?: string | null; signedIn?: boolean } = {}) {
+async function connect({
+  site = "same-origin",
+  origin = HUB,
+  signedIn = true,
+  aiGateway = true
+}: {
+  site?: string | null;
+  origin?: string | null;
+  signedIn?: boolean;
+  aiGateway?: boolean;
+} = {}) {
   const headers = new Headers({ "content-type": "application/x-www-form-urlencoded" });
   if (site !== null) {
     headers.set("sec-fetch-site", site);
@@ -28,7 +38,7 @@ async function connect({ site = "same-origin", origin = HUB, signedIn = true }: 
     headers.set("origin", origin);
   }
   if (signedIn) {
-    headers.set("cookie", `${SESSION_COOKIE}=${await sealSession({ oid: "an-oid", tid: "a-tenant", name: "A Person", aiGateway: false }, SECRET)}`);
+    headers.set("cookie", `${SESSION_COOKIE}=${await sealSession({ oid: "an-oid", tid: "a-tenant", name: "A Person", aiGateway }, SECRET)}`);
   }
   return await POST(new NextRequest(`${HUB}/auth/microsoft/connect`, { method: "POST", headers, body: "redirect=%2Fassistant%3Fsettings%3Dconnections" }));
 }
@@ -71,6 +81,15 @@ describe("POST /auth/microsoft/connect", () => {
 
   it("should accept an old browser that sends only the hub's own Origin", async () => {
     expect((await connect({ site: null })).status).toBe(303);
+  });
+
+  it("should send someone who is not an AI Gateway user back to settings saying it is unavailable, starting nothing", async () => {
+    const response = await connect({ aiGateway: false });
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe("/assistant?settings=connections&microsoft=unavailable");
+    expect(authorizationUrl).not.toHaveBeenCalled();
+    expect(response.headers.get("set-cookie")).toBeNull();
   });
 
   it("should send someone not signed in to sign in first, coming back to settings", async () => {

@@ -38,3 +38,7 @@ The person opts in by pressing **Connect** for Microsoft 365 under Connections i
 then nothing here works. If a command answers 404, "not connected" or "has lapsed", stop: tell the person to click
 Connect for Microsoft 365 in the Assistant's settings, and do not run it again or try another command until they say
 they have. Retrying cannot connect it.
+
+If a command answers 403 saying Microsoft 365 is only available to AI Gateway users, stop: tell the person that
+Microsoft 365 is only for AI Gateway users, so Connect will not help, and do not run it again or try another command.
+Nothing they or you can do from here changes that.

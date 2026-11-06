@@ -1,3 +1,4 @@
+import { canConnectMicrosoft } from "../access/rules.ts";
 import type { CredentialKind } from "../credentials/names.ts";
 import type { CredentialStatus } from "../credentials/store.ts";
 import { CONNECT_PATH } from "../microsoft/microsoft.ts";
@@ -19,6 +20,11 @@ export interface ConnectionsData {
   kinds: CredentialKind[];
   statuses: CredentialStatus[];
   logins: LoginView[];
+  /**
+   * Whether the person may connect Microsoft 365 (`canConnectMicrosoft`), on their own route rather than this
+   * assistant's, since the connection is theirs and is judged on their sign-in.
+   */
+  microsoftConnectable: boolean;
   /** Why the hub cannot read their credentials, which is not the same as their having none. */
   unavailable: string | null;
 }
@@ -29,10 +35,11 @@ export interface ConnectionsData {
  */
 export function connectionsData(
   assistant: { modelRoute: ModelRoute; needed: CredentialKind[]; optional: CredentialKind[]; logins: LoginView[] },
-  credentials: { available: true; statuses: CredentialStatus[] } | { available: false; reason: string }
+  credentials: ({ available: true; statuses: CredentialStatus[] } | { available: false; reason: string }) & { modelRoute: ModelRoute }
 ): ConnectionsData {
   return {
     route: assistant.modelRoute,
+    microsoftConnectable: canConnectMicrosoft(credentials.modelRoute),
     kinds: [...assistant.needed, ...assistant.optional],
     statuses: credentials.available ? credentials.statuses : [],
     logins: assistant.logins,
@@ -345,7 +352,7 @@ function isModelCredential(route: ModelRoute, kind: CredentialKind): boolean {
  * not connected would be a row of wrong answers, and would raise a warning nobody can act on.
  */
 export function connections(
-  data: ConnectionsData | undefined,
+  data: Omit<ConnectionsData, "microsoftConnectable"> | undefined,
   checklist: (stored: boolean, login: LoginView | undefined, now: number) => ChecklistAnswer,
   now: number
 ): Connection[] {
@@ -668,6 +675,8 @@ export function signInPrompt(list: readonly Connection[]): ConnectionsPrompt | n
 export interface MicrosoftConnection {
   stored: boolean;
   accountLabel: string | null;
+  /** Whether Connect is offered. Disconnect is offered whatever this says, for a connection that is stored. */
+  connectable: boolean;
   /** Where Connect posts: the hub's connect sign-in. */
   connectPath: string;
   /** Where the connect sign-in returns to: this section. */
@@ -682,6 +691,7 @@ export function microsoftConnection(data: ConnectionsData | undefined): Microsof
   return {
     stored: status?.stored === true,
     accountLabel: status?.accountLabel ?? null,
+    connectable: data.microsoftConnectable,
     connectPath: CONNECT_PATH,
     returnTo: assistantSettingsPath("connections")
   };

@@ -58,7 +58,7 @@ function status(kind: CredentialKind, accountLabel: string | null = null): Crede
 }
 
 function connections(stored: CredentialKind[], kinds: CredentialKind[] = ["github", "claude", "jenkins"]): ConnectionsData {
-  return { route: "own-licence", kinds, statuses: stored.map((kind) => status(kind)), logins: [], unavailable: null };
+  return { route: "own-licence", microsoftConnectable: true, kinds, statuses: stored.map((kind) => status(kind)), logins: [], unavailable: null };
 }
 
 function ok(confirmation?: string) {
@@ -423,6 +423,7 @@ describe("the Assistant's Connections, one row per service", () => {
       {
         connections: {
           route: "gateway",
+          microsoftConnectable: true,
           kinds: ["github", "azure"],
           statuses: [status("github"), status("azure"), status("claude")],
           logins: [],
@@ -627,7 +628,14 @@ describe("the Connections section when the hub cannot read", () => {
   it("should say why the sign-ins and why the saved credentials cannot be shown when both fail", async () => {
     await open(
       {
-        connections: { route: "own-licence", kinds: ["github"], statuses: [], logins: [], unavailable: "the sign-ins could not be read" },
+        connections: {
+          route: "own-licence",
+          microsoftConnectable: true,
+          kinds: ["github"],
+          statuses: [],
+          logins: [],
+          unavailable: "the sign-ins could not be read"
+        },
         tokens: { ...tokens(), rows: [], unavailable: "no credential store is configured" }
       },
       "Connections"

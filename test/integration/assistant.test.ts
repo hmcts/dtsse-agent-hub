@@ -19,6 +19,7 @@ import * as sessionsRoute from "../../src/app/api/virtual/[virtualAgentId]/sessi
 import * as statusRoute from "../../src/app/api/virtual/[virtualAgentId]/status/route.ts";
 import { writeArtefact } from "../../src/assistant/artefact-store.ts";
 import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
+import { BRIEFING_SKILL } from "../../src/assistant/briefing.ts";
 import { CONFLUENCE_EXPORT_TIMEOUT_MS } from "../../src/assistant/confluence.ts";
 import {
   createConversation,
@@ -306,6 +307,36 @@ describe("the person's assistant", () => {
       expect(home.credentials).toMatchObject({ modelRoute: viewerRoute, claudeTokenUsable });
     }
   );
+
+  // Microsoft 365 stored and the skill reported either way, so the viewer's route is all that differs.
+  it.each([
+    ["gateway", true],
+    ["own-licence", false]
+  ] as const)("should offer the morning briefing only to an AI Gateway user when the viewer is on %s", async (modelRoute, offered) => {
+    await insertUser(ALICE);
+    const viewer = { ...VIEWER, modelRoute };
+    const assistant = await ensureAssistant(prisma, viewer);
+    await prisma.virtualAgent.update({ where: { id: assistant.id }, data: { launchTokenIssuedAt: new Date(Date.now() - 60 * 60_000) } });
+    await prisma.agent.create({
+      data: {
+        ownerOid: ALICE.oid,
+        sessionId: "briefing-session",
+        name: assistant.name,
+        status: "idle",
+        virtualAgentId: assistant.id,
+        skills: [{ name: BRIEFING_SKILL, description: "The day ahead" }],
+        lastHeartbeatAt: new Date()
+      }
+    });
+    const backend = credentialBackend(prisma);
+    if (!backend.available) {
+      throw new Error(backend.reason);
+    }
+    const connection = JSON.stringify({ refresh_token: "a-refresh-token", account: "alice@hmcts.net", scope: "Mail.Read" });
+    await putCredential(prisma, backend.store, { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "microsoft", value: connection, via: "web" });
+
+    expect((await openAssistant(viewer)).briefing).toBe(offered);
+  });
 });
 
 describe("conversations", () => {

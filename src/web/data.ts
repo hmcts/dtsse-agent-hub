@@ -1,5 +1,5 @@
 import "server-only";
-import { canManageVirtualAgent, canOwnerReadCredential, canReadDeck, canReadMessage, isOwner } from "../access/rules.ts";
+import { canConnectMicrosoft, canManageVirtualAgent, canOwnerReadCredential, canReadDeck, canReadMessage, isOwner } from "../access/rules.ts";
 import type { Skill } from "../agents/skills.ts";
 import { isUuid } from "../agents/store.ts";
 import { ensureAssistant, findAssistant } from "../assistant/assistant-store.ts";
@@ -306,7 +306,7 @@ export async function openAssistant(viewer: Viewer): Promise<AssistantHome> {
     conversations,
     plugins: pluginSettings(assistant),
     welsh: hasWelshPlugin(assistant),
-    briefing: offersBriefing(stored, skills),
+    briefing: canConnectMicrosoft(viewer.modelRoute) && offersBriefing(stored, skills),
     skills,
     chat: chatGateOf(summary.toChat, credentials, stored)
   };

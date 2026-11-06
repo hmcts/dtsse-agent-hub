@@ -10,9 +10,10 @@ const BEARER = /^Bearer\s+(\S+)\s*$/i;
 
 /**
  * Who is calling the agent API. A person with their own token, or a virtual agent's pod with its launch token, which
- * acts as the virtual agent's owner and carries `virtualAgentId` so every route can tell the two apart.
+ * acts as the virtual agent's owner and carries `virtualAgentId` so every route can tell the two apart. `aiGateway` is
+ * whether a person's Entra token carries the `AIGateway.User` app role; a launch token and `X-Dev-User` carry no role.
  */
-export type Caller = Identity & { virtualAgentId?: string };
+export type Caller = Identity & { virtualAgentId?: string; aiGateway?: boolean };
 
 /** The caller a launch token stands for, or `undefined` when it stands for nobody. */
 export type LaunchTokenResolver = (token: string) => Promise<Caller | undefined>;

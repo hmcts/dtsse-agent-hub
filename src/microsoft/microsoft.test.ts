@@ -103,6 +103,7 @@ describe("connect outcomes", () => {
   it("should know only the two outcomes it words", () => {
     expect(isConnectOutcome("cancelled")).toBe(true);
     expect(isConnectOutcome("failed")).toBe(true);
+    expect(isConnectOutcome("unavailable")).toBe(true);
     expect(isConnectOutcome("connected")).toBe(false);
     expect(isConnectOutcome(null)).toBe(false);
   });

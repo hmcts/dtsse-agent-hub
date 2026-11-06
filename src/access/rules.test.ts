@@ -8,6 +8,7 @@ import {
   canAgentMessageAgent,
   canAttachUpload,
   canChangeDeck,
+  canConnectMicrosoft,
   canForkConversation,
   canLaunchTokenActForAgent,
   canLaunchTokenReadMessage,
@@ -383,6 +384,16 @@ describe("canUseCredentialRoutes", () => {
 
   it("should refuse a caller when it holds a launch token", () => {
     expect(canUseCredentialRoutes({ virtualAgentId: "va-1" })).toBe(false);
+  });
+});
+
+describe("canConnectMicrosoft", () => {
+  it("should allow Microsoft 365 when the person is on the gateway route", () => {
+    expect(canConnectMicrosoft("gateway")).toBe(true);
+  });
+
+  it("should refuse Microsoft 365 when the person is on their own Claude licence", () => {
+    expect(canConnectMicrosoft("own-licence")).toBe(false);
   });
 });
 

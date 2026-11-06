@@ -3,9 +3,11 @@ import * as directRoute from "../../src/app/api/agent/[agentId]/direct/route.ts"
 import * as heartbeatRoute from "../../src/app/api/agent/[agentId]/heartbeat/route.ts";
 import * as personalCredentialRoute from "../../src/app/api/agent/credentials/[kind]/route.ts";
 import * as messageRoute from "../../src/app/api/agent/messages/[id]/route.ts";
+import * as personalMicrosoftTokenRoute from "../../src/app/api/agent/microsoft/token/route.ts";
 import * as registerRoute from "../../src/app/api/agent/register/route.ts";
 import * as credentialRoute from "../../src/app/api/virtual/[virtualAgentId]/credentials/[kind]/route.ts";
 import * as loginRoute from "../../src/app/api/virtual/[virtualAgentId]/login/[kind]/route.ts";
+import * as microsoftTokenRoute from "../../src/app/api/virtual/[virtualAgentId]/microsoft/token/route.ts";
 import * as portsRoute from "../../src/app/api/virtual/[virtualAgentId]/ports/route.ts";
 import * as statusRoute from "../../src/app/api/virtual/[virtualAgentId]/status/route.ts";
 import { DEFAULT_CLAUDE_MD } from "../../src/credentials/claude-md.ts";
@@ -915,5 +917,47 @@ describe("the status across start and stop", () => {
     expect((await row(id)).status).toBe("provisioning");
     expect((await status(id, starting!.launch_token!, { phase: "running" })).status).toBe(204);
     expect((await row(id)).status).toBe("running");
+  });
+});
+
+describe("the Microsoft 365 token routes", () => {
+  async function connected(owner: typeof ALICE): Promise<void> {
+    await putCredential(prisma, localStore(), {
+      actorOid: owner.oid,
+      ownerOid: owner.oid,
+      kind: "microsoft",
+      value: JSON.stringify({ refresh_token: "a-refresh-token", account: "alice@hmcts.net", scope: "Mail.Read" }),
+      via: "web"
+    });
+  }
+
+  it("should refuse a pod's token with 403 when its virtual agent is on the own-licence route, even with a connection stored", async () => {
+    const { id, token } = await started(ALICE, "pcs-api", "own-licence");
+    await connected(ALICE);
+
+    const response = await pod(microsoftTokenRoute.GET, token, `/api/virtual/${id}/microsoft/token`, { virtualAgentId: id });
+
+    expect(response.status).toBe(403);
+    expect((await jsonOf(response)).error).toMatch(/only available to AI Gateway users/);
+  });
+
+  // This suite runs without the hub's Entra settings, so a request past the gate stops at the 503 that says so.
+  it("should let a pod's token request past the gate when its virtual agent is on the gateway route", async () => {
+    const { id, token } = await started(ALICE, "pcs-api", "gateway");
+    await connected(ALICE);
+
+    const response = await pod(microsoftTokenRoute.GET, token, `/api/virtual/${id}/microsoft/token`, { virtualAgentId: id });
+
+    expect(response.status).toBe(503);
+  });
+
+  it("should refuse a person's token with 403 when their caller carries no AI Gateway role", async () => {
+    await insertUser(ALICE);
+    await connected(ALICE);
+
+    const response = await call(personalMicrosoftTokenRoute.GET, { as: ALICE, path: "/api/agent/microsoft/token" });
+
+    expect(response.status).toBe(403);
+    expect((await jsonOf(response)).error).toMatch(/only available to AI Gateway users/);
   });
 });

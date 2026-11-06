@@ -14,7 +14,7 @@ function status(kind: CredentialKind, accountLabel: string | null = null): Crede
 
 /** The rows a page would build for this route, these sign-ins and these stored credentials. */
 function rows(route: ModelRoute, kinds: CredentialKind[], stored: CredentialStatus[]) {
-  const data = { route, kinds, statuses: stored, logins: [], unavailable: null };
+  const data = { route, microsoftConnectable: true, kinds, statuses: stored, logins: [], unavailable: null };
   const list = connections(data, checklistState, NOW);
   return connectionRows(list, modelAccess(route, list), savedCredentials(stored, route, route === "own-licence"), microsoftConnection(data), route);
 }
@@ -56,7 +56,7 @@ describe("connectionRows", () => {
   });
 
   it("should list nothing when the hub cannot read the person's credentials", () => {
-    const data = { route: "own-licence" as const, kinds: ["github" as const], statuses: [], logins: [], unavailable: "no store" };
+    const data = { route: "own-licence" as const, microsoftConnectable: true, kinds: ["github" as const], statuses: [], logins: [], unavailable: "no store" };
 
     expect(connectionRows(connections(data, checklistState, NOW), null, [], microsoftConnection(data), "own-licence")).toEqual([]);
   });

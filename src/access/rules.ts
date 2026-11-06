@@ -1,3 +1,5 @@
+import type { ModelRoute } from "../viewer/identity.ts";
+
 /**
  * Who may do what, as pure functions over rows the caller has already loaded.
  *
@@ -19,7 +21,7 @@
  * `replyRoute`). A launch token acts as its owner only for its own virtual agent and the agents its sessions
  * registered. Only its owner saves, replaces or deletes a credential (`isOwner`), and its value is write-only for
  * them except the kinds `canOwnerReadCredential` allows; which kinds a pod may store is
- * `canVirtualAgentStoreCredential`.
+ * `canVirtualAgentStoreCredential`. Microsoft 365 is for people on the AI Gateway alone (`canConnectMicrosoft`).
  */
 
 export interface AgentRef {
@@ -229,6 +231,21 @@ export function isHubIssuedCredential(kind: string): boolean {
  */
 export function canPodReadCredential(kind: string): boolean {
   return kind !== "microsoft";
+}
+
+/**
+ * Whether Microsoft 365 is for someone: people on the HMCTS AI Gateway alone, which is the `gateway` route. It decides
+ * both whether they may connect it and whether the hub mints a Graph token from a connection they already hold, so a
+ * connection made before the role was taken away stops working rather than outliving it. Disconnecting is never
+ * refused: a connection the person may no longer use is still theirs to delete.
+ *
+ * A route rather than the role, because a route is what each caller already has: a web session's is the viewer's own,
+ * from their `AIGateway.User` role at sign-in (`modelRouteFor`); a person's bearer token's follows that role in its
+ * `roles`; and a pod's is its virtual agent's `model_route`, fixed when the agent was made, so a pod follows the role
+ * only once its owner replaces it.
+ */
+export function canConnectMicrosoft(route: ModelRoute): boolean {
+  return route === "gateway";
 }
 
 export type UploadState = "pending" | "stored" | "fetched" | "expired";

@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { canConnectMicrosoft } from "@/access/rules";
 import { clearedSignInCookie, SIGN_IN_COOKIE, sessionCookie } from "@/auth/cookies";
 import { completeMicrosoftConnect, completeSignIn, readSignIn, SignInFailed, type SignInState } from "@/auth/entra";
 import { HOME, safeReturnTo } from "@/auth/guard";
@@ -10,6 +11,7 @@ import { putCredential } from "@/credentials/store";
 import { type ConnectOutcome, connectOutcome, serialiseSignIn, withConnectOutcome } from "@/microsoft/microsoft";
 import { prisma } from "@/store/prisma";
 import { upsertUser } from "@/users/store";
+import { modelRouteFor } from "@/viewer/identity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -57,8 +59,9 @@ export async function GET(request: NextRequest): Promise<Response> {
 }
 
 /**
- * The end of Connect for Microsoft 365: the person must still be signed in, as the account they connected, and their
- * connection is then the one credential of theirs only this writes. It sets no session: they already have one.
+ * The end of Connect for Microsoft 365: the person must still be signed in, as the account they connected, with a
+ * session `canConnectMicrosoft` allows, and their connection is then the one credential of theirs only this writes.
+ * It sets no session: they already have one.
  */
 async function connectMicrosoft(request: NextRequest, settings: AuthSettings, callbackUrl: URL, signIn: SignInState): Promise<Response> {
   const returnTo = safeReturnTo(signIn.returnTo);
@@ -73,6 +76,11 @@ async function connectMicrosoft(request: NextRequest, settings: AuthSettings, ca
   if (session === undefined) {
     console.warn("a Microsoft 365 connection came back with nobody signed in, so it was not kept");
     return redirectTo(`/auth/login?redirect=${encodeURIComponent(returnTo)}`);
+  }
+  // Before the code is exchanged, so someone `canConnectMicrosoft` refuses is never given a refresh token to keep.
+  if (!canConnectMicrosoft(modelRouteFor(session.aiGateway))) {
+    console.warn(`${session.name} is not an AI Gateway user, so their Microsoft 365 connection was not kept`);
+    return connectEnded(returnTo, "unavailable");
   }
   try {
     const connection = await completeMicrosoftConnect(settings, callbackUrl, signIn, session);
