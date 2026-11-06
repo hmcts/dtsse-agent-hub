@@ -1,5 +1,5 @@
 import "server-only";
-import { canManageVirtualAgent, canOwnerReadCredential, canReadDeck, canReadMessage, isOwner } from "../access/rules.ts";
+import { canConnectMicrosoft, canManageVirtualAgent, canOwnerReadCredential, canReadDeck, canReadMessage, isOwner } from "../access/rules.ts";
 import type { Skill } from "../agents/skills.ts";
 import { isUuid } from "../agents/store.ts";
 import { ensureAssistantWithClaims, findAssistant } from "../assistant/assistant-store.ts";
@@ -239,9 +239,10 @@ export interface AssistantHome {
   /** Its assistant has the Welsh plugin ticked, so the sidebar offers the Welsh page; read from the row, not the offer. */
   welsh: boolean;
   /**
-   * The sidebar offers the morning briefing (`offersBriefing`): the `microsoft` credential is stored and the pod's
-   * client claims `morning-briefing` (`podSupports`). A connection Microsoft then refuses is the briefing's to
-   * report, in its own section.
+   * The sidebar offers the morning briefing when the viewer may connect Microsoft 365 on their own route
+   * (`canConnectMicrosoft`) and `offersBriefing` holds: the `microsoft` credential is stored and the pod's client
+   * claims `morning-briefing` (`podSupports`). A connection Microsoft then refuses is the briefing's to report, in its
+   * own section.
    */
   briefing: boolean;
   /** The pod's skills (`podSkills`), which the new chat offers on "/" before it has a session of its own to ask. */
@@ -306,7 +307,7 @@ export async function openAssistant(viewer: Viewer): Promise<AssistantHome> {
     conversations,
     plugins: pluginSettings(assistant),
     welsh: hasWelshPlugin(assistant),
-    briefing: offersBriefing(stored, claims),
+    briefing: canConnectMicrosoft(viewer.modelRoute) && offersBriefing(stored, claims),
     skills,
     chat: chatGateOf(summary.toChat, credentials, stored)
   };

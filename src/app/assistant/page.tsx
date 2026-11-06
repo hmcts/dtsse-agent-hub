@@ -81,6 +81,7 @@ export default async function AssistantPage() {
       theme={theme}
       actions={ROW_ACTIONS}
       connections={connectionsData(home.assistant, home.credentials)}
+      viewerRoute={home.credentials.modelRoute}
       connect={{ assistantId: home.assistant.id, running: home.assistant.desired === "running", reconnect: reconnectSignIn }}
       now={Date.now()}
       plugins={pluginSettings}

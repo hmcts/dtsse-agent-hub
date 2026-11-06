@@ -1,3 +1,5 @@
+import type { ModelRoute } from "../viewer/identity.ts";
+
 /**
  * Who may do what, as pure functions over rows the caller has already loaded.
  *
@@ -19,7 +21,7 @@
  * `replyRoute`). A launch token acts as its owner only for its own virtual agent and the agents its sessions
  * registered. Only its owner saves, replaces or deletes a credential (`isOwner`), and its value is write-only for
  * them except the kinds `canOwnerReadCredential` allows; which kinds a pod may store is
- * `canVirtualAgentStoreCredential`.
+ * `canVirtualAgentStoreCredential`. Only people on the AI Gateway may connect Microsoft 365 (`canConnectMicrosoft`).
  */
 
 export interface AgentRef {
@@ -229,6 +231,21 @@ export function isHubIssuedCredential(kind: string): boolean {
  */
 export function canPodReadCredential(kind: string): boolean {
   return kind !== "microsoft";
+}
+
+/**
+ * Whether someone may connect Microsoft 365: people on the HMCTS AI Gateway alone, which is the `gateway` route of
+ * their web session, from their `AIGateway.User` role when they signed in (`modelRouteFor`). Settings offers Connect,
+ * the connect sign-in starts and its callback keeps a connection only for them, and the sidebar offers the morning
+ * briefing only to them.
+ *
+ * Someone who signs in without the role has any connection they hold deleted then, as Disconnect deletes it. Until
+ * that next sign-in, up to a session's eight hours away, a connection they already hold keeps working: the token
+ * routes, for a pod and at the command line alike, ask only that a connection is stored.
+ * Disconnecting is never refused.
+ */
+export function canConnectMicrosoft(route: ModelRoute): boolean {
+  return route === "gateway";
 }
 
 export type UploadState = "pending" | "stored" | "fetched" | "expired";

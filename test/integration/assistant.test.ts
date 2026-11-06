@@ -46,7 +46,7 @@ import { appendEntries } from "../../src/transcripts/store.ts";
 import { MAX_VIRTUAL_AGENTS_PER_USER } from "../../src/virtual-agents/limits.ts";
 import { type ClaimedVirtualAgent, type ClaimResult, createVirtualAgent, setDesired } from "../../src/virtual-agents/store.ts";
 import { sweepVirtualAgents } from "../../src/virtual-agents/sweep.ts";
-import { form } from "./assistant-pod.ts";
+import { form, podFixture } from "./assistant-pod.ts";
 import { assistantSuite } from "./assistant-suite.ts";
 import { insertUser, type Person, prisma } from "./database.ts";
 import { call, jsonOf } from "./routes.ts";
@@ -306,6 +306,23 @@ describe("the person's assistant", () => {
       expect(home.credentials).toMatchObject({ modelRoute: viewerRoute, claudeTokenUsable });
     }
   );
+
+  // Microsoft 365 stored and the briefing claimed either way, so the viewer's route is all that differs.
+  it.each([
+    ["gateway", true],
+    ["own-licence", false]
+  ] as const)("should offer the morning briefing only to an AI Gateway user when the viewer is on %s", async (modelRoute, offered) => {
+    await podFixture(["morning-briefing"])(ALICE);
+    const viewer = { ...VIEWER, modelRoute };
+    const backend = credentialBackend(prisma);
+    if (!backend.available) {
+      throw new Error(backend.reason);
+    }
+    const connection = JSON.stringify({ refresh_token: "a-refresh-token", account: "alice@hmcts.net", scope: "Mail.Read" });
+    await putCredential(prisma, backend.store, { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "microsoft", value: connection, via: "web" });
+
+    expect((await openAssistant(viewer)).briefing).toBe(offered);
+  });
 });
 
 describe("conversations", () => {

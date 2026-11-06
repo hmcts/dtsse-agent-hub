@@ -198,7 +198,7 @@ directly with `?settings=<id>`:
 | Id | Label | What it holds |
 | --- | --- | --- |
 | `appearance` | Appearance | light, dark, or the device's setting |
-| `connections` | Connections | one row per service (GitHub, Azure, Claude, Jenkins, Atlassian, Microsoft 365), each with all of its actions: connect or sign in again (GitHub is connected by its device sign-in only), paste a Jenkins or, on your own licence, Claude token, and remove what is saved. `?settings=credentials`, which older pod clients link, opens it too |
+| `connections` | Connections | one row per service (GitHub, Azure, Claude, Jenkins, Atlassian, Microsoft 365), each with all of its actions: connect or sign in again (GitHub is connected by its device sign-in only), paste a Jenkins or, on your own licence, Claude token, and remove what is saved. Microsoft 365 is connected by AI Gateway users only: anyone else has no Connect, is not offered Morning briefing, and has any connection deleted when they next sign in (see "Microsoft 365" in `docs/agent-api.md`). `?settings=credentials`, which older pod clients link, opens it too |
 | `templates` | Templates | saved prompts |
 | `exports` | Jira & Confluence | export defaults |
 | `sharing` | Sharing | the chats you have shared or offered to fork, and those shared with or offered to you |

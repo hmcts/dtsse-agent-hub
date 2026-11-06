@@ -8,7 +8,7 @@ import { offersConnect } from "@/assistant/connections";
 import type { SavedCredential } from "@/assistant/saved-credentials";
 import { ActionForm, type FormAction } from "@/components/ActionForm";
 import { useFocusOnMount } from "@/components/assistant/useFocusOnMount";
-import { CONNECT_OUTCOME_PARAMETER, CONNECT_OUTCOME_WORDS, isConnectOutcome } from "@/microsoft/microsoft";
+import { CONNECT_OUTCOME_PARAMETER, CONNECT_OUTCOME_WORDS, isConnectOutcome, MICROSOFT_UNAVAILABLE } from "@/microsoft/microsoft";
 import type { ModelRoute } from "@/viewer/identity";
 
 /**
@@ -224,6 +224,7 @@ function Row({
   const pasteable = tokens !== undefined && saved?.pasteable === true;
   const removable = tokens !== undefined && saved?.stored === true;
   const disconnectable = tokens !== undefined && microsoft?.stored === true;
+  const microsoftConnect = microsoft !== null && !microsoft.stored && microsoft.connectable;
   return (
     <li className="flex flex-wrap items-center gap-3 border-b border-asst-line px-3.5 py-3 last:border-b-0">
       <span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-asst-active text-xs font-semibold">
@@ -234,7 +235,7 @@ function Row({
         <span className="truncate text-xs text-asst-muted">{row.desc}</span>
       </div>
       <span className={`shrink-0 text-xs font-medium ${STATE_CLASS[row.state]}`}>{row.detail}</span>
-      {doing === null && (connectable || pasteable || removable || disconnectable || microsoft !== null) ? (
+      {doing === null && (connectable || pasteable || removable || disconnectable || microsoftConnect) ? (
         <div className="flex shrink-0 items-center gap-2">
           {connectable && signIn !== null ? (
             <button type="button" onClick={start("connect")} aria-label={`Connect ${row.name}`} className={ACCENT_BUTTON}>
@@ -251,15 +252,12 @@ function Row({
               Remove
             </button>
           ) : null}
-          {microsoft === null ? null : microsoft.stored ? (
-            disconnectable ? (
-              <button type="button" onClick={start("remove")} className={QUIET_BUTTON}>
-                Disconnect
-              </button>
-            ) : null
-          ) : (
-            <MicrosoftConnect microsoft={microsoft} />
-          )}
+          {disconnectable ? (
+            <button type="button" onClick={start("remove")} className={QUIET_BUTTON}>
+              Disconnect
+            </button>
+          ) : null}
+          {microsoftConnect && microsoft !== null ? <MicrosoftConnect microsoft={microsoft} /> : null}
         </div>
       ) : null}
       {doing === "connect" && connect !== undefined && signIn !== null ? (
@@ -290,8 +288,10 @@ function Row({
           onRemoved={finish("Microsoft 365 is disconnected")}
         />
       ) : null}
+      {/* No Connect for someone off the AI Gateway: this says why, and a connection they already hold keeps Disconnect. */}
+      {microsoft !== null && !microsoft.connectable ? <p className="basis-full text-pretty text-[13px] text-asst-muted">{MICROSOFT_UNAVAILABLE}</p> : null}
       {/* A connect that came back without a connection says so here, from the address it returned to. */}
-      {microsoft !== null && !microsoft.stored && isConnectOutcome(outcome) ? (
+      {microsoft?.connectable && !microsoft.stored && isConnectOutcome(outcome) ? (
         <p role="status" className="basis-full text-pretty text-[13px] text-asst-warn">
           {CONNECT_OUTCOME_WORDS[outcome]}
         </p>

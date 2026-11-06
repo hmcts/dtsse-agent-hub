@@ -1104,9 +1104,10 @@ describe("microsoftConnection", () => {
   });
 
   it("should offer Connect, coming back to the Connections section, when nothing is stored", () => {
-    expect(microsoftConnection(data([]))).toEqual({
+    expect(microsoftConnection(data([]), "gateway")).toEqual({
       stored: false,
       accountLabel: null,
+      connectable: true,
       connectPath: "/auth/microsoft/connect",
       returnTo: "/assistant?settings=connections"
     });
@@ -1114,11 +1115,23 @@ describe("microsoftConnection", () => {
 
   it("should name the account when a connection is stored", () => {
     const status = { kind: "microsoft" as const, stored: true, accountLabel: "a.person@hmcts.net", updatedAt: "2026-12-01T09:00:00.000Z" };
-    expect(microsoftConnection(data([status]))).toMatchObject({ stored: true, accountLabel: "a.person@hmcts.net" });
+    expect(microsoftConnection(data([status]), "gateway")).toMatchObject({ stored: true, accountLabel: "a.person@hmcts.net" });
+  });
+
+  it.each([
+    ["own-licence", "own-licence"],
+    ["not known", undefined]
+  ] as const)("should offer no Connect, whatever the assistant's route, when the viewer's own route is %s", (_, viewerRoute) => {
+    expect(microsoftConnection(data([]), viewerRoute)).toMatchObject({ connectable: false });
+  });
+
+  it("should keep the stored connection, for its Disconnect, when the viewer may not connect Microsoft 365", () => {
+    const status = { kind: "microsoft" as const, stored: true, accountLabel: "a.person@hmcts.net", updatedAt: "2026-12-01T09:00:00.000Z" };
+    expect(microsoftConnection(data([status]), "own-licence")).toMatchObject({ stored: true, connectable: false });
   });
 
   it("should say nothing when the hub cannot read the credentials", () => {
-    expect(microsoftConnection(data([], "no store"))).toBeNull();
-    expect(microsoftConnection(undefined)).toBeNull();
+    expect(microsoftConnection(data([], "no store"), "gateway")).toBeNull();
+    expect(microsoftConnection(undefined, "gateway")).toBeNull();
   });
 });

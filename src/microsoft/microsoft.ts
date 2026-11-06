@@ -121,6 +121,12 @@ export type ConnectOutcome = "cancelled" | "failed";
 
 export const CONNECT_OUTCOME_PARAMETER = "microsoft";
 
+/**
+ * Why someone `canConnectMicrosoft` refuses is offered no Connect, which their Microsoft 365 row always says. So a
+ * connect refused for that reason returns to settings with no outcome: this line is already there.
+ */
+export const MICROSOFT_UNAVAILABLE = "Microsoft 365 is only available to AI Gateway users.";
+
 /** What the Microsoft 365 row says about a connect that came back without one. */
 export const CONNECT_OUTCOME_WORDS: Record<ConnectOutcome, string> = {
   cancelled: "Microsoft 365 wasn't connected, because it was cancelled at Microsoft. Press Connect to try again.",
@@ -139,8 +145,14 @@ export function connectOutcome(error: string): ConnectOutcome {
   return error === "access_denied" ? "cancelled" : "failed";
 }
 
-/** The address a connect returns to when it ended without a connection: the page it began on, saying how. */
-export function withConnectOutcome(returnTo: string, outcome: ConnectOutcome): string {
+/**
+ * The address a connect returns to when it ended without a connection: the page it began on, saying how. A connect
+ * `canConnectMicrosoft` refused has no outcome and says nothing, since `MICROSOFT_UNAVAILABLE` is already on the page.
+ */
+export function withConnectOutcome(returnTo: string, outcome?: ConnectOutcome): string {
+  if (outcome === undefined) {
+    return returnTo;
+  }
   const [path, query = ""] = returnTo.split("?", 2) as [string, string?];
   const search = new URLSearchParams(query);
   search.set(CONNECT_OUTCOME_PARAMETER, outcome);

@@ -133,7 +133,7 @@ async function saveSettings(): Promise<void> {
  * a test of any other one says which it is about.
  */
 function open(props: Partial<Parameters<typeof AssistantSettings>[0]> = {}, section?: string): void {
-  render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} sharing={sharingSettings()} {...props} />);
+  render(<AssistantSettings now={Date.now()} viewerRoute="gateway" connections={data(ALL_SIGNED_IN)} sharing={sharingSettings()} {...props} />);
   fireEvent.click(cog());
   if (section !== undefined) {
     go(section);
@@ -149,7 +149,9 @@ function themed(props: Partial<Parameters<typeof AssistantSettings>[0]> = {}, th
   root.className = "asst-theme";
   root.dataset.theme = theme;
   document.body.append(root);
-  render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} sharing={sharingSettings()} {...props} />, { container: root });
+  render(<AssistantSettings now={Date.now()} viewerRoute="gateway" connections={data(ALL_SIGNED_IN)} sharing={sharingSettings()} {...props} />, {
+    container: root
+  });
   return root;
 }
 
@@ -528,6 +530,7 @@ describe("the Assistant's settings dialog", () => {
     render(
       <AssistantSettings
         now={Date.now()}
+        viewerRoute="gateway"
         connections={{
           route: "own-licence",
           kinds: KINDS,
@@ -3152,6 +3155,27 @@ describe("AssistantSettings Microsoft 365", () => {
     expect(screen.getAllByRole("list").filter((list) => list.closest("[role=dialog]") !== null && list.getAttribute("aria-label") === "Microsoft 365")).toEqual(
       []
     );
+  });
+
+  it("should offer no Connect and say why when the viewer is not an AI Gateway user", () => {
+    open({ viewerRoute: "own-licence", connections: data([]) }, "Connections");
+    const row = within(connectionRow("Microsoft 365"));
+
+    expect(row.queryByRole("button", { name: "Connect Microsoft 365" })).toBeNull();
+    expect(row.getByText("Not connected")).toBeTruthy();
+    expect(row.getByText("Microsoft 365 is only available to AI Gateway users.")).toBeTruthy();
+  });
+
+  it("should keep Disconnect, and not call the connection healthy, when someone who is not an AI Gateway user still has one stored", () => {
+    const connected = data([...ALL_SIGNED_IN, "microsoft"]);
+    open({ viewerRoute: "own-licence", connections: connected, tokens: { rows: [], unavailable: null, save: vi.fn(), remove: vi.fn() } }, "Connections");
+    const row = within(connectionRow("Microsoft 365"));
+
+    expect(row.getByRole("button", { name: "Disconnect" })).toBeTruthy();
+    expect(row.queryByRole("button", { name: "Connect Microsoft 365" })).toBeNull();
+    expect(row.queryByText("Connected")).toBeNull();
+    expect(row.getByText("Removed when you next sign in")).toBeTruthy();
+    expect(row.getByText("Microsoft 365 is only available to AI Gateway users.")).toBeTruthy();
   });
 
   it("should leave Microsoft 365 out when the hub cannot read the person's credentials", () => {

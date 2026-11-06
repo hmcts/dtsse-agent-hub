@@ -8,6 +8,7 @@ import { type AuthSettings, authRequired, authSettings } from "@/auth/settings";
 import { credentialBackend } from "@/credentials/backend";
 import { putCredential } from "@/credentials/store";
 import { type ConnectOutcome, connectOutcome, serialiseSignIn, withConnectOutcome } from "@/microsoft/microsoft";
+import { mayCompleteMicrosoftConnect, removeRefusedMicrosoftConnection } from "@/microsoft/sign-in";
 import { prisma } from "@/store/prisma";
 import { upsertUser } from "@/users/store";
 
@@ -15,8 +16,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * Where Entra returns the person, and the only place a session is created. Failures are vague to the browser and
- * specific to the log.
+ * Where Entra returns the person, and the only place a session is created. A sign-in without the role
+ * `canConnectMicrosoft` asks for deletes any Microsoft 365 connection the person holds. Failures are vague to the
+ * browser and specific to the log.
  */
 export async function GET(request: NextRequest): Promise<Response> {
   if (!authRequired()) {
@@ -48,6 +50,7 @@ export async function GET(request: NextRequest): Promise<Response> {
   }
 
   await upsertUser(prisma, session);
+  await removeRefusedMicrosoftConnection(prisma, session);
 
   console.info(`${session.name} signed in`);
   const response = redirectTo(safeReturnTo(signIn.returnTo));
@@ -57,8 +60,9 @@ export async function GET(request: NextRequest): Promise<Response> {
 }
 
 /**
- * The end of Connect for Microsoft 365: the person must still be signed in, as the account they connected, and their
- * connection is then the one credential of theirs only this writes. It sets no session: they already have one.
+ * The end of Connect for Microsoft 365: the person must still be signed in, as the account they connected, with a
+ * session `canConnectMicrosoft` allows, and their connection is then the one credential of theirs only this writes.
+ * It sets no session: they already have one.
  */
 async function connectMicrosoft(request: NextRequest, settings: AuthSettings, callbackUrl: URL, signIn: SignInState): Promise<Response> {
   const returnTo = safeReturnTo(signIn.returnTo);
@@ -73,6 +77,9 @@ async function connectMicrosoft(request: NextRequest, settings: AuthSettings, ca
   if (session === undefined) {
     console.warn("a Microsoft 365 connection came back with nobody signed in, so it was not kept");
     return redirectTo(`/auth/login?redirect=${encodeURIComponent(returnTo)}`);
+  }
+  if (!mayCompleteMicrosoftConnect(session)) {
+    return connectEnded(returnTo);
   }
   try {
     const connection = await completeMicrosoftConnect(settings, callbackUrl, signIn, session);
@@ -97,8 +104,11 @@ async function connectMicrosoft(request: NextRequest, settings: AuthSettings, ca
   return response;
 }
 
-/** Back to where Connect was pressed, saying how it ended, with the sign-in cookie cleared so it cannot be replayed. */
-function connectEnded(returnTo: string, outcome: ConnectOutcome): Response {
+/**
+ * Back to where Connect was pressed, saying how it ended, with the sign-in cookie cleared so it cannot be replayed. A
+ * connect `canConnectMicrosoft` refuses says nothing: the row already says why it offers no Connect.
+ */
+function connectEnded(returnTo: string, outcome?: ConnectOutcome): Response {
   const response = redirectTo(withConnectOutcome(returnTo, outcome));
   response.headers.append("set-cookie", clearedSignInCookie());
   return response;

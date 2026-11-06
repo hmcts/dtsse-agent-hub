@@ -1,3 +1,4 @@
+import { canConnectMicrosoft } from "../access/rules.ts";
 import type { CredentialKind } from "../credentials/names.ts";
 import type { CredentialStatus } from "../credentials/store.ts";
 import { CONNECT_PATH } from "../microsoft/microsoft.ts";
@@ -668,13 +669,22 @@ export function signInPrompt(list: readonly Connection[]): ConnectionsPrompt | n
 export interface MicrosoftConnection {
   stored: boolean;
   accountLabel: string | null;
+  /**
+   * Whether the viewer may connect Microsoft 365 (`canConnectMicrosoft`), and so is offered Connect. A connection that
+   * is stored keeps its Disconnect whatever this says.
+   */
+  connectable: boolean;
   /** Where Connect posts: the hub's connect sign-in. */
   connectPath: string;
   /** Where the connect sign-in returns to: this section. */
   returnTo: string;
 }
 
-export function microsoftConnection(data: ConnectionsData | undefined): MicrosoftConnection | null {
+/**
+ * `viewerRoute` is the viewer's own route rather than `data.route`, the assistant's: the connection is theirs and is
+ * judged on their sign-in. Without one nothing says they may connect, so Connect is not offered.
+ */
+export function microsoftConnection(data: ConnectionsData | undefined, viewerRoute: ModelRoute | undefined): MicrosoftConnection | null {
   if (data === undefined || data.unavailable !== null) {
     return null;
   }
@@ -682,6 +692,7 @@ export function microsoftConnection(data: ConnectionsData | undefined): Microsof
   return {
     stored: status?.stored === true,
     accountLabel: status?.accountLabel ?? null,
+    connectable: viewerRoute !== undefined && canConnectMicrosoft(viewerRoute),
     connectPath: CONNECT_PATH,
     returnTo: assistantSettingsPath("connections")
   };

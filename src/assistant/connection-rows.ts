@@ -75,15 +75,22 @@ function savedRow(saved: SavedCredential & { kind: Exclude<SavedCredential["kind
   };
 }
 
+/** What a connection says when its holder may not connect Microsoft 365: their next sign-in deletes it. */
+export const MICROSOFT_ENDING = "Removed when you next sign in";
+
+/**
+ * A stored connection is connected only for someone who may connect it. Anyone else's is deleted at their next
+ * sign-in, so it is not shown as a healthy connection meanwhile, though it keeps its Disconnect.
+ */
 function microsoftRow(microsoft: MicrosoftConnection): ConnectionRow {
-  const state: ConnectionState = microsoft.stored ? "connected" : "waiting";
+  const state: ConnectionState = microsoft.stored && microsoft.connectable ? "connected" : "waiting";
   return {
     key: "microsoft",
     name: "Microsoft 365",
     initial: "M",
     desc: microsoft.accountLabel ?? MICROSOFT_DESC,
     state,
-    detail: CONNECTION_DETAILS[state],
+    detail: microsoft.stored && !microsoft.connectable ? MICROSOFT_ENDING : CONNECTION_DETAILS[state],
     signIn: null,
     saved: null,
     microsoft

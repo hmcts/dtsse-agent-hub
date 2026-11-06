@@ -26,6 +26,7 @@ import type { AssistantSize } from "@/components/assistant/SizeSettings";
 import type { AssistantTemplates } from "@/components/assistant/TemplateSettings";
 import { useResizableWidth } from "@/components/assistant/useResizableWidth";
 import { type StartChatAction, WorkflowsMenu } from "@/components/assistant/WorkflowsMenu";
+import type { ModelRoute } from "@/viewer/identity";
 import type { ActionResult } from "@/web/action";
 
 /** What a sidebar row's options menu does. The pages pass the same server actions the chat's own header uses. */
@@ -107,6 +108,7 @@ export function AssistantShell({
   activeId,
   theme = "system",
   connections,
+  viewerRoute,
   connect,
   now,
   plugins,
@@ -133,6 +135,8 @@ export function AssistantShell({
   theme?: Theme;
   /** The person's sign-ins, which the footer's settings lists and warns about. */
   connections?: ConnectionsData;
+  /** The viewer's own model route, which the footer's settings judge Microsoft 365's Connect on. */
+  viewerRoute?: ModelRoute;
   /** How the footer's settings connects a sign-in made only on request, such as Azure. */
   connect?: AssistantConnect;
   /** The page's own clock, which the footer's settings reads its sign-ins against. */
@@ -141,7 +145,10 @@ export function AssistantShell({
   plugins?: AssistantPlugins;
   /** Their assistant has the Welsh plugin ticked, so the way to the Welsh page is shown. */
   welsh?: boolean;
-  /** They have connected Microsoft 365 and their pod's client claims `morning-briefing`, so the morning briefing is offered. */
+  /**
+   * They may connect Microsoft 365 (`canConnectMicrosoft`), have connected it, and their pod's client claims
+   * `morning-briefing`, so the morning briefing is offered.
+   */
   briefing?: boolean;
   /** How the morning briefing starts its chat; without it, the briefing is not offered. */
   start?: StartChatAction;
@@ -362,6 +369,7 @@ export function AssistantShell({
             <AssistantSettings
               theme={theme}
               connections={connections}
+              viewerRoute={viewerRoute}
               connect={connect}
               now={now}
               plugins={plugins}
