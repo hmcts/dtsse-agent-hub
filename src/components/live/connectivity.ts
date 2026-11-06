@@ -12,10 +12,13 @@
  *   throttling devtools to "Offline" produces, so that reproduction shows nothing and proves nothing.
  * - The response starts and its body is cut mid-stream (`TypeError: network error`). Next has already returned by
  *   then, so React's Flight client rejects every pending row and the page throws during render, into
- *   `app/error.tsx`. This is the one people hit, and the reason `ErrorPanel` recovers itself as well.
+ *   `app/error.tsx`. This is the one people hit, and the reason `ErrorPanel` recovers itself as well. A body that
+ *   simply ends early rejects the same way, with Flight's "Connection closed.".
  *
  * The browser's answer is advisory. It says only that the machine has a network, not that this origin is reachable,
- * and it can still be `true` through a flap, so waiting narrows the gap rather than closing it.
+ * and it can still be `true` through a flap, so waiting narrows the gap rather than closing it. `ERR_NETWORK_CHANGED`
+ * usually leaves it `true` throughout, with no `online` event to wait for, which is why `ErrorPanel` also retries a
+ * failure `isNetworkFailure` recognises on a short timer of its own.
  */
 
 export interface ConnectivityDependencies {
