@@ -12,8 +12,18 @@ export function errorDigest(error: unknown): string | undefined {
   return typeof error.digest === "string" && error.digest !== "" ? error.digest : undefined;
 }
 
-/** What Chrome, Firefox and Safari put in the `TypeError` a fetch, or the read of its body, rejects with when the network drops. */
-const BROWSER_NETWORK_FAILURES = new Set(["network error", "Failed to fetch", "NetworkError when attempting to fetch resource.", "Load failed"]);
+/**
+ * What Chrome, Firefox and Safari, older Safari included, put in the `TypeError` a fetch, or the read of its body,
+ * rejects with when the network drops. Matching one wrongly costs a single extra refresh.
+ */
+const BROWSER_NETWORK_FAILURES = new Set([
+  "network error",
+  "Failed to fetch",
+  "NetworkError when attempting to fetch resource.",
+  "Error in input stream",
+  "Load failed",
+  "The network connection was lost."
+]);
 
 /**
  * How React Flight's error begins when an RSC body ends before every row it promised arrived: the development
@@ -67,8 +77,9 @@ export interface ReconnectDependencies {
   /** Calls `handler` whenever the network comes back or the tab is shown again; the returned function stops listening. */
   wake: (handler: () => void) => () => void;
   /**
-   * Where the attempts are counted. `retry` resets the boundary, which unmounts the panel, and a retry that fails
-   * mounts a new one, so the count lives outside it: kept in the panel, a page broken for good would retry forever.
+   * Where the attempts are counted. A retry that fails either hands the same panel the new error or, after a
+   * navigation, mounts a new one, so the count lives outside it: kept in the panel, a page broken for good could
+   * retry forever.
    */
   ledger: { current: ReconnectLedger | null };
 }
@@ -89,10 +100,10 @@ export function browserReconnect(): ReconnectDependencies {
           handler();
         }
       };
-      window.addEventListener("online", handler);
+      const unwatch = browserConnectivity().watch(handler);
       document.addEventListener("visibilitychange", shown);
       return () => {
-        window.removeEventListener("online", handler);
+        unwatch();
         document.removeEventListener("visibilitychange", shown);
       };
     },
@@ -100,49 +111,55 @@ export function browserReconnect(): ReconnectDependencies {
   };
 }
 
+/** How many automatic retries this page has spent, counting only those recent enough to be the same failure. */
+function spentAttempts(dependencies: ReconnectDependencies, page: string): number {
+  const spent = dependencies.ledger.current;
+  return spent !== null && spent.page === page && dependencies.now() - spent.at < RECONNECT_WINDOW_MS ? spent.attempts : 0;
+}
+
 /**
  * Retries a network failure the browser did not notice. A changed network (`ERR_NETWORK_CHANGED`) cuts the request
  * while `navigator.onLine` stays `true` and no `online` event follows, so `useRetryWhenOnline` has nothing to wait
- * for. Instead `retry` is called after each of `RECONNECT_DELAYS_MS` in turn, and at once if the network comes back
- * or the tab is shown again first. Returns whether an automatic retry is waiting; once the attempts are spent none
- * is, and the panel stays as it is for any other error until the person acts.
+ * for. Instead `retry` is called after each of `RECONNECT_DELAYS_MS` in turn, or at once if the network comes back
+ * or the tab is shown again first, and each counts as an attempt. Returns whether an automatic retry is waiting; once
+ * the attempts are spent none is, and the panel stays as it is for any other error until the person acts.
+ *
+ * Next's `retry` runs in a transition, so a retry that fails again usually leaves this panel mounted and hands it the
+ * new error rather than mounting a fresh one. Each new error re-arms the retry from the ledger either way. The ledger
+ * is not cleared when a retry succeeds; its window runs from the last automatic retry.
  */
-function useRetryAfterNetworkFailure(retry: () => void, enabled: boolean, reconnect: ReconnectDependencies | undefined): boolean {
+function useRetryAfterNetworkFailure(retry: () => void, error: unknown, openedOffline: boolean, reconnect: ReconnectDependencies | undefined): boolean {
   const [dependencies] = useState(() => reconnect ?? browserReconnect());
-  const [delay] = useState(() => {
-    if (!enabled) {
-      return undefined;
-    }
-    const spent = dependencies.ledger.current;
-    const recent = spent !== null && spent.page === dependencies.page() && dependencies.now() - spent.at < RECONNECT_WINDOW_MS;
-    return RECONNECT_DELAYS_MS[recent ? spent.attempts : 0];
-  });
+  const [reconnecting, setReconnecting] = useState(false);
   const latest = useRef(retry);
   latest.current = retry;
   useEffect(() => {
-    if (!enabled) {
+    if (openedOffline || !isNetworkFailure(error)) {
+      setReconnecting(false);
       return;
     }
-    const cancel =
-      delay === undefined
-        ? null
-        : dependencies.after(delay, () => {
-            const spent = dependencies.ledger.current;
-            const page = dependencies.page();
-            const recent = spent !== null && spent.page === page && dependencies.now() - spent.at < RECONNECT_WINDOW_MS;
-            dependencies.ledger.current = { page, attempts: recent ? spent.attempts + 1 : 1, at: dependencies.now() };
-            latest.current();
-          });
-    const unwake = dependencies.wake(() => {
+    const page = dependencies.page();
+    const delay = RECONNECT_DELAYS_MS[spentAttempts(dependencies, page)];
+    let cancel: (() => void) | null = null;
+    let unwake: (() => void) | null = null;
+    const stop = (): void => {
       cancel?.();
-      latest.current();
-    });
-    return () => {
-      cancel?.();
-      unwake();
+      unwake?.();
+      cancel = null;
+      unwake = null;
     };
-  }, [dependencies, enabled, delay]);
-  return enabled && delay !== undefined;
+    const fire = (): void => {
+      stop();
+      setReconnecting(false);
+      dependencies.ledger.current = { page, attempts: spentAttempts(dependencies, page) + 1, at: dependencies.now() };
+      latest.current();
+    };
+    cancel = delay === undefined ? null : dependencies.after(delay, fire);
+    unwake = dependencies.wake(fire);
+    setReconnecting(delay !== undefined);
+    return stop;
+  }, [dependencies, error, openedOffline]);
+  return reconnecting;
 }
 
 /**
@@ -191,7 +208,7 @@ export function ErrorPanel({
   const digest = errorDigest(error);
   const offline = useRetryWhenOnline(retry, connectivity);
   const [openedOffline] = useState(offline);
-  const reconnecting = useRetryAfterNetworkFailure(retry, !openedOffline && isNetworkFailure(error), reconnect);
+  const reconnecting = useRetryAfterNetworkFailure(retry, error, openedOffline, reconnect);
   return (
     <>
       <PaneHeader title={offline ? "No internet connection" : "Something went wrong"} />

@@ -190,16 +190,22 @@ describe("errorDigest", () => {
 });
 
 /**
- * A page that fails every time it loads, as Next's boundary does it: `retry` resets the boundary, which unmounts
- * the panel, and the segment throwing again mounts a fresh one with none of the last one's state.
+ * A page that fails every time it loads. `retry` runs in a transition, so Next usually keeps this panel mounted and
+ * hands it the new error; after a navigation, `remount` stands for the boundary mounting a fresh panel instead, with
+ * none of the last one's state. Every failure is a new error object, as every refresh is a new Flight response.
  */
-function brokenPage(error: unknown, reconnect: ReconnectDependencies): { retries: () => number } {
+function brokenPage(reconnect: ReconnectDependencies, { remount = false } = {}): { retries: () => number } {
   let retries = 0;
-  let mounted = render(<ErrorPanel error={error} retry={retry} reconnect={reconnect} />);
+  const panel = () => <ErrorPanel error={cutMidStream()} retry={retry} reconnect={reconnect} />;
+  let mounted = render(panel());
   function retry(): void {
     retries++;
-    mounted.unmount();
-    mounted = render(<ErrorPanel error={error} retry={retry} reconnect={reconnect} />);
+    if (remount) {
+      mounted.unmount();
+      mounted = render(panel());
+    } else {
+      mounted.rerender(panel());
+    }
   }
   return { retries: () => retries };
 }
@@ -222,7 +228,7 @@ describe("ErrorPanel after a network failure the browser did not notice", () => 
 
   it("should back off and then stop, behaving as for any other error, when every retry fails", async () => {
     const reconnect = fakeReconnect();
-    const page = brokenPage(cutMidStream(), reconnect);
+    const page = brokenPage(reconnect);
 
     await reconnect.elapse();
     expect(reconnect.waiting()).toEqual([3_000]);
@@ -234,9 +240,44 @@ describe("ErrorPanel after a network failure the browser did not notice", () => 
     expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
   });
 
+  it("should back off and then stop the same way when each failed retry mounts a fresh panel", async () => {
+    const reconnect = fakeReconnect();
+    const page = brokenPage(reconnect, { remount: true });
+
+    await reconnect.elapse();
+    expect(reconnect.waiting()).toEqual([3_000]);
+    await reconnect.elapse();
+
+    expect(page.retries()).toBe(2);
+    expect(reconnect.waiting()).toEqual([]);
+    expect(screen.getByRole("alert").textContent).not.toContain("Reconnecting…");
+  });
+
+  it("should stop saying it is reconnecting and stop listening once its retry is under way", async () => {
+    const retry = vi.fn();
+    const reconnect = fakeReconnect();
+    render(<ErrorPanel error={cutMidStream()} retry={retry} reconnect={reconnect} />);
+
+    await reconnect.elapse();
+    await reconnect.wake.fire();
+
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(reconnect.wake.listening()).toBe(0);
+    expect(screen.getByRole("alert").textContent).not.toContain("Reconnecting…");
+  });
+
+  it("should count a retry the network's return started as one of the attempts", async () => {
+    const reconnect = fakeReconnect();
+    brokenPage(reconnect);
+
+    await reconnect.wake.fire();
+
+    expect(reconnect.waiting()).toEqual([3_000]);
+  });
+
   it("should start the attempts again when the page fails long after the last automatic retry", async () => {
     const reconnect = fakeReconnect();
-    brokenPage(cutMidStream(), reconnect);
+    brokenPage(reconnect);
     await reconnect.elapse();
     await reconnect.elapse();
     cleanup();
@@ -249,7 +290,7 @@ describe("ErrorPanel after a network failure the browser did not notice", () => 
 
   it("should give another page attempts of its own", async () => {
     const reconnect = fakeReconnect();
-    brokenPage(cutMidStream(), reconnect);
+    brokenPage(reconnect);
     await reconnect.elapse();
     await reconnect.elapse();
     cleanup();
@@ -272,7 +313,7 @@ describe("ErrorPanel after a network failure the browser did not notice", () => 
 
   it("should still retry when the network comes back after the attempts are spent", async () => {
     const reconnect = fakeReconnect();
-    const page = brokenPage(cutMidStream(), reconnect);
+    const page = brokenPage(reconnect);
     await reconnect.elapse();
     await reconnect.elapse();
 
@@ -324,7 +365,14 @@ describe("ErrorPanel after a network failure the browser did not notice", () => 
 
 describe("isNetworkFailure", () => {
   it("should recognise each browser's network-failure TypeError", () => {
-    for (const message of ["network error", "Failed to fetch", "NetworkError when attempting to fetch resource.", "Load failed"]) {
+    for (const message of [
+      "network error",
+      "Failed to fetch",
+      "NetworkError when attempting to fetch resource.",
+      "Error in input stream",
+      "Load failed",
+      "The network connection was lost."
+    ]) {
       expect(isNetworkFailure(new TypeError(message))).toBe(true);
     }
   });
