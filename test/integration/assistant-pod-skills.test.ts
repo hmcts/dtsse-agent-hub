@@ -7,7 +7,7 @@ import { podSkills } from "../../src/assistant/views.ts";
 import { claimVirtualAgents, restartVirtualAgent, type VirtualAgentRow } from "../../src/virtual-agents/store.ts";
 import { insertUser, person, prisma, resetDatabase } from "./database.ts";
 
-/** Which of a pod's sessions `podSkills` reads the skills of, which is what decides whether the briefing is offered. */
+/** Which of a pod's sessions `podSkills` reads the skills of, which is what the new chat's "/" list offers. */
 
 const ALICE = person("alice");
 

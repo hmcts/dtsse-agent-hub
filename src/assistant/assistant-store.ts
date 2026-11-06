@@ -24,6 +24,15 @@ export async function findAssistantWithClaims(db: Database, ownerOid: string): P
   return row === null || assistant === undefined ? undefined : { assistant, claims: { clientFeatures: row.clientFeatures, agent: row.agent } };
 }
 
+/** The client-features claims of the assistant's pod, for a gate on `podSupports`; none for a virtual agent not found. */
+export async function assistantClaims(db: Database, virtualAgentId: string): Promise<PodClaims> {
+  const row = await db.virtualAgent.findUnique({
+    where: { id: virtualAgentId },
+    select: { clientFeatures: true, agent: { select: { clientFeatures: true } } }
+  });
+  return row ?? { clientFeatures: null, agent: null };
+}
+
 /** `assistant`, or `assistant-2` and on when an earlier one of that name is still being deleted. */
 async function freeName(db: Database, ownerOid: string): Promise<string> {
   const taken = new Set((await db.virtualAgent.findMany({ where: { ownerOid }, select: { name: true } })).map((row) => row.name));

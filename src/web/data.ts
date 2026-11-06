@@ -2,7 +2,7 @@ import "server-only";
 import { canManageVirtualAgent, canOwnerReadCredential, canReadDeck, canReadMessage, isOwner } from "../access/rules.ts";
 import type { Skill } from "../agents/skills.ts";
 import { isUuid } from "../agents/store.ts";
-import { ensureAssistant, findAssistant } from "../assistant/assistant-store.ts";
+import { assistantClaims, ensureAssistant, findAssistant } from "../assistant/assistant-store.ts";
 import { offersBriefing } from "../assistant/briefing.ts";
 import { conversationAgent, findConversation } from "../assistant/conversation-store.ts";
 import { isSha256 } from "../assistant/deck.ts";
@@ -240,8 +240,8 @@ export interface AssistantHome {
   welsh: boolean;
   /**
    * The sidebar offers the morning briefing (`offersBriefing`): the `microsoft` credential is stored and the pod's
-   * skills (`podSkills`) include the one that runs it. A connection Microsoft then refuses is the briefing's to report,
-   * in its own section.
+   * client claims `morning-briefing` (`assistantClaims`). A connection Microsoft then refuses is the briefing's to
+   * report, in its own section.
    */
   briefing: boolean;
   /** The pod's skills (`podSkills`), which the new chat offers on "/" before it has a session of its own to ask. */
@@ -293,10 +293,11 @@ function pluginSettings(assistant: { plugins: string[] }): AssistantHome["plugin
  */
 export async function openAssistant(viewer: Viewer): Promise<AssistantHome> {
   const assistant = await ensureAssistant(prisma, viewer);
-  const [credentials, conversations, skills] = await Promise.all([
+  const [credentials, conversations, skills, claims] = await Promise.all([
     credentialSettings(viewer),
     conversationGroups(prisma, viewer.oid),
-    podSkills(prisma, assistant)
+    podSkills(prisma, assistant),
+    assistantClaims(prisma, assistant.id)
   ]);
   const stored = storedKinds(credentials);
   const summary = await assistantSummary(prisma, assistant, stored);
@@ -306,7 +307,7 @@ export async function openAssistant(viewer: Viewer): Promise<AssistantHome> {
     conversations,
     plugins: pluginSettings(assistant),
     welsh: hasWelshPlugin(assistant),
-    briefing: offersBriefing(stored, skills),
+    briefing: offersBriefing(stored, claims),
     skills,
     chat: chatGateOf(summary.toChat, credentials, stored)
   };
