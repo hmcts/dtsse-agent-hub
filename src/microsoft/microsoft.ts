@@ -145,8 +145,14 @@ export function connectOutcome(error: string): ConnectOutcome {
   return error === "access_denied" ? "cancelled" : "failed";
 }
 
-/** The address a connect returns to when it ended without a connection: the page it began on, saying how. */
-export function withConnectOutcome(returnTo: string, outcome: ConnectOutcome): string {
+/**
+ * The address a connect returns to when it ended without a connection: the page it began on, saying how. A connect
+ * `canConnectMicrosoft` refused has no outcome and says nothing, since `MICROSOFT_UNAVAILABLE` is already on the page.
+ */
+export function withConnectOutcome(returnTo: string, outcome?: ConnectOutcome): string {
+  if (outcome === undefined) {
+    return returnTo;
+  }
   const [path, query = ""] = returnTo.split("?", 2) as [string, string?];
   const search = new URLSearchParams(query);
   search.set(CONNECT_OUTCOME_PARAMETER, outcome);

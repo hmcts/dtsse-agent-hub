@@ -100,6 +100,10 @@ describe("connect outcomes", () => {
     expect(withConnectOutcome("/assistant", "failed")).toBe("/assistant?microsoft=failed");
   });
 
+  it("should return the settings address unchanged when a refused connect has no outcome", () => {
+    expect(withConnectOutcome("/assistant?settings=connections")).toBe("/assistant?settings=connections");
+  });
+
   it("should know only the two outcomes it words", () => {
     expect(isConnectOutcome("cancelled")).toBe(true);
     expect(isConnectOutcome("failed")).toBe(true);

@@ -122,42 +122,4 @@ describe("the callback completing a sign-in", () => {
 
     expect(deleteCredential).not.toHaveBeenCalled();
   });
-
-  it("should not touch the credential store when a person signing in without the AI Gateway role has no Microsoft 365 connection", async () => {
-    const response = await signIn(false);
-
-    expect(response.headers.get("location")).toBe("/assistant");
-    expect(credentialVersion).toHaveBeenCalledWith({}, "an-oid", "microsoft");
-    expect(credentialBackend).not.toHaveBeenCalled();
-    expect(deleteCredential).not.toHaveBeenCalled();
-  });
-
-  it("should still sign the person in, and log why, when whether they have a Microsoft 365 connection cannot be read", async () => {
-    credentialVersion.mockRejectedValue(new Error("the database is unavailable"));
-    const response = await signIn(false);
-
-    expect(response.headers.get("location")).toBe("/assistant");
-    expect(deleteCredential).not.toHaveBeenCalled();
-    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("the database is unavailable"));
-  });
-
-  it("should still sign the person in, and log why, when their Microsoft 365 connection cannot be deleted", async () => {
-    credentialVersion.mockResolvedValue(new Date());
-    deleteCredential.mockRejectedValue(new Error("Key Vault is unavailable"));
-    const response = await signIn(false);
-
-    expect(response.headers.get("location")).toBe("/assistant");
-    expect(response.headers.get("set-cookie")).toContain(`${SESSION_COOKIE}=`);
-    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("Key Vault is unavailable"));
-  });
-
-  it("should still sign the person in when the hub has no credential store to delete from", async () => {
-    credentialVersion.mockResolvedValue(new Date());
-    credentialBackend.mockReturnValueOnce({ available: false, reason: "no credential store is configured" });
-    const response = await signIn(false);
-
-    expect(response.headers.get("location")).toBe("/assistant");
-    expect(deleteCredential).not.toHaveBeenCalled();
-    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("no credential store is configured"));
-  });
 });

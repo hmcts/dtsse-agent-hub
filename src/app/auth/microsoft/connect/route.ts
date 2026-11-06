@@ -1,12 +1,11 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { canConnectMicrosoft } from "@/access/rules";
 import { signInCookie } from "@/auth/cookies";
 import { authorizationUrl, beginSignIn, sealSignIn } from "@/auth/entra";
 import { safeReturnTo, sameOriginPost } from "@/auth/guard";
 import { redirectTo } from "@/auth/redirect";
 import { readSession, SESSION_COOKIE } from "@/auth/session";
 import { authRequired, authSettings } from "@/auth/settings";
-import { modelRouteFor } from "@/viewer/identity";
+import { mayConnectMicrosoft } from "@/microsoft/sign-in";
 import { assistantSettingsPath } from "@/web/home";
 
 export const dynamic = "force-dynamic";
@@ -41,7 +40,7 @@ export async function POST(request: NextRequest): Promise<Response> {
   if (session === undefined) {
     return redirectAfterPost(`/auth/login?redirect=${encodeURIComponent(returnTo)}`);
   }
-  if (!canConnectMicrosoft(modelRouteFor(session.aiGateway))) {
+  if (!mayConnectMicrosoft(session)) {
     return redirectAfterPost(returnTo);
   }
   const signIn = beginSignIn(returnTo, "microsoft");

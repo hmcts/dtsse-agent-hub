@@ -1,5 +1,4 @@
 import type { NextRequest } from "next/server";
-import { canConnectMicrosoft } from "@/access/rules";
 import { clearedSignInCookie, SIGN_IN_COOKIE, sessionCookie } from "@/auth/cookies";
 import { completeMicrosoftConnect, completeSignIn, readSignIn, SignInFailed, type SignInState } from "@/auth/entra";
 import { HOME, safeReturnTo } from "@/auth/guard";
@@ -7,11 +6,11 @@ import { redirectTo } from "@/auth/redirect";
 import { readSession, SESSION_COOKIE, sealSession } from "@/auth/session";
 import { type AuthSettings, authRequired, authSettings } from "@/auth/settings";
 import { credentialBackend } from "@/credentials/backend";
-import { credentialVersion, deleteCredential, putCredential } from "@/credentials/store";
+import { putCredential } from "@/credentials/store";
 import { type ConnectOutcome, connectOutcome, serialiseSignIn, withConnectOutcome } from "@/microsoft/microsoft";
+import { mayCompleteMicrosoftConnect, removeRefusedMicrosoftConnection } from "@/microsoft/sign-in";
 import { prisma } from "@/store/prisma";
 import { upsertUser } from "@/users/store";
-import { modelRouteFor } from "@/viewer/identity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -51,9 +50,7 @@ export async function GET(request: NextRequest): Promise<Response> {
   }
 
   await upsertUser(prisma, session);
-  if (!canConnectMicrosoft(modelRouteFor(session.aiGateway))) {
-    await removeMicrosoftConnection(session);
-  }
+  await removeRefusedMicrosoftConnection(prisma, session);
 
   console.info(`${session.name} signed in`);
   const response = redirectTo(safeReturnTo(signIn.returnTo));
@@ -81,9 +78,7 @@ async function connectMicrosoft(request: NextRequest, settings: AuthSettings, ca
     console.warn("a Microsoft 365 connection came back with nobody signed in, so it was not kept");
     return redirectTo(`/auth/login?redirect=${encodeURIComponent(returnTo)}`);
   }
-  // Before the code is exchanged, so someone `canConnectMicrosoft` refuses is never given a refresh token to keep.
-  if (!canConnectMicrosoft(modelRouteFor(session.aiGateway))) {
-    console.warn(`${session.name} is not an AI Gateway user, so their Microsoft 365 connection was not kept`);
+  if (!mayCompleteMicrosoftConnect(session)) {
     return connectEnded(returnTo);
   }
   try {
@@ -110,32 +105,11 @@ async function connectMicrosoft(request: NextRequest, settings: AuthSettings, ca
 }
 
 /**
- * Deletes the Microsoft 365 connection of someone signing in without the role `canConnectMicrosoft` asks for, as
- * Disconnect does, so the connection does not outlive the role. Someone with no connection row costs no trip to
- * the credential store. The sign-in goes ahead whatever happens here: a
- * connection left behind is deleted at their next sign-in, and is no reason to keep them out of the hub.
- */
-async function removeMicrosoftConnection(session: { oid: string; name: string }): Promise<void> {
-  try {
-    if ((await credentialVersion(prisma, session.oid, "microsoft")) === undefined) {
-      return;
-    }
-    const backend = credentialBackend(prisma);
-    if (!backend.available) {
-      throw new Error(backend.reason);
-    }
-    await deleteCredential(prisma, backend.store, { actorOid: session.oid, ownerOid: session.oid, kind: "microsoft" });
-  } catch (failure) {
-    console.warn(`${session.name} signed in without the AI Gateway role, and their Microsoft 365 connection could not be deleted: ${String(failure)}`);
-  }
-}
-
-/**
  * Back to where Connect was pressed, saying how it ended, with the sign-in cookie cleared so it cannot be replayed. A
  * connect `canConnectMicrosoft` refuses says nothing: the row already says why it offers no Connect.
  */
 function connectEnded(returnTo: string, outcome?: ConnectOutcome): Response {
-  const response = redirectTo(outcome === undefined ? returnTo : withConnectOutcome(returnTo, outcome));
+  const response = redirectTo(withConnectOutcome(returnTo, outcome));
   response.headers.append("set-cookie", clearedSignInCookie());
   return response;
 }
