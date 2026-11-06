@@ -46,7 +46,7 @@
     "@prisma/adapter-pg": "7.10.1",
     "@prisma/client": "7.10.1",
     "jose": "6.2.15",
-    "next": "16.4.3",
+    "next": "16.4.5",
     "openid-client": "6.8.9",
     "pg": "8.23.1",
     "react": "19.3.1",
