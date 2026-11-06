@@ -28,6 +28,7 @@ export type ClientFeature =
   | "lookups"
   | "memory-anon"
   | "model-alias"
+  | "morning-briefing"
   | "plain-prompt"
   | "slides-always-on"
   | "stop"

@@ -19,7 +19,6 @@ import * as sessionsRoute from "../../src/app/api/virtual/[virtualAgentId]/sessi
 import * as statusRoute from "../../src/app/api/virtual/[virtualAgentId]/status/route.ts";
 import { writeArtefact } from "../../src/assistant/artefact-store.ts";
 import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
-import { BRIEFING_SKILL } from "../../src/assistant/briefing.ts";
 import { CONFLUENCE_EXPORT_TIMEOUT_MS } from "../../src/assistant/confluence.ts";
 import {
   createConversation,
@@ -47,7 +46,7 @@ import { appendEntries } from "../../src/transcripts/store.ts";
 import { MAX_VIRTUAL_AGENTS_PER_USER } from "../../src/virtual-agents/limits.ts";
 import { type ClaimedVirtualAgent, type ClaimResult, createVirtualAgent, setDesired } from "../../src/virtual-agents/store.ts";
 import { sweepVirtualAgents } from "../../src/virtual-agents/sweep.ts";
-import { form } from "./assistant-pod.ts";
+import { form, podFixture } from "./assistant-pod.ts";
 import { assistantSuite } from "./assistant-suite.ts";
 import { insertUser, type Person, prisma } from "./database.ts";
 import { call, jsonOf } from "./routes.ts";
@@ -308,26 +307,13 @@ describe("the person's assistant", () => {
     }
   );
 
-  // Microsoft 365 stored and the skill reported either way, so the viewer's route is all that differs.
+  // Microsoft 365 stored and the briefing claimed either way, so the viewer's route is all that differs.
   it.each([
     ["gateway", true],
     ["own-licence", false]
   ] as const)("should offer the morning briefing only to an AI Gateway user when the viewer is on %s", async (modelRoute, offered) => {
-    await insertUser(ALICE);
+    await podFixture(["morning-briefing"])(ALICE);
     const viewer = { ...VIEWER, modelRoute };
-    const assistant = await ensureAssistant(prisma, viewer);
-    await prisma.virtualAgent.update({ where: { id: assistant.id }, data: { launchTokenIssuedAt: new Date(Date.now() - 60 * 60_000) } });
-    await prisma.agent.create({
-      data: {
-        ownerOid: ALICE.oid,
-        sessionId: "briefing-session",
-        name: assistant.name,
-        status: "idle",
-        virtualAgentId: assistant.id,
-        skills: [{ name: BRIEFING_SKILL, description: "The day ahead" }],
-        lastHeartbeatAt: new Date()
-      }
-    });
     const backend = credentialBackend(prisma);
     if (!backend.available) {
       throw new Error(backend.reason);

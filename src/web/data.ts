@@ -2,7 +2,7 @@ import "server-only";
 import { canConnectMicrosoft, canManageVirtualAgent, canOwnerReadCredential, canReadDeck, canReadMessage, isOwner } from "../access/rules.ts";
 import type { Skill } from "../agents/skills.ts";
 import { isUuid } from "../agents/store.ts";
-import { ensureAssistant, findAssistant } from "../assistant/assistant-store.ts";
+import { ensureAssistantWithClaims, findAssistant } from "../assistant/assistant-store.ts";
 import { offersBriefing } from "../assistant/briefing.ts";
 import { conversationAgent, findConversation } from "../assistant/conversation-store.ts";
 import { isSha256 } from "../assistant/deck.ts";
@@ -240,8 +240,8 @@ export interface AssistantHome {
   welsh: boolean;
   /**
    * The sidebar offers the morning briefing when the viewer may connect Microsoft 365 on their own route
-   * (`canConnectMicrosoft`) and `offersBriefing` holds: the `microsoft` credential is stored and the pod's skills
-   * (`podSkills`) include the one that runs it. A connection Microsoft then refuses is the briefing's to report, in its
+   * (`canConnectMicrosoft`) and `offersBriefing` holds: the `microsoft` credential is stored and the pod's client
+   * claims `morning-briefing` (`podSupports`). A connection Microsoft then refuses is the briefing's to report, in its
    * own section.
    */
   briefing: boolean;
@@ -293,7 +293,7 @@ function pluginSettings(assistant: { plugins: string[] }): AssistantHome["plugin
  * warming up while they sign in or type; what it still needs from them; and their conversations.
  */
 export async function openAssistant(viewer: Viewer): Promise<AssistantHome> {
-  const assistant = await ensureAssistant(prisma, viewer);
+  const { assistant, claims } = await ensureAssistantWithClaims(prisma, viewer);
   const [credentials, conversations, skills] = await Promise.all([
     credentialSettings(viewer),
     conversationGroups(prisma, viewer.oid),
@@ -307,7 +307,7 @@ export async function openAssistant(viewer: Viewer): Promise<AssistantHome> {
     conversations,
     plugins: pluginSettings(assistant),
     welsh: hasWelshPlugin(assistant),
-    briefing: canConnectMicrosoft(viewer.modelRoute) && offersBriefing(stored, skills),
+    briefing: canConnectMicrosoft(viewer.modelRoute) && offersBriefing(stored, claims),
     skills,
     chat: chatGateOf(summary.toChat, credentials, stored)
   };
