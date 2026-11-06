@@ -439,7 +439,7 @@ describe("AssistantShell", () => {
   });
 
   it("should warn on the cog when a sign-in the viewer has to act on is missing", () => {
-    render(shell({ connections: { route: "own-licence", microsoftConnectable: true, kinds: ["github"], statuses: [], logins: [], unavailable: null } }));
+    render(shell({ connections: { route: "own-licence", kinds: ["github"], statuses: [], logins: [], unavailable: null } }));
 
     expect(screen.getByRole("button", { name: "Settings. GitHub needs your attention" })).toBeTruthy();
   });

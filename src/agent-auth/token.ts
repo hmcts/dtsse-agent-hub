@@ -1,5 +1,4 @@
 import { createRemoteJWKSet, errors, type JWTVerifyGetKey, jwtVerify } from "jose";
-import { hasAiGatewayRole } from "../auth/entra.ts";
 import type { Identity } from "../users/identity.ts";
 import { type AgentAuthSettings, jwksUrl } from "./settings.ts";
 
@@ -111,16 +110,9 @@ export interface EntraClaims {
  * `scp` must be present: only a delegated token, issued to a signed-in person, carries it. An app-only
  * (client-credentials) token has `roles` instead, and an ID token has neither, so neither acts as the person whose
  * `oid` it names. Which scope is not checked, because the registration's scope names are not this service's to fix.
- *
- * `aiGateway` is whether `roles` carries `AIGateway.User`. The token is for this app, the same registration the web
- * sign-in is, so its `roles` are the person's app roles here, from the same group assignment the id token's come from.
  */
-export async function verifyAgentToken(
-  token: string,
-  settings: AgentAuthSettings,
-  keys: JWTVerifyGetKey = tenantKeys(settings.tenantId)
-): Promise<Identity & { aiGateway: boolean }> {
-  const { payload, tid, oid, scp, roles } = await verifyEntraToken(token, settings, keys);
+export async function verifyAgentToken(token: string, settings: AgentAuthSettings, keys: JWTVerifyGetKey = tenantKeys(settings.tenantId)): Promise<Identity> {
+  const { payload, tid, oid, scp } = await verifyEntraToken(token, settings, keys);
   if (scp === undefined) {
     throw new AgentAuthFailed("the bearer token is not a delegated access token: it has no scp");
   }
@@ -129,7 +121,6 @@ export async function verifyAgentToken(
     oid,
     tid,
     name: claim(payload, "name") ?? email ?? oid,
-    ...(email === undefined ? {} : { email }),
-    aiGateway: hasAiGatewayRole(roles)
+    ...(email === undefined ? {} : { email })
   };
 }

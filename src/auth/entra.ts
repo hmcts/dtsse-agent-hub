@@ -121,7 +121,7 @@ export async function completeSignIn(settings: AuthSettings, currentUrl: URL, si
  */
 const AI_GATEWAY_ROLE = "AIGateway.User";
 
-export function hasAiGatewayRole(roles: unknown): boolean {
+function hasAiGatewayRole(roles: unknown): boolean {
   return Array.isArray(roles) && roles.includes(AI_GATEWAY_ROLE);
 }
 

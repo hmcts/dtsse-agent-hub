@@ -45,17 +45,8 @@ describe("verifyAgentToken", () => {
       oid: CLAIMS.oid,
       tid: TENANT,
       name: "Alice Smith",
-      email: "alice.smith@justice.gov.uk",
-      aiGateway: false
+      email: "alice.smith@justice.gov.uk"
     });
-  });
-
-  it("should say the caller is an AI Gateway user when the token's roles carry AIGateway.User", async () => {
-    await expect(verifyAgentToken(await token({ roles: ["Other.Role", "AIGateway.User"] }), SETTINGS, keys)).resolves.toMatchObject({ aiGateway: true });
-  });
-
-  it("should say the caller is not an AI Gateway user when the token's roles carry other roles only", async () => {
-    await expect(verifyAgentToken(await token({ roles: ["Other.Role"] }), SETTINGS, keys)).resolves.toMatchObject({ aiGateway: false });
   });
 
   it("should accept the application id URI as the audience as well as the client id", async () => {

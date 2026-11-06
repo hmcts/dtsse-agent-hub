@@ -83,11 +83,11 @@ describe("POST /auth/microsoft/connect", () => {
     expect((await connect({ site: null })).status).toBe(303);
   });
 
-  it("should send someone who is not an AI Gateway user back to settings saying it is unavailable, starting nothing", async () => {
+  it("should send someone back to settings, which says why, starting nothing, when they are not an AI Gateway user", async () => {
     const response = await connect({ aiGateway: false });
 
     expect(response.status).toBe(303);
-    expect(response.headers.get("location")).toBe("/assistant?settings=connections&microsoft=unavailable");
+    expect(response.headers.get("location")).toBe("/assistant?settings=connections");
     expect(authorizationUrl).not.toHaveBeenCalled();
     expect(response.headers.get("set-cookie")).toBeNull();
   });

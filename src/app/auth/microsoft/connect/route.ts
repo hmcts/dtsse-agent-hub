@@ -6,7 +6,6 @@ import { safeReturnTo, sameOriginPost } from "@/auth/guard";
 import { redirectTo } from "@/auth/redirect";
 import { readSession, SESSION_COOKIE } from "@/auth/session";
 import { authRequired, authSettings } from "@/auth/settings";
-import { withConnectOutcome } from "@/microsoft/microsoft";
 import { modelRouteFor } from "@/viewer/identity";
 import { assistantSettingsPath } from "@/web/home";
 
@@ -43,7 +42,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     return redirectAfterPost(`/auth/login?redirect=${encodeURIComponent(returnTo)}`);
   }
   if (!canConnectMicrosoft(modelRouteFor(session.aiGateway))) {
-    return redirectAfterPost(withConnectOutcome(returnTo, "unavailable"));
+    return redirectAfterPost(returnTo);
   }
   const signIn = beginSignIn(returnTo, "microsoft");
   // 303, so the browser follows it with a GET: a 307 would send the form on to Entra.

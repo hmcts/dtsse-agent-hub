@@ -798,7 +798,7 @@ describe("connectionsData", () => {
   };
 
   it("should ask for the needed sign-ins before the optional ones when the credentials are readable", () => {
-    const data = connectionsData(assistant, { modelRoute: "gateway", available: true, statuses: [status("github", true)] });
+    const data = connectionsData(assistant, { available: true, statuses: [status("github", true)] });
 
     expect(data.kinds).toEqual(["github", "azure", "claude", "jenkins", "atlassian"]);
     expect(data.statuses).toEqual([status("github", true)]);
@@ -808,20 +808,13 @@ describe("connectionsData", () => {
   it("should carry the sign-ins the assistant has relayed when there are any", () => {
     const pending = login("github", "pending");
 
-    const data = connectionsData({ ...assistant, logins: [pending] }, { modelRoute: "gateway", available: true, statuses: [] });
+    const data = connectionsData({ ...assistant, logins: [pending] }, { available: true, statuses: [] });
 
     expect(data.logins).toEqual([pending]);
   });
 
-  it.each([
-    ["gateway", true],
-    ["own-licence", false]
-  ] as const)("should judge Microsoft 365 on the person's own route when they are on %s, whatever the assistant's", (modelRoute, connectable) => {
-    expect(connectionsData(assistant, { modelRoute, available: true, statuses: [] }).microsoftConnectable).toBe(connectable);
-  });
-
   it("should give no statuses and say why when the hub cannot read the person's credentials", () => {
-    const data = connectionsData(assistant, { modelRoute: "gateway", available: false, reason: "the credentials Key Vault is not configured" });
+    const data = connectionsData(assistant, { available: false, reason: "the credentials Key Vault is not configured" });
 
     expect(data.statuses).toEqual([]);
     expect(data.unavailable).toBe("the credentials Key Vault is not configured");
@@ -1104,7 +1097,6 @@ describe("inWords", () => {
 describe("microsoftConnection", () => {
   const data = (statuses: ConnectionsData["statuses"], unavailable: string | null = null): ConnectionsData => ({
     route: "gateway",
-    microsoftConnectable: true,
     kinds: [],
     statuses,
     logins: [],
@@ -1112,7 +1104,7 @@ describe("microsoftConnection", () => {
   });
 
   it("should offer Connect, coming back to the Connections section, when nothing is stored", () => {
-    expect(microsoftConnection(data([]))).toEqual({
+    expect(microsoftConnection(data([]), "gateway")).toEqual({
       stored: false,
       accountLabel: null,
       connectable: true,
@@ -1123,16 +1115,23 @@ describe("microsoftConnection", () => {
 
   it("should name the account when a connection is stored", () => {
     const status = { kind: "microsoft" as const, stored: true, accountLabel: "a.person@hmcts.net", updatedAt: "2026-12-01T09:00:00.000Z" };
-    expect(microsoftConnection(data([status]))).toMatchObject({ stored: true, accountLabel: "a.person@hmcts.net" });
+    expect(microsoftConnection(data([status]), "gateway")).toMatchObject({ stored: true, accountLabel: "a.person@hmcts.net" });
   });
 
-  it("should withhold Connect but keep the stored connection when the person may not connect Microsoft 365", () => {
+  it.each([
+    ["own-licence", "own-licence"],
+    ["not known", undefined]
+  ] as const)("should offer no Connect, whatever the assistant's route, when the viewer's own route is %s", (_, viewerRoute) => {
+    expect(microsoftConnection(data([]), viewerRoute)).toMatchObject({ connectable: false });
+  });
+
+  it("should keep the stored connection, for its Disconnect, when the viewer may not connect Microsoft 365", () => {
     const status = { kind: "microsoft" as const, stored: true, accountLabel: "a.person@hmcts.net", updatedAt: "2026-12-01T09:00:00.000Z" };
-    expect(microsoftConnection({ ...data([status]), microsoftConnectable: false })).toMatchObject({ stored: true, connectable: false });
+    expect(microsoftConnection(data([status]), "own-licence")).toMatchObject({ stored: true, connectable: false });
   });
 
   it("should say nothing when the hub cannot read the credentials", () => {
-    expect(microsoftConnection(data([], "no store"))).toBeNull();
-    expect(microsoftConnection(undefined)).toBeNull();
+    expect(microsoftConnection(data([], "no store"), "gateway")).toBeNull();
+    expect(microsoftConnection(undefined, "gateway")).toBeNull();
   });
 });

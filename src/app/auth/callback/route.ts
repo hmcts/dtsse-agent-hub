@@ -7,7 +7,7 @@ import { redirectTo } from "@/auth/redirect";
 import { readSession, SESSION_COOKIE, sealSession } from "@/auth/session";
 import { type AuthSettings, authRequired, authSettings } from "@/auth/settings";
 import { credentialBackend } from "@/credentials/backend";
-import { putCredential } from "@/credentials/store";
+import { credentialVersion, deleteCredential, putCredential } from "@/credentials/store";
 import { type ConnectOutcome, connectOutcome, serialiseSignIn, withConnectOutcome } from "@/microsoft/microsoft";
 import { prisma } from "@/store/prisma";
 import { upsertUser } from "@/users/store";
@@ -17,8 +17,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * Where Entra returns the person, and the only place a session is created. Failures are vague to the browser and
- * specific to the log.
+ * Where Entra returns the person, and the only place a session is created. A sign-in without the role
+ * `canConnectMicrosoft` asks for deletes any Microsoft 365 connection the person holds. Failures are vague to the
+ * browser and specific to the log.
  */
 export async function GET(request: NextRequest): Promise<Response> {
   if (!authRequired()) {
@@ -50,6 +51,9 @@ export async function GET(request: NextRequest): Promise<Response> {
   }
 
   await upsertUser(prisma, session);
+  if (!canConnectMicrosoft(modelRouteFor(session.aiGateway))) {
+    await removeMicrosoftConnection(session);
+  }
 
   console.info(`${session.name} signed in`);
   const response = redirectTo(safeReturnTo(signIn.returnTo));
@@ -80,7 +84,7 @@ async function connectMicrosoft(request: NextRequest, settings: AuthSettings, ca
   // Before the code is exchanged, so someone `canConnectMicrosoft` refuses is never given a refresh token to keep.
   if (!canConnectMicrosoft(modelRouteFor(session.aiGateway))) {
     console.warn(`${session.name} is not an AI Gateway user, so their Microsoft 365 connection was not kept`);
-    return connectEnded(returnTo, "unavailable");
+    return connectEnded(returnTo);
   }
   try {
     const connection = await completeMicrosoftConnect(settings, callbackUrl, signIn, session);
@@ -105,9 +109,33 @@ async function connectMicrosoft(request: NextRequest, settings: AuthSettings, ca
   return response;
 }
 
-/** Back to where Connect was pressed, saying how it ended, with the sign-in cookie cleared so it cannot be replayed. */
-function connectEnded(returnTo: string, outcome: ConnectOutcome): Response {
-  const response = redirectTo(withConnectOutcome(returnTo, outcome));
+/**
+ * Deletes the Microsoft 365 connection of someone signing in without the role `canConnectMicrosoft` asks for, as
+ * Disconnect does, so the connection does not outlive the role. Someone with no connection row costs no trip to
+ * the credential store. The sign-in goes ahead whatever happens here: a
+ * connection left behind is deleted at their next sign-in, and is no reason to keep them out of the hub.
+ */
+async function removeMicrosoftConnection(session: { oid: string; name: string }): Promise<void> {
+  try {
+    if ((await credentialVersion(prisma, session.oid, "microsoft")) === undefined) {
+      return;
+    }
+    const backend = credentialBackend(prisma);
+    if (!backend.available) {
+      throw new Error(backend.reason);
+    }
+    await deleteCredential(prisma, backend.store, { actorOid: session.oid, ownerOid: session.oid, kind: "microsoft" });
+  } catch (failure) {
+    console.warn(`${session.name} signed in without the AI Gateway role, and their Microsoft 365 connection could not be deleted: ${String(failure)}`);
+  }
+}
+
+/**
+ * Back to where Connect was pressed, saying how it ended, with the sign-in cookie cleared so it cannot be replayed. A
+ * connect `canConnectMicrosoft` refuses says nothing: the row already says why it offers no Connect.
+ */
+function connectEnded(returnTo: string, outcome?: ConnectOutcome): Response {
+  const response = redirectTo(outcome === undefined ? returnTo : withConnectOutcome(returnTo, outcome));
   response.headers.append("set-cookie", clearedSignInCookie());
   return response;
 }

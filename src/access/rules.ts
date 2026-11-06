@@ -21,7 +21,7 @@ import type { ModelRoute } from "../viewer/identity.ts";
  * `replyRoute`). A launch token acts as its owner only for its own virtual agent and the agents its sessions
  * registered. Only its owner saves, replaces or deletes a credential (`isOwner`), and its value is write-only for
  * them except the kinds `canOwnerReadCredential` allows; which kinds a pod may store is
- * `canVirtualAgentStoreCredential`. Microsoft 365 is for people on the AI Gateway alone (`canConnectMicrosoft`).
+ * `canVirtualAgentStoreCredential`. Only people on the AI Gateway may connect Microsoft 365 (`canConnectMicrosoft`).
  */
 
 export interface AgentRef {
@@ -234,15 +234,15 @@ export function canPodReadCredential(kind: string): boolean {
 }
 
 /**
- * Whether Microsoft 365 is for someone: people on the HMCTS AI Gateway alone, which is the `gateway` route. It decides
- * both whether they may connect it and whether the hub mints a Graph token from a connection they already hold, so a
- * connection made before the role was taken away stops working rather than outliving it. Disconnecting is never
- * refused: a connection the person may no longer use is still theirs to delete.
+ * Whether someone may connect Microsoft 365: people on the HMCTS AI Gateway alone, which is the `gateway` route of
+ * their web session, from their `AIGateway.User` role when they signed in (`modelRouteFor`). Settings offers Connect,
+ * the connect sign-in starts and its callback keeps a connection only for them, and the sidebar offers the morning
+ * briefing only to them.
  *
- * A route rather than the role, because a route is what each caller already has: a web session's is the viewer's own,
- * from their `AIGateway.User` role at sign-in (`modelRouteFor`); a person's bearer token's follows that role in its
- * `roles`; and a pod's is its virtual agent's `model_route`, fixed when the agent was made, so a pod follows the role
- * only once its owner replaces it.
+ * Someone who signs in without the role has any connection they hold deleted then, as Disconnect deletes it. Until
+ * that next sign-in, up to a session's eight hours away, a connection they already hold keeps working: the token
+ * routes, for a pod and at the command line alike, ask only that a connection is stored.
+ * Disconnecting is never refused.
  */
 export function canConnectMicrosoft(route: ModelRoute): boolean {
   return route === "gateway";

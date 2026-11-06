@@ -34,6 +34,7 @@ import {
 } from "@/components/assistant/useSettingsDraft";
 import { useEndSession } from "@/components/live/HubStream";
 import { sessionEnded } from "@/components/live/session";
+import type { ModelRoute } from "@/viewer/identity";
 import type { ActionResult } from "@/web/action";
 import { SETTINGS_PARAMETER, withoutSettingsParameter } from "@/web/home";
 
@@ -1006,6 +1007,7 @@ function Dialog({
 export function AssistantSettings({
   theme = "system",
   connections: data,
+  viewerRoute,
   connect,
   now: from,
   plugins,
@@ -1022,6 +1024,8 @@ export function AssistantSettings({
 }: {
   theme?: Theme;
   connections?: ConnectionsData;
+  /** The viewer's own model route, which Microsoft 365's Connect is judged on; without it Connect is not offered. */
+  viewerRoute?: ModelRoute;
   /** How a row connects a sign-in made on request; without it the rows only say where each stands. */
   connect?: AssistantConnect;
   /** The page's own clock, so the cog's name and badge are the same in the HTML as in the first render. */
@@ -1168,7 +1172,7 @@ export function AssistantSettings({
                 list,
                 access,
                 connect,
-                microsoft: microsoftConnection(data),
+                microsoft: microsoftConnection(data, viewerRoute),
                 route: data?.route ?? "own-licence",
                 unavailable: data?.unavailable ?? null,
                 warning,

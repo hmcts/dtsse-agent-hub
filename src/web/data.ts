@@ -239,9 +239,10 @@ export interface AssistantHome {
   /** Its assistant has the Welsh plugin ticked, so the sidebar offers the Welsh page; read from the row, not the offer. */
   welsh: boolean;
   /**
-   * The sidebar offers the morning briefing (`offersBriefing`): the `microsoft` credential is stored and the pod's
-   * skills (`podSkills`) include the one that runs it. A connection Microsoft then refuses is the briefing's to report,
-   * in its own section.
+   * The sidebar offers the morning briefing when the viewer may connect Microsoft 365 on their own route
+   * (`canConnectMicrosoft`) and `offersBriefing` holds: the `microsoft` credential is stored and the pod's skills
+   * (`podSkills`) include the one that runs it. A connection Microsoft then refuses is the briefing's to report, in its
+   * own section.
    */
   briefing: boolean;
   /** The pod's skills (`podSkills`), which the new chat offers on "/" before it has a session of its own to ask. */

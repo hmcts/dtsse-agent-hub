@@ -20,11 +20,6 @@ export interface ConnectionsData {
   kinds: CredentialKind[];
   statuses: CredentialStatus[];
   logins: LoginView[];
-  /**
-   * Whether the person may connect Microsoft 365 (`canConnectMicrosoft`), on their own route rather than this
-   * assistant's, since the connection is theirs and is judged on their sign-in.
-   */
-  microsoftConnectable: boolean;
   /** Why the hub cannot read their credentials, which is not the same as their having none. */
   unavailable: string | null;
 }
@@ -35,11 +30,10 @@ export interface ConnectionsData {
  */
 export function connectionsData(
   assistant: { modelRoute: ModelRoute; needed: CredentialKind[]; optional: CredentialKind[]; logins: LoginView[] },
-  credentials: ({ available: true; statuses: CredentialStatus[] } | { available: false; reason: string }) & { modelRoute: ModelRoute }
+  credentials: { available: true; statuses: CredentialStatus[] } | { available: false; reason: string }
 ): ConnectionsData {
   return {
     route: assistant.modelRoute,
-    microsoftConnectable: canConnectMicrosoft(credentials.modelRoute),
     kinds: [...assistant.needed, ...assistant.optional],
     statuses: credentials.available ? credentials.statuses : [],
     logins: assistant.logins,
@@ -352,7 +346,7 @@ function isModelCredential(route: ModelRoute, kind: CredentialKind): boolean {
  * not connected would be a row of wrong answers, and would raise a warning nobody can act on.
  */
 export function connections(
-  data: Omit<ConnectionsData, "microsoftConnectable"> | undefined,
+  data: ConnectionsData | undefined,
   checklist: (stored: boolean, login: LoginView | undefined, now: number) => ChecklistAnswer,
   now: number
 ): Connection[] {
@@ -675,7 +669,10 @@ export function signInPrompt(list: readonly Connection[]): ConnectionsPrompt | n
 export interface MicrosoftConnection {
   stored: boolean;
   accountLabel: string | null;
-  /** Whether Connect is offered. Disconnect is offered whatever this says, for a connection that is stored. */
+  /**
+   * Whether the viewer may connect Microsoft 365 (`canConnectMicrosoft`), and so is offered Connect. A connection that
+   * is stored keeps its Disconnect whatever this says.
+   */
   connectable: boolean;
   /** Where Connect posts: the hub's connect sign-in. */
   connectPath: string;
@@ -683,7 +680,11 @@ export interface MicrosoftConnection {
   returnTo: string;
 }
 
-export function microsoftConnection(data: ConnectionsData | undefined): MicrosoftConnection | null {
+/**
+ * `viewerRoute` is the viewer's own route rather than `data.route`, the assistant's: the connection is theirs and is
+ * judged on their sign-in. Without one nothing says they may connect, so Connect is not offered.
+ */
+export function microsoftConnection(data: ConnectionsData | undefined, viewerRoute: ModelRoute | undefined): MicrosoftConnection | null {
   if (data === undefined || data.unavailable !== null) {
     return null;
   }
@@ -691,7 +692,7 @@ export function microsoftConnection(data: ConnectionsData | undefined): Microsof
   return {
     stored: status?.stored === true,
     accountLabel: status?.accountLabel ?? null,
-    connectable: data.microsoftConnectable,
+    connectable: viewerRoute !== undefined && canConnectMicrosoft(viewerRoute),
     connectPath: CONNECT_PATH,
     returnTo: assistantSettingsPath("connections")
   };

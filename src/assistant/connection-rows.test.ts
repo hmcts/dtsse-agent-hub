@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { CredentialKind } from "../credentials/names.ts";
 import type { CredentialStatus } from "../credentials/store.ts";
 import type { ModelRoute } from "../viewer/identity.ts";
-import { connectionRows } from "./connection-rows.ts";
+import { connectionRows, MICROSOFT_ENDING } from "./connection-rows.ts";
 import { checklistState, connections, microsoftConnection, modelAccess } from "./connections.ts";
 import { savedCredentials } from "./saved-credentials.ts";
 
@@ -12,11 +12,17 @@ function status(kind: CredentialKind, accountLabel: string | null = null): Crede
   return { kind, stored: true, accountLabel, updatedAt: "2026-11-01T09:00:00.000Z" };
 }
 
-/** The rows a page would build for this route, these sign-ins and these stored credentials. */
-function rows(route: ModelRoute, kinds: CredentialKind[], stored: CredentialStatus[]) {
-  const data = { route, microsoftConnectable: true, kinds, statuses: stored, logins: [], unavailable: null };
+/** The rows a page would build for this route, these sign-ins and these stored credentials, for a viewer on `viewerRoute`. */
+function rows(route: ModelRoute, kinds: CredentialKind[], stored: CredentialStatus[], viewerRoute: ModelRoute = "gateway") {
+  const data = { route, kinds, statuses: stored, logins: [], unavailable: null };
   const list = connections(data, checklistState, NOW);
-  return connectionRows(list, modelAccess(route, list), savedCredentials(stored, route, route === "own-licence"), microsoftConnection(data), route);
+  return connectionRows(
+    list,
+    modelAccess(route, list),
+    savedCredentials(stored, route, route === "own-licence"),
+    microsoftConnection(data, viewerRoute),
+    route
+  );
 }
 
 describe("connectionRows", () => {
@@ -55,9 +61,28 @@ describe("connectionRows", () => {
     expect(listed.at(-1)).toMatchObject({ key: "microsoft", desc: "a.person@hmcts.net", state: "connected", saved: null, microsoft: { stored: true } });
   });
 
-  it("should list nothing when the hub cannot read the person's credentials", () => {
-    const data = { route: "own-licence" as const, microsoftConnectable: true, kinds: ["github" as const], statuses: [], logins: [], unavailable: "no store" };
+  it("should not show a stored connection as connected, and say it ends at the next sign-in, when the viewer may not connect Microsoft 365", () => {
+    const listed = rows("own-licence", ["github"], [status("github"), status("microsoft", "a.person@hmcts.net")], "own-licence");
 
-    expect(connectionRows(connections(data, checklistState, NOW), null, [], microsoftConnection(data), "own-licence")).toEqual([]);
+    expect(listed.at(-1)).toMatchObject({
+      key: "microsoft",
+      state: "waiting",
+      detail: MICROSOFT_ENDING,
+      microsoft: { stored: true, connectable: false }
+    });
+  });
+
+  it("should say Not connected when the viewer may not connect Microsoft 365 and holds no connection", () => {
+    expect(rows("own-licence", ["github"], [status("github")], "own-licence").at(-1)).toMatchObject({
+      key: "microsoft",
+      state: "waiting",
+      detail: "Not connected"
+    });
+  });
+
+  it("should list nothing when the hub cannot read the person's credentials", () => {
+    const data = { route: "own-licence" as const, kinds: ["github" as const], statuses: [], logins: [], unavailable: "no store" };
+
+    expect(connectionRows(connections(data, checklistState, NOW), null, [], microsoftConnection(data, "gateway"), "own-licence")).toEqual([]);
   });
 });

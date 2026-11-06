@@ -85,7 +85,7 @@ function login(kind: CredentialKind, state: LoginState, expiresAt = new Date(Dat
  * list like any other. The gateway route's derived row has its own tests below.
  */
 function data(stored: CredentialKind[], logins: LoginView[] = [], unavailable: string | null = null): ConnectionsData {
-  return { route: "own-licence", microsoftConnectable: true, kinds: KINDS, statuses: stored.map((kind) => status(kind)), logins, unavailable };
+  return { route: "own-licence", kinds: KINDS, statuses: stored.map((kind) => status(kind)), logins, unavailable };
 }
 
 /** The Sharing section's read of its four lists, each empty unless a test says otherwise, and its four actions. */
@@ -133,7 +133,7 @@ async function saveSettings(): Promise<void> {
  * a test of any other one says which it is about.
  */
 function open(props: Partial<Parameters<typeof AssistantSettings>[0]> = {}, section?: string): void {
-  render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} sharing={sharingSettings()} {...props} />);
+  render(<AssistantSettings now={Date.now()} viewerRoute="gateway" connections={data(ALL_SIGNED_IN)} sharing={sharingSettings()} {...props} />);
   fireEvent.click(cog());
   if (section !== undefined) {
     go(section);
@@ -149,7 +149,9 @@ function themed(props: Partial<Parameters<typeof AssistantSettings>[0]> = {}, th
   root.className = "asst-theme";
   root.dataset.theme = theme;
   document.body.append(root);
-  render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} sharing={sharingSettings()} {...props} />, { container: root });
+  render(<AssistantSettings now={Date.now()} viewerRoute="gateway" connections={data(ALL_SIGNED_IN)} sharing={sharingSettings()} {...props} />, {
+    container: root
+  });
   return root;
 }
 
@@ -272,7 +274,6 @@ describe("the Assistant's settings cog", () => {
     const stored: CredentialStatus = { kind: "github", stored: true, accountLabel: null, updatedAt: new Date(built - 30_000).toISOString() };
     const connections: ConnectionsData = {
       route: "own-licence",
-      microsoftConnectable: true,
       kinds: KINDS,
       statuses: [stored, ...ALL_SIGNED_IN.map((kind) => status(kind))],
       logins: [relayed],
@@ -295,7 +296,6 @@ describe("the Assistant's settings cog", () => {
         now={built}
         connections={{
           route: "own-licence",
-          microsoftConnectable: true,
           kinds: KINDS,
           statuses: [stored, ...ALL_SIGNED_IN.map((kind) => status(kind))],
           logins: [relayed],
@@ -530,9 +530,9 @@ describe("the Assistant's settings dialog", () => {
     render(
       <AssistantSettings
         now={Date.now()}
+        viewerRoute="gateway"
         connections={{
           route: "own-licence",
-          microsoftConnectable: true,
           kinds: KINDS,
           statuses: [status("github", "alice@hmcts.net"), status("claude")],
           logins: [login("azure", "pending"), login("atlassian", "expired"), login("jenkins", "failed")],
@@ -558,14 +558,7 @@ describe("the Assistant's settings dialog", () => {
     render(
       <AssistantSettings
         now={Date.now()}
-        connections={{
-          route: "own-licence",
-          microsoftConnectable: true,
-          kinds: [...KINDS, "claude_md", "git_identity"],
-          statuses: [],
-          logins: [],
-          unavailable: null
-        }}
+        connections={{ route: "own-licence", kinds: [...KINDS, "claude_md", "git_identity"], statuses: [], logins: [], unavailable: null }}
       />
     );
     fireEvent.click(cog());
@@ -580,14 +573,7 @@ describe("the Assistant's settings dialog", () => {
     render(
       <AssistantSettings
         now={Date.now()}
-        connections={{
-          route: "own-licence",
-          microsoftConnectable: true,
-          kinds: KINDS,
-          statuses: [],
-          logins: [],
-          unavailable: "the credentials Key Vault is not configured"
-        }}
+        connections={{ route: "own-licence", kinds: KINDS, statuses: [], logins: [], unavailable: "the credentials Key Vault is not configured" }}
       />
     );
 
@@ -674,7 +660,6 @@ function connectionRows(): string[] {
 function routeData(route: ModelRoute, stored: CredentialKind[], logins: LoginView[] = []): ConnectionsData {
   return {
     route,
-    microsoftConnectable: true,
     kinds: [...neededCredentials(route), ...optionalCredentials(route)],
     statuses: stored.map((kind) => status(kind)),
     logins,
@@ -3172,8 +3157,8 @@ describe("AssistantSettings Microsoft 365", () => {
     );
   });
 
-  it("should offer no Connect and say why when the person is not an AI Gateway user", () => {
-    open({ connections: { ...data([]), microsoftConnectable: false } }, "Connections");
+  it("should offer no Connect and say why when the viewer is not an AI Gateway user", () => {
+    open({ viewerRoute: "own-licence", connections: data([]) }, "Connections");
     const row = within(connectionRow("Microsoft 365"));
 
     expect(row.queryByRole("button", { name: "Connect Microsoft 365" })).toBeNull();
@@ -3181,13 +3166,15 @@ describe("AssistantSettings Microsoft 365", () => {
     expect(row.getByText("Microsoft 365 is only available to AI Gateway users.")).toBeTruthy();
   });
 
-  it("should still offer Disconnect when someone who is not an AI Gateway user has a connection stored", () => {
-    const connected = { ...data([...ALL_SIGNED_IN, "microsoft"]), microsoftConnectable: false };
-    open({ connections: connected, tokens: { rows: [], unavailable: null, save: vi.fn(), remove: vi.fn() } }, "Connections");
+  it("should keep Disconnect, and not call the connection healthy, when someone who is not an AI Gateway user still has one stored", () => {
+    const connected = data([...ALL_SIGNED_IN, "microsoft"]);
+    open({ viewerRoute: "own-licence", connections: connected, tokens: { rows: [], unavailable: null, save: vi.fn(), remove: vi.fn() } }, "Connections");
     const row = within(connectionRow("Microsoft 365"));
 
     expect(row.getByRole("button", { name: "Disconnect" })).toBeTruthy();
     expect(row.queryByRole("button", { name: "Connect Microsoft 365" })).toBeNull();
+    expect(row.queryByText("Connected")).toBeNull();
+    expect(row.getByText("Removed when you next sign in")).toBeTruthy();
     expect(row.getByText("Microsoft 365 is only available to AI Gateway users.")).toBeTruthy();
   });
 

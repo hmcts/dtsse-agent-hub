@@ -116,26 +116,25 @@ export function refreshFailure(error: string | undefined): RefreshFailure {
 /** Where Connect posts to: the start of the connect sign-in. */
 export const CONNECT_PATH = "/auth/microsoft/connect";
 
-/**
- * How a connect that came back without a connection ended, as the settings address carries it back. `unavailable` is
- * someone `canConnectMicrosoft` refuses, turned back before Microsoft is asked for anything.
- */
-export type ConnectOutcome = "cancelled" | "failed" | "unavailable";
+/** How a connect that came back without a connection ended, as the settings address carries it back. */
+export type ConnectOutcome = "cancelled" | "failed";
 
 export const CONNECT_OUTCOME_PARAMETER = "microsoft";
 
-/** Why someone off the AI Gateway is offered no Connect: what settings says in its place, and what a refused connect says. */
+/**
+ * Why someone `canConnectMicrosoft` refuses is offered no Connect, which their Microsoft 365 row always says. So a
+ * connect refused for that reason returns to settings with no outcome: this line is already there.
+ */
 export const MICROSOFT_UNAVAILABLE = "Microsoft 365 is only available to AI Gateway users.";
 
 /** What the Microsoft 365 row says about a connect that came back without one. */
 export const CONNECT_OUTCOME_WORDS: Record<ConnectOutcome, string> = {
   cancelled: "Microsoft 365 wasn't connected, because it was cancelled at Microsoft. Press Connect to try again.",
-  failed: "Microsoft 365 couldn't be connected. Press Connect to try again.",
-  unavailable: MICROSOFT_UNAVAILABLE
+  failed: "Microsoft 365 couldn't be connected. Press Connect to try again."
 };
 
 export function isConnectOutcome(value: string | null): value is ConnectOutcome {
-  return value === "cancelled" || value === "failed" || value === "unavailable";
+  return value === "cancelled" || value === "failed";
 }
 
 /**

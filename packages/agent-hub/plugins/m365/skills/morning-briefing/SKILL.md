@@ -48,10 +48,9 @@ to the display name only when the id is null.
 
 `me` fails only when the connection itself cannot be used. If it fails saying "not connected" or "has lapsed",
 Microsoft 365 is not available: skip sections 3 to 5, and say once, at the top of the briefing, "Microsoft 365 is not
-connected — click Connect for Microsoft 365 under Connections in the Assistant's settings." If it fails saying
-Microsoft 365 is only available to AI Gateway users, skip the same sections and say once, at the top, "Microsoft 365
-is only available to AI Gateway users." If it fails any other way, skip the same sections and say once that
-Microsoft 365 could not be read, with the error's own words. Then go on to Jira and GitHub.
+connected — click Connect for Microsoft 365 under Connections in the Assistant's settings." If it fails any other way,
+skip the same sections and say once that Microsoft 365 could not be read, with the error's own words. Then go on to
+Jira and GitHub.
 
 ## 3. Today's calendar
 
