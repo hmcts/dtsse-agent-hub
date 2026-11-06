@@ -4,7 +4,7 @@ import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
 import { BRIEFING_SKILL } from "../../src/assistant/briefing.ts";
 import { createConversation } from "../../src/assistant/conversation-store.ts";
 import { podSkills } from "../../src/assistant/views.ts";
-import type { VirtualAgentRow } from "../../src/virtual-agents/store.ts";
+import { claimVirtualAgents, restartVirtualAgent, type VirtualAgentRow } from "../../src/virtual-agents/store.ts";
 import { insertUser, person, prisma, resetDatabase } from "./database.ts";
 
 /** Which of a pod's sessions `podSkills` reads the skills of, which is what decides whether the briefing is offered. */
@@ -17,6 +17,8 @@ beforeEach(async () => {
   await resetDatabase();
   await insertUser(ALICE);
   assistant = await ensureAssistant(prisma, { oid: ALICE.oid, modelRoute: "own-licence" });
+  // The pod booting an hour ago, on the token minted for it, so the sessions below are all of this boot.
+  await prisma.virtualAgent.update({ where: { id: assistant.id }, data: { launchTokenIssuedAt: new Date(Date.now() - 60 * 60_000) } });
 });
 
 afterAll(async () => {
@@ -60,5 +62,25 @@ describe("podSkills", () => {
     await createConversation(prisma, ALICE.oid, { product: "pcs" });
 
     expect(await podSkills(prisma, assistant)).toEqual([]);
+  });
+});
+
+describe("podSkills across a pod restart", () => {
+  it("should pass over a session of the previous boot when the pod has restarted", async () => {
+    await session([MAIL, BRIEFING], 5);
+
+    await restartVirtualAgent(prisma, ALICE.oid, assistant.id, "restarted by its owner");
+    await claimVirtualAgents(prisma, "preview-01");
+    expect(await podSkills(prisma, assistant)).toEqual([]);
+
+    await session([MAIL], 0);
+    expect((await podSkills(prisma, assistant)).map((skill) => skill.name)).toEqual(["m365:mail"]);
+  });
+
+  it("should give the newest session's skills when the pod is stopped and holds no launch token", async () => {
+    await session([MAIL, BRIEFING], 5);
+    await prisma.virtualAgent.update({ where: { id: assistant.id }, data: { launchTokenIssuedAt: null } });
+
+    expect((await podSkills(prisma, assistant)).map((skill) => skill.name)).toEqual(["m365:mail", BRIEFING_SKILL]);
   });
 });

@@ -278,8 +278,21 @@ describe("selectFrame", () => {
     expect(frame).toBe(`event: agent_skills\ndata: ${JSON.stringify({ agent_id: AGENT.id })}\n\n`);
   });
 
+  it("should name any of the viewer's own agents whose skills changed when the page watches no agent", async () => {
+    const frame = await selectFrame({ type: "agent_skills", agent_id: "agent-sibling", owner_oid: VIEWER }, TOPICS, sources());
+
+    expect(frame).toBe(`event: agent_skills\ndata: ${JSON.stringify({ agent_id: "agent-sibling" })}\n\n`);
+  });
+
   it.each<[string, UiWatch]>([
-    ["no agent is watched", TOPICS],
+    ["no agent is watched and the agent is somebody else's", TOPICS],
+    ["another agent is watched", THREAD],
+    ["the watched agent is that one", THEIR_THREAD]
+  ])("should not send another owner's skills change when %s", async (_label, watch) => {
+    expect(await selectFrame({ type: "agent_skills", agent_id: THEIR_AGENT.id, owner_oid: OTHER }, watch, sources())).toBeUndefined();
+  });
+
+  it.each<[string, UiWatch]>([
     ["another agent is watched", { ...THREAD, agent: { id: "agent-other", ownerOid: VIEWER } }],
     ["the watched agent is somebody else's", { ...THEIR_THREAD, agent: { ...THEIR_AGENT, id: AGENT.id } }]
   ])("should not send a skills change when %s", async (_label, watch) => {

@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
+import type { Skill } from "@/agents/skills";
 import { DEFAULT_PRODUCT, isProduct } from "@/assistant/products";
 import { fillWith, type Starter, type Template } from "@/assistant/starters";
 import type { UnsentChat } from "@/assistant/views";
@@ -76,20 +77,23 @@ function rememberProduct(viewerOid: string, product: string): void {
  * `unsent` — authoritative, because the bytes are already there — and the product comes back with them, from the
  * conversation's own row when there is one and from `sessionStorage` when there is not.
  *
- * The composer here offers no "/" list. A skill list is a session's report of what it can run, and this screen has no
- * session: the ordinary new chat has no conversation at all, and the one attaching a file opened has an agent no pod
- * has started yet. So the box is a plain one, as the hub's is for an agent that has reported nothing, and the list
- * appears on the conversation's own page once its session says what it has.
+ * This screen has no session to report a skill list, so its "/" list is the pod's (`podSkills`): the newest list a
+ * session of the pod's current boot reported, which is what every session on that boot loads, the one this chat
+ * starts included. Until a session of the current boot has reported its skills the list is empty and the box is a
+ * plain one. The page re-reads it when one of the viewer's sessions reports a changed list.
  */
 export function EmptyChat({
   starters,
   templates,
+  skills,
   viewerOid,
   unsent,
   actions
 }: {
   starters: readonly Starter[];
   templates: readonly Template[];
+  /** What "/" offers: the skills the viewer's pod reported. */
+  skills: readonly Skill[];
   /** Who is reading, which the composer keys its draft on. */
   viewerOid: string;
   /** The conversation this screen already opened for a file and never sent, if there is one. */
@@ -205,6 +209,7 @@ export function EmptyChat({
               person is still typing into this box. A starter card only fills this box, so it is a draft like anything typed. */}
           <Composer
             templates={templates}
+            skills={skills}
             viewerOid={viewerOid}
             draftId={NEW_CHAT_DRAFT}
             onSend={begin}

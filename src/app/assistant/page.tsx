@@ -100,7 +100,7 @@ export default async function AssistantPage() {
     >
       {/* No `local` here: this screen is about to start a chat on a pod, so it needs what a pod needs. */}
       <AssistantGate home={home} waiting={jar.get(WAITING_COOKIE)?.value} theme={theme}>
-        <EmptyChat starters={STARTERS} templates={offeredTemplates(mine)} viewerOid={viewer.oid} unsent={unsent} actions={CHAT_ACTIONS} />
+        <EmptyChat starters={STARTERS} templates={offeredTemplates(mine)} skills={home.skills} viewerOid={viewer.oid} unsent={unsent} actions={CHAT_ACTIONS} />
       </AssistantGate>
     </AssistantShell>
   );

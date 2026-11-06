@@ -481,12 +481,13 @@ describe("conversations", () => {
     expect(await assistantConversation({ ...BOB, tid: "dev", modelRoute: "gateway" }, id)).toBeUndefined();
   });
 
-  it("should carry the session's skills to the conversation page, and none before a session registers", async () => {
+  it("should carry a session's skills to the conversation page and the new chat when it registers", async () => {
     const { token } = await startedAssistant();
     const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
     const { sessionId } = await sessionOf(id);
 
     expect((await assistantConversation(VIEWER, id))?.skills).toEqual([]);
+    expect((await openAssistant(VIEWER)).skills).toEqual([]);
     await register(token, sessionId, id, {
       skills: [
         { name: "cft-how-to", description: "Find a how-to recipe" },
@@ -498,6 +499,31 @@ describe("conversations", () => {
       { name: "cft-explain", description: "Answer a what is X question" },
       { name: "cft-how-to", description: "Find a how-to recipe" }
     ]);
+    expect((await openAssistant(VIEWER)).skills).toEqual([
+      { name: "cft-explain", description: "Answer a what is X question" },
+      { name: "cft-how-to", description: "Find a how-to recipe" }
+    ]);
+  });
+
+  it("should offer the pod's skills on the conversation page when the conversation's own session has not registered", async () => {
+    const { token } = await startedAssistant();
+    const first = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+    await register(token, (await sessionOf(first)).sessionId, first, { skills: [{ name: "cft-explain", description: "Answer a what is X question" }] });
+    const second = ((await actions.startConversation({ product: "general", body: "and another" })) as { id: string }).id;
+
+    expect((await assistantConversation(VIEWER, second))?.skills).toEqual([{ name: "cft-explain", description: "Answer a what is X question" }]);
+
+    await register(token, (await sessionOf(second)).sessionId, second, { skills: [{ name: "cft-how-to", description: "Find a how-to recipe" }] });
+    expect((await assistantConversation(VIEWER, second))?.skills).toEqual([{ name: "cft-how-to", description: "Find a how-to recipe" }]);
+  });
+
+  it("should offer no skills on a laptop chat's page when its session has reported none, whatever the pod has", async () => {
+    const { token } = await startedAssistant();
+    const onPod = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+    await register(token, (await sessionOf(onPod)).sessionId, onPod, { skills: [{ name: "cft-explain", description: "Answer a what is X question" }] });
+    const local = await laptopChat();
+
+    expect((await assistantConversation(VIEWER, local))?.skills).toEqual([]);
   });
 
   /** Where a repo-relative path in an answer resolves to, which is the registering session's repo and branch. */
