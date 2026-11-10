@@ -54,7 +54,7 @@ const CASES = [
   "org-invitation-pending",
   "org-check-forbidden",
   "org-check-without-read-org",
-  "org-check-with-checkout",
+  "org-member-clone-refused",
   "org-from-repo-url"
 ];
 

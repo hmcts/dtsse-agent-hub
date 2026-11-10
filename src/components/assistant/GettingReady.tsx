@@ -563,6 +563,11 @@ function ReadyShell({ assistant, unavailable, theme = "system", subtitle, childr
               {readiness.step}
             </p>
             {readiness.failed && assistant.statusDetail ? <p className="text-xs text-asst-error">{assistant.statusDetail}</p> : null}
+            {/* What the pod is waiting on the person for, such as joining the GitHub organisation its workspace is in:
+                the step says only that it is waiting, and nothing else on the screen says what to do. */}
+            {assistant.status === "awaiting_credentials" && assistant.statusDetail ? (
+              <p className="text-pretty text-xs text-asst-warn">{assistant.statusDetail}</p>
+            ) : null}
           </div>
         </div>
         {unavailable === null ? null : <p className="text-sm text-asst-error">{unavailable}</p>}

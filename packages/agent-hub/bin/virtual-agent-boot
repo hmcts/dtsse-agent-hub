@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# Stage 0 of an agent-hub virtual agent pod. It only gets the workspace onto the volume: GitHub auth, a wait
-# for that account to be a member of the organisation owning the repo, then a clone or fast-forward of
-# cft-workspace, then an upgrade of this client to the published one, then it hands over to stage 1, this
-# package's virtual-agent/entrypoint.sh.
+# Stage 0 of an agent-hub virtual agent pod. It only gets the workspace onto the volume: GitHub auth,
+# then a clone or fast-forward of cft-workspace, then an upgrade of this client to the published one, then
+# it hands over to stage 1, this package's virtual-agent/entrypoint.sh.
 #
 # The pod's `command` is this bin's name, resolved by the kubelet with no shell against the image's
 # PATH, and npm's global bin directory is not on it (the devcontainer image reaches node through
@@ -158,83 +157,88 @@ github_org_of() {
     printf '%s\n' "${path%%/*}"
 }
 
-# Prints active, pending or absent for the signed-in account's membership of $1, or unknown for any answer that
-# does not settle it. --include because gh prints the response either way but keeps its status only in the
-# headers, and a 404 means "not a member" only from a token with read:org: without it GitHub can answer 404 for a
-# membership that exists, and a check that blocked on that would stop a setup that clones fine.
+# Sets MEMBERSHIP to active, pending or absent for the signed-in account's membership of $1, or unknown for any
+# answer that does not settle it, and leaves GitHub's answer in $TMP/membership. --include because gh prints the
+# response either way but keeps its status only in the headers, and a 404 means "not a member" only from a token
+# with read:org: without it GitHub can answer 404 for a membership that exists.
+MEMBERSHIP=""
 github_org_membership() {
     local status scopes state
-    gh api --include "user/memberships/orgs/$1" 2>"$TMP/gh.err" | tr -d '\r' >"$TMP/membership" || true
+    MEMBERSHIP=unknown
+    env -u GH_TOKEN -u GITHUB_TOKEN gh api --include "user/memberships/orgs/$1" 2>"$TMP/gh.err" | tr -d '\r' >"$TMP/membership" || true
     status=$(head -n 1 "$TMP/membership" | cut -d' ' -f2)
     scopes=$(sed -n '2,/^$/p' "$TMP/membership" | grep -i '^x-oauth-scopes:' || true)
     case "$status" in
         200)
             state=$(sed '1,/^$/d' "$TMP/membership" | jq -r '.state // empty' 2>/dev/null || true)
             case "$state" in
-                active | pending) printf '%s\n' "$state"; return 0 ;;
+                active | pending) MEMBERSHIP="$state"; return 0 ;;
             esac
             log "membership of $1: GitHub answered 200 with state '${state}'"
             ;;
         404)
             if grep -qE '(^|[ ,:])(read|write|admin):org(,|$| )' <<<"$scopes"; then
-                printf 'absent\n'
+                MEMBERSHIP=absent
                 return 0
             fi
             log "membership of $1: GitHub answered 404 to a token without read:org"
             ;;
         *) log "membership of $1 not checked: ${status:-no answer} $(head -c 300 "$TMP/gh.err" | tr '\n' ' ')" ;;
     esac
-    printf 'unknown\n'
 }
 
-# A clone by an account outside the repo's organisation fails as "Repository not found", which the clone's
-# backoff would retry for many minutes before saying anything the owner can act on, and the Claude sign-in that
-# stage 1 relays never comes. Joining is the remedy, so the owner is told that, and the pod waits for it rather
-# than needing a restart. Anything this cannot settle falls through to the clone, whose own failure handling
-# stays the backstop, so a setup that would have cloned still does. Only before the first clone: a pod with a
-# checkout boots on it even when the fetch fails, so waiting there would hold back a pod that works.
-await_org_membership() {
-    local org state login reported=""
-    [[ ! -d "$WORKSPACE/.git" ]] || return 0
-    org=$(github_org_of "$REPO_URL") || return 0
-    while :; do
-        state=$(github_org_membership "$org")
-        case "$state" in
-            active)
-                [[ -z "$reported" ]] || { log "$login is now a member of $org"; report provisioning "github: $login is a member of the $org GitHub organisation"; }
-                return 0
-                ;;
-            absent | pending)
-                if [[ "$state" != "$reported" ]]; then
-                    [[ -n "${login:-}" ]] || login=$(gh api user --jq .login 2>/dev/null) || true
-                    login="${login:-the signed-in GitHub account}"
-                    if [[ "$state" == absent ]]; then
-                        report awaiting_credentials "github: $login is not a member of the $org GitHub organisation, so this agent cannot fetch the $org repositories. Ask to join the organisation; this agent carries on by itself once you are a member, or start it again if it has stopped by then."
-                    else
-                        report awaiting_credentials "github: $login has been invited to the $org GitHub organisation but has not accepted yet. Accept the invitation at https://github.com/orgs/$org/invitation; this agent carries on by itself once you have, or start it again if it has stopped by then."
-                    fi
-                    log "$login is not an active member of $org ($state); checking again every 3 minutes"
-                    reported="$state"
-                fi
-                sleep_interruptibly 180
-                ;;
-            *) return 0 ;;
-        esac
-    done
+GITHUB_LOGIN=""
+CLONE_DETAIL=""
+
+# Sets CLONE_DETAIL to what to tell the owner when GitHub will not let the signed-in account clone. "Repository
+# not found" is all git says, and for an account outside the repo's organisation the remedy is joining it rather
+# than being granted access to one repo. Every answer the membership lookup cannot settle, a member's included,
+# gets the read-access message, so the lookup only sharpens what the owner is told and never changes whether the
+# clone is retried.
+clone_refused_detail() {
+    local err="$1" org
+    if org=$(github_org_of "$REPO_URL"); then
+        github_org_membership "$org"
+        if [[ "$MEMBERSHIP" == absent || "$MEMBERSHIP" == pending ]]; then
+            if [[ -z "$GITHUB_LOGIN" ]]; then
+                [[ "$MEMBERSHIP" == pending ]] &&
+                    GITHUB_LOGIN=$(sed '1,/^$/d' "$TMP/membership" | jq -r '.user.login // empty' 2>/dev/null || true)
+                [[ -n "$GITHUB_LOGIN" ]] ||
+                    GITHUB_LOGIN=$(env -u GH_TOKEN -u GITHUB_TOKEN gh api user --jq .login 2>/dev/null || true)
+                GITHUB_LOGIN="${GITHUB_LOGIN:-the signed-in GitHub account}"
+            fi
+            if [[ "$MEMBERSHIP" == absent ]]; then
+                CLONE_DETAIL="github: $GITHUB_LOGIN is not a member of the $org GitHub organisation, so this agent cannot fetch its repositories. Ask to join the organisation; this agent carries on by itself once you are a member, or start it again if it has stopped by then."
+            else
+                CLONE_DETAIL="github: $GITHUB_LOGIN has been invited to the $org GitHub organisation but has not accepted yet. Accept the invitation at https://github.com/orgs/$org/invitation; this agent carries on by itself once you have, or start it again if it has stopped by then."
+            fi
+            return 0
+        fi
+    else
+        log "cannot tell which GitHub organisation owns $REPO_URL, so its membership is not looked up"
+    fi
+    CLONE_DETAIL="github: the signed-in GitHub account cannot clone $REPO_URL; it needs read access to the repo ($err)"
 }
 
 checkout_workspace() {
-    local delay=5 err reported=""
+    local delay=5 err looked_up="" reported=""
     if [[ ! -d "$WORKSPACE/.git" ]]; then
         mkdir -p "$(dirname "$WORKSPACE")"
         until git clone --quiet --filter=blob:none "$REPO_URL" "$WORKSPACE" 2>"$TMP/git.err"; do
             err=$(head -c 300 "$TMP/git.err" | tr '\n' ' ')
             log "clone of $REPO_URL failed: $err; retrying in ${delay}s"
-            # The owner has to act on this one (the GitHub account needs access to the repo), so they
-            # are told once per distinct error rather than left watching "Starting".
-            if git_auth_error "$TMP/git.err" && [[ "$err" != "$reported" ]]; then
-                report awaiting_credentials "github: the signed-in GitHub account cannot clone $REPO_URL; it needs read access to the repo ($err)"
-                reported="$err"
+            # The owner has to act on this one (the GitHub account needs access to the repo, or to join its
+            # organisation), so they are told once per distinct message rather than left watching "Starting".
+            # Membership is looked up once per distinct git error, not on every retry.
+            if git_auth_error "$TMP/git.err"; then
+                if [[ "$err" != "$looked_up" ]]; then
+                    clone_refused_detail "$err"
+                    looked_up="$err"
+                fi
+                if [[ "$CLONE_DETAIL" != "$reported" ]]; then
+                    report awaiting_credentials "$CLONE_DETAIL"
+                    reported="$CLONE_DETAIL"
+                fi
             fi
             rm -rf "$WORKSPACE"
             sleep_interruptibly "$delay"
@@ -449,7 +453,6 @@ if [[ -n "$github_missing" ]]; then
     report provisioning
 fi
 
-await_org_membership
 checkout_workspace
 [[ -n "$sync_detail" ]] && { log "$sync_detail"; report provisioning "$sync_detail"; }
 

@@ -139,6 +139,23 @@ describe("GettingReady progress", () => {
     expect(screen.getByText("image pull failed")).toBeTruthy();
   });
 
+  it("should show what the pod is waiting for when it is awaiting credentials", () => {
+    const detail = "github: octocat is not a member of the hmcts GitHub organisation, so this agent cannot fetch its repositories.";
+    render(ready({ assistant: assistant("awaiting_credentials", { statusDetail: detail }) }));
+
+    expect(screen.getByRole("heading", { name: "Your assistant is getting ready" })).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toBe("Waiting for you to connect your accounts…");
+    const shown = screen.getByText(detail);
+    expect(shown.className).toContain("text-asst-warn");
+    expect(shown.className).not.toContain("text-asst-error");
+  });
+
+  it("should not show the pod's detail when it is starting", () => {
+    render(ready({ assistant: assistant("provisioning", { statusDetail: "cloned cft-workspace" }) }));
+
+    expect(screen.queryByText("cloned cft-workspace")).toBeNull();
+  });
+
   it("should say the assistant is unavailable when the page says so", () => {
     render(ready({ unavailable: "Virtual agents are not available here" }));
 
