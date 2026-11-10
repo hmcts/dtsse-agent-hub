@@ -34,6 +34,9 @@ import {
   offeredConnections,
   offersConnect,
   PROMPTED_WHEN_MISSING,
+  pasteIsFallback,
+  RELAY_WAIT_DETAILS,
+  relayWait,
   type StoredCredential,
   screenDetail,
   signInPrompt,
@@ -97,10 +100,17 @@ describe("CONNECTORS", () => {
     expect(new Set(Object.keys(CONNECTORS))).toEqual(new Set(CREDENTIAL_KINDS));
   });
 
-  it("should ask the person to paste exactly the connections their assistant cannot sign in to itself", () => {
-    const pasted = CREDENTIAL_KINDS.filter((kind) => isConnection(kind) && CONNECTORS[kind]?.paste !== null);
+  it("should relay exactly the connections the person can ask to sign in to again", () => {
+    const relayed = CREDENTIAL_KINDS.filter((kind) => isConnection(kind) && CONNECTORS[kind]?.relays === true);
 
-    expect(pasted).toEqual(CREDENTIAL_KINDS.filter((kind) => isConnection(kind) && !isSignInKind(kind)));
+    expect(relayed).toEqual(CREDENTIAL_KINDS.filter(isSignInKind));
+  });
+
+  it("should give the person something to paste for every connection their assistant does not relay", () => {
+    const unrelayed = CREDENTIAL_KINDS.filter((kind) => isConnection(kind) && CONNECTORS[kind]?.relays === false);
+
+    expect(unrelayed).toEqual(["jenkins"]);
+    expect(unrelayed.map((kind) => CONNECTORS[kind]?.paste)).toEqual(["Jenkins API token"]);
   });
 
   it("should word every connection the Assistant can ask for, on every model route", () => {
@@ -239,19 +249,21 @@ describe("lapsedSinceStored", () => {
  */
 describe("canSignInAgain", () => {
   const NOTHING: CredentialKind[] = [];
+  /** The sign-ins only the assistant can make, with nothing for the person to paste. */
+  const relayedOnly = CREDENTIAL_KINDS.filter((kind) => isSignInKind(kind) && CONNECTORS[kind]?.paste === null);
 
   it.each([
     ["it uses nothing else", NOTHING],
     ["it uses its own route's credentials", neededCredentials("own-licence")],
     ["it uses every credential there is", [...CREDENTIAL_KINDS]]
-  ])("should offer every sign-in the assistant makes for itself when %s", (_what, uses) => {
+  ])("should offer every sign-in only the assistant can make when %s", (_what, uses) => {
     const offered = CREDENTIAL_KINDS.filter((kind) => canSignInAgain(kind, uses));
 
-    expect(CREDENTIAL_KINDS.filter(isSignInKind).filter((kind) => !offered.includes(kind))).toEqual([]);
+    expect(relayedOnly.filter((kind) => !offered.includes(kind))).toEqual([]);
   });
 
   it("should offer no more than those when the assistant uses nothing the person pastes", () => {
-    expect(CREDENTIAL_KINDS.filter((kind) => canSignInAgain(kind, NOTHING))).toEqual(CREDENTIAL_KINDS.filter(isSignInKind));
+    expect(CREDENTIAL_KINDS.filter((kind) => canSignInAgain(kind, NOTHING))).toEqual(relayedOnly);
   });
 
   it("should offer a credential the person pastes only while their assistant uses it", () => {
@@ -499,6 +511,53 @@ describe("screenDetail", () => {
   // The derived row has no control of its own, so a state with no words would be a row with an empty status column.
   it.each(CONNECTION_STATES)("should word %s for a sign-in the assistant makes for itself while it is starting", (state) => {
     expect(screenDetail(state, null, true)).not.toBeNull();
+  });
+});
+
+/**
+ * Which connections the getting-ready screen leads with a relayed sign-in for, even though the person could paste a
+ * value: the screen is for people who may have no Claude Code to make a token with.
+ */
+describe("pasteIsFallback", () => {
+  it("should lead with the relayed sign-in for Claude when its token can be pasted as well", () => {
+    expect(pasteIsFallback(CONNECTORS.claude)).toBe(true);
+  });
+
+  it("should keep the box as the way in when the assistant relays nothing for the connection", () => {
+    expect(pasteIsFallback(CONNECTORS.jenkins)).toBe(false);
+  });
+
+  it.each(["github", "azure", "atlassian"] as const)("should have no box to fall back to when %s is only ever relayed", (kind) => {
+    expect(pasteIsFallback(CONNECTORS[kind])).toBe(false);
+  });
+});
+
+describe("relayWait", () => {
+  const STARTING = { status: "provisioning" as const, failed: false };
+  const RUNNING = { status: "running" as const, failed: false };
+
+  it("should say the sign-in is on its way when the assistant is starting", () => {
+    expect(relayWait("waiting", STARTING)).toBe("connecting");
+    expect(RELAY_WAIT_DETAILS.connecting).toBe("Connecting…");
+  });
+
+  it("should wait for the assistant rather than offer a Connect when it is running and has relayed nothing", () => {
+    expect(relayWait("waiting", RUNNING)).toBe("waiting");
+    expect(RELAY_WAIT_DETAILS.waiting).toBe("Waiting for your assistant");
+  });
+
+  // The pod drops to `awaiting_credentials` when it cannot drive `claude setup-token`, and relays nothing after that.
+  it("should count the sign-in as stalled when the assistant has stopped trying to relay it", () => {
+    expect(relayWait("waiting", { status: "awaiting_credentials", failed: false })).toBe("stalled");
+    expect(RELAY_WAIT_DETAILS.stalled).toBe(CONNECTION_DETAILS.waiting);
+  });
+
+  it("should count the sign-in as stalled when the assistant has failed", () => {
+    expect(relayWait("waiting", { status: "failed", failed: true })).toBe("stalled");
+  });
+
+  it.each(CONNECTION_STATES.filter((state) => state !== "waiting"))("should leave the words to the row when the sign-in is %s", (state) => {
+    expect(relayWait(state, RUNNING)).toBeNull();
   });
 });
 

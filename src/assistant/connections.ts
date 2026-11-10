@@ -3,6 +3,7 @@ import type { CredentialKind } from "../credentials/names.ts";
 import type { CredentialStatus } from "../credentials/store.ts";
 import { CONNECT_PATH } from "../microsoft/microsoft.ts";
 import type { ModelRoute } from "../viewer/identity.ts";
+import type { VirtualAgentStatus } from "../virtual-agents/lifecycle.ts";
 import type { LoginView } from "../virtual-agents/logins.ts";
 import { assistantSettingsPath } from "../web/home.ts";
 import type { ConnectionsAsk } from "./onboarding.ts";
@@ -48,11 +49,16 @@ export interface Connector {
   initial: string;
   desc: string;
   /**
-   * What the person pastes to connect it, or `null` when their assistant signs in for them and relays a code. The
-   * screen offers a field for the first and a note about the sign-in to come for the second, so getting this wrong
-   * is a row with nothing on it that connects anything.
+   * What the person pastes to connect it, or `null` when the only way in is the sign-in their assistant relays. A
+   * kind with nothing relayed has to have one, or nothing on any surface connects it.
    */
   paste: string | null;
+  /**
+   * Whether the person's assistant signs in to it and relays a code or a link for them to finish, which is what
+   * `reconnectSignIn` can restart it for. A kind can do both: Claude's pod relays `claude setup-token`'s link, and
+   * someone who has run that themselves can paste the token it printed instead.
+   */
+  relays: boolean;
 }
 
 /**
@@ -64,11 +70,11 @@ export interface Connector {
  * missing entry here is a credential the hub can wait for and no surface can show.
  */
 export const CONNECTORS = {
-  github: { name: "GitHub", initial: "G", desc: "Read repositories and open pull requests", paste: null },
-  azure: { name: "Azure", initial: "Az", desc: "Your HMCTS account, for pipelines and environments (optional)", paste: null },
-  atlassian: { name: "Atlassian", initial: "A", desc: "Jira tickets and Confluence pages (optional)", paste: null },
-  jenkins: { name: "Jenkins", initial: "J", desc: "Builds and pipelines on Jenkins (optional)", paste: "Jenkins API token" },
-  claude: { name: "Claude", initial: "C", desc: "Your Claude licence", paste: "Claude token" },
+  github: { name: "GitHub", initial: "G", desc: "Read repositories and open pull requests", paste: null, relays: true },
+  azure: { name: "Azure", initial: "Az", desc: "Your HMCTS account, for pipelines and environments (optional)", paste: null, relays: true },
+  atlassian: { name: "Atlassian", initial: "A", desc: "Jira tickets and Confluence pages (optional)", paste: null, relays: true },
+  jenkins: { name: "Jenkins", initial: "J", desc: "Builds and pipelines on Jenkins (optional)", paste: "Jenkins API token", relays: false },
+  claude: { name: "Claude", initial: "C", desc: "Your Claude licence", paste: "Claude token", relays: true },
   // Neither is a sign-in: both are kept beside them because they may hold private context, and there is nothing to
   // connect for either, so no surface offers a row for them.
   claude_md: null,
@@ -210,6 +216,41 @@ export function screenDetail(state: ConnectionState, pasted: string | null, pres
   }
   return pasted === null && pressed ? "Connecting…" : null;
 }
+
+/**
+ * Whether what the person can paste for this connection is a fallback to the sign-in their assistant relays, rather
+ * than the way to connect it. The getting-ready screen leads with the relayed sign-in for one of these and offers the
+ * box only to someone who says they already have a value: the screen is where people without Claude Code connect, and
+ * a box for a token only Claude Code can make is a dead end for them.
+ */
+export function pasteIsFallback(connector: Connector): boolean {
+  return connector.relays && connector.paste !== null;
+}
+
+/**
+ * Where a connection whose paste is a fallback stands while its assistant has relayed nothing for it: `connecting`
+ * while the assistant starts and has yet to reach it, `waiting` once it is up and its next relay is still to come,
+ * and `stalled` when none is coming — the assistant failed, or gave up on the sign-in and waits in
+ * `awaiting_credentials` for a value to be pasted instead. `null` for any other state, which `screenDetail` words.
+ */
+export type RelayWait = "connecting" | "waiting" | "stalled";
+
+export function relayWait(state: ConnectionState, assistant: { status: VirtualAgentStatus; failed: boolean }): RelayWait | null {
+  if (state !== "waiting") {
+    return null;
+  }
+  if (assistant.failed || assistant.status === "awaiting_credentials") {
+    return "stalled";
+  }
+  return assistant.status === "running" ? "waiting" : "connecting";
+}
+
+/** Each of those in the getting-ready screen's words. */
+export const RELAY_WAIT_DETAILS: Record<RelayWait, string> = {
+  connecting: "Connecting…",
+  waiting: "Waiting for your assistant",
+  stalled: CONNECTION_DETAILS.waiting
+};
 
 /**
  * Whether the code the person pasted is still there for the pod to collect. The column being set is not that:
@@ -487,13 +528,13 @@ export interface OfferedConnection {
 /**
  * Whether a sign-in of this kind that is over and unsuccessful has a way back the hub will take.
  *
- * One the assistant makes for itself always has: `reconnectSignIn` accepts a `SignInKind`, and the kinds with no
- * `paste` are exactly those — which is `CONNECTORS`'s own test, "should ask the person to paste exactly the
- * connections their assistant cannot sign in to itself", and the reason this can read `paste` rather than importing
- * the server module that owns `SIGN_IN_KINDS`. It restarts the pod so it relays a fresh code. Anything the person
- * pastes has a way back only for a credential their
- * assistant uses, because `saveCredential` is route-aware — it refuses a Claude token from somebody whose agents do
- * not run on their own licence. So a lapsed Claude sign-in relayed to a gateway-route person has no way back at all:
+ * One the assistant makes for itself, with nothing to paste, always has: `reconnectSignIn` accepts a `SignInKind`, and
+ * those are exactly the kinds that relay — which is `CONNECTORS`'s own test, "should relay exactly the connections
+ * the person can ask to sign in to again", and the reason this can read `CONNECTORS` rather than importing the server
+ * module that owns `SIGN_IN_KINDS`. It restarts the pod so it relays a fresh code. Anything the person can paste has
+ * a way back only for a credential their assistant uses, whether or not its pod relays it as well, because
+ * `saveCredential` and `reconnectSignIn` are route-aware — both refuse Claude for somebody whose agents do not run
+ * on their own licence. So a lapsed Claude sign-in relayed to a gateway-route person has no way back at all:
  * the only control for it is a box whose save is refused, and nothing ever clears the login row, since `startLogin`
  * overwrites only on a new relay and the two states that end one need a pod's report.
  *

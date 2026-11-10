@@ -16,6 +16,9 @@ import {
   modelAccess,
   modelAccessAfter,
   offeredConnections,
+  pasteIsFallback,
+  RELAY_WAIT_DETAILS,
+  relayWait,
   screenDetail,
   signInPrompt
 } from "@/assistant/connections";
@@ -41,6 +44,7 @@ import { LoginCountdown } from "@/components/assistant/LoginCountdown";
 import { ThemeSwitch } from "@/components/assistant/ThemeSwitch";
 import type { CredentialKind } from "@/credentials/names";
 import type { CredentialStatus } from "@/credentials/store";
+import type { VirtualAgentStatus } from "@/virtual-agents/lifecycle";
 import type { LoginView } from "@/virtual-agents/logins";
 
 const INPUT =
@@ -306,6 +310,7 @@ function ConnectionRow({
   assistantId,
   starting,
   running,
+  phase,
   paste,
   save,
   reconnect,
@@ -319,6 +324,8 @@ function ConnectionRow({
   assistantId: string;
   starting: boolean;
   running: boolean;
+  /** How far the assistant has got, which is what says whether a sign-in it has yet to relay is still coming. */
+  phase: { status: VirtualAgentStatus; failed: boolean };
   paste: FormAction;
   save: FormAction;
   reconnect: FormAction;
@@ -326,6 +333,7 @@ function ConnectionRow({
   first: boolean;
 }) {
   const [connecting, setConnecting] = useState(false);
+  const [pasting, setPasting] = useState(false);
   const answer = checklistState(status?.stored === true, login, now);
   const state = connectionState(answer, login, status, now);
   // A sign-in asked for here waits on the restart the ask caused: "Connecting…" while the assistant starts again, and
@@ -339,17 +347,20 @@ function ConnectionRow({
     setConnecting(false);
     setRestarted(false);
   }
-  // What the person pastes to connect this one, or `null` when their assistant signs in and relays a code. The
-  // connector's own answer, so a kind with no sign-in behind it is never offered a note about one never coming.
-  const pasted = connector.paste;
-  // A lapsed sign-in the assistant makes for itself, which is the one case the row has an action of its own for:
-  // nothing on it can mend a stored value, nothing re-relays by itself, and a credential may not even be there to
-  // replace. Whether one is only changes what the action takes with it, which `SignInAgain` is what says. Anything
-  // the person pastes keeps offering its box instead, because they can simply paste a new value.
-  const again = hasLapsed(state) && pasted === null;
+  // A connection whose paste is a fallback leads with the sign-in its assistant relays: until that comes the row says
+  // where the assistant has got rather than offering a box, which someone without Claude Code has nothing to put in.
+  const fallback = pasteIsFallback(connector);
+  // What the row offers to paste to connect this one, or `null` when it waits for the sign-in its assistant relays.
+  const pasted = fallback ? null : connector.paste;
+  const relay = fallback ? relayWait(state, phase) : null;
+  // A lapsed sign-in the assistant makes for itself, or one it has stopped trying to relay, which is the case the row
+  // has an action of its own for: nothing on it can mend a stored value, nothing re-relays by itself, and a credential
+  // may not even be there to replace. Whether one is only changes what the action takes with it, which `SignInAgain`
+  // is what says. A kind the row offers to paste keeps offering its box instead, because a new value is the way back.
+  const again = (hasLapsed(state) && pasted === null) || relay === "stalled";
   // Where this stands in the screen's words, which the derived model-access row reads from as well so the two cannot
   // word one credential two ways. `null` is a row with a control to press instead of anything to read.
-  const words = screenDetail(state, pasted, connecting || starting);
+  const words = relay === null ? screenDetail(state, pasted, connecting || starting) : RELAY_WAIT_DETAILS[relay];
   // A sign-in made on request, with nothing live and nothing lapsed, is one its pod is not relaying: off the `gateway`
   // route because nobody asked, and on it because this boot's relay never reached the person. Connect is
   // `reconnectSignIn`, recording the ask and restarting, sent as `keep=stored` so it deletes nothing: the row shows
@@ -370,31 +381,36 @@ function ConnectionRow({
   } else if (!askForm) {
     right = <span className="shrink-0 text-[13px] text-asst-accent-soft">{words}</span>;
   }
+  const pasteForm = (label: string) => (
+    <ActionForm action={save} label={`Save your ${label}`} className="flex flex-wrap items-center gap-2">
+      <input type="hidden" name="kind" value={kind} />
+      <input name="value" type="password" required autoComplete="off" spellCheck={false} aria-label={label} className={INPUT} />
+      <button type="submit" className={PRIMARY}>
+        Save
+      </button>
+    </ActionForm>
+  );
   // One thing to do at a time, chosen here rather than by three conditions that have to agree: a relayed sign-in and
   // a field for the same credential, side by side, is two password boxes posting to different places, and a token
   // typed into the code box reaches the pod and comes back only as a sign-in that did not work.
   let below: React.ReactNode = null;
   if (answer === "login" && login !== undefined) {
-    // The live sign-in wins over anything the person clicked before it arrived, which on the Claude row is the usual
-    // order: they ask to connect, and the pod relays its code a moment later.
+    // The live sign-in wins over anything the person clicked before it arrived.
     below = <SignIn assistantId={assistantId} login={login} name={connector.name} collectable={codeCollectable(login, now)} paste={paste} />;
   } else if (again) {
     below = (
       <SignInAgain assistantId={assistantId} kind={kind} name={connector.name} stored={status?.stored === true} running={running} reconnect={reconnect} />
     );
+  } else if (relay !== null) {
+    below = <p className="text-xs text-asst-faint">Your assistant will send a link here for you to sign in to {connector.name}.</p>;
   } else if (state !== "connected" && connecting && pasted !== null) {
-    below = (
-      <ActionForm action={save} label={`Save your ${pasted}`} className="flex flex-wrap items-center gap-2">
-        <input type="hidden" name="kind" value={kind} />
-        <input name="value" type="password" required autoComplete="off" spellCheck={false} aria-label={pasted} className={INPUT} />
-        <button type="submit" className={PRIMARY}>
-          Save
-        </button>
-      </ActionForm>
-    );
+    below = pasteForm(pasted);
   } else if (state !== "connected" && connecting) {
     below = <p className="text-xs text-asst-faint">Your assistant asks for this as it starts. The sign-in will appear here.</p>;
   }
+  // The box for someone who already has a value, under whatever the row leads with, and behind a choice of theirs so
+  // nobody mistakes it for the way in. Never beside a live sign-in, for the two-boxes reason above.
+  const fallbackPaste = fallback && connector.paste !== null && state !== "connected" && answer !== "login" ? connector.paste : null;
   const head = (control: React.ReactNode) => (
     <div className="flex items-center gap-3.5">
       <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[9px] bg-asst-active text-sm font-semibold">
@@ -429,6 +445,13 @@ function ConnectionRow({
         head(right)
       )}
       {below}
+      {fallbackPaste === null ? null : pasting ? (
+        pasteForm(fallbackPaste)
+      ) : (
+        <button type="button" onClick={() => setPasting(true)} className="self-start text-xs text-asst-accent underline">
+          Already have a {fallbackPaste}? Paste it instead
+        </button>
+      )}
       {/*
        * Only a lapsed key the person pastes reaches here — `again` has the rest — so the way out is the Connect this
        * row is already offering, and saying so is the whole of it. Promising that the assistant will ask again would
@@ -639,6 +662,7 @@ export function GettingReady({
                 assistantId={assistant.id}
                 starting={starting}
                 running={assistant.desired === "running"}
+                phase={{ status: assistant.status, failed: assistant.readiness.failed }}
                 paste={paste}
                 save={save}
                 reconnect={reconnect}
