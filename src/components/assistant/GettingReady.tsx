@@ -16,7 +16,9 @@ import {
   modelAccess,
   modelAccessAfter,
   offeredConnections,
+  pasteIsFallback,
   screenDetail,
+  signInComing,
   signInPrompt
 } from "@/assistant/connections";
 import { type ConnectionsAsk, chatGate, connectionsAsk } from "@/assistant/onboarding";
@@ -41,6 +43,7 @@ import { LoginCountdown } from "@/components/assistant/LoginCountdown";
 import { ThemeSwitch } from "@/components/assistant/ThemeSwitch";
 import type { CredentialKind } from "@/credentials/names";
 import type { CredentialStatus } from "@/credentials/store";
+import type { VirtualAgentStatus } from "@/virtual-agents/lifecycle";
 import type { LoginView } from "@/virtual-agents/logins";
 
 const INPUT =
@@ -304,7 +307,7 @@ function ConnectionRow({
   status,
   login,
   assistantId,
-  starting,
+  agentStatus,
   running,
   paste,
   save,
@@ -317,7 +320,9 @@ function ConnectionRow({
   status: CredentialStatus | undefined;
   login: LoginView | undefined;
   assistantId: string;
-  starting: boolean;
+  /** How far the assistant has got, which is what says whether it is still on its way to relaying this sign-in. */
+  agentStatus: VirtualAgentStatus;
+  /** Whether the person wants the assistant running, which decides what signing in again does to it. */
   running: boolean;
   paste: FormAction;
   save: FormAction;
@@ -326,8 +331,10 @@ function ConnectionRow({
   first: boolean;
 }) {
   const [connecting, setConnecting] = useState(false);
+  const [pasting, setPasting] = useState(false);
   const answer = checklistState(status?.stored === true, login, now);
   const state = connectionState(answer, login, status, now);
+  const starting = signInComing(connector, agentStatus);
   // A sign-in asked for here waits on the restart the ask caused: "Connecting…" while the assistant starts again, and
   // Connect back once it has started, or failed, with no code to show, so a pod that never relays one does not leave
   // the row saying it is connecting for good.
@@ -339,22 +346,30 @@ function ConnectionRow({
     setConnecting(false);
     setRestarted(false);
   }
-  // What the person pastes to connect this one, or `null` when their assistant signs in and relays a code. The
-  // connector's own answer, so a kind with no sign-in behind it is never offered a note about one never coming.
-  const pasted = connector.paste;
-  // A lapsed sign-in the assistant makes for itself, which is the one case the row has an action of its own for:
-  // nothing on it can mend a stored value, nothing re-relays by itself, and a credential may not even be there to
-  // replace. Whether one is only changes what the action takes with it, which `SignInAgain` is what says. Anything
-  // the person pastes keeps offering its box instead, because they can simply paste a new value.
-  const again = hasLapsed(state) && pasted === null;
-  // Where this stands in the screen's words, which the derived model-access row reads from as well so the two cannot
-  // word one credential two ways. `null` is a row with a control to press instead of anything to read.
-  const words = screenDetail(state, pasted, connecting || starting);
-  // A sign-in made on request, with nothing live and nothing lapsed, is one its pod is not relaying: off the `gateway`
-  // route because nobody asked, and on it because this boot's relay never reached the person. Connect is
-  // `reconnectSignIn`, recording the ask and restarting, sent as `keep=stored` so it deletes nothing: the row shows
-  // nothing stored, which is why it asks no question first, but a credential saved since would be the one every agent
-  // of theirs uses.
+  // A token box opened before the relayed sign-in arrived, or one that saved, is closed by it, so it does not come
+  // back open by itself once that sign-in is over or the token lapses.
+  if (pasting && (answer === "login" || state === "connected")) {
+    setPasting(false);
+  }
+  // A connection whose paste is a fallback leads with the sign-in its assistant relays, and keeps its box behind a
+  // choice of the person's: someone without Claude Code has nothing to put in it.
+  const fallback = pasteIsFallback(connector);
+  // What Connect opens a box for, or `null` when the way in is a sign-in the assistant relays.
+  const pasted = fallback ? null : connector.paste;
+  // A lapsed sign-in the assistant makes for itself, with nothing the person could paste instead, which is the case
+  // the row has an action of its own for: nothing on it can mend a stored value, nothing re-relays by itself, and a
+  // credential may not even be there to replace. Whether one is only changes what the action takes with it, which
+  // `SignInAgain` is what says. A lapsed one the person can paste for keeps offering Connect instead: the box for a
+  // pasted kind, and for one whose paste is a fallback the restart below, which deletes nothing.
+  const again = hasLapsed(state) && connector.paste === null;
+  // Where this stands in the screen's words, the same as the derived model-access row's for the same state. `null` is
+  // a row with a Connect to press instead of anything to read.
+  const words = screenDetail(state, connector, connecting || starting);
+  // A sign-in its pod relays only at boot or on request, with nothing live, is one no code is coming for unless the
+  // assistant restarts: off the `gateway` route because nobody asked for Azure, a pod past its boot step for GitHub
+  // or Claude, or a boot relay that never reached the person or lapsed. Connect is `reconnectSignIn`, recording the
+  // ask and restarting, sent as `keep=stored` so it deletes nothing and asks no question first: a credential the screen
+  // has not seen saved, in another tab or by the pod, would be the one every agent of theirs uses.
   const askForm = words === null && connectRestarts(kind);
   let right: React.ReactNode = null;
   if (words === null && !askForm) {
@@ -370,31 +385,34 @@ function ConnectionRow({
   } else if (!askForm) {
     right = <span className="shrink-0 text-[13px] text-asst-accent-soft">{words}</span>;
   }
+  const pasteForm = (label: string) => (
+    <ActionForm action={save} label={`Save your ${label}`} className="flex flex-wrap items-center gap-2">
+      <input type="hidden" name="kind" value={kind} />
+      <input name="value" type="password" required autoComplete="off" spellCheck={false} aria-label={label} className={INPUT} />
+      <button type="submit" className={PRIMARY}>
+        Save
+      </button>
+    </ActionForm>
+  );
   // One thing to do at a time, chosen here rather than by three conditions that have to agree: a relayed sign-in and
   // a field for the same credential, side by side, is two password boxes posting to different places, and a token
   // typed into the code box reaches the pod and comes back only as a sign-in that did not work.
   let below: React.ReactNode = null;
   if (answer === "login" && login !== undefined) {
-    // The live sign-in wins over anything the person clicked before it arrived, which on the Claude row is the usual
-    // order: they ask to connect, and the pod relays its code a moment later.
+    // The live sign-in wins over anything the person clicked before it arrived.
     below = <SignIn assistantId={assistantId} login={login} name={connector.name} collectable={codeCollectable(login, now)} paste={paste} />;
   } else if (again) {
     below = (
       <SignInAgain assistantId={assistantId} kind={kind} name={connector.name} stored={status?.stored === true} running={running} reconnect={reconnect} />
     );
   } else if (state !== "connected" && connecting && pasted !== null) {
-    below = (
-      <ActionForm action={save} label={`Save your ${pasted}`} className="flex flex-wrap items-center gap-2">
-        <input type="hidden" name="kind" value={kind} />
-        <input name="value" type="password" required autoComplete="off" spellCheck={false} aria-label={pasted} className={INPUT} />
-        <button type="submit" className={PRIMARY}>
-          Save
-        </button>
-      </ActionForm>
-    );
+    below = pasteForm(pasted);
   } else if (state !== "connected" && connecting) {
     below = <p className="text-xs text-asst-faint">Your assistant asks for this as it starts. The sign-in will appear here.</p>;
   }
+  // The box for someone who already has a value, under whatever the row leads with. Never beside a live sign-in, for
+  // the two-boxes reason above.
+  const fallbackPaste = fallback && state !== "connected" && answer !== "login" ? connector.paste : null;
   const head = (control: React.ReactNode) => (
     <div className="flex items-center gap-3.5">
       <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[9px] bg-asst-active text-sm font-semibold">
@@ -429,15 +447,22 @@ function ConnectionRow({
         head(right)
       )}
       {below}
+      {fallbackPaste === null ? null : pasting ? (
+        pasteForm(fallbackPaste)
+      ) : (
+        <button type="button" onClick={() => setPasting(true)} className="self-start text-xs text-asst-accent underline">
+          Already have a {fallbackPaste}? Paste it instead
+        </button>
+      )}
       {/*
-       * Only a lapsed key the person pastes reaches here — `again` has the rest — so the way out is the Connect this
-       * row is already offering, and saying so is the whole of it. Promising that the assistant will ask again would
-       * be false: nothing re-relays until its pod next starts.
+       * Only a lapsed sign-in the person can paste for reaches here — `again` has the rest — so the way out is the
+       * Connect this row is already offering, and saying so is the whole of it. Promising that the assistant will ask
+       * again would be false: nothing re-relays until its pod next starts.
        */}
-      {hasLapsed(state) && !again && pasted !== null ? (
+      {hasLapsed(state) && !again && words === null ? (
         <p role="alert" className="text-xs text-asst-error">
-          {state === "failed" ? `That ${connector.name} sign-in did not work.` : `That ${connector.name} sign-in ran out before anyone used it.`} Connect it
-          again to paste a new {pasted}.
+          {state === "failed" ? `That ${connector.name} sign-in did not work.` : `That ${connector.name} sign-in ran out before anyone used it.`}{" "}
+          {pasted === null ? "Connect it again for a new sign-in link." : `Connect it again to paste a new ${pasted}.`}
         </p>
       ) : null}
     </li>
@@ -457,7 +482,8 @@ function ConnectionRow({
  * `first` rows get their separator left off.
  */
 function ModelAccessRow({ row, starting }: { row: ModelAccess; starting: boolean }) {
-  const words = screenDetail(row.state, null, starting);
+  // A relayed sign-in with nothing to paste, which is what the credential behind it is.
+  const words = screenDetail(row.state, { relays: true, paste: null }, starting);
   const tone =
     row.state === "connected" ? "text-asst-ok" : hasLapsed(row.state) ? "text-asst-warn" : words === null ? "text-asst-muted" : "text-asst-accent-soft";
   return (
@@ -574,7 +600,8 @@ function ReadyShell({ assistant, unavailable, theme = "system", subtitle, childr
 
 /**
  * The connections and the sign-ins the assistant's pod relays as it reaches each one, so a connection shows
- * "Connecting…" until its code appears. On a first visit it is where the person connects the accounts their assistant
+ * "Connecting…" while the pod is on its way to its code, and Connect — a restart that relays one, or a box to paste a
+ * value into — once nothing is coming by itself. On a first visit it is where the person connects the accounts their assistant
  * works with, opened from the connections banner while the assistant warms up behind it.
  * `returning` is the other way in — someone who connected everything on an earlier visit, whose assistant has
  * stopped to ask them to sign in again — so the screen asks for that rather than introducing the connections, and
@@ -589,9 +616,11 @@ function ReadyShell({ assistant, unavailable, theme = "system", subtitle, childr
  * the gate across the Assistant, and "Go to your chats" would be a way to chats that cannot be had without GitHub
  * and Claude. It is offered on a page whose chat has no pod, where the screen is one they opened and those chats can.
  *
- * A row whose stored credential a pod has failed to use reads as lapsed rather than connected, and offers `reconnect`:
- * nothing else on this screen can mend a stored value, so without it the one row that needs the person is the one
- * with nothing on it to press.
+ * A row whose sign-in has lapsed, stored credential or not, reads as lapsed rather than connected, and offers
+ * `reconnect`: nothing else on this screen can mend a stored value, so without it the one row that needs the person is
+ * the one with nothing on it to press. For a kind with nothing to paste that is `SignInAgain`, which deletes what is
+ * stored only behind its confirmation; for Claude it is the restart Connect, which deletes nothing, with the token box
+ * beside it for someone who has one.
  */
 export function GettingReady({
   assistant,
@@ -637,7 +666,7 @@ export function GettingReady({
                 status={statuses.find((status) => status.kind === kind)}
                 login={assistant.logins.find((login) => login.kind === kind)}
                 assistantId={assistant.id}
-                starting={starting}
+                agentStatus={assistant.status}
                 running={assistant.desired === "running"}
                 paste={paste}
                 save={save}
