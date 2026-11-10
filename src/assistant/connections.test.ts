@@ -99,13 +99,13 @@ describe("CONNECTORS", () => {
     expect(new Set(Object.keys(CONNECTORS))).toEqual(new Set(CREDENTIAL_KINDS));
   });
 
-  it("should relay exactly the connections the person can ask to sign in to again", () => {
+  it("should mark a connection as relayed when the hub lets its owner ask to sign in to it again", () => {
     const relayed = CREDENTIAL_KINDS.filter((kind) => isConnection(kind) && CONNECTORS[kind]?.relays === true);
 
     expect(relayed).toEqual(CREDENTIAL_KINDS.filter(isSignInKind));
   });
 
-  it("should give the person something to paste for every connection their assistant does not relay", () => {
+  it("should give a connection something to paste when its assistant does not relay it", () => {
     const unrelayed = CREDENTIAL_KINDS.filter((kind) => isConnection(kind) && CONNECTORS[kind]?.relays === false);
 
     expect(unrelayed).toEqual(["jenkins"]);
@@ -512,6 +512,13 @@ describe("screenDetail", () => {
     expect(screenDetail("expired", CONNECTORS.claude, false)).toBeNull();
     expect(screenDetail("expired", CONNECTORS.jenkins, false)).toBeNull();
     expect(screenDetail("waiting", CONNECTORS.jenkins, true)).toBeNull();
+  });
+
+  it("should say it is connecting when a lapsed sign-in the assistant relays is being restarted", () => {
+    expect(screenDetail("expired", CONNECTORS.claude, true)).toBe("Connecting…");
+    expect(screenDetail("failed", CONNECTORS.claude, true)).toBe("Connecting…");
+    expect(screenDetail("expired", CONNECTORS.jenkins, true)).toBeNull();
+    expect(screenDetail("expired", RELAYED, true)).toBe(CONNECTION_DETAILS.expired);
   });
 
   // The derived row has no control of its own, so a state with no words would be a row with an empty status column.

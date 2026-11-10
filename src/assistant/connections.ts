@@ -207,7 +207,12 @@ export function screenDetail(state: ConnectionState, way: Pick<Connector, "relay
     return "✓ Connected";
   }
   if (hasLapsed(state)) {
-    return way.paste === null ? CONNECTION_DETAILS[state] : null;
+    if (way.paste === null) {
+      return CONNECTION_DETAILS[state];
+    }
+    // The expired login stays until the restarted pod relays a new one, so without this the row would offer Connect
+    // again mid-restart, and a second press restarts the pod before it gets that far.
+    return way.relays && pressed ? "Connecting…" : null;
   }
   if (needsPerson(state)) {
     return "Waiting for you";
@@ -528,12 +533,11 @@ export interface OfferedConnection {
  * Whether a sign-in of this kind that is over and unsuccessful has a way back the hub will take.
  *
  * A kind with nothing to paste always has one. Its assistant is the only way in, so it relays, and `reconnectSignIn`
- * takes every kind that relays — `CONNECTORS`'s own test, "should relay exactly the connections the person can ask to
- * sign in to again", pins `relays` to `SIGN_IN_KINDS`, which is why this can read `CONNECTORS` rather than importing
- * the server module that owns that list. It restarts the pod so it relays a fresh code. A kind the person can paste
- * has a way back only for a credential their assistant uses, whether that is a new value or, for one its pod relays
- * as well, the same restart, because
- * `saveCredential` and `reconnectSignIn` are route-aware — both refuse Claude for somebody whose agents do not run
+ * takes every kind that relays — `CONNECTORS`'s own test, "should mark a connection as relayed when the hub lets its
+ * owner ask to sign in to it again", pins `relays` to `SIGN_IN_KINDS`, which is why this can read `CONNECTORS`
+ * rather than importing the server module that owns that list. It restarts the pod so it relays a fresh code. A kind
+ * the person can paste has a way back only for a credential their assistant uses, whether that is a new value or, for
+ * one its pod relays as well, the same restart, because `saveCredential` and `reconnectSignIn` are route-aware — both refuse Claude for somebody whose agents do not run
  * on their own licence. So a lapsed Claude sign-in relayed to a gateway-route person has no way back at all:
  * the only control for it is a box whose save is refused, and nothing ever clears the login row, since `startLogin`
  * overwrites only on a new relay and the two states that end one need a pod's report.

@@ -346,9 +346,9 @@ function ConnectionRow({
     setConnecting(false);
     setRestarted(false);
   }
-  // A token box opened before the relayed sign-in arrived is closed by it, so it does not come back open by itself
-  // once that sign-in is over.
-  if (pasting && answer === "login") {
+  // A token box opened before the relayed sign-in arrived, or one that saved, is closed by it, so it does not come
+  // back open by itself once that sign-in is over or the token lapses.
+  if (pasting && (answer === "login" || state === "connected")) {
     setPasting(false);
   }
   // A connection whose paste is a fallback leads with the sign-in its assistant relays, and keeps its box behind a
@@ -459,7 +459,7 @@ function ConnectionRow({
        * Connect this row is already offering, and saying so is the whole of it. Promising that the assistant will ask
        * again would be false: nothing re-relays until its pod next starts.
        */}
-      {hasLapsed(state) && !again ? (
+      {hasLapsed(state) && !again && words === null ? (
         <p role="alert" className="text-xs text-asst-error">
           {state === "failed" ? `That ${connector.name} sign-in did not work.` : `That ${connector.name} sign-in ran out before anyone used it.`}{" "}
           {pasted === null ? "Connect it again for a new sign-in link." : `Connect it again to paste a new ${pasted}.`}
