@@ -48,7 +48,15 @@ const CASES = [
   "client-upgrade-pinned",
   "package-entrypoint",
   "client-upgrade-ships-entrypoint",
-  "checkout-entrypoint"
+  "checkout-entrypoint",
+  "org-member",
+  "org-not-member",
+  "org-invitation-pending",
+  "org-invited-after-refusal",
+  "org-check-forbidden",
+  "org-check-without-read-org",
+  "org-member-clone-refused",
+  "org-from-repo-url"
 ];
 
 let stateDir: string;

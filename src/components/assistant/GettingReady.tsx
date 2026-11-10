@@ -553,7 +553,14 @@ function connectionRows(view: { assistant: AssistantSummary; statuses: Credentia
 }
 
 /** The shell both getting-ready screens share: the mark, the heading, how far the assistant has got, and why not. */
-function ReadyShell({ assistant, unavailable, theme = "system", subtitle, children }: ScreenProps & { subtitle?: string; children: React.ReactNode }) {
+function ReadyShell({
+  assistant,
+  unavailable,
+  theme = "system",
+  subtitle,
+  showWaitingDetail = false,
+  children
+}: ScreenProps & { subtitle?: string; showWaitingDetail?: boolean; children: React.ReactNode }) {
   const { readiness } = assistant;
   return (
     <div
@@ -589,6 +596,12 @@ function ReadyShell({ assistant, unavailable, theme = "system", subtitle, childr
               {readiness.step}
             </p>
             {readiness.failed && assistant.statusDetail ? <p className="text-xs text-asst-error">{assistant.statusDetail}</p> : null}
+            {/* What the pod is waiting on the person for once GitHub is connected, such as joining the organisation its
+                workspace is in: no row says what to do about that. Before then the rows say it, and the pod's detail is
+                its own wording of the sign-in it is relaying. */}
+            {showWaitingDetail && assistant.status === "awaiting_credentials" && assistant.statusDetail ? (
+              <p className="text-pretty text-xs text-asst-warn">{assistant.statusDetail}</p>
+            ) : null}
           </div>
         </div>
         {unavailable === null ? null : <p className="text-sm text-asst-error">{unavailable}</p>}
@@ -650,7 +663,13 @@ export function GettingReady({
   const access = modelAccess(assistant.modelRoute, connectionRows({ assistant, statuses, unavailable }, now));
   const starting = !assistant.readiness.failed && assistant.status !== "running";
   return (
-    <ReadyShell assistant={assistant} unavailable={unavailable} theme={theme} subtitle={subtitleFor(ask, returning)}>
+    <ReadyShell
+      assistant={assistant}
+      unavailable={unavailable}
+      theme={theme}
+      subtitle={subtitleFor(ask, returning)}
+      showWaitingDetail={statuses.some((status) => status.kind === "github" && status.stored)}
+    >
       {ask === "unknown" ? (
         <p className="text-pretty text-asst-body">
           Whatever you have already connected is still connected — the hub just cannot read your sign-ins at the moment, so it is not listing them. There is

@@ -144,6 +144,82 @@ git_auth_error() {
     grep -qiE 'could not read (Username|Password)|terminal prompts disabled|Authentication failed|Invalid username or (password|token)|Repository not found|returned error: 40[13]' "$1"
 }
 
+# The GitHub organisation that owns a github.com repo URL, in any of the forms git and workspace.yaml use.
+github_org_of() {
+    local path
+    case "$1" in
+        git@github.com:*) path="${1#git@github.com:}" ;;
+        ssh://git@github.com/*) path="${1#ssh://git@github.com/}" ;;
+        https://github.com/*) path="${1#https://github.com/}" ;;
+        *) return 1 ;;
+    esac
+    [[ "$path" == */* && -n "${path%%/*}" ]] || return 1
+    printf '%s\n' "${path%%/*}"
+}
+
+# Sets MEMBERSHIP to active, pending or absent for the signed-in account's membership of $1, or unknown for any
+# answer that does not settle it, and leaves GitHub's answer in $TMP/membership. --include because gh prints the
+# response either way but keeps its status only in the headers, and a 404 means "not a member" only from a token
+# with read:org: without it GitHub can answer 404 for a membership that exists.
+MEMBERSHIP=""
+github_org_membership() {
+    local status scopes state
+    MEMBERSHIP=unknown
+    env -u GH_TOKEN -u GITHUB_TOKEN gh api --include "user/memberships/orgs/$1" 2>"$TMP/gh.err" | tr -d '\r' >"$TMP/membership" || true
+    status=$(head -n 1 "$TMP/membership" | cut -d' ' -f2)
+    scopes=$(sed -n '2,/^$/p' "$TMP/membership" | grep -i '^x-oauth-scopes:' || true)
+    case "$status" in
+        200)
+            state=$(sed '1,/^$/d' "$TMP/membership" | jq -r '.state // empty' 2>/dev/null || true)
+            case "$state" in
+                active | pending) MEMBERSHIP="$state"; return 0 ;;
+            esac
+            log "membership of $1: GitHub answered 200 with state '${state}'"
+            ;;
+        404)
+            if grep -qE '(^|[ ,:])(read|write|admin):org(,|$| )' <<<"$scopes"; then
+                MEMBERSHIP=absent
+                return 0
+            fi
+            log "membership of $1: GitHub answered 404 to a token without read:org"
+            ;;
+        *) log "membership of $1 not checked: ${status:-no answer} $(head -c 300 "$TMP/gh.err" | tr '\n' ' ')" ;;
+    esac
+}
+
+GITHUB_LOGIN=""
+CLONE_DETAIL=""
+
+# Sets CLONE_DETAIL to what to tell the owner when GitHub will not let the signed-in account clone. "Repository
+# not found" is all git says, and for an account outside the repo's organisation the remedy is joining it rather
+# than being granted access to one repo. Every answer the membership lookup cannot settle, a member's included,
+# gets the read-access message, so the lookup only sharpens what the owner is told and never changes whether the
+# clone is retried.
+clone_refused_detail() {
+    local err="$1" org
+    if org=$(github_org_of "$REPO_URL"); then
+        github_org_membership "$org"
+        if [[ "$MEMBERSHIP" == absent || "$MEMBERSHIP" == pending ]]; then
+            if [[ -z "$GITHUB_LOGIN" ]]; then
+                [[ "$MEMBERSHIP" == pending ]] &&
+                    GITHUB_LOGIN=$(sed '1,/^$/d' "$TMP/membership" | jq -r '.user.login // empty' 2>/dev/null || true)
+                [[ -n "$GITHUB_LOGIN" ]] ||
+                    GITHUB_LOGIN=$(env -u GH_TOKEN -u GITHUB_TOKEN gh api user --jq .login 2>/dev/null || true)
+            fi
+            local who="${GITHUB_LOGIN:-the signed-in GitHub account}"
+            if [[ "$MEMBERSHIP" == absent ]]; then
+                CLONE_DETAIL="github: $who is not a member of the $org GitHub organisation, so this agent cannot fetch its repositories. Ask to join the organisation, then restart this agent."
+            else
+                CLONE_DETAIL="github: $who has been invited to the $org GitHub organisation but has not accepted yet. Accept the invitation at https://github.com/orgs/$org/invitation, then restart this agent."
+            fi
+            return 0
+        fi
+    else
+        log "cannot tell which GitHub organisation owns $REPO_URL, so its membership is not looked up"
+    fi
+    CLONE_DETAIL="github: the signed-in GitHub account cannot clone $REPO_URL; it needs read access to the repo ($err)"
+}
+
 checkout_workspace() {
     local delay=5 err reported=""
     if [[ ! -d "$WORKSPACE/.git" ]]; then
@@ -151,11 +227,14 @@ checkout_workspace() {
         until git clone --quiet --filter=blob:none "$REPO_URL" "$WORKSPACE" 2>"$TMP/git.err"; do
             err=$(head -c 300 "$TMP/git.err" | tr '\n' ' ')
             log "clone of $REPO_URL failed: $err; retrying in ${delay}s"
-            # The owner has to act on this one (the GitHub account needs access to the repo), so they
-            # are told once per distinct error rather than left watching "Starting".
-            if git_auth_error "$TMP/git.err" && [[ "$err" != "$reported" ]]; then
-                report awaiting_credentials "github: the signed-in GitHub account cannot clone $REPO_URL; it needs read access to the repo ($err)"
-                reported="$err"
+            # The owner has to act on this one (the GitHub account needs access to the repo, or to join its
+            # organisation), so they are told once per distinct message rather than left watching "Starting".
+            if git_auth_error "$TMP/git.err"; then
+                clone_refused_detail "$err"
+                if [[ "$CLONE_DETAIL" != "$reported" ]]; then
+                    report awaiting_credentials "$CLONE_DETAIL"
+                    reported="$CLONE_DETAIL"
+                fi
             fi
             rm -rf "$WORKSPACE"
             sleep_interruptibly "$delay"
