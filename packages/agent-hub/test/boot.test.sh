@@ -22,7 +22,8 @@ CASES=(no-token refused-token sign-in-not-completed sign-in-transient-failure st
     checkout-untracked-file checkout-modified-file checkout-modified-collision checkout-untracked-clobber checkout-local-commit
     checkout-refusal-flood checkout-refusal-silent no-client trailing-slash
     client-upgrade client-upgrade-offline client-upgrade-no-npm client-upgrade-pinned package-entrypoint client-upgrade-ships-entrypoint
-    checkout-entrypoint)
+    checkout-entrypoint org-member org-not-member org-invitation-pending org-check-forbidden org-check-without-read-org
+    org-check-with-checkout org-from-repo-url)
 
 if [ "${1:-}" = "--list" ]; then
     printf '%s\n' "${CASES[@]}"
@@ -95,6 +96,26 @@ case "$1 $2" in
     "auth setup-git") echo "gh setup-git" >>"$FAKE_DIR/order.log" ;;
     "auth token") [ -f "$FAKE_DIR/gh.signed-in" ] && printf '%s\n' "$FAKE_GOOD_TOKEN" ;;
     "api user") echo octocat ;;
+    # The org membership check. FAKE_MEMBERSHIP is the answer to each call in turn, the last one repeating:
+    # active or pending as GitHub's 200, or an HTTP error status. FAKE_SCOPES is the token's X-OAuth-Scopes.
+    "api --include")
+        n=$(cat "$FAKE_DIR/membership-calls" 2>/dev/null || echo 0)
+        echo $((n + 1)) >"$FAKE_DIR/membership-calls"
+        printf '%s\n' "$3" >>"$FAKE_DIR/membership.paths"
+        read -ra answers <<<"${FAKE_MEMBERSHIP:-active}"
+        answer=${answers[$((n < ${#answers[@]} ? n : ${#answers[@]} - 1))]}
+        case "$answer" in
+            active | pending) printf 'HTTP/2.0 200 OK\n' ;;
+            *) printf 'HTTP/2.0 %s Error\n' "$answer" ;;
+        esac
+        printf 'Content-Type: application/json\r\nX-Oauth-Scopes: %s\r\n\r\n' "${FAKE_SCOPES-gist, read:org, repo, user:email}"
+        case "$answer" in
+            active | pending) printf '{"state":"%s","role":"member"}' "$answer" ;;
+            *)
+                printf '{"message":"Resource protected by organization SAML enforcement","status":"%s"}' "$answer"
+                echo "gh: Resource protected by organization SAML enforcement (HTTP $answer)" >&2
+                exit 1 ;;
+        esac ;;
 esac
 EOF
 
@@ -109,6 +130,7 @@ case "$1" in
     config) exec "$REAL_GIT" "$@" ;;
     clone)
         echo "git clone" >>"$FAKE_DIR/order.log"
+        [ -f "$FAKE_DIR/membership-at-clone" ] || cat "$FAKE_DIR/membership-calls" >"$FAKE_DIR/membership-at-clone" 2>/dev/null
         if [ ! -f "$FAKE_DIR/gh.signed-in" ]; then
             echo "fatal: could not read Username for 'https://github.com': terminal prompts disabled" >&2
             exit 128
@@ -701,6 +723,101 @@ case_checkout_entrypoint() {
         ok "logs that the stage 1 it ran came from the checkout" || no "handover not logged: $(grep 'handing over' "$C/out")"
 }
 
+case_org_member() {
+    setup org-member
+    seed_github "$GOOD_TOKEN"
+    boot
+    [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git clone npm install entrypoint " &&
+        ok "clones as before when the account is an active member" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
+    [ "$(cat "$C/membership.paths" 2>/dev/null)" = "user/memberships/orgs/hmcts" ] &&
+        ok "checks membership of the organisation that owns the workspace repo, once" || no "membership calls: $(cat "$C/membership.paths" 2>/dev/null)"
+    [ "$(hub '[.status[] | select(.phase == "awaiting_credentials")] | length')" -eq 0 ] &&
+        ok "asks nothing of a member" || no "status: $(hub -c '.status')"
+}
+
+# An account outside the organisation is answered "Repository not found" by the clone, which backs off for many
+# minutes before it says anything, and the Claude sign-in stage 1 relays never comes.
+case_org_not_member() {
+    setup org-not-member
+    seed_github "$GOOD_TOKEN"
+    boot FAKE_MEMBERSHIP="404 404 active"
+    [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git clone npm install entrypoint " &&
+        ok "boots on by itself once the account joins, with no restart" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
+    [ "$(cat "$C/membership-at-clone" 2>/dev/null)" = 3 ] &&
+        ok "does not clone until the membership is active" || no "membership calls before the clone: $(cat "$C/membership-at-clone" 2>/dev/null)"
+    [ "$(hub '[.status[] | select(.phase == "awaiting_credentials")] | length')" -eq 1 ] &&
+        hub '.status[] | select(.phase == "awaiting_credentials") | .detail' |
+        grep -q '^github: octocat is not a member of the hmcts GitHub organisation.*Ask to join the organisation' &&
+        ok "tells the owner once which account has to join which organisation" || no "status: $(hub -c '.status')"
+    hub '.status[].detail // empty' | grep -q 'octocat is a member of the hmcts GitHub organisation' &&
+        ok "reports provisioning again once the account is a member" || no "status: $(hub -c '.status')"
+    hub '.status[].detail // empty' | grep -q 'cannot clone' && no "reported a clone failure" || ok "never reaches the clone failure"
+}
+
+case_org_invitation_pending() {
+    setup org-invitation-pending
+    seed_github "$GOOD_TOKEN"
+    boot FAKE_MEMBERSHIP="pending pending active"
+    [ "$BOOT_RC" -eq 0 ] && [ "$(cat "$C/membership-at-clone" 2>/dev/null)" = 3 ] &&
+        ok "waits for the invitation to be accepted, then clones" || no "rc $BOOT_RC, membership calls before the clone: $(cat "$C/membership-at-clone" 2>/dev/null)"
+    [ "$(hub '[.status[] | select(.phase == "awaiting_credentials")] | length')" -eq 1 ] &&
+        hub '.status[] | select(.phase == "awaiting_credentials") | .detail' | grep -q 'Accept the invitation at https://github.com/orgs/hmcts/invitation' &&
+        ok "sends the owner to accept the invitation, once" || no "status: $(hub -c '.status')"
+}
+
+# A token whose organisation access GitHub withholds, as SAML enforcement does, says nothing about whether it can
+# clone, so the check must not stand in the way.
+case_org_check_forbidden() {
+    setup org-check-forbidden
+    seed_github "$GOOD_TOKEN"
+    boot FAKE_MEMBERSHIP=403
+    [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git clone npm install entrypoint " &&
+        ok "clones as before when GitHub will not answer the membership check" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
+    [ "$(cat "$C/membership-calls")" -eq 1 ] && ok "asks once and does not wait" || no "membership calls: $(cat "$C/membership-calls")"
+    [ "$(hub '[.status[] | select(.phase == "awaiting_credentials")] | length')" -eq 0 ] &&
+        ok "reports nothing to the owner" || no "status: $(hub -c '.status')"
+    grep -q 'membership of hmcts not checked: 403' "$C/out" && ok "logs why the check was skipped" || no "not logged: $(grep membership "$C/out")"
+}
+
+# A hand-pasted token without read:org can be answered 404 for a membership that exists.
+case_org_check_without_read_org() {
+    setup org-check-without-read-org
+    seed_github "$GOOD_TOKEN"
+    boot FAKE_MEMBERSHIP=404 FAKE_SCOPES="repo"
+    [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git clone npm install entrypoint " &&
+        ok "clones as before when the token cannot read organisations" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
+    [ "$(hub '[.status[] | select(.phase == "awaiting_credentials")] | length')" -eq 0 ] &&
+        ok "does not call the owner a non-member on a 404 it cannot trust" || no "status: $(hub -c '.status')"
+}
+
+case_org_check_with_checkout() {
+    setup org-check-with-checkout
+    seed_github "$GOOD_TOKEN"
+    mkdir -p "$C/ws/cft-workspace/.git" "$C/ws/cft-workspace/.devcontainer/virtual-agent"
+    printf '#!/bin/sh\necho entrypoint >>"$FAKE_DIR/order.log"\n' >"$C/ws/cft-workspace/.devcontainer/virtual-agent/entrypoint.sh"
+    chmod +x "$C/ws/cft-workspace/.devcontainer/virtual-agent/entrypoint.sh"
+    boot FAKE_MEMBERSHIP=404
+    [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git fetch git merge npm install entrypoint " &&
+        ok "boots on the existing checkout whatever the membership" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
+    [ ! -f "$C/membership.paths" ] && ok "checks membership only before the first clone" || no "membership calls: $(cat "$C/membership.paths")"
+}
+
+case_org_from_repo_url() {
+    setup org-from-repo-url
+    seed_github "$GOOD_TOKEN"
+    boot VIRTUAL_AGENT_REPO=ssh://git@github.com/acme/cft-workspace.git
+    [ "$(cat "$C/membership.paths" 2>/dev/null)" = "user/memberships/orgs/acme" ] &&
+        ok "checks the organisation named in an ssh:// repo URL" || no "membership calls: $(cat "$C/membership.paths" 2>/dev/null)"
+    setup org-from-repo-url-https
+    boot VIRTUAL_AGENT_REPO=https://github.com/acme-two/cft-workspace.git
+    [ "$(cat "$C/membership.paths" 2>/dev/null)" = "user/memberships/orgs/acme-two" ] &&
+        ok "checks the organisation named in an https:// repo URL" || no "membership calls: $(cat "$C/membership.paths" 2>/dev/null)"
+    setup org-from-repo-url-other-host
+    boot VIRTUAL_AGENT_REPO=https://gitlab.example.com/acme/cft-workspace.git
+    [ "$BOOT_RC" -eq 0 ] && [ ! -f "$C/membership.paths" ] &&
+        ok "skips the check for a repo not on github.com" || no "rc $BOOT_RC, membership calls: $(cat "$C/membership.paths" 2>/dev/null)"
+}
+
 run_case() {
     case "$1" in
         no-token) case_no_token ;;
@@ -726,6 +843,13 @@ run_case() {
         package-entrypoint) case_package_entrypoint ;;
         client-upgrade-ships-entrypoint) case_client_upgrade_ships_entrypoint ;;
         checkout-entrypoint) case_checkout_entrypoint ;;
+        org-member) case_org_member ;;
+        org-not-member) case_org_not_member ;;
+        org-invitation-pending) case_org_invitation_pending ;;
+        org-check-forbidden) case_org_check_forbidden ;;
+        org-check-without-read-org) case_org_check_without_read_org ;;
+        org-check-with-checkout) case_org_check_with_checkout ;;
+        org-from-repo-url) case_org_from_repo_url ;;
         *) printf 'unknown case %s (try --list)\n' "$1" >&2; exit 2 ;;
     esac
 }
