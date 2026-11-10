@@ -245,17 +245,24 @@ describe("GettingReady connectors", () => {
     expect(formsIn("Jenkins")).toEqual(["Save your Jenkins API token"]);
   });
 
-  // Signing in again is what brings a fresh link: with no token stored, the restarted pod drives `claude setup-token`.
-  // The token box is no way back for someone without Claude Code to make one with.
-  it("should offer to sign in to Claude again rather than the token box when its relayed sign-in lapsed", () => {
-    render(ready({ assistant: assistant("running", { needed: ["github", "azure", "claude"], logins: [lapsed("claude")] }) }));
+  // Connecting again is what brings a fresh link: the restarted pod drives `claude setup-token` when it has no token.
+  // It goes as `keep=stored`, so a token saved since, which this screen may not have seen, is not deleted; and the
+  // token box is no way back for someone without Claude Code to make one with.
+  it("should offer the restart that deletes nothing when a relayed Claude sign-in lapsed", async () => {
+    const reconnect = ok();
+    render(ready({ assistant: assistant("running", { needed: ["github", "azure", "claude"], logins: [lapsed("claude")] }), reconnect }));
 
     const claude = connector("Claude");
-    expect(within(claude).getByText("Sign-in expired")).toBeTruthy();
-    expect(within(claude).queryByRole("alert")).toBeNull();
-    expect(within(claude).queryByRole("button", { name: "Connect" })).toBeNull();
-    fireEvent.click(within(claude).getByRole("button", { name: "Sign in again" }));
-    expect(formsIn("Claude")).toEqual(["Sign in to Claude again"]);
+    expect(within(claude).getByRole("alert").textContent).toBe("That Claude sign-in ran out before anyone used it. Connect it again for a new sign-in link.");
+    expect(within(claude).queryByRole("button", { name: "Sign in again" })).toBeNull();
+    expect(formsIn("Claude")).toEqual(["Connect Claude"]);
+    await act(async () => {
+      fireEvent.click(within(claude).getByRole("button", { name: "Connect" }));
+    });
+
+    const sent = (reconnect.mock.calls[0] as unknown as [FormData])[0];
+    expect(sent.get("kind")).toBe("claude");
+    expect(sent.get("keep")).toBe("stored");
   });
 
   it("should show a sign-in as connecting while the assistant is starting", () => {
@@ -267,8 +274,9 @@ describe("GettingReady connectors", () => {
 
   /**
    * The sign-ins whose Connect has to restart the assistant, because nothing else makes its pod relay a code: GitHub is
-   * signed in to only as the pod boots, and a running gateway assistant with no Azure code and none stored is one whose
-   * boot relay never reached the person. Without the restart no code ever arrives and the person is held here for good.
+   * signed in to only as the pod boots, Claude only before an own-licence pod first reports running, and a running
+   * gateway assistant with no Azure code and none stored is one whose boot relay never reached the person. Without the
+   * restart no code ever arrives and the person is held here for good.
    */
   const RESTARTING = [
     { name: "GitHub", kind: "github", props: (status: VirtualAgentStatus) => ({ assistant: assistant(status) }) },
@@ -279,7 +287,8 @@ describe("GettingReady connectors", () => {
         assistant: assistant(status, { modelRoute: "gateway", needed: neededCredentials("gateway"), optional: optionalCredentials("gateway") }),
         statuses: statuses("github")
       })
-    }
+    },
+    { name: "Claude", kind: "claude", props: (status: VirtualAgentStatus) => ({ assistant: assistant(status), statuses: statuses("github", "azure") }) }
   ] as const;
 
   it.each(RESTARTING)("should restart the assistant to ask for the $name sign-in when the person clicks Connect", async ({ name, kind, props }) => {
@@ -453,18 +462,18 @@ describe("GettingReady connectors", () => {
 
     const claude = connector("Claude");
     expect(within(claude).getByText("Connecting…")).toBeTruthy();
-    expect(within(claude).getByText("Your assistant will send a link here for you to sign in to Claude.")).toBeTruthy();
     expect(within(claude).queryByRole("button", { name: "Connect" })).toBeNull();
     expect(within(claude).queryByRole("form")).toBeNull();
   });
 
-  it("should wait for the Claude sign-in link rather than offer a Connect when the assistant is running and has relayed none", () => {
-    render(ready({ assistant: assistant("running", { needed: ["github", "azure", "claude"] }), statuses: statuses("github", "azure") }));
+  // The pod signs in to Claude only before it first reports running, and a stopped one not at all, so the link is not
+  // coming by itself and Connect is the restart that brings it.
+  it.each(["running", "stopped", "stopping"] as const)("should offer Connect for Claude when the assistant is %s with no Claude token", (status) => {
+    render(ready({ assistant: assistant(status, { needed: ["github", "azure", "claude"] }), statuses: statuses("github", "azure") }));
 
     const claude = connector("Claude");
-    expect(within(claude).getByText("Waiting for your assistant")).toBeTruthy();
-    expect(within(claude).queryByRole("button", { name: "Connect" })).toBeNull();
-    expect(within(claude).queryByRole("form")).toBeNull();
+    expect(within(claude).queryByText("Connecting…")).toBeNull();
+    expect(formsIn("Claude")).toEqual(["Connect Claude"]);
   });
 
   // Someone who has run `claude setup-token` themselves can still paste what it printed, but only once they say so.
@@ -498,18 +507,16 @@ describe("GettingReady connectors", () => {
  */
 describe("GettingReady asks the person can act on", () => {
   // The pod gives up driving `claude setup-token` and waits for a token instead, so a note about a link that is never
-  // coming would leave them with the ask and nowhere to answer it: signing in again restarts it for a fresh link, and
-  // the box is there for someone who has a token already.
-  it("should offer to sign in to Claude again, and the token box, when the assistant has stopped relaying a sign-in", () => {
+  // coming would leave them with the ask and nowhere to answer it: Connect restarts it for a fresh link, and the box is
+  // there for someone who has a token already.
+  it("should offer Connect for Claude, and the token box, when the assistant has stopped relaying a sign-in", () => {
     const summary = assistant("awaiting_credentials", { needed: ["github", "azure", "claude"] });
     render(ready({ assistant: summary, statuses: statuses("github", "azure") }));
 
     const missing = connectionsPrompt("connect", summary.needed, new Set<CredentialKind>(["github", "azure"]));
     expect(missing?.message).toContain("Claude");
-    const claude = connector("Claude");
-    expect(within(claude).getByText("Not connected")).toBeTruthy();
-    expect(within(claude).getByRole("button", { name: "Sign in again" })).toBeTruthy();
-    fireEvent.click(within(claude).getByRole("button", { name: "Already have a Claude token? Paste it instead" }));
+    expect(formsIn("Claude")).toEqual(["Connect Claude"]);
+    fireEvent.click(within(connector("Claude")).getByRole("button", { name: "Already have a Claude token? Paste it instead" }));
 
     const form = within(connector("Claude")).getByRole("form", { name: "Save your Claude token" });
     expect(within(form).getByLabelText("Claude token")).toBeTruthy();
@@ -524,7 +531,7 @@ describe("GettingReady asks the person can act on", () => {
     const { rerender } = render(ready({ assistant: summary, statuses: statuses("github", "azure") }));
     fireEvent.click(within(connector("Claude")).getByRole("button", { name: "Already have a Claude token? Paste it instead" }));
 
-    expect(formsIn("Claude")).toEqual(["Save your Claude token"]);
+    expect(formsIn("Claude")).toEqual(["Connect Claude", "Save your Claude token"]);
 
     const relayed = assistant("awaiting_login", {
       needed: ["github", "azure", "claude"],
@@ -534,6 +541,24 @@ describe("GettingReady asks the person can act on", () => {
 
     expect(formsIn("Claude")).toEqual(["Paste the Claude code"]);
     expect(connector("Claude").querySelectorAll('input[type="password"]')).toHaveLength(1);
+  });
+
+  // The box the person opened was closed by the sign-in that arrived, so its lapsing leaves the row on Connect.
+  it("should leave the token box closed when a relayed Claude sign-in it gave way to has lapsed", () => {
+    const needed: CredentialKind[] = ["github", "azure", "claude"];
+    const { rerender } = render(ready({ assistant: assistant("awaiting_credentials", { needed }), statuses: statuses("github", "azure") }));
+    fireEvent.click(within(connector("Claude")).getByRole("button", { name: "Already have a Claude token? Paste it instead" }));
+
+    rerender(
+      ready({
+        assistant: assistant("awaiting_login", { needed, logins: [login("claude", { prompt: "paste_code", userCode: null })] }),
+        statuses: statuses("github", "azure")
+      })
+    );
+    rerender(ready({ assistant: assistant("running", { needed, logins: [lapsed("claude")] }), statuses: statuses("github", "azure") }));
+
+    expect(formsIn("Claude")).toEqual(["Connect Claude"]);
+    expect(within(connector("Claude")).getByRole("button", { name: "Already have a Claude token? Paste it instead" })).toBeTruthy();
   });
 
   it("should offer a row for a sign-in the assistant is waiting on that it would not offer unasked", () => {
