@@ -22,7 +22,7 @@ CASES=(no-token refused-token sign-in-not-completed sign-in-transient-failure st
     checkout-untracked-file checkout-modified-file checkout-modified-collision checkout-untracked-clobber checkout-local-commit
     checkout-refusal-flood checkout-refusal-silent no-client trailing-slash
     client-upgrade client-upgrade-offline client-upgrade-no-npm client-upgrade-pinned package-entrypoint client-upgrade-ships-entrypoint
-    checkout-entrypoint org-member org-not-member org-invitation-pending org-check-forbidden org-check-without-read-org
+    checkout-entrypoint org-member org-not-member org-invitation-pending org-invited-after-refusal org-check-forbidden org-check-without-read-org
     org-member-clone-refused org-from-repo-url)
 
 if [ "${1:-}" = "--list" ]; then
@@ -745,12 +745,12 @@ case_org_not_member() {
     boot FAKE_CLONE_DENIED=3 FAKE_MEMBERSHIP=404 GH_TOKEN=stray-token
     [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git clone git clone git clone git clone npm install entrypoint " &&
         ok "goes on retrying the clone and boots once it succeeds, with no restart" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
-    [ "$(cat "$C/membership.paths" 2>/dev/null)" = "user/memberships/orgs/hmcts" ] &&
-        ok "looks up the membership once for a git error that does not change" || no "membership calls: $(cat "$C/membership.paths" 2>/dev/null)"
+    [ "$(sort -u "$C/membership.paths" 2>/dev/null)" = "user/memberships/orgs/hmcts" ] && [ "$(wc -l <"$C/membership.paths")" -eq 3 ] &&
+        ok "looks the membership up on each refused clone, since joining does not change git's error" || no "membership calls: $(cat "$C/membership.paths" 2>/dev/null)"
     [ ! -f "$C/gh-token.leaks" ] && ok "asks as the signed-in account, not a GH_TOKEN in the environment" || no "$(cat "$C/gh-token.leaks")"
     [ "$(hub '[.status[] | select(.phase == "awaiting_credentials")] | length')" -eq 1 ] &&
         hub '.status[] | select(.phase == "awaiting_credentials") | .detail' |
-        grep -q '^github: octocat is not a member of the hmcts GitHub organisation, so this agent cannot fetch its repositories. Ask to join the organisation; .*start it again if it has stopped by then\.$' &&
+        grep -q '^github: octocat is not a member of the hmcts GitHub organisation, so this agent cannot fetch its repositories. Ask to join the organisation, then restart this agent\.$' &&
         ok "tells the owner once which account has to join which organisation" || no "status: $(hub -c '.status')"
     hub '.status[].detail // empty' | grep -q 'needs read access' && no "also sent the read-access message" || ok "sends the join message in place of the read-access one"
     [ "$(hub '.status[-1].detail')" = "cloned cft-workspace" ] && ok "reports provisioning again once cloned" || no "status: $(hub -c '.status')"
@@ -764,9 +764,19 @@ case_org_invitation_pending() {
         ok "boots once the clone succeeds" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
     [ "$(hub '[.status[] | select(.phase == "awaiting_credentials")] | length')" -eq 1 ] &&
         hub '.status[] | select(.phase == "awaiting_credentials") | .detail' |
-        grep -q '^github: invitee has been invited to the hmcts GitHub organisation but has not accepted yet. Accept the invitation at https://github.com/orgs/hmcts/invitation;' &&
+        grep -q '^github: invitee has been invited to the hmcts GitHub organisation but has not accepted yet. Accept the invitation at https://github.com/orgs/hmcts/invitation, then restart this agent\.$' &&
         ok "sends the owner to accept the invitation, once" || no "status: $(hub -c '.status')"
     [ ! -f "$C/api-user.calls" ] && ok "takes the login from the invitation rather than asking again" || no "gh api user was called"
+}
+
+# An owner told to join who is then invited is told to accept, though git's error has not changed.
+case_org_invited_after_refusal() {
+    setup org-invited-after-refusal
+    seed_github "$GOOD_TOKEN"
+    boot FAKE_CLONE_DENIED=2 FAKE_MEMBERSHIP="404 pending"
+    [ "$BOOT_RC" -eq 0 ] && ok "boots once the clone succeeds" || no "rc $BOOT_RC"
+    hub '[.status[] | select(.phase == "awaiting_credentials") | .detail]' | jq -e 'length == 2 and (.[0] | test("Ask to join")) and (.[1] | test("Accept the invitation"))' >/dev/null &&
+        ok "tells the owner to join, then to accept the invitation once they have one" || no "status: $(hub -c '.status')"
 }
 
 # GitHub withholding the answer, as SAML enforcement does, says nothing about membership.
@@ -850,6 +860,7 @@ run_case() {
         org-member) case_org_member ;;
         org-not-member) case_org_not_member ;;
         org-invitation-pending) case_org_invitation_pending ;;
+        org-invited-after-refusal) case_org_invited_after_refusal ;;
         org-check-forbidden) case_org_check_forbidden ;;
         org-check-without-read-org) case_org_check_without_read_org ;;
         org-member-clone-refused) case_org_member_clone_refused ;;

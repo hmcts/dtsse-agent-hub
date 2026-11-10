@@ -52,6 +52,7 @@ const CASES = [
   "org-member",
   "org-not-member",
   "org-invitation-pending",
+  "org-invited-after-refusal",
   "org-check-forbidden",
   "org-check-without-read-org",
   "org-member-clone-refused",

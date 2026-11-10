@@ -205,12 +205,12 @@ clone_refused_detail() {
                     GITHUB_LOGIN=$(sed '1,/^$/d' "$TMP/membership" | jq -r '.user.login // empty' 2>/dev/null || true)
                 [[ -n "$GITHUB_LOGIN" ]] ||
                     GITHUB_LOGIN=$(env -u GH_TOKEN -u GITHUB_TOKEN gh api user --jq .login 2>/dev/null || true)
-                GITHUB_LOGIN="${GITHUB_LOGIN:-the signed-in GitHub account}"
             fi
+            local who="${GITHUB_LOGIN:-the signed-in GitHub account}"
             if [[ "$MEMBERSHIP" == absent ]]; then
-                CLONE_DETAIL="github: $GITHUB_LOGIN is not a member of the $org GitHub organisation, so this agent cannot fetch its repositories. Ask to join the organisation; this agent carries on by itself once you are a member, or start it again if it has stopped by then."
+                CLONE_DETAIL="github: $who is not a member of the $org GitHub organisation, so this agent cannot fetch its repositories. Ask to join the organisation, then restart this agent."
             else
-                CLONE_DETAIL="github: $GITHUB_LOGIN has been invited to the $org GitHub organisation but has not accepted yet. Accept the invitation at https://github.com/orgs/$org/invitation; this agent carries on by itself once you have, or start it again if it has stopped by then."
+                CLONE_DETAIL="github: $who has been invited to the $org GitHub organisation but has not accepted yet. Accept the invitation at https://github.com/orgs/$org/invitation, then restart this agent."
             fi
             return 0
         fi
@@ -221,7 +221,7 @@ clone_refused_detail() {
 }
 
 checkout_workspace() {
-    local delay=5 err looked_up="" reported=""
+    local delay=5 err reported=""
     if [[ ! -d "$WORKSPACE/.git" ]]; then
         mkdir -p "$(dirname "$WORKSPACE")"
         until git clone --quiet --filter=blob:none "$REPO_URL" "$WORKSPACE" 2>"$TMP/git.err"; do
@@ -229,12 +229,8 @@ checkout_workspace() {
             log "clone of $REPO_URL failed: $err; retrying in ${delay}s"
             # The owner has to act on this one (the GitHub account needs access to the repo, or to join its
             # organisation), so they are told once per distinct message rather than left watching "Starting".
-            # Membership is looked up once per distinct git error, not on every retry.
             if git_auth_error "$TMP/git.err"; then
-                if [[ "$err" != "$looked_up" ]]; then
-                    clone_refused_detail "$err"
-                    looked_up="$err"
-                fi
+                clone_refused_detail "$err"
                 if [[ "$CLONE_DETAIL" != "$reported" ]]; then
                     report awaiting_credentials "$CLONE_DETAIL"
                     reported="$CLONE_DETAIL"

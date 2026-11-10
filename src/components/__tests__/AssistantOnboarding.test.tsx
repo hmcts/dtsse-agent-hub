@@ -139,15 +139,22 @@ describe("GettingReady progress", () => {
     expect(screen.getByText("image pull failed")).toBeTruthy();
   });
 
-  it("should show what the pod is waiting for when it is awaiting credentials", () => {
+  it("should show what the pod is waiting for when it is awaiting credentials with GitHub connected", () => {
     const detail = "github: octocat is not a member of the hmcts GitHub organisation, so this agent cannot fetch its repositories.";
-    render(ready({ assistant: assistant("awaiting_credentials", { statusDetail: detail }) }));
+    render(ready({ assistant: assistant("awaiting_credentials", { statusDetail: detail }), statuses: statuses("github") }));
 
     expect(screen.getByRole("heading", { name: "Your assistant is getting ready" })).toBeTruthy();
     expect(screen.getByRole("status").textContent).toBe("Waiting for you to connect your accounts…");
     const shown = screen.getByText(detail);
     expect(shown.className).toContain("text-asst-warn");
     expect(shown.className).not.toContain("text-asst-error");
+  });
+
+  it("should leave the pod's detail to the rows when it is awaiting credentials before GitHub is connected", () => {
+    const detail = "github: no GitHub token stored; relaying a device-code sign-in to the owner";
+    render(ready({ assistant: assistant("awaiting_credentials", { statusDetail: detail }) }));
+
+    expect(screen.queryByText(detail)).toBeNull();
   });
 
   it("should not show the pod's detail when it is starting", () => {
