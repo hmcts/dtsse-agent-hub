@@ -24,7 +24,7 @@ import { offerChatFork, withdrawChatFork } from "@/app/_actions/forks";
 import { answerAgentQuestion } from "@/app/_actions/questions";
 import { shareChat, unshareChat } from "@/app/_actions/shares";
 import { deleteTemplate, saveTemplate } from "@/app/_actions/templates";
-import { reconnectSignIn, restartVirtualAgent, saveVirtualAgentPod } from "@/app/_actions/virtual-agents";
+import { pasteLoginCode, reconnectSignIn, restartVirtualAgent, saveVirtualAgentPod } from "@/app/_actions/virtual-agents";
 import { SHARING_SETTINGS } from "@/app/assistant/sharing";
 import { connectionsData } from "@/assistant/connections";
 import { savedCredentialsData } from "@/assistant/saved-credentials";
@@ -116,7 +116,7 @@ export default async function ConversationPage({
       actions={ACTIONS}
       connections={connectionsData(home.assistant, home.credentials)}
       viewerRoute={home.credentials.modelRoute}
-      connect={{ assistantId: home.assistant.id, running: home.assistant.desired === "running", reconnect: reconnectSignIn }}
+      connect={{ assistantId: home.assistant.id, running: home.assistant.desired === "running", reconnect: reconnectSignIn, paste: pasteLoginCode }}
       now={Date.now()}
       plugins={pluginSettings}
       welsh={home.welsh}

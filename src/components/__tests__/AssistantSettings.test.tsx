@@ -625,8 +625,8 @@ function plugins(overrides: Partial<AssistantPlugins> = {}): AssistantPlugins {
 
 const PLUGINS = "Your assistant's plugins";
 
-function connectWith(overrides: Partial<{ running: boolean; reconnect: FormAction }> = {}) {
-  return { assistantId: ASSISTANT_ID, running: true, reconnect: ok(), ...overrides };
+function connectWith(overrides: Partial<{ running: boolean; reconnect: FormAction; paste: FormAction }> = {}) {
+  return { assistantId: ASSISTANT_ID, running: true, reconnect: ok(), paste: ok(), ...overrides };
 }
 
 /** The row the named connection's status is on, which is the one element that names it. */
@@ -849,8 +849,8 @@ describe("connecting Azure from the Assistant's settings", () => {
     expect(within(azureRow()).queryByRole("button")).toBeNull();
   });
 
-  it("should offer a connect for nothing but GitHub, Azure and Microsoft 365", () => {
-    open({ connections: data([]), connect: connectWith() }, "Connections");
+  it("should offer a connect for nothing but GitHub, Azure and Microsoft 365 when GitHub is connected", () => {
+    open({ connections: data(["github"]), connect: connectWith() }, "Connections");
 
     const buttons = within(screen.getByRole("list", { name: "Connections" })).getAllByRole("button");
     expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual(["Connect GitHub", "Connect Azure", "Connect Microsoft 365"]);
@@ -3471,5 +3471,66 @@ describe("the settings dialog's drafts across a save and the address", () => {
       "Opus saved as the model for your chats"
     ]);
     root.remove();
+  });
+});
+
+/**
+ * A sign-in the pod has relayed is shown on its row, as the getting-ready screen shows it, so connecting from here does
+ * not leave the person to find the code somewhere else.
+ */
+describe("a relayed sign-in in the Assistant's settings", () => {
+  it("should show the GitHub code, its page and the HMCTS sign-on step on the GitHub row when a code is live", () => {
+    open({ connections: data(["claude"], [login("github", "pending")]), connect: connectWith() }, "Connections");
+
+    const github = connectionRow("GitHub");
+    expect(within(github).getByText("Waiting for you")).toBeTruthy();
+    expect(within(github).getByText("ABCD-1234")).toBeTruthy();
+    expect(within(github).getByRole("link", { name: "the GitHub sign-in page" }).getAttribute("href")).toBe("https://example.com/device");
+    expect(within(github).getByRole("link", { name: "sign in to HMCTS on GitHub" })).toBeTruthy();
+  });
+
+  it("should offer nothing that restarts or removes beside the code when a sign-in is live", () => {
+    open({ connections: data(["github", "claude"], [{ ...login("github", "pending"), updatedAt: AFTER_STORED }]), connect: connectWith() }, "Connections");
+
+    const github = connectionRow("GitHub");
+    expect(within(github).queryByText("Connected")).toBeNull();
+    expect(within(github).queryByRole("button", { name: "Connect GitHub" })).toBeNull();
+    expect(within(github).queryByRole("button", { name: /Remove/ })).toBeNull();
+  });
+
+  it("should show the box for the Claude code and send it back when the pod relays a link to paste from", async () => {
+    const paste = ok();
+    const relayed: LoginView = { ...login("claude", "pending"), prompt: "paste_code", userCode: null, verificationUri: "https://claude.ai/oauth/authorize" };
+    open({ connections: data(["github"], [relayed]), connect: connectWith({ paste }) }, "Connections");
+
+    const claude = connectionRow("Claude");
+    expect(within(claude).getByRole("link", { name: "the Claude sign-in page" }).getAttribute("href")).toBe("https://claude.ai/oauth/authorize");
+    fireEvent.change(within(claude).getByLabelText("Claude code"), { target: { value: "code#123" } });
+    await act(async () => {
+      fireEvent.submit(within(claude).getByRole("form", { name: "Paste the Claude code" }));
+    });
+
+    const sent = (paste.mock.calls[0] as unknown as [FormData])[0];
+    expect(sent.get("id")).toBe(ASSISTANT_ID);
+    expect(sent.get("kind")).toBe("claude");
+    expect(sent.get("code")).toBe("code#123");
+  });
+});
+
+describe("connecting from the Assistant's settings before GitHub", () => {
+  it("should hold back every Connect and Add but GitHub's, and say why, when GitHub is not connected", () => {
+    open({ connections: data([]), connect: connectWith() }, "Connections");
+
+    expect(within(connectionRow("GitHub")).getByRole("button", { name: "Connect GitHub" })).toBeTruthy();
+    expect(within(azureRow()).queryByRole("button", { name: "Connect Azure" })).toBeNull();
+    expect(within(azureRow()).getByText("Connect GitHub first")).toBeTruthy();
+    expect(within(connectionRow("Microsoft 365")).queryByRole("button", { name: "Connect Microsoft 365" })).toBeNull();
+  });
+
+  it("should offer them once GitHub is connected", () => {
+    open({ connections: data(["github"]), connect: connectWith() }, "Connections");
+
+    expect(within(azureRow()).getByRole("button", { name: "Connect Azure" })).toBeTruthy();
+    expect(within(azureRow()).queryByText("Connect GitHub first")).toBeNull();
   });
 });

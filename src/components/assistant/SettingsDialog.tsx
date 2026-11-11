@@ -1170,6 +1170,8 @@ export function AssistantSettings({
               view={{
                 theme: shownTheme,
                 list,
+                logins: data?.logins ?? [],
+                now,
                 access,
                 connect,
                 microsoft: microsoftConnection(data, viewerRoute),

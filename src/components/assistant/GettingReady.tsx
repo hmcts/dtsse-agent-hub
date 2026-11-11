@@ -2,6 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import {
+  awaitsGithub,
   type Connection,
   type ConnectionsPrompt,
   type Connector,
@@ -11,6 +12,7 @@ import {
   connections,
   connectionsPrompt,
   connectRestarts,
+  GITHUB_FIRST,
   hasLapsed,
   type ModelAccess,
   modelAccess,
@@ -39,7 +41,7 @@ import {
 import { ActionForm, type FormAction } from "@/components/ActionForm";
 import { Mark } from "@/components/assistant/AssistantShell";
 import { useVisit } from "@/components/assistant/AssistantVisit";
-import { LoginCountdown } from "@/components/assistant/LoginCountdown";
+import { SignIn } from "@/components/assistant/SignIn";
 import { ThemeSwitch } from "@/components/assistant/ThemeSwitch";
 import type { CredentialKind } from "@/credentials/names";
 import type { CredentialStatus } from "@/credentials/store";
@@ -138,85 +140,6 @@ function useWarmupMessage(phase: WarmupPhase, rotating: boolean, since: number):
     return () => clearInterval(timer);
   }, [rotating, slow]);
   return { message, slow };
-}
-
-/**
- * What to do for a sign-in the assistant is waiting on: a code to enter on a page, or a code to paste back.
- *
- * `collectable` is whether a code they have already pasted is still there for the pod, rather than whether they ever
- * pasted one: a code the pod never came for stops being any use after `PASTED_CODE_TTL_MS` while the sign-in itself
- * can run for the rest of the hour, and `storePastedCode` will take another — so the box comes back.
- */
-function SignIn({
-  assistantId,
-  login,
-  name,
-  collectable,
-  paste
-}: {
-  assistantId: string;
-  login: LoginView;
-  name: string;
-  collectable: boolean;
-  paste: FormAction;
-}) {
-  if (login.prompt === "device_code") {
-    return (
-      <div className="flex flex-col gap-1.5 text-[13px] text-asst-body">
-        <p>
-          Open{" "}
-          <a href={login.verificationUri} target="_blank" rel="noreferrer noopener" className="text-asst-accent underline">
-            the {name} sign-in page
-          </a>{" "}
-          and enter this code <LoginCountdown expiresAt={login.expiresAt} />:
-        </p>
-        <p>
-          <span className="sr-only">{name} code: </span>
-          <code className="inline-block rounded-lg border border-asst-strong bg-asst-field px-3 py-1 font-plex-mono text-lg tracking-widest text-asst-text">
-            {login.userCode}
-          </code>
-        </p>
-        <p className="text-xs text-asst-faint">Sign in as yourself.</p>
-        {/* hmcts enforces SAML single sign-on, and a token is authorised for it only if the person has an SSO session
-            when they enter the code; without one the clone is refused and they are asked to do this again. */}
-        {login.kind === "github" ? (
-          <p className="text-xs text-asst-faint">
-            First{" "}
-            <a href="https://github.com/orgs/hmcts/sso" target="_blank" rel="noreferrer noopener" className="text-asst-accent underline">
-              sign in to HMCTS on GitHub
-            </a>
-            , so the sign-in is authorised for HMCTS repositories.
-          </p>
-        ) : null}
-      </div>
-    );
-  }
-  if (collectable) {
-    return (
-      <p role="status" className="text-[13px] text-asst-ok">
-        Got it. Your assistant is finishing signing in.
-      </p>
-    );
-  }
-  return (
-    <div className="flex flex-col gap-1.5 text-[13px] text-asst-body">
-      <p>
-        Open{" "}
-        <a href={login.verificationUri} target="_blank" rel="noreferrer noopener" className="text-asst-accent underline">
-          the {name} sign-in page
-        </a>
-        , sign in, and paste the code it gives you <LoginCountdown expiresAt={login.expiresAt} />.
-      </p>
-      <ActionForm action={paste} label={`Paste the ${name} code`} className="flex flex-wrap items-center gap-2">
-        <input type="hidden" name="id" value={assistantId} />
-        <input type="hidden" name="kind" value={login.kind} />
-        <input name="code" type="password" required autoComplete="off" spellCheck={false} aria-label={`${name} code`} className={INPUT} />
-        <button type="submit" className={PRIMARY}>
-          Send
-        </button>
-      </ActionForm>
-    </div>
-  );
 }
 
 /** What the confirmation asks and what the button that answers it is called, by what the action will actually do. */
@@ -320,6 +243,7 @@ function ConnectionRow({
   assistantId,
   agentStatus,
   running,
+  awaitingGithub,
   paste,
   save,
   reconnect,
@@ -335,6 +259,8 @@ function ConnectionRow({
   agentStatus: VirtualAgentStatus;
   /** Whether the person wants the assistant running, which decides what signing in again does to it. */
   running: boolean;
+  /** Whether this row's controls wait for GitHub to be connected: `awaitsGithub`. */
+  awaitingGithub: boolean;
   paste: FormAction;
   save: FormAction;
   reconnect: FormAction;
@@ -373,9 +299,12 @@ function ConnectionRow({
   // `SignInAgain` is what says. A lapsed one the person can paste for keeps offering Connect instead: the box for a
   // pasted kind, and for one whose paste is a fallback the restart below, which deletes nothing.
   const again = hasLapsed(state) && connector.paste === null;
+  // A row waiting for GitHub offers nothing to press and says why. A sign-in its pod has already relayed still shows,
+  // since that is the pod asking and not the screen, and so does a connection that is already made.
+  const held = awaitingGithub && state !== "connected" && answer !== "login";
   // Where this stands in the screen's words, the same as the derived model-access row's for the same state. `null` is
   // a row with a Connect to press instead of anything to read.
-  const words = screenDetail(state, connector, connecting || starting);
+  const words = held ? GITHUB_FIRST : screenDetail(state, connector, connecting || starting);
   // A sign-in its pod relays only at boot or on request, with nothing live, is one no code is coming for unless the
   // assistant restarts: off the `gateway` route because nobody asked for Azure, a pod past its boot step for GitHub
   // or Claude, or a boot relay that never reached the person or lapsed. Connect is `reconnectSignIn`, recording the
@@ -383,7 +312,9 @@ function ConnectionRow({
   // has not seen saved, in another tab or by the pod, would be the one every agent of theirs uses.
   const askForm = words === null && connectRestarts(kind);
   let right: React.ReactNode = null;
-  if (words === null && !askForm) {
+  if (held) {
+    right = <span className="shrink-0 text-[13px] text-asst-muted">{words}</span>;
+  } else if (words === null && !askForm) {
     right = (
       <button type="button" onClick={() => setConnecting(true)} className={CONNECT}>
         Connect
@@ -412,6 +343,8 @@ function ConnectionRow({
   if (answer === "login" && login !== undefined) {
     // The live sign-in wins over anything the person clicked before it arrived.
     below = <SignIn assistantId={assistantId} login={login} name={connector.name} collectable={codeCollectable(login, now)} paste={paste} />;
+  } else if (held) {
+    below = null;
   } else if (again) {
     below = (
       <SignInAgain assistantId={assistantId} kind={kind} name={connector.name} stored={status?.stored === true} running={running} reconnect={reconnect} />
@@ -423,7 +356,7 @@ function ConnectionRow({
   }
   // The box for someone who already has a value, under whatever the row leads with. Never beside a live sign-in, for
   // the two-boxes reason above.
-  const fallbackPaste = fallback && state !== "connected" && answer !== "login" ? connector.paste : null;
+  const fallbackPaste = fallback && !held && state !== "connected" && answer !== "login" ? connector.paste : null;
   const head = (control: React.ReactNode) => (
     <div className="flex items-center gap-3.5">
       <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[9px] bg-asst-active text-sm font-semibold">
@@ -470,7 +403,7 @@ function ConnectionRow({
        * Connect this row is already offering, and saying so is the whole of it. Promising that the assistant will ask
        * again would be false: nothing re-relays until its pod next starts.
        */}
-      {hasLapsed(state) && !again && words === null ? (
+      {hasLapsed(state) && !again && !held && words === null ? (
         <p role="alert" className="text-xs text-asst-error">
           {state === "failed" ? `That ${connector.name} sign-in did not work.` : `That ${connector.name} sign-in ran out before anyone used it.`}{" "}
           {pasted === null ? "Connect it again for a new sign-in link." : `Connect it again to paste a new ${pasted}.`}
@@ -671,7 +604,8 @@ export function GettingReady({
 }) {
   const ask = connectionsAsk(assistant.onboarded, unavailable);
   const offered = offeredConnections(assistant, now);
-  const access = modelAccess(assistant.modelRoute, connectionRows({ assistant, statuses, unavailable }, now));
+  const rows = connectionRows({ assistant, statuses, unavailable }, now);
+  const access = modelAccess(assistant.modelRoute, rows);
   const starting = !assistant.readiness.failed && assistant.status !== "running";
   return (
     <ReadyShell
@@ -698,6 +632,7 @@ export function GettingReady({
                 assistantId={assistant.id}
                 agentStatus={assistant.status}
                 running={assistant.desired === "running"}
+                awaitingGithub={awaitsGithub(kind, rows)}
                 paste={paste}
                 save={save}
                 reconnect={reconnect}

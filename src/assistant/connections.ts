@@ -517,6 +517,25 @@ export function offersConnect(row: Pick<Connection, "kind" | "state">): boolean 
   return signsInOnRequest(row.kind) && (row.state === "waiting" || hasLapsed(row.state));
 }
 
+/** What a connection held back by `awaitsGithub` says in place of its controls. */
+export const GITHUB_FIRST = "Connect GitHub first";
+
+/**
+ * Whether a connection's controls wait for GitHub. A pod gets no further than a workspace clone the hmcts organisation
+ * refuses, so a connected GitHub is the hub's word that the person belongs there; until then nothing else is worth
+ * connecting. GitHub itself never waits, and nothing does where the list has no GitHub row to connect first, since
+ * "connect GitHub first" with no GitHub to connect is a dead end.
+ *
+ * The keys are the list's own — a credential kind, or `microsoft` — so any surface's rows can be asked.
+ */
+export function awaitsGithub(key: string, list: readonly Pick<Connection, "kind" | "state">[]): boolean {
+  if (key === "github") {
+    return false;
+  }
+  const github = list.find((row) => row.kind === "github");
+  return github !== undefined && github.state !== "connected";
+}
+
 /**
  * The one optional connection the Assistant offers unasked. A Jenkins API token is an engineer's thing, and the
  * place for it is the hub's own credentials page rather than in front of somebody who came to start a chat.
