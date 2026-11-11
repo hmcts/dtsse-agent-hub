@@ -54,7 +54,9 @@ const CASES = [
   "org-check-forbidden",
   "org-check-without-read-org",
   "org-member-clone-refused",
-  "org-from-repo-url"
+  "org-from-repo-url",
+  "saml-reauth",
+  "saml-after-reauth"
 ];
 
 let stateDir: string;

@@ -190,6 +190,25 @@ github_org_membership() {
 GITHUB_LOGIN=""
 CLONE_DETAIL=""
 
+# What git says when the repo's organisation enforces SAML single sign-on and the token was never authorised
+# for it, as a token issued before its account joined the organisation is not. gh accepts such a token, so only
+# the clone finds out, and no retry with it can succeed.
+git_saml_error() {
+    grep -qiE "SAML SSO|re-authorize the OAuth Application" "$1"
+}
+
+# What the owner is told about a token single sign-on refuses; $1 is what they do once they have signed in to
+# the organisation. With $2 set the token is the one the pod just signed in for, so it is not called an old one.
+saml_detail() {
+    local org why="your GitHub sign-in was made before it was authorised for"
+    [[ -z "${2:-}" ]] || why="your new GitHub sign-in was not authorised for"
+    if org=$(github_org_of "$REPO_URL"); then
+        CLONE_DETAIL="github: $why the $org organisation's single sign-on. Open https://github.com/orgs/$org/sso to sign in to $org, then $1"
+    else
+        CLONE_DETAIL="github: $why the organisation's single sign-on. Sign in to the organisation on GitHub, then $1"
+    fi
+}
+
 # Sets CLONE_DETAIL to what to tell the owner when GitHub will not let the signed-in account clone. "Repository
 # not found" is all git says, and for an account outside the repo's organisation the remedy is joining it rather
 # than being granted access to one repo. Every answer the membership lookup cannot settle, a member's included,
@@ -221,20 +240,41 @@ clone_refused_detail() {
 }
 
 checkout_workspace() {
-    local delay=5 err reported=""
+    local delay=5 err reported="" reauthed=""
     if [[ ! -d "$WORKSPACE/.git" ]]; then
         mkdir -p "$(dirname "$WORKSPACE")"
         until git clone --quiet --filter=blob:none "$REPO_URL" "$WORKSPACE" 2>"$TMP/git.err"; do
             err=$(head -c 300 "$TMP/git.err" | tr '\n' ' ')
             log "clone of $REPO_URL failed: $err; retrying in ${delay}s"
-            # The owner has to act on this one (the GitHub account needs access to the repo, or to join its
-            # organisation), so they are told once per distinct message rather than left watching "Starting".
-            if git_auth_error "$TMP/git.err"; then
+            CLONE_DETAIL=""
+            # The stored token can never pass single sign-on, so the pod gets a new one the way it does when
+            # GitHub refuses the stored token outright, and retries the clone with it at once. Once only: a fresh
+            # sign-in that single sign-on refuses too is one made without signing in to the organisation first,
+            # and relaying more codes would ask the owner the same thing for as long as the pod runs.
+            if git_saml_error "$TMP/git.err" && [[ -z "$reauthed" ]]; then
+                reauthed=1
+                saml_detail "enter the code your assistant shows to sign in to GitHub again."
+                reported="$CLONE_DETAIL"
+                # The client stores whatever token gh already holds rather than relaying a code, so gh lets go
+                # of this one first.
+                env -u GH_TOKEN -u GITHUB_TOKEN gh auth logout --hostname github.com >/dev/null 2>"$TMP/gh.err" ||
+                    log "gh auth logout failed: $(head -c 300 "$TMP/gh.err" | tr '\n' ' ')"
+                github_refused=$(github_credential || true)
+                github_device_sign_in "$CLONE_DETAIL" "$github_refused"
+                rm -rf "$WORKSPACE"
+                continue
+            fi
+            # The owner has to act on these (the GitHub account needs access to the repo, to join its
+            # organisation, or to sign in to it), so they are told once per distinct message rather than left
+            # watching "Starting". Single sign-on is tested first: its refusal is a 403 too.
+            if git_saml_error "$TMP/git.err"; then
+                saml_detail "restart this agent to sign in to GitHub again." again
+            elif git_auth_error "$TMP/git.err"; then
                 clone_refused_detail "$err"
-                if [[ "$CLONE_DETAIL" != "$reported" ]]; then
-                    report awaiting_credentials "$CLONE_DETAIL"
-                    reported="$CLONE_DETAIL"
-                fi
+            fi
+            if [[ -n "$CLONE_DETAIL" && "$CLONE_DETAIL" != "$reported" ]]; then
+                report awaiting_credentials "$CLONE_DETAIL"
+                reported="$CLONE_DETAIL"
             fi
             rm -rf "$WORKSPACE"
             sleep_interruptibly "$delay"
@@ -376,28 +416,13 @@ agent_hub_client() {
     command -v agent-hub
 }
 
-configure_git
-token=""
-# The stored token GitHub has already refused, so the wait below does not report it as news: it is what set
-# `github_missing`, and reporting it again would replace the message telling the owner how to get another code
-# within a second of sending it.
-github_refused=""
-until token=$(github_credential); do sleep_interruptibly 10; done
-github_missing="no GitHub token stored"
-if [[ -n "$token" ]]; then
-    if gh_login_with_token "$token"; then
-        github_missing=""
-    else
-        github_missing="the stored GitHub token was refused"
-        github_refused="$token"
-    fi
-fi
-unset token
-
-# cft-workspace is internal, so the clone needs GitHub auth: without a usable stored token, the
-# device-code sign-in runs first, from the installed client if there is no checkout yet.
-if [[ -n "$github_missing" ]]; then
-    report awaiting_credentials "github: $github_missing; relaying a device-code sign-in to the owner"
+# The device-code sign-in, from the installed client if there is no checkout yet, reporting $1 as it starts.
+# The token in $github_refused is one GitHub has already turned down, so the wait for a stored token below does
+# not report it as news. $2 is a token gh accepts but single sign-on refuses, which the wait must not sign in
+# with again; a token gh itself refused is retried, since that refusal can be GitHub being briefly unreachable.
+github_device_sign_in() {
+    local client delay asked rc token refused unusable="${2:-}"
+    report awaiting_credentials "$1"
     load_node || { report failed "node is not installed in the image"; exit 1; }
     client=$(agent_hub_client) ||
         { report failed "the image has no agent-hub client: neither $WORKSPACE/scripts/agent-hub nor an agent-hub on PATH"; exit 1; }
@@ -432,7 +457,7 @@ if [[ -n "$github_missing" ]]; then
         report awaiting_credentials "github: this agent is not signed in to GitHub yet. Restart the assistant from its settings at $HUB/assistant?settings=assistant to be sent another code."
         log "github sign-in did not finish; waiting for a stored GitHub token rather than asking again"
         refused="$github_refused"
-        until token=$(github_credential) && [[ -n "$token" ]] && gh_login_with_token "$token"; do
+        until token=$(github_credential) && [[ -n "$token" && "$token" != "$unusable" ]] && gh_login_with_token "$token"; do
             # Keyed on the value, so each token stored is reported once and a second bad one is reported too,
             # while the one already known refused is not, which would replace the message saying how to get
             # another code within a second of sending it.
@@ -442,11 +467,34 @@ if [[ -n "$github_missing" ]]; then
             fi
             sleep_interruptibly 30
         done
-        unset token refused
         log "signed in with the GitHub token the owner stored"
     fi
     gh auth setup-git --hostname github.com
     report provisioning
+}
+
+configure_git
+token=""
+# The stored token GitHub has already refused, so the sign-in's wait for a stored token does not report it as
+# news: it is what set `github_missing`, and reporting it again would replace the message telling the owner how
+# to get another code within a second of sending it.
+github_refused=""
+until token=$(github_credential); do sleep_interruptibly 10; done
+github_missing="no GitHub token stored"
+if [[ -n "$token" ]]; then
+    if gh_login_with_token "$token"; then
+        github_missing=""
+    else
+        github_missing="the stored GitHub token was refused"
+        github_refused="$token"
+    fi
+fi
+unset token
+
+# cft-workspace is internal, so the clone needs GitHub auth: without a usable stored token, the device-code
+# sign-in runs first.
+if [[ -n "$github_missing" ]]; then
+    github_device_sign_in "github: $github_missing; relaying a device-code sign-in to the owner"
 fi
 
 checkout_workspace

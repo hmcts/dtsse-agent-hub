@@ -177,6 +177,17 @@ function SignIn({
           </code>
         </p>
         <p className="text-xs text-asst-faint">Sign in as yourself.</p>
+        {/* hmcts enforces SAML single sign-on, and a token is authorised for it only if the person has an SSO session
+            when they enter the code; without one the clone is refused and they are asked to do this again. */}
+        {login.kind === "github" ? (
+          <p className="text-xs text-asst-faint">
+            First{" "}
+            <a href="https://github.com/orgs/hmcts/sso" target="_blank" rel="noreferrer noopener" className="text-asst-accent underline">
+              sign in to HMCTS on GitHub
+            </a>
+            , so the sign-in is authorised for HMCTS repositories.
+          </p>
+        ) : null}
       </div>
     );
   }

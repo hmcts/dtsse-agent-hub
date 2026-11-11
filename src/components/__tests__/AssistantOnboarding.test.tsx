@@ -195,6 +195,33 @@ describe("GettingReady connectors", () => {
     expect(within(connector("GitHub")).getByText("✓ Connected")).toBeTruthy();
   });
 
+  // The pod relays a fresh GitHub sign-in over a stored token single sign-on refuses, which it keeps until the new
+  // one replaces it.
+  it("should show the GitHub code rather than connected when a sign-in is relayed over a stored token", () => {
+    render(ready({ assistant: assistant("awaiting_login", { logins: [login("github")] }), statuses: statuses("github") }));
+
+    const github = connector("GitHub");
+    expect(within(github).getByText("ABCD-1234")).toBeTruthy();
+    expect(within(github).getByText("Waiting for you")).toBeTruthy();
+    expect(within(github).queryByText("✓ Connected")).toBeNull();
+  });
+
+  it("should send the person to HMCTS single sign-on first when GitHub relays a code", () => {
+    render(ready({ assistant: assistant("awaiting_login", { logins: [login("github"), login("azure")] }) }));
+
+    const sso = within(connector("GitHub")).getByRole("link", { name: "sign in to HMCTS on GitHub" });
+    expect(sso.getAttribute("href")).toBe("https://github.com/orgs/hmcts/sso");
+    expect(within(connector("Azure")).queryByRole("link", { name: "sign in to HMCTS on GitHub" })).toBeNull();
+  });
+
+  it("should offer to sign in to GitHub again when the sign-in relayed over a stored token lapsed", () => {
+    render(ready({ assistant: assistant("awaiting_credentials", { logins: [lapsed("github")] }), statuses: statuses("github") }));
+
+    const github = connector("GitHub");
+    expect(within(github).getByRole("button", { name: "Sign in again" })).toBeTruthy();
+    expect(within(github).queryByText("✓ Connected")).toBeNull();
+  });
+
   it("should show the device code to enter when the assistant is waiting on a device sign-in", () => {
     render(ready({ assistant: assistant("awaiting_login", { logins: [login("azure")] }) }));
 

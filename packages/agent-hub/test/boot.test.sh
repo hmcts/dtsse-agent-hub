@@ -23,7 +23,7 @@ CASES=(no-token refused-token sign-in-not-completed sign-in-transient-failure st
     checkout-refusal-flood checkout-refusal-silent no-client trailing-slash
     client-upgrade client-upgrade-offline client-upgrade-no-npm client-upgrade-pinned client-upgrade-ships-entrypoint
     org-member org-not-member org-invitation-pending org-invited-after-refusal org-check-forbidden org-check-without-read-org
-    org-member-clone-refused org-from-repo-url)
+    org-member-clone-refused org-from-repo-url saml-reauth saml-after-reauth)
 
 if [ "${1:-}" = "--list" ]; then
     printf '%s\n' "${CASES[@]}"
@@ -96,6 +96,10 @@ case "$1 $2" in
         echo "gh login-with-token" >>"$FAKE_DIR/order.log"
         touch "$FAKE_DIR/gh.signed-in" ;;
     "auth setup-git") echo "gh setup-git" >>"$FAKE_DIR/order.log" ;;
+    "auth logout")
+        [ -z "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ] || echo "GH_TOKEN reached gh auth logout" >>"$FAKE_DIR/gh-token.leaks"
+        echo "gh logout" >>"$FAKE_DIR/order.log"
+        rm -f "$FAKE_DIR/gh.signed-in" ;;
     "auth token") [ -f "$FAKE_DIR/gh.signed-in" ] && printf '%s\n' "$FAKE_GOOD_TOKEN" ;;
     "api user")
         echo "api user" >>"$FAKE_DIR/api-user.calls"
@@ -139,6 +143,14 @@ case "$1" in
         echo "git clone" >>"$FAKE_DIR/order.log"
         if [ ! -f "$FAKE_DIR/gh.signed-in" ]; then
             echo "fatal: could not read Username for 'https://github.com': terminal prompts disabled" >&2
+            exit 128
+        fi
+        # FAKE_CLONE_SAML clones are refused as GitHub refuses a token not authorised for the organisation's
+        # single sign-on, which gh accepted all the same.
+        saml=$(cat "$FAKE_DIR/saml" 2>/dev/null || echo "${FAKE_CLONE_SAML:-0}")
+        if [ "$saml" -gt 0 ]; then
+            echo $((saml - 1)) >"$FAKE_DIR/saml"
+            printf "remote: The 'hmcts' organization has enabled or enforced SAML SSO.\nremote: To access this repository, you must re-authorize the OAuth Application 'GitHub CLI'.\nfatal: unable to access 'https://github.com/hmcts/cft-workspace.git/': The requested URL returned error: 403\n" >&2
             exit 128
         fi
         denied=$(cat "$FAKE_DIR/denied" 2>/dev/null || echo "${FAKE_CLONE_DENIED:-0}")
@@ -793,6 +805,39 @@ case_org_from_repo_url() {
         ok "logs that it cannot tell the organisation" || no "not logged: $(grep -i organisation "$C/out")"
 }
 
+# A token issued before its account joined an organisation that enforces SAML single sign-on: gh accepts it,
+# and only the clone is refused, so the pod has to sign in afresh rather than retry the same token.
+case_saml_reauth() {
+    setup saml-reauth
+    seed_github "$GOOD_TOKEN"
+    boot FAKE_CLONE_SAML=1 GH_TOKEN=stray-token
+    [ "$BOOT_RC" -eq 0 ] &&
+        order_is "gh login-with-token gh setup-git git clone gh logout gh login-with-token gh setup-git git clone npm install entrypoint " &&
+        ok "signs gh out, signs in again and clones with the new token" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
+    [ "$(hub '.prompts | length')" -eq 1 ] && ok "relays one device code" || no "prompts: $(hub -c '.prompts')"
+    [ ! -f "$C/gh-token.leaks" ] && ok "signs out the account gh holds, not a GH_TOKEN in the environment" || no "$(cat "$C/gh-token.leaks")"
+    hub '.status[] | select(.phase == "awaiting_credentials") | .detail' |
+        grep -q "^github: your GitHub sign-in was made before it was authorised for the hmcts organisation's single sign-on. Open https://github.com/orgs/hmcts/sso to sign in to hmcts, then enter the code your assistant shows to sign in to GitHub again.$" &&
+        ok "tells the owner to sign in to the organisation, then enter the code" || no "status: $(hub -c '.status')"
+    hub '.status[].detail // empty' | grep -q 'needs read access' && no "sent the read-access message" || ok "sends the single sign-on message in place of the read-access one"
+    [ "$(hub '.github')" = "$GOOD_TOKEN" ] && ok "stores the new token on the hub" || no "the token was not stored"
+    [ "$(hub '.status[-1].detail')" = "cloned cft-workspace" ] && ok "reports provisioning again once cloned" || no "status: $(hub -c '.status')"
+}
+
+# A fresh sign-in made without signing in to the organisation first is refused the same way, and more codes would
+# only ask the owner the same thing again.
+case_saml_after_reauth() {
+    setup saml-after-reauth
+    seed_github "$GOOD_TOKEN"
+    boot FAKE_CLONE_SAML=3
+    [ "$BOOT_RC" -eq 0 ] &&
+        order_is "gh login-with-token gh setup-git git clone gh logout gh login-with-token gh setup-git git clone git clone git clone npm install entrypoint " &&
+        ok "signs in again once, then goes on retrying the clone" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
+    [ "$(hub '.prompts | length')" -eq 1 ] && ok "relays no second code" || no "prompts: $(hub -c '.prompts')"
+    [ "$(hub '[.status[] | select(.detail != null) | select(.detail | test("^github: your new GitHub sign-in was not authorised for the hmcts organisation.s single sign-on.*restart this agent to sign in to GitHub again"))] | length')" -eq 1 ] &&
+        ok "says once to sign in to the organisation and restart" || no "status: $(hub -c '.status')"
+}
+
 run_case() {
     case "$1" in
         no-token) case_no_token ;;
@@ -824,6 +869,8 @@ run_case() {
         org-check-without-read-org) case_org_check_without_read_org ;;
         org-member-clone-refused) case_org_member_clone_refused ;;
         org-from-repo-url) case_org_from_repo_url ;;
+        saml-reauth) case_saml_reauth ;;
+        saml-after-reauth) case_saml_after_reauth ;;
         *) printf 'unknown case %s (try --list)\n' "$1" >&2; exit 2 ;;
     esac
 }
