@@ -21,7 +21,7 @@ set -u
 CASES=(no-token refused-token sign-in-not-completed sign-in-transient-failure stored-token-no-access checkout-client broken-checkout-client
     checkout-untracked-file checkout-modified-file checkout-modified-collision checkout-untracked-clobber checkout-local-commit
     checkout-refusal-flood checkout-refusal-silent no-client trailing-slash
-    client-upgrade client-upgrade-offline client-upgrade-no-npm client-upgrade-pinned package-entrypoint client-upgrade-ships-entrypoint
+    client-upgrade client-upgrade-offline client-upgrade-no-npm client-upgrade-pinned client-upgrade-ships-entrypoint
     org-member org-not-member org-invitation-pending org-invited-after-refusal org-check-forbidden org-check-without-read-org
     org-member-clone-refused org-from-repo-url)
 
@@ -76,7 +76,7 @@ setup() {
 
     # The script under test runs from a package directory of the case's own, reached through a symlink as npm
     # installs a bin: stage 1 is resolved from this file's location, so a case controls whether the package it
-    # was installed from ships one. Every case but client-upgrade-ships-entrypoint starts with one.
+    # was installed from ships one. Every case starts with one; client-upgrade-ships-entrypoint removes it.
     cp "$BOOT" "$C/pkg/bin/virtual-agent-boot"
     chmod +x "$C/pkg/bin/virtual-agent-boot"
     ln -s "$C/pkg/bin/virtual-agent-boot" "$C/bin/virtual-agent-boot"
@@ -675,19 +675,6 @@ case_client_upgrade_pinned() {
         ok "says the pod is pinned" || no "no reason logged: $(grep 'client' "$C/out")"
 }
 
-# Stage 1 ships with the client, so the package's copy is the one a pod runs.
-case_package_entrypoint() {
-    setup package-entrypoint
-    printf '#!/bin/sh\necho package-entrypoint >>"$FAKE_DIR/order.log"\n' >"$C/pkg/virtual-agent/entrypoint.sh"
-    chmod +x "$C/pkg/virtual-agent/entrypoint.sh"
-    seed_github "$GOOD_TOKEN"
-    boot
-    [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git clone npm install package-entrypoint " &&
-        ok "hands over to the package's own stage 1" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
-    grep -q "handing over to $C/pkg/virtual-agent/entrypoint.sh" "$C/out" &&
-        ok "logs which stage 1 it ran, resolved through the symlink it was invoked by" || no "handover not logged: $(grep 'handing over' "$C/out")"
-}
-
 # The upgrade is what brings stage 1 to a pod whose image client predates it, and npm's global prefix is in the
 # container filesystem rather than on the volume, so that install happens again on every boot of that pod.
 case_client_upgrade_ships_entrypoint() {
@@ -698,7 +685,7 @@ case_client_upgrade_ships_entrypoint() {
     [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git clone npm install package-entrypoint " &&
         ok "upgrades the client before it resolves stage 1" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
     grep -q "handing over to $C/pkg/virtual-agent/entrypoint.sh" "$C/out" &&
-        ok "hands over to the stage 1 the upgrade installed" || no "handover: $(grep 'handing over' "$C/out")"
+        ok "should hand over to the stage 1 the upgrade installed" || no "handover: $(grep 'handing over' "$C/out")"
 }
 
 # A clone that succeeds asks GitHub nothing about the organisation: the lookup only words a refusal.
@@ -828,7 +815,6 @@ run_case() {
         client-upgrade-offline) case_client_upgrade_offline ;;
         client-upgrade-no-npm) case_client_upgrade_no_npm ;;
         client-upgrade-pinned) case_client_upgrade_pinned ;;
-        package-entrypoint) case_package_entrypoint ;;
         client-upgrade-ships-entrypoint) case_client_upgrade_ships_entrypoint ;;
         org-member) case_org_member ;;
         org-not-member) case_org_not_member ;;

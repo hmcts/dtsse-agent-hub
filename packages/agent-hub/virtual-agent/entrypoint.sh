@@ -420,10 +420,6 @@ read_repos_state() {
 # Writes the clone step's state as this file knows it. Never a note= line: the sentence a session is given
 # belongs to whatever did the cloning, and the client has a generic one of its own for a state that carries
 # none, which is better than a stale sentence from a step that is no longer running.
-#
-# date(1) writes the updated= value itself inside the group rather than being read back with `$(…)`: this runs
-# on every pass while the repositories arrive, and a SIGTERM that lands in that command substitution's parse
-# takes the shutdown handler with it. See the trap above.
 write_repos_state() {
     {
         printf 'state=%s\ndone=%s\ntotal=%s\nupdated=' "$repos_state" "$repos_done" "$repos_total"

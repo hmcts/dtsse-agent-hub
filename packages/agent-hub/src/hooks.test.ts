@@ -477,7 +477,7 @@ describe("runHook in a virtual agent", () => {
     expect(out[3]).toMatch(/^agent-hub: Web servers/);
   });
 
-  it("should keep the fallback free of the layout and the scripts the entrypoint owns", () => {
+  it("should keep the fallback free of the workspace layout and its clone step", () => {
     // Act
     const arriving = reposNote(reposState("cloning"));
     const failed = reposNote(reposState("failed"));

@@ -46,7 +46,6 @@ const CASES = [
   "client-upgrade-offline",
   "client-upgrade-no-npm",
   "client-upgrade-pinned",
-  "package-entrypoint",
   "client-upgrade-ships-entrypoint",
   "org-member",
   "org-not-member",
