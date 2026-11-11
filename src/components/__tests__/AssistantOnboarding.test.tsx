@@ -206,6 +206,14 @@ describe("GettingReady connectors", () => {
     expect(within(github).queryByText("✓ Connected")).toBeNull();
   });
 
+  it("should send the person to HMCTS single sign-on first when GitHub relays a code", () => {
+    render(ready({ assistant: assistant("awaiting_login", { logins: [login("github"), login("azure")] }) }));
+
+    const sso = within(connector("GitHub")).getByRole("link", { name: "sign in to HMCTS on GitHub" });
+    expect(sso.getAttribute("href")).toBe("https://github.com/orgs/hmcts/sso");
+    expect(within(connector("Azure")).queryByRole("link", { name: "sign in to HMCTS on GitHub" })).toBeNull();
+  });
+
   it("should offer to sign in to GitHub again when the sign-in relayed over a stored token lapsed", () => {
     render(ready({ assistant: assistant("awaiting_credentials", { logins: [lapsed("github")] }), statuses: statuses("github") }));
 

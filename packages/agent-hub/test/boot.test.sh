@@ -834,7 +834,7 @@ case_saml_after_reauth() {
         order_is "gh login-with-token gh setup-git git clone gh logout gh login-with-token gh setup-git git clone git clone git clone npm install entrypoint " &&
         ok "signs in again once, then goes on retrying the clone" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
     [ "$(hub '.prompts | length')" -eq 1 ] && ok "relays no second code" || no "prompts: $(hub -c '.prompts')"
-    [ "$(hub '[.status[] | select(.detail != null) | select(.detail | test("restart this agent to sign in to GitHub again"))] | length')" -eq 1 ] &&
+    [ "$(hub '[.status[] | select(.detail != null) | select(.detail | test("^github: your new GitHub sign-in was not authorised for the hmcts organisation.s single sign-on.*restart this agent to sign in to GitHub again"))] | length')" -eq 1 ] &&
         ok "says once to sign in to the organisation and restart" || no "status: $(hub -c '.status')"
 }
 

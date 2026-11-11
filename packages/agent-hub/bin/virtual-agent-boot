@@ -198,13 +198,14 @@ git_saml_error() {
 }
 
 # What the owner is told about a token single sign-on refuses; $1 is what they do once they have signed in to
-# the organisation.
+# the organisation. With $2 set the token is the one the pod just signed in for, so it is not called an old one.
 saml_detail() {
-    local org
+    local org why="your GitHub sign-in was made before it was authorised for"
+    [[ -z "${2:-}" ]] || why="your new GitHub sign-in was not authorised for"
     if org=$(github_org_of "$REPO_URL"); then
-        CLONE_DETAIL="github: your GitHub sign-in was made before it was authorised for the $org organisation's single sign-on. Open https://github.com/orgs/$org/sso to sign in to $org, then $1"
+        CLONE_DETAIL="github: $why the $org organisation's single sign-on. Open https://github.com/orgs/$org/sso to sign in to $org, then $1"
     else
-        CLONE_DETAIL="github: your GitHub sign-in was made before it was authorised for the organisation's single sign-on. Sign in to the organisation on GitHub, then $1"
+        CLONE_DETAIL="github: $why the organisation's single sign-on. Sign in to the organisation on GitHub, then $1"
     fi
 }
 
@@ -259,7 +260,7 @@ checkout_workspace() {
                 env -u GH_TOKEN -u GITHUB_TOKEN gh auth logout --hostname github.com >/dev/null 2>"$TMP/gh.err" ||
                     log "gh auth logout failed: $(head -c 300 "$TMP/gh.err" | tr '\n' ' ')"
                 github_refused=$(github_credential || true)
-                github_device_sign_in "$CLONE_DETAIL"
+                github_device_sign_in "$CLONE_DETAIL" "$github_refused"
                 rm -rf "$WORKSPACE"
                 continue
             fi
@@ -267,7 +268,7 @@ checkout_workspace() {
             # organisation, or to sign in to it), so they are told once per distinct message rather than left
             # watching "Starting". Single sign-on is tested first: its refusal is a 403 too.
             if git_saml_error "$TMP/git.err"; then
-                saml_detail "restart this agent to sign in to GitHub again."
+                saml_detail "restart this agent to sign in to GitHub again." again
             elif git_auth_error "$TMP/git.err"; then
                 clone_refused_detail "$err"
             fi
@@ -416,10 +417,11 @@ agent_hub_client() {
 }
 
 # The device-code sign-in, from the installed client if there is no checkout yet, reporting $1 as it starts.
-# The token in $github_refused is one GitHub has already turned down, so the wait for a stored token below
-# neither signs in with it again nor reports it as news.
+# The token in $github_refused is one GitHub has already turned down, so the wait for a stored token below does
+# not report it as news. $2 is a token gh accepts but single sign-on refuses, which the wait must not sign in
+# with again; a token gh itself refused is retried, since that refusal can be GitHub being briefly unreachable.
 github_device_sign_in() {
-    local client delay asked rc token refused
+    local client delay asked rc token refused unusable="${2:-}"
     report awaiting_credentials "$1"
     load_node || { report failed "node is not installed in the image"; exit 1; }
     client=$(agent_hub_client) ||
@@ -455,7 +457,7 @@ github_device_sign_in() {
         report awaiting_credentials "github: this agent is not signed in to GitHub yet. Restart the assistant from its settings at $HUB/assistant?settings=assistant to be sent another code."
         log "github sign-in did not finish; waiting for a stored GitHub token rather than asking again"
         refused="$github_refused"
-        until token=$(github_credential) && [[ -n "$token" && "$token" != "$github_refused" ]] && gh_login_with_token "$token"; do
+        until token=$(github_credential) && [[ -n "$token" && "$token" != "$unusable" ]] && gh_login_with_token "$token"; do
             # Keyed on the value, so each token stored is reported once and a second bad one is reported too,
             # while the one already known refused is not, which would replace the message saying how to get
             # another code within a second of sending it.
