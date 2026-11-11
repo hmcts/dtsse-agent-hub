@@ -14,6 +14,9 @@ export type FormAction = (form: FormData) => Promise<ActionResult<object & { con
  * going to the page `navigate` names for the result. A form whose fields are controlled by its parent passes
  * `keepValues`, since resetting them would show stale text. Children given as a function are told whether a post is
  * in flight, so a form whose submit must not be sent twice can disable it.
+ *
+ * Every form of this kind is the Assistant's, so its messages are in the Assistant's tokens, which follow its light and
+ * dark themes; the hub's own pale-on-dark greens and reds are unreadable on the light one.
  */
 export function ActionForm<T extends object & { confirmation?: string }>({
   action,
@@ -84,11 +87,11 @@ export function ActionForm<T extends object & { confirmation?: string }>({
     <form method="post" onSubmit={submit} aria-label={label} aria-busy={pending} className={className}>
       {typeof children === "function" ? children({ pending }) : children}
       {signedOut ? (
-        <p role="status" className="text-xs text-red-300">
+        <p role="status" className="text-xs text-asst-error">
           <SessionEndedMessage />
         </p>
       ) : message ? (
-        <p role={message.ok ? "status" : "alert"} className={`text-xs ${message.ok ? "text-green-300" : "text-red-300"}`}>
+        <p role={message.ok ? "status" : "alert"} className={`text-xs ${message.ok ? "text-asst-ok" : "text-asst-error"}`}>
           {message.text}
         </p>
       ) : null}

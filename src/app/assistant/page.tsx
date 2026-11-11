@@ -14,7 +14,7 @@ import { readAssistantAgent, readGitIdentity } from "@/app/_actions/assistant-se
 import { clearGitIdentity, removeCredential, resetClaudeMd, saveClaudeMd, saveCredential, saveGitIdentity } from "@/app/_actions/credentials";
 import { saveExportDefaults } from "@/app/_actions/export-defaults";
 import { deleteTemplate, saveTemplate } from "@/app/_actions/templates";
-import { reconnectSignIn, restartVirtualAgent, saveVirtualAgentPod } from "@/app/_actions/virtual-agents";
+import { pasteLoginCode, reconnectSignIn, restartVirtualAgent, saveVirtualAgentPod } from "@/app/_actions/virtual-agents";
 import { SHARING_SETTINGS } from "@/app/assistant/sharing";
 import { connectionsData } from "@/assistant/connections";
 import { savedCredentialsData } from "@/assistant/saved-credentials";
@@ -82,7 +82,7 @@ export default async function AssistantPage() {
       actions={ROW_ACTIONS}
       connections={connectionsData(home.assistant, home.credentials)}
       viewerRoute={home.credentials.modelRoute}
-      connect={{ assistantId: home.assistant.id, running: home.assistant.desired === "running", reconnect: reconnectSignIn }}
+      connect={{ assistantId: home.assistant.id, running: home.assistant.desired === "running", reconnect: reconnectSignIn, paste: pasteLoginCode }}
       now={Date.now()}
       plugins={pluginSettings}
       welsh={home.welsh}

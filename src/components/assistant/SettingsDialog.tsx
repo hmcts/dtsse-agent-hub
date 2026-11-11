@@ -1048,14 +1048,21 @@ export function AssistantSettings({
   const [open, setOpen] = useState(false);
   const [opening, setOpening] = useState<string | null>(null);
   const fromAddress = useRef(false);
-  // The page's own clock to begin with, then the browser's as it takes over and again whenever the dialog opens. A
-  // sign-in's deadline moves slowly and a timer on every page to watch it would cost more than it is worth, but the
-  // first read has to be the page's: `Date.now()` here would be the server's clock in the HTML and the browser's in
+  // The page's own clock to begin with, then the browser's as it takes over, whenever the dialog opens, and every
+  // half-minute while it is open, since a sign-in it shows is live only until its deadline. A timer on every page with
+  // the dialog shut would cost more than it is worth, but the first read has to be the page's: `Date.now()` here would be the server's clock in the HTML and the browser's in
   // the first render, and a deadline falling between the two is a badge and an accessible name that disagree.
   const [now, setNow] = useState(from);
   useEffect(() => {
     setNow(Date.now());
   }, []);
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, [open]);
   // The appearance the switch starts from. The dialog's Save writes the person's choice to the cookie and to the theme
   // root, not to the server tree, so `theme` keeps the value the page was rendered with and the dialog, which
   // unmounts when it closes, would otherwise reopen showing a choice the page has moved on from.
@@ -1170,6 +1177,8 @@ export function AssistantSettings({
               view={{
                 theme: shownTheme,
                 list,
+                logins: data?.logins ?? [],
+                now,
                 access,
                 connect,
                 microsoft: microsoftConnection(data, viewerRoute),

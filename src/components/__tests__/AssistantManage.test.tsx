@@ -336,7 +336,7 @@ describe("the Assistant's Connections, one row per service", () => {
   it("should list each service once, with its sign-in's and its saved credential's actions on the one row, when both are given", async () => {
     await open(
       {
-        connect: { assistantId: ID, running: true, reconnect: ok() },
+        connect: { assistantId: ID, running: true, reconnect: ok(), paste: ok() },
         tokens: tokens([status("github"), status("claude")])
       },
       "Connections"
@@ -604,7 +604,18 @@ describe("how often the settings read", () => {
 
 /** The Connections section with only saved credentials to list. */
 function credentialsOnly(saved: AssistantTokens): ConnectionsView {
-  return { list: [], access: null, connect: undefined, microsoft: null, route: "gateway", unavailable: null, warning: null, tokens: saved };
+  return {
+    list: [],
+    logins: [],
+    now: Date.now(),
+    access: null,
+    connect: undefined,
+    microsoft: null,
+    route: "gateway",
+    unavailable: null,
+    warning: null,
+    tokens: saved
+  };
 }
 
 describe("a removed credential's confirmation", () => {

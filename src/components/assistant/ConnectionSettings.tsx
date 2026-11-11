@@ -4,22 +4,26 @@ import { useSearchParams } from "next/navigation";
 import { useId, useState } from "react";
 import { type ConnectionRow, connectionRows } from "@/assistant/connection-rows";
 import type { Connection, ConnectionState, MicrosoftConnection, ModelAccess } from "@/assistant/connections";
-import { offersConnect } from "@/assistant/connections";
+import { awaitsGithub, checklistState, codeCollectable, GITHUB_FIRST, offersConnect } from "@/assistant/connections";
 import type { SavedCredential } from "@/assistant/saved-credentials";
 import { ActionForm, type FormAction } from "@/components/ActionForm";
+import { SignIn } from "@/components/assistant/SignIn";
 import { useFocusOnMount } from "@/components/assistant/useFocusOnMount";
 import { CONNECT_OUTCOME_PARAMETER, CONNECT_OUTCOME_WORDS, isConnectOutcome, MICROSOFT_UNAVAILABLE } from "@/microsoft/microsoft";
 import type { ModelRoute } from "@/viewer/identity";
+import type { LoginView } from "@/virtual-agents/logins";
 
 /**
  * What a row needs to connect a sign-in the assistant makes only on request: the assistant it restarts and the action
- * that does it, `reconnectSignIn`, which the getting-ready screen's Connect and "Sign in again" post to as well.
+ * that does it, `reconnectSignIn`, which the getting-ready screen's Connect and "Sign in again" post to as well; and
+ * `pasteLoginCode`, which sends back the code a relayed sign-in gives the person, as the getting-ready screen does.
  */
 export interface AssistantConnect {
   assistantId: string;
   /** Whether it is meant to be running, which is whether connecting restarts it now or asks when it next starts. */
   running: boolean;
   reconnect: FormAction;
+  paste: FormAction;
 }
 
 /**
@@ -37,6 +41,10 @@ export interface AssistantTokens {
 /** What the Connections section reads of the dialog's view. */
 export interface ConnectionsView {
   list: Connection[];
+  /** The sign-ins the assistant's pod has relayed, which a row shows while one is live. */
+  logins: readonly LoginView[];
+  /** The clock `list` was read against, so a row and its sign-in agree on whether the code is still live. */
+  now: number;
   /** How this person's agents reach Claude, where that is not one of `list`'s own rows. */
   access: ModelAccess | null;
   connect: AssistantConnect | undefined;
@@ -92,13 +100,24 @@ function connectWords(name: string, stored: boolean, running: boolean): { questi
  * Connecting a sign-in made on request. Its pod relays one only as it starts, and off the `gateway` route only once
  * asked, so connecting is `reconnectSignIn`: record the ask and restart. Behind a confirmation because the restart ends
  * whatever the assistant is doing, and because a lapsed sign-in with a value saved deletes the one all their agents
- * use. The code then arrives where every relayed code does, above the chats.
+ * use. The code then arrives on this row, as it does on the getting-ready screen.
  */
-function ConnectQuestion({ row, connect, onCancel }: { row: Connection; connect: AssistantConnect; onCancel: () => void }) {
+function ConnectQuestion({
+  row,
+  connect,
+  onCancel,
+  onDone
+}: {
+  row: Connection;
+  connect: AssistantConnect;
+  onCancel: () => void;
+  /** Closes the question once the restart is asked for, so it is not back on the row when the sign-in it led to is over. */
+  onDone: (said: string | null) => void;
+}) {
   const confirm = useFocusOnMount<HTMLButtonElement>();
   const words = connectWords(row.name, row.stored, connect.running);
   return (
-    <ActionForm action={connect.reconnect} label={`Connect ${row.name}`} className={BELOW}>
+    <ActionForm action={connect.reconnect} label={`Connect ${row.name}`} className={BELOW} onSuccess={(result) => onDone(result.confirmation ?? null)}>
       <input type="hidden" name="id" value={connect.assistantId} />
       <input type="hidden" name="kind" value={row.kind} />
       <p className="text-pretty text-[13px] font-semibold text-asst-text">{words.question}</p>
@@ -202,11 +221,19 @@ function Row({
   row,
   connect,
   tokens,
+  login,
+  now,
+  held,
   onSaid
 }: {
   row: ConnectionRow;
   connect: AssistantConnect | undefined;
   tokens: AssistantTokens | undefined;
+  /** The sign-in the pod relayed for this row's kind, if any. */
+  login: LoginView | undefined;
+  now: number;
+  /** Whether Connect and Add wait for GitHub: `awaitsGithub`. Remove does not, since it only takes something away. */
+  held: boolean;
   onSaid: (said: string | null) => void;
 }) {
   const [doing, setDoing] = useState<Doing>(null);
@@ -220,11 +247,20 @@ function Row({
     setDoing(null);
     onSaid(said);
   };
-  const connectable = connect !== undefined && signIn !== null && offersConnect(signIn);
-  const pasteable = tokens !== undefined && saved?.pasteable === true;
-  const removable = tokens !== undefined && saved?.stored === true;
+  // A code the pod relayed is the one thing to do on the row while it is live: shown here as on the getting-ready
+  // screen, with nothing beside it that would restart the assistant or replace the credential out from under it.
+  const live = signIn !== null && login !== undefined && checklistState(signIn.stored, login, now) === "login";
+  const connectable = !live && connect !== undefined && signIn !== null && offersConnect(signIn);
+  const pasteable = !live && tokens !== undefined && saved?.pasteable === true;
+  const removable = !live && tokens !== undefined && saved?.stored === true;
   const disconnectable = tokens !== undefined && microsoft?.stored === true;
   const microsoftConnect = microsoft !== null && !microsoft.stored && microsoft.connectable;
+  const heldBack = held && (connectable || pasteable || microsoftConnect);
+  const offered = {
+    connect: connectable && !held,
+    paste: pasteable && !held,
+    microsoft: microsoftConnect && !held
+  };
   return (
     <li className="flex flex-wrap items-center gap-3 border-b border-asst-line px-3.5 py-3 last:border-b-0">
       <span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-asst-active text-xs font-semibold">
@@ -235,14 +271,15 @@ function Row({
         <span className="truncate text-xs text-asst-muted">{row.desc}</span>
       </div>
       <span className={`shrink-0 text-xs font-medium ${STATE_CLASS[row.state]}`}>{row.detail}</span>
-      {doing === null && (connectable || pasteable || removable || disconnectable || microsoftConnect) ? (
+      {doing === null && heldBack ? <span className="shrink-0 text-xs text-asst-muted">{GITHUB_FIRST}</span> : null}
+      {doing === null && (offered.connect || offered.paste || removable || disconnectable || offered.microsoft) ? (
         <div className="flex shrink-0 items-center gap-2">
-          {connectable && signIn !== null ? (
+          {offered.connect && signIn !== null ? (
             <button type="button" onClick={start("connect")} aria-label={`Connect ${row.name}`} className={ACCENT_BUTTON}>
               {signIn.state === "waiting" ? "Connect" : "Sign in again"}
             </button>
           ) : null}
-          {pasteable && saved !== null ? (
+          {offered.paste && saved !== null ? (
             <button type="button" onClick={start("paste")} aria-label={`${saved.stored ? "Replace" : "Add"} your ${saved.title}`} className={QUIET_BUTTON}>
               {saved.stored ? "Replace" : "Add"}
             </button>
@@ -257,16 +294,29 @@ function Row({
               Disconnect
             </button>
           ) : null}
-          {microsoftConnect && microsoft !== null ? <MicrosoftConnect microsoft={microsoft} /> : null}
+          {offered.microsoft && microsoft !== null ? <MicrosoftConnect microsoft={microsoft} /> : null}
         </div>
       ) : null}
-      {doing === "connect" && connect !== undefined && signIn !== null ? (
-        <ConnectQuestion row={signIn} connect={connect} onCancel={() => setDoing(null)} />
+      {live && connect !== undefined && login !== undefined && signIn !== null ? (
+        <div className={BELOW}>
+          <SignIn assistantId={connect.assistantId} login={login} name={signIn.name} collectable={codeCollectable(login, now)} paste={connect.paste} />
+        </div>
       ) : null}
-      {doing === "paste" && tokens !== undefined && saved !== null ? (
+      {doing === "connect" && !live && connect !== undefined && signIn !== null ? (
+        <ConnectQuestion
+          row={signIn}
+          connect={connect}
+          onCancel={() => setDoing(null)}
+          onDone={(said) => {
+            setDoing(null);
+            onSaid(said);
+          }}
+        />
+      ) : null}
+      {doing === "paste" && !live && tokens !== undefined && saved !== null ? (
         <Paste saved={saved} save={tokens.save} onCancel={() => setDoing(null)} onSaved={finish(`Your ${saved.title} is saved`)} />
       ) : null}
-      {doing === "remove" && tokens !== undefined && saved !== null ? (
+      {doing === "remove" && !live && tokens !== undefined && saved !== null ? (
         <Remove
           kind={saved.kind}
           label={`Remove your ${saved.title}`}
@@ -354,7 +404,16 @@ export function Connections({ view }: { view: ConnectionsView }) {
       {rows.length === 0 ? null : (
         <ul aria-label="Connections" className="flex flex-col overflow-hidden rounded-[10px] border border-asst-line">
           {rows.map((row) => (
-            <Row key={row.key} row={row} connect={view.connect} tokens={view.tokens} onSaid={setSaid} />
+            <Row
+              key={row.key}
+              row={row}
+              connect={view.connect}
+              tokens={view.tokens}
+              login={row.signIn === null ? undefined : view.logins.find((login) => login.kind === row.signIn?.kind)}
+              now={view.now}
+              held={awaitsGithub(row.key, view.list)}
+              onSaid={setSaid}
+            />
           ))}
         </ul>
       )}

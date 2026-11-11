@@ -5,6 +5,7 @@ import { type ModelRoute, modelRouteFor } from "../viewer/identity.ts";
 import { isSignInKind, type LoginState, type LoginView } from "../virtual-agents/logins.ts";
 import { neededCredentials, OPTIONAL_CREDENTIALS, optionalCredentials } from "../virtual-agents/views.ts";
 import {
+  awaitsGithub,
   CONNECTION_DETAILS,
   CONNECTION_STATES,
   CONNECTORS,
@@ -21,6 +22,7 @@ import {
   connectionsWarning,
   connectorFor,
   connectRestarts,
+  GITHUB_FIRST,
   hasLapsed,
   inWords,
   isConnection,
@@ -1198,5 +1200,39 @@ describe("microsoftConnection", () => {
   it("should say nothing when the hub cannot read the credentials", () => {
     expect(microsoftConnection(data([], "no store"), "gateway")).toBeNull();
     expect(microsoftConnection(undefined, "gateway")).toBeNull();
+  });
+});
+
+/**
+ * Nothing but GitHub is offered until GitHub is connected: a connected GitHub is the hub's word that the person is in
+ * the hmcts organisation, since a pod gets no further than a clone the organisation refuses.
+ */
+describe("awaitsGithub", () => {
+  const rows = (github: ConnectionState | null) => [
+    ...(github === null ? [] : [{ kind: "github" as const, state: github }]),
+    { kind: "claude" as const, state: "waiting" as const }
+  ];
+
+  it.each(CONNECTION_STATES.filter((state) => state !== "connected"))("should hold back every other connection when GitHub is %s", (state) => {
+    for (const key of ["claude", "azure", "jenkins", "atlassian", "microsoft", "model-access"]) {
+      expect(awaitsGithub(key, rows(state))).toBe(true);
+    }
+  });
+
+  it("should hold back nothing when GitHub is connected", () => {
+    expect(awaitsGithub("claude", rows("connected"))).toBe(false);
+  });
+
+  it.each(CONNECTION_STATES)("should never hold back GitHub itself when it is %s", (state) => {
+    expect(awaitsGithub("github", rows(state))).toBe(false);
+  });
+
+  // "Connect GitHub first" with no GitHub row to connect would be a dead end.
+  it("should hold back nothing when the list has no GitHub row", () => {
+    expect(awaitsGithub("claude", rows(null))).toBe(false);
+  });
+
+  it("should say what to do instead of offering a control when a connection waits", () => {
+    expect(GITHUB_FIRST).toBe("Connect GitHub first");
   });
 });
