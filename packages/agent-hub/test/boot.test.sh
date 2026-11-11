@@ -21,8 +21,8 @@ set -u
 CASES=(no-token refused-token sign-in-not-completed sign-in-transient-failure stored-token-no-access checkout-client broken-checkout-client
     checkout-untracked-file checkout-modified-file checkout-modified-collision checkout-untracked-clobber checkout-local-commit
     checkout-refusal-flood checkout-refusal-silent no-client trailing-slash
-    client-upgrade client-upgrade-offline client-upgrade-no-npm client-upgrade-pinned package-entrypoint client-upgrade-ships-entrypoint
-    checkout-entrypoint org-member org-not-member org-invitation-pending org-invited-after-refusal org-check-forbidden org-check-without-read-org
+    client-upgrade client-upgrade-offline client-upgrade-no-npm client-upgrade-pinned client-upgrade-ships-entrypoint
+    org-member org-not-member org-invitation-pending org-invited-after-refusal org-check-forbidden org-check-without-read-org
     org-member-clone-refused org-from-repo-url)
 
 if [ "${1:-}" = "--list" ]; then
@@ -71,15 +71,17 @@ no() {
 setup() {
     CASE="$1"
     C="$T/$1"
-    mkdir -p "$C/bin" "$C/home" "$C/pkg/bin"
+    mkdir -p "$C/bin" "$C/home" "$C/pkg/bin" "$C/pkg/virtual-agent"
     : >"$C/order.log"
 
     # The script under test runs from a package directory of the case's own, reached through a symlink as npm
     # installs a bin: stage 1 is resolved from this file's location, so a case controls whether the package it
-    # was installed from ships one. Only package-entrypoint does; every other case falls back to the checkout's.
+    # was installed from ships one. Every case starts with one; client-upgrade-ships-entrypoint removes it.
     cp "$BOOT" "$C/pkg/bin/virtual-agent-boot"
     chmod +x "$C/pkg/bin/virtual-agent-boot"
     ln -s "$C/pkg/bin/virtual-agent-boot" "$C/bin/virtual-agent-boot"
+    printf '#!/bin/sh\necho entrypoint >>"$FAKE_DIR/order.log"\n' >"$C/pkg/virtual-agent/entrypoint.sh"
+    chmod +x "$C/pkg/virtual-agent/entrypoint.sh"
 
     # The device flow is the client's own HTTP against $GITHUB_OAUTH_HOST, so gh only ever takes a token on
     # stdin here: a token the owner stored, or the one that sign-in ended with.
@@ -146,9 +148,7 @@ case "$1" in
             exit 128
         fi
         dest="${*: -1}"
-        mkdir -p "$dest/.git" "$dest/.devcontainer/virtual-agent"
-        printf '#!/bin/sh\necho entrypoint >>"$FAKE_DIR/order.log"\n' >"$dest/.devcontainer/virtual-agent/entrypoint.sh"
-        chmod +x "$dest/.devcontainer/virtual-agent/entrypoint.sh" ;;
+        mkdir -p "$dest/.git" ;;
     -C)
         case "$3" in
             fetch) echo "git fetch" >>"$FAKE_DIR/order.log" ;;
@@ -257,11 +257,6 @@ rgit() { "$REAL_GIT" -c user.name="Boot Test" -c user.email=boot@example.com -c 
 real_checkout() {
     rgit init --quiet --bare "$C/origin"
     rgit init --quiet "$C/seed"
-    mkdir -p "$C/seed/.devcontainer/virtual-agent"
-    # Stage 1 comes from the checkout in these cases, so it is committed like cft-workspace's own: a file the
-    # fast-forward carries forward rather than one left in the working tree.
-    printf '#!/bin/sh\necho entrypoint >>"$FAKE_DIR/order.log"\n' >"$C/seed/.devcontainer/virtual-agent/entrypoint.sh"
-    chmod +x "$C/seed/.devcontainer/virtual-agent/entrypoint.sh"
     printf 'the commit the pod booted with\n' >"$C/seed/tracked.md"
     printf 'the commit the pod booted with\n' >"$C/seed/other.md"
     rgit -C "$C/seed" add -A
@@ -420,13 +415,11 @@ case_stored_token_no_access() {
 
 case_checkout_client() {
     setup checkout-client
-    mkdir -p "$C/ws/cft-workspace/.git" "$C/ws/cft-workspace/.devcontainer/virtual-agent" "$C/ws/cft-workspace/scripts"
+    mkdir -p "$C/ws/cft-workspace/.git" "$C/ws/cft-workspace/scripts"
     # cft-workspace keeps scripts/agent-hub as a shim over the installed client, so a checkout can
     # pin an older one through AGENT_HUB_CLI.
     printf '#!/usr/bin/env bash\nexec "${AGENT_HUB_CLI:-agent-hub}" "$@"\n' >"$C/ws/cft-workspace/scripts/agent-hub"
     chmod +x "$C/ws/cft-workspace/scripts/agent-hub"
-    printf '#!/bin/sh\necho entrypoint >>"$FAKE_DIR/order.log"\n' >"$C/ws/cft-workspace/.devcontainer/virtual-agent/entrypoint.sh"
-    chmod +x "$C/ws/cft-workspace/.devcontainer/virtual-agent/entrypoint.sh"
     boot
     [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git fetch git merge npm install entrypoint " &&
         ok "signs in, then fast-forwards the existing checkout" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
@@ -437,11 +430,9 @@ case_checkout_client() {
 # sign-in and back off forever, so the working installed client has to win.
 case_broken_checkout_client() {
     setup broken-checkout-client
-    mkdir -p "$C/ws/cft-workspace/.git" "$C/ws/cft-workspace/.devcontainer/virtual-agent" "$C/ws/cft-workspace/scripts"
+    mkdir -p "$C/ws/cft-workspace/.git" "$C/ws/cft-workspace/scripts"
     printf '#!/usr/bin/env bash\necho "agent-hub: cannot find module" >&2\nexit 127\n' >"$C/ws/cft-workspace/scripts/agent-hub"
     chmod +x "$C/ws/cft-workspace/scripts/agent-hub"
-    printf '#!/bin/sh\necho entrypoint >>"$FAKE_DIR/order.log"\n' >"$C/ws/cft-workspace/.devcontainer/virtual-agent/entrypoint.sh"
-    chmod +x "$C/ws/cft-workspace/.devcontainer/virtual-agent/entrypoint.sh"
     boot
     [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git fetch git merge npm install entrypoint " &&
         ok "boots through with a shim that cannot run" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
@@ -555,9 +546,7 @@ case_checkout_local_commit() {
 # canned_checkout: a checkout the canned fake git answers for, for the cases about what the script makes of
 # git's stderr rather than about git's rules. No scripts/agent-hub, so the installed client is used.
 canned_checkout() {
-    mkdir -p "$C/ws/cft-workspace/.git" "$C/ws/cft-workspace/.devcontainer/virtual-agent"
-    printf '#!/bin/sh\necho entrypoint >>"$FAKE_DIR/order.log"\n' >"$C/ws/cft-workspace/.devcontainer/virtual-agent/entrypoint.sh"
-    chmod +x "$C/ws/cft-workspace/.devcontainer/virtual-agent/entrypoint.sh"
+    mkdir -p "$C/ws/cft-workspace/.git"
 }
 
 # the_refusal: the sync detail the hub was told, out of the statuses it holds.
@@ -686,45 +675,17 @@ case_client_upgrade_pinned() {
         ok "says the pod is pinned" || no "no reason logged: $(grep 'client' "$C/out")"
 }
 
-# Stage 1 ships with the client, so the package's copy is the one a pod runs: a checkout pinning an older
-# runtime than the client it boots on is exactly what moving the runtime out of the checkout was for.
-case_package_entrypoint() {
-    setup package-entrypoint
-    mkdir -p "$C/pkg/virtual-agent"
-    printf '#!/bin/sh\necho package-entrypoint >>"$FAKE_DIR/order.log"\n' >"$C/pkg/virtual-agent/entrypoint.sh"
-    chmod +x "$C/pkg/virtual-agent/entrypoint.sh"
-    seed_github "$GOOD_TOKEN"
-    boot
-    [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git clone npm install package-entrypoint " &&
-        ok "hands over to the package's own stage 1" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
-    grep -q "handing over to $C/pkg/virtual-agent/entrypoint.sh" "$C/out" &&
-        ok "logs which stage 1 it ran, resolved through the symlink it was invoked by" || no "handover not logged: $(grep 'handing over' "$C/out")"
-}
-
 # The upgrade is what brings stage 1 to a pod whose image client predates it, and npm's global prefix is in the
 # container filesystem rather than on the volume, so that install happens again on every boot of that pod.
-# Resolving stage 1 before the upgrade sent every one of those boots to the checkout instead, for the pod's whole
-# life — which is the image rebuild and digest bump the upgrade exists to avoid.
 case_client_upgrade_ships_entrypoint() {
     setup client-upgrade-ships-entrypoint
+    rm "$C/pkg/virtual-agent/entrypoint.sh"
     seed_github "$GOOD_TOKEN"
     boot FAKE_NPM_SHIPS_ENTRYPOINT=1
     [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git clone npm install package-entrypoint " &&
         ok "upgrades the client before it resolves stage 1" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
     grep -q "handing over to $C/pkg/virtual-agent/entrypoint.sh" "$C/out" &&
-        ok "hands over to the stage 1 the upgrade installed, not the checkout's" || no "handover: $(grep 'handing over' "$C/out")"
-}
-
-# A pod whose client predates the move has stage 1 only in the checkout. The fallback goes once every pod image
-# floor carries a client that ships one.
-case_checkout_entrypoint() {
-    setup checkout-entrypoint
-    seed_github "$GOOD_TOKEN"
-    boot
-    [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git clone npm install entrypoint " &&
-        ok "falls back to the checkout's stage 1 when the package ships none" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
-    grep -q "handing over to $C/ws/cft-workspace/.devcontainer/virtual-agent/entrypoint.sh" "$C/out" &&
-        ok "logs that the stage 1 it ran came from the checkout" || no "handover not logged: $(grep 'handing over' "$C/out")"
+        ok "should hand over to the stage 1 the upgrade installed" || no "handover: $(grep 'handing over' "$C/out")"
 }
 
 # A clone that succeeds asks GitHub nothing about the organisation: the lookup only words a refusal.
@@ -854,9 +815,7 @@ run_case() {
         client-upgrade-offline) case_client_upgrade_offline ;;
         client-upgrade-no-npm) case_client_upgrade_no_npm ;;
         client-upgrade-pinned) case_client_upgrade_pinned ;;
-        package-entrypoint) case_package_entrypoint ;;
         client-upgrade-ships-entrypoint) case_client_upgrade_ships_entrypoint ;;
-        checkout-entrypoint) case_checkout_entrypoint ;;
         org-member) case_org_member ;;
         org-not-member) case_org_not_member ;;
         org-invitation-pending) case_org_invitation_pending ;;

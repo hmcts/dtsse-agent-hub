@@ -32,7 +32,6 @@ const CASES = [
   "hai-install-leaves-no-binary",
   "continues-a-conversation",
   "git-identity-fails",
-  "later-boot-fails",
   "sigterm-mid-clone",
   "claude-md-stored",
   "claude-md-missing",
@@ -53,7 +52,6 @@ const CASES = [
   "prepare-workspace-fails",
   "prepare-workspace-dies",
   "prepare-workspace-dies-silently",
-  "prepare-workspace-sigterm",
   "no-clone-step",
   "client-on-path",
   "broken-workspace-shim"
