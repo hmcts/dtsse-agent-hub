@@ -457,18 +457,11 @@ checkout_workspace
 {
     upgrade_client
 
-    # Stage 1 is this package's own, so a pod gets the runtime it was published with rather than whatever the
-    # checkout happens to carry. Resolved after the upgrade, not before: the global prefix is in the container
-    # filesystem rather than on the volume, so a pod whose image client predates the runtime installs one here
-    # on every boot, and resolving first would send every one of those boots to the checkout until the pod
-    # image itself was rebuilt. The checkout's copy is the fallback for the boot that has neither, and goes
-    # once every pod image floor carries a client that ships one.
+    # Stage 1 is this package's own, so a pod gets the runtime it was published with. Resolved after the
+    # upgrade, so it is the upgraded client's that runs.
     entrypoint="$PACKAGE/virtual-agent/entrypoint.sh"
     if [[ ! -x "$entrypoint" ]]; then
-        entrypoint="$WORKSPACE/.devcontainer/virtual-agent/entrypoint.sh"
-    fi
-    if [[ ! -x "$entrypoint" ]]; then
-        report failed "neither this agent-hub client nor the cft-workspace checkout has an executable virtual-agent/entrypoint.sh"
+        report failed "this agent-hub client has no executable virtual-agent/entrypoint.sh"
         exit 1
     fi
     log "handing over to $entrypoint"

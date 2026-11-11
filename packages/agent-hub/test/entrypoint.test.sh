@@ -22,11 +22,11 @@ set -u
 CASES=(first-boot gateway-route gateway-route-older-template gateway-route-unconfigured
     unknown-route hai-install-blip-recovers hai-install-falls-back
     hai-installed-off-path hai-install-retries hai-install-keeps-failing hai-install-leaves-no-binary
-    continues-a-conversation git-identity-fails later-boot-fails sigterm-mid-clone claude-md-stored
+    continues-a-conversation git-identity-fails sigterm-mid-clone claude-md-stored
     claude-md-missing claude-md-error claude-md-restart atlassian-fails atlassian-not-signed-in atlassian-sigterm
     atlassian-no-twg azure-restored azure-not-stored azure-requested azure-request-fails azure-wrong-account
     azure-sigterm conversations prepare-workspace prepare-workspace-fails prepare-workspace-dies
-    prepare-workspace-dies-silently prepare-workspace-sigterm
+    prepare-workspace-dies-silently
     no-clone-step client-on-path broken-workspace-shim)
 
 if [ "${1:-}" = "--list" ]; then
@@ -231,26 +231,8 @@ exit 0
 EOF
     cp "$F/client" "$W/scripts/agent-hub"
 
-    # Five repos, one every FAKE_REPO_SECONDS, then FAKE_REPOS_RC; records its niceness and run count. The
-    # workspace declares no clone step unless a case calls prepare_hook, so these are what runs.
-    cat >"$W/scripts/bootstrap" <<EOF
-#!/usr/bin/env bash
-REAL_SLEEP="$REAL_SLEEP"
-EOF
-    cat >>"$W/scripts/bootstrap" <<'EOF'
-echo "$(basename "$0") $(awk '{print $19}' /proc/$$/stat)" >>"$FAKE_DIR/repos.runs"
-echo "Cloning into 5 paths (jobs=16)…"
-"$REAL_SLEEP" 1000 &
-echo $! >"$FAKE_DIR/repos.child"
-for i in 1 2 3 4 5; do
-    "$REAL_SLEEP" "${FAKE_REPO_SECONDS:-1}"
-    printf 'OK  apps/fake/repo%s\n' "$i"
-done
-kill $! 2>/dev/null
-exit "${FAKE_REPOS_RC:-0}"
-EOF
-    sed 's/Cloning into 5 paths/Syncing 5 repo(s)/' "$W/scripts/bootstrap" >"$W/scripts/sync"
     chmod +x "$F/bin/"* "$W/scripts/"* "$F/client"
+    prepare_hook
 }
 
 # The workspace's own clone step, as cft-workspace declares it: five repositories, one every FAKE_REPO_SECONDS,
@@ -368,12 +350,9 @@ case_first_boot() {
     grep -q '^cloning$' "$F/hub.log" && no "still reports the cloning phase" || ok "should report no cloning phase of its own when the repositories are arriving"
     wait_for 30 state_is "done" && ok "should end repos-state done when the clone finishes cleanly" || no "repos-state never said done"
     grep -qx 'total=5' "$STATE/repos-state" && grep -qx 'done=5' "$STATE/repos-state" && ok "should count the repositories in repos-state while they arrive" || no "repos-state has the wrong counts"
-    [ -f "$STATE/bootstrapped" ] && ok "should write the bootstrapped marker when a clean bootstrap finishes" || no "no bootstrapped marker"
     wait_for 10 hub_has 'running Claude is ready; repositories ready' && ok "should report the repositories ready when they have all arrived" || no "never reported repositories ready"
     wait_for 20 grep -q '^start 2 ' "$F/claude.log" && ok "should restart Claude when its session ends" || no "Claude was not restarted"
-    [ "$(wc -l <"$F/repos.runs")" -eq 1 ] && ok "should start no second bootstrap when Claude restarts" || no "bootstrap ran $(wc -l <"$F/repos.runs") times"
-    grep -qx 'bootstrap 10' "$F/repos.runs" && ok "should run the clone step nice'd when it starts it behind Claude" || no "bootstrap niceness: $(cat "$F/repos.runs")"
-    grep -q 'OK  apps/fake/repo5' "$STATE/repos.log" && ok "should send the clone step's output to repos.log when it runs it" || no "repos.log lacks bootstrap output"
+    [ "$(wc -l <"$F/repos.runs")" -eq 1 ] && ok "should start no second clone step when Claude restarts" || no "the clone step ran $(wc -l <"$F/repos.runs") times"
     wait_for 5 test -f "$F/ports.pid" && ok "should start the port watcher when the pod boots" || no "the port watcher was not started"
     ports=$(cat "$F/ports.pid" 2>/dev/null)
     stop && ok "should stop the entrypoint when it gets SIGTERM" || no "the entrypoint did not stop on SIGTERM"
@@ -562,18 +541,6 @@ case_git_identity_fails() {
     stop && ok "should stop the entrypoint when it gets SIGTERM" || no "the entrypoint did not stop on SIGTERM"
 }
 
-case_later_boot_fails() {
-    setup later-boot-fails
-    mkdir -p "$STATE"
-    echo yesterday >"$STATE/bootstrapped"
-    start FAKE_REPO_SECONDS=0.2 FAKE_REPOS_RC=1
-    wait_for 20 state_is failed && ok "should leave repos-state failed when the sync fails" || no "repos-state never said failed"
-    grep -qx 'sync 10' "$F/repos.runs" && ok "should run sync when the volume has been bootstrapped before" || no "did not run sync: $(cat "$F/repos.runs" 2>/dev/null)"
-    head -1 "$F/hub.log" 2>/dev/null | grep -q '^running Claude is ready; syncing repositories' && ok "should report the sync's progress when it is syncing" || no "did not report syncing"
-    wait_for 10 hub_has 'running Claude is ready; some repositories failed to sync' && ok "should report the failure in the detail when the sync fails" || no "did not report the failure"
-    stop && ok "should stop the entrypoint when it gets SIGTERM" || no "the entrypoint did not stop on SIGTERM"
-}
-
 case_sigterm_mid_clone() {
     setup sigterm-mid-clone
     start FAKE_REPO_SECONDS=30
@@ -581,7 +548,6 @@ case_sigterm_mid_clone() {
     child=$(cat "$F/repos.child" 2>/dev/null)
     stop && ok "should stop the entrypoint when it gets SIGTERM mid-clone" || no "the entrypoint did not stop on SIGTERM mid-clone"
     wait_for 5 dead "$child" && ok "should stop the clone step and its children when it gets SIGTERM" || no "the clone's child $child is still running"
-    [ ! -f "$STATE/bootstrapped" ] && ok "should write no bootstrapped marker when the bootstrap is interrupted" || no "an interrupted bootstrap wrote the marker"
     grep -q "clone step" "$T/out" && ok "should log that it stopped the clone step when it gets SIGTERM" || no "did not log the clone stop"
 }
 
@@ -788,18 +754,15 @@ case_conversations() {
     [ -n "$main" ] && wait_for 5 dead "$main" && ok "should kill the main claude session when it gets SIGTERM" || no "the main session $main is still running"
 }
 
-# The workspace that declares its own clone step, which is the shape every checkout has once cft-workspace
-# carries prepare-workspace.sh: this file starts it and reads its progress back, and knows nothing about what
-# it clones or where.
+# The workspace that declares its own clone step: this file starts it and reads its progress back, and knows
+# nothing about what it clones or where.
 case_prepare_workspace() {
     setup prepare-workspace
-    prepare_hook
     start FAKE_REPO_SECONDS=1
     wait_for 10 test -f "$F/claude.log" && ok "should start Claude when the workspace declares a clone step" || no "Claude did not start"
     grep -q '^start 1 state=cloning$' "$F/claude.log" && ok "should start Claude while the declared clone step is still running" || no "Claude did not start before the clone step finished"
     grep -q "running the workspace's clone step" "$T/out" && ok "should log that it ran the workspace's clone step when the workspace declares one" || no "did not log the clone step"
     grep -qx 'prepare-workspace 10' "$F/repos.runs" && ok "should run the declared clone step nice'd behind Claude" || no "clone step niceness: $(cat "$F/repos.runs" 2>/dev/null)"
-    grep -q '^bootstrap' "$F/repos.runs" && no "ran the workspace's bootstrap as well as the hook" || ok "should run no bootstrap or sync of its own when the workspace declares a clone step"
     # The counts come from the file the clone step wrote: nothing here counts anything itself. The first report
     # is the one that carries them, because progress is reported at most every REPORT_EVERY real seconds while
     # the repositories are arriving, and that gate is on the clock rather than on a sleep.
@@ -809,13 +772,11 @@ case_prepare_workspace() {
     wait_for 10 hub_has 'running Claude is ready; repositories ready' && ok "should report the repositories ready when the clone step is done" || no "never reported repositories ready"
     grep -q '^note=the workspace says the repositories are done$' "$STATE/repos-state" &&
         ok "should leave the clone step's note= line alone when it reads its progress" || no "repos-state: $(cat "$STATE/repos-state" 2>/dev/null | tr '\n' ' ')"
-    [ ! -f "$STATE/bootstrapped" ] && ok "should write no bootstrapped marker when the clone step owns which of the two it runs" || no "wrote a marker the clone step owns"
     stop && ok "should stop the entrypoint when it gets SIGTERM" || no "the entrypoint did not stop on SIGTERM"
 }
 
 case_prepare_workspace_fails() {
     setup prepare-workspace-fails
-    prepare_hook
     # Long enough that the first poll sees the clone step running: which of the two it was doing is only ever
     # said in state=, and the failure detail names it.
     start FAKE_REPO_SECONDS=1 FAKE_REPOS_RC=1
@@ -833,7 +794,6 @@ case_prepare_workspace_fails() {
 # without the step's note=, which was written for a clone that was still running.
 case_prepare_workspace_dies() {
     setup prepare-workspace-dies
-    prepare_hook
     start FAKE_PREPARE_DIES=1
     wait_for 15 state_is failed && ok "should write failed when the clone step stops without saying how it ended" || no "repos-state: $(cat "$STATE/repos-state" 2>/dev/null | tr '\n' ' ')"
     grep -q '^note=' "$STATE/repos-state" && no "kept the clone step's note for a step that is no longer running" ||
@@ -848,7 +808,6 @@ case_prepare_workspace_dies() {
 # state is a lie about this boot, and a session reading it is told nothing at all.
 case_prepare_workspace_dies_silently() {
     setup prepare-workspace-dies-silently
-    prepare_hook
     mkdir -p "$STATE"
     printf 'state=done\ndone=5\ntotal=5\nupdated=yesterday\nnote=the last boot cloned them all\n' >"$STATE/repos-state"
     start FAKE_PREPARE_SILENT=1
@@ -860,20 +819,10 @@ case_prepare_workspace_dies_silently() {
     stop && ok "should stop the entrypoint when it gets SIGTERM" || no "the entrypoint did not stop on SIGTERM"
 }
 
-case_prepare_workspace_sigterm() {
-    setup prepare-workspace-sigterm
-    prepare_hook
-    start FAKE_REPO_SECONDS=30
-    wait_for 10 test -f "$F/repos.child" && wait_for 10 test -f "$F/claude.log"
-    child=$(cat "$F/repos.child" 2>/dev/null)
-    stop && ok "should stop the entrypoint when it gets SIGTERM while the clone step runs" || no "the entrypoint did not stop on SIGTERM"
-    wait_for 5 dead "$child" && ok "should stop the declared clone step and its children when it gets SIGTERM" || no "the clone step's child $child is still running"
-}
-
-# The shape a workspace has that declares no clone step at all, which is neither the hook nor the two scripts.
+# The shape a workspace has that declares no clone step at all.
 case_no_clone_step() {
     setup no-clone-step
-    rm -f "$W/scripts/bootstrap" "$W/scripts/sync"
+    rm "$W/.devcontainer/virtual-agent/prepare-workspace.sh"
     start
     wait_for 10 test -f "$F/hai.argv.1" && ok "should start Claude when the workspace has nothing to clone" || no "Claude did not start"
     grep -q 'declares no clone step' "$T/out" && ok "should log that the workspace declares no clone step when it has none" || no "did not log the missing clone step"
@@ -922,7 +871,6 @@ run_case() {
         hai-install-leaves-no-binary) case_hai_install_leaves_no_binary ;;
         continues-a-conversation) case_continues_a_conversation ;;
         git-identity-fails) case_git_identity_fails ;;
-        later-boot-fails) case_later_boot_fails ;;
         sigterm-mid-clone) case_sigterm_mid_clone ;;
         claude-md-stored) case_claude_md_stored ;;
         claude-md-missing) case_claude_md_missing ;;
@@ -943,7 +891,6 @@ run_case() {
         prepare-workspace-fails) case_prepare_workspace_fails ;;
         prepare-workspace-dies) case_prepare_workspace_dies ;;
         prepare-workspace-dies-silently) case_prepare_workspace_dies_silently ;;
-        prepare-workspace-sigterm) case_prepare_workspace_sigterm ;;
         no-clone-step) case_no_clone_step ;;
         client-on-path) case_client_on_path ;;
         broken-workspace-shim) case_broken_workspace_shim ;;

@@ -376,8 +376,6 @@ REPOS_RC="$STATE/repos.rc"
 # done= and total= are read back here. A workspace that declares none simply has no clone step.
 PREPARE="$WS/.devcontainer/virtual-agent/prepare-workspace.sh"
 REPORT_EVERY=15
-# 1 once the clone step running is the hook rather than the fallback below.
-repos_hook=0
 repos_kind=""
 repos_state=""
 repos_done=0
@@ -445,85 +443,22 @@ set_repos_verb() {
     esac
 }
 
-# --- The fallback, which goes once every checkout carries prepare-workspace.sh. ---
-# A checkout from before the workspace declared the step: the two scripts boot has always run, the same log,
-# and the counts taken from that log rather than from a state file, so a session still gets the client's
-# generic sentence about the repositories rather than nothing at all. The apps/, libs/ and platops/ wording is
-# the workspace's and arrives with the hook.
-#
-# The counts go through a file rather than a `<(…)` process substitution: this runs on every pass while the
-# repositories arrive, and a process substitution is the likeliest place of all to lose a SIGTERM. See the
-# trap above.
-fallback_count() {
-    awk '
-        /^(Cloning into|Syncing) [0-9]+ / { total = $(/^Syncing/ ? 2 : 3) }
-        /^(OK|ERR|SKIP|MISS) / || / skip \(/ { done++ }
-        END { print done + 0, total + 0 }' "$REPOS_LOG" >"$REPOS_LOG.count" 2>/dev/null
-    read -r repos_done repos_total <"$REPOS_LOG.count"
-}
-
-fallback_start() {
-    local cmd
-    if [[ -f "$STATE/bootstrapped" ]]; then
-        repos_kind=syncing
-        cmd=("$WS/scripts/sync" -j16)
-    else
-        repos_kind=cloning
-        cmd=("$WS/scripts/bootstrap" --no-ssh-check --filter=blob:none -j16)
-    fi
-    repos_state=$repos_kind
-    start_in_background "${cmd[@]}"
-    write_repos_state
-    log "$repos_kind the workspace repos in the background; log in $REPOS_LOG"
-}
-
-fallback_finished() {
-    fallback_count
-    if [[ "$1" == 0 ]]; then
-        repos_state="done"
-        [[ "$repos_kind" == cloning ]] && date -u +%Y-%m-%dT%H:%M:%SZ >"$STATE/bootstrapped"
-        log "the workspace repos are ready"
-    else
-        repos_state=failed
-        set_repos_verb
-        log "the background $repos_verb reported failures; see $REPOS_LOG (the next boot runs it again)"
-    fi
-    write_repos_state
-}
-# --- End of the fallback. ---
-
 # Claude starts while the repositories arrive, so the clone step runs behind it.
 start_repos() {
     if [[ -x "$PREPARE" ]]; then
-        repos_hook=1
         # The state dir is on the volume, so the file still holds the last boot's result until the step writes
         # its own. Left there, a step that dies before its first write would be read as that boot's success,
         # and until then this boot's progress would be whatever that one ended on.
         rm -f "$REPOS_STATE"
         start_in_background "$PREPARE"
         log "running the workspace's clone step ($PREPARE) in the background; log in $REPOS_LOG"
-    elif [[ -x "$WS/scripts/bootstrap" ]]; then
-        fallback_start
     else
         log "the workspace declares no clone step ($PREPARE); nothing is cloned or synced"
     fi
 }
 
-repos_progress() {
-    if [[ "$repos_hook" -eq 1 ]]; then
-        read_repos_state
-    else
-        fallback_count
-        write_repos_state
-    fi
-}
-
 # How the clone step ended, given its exit status.
 repos_finished() {
-    if [[ "$repos_hook" -eq 0 ]]; then
-        fallback_finished "$1"
-        return 0
-    fi
     read_repos_state
     case "$repos_state" in
         done) log "the workspace repositories are ready" ;;
@@ -546,7 +481,7 @@ poll_repos() {
     local rc=""
     [[ -n "$repos_pid" ]] || return 0
     if [[ ! -f "$REPOS_RC" ]] && kill -0 "$repos_pid" 2>/dev/null; then
-        repos_progress
+        read_repos_state
         return 0
     fi
     wait "$repos_pid" 2>/dev/null
