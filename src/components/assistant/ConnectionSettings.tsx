@@ -102,11 +102,22 @@ function connectWords(name: string, stored: boolean, running: boolean): { questi
  * whatever the assistant is doing, and because a lapsed sign-in with a value saved deletes the one all their agents
  * use. The code then arrives on this row, as it does on the getting-ready screen.
  */
-function ConnectQuestion({ row, connect, onCancel }: { row: Connection; connect: AssistantConnect; onCancel: () => void }) {
+function ConnectQuestion({
+  row,
+  connect,
+  onCancel,
+  onDone
+}: {
+  row: Connection;
+  connect: AssistantConnect;
+  onCancel: () => void;
+  /** Closes the question once the restart is asked for, so it is not back on the row when the sign-in it led to is over. */
+  onDone: (said: string | null) => void;
+}) {
   const confirm = useFocusOnMount<HTMLButtonElement>();
   const words = connectWords(row.name, row.stored, connect.running);
   return (
-    <ActionForm action={connect.reconnect} label={`Connect ${row.name}`} className={BELOW}>
+    <ActionForm action={connect.reconnect} label={`Connect ${row.name}`} className={BELOW} onSuccess={(result) => onDone(result.confirmation ?? null)}>
       <input type="hidden" name="id" value={connect.assistantId} />
       <input type="hidden" name="kind" value={row.kind} />
       <p className="text-pretty text-[13px] font-semibold text-asst-text">{words.question}</p>
@@ -292,7 +303,15 @@ function Row({
         </div>
       ) : null}
       {doing === "connect" && !live && connect !== undefined && signIn !== null ? (
-        <ConnectQuestion row={signIn} connect={connect} onCancel={() => setDoing(null)} />
+        <ConnectQuestion
+          row={signIn}
+          connect={connect}
+          onCancel={() => setDoing(null)}
+          onDone={(said) => {
+            setDoing(null);
+            onSaid(said);
+          }}
+        />
       ) : null}
       {doing === "paste" && !live && tokens !== undefined && saved !== null ? (
         <Paste saved={saved} save={tokens.save} onCancel={() => setDoing(null)} onSaved={finish(`Your ${saved.title} is saved`)} />

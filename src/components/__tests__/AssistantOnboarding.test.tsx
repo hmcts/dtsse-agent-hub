@@ -1509,6 +1509,23 @@ describe("GettingReady sending a pasted code", () => {
     expect(within(connector("Claude")).queryByRole("form", { name: "Paste the Claude code" })).toBeNull();
   });
 
+  // Collecting the code clears its deadline, which is the pod finishing the sign-in rather than a code that went astray.
+  it("should go on saying the code arrived when the pod has collected it", async () => {
+    const login = relayed();
+    const { rerender } = render(ready({ assistant: assistant("awaiting_login", { logins: [login] }), statuses: statuses("github") }));
+    fireEvent.change(within(connector("Claude")).getByLabelText("Claude code"), { target: { value: "code#123" } });
+    await act(async () => {
+      fireEvent.submit(within(connector("Claude")).getByRole("form", { name: "Paste the Claude code" }));
+    });
+
+    const waiting = { ...login, codeWaitingUntil: new Date(Date.now() + 60_000).toISOString() };
+    rerender(ready({ assistant: assistant("awaiting_login", { logins: [waiting] }), statuses: statuses("github") }));
+    rerender(ready({ assistant: assistant("awaiting_login", { logins: [{ ...waiting, codeWaitingUntil: null }] }), statuses: statuses("github") }));
+
+    expect(within(connector("Claude")).getByRole("status").textContent).toBe("Got it. Your assistant is finishing signing in.");
+    expect(within(connector("Claude")).queryByRole("form", { name: "Paste the Claude code" })).toBeNull();
+  });
+
   // The pod never came for the code, so the refreshed sign-in says it is past collecting and the box is the way on.
   it("should offer the box again when the refreshed sign-in says the sent code was not collected", async () => {
     const { rerender } = render(ready({ assistant: assistant("awaiting_login", { logins: [relayed()] }), statuses: statuses("github") }));
@@ -1537,7 +1554,7 @@ describe("GettingReady before GitHub is connected", () => {
     }
   });
 
-  it("should offer the other rows' controls once GitHub is connected", () => {
+  it("should offer the other rows' controls when GitHub is connected", () => {
     render(
       ready({ assistant: assistant("running", { needed: ["github", "azure", "claude"], optional: ["jenkins", "atlassian"] }), statuses: statuses("github") })
     );

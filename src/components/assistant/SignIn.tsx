@@ -18,8 +18,9 @@ const PRIMARY = "shrink-0 rounded-[9px] bg-asst-accent px-3.5 py-1.5 text-[13px]
  * can run for the rest of the hour, and `storePastedCode` will take another — so the box comes back.
  *
  * A code just sent reads as received at once rather than when the page's refresh brings `collectable`: in between
- * the form has reset, and an empty box where the code was reads as a code that was lost. That holds until the
- * refreshed sign-in says what became of it, or a new one replaces it.
+ * the form has reset, and an empty box where the code was reads as a code that was lost. It goes on reading so while
+ * the pod collects it, which clears `codeWaitingUntil`, and gives way to the box only for a code the pod left past
+ * its deadline, or a new sign-in.
  */
 export function SignIn({
   assistantId,
@@ -36,9 +37,10 @@ export function SignIn({
 }) {
   const [sent, setSent] = useState<{ login: string; waiting: string | null } | null>(null);
   const identity = `${login.kind} ${login.verificationUri} ${login.expiresAt}`;
-  if (sent !== null && (sent.login !== identity || sent.waiting !== login.codeWaitingUntil)) {
+  if (sent !== null && sent.login !== identity) {
     setSent(null);
   }
+  const received = sent !== null && (login.codeWaitingUntil === null || login.codeWaitingUntil === sent.waiting);
   if (login.prompt === "device_code") {
     return (
       <div className="flex flex-col gap-1.5 text-[13px] text-asst-body">
@@ -70,7 +72,7 @@ export function SignIn({
       </div>
     );
   }
-  if (collectable || sent !== null) {
+  if (collectable || received) {
     return (
       <p role="status" className="text-[13px] text-asst-ok">
         Got it. Your assistant is finishing signing in.

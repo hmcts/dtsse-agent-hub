@@ -804,6 +804,19 @@ describe("connecting Azure from the Assistant's settings", () => {
     expect([sent.get("id"), sent.get("kind")]).toEqual([ASSISTANT_ID, "azure"]);
   });
 
+  it("should close the connect question when the restart it asked for is under way", async () => {
+    const reconnect = vi.fn(async () => ({ ok: true as const, confirmation: "Your assistant is restarting to sign in to Azure" }));
+    open({ connections: data(["github", "claude"]), connect: connectWith({ reconnect }) }, "Connections");
+
+    fireEvent.click(within(azureRow()).getByRole("button", { name: "Connect Azure" }));
+    await act(async () => {
+      fireEvent.submit(within(azureRow()).getByRole("form", { name: "Connect Azure" }));
+    });
+
+    expect(within(azureRow()).queryByRole("form", { name: "Connect Azure" })).toBeNull();
+    expect(screen.getByText("Your assistant is restarting to sign in to Azure")).toBeTruthy();
+  });
+
   it("should say the sign-in is asked for at the next start when the assistant is stopped", () => {
     open({ connections: data(["github", "claude"]), connect: connectWith({ running: false }) }, "Connections");
 
@@ -3527,7 +3540,7 @@ describe("connecting from the Assistant's settings before GitHub", () => {
     expect(within(connectionRow("Microsoft 365")).queryByRole("button", { name: "Connect Microsoft 365" })).toBeNull();
   });
 
-  it("should offer them once GitHub is connected", () => {
+  it("should offer Connect and Add on the other rows when GitHub is connected", () => {
     open({ connections: data(["github"]), connect: connectWith() }, "Connections");
 
     expect(within(azureRow()).getByRole("button", { name: "Connect Azure" })).toBeTruthy();
