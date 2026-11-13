@@ -66,3 +66,34 @@ export function groupForSidebar<T>(
   const section: { label: SidebarGroup; items: T[] }[] = pinned.length === 0 ? [] : [{ label: PINNED, items: pinned }];
   return [...section, ...groupByDate(rest, at, now)];
 }
+
+/** What `bySidebarOrder` reads of an item, chat or feedback project alike. */
+export interface SidebarOrdered {
+  id: string;
+  lastActiveAt: string;
+  pinnedAt: string | null;
+}
+
+/**
+ * The order `groupForSidebar` keeps for a list merged from several sources: the pinned ones first, most recently pinned
+ * first, then the rest most recently active first, the id settling a tie so the order does not change between renders.
+ */
+export function bySidebarOrder(a: SidebarOrdered, b: SidebarOrdered): number {
+  if ((a.pinnedAt === null) !== (b.pinnedAt === null)) {
+    return a.pinnedAt === null ? 1 : -1;
+  }
+  const pinned = a.pinnedAt === null || b.pinnedAt === null ? 0 : Date.parse(b.pinnedAt) - Date.parse(a.pinnedAt);
+  if (pinned !== 0) {
+    return pinned;
+  }
+  const active = Date.parse(b.lastActiveAt) - Date.parse(a.lastActiveAt);
+  if (active !== 0) {
+    return active;
+  }
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
+/** A row's count of what is new, as its badge shows it: past 99 the exact figure says nothing more. */
+export function unreadLabel(count: number): string {
+  return count > 99 ? "99+" : String(count);
+}

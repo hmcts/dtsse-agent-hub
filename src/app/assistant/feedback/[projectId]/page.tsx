@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
+import { markFeedbackProjectSeen } from "@/app/_actions/feedback";
 import { FeedbackRefresh } from "@/components/feedback/dev/FeedbackRefresh";
 import { projectTab } from "@/components/feedback/dev/look";
+import { MarkSeen } from "@/components/feedback/dev/MarkSeen";
 import { FeedbackHeader } from "@/components/feedback/dev/ProjectList";
 import { ProjectPage } from "@/components/feedback/dev/ProjectPage";
 import { allowPrivateTargets } from "@/feedback/targets";
@@ -25,8 +27,9 @@ export default async function FeedbackProjectPage({
   }
   const tab = projectTab(query.tab, data.project.access === "owner");
   return (
-    <FeedbackFrame viewer={viewer}>
+    <FeedbackFrame viewer={viewer} projectId={data.project.id}>
       <FeedbackRefresh projectId={data.project.id} />
+      <MarkSeen projectId={data.project.id} markSeen={markFeedbackProjectSeen} />
       <div className="mx-auto flex max-w-[1280px] flex-col gap-5 px-5 pb-10 pt-5">
         <FeedbackHeader title={data.project.name} back={{ href: "/assistant/feedback", label: "Feedback projects" }} />
         <ProjectPage data={data} tab={tab} actions={PROJECT_ACTIONS} allowHttp={allowPrivateTargets()} />

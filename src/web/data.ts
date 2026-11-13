@@ -31,11 +31,11 @@ import { type UploadsOnDisk, uploadsOnDisk } from "../assistant/upload-disk.ts";
 import {
   type AssistantSummary,
   assistantSummary,
-  type ConversationLink,
   type ConversationView,
-  conversationGroups,
   conversationView,
   podSkills,
+  type SidebarItem,
+  sidebarGroups,
   type UnsentChat,
   unsentChat
 } from "../assistant/views.ts";
@@ -230,7 +230,7 @@ async function virtualAddress(viewer: Identity, virtualAgentId: string): Promise
 export interface AssistantHome {
   assistant: AssistantSummary;
   credentials: CredentialSettings;
-  conversations: { label: SidebarGroup; items: ConversationLink[] }[];
+  conversations: { label: SidebarGroup; items: SidebarItem[] }[];
   /**
    * The workspace plugins this hub offers, and the ones the viewer's assistant loads; `null` when the configuration
    * cannot be read, which is not the same as its offering nothing.
@@ -294,11 +294,7 @@ function pluginSettings(assistant: { plugins: string[] }): AssistantHome["plugin
  */
 export async function openAssistant(viewer: Viewer): Promise<AssistantHome> {
   const { assistant, claims } = await ensureAssistantWithClaims(prisma, viewer);
-  const [credentials, conversations, skills] = await Promise.all([
-    credentialSettings(viewer),
-    conversationGroups(prisma, viewer.oid),
-    podSkills(prisma, assistant)
-  ]);
+  const [credentials, conversations, skills] = await Promise.all([credentialSettings(viewer), sidebarGroups(prisma, viewer.oid), podSkills(prisma, assistant)]);
   const stored = storedKinds(credentials);
   const summary = await assistantSummary(prisma, assistant, stored);
   return {

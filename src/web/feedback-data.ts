@@ -2,8 +2,7 @@ import "server-only";
 import { HttpError } from "../agent-api/http.ts";
 import type { MentionablePerson } from "../feedback/mentions.ts";
 import { type FeedbackRecordingDetail, type FeedbackRecordingView, getRecording, listRecordings, recordingPages } from "../feedback/recording-store.ts";
-import { feedbackEnabled } from "../feedback/settings.ts";
-import { type FeedbackProjectSummary, type FeedbackProjectView, getProject, hasFeedbackProjects, listProjects, mentionablePeople } from "../feedback/store.ts";
+import { type FeedbackProjectSummary, type FeedbackProjectView, getProject, listProjects, mentionablePeople } from "../feedback/store.ts";
 import { type FeedbackThreadView, listThreads } from "../feedback/thread-store.ts";
 import { prisma } from "../store/prisma.ts";
 import type { Identity } from "../users/identity.ts";
@@ -13,19 +12,6 @@ import type { Identity } from "../users/identity.ts";
  * stores it calls apply `src/access/`. A project the viewer is not on the team of reads as `undefined`, which the page
  * renders as not found, as it does one that does not exist.
  */
-
-/** What the sidebar's plus offers: `undefined` while feedback is off. */
-export interface FeedbackMenu {
-  /** The viewer owns or is on the team of a project, so the way to the list is offered too. */
-  projects: boolean;
-}
-
-export async function feedbackMenu(viewer: Identity): Promise<FeedbackMenu | undefined> {
-  if (!feedbackEnabled()) {
-    return undefined;
-  }
-  return { projects: await hasFeedbackProjects(prisma, viewer.oid) };
-}
 
 export interface FeedbackProjectRow extends FeedbackProjectSummary {
   /** The latest of the project's own change, a thread's and a recording's. */

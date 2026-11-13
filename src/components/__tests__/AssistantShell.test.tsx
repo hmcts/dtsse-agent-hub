@@ -61,7 +61,16 @@ afterEach(() => {
 });
 
 function link(id: string, title: string, mark: ConversationMark = null): ConversationLink {
-  return { id, title, product: "ccd", productLabel: "CCD", lastActiveAt: "2026-10-21T09:00:00.000Z", pinnedAt: null, mark };
+  return {
+    kind: mark?.where === "computer" ? "local" : "cloud",
+    id,
+    title,
+    product: "ccd",
+    productLabel: "CCD",
+    lastActiveAt: "2026-10-21T09:00:00.000Z",
+    pinnedAt: null,
+    mark
+  };
 }
 
 /** A chat on the person's own computer, whose session is in one of the three states its mark carries. */
@@ -252,8 +261,8 @@ describe("AssistantShell", () => {
     ).toEqual(["/assistant/scheduled"]);
   });
 
-  it("should offer a new feedback project when feedback is on, and the list of them once the person is on a project", () => {
-    const { rerender } = render(shell({ welsh: true, feedback: { projects: false } }));
+  it("should offer a new feedback project, and not the list of them, when feedback is on", () => {
+    render(shell({ welsh: true, feedback: true }));
     fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
 
     const hrefs = () =>
@@ -262,9 +271,6 @@ describe("AssistantShell", () => {
         .map((item) => item.getAttribute("href"));
     expect(hrefs()).toEqual(["/assistant/welsh", "/assistant/feedback/new", "/assistant/scheduled"]);
     expect(screen.getByRole("menuitem", { name: /New feedback project/ }).textContent).toContain("Share a prototype for comments and recorded feedback");
-
-    rerender(shell({ welsh: true, feedback: { projects: true } }));
-    expect(hrefs()).toEqual(["/assistant/welsh", "/assistant/feedback/new", "/assistant/feedback", "/assistant/scheduled"]);
   });
 
   it("should offer nothing of feedback while it is off", () => {
