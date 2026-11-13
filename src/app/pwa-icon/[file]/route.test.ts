@@ -21,7 +21,8 @@ describe("every icon the app points at", () => {
   it("should be served, and be served without a session", async () => {
     const { default: manifest } = await import("../../manifest.ts");
     const { exempt } = await import("../../../auth/guard.ts");
-    const urls = [...manifest().icons!.map((icon) => icon.src), "/pwa-icon/180.png"];
+    const { HOME_SCREEN_ICON } = await import("../../../web/icons.ts");
+    const urls = [...manifest().icons!.map((icon) => icon.src), HOME_SCREEN_ICON.url];
 
     for (const url of urls) {
       expect(exempt(url), url).toBe(true);

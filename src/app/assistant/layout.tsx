@@ -5,12 +5,15 @@ import { THEME_COOKIE, themeOf } from "@/assistant/theme";
 import { AssistantRefresh } from "@/components/assistant/AssistantRefresh";
 import { AssistantVisit } from "@/components/assistant/AssistantVisit";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
+import { HOME_SCREEN_ICON, TAB_ICON } from "@/web/icons";
 
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "CFT Workspace",
-  description: "Ask for help with user stories, research, analysis and prototypes"
+  description: "Ask for help with user stories, research, analysis and prototypes",
+  // A segment's `icons` replace its parent's, so the home-screen icon is named again alongside the crown.
+  icons: { icon: TAB_ICON, apple: HOME_SCREEN_ICON }
 };
 
 /**
