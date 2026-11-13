@@ -95,6 +95,25 @@ export function feedbackPrefix(token: string): string {
 }
 
 /**
+ * Where under a feedback link's prefix one of `FEEDBACK_SIGN_IN_ORIGINS` is served: `/f/<token>/_sign-in/<host>`,
+ * `<host>` with its port when it has one. Under the link's prefix, so the link's own cookie and checks apply to it.
+ */
+const SIGN_IN_SEGMENT = "_sign-in";
+
+export function signInPrefix(token: string, host: string): string {
+  return `${feedbackPrefix(token)}/${SIGN_IN_SEGMENT}/${host}`;
+}
+
+/** The sign-in host a path under a feedback link's prefix names, and the path on it, or `undefined` for any other. */
+export function signInPathOf(rest: string): { host: string; rest: string } | undefined {
+  const match = /^\/_sign-in\/([a-z0-9.-]+(?::\d{1,5})?)(\/.*)?$/.exec(rest);
+  if (match === null) {
+    return undefined;
+  }
+  return { host: match[1]!, rest: match[2] ?? "/" };
+}
+
+/**
  * Whether a path on the viewer's host is under a feedback link's prefix, or is its bare prefix: the only responses
  * the hub's own pages may frame.
  */
@@ -103,6 +122,13 @@ export function isFeedbackPath(pathname: string): boolean {
 }
 
 export const VIEWER_COOKIE_PREFIX = "ahv-";
+
+/**
+ * A sign-in service's cookies are kept on the viewer under this name prefix, so that forwarding can tell them from the
+ * prototype's, which are sent to every path under the link's prefix, the sign-in paths included. Under
+ * `VIEWER_COOKIE_PREFIX`, so the prototype is never sent them and cannot set one.
+ */
+export const SIGN_IN_COOKIE_PREFIX = `${VIEWER_COOKIE_PREFIX}si-`;
 
 export function viewerCookieName(virtualAgentId: string, port: number): string {
   return `${VIEWER_COOKIE_PREFIX}${virtualAgentId}-${port}`;
@@ -184,7 +210,10 @@ function pagePrefix(page: ViewerPath): string | undefined {
     case "port":
     case "bare-port":
       return viewerPrefix(page.virtualAgentId, page.port);
-    case "feedback":
+    case "feedback": {
+      const signIn = signInPathOf(page.rest);
+      return signIn === undefined ? feedbackPrefix(page.token) : signInPrefix(page.token, signIn.host);
+    }
     case "bare-feedback":
       return feedbackPrefix(page.token);
     default:

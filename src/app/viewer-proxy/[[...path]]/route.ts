@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { errorResponse } from "@/agent-api/http";
-import { feedbackEnabled } from "@/feedback/settings";
+import { feedbackEnabled, feedbackSignInOrigins } from "@/feedback/settings";
 import { findLink } from "@/feedback/store";
 import { cachedPublicAddresses, pinnedFetch } from "@/feedback/targets";
 import { denyFraming, serveViewer } from "@/port-viewer/serve";
@@ -40,7 +40,15 @@ async function handle(request: NextRequest): Promise<Response> {
     publicDomain: publicDomain(),
     loadAgent: ports ? (id) => findVirtualAgent(prisma, id) : async () => undefined,
     fetch: (input, init) => fetch(input, init),
-    feedback: feedback ? { findLink: (token) => findLink(prisma, token), publicAddresses, fetch: feedbackFetch, readWidget: () => readWidget() } : undefined
+    feedback: feedback
+      ? {
+          findLink: (token) => findLink(prisma, token),
+          publicAddresses,
+          fetch: feedbackFetch,
+          readWidget: () => readWidget(),
+          signInOrigins: feedbackSignInOrigins()
+        }
+      : undefined
   });
 }
 

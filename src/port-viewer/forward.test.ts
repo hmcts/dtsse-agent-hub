@@ -18,6 +18,7 @@ import {
   rewriteCsp,
   rewriteLocation,
   rewriteSetCookie,
+  signInCookie,
   transformHtml,
   UpstreamUnreachable
 } from "./forward.ts";
@@ -553,5 +554,49 @@ describe("forwardedResponseHeaders cookies for a feedback page", () => {
   it("should refuse a __Host- cookie from rewriteSetCookie only for a feedback page", () => {
     expect(rewriteSetCookie("__Host-sid=1; Secure", "/f/token", { feedback: true })).toBeUndefined();
     expect(rewriteSetCookie("__Host-sid=1; Secure", PREFIX)).toBe("__Host-sid=1; Secure; Path=/");
+  });
+});
+
+describe("signInCookie", () => {
+  it("should send a sign-in service only the cookies it set, under their own names", () => {
+    expect(signInCookie("ahv-f-tok=grant; connect.sid=prototype; ahv-si-XSRF-TOKEN=t; ahv-si-Idam.UI=classic")).toBe("XSRF-TOKEN=t; Idam.UI=classic");
+  });
+
+  it("should send nothing when it has set nothing", () => {
+    expect(signInCookie("connect.sid=prototype")).toBeUndefined();
+    expect(signInCookie(null)).toBeUndefined();
+  });
+});
+
+describe("rewriteLocation between a prototype and its sign-in service", () => {
+  const routes = [{ origin: "https://idam.example", prefix: "/f/tok/_sign-in/idam.example" }];
+
+  it("should move a redirect to a routed origin under that route's prefix, keeping its query", () => {
+    expect(
+      rewriteLocation("https://idam.example/o/authorize?redirect_uri=https%3A%2F%2Fproto.example%2Fcb", {
+        upstreamOrigin: "https://proto.example",
+        prefix: "/f/tok",
+        routes
+      })
+    ).toBe("/f/tok/_sign-in/idam.example/o/authorize?redirect_uri=https%3A%2F%2Fproto.example%2Fcb");
+  });
+
+  it("should leave a redirect to an origin on another scheme or port than the route's alone", () => {
+    expect(rewriteLocation("http://idam.example/login", { upstreamOrigin: "https://proto.example", prefix: "/f/tok", routes })).toBe(
+      "http://idam.example/login"
+    );
+  });
+});
+
+describe("forwardedResponseHeaders for a sign-in service", () => {
+  it("should keep the cookies it sets under the sign-in prefix and name", () => {
+    const headers = forwardedResponseHeaders(new Headers([["set-cookie", "Idam.Session=s; Path=/; Secure; HttpOnly"]]), {
+      upstreamOrigin: "https://idam.example",
+      prefix: "/f/tok/_sign-in/idam.example",
+      viewerOrigin: "https://agent-hub-viewer.example",
+      feedback: true,
+      signIn: true
+    });
+    expect(headers.getSetCookie()).toEqual(["ahv-si-Idam.Session=s; Path=/f/tok/_sign-in/idam.example/; Secure; HttpOnly"]);
   });
 });

@@ -508,6 +508,111 @@ describe("feedback links on the viewer", () => {
     expectHubFraming(response);
   });
 
+  describe("sign-in services", () => {
+    const IDAM = "https://idam.example";
+    const SPREFIX = `${FPREFIX}/_sign-in/idam.example`;
+
+    it("should move the prototype's redirect to a sign-in service under the link's prefix", async () => {
+      const authorize = `${IDAM}/o/authorize?redirect_uri=${encodeURIComponent("https://prototype.example/oauth2/callback")}&state=s`;
+      const fetchImpl = vi.fn<Fetch>(async () => new Response(null, { status: 302, headers: { location: authorize } }));
+
+      const response = await serveViewer(
+        await reviewing(`${FPREFIX}/login`),
+        `${FPREFIX}/login`,
+        withFeedback({ signInOrigins: [IDAM] }, { fetch: fetchImpl })
+      );
+
+      expect(response.headers.get("location")).toBe(
+        `${SPREFIX}/o/authorize?redirect_uri=${encodeURIComponent("https://prototype.example/oauth2/callback")}&state=s`
+      );
+    });
+
+    it("should leave a redirect to a sign-in service alone when it is not one the viewer serves", async () => {
+      const fetchImpl = vi.fn<Fetch>(async () => new Response(null, { status: 302, headers: { location: `${IDAM}/login` } }));
+
+      const response = await serveViewer(await reviewing(`${FPREFIX}/login`), `${FPREFIX}/login`, withFeedback({}, { fetch: fetchImpl }));
+
+      expect(response.headers.get("location")).toBe(`${IDAM}/login`);
+    });
+
+    it("should serve a sign-in page framed by the hub, with only its own cookies and no widget", async () => {
+      const fetchImpl = vi.fn<Fetch>(
+        async () =>
+          new Response("<html><head><title>Sign in</title></head></html>", {
+            headers: [
+              ["content-type", "text/html"],
+              ["x-frame-options", "DENY"],
+              ["content-security-policy", "default-src 'self'; frame-ancestors 'none'"],
+              ["set-cookie", "XSRF-TOKEN=t; Path=/; Secure; HttpOnly; SameSite=Strict"]
+            ]
+          })
+      );
+      const request = await reviewing(`${SPREFIX}/login?client_id=c`);
+      request.headers.set("cookie", `${request.headers.get("cookie")}; connect.sid=prototype; ahv-si-Idam.UI=classic`);
+
+      const response = await serveViewer(request, `${SPREFIX}/login?client_id=c`, withFeedback({ signInOrigins: [IDAM] }, { fetch: fetchImpl }));
+
+      expect(fetchImpl).toHaveBeenCalledWith(`${IDAM}/login?client_id=c`, expect.anything());
+      const sent = fetchImpl.mock.calls[0]![1].headers as Headers;
+      expect(sent.get("cookie")).toBe("Idam.UI=classic");
+      expectHubFraming(response);
+      expect(response.headers.getSetCookie()).toEqual([`ahv-si-XSRF-TOKEN=t; Path=${SPREFIX}/; Secure; HttpOnly; SameSite=Strict`]);
+      expect(await response.text()).toBe("<html><head><title>Sign in</title></head></html>");
+    });
+
+    it("should send the sign-in service's redirect back to the prototype under the link's prefix", async () => {
+      const fetchImpl = vi.fn<Fetch>(
+        async () => new Response(null, { status: 302, headers: { location: "https://prototype.example/oauth2/callback?code=c&state=s" } })
+      );
+
+      const response = await serveViewer(
+        await reviewing(`${SPREFIX}/login`, { method: "POST", body: "username=a" }),
+        `${SPREFIX}/login`,
+        withFeedback({ signInOrigins: [IDAM] }, { fetch: fetchImpl })
+      );
+
+      expect(fetchImpl.mock.calls[0]![1].method).toBe("POST");
+      expect(response.headers.get("location")).toBe(`${FPREFIX}/oauth2/callback?code=c&state=s`);
+    });
+
+    it("should forward a sign-in path to the prototype when its host is not a sign-in service", async () => {
+      const fetchImpl = vi.fn<Fetch>(async () => new Response("prototype"));
+
+      await serveViewer(
+        await reviewing(`${FPREFIX}/_sign-in/other.example/x`),
+        `${FPREFIX}/_sign-in/other.example/x`,
+        withFeedback({ signInOrigins: [IDAM] }, { fetch: fetchImpl })
+      );
+
+      expect(fetchImpl).toHaveBeenCalledWith("https://prototype.example/_sign-in/other.example/x", expect.anything());
+    });
+
+    it("should refuse a sign-in service whose host does not resolve to public addresses", async () => {
+      const fetchImpl = vi.fn<Fetch>(async () => new Response("never asked for"));
+      const publicAddresses = async (hostname: string) => (hostname === "idam.example" ? [] : [{ address: "8.8.8.8", family: 4 }]);
+
+      const response = await serveViewer(
+        await reviewing(`${SPREFIX}/login`),
+        `${SPREFIX}/login`,
+        withFeedback({ signInOrigins: [IDAM], publicAddresses }, { fetch: fetchImpl })
+      );
+
+      expect(response.status).toBe(502);
+      expect(fetchImpl).not.toHaveBeenCalled();
+    });
+
+    it("should send a root-relative request from a sign-in page back under that page's prefix", async () => {
+      const request = new Request("https://agent-hub-viewer.example/assets/app.css", {
+        headers: { referer: `https://agent-hub-viewer.example${SPREFIX}/login` }
+      });
+
+      const response = await serveViewer(request, "/assets/app.css", withFeedback({ signInOrigins: [IDAM] }));
+
+      expect(response.status).toBe(307);
+      expect(response.headers.get("location")).toBe(`${SPREFIX}/assets/app.css`);
+    });
+  });
+
   it("should answer 404 when the link is revoked, its project archived or it no longer exists", async () => {
     for (const findLink of [
       async () => ({ ...LINK, revokedAt: new Date() }),

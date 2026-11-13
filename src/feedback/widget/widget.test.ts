@@ -106,6 +106,14 @@ describe("startWidget", () => {
     });
   });
 
+  it("should answer the shell's ping with the page it is on", () => {
+    running = startWidget(framedView(), CONFIG, record);
+    window.history.pushState(null, "", "/f/tok/next");
+    posted = [];
+    send({ type: "ping" });
+    expect(posted).toEqual([{ message: expect.objectContaining({ type: "present", path: "/next" }), target: HUB }]);
+  });
+
   it("should report a single-page app's navigation once", () => {
     running = startWidget(framedView(), CONFIG, record);
     window.history.pushState(null, "", "/f/tok/next");

@@ -12,6 +12,8 @@ import {
   portOf,
   refererTarget,
   reviewPath,
+  signInPathOf,
+  signInPrefix,
   ticketPath,
   viewerCookieName,
   viewerPrefix,
@@ -180,5 +182,28 @@ describe("feedback paths", () => {
     expect(lastFeedbackCookie(TOKEN, 60)).toBe(`${LAST_PORT_COOKIE}=f/${TOKEN}; Path=/; Max-Age=60; HttpOnly; Secure; SameSite=Lax`);
     expect(lastPortTarget(`f/${TOKEN}`, "/cases")).toBe(`/f/${TOKEN}/cases`);
     expect(lastPortTarget("f/short", "/cases")).toBeUndefined();
+  });
+});
+
+describe("sign-in paths", () => {
+  const TOKEN = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_abcde";
+
+  it("should name a sign-in service by its host, with its port when it has one", () => {
+    expect(signInPrefix(TOKEN, "idam.example")).toBe(`/f/${TOKEN}/_sign-in/idam.example`);
+    expect(signInPathOf("/_sign-in/localhost:5062/o/authorize?x=1")).toEqual({ host: "localhost:5062", rest: "/o/authorize?x=1" });
+    expect(signInPathOf("/_sign-in/idam.example")).toEqual({ host: "idam.example", rest: "/" });
+  });
+
+  it("should not read a sign-in service from any other path", () => {
+    expect(signInPathOf("/start")).toBeUndefined();
+    expect(signInPathOf("/_sign-in/")).toBeUndefined();
+    expect(signInPathOf("/x/_sign-in/idam.example/")).toBeUndefined();
+  });
+
+  it("should send a root-relative request from a sign-in page under the sign-in prefix", () => {
+    const viewer = "https://agent-hub-viewer.example";
+    expect(refererTarget(`${viewer}/f/${TOKEN}/_sign-in/idam.example/login`, viewer, "/assets/app.css")).toBe(
+      `/f/${TOKEN}/_sign-in/idam.example/assets/app.css`
+    );
   });
 });
