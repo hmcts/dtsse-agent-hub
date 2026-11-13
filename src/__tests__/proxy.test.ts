@@ -537,3 +537,72 @@ describe("proxy redirects staying on their own origin", () => {
     }
   );
 });
+
+describe("proxy same-origin check on the UI's writes", () => {
+  const HUB = "https://agent-hub.example";
+  const VIEWER = "https://agent-hub-viewer.example";
+
+  beforeEach(() => {
+    vi.stubEnv("AUTH_DISABLED", "");
+    vi.stubEnv("SESSION_SECRET", SECRET);
+    vi.stubEnv("ENTRA_REDIRECT_URI", `${HUB}/auth/callback`);
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  function send(method: string, path: string, headers: Record<string, string>): NextRequest {
+    return new NextRequest(new URL(path, HUB), { method, headers, ...(method === "GET" || method === "HEAD" ? {} : { body: "{}" }) });
+  }
+
+  it.each(["POST", "PUT", "PATCH", "DELETE"])("should refuse a %s from the viewer's host, which is the same site", async (method) => {
+    const response = await proxy(send(method, "/api/ui/assistant/welsh", { origin: VIEWER, "sec-fetch-site": "same-site" }));
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "that request did not come from the hub's own page" });
+  });
+
+  it("should refuse a no-cors POST that says nothing of where it came from", async () => {
+    expect((await proxy(send("POST", "/api/ui/assistant/lookups", {}))).status).toBe(403);
+  });
+
+  it("should refuse a write before the sign-in check, so a forged one never reaches a route with the session", async () => {
+    const cookie = await sealSession(PERSON, SECRET);
+
+    expect((await proxy(send("POST", "/api/ui/uploads", { cookie: `${SESSION_COOKIE}=${cookie}`, "sec-fetch-site": "cross-site" }))).status).toBe(403);
+  });
+
+  it.each([
+    ["POST", "/api/ui/assistant/welsh"],
+    ["PUT", "/api/ui/uploads/u/parts/0"],
+    ["DELETE", "/api/ui/uploads/u"],
+    ["PATCH", "/api/ui/feedback/review/t/threads/x"]
+  ])("should let a %s to %s from the hub's own page through", async (method, path) => {
+    expect((await proxy(send(method, path, { origin: HUB, "sec-fetch-site": "same-origin" }))).status).toBe(200);
+  });
+
+  it("should let a same-origin write through when the redirect URI names another host, as a preview's does", async () => {
+    vi.stubEnv("ENTRA_REDIRECT_URI", "https://agent-hub.preview.example/auth/callback");
+
+    expect((await proxy(send("POST", "/api/ui/uploads", { origin: HUB, "sec-fetch-site": "same-origin" }))).status).toBe(200);
+  });
+
+  it("should take the Origin from a browser that sends no Sec-Fetch-Site", async () => {
+    expect((await proxy(send("POST", "/api/ui/uploads", { origin: HUB }))).status).toBe(200);
+    expect((await proxy(send("POST", "/api/ui/uploads", { origin: VIEWER }))).status).toBe(403);
+  });
+
+  it.each(["GET", "HEAD", "OPTIONS"])("should leave a %s to the route, which a link or an image can send anyway", async (method) => {
+    expect((await proxy(send(method, "/api/ui/session", { "sec-fetch-site": "same-site" }))).status).toBe(200);
+  });
+
+  it("should leave writes outside /api/ui/ to their own checks", async () => {
+    expect((await proxy(send("POST", "/api/agent/register", { "sec-fetch-site": "cross-site" }))).status).toBe(200);
+  });
+
+  it("should check the UI's writes when sign-in is disabled too", async () => {
+    vi.stubEnv("AUTH_DISABLED", "true");
+
+    expect((await proxy(send("POST", "/api/ui/uploads", { "sec-fetch-site": "same-site" }))).status).toBe(403);
+  });
+});

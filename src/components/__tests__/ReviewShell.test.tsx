@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POLL_MS, ReviewShell } from "@/components/feedback/ReviewShell";
 import { AUDIO_SLICE_MS } from "@/components/feedback/recording";
+import { MAX_RECORDING_MS } from "@/feedback/limits";
 import { type ShellMessage, type WidgetMessageBody, widgetMessage } from "@/feedback/protocol";
 import type { FeedbackThreadView } from "@/feedback/thread-store";
 
@@ -312,6 +313,35 @@ describe("ReviewShell", () => {
     ]);
     expect(calls.find((call) => call.url.endsWith("/complete"))?.body).toMatchObject({ duration_ms: expect.any(Number) });
     expect(screen.getByRole("button", { name: "Record" })).toBeTruthy();
+  });
+
+  it("should stop once at the time limit when finishing the recording takes longer than a tick", async () => {
+    vi.setSystemTime(new Date("2026-11-13T10:00:00.000Z"));
+    const completes: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit = {}) => {
+        const method = init.method ?? "GET";
+        if (url.endsWith("/complete")) {
+          completes.push(url);
+          return await new Promise<Response>(() => undefined);
+        }
+        return answer(url, method, typeof init.body === "string" ? JSON.parse(init.body) : init.body);
+      })
+    );
+    shell();
+    await fromWidget({ type: "hello", path: "/start", title: "", version: "" });
+    fireEvent.click(screen.getByRole("button", { name: "Record" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start recording" }));
+    await settle();
+    await settle();
+
+    vi.setSystemTime(Date.now() + MAX_RECORDING_MS);
+    await settle(1000);
+    await settle(10_000);
+
+    expect(posted.filter((message) => message.type === "record-stop")).toHaveLength(1);
+    expect(completes).toHaveLength(1);
   });
 
   it("should carry on and say so when a chunk cannot be uploaded", async () => {

@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { carriesSecret, exempt } from "@/auth/guard";
+import { carriesSecret, exempt, sameOriginRequest } from "@/auth/guard";
 import { readSession, SESSION_COOKIE } from "@/auth/session";
-import { authRequired, sessionSecret } from "@/auth/settings";
+import { authRequired, publicOrigin, sessionSecret } from "@/auth/settings";
 import { requestHost, VIEWER_ROUTE, VIEWER_URL_HEADER, viewerRouteHost, viewerSettings } from "@/port-viewer/settings";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
 import { movedHubPath, movedPortTicketPath, retiredPath } from "@/web/home";
@@ -57,6 +57,9 @@ function forViewer(request: NextRequest): boolean {
   return host !== undefined && requestHost(request.headers, request.nextUrl.host) === host;
 }
 
+/** Methods that change nothing, which a cross-origin page can already send with a link or an image. */
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
 async function hubProxy(request: NextRequest): Promise<NextResponse> {
   const { pathname, search } = request.nextUrl;
   // Ahead of everything else: what `proxy` has not sent to the viewer's route on its host is still never the hub's
@@ -72,6 +75,12 @@ async function hubProxy(request: NextRequest): Promise<NextResponse> {
   }
   if (pathname === VIEWER_ROUTE || pathname.startsWith(`${VIEWER_ROUTE}/`)) {
     return new NextResponse(null, { status: 404 });
+  }
+  // Every write the browser's own routes take is checked here, once, rather than in each route: a script on the
+  // viewer's host is same-site with the hub, so `ah_session` rides on its `no-cors` POSTs, which no route's body
+  // parsing refuses.
+  if (pathname.startsWith("/api/ui/") && !SAFE_METHODS.has(request.method) && !sameOriginRequest(request, publicOrigin())) {
+    return NextResponse.json({ error: "that request did not come from the hub's own page" }, { status: 403 });
   }
   // Ahead of the sign-in check, which would otherwise copy the query into the login's `redirect=`.
   if (carriesSecret(request.method, request.nextUrl.pathname, request.nextUrl.searchParams)) {

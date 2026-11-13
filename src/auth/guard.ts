@@ -76,15 +76,21 @@ export function carriesSecret(method: string, pathname: string, search: URLSearc
 }
 
 /**
- * Whether a POST that changes something for the signed-in person came from the hub's own pages. The session cookie is
- * `SameSite=Lax`, which already keeps it off a cross-site POST, and this is the second lock: a browser's
- * `Sec-Fetch-Site` must say `same-origin`, and a browser too old to send it must send an `Origin` that is the hub's
- * own public origin (the redirect URI's, since a route handler's own URL carries the pod's listen address). Neither
- * header, or a different one, is refused.
+ * Whether a request that acts for the signed-in person came from the hub's own pages. `ah_session` is `SameSite=Lax`,
+ * which keeps it off a cross-site POST but not a same-site one, and the viewer's host, which serves agents' and
+ * prototypes' pages, is the same site as the hub's: a script there can send `ah_session`-bearing requests to the hub,
+ * and only what the browser stamps on the request tells the two apart.
+ *
+ * A browser's `Sec-Fetch-Site` must say `same-origin`, which needs no public origin to compare against, so it holds
+ * on a preview whose `ENTRA_REDIRECT_URI` names another host. A browser too old to send it must send an `Origin` that
+ * is the hub's own public origin (the redirect URI's, since a route handler's own URL carries the pod's listen
+ * address). Neither header, or a different one, is refused.
  */
-export function sameOriginPost(headers: { secFetchSite: string | null; origin: string | null }, publicOrigin: string): boolean {
-  if (headers.secFetchSite !== null) {
-    return headers.secFetchSite === "same-origin";
+export function sameOriginRequest(request: Pick<Request, "headers">, publicOrigin: string | undefined): boolean {
+  const site = request.headers.get("sec-fetch-site");
+  if (site !== null) {
+    return site === "same-origin";
   }
-  return headers.origin !== null && headers.origin === publicOrigin;
+  const origin = request.headers.get("origin");
+  return origin !== null && publicOrigin !== undefined && origin === publicOrigin;
 }

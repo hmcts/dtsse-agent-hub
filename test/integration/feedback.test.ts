@@ -326,19 +326,39 @@ describe("feedback recordings", () => {
     expect(await refusal(requestSegment(prisma, DAN.oid, token, carols.id, { kind: "audio", seq: 0, pagePath: null, offsetMs: 0, bytes: 1 }))).toBe(404);
     expect(await refusal(completeRecording(prisma, ALICE.oid, token, carols.id, { durationMs: 1 }))).toBe(404);
   });
+
+  it("should complete a recording once when two completes race", async () => {
+    const made = await project();
+    const token = made.links[0]!.token;
+    const recording = await startRecording(prisma, CAROL.oid, token);
+
+    const results = await Promise.allSettled([
+      completeRecording(prisma, CAROL.oid, token, recording.id, { durationMs: 1000 }),
+      completeRecording(prisma, CAROL.oid, token, recording.id, { durationMs: 2000 })
+    ]);
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const refused = results.find((result) => result.status === "rejected");
+    expect(refused?.status === "rejected" && refused.reason instanceof HttpError && refused.reason.status).toBe(409);
+    const stored = await prisma.feedbackRecording.findUniqueOrThrow({ where: { id: recording.id } });
+    const winner = results.find((result) => result.status === "fulfilled");
+    expect(stored.durationMs).toBe(winner?.status === "fulfilled" ? winner.value.durationMs : undefined);
+  });
 });
 
 describe("sweepFeedback", () => {
-  function blobStub(fail = false) {
+  /** Blob deletes that succeed, except for the paths and prefixes `failing` accepts. */
+  function blobStub(failing: (path: string) => boolean = () => false) {
     const deleted: string[] = [];
     return {
       deleted,
       blobs: {
-        deleteBlob: async (path: string) => {
-          deleted.push(path);
+        deleteBlobs: async (paths: readonly string[]) => {
+          deleted.push(...paths.filter((path) => !failing(path)));
+          return paths.filter(failing);
         },
         deletePrefix: async (prefix: string) => {
-          if (fail) {
+          if (failing(prefix)) {
             throw new Error("storage down");
           }
           deleted.push(prefix);
@@ -370,8 +390,8 @@ describe("sweepFeedback", () => {
     const result = await sweepFeedback(prisma, blobs);
 
     // Assert
-    expect(result).toEqual({ projects: 0, recordings: 1, threads: 1, abandoned: 0 });
-    expect(deleted).toEqual([`${made.id}/recordings/${recording.id}/`, old.snapshotBlob]);
+    expect(result).toEqual({ projects: 0, recordings: 1, threads: 1, abandoned: 0, kept: 0 });
+    expect(deleted.sort(byCodePoint)).toEqual([`${made.id}/recordings/${recording.id}/`, old.snapshotBlob as string].sort(byCodePoint));
     expect(await prisma.feedbackRecording.count()).toBe(0);
     expect((await prisma.feedbackThread.findMany({ select: { id: true } })).map((row) => row.id)).toEqual([fresh.id]);
   });
@@ -394,10 +414,73 @@ describe("sweepFeedback", () => {
   it("should keep the rows when deleting their blobs fails, for the next sweep to try again", async () => {
     await aged(CAROL, 7);
 
-    await expect(sweepFeedback(prisma, blobStub(true).blobs)).rejects.toThrow("storage down");
+    const result = await sweepFeedback(prisma, blobStub(() => true).blobs);
 
+    expect(result).toEqual({ projects: 0, recordings: 0, threads: 0, abandoned: 0, kept: 2 });
     expect(await prisma.feedbackRecording.count()).toBe(1);
     expect(await prisma.feedbackThread.count()).toBe(1);
+  });
+
+  it("should keep only the rows whose blobs failed, and carry on with every other step", async () => {
+    // Arrange
+    const first = await aged(CAROL, 7);
+    const second = await aged(DAN, 7);
+    const archived = await project();
+    await archiveProject(prisma, ALICE.oid, archived.id, new Date(Date.now() - 8 * DAY_MS));
+    const failing = (path: string) => path.startsWith(`${first.made.id}/recordings/`) || path === second.thread.snapshotBlob;
+
+    // Act
+    const result = await sweepFeedback(prisma, blobStub(failing).blobs);
+
+    // Assert
+    expect(result).toEqual({ projects: 1, recordings: 1, threads: 1, abandoned: 0, kept: 2 });
+    expect((await prisma.feedbackRecording.findMany({ select: { id: true } })).map((row) => row.id)).toEqual([first.recording.id]);
+    expect((await prisma.feedbackThread.findMany({ select: { id: true } })).map((row) => row.id)).toEqual([second.thread.id]);
+    expect(await prisma.feedbackProject.count({ where: { id: archived.id } })).toBe(0);
+  });
+
+  it("should keep a thread a reply reached while its blobs were being deleted", async () => {
+    const { made, thread: old } = await aged(CAROL, 7);
+    const blobs = {
+      deleteBlobs: async () => {
+        await replyToThread(prisma, BOB.oid, { projectId: made.id }, old.id, "still looking");
+        return [];
+      },
+      deletePrefix: async () => 0
+    };
+
+    const result = await sweepFeedback(prisma, blobs);
+
+    expect(result?.threads).toBe(0);
+    expect(await prisma.feedbackThread.count({ where: { id: old.id } })).toBe(1);
+  });
+
+  it("should let one pod sweep at a time, holding the lock while the blobs are deleted", async () => {
+    await aged(CAROL, 7);
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered: () => void = () => undefined;
+    const reached = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const slow = {
+      deleteBlobs: async () => [],
+      deletePrefix: async () => {
+        entered();
+        await held;
+        return 1;
+      }
+    };
+
+    const first = sweepFeedback(prisma, slow);
+    await reached;
+    const second = await sweepFeedback(prisma, blobStub().blobs);
+    release();
+
+    expect(second).toBeUndefined();
+    expect((await first)?.recordings).toBe(1);
   });
 
   it("should mark failed a recording left running long past the longest one may be", async () => {

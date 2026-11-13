@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { signInCookie } from "@/auth/cookies";
 import { authorizationUrl, beginSignIn, sealSignIn } from "@/auth/entra";
-import { safeReturnTo, sameOriginPost } from "@/auth/guard";
+import { safeReturnTo, sameOriginRequest } from "@/auth/guard";
 import { redirectTo } from "@/auth/redirect";
 import { readSession, SESSION_COOKIE } from "@/auth/session";
 import { authRequired, authSettings } from "@/auth/settings";
@@ -19,7 +19,7 @@ const CONNECTIONS = assistantSettingsPath("connections");
  * someone `canConnectMicrosoft` allows, on the role their session was signed in with, gets as far as Entra; anyone
  * else goes back to settings, which says why.
  *
- * A POST from the hub's own settings page and nothing else (`sameOriginPost`), so another site cannot start one: a
+ * A POST from the hub's own settings page and nothing else (`sameOriginRequest`), so another site cannot start one: a
  * link or a cross-site form would otherwise put a Microsoft consent in front of the person that they never asked for.
  */
 export async function POST(request: NextRequest): Promise<Response> {
@@ -27,8 +27,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     return text(503, "Microsoft 365 cannot be connected while sign-in is disabled.");
   }
   const settings = authSettings();
-  const headers = { secFetchSite: request.headers.get("sec-fetch-site"), origin: request.headers.get("origin") };
-  if (!sameOriginPost(headers, new URL(settings.redirectUri).origin)) {
+  if (!sameOriginRequest(request, new URL(settings.redirectUri).origin)) {
     console.warn("a Microsoft 365 connect that did not come from the hub's own page was refused");
     return text(403, "Connect Microsoft 365 from the Assistant's settings.");
   }

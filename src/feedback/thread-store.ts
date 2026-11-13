@@ -139,21 +139,24 @@ async function threadIn(db: Database, scope: ResolvedScope, threadId: string): P
   return row;
 }
 
-/** Writes a comment and the people it names, who must be among those `mentionablePeople` offers. */
-async function writeComment(
-  db: Database,
-  scope: { projectId: string; linkId: string },
-  threadId: string,
-  authorOid: string,
-  body: string,
-  now: Date
-): Promise<string> {
-  const comment = await db.feedbackComment.create({ data: { threadId, authorOid, body, createdAt: now }, select: { id: true } });
+/**
+ * The people a comment names, who must be among those `mentionablePeople` offers. Read before the link's lock is
+ * taken, so every comment on the link does not queue behind the lookup, and not at all for a body with no `@`.
+ */
+async function namedIn(db: Database, scope: { projectId: string; linkId: string }, authorOid: string, body: string): Promise<string[]> {
+  if (!body.includes("@")) {
+    return [];
+  }
   const people = await mentionablePeople(db, scope.projectId, scope.linkId);
-  const named = mentionsIn(
+  return mentionsIn(
     body,
     people.filter((person) => person.oid !== authorOid)
   );
+}
+
+/** Writes a comment and the people it names. */
+async function writeComment(db: Database, threadId: string, authorOid: string, body: string, named: readonly string[], now: Date): Promise<string> {
+  const comment = await db.feedbackComment.create({ data: { threadId, authorOid, body, createdAt: now }, select: { id: true } });
   if (named.length > 0) {
     await db.feedbackMention.createMany({ data: named.map((personOid) => ({ commentId: comment.id, personOid })) });
   }
@@ -181,6 +184,7 @@ export async function createThread(
   const linkId = scope.linkId as string;
   const id = randomUUID();
   const snapshot = input.snapshot ? snapshotPath(scope.projectId, id) : null;
+  const named = await namedIn(prisma, { projectId: scope.projectId, linkId }, viewerOid, input.body);
   await prisma.$transaction(async (tx) => {
     await lockFeedbackLink(tx, linkId);
     await underLimit(
@@ -209,7 +213,7 @@ export async function createThread(
         updatedAt: now
       }
     });
-    await writeComment(tx, { projectId: scope.projectId, linkId }, id, viewerOid, input.body, now);
+    await writeComment(tx, id, viewerOid, input.body, named, now);
     await notify(tx, { type: "feedback", project_id: scope.projectId, link_id: linkId });
   });
   return { thread: threadView(await threadIn(prisma, scope, id)), snapshotPath: snapshot };
@@ -226,6 +230,7 @@ export async function replyToThread(
 ): Promise<FeedbackCommentView> {
   const resolved = await writableScope(prisma, viewerOid, scope);
   const thread = await threadIn(prisma, resolved, threadId);
+  const named = await namedIn(prisma, { projectId: thread.projectId, linkId: thread.linkId }, viewerOid, body);
   const commentId = await prisma.$transaction(async (tx) => {
     await lockFeedbackLink(tx, thread.linkId);
     await underLimit(
@@ -234,7 +239,7 @@ export async function replyToThread(
       }),
       MAX_COMMENTS_PER_WINDOW
     );
-    const id = await writeComment(tx, { projectId: thread.projectId, linkId: thread.linkId }, threadId, viewerOid, body, now);
+    const id = await writeComment(tx, threadId, viewerOid, body, named, now);
     await tx.feedbackThread.update({ where: { id: threadId }, data: { updatedAt: now } });
     await notify(tx, { type: "feedback", project_id: thread.projectId, link_id: thread.linkId });
     return id;

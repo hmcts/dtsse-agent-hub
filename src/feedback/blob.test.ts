@@ -1,6 +1,16 @@
 import { type BlobServiceClient, StorageSharedKeyCredential } from "@azure/storage-blob";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createFeedbackBlobs, feedbackBlobs, projectPrefix, READ_TTL_MS, recordingPrefix, segmentPath, snapshotPath, UPLOAD_TTL_MS } from "./blob.ts";
+import {
+  BLOB_BATCH_LIMIT,
+  createFeedbackBlobs,
+  feedbackBlobs,
+  projectPrefix,
+  READ_TTL_MS,
+  recordingPrefix,
+  segmentPath,
+  snapshotPath,
+  UPLOAD_TTL_MS
+} from "./blob.ts";
 
 const PROJECT = "11111111-1111-4111-8111-111111111111";
 const RECORDING = "22222222-2222-4222-8222-222222222222";
@@ -8,9 +18,12 @@ const THREAD = "33333333-3333-4333-8333-333333333333";
 const NOW = new Date("2026-11-13T12:00:00Z");
 const BASE = "https://account.blob.core.windows.net/feedback";
 
-function fakeService(credential: unknown, blobs: string[] = []) {
+/** Each batch's sub-responses: 202 for every blob unless `status` says otherwise for its path. */
+function fakeService(credential: unknown, blobs: string[] = [], status: (path: string) => number = () => 202) {
   const uploadData = vi.fn(async () => ({}));
-  const deleteIfExists = vi.fn(async (_options: unknown) => ({}));
+  const deleteBlobs = vi.fn(async (clients: { path: string }[], _options: unknown) => ({
+    subResponses: clients.map((client) => ({ status: status(client.path) }))
+  }));
   const container = {
     createIfNotExists: vi.fn(async () => ({})),
     getBlockBlobClient: (path: string) => ({ url: `${BASE}/${path}`, uploadData }),
@@ -21,8 +34,8 @@ function fakeService(credential: unknown, blobs: string[] = []) {
         }
       })()
     ),
-    deleteBlob: vi.fn(async (_name: string, _options: unknown) => ({})),
-    getBlobClient: vi.fn((path: string) => ({ path, deleteIfExists }))
+    getBlobClient: vi.fn((path: string) => ({ path })),
+    getBlobBatchClient: () => ({ deleteBlobs })
   };
   const service = {
     credential,
@@ -39,7 +52,7 @@ function fakeService(credential: unknown, blobs: string[] = []) {
       value: Buffer.from("k".repeat(32)).toString("base64")
     }))
   };
-  return { service, container, uploadData, deleteIfExists, typed: service as unknown as BlobServiceClient };
+  return { service, container, uploadData, deleteBlobs, typed: service as unknown as BlobServiceClient };
 }
 
 function queryOf(url: string): URLSearchParams {
@@ -142,22 +155,48 @@ describe("createFeedbackBlobs", () => {
     expect(uploadData).toHaveBeenCalledWith(new Uint8Array([1, 2]), { blobHTTPHeaders: { blobContentType: "application/gzip" } });
   });
 
-  it("should delete one blob and its snapshots, answering nothing when it is not there", async () => {
-    const { container, deleteIfExists, typed } = fakeService({});
+  it("should delete blobs and their snapshots in one batch, counting one already gone as deleted", async () => {
+    const { deleteBlobs, typed } = fakeService({}, [], (path) => (path === "p/gone" ? 404 : 202));
     const blobs = createFeedbackBlobs(IDENTITY, { service: typed });
 
-    await blobs.deleteBlob("p/snapshots/t.json.gz");
+    expect(await blobs.deleteBlobs(["p/snapshots/t.json.gz", "p/gone"])).toEqual([]);
 
-    expect(container.getBlobClient).toHaveBeenCalledWith("p/snapshots/t.json.gz");
-    expect(deleteIfExists).toHaveBeenCalledWith({ deleteSnapshots: "include" });
+    expect(deleteBlobs).toHaveBeenCalledTimes(1);
+    expect(deleteBlobs.mock.calls[0]?.[0].map((client) => client.path)).toEqual(["p/snapshots/t.json.gz", "p/gone"]);
+    expect(deleteBlobs.mock.calls[0]?.[1]).toEqual({ deleteSnapshots: "include" });
   });
 
-  it("should delete every blob under a prefix and nothing beside it", async () => {
-    const { container, typed } = fakeService({}, [`${PROJECT}/a`, `${PROJECT}/b/c`, "other/a"]);
+  it("should answer the blobs whose delete failed, and every blob of a batch that failed whole", async () => {
+    const { deleteBlobs, typed } = fakeService({}, [], (path) => (path === "p/busy" ? 409 : 202));
     const blobs = createFeedbackBlobs(IDENTITY, { service: typed });
 
-    expect(await blobs.deletePrefix(projectPrefix(PROJECT))).toBe(2);
-    expect(container.deleteBlob.mock.calls.map(([name]) => name)).toEqual([`${PROJECT}/a`, `${PROJECT}/b/c`]);
+    expect(await blobs.deleteBlobs(["p/a", "p/busy"])).toEqual(["p/busy"]);
+    deleteBlobs.mockRejectedValueOnce(new Error("storage down"));
+    expect(await blobs.deleteBlobs(["p/a", "p/b"])).toEqual(["p/a", "p/b"]);
+  });
+
+  it("should ask for nothing when there is nothing to delete", async () => {
+    const { deleteBlobs, typed } = fakeService({});
+
+    expect(await createFeedbackBlobs(IDENTITY, { service: typed }).deleteBlobs([])).toEqual([]);
+    expect(deleteBlobs).not.toHaveBeenCalled();
+  });
+
+  it("should delete every blob under a prefix and nothing beside it, in batches of the most a batch takes", async () => {
+    const under = Array.from({ length: BLOB_BATCH_LIMIT + 1 }, (_, index) => `${PROJECT}/${String(index).padStart(4, "0")}`);
+    const { deleteBlobs, typed } = fakeService({}, [...under, "other/a"]);
+    const blobs = createFeedbackBlobs(IDENTITY, { service: typed });
+
+    expect(await blobs.deletePrefix(projectPrefix(PROJECT))).toBe(BLOB_BATCH_LIMIT + 1);
+    expect(deleteBlobs.mock.calls.map(([clients]) => clients.length)).toEqual([BLOB_BATCH_LIMIT, 1]);
+    expect(deleteBlobs.mock.calls.flatMap(([clients]) => clients.map((client) => client.path))).toEqual(under);
+  });
+
+  it("should throw when a blob under a prefix could not be deleted, so its row is kept", async () => {
+    const { typed } = fakeService({}, [`${PROJECT}/a`, `${PROJECT}/b`], (path) => (path.endsWith("/b") ? 500 : 202));
+    const blobs = createFeedbackBlobs(IDENTITY, { service: typed });
+
+    await expect(blobs.deletePrefix(projectPrefix(PROJECT))).rejects.toThrow(`1 of the 2 blobs under ${PROJECT}/ could not be deleted`);
   });
 
   it.each([[""], [PROJECT]])("should refuse to delete under %j, which is not a folder", async (prefix) => {

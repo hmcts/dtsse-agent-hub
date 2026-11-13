@@ -1,12 +1,21 @@
+import type { NextRequest } from "next/server";
 import { errorResponse, HttpError } from "../agent-api/http.ts";
-import { sameOriginRequest } from "./origin.ts";
+import { uiRefusals, uiViewer } from "../app/api/ui/request.ts";
+import { sameOriginRequest } from "../auth/guard.ts";
+import { viewerSettings } from "../port-viewer/settings.ts";
+import type { Identity } from "../users/identity.ts";
 import { pagePath } from "./schemas.ts";
-import type { FeedbackThreadFilter } from "./thread-store.ts";
+import { feedbackEnabled } from "./settings.ts";
+import type { FeedbackThreadFilter, FeedbackThreadStatus } from "./thread-store.ts";
 
 /**
- * What the review shell's routes, `/api/ui/feedback/review/{token}/…`, check before a store is reached, in this order
- * after the session: the request is the hub's own page's (403), and feedback is on (404). A dead or unknown link is
- * the store's 404.
+ * What every feedback route, the review shell's `/api/ui/feedback/review/{token}/…` and the team pages'
+ * `/api/ui/feedback/projects/{id}/…`, checks before a store is reached, in this order after the session: the request
+ * is the hub's own page's (403), and feedback is on (404). A dead or unknown link, or a project the viewer is not on
+ * the team of, is the store's 404.
+ *
+ * The proxy already refuses a write to `/api/ui/` from anywhere but the hub's own page; this check is what holds a
+ * read to the same, since a prototype in a review frame is on a sibling host and its `no-cors` GETs carry the session.
  */
 
 export interface ReviewGate {
@@ -25,7 +34,34 @@ export function reviewRefusal(request: Request, gate: ReviewGate): Response | un
   return undefined;
 }
 
-const STATUSES = new Set(["open", "resolved", "detached"]);
+/**
+ * Runs one feedback route's handler: signed in (401), `reviewRefusal`, and any `HttpError` the stores raise rendered
+ * as the contract's `{"error": …}`.
+ */
+export async function feedbackRoute(request: NextRequest, name: string, work: (viewer: Identity) => Promise<Response>): Promise<Response> {
+  const viewer = await uiViewer(request);
+  if (viewer instanceof Response) {
+    return viewer;
+  }
+  const refusal = reviewRefusal(request, { hubOrigin: viewerSettings()?.hubOrigin, enabled: feedbackEnabled() });
+  if (refusal !== undefined) {
+    return refusal;
+  }
+  return await uiRefusals(name, () => work(viewer));
+}
+
+const STATUSES: ReadonlySet<string> = new Set<FeedbackThreadStatus>(["open", "resolved", "detached"]);
+
+/** A `status=` filter, or `undefined` when none was given; any other value is a 400. */
+export function threadStatus(raw: string | undefined): FeedbackThreadStatus | undefined {
+  if (raw === undefined) {
+    return undefined;
+  }
+  if (!STATUSES.has(raw)) {
+    throw new HttpError(400, "status: must be open, resolved or detached");
+  }
+  return raw as FeedbackThreadStatus;
+}
 
 /** `?page_path=&status=` of the shell's thread read: both optional, and a 400 naming the one that is malformed. */
 export function threadQuery(params: URLSearchParams): Pick<FeedbackThreadFilter, "pagePath" | "status"> {
@@ -37,14 +73,20 @@ export function threadQuery(params: URLSearchParams): Pick<FeedbackThreadFilter,
     }
     filter.pagePath = path;
   }
-  const status = params.get("status");
-  if (status !== null) {
-    if (!STATUSES.has(status)) {
-      throw new HttpError(400, "status: must be open, resolved or detached");
-    }
-    filter.status = status as FeedbackThreadFilter["status"];
+  const status = threadStatus(params.get("status") ?? undefined);
+  if (status !== undefined) {
+    filter.status = status;
   }
   return filter;
+}
+
+/** `?link=&page=&status=&author=` of the team's thread read, each optional and an empty one the same as none. */
+export function teamThreadQuery(params: URLSearchParams): FeedbackThreadFilter {
+  const value = (name: string) => {
+    const raw = params.get(name);
+    return raw === null || raw === "" ? undefined : raw;
+  };
+  return { linkId: value("link"), pagePath: value("page"), authorOid: value("author"), status: threadStatus(value("status")) };
 }
 
 /** No answer of these routes is worth a cache keeping: each is one person's view of a live link. */

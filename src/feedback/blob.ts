@@ -30,9 +30,9 @@ export interface FeedbackBlobs {
   readUrl: (path: string, ttlMs?: number) => Promise<string>;
   /** Writes one blob from the hub itself. */
   putBlob: (path: string, bytes: Uint8Array, contentType: string) => Promise<void>;
-  /** Deletes one blob, if it is there. */
-  deleteBlob: (path: string) => Promise<void>;
-  /** Deletes every blob under `prefix`, and answers how many there were. */
+  /** Deletes each blob that is there, and answers the paths that could not be deleted; one already gone is deleted. */
+  deleteBlobs: (paths: readonly string[]) => Promise<string[]>;
+  /** Deletes every blob under `prefix` and answers how many there were, or throws when any could not be deleted. */
   deletePrefix: (prefix: string) => Promise<number>;
 }
 
@@ -147,9 +147,12 @@ export function createFeedbackBlobs(settings: FeedbackBlobSettings, options: Fee
       await ready();
       await container.getBlockBlobClient(path).uploadData(bytes, { blobHTTPHeaders: { blobContentType: contentType } });
     },
-    deleteBlob: async (path) => {
+    deleteBlobs: async (paths) => {
+      if (paths.length === 0) {
+        return [];
+      }
       await ready();
-      await container.getBlobClient(path).deleteIfExists({ deleteSnapshots: "include" });
+      return await deleteBatched(container, paths);
     },
     deletePrefix: async (prefix) => {
       // An empty prefix is the whole container: every project's bytes.
@@ -162,13 +165,46 @@ export function createFeedbackBlobs(settings: FeedbackBlobSettings, options: Fee
   };
 }
 
-async function deleteUnder(container: ContainerClient, prefix: string): Promise<number> {
-  let deleted = 0;
-  for await (const blob of container.listBlobsFlat({ prefix })) {
-    await container.deleteBlob(blob.name, { deleteSnapshots: "include" });
-    deleted += 1;
+/** The most sub-requests Blob Storage takes in one batch. */
+export const BLOB_BATCH_LIMIT = 256;
+
+/** A sub-request that deleted its blob, or found it already gone. */
+function deleted(status: number | undefined): boolean {
+  return status === 202 || status === 404;
+}
+
+/**
+ * `names` deleted `BLOB_BATCH_LIMIT` to a request, answering those that were not: a batch that fails whole fails
+ * each of its names. Sub-responses come back in the order the requests were put in the batch.
+ */
+async function deleteBatched(container: ContainerClient, names: readonly string[]): Promise<string[]> {
+  const batches = container.getBlobBatchClient();
+  const failed: string[] = [];
+  for (let at = 0; at < names.length; at += BLOB_BATCH_LIMIT) {
+    const chunk = names.slice(at, at + BLOB_BATCH_LIMIT);
+    try {
+      const response = await batches.deleteBlobs(
+        chunk.map((name) => container.getBlobClient(name)),
+        { deleteSnapshots: "include" }
+      );
+      failed.push(...chunk.filter((_name, index) => !deleted(response.subResponses[index]?.status)));
+    } catch {
+      failed.push(...chunk);
+    }
   }
-  return deleted;
+  return failed;
+}
+
+async function deleteUnder(container: ContainerClient, prefix: string): Promise<number> {
+  const names: string[] = [];
+  for await (const blob of container.listBlobsFlat({ prefix })) {
+    names.push(blob.name);
+  }
+  const failed = await deleteBatched(container, names);
+  if (failed.length > 0) {
+    throw new Error(`${failed.length} of the ${names.length} blobs under ${prefix} could not be deleted`);
+  }
+  return names.length;
 }
 
 const globalForBlobs = globalThis as unknown as { agentHubFeedbackBlobs?: { key: string; blobs: FeedbackBlobs } };

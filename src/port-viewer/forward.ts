@@ -55,16 +55,91 @@ function connectionTokens(headers: Headers): Set<string> {
   );
 }
 
-/** The `Cookie` header without the viewer's own cookies, which are the hub's and no business of the pod's. */
-export function forwardedCookie(header: string | null): string | undefined {
+/**
+ * A `__Host-` or `__Secure-` cookie. The browser sends a `__Host-` cookie an agent's app set to every prefix on the
+ * viewer's host, since it is kept at `Path=/` (see `rewriteSetCookie`), and a `__Secure-` one may carry a `Path=/` of
+ * its own. Matched without case, as the prefixes are in RFC 6265bis and in the browsers.
+ */
+function prefixedCookie(pair: string): boolean {
+  const lower = pair.toLowerCase();
+  return lower.startsWith("__host-") || lower.startsWith("__secure-");
+}
+
+/**
+ * The `Cookie` header without the viewer's own cookies, which are the hub's and no business of the pod's. For a
+ * feedback link's prototype, a site outside the hub, `__Host-` and `__Secure-` cookies are left out too: they can
+ * belong to an agent's app rather than the prototype.
+ */
+export function forwardedCookie(header: string | null, options: { feedback?: boolean } = {}): string | undefined {
   if (header === null) {
     return undefined;
   }
   const kept = header
     .split(";")
     .map((pair) => pair.trim())
-    .filter((pair) => pair !== "" && !pair.startsWith(VIEWER_COOKIE_PREFIX));
+    .filter((pair) => pair !== "" && !pair.startsWith(VIEWER_COOKIE_PREFIX) && !(options.feedback === true && prefixedCookie(pair)));
   return kept.length === 0 ? undefined : kept.join("; ");
+}
+
+/**
+ * The only browser headers a feedback link's prototype is sent, besides `cookie` and `referer`, which are rewritten.
+ * It is a site outside the cluster, so it gets what a browser fetching it directly would send, less anything that
+ * names the hub, the viewer or the network in front of them.
+ */
+const FEEDBACK_REQUEST_HEADERS = [
+  "accept",
+  "accept-language",
+  "cache-control",
+  "content-type",
+  "if-none-match",
+  "if-modified-since",
+  "if-match",
+  "if-unmodified-since",
+  "range",
+  "if-range",
+  "pragma",
+  "user-agent"
+];
+
+/**
+ * A `Referer` from the prototype's own pages on the viewer, as the prototype would see it served directly: its origin
+ * and the path under the prefix. Any other names a page that is not the prototype's, and is dropped.
+ */
+function feedbackReferer(referer: string | null, target: Pick<ForwardTarget, "upstreamOrigin" | "prefix" | "viewerOrigin">): string | undefined {
+  if (referer === null || !URL.canParse(referer)) {
+    return undefined;
+  }
+  const url = new URL(referer);
+  if (url.origin !== target.viewerOrigin || !alreadyPrefixed(url.pathname, target.prefix)) {
+    return undefined;
+  }
+  return `${target.upstreamOrigin}${url.pathname.slice(target.prefix.length) || "/"}${url.search}`;
+}
+
+function feedbackRequestHeaders(incoming: Headers, target: ForwardTarget, withBody: boolean): Headers {
+  const headers = new Headers();
+  for (const name of FEEDBACK_REQUEST_HEADERS) {
+    const value = incoming.get(name);
+    if (value !== null) {
+      headers.set(name, value);
+    }
+  }
+  const length = incoming.get("content-length");
+  if (withBody && length !== null) {
+    headers.set("content-length", length);
+  }
+  const cookie = forwardedCookie(incoming.get("cookie"), { feedback: true });
+  if (cookie !== undefined) {
+    headers.set("cookie", cookie);
+  }
+  const referer = feedbackReferer(incoming.get("referer"), target);
+  if (referer !== undefined) {
+    headers.set("referer", referer);
+  }
+  // No `X-Forwarded-Host`: `fetch` sends the prototype's own host as `Host`, and the viewer's is none of its business.
+  headers.set("x-forwarded-proto", "https");
+  headers.set("x-forwarded-prefix", target.prefix);
+  return headers;
 }
 
 export interface ForwardTarget {
@@ -87,9 +162,17 @@ export interface ForwardTarget {
   inject?: string;
   /** The nonce `inject`'s script carries, which a policy with `'strict-dynamic'` is given so it still runs. */
   scriptNonce?: string;
+  /**
+   * A feedback link's prototype, a site outside the cluster: it is sent an allowlist of the browser's headers rather
+   * than all but a few, and no `__Host-` cookie either way.
+   */
+  feedback?: boolean;
 }
 
-export function forwardedRequestHeaders(incoming: Headers, target: ForwardTarget): Headers {
+export function forwardedRequestHeaders(incoming: Headers, target: ForwardTarget, method = "GET"): Headers {
+  if (target.feedback === true) {
+    return feedbackRequestHeaders(incoming, target, hasBody(method));
+  }
   const named = connectionTokens(incoming);
   const headers = new Headers();
   for (const [name, value] of incoming) {
@@ -153,14 +236,19 @@ function hostPrefixedCookie(pair: string): boolean {
  *
  * A `__Host-` cookie is the exception, and keeps `Path=/`: under the prefix the browser would refuse it outright, so
  * an app that names its session or CSRF cookie that way could never sign anyone in. The cost is that it reaches every
- * other agent's prefix on the viewer's host, which `Path` only ever discouraged rather than enforced.
+ * other agent's prefix on the viewer's host, which `Path` only ever discouraged rather than enforced. A feedback
+ * link's prototype is a site outside the hub, and its `__Host-` cookies are refused: no `Path` can keep one to its
+ * prefix, and the prototype is never sent one back.
  */
-export function rewriteSetCookie(value: string, prefix: string): string | undefined {
+export function rewriteSetCookie(value: string, prefix: string, options: { feedback?: boolean } = {}): string | undefined {
   const [pair, ...attributes] = value.split(";");
   if (pair === undefined || pair.trim().startsWith(VIEWER_COOKIE_PREFIX)) {
     return undefined;
   }
   const hostPrefixed = hostPrefixedCookie(pair.trim());
+  if (hostPrefixed && options.feedback === true) {
+    return undefined;
+  }
   const kept: string[] = [pair.trim()];
   let path = false;
   for (const attribute of attributes) {
@@ -248,7 +336,7 @@ export const WIDGET_ABSENT_HEADER = "x-feedback-widget";
 
 export function forwardedResponseHeaders(
   incoming: Headers,
-  target: Pick<ForwardTarget, "upstreamOrigin" | "prefix" | "viewerOrigin"> & Partial<Pick<ForwardTarget, "frameAncestors" | "scriptNonce">>
+  target: Pick<ForwardTarget, "upstreamOrigin" | "prefix" | "viewerOrigin"> & Partial<Pick<ForwardTarget, "frameAncestors" | "scriptNonce" | "feedback">>
 ): Headers {
   const named = connectionTokens(incoming);
   const headers = new Headers();
@@ -264,7 +352,7 @@ export function forwardedResponseHeaders(
     headers.set("location", rewriteLocation(location, target));
   }
   for (const cookie of incoming.getSetCookie()) {
-    const rewritten = rewriteSetCookie(cookie, target.prefix);
+    const rewritten = rewriteSetCookie(cookie, target.prefix, { feedback: target.feedback });
     if (rewritten !== undefined) {
       headers.append("set-cookie", rewritten);
     }
@@ -425,7 +513,7 @@ export async function forward(request: Request, target: ForwardTarget, fetchImpl
   try {
     upstream = await fetchImpl(url, {
       method: request.method,
-      headers: forwardedRequestHeaders(request.headers, target),
+      headers: forwardedRequestHeaders(request.headers, target, request.method),
       ...(hasBody(request.method) && request.body !== null ? { body: request.body, duplex: "half" as const } : {}),
       redirect: "manual",
       signal: request.signal

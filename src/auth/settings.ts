@@ -57,3 +57,13 @@ export function authSettings(env: Environment = process.env): AuthSettings {
 export function issuerUrl(tenantId: string): URL {
   return new URL(`https://login.microsoftonline.com/${tenantId}/v2.0`);
 }
+
+/** The origin of `ENTRA_REDIRECT_URI`, which is the hub's public address whichever host a request came in on. */
+export function publicOrigin(env: Environment = process.env): string | undefined {
+  const raw = env.ENTRA_REDIRECT_URI?.trim();
+  if (!raw || !URL.canParse(raw)) {
+    return undefined;
+  }
+  const url = new URL(raw);
+  return url.protocol === "https:" || url.protocol === "http:" ? url.origin : undefined;
+}

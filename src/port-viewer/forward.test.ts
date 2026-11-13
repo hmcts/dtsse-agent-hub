@@ -329,7 +329,8 @@ const FEEDBACK: ForwardTarget = {
   viewerOrigin: "https://agent-hub-viewer.example",
   frameAncestors: HUB,
   inject: '<script src="/_feedback/widget.js"></script>',
-  scriptNonce: "n0nce"
+  scriptNonce: "n0nce",
+  feedback: true
 };
 
 describe("rewriteCsp", () => {
@@ -465,5 +466,92 @@ describe("forward for a feedback page", () => {
 
     expect((await forward(new Request("https://agent-hub-viewer.example/x"), FEEDBACK, json)).headers.get("x-feedback-widget")).toBeNull();
     expect((await forward(new Request("https://agent-hub-viewer.example/x"), TARGET, big)).headers.get("x-feedback-widget")).toBeNull();
+  });
+});
+
+describe("forwardedRequestHeaders for a feedback page", () => {
+  const browser = {
+    accept: "text/html",
+    "accept-language": "en-GB",
+    "user-agent": "Mozilla/5.0",
+    "if-none-match": '"v1"',
+    range: "bytes=0-99",
+    "content-type": "application/x-www-form-urlencoded",
+    "content-length": "12",
+    host: "agent-hub-viewer.example",
+    authorization: "Bearer hub",
+    origin: VIEWER_ORIGIN,
+    referer: `${VIEWER_ORIGIN}/f/token/check?x=1`,
+    forwarded: "for=203.0.113.9",
+    "x-forwarded-for": "203.0.113.9",
+    "x-forwarded-host": "agent-hub-viewer.example",
+    "x-real-ip": "203.0.113.9",
+    "x-azure-clientip": "203.0.113.9",
+    "x-original-url": "/f/token/check",
+    "x-agent-hub-viewer-url": "/f/token/check",
+    "sec-fetch-site": "same-origin",
+    cookie: "ahv-f-token=sealed; sid=1"
+  };
+
+  it("should send only the allowlisted headers, with the Referer moved onto the prototype", () => {
+    expect(Object.fromEntries(forwardedRequestHeaders(new Headers(browser), FEEDBACK, "POST"))).toEqual({
+      accept: "text/html",
+      "accept-language": "en-GB",
+      "user-agent": "Mozilla/5.0",
+      "if-none-match": '"v1"',
+      range: "bytes=0-99",
+      "content-type": "application/x-www-form-urlencoded",
+      "content-length": "12",
+      cookie: "sid=1",
+      referer: "https://prototype.example/check?x=1",
+      "x-forwarded-proto": "https",
+      "x-forwarded-prefix": "/f/token"
+    });
+  });
+
+  it("should send no Content-Length when the method carries no body", () => {
+    expect(forwardedRequestHeaders(new Headers(browser), FEEDBACK, "GET").get("content-length")).toBeNull();
+  });
+
+  it.each([
+    ["another page on the viewer", `${VIEWER_ORIGIN}/${ID}/8080/`],
+    ["the hub", `${HUB}/hub`],
+    ["a page that is not a URL", "not a url"]
+  ])("should drop a Referer from %s", (_name, referer) => {
+    expect(forwardedRequestHeaders(new Headers({ referer }), FEEDBACK).get("referer")).toBeNull();
+  });
+
+  it("should send the prototype's root as the Referer when it was the prefix itself", () => {
+    expect(forwardedRequestHeaders(new Headers({ referer: `${VIEWER_ORIGIN}/f/token` }), FEEDBACK).get("referer")).toBe("https://prototype.example/");
+  });
+
+  it("should leave out __Host- and __Secure- cookies, which may be an agent's app's", () => {
+    const headers = forwardedRequestHeaders(new Headers({ cookie: "__Host-sid=agent; __secure-csrf=agent; sid=1" }), FEEDBACK);
+
+    expect(headers.get("cookie")).toBe("sid=1");
+  });
+
+  it("should still send a port its __Host- and __Secure- cookies", () => {
+    expect(forwardedRequestHeaders(new Headers({ cookie: "__Host-sid=1; __Secure-csrf=2" }), TARGET).get("cookie")).toBe("__Host-sid=1; __Secure-csrf=2");
+  });
+});
+
+describe("forwardedResponseHeaders cookies for a feedback page", () => {
+  it("should drop a __Host- cookie the prototype sets and scope its others to the prefix", () => {
+    const headers = forwardedResponseHeaders(
+      new Headers([
+        ["set-cookie", "__Host-sid=1; Path=/; Secure"],
+        ["set-cookie", "__host-csrf=2; Secure"],
+        ["set-cookie", "sid=3; Path=/"]
+      ]),
+      FEEDBACK
+    );
+
+    expect(headers.getSetCookie()).toEqual(["sid=3; Path=/f/token/"]);
+  });
+
+  it("should refuse a __Host- cookie from rewriteSetCookie only for a feedback page", () => {
+    expect(rewriteSetCookie("__Host-sid=1; Secure", "/f/token", { feedback: true })).toBeUndefined();
+    expect(rewriteSetCookie("__Host-sid=1; Secure", PREFIX)).toBe("__Host-sid=1; Secure; Path=/");
   });
 });

@@ -178,6 +178,12 @@ export async function completeRecording(
   const scope = await writableScope(prisma, viewerOid, { token });
   const row = await runningRecording(prisma, viewerOid, scope, recordingId);
   await prisma.$transaction(async (tx) => {
+    // Read again under the row's lock: two completes that both passed the check above would otherwise both succeed,
+    // the second overwriting the first's end and duration.
+    const [locked] = await tx.$queryRaw<{ status: string }[]>`SELECT status FROM feedback_recording WHERE id = ${recordingId}::uuid FOR UPDATE`;
+    if (locked?.status !== "recording") {
+      throw new HttpError(409, "that recording has stopped");
+    }
     await tx.feedbackRecording.update({ where: { id: recordingId }, data: { status: "ready", endedAt: now, durationMs } });
     await notify(tx, { type: "feedback", project_id: row.projectId, link_id: row.linkId });
   });

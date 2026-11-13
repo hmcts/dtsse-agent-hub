@@ -103,6 +103,7 @@ export function ReviewShell(props: ReviewShellProps) {
 
   const recordingRef = useRef<Recording | null>(null);
   recordingRef.current = recording;
+  const stopping = useRef(false);
   const pathRef = useRef<string | null>(null);
   pathRef.current = path;
 
@@ -148,9 +149,12 @@ export function ReviewShell(props: ReviewShellProps) {
 
   const stopRecording = useCallback(async () => {
     const current = recordingRef.current;
-    if (current === null) {
+    // The time limit and the button can both ask while a stop is still uploading its last segments, and a second
+    // `session.stop()` would complete the recording twice.
+    if (current === null || stopping.current) {
       return;
     }
+    stopping.current = true;
     setRecordBusy(true);
     send({ type: "record-stop" });
     try {
@@ -159,6 +163,7 @@ export function ReviewShell(props: ReviewShellProps) {
     } catch (error) {
       setNotice(`The recording could not be finished: ${messageOf(error)}`);
     } finally {
+      stopping.current = false;
       setRecording(null);
       setRecordBusy(false);
     }
@@ -238,6 +243,7 @@ export function ReviewShell(props: ReviewShellProps) {
       const ms = Date.now() - recording.startedAt;
       setElapsed(ms);
       if (ms >= MAX_RECORDING_MS) {
+        clearInterval(timer);
         void stopRecording();
       }
     }, 1000);

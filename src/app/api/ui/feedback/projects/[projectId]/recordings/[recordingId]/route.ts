@@ -2,16 +2,15 @@ import type { NextRequest } from "next/server";
 import { errorResponse, json } from "@/agent-api/http";
 import { feedbackBlobs } from "@/feedback/blob";
 import { getRecording } from "@/feedback/recording-store";
-import { noStore } from "@/feedback/review-api";
+import { feedbackRoute, noStore } from "@/feedback/review-api";
 import { prisma } from "@/store/prisma";
-import { teamRoute } from "../../../team";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /** One recording for the player: its segments, each with a read-only URL, and the markers of threads made during it. */
 export async function GET(request: NextRequest, context: { params: Promise<{ projectId: string; recordingId: string }> }): Promise<Response> {
-  return await teamRoute(request, "read feedback recording", async (viewer) => {
+  return await feedbackRoute(request, "read feedback recording", async (viewer) => {
     const { projectId, recordingId } = await context.params;
     const recording = await getRecording(prisma, viewer.oid, { projectId }, recordingId);
     const blobs = feedbackBlobs();

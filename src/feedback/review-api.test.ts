@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { NextRequest } from "next/server";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HttpError } from "../agent-api/http.ts";
-import { noStore, reviewLanding, reviewRefusal, threadQuery } from "./review-api.ts";
+import { feedbackRoute, noStore, reviewLanding, reviewRefusal, teamThreadQuery, threadQuery } from "./review-api.ts";
 
 const HUB = "https://agent-hub.aat.platform.hmcts.net";
 
@@ -32,6 +33,57 @@ describe("reviewRefusal", () => {
   });
 });
 
+describe("feedbackRoute", () => {
+  const VIEWER = "https://agent-hub-viewer.aat.platform.hmcts.net";
+
+  beforeEach(() => {
+    vi.stubEnv("AUTH_DISABLED", "true");
+    vi.stubEnv("AUTH_DEV_USER", "oid-1|Ann|ann@example.com");
+    vi.stubEnv("SESSION_SECRET", "a-test-session-secret-long-enough-to-be-plausible");
+    vi.stubEnv("ENTRA_REDIRECT_URI", `${HUB}/auth/callback`);
+    vi.stubEnv("AGENT_HUB_VIEWER_HOST", new URL(VIEWER).host);
+    vi.stubEnv("FEEDBACK_ENABLED", "true");
+    vi.stubEnv("FEEDBACK_STORAGE_CONNECTION_STRING", "UseDevelopmentStorage=true");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  function get(headers: Record<string, string>): NextRequest {
+    return new NextRequest(`${HUB}/api/ui/feedback/review/t/threads`, { headers });
+  }
+
+  it("should run the handler as the viewer when the request is the hub's own page's", async () => {
+    const response = await feedbackRoute(get({ "sec-fetch-site": "same-origin" }), "read", async (viewer) => Response.json({ oid: viewer.oid }));
+
+    expect(await response.json()).toEqual({ oid: "oid-1" });
+  });
+
+  it("should answer 403 to a read from the viewer's host without running the handler", async () => {
+    const work = vi.fn(async () => Response.json({}));
+
+    const response = await feedbackRoute(get({ "sec-fetch-site": "same-site", origin: VIEWER }), "read", work);
+
+    expect(response.status).toBe(403);
+    expect(work).not.toHaveBeenCalled();
+  });
+
+  it("should answer 401 when nobody is signed in", async () => {
+    vi.stubEnv("AUTH_DISABLED", "");
+
+    expect((await feedbackRoute(get({ "sec-fetch-site": "same-origin" }), "read", async () => Response.json({}))).status).toBe(401);
+  });
+
+  it("should render a store's refusal as the contract's error", async () => {
+    const response = await feedbackRoute(get({ "sec-fetch-site": "same-origin" }), "read", async () => {
+      throw new HttpError(409, "that recording has stopped");
+    });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "that recording has stopped" });
+  });
+});
+
 describe("threadQuery", () => {
   it("should read a page and a status", () => {
     expect(threadQuery(new URLSearchParams({ page_path: "/start?x=1", status: "open" }))).toEqual({ pagePath: "/start?x=1", status: "open" });
@@ -47,6 +99,30 @@ describe("threadQuery", () => {
   ])("should refuse a malformed %s", (field, query) => {
     expect(() => threadQuery(new URLSearchParams(query))).toThrow(HttpError);
     expect(() => threadQuery(new URLSearchParams(query))).toThrow(new RegExp(`^${field}:`));
+  });
+});
+
+describe("teamThreadQuery", () => {
+  it("should read every filter it is given", () => {
+    expect(teamThreadQuery(new URLSearchParams({ link: "l", page: "/start", status: "resolved", author: "a" }))).toEqual({
+      linkId: "l",
+      pagePath: "/start",
+      status: "resolved",
+      authorOid: "a"
+    });
+  });
+
+  it("should read an empty filter as none", () => {
+    expect(teamThreadQuery(new URLSearchParams({ link: "", status: "" }))).toEqual({
+      linkId: undefined,
+      pagePath: undefined,
+      status: undefined,
+      authorOid: undefined
+    });
+  });
+
+  it("should refuse a status that is not one a thread can have, as the shell's read does", () => {
+    expect(() => teamThreadQuery(new URLSearchParams({ status: "closed" }))).toThrow(/^status:/);
   });
 });
 

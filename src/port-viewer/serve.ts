@@ -372,6 +372,7 @@ async function serveFeedback(
         viewerOrigin: settings.origin,
         frameAncestors: settings.hubOrigin,
         scriptNonce: nonce,
+        feedback: true,
         inject: widgetSnippet({
           hubOrigin: settings.hubOrigin,
           prefix,
