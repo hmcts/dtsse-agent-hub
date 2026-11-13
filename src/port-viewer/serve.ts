@@ -348,10 +348,16 @@ function signInRoutesOf(token: string, feedback: FeedbackDependencies): SignInRo
 
 /**
  * The sign-in service a prototype's redirect sends the browser to, when it is not one of `FEEDBACK_SIGN_IN_ORIGINS`:
- * an authorization request on another origin, with a `client_id` or `response_type` and a `redirect_uri` back to the
- * prototype, matched by hostname as the redirect back is. Its origin must pass the same checks as a link's.
+ * an authorization request to a path ending `/authorize` on a host that is not the prototype's, the hub's or the
+ * viewer's, with a `client_id` or `response_type` and a `redirect_uri` back to the prototype, matched by hostname as
+ * the redirect back is. Its origin must pass the same checks as a link's.
  */
-export function detectedSignInOrigin(location: string, prototypeOrigin: string, env?: Environment): string | undefined {
+export function detectedSignInOrigin(
+  location: string,
+  prototypeOrigin: string,
+  settings: Pick<ViewerSettings, "host" | "hubOrigin">,
+  env?: Environment
+): string | undefined {
   if (!URL.canParse(location)) {
     return undefined;
   }
@@ -359,7 +365,8 @@ export function detectedSignInOrigin(location: string, prototypeOrigin: string, 
   const prototypeHost = new URL(prototypeOrigin).hostname;
   const redirectUri = url.searchParams.get("redirect_uri");
   if (
-    url.hostname === prototypeHost ||
+    [prototypeHost, settings.host, new URL(settings.hubOrigin).hostname].includes(url.hostname) ||
+    url.pathname.split("/").at(-1) !== "authorize" ||
     redirectUri === null ||
     !URL.canParse(redirectUri) ||
     new URL(redirectUri).hostname !== prototypeHost ||
@@ -382,8 +389,8 @@ async function grantedSignInRoute(request: Request, token: string, host: string,
 
 /** A redirect to a detected sign-in service, moved under its prefix with the grant that lets it be served there. */
 async function grantSignIn(response: Response, token: string, prototypeOrigin: string, deps: ViewerDependencies, env?: Environment): Promise<void> {
-  const location = response.headers.get("location");
-  const origin = location === null ? undefined : detectedSignInOrigin(location, prototypeOrigin, env);
+  const location = response.status >= 300 && response.status < 400 ? response.headers.get("location") : null;
+  const origin = location === null ? undefined : detectedSignInOrigin(location, prototypeOrigin, deps.settings, env);
   if (location === null || origin === undefined) {
     return;
   }

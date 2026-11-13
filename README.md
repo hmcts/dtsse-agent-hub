@@ -321,7 +321,7 @@ assistant that never starts, but the feedback pages do not. A second reviewer is
 | `FEEDBACK_STORAGE_ACCOUNT_URL` | none | The storage account, as `https://dtsseagenthubaat.blob.core.windows.net`, reached as the hub's managed identity, which signs every SAS from a user delegation key |
 | `FEEDBACK_STORAGE_CONNECTION_STRING` | none | A connection string, which wins over the account URL: `UseDevelopmentStorage=true` for Azurite |
 | `FEEDBACK_STORAGE_CONTAINER` | `feedback` | The container every project's blobs are under |
-| `FEEDBACK_SIGN_IN_ORIGINS` | none | Sign-in services, as comma-separated origins, a prototype's sign-in may always pass through the viewer (AAT IDAM's `https://idam-web-public.aat.platform.hmcts.net` and `https://hmcts-access.aat.platform.hmcts.net` deployed). Any other, such as a prototype's own IDAM simulator, is detected when the prototype redirects to it with a `redirect_uri` back to itself, and served for that link for an hour |
+| `FEEDBACK_SIGN_IN_ORIGINS` | none | Sign-in services, as comma-separated origins, a prototype's sign-in may always pass through the viewer (AAT IDAM's `https://idam-web-public.aat.platform.hmcts.net` and `https://hmcts-access.aat.platform.hmcts.net` deployed). Any other, such as a prototype's own IDAM simulator, is detected when the prototype redirects to a path ending `/authorize` on a host other than its own, the hub's or the viewer's, with a `redirect_uri` back to itself, and served for that link for an hour |
 
 ### The deployed secrets are opt-in
 

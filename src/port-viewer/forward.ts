@@ -1,4 +1,4 @@
-import { SIGN_IN_COOKIE_PREFIX, VIEWER_COOKIE_PREFIX } from "./paths.ts";
+import { SIGN_IN_COOKIE_PREFIX, signInPathOf, VIEWER_COOKIE_PREFIX } from "./paths.ts";
 import { VIEWER_URL_HEADER } from "./settings.ts";
 
 /**
@@ -114,7 +114,7 @@ function feedbackReferer(referer: string | null, target: ForwardTarget): string 
   if (url.origin !== target.viewerOrigin || !alreadyPrefixed(url.pathname, target.prefix)) {
     return undefined;
   }
-  if (target.signIn !== true && target.routes?.some((route) => alreadyPrefixed(url.pathname, route.prefix))) {
+  if (target.signIn !== true && signInPathOf(url.pathname.slice(target.prefix.length)) !== undefined) {
     return undefined;
   }
   return `${target.upstreamOrigin}${url.pathname.slice(target.prefix.length) || "/"}${url.search}`;

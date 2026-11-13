@@ -660,6 +660,12 @@ describe("the Referer a feedback link's upstreams are sent from a sign-in page",
     expect(headers.get("referer")).toBeNull();
   });
 
+  it("should send the prototype no Referer when it comes from a detected sign-in service's page, which is in no route", () => {
+    const detected = `${VIEWER_ORIGIN}/f/token/_sign-in/sim.example/o/authorize?client_id=c&state=s`;
+
+    expect(forwardedRequestHeaders(new Headers({ referer: detected }), FEEDBACK).get("referer")).toBeNull();
+  });
+
   it("should send the sign-in service its own page as the Referer when it comes from that page", () => {
     const target: ForwardTarget = {
       ...FEEDBACK,

@@ -659,8 +659,17 @@ describe("feedback links on the viewer", () => {
     }
 
     it("should detect an authorization request whose redirect_uri goes back to the prototype", () => {
-      expect(detectedSignInOrigin(AUTHORIZE, LINK.origin)).toBe(SIM);
-      expect(detectedSignInOrigin(`${SIM}/login?response_type=code&redirect_uri=http://prototype.example:8080/cb`, LINK.origin)).toBe(SIM);
+      expect(detectedSignInOrigin(AUTHORIZE, LINK.origin, SETTINGS)).toBe(SIM);
+      expect(detectedSignInOrigin(`${SIM}/oauth2/authorize?response_type=code&redirect_uri=http://prototype.example:8080/cb`, LINK.origin, SETTINGS)).toBe(SIM);
+      expect(detectedSignInOrigin(`${SIM}/authorize?client_id=c&redirect_uri=${CALLBACK}`, LINK.origin, SETTINGS)).toBe(SIM);
+    });
+
+    it("should detect a prototype's IDAM simulator on its own public host", () => {
+      const simulator = "https://pcs-private-landlord-idam.uksouth.cloudapp.azure.com";
+      const prototype = "https://pcs-private-landlord-pcs.uksouth.cloudapp.azure.com";
+      const location = `${simulator}/o/authorize?client_id=pcs&response_type=code&redirect_uri=${encodeURIComponent(`${prototype}/oauth2/callback`)}&state=s`;
+
+      expect(detectedSignInOrigin(location, prototype, SETTINGS)).toBe(simulator);
     });
 
     it.each<[string, string]>([
@@ -670,9 +679,21 @@ describe("feedback links on the viewer", () => {
       ["it is not over https", `http://sim.example/o/authorize?client_id=c&redirect_uri=${CALLBACK}`],
       ["its host is private", `https://10.0.0.5/o/authorize?client_id=c&redirect_uri=${CALLBACK}`],
       ["it is on the prototype's own host", `https://prototype.example/o/authorize?client_id=c&redirect_uri=${CALLBACK}`],
+      ["it is on the hub's host", `https://agent-hub.example/o/authorize?client_id=c&redirect_uri=${CALLBACK}`],
+      ["it is on the viewer's host", `https://agent-hub-viewer.example/o/authorize?client_id=c&redirect_uri=${CALLBACK}`],
+      ["its path does not end in authorize", `${SIM}/login?client_id=c&response_type=code&redirect_uri=${CALLBACK}`],
+      ["its path only contains authorize", `${SIM}/authorize/next?client_id=c&redirect_uri=${CALLBACK}`],
       ["it is a path", `/o/authorize?client_id=c&redirect_uri=${CALLBACK}`]
     ])("should detect no sign-in service when %s", (_case, location) => {
-      expect(detectedSignInOrigin(location, LINK.origin, {})).toBeUndefined();
+      expect(detectedSignInOrigin(location, LINK.origin, SETTINGS, {})).toBeUndefined();
+    });
+
+    it("should grant nothing when the authorization URL is in a Location on a response that is not a redirect", async () => {
+      const fetchImpl = vi.fn<Fetch>(async () => new Response("created", { status: 201, headers: { location: AUTHORIZE } }));
+
+      const response = await serveViewer(await reviewing(`${FPREFIX}/login`), `${FPREFIX}/login`, withFeedback({}, { fetch: fetchImpl }));
+
+      expect(response.headers.getSetCookie().filter((cookie) => cookie.startsWith("ahv-grant="))).toEqual([]);
     });
 
     it("should move the prototype's authorization redirect under the sign-in prefix and grant it there for an hour", async () => {
