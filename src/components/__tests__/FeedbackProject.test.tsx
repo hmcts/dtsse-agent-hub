@@ -3,11 +3,10 @@
  */
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
-import { FeedbackRefresh } from "@/components/feedback/dev/FeedbackRefresh";
 import { projectTab } from "@/components/feedback/dev/look";
 import { ProjectList } from "@/components/feedback/dev/ProjectList";
 import { type ProjectActions, ProjectPage } from "@/components/feedback/dev/ProjectPage";
-import { BEN, pageData, project, recordingRow, thread } from "./feedback-fixtures";
+import { pageData, project, recordingRow, thread } from "./feedback-fixtures";
 
 const refresh = vi.fn();
 const push = vi.fn();
@@ -373,34 +372,5 @@ describe("ProjectList", () => {
 
     expect(screen.getByRole("link", { name: "Set up a feedback project" }).getAttribute("href")).toBe("/assistant/feedback/new");
     expect(screen.getByRole("link", { name: "Show archived projects" }).getAttribute("href")).toBe("/assistant/feedback?archived=1");
-  });
-});
-
-describe("FeedbackRefresh", () => {
-  it("should re-read the page when its own project changes, or the stream resyncs, and not for another project", () => {
-    vi.useFakeTimers();
-    render(<FeedbackRefresh projectId="p1" />);
-
-    hubHandlers.get("feedback")?.({ project_id: "p2" });
-    vi.advanceTimersByTime(1_000);
-    expect(refresh).not.toHaveBeenCalled();
-    hubHandlers.get("feedback")?.({ project_id: "p1" });
-    vi.advanceTimersByTime(1_000);
-    expect(refresh).toHaveBeenCalledTimes(1);
-    hubHandlers.get("resync")?.({});
-    vi.advanceTimersByTime(1_000);
-    expect(refresh).toHaveBeenCalledTimes(2);
-    vi.useRealTimers();
-  });
-
-  it("should re-read the list for any of the viewer's projects", () => {
-    vi.useFakeTimers();
-    render(<FeedbackRefresh />);
-
-    hubHandlers.get("feedback")?.({ project_id: BEN.oid });
-    vi.advanceTimersByTime(1_000);
-
-    expect(refresh).toHaveBeenCalledTimes(1);
-    vi.useRealTimers();
   });
 });

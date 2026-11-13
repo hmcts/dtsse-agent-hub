@@ -191,19 +191,16 @@ export function sampleTranscript(prefix: string): TranscriptEntry[] {
 }
 
 /**
- * The sidebar row of a local chat called `title`, found by its accessible name — the local marker's words joined to
- * the title (`LocalMark`) — so every spec using it also fails on a chat the sidebar has stopped marking.
+ * The sidebar row of a local chat called `title`, found by its accessible name, which is the title alone: a person
+ * whose list holds only local chats, as every spec persona's does, sees no marks (`showsMarks`).
  *
  * `title` is what the chat is called now, which is the name its session registered under only until a batch carrying
- * a prompt renames it to that prompt (`refreshLocalTitle`); a caller that uploaded one passes the prompt.
- *
- * The state of the session is part of those words and is matched loosely, because it is whatever the session was
- * doing when the page rendered; that the row is marked, and marked as being on the person's own computer, is what
- * this pins. Both the `unique` titles and the prompts passed here are lower-case words, digits, spaces and hyphens,
- * so none of them needs escaping.
+ * a prompt renames it to that prompt (`refreshLocalTitle`); a caller that uploaded one passes the prompt. Both the
+ * `unique` titles and the prompts passed here are lower-case words, digits, spaces and hyphens, so none of them needs
+ * escaping.
  */
 export function localChatRow(page: Page, title: string): Locator {
-  return page.getByRole("navigation", { name: "Chats" }).getByRole("link", { name: new RegExp(`^On your computer, [a-z ]+: ${title}$`) });
+  return page.getByRole("navigation", { name: "Chats" }).getByRole("link", { name: new RegExp(`^${title}$`) });
 }
 
 /**

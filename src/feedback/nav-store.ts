@@ -1,5 +1,6 @@
 import { canChangeFeedbackProject, feedbackProjectAccess } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
+import { clientPrisma } from "../store/client-namespace.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { teamProject } from "./store.ts";
 
@@ -12,9 +13,9 @@ export interface NavProjectRow {
   id: string;
   name: string;
   pinnedAt: Date | null;
-  /** The latest of the project's own change and the creation of any of its threads, comments or recordings. */
+  /** See `lastActive`. */
   lastActiveAt: Date;
-  /** Comments, replies included, and recordings by anyone else since the viewer last opened it; all of them if never. */
+  /** Comments, replies included, and finished recordings by anyone else since the viewer last opened it; all of them if never. */
   unread: number;
   /** Whether the viewer may archive it (`canChangeFeedbackProject`). */
   archivable: boolean;
@@ -31,33 +32,45 @@ interface RawProject {
   unread: number;
 }
 
-/** `terms` given, only the projects whose name holds every one of them, case aside. */
-async function readProjects(db: Database, viewerOid: string, terms: readonly string[] | null): Promise<RawProject[]> {
-  return await db.$queryRaw<RawProject[]>`
+/**
+ * When project `p` last saw activity: its own change, or the latest change to one of its threads (a resolve or
+ * re-anchor included), comments or recordings. The one definition the sidebar, its search and the list of projects share.
+ */
+function lastActive() {
+  return clientPrisma().sql`GREATEST(
+    p.updated_at,
+    (SELECT max(t.updated_at) FROM feedback_thread t WHERE t.project_id = p.id),
+    (SELECT max(c.created_at) FROM feedback_comment c JOIN feedback_thread t ON t.id = c.thread_id WHERE t.project_id = p.id),
+    (SELECT max(GREATEST(r.started_at, r.ended_at)) FROM feedback_recording r WHERE r.project_id = p.id)
+  )`;
+}
+
+function onTeam(viewerOid: string) {
+  return clientPrisma().sql`p.archived_at IS NULL
+    AND (p.owner_oid = ${viewerOid} OR EXISTS (SELECT 1 FROM feedback_member m WHERE m.project_id = p.id AND m.member_oid = ${viewerOid}))`;
+}
+
+/** As many as the sidebar reads of a person's chats. Pinned ones first, so the limit never drops a pin. */
+const NAV_LIMIT = 200;
+
+export async function navProjects(db: Database, viewerOid: string): Promise<NavProjectRow[]> {
+  const rows = await db.$queryRaw<RawProject[]>`
     SELECT p.id::text AS id,
            p.name,
            p.owner_oid AS "ownerOid",
            EXISTS (SELECT 1 FROM feedback_member m WHERE m.project_id = p.id AND m.member_oid = ${viewerOid}) AS "isMember",
            s.pinned_at AS "pinnedAt",
-           GREATEST(
-             p.updated_at,
-             (SELECT max(t.created_at) FROM feedback_thread t WHERE t.project_id = p.id),
-             (SELECT max(c.created_at) FROM feedback_comment c JOIN feedback_thread t ON t.id = c.thread_id WHERE t.project_id = p.id),
-             (SELECT max(r.started_at) FROM feedback_recording r WHERE r.project_id = p.id)
-           ) AS "lastActiveAt",
+           ${lastActive()} AS "lastActiveAt",
            ((SELECT count(*) FROM feedback_comment c JOIN feedback_thread t ON t.id = c.thread_id
               WHERE t.project_id = p.id AND c.author_oid <> ${viewerOid} AND (s.seen_at IS NULL OR c.created_at > s.seen_at))
             + (SELECT count(*) FROM feedback_recording r
-              WHERE r.project_id = p.id AND r.author_oid <> ${viewerOid} AND (s.seen_at IS NULL OR r.started_at > s.seen_at)))::int AS unread
+              WHERE r.project_id = p.id AND r.status = 'ready' AND r.author_oid <> ${viewerOid} AND (s.seen_at IS NULL OR r.started_at > s.seen_at)))::int AS unread
       FROM feedback_project p
       LEFT JOIN feedback_project_person s ON s.project_id = p.id AND s.person_oid = ${viewerOid}
-     WHERE p.archived_at IS NULL
-       AND (p.owner_oid = ${viewerOid} OR EXISTS (SELECT 1 FROM feedback_member m WHERE m.project_id = p.id AND m.member_oid = ${viewerOid}))
-       AND (${terms}::text[] IS NULL OR NOT EXISTS (SELECT 1 FROM unnest(${terms}::text[]) AS u(term) WHERE strpos(lower(p.name), u.term) = 0))
+     WHERE ${onTeam(viewerOid)}
+     ORDER BY s.pinned_at IS NULL, "lastActiveAt" DESC, p.id
+     LIMIT ${NAV_LIMIT}
   `;
-}
-
-async function withLinks(db: Database, viewerOid: string, rows: RawProject[]): Promise<NavProjectRow[]> {
   const links = await db.feedbackLink.findMany({
     where: { projectId: { in: rows.map((row) => row.id) }, revokedAt: null },
     select: { projectId: true, label: true, token: true },
@@ -74,13 +87,32 @@ async function withLinks(db: Database, viewerOid: string, rows: RawProject[]): P
   }));
 }
 
-export async function navProjects(db: Database, viewerOid: string): Promise<NavProjectRow[]> {
-  return await withLinks(db, viewerOid, await readProjects(db, viewerOid, null));
+export type ProjectMatchRow = Pick<NavProjectRow, "id" | "name" | "lastActiveAt">;
+
+/**
+ * Up to `limit` of the projects `navProjects` lists whose name holds every one of `terms`, which are lower-case
+ * already, most recently active first.
+ */
+export async function searchProjects(db: Database, viewerOid: string, terms: readonly string[], limit: number): Promise<ProjectMatchRow[]> {
+  if (terms.length === 0) {
+    return [];
+  }
+  return await db.$queryRaw<ProjectMatchRow[]>`
+    SELECT p.id::text AS id, p.name, ${lastActive()} AS "lastActiveAt"
+      FROM feedback_project p
+     WHERE ${onTeam(viewerOid)}
+       AND NOT EXISTS (SELECT 1 FROM unnest(${terms}::text[]) AS u(term) WHERE strpos(lower(p.name), u.term) = 0)
+     ORDER BY "lastActiveAt" DESC, p.id
+     LIMIT ${limit}
+  `;
 }
 
-/** The projects `navProjects` lists whose name holds every one of `terms`, which are lower-case already. */
-export async function searchProjects(db: Database, viewerOid: string, terms: readonly string[]): Promise<NavProjectRow[]> {
-  return terms.length === 0 ? [] : await withLinks(db, viewerOid, await readProjects(db, viewerOid, terms));
+/** `lastActive` of each of `projectIds`, archived or not, for the list of projects. */
+export async function projectsLastActive(db: Database, projectIds: readonly string[]): Promise<Map<string, Date>> {
+  const rows = await db.$queryRaw<{ id: string; at: Date }[]>`
+    SELECT p.id::text AS id, ${lastActive()} AS at FROM feedback_project p WHERE p.id = ANY(${projectIds}::uuid[])
+  `;
+  return new Map(rows.map((row) => [row.id, row.at]));
 }
 
 /**

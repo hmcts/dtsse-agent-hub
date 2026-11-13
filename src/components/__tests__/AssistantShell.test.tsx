@@ -943,7 +943,7 @@ describe("AssistantMarkdown", () => {
 });
 
 describe("AssistantRefresh", () => {
-  it.each(["assistant_conversation", "virtual_agent", "agent_skills"])("should refresh the page once for a burst of %s events", async (type) => {
+  it.each(["assistant_conversation", "virtual_agent", "agent_skills", "feedback"])("should refresh the page once for a burst of %s events", async (type) => {
     vi.useFakeTimers();
     render(<AssistantRefresh />);
 

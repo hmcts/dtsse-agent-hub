@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { HttpError } from "../../src/agent-api/http.ts";
-import { markProjectSeen, navProjects, pinProject, searchProjects } from "../../src/feedback/nav-store.ts";
-import { startRecording } from "../../src/feedback/recording-store.ts";
+import { markProjectSeen, navProjects, pinProject, projectsLastActive, searchProjects } from "../../src/feedback/nav-store.ts";
+import { completeRecording, startRecording } from "../../src/feedback/recording-store.ts";
 import { archiveProject, createProject, revokeLink } from "../../src/feedback/store.ts";
-import { createThread, replyToThread } from "../../src/feedback/thread-store.ts";
+import { createThread, patchThread, replyToThread } from "../../src/feedback/thread-store.ts";
 import { insertUser, person, prisma, resetDatabase } from "./database.ts";
 
 /**
@@ -92,16 +92,45 @@ describe("navProjects", () => {
     expect((await navProjects(prisma, BOB.oid))[0]?.links).toEqual([{ label: "Version 2", token: made.links[1]!.token }]);
   });
 
-  it("should date the project by its latest comment, reply or recording when one is newer than the project", async () => {
+  it("should date the project by its latest comment, reply, resolve or recording when one is newer than the project", async () => {
     const made = await project("Claims prototype", T0);
+    const token = made.links[1]!.token;
     const { thread: created } = await createThread(prisma, CAROL.oid, made.links[0]!.token, thread("Hard to find"), at(10));
     expect((await navProjects(prisma, ALICE.oid))[0]?.lastActiveAt).toEqual(at(10));
 
     await replyToThread(prisma, BOB.oid, { projectId: made.id }, created.id, "Thanks", at(20));
     expect((await navProjects(prisma, ALICE.oid))[0]?.lastActiveAt).toEqual(at(20));
 
-    await startRecording(prisma, CAROL.oid, made.links[1]!.token, at(30));
+    await patchThread(prisma, ALICE.oid, { projectId: made.id }, created.id, { status: "resolved" }, at(25));
+    expect((await navProjects(prisma, ALICE.oid))[0]?.lastActiveAt).toEqual(at(25));
+
+    const recording = await startRecording(prisma, CAROL.oid, token, at(30));
     expect((await navProjects(prisma, ALICE.oid))[0]?.lastActiveAt).toEqual(at(30));
+
+    await completeRecording(prisma, CAROL.oid, token, recording.id, { durationMs: 1_000 }, at(40));
+    expect((await navProjects(prisma, ALICE.oid))[0]?.lastActiveAt).toEqual(at(40));
+  });
+
+  it("should date the list of projects as the sidebar does, an archived one included", async () => {
+    const made = await project("Claims prototype", T0);
+    const other = await project("Possession prototype", T0);
+    await createThread(prisma, CAROL.oid, made.links[0]!.token, thread("Hard to find"), at(10));
+    const [row] = await navProjects(prisma, ALICE.oid);
+    await archiveProject(prisma, ALICE.oid, other.id);
+
+    const latest = await projectsLastActive(prisma, [made.id, other.id]);
+
+    expect(latest.get(made.id)).toEqual(row?.lastActiveAt);
+    expect(latest.get(other.id)).toEqual((await prisma.feedbackProject.findUniqueOrThrow({ where: { id: other.id } })).updatedAt);
+  });
+
+  it("should list pinned projects first, then the most recently active", async () => {
+    const older = await project("Older prototype", at(1));
+    await project("Newer prototype", at(2));
+    await project("Newest prototype", at(3));
+    await pinProject(prisma, ALICE.oid, older.id, true);
+
+    expect((await navProjects(prisma, ALICE.oid)).map((row) => row.name)).toEqual(["Older prototype", "Newest prototype", "Newer prototype"]);
   });
 });
 
@@ -111,10 +140,22 @@ describe("unread", () => {
     const { thread: created } = await createThread(prisma, CAROL.oid, made.links[0]!.token, thread("Hard to find"), at(1));
     await replyToThread(prisma, BOB.oid, { projectId: made.id }, created.id, "Agreed", at(2));
     await replyToThread(prisma, ALICE.oid, { projectId: made.id }, created.id, "Fixing it", at(3));
-    await startRecording(prisma, CAROL.oid, made.links[0]!.token, at(4));
+    const recording = await startRecording(prisma, CAROL.oid, made.links[0]!.token, at(4));
+    await completeRecording(prisma, CAROL.oid, made.links[0]!.token, recording.id, { durationMs: 1_000 }, at(5));
 
     expect((await navProjects(prisma, ALICE.oid))[0]?.unread).toBe(3);
     expect((await navProjects(prisma, BOB.oid))[0]?.unread).toBe(3);
+  });
+
+  it("should not count a recording until it is ready to play", async () => {
+    const made = await project();
+    const token = made.links[0]!.token;
+    const recording = await startRecording(prisma, CAROL.oid, token, at(1));
+    expect((await navProjects(prisma, ALICE.oid))[0]?.unread).toBe(0);
+
+    await completeRecording(prisma, CAROL.oid, token, recording.id, { durationMs: 1_000 }, at(2));
+
+    expect((await navProjects(prisma, ALICE.oid))[0]?.unread).toBe(1);
   });
 
   it("should count only what arrived since the viewer last opened the project", async () => {
@@ -180,21 +221,29 @@ describe("searchProjects", () => {
     await project("Claims prototype");
     await project("Possession journey");
 
-    expect((await searchProjects(prisma, BOB.oid, ["claim", "proto"])).map((row) => row.name)).toEqual(["Claims prototype"]);
-    expect(await searchProjects(prisma, BOB.oid, ["claim", "journey"])).toEqual([]);
+    expect((await searchProjects(prisma, BOB.oid, ["claim", "proto"], 50)).map((row) => row.name)).toEqual(["Claims prototype"]);
+    expect(await searchProjects(prisma, BOB.oid, ["claim", "journey"], 50)).toEqual([]);
   });
 
   it("should find nothing by a link's label, and nothing for someone not on the team", async () => {
     await project("Claims prototype");
 
-    expect(await searchProjects(prisma, BOB.oid, ["version"])).toEqual([]);
-    expect(await searchProjects(prisma, CAROL.oid, ["claims"])).toEqual([]);
+    expect(await searchProjects(prisma, BOB.oid, ["version"], 50)).toEqual([]);
+    expect(await searchProjects(prisma, CAROL.oid, ["claims"], 50)).toEqual([]);
+  });
+
+  it("should answer with at most the limit, most recently active first", async () => {
+    await project("Claims prototype one", at(1));
+    await project("Claims prototype two", at(2));
+    await project("Claims prototype three", at(3));
+
+    expect((await searchProjects(prisma, BOB.oid, ["claims"], 2)).map((row) => row.name)).toEqual(["Claims prototype three", "Claims prototype two"]);
   });
 
   it("should treat a LIKE wildcard in a term as the character itself", async () => {
     await project("Claims prototype");
 
-    expect(await searchProjects(prisma, BOB.oid, ["%"])).toEqual([]);
-    expect(await searchProjects(prisma, BOB.oid, [])).toEqual([]);
+    expect(await searchProjects(prisma, BOB.oid, ["%"], 50)).toEqual([]);
+    expect(await searchProjects(prisma, BOB.oid, [], 50)).toEqual([]);
   });
 });

@@ -14,7 +14,16 @@ afterEach(() => {
   cleanup();
   handlers.clear();
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
+
+function hideTab(): (state: DocumentVisibilityState) => void {
+  const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+  return (state) => {
+    visibility.mockReturnValue(state);
+    document.dispatchEvent(new Event("visibilitychange"));
+  };
+}
 
 describe("MarkSeen", () => {
   it("should mark the project seen once it is on screen", async () => {
@@ -39,6 +48,48 @@ describe("MarkSeen", () => {
 
     handlers.get("feedback")?.({ project_id: "p1" });
     await act(async () => vi.advanceTimersByTimeAsync(1_000));
+    expect(markSeen).toHaveBeenCalledExactlyOnceWith({ projectId: "p1" });
+  });
+
+  it("should mark it seen once when the page re-renders with a new action", async () => {
+    const markSeen = vi.fn(async () => ({ ok: true as const }));
+    const again = vi.fn(async () => ({ ok: true as const }));
+    const { rerender } = render(<MarkSeen projectId="p1" markSeen={markSeen} />);
+
+    await act(async () => {
+      rerender(<MarkSeen projectId="p1" markSeen={again} />);
+    });
+
+    expect(markSeen).toHaveBeenCalledOnce();
+    expect(again).not.toHaveBeenCalled();
+  });
+
+  it("should wait for the tab to be visible when it opens in a hidden one", async () => {
+    const show = hideTab();
+    const markSeen = vi.fn(async () => ({ ok: true as const }));
+    render(<MarkSeen projectId="p1" markSeen={markSeen} />);
+    expect(markSeen).not.toHaveBeenCalled();
+
+    await act(async () => show("hidden"));
+    expect(markSeen).not.toHaveBeenCalled();
+    await act(async () => show("visible"));
+    await act(async () => show("visible"));
+
+    expect(markSeen).toHaveBeenCalledExactlyOnceWith({ projectId: "p1" });
+  });
+
+  it("should mark what arrived in a hidden tab only once the tab is visible again", async () => {
+    vi.useFakeTimers();
+    const markSeen = vi.fn(async () => ({ ok: true as const }));
+    render(<MarkSeen projectId="p1" markSeen={markSeen} />);
+    markSeen.mockClear();
+    const show = hideTab();
+
+    handlers.get("feedback")?.({ project_id: "p1" });
+    await act(async () => vi.advanceTimersByTimeAsync(1_000));
+    expect(markSeen).not.toHaveBeenCalled();
+
+    await act(async () => show("visible"));
     expect(markSeen).toHaveBeenCalledExactlyOnceWith({ projectId: "p1" });
   });
 

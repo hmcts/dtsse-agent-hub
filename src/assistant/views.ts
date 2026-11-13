@@ -38,7 +38,7 @@ import { LOCAL_SESSION, type LocalSession } from "./local-session.ts";
 import { chatCredentials, onboarded, type Readiness, readiness } from "./onboarding.ts";
 import { hasPod } from "./pods.ts";
 import { productLabel } from "./products.ts";
-import { mergeMatches, searchTerms, snippetOf } from "./search.ts";
+import { mergeMatches, SEARCH_LIMIT, searchTerms, snippetOf } from "./search.ts";
 import { type ConversationMatchRow, searchConversations } from "./search-store.ts";
 import { type MessageAttachment, unsentAttachments } from "./upload-store.ts";
 
@@ -114,16 +114,17 @@ export function showsMarks(kinds: ReadonlySet<SidebarKind>): boolean {
   return kinds.size > 1;
 }
 
-async function listMarked(db: Database, ownerOid: string): Promise<boolean> {
-  const [local, cloud, feedback] = await Promise.all([
+/** `feedback` given, whether the person has a feedback project, from projects the caller has read already. */
+async function listMarked(db: Database, ownerOid: string, feedback?: Promise<boolean>): Promise<boolean> {
+  const [local, cloud, hasFeedback] = await Promise.all([
     hasLocalConversation(db, ownerOid),
     hasPodConversation(db, ownerOid),
-    feedbackEnabled() ? hasFeedbackProjects(db, ownerOid) : false
+    feedback ?? (feedbackEnabled() ? hasFeedbackProjects(db, ownerOid) : false)
   ]);
   const kinds: [SidebarKind, boolean][] = [
     ["local", local],
     ["cloud", cloud],
-    ["feedback", feedback]
+    ["feedback", hasFeedback]
   ];
   return showsMarks(new Set(kinds.flatMap(([kind, has]) => (has ? [kind] : []))));
 }
@@ -261,10 +262,15 @@ export async function conversationLinks(db: Database, ownerOid: string, virtualA
 
 /** The sidebar: the viewer's chats and, while prototype feedback is on, their feedback projects, in one list. */
 export async function sidebarGroups(db: Database, ownerOid: string, now: Date = new Date()): Promise<{ label: SidebarGroup; items: SidebarItem[] }[]> {
+  const read = feedbackEnabled() ? navProjects(db, ownerOid) : Promise.resolve([]);
   const [{ pinned, recent }, projects, marked] = await Promise.all([
     sidebarConversations(db, ownerOid),
-    feedbackEnabled() ? navProjects(db, ownerOid) : [],
-    listMarked(db, ownerOid)
+    read,
+    listMarked(
+      db,
+      ownerOid,
+      read.then((rows) => rows.length > 0)
+    )
   ]);
   const items: SidebarItem[] = [...pinned, ...recent].map((row) => listLink(row, marked));
   items.push(...projects.map((row) => projectLink(row, marked)));
@@ -304,7 +310,7 @@ export async function conversationMatches(db: Database, ownerOid: string, query:
 export async function sidebarMatches(db: Database, ownerOid: string, query: string): Promise<SidebarMatch[]> {
   const [rows, projects, marked] = await Promise.all([
     searchConversations(db, ownerOid, query),
-    feedbackEnabled() ? searchProjects(db, ownerOid, searchTerms(query)) : [],
+    feedbackEnabled() ? searchProjects(db, ownerOid, searchTerms(query), SEARCH_LIMIT) : [],
     listMarked(db, ownerOid)
   ]);
   return mergeMatches<SidebarMatch>(
