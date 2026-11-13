@@ -170,6 +170,7 @@ model User {
   feedbackComments            FeedbackComment[]   @relation("feedbackCommentAuthor")
   feedbackMentions            FeedbackMention[]   @relation("feedbackMention")
   feedbackRecordings          FeedbackRecording[] @relation("feedbackRecordingAuthor")
+  feedbackProjectStates       FeedbackProjectPerson[]
 
   @@map("user")
 }
@@ -906,9 +907,25 @@ model FeedbackProject {
   links      FeedbackLink[]
   threads    FeedbackThread[]
   recordings FeedbackRecording[]
+  people     FeedbackProjectPerson[]
 
   @@index([ownerOid, createdAt], map: "feedback_project_owner_idx")
   @@map("feedback_project")
+}
+
+/// One person's pin and last visit for a project, for the Assistant's sidebar.
+model FeedbackProjectPerson {
+  projectId String    @map("project_id") @db.Uuid
+  personOid String    @map("person_oid")
+  pinnedAt  DateTime? @map("pinned_at") @db.Timestamptz(6)
+  /// When they last opened the project; its unread count is what others added since.
+  seenAt    DateTime? @map("seen_at") @db.Timestamptz(6)
+
+  project FeedbackProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  person  User            @relation(fields: [personOid], references: [oid], onDelete: Cascade)
+
+  @@id([projectId, personOid])
+  @@map("feedback_project_person")
 }
 
 model FeedbackMember {

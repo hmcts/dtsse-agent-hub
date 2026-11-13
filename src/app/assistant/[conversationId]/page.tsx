@@ -20,6 +20,7 @@ import { readAssistantAgent, readGitIdentity } from "@/app/_actions/assistant-se
 import { clearGitIdentity, removeCredential, resetClaudeMd, saveClaudeMd, saveCredential, saveGitIdentity } from "@/app/_actions/credentials";
 import { restoreDeckVersion, saveDeck } from "@/app/_actions/decks";
 import { saveExportDefaults } from "@/app/_actions/export-defaults";
+import { archiveFeedbackProject, pinFeedbackProject } from "@/app/_actions/feedback";
 import { offerChatFork, withdrawChatFork } from "@/app/_actions/forks";
 import { answerAgentQuestion } from "@/app/_actions/questions";
 import { shareChat, unshareChat } from "@/app/_actions/shares";
@@ -36,6 +37,7 @@ import { AssistantGate } from "@/components/assistant/AssistantGate";
 import { AssistantShell } from "@/components/assistant/AssistantShell";
 import { type ChatActions, ChatView } from "@/components/assistant/ChatView";
 import { ShareGate } from "@/components/assistant/ShareGate";
+import { feedbackEnabled } from "@/feedback/settings";
 import { requireViewer } from "@/viewer/current";
 import {
   assistantConversation,
@@ -49,7 +51,6 @@ import {
   claudeMdSettings,
   openAssistant
 } from "@/web/data";
-import { feedbackMenu } from "@/web/feedback-data";
 
 export const dynamic = "force-dynamic";
 
@@ -87,7 +88,7 @@ export default async function ConversationPage({
   // queries to fill a dialog, and this is the page that loads most often.
   const sharing = query.share === "1";
   const forking = !sharing && query.fork === "1";
-  const [home, view, claudeMd, mine, shares, forks, files, size, defaults, model, feedback] = await Promise.all([
+  const [home, view, claudeMd, mine, shares, forks, files, size, defaults, model] = await Promise.all([
     openAssistant(viewer),
     assistantConversation(viewer, conversationId),
     claudeMdSettings(viewer),
@@ -97,8 +98,7 @@ export default async function ConversationPage({
     assistantFiles(viewer),
     assistantSize(viewer),
     assistantExportDefaults(viewer),
-    assistantModel(viewer),
-    feedbackMenu(viewer)
+    assistantModel(viewer)
   ]);
   if (view === undefined) {
     notFound();
@@ -115,7 +115,7 @@ export default async function ConversationPage({
       groups={home.conversations}
       activeId={view.id}
       theme={theme}
-      actions={ACTIONS}
+      actions={{ ...ACTIONS, pinFeedback: pinFeedbackProject, archiveFeedback: archiveFeedbackProject }}
       connections={connectionsData(home.assistant, home.credentials)}
       viewerRoute={home.credentials.modelRoute}
       connect={{ assistantId: home.assistant.id, running: home.assistant.desired === "running", reconnect: reconnectSignIn, paste: pasteLoginCode }}
@@ -123,7 +123,7 @@ export default async function ConversationPage({
       plugins={pluginSettings}
       welsh={home.welsh}
       briefing={home.briefing}
-      feedback={feedback}
+      feedback={feedbackEnabled()}
       start={startConversation}
       claudeMd={{ settings: claudeMd, save: saveClaudeMd, reset: resetClaudeMd }}
       templates={{ mine, save: saveTemplate, remove: deleteTemplate }}

@@ -1,9 +1,9 @@
 import "server-only";
 import { HttpError } from "../agent-api/http.ts";
 import type { MentionablePerson } from "../feedback/mentions.ts";
+import { projectsLastActive } from "../feedback/nav-store.ts";
 import { type FeedbackRecordingDetail, type FeedbackRecordingView, getRecording, listRecordings, recordingPages } from "../feedback/recording-store.ts";
-import { feedbackEnabled } from "../feedback/settings.ts";
-import { type FeedbackProjectSummary, type FeedbackProjectView, getProject, hasFeedbackProjects, listProjects, mentionablePeople } from "../feedback/store.ts";
+import { type FeedbackProjectSummary, type FeedbackProjectView, getProject, listProjects, mentionablePeople } from "../feedback/store.ts";
 import { type FeedbackThreadView, listThreads } from "../feedback/thread-store.ts";
 import { prisma } from "../store/prisma.ts";
 import type { Identity } from "../users/identity.ts";
@@ -14,51 +14,21 @@ import type { Identity } from "../users/identity.ts";
  * renders as not found, as it does one that does not exist.
  */
 
-/** What the sidebar's plus offers: `undefined` while feedback is off. */
-export interface FeedbackMenu {
-  /** The viewer owns or is on the team of a project, so the way to the list is offered too. */
-  projects: boolean;
-}
-
-export async function feedbackMenu(viewer: Identity): Promise<FeedbackMenu | undefined> {
-  if (!feedbackEnabled()) {
-    return undefined;
-  }
-  return { projects: await hasFeedbackProjects(prisma, viewer.oid) };
-}
-
 export interface FeedbackProjectRow extends FeedbackProjectSummary {
-  /** The latest of the project's own change, a thread's and a recording's. */
+  /** As the sidebar dates it; see `projectsLastActive`. */
   lastActivityAt: string;
 }
 
 export async function feedbackProjects(viewer: Identity, includeArchived: boolean): Promise<FeedbackProjectRow[]> {
   const projects = await listProjects(prisma, viewer.oid, { includeArchived });
-  const ids = projects.map((project) => project.id);
-  if (ids.length === 0) {
+  if (projects.length === 0) {
     return [];
   }
-  const [threads, recordings] = await Promise.all([
-    prisma.feedbackThread.groupBy({ by: ["projectId"], where: { projectId: { in: ids } }, _max: { updatedAt: true } }),
-    prisma.feedbackRecording.groupBy({ by: ["projectId"], where: { projectId: { in: ids } }, _max: { startedAt: true, endedAt: true } })
-  ]);
-  const latest = new Map<string, number>();
-  const seen = (projectId: string, at: Date | null | undefined) => {
-    if (at) {
-      latest.set(projectId, Math.max(latest.get(projectId) ?? 0, at.getTime()));
-    }
-  };
-  for (const row of threads) {
-    seen(row.projectId, row._max.updatedAt);
-  }
-  for (const row of recordings) {
-    seen(row.projectId, row._max.startedAt);
-    seen(row.projectId, row._max.endedAt);
-  }
-  return projects.map((project) => {
-    const at = Math.max(Date.parse(project.updatedAt), latest.get(project.id) ?? 0);
-    return { ...project, lastActivityAt: new Date(at).toISOString() };
-  });
+  const latest = await projectsLastActive(
+    prisma,
+    projects.map((project) => project.id)
+  );
+  return projects.map((project) => ({ ...project, lastActivityAt: (latest.get(project.id) ?? new Date(project.updatedAt)).toISOString() }));
 }
 
 export interface FeedbackRecordingRow extends FeedbackRecordingView {

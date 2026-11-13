@@ -114,3 +114,11 @@ export function visibleMatches<T extends { ownerOid: string }>(viewerOid: string
   }
   return [...rows];
 }
+
+/**
+ * The search's chats and feedback projects as one list, most recently active first, as the sidebar's list orders
+ * them; the id settles a tie.
+ */
+export function mergeMatches<T extends { id: string; lastActiveAt: string }>(...lists: readonly (readonly T[])[]): T[] {
+  return lists.flat().sort((a, b) => Date.parse(b.lastActiveAt) - Date.parse(a.lastActiveAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}

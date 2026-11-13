@@ -5,9 +5,10 @@ import { useRouter } from "next/navigation";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ConnectionsData } from "@/assistant/connections";
 import type { SidebarGroup } from "@/assistant/grouping";
+import { unreadLabel } from "@/assistant/grouping";
 import type { LocalSession } from "@/assistant/local-session";
 import type { Theme } from "@/assistant/theme";
-import type { ConversationLink } from "@/assistant/views";
+import type { SidebarItem } from "@/assistant/views";
 import type { AssistantAgentSettings } from "@/components/assistant/AgentSettings";
 import { ChatMark } from "@/components/assistant/ChatMark";
 import { ChatMenu } from "@/components/assistant/ChatMenu";
@@ -15,6 +16,7 @@ import type { AssistantClaudeMd } from "@/components/assistant/ClaudeMdSettings"
 import type { AssistantTokens } from "@/components/assistant/ConnectionSettings";
 import { ConversationSearch } from "@/components/assistant/ConversationSearch";
 import type { AssistantExportDefaults } from "@/components/assistant/ExportSettings";
+import { FeedbackMenu } from "@/components/assistant/FeedbackMenu";
 import type { AssistantFiles } from "@/components/assistant/FileSettings";
 import type { AssistantGitIdentity } from "@/components/assistant/GitIdentitySettings";
 import { LiveLocalSessions } from "@/components/assistant/LiveLocalSessions";
@@ -25,7 +27,7 @@ import type { AssistantSharing } from "@/components/assistant/SharingSettings";
 import type { AssistantSize } from "@/components/assistant/SizeSettings";
 import type { AssistantTemplates } from "@/components/assistant/TemplateSettings";
 import { useResizableWidth } from "@/components/assistant/useResizableWidth";
-import { type FeedbackOffer, type StartChatAction, WorkflowsMenu } from "@/components/assistant/WorkflowsMenu";
+import { type StartChatAction, WorkflowsMenu } from "@/components/assistant/WorkflowsMenu";
 import type { ModelRoute } from "@/viewer/identity";
 import type { ActionResult } from "@/web/action";
 
@@ -34,6 +36,8 @@ export interface ConversationActions {
   rename: (input: { conversationId: unknown; title: unknown }) => Promise<ActionResult>;
   pin: (input: { conversationId: unknown; pinned: unknown }) => Promise<ActionResult>;
   remove: (input: { conversationId: unknown }) => Promise<ActionResult>;
+  pinFeedback: (input: { projectId: unknown; pinned: unknown }) => Promise<ActionResult>;
+  archiveFeedback: (input: { projectId: unknown }) => Promise<ActionResult>;
 }
 
 interface ShellContextValue {
@@ -130,7 +134,7 @@ export function AssistantShell({
   children
 }: {
   viewerName: string;
-  groups: { label: SidebarGroup; items: ConversationLink[] }[];
+  groups: { label: SidebarGroup; items: SidebarItem[] }[];
   activeId: string | null;
   /** The appearance the person chose, which the switch in the footer's settings starts from. */
   theme?: Theme;
@@ -151,8 +155,8 @@ export function AssistantShell({
    * `morning-briefing`, so the morning briefing is offered.
    */
   briefing?: boolean;
-  /** Prototype feedback is on, so the way to a new feedback project is shown, and to the list once there is one. */
-  feedback?: FeedbackOffer;
+  /** Prototype feedback is on, so the way to a new feedback project is shown. */
+  feedback?: boolean;
   /** How the morning briefing starts its chat; without it, the briefing is not offered. */
   start?: StartChatAction;
   /** The Claude model the person's chats run on, which the footer's settings shows and changes. */
@@ -292,71 +296,97 @@ export function AssistantShell({
                 <div key={group.label} className="flex flex-col gap-0.5">
                   <h2 className="px-2.5 pb-1.5 pt-1 text-xs font-medium text-asst-faint">{group.label}</h2>
                   <ul className="flex flex-col gap-0.5">
-                    {group.items.map((item) => (
-                      <li key={item.id} className="group relative">
-                        <Link
-                          href={`/assistant/${item.id}`}
-                          aria-current={item.id === activeId ? "page" : undefined}
-                          className={`flex items-center gap-1.5 rounded-lg py-2 pl-2.5 text-sm ${actions === undefined ? "pr-2.5" : "pr-9"} ${
-                            item.id === activeId ? "bg-asst-active text-asst-text" : "text-asst-body hover:bg-asst-raised"
-                          }`}
-                        >
-                          <ChatMark conversationId={item.id} mark={item.mark} />
-                          {/* The title is what gives way, so the marker beside it stays whole at any sidebar width. */}
-                          <span className="min-w-0 truncate">{item.title}</span>
-                        </Link>
-                        {actions === undefined ? null : (
-                          // A sibling of the link, not a child: an anchor may not hold a button.
-                          <div className="absolute right-1 top-1 flex">
-                            <ChatMenu
-                              title={item.title}
-                              shareHref={`/assistant/${item.id}?share=1`}
-                              local={item.mark?.where === "computer"}
-                              forkHref={`/assistant/${item.id}?fork=1`}
-                              label={`Options for ${item.title}`}
-                              // The trigger appears when the row is hovered, but a keyboard or touch user never
-                              // hovers, so it is shown as well while the focus is anywhere inside the row, at every
-                              // drawer-width screen, and always on the chat that is open.
-                              triggerClassName={`flex h-7 w-7 items-center justify-center rounded-md text-base leading-none text-asst-muted hover:bg-asst-field hover:text-asst-text group-hover:opacity-100 group-focus-within:opacity-100 max-md:opacity-100 ${
-                                item.id === activeId ? "" : "opacity-0"
-                              }`}
-                              pinned={item.pinnedAt !== null}
-                              onOpen={() => setFailed(null)}
-                              onPin={async (pinned) => {
-                                const result = await actions.pin({ conversationId: item.id, pinned });
-                                setFailed(result.ok ? null : { id: item.id, error: result.error });
-                                router.refresh();
-                              }}
-                              onRename={async (title) => {
-                                const result = await actions.rename({ conversationId: item.id, title });
-                                setFailed(result.ok ? null : { id: item.id, error: result.error });
-                                router.refresh();
-                              }}
-                              onDelete={async () => {
-                                const result = await actions.remove({ conversationId: item.id });
-                                if (!result.ok) {
-                                  setFailed({ id: item.id, error: result.error });
-                                  return;
-                                }
-                                setFailed(null);
-                                // The open chat's page now has nothing to show, so it has to be left; deleting any
-                                // other only takes a row out of the list.
-                                if (item.id === activeId) {
-                                  router.push("/assistant");
-                                } else {
-                                  router.refresh();
-                                }
-                              }}
-                            />
-                          </div>
-                        )}
-                        {failed?.id === item.id ? (
-                          <p role="alert" className="px-2.5 pb-1 text-xs text-asst-error">
-                            {failed.error}
-                          </p>
-                        ) : null}
-                      </li>
-                    ))}
+                    {group.items.map((item) => {
+                      const active = item.id === activeId;
+                      // The trigger appears when the row is hovered, but a keyboard or touch user never hovers, so it
+                      // is shown as well while the focus is anywhere inside the row, at every drawer-width screen, and
+                      // always on the item that is open.
+                      const triggerClassName = `flex h-7 w-7 items-center justify-center rounded-md text-base leading-none text-asst-muted hover:bg-asst-field hover:text-asst-text group-hover:opacity-100 group-focus-within:opacity-100 max-md:opacity-100 ${
+                        active ? "" : "opacity-0"
+                      }`;
+                      const report = (result: ActionResult) => setFailed(result.ok ? null : { id: item.id, error: result.error });
+                      return (
+                        <li key={item.id} className="group relative">
+                          <Link
+                            href={item.kind === "feedback" ? `/assistant/feedback/${item.id}` : `/assistant/${item.id}`}
+                            aria-current={active ? "page" : undefined}
+                            className={`flex items-center gap-1.5 rounded-lg py-2 pl-2.5 text-sm ${actions === undefined ? "pr-2.5" : "pr-9"} ${
+                              active ? "bg-asst-active text-asst-text" : "text-asst-body hover:bg-asst-raised"
+                            }`}
+                          >
+                            <ChatMark item={item} />
+                            {/* The title is what gives way, so the marker beside it stays whole at any sidebar width. */}
+                            <span className="min-w-0 truncate">{item.title}</span>
+                            {item.kind === "feedback" && item.unread > 0 ? <UnreadBadge count={item.unread} /> : null}
+                          </Link>
+                          {actions === undefined ? null : (
+                            // A sibling of the link, not a child: an anchor may not hold a button.
+                            <div className="absolute right-1 top-1 flex">
+                              {item.kind === "feedback" ? (
+                                <FeedbackMenu
+                                  title={item.title}
+                                  pinned={item.pinnedAt !== null}
+                                  links={item.links}
+                                  archivable={item.archivable}
+                                  triggerClassName={triggerClassName}
+                                  onOpen={() => setFailed(null)}
+                                  onPin={async (pinned) => {
+                                    report(await actions.pinFeedback({ projectId: item.id, pinned }));
+                                  }}
+                                  onArchive={async () => {
+                                    const result = await actions.archiveFeedback({ projectId: item.id });
+                                    report(result);
+                                    // The open project's page would show it archived; its list is where its owner goes.
+                                    if (result.ok && active) {
+                                      router.push("/assistant/feedback");
+                                    }
+                                  }}
+                                />
+                              ) : (
+                                <ChatMenu
+                                  title={item.title}
+                                  shareHref={`/assistant/${item.id}?share=1`}
+                                  local={item.kind === "local"}
+                                  forkHref={`/assistant/${item.id}?fork=1`}
+                                  label={`Options for ${item.title}`}
+                                  triggerClassName={triggerClassName}
+                                  pinned={item.pinnedAt !== null}
+                                  onOpen={() => setFailed(null)}
+                                  onPin={async (pinned) => {
+                                    report(await actions.pin({ conversationId: item.id, pinned }));
+                                    router.refresh();
+                                  }}
+                                  onRename={async (title) => {
+                                    report(await actions.rename({ conversationId: item.id, title }));
+                                    router.refresh();
+                                  }}
+                                  onDelete={async () => {
+                                    const result = await actions.remove({ conversationId: item.id });
+                                    if (!result.ok) {
+                                      report(result);
+                                      return;
+                                    }
+                                    setFailed(null);
+                                    // The open chat's page now has nothing to show, so it has to be left; deleting any
+                                    // other only takes a row out of the list.
+                                    if (active) {
+                                      router.push("/assistant");
+                                    } else {
+                                      router.refresh();
+                                    }
+                                  }}
+                                />
+                              )}
+                            </div>
+                          )}
+                          {failed?.id === item.id ? (
+                            <p role="alert" className="px-2.5 pb-1 text-xs text-asst-error">
+                              {failed.error}
+                            </p>
+                          ) : null}
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
               ))}
@@ -403,7 +433,22 @@ export function AssistantShell({
   );
 }
 
+/** How many new comments and recordings a feedback project has, in words for a screen reader. */
+function UnreadBadge({ count }: { count: number }) {
+  const label = unreadLabel(count);
+  return (
+    <span className="ml-auto shrink-0 rounded-full bg-asst-accent px-1.5 text-[11px] font-semibold leading-[18px] text-asst-ink">
+      <span aria-hidden="true">{label}</span>
+      <span className="sr-only">{`, ${label} new`}</span>
+    </span>
+  );
+}
+
 /** The server's state for each chat in the list that is on the person's own computer; see `LiveLocalSessions`. */
-function localSessions(groups: { items: ConversationLink[] }[]): ReadonlyMap<string, LocalSession> {
-  return new Map(groups.flatMap((group) => group.items.flatMap((item) => (item.mark?.where === "computer" ? [[item.id, item.mark.session] as const] : []))));
+function localSessions(groups: { items: SidebarItem[] }[]): ReadonlyMap<string, LocalSession> {
+  return new Map(
+    groups.flatMap((group) =>
+      group.items.flatMap((item) => (item.kind === "local" && item.mark?.where === "computer" ? [[item.id, item.mark.session] as const] : []))
+    )
+  );
 }

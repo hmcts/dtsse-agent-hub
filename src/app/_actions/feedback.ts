@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { HttpError, parse } from "@/agent-api/http";
+import { markProjectSeen, pinProject } from "@/feedback/nav-store";
 import { type ProbeOutcome, probeTarget } from "@/feedback/probe";
 import {
   createFeedbackProjectBody,
@@ -187,5 +188,34 @@ export async function probeFeedbackLink(input: { url: unknown }): Promise<Action
     }
     await requireViewer();
     return { ok: true, probe: await probeTarget(text(input.url)) };
+  });
+}
+
+/** Pins the project in the viewer's own sidebar, or unpins it. */
+export async function pinFeedbackProject(input: { projectId: unknown; pinned: unknown }): Promise<ActionResult> {
+  return await runAction("pin feedback project", async () => {
+    if (!feedbackEnabled()) {
+      return OFF;
+    }
+    const viewer = await requireViewer();
+    await pinProject(prisma, viewer.oid, text(input.projectId), input.pinned);
+    revalidatePath("/assistant", "layout");
+    return { ok: true };
+  });
+}
+
+/**
+ * Marks the project seen by the viewer, which clears its count in their sidebar. Called by the project's page once it
+ * is on screen rather than as the page renders, so a prefetch of the page marks nothing.
+ */
+export async function markFeedbackProjectSeen(input: { projectId: unknown }): Promise<ActionResult> {
+  return await runAction("mark feedback project seen", async () => {
+    if (!feedbackEnabled()) {
+      return OFF;
+    }
+    const viewer = await requireViewer();
+    await markProjectSeen(prisma, viewer.oid, text(input.projectId));
+    revalidatePath("/assistant", "layout");
+    return { ok: true };
   });
 }

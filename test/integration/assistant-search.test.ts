@@ -1,11 +1,20 @@
 import { NextRequest } from "next/server";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET as searchRoute } from "../../src/app/api/ui/assistant/search/route.ts";
 import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
 import type { ConversationRow } from "../../src/assistant/conversation-row.ts";
 import { conversationAgent, createConversation, listConversations, renameConversation, touchConversation } from "../../src/assistant/conversation-store.ts";
 import { searchConversations } from "../../src/assistant/search-store.ts";
-import { type ConversationMark, type ConversationMatch, conversationGroups, conversationMatches } from "../../src/assistant/views.ts";
+import {
+  type ConversationMark,
+  type ConversationMatch,
+  conversationMatches,
+  type SidebarMatch,
+  sidebarGroups,
+  sidebarMatches
+} from "../../src/assistant/views.ts";
+import { pinProject } from "../../src/feedback/nav-store.ts";
+import { createProject } from "../../src/feedback/store.ts";
 import { directAsPerson } from "../../src/messages/send.ts";
 import { byCodePoint } from "../../src/topics/slug.ts";
 import { appendEntries } from "../../src/transcripts/store.ts";
@@ -50,8 +59,8 @@ async function listed(who: Person): Promise<(string | null)[]> {
 
 /** What the sidebar's own grouped list marks each of their chats with, which a search result has to agree with. */
 async function marked(who: Person): Promise<Map<string, ConversationMark>> {
-  const groups = await conversationGroups(prisma, who.oid);
-  return new Map(groups.flatMap((group) => group.items).map((item) => [item.title, item.mark]));
+  const groups = await sidebarGroups(prisma, who.oid);
+  return new Map(groups.flatMap((group) => group.items).flatMap((item) => (item.kind === "feedback" ? [] : [[item.title, item.mark] as const])));
 }
 
 /**
@@ -72,7 +81,8 @@ async function asked(persona: string, query: string): Promise<ConversationMatch[
   });
   const response = await searchRoute(request);
   expect(response.status).toBe(200);
-  return (await jsonOf<{ chats: ConversationMatch[] }>(response)).chats;
+  const { results } = await jsonOf<{ results: SidebarMatch[] }>(response);
+  return results.flatMap((result) => (result.kind === "feedback" ? [] : [result]));
 }
 
 beforeEach(async () => {
@@ -376,6 +386,7 @@ describe("a chat with no assistant behind it", () => {
     ["idle", "ready"],
     ["offline", "disconnected"]
   ] as const)("should mark a result that is a local chat as %s with the state of its session", async (status, session) => {
+    await chat(ALICE, ["Something on my assistant"]);
     const local = await chat(ALICE, ["A possession claim with no assistant"]);
     await withoutPod(local);
     await prisma.agent.updateMany({ where: { assistantConversationId: local.id }, data: { status } });
@@ -388,7 +399,7 @@ describe("a chat with no assistant behind it", () => {
   /**
    * Whether a pod chat is marked as one is a fact about the person's whole list, and the sidebar's list and its
    * search are two requests apart: the page renders one and the browser asks the route for the other. Both read it
-   * through `hasLocalConversation`, which is what keeps them from answering differently for the same person.
+   * through `showsMarks`, which is what keeps them from answering differently for the same person.
    */
   it("should mark a pod chat the same in the sidebar's list and in the search for the same person", async () => {
     const ON_POD = "A possession claim on my assistant";
@@ -407,6 +418,13 @@ describe("a chat with no assistant behind it", () => {
     ]);
     expect(await marked(ALICE)).toEqual(mixed);
     expect(new Map((await asked("alice", "possession")).map((match) => [match.title, match.mark]))).toEqual(mixed);
+  });
+
+  it("should mark no chat when every one of the person's chats is on their own computer", async () => {
+    await withoutPod(await chat(ALICE, ["A possession claim with no assistant"]));
+
+    expect(await marked(ALICE)).toEqual(new Map([["A possession claim with no assistant", null]]));
+    expect((await asked("alice", "possession")).map((match) => match.mark)).toEqual([null]);
   });
 
   it("should find nothing of another person's chat that has no assistant either", async () => {
@@ -456,5 +474,90 @@ describe("searching someone else's conversations", () => {
 
   it("should find nothing for a person who has no chats of their own", async () => {
     expect(await asked("carol", "possession")).toEqual([]);
+  });
+});
+
+describe("feedback projects beside the chats", () => {
+  beforeEach(() => {
+    vi.stubEnv("FEEDBACK_ENABLED", "true");
+    vi.stubEnv("AGENT_HUB_VIEWER_HOST", "agent-hub-viewer.aat.platform.hmcts.net");
+    vi.stubEnv("ENTRA_REDIRECT_URI", "https://agent-hub.aat.platform.hmcts.net/auth/callback");
+    vi.stubEnv("SESSION_SECRET", "s".repeat(32));
+    vi.stubEnv("FEEDBACK_STORAGE_ACCOUNT_URL", "https://dtsseagenthubaat.blob.core.windows.net");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  async function project(name: string): Promise<string> {
+    const made = await createProject(prisma, ALICE.oid, {
+      name,
+      links: [{ label: "Version 1", targetUrl: "https://claims-v1.herokuapp.com/start", prototypeVersion: null }],
+      memberOids: [BOB.oid],
+      maskInputs: false,
+      retentionDays: 90
+    });
+    return made.id;
+  }
+
+  async function sidebar(who: Person) {
+    return (await sidebarGroups(prisma, who.oid)).flatMap((group) => group.items.map((item) => ({ group: group.label, item })));
+  }
+
+  it("should list a project with the chats and mark every row once the list holds both", async () => {
+    await chat(ALICE, ["A possession claim on my assistant"]);
+    const id = await project("Possession prototype");
+
+    const rows = await sidebar(ALICE);
+
+    expect(rows.map(({ item }) => [item.kind, item.title])).toEqual([
+      ["feedback", "Possession prototype"],
+      ["cloud", "A possession claim on my assistant"]
+    ]);
+    expect(rows.map(({ item }) => (item.kind === "feedback" ? item.marked : item.mark !== null))).toEqual([true, true]);
+    expect(rows[0]?.item.id).toBe(id);
+  });
+
+  it("should mark nothing when the person has projects and no chats", async () => {
+    await project("Possession prototype");
+
+    expect((await sidebar(BOB)).map(({ item }) => (item.kind === "feedback" ? item.marked : item.mark))).toEqual([false]);
+  });
+
+  it("should put a project the person pinned in Pinned", async () => {
+    await chat(BOB, ["A possession claim on my assistant"]);
+    const id = await project("Possession prototype");
+    await pinProject(prisma, BOB.oid, id, true);
+
+    expect((await sidebar(BOB)).map(({ group, item }) => [group, item.title])).toEqual([
+      ["Pinned", "Possession prototype"],
+      ["Today", "A possession claim on my assistant"]
+    ]);
+    expect((await sidebar(ALICE)).map(({ group }) => group)).toEqual(["Today"]);
+  });
+
+  it("should find a project by its name in the sidebar's search, marked as the list marks it", async () => {
+    await chat(ALICE, ["A possession claim on my assistant"]);
+    const id = await project("Possession prototype");
+    const request = new NextRequest("http://localhost:3000/api/ui/assistant/search?q=possession", { headers: { cookie: "ah_dev_persona=alice" } });
+
+    const { results } = await jsonOf<{ results: SidebarMatch[] }>(await searchRoute(request));
+
+    expect(results.map((result) => [result.kind, result.title])).toEqual([
+      ["feedback", "Possession prototype"],
+      ["cloud", "A possession claim on my assistant"]
+    ]);
+    expect(results[0]).toMatchObject({ id, marked: true });
+    expect(results[1]).toMatchObject({ mark: { where: "assistant" } });
+  });
+
+  it("should leave the projects out of the list and the search while feedback is off", async () => {
+    vi.stubEnv("FEEDBACK_ENABLED", "false");
+    await chat(ALICE, ["A possession claim on my assistant"]);
+    await project("Possession prototype");
+
+    expect((await sidebar(ALICE)).map(({ item }) => [item.kind, item.kind === "feedback" ? item.marked : item.mark])).toEqual([["cloud", null]]);
+    expect((await sidebarMatches(prisma, ALICE.oid, "possession")).map((result) => result.kind)).toEqual(["cloud"]);
   });
 });

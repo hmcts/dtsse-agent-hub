@@ -20,9 +20,7 @@ const SESSION: Record<PodSession, { words: string; colour: string }> = {
 
 /**
  * That a chat runs on the person's assistant rather than on their own computer — the other half of `LocalMark`, and
- * shown only once they have a local chat for it to tell this one apart from. `ConversationMark` is where that is
- * decided; a list with nothing but pod chats in it carries no marks at all, because a cloud against every row of it
- * would distinguish them from nothing.
+ * shown only once their list holds another kind of item for it to tell this one apart from (`showsMarks`).
  *
  * Coloured by whether the chat has an agent session connected, which is what `podSessionOf` works out. The pod's own
  * lifecycle has more states than that (queued, being swept, stopped) and they are folded into these four; the chat's

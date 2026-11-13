@@ -5,6 +5,7 @@ import { deleteAllAssistantFiles, deleteAssistantFile } from "@/app/_actions/ass
 import { readAssistantAgent, readGitIdentity } from "@/app/_actions/assistant-settings";
 import { clearGitIdentity, removeCredential, resetClaudeMd, saveClaudeMd, saveCredential, saveGitIdentity } from "@/app/_actions/credentials";
 import { saveExportDefaults } from "@/app/_actions/export-defaults";
+import { archiveFeedbackProject, pinFeedbackProject } from "@/app/_actions/feedback";
 import { deleteTemplate, saveTemplate } from "@/app/_actions/templates";
 import { pasteLoginCode, reconnectSignIn, restartVirtualAgent, saveVirtualAgentPod } from "@/app/_actions/virtual-agents";
 import { SHARING_SETTINGS } from "@/app/assistant/sharing";
@@ -16,9 +17,14 @@ import { AssistantShell, type ConversationActions } from "@/components/assistant
 import { feedbackEnabled } from "@/feedback/settings";
 import type { Viewer } from "@/viewer/identity";
 import { assistantExportDefaults, assistantFiles, assistantModel, assistantSize, assistantTemplates, claudeMdSettings, openAssistant } from "@/web/data";
-import { feedbackMenu } from "@/web/feedback-data";
 
-const ROW_ACTIONS: ConversationActions = { rename: renameConversation, pin: pinConversation, remove: deleteConversation };
+const ROW_ACTIONS: ConversationActions = {
+  rename: renameConversation,
+  pin: pinConversation,
+  remove: deleteConversation,
+  pinFeedback: pinFeedbackProject,
+  archiveFeedback: archiveFeedbackProject
+};
 
 /** Not found while prototype feedback is off, so its pages say nothing about a feature that is not there. */
 export function requireFeedback(): void {
@@ -29,20 +35,24 @@ export function requireFeedback(): void {
 
 /**
  * The feedback pages' frame: the Assistant's sidebar and settings, as every Assistant page has them, around the page.
- * It holds no getting-ready gate, since nothing here runs on the person's assistant.
+ * It holds no getting-ready gate, since nothing here runs on the person's assistant. `projectId` is the project the
+ * page is about, whose row the sidebar shows as the current one.
  */
-export async function FeedbackFrame({ viewer, children }: Readonly<{ viewer: Viewer; children: React.ReactNode }>) {
+export async function FeedbackFrame({
+  viewer,
+  projectId = null,
+  children
+}: Readonly<{ viewer: Viewer; projectId?: string | null; children: React.ReactNode }>) {
   const jar = await cookies();
   const theme = themeOf(jar.get(THEME_COOKIE)?.value);
-  const [home, claudeMd, mine, files, size, defaults, model, feedback] = await Promise.all([
+  const [home, claudeMd, mine, files, size, defaults, model] = await Promise.all([
     openAssistant(viewer),
     claudeMdSettings(viewer),
     assistantTemplates(viewer),
     assistantFiles(viewer),
     assistantSize(viewer),
     assistantExportDefaults(viewer),
-    assistantModel(viewer),
-    feedbackMenu(viewer)
+    assistantModel(viewer)
   ]);
   const atlassian = {
     connected: home.credentials.available && home.credentials.statuses.some((status) => status.kind === "atlassian" && status.stored),
@@ -54,7 +64,7 @@ export async function FeedbackFrame({ viewer, children }: Readonly<{ viewer: Vie
     <AssistantShell
       viewerName={viewer.name}
       groups={home.conversations}
-      activeId={null}
+      activeId={projectId}
       theme={theme}
       actions={ROW_ACTIONS}
       connections={connectionsData(home.assistant, home.credentials)}
@@ -64,7 +74,7 @@ export async function FeedbackFrame({ viewer, children }: Readonly<{ viewer: Vie
       plugins={pluginSettings}
       welsh={home.welsh}
       briefing={home.briefing}
-      feedback={feedback}
+      feedback={feedbackEnabled()}
       start={startConversation}
       claudeMd={{ settings: claudeMd, save: saveClaudeMd, reset: resetClaudeMd }}
       templates={{ mine, save: saveTemplate, remove: deleteTemplate }}
