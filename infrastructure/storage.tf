@@ -28,6 +28,10 @@ resource "azurerm_storage_account" "feedback" {
   default_to_oauth_authentication = true
   allow_nested_items_to_be_public = false
 
+  identity {
+    type = "SystemAssigned"
+  }
+
   blob_properties {
     # The review shell uploads segments and the hub's pages play them, both from the hub's own origin.
     cors_rule {

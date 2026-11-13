@@ -208,4 +208,14 @@ describe("ThreadCard", () => {
     fireEvent.focus(screen.getByRole("button", { name: "Resolve" }));
     expect(onFocus).toHaveBeenCalled();
   });
+
+  it("should tell the page when its heading is chosen without moving focus, as Safari's clicks do", () => {
+    const onFocus = vi.fn();
+    render(<ThreadCard thread={thread()} people={PEOPLE} onReply={vi.fn()} onStatus={vi.fn()} onFocus={onFocus} number={3} />);
+    const heading = screen.getByRole("heading", { name: "Comment 3: Bob Builder" });
+    fireEvent.click(screen.getByRole("button", { name: "Comment 3: Bob Builder" }));
+    expect(onFocus).toHaveBeenCalledTimes(1);
+    expect(heading.contains(screen.getByRole("button", { name: "Comment 3: Bob Builder" }))).toBe(true);
+    expect(screen.getByRole("article", { name: "Comment 3: Bob Builder" })).toBeTruthy();
+  });
 });

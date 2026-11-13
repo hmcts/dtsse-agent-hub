@@ -134,6 +134,28 @@ async function settle(ms = 0): Promise<void> {
   });
 }
 
+const realSetTimeout = globalThis.setTimeout;
+
+/**
+ * Waits on the real clock, leaving the fake one where it is, until `done`. Snapshots and replay segments are gzipped
+ * through `CompressionStream`, which runs on the real clock: advancing the fake one does not wait for it.
+ */
+async function untilReal(done: () => boolean): Promise<void> {
+  for (let waited = 0; !done(); waited += 5) {
+    if (waited >= 5000) {
+      throw new Error("timed out waiting on the real clock");
+    }
+    await act(async () => {
+      await new Promise((resolve) => realSetTimeout(resolve, 5));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  }
+}
+
+function snapshotPuts(): Call[] {
+  return calls.filter((call) => call.url === "https://blob.example/snapshot?sas");
+}
+
 function shell() {
   render(
     <ReviewShell
@@ -237,11 +259,11 @@ describe("ReviewShell", () => {
     expect(screen.getByText(/button “Continue”/)).toBeTruthy();
     fireEvent.change(screen.getByRole("combobox", { name: "Your comment" }), { target: { value: "Where does this go?" } });
     fireEvent.click(screen.getByRole("button", { name: "Save comment" }));
-    await settle();
+    await untilReal(() => snapshotPuts().length > 0);
     await settle();
     const created = calls.find((call) => call.method === "POST" && call.url === `${BASE}/threads`);
     expect(created?.body).toEqual({ page_path: "/start", anchor: ANCHOR, body: "Where does this go?", snapshot: true });
-    const put = calls.find((call) => call.url === "https://blob.example/snapshot?sas");
+    const put = snapshotPuts()[0];
     expect(put?.method).toBe("PUT");
     expect(put?.headers["x-ms-blob-type"]).toBe("BlockBlob");
     expect(screen.getByRole("status", { name: "" }).textContent).toContain("Comment saved");
@@ -297,6 +319,7 @@ describe("ReviewShell", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Stop recording/ }));
     await settle(500);
+    await untilReal(() => calls.some((call) => call.url.endsWith("/complete")));
     await settle();
     expect(posted.some((message) => message.type === "record-stop")).toBe(true);
 
@@ -400,7 +423,7 @@ describe("ReviewShell", () => {
     await fromWidget({ type: "hello", path: "/start", title: "", version: "" });
     await fromWidget({ type: "marker-clicked", id: "t2" });
     expect(screen.getByRole("article", { name: "Comment 2: Ann Reviewer" }).className).toContain("ring-2");
-    fireEvent.click(screen.getByRole("article", { name: "Comment 1: Ann Reviewer" }));
+    fireEvent.click(screen.getByRole("button", { name: "Comment 1: Ann Reviewer" }));
     expect(posted.at(-1)).toEqual(expect.objectContaining({ type: "focus-thread", id: "t1" }));
   });
 
@@ -511,9 +534,10 @@ describe("ReviewShell's refusals and dialogs", () => {
     await fromWidget({ type: "picked", path: "/start", anchor: ANCHOR, snapshot: SNAPSHOT });
     fireEvent.change(screen.getByRole("combobox", { name: "Your comment" }), { target: { value: "Hmm" } });
     fireEvent.click(screen.getByRole("button", { name: "Save comment" }));
+    await untilReal(() => snapshotPuts().length > 0);
     await settle(20_000);
     await settle();
-    expect(calls.filter((call) => call.url === "https://blob.example/snapshot?sas")).toHaveLength(4);
+    expect(snapshotPuts()).toHaveLength(4);
     expect(screen.getByRole("alert").textContent).toContain("picture of the page could not be");
   });
 

@@ -203,13 +203,13 @@ export function CommentsView({
             </svg>
             <div className="relative flex shrink-0 flex-col gap-3 xl:w-[300px]">
               <ol aria-label="Comments on this page" className="flex flex-col gap-2">
-                {margin.map(card)}
+                {margin.map((thread, index) => card(thread, index))}
               </ol>
               {detached.length === 0 ? null : (
                 <div className="flex flex-col gap-2">
                   <h4 className="text-xs text-asst-faint">No longer on the page</h4>
                   <ol aria-label="Comments no longer on the page" className="flex flex-col gap-2">
-                    {detached.map(card)}
+                    {detached.map((thread, index) => card(thread, index))}
                   </ol>
                 </div>
               )}

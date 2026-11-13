@@ -64,10 +64,10 @@ export function findAnchored(document: Document, anchor: WidgetAnchor): Element 
   if (anchor.text === "" || !TAG.test(anchor.tag)) {
     return undefined;
   }
-  const candidates = Array.from(document.getElementsByTagName(anchor.tag)).filter((element) => textSnippet(element) === anchor.text);
-  if (candidates.length === 0) {
+  const [first, ...rest] = Array.from(document.getElementsByTagName(anchor.tag)).filter((element) => textSnippet(element) === anchor.text);
+  if (first === undefined) {
     return undefined;
   }
   const view = document.defaultView;
-  return candidates.reduce((best, candidate) => (distance(candidate, anchor, view) < distance(best, anchor, view) ? candidate : best));
+  return rest.reduce((best, candidate) => (distance(candidate, anchor, view) < distance(best, anchor, view) ? candidate : best), first);
 }

@@ -7,8 +7,8 @@ import { MentionInput, type MentionPerson } from "./MentionInput";
 
 /**
  * One comment thread, as a card in the review shell's panel and the team's comments view: who raised it and when,
- * every comment with the people it names picked out, a reply box and Resolve or Reopen. Focusing the card (a click
- * or a keyboard focus inside it) tells the page, which points at the thread's element.
+ * every comment with the people it names picked out, a reply box and Resolve or Reopen. Focusing the card (choosing
+ * its heading, or any focus inside it) tells the page, which points at the thread's element.
  */
 
 function escapeRegExp(value: string): string {
@@ -112,12 +112,10 @@ export function ThreadCard({
 
   const first = thread.comments[0];
   return (
-    // biome-ignore lint/a11y/useKeyWithClickEvents: a click anywhere on the card is a pointer shortcut; the keyboard reaches the same through onFocusCapture, as focus enters the card.
     <article
       ref={card}
       aria-labelledby={headingId}
       onFocusCapture={onFocus}
-      onClick={onFocus}
       className={`flex flex-col gap-2 rounded-xl border bg-asst-raised p-3 ${focused ? "border-asst-accent ring-2 ring-asst-accent-line" : "border-asst-line"} ${resolved ? "opacity-80" : ""}`}
     >
       <header className="flex items-start gap-2">
@@ -130,9 +128,12 @@ export function ThreadCard({
           </span>
         )}
         <div className="min-w-0 flex-1">
-          <h3 id={headingId} className="truncate text-sm font-semibold text-asst-text">
-            {number === undefined ? "" : `Comment ${number}: `}
-            {thread.author.name}
+          <h3 id={headingId} className="text-sm font-semibold text-asst-text">
+            {/* Safari does not focus a button it clicks, so the click calls onFocus as well as the focus that reaches the card. */}
+            <button type="button" onClick={onFocus} className="block w-full truncate text-left hover:underline">
+              {number === undefined ? "" : `Comment ${number}: `}
+              {thread.author.name}
+            </button>
           </h3>
           <p className="text-xs text-asst-faint">
             {first === undefined ? null : <Timestamp iso={first.createdAt} />}

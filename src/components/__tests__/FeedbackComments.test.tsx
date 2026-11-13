@@ -129,7 +129,7 @@ describe("CommentsView", () => {
     render(<CommentsView projectId="p1" threads={threads} links={project().links} people={[ANN]} handlers={handlers} />);
     await waitFor(() => expect(replayed.built).toHaveLength(1));
 
-    fireEvent.click(screen.getAllByRole("article")[1] as HTMLElement);
+    fireEvent.click(within(screen.getAllByRole("article")[1] as HTMLElement).getByRole("button", { name: /^Comment 2:/ }));
 
     await waitFor(() => expect(replayed.built).toHaveLength(2));
     expect(replayed.built[0]?.destroyed).toBe(true);
