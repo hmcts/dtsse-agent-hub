@@ -40,11 +40,26 @@ export function plural(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
-/** Whether a URL is one the wizard can send for checking: https with a host, as the server will insist. */
-export function isHttpsUrl(value: string): boolean {
+/**
+ * Whether a URL is one the wizard can send for checking: https with a host, as the server will insist, or http too
+ * where the server allows it, which `allowPrivateTargets` does on a developer's machine.
+ */
+export function isTargetUrl(value: string, allowHttp = false): boolean {
   if (!URL.canParse(value.trim())) {
     return false;
   }
   const url = new URL(value.trim());
-  return url.protocol === "https:" && url.hostname !== "";
+  return (url.protocol === "https:" || (allowHttp && url.protocol === "http:")) && url.hostname !== "";
+}
+
+export const TABS = ["overview", "comments", "recordings", "people", "settings"] as const;
+export type ProjectTab = (typeof TABS)[number];
+
+/**
+ * The tab `?tab=` names, if the viewer may see it, or the overview. Outside `ProjectPage`, a client module, because the
+ * server page calls it.
+ */
+export function projectTab(value: unknown, owner: boolean): ProjectTab {
+  const tab = TABS.find((t) => t === value) ?? "overview";
+  return tab === "settings" && !owner ? "overview" : tab;
 }

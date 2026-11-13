@@ -83,24 +83,27 @@ describe("landingPath", () => {
 
 describe("refererTarget", () => {
   const HOST = "agent-hub-viewer.example";
+  const ORIGIN = `https://${HOST}`;
   const PAGE = `https://${HOST}/${ID}/8080/dashboard?tab=1`;
 
   it("should move a root-relative path, query and all, under the prefix of the page that asked for it", () => {
-    expect(refererTarget(PAGE, HOST, "/style.css")).toBe(`/${ID}/8080/style.css`);
-    expect(refererTarget(PAGE, HOST, "/api?x=1")).toBe(`/${ID}/8080/api?x=1`);
-    expect(refererTarget(`https://${HOST}/${ID}/8080`, HOST, "/")).toBe(`/${ID}/8080/`);
+    expect(refererTarget(PAGE, ORIGIN, "/style.css")).toBe(`/${ID}/8080/style.css`);
+    expect(refererTarget(PAGE, ORIGIN, "/api?x=1")).toBe(`/${ID}/8080/api?x=1`);
+    expect(refererTarget(`https://${HOST}/${ID}/8080`, ORIGIN, "/")).toBe(`/${ID}/8080/`);
+    expect(refererTarget(`http://${HOST}:3000/${ID}/8080/`, `http://${HOST}:3000`, "/app.js")).toBe(`/${ID}/8080/app.js`);
   });
 
   it.each<[string, string | null, string]>([
     ["no Referer", null, "/style.css"],
     ["a Referer that is not a URL", "not a url", "/style.css"],
     ["a page on another host", `https://agent-hub.example/${ID}/8080/`, "/style.css"],
+    ["a page on another port", `https://${HOST}:8443/${ID}/8080/`, "/style.css"],
     ["a page over http", `http://${HOST}/${ID}/8080/`, "/style.css"],
     ["a page outside every prefix", `https://${HOST}/`, "/style.css"],
     ["the viewer's own ticket exchange", PAGE, "/_auth?ticket=x"],
     ["a scheme-relative path", PAGE, "//evil.example/"]
   ])("should leave nothing to redirect for %s", (_case, referer, path) => {
-    expect(refererTarget(referer, HOST, path)).toBeUndefined();
+    expect(refererTarget(referer, ORIGIN, path)).toBeUndefined();
   });
 });
 
@@ -129,6 +132,7 @@ describe("the last port's cookie", () => {
 
 const TOKEN = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_abcde";
 const HOST = "agent-hub-viewer.example";
+const ORIGIN = `https://${HOST}`;
 
 describe("feedback paths", () => {
   it("should read the widget's own path outside every prefix", () => {
@@ -162,13 +166,13 @@ describe("feedback paths", () => {
   });
 
   it("should move a root-relative path from a feedback link's page under its prefix", () => {
-    expect(refererTarget(`https://${HOST}/f/${TOKEN}/start`, HOST, "/assets/app.css")).toBe(`/f/${TOKEN}/assets/app.css`);
-    expect(refererTarget(`https://${HOST}/f/${TOKEN}`, HOST, "/next?x=1")).toBe(`/f/${TOKEN}/next?x=1`);
+    expect(refererTarget(`https://${HOST}/f/${TOKEN}/start`, ORIGIN, "/assets/app.css")).toBe(`/f/${TOKEN}/assets/app.css`);
+    expect(refererTarget(`https://${HOST}/f/${TOKEN}`, ORIGIN, "/next?x=1")).toBe(`/f/${TOKEN}/next?x=1`);
   });
 
   it.each(["/_feedback/widget.js", "/_feedback/widget.js?v=2", "/_auth?ticket=x"])("should never treat the viewer's own %s as a page's", (path) => {
-    expect(refererTarget(`https://${HOST}/f/${TOKEN}/start`, HOST, path)).toBeUndefined();
-    expect(refererTarget(`https://${HOST}/${ID}/8080/`, HOST, path)).toBeUndefined();
+    expect(refererTarget(`https://${HOST}/f/${TOKEN}/start`, ORIGIN, path)).toBeUndefined();
+    expect(refererTarget(`https://${HOST}/${ID}/8080/`, ORIGIN, path)).toBeUndefined();
     expect(lastPortTarget(`f/${TOKEN}`, path)).toBeUndefined();
   });
 

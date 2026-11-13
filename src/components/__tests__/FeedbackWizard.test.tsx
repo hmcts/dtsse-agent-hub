@@ -93,6 +93,15 @@ describe("FeedbackWizard", () => {
     expect(screen.getByRole("alert").textContent).toBe("Link 1: Enter the prototype's address, starting https://");
   });
 
+  it("should send an http address to the hub for checking when the hub allows private targets", async () => {
+    render(<FeedbackWizard actions={actions()} origin="https://hub.example.com" allowHttp />);
+    await toLinks();
+    await fillLink(1, "Round 1", "http://localhost:4100/");
+
+    expect(probe).toHaveBeenCalledWith({ url: "http://localhost:4100/" });
+    expect(screen.queryByText("The address must start https://")).toBeNull();
+  });
+
   it("should not go past an address the hub refuses, whatever is pressed", async () => {
     probe.mockResolvedValue({ ok: true, probe: { result: "refused", reason: "the address must be on the public internet" } });
     render(<FeedbackWizard actions={actions()} origin="https://hub.example.com" />);

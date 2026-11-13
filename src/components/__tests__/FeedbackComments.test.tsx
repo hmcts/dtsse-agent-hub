@@ -147,7 +147,8 @@ describe("SnapshotView", () => {
     const built = replayed.built[0];
     expect(built?.config).toMatchObject({ UNSAFE_replayCanvas: false, mouseTail: false, triggerFocus: false });
     expect(built?.paused).toEqual([41]);
-    expect(seen.at(-1)).toMatchObject({ approximate: false });
+    // The highlight is reported from an effect, which can run after the outline is already on screen.
+    await waitFor(() => expect(seen.at(-1)).toMatchObject({ approximate: false }));
     expect(screen.getByRole("status").textContent).toContain("with the element outlined");
   });
 

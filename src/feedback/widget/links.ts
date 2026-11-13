@@ -108,7 +108,10 @@ export function installLinkCapture(view: Window, context: FrameContext): () => v
     }
     event.preventDefault();
     if (action.kind === "assign") {
-      view.location.assign(action.url);
+      // Once the click has been dispatched, as a link's own navigation starts: the recorder and the prototype's
+      // handlers see the click first, and the recording's last batch goes before the page does.
+      const url = action.url;
+      setTimeout(() => view.location.assign(url), 0);
     } else {
       view.open(action.url, "_blank", "noopener");
     }

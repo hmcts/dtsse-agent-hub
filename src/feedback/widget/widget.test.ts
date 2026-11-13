@@ -144,6 +144,15 @@ describe("startWidget", () => {
     Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true });
   });
 
+  it("should post what it has recorded when navigation starts, while the frame still holds this document", () => {
+    running = startWidget(framedView(), CONFIG, record);
+    send({ type: "record-start", maskInputs: false });
+    const before = posted.length;
+    window.dispatchEvent(new Event("beforeunload"));
+    expect(posted.length).toBe(before + 1);
+    expect(types().at(-1)).toBe("replay-events");
+  });
+
   it("should post the picked element's anchor and snapshot", () => {
     document.body.innerHTML = `<button id="go">Continue</button>`;
     running = startWidget(framedView(), CONFIG, record);

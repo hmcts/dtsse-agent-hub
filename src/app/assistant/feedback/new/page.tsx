@@ -1,6 +1,7 @@
 import { createFeedbackProject, probeFeedbackLink } from "@/app/_actions/feedback";
 import { FeedbackWizard, type WizardActions } from "@/components/feedback/dev/FeedbackWizard";
 import { FeedbackHeader } from "@/components/feedback/dev/ProjectList";
+import { allowPrivateTargets } from "@/feedback/targets";
 import { requireViewer } from "@/viewer/current";
 import { FeedbackFrame, requireFeedback } from "../frame";
 
@@ -16,7 +17,7 @@ export default async function NewFeedbackProjectPage() {
     <FeedbackFrame viewer={viewer}>
       <div className="mx-auto flex max-w-[960px] flex-col gap-6 px-5 pb-10 pt-5">
         <FeedbackHeader title="New feedback project" back={{ href: "/assistant/feedback", label: "Feedback projects" }} />
-        <FeedbackWizard actions={ACTIONS} />
+        <FeedbackWizard actions={ACTIONS} allowHttp={allowPrivateTargets()} />
       </div>
     </FeedbackFrame>
   );

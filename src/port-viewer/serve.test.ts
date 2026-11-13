@@ -31,6 +31,7 @@ const PREFIX = `/${ID}/8080`;
 const COOKIE = `ahv-${ID}-8080`;
 const SETTINGS: ViewerSettings = {
   host: "agent-hub-viewer.example",
+  origin: "https://agent-hub-viewer.example",
   hubOrigin: "https://agent-hub.example",
   secret: "a-test-session-secret-long-enough-to-be-plausible"
 };

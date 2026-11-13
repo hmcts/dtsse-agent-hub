@@ -154,7 +154,7 @@ export async function ticketUrl(
     return undefined;
   }
   const ticket = await sealTicket({ oid: viewerOid, virtualAgentId: agent.id, port, path: landingPath(path) }, settings.secret, now);
-  return `https://${settings.host}${AUTH_PATH}?${new URLSearchParams({ [TICKET_PARAMETER]: ticket })}`;
+  return `${settings.origin}${AUTH_PATH}?${new URLSearchParams({ [TICKET_PARAMETER]: ticket })}`;
 }
 
 /**
@@ -173,7 +173,7 @@ export async function feedbackTicketUrl(
     return undefined;
   }
   const ticket = await sealFeedbackTicket({ oid: identity.oid, token, path: landingPath(path) }, settings.secret, now);
-  return `https://${settings.host}${AUTH_PATH}?${new URLSearchParams({ [TICKET_PARAMETER]: ticket })}`;
+  return `${settings.origin}${AUTH_PATH}?${new URLSearchParams({ [TICKET_PARAMETER]: ticket })}`;
 }
 
 function newNonce(): string {
@@ -204,7 +204,7 @@ async function answer(request: Request, pathAndQuery: string, deps: ViewerDepend
       // `/submit` arrives. Failing that, the prefix whose page was last served here, for a single-page app that has
       // left its prefix.
       const location =
-        refererTarget(request.headers.get("referer"), settings.host, pathAndQuery) ??
+        refererTarget(request.headers.get("referer"), settings.origin, pathAndQuery) ??
         lastPortTarget(cookieValue(request.headers.get("cookie"), LAST_PORT_COOKIE), pathAndQuery);
       if (location !== undefined) {
         return { response: new Response(null, { status: 307, headers: { ...NO_STORE, location } }), hubFramed: isFeedbackPath(location) };
@@ -282,7 +282,8 @@ async function answer(request: Request, pathAndQuery: string, deps: ViewerDepend
             rest,
             search,
             prefix: viewerPrefix(virtualAgentId, port),
-            viewerHost: settings.host
+            viewerHost: settings.host,
+            viewerOrigin: settings.origin
           },
           deps.fetch
         );
@@ -366,6 +367,7 @@ async function serveFeedback(
         search,
         prefix,
         viewerHost: settings.host,
+        viewerOrigin: settings.origin,
         frameAncestors: settings.hubOrigin,
         scriptNonce: nonce,
         inject: widgetSnippet({

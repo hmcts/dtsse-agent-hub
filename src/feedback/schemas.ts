@@ -16,6 +16,7 @@ import {
   MAX_TARGET_URL,
   MIN_RETENTION_DAYS
 } from "./limits.ts";
+import { allowPrivateTargets } from "./targets.ts";
 
 /**
  * Request bodies of prototype feedback, for `parse` from `src/agent-api/http.ts`. On the wire in snake_case like the
@@ -28,7 +29,10 @@ const retentionDays = z.number().int().min(MIN_RETENTION_DAYS).max(MAX_RETENTION
 const oid = z.string().trim().min(1).max(64);
 const commentBody = z.string().trim().min(1).max(MAX_COMMENT);
 
-/** An https address with a host and no user name or password in it, which is all a link's target may be. */
+/**
+ * An https address with a host and no user name or password in it, which is all a link's target may be; http too
+ * where `allowPrivateTargets` lets a developer point a link at their own machine.
+ */
 export const targetUrl = z
   .string()
   .trim()
@@ -38,7 +42,8 @@ export const targetUrl = z
       return false;
     }
     const url = new URL(value);
-    return url.protocol === "https:" && url.hostname !== "" && url.username === "" && url.password === "";
+    const scheme = url.protocol === "https:" || (url.protocol === "http:" && allowPrivateTargets());
+    return scheme && url.hostname !== "" && url.username === "" && url.password === "";
   }, "must be an https address");
 
 // Control characters would end up in a stored path the pages render and the proxy requests.

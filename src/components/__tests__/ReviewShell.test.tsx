@@ -193,6 +193,21 @@ describe("ReviewShell", () => {
     expect(screen.getByText("Reviewer")).toBeTruthy();
   });
 
+  it("should keep the frame where it is when the page renders again with a fresh ticket", () => {
+    const props = {
+      token: TOKEN,
+      projectName: "Claims prototype",
+      linkLabel: "Version 1",
+      viewerName: "Ann Reviewer",
+      access: "reviewer" as const,
+      maskInputs: true,
+      retentionDays: 30
+    };
+    const { rerender } = render(<ReviewShell {...props} frameSrc={FRAME_SRC} />);
+    rerender(<ReviewShell {...props} frameSrc={`${VIEWER}/_auth?ticket=fresh`} />);
+    expect(frame().getAttribute("src")).toBe(FRAME_SRC);
+  });
+
   it("should show the page's threads and send their markers once the widget says hello", async () => {
     shell();
     await fromWidget({ type: "hello", path: "/start", title: "Start", version: "" });

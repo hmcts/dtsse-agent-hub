@@ -10,7 +10,7 @@ import type { FeedbackCommentView, FeedbackThreadView } from "@/feedback/thread-
 import type { ActionResult } from "@/web/action";
 import type { FeedbackProjectPageData, FeedbackRecordingRow } from "@/web/feedback-data";
 import { CommentsView, type ThreadHandlers } from "./CommentsView";
-import { Badge, DANGER, FIELD, isHttpsUrl, LINK, PRIMARY, plural, reviewPath, SECONDARY, when } from "./look";
+import { Badge, DANGER, FIELD, isTargetUrl, LINK, PRIMARY, type ProjectTab, plural, reviewPath, SECONDARY, TABS, when } from "./look";
 import { CopyField, call, PeoplePicker, type PickedPerson, useOrigin } from "./parts";
 
 /**
@@ -19,16 +19,7 @@ import { CopyField, call, PeoplePicker, type PickedPerson, useOrigin } from "./p
  * (`?tab=`), so a link can open any of them.
  */
 
-export const TABS = ["overview", "comments", "recordings", "people", "settings"] as const;
-export type ProjectTab = (typeof TABS)[number];
-
 const TAB_LABELS: Record<ProjectTab, string> = { overview: "Overview", comments: "Comments", recordings: "Recordings", people: "People", settings: "Settings" };
-
-/** The tab `?tab=` names, if the viewer may see it, or the overview. */
-export function projectTab(value: unknown, owner: boolean): ProjectTab {
-  const tab = TABS.find((t) => t === value) ?? "overview";
-  return tab === "settings" && !owner ? "overview" : tab;
-}
 
 type Id = { projectId: unknown };
 
@@ -69,8 +60,9 @@ export function ProjectPage({
   data,
   tab,
   actions,
-  origin: givenOrigin
-}: Readonly<{ data: FeedbackProjectPageData; tab: ProjectTab; actions: ProjectActions; origin?: string }>) {
+  origin: givenOrigin,
+  allowHttp = false
+}: Readonly<{ data: FeedbackProjectPageData; tab: ProjectTab; actions: ProjectActions; origin?: string; allowHttp?: boolean }>) {
   const { project } = data;
   const owner = project.access === "owner";
   const archived = project.archivedAt !== null;
@@ -106,7 +98,7 @@ export function ProjectPage({
       ) : null}
       {tab === "recordings" ? <Recordings projectId={project.id} recordings={data.recordings} links={project.links} /> : null}
       {tab === "people" ? <People data={data} actions={actions} owner={owner && !archived} /> : null}
-      {tab === "settings" && owner ? <Settings data={data} actions={actions} origin={origin} /> : null}
+      {tab === "settings" && owner ? <Settings data={data} actions={actions} origin={origin} allowHttp={allowHttp} /> : null}
     </div>
   );
 }
@@ -433,7 +425,12 @@ function MembersEditor({
   );
 }
 
-function Settings({ data, actions, origin }: Readonly<{ data: FeedbackProjectPageData; actions: ProjectActions; origin: string }>) {
+function Settings({
+  data,
+  actions,
+  origin,
+  allowHttp
+}: Readonly<{ data: FeedbackProjectPageData; actions: ProjectActions; origin: string; allowHttp: boolean }>) {
   const { project } = data;
   const router = useRouter();
   const ids = useId();
@@ -517,7 +514,7 @@ function Settings({ data, actions, origin }: Readonly<{ data: FeedbackProjectPag
           Links
         </h2>
         <LinkList projectId={project.id} links={project.links} origin={origin} actions={actions} owner={!archived} />
-        {archived ? null : <AddLink projectId={project.id} actions={actions} />}
+        {archived ? null : <AddLink projectId={project.id} actions={actions} allowHttp={allowHttp} />}
       </section>
 
       {archived ? null : (
@@ -579,7 +576,7 @@ function ArchiveDialog({ name, busy, onCancel, onConfirm }: Readonly<{ name: str
   );
 }
 
-function AddLink({ projectId, actions }: Readonly<{ projectId: string; actions: ProjectActions }>) {
+function AddLink({ projectId, actions, allowHttp }: Readonly<{ projectId: string; actions: ProjectActions; allowHttp: boolean }>) {
   const router = useRouter();
   const ids = useId();
   const [label, setLabel] = useState("");
@@ -589,7 +586,7 @@ function AddLink({ projectId, actions }: Readonly<{ projectId: string; actions: 
   const [message, setMessage] = useState<{ tone: "ok" | "warn" | "error"; text: string } | null>(null);
 
   async function add(): Promise<void> {
-    if (label.trim() === "" || !isHttpsUrl(url)) {
+    if (label.trim() === "" || !isTargetUrl(url, allowHttp)) {
       setMessage({ tone: "error", text: "Give the link a label and an address starting https://" });
       return;
     }

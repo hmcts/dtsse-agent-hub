@@ -38,9 +38,11 @@ CREATE TABLE "feedback_link" (
   "id"                UUID        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   "project_id"        UUID        NOT NULL REFERENCES "feedback_project" ("id") ON DELETE CASCADE,
   "label"             TEXT        NOT NULL CHECK (char_length("label") BETWEEN 1 AND 80),
-  "target_url"        TEXT        NOT NULL CHECK (char_length("target_url") <= 2048 AND "target_url" LIKE 'https://%'),
+  -- http as well as https, for a prototype on a developer's own machine: which scheme a deployment accepts is
+  -- `checkTargetUrl`'s to say, and it refuses http under NODE_ENV=production.
+  "target_url"        TEXT        NOT NULL CHECK (char_length("target_url") <= 2048 AND "target_url" ~ '^https?://'),
   -- The target's origin, the only one the proxy fetches for this link.
-  "origin"            TEXT        NOT NULL CHECK ("origin" ~ '^https://[^/?#@\s]+$'),
+  "origin"            TEXT        NOT NULL CHECK ("origin" ~ '^https?://[^/?#@\s]+$'),
   "token"             TEXT        NOT NULL UNIQUE CHECK ("token" ~ '^[A-Za-z0-9_-]{22,86}$'),
   "prototype_version" TEXT        CHECK (char_length("prototype_version") BETWEEN 1 AND 100),
   "revoked_at"        TIMESTAMPTZ,

@@ -26,7 +26,8 @@ const TARGET: ForwardTarget = {
   rest: "/docs",
   search: "?page=2",
   prefix: PREFIX,
-  viewerHost: "agent-hub-viewer.example"
+  viewerHost: "agent-hub-viewer.example",
+  viewerOrigin: "https://agent-hub-viewer.example"
 };
 
 describe("forwardedCookie", () => {
@@ -296,6 +297,7 @@ const FEEDBACK: ForwardTarget = {
   search: "",
   prefix: "/f/token",
   viewerHost: "agent-hub-viewer.example",
+  viewerOrigin: "https://agent-hub-viewer.example",
   frameAncestors: HUB,
   inject: '<script src="/_feedback/widget.js"></script>',
   scriptNonce: "n0nce"

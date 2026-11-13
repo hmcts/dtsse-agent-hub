@@ -70,8 +70,11 @@ function messageOf(error: unknown): string {
 }
 
 export function ReviewShell(props: ReviewShellProps) {
-  const { token, frameSrc, projectName, linkLabel, viewerName, access, maskInputs, retentionDays } = props;
+  const { token, projectName, linkLabel, viewerName, access, maskInputs, retentionDays } = props;
   const api = useMemo(() => props.api ?? reviewApi(token), [props.api, token]);
+  // The first ticket only: the page mints a fresh one each time it renders, as a refresh does, and a new `src` would
+  // reload the prototype at the link's landing page, losing the reviewer's place and the page being recorded.
+  const [frameSrc] = useState(props.frameSrc);
   const frameOrigin = useMemo(() => new URL(frameSrc).origin, [frameSrc]);
   const frame = useRef<HTMLIFrameElement>(null);
   const recordButton = useRef<HTMLButtonElement>(null);

@@ -76,6 +76,8 @@ export interface ForwardTarget {
   /** `/<virtual agent id>/<port>` or `/f/<token>`. */
   prefix: string;
   viewerHost: string;
+  /** The viewer's origin, which a feedback page's policies let the widget's script load from. */
+  viewerOrigin: string;
   /**
    * The origin allowed to frame the answer, the hub's, for a feedback link's pages. Its `X-Frame-Options` is dropped
    * and every `frame-ancestors` in its policies replaced with this, and the policies let the widget's script load.
@@ -246,7 +248,7 @@ export const WIDGET_ABSENT_HEADER = "x-feedback-widget";
 
 export function forwardedResponseHeaders(
   incoming: Headers,
-  target: Pick<ForwardTarget, "upstreamOrigin" | "prefix"> & Partial<Pick<ForwardTarget, "viewerHost" | "frameAncestors" | "scriptNonce">>
+  target: Pick<ForwardTarget, "upstreamOrigin" | "prefix" | "viewerOrigin"> & Partial<Pick<ForwardTarget, "frameAncestors" | "scriptNonce">>
 ): Headers {
   const named = connectionTokens(incoming);
   const headers = new Headers();
@@ -268,7 +270,7 @@ export function forwardedResponseHeaders(
     }
   }
   if (target.frameAncestors !== undefined) {
-    const rewrite = { frameAncestors: target.frameAncestors, scriptOrigin: `https://${target.viewerHost}`, nonce: target.scriptNonce };
+    const rewrite = { frameAncestors: target.frameAncestors, scriptOrigin: target.viewerOrigin, nonce: target.scriptNonce };
     headers.delete("x-frame-options");
     const policy = incoming.get("content-security-policy");
     headers.set("content-security-policy", policy === null ? `frame-ancestors ${target.frameAncestors}` : rewriteCsp(policy, rewrite));

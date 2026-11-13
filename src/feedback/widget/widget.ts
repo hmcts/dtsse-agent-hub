@@ -126,6 +126,10 @@ export function startWidget(view: Window, config: WidgetConfig, record: RecordFu
     navigated();
   };
   const onPageHide = () => recorder.flush();
+  // Ahead of `pagehide` as well: a message posted from `pagehide` reaches the shell after the frame's next document
+  // has replaced this one, with a `null` `event.source` the shell rightly refuses, which would lose the click that
+  // left the page. `beforeunload` fires while this document is still the frame's, so its batch arrives as the frame's.
+  const onBeforeUnload = () => recorder.flush();
   const onVisibility = () => {
     if (document.visibilityState === "hidden") {
       recorder.flush();
@@ -134,6 +138,7 @@ export function startWidget(view: Window, config: WidgetConfig, record: RecordFu
 
   view.addEventListener("message", onMessage);
   view.addEventListener("popstate", navigated);
+  view.addEventListener("beforeunload", onBeforeUnload);
   view.addEventListener("pagehide", onPageHide);
   document.addEventListener("visibilitychange", onVisibility);
   const stopLinks = installLinkCapture(view, context);
@@ -152,6 +157,7 @@ export function startWidget(view: Window, config: WidgetConfig, record: RecordFu
       history.replaceState = originalReplace;
       view.removeEventListener("message", onMessage);
       view.removeEventListener("popstate", navigated);
+      view.removeEventListener("beforeunload", onBeforeUnload);
       view.removeEventListener("pagehide", onPageHide);
       document.removeEventListener("visibilitychange", onVisibility);
       layer.host.remove();

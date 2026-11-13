@@ -294,15 +294,26 @@ route except `own-licence` and `own-licence-…`, which are on their own Claude 
 
 Prototype feedback is off unless `FEEDBACK_ENABLED=true` and both the viewer and Blob Storage are configured. `yarn
 deps:up` starts Azurite on 10000 beside Postgres, and the hub makes its container and opens its CORS on first use. The
-viewer needs a host of its own, so serve the hub on `localhost` and the viewer on `127.0.0.1`:
+viewer needs a host of its own on the same site as the hub's, or the browser will not keep the frame's cookie, so
+serve the hub on `hub.localhost` and the viewer on `viewer.hub.localhost`, which browsers resolve to this machine.
+`localhost` beside `127.0.0.1` is two sites, and every framed page answers that the review has timed out. Outside
+production the viewer takes the hub's scheme and port, so both are served over http from the one dev server. The
+feedback pages sit in the CFT Workspace, which needs `VIRTUAL_AGENTS_ENABLED=true`, and
+`FEEDBACK_ALLOW_PRIVATE_TARGETS=true` lets a link point at a prototype on this machine, over http on any port:
 
 ```bash
 FEEDBACK_ENABLED=true \
 FEEDBACK_STORAGE_CONNECTION_STRING=UseDevelopmentStorage=true \
-AGENT_HUB_VIEWER_HOST=127.0.0.1 \
-ENTRA_REDIRECT_URI=http://localhost:3000/auth/callback \
+FEEDBACK_ALLOW_PRIVATE_TARGETS=true \
+VIRTUAL_AGENTS_ENABLED=true \
+AGENT_HUB_VIEWER_HOST=viewer.hub.localhost \
+ENTRA_REDIRECT_URI=http://hub.localhost:3000/auth/callback \
 SESSION_SECRET=$(openssl rand -base64 48) AUTH_DISABLED=true AGENT_AUTH_DISABLED=true yarn dev
 ```
+
+Open the Assistant at `http://hub.localhost:3000/assistant/feedback`; with no orchestrator its home page waits for an
+assistant that never starts, but the feedback pages do not. A second reviewer is a second persona: set the
+`ah_dev_persona` cookie on `hub.localhost` to a short name.
 
 | Variable | Default | What it is |
 | --- | --- | --- |

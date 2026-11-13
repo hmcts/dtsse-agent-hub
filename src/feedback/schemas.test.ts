@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { MAX_RECORDING_MS, MAX_SEGMENT_BYTES } from "./limits.ts";
 import {
   completeFeedbackRecordingBody,
@@ -36,6 +36,27 @@ describe("targetUrl", () => {
     ["another scheme", "javascript:alert(1)"]
   ])("should refuse an address that is %s", (_label, value) => {
     expect(targetUrl.safeParse(value).success).toBe(false);
+  });
+
+  it("should accept an http address when private targets are allowed, as on a developer's machine", () => {
+    vi.stubEnv("FEEDBACK_ALLOW_PRIVATE_TARGETS", "true");
+    vi.stubEnv("NODE_ENV", "development");
+    try {
+      expect(targetUrl.parse("http://localhost:4100/")).toBe("http://localhost:4100/");
+      expect(targetUrl.safeParse("http://user:pass@localhost:4100/").success).toBe(false);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("should refuse an http address in production whatever FEEDBACK_ALLOW_PRIVATE_TARGETS says", () => {
+    vi.stubEnv("FEEDBACK_ALLOW_PRIVATE_TARGETS", "true");
+    vi.stubEnv("NODE_ENV", "production");
+    try {
+      expect(targetUrl.safeParse("http://localhost:4100/").success).toBe(false);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 

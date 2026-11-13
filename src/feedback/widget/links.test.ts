@@ -101,12 +101,16 @@ describe("installLinkCapture", () => {
     return { assign, open };
   }
 
-  it("should follow a click on a prototype link in the frame", () => {
+  it("should follow a click on a prototype link in the frame once the click has been dispatched", () => {
+    vi.useFakeTimers();
     const { assign } = capture();
     document.body.innerHTML = `<a href="https://proto.example/next"><span>Next</span></a>`;
     const click = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
     document.querySelector("span")?.dispatchEvent(click);
     expect(click.defaultPrevented).toBe(true);
+    expect(assign).not.toHaveBeenCalled();
+    vi.runAllTimers();
+    vi.useRealTimers();
     expect(assign).toHaveBeenCalledWith(`${window.location.origin}/f/tok/next`);
   });
 
@@ -118,10 +122,13 @@ describe("installLinkCapture", () => {
   });
 
   it("should honour a base target", () => {
+    vi.useFakeTimers();
     const { assign } = capture();
     document.head.innerHTML = `<base target="_top">`;
     document.body.innerHTML = `<a href="https://proto.example/x">X</a>`;
     document.querySelector("a")?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    vi.runAllTimers();
+    vi.useRealTimers();
     expect(assign).toHaveBeenCalledWith(`${window.location.origin}/f/tok/x`);
     document.head.innerHTML = "";
   });

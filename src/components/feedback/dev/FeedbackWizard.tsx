@@ -5,7 +5,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import type { ProbeOutcome } from "@/feedback/probe";
 import type { FeedbackProjectView } from "@/feedback/store";
 import type { ActionResult } from "@/web/action";
-import { FIELD, isHttpsUrl, LINK, PRIMARY, plural, reviewPath, SECONDARY } from "./look";
+import { FIELD, isTargetUrl, LINK, PRIMARY, plural, reviewPath, SECONDARY } from "./look";
 import { CopyField, call, PeoplePicker, type PickedPerson, useOrigin } from "./parts";
 
 /**
@@ -43,14 +43,14 @@ function blankRow(key: number): LinkRow {
   return { key, label: "", url: "", version: "", probe: null, checkedUrl: "" };
 }
 
-function rowError(row: LinkRow): string | null {
+function rowError(row: LinkRow, allowHttp: boolean): string | null {
   if (row.label.trim() === "") {
     return "Give the link a label, such as the journey it covers";
   }
   if (row.label.trim().length > MAX_LABEL) {
     return `Keep the label to ${MAX_LABEL} characters`;
   }
-  if (!isHttpsUrl(row.url)) {
+  if (!isTargetUrl(row.url, allowHttp)) {
     return "Enter the prototype's address, starting https://";
   }
   if (row.version.trim().length > MAX_VERSION) {
@@ -63,7 +63,11 @@ function currentProbe(row: LinkRow): ProbeOutcome | "checking" | null {
   return row.checkedUrl === row.url.trim() ? row.probe : null;
 }
 
-export function FeedbackWizard({ actions, origin: givenOrigin }: Readonly<{ actions: WizardActions; origin?: string }>) {
+export function FeedbackWizard({
+  actions,
+  origin: givenOrigin,
+  allowHttp = false
+}: Readonly<{ actions: WizardActions; origin?: string; allowHttp?: boolean }>) {
   const origin = useOrigin(givenOrigin);
   const ids = useId();
   const [step, setStep] = useState(0);
@@ -101,7 +105,7 @@ export function FeedbackWizard({ actions, origin: givenOrigin }: Readonly<{ acti
 
   async function probe(row: LinkRow): Promise<ProbeOutcome | null> {
     const url = row.url.trim();
-    if (!isHttpsUrl(url)) {
+    if (!isTargetUrl(url, allowHttp)) {
       return null;
     }
     const known = currentProbe(row);
@@ -116,9 +120,9 @@ export function FeedbackWizard({ actions, origin: givenOrigin }: Readonly<{ acti
   }
 
   async function nextFromLinks(): Promise<void> {
-    const invalid = rows.findIndex((row) => rowError(row) !== null);
+    const invalid = rows.findIndex((row) => rowError(row, allowHttp) !== null);
     if (invalid !== -1) {
-      setError(`Link ${invalid + 1}: ${rowError(rows[invalid] as LinkRow)}`);
+      setError(`Link ${invalid + 1}: ${rowError(rows[invalid] as LinkRow, allowHttp)}`);
       return;
     }
     setBusy(true);
@@ -277,6 +281,7 @@ export function FeedbackWizard({ actions, origin: givenOrigin }: Readonly<{ acti
                 onChange={(change) => updateRow(row.key, change)}
                 onRemove={() => setRows((current) => current.filter((other) => other.key !== row.key))}
                 onCheck={() => void probe(row)}
+                allowHttp={allowHttp}
               />
             ))}
           </ol>
@@ -430,7 +435,8 @@ function LinkFields({
   removable,
   onChange,
   onRemove,
-  onCheck
+  onCheck,
+  allowHttp
 }: Readonly<{
   index: number;
   row: LinkRow;
@@ -438,6 +444,7 @@ function LinkFields({
   onChange: (change: Partial<LinkRow>) => void;
   onRemove: () => void;
   onCheck: () => void;
+  allowHttp: boolean;
 }>) {
   const ids = useId();
   const probe = currentProbe(row);
@@ -477,7 +484,7 @@ function LinkFields({
         </div>
       </fieldset>
       <p id={`${ids}-probe`} aria-live="polite" className="text-xs">
-        <ProbeLine probe={probe} url={row.url} />
+        <ProbeLine probe={probe} url={row.url} allowHttp={allowHttp} />
       </p>
       {removable ? (
         <div>
@@ -490,12 +497,12 @@ function LinkFields({
   );
 }
 
-function ProbeLine({ probe, url }: Readonly<{ probe: ProbeOutcome | "checking" | null; url: string }>) {
+function ProbeLine({ probe, url, allowHttp }: Readonly<{ probe: ProbeOutcome | "checking" | null; url: string; allowHttp: boolean }>) {
   if (probe === "checking") {
     return <span className="text-asst-muted">Checking the address…</span>;
   }
   if (probe === null) {
-    return url.trim() !== "" && !isHttpsUrl(url) ? <span className="text-asst-error">The address must start https://</span> : null;
+    return url.trim() !== "" && !isTargetUrl(url, allowHttp) ? <span className="text-asst-error">The address must start https://</span> : null;
   }
   if (probe.result === "pass") {
     return <span className="text-asst-ok">✓ The prototype answered: {probe.reason}.</span>;

@@ -4,8 +4,9 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import { FeedbackRefresh } from "@/components/feedback/dev/FeedbackRefresh";
+import { projectTab } from "@/components/feedback/dev/look";
 import { ProjectList } from "@/components/feedback/dev/ProjectList";
-import { type ProjectActions, ProjectPage, projectTab } from "@/components/feedback/dev/ProjectPage";
+import { type ProjectActions, ProjectPage } from "@/components/feedback/dev/ProjectPage";
 import { BEN, pageData, project, recordingRow, thread } from "./feedback-fixtures";
 
 const refresh = vi.fn();
@@ -261,6 +262,20 @@ describe("ProjectPage", () => {
     act$.addLink.mockResolvedValue({ ok: false, error: "a project holds at most 20 links" });
     await act(async () => fireEvent.click(within(form).getByRole("button", { name: "Add link" })));
     expect(within(form).getByRole("alert").textContent).toBe("a project holds at most 20 links");
+  });
+
+  it("should add an http link only when the hub allows private targets", async () => {
+    const act$ = actions();
+    const { rerender } = render(<ProjectPage data={pageData()} tab="settings" actions={act$} origin="https://hub.example.com" />);
+    const form = () => screen.getByRole("heading", { name: "Add a link" }).parentElement as HTMLElement;
+    fireEvent.change(within(form()).getByLabelText("Label"), { target: { value: "Local" } });
+    fireEvent.change(within(form()).getByLabelText("Prototype address"), { target: { value: "http://localhost:4100/" } });
+    await act(async () => fireEvent.click(within(form()).getByRole("button", { name: "Add link" })));
+    expect(act$.probe).not.toHaveBeenCalled();
+
+    rerender(<ProjectPage data={pageData()} tab="settings" actions={act$} origin="https://hub.example.com" allowHttp />);
+    await act(async () => fireEvent.click(within(form()).getByRole("button", { name: "Add link" })));
+    expect(act$.addLink).toHaveBeenCalledWith({ projectId: "p1", link: { label: "Local", url: "http://localhost:4100/" } });
   });
 
   it("should archive only once the owner confirms, and go back to the list", async () => {

@@ -138,15 +138,15 @@ export function landingPath(value: string | null | undefined): string {
  * The port or feedback link whose page asked for `pathAndQuery` from outside every prefix, read from the request's
  * `Referer`, and where under that page's prefix the request belongs. A server that thinks it is at `/` writes links,
  * assets and form actions from `/`, which the browser sends to the viewer's root. Only a page on the viewer's own
- * host, under a prefix, counts, and only a path from `/` that is not one of the viewer's own, `AUTH_PATH` and
+ * origin, under a prefix, counts, and only a path from `/` that is not one of the viewer's own, `AUTH_PATH` and
  * `WIDGET_PATH`.
  */
-export function refererTarget(referer: string | null, viewerHost: string, pathAndQuery: string): string | undefined {
+export function refererTarget(referer: string | null, viewerOrigin: string, pathAndQuery: string): string | undefined {
   if (referer === null || !URL.canParse(referer)) {
     return undefined;
   }
   const from = new URL(referer);
-  if (from.protocol !== "https:" || from.host !== viewerHost) {
+  if (from.origin !== viewerOrigin) {
     return undefined;
   }
   return underPage(parseViewerPath(from.pathname), pathAndQuery);
