@@ -50,6 +50,7 @@ export const HUB_EVENT_TYPES = [
   "transcript",
   "virtual_agent",
   "assistant_conversation",
+  "feedback",
   "resync"
 ] as const satisfies readonly HubEventType[];
 

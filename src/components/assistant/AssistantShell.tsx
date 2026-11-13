@@ -25,7 +25,7 @@ import type { AssistantSharing } from "@/components/assistant/SharingSettings";
 import type { AssistantSize } from "@/components/assistant/SizeSettings";
 import type { AssistantTemplates } from "@/components/assistant/TemplateSettings";
 import { useResizableWidth } from "@/components/assistant/useResizableWidth";
-import { type StartChatAction, WorkflowsMenu } from "@/components/assistant/WorkflowsMenu";
+import { type FeedbackOffer, type StartChatAction, WorkflowsMenu } from "@/components/assistant/WorkflowsMenu";
 import type { ModelRoute } from "@/viewer/identity";
 import type { ActionResult } from "@/web/action";
 
@@ -114,6 +114,7 @@ export function AssistantShell({
   plugins,
   welsh = false,
   briefing = false,
+  feedback,
   start,
   model,
   claudeMd,
@@ -150,6 +151,8 @@ export function AssistantShell({
    * `morning-briefing`, so the morning briefing is offered.
    */
   briefing?: boolean;
+  /** Prototype feedback is on, so the way to a new feedback project is shown, and to the list once there is one. */
+  feedback?: FeedbackOffer;
   /** How the morning briefing starts its chat; without it, the briefing is not offered. */
   start?: StartChatAction;
   /** The Claude model the person's chats run on, which the footer's settings shows and changes. */
@@ -280,7 +283,7 @@ export function AssistantShell({
               New chat
             </Link>
             {/* The workflows a person can open beside their chats, behind one plus. */}
-            <WorkflowsMenu welsh={welsh} briefing={briefing} start={start} />
+            <WorkflowsMenu welsh={welsh} briefing={briefing} feedback={feedback} start={start} />
           </div>
           <LiveLocalSessions served={served}>
             <ConversationSearch>

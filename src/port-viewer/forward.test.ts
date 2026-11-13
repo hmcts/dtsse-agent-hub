@@ -1,5 +1,8 @@
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { describe, expect, it, vi } from "vitest";
 import nextConfig from "../../next.config.mjs";
+import { pinnedFetch } from "../feedback/targets.ts";
 import {
   BASE_REWRITE_LIMIT_BYTES,
   declaresTooLongBody,
@@ -12,8 +15,10 @@ import {
   isRewritableHtml,
   PROXY_BODY_LIMIT_BYTES,
   rewriteBaseHref,
+  rewriteCsp,
   rewriteLocation,
   rewriteSetCookie,
+  transformHtml,
   UpstreamUnreachable
 } from "./forward.ts";
 
@@ -24,7 +29,8 @@ const TARGET: ForwardTarget = {
   rest: "/docs",
   search: "?page=2",
   prefix: PREFIX,
-  viewerHost: "agent-hub-viewer.example"
+  viewerHost: "agent-hub-viewer.example",
+  viewerOrigin: "https://agent-hub-viewer.example"
 };
 
 describe("forwardedCookie", () => {
@@ -210,6 +216,32 @@ describe("isRewritableHtml", () => {
 });
 
 describe("forward", () => {
+  it("should forward through a pinned fetch, streaming the body both ways and rewriting the page", async () => {
+    const server = createServer((request, response) => {
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => chunks.push(chunk));
+      request.on("end", () => {
+        response.writeHead(200, { "content-type": "text/html", "set-cookie": "sid=1; Path=/" });
+        response.end(`<html><head><base href="/"></head><body>${request.headers.host} ${Buffer.concat(chunks).toString()}</body></html>`);
+      });
+    });
+    await new Promise<void>((listening) => server.listen(0, "127.0.0.1", listening));
+    const { port } = server.address() as AddressInfo;
+    const target = { ...TARGET, upstreamOrigin: `http://prototype.example:${port}`, rest: "/form", search: "" };
+    const request = new Request("https://agent-hub-viewer.example/x", { method: "POST", body: "a=1", headers: { "content-type": "text/plain" } });
+
+    const response = await forward(
+      request,
+      target,
+      pinnedFetch(async () => [{ address: "127.0.0.1", family: 4 }])
+    );
+
+    expect(await response.text()).toBe(`<html><head><base href="${PREFIX}/"></head><body>prototype.example:${port} a=1</body></html>`);
+    expect(response.headers.getSetCookie()).toEqual([`sid=1; Path=${PREFIX}/`]);
+    server.closeAllConnections();
+    await new Promise((closed) => server.close(closed));
+  });
+
   it("should move an HTML page's base under the prefix", async () => {
     const fetchImpl = vi.fn<Fetch>(
       async () => new Response(`<html><head><base href="/"></head></html>`, { headers: { "content-type": "text/html; charset=utf-8" } })
@@ -282,5 +314,244 @@ describe("forward", () => {
 
     await expect(forward(new Request("https://agent-hub-viewer.example/x"), TARGET, refused)).rejects.toThrow(UpstreamUnreachable);
     await expect(forward(new Request("https://agent-hub-viewer.example/x"), TARGET, odd)).rejects.toThrow("not an error");
+  });
+});
+
+const HUB = "https://agent-hub.example";
+const VIEWER_ORIGIN = "https://agent-hub-viewer.example";
+const REWRITE = { frameAncestors: HUB, scriptOrigin: VIEWER_ORIGIN, nonce: "n0nce" };
+const FEEDBACK: ForwardTarget = {
+  upstreamOrigin: "https://prototype.example",
+  rest: "/start",
+  search: "",
+  prefix: "/f/token",
+  viewerHost: "agent-hub-viewer.example",
+  viewerOrigin: "https://agent-hub-viewer.example",
+  frameAncestors: HUB,
+  inject: '<script src="/_feedback/widget.js"></script>',
+  scriptNonce: "n0nce",
+  feedback: true
+};
+
+describe("rewriteCsp", () => {
+  it.each<[string, string, string]>([
+    ["no frame-ancestors", "default-src 'self'; img-src *", `default-src 'self'; img-src *; script-src 'self' ${VIEWER_ORIGIN}; frame-ancestors ${HUB}`],
+    ["a frame-ancestors of its own", "frame-ancestors 'none'; img-src *", `img-src *; frame-ancestors ${HUB}`],
+    ["frame-ancestors in capitals", "FRAME-ANCESTORS 'self'", `frame-ancestors ${HUB}`],
+    ["a script-src", "script-src 'self' https://cdn.example", `script-src 'self' https://cdn.example ${VIEWER_ORIGIN}; frame-ancestors ${HUB}`],
+    [
+      "script-src and script-src-elem both",
+      "script-src 'self'; script-src-elem 'self'",
+      `script-src 'self' ${VIEWER_ORIGIN}; script-src-elem 'self' ${VIEWER_ORIGIN}; frame-ancestors ${HUB}`
+    ],
+    [
+      "a script-src beside default-src, which is left alone",
+      "default-src 'none'; script-src 'self'",
+      `default-src 'none'; script-src 'self' ${VIEWER_ORIGIN}; frame-ancestors ${HUB}`
+    ],
+    ["a script-src of 'none'", "script-src 'none'", `script-src ${VIEWER_ORIGIN}; frame-ancestors ${HUB}`],
+    ["only a default-src of 'none'", "default-src 'none'", `default-src 'none'; script-src ${VIEWER_ORIGIN}; frame-ancestors ${HUB}`],
+    ["a nonce without 'strict-dynamic'", "script-src 'nonce-theirs' 'self'", `script-src 'nonce-theirs' 'self' ${VIEWER_ORIGIN}; frame-ancestors ${HUB}`],
+    [
+      "'strict-dynamic', under which host sources are ignored",
+      "script-src 'nonce-theirs' 'strict-dynamic'; object-src 'none'",
+      `script-src 'nonce-theirs' 'strict-dynamic' ${VIEWER_ORIGIN} 'nonce-n0nce'; object-src 'none'; frame-ancestors ${HUB}`
+    ],
+    ["no script directive at all", "img-src 'self'", `img-src 'self'; frame-ancestors ${HUB}`],
+    ["stray semicolons and spaces", " ;img-src  'self' ;; ", `img-src 'self'; frame-ancestors ${HUB}`],
+    [
+      "two policies, each enforced on its own",
+      "script-src 'self', frame-ancestors 'self'; default-src https:",
+      `script-src 'self' ${VIEWER_ORIGIN}; frame-ancestors ${HUB}, default-src https:; script-src https: ${VIEWER_ORIGIN}; frame-ancestors ${HUB}`
+    ]
+  ])("should rewrite a policy with %s", (_case, value, expected) => {
+    expect(rewriteCsp(value, REWRITE)).toBe(expected);
+  });
+
+  it("should add no nonce under 'strict-dynamic' when it is given none", () => {
+    expect(rewriteCsp("script-src 'strict-dynamic'", { frameAncestors: HUB, scriptOrigin: VIEWER_ORIGIN })).toBe(
+      `script-src 'strict-dynamic' ${VIEWER_ORIGIN}; frame-ancestors ${HUB}`
+    );
+  });
+});
+
+describe("transformHtml", () => {
+  const SNIPPET = "<script></script>";
+
+  it("should move the base and nothing else when there is nothing to inject", () => {
+    expect(transformHtml('<head><base href="/"></head>', { prefix: PREFIX })).toBe(rewriteBaseHref('<head><base href="/"></head>', PREFIX));
+  });
+
+  it.each<[string, string, string]>([
+    [
+      "a head",
+      '<!doctype html><html lang="en"><head data-x="1"><title>t</title>',
+      `<!doctype html><html lang="en"><head data-x="1">${SNIPPET}<title>t</title>`
+    ],
+    ["a header but no head", "<html><body><header>h</header>", `<html>${SNIPPET}<body><header>h</header>`],
+    ["only a doctype", "<!DOCTYPE html><title>t</title>", `<!DOCTYPE html>${SNIPPET}<title>t</title>`],
+    ["no tags it knows", "<p>hi</p>", `${SNIPPET}<p>hi</p>`]
+  ])("should put the snippet after the opening tag of a page with %s", (_case, html, expected) => {
+    expect(transformHtml(html, { prefix: PREFIX, inject: SNIPPET })).toBe(expected);
+  });
+
+  it("should move the base and inject both", () => {
+    expect(transformHtml('<head><base href="/app/">', { prefix: "/f/t", inject: SNIPPET })).toBe(`<head>${SNIPPET}<base href="/f/t/app/">`);
+  });
+});
+
+describe("forwardedResponseHeaders for a feedback page", () => {
+  it("should drop X-Frame-Options and let the hub alone frame the page when the prototype sets neither header", () => {
+    const headers = forwardedResponseHeaders(new Headers({ "x-frame-options": "SAMEORIGIN" }), FEEDBACK);
+
+    expect(headers.get("x-frame-options")).toBeNull();
+    expect(headers.get("content-security-policy")).toBe(`frame-ancestors ${HUB}`);
+    expect(headers.get("content-security-policy-report-only")).toBeNull();
+  });
+
+  it("should rewrite the prototype's policy and its report-only twin", () => {
+    const headers = forwardedResponseHeaders(
+      new Headers({
+        "content-security-policy": "frame-ancestors 'none'; script-src 'strict-dynamic' 'nonce-x'",
+        "content-security-policy-report-only": "frame-ancestors 'self'"
+      }),
+      FEEDBACK
+    );
+
+    expect(headers.get("content-security-policy")).toBe(`script-src 'strict-dynamic' 'nonce-x' ${VIEWER_ORIGIN} 'nonce-n0nce'; frame-ancestors ${HUB}`);
+    expect(headers.get("content-security-policy-report-only")).toBe(`frame-ancestors ${HUB}`);
+  });
+
+  it("should leave a port's framing headers as the pod sent them, for the viewer to replace", () => {
+    const headers = forwardedResponseHeaders(new Headers({ "x-frame-options": "SAMEORIGIN", "content-security-policy": "frame-ancestors 'self'" }), TARGET);
+
+    expect(headers.get("x-frame-options")).toBe("SAMEORIGIN");
+    expect(headers.get("content-security-policy")).toBe("frame-ancestors 'self'");
+  });
+});
+
+describe("forward for a feedback page", () => {
+  it("should put the widget into an HTML page and say nothing of it", async () => {
+    const fetchImpl = vi.fn<Fetch>(async () => new Response('<html><head><base href="/"></head></html>', { headers: { "content-type": "text/html" } }));
+
+    const response = await forward(new Request("https://agent-hub-viewer.example/x"), FEEDBACK, fetchImpl);
+
+    expect(fetchImpl).toHaveBeenCalledWith("https://prototype.example/start", expect.anything());
+    expect(await response.text()).toBe(`<html><head>${FEEDBACK.inject}<base href="/f/token/"></head></html>`);
+    expect(response.headers.get("x-feedback-widget")).toBeNull();
+  });
+
+  it("should pass a page over the rewrite limit on unchanged and say the widget is absent", async () => {
+    const page = `<head>${"x".repeat(BASE_REWRITE_LIMIT_BYTES)}`;
+    const fetchImpl = vi.fn<Fetch>(async () => new Response(page, { headers: { "content-type": "text/html" } }));
+
+    const response = await forward(new Request("https://agent-hub-viewer.example/x"), FEEDBACK, fetchImpl);
+
+    expect(await response.text()).toBe(page);
+    expect(response.headers.get("x-feedback-widget")).toBe("absent");
+  });
+
+  it("should say the widget is absent from an HTML page in a charset it cannot rewrite", async () => {
+    const fetchImpl = vi.fn<Fetch>(async () => new Response("<head>", { headers: { "content-type": "text/html; charset=iso-8859-1" } }));
+
+    const response = await forward(new Request("https://agent-hub-viewer.example/x"), FEEDBACK, fetchImpl);
+
+    expect(await response.text()).toBe("<head>");
+    expect(response.headers.get("x-feedback-widget")).toBe("absent");
+  });
+
+  it("should say nothing of the widget for an answer that is not a page, or a port's page over the limit", async () => {
+    const json = vi.fn<Fetch>(async () => new Response("{}", { headers: { "content-type": "application/json" } }));
+    const big = vi.fn<Fetch>(async () => new Response("x".repeat(BASE_REWRITE_LIMIT_BYTES + 1), { headers: { "content-type": "text/html" } }));
+
+    expect((await forward(new Request("https://agent-hub-viewer.example/x"), FEEDBACK, json)).headers.get("x-feedback-widget")).toBeNull();
+    expect((await forward(new Request("https://agent-hub-viewer.example/x"), TARGET, big)).headers.get("x-feedback-widget")).toBeNull();
+  });
+});
+
+describe("forwardedRequestHeaders for a feedback page", () => {
+  const browser = {
+    accept: "text/html",
+    "accept-language": "en-GB",
+    "user-agent": "Mozilla/5.0",
+    "if-none-match": '"v1"',
+    range: "bytes=0-99",
+    "content-type": "application/x-www-form-urlencoded",
+    "content-length": "12",
+    host: "agent-hub-viewer.example",
+    authorization: "Bearer hub",
+    origin: VIEWER_ORIGIN,
+    referer: `${VIEWER_ORIGIN}/f/token/check?x=1`,
+    forwarded: "for=203.0.113.9",
+    "x-forwarded-for": "203.0.113.9",
+    "x-forwarded-host": "agent-hub-viewer.example",
+    "x-real-ip": "203.0.113.9",
+    "x-azure-clientip": "203.0.113.9",
+    "x-original-url": "/f/token/check",
+    "x-agent-hub-viewer-url": "/f/token/check",
+    "sec-fetch-site": "same-origin",
+    cookie: "ahv-f-token=sealed; sid=1"
+  };
+
+  it("should send only the allowlisted headers, with the Referer moved onto the prototype", () => {
+    expect(Object.fromEntries(forwardedRequestHeaders(new Headers(browser), FEEDBACK, "POST"))).toEqual({
+      accept: "text/html",
+      "accept-language": "en-GB",
+      "user-agent": "Mozilla/5.0",
+      "if-none-match": '"v1"',
+      range: "bytes=0-99",
+      "content-type": "application/x-www-form-urlencoded",
+      "content-length": "12",
+      cookie: "sid=1",
+      referer: "https://prototype.example/check?x=1",
+      "x-forwarded-proto": "https",
+      "x-forwarded-prefix": "/f/token"
+    });
+  });
+
+  it("should send no Content-Length when the method carries no body", () => {
+    expect(forwardedRequestHeaders(new Headers(browser), FEEDBACK, "GET").get("content-length")).toBeNull();
+  });
+
+  it.each([
+    ["another page on the viewer", `${VIEWER_ORIGIN}/${ID}/8080/`],
+    ["the hub", `${HUB}/hub`],
+    ["a page that is not a URL", "not a url"]
+  ])("should drop a Referer from %s", (_name, referer) => {
+    expect(forwardedRequestHeaders(new Headers({ referer }), FEEDBACK).get("referer")).toBeNull();
+  });
+
+  it("should send the prototype's root as the Referer when it was the prefix itself", () => {
+    expect(forwardedRequestHeaders(new Headers({ referer: `${VIEWER_ORIGIN}/f/token` }), FEEDBACK).get("referer")).toBe("https://prototype.example/");
+  });
+
+  it("should leave out __Host- and __Secure- cookies, which may be an agent's app's", () => {
+    const headers = forwardedRequestHeaders(new Headers({ cookie: "__Host-sid=agent; __secure-csrf=agent; sid=1" }), FEEDBACK);
+
+    expect(headers.get("cookie")).toBe("sid=1");
+  });
+
+  it("should still send a port its __Host- and __Secure- cookies", () => {
+    expect(forwardedRequestHeaders(new Headers({ cookie: "__Host-sid=1; __Secure-csrf=2" }), TARGET).get("cookie")).toBe("__Host-sid=1; __Secure-csrf=2");
+  });
+});
+
+describe("forwardedResponseHeaders cookies for a feedback page", () => {
+  it("should drop a __Host- cookie the prototype sets and scope its others to the prefix", () => {
+    const headers = forwardedResponseHeaders(
+      new Headers([
+        ["set-cookie", "__Host-sid=1; Path=/; Secure"],
+        ["set-cookie", "__host-csrf=2; Secure"],
+        ["set-cookie", "sid=3; Path=/"]
+      ]),
+      FEEDBACK
+    );
+
+    expect(headers.getSetCookie()).toEqual(["sid=3; Path=/f/token/"]);
+  });
+
+  it("should refuse a __Host- cookie from rewriteSetCookie only for a feedback page", () => {
+    expect(rewriteSetCookie("__Host-sid=1; Secure", "/f/token", { feedback: true })).toBeUndefined();
+    expect(rewriteSetCookie("__Host-sid=1; Secure", PREFIX)).toBe("__Host-sid=1; Secure; Path=/");
   });
 });

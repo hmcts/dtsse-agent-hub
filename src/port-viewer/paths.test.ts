@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  feedbackCookieName,
+  feedbackPrefix,
+  isFeedbackPath,
   LAST_PORT_COOKIE,
   landingPath,
+  lastFeedbackCookie,
   lastPortCookie,
   lastPortTarget,
   parseViewerPath,
   portOf,
   refererTarget,
+  reviewPath,
   ticketPath,
   viewerCookieName,
   viewerPrefix,
@@ -78,24 +83,27 @@ describe("landingPath", () => {
 
 describe("refererTarget", () => {
   const HOST = "agent-hub-viewer.example";
+  const ORIGIN = `https://${HOST}`;
   const PAGE = `https://${HOST}/${ID}/8080/dashboard?tab=1`;
 
   it("should move a root-relative path, query and all, under the prefix of the page that asked for it", () => {
-    expect(refererTarget(PAGE, HOST, "/style.css")).toBe(`/${ID}/8080/style.css`);
-    expect(refererTarget(PAGE, HOST, "/api?x=1")).toBe(`/${ID}/8080/api?x=1`);
-    expect(refererTarget(`https://${HOST}/${ID}/8080`, HOST, "/")).toBe(`/${ID}/8080/`);
+    expect(refererTarget(PAGE, ORIGIN, "/style.css")).toBe(`/${ID}/8080/style.css`);
+    expect(refererTarget(PAGE, ORIGIN, "/api?x=1")).toBe(`/${ID}/8080/api?x=1`);
+    expect(refererTarget(`https://${HOST}/${ID}/8080`, ORIGIN, "/")).toBe(`/${ID}/8080/`);
+    expect(refererTarget(`http://${HOST}:3000/${ID}/8080/`, `http://${HOST}:3000`, "/app.js")).toBe(`/${ID}/8080/app.js`);
   });
 
   it.each<[string, string | null, string]>([
     ["no Referer", null, "/style.css"],
     ["a Referer that is not a URL", "not a url", "/style.css"],
     ["a page on another host", `https://agent-hub.example/${ID}/8080/`, "/style.css"],
+    ["a page on another port", `https://${HOST}:8443/${ID}/8080/`, "/style.css"],
     ["a page over http", `http://${HOST}/${ID}/8080/`, "/style.css"],
     ["a page outside every prefix", `https://${HOST}/`, "/style.css"],
     ["the viewer's own ticket exchange", PAGE, "/_auth?ticket=x"],
     ["a scheme-relative path", PAGE, "//evil.example/"]
   ])("should leave nothing to redirect for %s", (_case, referer, path) => {
-    expect(refererTarget(referer, HOST, path)).toBeUndefined();
+    expect(refererTarget(referer, ORIGIN, path)).toBeUndefined();
   });
 });
 
@@ -119,5 +127,58 @@ describe("the last port's cookie", () => {
     ["a scheme-relative path", `${ID}/8080`, "//evil.example/"]
   ])("should leave nothing to redirect for %s", (_case, value, path) => {
     expect(lastPortTarget(value, path)).toBeUndefined();
+  });
+});
+
+const TOKEN = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_abcde";
+const HOST = "agent-hub-viewer.example";
+const ORIGIN = `https://${HOST}`;
+
+describe("feedback paths", () => {
+  it("should read the widget's own path outside every prefix", () => {
+    expect(parseViewerPath("/_feedback/widget.js?v=1")).toEqual({ kind: "widget" });
+  });
+
+  it("should split a feedback link's path into its token, the rest and the query", () => {
+    expect(parseViewerPath(`/f/${TOKEN}/start/page?x=1`)).toEqual({ kind: "feedback", token: TOKEN, rest: "/start/page", search: "?x=1" });
+    expect(parseViewerPath(`/f/${TOKEN}?x=1`)).toEqual({ kind: "bare-feedback", token: TOKEN, search: "?x=1" });
+  });
+
+  it.each(["/f/short/", "/f/", "/f", `/F/${TOKEN}/`, `/f/${TOKEN}!/`, "/_feedback/widget.js/x"])("should match nothing when the path is %s", (path) => {
+    expect(parseViewerPath(path)).toEqual({ kind: "none" });
+  });
+
+  it("should give a link's prefix, cookie and the hub's review page", () => {
+    expect(feedbackPrefix(TOKEN)).toBe(`/f/${TOKEN}`);
+    expect(feedbackCookieName(TOKEN)).toBe(`ahv-f-${TOKEN}`);
+    expect(reviewPath(TOKEN, "/start?x=1")).toBe(`/review/${TOKEN}?path=%2Fstart%3Fx%3D1`);
+  });
+
+  it.each<[string, boolean]>([
+    [`/f/${TOKEN}/`, true],
+    ["/f", true],
+    ["/f/", true],
+    ["/favicon.ico", false],
+    ["/fx/", false],
+    [`/${ID}/8080/`, false]
+  ])("should say whether %s is a feedback path", (path, expected) => {
+    expect(isFeedbackPath(path)).toBe(expected);
+  });
+
+  it("should move a root-relative path from a feedback link's page under its prefix", () => {
+    expect(refererTarget(`https://${HOST}/f/${TOKEN}/start`, ORIGIN, "/assets/app.css")).toBe(`/f/${TOKEN}/assets/app.css`);
+    expect(refererTarget(`https://${HOST}/f/${TOKEN}`, ORIGIN, "/next?x=1")).toBe(`/f/${TOKEN}/next?x=1`);
+  });
+
+  it.each(["/_feedback/widget.js", "/_feedback/widget.js?v=2", "/_auth?ticket=x"])("should never treat the viewer's own %s as a page's", (path) => {
+    expect(refererTarget(`https://${HOST}/f/${TOKEN}/start`, ORIGIN, path)).toBeUndefined();
+    expect(refererTarget(`https://${HOST}/${ID}/8080/`, ORIGIN, path)).toBeUndefined();
+    expect(lastPortTarget(`f/${TOKEN}`, path)).toBeUndefined();
+  });
+
+  it("should name a feedback link in the last page's cookie and send root-relative paths under it", () => {
+    expect(lastFeedbackCookie(TOKEN, 60)).toBe(`${LAST_PORT_COOKIE}=f/${TOKEN}; Path=/; Max-Age=60; HttpOnly; Secure; SameSite=Lax`);
+    expect(lastPortTarget(`f/${TOKEN}`, "/cases")).toBe(`/f/${TOKEN}/cases`);
+    expect(lastPortTarget("f/short", "/cases")).toBeUndefined();
   });
 });

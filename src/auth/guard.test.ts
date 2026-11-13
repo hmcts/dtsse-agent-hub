@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { exempt, safeReturnTo, sameOriginPost } from "./guard.ts";
+import { exempt, safeReturnTo, sameOriginRequest } from "./guard.ts";
 
 describe("exempt", () => {
   it.each(["/health", "/health/liveness", "/health/readiness", "/liveness", "/readiness"])(
@@ -96,23 +96,42 @@ describe("safeReturnTo", () => {
   });
 });
 
-describe("sameOriginPost", () => {
+describe("sameOriginRequest", () => {
   const HUB = "https://agent-hub.example";
+  const VIEWER = "https://agent-hub-viewer.example";
 
-  it("should accept a POST the browser says came from the hub's own page", () => {
-    expect(sameOriginPost({ secFetchSite: "same-origin", origin: HUB }, HUB)).toBe(true);
+  function request(headers: Record<string, string>): Request {
+    return new Request(`${HUB}/api/ui/assistant/welsh`, { method: "POST", headers });
+  }
+
+  it("should accept a request the browser says came from the hub's own page", () => {
+    expect(sameOriginRequest(request({ "sec-fetch-site": "same-origin", origin: HUB }), HUB)).toBe(true);
   });
 
-  it.each(["cross-site", "same-site", "none"])("should refuse a POST whose Sec-Fetch-Site is %s, whatever its Origin says", (site) => {
-    expect(sameOriginPost({ secFetchSite: site, origin: HUB }, HUB)).toBe(false);
+  it("should accept a same-origin request when the public origin names another host, as a preview's does", () => {
+    expect(sameOriginRequest(request({ "sec-fetch-site": "same-origin", origin: "https://dtsse-agent-hub-pr-1.example" }), HUB)).toBe(true);
+    expect(sameOriginRequest(request({ "sec-fetch-site": "same-origin" }), undefined)).toBe(true);
+  });
+
+  it.each(["cross-site", "same-site", "none"])("should refuse a request whose Sec-Fetch-Site is %s, whatever its Origin says", (site) => {
+    expect(sameOriginRequest(request({ "sec-fetch-site": site, origin: HUB }), HUB)).toBe(false);
+  });
+
+  it("should refuse a request from the viewer's host", () => {
+    expect(sameOriginRequest(request({ "sec-fetch-site": "same-site", origin: VIEWER }), HUB)).toBe(false);
   });
 
   it("should fall back to the Origin when the browser sends no Sec-Fetch-Site", () => {
-    expect(sameOriginPost({ secFetchSite: null, origin: HUB }, HUB)).toBe(true);
-    expect(sameOriginPost({ secFetchSite: null, origin: "https://evil.example" }, HUB)).toBe(false);
+    expect(sameOriginRequest(request({ origin: HUB }), HUB)).toBe(true);
+    expect(sameOriginRequest(request({ origin: VIEWER }), HUB)).toBe(false);
+    expect(sameOriginRequest(request({ origin: "null" }), HUB)).toBe(false);
   });
 
-  it("should refuse a POST with neither header", () => {
-    expect(sameOriginPost({ secFetchSite: null, origin: null }, HUB)).toBe(false);
+  it("should refuse an Origin alone when there is no public origin to compare it with", () => {
+    expect(sameOriginRequest(request({ origin: HUB }), undefined)).toBe(false);
+  });
+
+  it("should refuse a request with neither header", () => {
+    expect(sameOriginRequest(request({}), HUB)).toBe(false);
   });
 });

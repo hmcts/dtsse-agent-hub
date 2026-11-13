@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SESSION_COOKIE, sealSession } from "@/auth/session";
 import { config, proxy } from "@/proxy";
+import nextConfig from "../../next.config.mjs";
 
 const SECRET = "a-test-session-secret-long-enough-to-be-plausible";
 
@@ -425,6 +426,69 @@ describe("proxy for the viewer's host", () => {
   });
 });
 
+describe("proxy framing headers", () => {
+  const VIEWER = "agent-hub-viewer.example";
+
+  function onHost(host: string, path: string): NextRequest {
+    return new NextRequest(new URL(path, `https://${host}`), { headers: { host } });
+  }
+
+  function framing(response: Response): [string | null, string | null] {
+    return [response.headers.get("x-frame-options"), response.headers.get("content-security-policy")];
+  }
+
+  beforeEach(() => {
+    vi.stubEnv("AUTH_DISABLED", "");
+    vi.stubEnv("SESSION_SECRET", SECRET);
+    vi.stubEnv("AGENT_HUB_VIEWER_HOST", VIEWER);
+    vi.stubEnv("ENTRA_REDIRECT_URI", "https://agent-hub.example/auth/callback");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it.each([
+    ["a page passed through", "/health"],
+    ["a sign-in redirect", "/hub"],
+    ["a trailing-slash redirect", "/hub/c/"],
+    ["the viewer's route refused", "/viewer-proxy"],
+    ["a secret stripped", "/hub?token=x"]
+  ])("should forbid framing on the hub's host for %s", async (_case, path) => {
+    expect(framing(await proxy(onHost("agent-hub.example", path)))).toEqual(["DENY", "frame-ancestors 'none'"]);
+  });
+
+  it("should forbid framing on the viewer's host for the health routes and while the viewer is not configured", async () => {
+    expect(framing(await proxy(onHost(VIEWER, "/health/liveness")))).toEqual(["DENY", "frame-ancestors 'none'"]);
+
+    vi.stubEnv("ENTRA_REDIRECT_URI", "");
+
+    expect(framing(await proxy(onHost(VIEWER, "/f/x/")))).toEqual(["DENY", "frame-ancestors 'none'"]);
+  });
+
+  it("should leave the framing headers in next.config.mjs to the paths outside the proxy's matcher", async () => {
+    const rules = await nextConfig.headers();
+    const framed = rules.filter((rule) => rule.headers.some((header) => header.key === "X-Frame-Options")).map((rule) => rule.source);
+    const [matcher] = config.matcher;
+    const pattern = new RegExp(`^${matcher}$`);
+
+    expect(framed).toEqual(["/_next/static/:path*", "/_next/image", "/favicon.ico"]);
+    expect(framed.map((source) => pattern.test(source.replace(":path*", "chunks/main.js")))).toEqual([false, false, false]);
+  });
+
+  // Next skips a route's header when the proxy has already set one of the same name, so a value set here would
+  // overwrite the `frame-ancestors <hub>` a feedback page needs.
+  it.each(["/f/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_abcde/start", "/3fa85f64-5717-4562-b3fc-2c963f66afa6/8080/", "/_auth?ticket=x"])(
+    "should leave framing to the viewer's route for %s",
+    async (path) => {
+      const response = await proxy(onHost(VIEWER, path));
+
+      expect(response.headers.get("x-middleware-rewrite")).toBe(`https://${VIEWER}/viewer-proxy`);
+      expect(framing(response)).toEqual([null, null]);
+      expect(response.headers.get("x-middleware-request-content-security-policy")).toBeNull();
+    }
+  );
+});
+
 /**
  * A path beginning with two slashes is a scheme-relative URL, so a `Location` built from one names another site and
  * the base origin is thrown away. Both of the redirects below sit above the sign-in check, so neither needs a
@@ -472,4 +536,73 @@ describe("proxy redirects staying on their own origin", () => {
       expect(new URL(response.headers.get("location") ?? "").host).toBe("agent-hub.example");
     }
   );
+});
+
+describe("proxy same-origin check on the UI's writes", () => {
+  const HUB = "https://agent-hub.example";
+  const VIEWER = "https://agent-hub-viewer.example";
+
+  beforeEach(() => {
+    vi.stubEnv("AUTH_DISABLED", "");
+    vi.stubEnv("SESSION_SECRET", SECRET);
+    vi.stubEnv("ENTRA_REDIRECT_URI", `${HUB}/auth/callback`);
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  function send(method: string, path: string, headers: Record<string, string>): NextRequest {
+    return new NextRequest(new URL(path, HUB), { method, headers, ...(method === "GET" || method === "HEAD" ? {} : { body: "{}" }) });
+  }
+
+  it.each(["POST", "PUT", "PATCH", "DELETE"])("should refuse a %s from the viewer's host, which is the same site", async (method) => {
+    const response = await proxy(send(method, "/api/ui/assistant/welsh", { origin: VIEWER, "sec-fetch-site": "same-site" }));
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "that request did not come from the hub's own page" });
+  });
+
+  it("should refuse a no-cors POST that says nothing of where it came from", async () => {
+    expect((await proxy(send("POST", "/api/ui/assistant/lookups", {}))).status).toBe(403);
+  });
+
+  it("should refuse a write before the sign-in check, so a forged one never reaches a route with the session", async () => {
+    const cookie = await sealSession(PERSON, SECRET);
+
+    expect((await proxy(send("POST", "/api/ui/uploads", { cookie: `${SESSION_COOKIE}=${cookie}`, "sec-fetch-site": "cross-site" }))).status).toBe(403);
+  });
+
+  it.each([
+    ["POST", "/api/ui/assistant/welsh"],
+    ["PUT", "/api/ui/uploads/u/parts/0"],
+    ["DELETE", "/api/ui/uploads/u"],
+    ["PATCH", "/api/ui/feedback/review/t/threads/x"]
+  ])("should let a %s to %s from the hub's own page through", async (method, path) => {
+    expect((await proxy(send(method, path, { origin: HUB, "sec-fetch-site": "same-origin" }))).status).toBe(200);
+  });
+
+  it("should let a same-origin write through when the redirect URI names another host, as a preview's does", async () => {
+    vi.stubEnv("ENTRA_REDIRECT_URI", "https://agent-hub.preview.example/auth/callback");
+
+    expect((await proxy(send("POST", "/api/ui/uploads", { origin: HUB, "sec-fetch-site": "same-origin" }))).status).toBe(200);
+  });
+
+  it("should take the Origin from a browser that sends no Sec-Fetch-Site", async () => {
+    expect((await proxy(send("POST", "/api/ui/uploads", { origin: HUB }))).status).toBe(200);
+    expect((await proxy(send("POST", "/api/ui/uploads", { origin: VIEWER }))).status).toBe(403);
+  });
+
+  it.each(["GET", "HEAD", "OPTIONS"])("should leave a %s to the route, which a link or an image can send anyway", async (method) => {
+    expect((await proxy(send(method, "/api/ui/session", { "sec-fetch-site": "same-site" }))).status).toBe(200);
+  });
+
+  it("should leave writes outside /api/ui/ to their own checks", async () => {
+    expect((await proxy(send("POST", "/api/agent/register", { "sec-fetch-site": "cross-site" }))).status).toBe(200);
+  });
+
+  it("should check the UI's writes when sign-in is disabled too", async () => {
+    vi.stubEnv("AUTH_DISABLED", "true");
+
+    expect((await proxy(send("POST", "/api/ui/uploads", { "sec-fetch-site": "same-site" }))).status).toBe(403);
+  });
 });

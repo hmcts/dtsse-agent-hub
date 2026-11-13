@@ -37,7 +37,7 @@ contract changes. Running virtual agents is [`docs/virtual-agents.md`](docs/virt
 | `src/credentials/` | Per-person credentials, CLAUDE.md and git identity: value checks, Key Vault and local encrypted stores, metadata rows |
 | `src/virtual-agents/` | Virtual agents: flag and settings, lifecycle, limits, launch tokens, plugins, store, sign-ins, sweep and views |
 | `src/assistant/`, `src/app/assistant/` | The CFT Workspace. Stores by concern (`conversation-row.ts`, `assistant-store.ts`, `conversation-store.ts`, `local-chat-store.ts`, `session-store.ts`, `artefact-store.ts`, `search-store.ts`, …), each beside a pure `<name>.ts`: exports, lookups, uploads, shares, forks, models, memory, templates, Welsh, the morning briefing. Settings are `components/assistant/SettingsDialog.tsx` |
-| `src/port-viewer/` | The viewer that serves virtual agents' web servers on `AGENT_HUB_VIEWER_HOST`, and the ticket route `/assistant/ports/{id}/{port}` hands out |
+| `src/port-viewer/` | The viewer that serves virtual agents' web servers and feedback links' prototypes on `AGENT_HUB_VIEWER_HOST`, the tickets the hub hands out for each, and the feedback widget's bundle |
 | `src/realtime/` | `hub_events` NOTIFY payloads, the per-pod LISTEN connection and in-process hub, SSE framing, the agent and UI streams |
 | `src/orchestrator/`, `src/cli/orchestrator.ts` | The virtual-agent orchestrator, run from the same image. Nothing here uses the `@/` alias |
 | `src/platform/` | Where the database is (`database-target.ts`) and whether a process may read the Key Vault (`secrets.ts`) |

@@ -12,10 +12,11 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "yarn deps:up && yarn db:generate && yarn db:migrate && next dev",
-    "build": "yarn build:app && yarn build:cli",
+    "dev": "yarn deps:up && yarn db:generate && yarn db:migrate && yarn build:widget && next dev",
+    "build": "yarn build:widget && yarn build:app && yarn build:cli",
     "build:app": "next build",
     "build:cli": "tsc -p tsconfig.cli.json",
+    "build:widget": "esbuild src/feedback/widget/index.ts --bundle --format=iife --minify --target=es2022 --legal-comments=none --outfile=public/feedback/widget.js",
     "build:client": "yarn workspace @hmcts-cft/agent-hub run build",
     "clean": "rm -rf .next dist && yarn workspace @hmcts-cft/agent-hub run clean",
     "start": "node .next/standalone/server.js",
@@ -42,9 +43,12 @@
   "dependencies": {
     "@azure/identity": "4.14.0",
     "@azure/keyvault-secrets": "4.11.2",
+    "@azure/storage-blob": "12.34.0",
     "@hmcts-cft/cloud-native-platform": "2.3.0",
     "@prisma/adapter-pg": "7.10.1",
     "@prisma/client": "7.10.1",
+    "@rrweb/record": "2.2.2",
+    "@rrweb/replay": "2.2.2",
     "jose": "6.2.15",
     "next": "16.4.3",
     "openid-client": "6.8.9",
@@ -52,6 +56,7 @@
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "server-only": "0.0.1",
+    "undici": "8.12.4",
     "zod": "4.6.7"
   },
   "devDependencies": {
@@ -68,6 +73,7 @@
     "@vitejs/plugin-react": "6.1.2",
     "@vitest/coverage-v8": "5.0.5",
     "axe-core": "4.14.0",
+    "esbuild": "0.28.2",
     "jsdom": "30.1.3",
     "playwright-core": "1.64.1",
     "postcss": "8.5.32",
