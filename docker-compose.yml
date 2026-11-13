@@ -34,5 +34,28 @@ services:
       timeout: 5s
       retries: 10
 
+  # Blob Storage for prototype feedback's recordings and snapshots, which `yarn dev` reaches with
+  # `FEEDBACK_STORAGE_CONNECTION_STRING=UseDevelopmentStorage=true`; the hub makes the container and opens CORS itself.
+  # In memory, because nothing on it is worth keeping. `--skipApiVersionCheck` because the SDK asks for service
+  # versions newer than Azurite knows of.
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:3.37.0
+    command:
+      - azurite-blob
+      - --blobHost
+      - 0.0.0.0
+      - --blobPort
+      - "10000"
+      - --inMemoryPersistence
+      - --skipApiVersionCheck
+      - --loose
+    ports:
+      - "10000:10000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('net').connect(10000, '127.0.0.1').on('connect', () => process.exit(0)).on('error', () => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
 volumes:
   postgres-data:

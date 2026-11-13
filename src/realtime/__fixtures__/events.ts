@@ -38,7 +38,12 @@ const NOTIFIED_EVENT_SAMPLES: { [T in NotifiedEvent["type"]]: readonly Extract<N
   assistant_lookup_answered: [{ type: "assistant_lookup_answered", lookup_id: "l-a", virtual_agent_id: "va-a", owner_oid: "oid-a" }],
   assistant_welsh: [{ type: "assistant_welsh", job_id: "w-a", virtual_agent_id: "va-a", owner_oid: "oid-a" }],
   assistant_welsh_answered: [{ type: "assistant_welsh_answered", job_id: "w-a", virtual_agent_id: "va-a", owner_oid: "oid-a" }],
-  assistant_deck_build: [{ type: "assistant_deck_build", job_id: "d-a", virtual_agent_id: "va-a", owner_oid: "oid-a" }]
+  assistant_deck_build: [{ type: "assistant_deck_build", job_id: "d-a", virtual_agent_id: "va-a", owner_oid: "oid-a" }],
+  feedback: [
+    { type: "feedback", project_id: "fp-a", link_id: "fl-a" },
+    // A change to the project itself rather than through one of its links.
+    { type: "feedback", project_id: "fp-a", link_id: null }
+  ]
 };
 
 /** Every type that crosses pods, in the order the samples are written. */

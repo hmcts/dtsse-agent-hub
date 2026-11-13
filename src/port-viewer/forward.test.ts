@@ -12,8 +12,10 @@ import {
   isRewritableHtml,
   PROXY_BODY_LIMIT_BYTES,
   rewriteBaseHref,
+  rewriteCsp,
   rewriteLocation,
   rewriteSetCookie,
+  transformHtml,
   UpstreamUnreachable
 } from "./forward.ts";
 
@@ -282,5 +284,155 @@ describe("forward", () => {
 
     await expect(forward(new Request("https://agent-hub-viewer.example/x"), TARGET, refused)).rejects.toThrow(UpstreamUnreachable);
     await expect(forward(new Request("https://agent-hub-viewer.example/x"), TARGET, odd)).rejects.toThrow("not an error");
+  });
+});
+
+const HUB = "https://agent-hub.example";
+const VIEWER_ORIGIN = "https://agent-hub-viewer.example";
+const REWRITE = { frameAncestors: HUB, scriptOrigin: VIEWER_ORIGIN, nonce: "n0nce" };
+const FEEDBACK: ForwardTarget = {
+  upstreamOrigin: "https://prototype.example",
+  rest: "/start",
+  search: "",
+  prefix: "/f/token",
+  viewerHost: "agent-hub-viewer.example",
+  frameAncestors: HUB,
+  inject: '<script src="/_feedback/widget.js"></script>',
+  scriptNonce: "n0nce"
+};
+
+describe("rewriteCsp", () => {
+  it.each<[string, string, string]>([
+    ["no frame-ancestors", "default-src 'self'; img-src *", `default-src 'self'; img-src *; script-src 'self' ${VIEWER_ORIGIN}; frame-ancestors ${HUB}`],
+    ["a frame-ancestors of its own", "frame-ancestors 'none'; img-src *", `img-src *; frame-ancestors ${HUB}`],
+    ["frame-ancestors in capitals", "FRAME-ANCESTORS 'self'", `frame-ancestors ${HUB}`],
+    ["a script-src", "script-src 'self' https://cdn.example", `script-src 'self' https://cdn.example ${VIEWER_ORIGIN}; frame-ancestors ${HUB}`],
+    [
+      "script-src and script-src-elem both",
+      "script-src 'self'; script-src-elem 'self'",
+      `script-src 'self' ${VIEWER_ORIGIN}; script-src-elem 'self' ${VIEWER_ORIGIN}; frame-ancestors ${HUB}`
+    ],
+    [
+      "a script-src beside default-src, which is left alone",
+      "default-src 'none'; script-src 'self'",
+      `default-src 'none'; script-src 'self' ${VIEWER_ORIGIN}; frame-ancestors ${HUB}`
+    ],
+    ["a script-src of 'none'", "script-src 'none'", `script-src ${VIEWER_ORIGIN}; frame-ancestors ${HUB}`],
+    ["only a default-src of 'none'", "default-src 'none'", `default-src 'none'; script-src ${VIEWER_ORIGIN}; frame-ancestors ${HUB}`],
+    ["a nonce without 'strict-dynamic'", "script-src 'nonce-theirs' 'self'", `script-src 'nonce-theirs' 'self' ${VIEWER_ORIGIN}; frame-ancestors ${HUB}`],
+    [
+      "'strict-dynamic', under which host sources are ignored",
+      "script-src 'nonce-theirs' 'strict-dynamic'; object-src 'none'",
+      `script-src 'nonce-theirs' 'strict-dynamic' ${VIEWER_ORIGIN} 'nonce-n0nce'; object-src 'none'; frame-ancestors ${HUB}`
+    ],
+    ["no script directive at all", "img-src 'self'", `img-src 'self'; frame-ancestors ${HUB}`],
+    ["stray semicolons and spaces", " ;img-src  'self' ;; ", `img-src 'self'; frame-ancestors ${HUB}`],
+    [
+      "two policies, each enforced on its own",
+      "script-src 'self', frame-ancestors 'self'; default-src https:",
+      `script-src 'self' ${VIEWER_ORIGIN}; frame-ancestors ${HUB}, default-src https:; script-src https: ${VIEWER_ORIGIN}; frame-ancestors ${HUB}`
+    ]
+  ])("should rewrite a policy with %s", (_case, value, expected) => {
+    expect(rewriteCsp(value, REWRITE)).toBe(expected);
+  });
+
+  it("should add no nonce under 'strict-dynamic' when it is given none", () => {
+    expect(rewriteCsp("script-src 'strict-dynamic'", { frameAncestors: HUB, scriptOrigin: VIEWER_ORIGIN })).toBe(
+      `script-src 'strict-dynamic' ${VIEWER_ORIGIN}; frame-ancestors ${HUB}`
+    );
+  });
+});
+
+describe("transformHtml", () => {
+  const SNIPPET = "<script></script>";
+
+  it("should move the base and nothing else when there is nothing to inject", () => {
+    expect(transformHtml('<head><base href="/"></head>', { prefix: PREFIX })).toBe(rewriteBaseHref('<head><base href="/"></head>', PREFIX));
+  });
+
+  it.each<[string, string, string]>([
+    [
+      "a head",
+      '<!doctype html><html lang="en"><head data-x="1"><title>t</title>',
+      `<!doctype html><html lang="en"><head data-x="1">${SNIPPET}<title>t</title>`
+    ],
+    ["a header but no head", "<html><body><header>h</header>", `<html>${SNIPPET}<body><header>h</header>`],
+    ["only a doctype", "<!DOCTYPE html><title>t</title>", `<!DOCTYPE html>${SNIPPET}<title>t</title>`],
+    ["no tags it knows", "<p>hi</p>", `${SNIPPET}<p>hi</p>`]
+  ])("should put the snippet after the opening tag of a page with %s", (_case, html, expected) => {
+    expect(transformHtml(html, { prefix: PREFIX, inject: SNIPPET })).toBe(expected);
+  });
+
+  it("should move the base and inject both", () => {
+    expect(transformHtml('<head><base href="/app/">', { prefix: "/f/t", inject: SNIPPET })).toBe(`<head>${SNIPPET}<base href="/f/t/app/">`);
+  });
+});
+
+describe("forwardedResponseHeaders for a feedback page", () => {
+  it("should drop X-Frame-Options and let the hub alone frame the page when the prototype sets neither header", () => {
+    const headers = forwardedResponseHeaders(new Headers({ "x-frame-options": "SAMEORIGIN" }), FEEDBACK);
+
+    expect(headers.get("x-frame-options")).toBeNull();
+    expect(headers.get("content-security-policy")).toBe(`frame-ancestors ${HUB}`);
+    expect(headers.get("content-security-policy-report-only")).toBeNull();
+  });
+
+  it("should rewrite the prototype's policy and its report-only twin", () => {
+    const headers = forwardedResponseHeaders(
+      new Headers({
+        "content-security-policy": "frame-ancestors 'none'; script-src 'strict-dynamic' 'nonce-x'",
+        "content-security-policy-report-only": "frame-ancestors 'self'"
+      }),
+      FEEDBACK
+    );
+
+    expect(headers.get("content-security-policy")).toBe(`script-src 'strict-dynamic' 'nonce-x' ${VIEWER_ORIGIN} 'nonce-n0nce'; frame-ancestors ${HUB}`);
+    expect(headers.get("content-security-policy-report-only")).toBe(`frame-ancestors ${HUB}`);
+  });
+
+  it("should leave a port's framing headers as the pod sent them, for the viewer to replace", () => {
+    const headers = forwardedResponseHeaders(new Headers({ "x-frame-options": "SAMEORIGIN", "content-security-policy": "frame-ancestors 'self'" }), TARGET);
+
+    expect(headers.get("x-frame-options")).toBe("SAMEORIGIN");
+    expect(headers.get("content-security-policy")).toBe("frame-ancestors 'self'");
+  });
+});
+
+describe("forward for a feedback page", () => {
+  it("should put the widget into an HTML page and say nothing of it", async () => {
+    const fetchImpl = vi.fn<Fetch>(async () => new Response('<html><head><base href="/"></head></html>', { headers: { "content-type": "text/html" } }));
+
+    const response = await forward(new Request("https://agent-hub-viewer.example/x"), FEEDBACK, fetchImpl);
+
+    expect(fetchImpl).toHaveBeenCalledWith("https://prototype.example/start", expect.anything());
+    expect(await response.text()).toBe(`<html><head>${FEEDBACK.inject}<base href="/f/token/"></head></html>`);
+    expect(response.headers.get("x-feedback-widget")).toBeNull();
+  });
+
+  it("should pass a page over the rewrite limit on unchanged and say the widget is absent", async () => {
+    const page = `<head>${"x".repeat(BASE_REWRITE_LIMIT_BYTES)}`;
+    const fetchImpl = vi.fn<Fetch>(async () => new Response(page, { headers: { "content-type": "text/html" } }));
+
+    const response = await forward(new Request("https://agent-hub-viewer.example/x"), FEEDBACK, fetchImpl);
+
+    expect(await response.text()).toBe(page);
+    expect(response.headers.get("x-feedback-widget")).toBe("absent");
+  });
+
+  it("should say the widget is absent from an HTML page in a charset it cannot rewrite", async () => {
+    const fetchImpl = vi.fn<Fetch>(async () => new Response("<head>", { headers: { "content-type": "text/html; charset=iso-8859-1" } }));
+
+    const response = await forward(new Request("https://agent-hub-viewer.example/x"), FEEDBACK, fetchImpl);
+
+    expect(await response.text()).toBe("<head>");
+    expect(response.headers.get("x-feedback-widget")).toBe("absent");
+  });
+
+  it("should say nothing of the widget for an answer that is not a page, or a port's page over the limit", async () => {
+    const json = vi.fn<Fetch>(async () => new Response("{}", { headers: { "content-type": "application/json" } }));
+    const big = vi.fn<Fetch>(async () => new Response("x".repeat(BASE_REWRITE_LIMIT_BYTES + 1), { headers: { "content-type": "text/html" } }));
+
+    expect((await forward(new Request("https://agent-hub-viewer.example/x"), FEEDBACK, json)).headers.get("x-feedback-widget")).toBeNull();
+    expect((await forward(new Request("https://agent-hub-viewer.example/x"), TARGET, big)).headers.get("x-feedback-widget")).toBeNull();
   });
 });

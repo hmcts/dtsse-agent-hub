@@ -77,6 +77,10 @@ nodejs:
     # is always loaded on every pod and is not offered here.
     VIRTUAL_AGENT_PLUGINS: "pcs=PCS team workflows,dtsse=DTSSE docs,welsh=Welsh translations,cath=CaTH team workflows"
     ORCHESTRATOR_OIDS: ebed2d6c-e5b5-4fe8-970b-f8f501e33721
+    # Prototype feedback. Off until the hub pod can reach the prototypes it proxies and the storage account has its
+    # sign-off; the account is `infrastructure/storage.tf`'s, and the hub signs SAS for it as its managed identity.
+    FEEDBACK_ENABLED: "false"
+    FEEDBACK_STORAGE_ACCOUNT_URL: https://dtsseagenthub{{ .Values.global.environment }}.blob.core.windows.net
 
 postgresql:
   enabled: false

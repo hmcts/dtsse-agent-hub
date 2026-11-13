@@ -194,6 +194,9 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
     // An instruction to the pod; the slides panel reads its own build back.
     case "assistant_deck_build":
       return undefined;
+    // The feedback pages and the review shell re-read on their own, so no browser frame carries it.
+    case "feedback":
+      return undefined;
     case "resync":
       return RESYNC;
   }

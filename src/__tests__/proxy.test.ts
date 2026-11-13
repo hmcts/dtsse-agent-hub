@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SESSION_COOKIE, sealSession } from "@/auth/session";
 import { config, proxy } from "@/proxy";
+import nextConfig from "../../next.config.mjs";
 
 const SECRET = "a-test-session-secret-long-enough-to-be-plausible";
 
@@ -423,6 +424,69 @@ describe("proxy for the viewer's host", () => {
     expect((await proxy(onHost("agent-hub.example", "/health"))).status).toBe(200);
     expect((await proxy(onHost("agent-hub.example", "/hub"))).status).toBe(307);
   });
+});
+
+describe("proxy framing headers", () => {
+  const VIEWER = "agent-hub-viewer.example";
+
+  function onHost(host: string, path: string): NextRequest {
+    return new NextRequest(new URL(path, `https://${host}`), { headers: { host } });
+  }
+
+  function framing(response: Response): [string | null, string | null] {
+    return [response.headers.get("x-frame-options"), response.headers.get("content-security-policy")];
+  }
+
+  beforeEach(() => {
+    vi.stubEnv("AUTH_DISABLED", "");
+    vi.stubEnv("SESSION_SECRET", SECRET);
+    vi.stubEnv("AGENT_HUB_VIEWER_HOST", VIEWER);
+    vi.stubEnv("ENTRA_REDIRECT_URI", "https://agent-hub.example/auth/callback");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it.each([
+    ["a page passed through", "/health"],
+    ["a sign-in redirect", "/hub"],
+    ["a trailing-slash redirect", "/hub/c/"],
+    ["the viewer's route refused", "/viewer-proxy"],
+    ["a secret stripped", "/hub?token=x"]
+  ])("should forbid framing on the hub's host for %s", async (_case, path) => {
+    expect(framing(await proxy(onHost("agent-hub.example", path)))).toEqual(["DENY", "frame-ancestors 'none'"]);
+  });
+
+  it("should forbid framing on the viewer's host for the health routes and while the viewer is not configured", async () => {
+    expect(framing(await proxy(onHost(VIEWER, "/health/liveness")))).toEqual(["DENY", "frame-ancestors 'none'"]);
+
+    vi.stubEnv("ENTRA_REDIRECT_URI", "");
+
+    expect(framing(await proxy(onHost(VIEWER, "/f/x/")))).toEqual(["DENY", "frame-ancestors 'none'"]);
+  });
+
+  it("should leave the framing headers in next.config.mjs to the paths outside the proxy's matcher", async () => {
+    const rules = await nextConfig.headers();
+    const framed = rules.filter((rule) => rule.headers.some((header) => header.key === "X-Frame-Options")).map((rule) => rule.source);
+    const [matcher] = config.matcher;
+    const pattern = new RegExp(`^${matcher}$`);
+
+    expect(framed).toEqual(["/_next/static/:path*", "/_next/image", "/favicon.ico"]);
+    expect(framed.map((source) => pattern.test(source.replace(":path*", "chunks/main.js")))).toEqual([false, false, false]);
+  });
+
+  // Next skips a route's header when the proxy has already set one of the same name, so a value set here would
+  // overwrite the `frame-ancestors <hub>` a feedback page needs.
+  it.each(["/f/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_abcde/start", "/3fa85f64-5717-4562-b3fc-2c963f66afa6/8080/", "/_auth?ticket=x"])(
+    "should leave framing to the viewer's route for %s",
+    async (path) => {
+      const response = await proxy(onHost(VIEWER, path));
+
+      expect(response.headers.get("x-middleware-rewrite")).toBe(`https://${VIEWER}/viewer-proxy`);
+      expect(framing(response)).toEqual([null, null]);
+      expect(response.headers.get("x-middleware-request-content-security-policy")).toBeNull();
+    }
+  );
 });
 
 /**

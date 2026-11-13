@@ -290,6 +290,27 @@ The local store refuses to start under `NODE_ENV=production`. With sign-in disab
 route except `own-licence` and `own-licence-…`, which are on their own Claude licence — so
 `ah_dev_persona=own-licence` shows the Claude token field and any other persona shows the gateway.
 
+### Prototype feedback locally
+
+Prototype feedback is off unless `FEEDBACK_ENABLED=true` and both the viewer and Blob Storage are configured. `yarn
+deps:up` starts Azurite on 10000 beside Postgres, and the hub makes its container and opens its CORS on first use. The
+viewer needs a host of its own, so serve the hub on `localhost` and the viewer on `127.0.0.1`:
+
+```bash
+FEEDBACK_ENABLED=true \
+FEEDBACK_STORAGE_CONNECTION_STRING=UseDevelopmentStorage=true \
+AGENT_HUB_VIEWER_HOST=127.0.0.1 \
+ENTRA_REDIRECT_URI=http://localhost:3000/auth/callback \
+SESSION_SECRET=$(openssl rand -base64 48) AUTH_DISABLED=true AGENT_AUTH_DISABLED=true yarn dev
+```
+
+| Variable | Default | What it is |
+| --- | --- | --- |
+| `FEEDBACK_ENABLED` | off | `true` turns prototype feedback on, when the two below are also configured |
+| `FEEDBACK_STORAGE_ACCOUNT_URL` | none | The storage account, as `https://dtsseagenthubaat.blob.core.windows.net`, reached as the hub's managed identity, which signs every SAS from a user delegation key |
+| `FEEDBACK_STORAGE_CONNECTION_STRING` | none | A connection string, which wins over the account URL: `UseDevelopmentStorage=true` for Azurite |
+| `FEEDBACK_STORAGE_CONTAINER` | `feedback` | The container every project's blobs are under |
+
 ### The deployed secrets are opt-in
 
 `yarn dev` reads the `dtsse-aat` Key Vault only with `USE_KEY_VAULT=true`; otherwise it uses the compose defaults.

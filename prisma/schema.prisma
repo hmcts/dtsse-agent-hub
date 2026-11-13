@@ -162,6 +162,14 @@ model User {
   conversationsForkedToThem   AssistantConversationFork[]  @relation("forkRecipient")
   conversationsTheyForked     AssistantConversationFork[]  @relation("forkOwner")
   assistantWelshFiles         AssistantWelshFile[]
+  feedbackProjects            FeedbackProject[]   @relation("feedbackProjectOwner")
+  feedbackMemberships         FeedbackMember[]    @relation("feedbackMember")
+  feedbackMembersAdded        FeedbackMember[]    @relation("feedbackMemberAddedBy")
+  feedbackThreads             FeedbackThread[]    @relation("feedbackThreadAuthor")
+  feedbackThreadsResolved     FeedbackThread[]    @relation("feedbackThreadResolver")
+  feedbackComments            FeedbackComment[]   @relation("feedbackCommentAuthor")
+  feedbackMentions            FeedbackMention[]   @relation("feedbackMention")
+  feedbackRecordings          FeedbackRecording[] @relation("feedbackRecordingAuthor")
 
   @@map("user")
 }
@@ -877,4 +885,168 @@ model AssistantWelshFile {
   @@index([virtualAgentId, createdAt], map: "assistant_welsh_file_agent_idx")
   @@index([jobId], map: "assistant_welsh_file_job_idx")
   @@map("assistant_welsh_file")
+}
+
+/// A prototype feedback project: its share links, the threads reviewers pin to pages and the recordings they make.
+/// See src/feedback/.
+model FeedbackProject {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ownerOid      String    @map("owner_oid")
+  name          String
+  /// Whether recordings mask every input's value; passwords are masked whatever this says.
+  maskInputs    Boolean   @default(false) @map("mask_inputs")
+  /// 1–365 days a thread or recording is kept.
+  retentionDays Int       @default(90) @map("retention_days")
+  archivedAt    DateTime? @map("archived_at") @db.Timestamptz(6)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  owner      User                @relation("feedbackProjectOwner", fields: [ownerOid], references: [oid], onDelete: Cascade)
+  members    FeedbackMember[]
+  links      FeedbackLink[]
+  threads    FeedbackThread[]
+  recordings FeedbackRecording[]
+
+  @@index([ownerOid, createdAt], map: "feedback_project_owner_idx")
+  @@map("feedback_project")
+}
+
+model FeedbackMember {
+  projectId  String   @map("project_id") @db.Uuid
+  memberOid  String   @map("member_oid")
+  /// The project's owner, who alone changes the team.
+  addedByOid String   @map("added_by_oid")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  project FeedbackProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  member  User            @relation("feedbackMember", fields: [memberOid], references: [oid], onDelete: Cascade)
+  addedBy User            @relation("feedbackMemberAddedBy", fields: [addedByOid], references: [oid], onDelete: Cascade)
+
+  @@id([projectId, memberOid])
+  @@index([memberOid, createdAt], map: "feedback_member_member_idx")
+  @@map("feedback_member")
+}
+
+model FeedbackLink {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId        String    @map("project_id") @db.Uuid
+  label            String
+  targetUrl        String    @map("target_url")
+  /// The target's https origin, the only one the proxy fetches for this link.
+  origin           String
+  /// What the share link carries. See src/feedback/tokens.ts.
+  token            String    @unique
+  prototypeVersion String?   @map("prototype_version")
+  revokedAt        DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  project    FeedbackProject     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  threads    FeedbackThread[]
+  recordings FeedbackRecording[]
+
+  @@index([projectId, createdAt], map: "feedback_link_project_idx")
+  @@map("feedback_link")
+}
+
+model FeedbackThread {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId        String    @map("project_id") @db.Uuid
+  linkId           String    @map("link_id") @db.Uuid
+  authorOid        String    @map("author_oid")
+  pagePath         String    @map("page_path")
+  /// {selector, text, tag, rect, viewport}, checked by src/feedback/schemas.ts.
+  anchor           Json
+  snapshotBlob     String?   @map("snapshot_blob")
+  /// open, resolved or detached.
+  status           String    @default("open")
+  resolvedByOid    String?   @map("resolved_by_oid")
+  resolvedAt       DateTime? @map("resolved_at") @db.Timestamptz(6)
+  recordingId      String?   @map("recording_id") @db.Uuid
+  offsetMs         Int?      @map("offset_ms")
+  prototypeVersion String?   @map("prototype_version")
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  project    FeedbackProject    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  link       FeedbackLink       @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  author     User               @relation("feedbackThreadAuthor", fields: [authorOid], references: [oid], onDelete: Cascade)
+  resolvedBy User?              @relation("feedbackThreadResolver", fields: [resolvedByOid], references: [oid], onDelete: SetNull)
+  recording  FeedbackRecording? @relation(fields: [recordingId], references: [id], onDelete: SetNull)
+  comments   FeedbackComment[]
+
+  @@index([linkId, pagePath, createdAt], map: "feedback_thread_link_idx")
+  @@index([projectId, updatedAt], map: "feedback_thread_project_idx")
+  @@index([authorOid, createdAt], map: "feedback_thread_author_idx")
+  @@map("feedback_thread")
+}
+
+model FeedbackComment {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  threadId  String   @map("thread_id") @db.Uuid
+  authorOid String   @map("author_oid")
+  body      String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  thread   FeedbackThread    @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  author   User              @relation("feedbackCommentAuthor", fields: [authorOid], references: [oid], onDelete: Cascade)
+  mentions FeedbackMention[]
+
+  @@index([threadId, createdAt], map: "feedback_comment_thread_idx")
+  @@index([authorOid, createdAt], map: "feedback_comment_author_idx")
+  @@map("feedback_comment")
+}
+
+model FeedbackMention {
+  commentId  String    @map("comment_id") @db.Uuid
+  personOid  String    @map("person_oid")
+  notifiedAt DateTime? @map("notified_at") @db.Timestamptz(6)
+
+  comment FeedbackComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  person  User            @relation("feedbackMention", fields: [personOid], references: [oid], onDelete: Cascade)
+
+  @@id([commentId, personOid])
+  @@index([personOid], map: "feedback_mention_person_idx")
+  @@map("feedback_mention")
+}
+
+model FeedbackRecording {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId        String    @map("project_id") @db.Uuid
+  linkId           String    @map("link_id") @db.Uuid
+  authorOid        String    @map("author_oid")
+  startedAt        DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  endedAt          DateTime? @map("ended_at") @db.Timestamptz(6)
+  durationMs       Int?      @map("duration_ms")
+  /// recording, ready or failed.
+  status           String    @default("recording")
+  prototypeVersion String?   @map("prototype_version")
+
+  project  FeedbackProject            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  link     FeedbackLink               @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  author   User                       @relation("feedbackRecordingAuthor", fields: [authorOid], references: [oid], onDelete: Cascade)
+  segments FeedbackRecordingSegment[]
+  threads  FeedbackThread[]
+
+  @@index([linkId, authorOid, startedAt], map: "feedback_recording_link_idx")
+  @@index([projectId, startedAt], map: "feedback_recording_project_idx")
+  @@index([authorOid], map: "feedback_recording_author_idx")
+  @@map("feedback_recording")
+}
+
+model FeedbackRecordingSegment {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  recordingId String   @map("recording_id") @db.Uuid
+  /// audio or replay.
+  kind        String
+  seq         Int
+  pagePath    String?  @map("page_path")
+  blobPath    String   @map("blob_path")
+  offsetMs    Int      @map("offset_ms")
+  bytes       Int
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  recording FeedbackRecording @relation(fields: [recordingId], references: [id], onDelete: Cascade)
+
+  @@unique([recordingId, kind, seq])
+  @@map("feedback_recording_segment")
 }

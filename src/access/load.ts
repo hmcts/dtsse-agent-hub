@@ -61,3 +61,9 @@ export async function virtualAgentSessions(db: Database, virtualAgentId: string)
   const rows = await db.agent.findMany({ where: { virtualAgentId }, select: { id: true } });
   return rows.map((row) => row.id);
 }
+
+/** A feedback project's team besides its owner, which `feedbackProjectAccess` and `feedbackLinkAccess` read. */
+export async function feedbackMemberOids(db: Database, projectId: string): Promise<string[]> {
+  const rows = await db.feedbackMember.findMany({ where: { projectId }, select: { memberOid: true }, orderBy: { memberOid: "asc" } });
+  return rows.map((row) => row.memberOid);
+}

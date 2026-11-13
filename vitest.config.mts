@@ -84,7 +84,12 @@ export default defineConfig({
         "src/assistant/template-store.ts",
         "src/assistant/upload-store.ts",
         "src/assistant/upload-sweep.ts",
-        "src/assistant/views.ts"
+        "src/assistant/views.ts",
+        "src/feedback/store.ts",
+        "src/feedback/thread-store.ts",
+        "src/feedback/recording-store.ts",
+        "src/feedback/scope.ts",
+        "src/feedback/sweep.ts"
       ],
       reporter: ["lcov", "text"],
       reportsDirectory: "coverage",
