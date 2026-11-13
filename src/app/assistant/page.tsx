@@ -37,6 +37,7 @@ import {
   openAssistant,
   unsentNewChat
 } from "@/web/data";
+import { feedbackMenu } from "@/web/feedback-data";
 
 export const dynamic = "force-dynamic";
 
@@ -56,7 +57,7 @@ export default async function AssistantPage() {
   const viewer = await requireViewer();
   const jar = await cookies();
   const theme = themeOf(jar.get(THEME_COOKIE)?.value);
-  const [home, unsent, claudeMd, mine, files, size, defaults, model] = await Promise.all([
+  const [home, unsent, claudeMd, mine, files, size, defaults, model, feedback] = await Promise.all([
     openAssistant(viewer),
     unsentNewChat(viewer),
     claudeMdSettings(viewer),
@@ -64,7 +65,8 @@ export default async function AssistantPage() {
     assistantFiles(viewer),
     assistantSize(viewer),
     assistantExportDefaults(viewer),
-    assistantModel(viewer)
+    assistantModel(viewer),
+    feedbackMenu(viewer)
   ]);
   // The same sign-in the conversation page gives the document panel, for the settings' searches.
   const atlassian = {
@@ -87,6 +89,7 @@ export default async function AssistantPage() {
       plugins={pluginSettings}
       welsh={home.welsh}
       briefing={home.briefing}
+      feedback={feedback}
       start={startConversation}
       claudeMd={{ settings: claudeMd, save: saveClaudeMd, reset: resetClaudeMd }}
       templates={{ mine, save: saveTemplate, remove: deleteTemplate }}

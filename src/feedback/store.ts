@@ -26,7 +26,7 @@ export interface FoundFeedbackLink {
   label: string;
   prototypeVersion: string | null;
   revokedAt: Date | null;
-  project: { id: string; name: string; ownerOid: string; archivedAt: Date | null; maskInputs: boolean };
+  project: { id: string; name: string; ownerOid: string; archivedAt: Date | null; maskInputs: boolean; retentionDays: number };
   memberOids: string[];
 }
 
@@ -135,7 +135,9 @@ export async function findLink(db: Database, token: string): Promise<FoundFeedba
       label: true,
       prototypeVersion: true,
       revokedAt: true,
-      project: { select: { id: true, name: true, ownerOid: true, archivedAt: true, maskInputs: true, members: { select: { memberOid: true } } } }
+      project: {
+        select: { id: true, name: true, ownerOid: true, archivedAt: true, maskInputs: true, retentionDays: true, members: { select: { memberOid: true } } }
+      }
     }
   });
   if (row === null) {
@@ -301,6 +303,15 @@ export async function listProjects(
     openThreads: row._count.threads,
     recordings: row._count.recordings
   }));
+}
+
+/** Whether the viewer owns or is on the team of any project that is not archived, for the menu's way to the list. */
+export async function hasFeedbackProjects(db: Database, viewerOid: string): Promise<boolean> {
+  const row = await db.feedbackProject.findFirst({
+    where: { archivedAt: null, OR: [{ ownerOid: viewerOid }, { members: { some: { memberOid: viewerOid } } }] },
+    select: { id: true }
+  });
+  return row !== null;
 }
 
 /** One project as its team sees it: settings, every link with its token, and the team. */

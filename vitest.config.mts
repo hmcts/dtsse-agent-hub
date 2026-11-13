@@ -29,6 +29,8 @@ export default defineConfig({
         "src/assistant/slides/masters.ts",
         "src/instrumentation.ts",
         "src/instrumentation-node.ts",
+        // The widget bundle's entry, which only hands rrweb and its own <script> tag to `startWidget` (widget.test.ts).
+        "src/feedback/widget/index.ts",
         "src/app/**",
         "src/cli/**",
         // Everything below reads or writes Postgres, and is covered by `vitest.integration.config.mts` instead.
@@ -51,6 +53,7 @@ export default defineConfig({
         "src/agent-api/**",
         "src/viewer/current.ts",
         "src/web/data.ts",
+        "src/web/feedback-data.ts",
         "src/transcripts/store.ts",
         "src/transcripts/sweep.ts",
         "src/transcripts/views.ts",

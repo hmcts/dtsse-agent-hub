@@ -67,3 +67,9 @@ export async function feedbackMemberOids(db: Database, projectId: string): Promi
   const rows = await db.feedbackMember.findMany({ where: { projectId }, select: { memberOid: true }, orderBy: { memberOid: "asc" } });
   return rows.map((row) => row.memberOid);
 }
+
+/** A feedback project's owner and team, for a rule asked of a project named only by its id; `undefined` for none. */
+export async function feedbackTeam(db: Database, projectId: string): Promise<{ ownerOid: string; memberOids: string[] } | undefined> {
+  const project = await db.feedbackProject.findUnique({ where: { id: projectId }, select: { ownerOid: true } });
+  return project === null ? undefined : { ownerOid: project.ownerOid, memberOids: await feedbackMemberOids(db, projectId) };
+}

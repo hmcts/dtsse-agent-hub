@@ -33,6 +33,9 @@ allure-report/
 
 src/store/generated/
 
+# The feedback widget, built from src/feedback/widget/ by `yarn build:widget`.
+public/feedback/widget.js
+
 charts/*/charts/
 charts/*/Chart.lock
 

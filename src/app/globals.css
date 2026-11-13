@@ -325,3 +325,28 @@ body {
     --asst-error: 0.52 0.18 25;
   }
 }
+
+/* The rrweb replayer's own markup inside the feedback snapshot and player. Its stylesheet is not exported by the
+ * package, so the few rules it needs are here: the frame sits flush, and the replayed pointer is a dot. */
+.feedback-replay .replayer-wrapper {
+  position: relative;
+}
+.feedback-replay iframe {
+  border: 0;
+  background: white;
+}
+.feedback-replay .replayer-mouse {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border-radius: 9999px;
+  background: rgb(29 112 184 / 0.55);
+  box-shadow: 0 0 0 2px white;
+  transition:
+    left 0.05s linear,
+    top 0.05s linear;
+}
+.feedback-replay-still .replayer-mouse {
+  display: none;
+}

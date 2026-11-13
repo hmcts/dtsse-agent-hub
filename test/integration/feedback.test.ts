@@ -1,13 +1,15 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { feedbackTeam } from "../../src/access/load.ts";
 import { HttpError } from "../../src/agent-api/http.ts";
 import { MAX_THREADS_PER_WINDOW } from "../../src/feedback/limits.ts";
-import { completeRecording, getRecording, listRecordings, requestSegment, startRecording } from "../../src/feedback/recording-store.ts";
+import { completeRecording, getRecording, listRecordings, recordingPages, requestSegment, startRecording } from "../../src/feedback/recording-store.ts";
 import {
   addLink,
   archiveProject,
   createProject,
   findLink,
   getProject,
+  hasFeedbackProjects,
   listProjects,
   mentionablePeople,
   openFeedbackLink,
@@ -157,7 +159,7 @@ describe("feedback links", () => {
       label: "Version 1",
       prototypeVersion: "1.0",
       revokedAt: null,
-      project: { id: made.id, name: "Claims prototype", ownerOid: ALICE.oid, archivedAt: null, maskInputs: false },
+      project: { id: made.id, name: "Claims prototype", ownerOid: ALICE.oid, archivedAt: null, maskInputs: false, retentionDays: 90 },
       memberOids: [BOB.oid]
     });
     expect(await findLink(prisma, "not a token")).toBeUndefined();
@@ -407,5 +409,48 @@ describe("sweepFeedback", () => {
 
     expect(result?.abandoned).toBe(1);
     expect((await prisma.feedbackRecording.findUniqueOrThrow({ where: { id: recording.id } })).status).toBe("failed");
+  });
+});
+
+describe("the team's feedback pages", () => {
+  it("should say whether the viewer owns or is on the team of a live project", async () => {
+    expect(await hasFeedbackProjects(prisma, ALICE.oid)).toBe(false);
+    const made = await project();
+
+    expect(await hasFeedbackProjects(prisma, ALICE.oid)).toBe(true);
+    expect(await hasFeedbackProjects(prisma, BOB.oid)).toBe(true);
+    expect(await hasFeedbackProjects(prisma, CAROL.oid)).toBe(false);
+    await archiveProject(prisma, ALICE.oid, made.id);
+    expect(await hasFeedbackProjects(prisma, BOB.oid)).toBe(false);
+  });
+
+  it("should read a project's owner and team for the stream's rule, and nothing for one that is not there", async () => {
+    const made = await project();
+
+    expect(await feedbackTeam(prisma, made.id)).toEqual({ ownerOid: ALICE.oid, memberOids: [BOB.oid] });
+    expect(await feedbackTeam(prisma, "00000000-0000-4000-8000-000000000000")).toBeUndefined();
+  });
+
+  it("should list the pages each recording's replay visited, once each, in the order it reached them", async () => {
+    const made = await project();
+    const token = made.links[0]!.token;
+    const recording = await startRecording(prisma, CAROL.oid, token);
+    const quiet = await startRecording(prisma, DAN.oid, token);
+    for (const [seq, pagePath] of [
+      [0, "/start"],
+      [1, "/start"],
+      [2, "/details"],
+      [3, null],
+      [4, "/start"]
+    ] as const) {
+      await requestSegment(prisma, CAROL.oid, token, recording.id, { kind: "replay", seq, pagePath, offsetMs: seq * 1000, bytes: 1 });
+    }
+    await requestSegment(prisma, CAROL.oid, token, recording.id, { kind: "audio", seq: 0, pagePath: "/audio-only", offsetMs: 0, bytes: 1 });
+
+    const pages = await recordingPages(prisma, [recording.id, quiet.id]);
+
+    expect(pages.get(recording.id)).toEqual(["/start", "/details"]);
+    expect(pages.get(quiet.id)).toEqual([]);
+    expect((await recordingPages(prisma, [])).size).toBe(0);
   });
 });

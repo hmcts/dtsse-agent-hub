@@ -235,3 +235,26 @@ export async function getRecording(db: Database, viewerOid: string, scope: Feedb
     markers: threads.map((thread) => ({ threadId: thread.id, offsetMs: thread.offsetMs as number, pagePath: thread.pagePath }))
   };
 }
+
+/**
+ * The pages each recording's replay visited, in the order it first reached them, for recordings `listRecordings`
+ * already let the viewer see.
+ */
+export async function recordingPages(db: Database, recordingIds: readonly string[]): Promise<Map<string, string[]>> {
+  const pages = new Map<string, string[]>(recordingIds.map((id) => [id, []]));
+  if (recordingIds.length === 0) {
+    return pages;
+  }
+  const rows = await db.feedbackRecordingSegment.findMany({
+    where: { recordingId: { in: [...recordingIds] }, kind: "replay", pagePath: { not: null } },
+    select: { recordingId: true, pagePath: true },
+    orderBy: [{ recordingId: "asc" }, { seq: "asc" }]
+  });
+  for (const row of rows) {
+    const seen = pages.get(row.recordingId);
+    if (seen !== undefined && row.pagePath !== null && !seen.includes(row.pagePath)) {
+      seen.push(row.pagePath);
+    }
+  }
+  return pages;
+}

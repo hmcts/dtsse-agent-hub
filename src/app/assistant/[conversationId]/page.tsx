@@ -49,6 +49,7 @@ import {
   claudeMdSettings,
   openAssistant
 } from "@/web/data";
+import { feedbackMenu } from "@/web/feedback-data";
 
 export const dynamic = "force-dynamic";
 
@@ -86,7 +87,7 @@ export default async function ConversationPage({
   // queries to fill a dialog, and this is the page that loads most often.
   const sharing = query.share === "1";
   const forking = !sharing && query.fork === "1";
-  const [home, view, claudeMd, mine, shares, forks, files, size, defaults, model] = await Promise.all([
+  const [home, view, claudeMd, mine, shares, forks, files, size, defaults, model, feedback] = await Promise.all([
     openAssistant(viewer),
     assistantConversation(viewer, conversationId),
     claudeMdSettings(viewer),
@@ -96,7 +97,8 @@ export default async function ConversationPage({
     assistantFiles(viewer),
     assistantSize(viewer),
     assistantExportDefaults(viewer),
-    assistantModel(viewer)
+    assistantModel(viewer),
+    feedbackMenu(viewer)
   ]);
   if (view === undefined) {
     notFound();
@@ -121,6 +123,7 @@ export default async function ConversationPage({
       plugins={pluginSettings}
       welsh={home.welsh}
       briefing={home.briefing}
+      feedback={feedback}
       start={startConversation}
       claudeMd={{ settings: claudeMd, save: saveClaudeMd, reset: resetClaudeMd }}
       templates={{ mine, save: saveTemplate, remove: deleteTemplate }}

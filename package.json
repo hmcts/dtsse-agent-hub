@@ -12,10 +12,11 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "yarn deps:up && yarn db:generate && yarn db:migrate && next dev",
-    "build": "yarn build:app && yarn build:cli",
+    "dev": "yarn deps:up && yarn db:generate && yarn db:migrate && yarn build:widget && next dev",
+    "build": "yarn build:widget && yarn build:app && yarn build:cli",
     "build:app": "next build",
     "build:cli": "tsc -p tsconfig.cli.json",
+    "build:widget": "esbuild src/feedback/widget/index.ts --bundle --format=iife --minify --target=es2022 --legal-comments=none --outfile=public/feedback/widget.js",
     "build:client": "yarn workspace @hmcts-cft/agent-hub run build",
     "clean": "rm -rf .next dist && yarn workspace @hmcts-cft/agent-hub run clean",
     "start": "node .next/standalone/server.js",

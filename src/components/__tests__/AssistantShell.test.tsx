@@ -252,6 +252,29 @@ describe("AssistantShell", () => {
     ).toEqual(["/assistant/scheduled"]);
   });
 
+  it("should offer a new feedback project when feedback is on, and the list of them once the person is on a project", () => {
+    const { rerender } = render(shell({ welsh: true, feedback: { projects: false } }));
+    fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
+
+    const hrefs = () =>
+      within(screen.getByRole("menu", { name: "Workflows" }))
+        .getAllByRole("menuitem")
+        .map((item) => item.getAttribute("href"));
+    expect(hrefs()).toEqual(["/assistant/welsh", "/assistant/feedback/new", "/assistant/scheduled"]);
+    expect(screen.getByRole("menuitem", { name: /New feedback project/ }).textContent).toContain("Share a prototype for comments and recorded feedback");
+
+    rerender(shell({ welsh: true, feedback: { projects: true } }));
+    expect(hrefs()).toEqual(["/assistant/welsh", "/assistant/feedback/new", "/assistant/feedback", "/assistant/scheduled"]);
+  });
+
+  it("should offer nothing of feedback while it is off", () => {
+    render(shell());
+
+    fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
+
+    expect(screen.queryByRole("menuitem", { name: /feedback/i })).toBeNull();
+  });
+
   it("should offer the morning briefing first when the page says it is offered", () => {
     render(shell({ briefing: true, start: vi.fn() }));
 
