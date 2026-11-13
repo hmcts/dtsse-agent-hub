@@ -159,8 +159,12 @@ describe("ProjectPage", () => {
     render(<ProjectPage data={pageData({ recordings })} tab="recordings" actions={actions()} origin="https://hub.example.com" />);
 
     const rows = screen.getAllByRole("row").slice(1);
-    const title = within(rows[0]!).getByRole("link", { name: "Recording · 11 Nov, 09:00 · 3m 05s" });
-    expect(title.getAttribute("href")).toBe("/assistant/feedback/p1/recordings/r1");
+    expect(rows[0]!.textContent).toContain("Recording · 11 Nov, 09:00 · 3m 05s");
+    expect(
+      within(rows[0]!)
+        .getAllByRole("link")
+        .map((link) => link.getAttribute("href"))
+    ).toEqual(["/assistant/feedback/p1/recordings/r1"]);
     expect(rows[0]!.textContent).toContain("Ben Reviewer");
     expect(rows[0]!.textContent).toContain("/start, /details");
     expect(within(rows[1]!).queryByRole("link")).toBeNull();

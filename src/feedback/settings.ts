@@ -60,13 +60,8 @@ export function feedbackEnabled(env: Environment = process.env): boolean {
 export function feedbackSignInOrigins(env: Environment = process.env): string[] {
   const origins = new Set<string>();
   for (const entry of (env.FEEDBACK_SIGN_IN_ORIGINS ?? "").split(",")) {
-    const value = entry.trim();
-    if (value === "" || !URL.canParse(value)) {
-      continue;
-    }
-    const url = new URL(value);
-    const checked = checkTargetUrl(value, env);
-    if (checked.ok && (url.pathname === "/" || url.pathname === "") && url.search === "" && url.hash === "") {
+    const checked = checkTargetUrl(entry.trim(), env);
+    if (checked.ok && checked.url.pathname === "/" && checked.url.search === "" && checked.url.hash === "") {
       origins.add(checked.origin);
     }
   }

@@ -210,8 +210,12 @@ async function answer(request: Request, pathAndQuery: string, deps: ViewerDepend
       // `/submit` arrives. Failing that, the prefix whose page was last served here, for a single-page app that has
       // left its prefix.
       const location =
-        refererTarget(request.headers.get("referer"), settings.origin, pathAndQuery) ??
-        lastPortTarget(cookieValue(request.headers.get("cookie"), LAST_PORT_COOKIE), pathAndQuery);
+        refererTarget(
+          request.headers.get("referer"),
+          settings.origin,
+          pathAndQuery,
+          (deps.feedback?.signInOrigins ?? []).map((origin) => new URL(origin).host)
+        ) ?? lastPortTarget(cookieValue(request.headers.get("cookie"), LAST_PORT_COOKIE), pathAndQuery);
       if (location !== undefined) {
         return { response: new Response(null, { status: 307, headers: { ...NO_STORE, location } }), hubFramed: isFeedbackPath(location) };
       }
@@ -333,6 +337,15 @@ async function serveWidget(request: Request, feedback: FeedbackDependencies | un
   return new Response(request.method === "HEAD" ? null : widget.body, { headers });
 }
 
+type SignInRoute = ForwardRoute & { host: string };
+
+function signInRoutesOf(token: string, feedback: FeedbackDependencies): SignInRoute[] {
+  return (feedback.signInOrigins ?? []).map((origin) => {
+    const host = new URL(origin).host;
+    return { origin, host, prefix: signInPrefix(token, host) };
+  });
+}
+
 async function serveFeedback(
   request: Request,
   target: { token: string; rest: string; search: string },
@@ -358,22 +371,22 @@ async function serveFeedback(
   if (declaresTooLongBody(request.headers)) {
     return text(413, `The viewer cannot carry a request body larger than ${PROXY_BODY_LIMIT_BYTES / (1024 * 1024)} MiB.`);
   }
-  const checked = checkTargetUrl(link.origin, feedback.env);
-  if (!checked.ok || (await feedback.publicAddresses(checked.hostname)).length === 0) {
-    return text(502, "The prototype's address is not one the hub may reach.");
-  }
   const prefix = feedbackPrefix(token);
-  const signInRoutes: ForwardRoute[] = (feedback.signInOrigins ?? []).map((origin) => ({ origin, prefix: signInPrefix(token, new URL(origin).host) }));
+  const signInRoutes = signInRoutesOf(token, feedback);
   const signIn = signInPathOf(rest);
-  const signInRoute = signIn === undefined ? undefined : signInRoutes.find((route) => new URL(route.origin).host === signIn.host);
+  const signInRoute = signIn === undefined ? undefined : signInRoutes.find((route) => route.host === signIn.host);
   if (signIn !== undefined && signInRoute !== undefined) {
     return await serveSignIn(
       request,
       { ...signIn, search, route: signInRoute },
-      { prototype: { origin: checked.origin, prefix }, signInRoutes },
+      { prototype: { origin: link.origin, prefix, byHostname: true }, signInRoutes },
       deps,
       feedback
     );
+  }
+  const checked = checkTargetUrl(link.origin, feedback.env);
+  if (!checked.ok || (await feedback.publicAddresses(checked.hostname)).length === 0) {
+    return text(502, "The prototype's address is not one the hub may reach.");
   }
   const nonce = (feedback.nonce ?? newNonce)();
   try {

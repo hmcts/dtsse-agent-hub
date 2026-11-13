@@ -10,23 +10,7 @@ import type { FeedbackCommentView, FeedbackThreadView } from "@/feedback/thread-
 import type { ActionResult } from "@/web/action";
 import type { FeedbackProjectPageData, FeedbackRecordingRow } from "@/web/feedback-data";
 import { CommentsView, type ThreadHandlers } from "./CommentsView";
-import {
-  Badge,
-  DANGER,
-  FIELD,
-  isTargetUrl,
-  LINK,
-  PlayRecording,
-  PRIMARY,
-  type ProjectTab,
-  plural,
-  recordingPath,
-  recordingTitle,
-  reviewPath,
-  SECONDARY,
-  TABS,
-  when
-} from "./look";
+import { Badge, DANGER, FIELD, isTargetUrl, PlayRecording, PRIMARY, type ProjectTab, plural, recordingTitle, reviewPath, SECONDARY, TABS, when } from "./look";
 import { CopyField, call, PeoplePicker, type PickedPerson, useOrigin } from "./parts";
 
 /**
@@ -290,13 +274,7 @@ function Recordings({
           <tr key={recording.id} className="border-b border-asst-line">
             <td className="py-2.5 pr-3">
               <span className="flex flex-col gap-0.5">
-                {recording.status === "ready" ? (
-                  <Link href={recordingPath(projectId, recording.id)} className={`${LINK} font-medium`}>
-                    {recordingTitle(recording)}
-                  </Link>
-                ) : (
-                  <span className="font-medium">{recordingTitle(recording)}</span>
-                )}
+                <span className="font-medium">{recordingTitle(recording)}</span>
                 <span className="text-asst-muted">{recording.author.name}</span>
               </span>
             </td>

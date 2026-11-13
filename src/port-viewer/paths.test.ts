@@ -202,8 +202,13 @@ describe("sign-in paths", () => {
 
   it("should send a root-relative request from a sign-in page under the sign-in prefix", () => {
     const viewer = "https://agent-hub-viewer.example";
-    expect(refererTarget(`${viewer}/f/${TOKEN}/_sign-in/idam.example/login`, viewer, "/assets/app.css")).toBe(
+    expect(refererTarget(`${viewer}/f/${TOKEN}/_sign-in/idam.example/login`, viewer, "/assets/app.css", ["idam.example"])).toBe(
       `/f/${TOKEN}/_sign-in/idam.example/assets/app.css`
     );
+  });
+
+  it("should send a root-relative request from a sign-in path under the link's prefix when its host is not a sign-in service", () => {
+    const viewer = "https://agent-hub-viewer.example";
+    expect(refererTarget(`${viewer}/f/${TOKEN}/_sign-in/other.example/page`, viewer, "/assets/app.css", ["idam.example"])).toBe(`/f/${TOKEN}/assets/app.css`);
   });
 });

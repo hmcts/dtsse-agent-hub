@@ -102,15 +102,19 @@ const FEEDBACK_REQUEST_HEADERS = [
 ];
 
 /**
- * A `Referer` from the prototype's own pages on the viewer, as the prototype would see it served directly: its origin
- * and the path under the prefix. Any other names a page that is not the prototype's, and is dropped.
+ * A `Referer` from the upstream's own pages on the viewer, as it would see it served directly: its origin and the path
+ * under the prefix. Any other names a page that is not its own, and is dropped: for the prototype, that includes its
+ * sign-in services' pages, which are under its prefix and whose query carries the sign-in's state.
  */
-function feedbackReferer(referer: string | null, target: Pick<ForwardTarget, "upstreamOrigin" | "prefix" | "viewerOrigin">): string | undefined {
+function feedbackReferer(referer: string | null, target: ForwardTarget): string | undefined {
   if (referer === null || !URL.canParse(referer)) {
     return undefined;
   }
   const url = new URL(referer);
   if (url.origin !== target.viewerOrigin || !alreadyPrefixed(url.pathname, target.prefix)) {
+    return undefined;
+  }
+  if (target.signIn !== true && target.routes?.some((route) => alreadyPrefixed(url.pathname, route.prefix))) {
     return undefined;
   }
   return `${target.upstreamOrigin}${url.pathname.slice(target.prefix.length) || "/"}${url.search}`;
@@ -127,7 +131,7 @@ export function signInCookie(header: string | null): string | undefined {
     .map((pair) => pair.trim())
     .filter((pair) => pair.startsWith(SIGN_IN_COOKIE_PREFIX))
     .map((pair) => pair.slice(SIGN_IN_COOKIE_PREFIX.length))
-    .filter((pair) => pair !== "" && !pair.toLowerCase().startsWith("__host-"));
+    .filter((pair) => pair !== "");
   return kept.length === 0 ? undefined : kept.join("; ");
 }
 
@@ -161,6 +165,8 @@ function feedbackRequestHeaders(incoming: Headers, target: ForwardTarget, withBo
 export interface ForwardRoute {
   origin: string;
   prefix: string;
+  /** Matched by hostname alone, as the upstream's own redirects are: the prototype may not know it is behind TLS. */
+  byHostname?: boolean;
 }
 
 export interface ForwardTarget {
@@ -185,12 +191,12 @@ export interface ForwardTarget {
   scriptNonce?: string;
   /**
    * A feedback link's prototype, a site outside the cluster: it is sent an allowlist of the browser's headers rather
-   * than all but a few, and no `__Host-` cookie either way.
+   * than all but a few, and the prototype no `__Host-` cookie either way.
    */
   feedback?: boolean;
   /**
    * One of a feedback link's sign-in services rather than its prototype: it is sent only the cookies it set, and
-   * those it sets are kept under `SIGN_IN_COOKIE_PREFIX`.
+   * those it sets are kept under `SIGN_IN_COOKIE_PREFIX`, its `__Host-` cookies among them.
    */
   signIn?: boolean;
   /**
@@ -247,7 +253,9 @@ export function rewriteLocation(location: string, target: Pick<ForwardTarget, "u
   // By host alone: the pod may not know it is behind TLS and an ingress, so it can name itself over http or on the
   // port it listens on.
   if (url.hostname !== new URL(target.upstreamOrigin).hostname) {
-    const route = target.routes?.find((candidate) => candidate.origin === url.origin);
+    const route = target.routes?.find((candidate) =>
+      candidate.byHostname === true ? new URL(candidate.origin).hostname === url.hostname : candidate.origin === url.origin
+    );
     return route === undefined ? location : `${route.prefix}${url.pathname}${url.search}${url.hash}`;
   }
   const prefix = alreadyPrefixed(url.pathname, target.prefix) ? "" : target.prefix;
@@ -271,18 +279,20 @@ function hostPrefixedCookie(pair: string): boolean {
  * an app that names its session or CSRF cookie that way could never sign anyone in. The cost is that it reaches every
  * other agent's prefix on the viewer's host, which `Path` only ever discouraged rather than enforced. A feedback
  * link's prototype is a site outside the hub, and its `__Host-` cookies are refused: no `Path` can keep one to its
- * prefix, and the prototype is never sent one back.
+ * prefix, and the prototype is never sent one back. `namePrefix` goes before the name, after which a `__Host-` name is
+ * no longer one, so a sign-in service's are kept under its prefix like any other cookie.
  */
-export function rewriteSetCookie(value: string, prefix: string, options: { feedback?: boolean } = {}): string | undefined {
-  const [pair, ...attributes] = value.split(";");
-  if (pair === undefined || pair.trim().startsWith(VIEWER_COOKIE_PREFIX)) {
+export function rewriteSetCookie(value: string, prefix: string, options: { feedback?: boolean; namePrefix?: string } = {}): string | undefined {
+  const [given, ...attributes] = value.split(";");
+  if (given === undefined || given.trim().startsWith(VIEWER_COOKIE_PREFIX)) {
     return undefined;
   }
-  const hostPrefixed = hostPrefixedCookie(pair.trim());
+  const pair = `${options.namePrefix ?? ""}${given.trim()}`;
+  const hostPrefixed = hostPrefixedCookie(pair);
   if (hostPrefixed && options.feedback === true) {
     return undefined;
   }
-  const kept: string[] = [pair.trim()];
+  const kept: string[] = [pair];
   let path = false;
   for (const attribute of attributes) {
     const trimmed = attribute.trim();
@@ -386,9 +396,10 @@ export function forwardedResponseHeaders(
     headers.set("location", rewriteLocation(location, target));
   }
   for (const cookie of incoming.getSetCookie()) {
-    const rewritten = rewriteSetCookie(cookie, target.prefix, { feedback: target.feedback });
+    const namePrefix = target.signIn === true ? SIGN_IN_COOKIE_PREFIX : undefined;
+    const rewritten = rewriteSetCookie(cookie, target.prefix, { feedback: target.feedback, namePrefix });
     if (rewritten !== undefined) {
-      headers.append("set-cookie", target.signIn === true ? `${SIGN_IN_COOKIE_PREFIX}${rewritten}` : rewritten);
+      headers.append("set-cookie", rewritten);
     }
   }
   if (target.frameAncestors !== undefined) {

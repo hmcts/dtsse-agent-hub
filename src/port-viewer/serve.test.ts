@@ -575,6 +575,32 @@ describe("feedback links on the viewer", () => {
       expect(response.headers.get("location")).toBe(`${FPREFIX}/oauth2/callback?code=c&state=s`);
     });
 
+    it("should send the sign-in service's redirect back to the prototype under the link's prefix when it names the prototype over http", async () => {
+      const fetchImpl = vi.fn<Fetch>(async () => new Response(null, { status: 302, headers: { location: "http://prototype.example/oauth2/callback?code=c" } }));
+
+      const response = await serveViewer(
+        await reviewing(`${SPREFIX}/login`),
+        `${SPREFIX}/login`,
+        withFeedback({ signInOrigins: [IDAM] }, { fetch: fetchImpl })
+      );
+
+      expect(response.headers.get("location")).toBe(`${FPREFIX}/oauth2/callback?code=c`);
+    });
+
+    it("should check and resolve only the sign-in service's address for a sign-in request", async () => {
+      const fetchImpl = vi.fn<Fetch>(async () => new Response("sign in"));
+      const publicAddresses = vi.fn(async (hostname: string) => (hostname === "idam.example" ? [{ address: "8.8.8.8", family: 4 }] : []));
+
+      const response = await serveViewer(
+        await reviewing(`${SPREFIX}/login`),
+        `${SPREFIX}/login`,
+        withFeedback({ signInOrigins: [IDAM], publicAddresses }, { fetch: fetchImpl })
+      );
+
+      expect(response.status).toBe(200);
+      expect(publicAddresses.mock.calls.map(([hostname]) => hostname)).toEqual(["idam.example"]);
+    });
+
     it("should forward a sign-in path to the prototype when its host is not a sign-in service", async () => {
       const fetchImpl = vi.fn<Fetch>(async () => new Response("prototype"));
 
