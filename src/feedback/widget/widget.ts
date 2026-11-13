@@ -81,6 +81,9 @@ export function startWidget(view: Window, config: WidgetConfig, record: RecordFu
   };
   const handle = (message: ShellMessage) => {
     switch (message.type) {
+      case "ping":
+        post({ type: "present", path: path() });
+        break;
       case "pick-start":
         stopPicking?.();
         view.focus();

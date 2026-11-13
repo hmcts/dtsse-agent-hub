@@ -2,7 +2,7 @@ import { canOpenVirtualAgentPort, feedbackLinkAccess } from "../access/rules.ts"
 import type { Environment } from "../auth/settings.ts";
 import { checkTargetUrl, type Resolve } from "../feedback/targets.ts";
 import { publicUrl } from "../virtual-agents/ports.ts";
-import { declaresTooLongBody, type Fetch, forward, isRewritableHtml, PROXY_BODY_LIMIT_BYTES, UpstreamUnreachable } from "./forward.ts";
+import { declaresTooLongBody, type Fetch, type ForwardRoute, forward, isRewritableHtml, PROXY_BODY_LIMIT_BYTES, UpstreamUnreachable } from "./forward.ts";
 import {
   AUTH_PATH,
   feedbackCookieName,
@@ -16,6 +16,8 @@ import {
   parseViewerPath,
   refererTarget,
   reviewPath,
+  signInPathOf,
+  signInPrefix,
   TICKET_PARAMETER,
   ticketPath,
   viewerCookieName,
@@ -70,6 +72,8 @@ export interface FeedbackDependencies {
   readWidget: () => Promise<WidgetBundle | undefined>;
   /** A fresh nonce for each page's widget script. */
   nonce?: () => string;
+  /** `FEEDBACK_SIGN_IN_ORIGINS` (`feedbackSignInOrigins`): the sign-in services served under every link's prefix. */
+  signInOrigins?: readonly string[];
   env?: Environment;
 }
 
@@ -206,8 +210,12 @@ async function answer(request: Request, pathAndQuery: string, deps: ViewerDepend
       // `/submit` arrives. Failing that, the prefix whose page was last served here, for a single-page app that has
       // left its prefix.
       const location =
-        refererTarget(request.headers.get("referer"), settings.origin, pathAndQuery) ??
-        lastPortTarget(cookieValue(request.headers.get("cookie"), LAST_PORT_COOKIE), pathAndQuery);
+        refererTarget(
+          request.headers.get("referer"),
+          settings.origin,
+          pathAndQuery,
+          (deps.feedback?.signInOrigins ?? []).map((origin) => new URL(origin).host)
+        ) ?? lastPortTarget(cookieValue(request.headers.get("cookie"), LAST_PORT_COOKIE), pathAndQuery);
       if (location !== undefined) {
         return { response: new Response(null, { status: 307, headers: { ...NO_STORE, location } }), hubFramed: isFeedbackPath(location) };
       }
@@ -329,6 +337,15 @@ async function serveWidget(request: Request, feedback: FeedbackDependencies | un
   return new Response(request.method === "HEAD" ? null : widget.body, { headers });
 }
 
+type SignInRoute = ForwardRoute & { host: string };
+
+function signInRoutesOf(token: string, feedback: FeedbackDependencies): SignInRoute[] {
+  return (feedback.signInOrigins ?? []).map((origin) => {
+    const host = new URL(origin).host;
+    return { origin, host, prefix: signInPrefix(token, host) };
+  });
+}
+
 async function serveFeedback(
   request: Request,
   target: { token: string; rest: string; search: string },
@@ -354,11 +371,23 @@ async function serveFeedback(
   if (declaresTooLongBody(request.headers)) {
     return text(413, `The viewer cannot carry a request body larger than ${PROXY_BODY_LIMIT_BYTES / (1024 * 1024)} MiB.`);
   }
+  const prefix = feedbackPrefix(token);
+  const signInRoutes = signInRoutesOf(token, feedback);
+  const signIn = signInPathOf(rest);
+  const signInRoute = signIn === undefined ? undefined : signInRoutes.find((route) => route.host === signIn.host);
+  if (signIn !== undefined && signInRoute !== undefined) {
+    return await serveSignIn(
+      request,
+      { ...signIn, search, route: signInRoute },
+      { prototype: { origin: link.origin, prefix, byHostname: true }, signInRoutes },
+      deps,
+      feedback
+    );
+  }
   const checked = checkTargetUrl(link.origin, feedback.env);
   if (!checked.ok || (await feedback.publicAddresses(checked.hostname)).length === 0) {
     return text(502, "The prototype's address is not one the hub may reach.");
   }
-  const prefix = feedbackPrefix(token);
   const nonce = (feedback.nonce ?? newNonce)();
   try {
     const response = await forward(
@@ -373,6 +402,7 @@ async function serveFeedback(
         frameAncestors: settings.hubOrigin,
         scriptNonce: nonce,
         feedback: true,
+        routes: signInRoutes,
         inject: widgetSnippet({
           hubOrigin: settings.hubOrigin,
           prefix,
@@ -391,6 +421,48 @@ async function serveFeedback(
   } catch (error) {
     if (error instanceof UpstreamUnreachable) {
       return text(502, "The prototype did not answer.");
+    }
+    throw error;
+  }
+}
+
+/**
+ * A page of one of the link's sign-in services, under `/f/<token>/_sign-in/<host>/`, which the prototype's redirect
+ * to it was moved under. A sign-in page refuses to be framed and sends the browser back to the prototype's own
+ * origin; served here, the hub may frame it and its redirect back to the prototype lands under the link's prefix,
+ * where the prototype's session cookie is. Its pages get no widget, so nothing typed on them is ever recorded.
+ */
+async function serveSignIn(
+  request: Request,
+  target: { rest: string; search: string; route: ForwardRoute },
+  others: { prototype: ForwardRoute; signInRoutes: readonly ForwardRoute[] },
+  deps: ViewerDependencies,
+  feedback: FeedbackDependencies
+): Promise<Response> {
+  const checked = checkTargetUrl(target.route.origin, feedback.env);
+  if (!checked.ok || (await feedback.publicAddresses(checked.hostname)).length === 0) {
+    return text(502, "The sign-in service's address is not one the hub may reach.");
+  }
+  try {
+    return await forward(
+      request,
+      {
+        upstreamOrigin: checked.origin,
+        rest: target.rest,
+        search: target.search,
+        prefix: target.route.prefix,
+        viewerHost: deps.settings.host,
+        viewerOrigin: deps.settings.origin,
+        frameAncestors: deps.settings.hubOrigin,
+        feedback: true,
+        signIn: true,
+        routes: [others.prototype, ...others.signInRoutes.filter((route) => route.origin !== target.route.origin)]
+      },
+      feedback.fetch
+    );
+  } catch (error) {
+    if (error instanceof UpstreamUnreachable) {
+      return text(502, "The sign-in service did not answer.");
     }
     throw error;
   }

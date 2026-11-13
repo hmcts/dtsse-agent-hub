@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { feedbackBlobSettings, feedbackEnabled } from "./settings.ts";
+import { feedbackBlobSettings, feedbackEnabled, feedbackSignInOrigins } from "./settings.ts";
 
 const VIEWER = {
   AGENT_HUB_VIEWER_HOST: "agent-hub-viewer.aat.platform.hmcts.net",
@@ -46,5 +46,21 @@ describe("feedbackEnabled", () => {
     ["there is no storage", { ...VIEWER, FEEDBACK_ENABLED: "true" }]
   ])("should be off when %s", (_label, env) => {
     expect(feedbackEnabled(env)).toBe(false);
+  });
+});
+
+describe("feedbackSignInOrigins", () => {
+  it("should read each https origin once, normalised", () => {
+    const env = { NODE_ENV: "production", FEEDBACK_SIGN_IN_ORIGINS: " https://IDAM.example/ , https://idam.example,https://other.example" };
+    expect(feedbackSignInOrigins(env)).toEqual(["https://idam.example", "https://other.example"]);
+  });
+
+  it("should leave out what a link's origin could not be, or anything with a path", () => {
+    const env = { NODE_ENV: "production", FEEDBACK_SIGN_IN_ORIGINS: "http://idam.example,https://10.0.0.1,https://idam.example/login,not a url" };
+    expect(feedbackSignInOrigins(env)).toEqual([]);
+  });
+
+  it("should be empty when unset", () => {
+    expect(feedbackSignInOrigins({})).toEqual([]);
   });
 });

@@ -1,5 +1,6 @@
 import type { Environment } from "../auth/settings.ts";
 import { viewerSettings } from "../port-viewer/settings.ts";
+import { checkTargetUrl } from "./targets.ts";
 
 /**
  * The prototype feedback flag and where its blobs go, read per call from the environment because the chart's secrets
@@ -48,4 +49,21 @@ export function feedbackBlobSettings(env: Environment = process.env): FeedbackBl
  */
 export function feedbackEnabled(env: Environment = process.env): boolean {
   return env.FEEDBACK_ENABLED === "true" && viewerSettings(env) !== undefined && feedbackBlobSettings(env) !== undefined;
+}
+
+/**
+ * `FEEDBACK_SIGN_IN_ORIGINS`: the sign-in services, as comma-separated origins, that a prototype's sign-in may pass
+ * through the viewer on its way back to the prototype. A sign-in page such as HMCTS IDAM's refuses to be framed and
+ * sends the browser back to the prototype's own origin, so served directly it can never sign a reviewer in under the
+ * link's prefix. Each must pass `checkTargetUrl` as a link's origin does; anything else in the list is left out.
+ */
+export function feedbackSignInOrigins(env: Environment = process.env): string[] {
+  const origins = new Set<string>();
+  for (const entry of (env.FEEDBACK_SIGN_IN_ORIGINS ?? "").split(",")) {
+    const checked = checkTargetUrl(entry.trim(), env);
+    if (checked.ok && checked.url.pathname === "/" && checked.url.search === "" && checked.url.hash === "") {
+      origins.add(checked.origin);
+    }
+  }
+  return [...origins];
 }

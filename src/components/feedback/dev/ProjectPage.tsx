@@ -10,7 +10,7 @@ import type { FeedbackCommentView, FeedbackThreadView } from "@/feedback/thread-
 import type { ActionResult } from "@/web/action";
 import type { FeedbackProjectPageData, FeedbackRecordingRow } from "@/web/feedback-data";
 import { CommentsView, type ThreadHandlers } from "./CommentsView";
-import { Badge, DANGER, FIELD, isTargetUrl, LINK, PRIMARY, type ProjectTab, plural, reviewPath, SECONDARY, TABS, when } from "./look";
+import { Badge, DANGER, FIELD, isTargetUrl, PlayRecording, PRIMARY, type ProjectTab, plural, recordingTitle, reviewPath, SECONDARY, TABS, when } from "./look";
 import { CopyField, call, PeoplePicker, type PickedPerson, useOrigin } from "./parts";
 
 /**
@@ -139,7 +139,7 @@ function Overview({ data, origin, actions, owner }: Readonly<{ data: FeedbackPro
         ) : (
           <ul className="flex flex-col gap-1.5 text-[13px]">
             {activity.map((item) => (
-              <li key={`${item.kind} ${"threadId" in item ? item.threadId : item.recordingId} ${item.at}`} className="flex flex-wrap gap-x-2">
+              <li key={`${item.kind} ${"threadId" in item ? item.threadId : item.recordingId} ${item.at}`} className="flex flex-wrap items-center gap-x-2">
                 <time dateTime={item.at} className="text-asst-faint">
                   {when(item.at)}
                 </time>
@@ -151,12 +151,15 @@ function Overview({ data, origin, actions, owner }: Readonly<{ data: FeedbackPro
                       ? `replied on ${item.pagePath}: “${item.text.slice(0, 120)}”`
                       : item.kind === "resolved"
                         ? `resolved a comment on ${item.pagePath}`
-                        : `recorded ${durationText(item.durationMs)}`}
+                        : item.status === "ready"
+                          ? `recorded ${durationText(item.durationMs)}`
+                          : "started a recording"}
                 </span>
                 {item.kind === "recording" ? (
-                  <Link href={`/assistant/feedback/${data.project.id}/recordings/${item.recordingId}`} className={LINK}>
-                    Play
-                  </Link>
+                  <PlayRecording
+                    projectId={data.project.id}
+                    recording={{ id: item.recordingId, startedAt: item.at, status: item.status, author: { name: item.who } }}
+                  />
                 ) : null}
               </li>
             ))}
@@ -256,39 +259,31 @@ function Recordings({
       <caption className="sr-only">Recordings</caption>
       <thead>
         <tr className="border-b border-asst-line text-xs text-asst-faint">
-          {["Reviewer", "Link", "Started", "Length", "Pages visited", "Comments"].map((heading) => (
+          {["Recording", "Link", "Pages visited", "Comments"].map((heading) => (
             <th key={heading} scope="col" className="py-2 pr-3 font-medium">
               {heading}
             </th>
           ))}
+          <th scope="col" className="py-2 font-medium">
+            <span className="sr-only">Play</span>
+          </th>
         </tr>
       </thead>
       <tbody>
         {recordings.map((recording) => (
           <tr key={recording.id} className="border-b border-asst-line">
             <td className="py-2.5 pr-3">
-              {recording.status === "ready" ? (
-                <Link href={`/assistant/feedback/${projectId}/recordings/${recording.id}`} className={LINK}>
-                  <span aria-hidden="true">{recording.author.name}</span>
-                  <span className="sr-only">{`Play ${recording.author.name}'s recording from ${when(recording.startedAt)}`}</span>
-                </Link>
-              ) : (
-                recording.author.name
-              )}
+              <span className="flex flex-col gap-0.5">
+                <span className="font-medium">{recordingTitle(recording)}</span>
+                <span className="text-asst-muted">{recording.author.name}</span>
+              </span>
             </td>
             <td className="py-2.5 pr-3">{links.find((link) => link.id === recording.linkId)?.label ?? ""}</td>
-            <td className="py-2.5 pr-3">
-              <time dateTime={recording.startedAt}>{when(recording.startedAt)}</time>
-            </td>
-            <td className="py-2.5 pr-3">
-              {recording.status === "ready" ? (
-                durationText(recording.durationMs)
-              ) : (
-                <Badge status={recording.status}>{recording.status === "recording" ? "still recording" : "failed"}</Badge>
-              )}
-            </td>
             <td className="py-2.5 pr-3">{recording.pages.length === 0 ? "—" : recording.pages.join(", ")}</td>
-            <td className="py-2.5">{recording.comments}</td>
+            <td className="py-2.5 pr-3">{recording.comments}</td>
+            <td className="py-2.5 text-right">
+              <PlayRecording projectId={projectId} recording={recording} />
+            </td>
           </tr>
         ))}
       </tbody>
@@ -365,15 +360,8 @@ function People({ data, actions, owner }: Readonly<{ data: FeedbackProjectPageDa
                 </li>
               ) : (
                 <li key={`r ${item.recording.id}`} className="flex flex-wrap items-center gap-2 rounded-lg border border-asst-line px-3 py-2">
-                  <time dateTime={item.at} className="text-asst-faint">
-                    {when(item.at)}
-                  </time>
-                  <span>Recording, {durationText(item.recording.durationMs)}</span>
-                  {item.recording.status === "ready" ? (
-                    <Link href={`/assistant/feedback/${data.project.id}/recordings/${item.recording.id}`} className={LINK}>
-                      Play
-                    </Link>
-                  ) : null}
+                  <span className="flex-1">{recordingTitle(item.recording)}</span>
+                  <PlayRecording projectId={data.project.id} recording={item.recording} />
                 </li>
               )
             )}

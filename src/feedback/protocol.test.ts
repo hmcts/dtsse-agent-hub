@@ -11,6 +11,7 @@ describe("isWidgetMessage", () => {
   it.each([
     widgetMessage({ type: "hello", path: "/start", title: "Start", version: "1.0" }),
     widgetMessage({ type: "navigated", path: "/next?x=1" }),
+    widgetMessage({ type: "present", path: "/start" }),
     widgetMessage({ type: "pick-cancel" }),
     widgetMessage({ type: "picked", path: "/start", anchor: ANCHOR, snapshot: EVENTS }),
     widgetMessage({ type: "marker-clicked", id: "t1" }),
@@ -26,6 +27,7 @@ describe("isWidgetMessage", () => {
     ["another version", { protocol: FEEDBACK_PROTOCOL, v: 2, type: "pick-cancel" }],
     ["an unknown type", { ...widgetMessage({ type: "pick-cancel" }), type: "explode" }],
     ["a protocol-relative path", widgetMessage({ type: "navigated", path: "//evil.example/" })],
+    ["a present with no path", { ...widgetMessage({ type: "present", path: "/" }), path: undefined }],
     ["a picked with no anchor", { ...widgetMessage({ type: "picked", path: "/", anchor: ANCHOR, snapshot: [] }), anchor: null }],
     ["events without timestamps", widgetMessage({ type: "replay-events", path: "/", events: [{ type: 3 } as never] })],
     ["an empty id", widgetMessage({ type: "detached", ids: [""] })],
@@ -39,6 +41,7 @@ describe("isWidgetMessage", () => {
 
 describe("isShellMessage", () => {
   it.each([
+    shellMessage({ type: "ping" }),
     shellMessage({ type: "pick-start" }),
     shellMessage({ type: "pick-cancel" }),
     shellMessage({ type: "markers", threads: [{ id: "t1", number: 1, anchor: ANCHOR, status: "open" }] }),

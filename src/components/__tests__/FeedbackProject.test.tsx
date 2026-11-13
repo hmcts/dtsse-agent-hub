@@ -154,16 +154,40 @@ describe("ProjectPage", () => {
     expect(screen.queryByRole("button", { name: /Turn off/ })).toBeNull();
   });
 
-  it("should list recordings with who, where, how long and what they visited, linking the playable ones", () => {
+  it("should list recordings by when they started and how long they ran, with the reviewer, where and what they visited", () => {
     const recordings = [recordingRow("r1"), recordingRow("r2", { status: "recording", durationMs: null, pages: [], comments: 0 })];
     render(<ProjectPage data={pageData({ recordings })} tab="recordings" actions={actions()} origin="https://hub.example.com" />);
 
     const rows = screen.getAllByRole("row").slice(1);
-    expect(within(rows[0]!).getByRole("link").getAttribute("href")).toBe("/assistant/feedback/p1/recordings/r1");
-    expect(rows[0]!.textContent).toContain("3m 05s");
+    expect(rows[0]!.textContent).toContain("Recording · 11 Nov, 09:00 · 3m 05s");
+    expect(
+      within(rows[0]!)
+        .getAllByRole("link")
+        .map((link) => link.getAttribute("href"))
+    ).toEqual(["/assistant/feedback/p1/recordings/r1"]);
+    expect(rows[0]!.textContent).toContain("Ben Reviewer");
     expect(rows[0]!.textContent).toContain("/start, /details");
     expect(within(rows[1]!).queryByRole("link")).toBeNull();
+    expect(rows[1]!.textContent).toContain("Recording · 11 Nov, 09:00");
     expect(rows[1]!.textContent).toContain("still recording");
+  });
+
+  it("should give each playable recording a Play button that names whose recording it is", () => {
+    render(<ProjectPage data={pageData({ recordings: [recordingRow("r1")] })} tab="recordings" actions={actions()} origin="https://hub.example.com" />);
+
+    const play = screen.getByRole("link", { name: "Play Ben Reviewer's recording from 11 Nov, 09:00" });
+    expect(play.getAttribute("href")).toBe("/assistant/feedback/p1/recordings/r1");
+    expect(screen.queryByRole("link", { name: "Ben Reviewer" })).toBeNull();
+  });
+
+  it("should open a recording from the overview's activity with the same Play button, and not one still recording", () => {
+    const recordings = [recordingRow("r1"), recordingRow("r2", { status: "recording", durationMs: null, startedAt: "2026-11-11T10:00:00.000Z" })];
+    render(<ProjectPage data={pageData({ threads: [], recordings })} tab="overview" actions={actions()} origin="https://hub.example.com" />);
+
+    const activity = screen.getByRole("heading", { name: "Recent activity" }).parentElement as HTMLElement;
+    const plays = within(activity).getAllByRole("link", { name: /^Play / });
+    expect(plays.map((link) => link.getAttribute("href"))).toEqual(["/assistant/feedback/p1/recordings/r1"]);
+    expect(activity.textContent).toContain("started a recording");
   });
 
   it("should say when there are no recordings", () => {
@@ -185,7 +209,12 @@ describe("ProjectPage", () => {
         .getAllByRole("listitem")
         .map((item) => (item.textContent?.includes("Recording") ? "recording" : "thread"))
     ).toEqual(["thread", "recording"]);
-    expect(within(by).getByRole("link", { name: "Play" }).getAttribute("href")).toBe("/assistant/feedback/p1/recordings/r1");
+    expect(
+      within(by)
+        .getByRole("link", { name: /^Play Ben Reviewer's recording/ })
+        .getAttribute("href")
+    ).toBe("/assistant/feedback/p1/recordings/r1");
+    expect(within(by).getByText("Recording · 11 Nov, 09:00 · 3m 05s")).toBeTruthy();
   });
 
   it("should say when nobody has reviewed yet", () => {

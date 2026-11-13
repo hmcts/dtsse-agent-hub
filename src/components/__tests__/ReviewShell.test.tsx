@@ -417,6 +417,40 @@ describe("ReviewShell", () => {
     expect(screen.getByText(/Feedback is unavailable on this page/)).toBeTruthy();
   });
 
+  it("should ask the frame's widget whether it is there each time the frame loads", async () => {
+    shell();
+    posted = [];
+    fireEvent.load(frame());
+    expect(posted).toEqual([expect.objectContaining({ type: "ping" })]);
+  });
+
+  it("should keep comments available when the frame loads after the widget's hello and the widget answers the ping", async () => {
+    shell();
+    await fromWidget({ type: "hello", path: "/start", title: "", version: "" });
+    await fromWidget({ type: "hello", path: "/next", title: "", version: "" });
+    fireEvent.load(frame());
+    await fromWidget({ type: "present", path: "/next" });
+    await settle(5000);
+    expect(screen.queryByText(/Feedback is unavailable on this page/)).toBeNull();
+    expect((screen.getByRole("button", { name: "Add comment" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("should not read the page's threads again when the widget answers the ping for a page it already announced", async () => {
+    shell();
+    await fromWidget({ type: "hello", path: "/start", title: "", version: "" });
+    const reads = threadReads().length;
+    fireEvent.load(frame());
+    await fromWidget({ type: "present", path: "/start" });
+    expect(threadReads()).toHaveLength(reads);
+  });
+
+  it("should take the page from the widget's answer to the ping when its hello was missed", async () => {
+    shell();
+    await fromWidget({ type: "present", path: "/start" });
+    expect(threadReads().at(-1)?.url).toBe(`${BASE}/threads?page_path=%2Fstart`);
+    expect((screen.getByRole("button", { name: "Add comment" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it("should focus a thread's card from its marker, and its marker from the card", async () => {
     threads = [thread("t1"), thread("t2")];
     shell();

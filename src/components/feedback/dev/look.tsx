@@ -1,3 +1,7 @@
+import Link from "next/link";
+import type { FeedbackRecordingStatus } from "@/feedback/recording-store";
+import { durationText } from "@/feedback/team-views";
+
 /**
  * What the team's feedback pages share and can render on the server: the button and field styles, the share address,
  * the status badge and the date and count wording.
@@ -34,6 +38,35 @@ const DATE = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", 
 
 export function when(iso: string): string {
   return DATE.format(new Date(iso));
+}
+
+/** The player's page for one recording. */
+export function recordingPath(projectId: string, recordingId: string): string {
+  return `/assistant/feedback/${projectId}/recordings/${recordingId}`;
+}
+
+/** What a recording is called wherever it is listed: when it started, and its length once it has one. */
+export function recordingTitle(recording: Readonly<{ startedAt: string; durationMs: number | null; status: FeedbackRecordingStatus }>): string {
+  const length = recording.status === "ready" ? ` · ${durationText(recording.durationMs)}` : "";
+  return `Recording · ${when(recording.startedAt)}${length}`;
+}
+
+/**
+ * How every list opens a recording: a Play button for one that is ready, named for whose recording it is and when,
+ * and its state for one that is not.
+ */
+export function PlayRecording({
+  projectId,
+  recording
+}: Readonly<{ projectId: string; recording: Readonly<{ id: string; startedAt: string; status: FeedbackRecordingStatus; author: { name: string } }> }>) {
+  if (recording.status !== "ready") {
+    return <Badge status={recording.status}>{recording.status === "recording" ? "still recording" : "failed"}</Badge>;
+  }
+  return (
+    <Link href={recordingPath(projectId, recording.id)} className={`${PRIMARY} py-1`}>
+      Play <span className="sr-only">{`${recording.author.name}'s recording from ${when(recording.startedAt)}`}</span>
+    </Link>
+  );
 }
 
 export function plural(n: number, one: string, many = `${one}s`): string {

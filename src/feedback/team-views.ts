@@ -1,4 +1,4 @@
-import type { FeedbackRecordingView } from "./recording-store.ts";
+import type { FeedbackRecordingStatus, FeedbackRecordingView } from "./recording-store.ts";
 import type { FeedbackThreadStatus, FeedbackThreadView } from "./thread-store.ts";
 
 /**
@@ -106,7 +106,7 @@ export type Activity =
   | { kind: "thread"; at: string; who: string; threadId: string; pagePath: string; text: string }
   | { kind: "reply"; at: string; who: string; threadId: string; pagePath: string; text: string }
   | { kind: "resolved"; at: string; who: string; threadId: string; pagePath: string }
-  | { kind: "recording"; at: string; who: string; recordingId: string; durationMs: number | null };
+  | { kind: "recording"; at: string; who: string; recordingId: string; durationMs: number | null; status: FeedbackRecordingStatus };
 
 /** What happened on the project, newest first, at most `limit` of it. */
 export function recentActivity(threads: readonly FeedbackThreadView[], recordings: readonly FeedbackRecordingView[], limit = 10): Activity[] {
@@ -123,7 +123,14 @@ export function recentActivity(threads: readonly FeedbackThreadView[], recording
     }
   }
   for (const recording of recordings) {
-    items.push({ kind: "recording", at: recording.startedAt, who: recording.author.name, recordingId: recording.id, durationMs: recording.durationMs });
+    items.push({
+      kind: "recording",
+      at: recording.startedAt,
+      who: recording.author.name,
+      recordingId: recording.id,
+      durationMs: recording.durationMs,
+      status: recording.status
+    });
   }
   return items.sort((a, b) => byCodePoint(b.at, a.at)).slice(0, limit);
 }

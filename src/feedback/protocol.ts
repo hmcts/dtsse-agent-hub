@@ -47,6 +47,8 @@ type Envelope<T> = T & { protocol: typeof FEEDBACK_PROTOCOL; v: typeof FEEDBACK_
 /** From the widget to the shell. `path` is always the page's path and query under the link's prefix, from `/`. */
 export type WidgetMessage = Envelope<
   | { type: "hello"; path: string; title: string; version: string }
+  /** The answer to the shell's `ping`: this page's widget is running, whether or not the shell heard its `hello`. */
+  | { type: "present"; path: string }
   | { type: "navigated"; path: string }
   | { type: "pick-cancel" }
   | { type: "picked"; path: string; anchor: WidgetAnchor; snapshot: RecordedEvent[] }
@@ -57,6 +59,11 @@ export type WidgetMessage = Envelope<
 
 /** From the shell to the widget. */
 export type ShellMessage = Envelope<
+  /**
+   * Sent each time the frame fires `load`, which is after a page's deferred widget has already said `hello`, so the
+   * shell cannot tell a page without a widget from one whose `hello` came first except by asking.
+   */
+  | { type: "ping" }
   | { type: "pick-start" }
   | { type: "pick-cancel" }
   | { type: "markers"; threads: MarkerThread[] }
@@ -147,6 +154,7 @@ export function isWidgetMessage(value: unknown): value is WidgetMessage {
     case "hello":
       return isPath(value.path) && isText(value.title) && isText(value.version);
     case "navigated":
+    case "present":
       return isPath(value.path);
     case "pick-cancel":
       return true;
@@ -168,6 +176,7 @@ export function isShellMessage(value: unknown): value is ShellMessage {
     return false;
   }
   switch (value.type) {
+    case "ping":
     case "pick-start":
     case "pick-cancel":
     case "record-stop":

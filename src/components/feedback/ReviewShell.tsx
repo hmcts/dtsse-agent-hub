@@ -171,18 +171,31 @@ export function ReviewShell(props: ReviewShellProps) {
 
   const onWidget = useCallback(
     (message: WidgetMessage) => {
+      const arrived = (pagePath: string) => {
+        helloSinceLoad.current = true;
+        setUnavailable(false);
+        pathRef.current = pagePath;
+        setPath(pagePath);
+        setMissing([]);
+        setPicking(false);
+        void refresh(pagePath);
+        if (recordingRef.current !== null) {
+          send({ type: "record-start", maskInputs });
+        }
+      };
       switch (message.type) {
-        case "hello":
-          helloSinceLoad.current = true;
-          setUnavailable(false);
-          pathRef.current = message.path;
-          setPath(message.path);
-          setMissing([]);
-          setPicking(false);
-          void refresh(message.path);
-          if (recordingRef.current !== null) {
-            send({ type: "record-start", maskInputs });
+        case "present":
+          // A `hello` the shell missed, posted before its listener was attached, is caught up on here; otherwise the
+          // page is the one already announced, and nothing about it has changed.
+          if (pathRef.current === message.path) {
+            helloSinceLoad.current = true;
+            setUnavailable(false);
+          } else {
+            arrived(message.path);
           }
+          break;
+        case "hello":
+          arrived(message.path);
           break;
         case "navigated":
           pathRef.current = message.path;
@@ -222,8 +235,10 @@ export function ReviewShell(props: ReviewShellProps) {
       onWidget(event.data);
     };
     window.addEventListener("message", listener);
+    // The first page's widget may have said `hello` before this listener was here to hear it.
+    send({ type: "ping" });
     return () => window.removeEventListener("message", listener);
-  }, [frameOrigin, onWidget]);
+  }, [frameOrigin, onWidget, send]);
 
   useEffect(() => {
     const tick = () => {
@@ -250,8 +265,11 @@ export function ReviewShell(props: ReviewShellProps) {
     return () => clearInterval(timer);
   }, [recording, stopRecording]);
 
+  // A page's widget runs before the frame's `load`, so its `hello` has usually arrived already: the flag is cleared
+  // and the widget asked again, and only a page that does not answer is the one without a widget.
   const onFrameLoad = () => {
     helloSinceLoad.current = false;
+    send({ type: "ping" });
     setTimeout(() => {
       if (!helloSinceLoad.current) {
         setUnavailable(true);

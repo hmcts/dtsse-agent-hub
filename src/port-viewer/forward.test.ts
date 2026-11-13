@@ -18,6 +18,7 @@ import {
   rewriteCsp,
   rewriteLocation,
   rewriteSetCookie,
+  signInCookie,
   transformHtml,
   UpstreamUnreachable
 } from "./forward.ts";
@@ -553,5 +554,108 @@ describe("forwardedResponseHeaders cookies for a feedback page", () => {
   it("should refuse a __Host- cookie from rewriteSetCookie only for a feedback page", () => {
     expect(rewriteSetCookie("__Host-sid=1; Secure", "/f/token", { feedback: true })).toBeUndefined();
     expect(rewriteSetCookie("__Host-sid=1; Secure", PREFIX)).toBe("__Host-sid=1; Secure; Path=/");
+  });
+});
+
+describe("signInCookie", () => {
+  it("should send a sign-in service only the cookies it set, under their own names", () => {
+    expect(signInCookie("ahv-f-tok=grant; connect.sid=prototype; ahv-si-XSRF-TOKEN=t; ahv-si-Idam.UI=classic")).toBe("XSRF-TOKEN=t; Idam.UI=classic");
+  });
+
+  it("should send nothing when it has set nothing", () => {
+    expect(signInCookie("connect.sid=prototype")).toBeUndefined();
+    expect(signInCookie(null)).toBeUndefined();
+  });
+});
+
+describe("rewriteLocation between a prototype and its sign-in service", () => {
+  const routes = [{ origin: "https://idam.example", prefix: "/f/tok/_sign-in/idam.example" }];
+
+  it("should move a redirect to a routed origin under that route's prefix, keeping its query", () => {
+    expect(
+      rewriteLocation("https://idam.example/o/authorize?redirect_uri=https%3A%2F%2Fproto.example%2Fcb", {
+        upstreamOrigin: "https://proto.example",
+        prefix: "/f/tok",
+        routes
+      })
+    ).toBe("/f/tok/_sign-in/idam.example/o/authorize?redirect_uri=https%3A%2F%2Fproto.example%2Fcb");
+  });
+
+  it("should leave a redirect to an origin on another scheme or port than the route's alone", () => {
+    expect(rewriteLocation("http://idam.example/login", { upstreamOrigin: "https://proto.example", prefix: "/f/tok", routes })).toBe(
+      "http://idam.example/login"
+    );
+  });
+});
+
+describe("forwardedResponseHeaders for a sign-in service", () => {
+  it("should keep the cookies it sets under the sign-in prefix and name", () => {
+    const headers = forwardedResponseHeaders(new Headers([["set-cookie", "Idam.Session=s; Path=/; Secure; HttpOnly"]]), {
+      upstreamOrigin: "https://idam.example",
+      prefix: "/f/tok/_sign-in/idam.example",
+      viewerOrigin: "https://agent-hub-viewer.example",
+      feedback: true,
+      signIn: true
+    });
+    expect(headers.getSetCookie()).toEqual(["ahv-si-Idam.Session=s; Path=/f/tok/_sign-in/idam.example/; Secure; HttpOnly"]);
+  });
+});
+
+describe("a sign-in service's redirect back to the prototype", () => {
+  const SIGN_IN = { upstreamOrigin: "https://idam.example", prefix: "/f/tok/_sign-in/idam.example" };
+  const routes = [{ origin: "https://proto.example", prefix: "/f/tok", byHostname: true }];
+
+  it.each(["http://proto.example/callback?code=c", "https://proto.example:8443/callback?code=c"])(
+    "should move it under the link's prefix by hostname when it is %s",
+    (location) => {
+      expect(rewriteLocation(location, { ...SIGN_IN, routes })).toBe("/f/tok/callback?code=c");
+    }
+  );
+
+  it("should leave a redirect to another host alone", () => {
+    expect(rewriteLocation("http://elsewhere.example/callback", { ...SIGN_IN, routes })).toBe("http://elsewhere.example/callback");
+  });
+});
+
+describe("a sign-in service's __Host- cookies", () => {
+  const SIGN_IN = {
+    upstreamOrigin: "https://idam.example",
+    prefix: "/f/tok/_sign-in/idam.example",
+    viewerOrigin: VIEWER_ORIGIN,
+    feedback: true,
+    signIn: true
+  };
+
+  it("should keep them under the sign-in prefix and name when a sign-in service sets them", () => {
+    const headers = forwardedResponseHeaders(new Headers([["set-cookie", "__Host-Idam.Session=s; Path=/; Secure; HttpOnly"]]), SIGN_IN);
+
+    expect(headers.getSetCookie()).toEqual(["ahv-si-__Host-Idam.Session=s; Path=/f/tok/_sign-in/idam.example/; Secure; HttpOnly"]);
+  });
+
+  it("should send them back under their own names when the sign-in service is asked", () => {
+    expect(signInCookie("ahv-si-__Host-Idam.Session=s; __Host-sid=agent")).toBe("__Host-Idam.Session=s");
+  });
+});
+
+describe("the Referer a feedback link's upstreams are sent from a sign-in page", () => {
+  const SIGN_IN_PAGE = `${VIEWER_ORIGIN}/f/token/_sign-in/idam.example/login?client_id=c&state=s`;
+  const SIGN_IN_ROUTE = { origin: "https://idam.example", prefix: "/f/token/_sign-in/idam.example" };
+
+  it("should send the prototype no Referer when it comes from a sign-in page", () => {
+    const headers = forwardedRequestHeaders(new Headers({ referer: SIGN_IN_PAGE }), { ...FEEDBACK, routes: [SIGN_IN_ROUTE] });
+
+    expect(headers.get("referer")).toBeNull();
+  });
+
+  it("should send the sign-in service its own page as the Referer when it comes from that page", () => {
+    const target: ForwardTarget = {
+      ...FEEDBACK,
+      upstreamOrigin: "https://idam.example",
+      prefix: SIGN_IN_ROUTE.prefix,
+      signIn: true,
+      routes: [{ origin: "https://prototype.example", prefix: "/f/token", byHostname: true }]
+    };
+
+    expect(forwardedRequestHeaders(new Headers({ referer: SIGN_IN_PAGE }), target).get("referer")).toBe("https://idam.example/login?client_id=c&state=s");
   });
 });
