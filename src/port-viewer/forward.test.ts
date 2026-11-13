@@ -374,6 +374,19 @@ describe("rewriteCsp", () => {
       `script-src 'strict-dynamic' ${VIEWER_ORIGIN}; frame-ancestors ${HUB}`
     );
   });
+
+  it("should keep upgrade-insecure-requests when the viewer is served over https", () => {
+    expect(rewriteCsp("img-src 'self'; upgrade-insecure-requests", REWRITE)).toBe(`img-src 'self'; upgrade-insecure-requests; frame-ancestors ${HUB}`);
+  });
+
+  it("should drop upgrade-insecure-requests when the viewer is served over http", () => {
+    expect(
+      rewriteCsp("img-src 'self'; Upgrade-Insecure-Requests; script-src 'self'", {
+        frameAncestors: "http://hub.localhost:3000",
+        scriptOrigin: "http://viewer.hub.localhost:3000"
+      })
+    ).toBe("img-src 'self'; script-src 'self' http://viewer.hub.localhost:3000; frame-ancestors http://hub.localhost:3000");
+  });
 });
 
 describe("transformHtml", () => {

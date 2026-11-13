@@ -3,6 +3,7 @@ import { type Fetch, PROXY_BODY_LIMIT_BYTES } from "./forward.ts";
 import {
   cookieValue,
   denyFraming,
+  detectedSignInOrigin,
   type FeedbackDependencies,
   feedbackTicketUrl,
   serveViewer,
@@ -17,10 +18,12 @@ import type { ViewerSettings } from "./settings.ts";
 import {
   openFeedbackCookie,
   openFeedbackTicket,
+  openSignInGrant,
   openTicket,
   openViewerCookie,
   sealFeedbackCookie,
   sealFeedbackTicket,
+  sealSignInGrant,
   sealTicket,
   sealViewerCookie
 } from "./tickets.ts";
@@ -636,6 +639,99 @@ describe("feedback links on the viewer", () => {
 
       expect(response.status).toBe(307);
       expect(response.headers.get("location")).toBe(`${SPREFIX}/assets/app.css`);
+    });
+  });
+
+  describe("detected sign-in services", () => {
+    const SIM = "https://sim.example";
+    const SIM_PREFIX = `${FPREFIX}/_sign-in/sim.example`;
+    const CALLBACK = encodeURIComponent("https://prototype.example/oauth2/callback");
+    const AUTHORIZE = `${SIM}/o/authorize?client_id=c&response_type=code&redirect_uri=${CALLBACK}&state=s`;
+
+    function redirectingTo(location: string) {
+      return vi.fn<Fetch>(async () => new Response(null, { status: 302, headers: { location } }));
+    }
+
+    async function withGrant(path: string, grant: { token: string; origin: string }, init: RequestInit = {}): Promise<Request> {
+      const request = await reviewing(path, init);
+      request.headers.set("cookie", `${request.headers.get("cookie")}; ahv-grant=${await sealSignInGrant(grant, SETTINGS.secret)}`);
+      return request;
+    }
+
+    it("should detect an authorization request whose redirect_uri goes back to the prototype", () => {
+      expect(detectedSignInOrigin(AUTHORIZE, LINK.origin)).toBe(SIM);
+      expect(detectedSignInOrigin(`${SIM}/login?response_type=code&redirect_uri=http://prototype.example:8080/cb`, LINK.origin)).toBe(SIM);
+    });
+
+    it.each<[string, string]>([
+      ["its redirect_uri goes elsewhere", `${SIM}/o/authorize?client_id=c&redirect_uri=${encodeURIComponent("https://evil.example/cb")}`],
+      ["it has no redirect_uri", `${SIM}/o/authorize?client_id=c&response_type=code`],
+      ["it has neither client_id nor response_type", `${SIM}/o/authorize?redirect_uri=${CALLBACK}`],
+      ["it is not over https", `http://sim.example/o/authorize?client_id=c&redirect_uri=${CALLBACK}`],
+      ["its host is private", `https://10.0.0.5/o/authorize?client_id=c&redirect_uri=${CALLBACK}`],
+      ["it is on the prototype's own host", `https://prototype.example/o/authorize?client_id=c&redirect_uri=${CALLBACK}`],
+      ["it is a path", `/o/authorize?client_id=c&redirect_uri=${CALLBACK}`]
+    ])("should detect no sign-in service when %s", (_case, location) => {
+      expect(detectedSignInOrigin(location, LINK.origin, {})).toBeUndefined();
+    });
+
+    it("should move the prototype's authorization redirect under the sign-in prefix and grant it there for an hour", async () => {
+      const response = await serveViewer(await reviewing(`${FPREFIX}/login`), `${FPREFIX}/login`, withFeedback({}, { fetch: redirectingTo(AUTHORIZE) }));
+
+      expect(response.headers.get("location")).toBe(`${SIM_PREFIX}/o/authorize?client_id=c&response_type=code&redirect_uri=${CALLBACK}&state=s`);
+      const [cookie] = response.headers.getSetCookie();
+      expect(cookie).toMatch(new RegExp(`^ahv-grant=[^;]+; Path=${SIM_PREFIX}/; Max-Age=3600; HttpOnly; Secure; SameSite=Lax$`));
+      expect(await openSignInGrant(cookieValue(cookie!, "ahv-grant"), SETTINGS.secret)).toEqual({ token: TOKEN, origin: SIM });
+    });
+
+    it("should leave a redirect that is not an authorization request back to the prototype alone, granting nothing", async () => {
+      const elsewhere = `${SIM}/o/authorize?client_id=c&redirect_uri=${encodeURIComponent("https://evil.example/cb")}`;
+
+      const response = await serveViewer(await reviewing(`${FPREFIX}/login`), `${FPREFIX}/login`, withFeedback({}, { fetch: redirectingTo(elsewhere) }));
+
+      expect(response.headers.get("location")).toBe(elsewhere);
+      expect(response.headers.getSetCookie()).toEqual([]);
+    });
+
+    it("should serve a granted sign-in service, checking its address, and send its redirect back under the link's prefix", async () => {
+      const fetchImpl = redirectingTo("https://prototype.example/oauth2/callback?code=c");
+      const publicAddresses = vi.fn(async (_hostname: string) => [{ address: "8.8.8.8", family: 4 }]);
+
+      const response = await serveViewer(
+        await withGrant(`${SIM_PREFIX}/login`, { token: TOKEN, origin: SIM }, { method: "POST", body: "username=a" }),
+        `${SIM_PREFIX}/login`,
+        withFeedback({ publicAddresses }, { fetch: fetchImpl })
+      );
+
+      expect(fetchImpl).toHaveBeenCalledWith(`${SIM}/login`, expect.anything());
+      expect(publicAddresses.mock.calls.map(([hostname]) => hostname)).toEqual(["sim.example"]);
+      expect(response.headers.get("location")).toBe(`${FPREFIX}/oauth2/callback?code=c`);
+    });
+
+    it.each<[string, { token: string; origin: string } | undefined]>([
+      ["no grant", undefined],
+      ["a grant for another link", { token: "ZyXwVuTsRqPoNmLkJiHgFeDcBa9876543210_-edcba", origin: SIM }],
+      ["a grant for another host", { token: TOKEN, origin: "https://other.example" }]
+    ])("should send a sign-in path to the prototype when the request carries %s", async (_case, grant) => {
+      const fetchImpl = vi.fn<Fetch>(async () => new Response("prototype"));
+      const request = grant === undefined ? await reviewing(`${SIM_PREFIX}/login`) : await withGrant(`${SIM_PREFIX}/login`, grant);
+
+      await serveViewer(request, `${SIM_PREFIX}/login`, withFeedback({}, { fetch: fetchImpl }));
+
+      expect(fetchImpl).toHaveBeenCalledWith("https://prototype.example/_sign-in/sim.example/login", expect.anything());
+    });
+
+    it("should refuse a granted sign-in service whose host does not resolve to public addresses", async () => {
+      const fetchImpl = vi.fn<Fetch>(async () => new Response("never asked for"));
+
+      const response = await serveViewer(
+        await withGrant(`${SIM_PREFIX}/login`, { token: TOKEN, origin: SIM }),
+        `${SIM_PREFIX}/login`,
+        withFeedback({ publicAddresses: async (hostname) => (hostname === "sim.example" ? [] : [{ address: "8.8.8.8", family: 4 }]) }, { fetch: fetchImpl })
+      );
+
+      expect(response.status).toBe(502);
+      expect(fetchImpl).not.toHaveBeenCalled();
     });
   });
 

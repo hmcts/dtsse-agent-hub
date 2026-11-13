@@ -37,7 +37,16 @@ export interface FeedbackTicket extends FeedbackGrant {
   path: string;
 }
 
-type Purpose = "viewer-ticket" | "viewer-cookie" | "feedback-ticket" | "feedback-cookie";
+/** Long enough to sign in, short enough that a sign-in service the prototype once named is not served for the day. */
+export const SIGN_IN_GRANT_MAX_AGE = 60 * 60;
+
+/** A sign-in service a feedback link's prototype sent the browser to, which the viewer then serves under the link. */
+export interface SignInGrant {
+  token: string;
+  origin: string;
+}
+
+type Purpose = "viewer-ticket" | "viewer-cookie" | "feedback-ticket" | "feedback-cookie" | "sign-in-grant";
 
 function keyFor(secret: string, purpose: Purpose): string {
   return `${secret}\u0000agent-hub:${purpose}`;
@@ -105,4 +114,17 @@ export async function sealFeedbackCookie(grant: FeedbackGrant, secret: string, n
 
 export async function openFeedbackCookie(token: string | undefined, secret: string): Promise<FeedbackGrant | undefined> {
   return feedbackGrantOf(await open(token, keyFor(secret, "feedback-cookie")), "feedback-cookie");
+}
+
+export async function sealSignInGrant(grant: SignInGrant, secret: string, now = new Date()): Promise<string> {
+  const { token, origin } = grant;
+  return await seal({ token, origin, purpose: "sign-in-grant" }, keyFor(secret, "sign-in-grant"), SIGN_IN_GRANT_MAX_AGE, now);
+}
+
+export async function openSignInGrant(value: string | undefined, secret: string): Promise<SignInGrant | undefined> {
+  const payload = await open(value, keyFor(secret, "sign-in-grant"));
+  if (payload?.purpose !== "sign-in-grant" || typeof payload.token !== "string" || typeof payload.origin !== "string") {
+    return undefined;
+  }
+  return { token: payload.token, origin: payload.origin };
 }

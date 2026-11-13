@@ -344,10 +344,13 @@ function allowingWidget(sources: string[], rewrite: CspRewrite): string[] {
 }
 
 function rewritePolicy(policy: string, rewrite: CspRewrite): string {
+  // A viewer served over http, as `yarn dev` serves it, has no https twin for the browser to upgrade the page's
+  // requests to, so every stylesheet and script the page loads would fail.
+  const overHttp = rewrite.scriptOrigin.startsWith("http:");
   const directives = policy
     .split(";")
     .map((directive) => directive.trim().split(/\s+/))
-    .filter(([name]) => name !== "" && name!.toLowerCase() !== "frame-ancestors");
+    .filter(([name]) => name !== "" && name!.toLowerCase() !== "frame-ancestors" && !(overHttp && name!.toLowerCase() === "upgrade-insecure-requests"));
   const nameOf = (directive: string[]) => directive[0]!.toLowerCase();
   const scripts = directives.filter((directive) => SCRIPT_DIRECTIVES.includes(nameOf(directive)));
   const rewritten = directives.map((directive) => (scripts.includes(directive) ? [directive[0]!, ...allowingWidget(directive.slice(1), rewrite)] : directive));

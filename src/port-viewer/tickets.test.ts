@@ -4,10 +4,13 @@ import { readSession, sealSession } from "../auth/session.ts";
 import {
   openFeedbackCookie,
   openFeedbackTicket,
+  openSignInGrant,
   openTicket,
   openViewerCookie,
+  SIGN_IN_GRANT_MAX_AGE,
   sealFeedbackCookie,
   sealFeedbackTicket,
+  sealSignInGrant,
   sealTicket,
   sealViewerCookie,
   TICKET_MAX_AGE,
@@ -120,5 +123,34 @@ describe("feedback tickets and cookies", () => {
     expect(await openFeedbackTicket(await seal({ ...LINK, purpose: "feedback-ticket", path: 1 }, ticketKey, 60), SECRET)).toBeUndefined();
     expect(await openFeedbackTicket(await seal({ ...LINK, purpose: "feedback-ticket", path: "/", token: 1 }, ticketKey, 60), SECRET)).toBeUndefined();
     expect(await openFeedbackCookie(await seal({ ...LINK, purpose: "feedback-ticket" }, cookieKey, 60), SECRET)).toBeUndefined();
+  });
+});
+
+describe("sign-in grants", () => {
+  const SIGN_IN = { token: "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_abcde", origin: "https://idam.example" };
+
+  it("should carry the link and the sign-in service's origin back out", async () => {
+    expect(await openSignInGrant(await sealSignInGrant(SIGN_IN, SECRET), SECRET)).toEqual(SIGN_IN);
+  });
+
+  it("should not open once an hour has passed since it was sealed", async () => {
+    vi.useFakeTimers();
+    const grant = await sealSignInGrant(SIGN_IN, SECRET);
+
+    vi.advanceTimersByTime((SIGN_IN_GRANT_MAX_AGE - 1) * 1000);
+    expect(await openSignInGrant(grant, SECRET)).toEqual(SIGN_IN);
+    vi.advanceTimersByTime(2000);
+    expect(await openSignInGrant(grant, SECRET)).toBeUndefined();
+  });
+
+  it("should not open when forged, sealed with another secret or for another purpose", async () => {
+    const grantKey = `${SECRET}\u0000agent-hub:sign-in-grant`;
+
+    expect(await openSignInGrant("not-a-grant", SECRET)).toBeUndefined();
+    expect(await openSignInGrant(await sealSignInGrant(SIGN_IN, "another-secret"), SECRET)).toBeUndefined();
+    expect(await openSignInGrant(await sealFeedbackCookie({ oid: "o", token: SIGN_IN.token }, SECRET), SECRET)).toBeUndefined();
+    expect(await openSignInGrant(await seal({ ...SIGN_IN, purpose: "feedback-cookie" }, grantKey, 60), SECRET)).toBeUndefined();
+    expect(await openSignInGrant(await seal({ ...SIGN_IN, purpose: "sign-in-grant", origin: 1 }, grantKey, 60), SECRET)).toBeUndefined();
+    expect(await openFeedbackCookie(await sealSignInGrant(SIGN_IN, SECRET), SECRET)).toBeUndefined();
   });
 });
