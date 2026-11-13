@@ -16,6 +16,7 @@ import {
   parseViewerPath,
   refererTarget,
   reviewPath,
+  SIGN_IN_GRANT_COOKIE,
   signInPathOf,
   signInPrefix,
   TICKET_PARAMETER,
@@ -27,10 +28,13 @@ import { type ViewerSettings, viewerSettings } from "./settings.ts";
 import {
   openFeedbackCookie,
   openFeedbackTicket,
+  openSignInGrant,
   openTicket,
   openViewerCookie,
+  SIGN_IN_GRANT_MAX_AGE,
   sealFeedbackCookie,
   sealFeedbackTicket,
+  sealSignInGrant,
   sealTicket,
   sealViewerCookie,
   VIEWER_COOKIE_MAX_AGE
@@ -108,8 +112,8 @@ export function cookieValue(header: string | null, name: string): string | undef
   return undefined;
 }
 
-function viewerCookie(name: string, value: string, prefix: string): string {
-  return `${name}=${value}; Path=${prefix}/; Max-Age=${VIEWER_COOKIE_MAX_AGE}; HttpOnly; Secure; SameSite=Lax`;
+function viewerCookie(name: string, value: string, prefix: string, maxAge = VIEWER_COOKIE_MAX_AGE): string {
+  return `${name}=${value}; Path=${prefix}/; Max-Age=${maxAge}; HttpOnly; Secure; SameSite=Lax`;
 }
 
 /**
@@ -210,12 +214,8 @@ async function answer(request: Request, pathAndQuery: string, deps: ViewerDepend
       // `/submit` arrives. Failing that, the prefix whose page was last served here, for a single-page app that has
       // left its prefix.
       const location =
-        refererTarget(
-          request.headers.get("referer"),
-          settings.origin,
-          pathAndQuery,
-          (deps.feedback?.signInOrigins ?? []).map((origin) => new URL(origin).host)
-        ) ?? lastPortTarget(cookieValue(request.headers.get("cookie"), LAST_PORT_COOKIE), pathAndQuery);
+        refererTarget(request.headers.get("referer"), settings.origin, pathAndQuery) ??
+        lastPortTarget(cookieValue(request.headers.get("cookie"), LAST_PORT_COOKIE), pathAndQuery);
       if (location !== undefined) {
         return { response: new Response(null, { status: 307, headers: { ...NO_STORE, location } }), hubFramed: isFeedbackPath(location) };
       }
@@ -346,6 +346,61 @@ function signInRoutesOf(token: string, feedback: FeedbackDependencies): SignInRo
   });
 }
 
+/**
+ * The sign-in service a prototype's redirect sends the browser to, when it is not one of `FEEDBACK_SIGN_IN_ORIGINS`:
+ * an authorization request to a path ending `/authorize` on a host that is not the prototype's, the hub's or the
+ * viewer's, with a `client_id` or `response_type` and a `redirect_uri` back to the prototype, matched by hostname as
+ * the redirect back is. Its origin must pass the same checks as a link's.
+ */
+export function detectedSignInOrigin(
+  location: string,
+  prototypeOrigin: string,
+  settings: Pick<ViewerSettings, "host" | "hubOrigin">,
+  env?: Environment
+): string | undefined {
+  if (!URL.canParse(location)) {
+    return undefined;
+  }
+  const url = new URL(location);
+  const prototypeHost = new URL(prototypeOrigin).hostname;
+  const redirectUri = url.searchParams.get("redirect_uri");
+  if (
+    [prototypeHost, settings.host, new URL(settings.hubOrigin).hostname].includes(url.hostname) ||
+    url.pathname.split("/").at(-1) !== "authorize" ||
+    redirectUri === null ||
+    !URL.canParse(redirectUri) ||
+    new URL(redirectUri).hostname !== prototypeHost ||
+    !(url.searchParams.has("client_id") || url.searchParams.has("response_type"))
+  ) {
+    return undefined;
+  }
+  const checked = checkTargetUrl(url.origin, env);
+  return checked.ok ? checked.origin : undefined;
+}
+
+/** The sign-in service at `host`, when the request carries this link's grant for it. */
+async function grantedSignInRoute(request: Request, token: string, host: string, secret: string): Promise<SignInRoute | undefined> {
+  const grant = await openSignInGrant(cookieValue(request.headers.get("cookie"), SIGN_IN_GRANT_COOKIE), secret);
+  if (grant === undefined || grant.token !== token || !URL.canParse(grant.origin) || new URL(grant.origin).host !== host) {
+    return undefined;
+  }
+  return { origin: grant.origin, host, prefix: signInPrefix(token, host) };
+}
+
+/** A redirect to a detected sign-in service, moved under its prefix with the grant that lets it be served there. */
+async function grantSignIn(response: Response, token: string, prototypeOrigin: string, deps: ViewerDependencies, env?: Environment): Promise<void> {
+  const location = response.status >= 300 && response.status < 400 ? response.headers.get("location") : null;
+  const origin = location === null ? undefined : detectedSignInOrigin(location, prototypeOrigin, deps.settings, env);
+  if (location === null || origin === undefined) {
+    return;
+  }
+  const url = new URL(location);
+  const prefix = signInPrefix(token, new URL(origin).host);
+  const grant = await sealSignInGrant({ token, origin }, deps.settings.secret, deps.now?.());
+  response.headers.set("location", `${prefix}${url.pathname}${url.search}${url.hash}`);
+  response.headers.append("set-cookie", viewerCookie(SIGN_IN_GRANT_COOKIE, grant, prefix, SIGN_IN_GRANT_MAX_AGE));
+}
+
 async function serveFeedback(
   request: Request,
   target: { token: string; rest: string; search: string },
@@ -374,7 +429,10 @@ async function serveFeedback(
   const prefix = feedbackPrefix(token);
   const signInRoutes = signInRoutesOf(token, feedback);
   const signIn = signInPathOf(rest);
-  const signInRoute = signIn === undefined ? undefined : signInRoutes.find((route) => route.host === signIn.host);
+  const signInRoute =
+    signIn === undefined
+      ? undefined
+      : (signInRoutes.find((route) => route.host === signIn.host) ?? (await grantedSignInRoute(request, token, signIn.host, settings.secret)));
   if (signIn !== undefined && signInRoute !== undefined) {
     return await serveSignIn(
       request,
@@ -414,6 +472,7 @@ async function serveFeedback(
       },
       feedback.fetch
     );
+    await grantSignIn(response, token, checked.origin, deps, feedback.env);
     if (response.ok && isRewritableHtml(response.headers)) {
       response.headers.append("set-cookie", lastFeedbackCookie(token, VIEWER_COOKIE_MAX_AGE));
     }

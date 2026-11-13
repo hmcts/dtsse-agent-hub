@@ -130,6 +130,12 @@ export const VIEWER_COOKIE_PREFIX = "ahv-";
  */
 export const SIGN_IN_COOKIE_PREFIX = `${VIEWER_COOKIE_PREFIX}si-`;
 
+/**
+ * The cookie that lets one sign-in service be served under one link, scoped to that service's prefix. A service in
+ * `FEEDBACK_SIGN_IN_ORIGINS` needs none; any other is granted when the prototype sends the browser to it to sign in.
+ */
+export const SIGN_IN_GRANT_COOKIE = `${VIEWER_COOKIE_PREFIX}grant`;
+
 export function viewerCookieName(virtualAgentId: string, port: number): string {
   return `${VIEWER_COOKIE_PREFIX}${virtualAgentId}-${port}`;
 }
@@ -165,10 +171,11 @@ export function landingPath(value: string | null | undefined): string {
  * `Referer`, and where under that page's prefix the request belongs. A server that thinks it is at `/` writes links,
  * assets and form actions from `/`, which the browser sends to the viewer's root. Only a page on the viewer's own
  * origin, under a prefix, counts, and only a path from `/` that is not one of the viewer's own, `AUTH_PATH` and
- * `WIDGET_PATH`. A page under `/f/<token>/_sign-in/<host>/` is a sign-in service's only when `<host>` is one of
- * `signInHosts`; otherwise it is the prototype's.
+ * `WIDGET_PATH`. A page under `/f/<token>/_sign-in/<host>/` sends it under that same prefix, since the request to the
+ * viewer's root carries none of the cookies that say whether `<host>` is served there; under the prefix it does, and a
+ * host that is not goes to the prototype.
  */
-export function refererTarget(referer: string | null, viewerOrigin: string, pathAndQuery: string, signInHosts: readonly string[] = []): string | undefined {
+export function refererTarget(referer: string | null, viewerOrigin: string, pathAndQuery: string): string | undefined {
   if (referer === null || !URL.canParse(referer)) {
     return undefined;
   }
@@ -176,7 +183,7 @@ export function refererTarget(referer: string | null, viewerOrigin: string, path
   if (from.origin !== viewerOrigin) {
     return undefined;
   }
-  return underPage(parseViewerPath(from.pathname), pathAndQuery, signInHosts);
+  return underPage(parseViewerPath(from.pathname), pathAndQuery);
 }
 
 /**
@@ -206,14 +213,14 @@ export function lastPortTarget(value: string | undefined, pathAndQuery: string):
 }
 
 /** The prefix of a port's or a feedback link's page, and nothing for any other path. */
-function pagePrefix(page: ViewerPath, signInHosts: readonly string[]): string | undefined {
+function pagePrefix(page: ViewerPath): string | undefined {
   switch (page.kind) {
     case "port":
     case "bare-port":
       return viewerPrefix(page.virtualAgentId, page.port);
     case "feedback": {
       const signIn = signInPathOf(page.rest);
-      return signIn !== undefined && signInHosts.includes(signIn.host) ? signInPrefix(page.token, signIn.host) : feedbackPrefix(page.token);
+      return signIn !== undefined ? signInPrefix(page.token, signIn.host) : feedbackPrefix(page.token);
     }
     case "bare-feedback":
       return feedbackPrefix(page.token);
@@ -223,8 +230,8 @@ function pagePrefix(page: ViewerPath, signInHosts: readonly string[]): string | 
 }
 
 /** `pathAndQuery` under the prefix of `page`, when it has one and the path is from `/` and not the viewer's own. */
-function underPage(page: ViewerPath, pathAndQuery: string, signInHosts: readonly string[] = []): string | undefined {
-  const prefix = pagePrefix(page, signInHosts);
+function underPage(page: ViewerPath, pathAndQuery: string): string | undefined {
+  const prefix = pagePrefix(page);
   if (prefix === undefined || !pathAndQuery.startsWith("/") || pathAndQuery.startsWith("//")) {
     return undefined;
   }

@@ -374,6 +374,19 @@ describe("rewriteCsp", () => {
       `script-src 'strict-dynamic' ${VIEWER_ORIGIN}; frame-ancestors ${HUB}`
     );
   });
+
+  it("should keep upgrade-insecure-requests when the viewer is served over https", () => {
+    expect(rewriteCsp("img-src 'self'; upgrade-insecure-requests", REWRITE)).toBe(`img-src 'self'; upgrade-insecure-requests; frame-ancestors ${HUB}`);
+  });
+
+  it("should drop upgrade-insecure-requests when the viewer is served over http", () => {
+    expect(
+      rewriteCsp("img-src 'self'; Upgrade-Insecure-Requests; script-src 'self'", {
+        frameAncestors: "http://hub.localhost:3000",
+        scriptOrigin: "http://viewer.hub.localhost:3000"
+      })
+    ).toBe("img-src 'self'; script-src 'self' http://viewer.hub.localhost:3000; frame-ancestors http://hub.localhost:3000");
+  });
 });
 
 describe("transformHtml", () => {
@@ -645,6 +658,12 @@ describe("the Referer a feedback link's upstreams are sent from a sign-in page",
     const headers = forwardedRequestHeaders(new Headers({ referer: SIGN_IN_PAGE }), { ...FEEDBACK, routes: [SIGN_IN_ROUTE] });
 
     expect(headers.get("referer")).toBeNull();
+  });
+
+  it("should send the prototype no Referer when it comes from a detected sign-in service's page, which is in no route", () => {
+    const detected = `${VIEWER_ORIGIN}/f/token/_sign-in/sim.example/o/authorize?client_id=c&state=s`;
+
+    expect(forwardedRequestHeaders(new Headers({ referer: detected }), FEEDBACK).get("referer")).toBeNull();
   });
 
   it("should send the sign-in service its own page as the Referer when it comes from that page", () => {

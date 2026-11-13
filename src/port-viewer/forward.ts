@@ -1,4 +1,4 @@
-import { SIGN_IN_COOKIE_PREFIX, VIEWER_COOKIE_PREFIX } from "./paths.ts";
+import { SIGN_IN_COOKIE_PREFIX, signInPathOf, VIEWER_COOKIE_PREFIX } from "./paths.ts";
 import { VIEWER_URL_HEADER } from "./settings.ts";
 
 /**
@@ -114,7 +114,7 @@ function feedbackReferer(referer: string | null, target: ForwardTarget): string 
   if (url.origin !== target.viewerOrigin || !alreadyPrefixed(url.pathname, target.prefix)) {
     return undefined;
   }
-  if (target.signIn !== true && target.routes?.some((route) => alreadyPrefixed(url.pathname, route.prefix))) {
+  if (target.signIn !== true && signInPathOf(url.pathname.slice(target.prefix.length)) !== undefined) {
     return undefined;
   }
   return `${target.upstreamOrigin}${url.pathname.slice(target.prefix.length) || "/"}${url.search}`;
@@ -344,10 +344,13 @@ function allowingWidget(sources: string[], rewrite: CspRewrite): string[] {
 }
 
 function rewritePolicy(policy: string, rewrite: CspRewrite): string {
+  // A viewer served over http, as `yarn dev` serves it, has no https twin for the browser to upgrade the page's
+  // requests to, so every stylesheet and script the page loads would fail.
+  const overHttp = rewrite.scriptOrigin.startsWith("http:");
   const directives = policy
     .split(";")
     .map((directive) => directive.trim().split(/\s+/))
-    .filter(([name]) => name !== "" && name!.toLowerCase() !== "frame-ancestors");
+    .filter(([name]) => name !== "" && name!.toLowerCase() !== "frame-ancestors" && !(overHttp && name!.toLowerCase() === "upgrade-insecure-requests"));
   const nameOf = (directive: string[]) => directive[0]!.toLowerCase();
   const scripts = directives.filter((directive) => SCRIPT_DIRECTIVES.includes(nameOf(directive)));
   const rewritten = directives.map((directive) => (scripts.includes(directive) ? [directive[0]!, ...allowingWidget(directive.slice(1), rewrite)] : directive));
