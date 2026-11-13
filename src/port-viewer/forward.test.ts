@@ -1,5 +1,8 @@
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { describe, expect, it, vi } from "vitest";
 import nextConfig from "../../next.config.mjs";
+import { pinnedFetch } from "../feedback/targets.ts";
 import {
   BASE_REWRITE_LIMIT_BYTES,
   declaresTooLongBody,
@@ -213,6 +216,32 @@ describe("isRewritableHtml", () => {
 });
 
 describe("forward", () => {
+  it("should forward through a pinned fetch, streaming the body both ways and rewriting the page", async () => {
+    const server = createServer((request, response) => {
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => chunks.push(chunk));
+      request.on("end", () => {
+        response.writeHead(200, { "content-type": "text/html", "set-cookie": "sid=1; Path=/" });
+        response.end(`<html><head><base href="/"></head><body>${request.headers.host} ${Buffer.concat(chunks).toString()}</body></html>`);
+      });
+    });
+    await new Promise<void>((listening) => server.listen(0, "127.0.0.1", listening));
+    const { port } = server.address() as AddressInfo;
+    const target = { ...TARGET, upstreamOrigin: `http://prototype.example:${port}`, rest: "/form", search: "" };
+    const request = new Request("https://agent-hub-viewer.example/x", { method: "POST", body: "a=1", headers: { "content-type": "text/plain" } });
+
+    const response = await forward(
+      request,
+      target,
+      pinnedFetch(async () => [{ address: "127.0.0.1", family: 4 }])
+    );
+
+    expect(await response.text()).toBe(`<html><head><base href="${PREFIX}/"></head><body>prototype.example:${port} a=1</body></html>`);
+    expect(response.headers.getSetCookie()).toEqual([`sid=1; Path=${PREFIX}/`]);
+    server.closeAllConnections();
+    await new Promise((closed) => server.close(closed));
+  });
+
   it("should move an HTML page's base under the prefix", async () => {
     const fetchImpl = vi.fn<Fetch>(
       async () => new Response(`<html><head><base href="/"></head></html>`, { headers: { "content-type": "text/html; charset=utf-8" } })

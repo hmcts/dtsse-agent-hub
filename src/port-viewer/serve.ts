@@ -1,6 +1,6 @@
 import { canOpenVirtualAgentPort, feedbackLinkAccess } from "../access/rules.ts";
 import type { Environment } from "../auth/settings.ts";
-import { checkTargetUrl } from "../feedback/targets.ts";
+import { checkTargetUrl, type Resolve } from "../feedback/targets.ts";
 import { publicUrl } from "../virtual-agents/ports.ts";
 import { declaresTooLongBody, type Fetch, forward, isRewritableHtml, PROXY_BODY_LIMIT_BYTES, UpstreamUnreachable } from "./forward.ts";
 import {
@@ -63,8 +63,10 @@ export interface ViewerFeedbackLink {
 /** Present only while feedback is on; without it every feedback path and the widget are not found. */
 export interface FeedbackDependencies {
   findLink: (token: string) => Promise<ViewerFeedbackLink | null | undefined>;
-  /** Whether every address the prototype's host resolves to is public (`resolvesPublic`, cached). */
-  resolvesPublic: (hostname: string) => Promise<boolean>;
+  /** The prototype host's addresses when every one is public, else none (`publicAddresses`, cached). */
+  publicAddresses: Resolve;
+  /** Every prototype is fetched with this, which connects only to addresses `publicAddresses` passed (`pinnedFetch`). */
+  fetch: Fetch;
   readWidget: () => Promise<WidgetBundle | undefined>;
   /** A fresh nonce for each page's widget script. */
   nonce?: () => string;
@@ -353,7 +355,7 @@ async function serveFeedback(
     return text(413, `The viewer cannot carry a request body larger than ${PROXY_BODY_LIMIT_BYTES / (1024 * 1024)} MiB.`);
   }
   const checked = checkTargetUrl(link.origin, feedback.env);
-  if (!checked.ok || !(await feedback.resolvesPublic(checked.hostname))) {
+  if (!checked.ok || (await feedback.publicAddresses(checked.hostname)).length === 0) {
     return text(502, "The prototype's address is not one the hub may reach.");
   }
   const prefix = feedbackPrefix(token);
@@ -379,7 +381,7 @@ async function serveFeedback(
           nonce
         })
       },
-      deps.fetch
+      feedback.fetch
     );
     if (response.ok && isRewritableHtml(response.headers)) {
       response.headers.append("set-cookie", lastFeedbackCookie(token, VIEWER_COOKIE_MAX_AGE));

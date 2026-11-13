@@ -38,7 +38,7 @@ const nextConfig = {
     // The largest action is a post or direct message, bounded by the same worst case as MAX_REQUEST_BYTES.
     serverActions: { bodySizeLimit: "256kb" }
   },
-  serverExternalPackages: ["@hmcts-cft/cloud-native-platform", "applicationinsights", "@prisma/client", "pg"],
+  serverExternalPackages: ["@hmcts-cft/cloud-native-platform", "applicationinsights", "@prisma/client", "pg", "undici"],
   // No `redirects()`. The hub's bare addresses are redirected from `src/proxy.ts` instead, because Next checks
   // config redirects ahead of the proxy and a 308 from here would repeat a pasted secret into its own `Location`,
   // before `carriesSecret` ever sees the request.

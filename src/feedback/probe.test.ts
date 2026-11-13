@@ -1,19 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 import { probeTarget } from "./probe.ts";
+import type { PinnedFetch, Resolve } from "./targets.ts";
 
-const PUBLIC = async () => true;
+const PUBLIC: Resolve = async () => [{ address: "8.8.8.8", family: 4 }];
 const ENV = { NODE_ENV: "test" };
 
 function answering(...responses: Response[]) {
-  const fetch = vi.fn<typeof globalThis.fetch>();
+  const fetch = vi.fn<PinnedFetch>();
   for (const response of responses) {
     fetch.mockResolvedValueOnce(response);
   }
   return fetch;
 }
 
-const probe = (url: string, fetch: typeof globalThis.fetch, resolves = PUBLIC) =>
-  probeTarget(url, { fetch, resolvesPublic: resolves, env: ENV, timeoutMs: 50 });
+const probe = (url: string, fetch: PinnedFetch, resolves = PUBLIC) => probeTarget(url, { fetch, publicAddresses: resolves, env: ENV, timeoutMs: 50 });
 
 describe("probeTarget", () => {
   it("should pass a prototype that answers its address, asking with HEAD and never following a redirect", async () => {
@@ -35,7 +35,7 @@ describe("probeTarget", () => {
 
     expect(await probe("http://proto.example.com/", fetch)).toEqual({ result: "refused", reason: "the address must be https" });
     expect(await probe("https://localhost/", fetch)).toEqual({ result: "refused", reason: "the address must be on the public internet" });
-    expect(await probe("https://proto.example.com/", fetch, async () => false)).toEqual({
+    expect(await probe("https://proto.example.com/", fetch, async () => [])).toEqual({
       result: "refused",
       reason: "the address does not resolve to the public internet"
     });
@@ -66,8 +66,8 @@ describe("probeTarget", () => {
   });
 
   it("should warn of a prototype that cannot be reached or does not answer in time", async () => {
-    const down = vi.fn<typeof globalThis.fetch>().mockRejectedValue(new TypeError("fetch failed"));
-    const slow = vi.fn<typeof globalThis.fetch>().mockRejectedValue(Object.assign(new Error("timed out"), { name: "TimeoutError" }));
+    const down = vi.fn<PinnedFetch>().mockRejectedValue(new TypeError("fetch failed"));
+    const slow = vi.fn<PinnedFetch>().mockRejectedValue(Object.assign(new Error("timed out"), { name: "TimeoutError" }));
 
     expect(await probe("https://proto.example.com/", down)).toEqual({ result: "warn", status: null, reason: "it could not be reached from the hub" });
     expect(await probe("https://proto.example.com/", slow)).toEqual({ result: "warn", status: null, reason: "it did not answer within 0.05 seconds" });

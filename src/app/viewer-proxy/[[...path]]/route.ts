@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { errorResponse } from "@/agent-api/http";
 import { feedbackEnabled } from "@/feedback/settings";
 import { findLink } from "@/feedback/store";
-import { cachedResolvesPublic } from "@/feedback/targets";
+import { cachedPublicAddresses, pinnedFetch } from "@/feedback/targets";
 import { denyFraming, serveViewer } from "@/port-viewer/serve";
 import { VIEWER_URL_HEADER, viewerSettings } from "@/port-viewer/settings";
 import { readWidget } from "@/port-viewer/widget";
@@ -13,8 +13,13 @@ import { findVirtualAgent } from "@/virtual-agents/store";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** One per server process, so a prototype's page and its assets share one lookup of its host. */
-const resolvesPublic = cachedResolvesPublic();
+/**
+ * One per server process, so a prototype's page and its assets share one lookup of its host, which both the check
+ * before each fetch and every connection the fetch makes are answered from.
+ */
+const publicAddresses = cachedPublicAddresses();
+
+const feedbackFetch = pinnedFetch(publicAddresses);
 
 /**
  * Every request to the viewer's host, which the proxy rewrites here with the original path and query in
@@ -35,7 +40,7 @@ async function handle(request: NextRequest): Promise<Response> {
     publicDomain: publicDomain(),
     loadAgent: ports ? (id) => findVirtualAgent(prisma, id) : async () => undefined,
     fetch: (input, init) => fetch(input, init),
-    feedback: feedback ? { findLink: (token) => findLink(prisma, token), resolvesPublic, readWidget: () => readWidget() } : undefined
+    feedback: feedback ? { findLink: (token) => findLink(prisma, token), publicAddresses, fetch: feedbackFetch, readWidget: () => readWidget() } : undefined
   });
 }
 

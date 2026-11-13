@@ -1,9 +1,9 @@
 import type { Environment } from "../auth/settings.ts";
-import { checkTargetUrl, resolvesPublic } from "./targets.ts";
+import { checkTargetUrl, type PinnedFetch, pinnedFetch, publicAddresses, type Resolve } from "./targets.ts";
 
 /**
  * Whether a prototype address the setup wizard was given will work as a feedback link: first the rules every link is
- * held to (`checkTargetUrl`, `resolvesPublic`), whose refusal the wizard will not go past, then one request to the
+ * held to (`checkTargetUrl`, `publicAddresses`), whose refusal the wizard will not go past, then one request to the
  * address itself, whose failure it reports and lets the owner carry on from, since a prototype can be down for a
  * minute or answer a HEAD badly and still be the right address.
  */
@@ -19,15 +19,20 @@ export type ProbeOutcome =
 export const PROBE_TIMEOUT_MS = 5_000;
 
 export interface ProbeDependencies {
-  fetch: typeof fetch;
-  resolvesPublic: (hostname: string) => Promise<boolean>;
+  /** Connects only to the addresses `publicAddresses` passed. */
+  fetch: PinnedFetch;
+  publicAddresses: Resolve;
   env: Environment;
   timeoutMs: number;
 }
 
+const resolveFresh: Resolve = (hostname) => publicAddresses(hostname);
+
+const probeFetch = pinnedFetch(resolveFresh);
+
 const defaults = (): ProbeDependencies => ({
-  fetch: globalThis.fetch,
-  resolvesPublic: (hostname) => resolvesPublic(hostname),
+  fetch: probeFetch,
+  publicAddresses: resolveFresh,
   env: process.env,
   timeoutMs: PROBE_TIMEOUT_MS
 });
@@ -52,7 +57,7 @@ export async function probeTarget(value: string, overrides: Partial<ProbeDepende
   if (!checked.ok) {
     return { result: "refused", reason: checked.reason === "not a URL" ? "that is not a web address" : `the address ${checked.reason}` };
   }
-  if (!(await deps.resolvesPublic(checked.hostname))) {
+  if ((await deps.publicAddresses(checked.hostname)).length === 0) {
     return { result: "refused", reason: "the address does not resolve to the public internet" };
   }
   const ask = async (method: "HEAD" | "GET"): Promise<Response> => {

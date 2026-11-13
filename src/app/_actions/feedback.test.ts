@@ -24,7 +24,7 @@ vi.mock("@/feedback/thread-store", () => threads);
 vi.mock("@/feedback/probe", () => ({ probeTarget: (...args: unknown[]) => probeTarget(...args) }));
 vi.mock("@/feedback/targets", async (original) => ({
   ...(await original<typeof import("@/feedback/targets")>()),
-  resolvesPublic: async () => resolves
+  publicAddresses: async () => (resolves ? [{ address: "8.8.8.8", family: 4 }] : [])
 }));
 
 const actions = await import("./feedback.ts");

@@ -312,7 +312,8 @@ describe("feedback links on the viewer", () => {
   function feedback(overrides: Partial<FeedbackDependencies> = {}): FeedbackDependencies {
     return {
       findLink: async (token) => (token === TOKEN ? LINK : null),
-      resolvesPublic: async () => true,
+      publicAddresses: async () => [{ address: "8.8.8.8", family: 4 }],
+      fetch: vi.fn<Fetch>(async () => new Response("prototype")),
       readWidget: async () => ({ body: new TextEncoder().encode("widget();"), etag: '"abc"' }),
       nonce: () => "n0nce",
       env: { NODE_ENV: "production" },
@@ -320,8 +321,16 @@ describe("feedback links on the viewer", () => {
     };
   }
 
+  /** `rest.fetch` is the feedback fetch; the ports' own fetch throws, since no feedback request may use it. */
   function withFeedback(overrides: Partial<FeedbackDependencies> = {}, rest: Partial<ViewerDependencies> = {}): ViewerDependencies {
-    return deps({ feedback: feedback(overrides), ...rest });
+    const { fetch, ...others } = rest;
+    return deps({
+      feedback: feedback({ ...(fetch === undefined ? {} : { fetch }), ...overrides }),
+      ...others,
+      fetch: async () => {
+        throw new Error("a feedback request used the ports' fetch");
+      }
+    });
   }
 
   async function reviewing(path: string, init: RequestInit = {}, grant = { oid: REVIEWER, token: TOKEN }): Promise<Request> {
@@ -515,7 +524,7 @@ describe("feedback links on the viewer", () => {
   it("should refuse a link whose origin is not one the hub may fetch, without fetching it", async () => {
     const fetchImpl = vi.fn<Fetch>(async () => new Response("never asked for"));
     const local = withFeedback({ findLink: async () => ({ ...LINK, origin: "https://127.0.0.1" }) }, { fetch: fetchImpl });
-    const rebound = withFeedback({ resolvesPublic: async () => false }, { fetch: fetchImpl });
+    const rebound = withFeedback({ publicAddresses: async () => [] }, { fetch: fetchImpl });
 
     expect((await serveViewer(await reviewing(`${FPREFIX}/`), `${FPREFIX}/`, local)).status).toBe(502);
     expect((await serveViewer(await reviewing(`${FPREFIX}/`), `${FPREFIX}/`, rebound)).status).toBe(502);

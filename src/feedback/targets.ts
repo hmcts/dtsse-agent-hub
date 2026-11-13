@@ -1,12 +1,14 @@
-import { promises as dns } from "node:dns";
-import { BlockList, isIP } from "node:net";
+import { promises as dns, type LookupOptions } from "node:dns";
+import { BlockList, isIP, type LookupFunction } from "node:net";
+import { Agent, buildConnector, type RequestInit as UndiciRequestInit, fetch as undiciFetch } from "undici";
 import type { Environment } from "../auth/settings.ts";
 
 /**
  * Which prototype addresses the hub may fetch on a reviewer's behalf. The viewer fetches from inside the cluster, so
  * an address that names the cluster, the node, the pod network or the cloud's metadata service would hand anyone who
  * can make a feedback link a way to read them. Checked when a link is saved and again before every fetch, since what
- * a name resolves to can change after it was saved.
+ * a name resolves to can change after it was saved, and every connection a fetch makes is to an address that passed,
+ * since a name can resolve one way for the check and another for the connection.
  */
 
 /** The addresses no prototype is on: everything that is not the public internet, as IANA's special-purpose registries list it. */
@@ -137,25 +139,36 @@ export function checkTargetUrl(value: string, env: Environment = process.env): T
   return { ok: true, url, origin: url.origin, hostname };
 }
 
-export type Lookup = (hostname: string, options: { all: true; verbatim: true }) => Promise<{ address: string; family: number }[]>;
+export interface ResolvedAddress {
+  address: string;
+  family: number;
+}
+
+export type Lookup = (hostname: string, options: { all: true; verbatim: true }) => Promise<ResolvedAddress[]>;
+
+/** The addresses a hostname may be connected to: none when it may not be connected to at all. */
+export type Resolve = (hostname: string) => Promise<readonly ResolvedAddress[]>;
 
 /**
- * Whether every address `hostname` resolves to is public, which a name passing `checkTargetUrl` still has to be. One
- * private address is enough to refuse it: which of them a connection uses is the resolver's choice. A name that does
- * not resolve is refused too.
+ * Every address `hostname` resolves to when each of them is public, which a name passing `checkTargetUrl` still has to
+ * be, and otherwise none. One private address is enough to refuse the name: which of them a connection would use is
+ * the resolver's choice. A name that does not resolve, or is a local or cluster name, is refused too. With
+ * `allowPrivateTargets` the addresses are given unchecked.
  */
-export async function resolvesPublic(hostname: string, lookup: Lookup = dns.lookup, env: Environment = process.env): Promise<boolean> {
-  if (allowPrivateTargets(env)) {
-    return true;
+export async function publicAddresses(hostname: string, lookup: Lookup = dns.lookup, env: Environment = process.env): Promise<readonly ResolvedAddress[]> {
+  const relaxed = allowPrivateTargets(env);
+  const family = isIP(hostname);
+  if (family !== 0) {
+    return relaxed || !isPrivateAddress(hostname) ? [{ address: hostname, family }] : [];
   }
-  if (isIP(hostname) !== 0) {
-    return !isPrivateAddress(hostname);
+  if (!relaxed && isPrivateName(hostname)) {
+    return [];
   }
   try {
     const addresses = await lookup(hostname, { all: true, verbatim: true });
-    return addresses.length > 0 && addresses.every(({ address }) => !isPrivateAddress(address));
+    return relaxed || addresses.every(({ address }) => !isPrivateAddress(address)) ? addresses : [];
   } catch {
-    return false;
+    return [];
   }
 }
 
@@ -165,22 +178,98 @@ export const RESOLVE_CACHE_MS = 60_000;
 /** Enough for every prototype in use at once; past it the cache starts again rather than grow. */
 const RESOLVE_CACHE_ENTRIES = 1_000;
 
-/** `resolvesPublic`, remembering each answer for `RESOLVE_CACHE_MS`, refusals included. */
-export function cachedResolvesPublic(
-  resolve: (hostname: string) => Promise<boolean> = (hostname) => resolvesPublic(hostname),
-  now: () => number = Date.now
-): (hostname: string) => Promise<boolean> {
-  const answers = new Map<string, { at: number; answer: boolean }>();
+/** `publicAddresses`, remembering each answer for `RESOLVE_CACHE_MS`, refusals included. */
+export function cachedPublicAddresses(resolve: Resolve = (hostname) => publicAddresses(hostname), now: () => number = Date.now): Resolve {
+  const answers = new Map<string, { at: number; addresses: readonly ResolvedAddress[] }>();
   return async (hostname) => {
     const kept = answers.get(hostname);
     if (kept !== undefined && now() - kept.at < RESOLVE_CACHE_MS) {
-      return kept.answer;
+      return kept.addresses;
     }
-    const answer = await resolve(hostname);
+    const addresses = await resolve(hostname);
     if (answers.size >= RESOLVE_CACHE_ENTRIES) {
       answers.clear();
     }
-    answers.set(hostname, { at: now(), answer });
-    return answer;
+    answers.set(hostname, { at: now(), addresses });
+    return addresses;
   };
+}
+
+/** A connection refused because its host has no address the hub may reach, coded as a resolver failure is. */
+export class UnreachableTarget extends Error {
+  readonly code = "ENOTFOUND";
+}
+
+function asError(error: unknown): Error {
+  return error instanceof Error ? error : new UnreachableTarget(String(error));
+}
+
+function familyNumber(family: LookupOptions["family"]): number {
+  if (family === "IPv4") {
+    return 4;
+  }
+  if (family === "IPv6") {
+    return 6;
+  }
+  return family ?? 0;
+}
+
+/**
+ * A socket's `lookup` that answers only with addresses `resolve` passed and never asks the system resolver itself, so
+ * a connection goes to the very addresses that were checked rather than to whatever a second lookup of the name says.
+ */
+export function pinnedLookup(resolve: Resolve): LookupFunction {
+  return (hostname, options, callback) => {
+    resolve(hostname.replace(/\.$/, "").toLowerCase()).then(
+      (addresses) => {
+        const family = familyNumber(options.family);
+        const allowed = addresses.filter((address) => family === 0 || address.family === family);
+        const first = allowed[0];
+        if (first === undefined) {
+          callback(new UnreachableTarget(`${hostname} has no address the hub may connect to`), "", 0);
+        } else if (options.all === true) {
+          callback(null, [...allowed]);
+        } else {
+          callback(null, first.address, first.family);
+        }
+      },
+      (error: unknown) => callback(asError(error), "", 0)
+    );
+  };
+}
+
+/**
+ * An undici dispatcher whose every connection goes to an address `resolve` passed. The socket is still opened for the
+ * URL's hostname, so TLS sends it as the server name and verifies the certificate against it. A socket skips `lookup`
+ * for an IP literal, so one is checked before connecting instead.
+ */
+export function pinnedDispatcher(resolve: Resolve): Agent {
+  const connector = buildConnector({ lookup: pinnedLookup(resolve) });
+  return new Agent({
+    connect: (options, callback) => {
+      if (isIP(options.hostname) === 0) {
+        connector(options, callback);
+        return;
+      }
+      resolve(options.hostname).then(
+        (addresses) =>
+          addresses.length === 0
+            ? callback(new UnreachableTarget(`${options.hostname} is not an address the hub may connect to`), null)
+            : connector(options, callback),
+        (error: unknown) => callback(asError(error), null)
+      );
+    }
+  });
+}
+
+export type PinnedFetch = (input: string | URL, init?: RequestInit & { duplex?: "half" }) => Promise<Response>;
+
+/**
+ * undici's own `fetch` through `pinnedDispatcher`, rather than the global one: Node's `fetch` is the undici bundled
+ * with its release, of whatever major that is, and is not built to drive a dispatcher from another.
+ */
+export function pinnedFetch(resolve: Resolve): PinnedFetch {
+  const dispatcher = pinnedDispatcher(resolve);
+  // The DOM's `RequestInit` and `Response` and undici's describe the same objects in types that do not line up.
+  return async (input, init) => (await undiciFetch(input, { ...(init as UndiciRequestInit), dispatcher })) as unknown as Response;
 }

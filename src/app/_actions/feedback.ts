@@ -24,7 +24,7 @@ import {
   setMembers,
   updateSettings
 } from "@/feedback/store";
-import { checkTargetUrl, resolvesPublic } from "@/feedback/targets";
+import { checkTargetUrl, publicAddresses } from "@/feedback/targets";
 import { type FeedbackCommentView, type FeedbackThreadView, patchThread, replyToThread } from "@/feedback/thread-store";
 import { prisma } from "@/store/prisma";
 import { requireViewer } from "@/viewer/current";
@@ -47,7 +47,7 @@ async function publicLinks(links: readonly FeedbackLinkInput[]): Promise<void> {
     if (!checked.ok) {
       throw new HttpError(400, `links.${index}.url: ${checked.reason}`);
     }
-    if (!(await resolvesPublic(checked.hostname))) {
+    if ((await publicAddresses(checked.hostname)).length === 0) {
       throw new HttpError(400, `links.${index}.url: must be on the public internet`);
     }
   }
