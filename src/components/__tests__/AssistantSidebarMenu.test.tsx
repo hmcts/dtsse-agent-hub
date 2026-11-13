@@ -37,7 +37,7 @@ afterEach(() => {
 });
 
 function link(id: string, title: string): ConversationLink {
-  return { id, title, product: "ccd", productLabel: "CCD", lastActiveAt: "2026-10-21T09:00:00.000Z", pinnedAt: null, mark: null };
+  return { kind: "cloud", id, title, product: "ccd", productLabel: "CCD", lastActiveAt: "2026-10-21T09:00:00.000Z", pinnedAt: null, mark: null };
 }
 
 function ok() {
@@ -45,7 +45,7 @@ function ok() {
 }
 
 function actions(overrides: Partial<ConversationActions> = {}): ConversationActions {
-  return { rename: ok(), pin: ok(), remove: ok(), ...overrides };
+  return { rename: ok(), pin: ok(), remove: ok(), pinFeedback: ok(), archiveFeedback: ok(), ...overrides };
 }
 
 /** The sidebar with two chats, the second of which, "Story draft", is the one open. */
@@ -242,12 +242,12 @@ describe("AssistantShell conversation menu", () => {
     expect(refresh).not.toHaveBeenCalled();
   });
 
-  it("should say a chat on the person's own computer will not come back to the list when they are asked to delete it", () => {
+  it("should say a chat on the person's own computer will not come back to the list when they are asked to delete it, even unmarked", () => {
     render(
       <AssistantShell
         now={Date.now()}
         viewerName="Alice Smith"
-        groups={[{ label: "Today", items: [{ ...link("c", "On my laptop"), mark: { where: "computer", session: "ready" } }, link("a", "Event help")] }]}
+        groups={[{ label: "Today", items: [{ ...link("c", "On my laptop"), kind: "local" }, link("a", "Event help")] }]}
         activeId={null}
         actions={actions()}
       >

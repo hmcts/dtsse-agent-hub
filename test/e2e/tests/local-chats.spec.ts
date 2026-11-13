@@ -59,7 +59,7 @@ function turn(prefix: string, words: { prompt: string; command: string; output: 
 }
 
 test.describe("local chats @regression", () => {
-  test("should list a session on the person's own computer beside the chats that run on one @regression", async ({ browser, baseURL, request }) => {
+  test("should list a session on the person's own computer @regression", async ({ browser, baseURL, request }) => {
     const persona = chatPersona("list");
     const name = unique("laptop");
     const agent = await registerAgent(request, persona, name);
@@ -77,9 +77,6 @@ test.describe("local chats @regression", () => {
       const chats = page.getByRole("navigation", { name: "Chats" });
       // Created as the session registered, so it is today's.
       await expect(chats.getByRole("heading", { level: 2, name: "Today" })).toBeVisible();
-      // The marker is words before an icon, which is the whole point of it: a small laptop outline says nothing on
-      // its own, and neither does the colour it carries the session's state in. They lead the title, so the row's
-      // accessible name is the two joined.
       const row = localChatRow(page, name);
       await expect(row).toBeVisible();
       expect(await row.getAttribute("href")).toMatch(/^\/assistant\/[0-9a-f-]{36}$/);

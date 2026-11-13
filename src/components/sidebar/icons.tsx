@@ -128,3 +128,13 @@ export function ChatIcon() {
     </Icon>
   );
 }
+
+/** A speech bubble with a map pin at its corner: comments pinned to a page, which is what a feedback project holds. */
+export function FeedbackIcon() {
+  return (
+    <Icon>
+      <path d="M10.5 5H5.5A1.5 1.5 0 0 0 4 6.5v5A1.5 1.5 0 0 0 5.5 13H7v3l3.5-3h4a1.5 1.5 0 0 0 1.5-1.5V11" />
+      <path d="M15 9.5s-2.5-2.3-2.5-4.2a2.5 2.5 0 0 1 5 0c0 1.9-2.5 4.2-2.5 4.2Z" />
+    </Icon>
+  );
+}

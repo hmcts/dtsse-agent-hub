@@ -1,5 +1,4 @@
 import { notFound } from "next/navigation";
-import { FeedbackRefresh } from "@/components/feedback/dev/FeedbackRefresh";
 import { FeedbackHeader } from "@/components/feedback/dev/ProjectList";
 import { RecordingView } from "@/components/feedback/dev/RecordingView";
 import { requireViewer } from "@/viewer/current";
@@ -19,8 +18,7 @@ export default async function FeedbackRecordingPage({ params }: Readonly<{ param
     notFound();
   }
   return (
-    <FeedbackFrame viewer={viewer}>
-      <FeedbackRefresh projectId={data.project.id} />
+    <FeedbackFrame viewer={viewer} projectId={data.project.id}>
       <div className="mx-auto flex max-w-[1100px] flex-col gap-5 px-5 pb-10 pt-5">
         <FeedbackHeader
           title={`${data.recording.author.name}'s recording`}

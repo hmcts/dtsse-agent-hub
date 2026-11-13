@@ -4,14 +4,14 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LocalSession } from "@/assistant/local-session";
-import type { ConversationMark, ConversationMatch } from "@/assistant/views";
+import type { ConversationMark, ConversationMatch, SidebarMatch } from "@/assistant/views";
 import { ConversationSearch, SEARCH_AFTER_MS } from "@/components/assistant/ConversationSearch";
 
 const push = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push, refresh: () => undefined }), usePathname: () => "/assistant" }));
 
 function match(id: string, title: string, snippet: string | null = null): ConversationMatch {
-  return { id, title, product: "pcs", productLabel: "Possession Claims (PCS)", lastActiveAt: "2026-10-24T09:00:00.000Z", mark: null, snippet };
+  return { kind: "cloud", id, title, product: "pcs", productLabel: "Possession Claims (PCS)", lastActiveAt: "2026-10-24T09:00:00.000Z", mark: null, snippet };
 }
 
 /** A result that is a chat on the person's own computer, with the state of its session. */
@@ -19,7 +19,7 @@ function onComputer(session: LocalSession): ConversationMark {
   return { where: "computer", session };
 }
 
-const search = vi.fn<(query: string, signal: AbortSignal) => Promise<ConversationMatch[]>>();
+const search = vi.fn<(query: string, signal: AbortSignal) => Promise<SidebarMatch[]>>();
 
 function list(): React.ReactNode {
   return (
@@ -35,7 +35,7 @@ function render_(): void {
 }
 
 function box(): HTMLElement {
-  return screen.getByRole("combobox", { name: "Search chats" });
+  return screen.getByRole("combobox", { name: "Search" });
 }
 
 /** Types a query and lets the debounce and the search itself run. */
@@ -90,9 +90,37 @@ describe("ConversationSearch", () => {
     await type("possession");
 
     expect(search.mock.calls[0]?.[0]).toBe("possession");
-    const results = screen.getByRole("listbox", { name: "Chats found" });
+    const results = screen.getByRole("listbox", { name: "Search results" });
     expect(within(results).getByRole("option", { name: "Possession claim help" })).toBeTruthy();
-    expect(screen.getByRole("status").textContent).toBe("1 chat found.");
+    expect(screen.getByRole("status").textContent).toBe("1 result found.");
+  });
+
+  it("should be labelled Search rather than naming chats alone", () => {
+    render_();
+
+    expect(box().getAttribute("placeholder")).toBe("Search");
+  });
+
+  it("should mark a feedback project among the results and open its page when it is chosen", async () => {
+    const project: SidebarMatch = { kind: "feedback", id: "p1", title: "Claim journey", lastActiveAt: "2026-10-24T09:00:00.000Z", marked: true };
+    search.mockResolvedValue([match("c1", "Claim help", "the claim form"), project]);
+    render_();
+
+    await type("claim");
+
+    const option = screen.getByRole("option", { name: /^Feedback project:\s*Claim journey$/ });
+    expect(screen.getByRole("status").textContent).toBe("2 results found.");
+    fireEvent.click(option);
+    expect(push).toHaveBeenCalledWith("/assistant/feedback/p1");
+  });
+
+  it("should show a feedback project bare when the person's list holds one kind only", async () => {
+    search.mockResolvedValue([{ kind: "feedback", id: "p1", title: "Claim journey", lastActiveAt: "2026-10-24T09:00:00.000Z", marked: false }]);
+    render_();
+
+    await type("claim");
+
+    expect(screen.getByRole("option", { name: "Claim journey" })).toBeTruthy();
   });
 
   // A result is the same chat as the row in the list below, so it carries the same marker: a local chat found by
@@ -177,7 +205,7 @@ describe("ConversationSearch", () => {
 
     await type("possession");
 
-    expect(screen.getByRole("status").textContent).toBe("No chats match that.");
+    expect(screen.getByRole("status").textContent).toBe("Nothing matches that.");
     expect(screen.queryAllByRole("option")).toEqual([]);
     expect(box().getAttribute("aria-expanded")).toBe("false");
   });
@@ -188,7 +216,7 @@ describe("ConversationSearch", () => {
 
     await type("possession");
 
-    expect(screen.getByRole("status").textContent).toBe("Searching your chats…");
+    expect(screen.getByRole("status").textContent).toBe("Searching…");
   });
 
   // Emptying the list on every keystroke would flicker the results away and back as a word is typed out.
@@ -201,7 +229,7 @@ describe("ConversationSearch", () => {
     await type("possession claim");
 
     expect(screen.getByRole("option", { name: "Possession claim help" })).toBeTruthy();
-    expect(screen.getByRole("status").textContent).toBe("Searching your chats…");
+    expect(screen.getByRole("status").textContent).toBe("Searching…");
   });
 
   it("should say so when the search cannot be reached", async () => {
@@ -210,7 +238,7 @@ describe("ConversationSearch", () => {
 
     await type("possession");
 
-    expect(screen.getByRole("status").textContent).toBe("Your chats could not be searched. Check your connection and try again.");
+    expect(screen.getByRole("status").textContent).toBe("The search did not finish. Check your connection and try again.");
   });
 
   // One letter matches nearly every chat, so it is not a search: the sidebar keeps its list rather than showing one
@@ -335,7 +363,7 @@ describe("ConversationSearch", () => {
 
     expect(box().getAttribute("aria-autocomplete")).toBe("list");
     expect(box().getAttribute("aria-expanded")).toBe("true");
-    expect(box().getAttribute("aria-controls")).toBe(screen.getByRole("listbox", { name: "Chats found" }).id);
+    expect(box().getAttribute("aria-controls")).toBe(screen.getByRole("listbox", { name: "Search results" }).id);
   });
 
   it("should drop an answer to a query that has been typed past", async () => {

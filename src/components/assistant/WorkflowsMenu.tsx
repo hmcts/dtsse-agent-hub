@@ -11,16 +11,12 @@ import { ACTION_UNREACHABLE } from "@/web/action-fault";
 /** `startConversation`: a new chat and its first message, which is how the morning briefing is run. */
 export type StartChatAction = (input: { product: unknown; body: unknown; title?: unknown }) => Promise<ActionResult<{ id: string }>>;
 
-/** Prototype feedback, when it is on: `projects` once the person owns or is on the team of a project. */
-export type FeedbackOffer = { projects: boolean };
-
 /** One workflow the menu offers: its own page, so a link. */
 type Workflow = { href: string; label: string; hint: string };
 
 const WELSH: Workflow = { href: "/assistant/welsh", label: "Welsh translations", hint: "Search, scan, send and apply a service's Welsh" };
 const SCHEDULED: Workflow = { href: "/assistant/scheduled", label: "Scheduled", hint: "Prompts your assistant runs on a schedule" };
 const NEW_FEEDBACK: Workflow = { href: "/assistant/feedback/new", label: "New feedback project", hint: "Share a prototype for comments and recorded feedback" };
-const FEEDBACK_PROJECTS: Workflow = { href: "/assistant/feedback", label: "Feedback projects", hint: "Comments and recordings on your prototypes" };
 
 /**
  * The sidebar's plus: the workflows a person can open beside their chats. Morning briefing is offered only to someone
@@ -28,8 +24,8 @@ const FEEDBACK_PROJECTS: Workflow = { href: "/assistant/feedback", label: "Feedb
  * (`offersBriefing`). It is not a page: it starts a chat whose first message runs the briefing, the same way the
  * new-chat screen starts one, and opens it.
  * Welsh translations is offered only to someone whose assistant has the plugin that runs it; Scheduled is offered to
- * everyone. A new feedback project is offered wherever prototype feedback is on, and the list of them once the person
- * is on the team of one.
+ * everyone. A new feedback project is offered wherever prototype feedback is on; the projects themselves are in the
+ * sidebar's list.
  *
  * Dismissed by Escape or a click outside, in the same shape as the chat menu: closing from the keyboard puts focus
  * back on the trigger, while a click elsewhere leaves focus where the click put it.
@@ -37,9 +33,9 @@ const FEEDBACK_PROJECTS: Workflow = { href: "/assistant/feedback", label: "Feedb
 export function WorkflowsMenu({
   welsh = false,
   briefing = false,
-  feedback,
+  feedback = false,
   start
-}: Readonly<{ welsh?: boolean; briefing?: boolean; feedback?: FeedbackOffer; start?: StartChatAction }>) {
+}: Readonly<{ welsh?: boolean; briefing?: boolean; feedback?: boolean; start?: StartChatAction }>) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -49,11 +45,7 @@ export function WorkflowsMenu({
   // Which start the menu is waiting on. Closing it moves this on, so a start that answers after the person dismissed
   // the menu neither shows an error in a menu they closed nor takes them to a chat they have moved away from.
   const attempt = useRef(0);
-  const workflows = [
-    ...(welsh ? [WELSH] : []),
-    ...(feedback === undefined ? [] : feedback.projects ? [NEW_FEEDBACK, FEEDBACK_PROJECTS] : [NEW_FEEDBACK]),
-    SCHEDULED
-  ];
+  const workflows = [...(welsh ? [WELSH] : []), ...(feedback ? [NEW_FEEDBACK] : []), SCHEDULED];
 
   const close = useCallback(() => {
     if (ref.current?.contains(document.activeElement)) {

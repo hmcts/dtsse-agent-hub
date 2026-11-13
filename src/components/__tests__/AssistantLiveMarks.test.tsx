@@ -60,7 +60,16 @@ afterEach(() => {
 });
 
 function local(id: string, title: string, session: LocalSession): ConversationLink {
-  return { id, title, product: "ccd", productLabel: "CCD", lastActiveAt: "2026-10-21T09:00:00.000Z", pinnedAt: null, mark: { where: "computer", session } };
+  return {
+    kind: "local",
+    id,
+    title,
+    product: "ccd",
+    productLabel: "CCD",
+    lastActiveAt: "2026-10-21T09:00:00.000Z",
+    pinnedAt: null,
+    mark: { where: "computer", session }
+  };
 }
 
 function shell(items: ConversationLink[]) {
@@ -155,7 +164,7 @@ describe("a local chat's mark", () => {
         <ConversationSearch search={search}>{null}</ConversationSearch>
       </LiveLocalSessions>
     );
-    fireEvent.change(screen.getByRole("combobox", { name: "Search chats" }), { target: { value: "sweep" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Search" }), { target: { value: "sweep" } });
     await act(async () => {
       await vi.advanceTimersByTimeAsync(SEARCH_AFTER_MS);
     });

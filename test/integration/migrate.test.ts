@@ -178,6 +178,7 @@ describe("migrate", () => {
       "feedback_member",
       "feedback_mention",
       "feedback_project",
+      "feedback_project_person",
       "feedback_recording",
       "feedback_recording_segment",
       "feedback_thread",

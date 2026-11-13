@@ -13,6 +13,7 @@ import { deleteAllAssistantFiles, deleteAssistantFile } from "@/app/_actions/ass
 import { readAssistantAgent, readGitIdentity } from "@/app/_actions/assistant-settings";
 import { clearGitIdentity, removeCredential, resetClaudeMd, saveClaudeMd, saveCredential, saveGitIdentity } from "@/app/_actions/credentials";
 import { saveExportDefaults } from "@/app/_actions/export-defaults";
+import { archiveFeedbackProject, pinFeedbackProject } from "@/app/_actions/feedback";
 import { deleteTemplate, saveTemplate } from "@/app/_actions/templates";
 import { pasteLoginCode, reconnectSignIn, restartVirtualAgent, saveVirtualAgentPod } from "@/app/_actions/virtual-agents";
 import { SHARING_SETTINGS } from "@/app/assistant/sharing";
@@ -26,6 +27,7 @@ import { WAITING_COOKIE } from "@/assistant/waiting";
 import { AssistantGate } from "@/components/assistant/AssistantGate";
 import { AssistantShell, type ConversationActions } from "@/components/assistant/AssistantShell";
 import { EmptyChat, type EmptyChatActions } from "@/components/assistant/EmptyChat";
+import { feedbackEnabled } from "@/feedback/settings";
 import { requireViewer } from "@/viewer/current";
 import {
   assistantExportDefaults,
@@ -37,7 +39,6 @@ import {
   openAssistant,
   unsentNewChat
 } from "@/web/data";
-import { feedbackMenu } from "@/web/feedback-data";
 
 export const dynamic = "force-dynamic";
 
@@ -50,14 +51,20 @@ const CHAT_ACTIONS: EmptyChatActions = {
 };
 
 /** What a conversation's row in the sidebar offers. */
-const ROW_ACTIONS: ConversationActions = { rename: renameConversation, pin: pinConversation, remove: deleteConversation };
+const ROW_ACTIONS: ConversationActions = {
+  rename: renameConversation,
+  pin: pinConversation,
+  remove: deleteConversation,
+  pinFeedback: pinFeedbackProject,
+  archiveFeedback: archiveFeedbackProject
+};
 
 /** A new chat. Opening it creates the viewer's assistant on their first visit, and starts it whenever it is stopped. */
 export default async function AssistantPage() {
   const viewer = await requireViewer();
   const jar = await cookies();
   const theme = themeOf(jar.get(THEME_COOKIE)?.value);
-  const [home, unsent, claudeMd, mine, files, size, defaults, model, feedback] = await Promise.all([
+  const [home, unsent, claudeMd, mine, files, size, defaults, model] = await Promise.all([
     openAssistant(viewer),
     unsentNewChat(viewer),
     claudeMdSettings(viewer),
@@ -65,8 +72,7 @@ export default async function AssistantPage() {
     assistantFiles(viewer),
     assistantSize(viewer),
     assistantExportDefaults(viewer),
-    assistantModel(viewer),
-    feedbackMenu(viewer)
+    assistantModel(viewer)
   ]);
   // The same sign-in the conversation page gives the document panel, for the settings' searches.
   const atlassian = {
@@ -89,7 +95,7 @@ export default async function AssistantPage() {
       plugins={pluginSettings}
       welsh={home.welsh}
       briefing={home.briefing}
-      feedback={feedback}
+      feedback={feedbackEnabled()}
       start={startConversation}
       claudeMd={{ settings: claudeMd, save: saveClaudeMd, reset: resetClaudeMd }}
       templates={{ mine, save: saveTemplate, remove: deleteTemplate }}
