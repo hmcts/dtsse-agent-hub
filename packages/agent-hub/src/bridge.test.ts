@@ -103,6 +103,11 @@ async function waitUntil(fn: () => boolean, what: string, timeoutMs = 8000): Pro
 
 const gaps = (calls: RecordedCall[]) => calls.slice(1).map((c, i) => (c.at ?? 0) - ((calls[i] as RecordedCall).at ?? 0));
 
+// A shorter rapid-close threshold than `reconnect.ts`'s, so a stream that outlives it can end in a fraction of a
+// second. The refused-stream case keeps the real backoff: its bounds need the slack the full doubling gives.
+const FAST_RECONNECT = { rapidCloseMs: 200 };
+const STREAM_MS = FAST_RECONNECT.rapidCloseMs + 200;
+
 type StartBridgeOptions = Omit<RunBridgeOptions, "sid" | "api" | "deliver"> & {
   env?: Env;
   /** Stands in for some of the bridge's API calls; the setup's own registration goes to the mock hub as it is. */
@@ -448,7 +453,7 @@ describe("runBridge", () => {
   for (const reconnectEvent of [true, false]) {
     it(`should reopen the stream at once when the server ends it ${reconnectEvent ? "with a reconnect event" : "without one"}`, async () => {
       // Arrange
-      const bridge = await startBridge({ maxLifetimeMs: 2200, reconnectEvent });
+      const bridge = await startBridge({ maxLifetimeMs: STREAM_MS, reconnectEvent }, { reconnect: FAST_RECONNECT });
 
       try {
         // Act
@@ -456,7 +461,7 @@ describe("runBridge", () => {
 
         // Assert
         for (const gap of gaps(bridge.streamOpens())) {
-          expect(gap).toBeLessThan(2200 + 500);
+          expect(gap).toBeLessThan(STREAM_MS + 500);
         }
       } finally {
         await bridge.stop();
@@ -466,7 +471,7 @@ describe("runBridge", () => {
 
   it("should write a message to the inbox once and ack it again when it is replayed after it was acked", async () => {
     // Arrange
-    const bridge = await startBridge({ maxLifetimeMs: 2200, replayAcked: true });
+    const bridge = await startBridge({ maxLifetimeMs: STREAM_MS, replayAcked: true }, { reconnect: FAST_RECONNECT });
 
     try {
       await waitUntil(() => bridge.streamOpens().length >= 1, "the first stream");
@@ -484,7 +489,7 @@ describe("runBridge", () => {
 
   it("should replay, ack and write a message to the inbox once when its first ack failed", async () => {
     // Arrange
-    const bridge = await startBridge({ maxLifetimeMs: 2200 });
+    const bridge = await startBridge({ maxLifetimeMs: STREAM_MS }, { reconnect: FAST_RECONNECT });
 
     try {
       await waitUntil(() => bridge.streamOpens().length >= 1, "the first stream");
@@ -611,7 +616,7 @@ describe("runBridge", () => {
 
   it("should retry with backoff when the stream is refused", async () => {
     // Arrange
-    const bridge = await startBridge({});
+    const bridge = await startBridge({}, { reconnect: FAST_RECONNECT });
     bridge.hub.failNextStreams(2);
 
     try {

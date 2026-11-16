@@ -64,6 +64,7 @@ function fake({
     },
     agentId: "a-conversation",
     env: {},
+    retryWait: async () => {},
     run: async (cmd, args) => {
       calls.push([cmd, ...args]);
       const file = args.find((arg) => arg.startsWith("--body-file="))?.slice("--body-file=".length);

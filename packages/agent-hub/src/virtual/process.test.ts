@@ -41,11 +41,12 @@ describe("run", () => {
     // holding them. Without the giving-up step the timeout bounds nothing and the caller waits for ever.
     // Act
     const started = Date.now();
-    const r = await run("bash", ["-c", "( sleep 30 ) & printf out; printf err >&2; sleep 30"], { env: pod.env(), timeoutMs: 100 });
+    const r = await run("bash", ["-c", "( sleep 30 ) & printf out; printf err >&2; sleep 30"], { env: pod.env(), timeoutMs: 100, killGraceMs: 500 });
 
-    // Assert: answered with what the command had already said, inside the giving-up window.
+    // Assert: answered with what the command had already said, inside the giving-up window it was given rather
+    // than the default one.
     expect(r).toEqual({ code: 1, stdout: "out", stderr: "err" });
-    expect(Date.now() - started).toBeLessThan(SIGKILL_AFTER_MS * 2);
+    expect(Date.now() - started).toBeLessThan(SIGKILL_AFTER_MS);
   }, 20_000);
 });
 

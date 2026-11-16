@@ -15,6 +15,8 @@ export type RunOptions = {
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
   input?: string;
+  /** How long after the kill to stop waiting for the pipes to close; `SIGKILL_AFTER_MS` unless a test says otherwise. */
+  killGraceMs?: number;
 };
 
 /**
@@ -34,7 +36,11 @@ export function childEnv(env: Env, drop: string[] = []): NodeJS.ProcessEnv {
 }
 
 /** Runs a command to completion; its output is returned, never printed, because some of it is secret. */
-export function run(cmd: string, args: string[], { env = process.env, timeoutMs = 60000, input }: RunOptions = {}): Promise<RunResult> {
+export function run(
+  cmd: string,
+  args: string[],
+  { env = process.env, timeoutMs = 60000, input, killGraceMs = SIGKILL_AFTER_MS }: RunOptions = {}
+): Promise<RunResult> {
   return new Promise((resolve) => {
     let stdout = "";
     let stderr = "";
@@ -71,7 +77,7 @@ export function run(cmd: string, args: string[], { env = process.env, timeoutMs 
         child.stdout?.destroy();
         child.stderr?.destroy();
         finish({ code: 1, stdout, stderr });
-      }, SIGKILL_AFTER_MS);
+      }, killGraceMs);
     }, timeoutMs);
     child.stdout?.on("data", (d) => {
       stdout += d;

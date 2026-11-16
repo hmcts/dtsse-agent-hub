@@ -71,6 +71,7 @@ function fake({
     },
     agentId: "a-conversation",
     env: {},
+    retryWait: async () => {},
     run: async (cmd, args) => {
       calls.push([cmd, ...args]);
       if (args[0] === "whoami") {

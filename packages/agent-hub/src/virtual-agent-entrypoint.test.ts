@@ -5,8 +5,9 @@
 // No mock hub: every call the runtime makes to the hub goes through the agent-hub client, which the script
 // fakes, and the suite must also run under the `bash:3.2` image, which has no node to run a real one with.
 //
-// One run of the script per case, as the boot suite does, because each case boots a pod of its own. Several
-// cases wait out the hai install's backoff, so the timeout is generous.
+// One run of the script per case, as the boot suite does, because each case boots a pod of its own. Each run
+// makes its own temp directory and fakes, so the cases run concurrently: most of a case is waiting on its pod.
+// Several cases wait out the hai install's backoff, so the timeout is generous.
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -109,20 +110,16 @@ describe("test/entrypoint.test.sh", () => {
     expect(result.stdout.trim().split("\n")).toEqual(CASES);
   });
 
-  it.each(CASES)(
-    "should pass every assertion when the pod boots in the %s case",
-    async (name) => {
-      // Act
-      const run = await runCase(name);
+  it.concurrent.for(CASES)("should pass every assertion when the pod boots in the %s case", { timeout: CASE_TIMEOUT }, async (name, { expect }) => {
+    // Act
+    const run = await runCase(name);
 
-      // Assert: a case the host cannot arrange says so and asserts nothing; anything else has to assert.
-      expect(run.fails, run.out).toEqual([]);
-      if (run.skips.length === 0) {
-        expect(run.oks.length, run.out).toBeGreaterThan(0);
-      }
-      expect(run.summary, run.out).toEqual({ passed: run.oks.length, failed: 0 });
-      expect(run.code, run.out).toBe(0);
-    },
-    CASE_TIMEOUT
-  );
+    // Assert: a case the host cannot arrange says so and asserts nothing; anything else has to assert.
+    expect(run.fails, run.out).toEqual([]);
+    if (run.skips.length === 0) {
+      expect(run.oks.length, run.out).toBeGreaterThan(0);
+    }
+    expect(run.summary, run.out).toEqual({ passed: run.oks.length, failed: 0 });
+    expect(run.code, run.out).toBe(0);
+  });
 });
