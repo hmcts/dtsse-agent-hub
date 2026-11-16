@@ -35,9 +35,19 @@ const REPLACED_ON_REQUEST = new Set([
 
 /**
  * `fetch` decodes what it receives, so the encoding and length no longer describe the body it hands on. HSTS from a
- * pod is not the viewer's to set; the hub's own configuration sets the viewer's.
+ * pod is not the viewer's to set; the hub's own configuration sets the viewer's. `use-as-dictionary` would have the
+ * browser keep a compression dictionary for the viewer's origin, which every upstream shares, and offer it on any of
+ * their paths it matches; an answer compressed with it is one `fetch` cannot decode.
  */
-const DROPPED_FROM_RESPONSE = new Set(["content-encoding", "content-length", "strict-transport-security", "set-cookie", "location", "referrer-policy"]);
+const DROPPED_FROM_RESPONSE = new Set([
+  "content-encoding",
+  "content-length",
+  "strict-transport-security",
+  "set-cookie",
+  "location",
+  "referrer-policy",
+  "use-as-dictionary"
+]);
 
 /**
  * In place of whatever the pod asks for, as helmet's `no-referrer` default: the viewer finds the port a root-relative
@@ -82,24 +92,59 @@ export function forwardedCookie(header: string | null, options: { feedback?: boo
 }
 
 /**
- * The only browser headers a feedback link's prototype is sent, besides `cookie` and `referer`, which are rewritten.
- * It is a site outside the cluster, so it gets what a browser fetching it directly would send, less anything that
- * names the hub, the viewer or the network in front of them.
+ * Besides what `copiedHeaders` drops, the headers a feedback link's prototype is not sent as the browser sent them.
+ *
+ * - `origin`, `referer` and `content-length` are set apart by `feedbackRequestHeaders`.
+ * - `authorization`: every link and agent port shares the viewer's origin, so HTTP credentials the browser has cached
+ *   for it belong to no one link, and would reach other links' prototypes and their sign-in services.
+ * - `sec-fetch-*` describe the request's relation to the viewer, not to the prototype: a POST from another link's page
+ *   is `same-origin` there, which a Fetch-Metadata guard would accept.
+ * - `accept-encoding` and `available-dictionary`: `fetch` sends its own `accept-encoding` and decodes what it gets,
+ *   but passes on a coding it cannot decode, such as a dictionary-compressed `dcb` or `dcz`, whose `content-encoding`
+ *   the viewer then drops.
+ * - `via`, `cdn-loop`, the client-address headers and the prefixes are what the network in front of the viewer adds on
+ *   the way in: Front Door (`x-azure-`, `x-fd-`), the Application Gateway (`x-original-`, `x-appgw-`, `x-arr-`),
+ *   Traefik (`x-forwarded-`), and the names CDNs and service meshes use (`true-client-ip`, `x-client-ip`,
+ *   `x-cluster-client-ip`, `x-envoy-`, `l5d-`).
+ *
+ * Stripping by name covers only the hops named here: a hop put in front of the viewer that adds a header under another
+ * name passes it to the prototype until that name is added. `traceparent`, `tracestate`, `request-id` and
+ * `x-request-id` are kept: a browser app's own telemetry sends them, and none of the viewer's hops adds them.
  */
-const FEEDBACK_REQUEST_HEADERS = [
-  "accept",
-  "accept-language",
-  "cache-control",
-  "content-type",
-  "if-none-match",
-  "if-modified-since",
-  "if-match",
-  "if-unmodified-since",
-  "range",
-  "if-range",
-  "pragma",
-  "user-agent"
-];
+const FEEDBACK_DROPPED_ON_REQUEST = new Set([
+  "origin",
+  "referer",
+  "content-length",
+  "authorization",
+  "accept-encoding",
+  "available-dictionary",
+  "via",
+  "cdn-loop",
+  "true-client-ip",
+  "x-client-ip",
+  "x-cluster-client-ip"
+]);
+const FEEDBACK_DROPPED_PREFIXES = ["sec-fetch-", "x-forwarded-", "x-azure-", "x-fd-", "x-original-", "x-appgw-", "x-arr-", "x-envoy-", "l5d-"];
+
+function droppedForFeedback(name: string): boolean {
+  return FEEDBACK_DROPPED_ON_REQUEST.has(name) || FEEDBACK_DROPPED_PREFIXES.some((prefix) => name.startsWith(prefix));
+}
+
+/**
+ * The incoming headers less the hop-by-hop ones, any `Connection` names, those `REPLACED_ON_REQUEST`, Next's own
+ * `x-middleware-` ones, `expect`, which `fetch` refuses outright, and any `dropped` names.
+ */
+function copiedHeaders(incoming: Headers, dropped: (name: string) => boolean): Headers {
+  const named = connectionTokens(incoming);
+  const headers = new Headers();
+  for (const [name, value] of incoming) {
+    if (HOP_BY_HOP.has(name) || named.has(name) || REPLACED_ON_REQUEST.has(name) || name === "expect" || name.startsWith("x-middleware-") || dropped(name)) {
+      continue;
+    }
+    headers.append(name, value);
+  }
+  return headers;
+}
 
 /**
  * A `Referer` from the upstream's own pages on the viewer, as it would see it served directly: its origin and the path
@@ -135,14 +180,13 @@ export function signInCookie(header: string | null): string | undefined {
   return kept.length === 0 ? undefined : kept.join("; ");
 }
 
+/**
+ * The headers a feedback link's prototype, a site outside the cluster, is sent: every one the browser sent, so that
+ * an app's own, such as the `experimental` CCD's internal endpoints answer 404 without, still reach it, less those
+ * `droppedForFeedback` names. `cookie`, `referer` and `origin` name the viewer, and are rewritten.
+ */
 function feedbackRequestHeaders(incoming: Headers, target: ForwardTarget, withBody: boolean): Headers {
-  const headers = new Headers();
-  for (const name of FEEDBACK_REQUEST_HEADERS) {
-    const value = incoming.get(name);
-    if (value !== null) {
-      headers.set(name, value);
-    }
-  }
+  const headers = copiedHeaders(incoming, droppedForFeedback);
   const length = incoming.get("content-length");
   if (withBody && length !== null) {
     headers.set("content-length", length);
@@ -154,6 +198,14 @@ function feedbackRequestHeaders(incoming: Headers, target: ForwardTarget, withBo
   const referer = feedbackReferer(incoming.get("referer"), target);
   if (referer !== undefined) {
     headers.set("referer", referer);
+  }
+  // Rewritten rather than dropped, since an app may refuse a POST without its own `Origin`, but only when the
+  // `Referer` names the upstream's own pages: every link shares the viewer's origin, so the `Origin` alone could as
+  // well be another link's page. The `Referer` is no proof either: on a shared origin, script on any link's page can
+  // send a `Referer` naming another link's pages, and a page that sends no `Referer` loses its `Origin`. Only an
+  // origin per link would tell them apart.
+  if (referer !== undefined && incoming.get("origin") === target.viewerOrigin) {
+    headers.set("origin", target.upstreamOrigin);
   }
   // No `X-Forwarded-Host`: `fetch` sends the prototype's own host as `Host`, and the viewer's is none of its business.
   headers.set("x-forwarded-proto", "https");
@@ -190,8 +242,8 @@ export interface ForwardTarget {
   /** The nonce `inject`'s script carries, which a policy with `'strict-dynamic'` is given so it still runs. */
   scriptNonce?: string;
   /**
-   * A feedback link's prototype, a site outside the cluster: it is sent an allowlist of the browser's headers rather
-   * than all but a few, and the prototype no `__Host-` cookie either way.
+   * A feedback link's prototype, a site outside the cluster: it is sent the browser's headers less those that name the
+   * hub, the viewer or the network in front of them, and the prototype no `__Host-` cookie either way.
    */
   feedback?: boolean;
   /**
@@ -210,14 +262,7 @@ export function forwardedRequestHeaders(incoming: Headers, target: ForwardTarget
   if (target.feedback === true) {
     return feedbackRequestHeaders(incoming, target, hasBody(method));
   }
-  const named = connectionTokens(incoming);
-  const headers = new Headers();
-  for (const [name, value] of incoming) {
-    if (HOP_BY_HOP.has(name) || named.has(name) || REPLACED_ON_REQUEST.has(name) || name.startsWith("x-middleware-")) {
-      continue;
-    }
-    headers.append(name, value);
-  }
+  const headers = copiedHeaders(incoming, () => false);
   const cookie = forwardedCookie(incoming.get("cookie"));
   if (cookie !== undefined) {
     headers.set("cookie", cookie);
