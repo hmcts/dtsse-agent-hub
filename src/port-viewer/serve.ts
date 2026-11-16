@@ -348,8 +348,8 @@ function signInRoutesOf(token: string, feedback: FeedbackDependencies): SignInRo
 
 /**
  * The sign-in service a prototype's redirect sends the browser to, when it is not one of `FEEDBACK_SIGN_IN_ORIGINS`:
- * an authorization request to a path ending `/authorize` on a host that is not the prototype's, the hub's or the
- * viewer's, with a `client_id` or `response_type` and a `redirect_uri` back to the prototype, matched by hostname as
+ * an authorization request to a path ending `/authorize`, or `/login` as IDAM web sends it, on a host that is not the
+ * prototype's, the hub's or the viewer's, with a `client_id` or `response_type` and a `redirect_uri` back to the prototype, matched by hostname as
  * the redirect back is. Its origin must pass the same checks as a link's.
  */
 export function detectedSignInOrigin(
@@ -366,7 +366,7 @@ export function detectedSignInOrigin(
   const redirectUri = url.searchParams.get("redirect_uri");
   if (
     [prototypeHost, settings.host, new URL(settings.hubOrigin).hostname].includes(url.hostname) ||
-    url.pathname.split("/").at(-1) !== "authorize" ||
+    !["authorize", "login"].includes(url.pathname.split("/").at(-1) ?? "") ||
     redirectUri === null ||
     !URL.canParse(redirectUri) ||
     new URL(redirectUri).hostname !== prototypeHost ||

@@ -672,6 +672,14 @@ describe("feedback links on the viewer", () => {
       expect(detectedSignInOrigin(location, prototype, SETTINGS)).toBe(simulator);
     });
 
+    it("should detect XUI's redirect to its IDAM simulator's login page", () => {
+      const xui = "https://pcs-private-landlord-xui.uksouth.cloudapp.azure.com";
+      const location =
+        "https://pcs-private-landlord-idam.uksouth.cloudapp.azure.com/login?response_type=code&redirect_uri=https%3A%2F%2Fpcs-private-landlord-xui.uksouth.cloudapp.azure.com%2Foauth2%2Fcallback&scope=profile%20openid%20roles%20manage-user%20create-user%20search-user&state=s&client_id=xuiwebapp";
+
+      expect(detectedSignInOrigin(location, xui, SETTINGS)).toBe("https://pcs-private-landlord-idam.uksouth.cloudapp.azure.com");
+    });
+
     it.each<[string, string]>([
       ["its redirect_uri goes elsewhere", `${SIM}/o/authorize?client_id=c&redirect_uri=${encodeURIComponent("https://evil.example/cb")}`],
       ["it has no redirect_uri", `${SIM}/o/authorize?client_id=c&response_type=code`],
@@ -681,7 +689,8 @@ describe("feedback links on the viewer", () => {
       ["it is on the prototype's own host", `https://prototype.example/o/authorize?client_id=c&redirect_uri=${CALLBACK}`],
       ["it is on the hub's host", `https://agent-hub.example/o/authorize?client_id=c&redirect_uri=${CALLBACK}`],
       ["it is on the viewer's host", `https://agent-hub-viewer.example/o/authorize?client_id=c&redirect_uri=${CALLBACK}`],
-      ["its path does not end in authorize", `${SIM}/login?client_id=c&response_type=code&redirect_uri=${CALLBACK}`],
+      ["its path ends in neither authorize nor login", `${SIM}/sign-in?client_id=c&response_type=code&redirect_uri=${CALLBACK}`],
+      ["its path only contains login", `${SIM}/login/next?client_id=c&redirect_uri=${CALLBACK}`],
       ["its path only contains authorize", `${SIM}/authorize/next?client_id=c&redirect_uri=${CALLBACK}`],
       ["it is a path", `/o/authorize?client_id=c&redirect_uri=${CALLBACK}`]
     ])("should detect no sign-in service when %s", (_case, location) => {
