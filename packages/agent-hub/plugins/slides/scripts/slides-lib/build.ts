@@ -136,7 +136,7 @@ function pictureStage() {
       if (format === null) {
         throw new DeckError(`the picture ${path} is not a PNG, JPEG or GIF`);
       }
-      let size: { width?: number; height?: number };
+      let size: ReturnType<typeof imageSize>;
       try {
         size = imageSize(data);
       } catch (err) {

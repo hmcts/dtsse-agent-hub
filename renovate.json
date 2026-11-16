@@ -4,5 +4,30 @@
   "vulnerabilityAlerts": {
     "labels": ["security"]
   },
-  "rebaseWhen": "behind-base-branch"
+  "rebaseWhen": "behind-base-branch",
+  "packageRules": [
+    {
+      "description": "welsh-lib's adapters/ts-locale-pair.ts parses with the classic compiler API (ts.createSourceFile, ts.isVariableStatement, ts.SyntaxKind). TypeScript 7 removes it, and a new major of a runtime dependency here should be looked at by a person rather than merged on green.",
+      "matchFileNames": ["packages/agent-hub/plugins/welsh/scripts/welsh-lib/package.json"],
+      "matchPackageNames": ["typescript"],
+      "allowedVersions": "<6"
+    },
+    {
+      "description": "The runtime image hmctsprod.azurecr.io/base/node has no tag above 24, so the image, .nvmrc and engines move together and stay on 24.",
+      "matchPackageNames": ["node", "hmctsprod.azurecr.io/base/node"],
+      "allowedVersions": "<25"
+    },
+    {
+      "description": "The app's Node types follow the runtime above. The plugin libraries run on whatever Node their user has, so they are not held.",
+      "matchFileNames": ["package.json", "packages/agent-hub/package.json"],
+      "matchPackageNames": ["@types/node"],
+      "allowedVersions": "<25"
+    },
+    {
+      "description": "The integration-test container in Jenkinsfile_CNP and the AAT flexible server are on Postgres 16, and the hand-written migrations must match the deploy target.",
+      "matchManagers": ["docker-compose"],
+      "matchPackageNames": ["postgres"],
+      "allowedVersions": "<17"
+    }
+  ]
 }
