@@ -13,6 +13,7 @@ import { availablePlugins, checkPlugins, podPlugins, samePlugins, storedPlugins,
 import { normalisePorts, samePorts } from "./ports.ts";
 import { diskTtlDays, type GatewaySettings, gatewaySettings, orchestratorLeaseSeconds } from "./settings.ts";
 import { checkSize, sizeChangeRefusal, type VirtualAgentSize } from "./size.ts";
+import { startVirtualAgents } from "./start.ts";
 import { announce, type StopReason } from "./stop.ts";
 
 /**
@@ -253,22 +254,13 @@ export async function setDesired(
     if (row.desired === desired) {
       return row;
     }
-    let data: Record<string, unknown>;
     if (desired === "running") {
-      data = {
-        startedAt: now,
-        stopReason: null,
-        diskExpiresAt: null,
-        diskDeletedAt: null,
-        ...NO_MEMORY_REPORT,
-        ...noClientClaim(),
-        ...statusChange("requested", now)
-      };
-    } else {
-      const settled = desired === "stopped" && row.status === "stopped";
-      const stop = desired === "stopped" ? { stopReason: "user" as const } : {};
-      data = { ...NO_TOKEN, ...NO_PORTS, ...noClientClaim(), ...stop, ...(settled ? {} : statusChange("stopping", now)) };
+      await startVirtualAgents(tx, [id], now);
+      return toRow(await tx.virtualAgent.findUniqueOrThrow({ where: { id }, select: SELECT }));
     }
+    const settled = desired === "stopped" && row.status === "stopped";
+    const stop = desired === "stopped" ? { stopReason: "user" as const } : {};
+    const data = { ...NO_TOKEN, ...NO_PORTS, ...noClientClaim(), ...stop, ...(settled ? {} : statusChange("stopping", now)) };
     const updated = toRow(
       await tx.virtualAgent.update({
         where: { id },

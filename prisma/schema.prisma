@@ -157,6 +157,7 @@ model User {
   assistantTemplates     AssistantTemplate[]
   assistantExportDefault AssistantExportDefault?
   assistantModelChoice   AssistantModelChoice?
+  assistantSchedule      AssistantSchedule?
   conversationsSharedWithThem AssistantConversationShare[] @relation("shareRecipient")
   conversationsTheyShared     AssistantConversationShare[] @relation("shareOwner")
   conversationsForkedToThem   AssistantConversationFork[]  @relation("forkRecipient")
@@ -843,6 +844,22 @@ model AssistantModelChoice {
   owner User @relation(fields: [ownerOid], references: [oid], onDelete: Cascade)
 
   @@map("assistant_model_choice")
+}
+
+/// When the sweep starts a person's Assistant and how long it waits before stopping their idle agents. One row per person; no row means no auto start and the deployment's idle period.
+model AssistantSchedule {
+  ownerOid        String    @id @map("owner_oid")
+  /// UK wall-clock HH:MM, one of AUTO_START_TIMES in src/virtual-agents/schedule.ts; null for none.
+  autoStartTime   String?   @map("auto_start_time")
+  /// One of IDLE_CHOICES in src/virtual-agents/schedule.ts; null for the deployment's idle period.
+  idleAfter       String?   @map("idle_after")
+  /// The UK date of the last auto start the sweep acted on, so it happens once a day.
+  lastAutoStartOn DateTime? @map("last_auto_start_on") @db.Date
+  updatedAt       DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  owner User @relation(fields: [ownerOid], references: [oid], onDelete: Cascade)
+
+  @@map("assistant_schedule")
 }
 
 model AssistantWelshJob {

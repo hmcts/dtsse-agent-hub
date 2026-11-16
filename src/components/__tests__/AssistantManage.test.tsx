@@ -9,11 +9,13 @@ import type { FormAction } from "@/components/ActionForm";
 import type { AssistantAgentSettings } from "@/components/assistant/AgentSettings";
 import { type AssistantTokens, Connections, type ConnectionsView } from "@/components/assistant/ConnectionSettings";
 import type { AssistantGitIdentity } from "@/components/assistant/GitIdentitySettings";
+import type { AssistantScheduleSetting } from "@/components/assistant/ScheduleSettings";
 import { AssistantSettings } from "@/components/assistant/SettingsDialog";
 import { SETTLE_MS } from "@/components/live/useSettled";
 import type { CredentialKind } from "@/credentials/names";
 import type { CredentialStatus } from "@/credentials/store";
-import type { AssistantAgent, GitIdentitySettings } from "@/web/data";
+import { autoStartTimes } from "@/virtual-agents/schedule";
+import type { AssistantAgent, GitIdentitySettings, ScheduleSettings } from "@/web/data";
 
 /** The sections of the Assistant's settings that manage the virtual agent it runs on, and the person's own values. */
 
@@ -88,6 +90,25 @@ function git(settings: GitIdentitySettings = gitSettings(false), actions: Partia
     clear: ok("Your virtual agents are back to the default git identity"),
     ...actions
   };
+}
+
+const IDLE_OFFERS = [
+  { value: "1h", label: "1 hour" },
+  { value: "2h", label: "2 hours" },
+  { value: "3h", label: "3 hours" },
+  { value: "4h", label: "4 hours" },
+  { value: "never", label: "Never" }
+];
+
+function scheduleSettings(overrides: Partial<ScheduleSettings> = {}, actions: Partial<Omit<AssistantScheduleSetting, "load">> = {}): AssistantScheduleSetting {
+  const settings: ScheduleSettings = {
+    autoStart: "none",
+    idleAfter: "2h",
+    idleOffers: IDLE_OFFERS,
+    autoStartTimes: autoStartTimes({ hour: 19, minute: 0 }),
+    ...overrides
+  };
+  return { load: vi.fn(async () => settings), save: ok("Your schedule is saved"), ...actions };
 }
 
 function tokens(
@@ -312,6 +333,112 @@ describe("the Assistant's git identity", () => {
 
     expect(screen.getByText("Your git identity cannot be shown: no credential store is configured")).toBeTruthy();
     expect(screen.queryByRole("form")).toBeNull();
+  });
+});
+
+describe("the Assistant's schedule", () => {
+  function optionsOf(label: string): string[] {
+    return within(screen.getByLabelText(label))
+      .getAllByRole("option")
+      .map((option) => option.textContent ?? "");
+  }
+
+  it("should offer the schedule in the Agent group, after the Assistant, when the page passes it", async () => {
+    await open({ agent: agentSettings(), schedule: scheduleSettings() });
+
+    expect(
+      within(nav())
+        .getAllByRole("tab")
+        .map((tab) => tab.textContent)
+    ).toEqual(["Appearance", "Connections", "Assistant", "Schedule", "Web servers"]);
+  });
+
+  it("should open on the schedule when the address names it", async () => {
+    window.history.replaceState(null, "", "/?settings=schedule");
+    router.search = "settings=schedule";
+    try {
+      render(<AssistantSettings now={Date.now()} connections={connections(["github", "claude"])} schedule={scheduleSettings()} />);
+      await act(async () => {});
+
+      expect(screen.getByRole("heading", { name: "Schedule" })).toBeTruthy();
+    } finally {
+      router.search = "";
+      window.history.replaceState(null, "", "/");
+    }
+  });
+
+  it("should offer none then every half hour from 07:30 to 18:30 as the auto start time when it is shown", async () => {
+    await open({ schedule: scheduleSettings() }, "Schedule");
+    const times = optionsOf("Auto start time");
+
+    expect(times.slice(0, 3)).toEqual(["None", "07:30", "08:00"]);
+    expect(times.at(-1)).toBe("18:30");
+    expect(times).toHaveLength(24);
+  });
+
+  it("should offer one to four hours and never, with the deployment's default selected when nothing is stored", async () => {
+    await open({ schedule: scheduleSettings() }, "Schedule");
+
+    expect(optionsOf("Shut down when idle after")).toEqual(["1 hour", "2 hours", "3 hours", "4 hours", "Never"]);
+    expect((screen.getByLabelText("Shut down when idle after") as HTMLSelectElement).value).toBe("2h");
+    expect((screen.getByLabelText("Auto start time") as HTMLSelectElement).value).toBe("none");
+  });
+
+  it("should say the environment is shut down overnight and at weekends when it is shown", async () => {
+    await open({ schedule: scheduleSettings() }, "Schedule");
+    const panel = screen.getByRole("region", { name: "Schedule" });
+
+    expect(panel.textContent).toContain("shut down from 8pm to 7am and at weekends");
+    expect(panel.textContent).toContain("only auto started on weekdays");
+  });
+
+  it("should offer only the times the page says the evening stop leaves room for when it is shown", async () => {
+    await open({ schedule: scheduleSettings({ autoStartTimes: ["07:30", "08:00"] }) }, "Schedule");
+
+    expect(optionsOf("Auto start time")).toEqual(["None", "07:30", "08:00"]);
+  });
+
+  it("should say auto start pauses after two weeks and what never does when it is shown", async () => {
+    await open({ schedule: scheduleSettings() }, "Schedule");
+    const panel = screen.getByRole("region", { name: "Schedule" });
+
+    expect(panel.textContent).toContain("pauses after two weeks without you using your assistant, and resumes once you use it again");
+    expect(panel.textContent).toContain("Never still stops your assistant at the evening stop");
+  });
+
+  it("should send both choices when the dialog is saved", async () => {
+    const settings = scheduleSettings();
+    await open({ schedule: settings }, "Schedule");
+
+    fireEvent.change(screen.getByLabelText("Auto start time"), { target: { value: "08:30" } });
+    fireEvent.change(screen.getByLabelText("Shut down when idle after"), { target: { value: "never" } });
+    await act(async () => {
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }));
+    });
+
+    const form = sent(settings.save as ReturnType<typeof ok>);
+    expect([form.get("autoStart"), form.get("idleAfter")]).toEqual(["08:30", "never"]);
+    expect(screen.getByRole("status").textContent).toBe("Your schedule is saved");
+    expect(settings.load).toHaveBeenCalledTimes(1);
+  });
+
+  it("should show what is stored when the person has chosen both", async () => {
+    await open({ schedule: scheduleSettings({ autoStart: "09:00", idleAfter: "4h" }) }, "Schedule");
+
+    expect((screen.getByLabelText("Auto start time") as HTMLSelectElement).value).toBe("09:00");
+    expect((screen.getByLabelText("Shut down when idle after") as HTMLSelectElement).value).toBe("4h");
+  });
+
+  it("should say why beside the choices when the save is refused", async () => {
+    const save = vi.fn<FormAction>(async () => ({ ok: false as const, error: "pick an auto start time from the list" }));
+    await open({ schedule: scheduleSettings({}, { save }) }, "Schedule");
+
+    fireEvent.change(screen.getByLabelText("Auto start time"), { target: { value: "08:00" } });
+    await act(async () => {
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }));
+    });
+
+    expect(within(screen.getByRole("region", { name: "Schedule" })).getByRole("alert").textContent).toBe("pick an auto start time from the list");
   });
 });
 

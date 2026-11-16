@@ -10,7 +10,7 @@ import {
   startConversation
 } from "@/app/_actions/assistant";
 import { deleteAllAssistantFiles, deleteAssistantFile } from "@/app/_actions/assistant-files";
-import { readAssistantAgent, readGitIdentity } from "@/app/_actions/assistant-settings";
+import { readAssistantAgent, readGitIdentity, readSchedule, saveSchedule } from "@/app/_actions/assistant-settings";
 import { clearGitIdentity, removeCredential, resetClaudeMd, saveClaudeMd, saveCredential, saveGitIdentity } from "@/app/_actions/credentials";
 import { saveExportDefaults } from "@/app/_actions/export-defaults";
 import { archiveFeedbackProject, pinFeedbackProject } from "@/app/_actions/feedback";
@@ -106,6 +106,7 @@ export default async function AssistantPage() {
       sharing={SHARING_SETTINGS}
       agent={{ load: readAssistantAgent, restart: restartVirtualAgent }}
       git={{ load: readGitIdentity, save: saveGitIdentity, clear: clearGitIdentity }}
+      schedule={{ load: readSchedule, save: saveSchedule }}
       tokens={{ ...savedCredentialsData(home.credentials, home.assistant.modelRoute), save: saveCredential, remove: removeCredential }}
     >
       {/* No `local` here: this screen is about to start a chat on a pod, so it needs what a pod needs. */}

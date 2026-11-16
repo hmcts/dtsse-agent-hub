@@ -22,6 +22,7 @@ import type { AssistantGitIdentity } from "@/components/assistant/GitIdentitySet
 import { LiveLocalSessions } from "@/components/assistant/LiveLocalSessions";
 import { besideSidebar, SIDEBAR_DRAWER_MAX_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_WIDTH } from "@/components/assistant/layout";
 import type { AssistantModelSetting } from "@/components/assistant/ModelSettings";
+import type { AssistantScheduleSetting } from "@/components/assistant/ScheduleSettings";
 import { type AssistantConnect, type AssistantPlugins, AssistantSettings } from "@/components/assistant/SettingsDialog";
 import type { AssistantSharing } from "@/components/assistant/SharingSettings";
 import type { AssistantSize } from "@/components/assistant/SizeSettings";
@@ -129,6 +130,7 @@ export function AssistantShell({
   sharing,
   agent,
   git,
+  schedule,
   tokens,
   actions,
   children
@@ -176,6 +178,8 @@ export function AssistantShell({
   agent?: AssistantAgentSettings;
   /** The git identity the person's agents commit as, which the footer's settings shows and changes. */
   git?: AssistantGitIdentity;
+  /** When the hub starts the assistant and shuts it down for being idle, which the footer's settings shows and changes. */
+  schedule?: AssistantScheduleSetting;
   /** How the footer's settings replaces and removes a pasted token. */
   tokens?: AssistantTokens;
   /** Given, every row offers an options menu; left out, the rows are links alone. */
@@ -415,6 +419,7 @@ export function AssistantShell({
               sharing={sharing}
               agent={agent}
               git={git}
+              schedule={schedule}
               tokens={tokens}
             />
           </div>
