@@ -178,9 +178,12 @@ describe("the commands, in process against the mock hub", () => {
     ...extra
   });
 
-  async function cli(args: string[], { env = cliEnv(), input = "" }: { env?: Env; input?: string } = {}): Promise<Invocation> {
+  async function cli(
+    args: string[],
+    { env = cliEnv(), input = "", bridgeStopWaitMs }: { env?: Env; input?: string; bridgeStopWaitMs?: number } = {}
+  ): Promise<Invocation> {
     const out = sink();
-    const code = await runCli(args, { ...out.options, env, readStdin: () => input, cwd: () => home.root });
+    const code = await runCli(args, { ...out.options, env, readStdin: () => input, cwd: () => home.root, bridgeStopWaitMs });
     return { ...out, code };
   }
 
@@ -1006,7 +1009,7 @@ describe("the commands, in process against the mock hub", () => {
       enabledSession(sid, stubborn.pid);
 
       // Act: "in time" is the wait it is given rather than the default three seconds.
-      const r = await cli(["disable"], { env: cliEnv({ CLAUDE_CODE_SESSION_ID: sid, AGENT_HUB_BRIDGE_STOP_WAIT_MS: "300" }) });
+      const r = await cli(["disable"], { env: cliEnv({ CLAUDE_CODE_SESSION_ID: sid }), bridgeStopWaitMs: 300 });
 
       // Assert
       expect(r.code).toBe(0);

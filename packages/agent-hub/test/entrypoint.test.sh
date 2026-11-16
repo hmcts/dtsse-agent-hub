@@ -783,7 +783,7 @@ case_prepare_workspace_fails() {
     wait_for 15 state_is failed && ok "should leave repos-state failed when the clone step fails" || no "repos-state never said failed"
     wait_for 10 hub_has 'running Claude is ready; some repositories failed to clone' &&
         ok "should report the failure in the detail when the clone step fails" || no "hub: $(grep '^running' "$F/hub.log" 2>/dev/null | tail -1)"
-    grep -q "the workspace's clone step reported failures" "$T/out" && ok "should log that the clone step failed when it exits non-zero" || no "did not log the failure"
+    wait_for 10 grep -q "the workspace's clone step reported failures" "$T/out" && ok "should log that the clone step failed when it exits non-zero" || no "did not log the failure"
     grep -q '^note=the workspace says the repositories are failed$' "$STATE/repos-state" &&
         ok "should leave the clone step's own wording for a failure alone when it reads the state" || no "repos-state: $(cat "$STATE/repos-state" 2>/dev/null | tr '\n' ' ')"
     stop && ok "should stop the entrypoint when it gets SIGTERM" || no "the entrypoint did not stop on SIGTERM"

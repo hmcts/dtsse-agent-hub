@@ -29,7 +29,7 @@ export const disable: Command = async (cli) => {
   const sid = requireSessionId(cli.env);
   const agent = loadAgent(sid);
   const hadBridge = Boolean(bridgePid(sid));
-  const stopped = await stopBridge(sid, { waitMs: Number(cli.env.AGENT_HUB_BRIDGE_STOP_WAIT_MS) || undefined });
+  const stopped = await stopBridge(sid, { waitMs: cli.bridgeStopWaitMs });
   if (!hadBridge && agent?.agent_id) {
     try {
       await cli.api().offline(agent.agent_id);

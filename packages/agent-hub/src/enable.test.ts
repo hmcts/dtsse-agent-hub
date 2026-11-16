@@ -581,8 +581,8 @@ describe("runAutoEnable", () => {
     try {
       // Act: both races are won deterministically while the worker waits for a registry entry that never comes.
       // The two sessions share nothing, so the workers wait out their registry timeouts side by side.
-      const enabling = runAutoEnable({ sid: "race-enabled", cwd: home.root, registryWaitMs: 2000 });
-      const optingOut = runAutoEnable({ sid: "race-opted", cwd: home.root, registryWaitMs: 2000 });
+      const enabling = runAutoEnable({ sid: "race-enabled", cwd: home.root, registryWaitMs: 100 });
+      const optingOut = runAutoEnable({ sid: "race-opted", cwd: home.root, registryWaitMs: 100 });
       await until(() => fs.existsSync(stateFile("race-enabled", "auto-enable.lock")), "the worker to take its lock");
       fs.writeFileSync(stateFile("race-enabled", "enabled"), "x\n");
       await until(() => fs.existsSync(stateFile("race-opted", "auto-enable.lock")), "the worker to take its lock");

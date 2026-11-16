@@ -76,7 +76,7 @@ export async function runBridge({
   inbound = inboundAccepted,
   tmux = createTmux({ env: env as NodeJS.ProcessEnv }),
   modelSettleMs,
-  reconnect: { rapidCloseMs = RAPID_CLOSE_MS, minBackoffMs } = {}
+  reconnect
 }: RunBridgeOptions): Promise<void> {
   // Connected without it, the bridge would take every message off the stream and fail to deliver it.
   if (!env.CLAUDE_CODE_MESSAGING_TOKEN) {
@@ -531,9 +531,9 @@ export async function runBridge({
       break;
     }
     replayHeld = false;
-    retry = reconnectDelay(retry, { clean, lastedMs: Date.now() - opened }, { rapidCloseMs, minBackoffMs });
+    retry = reconnectDelay(retry, { clean, lastedMs: Date.now() - opened }, reconnect);
     if (clean && retry.delay > 0) {
-      log(sid, `streams keep ending within ${rapidCloseMs}ms; backing off ${retry.delay}ms`);
+      log(sid, `streams keep ending within ${reconnect?.rapidCloseMs ?? RAPID_CLOSE_MS}ms; backing off ${retry.delay}ms`);
     }
     if (retry.delay > 0) {
       await sleep(retry.delay);

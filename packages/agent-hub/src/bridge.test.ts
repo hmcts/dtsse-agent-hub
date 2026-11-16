@@ -103,11 +103,9 @@ async function waitUntil(fn: () => boolean, what: string, timeoutMs = 8000): Pro
 
 const gaps = (calls: RecordedCall[]) => calls.slice(1).map((c, i) => (c.at ?? 0) - ((calls[i] as RecordedCall).at ?? 0));
 
-// The reconnect cases run on shorter thresholds than `reconnect.ts`'s, so that a stream outliving a rapid close
-// and the backoffs between refused ones take fractions of a second rather than seconds. `STREAM_MS` outlives a
-// rapid close by the same 200ms margin the real threshold was tested with; the backoff is long enough that the
-// slack either side of each doubling is still several hundred milliseconds.
-const FAST_RECONNECT = { rapidCloseMs: 200, minBackoffMs: 500 };
+// A shorter rapid-close threshold than `reconnect.ts`'s, so a stream that outlives it can end in a fraction of a
+// second. The refused-stream case keeps the real backoff: its bounds need the slack the full doubling gives.
+const FAST_RECONNECT = { rapidCloseMs: 200 };
 const STREAM_MS = FAST_RECONNECT.rapidCloseMs + 200;
 
 type StartBridgeOptions = Omit<RunBridgeOptions, "sid" | "api" | "deliver"> & {
@@ -619,7 +617,6 @@ describe("runBridge", () => {
   it("should retry with backoff when the stream is refused", async () => {
     // Arrange
     const bridge = await startBridge({}, { reconnect: FAST_RECONNECT });
-    const backoff = FAST_RECONNECT.minBackoffMs;
     bridge.hub.failNextStreams(2);
 
     try {
@@ -628,10 +625,10 @@ describe("runBridge", () => {
 
       // Assert
       const [first, second] = gaps(bridge.streamOpens()) as [number, number];
-      expect(first).toBeGreaterThanOrEqual(backoff);
-      expect(first).toBeLessThan(backoff * 1.8);
-      expect(second).toBeGreaterThanOrEqual(backoff * 2);
-      expect(second).toBeLessThan(backoff * 2.8);
+      expect(first).toBeGreaterThanOrEqual(1000);
+      expect(first).toBeLessThan(1800);
+      expect(second).toBeGreaterThanOrEqual(2000);
+      expect(second).toBeLessThan(2800);
     } finally {
       await bridge.stop();
     }

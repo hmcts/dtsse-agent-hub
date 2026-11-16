@@ -6,8 +6,6 @@
 // reverse does not hold, which is why the child environment a process is spawned with stays `NodeJS.ProcessEnv`.
 export const ENV_KEYS = [
   "AGENT_HUB_AUTO_ENABLE",
-  // How long `disable` waits for the bridge to exit before saying it stops on its next heartbeat; 3s by default.
-  "AGENT_HUB_BRIDGE_STOP_WAIT_MS",
   // The copies of the bundled plugins a conversation session was started with; see virtual/bundled-plugins.ts.
   "AGENT_HUB_BUNDLED_PLUGIN_DIRS",
   "AGENT_HUB_CACHE_SYNC_MS",
