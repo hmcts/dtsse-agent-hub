@@ -1,37 +1,34 @@
-.git/
-.github/
-.vscode/
-.idea/
-node_modules/
-.next/
-dist/
-coverage/
-coverage-integration/
-playwright-report/
-test-results/
-allure-results/
-allure-report/
+*
+
+!Dockerfile
+!package.json
+!yarn.lock
+!.yarnrc.yml
+!.yarn/
+!packages/agent-hub/package.json
+!tsconfig.json
+!tsconfig.cli.json
+!next.config.mjs
+!biome.json
+!prisma.config.ts
+!postcss.config.mjs
+!src/
+!public/
+!prisma/
+!charts/
+
 .yarn/cache/
 .yarn/install-state.gz
 .yarn/build-state.yml
 .yarn/unplugged/
-*.tsbuildinfo
-docs/
-test/e2e/
+src/store/generated/
+public/feedback/widget.js
+**/*.test.ts
+**/*.test.tsx
 
-# Docker patterns are path-anchored, so the rules above do not reach into a workspace. Only the published
-# client's package.json belongs in the build context; its sources never enter the image.
-packages/*/dist/
-packages/*/coverage/
-packages/*/node_modules/
-packages/*/*.tsbuildinfo
-
-# Credential material, mirroring .gitignore. These files are untracked, so they only ever exist in a
-# developer's working copy — but the build context is uploaded to the registry, so an ignore rule here
-# is the only thing keeping a GitHub App private key out of that upload.
-.env*
-*.pem
-*.pem.aes
-*.aes
-*.key
-*.p12
+**/.env*
+**/*.pem
+**/*.pem.aes
+**/*.aes
+**/*.key
+**/*.p12
