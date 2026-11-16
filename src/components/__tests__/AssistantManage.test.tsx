@@ -14,6 +14,7 @@ import { AssistantSettings } from "@/components/assistant/SettingsDialog";
 import { SETTLE_MS } from "@/components/live/useSettled";
 import type { CredentialKind } from "@/credentials/names";
 import type { CredentialStatus } from "@/credentials/store";
+import { autoStartTimes } from "@/virtual-agents/schedule";
 import type { AssistantAgent, GitIdentitySettings, ScheduleSettings } from "@/web/data";
 
 /** The sections of the Assistant's settings that manage the virtual agent it runs on, and the person's own values. */
@@ -100,7 +101,13 @@ const IDLE_OFFERS = [
 ];
 
 function scheduleSettings(overrides: Partial<ScheduleSettings> = {}, actions: Partial<Omit<AssistantScheduleSetting, "load">> = {}): AssistantScheduleSetting {
-  const settings: ScheduleSettings = { autoStart: "none", idleAfter: "2h", idleOffers: IDLE_OFFERS, ...overrides };
+  const settings: ScheduleSettings = {
+    autoStart: "none",
+    idleAfter: "2h",
+    idleOffers: IDLE_OFFERS,
+    autoStartTimes: autoStartTimes({ hour: 19, minute: 0 }),
+    ...overrides
+  };
   return { load: vi.fn(async () => settings), save: ok("Your schedule is saved"), ...actions };
 }
 
@@ -385,7 +392,21 @@ describe("the Assistant's schedule", () => {
     expect(panel.textContent).toContain("only auto started on weekdays");
   });
 
-  it("should send both choices when the dialog is saved, and read them again after", async () => {
+  it("should offer only the times the page says the evening stop leaves room for when it is shown", async () => {
+    await open({ schedule: scheduleSettings({ autoStartTimes: ["07:30", "08:00"] }) }, "Schedule");
+
+    expect(optionsOf("Auto start time")).toEqual(["None", "07:30", "08:00"]);
+  });
+
+  it("should say auto start pauses after two weeks and what never does when it is shown", async () => {
+    await open({ schedule: scheduleSettings() }, "Schedule");
+    const panel = screen.getByRole("region", { name: "Schedule" });
+
+    expect(panel.textContent).toContain("pauses after two weeks without you using your assistant, and resumes once you use it again");
+    expect(panel.textContent).toContain("Never still stops your assistant at the evening stop");
+  });
+
+  it("should send both choices when the dialog is saved", async () => {
     const settings = scheduleSettings();
     await open({ schedule: settings }, "Schedule");
 
@@ -398,7 +419,7 @@ describe("the Assistant's schedule", () => {
     const form = sent(settings.save as ReturnType<typeof ok>);
     expect([form.get("autoStart"), form.get("idleAfter")]).toEqual(["08:30", "never"]);
     expect(screen.getByRole("status").textContent).toBe("Your schedule is saved");
-    expect(settings.load).toHaveBeenCalledTimes(2);
+    expect(settings.load).toHaveBeenCalledTimes(1);
   });
 
   it("should show what is stored when the person has chosen both", async () => {

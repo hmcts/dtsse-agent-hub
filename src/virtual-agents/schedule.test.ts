@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  AUTO_START_TIMES,
+  AUTO_START_UNUSED_DAYS,
+  autoStartTimes,
   DEFAULT_IDLE,
   IDLE_CHOICES,
   idleMinutesFor,
@@ -12,25 +13,59 @@ import {
   wallClockOf
 } from "./schedule.ts";
 
-describe("AUTO_START_TIMES", () => {
-  it("should run every half hour from 07:30 to 18:30 when listed", () => {
-    expect(AUTO_START_TIMES).toHaveLength(23);
-    expect(AUTO_START_TIMES.slice(0, 3)).toEqual(["07:30", "08:00", "08:30"]);
-    expect(AUTO_START_TIMES.at(-1)).toBe("18:30");
+const SEVEN_PM = { hour: 19, minute: 0 };
+
+describe("autoStartTimes", () => {
+  it("should run every half hour from 07:30 to 18:30 when the evening stop is 19:00", () => {
+    const times = autoStartTimes(SEVEN_PM);
+
+    expect(times).toHaveLength(23);
+    expect(times.slice(0, 3)).toEqual(["07:30", "08:00", "08:30"]);
+    expect(times.at(-1)).toBe("18:30");
   });
 
   it("should be in order when listed", () => {
-    expect([...AUTO_START_TIMES]).toEqual([...AUTO_START_TIMES].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)));
+    const times = autoStartTimes(SEVEN_PM);
+
+    expect(times).toEqual([...times].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)));
+  });
+
+  it("should end with the last slot whose whole window is before an earlier evening stop", () => {
+    expect(autoStartTimes({ hour: 17, minute: 0 }).at(-1)).toBe("16:30");
+    expect(autoStartTimes({ hour: 17, minute: 15 }).at(-1)).toBe("16:30");
+  });
+
+  it("should include a slot whose window ends exactly at the evening stop", () => {
+    expect(autoStartTimes({ hour: 8, minute: 0 })).toEqual(["07:30"]);
+  });
+
+  it("should offer nothing when the evening stop leaves no room", () => {
+    expect(autoStartTimes({ hour: 7, minute: 30 })).toEqual([]);
+  });
+
+  it("should offer more when the evening stop is later", () => {
+    expect(autoStartTimes({ hour: 21, minute: 0 }).at(-1)).toBe("20:30");
+  });
+});
+
+describe("AUTO_START_UNUSED_DAYS", () => {
+  it("should be a fortnight, as long as a stopped agent's disk is kept", () => {
+    expect(AUTO_START_UNUSED_DAYS).toBe(14);
   });
 });
 
 describe("isAutoStartTime", () => {
   it.each(["07:30", "12:00", "18:30"])("should accept %s when it is a slot", (time) => {
-    expect(isAutoStartTime(time)).toBe(true);
+    expect(isAutoStartTime(time, SEVEN_PM)).toBe(true);
   });
 
   it.each(["07:00", "07:29", "19:00", "18:31", "8:00", "", NO_AUTO_START, null, undefined, 730])("should refuse %s when it is no slot", (time) => {
-    expect(isAutoStartTime(time)).toBe(false);
+    expect(isAutoStartTime(time, SEVEN_PM)).toBe(false);
+  });
+
+  it("should refuse a slot the evening stop leaves no room for when the stop is earlier", () => {
+    expect(isAutoStartTime("18:30", { hour: 18, minute: 0 })).toBe(false);
+    expect(isAutoStartTime("17:30", { hour: 18, minute: 0 })).toBe(true);
   });
 });
 

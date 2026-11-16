@@ -1,6 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { saveAssistantSchedule } from "@/assistant/schedule-store";
 import { prisma } from "@/store/prisma";
 import { requireViewer } from "@/viewer/current";
@@ -51,7 +50,6 @@ export async function saveSchedule(form: FormData): Promise<ActionResult<{ confi
     }
     const viewer = await requireViewer();
     await saveAssistantSchedule(prisma, viewer.oid, { autoStart: text(form.get("autoStart")), idleAfter: text(form.get("idleAfter")) });
-    revalidatePath("/assistant", "layout");
     return { ok: true, confirmation: "Your schedule is saved" };
   });
 }

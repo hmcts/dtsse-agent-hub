@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useId, useRef } from "react";
+import { useId } from "react";
 import type { FormAction } from "@/components/ActionForm";
 import { useSettingsData } from "@/components/assistant/useSettingsData";
-import { useSettingsDraft, useSettingsSaves } from "@/components/assistant/useSettingsDraft";
-import { AUTO_START_TIMES, NO_AUTO_START } from "@/virtual-agents/schedule";
+import { useSettingsDraft } from "@/components/assistant/useSettingsDraft";
+import { NO_AUTO_START } from "@/virtual-agents/schedule";
 import type { ScheduleSettings } from "@/web/data";
 
 /**
@@ -40,7 +40,7 @@ function Form({ settings }: Readonly<{ settings: ScheduleSettings }>) {
         className={SELECT}
       >
         <option value={NO_AUTO_START}>None</option>
-        {AUTO_START_TIMES.map((time) => (
+        {settings.autoStartTimes.map((time) => (
           <option key={time} value={time}>
             {time}
           </option>
@@ -74,21 +74,12 @@ function Form({ settings }: Readonly<{ settings: ScheduleSettings }>) {
 /**
  * The Schedule section of the settings.
  *
- * Starting an assistant takes a while, so this lets it be ready before the person is. The times stop at 18:30 and begin
- * at 07:30 because the environment is not up before 07:00 and the evening stop is at 19:00; the section says the
- * environment is off outside working hours, since that is what overrides both choices.
+ * Starting an assistant takes a while, so this lets it be ready before the person is. The times begin at 07:30 because
+ * the environment is not up before 07:00, and end with the last whose window is before the evening stop; the section
+ * says the environment is off outside working hours, since that is what overrides both choices.
  */
 export function Schedule({ schedule }: Readonly<{ schedule: AssistantScheduleSetting }>) {
-  const { data: settings, failed, reload } = useSettingsData("schedule", schedule.load);
-  const saves = useSettingsSaves();
-  const seen = useRef(saves);
-  // Read again after the dialog's Save, so the section shows what is stored rather than what it was opened with.
-  useEffect(() => {
-    if (seen.current !== saves) {
-      seen.current = saves;
-      reload();
-    }
-  }, [saves, reload]);
+  const { data: settings, failed } = useSettingsData("schedule", schedule.load);
   return (
     <section aria-labelledby="assistant-settings-schedule" aria-busy={settings === undefined && !failed} className="flex flex-col gap-2.5">
       <h3 id="assistant-settings-schedule" className="text-sm font-semibold">
@@ -96,7 +87,7 @@ export function Schedule({ schedule }: Readonly<{ schedule: AssistantScheduleSet
       </h3>
       <p className="text-pretty text-[13px] text-asst-muted">
         Your assistant takes a little while to start. Choose a time and it is started for you on weekdays, so it is ready when you are. Times are UK time. It is
-        started once a day, and not again if it is stopped later.
+        started once a day, and not again if it is stopped later. It pauses after two weeks without you using your assistant, and resumes once you use it again.
       </p>
       {failed ? (
         <p className="text-[13px] text-asst-error">Your schedule could not be read. Close settings and open them again.</p>
@@ -108,6 +99,9 @@ export function Schedule({ schedule }: Readonly<{ schedule: AssistantScheduleSet
       <p className="text-pretty text-[13px] text-asst-muted">
         The whole environment is shut down from 8pm to 7am and at weekends. Your assistant is stopped then whatever you choose here, and it is only auto started
         on weekdays.
+      </p>
+      <p className="text-pretty text-[13px] text-asst-muted">
+        Never still stops your assistant at the evening stop. An assistant opened in the evening or at a weekend uses the usual idle time instead.
       </p>
     </section>
   );

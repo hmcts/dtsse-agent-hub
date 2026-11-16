@@ -57,8 +57,8 @@ import { listTopics, mostActiveTopics } from "../topics/store.ts";
 import type { Identity } from "../users/identity.ts";
 import type { ModelRoute, Viewer } from "../viewer/identity.ts";
 import { availablePlugins, PluginConfigurationError, type PluginOffer, type PluginOption } from "../virtual-agents/plugins.ts";
-import { idleOffers, idleSelected, NO_AUTO_START } from "../virtual-agents/schedule.ts";
-import { idleMinutes } from "../virtual-agents/settings.ts";
+import { autoStartTimes, idleOffers, idleSelected, NO_AUTO_START } from "../virtual-agents/schedule.ts";
+import { eveningStop, idleMinutes } from "../virtual-agents/settings.ts";
 import { liveModelRoutes, type VirtualAgentRow } from "../virtual-agents/store.ts";
 import { claudeTokenUsable, neededCredentials, type PortLink, portLinks } from "../virtual-agents/views.ts";
 import { type AgentAddress, NO_AGENT } from "./home.ts";
@@ -173,13 +173,20 @@ export interface ScheduleSettings {
   autoStart: string;
   idleAfter: string;
   idleOffers: { value: string; label: string }[];
+  /** The times the deployment's evening stop leaves room to start at. */
+  autoStartTimes: string[];
 }
 
 /** The viewer's own schedule for their virtual agents, with the deployment's idle period standing in for one they have not set. */
 export async function scheduleSettings(viewer: Identity): Promise<ScheduleSettings> {
   const stored = await readAssistantSchedule(prisma, viewer.oid);
   const fallback = idleMinutes();
-  return { autoStart: stored.autoStartTime ?? NO_AUTO_START, idleAfter: idleSelected(stored.idleAfter, fallback), idleOffers: idleOffers(fallback) };
+  return {
+    autoStart: stored.autoStartTime ?? NO_AUTO_START,
+    idleAfter: idleSelected(stored.idleAfter, fallback),
+    idleOffers: idleOffers(fallback),
+    autoStartTimes: autoStartTimes(eveningStop())
+  };
 }
 
 export interface MessagePageView {

@@ -1,6 +1,8 @@
 import type { PrismaClient } from "../store/prisma.ts";
+import { ukIsoDate } from "../web/format.ts";
 import {
   autoStartSlot,
+  boundedByEveningStop,
   CLAIM_TIMEOUT_MS,
   dueEveningStop,
   INACTIVITY_RULES,
@@ -8,7 +10,6 @@ import {
   inactivityRule,
   isIdle,
   lastActivity,
-  londonDay,
   PROVISIONING_TIMEOUT_MS
 } from "./cleanup.ts";
 import { idleMinutesFor } from "./schedule.ts";
@@ -67,12 +68,13 @@ interface Candidate {
  * - logins past their expiry are expired, and pasted codes past theirs are removed;
  * - claims older than `CLAIM_TIMEOUT_MS` are released, so another orchestrator may take them;
  * - an Assistant stopped at the time its owner chose for an auto start is started, once a UK day and only on a weekday,
- *   before the evening stop;
+ *   before the evening stop, unless its owner has not used it for `AUTO_START_UNUSED_DAYS`;
  * - on a weekday evening every agent still meant to be running, unless started after the stop time, is stopped;
  * - otherwise an agent whose linked agent is not busy and that has shown no activity, no transcript entry or pod
- *   report, for the deadline `inactivityRule` puts its status on is stopped: the idle period for one working, which
- *   its owner may set or exempt it from, the deployment's for one failed, and the shorter one for a pod blocked on its
- *   owner.
+ *   report, for the deadline `inactivityRule` puts its status on is stopped: the idle period for one working, the
+ *   deployment's for one failed, and the shorter one for a pod blocked on its owner. The idle period is the owner's
+ *   choice, or never, only for an agent the evening stop will bound (`boundedByEveningStop`); one started at the
+ *   weekend or after the stop gets the deployment's whatever the owner chose.
  */
 export async function sweepVirtualAgents(prisma: PrismaClient, options: VirtualAgentSweepOptions = {}): Promise<VirtualAgentSweepResult | undefined> {
   const now = options.now ?? new Date();
@@ -123,7 +125,7 @@ export async function sweepVirtualAgents(prisma: PrismaClient, options: VirtualA
     }
 
     const slot = autoStartSlot(now, stop);
-    const autoStarted = slot === undefined ? [] : await autoStartAssistants(tx, slot, londonDay(now), now);
+    const autoStarted = slot === undefined ? [] : await autoStartAssistants(tx, slot, ukIsoDate(now), now);
 
     // A virtual agent is busy while any of its sessions is, its own or a conversation's, and active as of the latest
     // transcript entry from any of them.
@@ -147,8 +149,10 @@ export async function sweepVirtualAgents(prisma: PrismaClient, options: VirtualA
         // A start is activity: an agent started again after a night stopped has only yesterday's timestamps otherwise.
         const active =
           lastActivity(candidate.started_at, candidate.status_changed_at, candidate.last_active_at, candidate.last_entry_at) ?? candidate.started_at;
-        // Only the idle rule is the owner's to set; `never` leaves the agent to the other rules and the evening stop.
-        const minutes = rule === "idle" ? idleMinutesFor(candidate.idle_after, deadlines.idle) : deadlines[rule];
+        // Only the idle rule is the owner's to set, and only where the evening stop backs it up: `never` leaves such an
+        // agent to the evening stop, while one that stop skips has nothing else to bound it.
+        const ownerChoice = rule === "idle" && boundedByEveningStop(candidate.started_at, stop);
+        const minutes = ownerChoice ? idleMinutesFor(candidate.idle_after, deadlines.idle) : deadlines[rule];
         return minutes !== undefined && isIdle(candidate.agent_status, active, now, minutes) ? [{ id: candidate.id, rule }] : [];
       });
     const ids = (rule: InactivityRule): string[] => inactive.filter((entry) => entry.rule === rule).map((entry) => entry.id);

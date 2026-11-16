@@ -1,5 +1,5 @@
 import { awaitsOwner } from "./lifecycle.ts";
-import { AUTO_START_TIMES, AUTO_START_WINDOW_MINUTES, wallClockOf } from "./schedule.ts";
+import { AUTO_START_WINDOW_MINUTES, autoStartTimes, wallClockOf } from "./schedule.ts";
 import type { WallClock } from "./settings.ts";
 import type { StopReason } from "./stop.ts";
 
@@ -66,6 +66,11 @@ export function londonInstant(year: number, month: number, day: number, { hour, 
   return new Date(wall - londonOffsetMs(new Date(first)));
 }
 
+function isLondonWeekday(year: number, month: number, day: number): boolean {
+  const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+  return weekday !== 0 && weekday !== 6;
+}
+
 /**
  * The most recent weekday evening stop at or before `now`, in UK time. An agent started before it is stopped by the
  * sweep; one started after it, by someone working late, runs until the next one.
@@ -74,34 +79,28 @@ export function latestEveningStop(now: Date, stop: WallClock): Date {
   const today = londonParts(now);
   for (let back = 0; ; back += 1) {
     const date = new Date(Date.UTC(today.year, today.month - 1, today.day - back));
-    const weekday = date.getUTCDay();
-    if (weekday === 0 || weekday === 6) {
+    const [year, month, day] = [date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate()];
+    if (!isLondonWeekday(year, month, day)) {
       continue;
     }
-    const cutoff = londonInstant(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate(), stop);
+    const cutoff = londonInstant(year, month, day, stop);
     if (cutoff.getTime() <= now.getTime()) {
       return cutoff;
     }
   }
 }
 
-/** The UK calendar date at `at` as `YYYY-MM-DD`, which is what "once a day" is counted in. */
-export function londonDay(at: Date): string {
-  const { year, month, day } = londonParts(at);
-  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-}
-
 /**
  * The auto start time whose window `now` is in, or `undefined`: a start is due on a UK weekday from its time for
- * `AUTO_START_WINDOW_MINUTES`, and never at or after the evening stop, which would stop what it started.
+ * `AUTO_START_WINDOW_MINUTES`. Only the times `autoStartTimes` offers for `stop` are considered, so a window never
+ * reaches the evening stop, which would stop what it started.
  */
 export function autoStartSlot(now: Date, stop: WallClock): string | undefined {
   const today = londonParts(now);
-  const weekday = new Date(Date.UTC(today.year, today.month - 1, today.day)).getUTCDay();
-  if (weekday === 0 || weekday === 6 || now.getTime() >= londonInstant(today.year, today.month, today.day, stop).getTime()) {
+  if (!isLondonWeekday(today.year, today.month, today.day)) {
     return undefined;
   }
-  return AUTO_START_TIMES.find((time) => {
+  return autoStartTimes(stop).find((time) => {
     const from = londonInstant(today.year, today.month, today.day, wallClockOf(time)).getTime();
     return now.getTime() >= from && now.getTime() < from + AUTO_START_WINDOW_MINUTES * 60_000;
   });
@@ -110,11 +109,22 @@ export function autoStartSlot(now: Date, stop: WallClock): string | undefined {
 /**
  * Whether an agent started at `startedAt` is due its evening stop at `now`. An agent started at the weekend is not
  * due one until the Monday, which is right because the evening stop is a working-day convenience rather than a
- * backstop: it would otherwise cut off someone working on a Saturday with no warning. What bounds an agent nobody is
- * using is `inactivityRule`, which covers every status that holds a pod, weekend or not.
+ * backstop: it would otherwise cut off someone working on a Saturday with no warning. What bounds an agent started
+ * after a stop, or at the weekend, is `inactivityRule` at the deployment's idle period, whatever its owner chose
+ * (`boundedByEveningStop`).
  */
 export function dueEveningStop(startedAt: Date, now: Date, stop: WallClock): boolean {
   return startedAt.getTime() < latestEveningStop(now, stop).getTime();
+}
+
+/**
+ * Whether the evening stop will bound an agent started at `startedAt`: it was started on a UK weekday before that
+ * day's stop, so the next stop is after it. Only such an agent may be left to the evening stop by its owner's choice of
+ * never idling out; every other one is bounded by the deployment's idle period alone.
+ */
+export function boundedByEveningStop(startedAt: Date, stop: WallClock): boolean {
+  const { year, month, day } = londonParts(startedAt);
+  return isLondonWeekday(year, month, day) && startedAt.getTime() < londonInstant(year, month, day, stop).getTime();
 }
 
 /** The latest of the times that show the agent doing something, or `undefined` when there are none. */

@@ -4,32 +4,45 @@
  * the store that refuses everything else and the sweep that acts on them.
  */
 
+import type { WallClock } from "./settings.ts";
+
 /** Auto start does not begin before this: AAT comes up at 07:00, and the hub is not running to start anything before. */
 const FIRST_AUTO_START_MINUTE = 7 * 60 + 30;
-
-/** The last slot is the one before the evening stop's default of 19:00; a start at or after it would be stopped at once. */
-const LAST_AUTO_START_MINUTE = 18 * 60 + 30;
 
 /** How long after its time an auto start may still happen, so a sweep that was down or late for a minute does not skip a day. */
 export const AUTO_START_WINDOW_MINUTES = 30;
 
 const AUTO_START_STEP_MINUTES = 30;
 
+/**
+ * Auto start pauses for a person who has not used their Assistant for this many days, and resumes once they do. It
+ * lines up with the 14-day disk TTL: starting a pod every weekday for someone who has stopped using it costs a pod and
+ * gains nothing.
+ */
+export const AUTO_START_UNUSED_DAYS = 14;
+
 function clock(minutes: number): string {
   return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
 }
 
-/** Every time an agent can be started at, as UK wall-clock `HH:MM`, in order. */
-export const AUTO_START_TIMES: readonly string[] = Array.from(
-  { length: (LAST_AUTO_START_MINUTE - FIRST_AUTO_START_MINUTE) / AUTO_START_STEP_MINUTES + 1 },
-  (_, slot) => clock(FIRST_AUTO_START_MINUTE + slot * AUTO_START_STEP_MINUTES)
-);
+/**
+ * Every time an agent can be started at, as UK wall-clock `HH:MM`, in order: half hours from 07:30 whose whole window
+ * is before the evening `stop`, since a start inside it would be stopped at once. That is 07:30 to 18:30 for 19:00.
+ */
+export function autoStartTimes(stop: WallClock): string[] {
+  const stopMinute = stop.hour * 60 + stop.minute;
+  const times: string[] = [];
+  for (let minute = FIRST_AUTO_START_MINUTE; minute + AUTO_START_WINDOW_MINUTES <= stopMinute; minute += AUTO_START_STEP_MINUTES) {
+    times.push(clock(minute));
+  }
+  return times;
+}
 
 /** What the form sends for no auto start. Stored as no value at all. */
 export const NO_AUTO_START = "none";
 
-export function isAutoStartTime(value: unknown): value is string {
-  return typeof value === "string" && AUTO_START_TIMES.includes(value);
+export function isAutoStartTime(value: unknown, stop: WallClock): value is string {
+  return typeof value === "string" && autoStartTimes(stop).includes(value);
 }
 
 /** `HH:MM` as a wall clock. Only for a value `isAutoStartTime` accepted. */
