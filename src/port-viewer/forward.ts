@@ -82,24 +82,13 @@ export function forwardedCookie(header: string | null, options: { feedback?: boo
 }
 
 /**
- * The only browser headers a feedback link's prototype is sent, besides `cookie` and `referer`, which are rewritten.
- * It is a site outside the cluster, so it gets what a browser fetching it directly would send, less anything that
- * names the hub, the viewer or the network in front of them.
+ * Besides `HOP_BY_HOP` and `REPLACED_ON_REQUEST`, the headers a feedback link's prototype is not sent as the browser
+ * sent them. `origin`, `referer` and `content-length` are set apart by `feedbackRequestHeaders`; `via` and the
+ * prefixes are what the network in front of the viewer adds on the way in: Front Door (`x-azure-`, `x-fd-`), the
+ * Application Gateway (`x-original-`, `x-appgw-`, `x-arr-`), Traefik (`x-forwarded-`) and Next (`x-middleware-`).
  */
-const FEEDBACK_REQUEST_HEADERS = [
-  "accept",
-  "accept-language",
-  "cache-control",
-  "content-type",
-  "if-none-match",
-  "if-modified-since",
-  "if-match",
-  "if-unmodified-since",
-  "range",
-  "if-range",
-  "pragma",
-  "user-agent"
-];
+const FEEDBACK_DROPPED_ON_REQUEST = new Set(["origin", "referer", "content-length", "via"]);
+const FEEDBACK_DROPPED_PREFIXES = ["x-forwarded-", "x-azure-", "x-fd-", "x-original-", "x-appgw-", "x-arr-", "x-middleware-"];
 
 /**
  * A `Referer` from the upstream's own pages on the viewer, as it would see it served directly: its origin and the path
@@ -135,13 +124,28 @@ export function signInCookie(header: string | null): string | undefined {
   return kept.length === 0 ? undefined : kept.join("; ");
 }
 
+/**
+ * The headers a feedback link's prototype, a site outside the cluster, is sent: every one the browser sent, so that
+ * an app's own, such as the `experimental` CCD's internal endpoints answer 404 without, still reach it, less those
+ * that describe the browser's connection to the viewer or the network in front of it. `cookie`, `referer` and
+ * `origin` name the viewer, and are rewritten. None of the hub's own credentials arrives to be passed on: its cookies
+ * are host-only on the hub's host, the viewer's are left out of `cookie`, and its bearer tokens are only ever sent to
+ * the hub's API, so an `Authorization` on the viewer's host is one the prototype asked the browser for.
+ */
 function feedbackRequestHeaders(incoming: Headers, target: ForwardTarget, withBody: boolean): Headers {
+  const named = connectionTokens(incoming);
   const headers = new Headers();
-  for (const name of FEEDBACK_REQUEST_HEADERS) {
-    const value = incoming.get(name);
-    if (value !== null) {
-      headers.set(name, value);
+  for (const [name, value] of incoming) {
+    if (
+      HOP_BY_HOP.has(name) ||
+      named.has(name) ||
+      REPLACED_ON_REQUEST.has(name) ||
+      FEEDBACK_DROPPED_ON_REQUEST.has(name) ||
+      FEEDBACK_DROPPED_PREFIXES.some((prefix) => name.startsWith(prefix))
+    ) {
+      continue;
     }
+    headers.append(name, value);
   }
   const length = incoming.get("content-length");
   if (withBody && length !== null) {
@@ -154,6 +158,12 @@ function feedbackRequestHeaders(incoming: Headers, target: ForwardTarget, withBo
   const referer = feedbackReferer(incoming.get("referer"), target);
   if (referer !== undefined) {
     headers.set("referer", referer);
+  }
+  // Rewritten rather than dropped, since an app may refuse a POST without its own `Origin`, but only when the
+  // `Referer` shows the request came from the upstream's own pages: every link shares the viewer's origin, so the
+  // `Origin` alone could as well be another link's page, which the upstream should see as another site.
+  if (referer !== undefined && incoming.get("origin") === target.viewerOrigin) {
+    headers.set("origin", target.upstreamOrigin);
   }
   // No `X-Forwarded-Host`: `fetch` sends the prototype's own host as `Host`, and the viewer's is none of its business.
   headers.set("x-forwarded-proto", "https");
@@ -190,8 +200,8 @@ export interface ForwardTarget {
   /** The nonce `inject`'s script carries, which a policy with `'strict-dynamic'` is given so it still runs. */
   scriptNonce?: string;
   /**
-   * A feedback link's prototype, a site outside the cluster: it is sent an allowlist of the browser's headers rather
-   * than all but a few, and the prototype no `__Host-` cookie either way.
+   * A feedback link's prototype, a site outside the cluster: it is sent the browser's headers less those that name the
+   * hub, the viewer or the network in front of them, and the prototype no `__Host-` cookie either way.
    */
   feedback?: boolean;
   /**

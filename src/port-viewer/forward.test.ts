@@ -503,11 +503,21 @@ describe("forwardedRequestHeaders for a feedback page", () => {
     "x-azure-clientip": "203.0.113.9",
     "x-original-url": "/f/token/check",
     "x-agent-hub-viewer-url": "/f/token/check",
+    "x-azure-fdid": "fd",
+    "x-fd-healthprobe": "1",
+    "x-arr-ssl": "1",
+    "x-appgw-trace-id": "t",
+    "x-original-host": "agent-hub-viewer.example",
+    "x-forwarded-scheme": "https",
+    "x-middleware-subrequest": "x",
+    via: "1.1 gateway",
     "sec-fetch-site": "same-origin",
+    experimental: "true",
+    "x-app-custom": "kept",
     cookie: "ahv-f-token=sealed; sid=1"
   };
 
-  it("should send only the allowlisted headers, with the Referer moved onto the prototype", () => {
+  it("should send the browser's own headers, with the Referer and Origin moved onto the prototype", () => {
     expect(Object.fromEntries(forwardedRequestHeaders(new Headers(browser), FEEDBACK, "POST"))).toEqual({
       accept: "text/html",
       "accept-language": "en-GB",
@@ -516,11 +526,70 @@ describe("forwardedRequestHeaders for a feedback page", () => {
       range: "bytes=0-99",
       "content-type": "application/x-www-form-urlencoded",
       "content-length": "12",
+      authorization: "Bearer hub",
+      "sec-fetch-site": "same-origin",
+      experimental: "true",
+      "x-app-custom": "kept",
       cookie: "sid=1",
+      origin: "https://prototype.example",
       referer: "https://prototype.example/check?x=1",
       "x-forwarded-proto": "https",
       "x-forwarded-prefix": "/f/token"
     });
+  });
+
+  it("should send an app's own headers, such as the experimental CCD's internal endpoints need", () => {
+    const headers = forwardedRequestHeaders(new Headers({ experimental: "true", "x-app-custom": "kept" }), FEEDBACK, "GET");
+
+    expect(headers.get("experimental")).toBe("true");
+    expect(headers.get("x-app-custom")).toBe("kept");
+  });
+
+  it("should send no hop-by-hop header, nor one Connection names", () => {
+    const incoming = new Headers({
+      connection: "keep-alive, x-hop",
+      "keep-alive": "timeout=5",
+      "x-hop": "1",
+      te: "trailers",
+      upgrade: "websocket",
+      "proxy-authorization": "Basic cHJveHk=",
+      "x-app-custom": "kept"
+    });
+
+    expect(Object.fromEntries(forwardedRequestHeaders(incoming, FEEDBACK))).toEqual({
+      "x-app-custom": "kept",
+      "x-forwarded-proto": "https",
+      "x-forwarded-prefix": "/f/token"
+    });
+  });
+
+  it("should send none of the forwarded or viewer headers, but its own X-Forwarded-Proto and X-Forwarded-Prefix", () => {
+    const headers = forwardedRequestHeaders(new Headers(browser), FEEDBACK, "POST");
+
+    for (const name of ["host", "forwarded", "x-forwarded-for", "x-forwarded-host", "x-forwarded-scheme", "x-real-ip", "x-agent-hub-viewer-url", "via"]) {
+      expect(headers.get(name), name).toBeNull();
+    }
+    for (const name of ["x-azure-clientip", "x-azure-fdid", "x-fd-healthprobe", "x-arr-ssl", "x-appgw-trace-id", "x-original-url", "x-original-host"]) {
+      expect(headers.get(name), name).toBeNull();
+    }
+    expect(headers.get("x-middleware-subrequest")).toBeNull();
+    expect(headers.get("x-forwarded-proto")).toBe("https");
+    expect(headers.get("x-forwarded-prefix")).toBe("/f/token");
+  });
+
+  it("should send the prototype's own origin as the Origin when the Referer is from its own pages", () => {
+    const incoming = new Headers({ origin: VIEWER_ORIGIN, referer: `${VIEWER_ORIGIN}/f/token/check` });
+
+    expect(forwardedRequestHeaders(incoming, FEEDBACK, "POST").get("origin")).toBe("https://prototype.example");
+  });
+
+  it.each([
+    ["the viewer's, with no Referer", { origin: VIEWER_ORIGIN }],
+    ["the viewer's, with a Referer from another link", { origin: VIEWER_ORIGIN, referer: `${VIEWER_ORIGIN}/f/other/page` }],
+    ["the hub's", { origin: HUB, referer: `${VIEWER_ORIGIN}/f/token/check` }],
+    ["null", { origin: "null" }]
+  ])("should drop an Origin when it is %s", (_name, incoming) => {
+    expect(forwardedRequestHeaders(new Headers(incoming), FEEDBACK, "POST").get("origin")).toBeNull();
   });
 
   it("should send no Content-Length when the method carries no body", () => {
@@ -676,5 +745,13 @@ describe("the Referer a feedback link's upstreams are sent from a sign-in page",
     };
 
     expect(forwardedRequestHeaders(new Headers({ referer: SIGN_IN_PAGE }), target).get("referer")).toBe("https://idam.example/login?client_id=c&state=s");
+  });
+
+  it("should send the sign-in service its own origin as the Origin and the prototype none when a sign-in page posts", () => {
+    const signIn: ForwardTarget = { ...FEEDBACK, upstreamOrigin: "https://idam.example", prefix: SIGN_IN_ROUTE.prefix, signIn: true };
+    const incoming = new Headers({ origin: VIEWER_ORIGIN, referer: SIGN_IN_PAGE });
+
+    expect(forwardedRequestHeaders(incoming, signIn, "POST").get("origin")).toBe("https://idam.example");
+    expect(forwardedRequestHeaders(incoming, FEEDBACK, "POST").get("origin")).toBeNull();
   });
 });
