@@ -662,6 +662,9 @@ describe("feedback links on the viewer", () => {
       expect(detectedSignInOrigin(AUTHORIZE, LINK.origin, SETTINGS)).toBe(SIM);
       expect(detectedSignInOrigin(`${SIM}/oauth2/authorize?response_type=code&redirect_uri=http://prototype.example:8080/cb`, LINK.origin, SETTINGS)).toBe(SIM);
       expect(detectedSignInOrigin(`${SIM}/authorize?client_id=c&redirect_uri=${CALLBACK}`, LINK.origin, SETTINGS)).toBe(SIM);
+      expect(detectedSignInOrigin(`${SIM}/login/?client_id=c&redirect_uri=${CALLBACK}`, LINK.origin, SETTINGS)).toBe(SIM);
+      expect(detectedSignInOrigin(`${SIM}/Login;jsessionid=A?response_type=code&redirect_uri=${CALLBACK}`, LINK.origin, SETTINGS)).toBe(SIM);
+      expect(detectedSignInOrigin(`${SIM}/sign-in?client_id=c&redirect_uri=${CALLBACK}`, LINK.origin, SETTINGS)).toBe(SIM);
     });
 
     it("should detect a prototype's IDAM simulator on its own public host", () => {
@@ -670,6 +673,14 @@ describe("feedback links on the viewer", () => {
       const location = `${simulator}/o/authorize?client_id=pcs&response_type=code&redirect_uri=${encodeURIComponent(`${prototype}/oauth2/callback`)}&state=s`;
 
       expect(detectedSignInOrigin(location, prototype, SETTINGS)).toBe(simulator);
+    });
+
+    it("should detect XUI's redirect to its IDAM simulator's login page", () => {
+      const xui = "https://pcs-private-landlord-xui.uksouth.cloudapp.azure.com";
+      const location =
+        "https://pcs-private-landlord-idam.uksouth.cloudapp.azure.com/login?response_type=code&redirect_uri=https%3A%2F%2Fpcs-private-landlord-xui.uksouth.cloudapp.azure.com%2Foauth2%2Fcallback&scope=profile%20openid%20roles%20manage-user%20create-user%20search-user&state=s&client_id=xuiwebapp";
+
+      expect(detectedSignInOrigin(location, xui, SETTINGS)).toBe("https://pcs-private-landlord-idam.uksouth.cloudapp.azure.com");
     });
 
     it.each<[string, string]>([
@@ -681,8 +692,6 @@ describe("feedback links on the viewer", () => {
       ["it is on the prototype's own host", `https://prototype.example/o/authorize?client_id=c&redirect_uri=${CALLBACK}`],
       ["it is on the hub's host", `https://agent-hub.example/o/authorize?client_id=c&redirect_uri=${CALLBACK}`],
       ["it is on the viewer's host", `https://agent-hub-viewer.example/o/authorize?client_id=c&redirect_uri=${CALLBACK}`],
-      ["its path does not end in authorize", `${SIM}/login?client_id=c&response_type=code&redirect_uri=${CALLBACK}`],
-      ["its path only contains authorize", `${SIM}/authorize/next?client_id=c&redirect_uri=${CALLBACK}`],
       ["it is a path", `/o/authorize?client_id=c&redirect_uri=${CALLBACK}`]
     ])("should detect no sign-in service when %s", (_case, location) => {
       expect(detectedSignInOrigin(location, LINK.origin, SETTINGS, {})).toBeUndefined();
@@ -702,6 +711,16 @@ describe("feedback links on the viewer", () => {
       expect(response.headers.get("location")).toBe(`${SIM_PREFIX}/o/authorize?client_id=c&response_type=code&redirect_uri=${CALLBACK}&state=s`);
       const [cookie] = response.headers.getSetCookie();
       expect(cookie).toMatch(new RegExp(`^ahv-grant=[^;]+; Path=${SIM_PREFIX}/; Max-Age=3600; HttpOnly; Secure; SameSite=Lax$`));
+      expect(await openSignInGrant(cookieValue(cookie!, "ahv-grant"), SETTINGS.secret)).toEqual({ token: TOKEN, origin: SIM });
+    });
+
+    it("should move a redirect to an IDAM login page under the sign-in prefix and grant it there", async () => {
+      const login = `${SIM}/login?response_type=code&redirect_uri=${CALLBACK}&client_id=xuiwebapp`;
+
+      const response = await serveViewer(await reviewing(`${FPREFIX}/auth/login`), `${FPREFIX}/auth/login`, withFeedback({}, { fetch: redirectingTo(login) }));
+
+      expect(response.headers.get("location")).toBe(`${SIM_PREFIX}/login?response_type=code&redirect_uri=${CALLBACK}&client_id=xuiwebapp`);
+      const [cookie] = response.headers.getSetCookie();
       expect(await openSignInGrant(cookieValue(cookie!, "ahv-grant"), SETTINGS.secret)).toEqual({ token: TOKEN, origin: SIM });
     });
 

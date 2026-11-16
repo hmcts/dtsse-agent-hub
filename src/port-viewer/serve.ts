@@ -348,9 +348,10 @@ function signInRoutesOf(token: string, feedback: FeedbackDependencies): SignInRo
 
 /**
  * The sign-in service a prototype's redirect sends the browser to, when it is not one of `FEEDBACK_SIGN_IN_ORIGINS`:
- * an authorization request to a path ending `/authorize` on a host that is not the prototype's, the hub's or the
- * viewer's, with a `client_id` or `response_type` and a `redirect_uri` back to the prototype, matched by hostname as
- * the redirect back is. Its origin must pass the same checks as a link's.
+ * an OAuth request, with a `client_id` or `response_type` and a `redirect_uri` back to the prototype (matched by
+ * hostname as the redirect back is), on a host that is not the prototype's, the hub's or the viewer's. Its path is not
+ * checked: the prototype already chooses where its redirects go, and sign-in pages differ (`/o/authorize`, IDAM web's
+ * `/login`). Its origin must pass the same checks as a link's.
  */
 export function detectedSignInOrigin(
   location: string,
@@ -366,7 +367,6 @@ export function detectedSignInOrigin(
   const redirectUri = url.searchParams.get("redirect_uri");
   if (
     [prototypeHost, settings.host, new URL(settings.hubOrigin).hostname].includes(url.hostname) ||
-    url.pathname.split("/").at(-1) !== "authorize" ||
     redirectUri === null ||
     !URL.canParse(redirectUri) ||
     new URL(redirectUri).hostname !== prototypeHost ||
