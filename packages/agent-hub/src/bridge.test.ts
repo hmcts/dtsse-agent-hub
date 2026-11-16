@@ -103,6 +103,13 @@ async function waitUntil(fn: () => boolean, what: string, timeoutMs = 8000): Pro
 
 const gaps = (calls: RecordedCall[]) => calls.slice(1).map((c, i) => (c.at ?? 0) - ((calls[i] as RecordedCall).at ?? 0));
 
+// The reconnect cases run on shorter thresholds than `reconnect.ts`'s, so that a stream outliving a rapid close
+// and the backoffs between refused ones take fractions of a second rather than seconds. `STREAM_MS` outlives a
+// rapid close by the same 200ms margin the real threshold was tested with; the backoff is long enough that the
+// slack either side of each doubling is still several hundred milliseconds.
+const FAST_RECONNECT = { rapidCloseMs: 200, minBackoffMs: 500 };
+const STREAM_MS = FAST_RECONNECT.rapidCloseMs + 200;
+
 type StartBridgeOptions = Omit<RunBridgeOptions, "sid" | "api" | "deliver"> & {
   env?: Env;
   /** Stands in for some of the bridge's API calls; the setup's own registration goes to the mock hub as it is. */
@@ -448,7 +455,7 @@ describe("runBridge", () => {
   for (const reconnectEvent of [true, false]) {
     it(`should reopen the stream at once when the server ends it ${reconnectEvent ? "with a reconnect event" : "without one"}`, async () => {
       // Arrange
-      const bridge = await startBridge({ maxLifetimeMs: 2200, reconnectEvent });
+      const bridge = await startBridge({ maxLifetimeMs: STREAM_MS, reconnectEvent }, { reconnect: FAST_RECONNECT });
 
       try {
         // Act
@@ -456,7 +463,7 @@ describe("runBridge", () => {
 
         // Assert
         for (const gap of gaps(bridge.streamOpens())) {
-          expect(gap).toBeLessThan(2200 + 500);
+          expect(gap).toBeLessThan(STREAM_MS + 500);
         }
       } finally {
         await bridge.stop();
@@ -466,7 +473,7 @@ describe("runBridge", () => {
 
   it("should write a message to the inbox once and ack it again when it is replayed after it was acked", async () => {
     // Arrange
-    const bridge = await startBridge({ maxLifetimeMs: 2200, replayAcked: true });
+    const bridge = await startBridge({ maxLifetimeMs: STREAM_MS, replayAcked: true }, { reconnect: FAST_RECONNECT });
 
     try {
       await waitUntil(() => bridge.streamOpens().length >= 1, "the first stream");
@@ -484,7 +491,7 @@ describe("runBridge", () => {
 
   it("should replay, ack and write a message to the inbox once when its first ack failed", async () => {
     // Arrange
-    const bridge = await startBridge({ maxLifetimeMs: 2200 });
+    const bridge = await startBridge({ maxLifetimeMs: STREAM_MS }, { reconnect: FAST_RECONNECT });
 
     try {
       await waitUntil(() => bridge.streamOpens().length >= 1, "the first stream");
@@ -611,7 +618,8 @@ describe("runBridge", () => {
 
   it("should retry with backoff when the stream is refused", async () => {
     // Arrange
-    const bridge = await startBridge({});
+    const bridge = await startBridge({}, { reconnect: FAST_RECONNECT });
+    const backoff = FAST_RECONNECT.minBackoffMs;
     bridge.hub.failNextStreams(2);
 
     try {
@@ -620,10 +628,10 @@ describe("runBridge", () => {
 
       // Assert
       const [first, second] = gaps(bridge.streamOpens()) as [number, number];
-      expect(first).toBeGreaterThanOrEqual(1000);
-      expect(first).toBeLessThan(1800);
-      expect(second).toBeGreaterThanOrEqual(2000);
-      expect(second).toBeLessThan(2800);
+      expect(first).toBeGreaterThanOrEqual(backoff);
+      expect(first).toBeLessThan(backoff * 1.8);
+      expect(second).toBeGreaterThanOrEqual(backoff * 2);
+      expect(second).toBeLessThan(backoff * 2.8);
     } finally {
       await bridge.stop();
     }

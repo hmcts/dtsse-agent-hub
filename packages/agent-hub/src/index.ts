@@ -238,7 +238,7 @@ export {
   readTables,
   watchPorts
 } from "./ports.ts";
-export type { ReconnectDecision, RetryState, StreamEnd } from "./reconnect.ts";
+export type { ReconnectDecision, ReconnectTiming, RetryState, StreamEnd } from "./reconnect.ts";
 export { nextBackoff, RAPID_CLOSE_MS, RAPID_CLOSES_BEFORE_BACKOFF, reconnectDelay } from "./reconnect.ts";
 export type { RetryOptions } from "./retry.ts";
 export { retryableByStatus, withRetry } from "./retry.ts";

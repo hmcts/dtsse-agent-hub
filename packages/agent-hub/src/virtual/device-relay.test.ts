@@ -59,10 +59,10 @@ describe("relayDeviceLogin", () => {
     // outlives every signal sent to its parent, holding the pipes open so that `close` can never arrive. That
     // is the only way to reach the giving-up step, and it prints a device code after it, which nothing should
     // still be listening for. Nothing above this has a timeout of its own.
-    pod.shim("stubborn", `trap '' TERM\n( sleep 13; printf '%s' "$2" >&2 ) &\nprintf '%s' "$1" >&2\nsleep 60`);
+    pod.shim("stubborn", `trap '' TERM\n( sleep 4; printf '%s' "$2" >&2 ) &\nprintf '%s' "$1" >&2\nsleep 60`);
     // A child's stdio handles and the mock hub's connections are both `Socket`s, and only the second kind has a
     // `remoteAddress`. Counting all of them would measure the hub reaping its own idle keep-alives against this
-    // test's fifteen seconds, which is a slack of two in whichever direction the reaping happens to fall — the
+    // test's six seconds, which is a slack of two in whichever direction the reaping happens to fall — the
     // same two this is here to catch.
     const pipes = () =>
       (process as unknown as { _getActiveHandles: () => { constructor: { name: string }; remoteAddress?: string }[] })
@@ -73,8 +73,10 @@ describe("relayDeviceLogin", () => {
     await new Promise((resolve) => setTimeout(resolve, 250));
     const before = pipes();
     const expiresIn = -29;
+    const killGraceMs = 500;
 
-    // Act: `expiresIn + 30` is the kill timer, so one second in, then SIGKILL and the giving-up step follow it.
+    // Act: `expiresIn + 30` is the kill timer, so one second in, then SIGKILL and the giving-up step follow it,
+    // half a second apart. The orphan prints two seconds after that.
     const started = Date.now();
     const error = await relayDeviceLogin({
       api: api(),
@@ -85,12 +87,13 @@ describe("relayDeviceLogin", () => {
       env: pod.env(),
       parse: parseAzDeviceCode,
       expiresIn,
-      label: "azure"
+      label: "azure",
+      killGraceMs
     }).catch((e: unknown) => e);
 
     // Assert: answered inside the escalation rather than the minute the child asked for.
     expect((error as Error).message).toMatch(/stubborn printed no sign-in code/);
-    expect(Date.now() - started).toBeLessThan(SIGKILL_AFTER_MS * 3);
+    expect(Date.now() - started).toBeLessThan(SIGKILL_AFTER_MS);
 
     // Then past the orphan's own print, which is when both of the things it must not do would show. A `destroy`
     // releases its handle on a later tick, so the count is read here rather than the moment the call answered.

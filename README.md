@@ -335,7 +335,7 @@ database: localhost:5432/agent_hub
 ## Tests
 
 ```bash
-yarn test                # unit
+yarn test                # unit, with coverage and its thresholds
 yarn test:integration    # needs `yarn deps:up`; a database per worker, migrated on use
 yarn lint
 yarn typecheck

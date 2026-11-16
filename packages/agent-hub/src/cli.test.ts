@@ -1005,8 +1005,8 @@ describe("the commands, in process against the mock hub", () => {
       const sid = "cli-sess-disable-stubborn";
       enabledSession(sid, stubborn.pid);
 
-      // Act
-      const r = await cli(["disable"], { env: cliEnv({ CLAUDE_CODE_SESSION_ID: sid }) });
+      // Act: "in time" is the wait it is given rather than the default three seconds.
+      const r = await cli(["disable"], { env: cliEnv({ CLAUDE_CODE_SESSION_ID: sid, AGENT_HUB_BRIDGE_STOP_WAIT_MS: "300" }) });
 
       // Assert
       expect(r.code).toBe(0);

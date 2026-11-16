@@ -47,6 +47,8 @@ export type GithubExportDeps = {
   print: (message: string) => void;
   /** Where created issues are remembered; `hubHome()/github-exports` unless a test says otherwise. */
   dir?: string;
+  /** How a retry of a call to the hub waits; a real sleep unless a test passes its own. */
+  retryWait?: (ms: number) => Promise<void>;
 };
 
 /**
@@ -141,7 +143,7 @@ async function label(deps: GithubExportDeps, repo: string, number: number, label
 }
 
 async function create(deps: GithubExportDeps, dir: string, request: GithubExportRequest): Promise<GithubExportOutcome> {
-  const doc = await withRetry(() => deps.api.getArtefact(deps.agentId), { attempts: 3 });
+  const doc = await withRetry(() => deps.api.getArtefact(deps.agentId), { attempts: 3, wait: deps.retryWait });
   if (!doc.markdown.trim()) {
     return { error: "The document is empty, so there was nothing to export." };
   }
@@ -207,6 +209,6 @@ export async function runGithubExport(deps: GithubExportDeps, request: GithubExp
   } else {
     report = { export_id: request.exportId, error: outcome.error };
   }
-  await withRetry(() => deps.api.putGithubExport(deps.agentId, report), { attempts: 3 });
+  await withRetry(() => deps.api.putGithubExport(deps.agentId, report), { attempts: 3, wait: deps.retryWait });
   return outcome;
 }

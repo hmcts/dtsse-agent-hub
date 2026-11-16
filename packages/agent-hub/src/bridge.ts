@@ -14,7 +14,7 @@ import { type AssistantFrame, type AttachmentOutcome, chooseEnvelope, routeDeliv
 import { CLIENT_FEATURES, sameFeatures } from "./features.ts";
 import { asRecord, parseAssistantFrame, parseAssistantProduct, parseDirectEventMessage } from "./frames.ts";
 import { describeInbound, type InboundOptions, type InboundResult, inboundAccepted, inboundFix } from "./inbound.ts";
-import { RAPID_CLOSE_MS, type ReconnectDecision, reconnectDelay } from "./reconnect.ts";
+import { RAPID_CLOSE_MS, type ReconnectDecision, type ReconnectTiming, reconnectDelay } from "./reconnect.ts";
 import { acquirePidFile, conversationId, isEnabled, log, pidAlive, readJson, readText, releasePidFile, sessionInfo, statePath, writeJson } from "./session.ts";
 import { collectSkills, type SkillListing, skillsHash } from "./skills.ts";
 import { deliverToSocket, NO_MESSAGING_TOKEN } from "./socket.ts";
@@ -58,6 +58,8 @@ export type RunBridgeOptions = {
   /** What types `/model` into a conversation's pane; a test passes its own. */
   tmux?: Pick<Tmux, "sendKeys">;
   modelSettleMs?: number;
+  /** When a stream counts as ending rapidly, and the first backoff; `reconnect.ts`'s own unless a test says otherwise. */
+  reconnect?: ReconnectTiming;
 };
 
 export async function runBridge({
@@ -73,7 +75,8 @@ export async function runBridge({
   transcriptSync,
   inbound = inboundAccepted,
   tmux = createTmux({ env: env as NodeJS.ProcessEnv }),
-  modelSettleMs
+  modelSettleMs,
+  reconnect: { rapidCloseMs = RAPID_CLOSE_MS, minBackoffMs } = {}
 }: RunBridgeOptions): Promise<void> {
   // Connected without it, the bridge would take every message off the stream and fail to deliver it.
   if (!env.CLAUDE_CODE_MESSAGING_TOKEN) {
@@ -528,9 +531,9 @@ export async function runBridge({
       break;
     }
     replayHeld = false;
-    retry = reconnectDelay(retry, { clean, lastedMs: Date.now() - opened });
+    retry = reconnectDelay(retry, { clean, lastedMs: Date.now() - opened }, { rapidCloseMs, minBackoffMs });
     if (clean && retry.delay > 0) {
-      log(sid, `streams keep ending within ${RAPID_CLOSE_MS}ms; backing off ${retry.delay}ms`);
+      log(sid, `streams keep ending within ${rapidCloseMs}ms; backing off ${retry.delay}ms`);
     }
     if (retry.delay > 0) {
       await sleep(retry.delay);
