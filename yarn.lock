@@ -4127,7 +4127,7 @@ __metadata:
     openid-client: "npm:6.8.9"
     pg: "npm:8.23.1"
     playwright-core: "npm:1.64.1"
-    postcss: "npm:8.5.32"
+    postcss: "npm:8.5.33"
     prisma: "npm:7.10.1"
     react: "npm:19.3.1"
     react-dom: "npm:19.3.1"
@@ -5503,18 +5503,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"postcss@npm:8.5.32, postcss@npm:^8.5.30, postcss@npm:^8.5.32":
-  version: 8.5.32
-  resolution: "postcss@npm:8.5.32"
-  dependencies:
-    nanoid: "npm:^3.3.20"
-    picocolors: "npm:^1.1.1"
-    source-map-js: "npm:^1.2.2"
-  checksum: 10c0/5fa6cad84e277c2ced965dc7e8e7c0b8d7e5b76a6835591b57a43fde46e671d0c8428d365e9141c080abaae5441d495ed77ffd7472c5bd41d6c2154bd03c01d7
-  languageName: node
-  linkType: hard
-
-"postcss@npm:^8.5.25":
+"postcss@npm:8.5.33, postcss@npm:^8.5.25, postcss@npm:^8.5.30, postcss@npm:^8.5.32":
   version: 8.5.33
   resolution: "postcss@npm:8.5.33"
   dependencies:
