@@ -18,6 +18,7 @@ import { type AssistantGitIdentity, GitIdentity } from "@/components/assistant/G
 import { SETTINGS_TWO_PANE_MIN_WIDTH } from "@/components/assistant/layout";
 import type { AssistantModelSetting } from "@/components/assistant/ModelSettings";
 import { PortSettings } from "@/components/assistant/PortSettings";
+import { type AssistantScheduleSetting, Schedule } from "@/components/assistant/ScheduleSettings";
 import { type AssistantSharing, Sharing } from "@/components/assistant/SharingSettings";
 import type { AssistantSize } from "@/components/assistant/SizeSettings";
 import { type AssistantTemplates, Templates } from "@/components/assistant/TemplateSettings";
@@ -55,6 +56,7 @@ interface SettingsView extends ConnectionsView {
   sharing: AssistantSharing | undefined;
   agent: AssistantAgentSettings | undefined;
   git: AssistantGitIdentity | undefined;
+  schedule: AssistantScheduleSetting | undefined;
 }
 
 /**
@@ -257,6 +259,14 @@ const SECTIONS: readonly SettingsSection[] = [
     shown: (view) => view.agent !== undefined || view.model !== undefined || view.size !== undefined,
     panel: (view) => <AgentSettings agent={view.agent} model={view.model} size={view.size} />,
     drafts: ["model", "size"]
+  },
+  {
+    id: "schedule",
+    label: "Schedule",
+    group: "Agent",
+    shown: (view) => view.schedule !== undefined,
+    panel: (view) => (view.schedule === undefined ? null : <Schedule schedule={view.schedule} />),
+    drafts: ["schedule"]
   },
   {
     id: "claude-md",
@@ -559,7 +569,7 @@ function formOf(fields: Record<string, string | readonly string[]>): FormData {
  */
 function saveTasks(view: SettingsView, dirty: Values): SaveTask[] {
   const tasks: SaveTask[] = [];
-  const { theme, model, size, plugins, claudeMd, git, exports } = dirty;
+  const { theme, model, size, plugins, claudeMd, git, exports, schedule } = dirty;
   if (theme !== undefined) {
     tasks.push({
       keys: ["theme"],
@@ -590,6 +600,10 @@ function saveTasks(view: SettingsView, dirty: Values): SaveTask[] {
           })
         )
     });
+  }
+  if (schedule !== undefined && view.schedule !== undefined) {
+    const save = view.schedule.save;
+    tasks.push({ keys: ["schedule"], done: "Your schedule is saved", run: () => save(formOf(schedule)) });
   }
   if (claudeMd !== undefined && view.claudeMd !== undefined) {
     const save = view.claudeMd.save;
@@ -1020,6 +1034,7 @@ export function AssistantSettings({
   sharing,
   agent,
   git,
+  schedule,
   tokens
 }: {
   theme?: Theme;
@@ -1040,6 +1055,7 @@ export function AssistantSettings({
   sharing?: AssistantSharing;
   agent?: AssistantAgentSettings;
   git?: AssistantGitIdentity;
+  schedule?: AssistantScheduleSetting;
   tokens?: AssistantTokens;
 }) {
   // `get` is the first value, so an address carrying the parameter twice still names one section.
@@ -1195,6 +1211,7 @@ export function AssistantSettings({
                 sharing,
                 agent,
                 git,
+                schedule,
                 tokens
               }}
               // Remounted for a section the address names while the dialog is already open, so it opens on that one.

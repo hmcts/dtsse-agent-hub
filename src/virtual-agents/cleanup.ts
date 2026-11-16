@@ -1,4 +1,5 @@
 import { awaitsOwner } from "./lifecycle.ts";
+import { AUTO_START_TIMES, AUTO_START_WINDOW_MINUTES, wallClockOf } from "./schedule.ts";
 import type { WallClock } from "./settings.ts";
 import type { StopReason } from "./stop.ts";
 
@@ -82,6 +83,28 @@ export function latestEveningStop(now: Date, stop: WallClock): Date {
       return cutoff;
     }
   }
+}
+
+/** The UK calendar date at `at` as `YYYY-MM-DD`, which is what "once a day" is counted in. */
+export function londonDay(at: Date): string {
+  const { year, month, day } = londonParts(at);
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/**
+ * The auto start time whose window `now` is in, or `undefined`: a start is due on a UK weekday from its time for
+ * `AUTO_START_WINDOW_MINUTES`, and never at or after the evening stop, which would stop what it started.
+ */
+export function autoStartSlot(now: Date, stop: WallClock): string | undefined {
+  const today = londonParts(now);
+  const weekday = new Date(Date.UTC(today.year, today.month - 1, today.day)).getUTCDay();
+  if (weekday === 0 || weekday === 6 || now.getTime() >= londonInstant(today.year, today.month, today.day, stop).getTime()) {
+    return undefined;
+  }
+  return AUTO_START_TIMES.find((time) => {
+    const from = londonInstant(today.year, today.month, today.day, wallClockOf(time)).getTime();
+    return now.getTime() >= from && now.getTime() < from + AUTO_START_WINDOW_MINUTES * 60_000;
+  });
 }
 
 /**

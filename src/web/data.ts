@@ -15,6 +15,7 @@ import type { SidebarGroup } from "../assistant/grouping.ts";
 import { type AssistantMemory, assistantMemory } from "../assistant/memory.ts";
 import { type AssistantModelChoice, assistantModelChoice } from "../assistant/model-store.ts";
 import { type ChatGate, chatCredentials, chatGate } from "../assistant/onboarding.ts";
+import { readAssistantSchedule } from "../assistant/schedule-store.ts";
 import {
   accessToConversation,
   conversationRef,
@@ -56,6 +57,8 @@ import { listTopics, mostActiveTopics } from "../topics/store.ts";
 import type { Identity } from "../users/identity.ts";
 import type { ModelRoute, Viewer } from "../viewer/identity.ts";
 import { availablePlugins, PluginConfigurationError, type PluginOffer, type PluginOption } from "../virtual-agents/plugins.ts";
+import { idleOffers, idleSelected, NO_AUTO_START } from "../virtual-agents/schedule.ts";
+import { idleMinutes } from "../virtual-agents/settings.ts";
 import { liveModelRoutes, type VirtualAgentRow } from "../virtual-agents/store.ts";
 import { claudeTokenUsable, neededCredentials, type PortLink, portLinks } from "../virtual-agents/views.ts";
 import { type AgentAddress, NO_AGENT } from "./home.ts";
@@ -163,6 +166,20 @@ export async function gitIdentitySettings(viewer: Identity): Promise<GitIdentity
   }
   const stored = await readCredential(prisma, backend.store, viewer.oid, "git_identity");
   return { available: true, stored: stored !== undefined, identity: readGitIdentity(stored) };
+}
+
+/** What the Schedule section shows: the selected value of each control, and the idle periods on offer. */
+export interface ScheduleSettings {
+  autoStart: string;
+  idleAfter: string;
+  idleOffers: { value: string; label: string }[];
+}
+
+/** The viewer's own schedule for their virtual agents, with the deployment's idle period standing in for one they have not set. */
+export async function scheduleSettings(viewer: Identity): Promise<ScheduleSettings> {
+  const stored = await readAssistantSchedule(prisma, viewer.oid);
+  const fallback = idleMinutes();
+  return { autoStart: stored.autoStartTime ?? NO_AUTO_START, idleAfter: idleSelected(stored.idleAfter, fallback), idleOffers: idleOffers(fallback) };
 }
 
 export interface MessagePageView {

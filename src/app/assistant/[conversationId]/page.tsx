@@ -16,7 +16,7 @@ import {
   warmConversation
 } from "@/app/_actions/assistant";
 import { deleteAllAssistantFiles, deleteAssistantFile } from "@/app/_actions/assistant-files";
-import { readAssistantAgent, readGitIdentity } from "@/app/_actions/assistant-settings";
+import { readAssistantAgent, readGitIdentity, readSchedule, saveSchedule } from "@/app/_actions/assistant-settings";
 import { clearGitIdentity, removeCredential, resetClaudeMd, saveClaudeMd, saveCredential, saveGitIdentity } from "@/app/_actions/credentials";
 import { restoreDeckVersion, saveDeck } from "@/app/_actions/decks";
 import { saveExportDefaults } from "@/app/_actions/export-defaults";
@@ -134,6 +134,7 @@ export default async function ConversationPage({
       sharing={SHARING_SETTINGS}
       agent={{ load: readAssistantAgent, restart: restartVirtualAgent }}
       git={{ load: readGitIdentity, save: saveGitIdentity, clear: clearGitIdentity }}
+      schedule={{ load: readSchedule, save: saveSchedule }}
       tokens={{ ...savedCredentialsData(home.credentials, home.assistant.modelRoute), save: saveCredential, remove: removeCredential }}
     >
       {/* `local` so a chat on the person's own computer is not held behind credentials only a pod needs. */}

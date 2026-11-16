@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
+import { readAssistantSchedule, saveAssistantSchedule } from "../../src/assistant/schedule-store.ts";
 import { dueEveningStop } from "../../src/virtual-agents/cleanup.ts";
 import { completeLogin, startLogin, storePastedCode } from "../../src/virtual-agents/logins.ts";
-import { reportStatus, type VirtualAgentRow } from "../../src/virtual-agents/store.ts";
+import { reportStatus, setDesired, type VirtualAgentRow } from "../../src/virtual-agents/store.ts";
 import { startVirtualAgentSweep, sweepVirtualAgents } from "../../src/virtual-agents/sweep.ts";
 import { connect, insertAgent, type Person, prisma } from "./database.ts";
 import { ALICE, BOB, CAROL, create, row, SECRET, started, status, virtualAgentSuite } from "./virtual-agent-suite.ts";
@@ -299,5 +300,189 @@ describe("sweepVirtualAgents", () => {
     } finally {
       await sweeper.stop();
     }
+  });
+});
+
+describe("the sweep's schedule for an Assistant", () => {
+  const STOP = { hour: 19, minute: 0 };
+  /** A Monday, in Greenwich Mean Time. */
+  const MONDAY_0800 = new Date("2026-10-26T08:00:00.000Z");
+  const OPTIONS = { idleMinutes: 120, awaitingOwnerMinutes: 30, eveningStop: STOP };
+
+  async function stoppedAssistant(owner: Person, name = "assistant"): Promise<string> {
+    const agent = await create(owner, name);
+    await setDesired(prisma, owner.oid, agent.id, "stopped");
+    return agent.id;
+  }
+
+  function schedule(owner: Person, autoStart: string, idleAfter = "default"): Promise<unknown> {
+    return saveAssistantSchedule(prisma, owner.oid, { autoStart, idleAfter });
+  }
+
+  it("should start a stopped Assistant at its owner's auto start time, as an owner's start does, and leave everyone else's", async () => {
+    const alice = await stoppedAssistant(ALICE);
+    const bob = await stoppedAssistant(BOB);
+    await schedule(ALICE, "08:00");
+    await schedule(BOB, "09:00");
+    const before = await row(alice);
+
+    const result = await sweepVirtualAgents(prisma, { ...OPTIONS, now: MONDAY_0800 });
+
+    expect(result).toMatchObject({ autoStarted: [alice], evening: [], idle: [] });
+    expect(await row(alice)).toMatchObject({ desired: "running", status: "requested", stopReason: null, generation: before.generation + 1 });
+    expect((await row(alice)).startedAt).toEqual(MONDAY_0800);
+    expect(await row(bob)).toMatchObject({ desired: "stopped" });
+  });
+
+  it("should start it at the UK time of the slot when the date is in British Summer Time", async () => {
+    const id = await stoppedAssistant(ALICE);
+    await schedule(ALICE, "08:00");
+
+    expect(await sweepVirtualAgents(prisma, { ...OPTIONS, now: new Date("2026-07-06T06:59:00.000Z") })).toMatchObject({ autoStarted: [] });
+    expect(await sweepVirtualAgents(prisma, { ...OPTIONS, now: new Date("2026-07-06T07:00:00.000Z") })).toMatchObject({ autoStarted: [id] });
+  });
+
+  it("should not start it again the same UK day when it is stopped after its start", async () => {
+    const id = await stoppedAssistant(ALICE);
+    await schedule(ALICE, "08:00");
+    await sweepVirtualAgents(prisma, { ...OPTIONS, now: MONDAY_0800 });
+    await setDesired(prisma, ALICE.oid, id, "stopped");
+
+    const later = await sweepVirtualAgents(prisma, { ...OPTIONS, now: new Date("2026-10-26T08:10:00.000Z") });
+
+    expect(later).toMatchObject({ autoStarted: [] });
+    expect((await row(id)).desired).toBe("stopped");
+  });
+
+  it("should start it again the next weekday when the day before already had its start", async () => {
+    const id = await stoppedAssistant(ALICE);
+    await schedule(ALICE, "08:00");
+    await sweepVirtualAgents(prisma, { ...OPTIONS, now: MONDAY_0800 });
+    await setDesired(prisma, ALICE.oid, id, "stopped");
+
+    expect(await sweepVirtualAgents(prisma, { ...OPTIONS, now: new Date("2026-10-27T08:00:00.000Z") })).toMatchObject({ autoStarted: [id] });
+  });
+
+  it("should count its day when it was already running, so a stop a minute later is not undone", async () => {
+    const agent = await create(ALICE, "assistant");
+    await schedule(ALICE, "08:00");
+    expect(await sweepVirtualAgents(prisma, { ...OPTIONS, now: MONDAY_0800 })).toMatchObject({ autoStarted: [] });
+    await setDesired(prisma, ALICE.oid, agent.id, "stopped");
+
+    expect(await sweepVirtualAgents(prisma, { ...OPTIONS, now: new Date("2026-10-26T08:01:00.000Z") })).toMatchObject({ autoStarted: [] });
+    expect((await row(agent.id)).desired).toBe("stopped");
+  });
+
+  it.each([
+    ["at the weekend", "2026-10-24T08:00:00.000Z"],
+    ["before its window", "2026-10-26T07:59:00.000Z"],
+    ["after its window", "2026-10-26T08:30:00.000Z"]
+  ])("should leave it stopped when the sweep runs %s", async (_when, at) => {
+    const id = await stoppedAssistant(ALICE);
+    await schedule(ALICE, "08:00");
+
+    expect(await sweepVirtualAgents(prisma, { ...OPTIONS, now: new Date(at) })).toMatchObject({ autoStarted: [] });
+    expect((await row(id)).desired).toBe("stopped");
+  });
+
+  it("should start only the first virtual agent, and never one being deleted", async () => {
+    const first = await stoppedAssistant(ALICE, "assistant");
+    const second = await stoppedAssistant(ALICE, "second");
+    await schedule(ALICE, "08:00");
+    await prisma.virtualAgent.update({ where: { id: first }, data: { desired: "deleted" } });
+
+    expect(await sweepVirtualAgents(prisma, { ...OPTIONS, now: MONDAY_0800 })).toMatchObject({ autoStarted: [second] });
+    expect((await row(first)).desired).toBe("deleted");
+  });
+
+  it("should not stop what it started, as idle or for the evening, in the same pass", async () => {
+    const id = await stoppedAssistant(ALICE);
+    await prisma.virtualAgent.update({ where: { id }, data: { lastActiveAt: new Date("2026-10-23T10:00:00.000Z") } });
+    await schedule(ALICE, "08:00");
+
+    expect(await sweepVirtualAgents(prisma, { ...OPTIONS, now: MONDAY_0800 })).toMatchObject({ autoStarted: [id], idle: [], evening: [] });
+    expect((await row(id)).desired).toBe("running");
+  });
+
+  describe("idle shutdown", () => {
+    const NOW = new Date("2026-10-26T12:00:00.000Z");
+
+    async function runningIdleFor(owner: Person, name: string, minutes: number, agentStatus = "running"): Promise<string> {
+      const agent = await create(owner, name);
+      const at = new Date(NOW.getTime() - minutes * 60_000);
+      await prisma.virtualAgent.update({
+        where: { id: agent.id },
+        data: { status: agentStatus as "running", statusChangedAt: at, lastActiveAt: at, startedAt: at }
+      });
+      return agent.id;
+    }
+
+    it("should stop an agent at its owner's idle period rather than the deployment's when they chose one", async () => {
+      const short = await runningIdleFor(ALICE, "short", 70);
+      const long = await runningIdleFor(BOB, "long", 150);
+      await schedule(ALICE, "none", "1h");
+      await schedule(BOB, "none", "4h");
+
+      const result = await sweepVirtualAgents(prisma, { ...OPTIONS, now: NOW });
+
+      expect(result).toMatchObject({ idle: [short] });
+      expect((await row(long)).desired).toBe("running");
+    });
+
+    it("should use the deployment's idle period when the owner chose none", async () => {
+      const idle = await runningIdleFor(ALICE, "idle", 130);
+      const fresh = await runningIdleFor(BOB, "fresh", 110);
+
+      expect(await sweepVirtualAgents(prisma, { ...OPTIONS, now: NOW })).toMatchObject({ idle: [idle] });
+      expect((await row(fresh)).desired).toBe("running");
+    });
+
+    it("should leave an agent to the other rules when its owner chose never", async () => {
+      const running = await runningIdleFor(ALICE, "running", 600);
+      const waiting = await runningIdleFor(ALICE, "waiting", 45, "awaiting_login");
+      const failed = await runningIdleFor(ALICE, "failed", 130, "failed");
+      await schedule(ALICE, "none", "never");
+
+      const result = await sweepVirtualAgents(prisma, { ...OPTIONS, now: NOW });
+
+      expect(result).toMatchObject({ idle: [], awaitingOwner: [waiting], afterFailure: [failed] });
+      expect((await row(running)).desired).toBe("running");
+    });
+
+    it("should still stop an agent that never idles out at the evening stop", async () => {
+      const id = await runningIdleFor(ALICE, "never", 600);
+      await schedule(ALICE, "none", "never");
+
+      expect(await sweepVirtualAgents(prisma, { ...OPTIONS, now: new Date("2026-10-26T19:00:00.000Z") })).toMatchObject({ evening: [id] });
+    });
+  });
+});
+
+describe("saveAssistantSchedule", () => {
+  it("should store both choices and read them back when they are offered", async () => {
+    await create(ALICE, "assistant");
+
+    await saveAssistantSchedule(prisma, ALICE.oid, { autoStart: "08:30", idleAfter: "3h" });
+
+    expect(await readAssistantSchedule(prisma, ALICE.oid)).toEqual({ autoStartTime: "08:30", idleAfter: "3h" });
+    expect(await readAssistantSchedule(prisma, BOB.oid)).toEqual({ autoStartTime: null, idleAfter: null });
+  });
+
+  it("should clear the choices when the person saves none and the default", async () => {
+    await create(ALICE, "assistant");
+    await saveAssistantSchedule(prisma, ALICE.oid, { autoStart: "08:30", idleAfter: "never" });
+
+    await saveAssistantSchedule(prisma, ALICE.oid, { autoStart: "none", idleAfter: "default" });
+
+    expect(await readAssistantSchedule(prisma, ALICE.oid)).toEqual({ autoStartTime: null, idleAfter: null });
+  });
+
+  it("should refuse a time that is no slot and keep what was stored", async () => {
+    await create(ALICE, "assistant");
+    await saveAssistantSchedule(prisma, ALICE.oid, { autoStart: "08:30", idleAfter: "3h" });
+
+    await expect(saveAssistantSchedule(prisma, ALICE.oid, { autoStart: "19:00", idleAfter: "1h" })).rejects.toMatchObject({ status: 400 });
+
+    expect(await readAssistantSchedule(prisma, ALICE.oid)).toEqual({ autoStartTime: "08:30", idleAfter: "3h" });
   });
 });

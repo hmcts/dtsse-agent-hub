@@ -16,6 +16,7 @@ export interface SettingsValues {
   plugins: string[];
   claudeMd: string;
   git: { name: string; email: string };
+  schedule: { autoStart: string; idleAfter: string };
   exports: ExportDefaults;
 }
 

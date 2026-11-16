@@ -17,7 +17,7 @@ the `-staging` release.
 | `VIRTUAL_AGENTS_ENABLED` | off | `true` turns the feature on |
 | `ORCHESTRATOR_OIDS` | none | Comma-separated object ids of the orchestrator's service principals. With none, every orchestrator request answers 503 |
 | `ORCHESTRATOR_ROLE` | none | An app role the orchestrator's token must also carry, as `VirtualAgents.Orchestrate`. Unset, the `oid` alone is checked |
-| `VIRTUAL_AGENT_IDLE_MINUTES` | `120` | A running, cloning or failed agent with no activity for this long is stopped |
+| `VIRTUAL_AGENT_IDLE_MINUTES` | `120` | A running, cloning or failed agent with no activity for this long is stopped. A running or cloning one uses its owner's choice of 1 to 4 hours, or never, instead when they have set one under Settings, Schedule |
 | `VIRTUAL_AGENT_AWAITING_OWNER_MINUTES` | `30` | An agent waiting for its owner to finish a sign-in or store a credential for this long is stopped |
 | `VIRTUAL_AGENT_EVENING_STOP` | `19:00` | UK time, `HH:MM`, at which every virtual agent started before it is stopped, on weekdays |
 | `VIRTUAL_AGENT_DISK_TTL_DAYS` | `14` | Days a stopped agent's disk is kept before the orchestrator deletes it |

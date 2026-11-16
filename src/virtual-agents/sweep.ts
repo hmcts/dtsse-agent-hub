@@ -1,5 +1,6 @@
 import type { PrismaClient } from "../store/prisma.ts";
 import {
+  autoStartSlot,
   CLAIM_TIMEOUT_MS,
   dueEveningStop,
   INACTIVITY_RULES,
@@ -7,9 +8,12 @@ import {
   inactivityRule,
   isIdle,
   lastActivity,
+  londonDay,
   PROVISIONING_TIMEOUT_MS
 } from "./cleanup.ts";
+import { idleMinutesFor } from "./schedule.ts";
 import { awaitingOwnerMinutes, eveningStop, idleMinutes, type WallClock } from "./settings.ts";
+import { autoStartAssistants } from "./start.ts";
 import { announce, stopVirtualAgents } from "./stop.ts";
 
 const VIRTUAL_AGENT_SWEEP_INTERVAL_MS = 60_000;
@@ -39,6 +43,8 @@ export interface VirtualAgentSweepResult {
   afterFailure: string[];
   /** Agents stopped at the end of the working day. */
   evening: string[];
+  /** Assistants started because their owner asked for an auto start at this time. */
+  autoStarted: string[];
 }
 
 interface Candidate {
@@ -49,6 +55,7 @@ interface Candidate {
   last_active_at: Date | null;
   agent_status: string | null;
   last_entry_at: Date | null;
+  idle_after: string | null;
 }
 
 /**
@@ -59,10 +66,13 @@ interface Candidate {
  * - a pod still `provisioning` with nothing from it for `PROVISIONING_TIMEOUT_MS` is failed;
  * - logins past their expiry are expired, and pasted codes past theirs are removed;
  * - claims older than `CLAIM_TIMEOUT_MS` are released, so another orchestrator may take them;
+ * - an Assistant stopped at the time its owner chose for an auto start is started, once a UK day and only on a weekday,
+ *   before the evening stop;
  * - on a weekday evening every agent still meant to be running, unless started after the stop time, is stopped;
  * - otherwise an agent whose linked agent is not busy and that has shown no activity, no transcript entry or pod
- *   report, for the deadline `inactivityRule` puts its status on is stopped: the idle period for one working or
- *   failed, the shorter one for a pod blocked on its owner.
+ *   report, for the deadline `inactivityRule` puts its status on is stopped: the idle period for one working, which
+ *   its owner may set or exempt it from, the deployment's for one failed, and the shorter one for a pod blocked on its
+ *   owner.
  */
 export async function sweepVirtualAgents(prisma: PrismaClient, options: VirtualAgentSweepOptions = {}): Promise<VirtualAgentSweepResult | undefined> {
   const now = options.now ?? new Date();
@@ -112,13 +122,18 @@ export async function sweepVirtualAgents(prisma: PrismaClient, options: VirtualA
       await announce(tx, row.id, row.owner_oid);
     }
 
+    const slot = autoStartSlot(now, stop);
+    const autoStarted = slot === undefined ? [] : await autoStartAssistants(tx, slot, londonDay(now), now);
+
     // A virtual agent is busy while any of its sessions is, its own or a conversation's, and active as of the latest
     // transcript entry from any of them.
     const candidates = await tx.$queryRaw<Candidate[]>`
       SELECT v.id::text AS id, v.status::text AS status, v.started_at, v.status_changed_at, v.last_active_at,
              CASE WHEN EXISTS (SELECT 1 FROM agent s WHERE (s.virtual_agent_id = v.id OR s.id = v.agent_id) AND s.status = 'busy') THEN 'busy' ELSE 'idle' END AS agent_status,
-             (SELECT max(t.created_at) FROM transcript_entry t JOIN agent s ON s.id = t.agent_id WHERE s.virtual_agent_id = v.id OR s.id = v.agent_id) AS last_entry_at
+             (SELECT max(t.created_at) FROM transcript_entry t JOIN agent s ON s.id = t.agent_id WHERE s.virtual_agent_id = v.id OR s.id = v.agent_id) AS last_entry_at,
+             sch.idle_after
         FROM virtual_agent v
+        LEFT JOIN assistant_schedule sch ON sch.owner_oid = v.owner_oid
        WHERE v.desired = 'running'
     `;
     const evening = candidates.filter((candidate) => dueEveningStop(candidate.started_at, now, stop)).map((candidate) => candidate.id);
@@ -132,7 +147,9 @@ export async function sweepVirtualAgents(prisma: PrismaClient, options: VirtualA
         // A start is activity: an agent started again after a night stopped has only yesterday's timestamps otherwise.
         const active =
           lastActivity(candidate.started_at, candidate.status_changed_at, candidate.last_active_at, candidate.last_entry_at) ?? candidate.started_at;
-        return isIdle(candidate.agent_status, active, now, deadlines[rule]) ? [{ id: candidate.id, rule }] : [];
+        // Only the idle rule is the owner's to set; `never` leaves the agent to the other rules and the evening stop.
+        const minutes = rule === "idle" ? idleMinutesFor(candidate.idle_after, deadlines.idle) : deadlines[rule];
+        return minutes !== undefined && isIdle(candidate.agent_status, active, now, minutes) ? [{ id: candidate.id, rule }] : [];
       });
     const ids = (rule: InactivityRule): string[] => inactive.filter((entry) => entry.rule === rule).map((entry) => entry.id);
 
@@ -150,7 +167,8 @@ export async function sweepVirtualAgents(prisma: PrismaClient, options: VirtualA
       idle: stopped.idle,
       awaitingOwner: stopped.awaiting_owner,
       afterFailure: stopped.failed,
-      evening: stoppedEvening.map((row) => row.id)
+      evening: stoppedEvening.map((row) => row.id),
+      autoStarted: autoStarted.map((row) => row.id)
     };
   });
 }
@@ -170,15 +188,20 @@ export function startVirtualAgentSweep(prisma: PrismaClient, intervalMs: number 
     running = true;
     tick = sweepVirtualAgents(prisma)
       .then((result) => {
-        const stops =
+        const changes =
           result === undefined
             ? 0
-            : result.failed.length + result.idle.length + result.awaitingOwner.length + result.afterFailure.length + result.evening.length;
-        if (result !== undefined && stops > 0) {
+            : result.failed.length +
+              result.idle.length +
+              result.awaitingOwner.length +
+              result.afterFailure.length +
+              result.evening.length +
+              result.autoStarted.length;
+        if (result !== undefined && changes > 0) {
           console.info(
             `virtual-agent sweep: ${result.failed.length} failed to start, ${result.idle.length} stopped as idle, ` +
               `${result.awaitingOwner.length} stopped still waiting for their owner, ${result.afterFailure.length} stopped after failing, ` +
-              `${result.evening.length} stopped for the evening`
+              `${result.evening.length} stopped for the evening, ${result.autoStarted.length} started on schedule`
           );
         }
       })

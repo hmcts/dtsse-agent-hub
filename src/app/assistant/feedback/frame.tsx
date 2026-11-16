@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { deleteConversation, pinConversation, renameConversation, saveAssistantModel, startConversation } from "@/app/_actions/assistant";
 import { deleteAllAssistantFiles, deleteAssistantFile } from "@/app/_actions/assistant-files";
-import { readAssistantAgent, readGitIdentity } from "@/app/_actions/assistant-settings";
+import { readAssistantAgent, readGitIdentity, readSchedule, saveSchedule } from "@/app/_actions/assistant-settings";
 import { clearGitIdentity, removeCredential, resetClaudeMd, saveClaudeMd, saveCredential, saveGitIdentity } from "@/app/_actions/credentials";
 import { saveExportDefaults } from "@/app/_actions/export-defaults";
 import { archiveFeedbackProject, pinFeedbackProject } from "@/app/_actions/feedback";
@@ -85,6 +85,7 @@ export async function FeedbackFrame({
       sharing={SHARING_SETTINGS}
       agent={{ load: readAssistantAgent, restart: restartVirtualAgent }}
       git={{ load: readGitIdentity, save: saveGitIdentity, clear: clearGitIdentity }}
+      schedule={{ load: readSchedule, save: saveSchedule }}
       tokens={{ ...savedCredentialsData(home.credentials, home.assistant.modelRoute), save: saveCredential, remove: removeCredential }}
     >
       <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
