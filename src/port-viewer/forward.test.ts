@@ -71,6 +71,36 @@ describe("forwardedRequestHeaders", () => {
       "x-forwarded-prefix": PREFIX
     });
   });
+
+  it("should pass a port the headers a feedback link's prototype is not sent, but no Expect, when the browser sends them", () => {
+    const headers = forwardedRequestHeaders(
+      new Headers({
+        authorization: "Bearer app",
+        "sec-fetch-site": "same-origin",
+        "accept-encoding": "gzip, br",
+        origin: "https://agent-hub-viewer.example",
+        "content-length": "2",
+        via: "1.1 gateway",
+        "x-azure-fdid": "fd",
+        expect: "100-continue"
+      }),
+      TARGET,
+      "POST"
+    );
+
+    expect(Object.fromEntries(headers)).toEqual({
+      authorization: "Bearer app",
+      "sec-fetch-site": "same-origin",
+      "accept-encoding": "gzip, br",
+      origin: "https://agent-hub-viewer.example",
+      "content-length": "2",
+      via: "1.1 gateway",
+      "x-azure-fdid": "fd",
+      "x-forwarded-host": "agent-hub-viewer.example",
+      "x-forwarded-proto": "https",
+      "x-forwarded-prefix": PREFIX
+    });
+  });
 });
 
 describe("rewriteLocation", () => {
@@ -165,6 +195,7 @@ describe("forwardedResponseHeaders", () => {
       "strict-transport-security": "max-age=1",
       "transfer-encoding": "chunked",
       "referrer-policy": "no-referrer",
+      "use-as-dictionary": 'match="/app/*"',
       location: "/next"
     });
     incoming.append("set-cookie", "a=1; Path=/");
@@ -176,7 +207,7 @@ describe("forwardedResponseHeaders", () => {
     expect(headers.get("location")).toBe(`${PREFIX}/next`);
     expect(headers.getSetCookie()).toEqual([`a=1; Path=${PREFIX}/`]);
     expect(headers.get("referrer-policy")).toBe("same-origin");
-    for (const name of ["content-encoding", "content-length", "strict-transport-security", "transfer-encoding"]) {
+    for (const name of ["content-encoding", "content-length", "strict-transport-security", "transfer-encoding", "use-as-dictionary"]) {
       expect(headers.has(name)).toBe(false);
     }
   });
@@ -517,7 +548,7 @@ describe("forwardedRequestHeaders for a feedback page", () => {
     cookie: "ahv-f-token=sealed; sid=1"
   };
 
-  it("should send the browser's own headers, with the Referer and Origin moved onto the prototype", () => {
+  it("should send the browser's own headers, with the Referer and Origin moved onto the prototype, when it posts from the link's pages", () => {
     expect(Object.fromEntries(forwardedRequestHeaders(new Headers(browser), FEEDBACK, "POST"))).toEqual({
       accept: "text/html",
       "accept-language": "en-GB",
@@ -526,8 +557,6 @@ describe("forwardedRequestHeaders for a feedback page", () => {
       range: "bytes=0-99",
       "content-type": "application/x-www-form-urlencoded",
       "content-length": "12",
-      authorization: "Bearer hub",
-      "sec-fetch-site": "same-origin",
       experimental: "true",
       "x-app-custom": "kept",
       cookie: "sid=1",
@@ -538,14 +567,66 @@ describe("forwardedRequestHeaders for a feedback page", () => {
     });
   });
 
-  it("should send an app's own headers, such as the experimental CCD's internal endpoints need", () => {
+  it("should send an app's own headers when the browser sends them, such as the experimental CCD's internal endpoints need", () => {
     const headers = forwardedRequestHeaders(new Headers({ experimental: "true", "x-app-custom": "kept" }), FEEDBACK, "GET");
 
     expect(headers.get("experimental")).toBe("true");
     expect(headers.get("x-app-custom")).toBe("kept");
   });
 
-  it("should send no hop-by-hop header, nor one Connection names", () => {
+  it.each([
+    ["the prototype", FEEDBACK],
+    ["a sign-in service", { ...FEEDBACK, upstreamOrigin: "https://idam.example", prefix: "/f/token/_sign-in/idam.example", signIn: true }]
+  ])("should send no Authorization when the upstream is %s", (_name, target: ForwardTarget) => {
+    const headers = forwardedRequestHeaders(new Headers({ authorization: "Basic dXNlcjpwYXNz", experimental: "true" }), target, "POST");
+
+    expect(headers.get("authorization")).toBeNull();
+    expect(headers.get("experimental")).toBe("true");
+  });
+
+  it("should send none of the Sec-Fetch, encoding, dictionary or Expect headers when the browser sends them", () => {
+    const incoming = new Headers({
+      "sec-fetch-site": "same-origin",
+      "sec-fetch-mode": "cors",
+      "sec-fetch-dest": "empty",
+      "sec-fetch-user": "?1",
+      "accept-encoding": "gzip, br, zstd, dcb, dcz",
+      "available-dictionary": ":pZGm1Av0IEBKARczz7exkNYsZb8LzaMrV7J32a2fFG4=:",
+      expect: "100-continue",
+      "x-app-custom": "kept"
+    });
+
+    expect(Object.fromEntries(forwardedRequestHeaders(incoming, FEEDBACK, "POST"))).toEqual({
+      "x-app-custom": "kept",
+      "x-forwarded-proto": "https",
+      "x-forwarded-prefix": "/f/token"
+    });
+  });
+
+  it("should send none of the client-address or edge headers when a hop in front of the viewer adds them", () => {
+    const incoming = new Headers({
+      "true-client-ip": "203.0.113.9",
+      "x-client-ip": "203.0.113.9",
+      "x-cluster-client-ip": "203.0.113.9",
+      "cdn-loop": "azurefd",
+      "x-envoy-external-address": "203.0.113.9",
+      "x-envoy-attempt-count": "1",
+      "l5d-client-id": "web.default.serviceaccount.identity.linkerd.cluster.local",
+      traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+      "request-id": "|abc.1",
+      "x-app-custom": "kept"
+    });
+
+    expect(Object.fromEntries(forwardedRequestHeaders(incoming, FEEDBACK, "GET"))).toEqual({
+      traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+      "request-id": "|abc.1",
+      "x-app-custom": "kept",
+      "x-forwarded-proto": "https",
+      "x-forwarded-prefix": "/f/token"
+    });
+  });
+
+  it("should send no hop-by-hop header, nor one Connection names, when the browser sends them", () => {
     const incoming = new Headers({
       connection: "keep-alive, x-hop",
       "keep-alive": "timeout=5",
@@ -563,7 +644,7 @@ describe("forwardedRequestHeaders for a feedback page", () => {
     });
   });
 
-  it("should send none of the forwarded or viewer headers, but its own X-Forwarded-Proto and X-Forwarded-Prefix", () => {
+  it("should send its own X-Forwarded-Proto and X-Forwarded-Prefix in place of the forwarded and viewer headers when the network adds them", () => {
     const headers = forwardedRequestHeaders(new Headers(browser), FEEDBACK, "POST");
 
     for (const name of ["host", "forwarded", "x-forwarded-for", "x-forwarded-host", "x-forwarded-scheme", "x-real-ip", "x-agent-hub-viewer-url", "via"]) {
