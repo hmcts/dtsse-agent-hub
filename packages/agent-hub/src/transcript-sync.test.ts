@@ -8,7 +8,7 @@ import { fakeSecrets, type TempClaudeHome, tempClaudeHome } from "./__fixtures__
 import { createMockHub } from "./__fixtures__/mock-hub.ts";
 import { type Api, ApiError, createApi, type RequestOptions } from "./api.ts";
 import type { Env } from "./env.ts";
-import { directEnvelope } from "./envelope.ts";
+import { assistantPrompt, directEnvelope } from "./envelope.ts";
 import { CLIENT_FEATURES } from "./features.ts";
 import { ensureStateDir, readJson, statePath } from "./session.ts";
 import {
@@ -267,6 +267,28 @@ describe("toEntries", () => {
     expect(toEntries(userLine(envelope))[0]?.message_id).toBe("1234");
     expect(toEntries(userLine([{ type: "text", text: envelope }]))[0]?.message_id).toBe("1234");
     expect(toEntries(userLine(`quoted: ${envelope}`))[0]?.message_id).toBeNull();
+  });
+
+  it("should link a conversation's prompt to its agent-hub message id by the context block it opens with", () => {
+    // Arrange
+    const prompt = assistantPrompt({ id: "77", body: "what is CDAM?" }, { product: "ccd" });
+    const conversation = { conversation: true };
+
+    // Act & Assert
+    expect(toEntries(userLine(prompt), conversation)[0]?.message_id).toBe("77");
+    expect(toEntries(userLine(`quoted: ${prompt}`), conversation)[0]?.message_id).toBeNull();
+    expect(toEntries(userLine("what is CDAM?"), conversation)[0]?.message_id).toBeNull();
+    // An envelope still links there too: a peer's direct to a conversation is framed as one.
+    expect(toEntries(userLine(directEnvelope({ id: "78", body: "x" })), conversation)[0]?.message_id).toBe("78");
+  });
+
+  it("should not link the context block's form outside a conversation, where it is only something the user typed", () => {
+    // Arrange
+    const prompt = assistantPrompt({ id: "77", body: "what is CDAM?" }, { product: "ccd" });
+
+    // Act & Assert
+    expect(toEntries(userLine(prompt))[0]?.message_id).toBeNull();
+    expect(parseEntries(jsonl(userLine(prompt)), { conversation: true })[0]?.message_id).toBe("77");
   });
 });
 

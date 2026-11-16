@@ -1,10 +1,6 @@
 #!groovy
 
-// Pinned to the ref dtsse-github-metrics uses, which shares this product's Jenkins identity and AAT subscription.
-// The library's `master` resolves `TF_VAR_jenkins_AAD_objectId` from a per-environment managed identity; metrics
-// pinned away from it because it forces a replace of its Postgres Entra administrator, which the server's delete lock
-// refuses. Move both repositories back to the floating `Infrastructure` together once the platform has resolved that.
-@Library("Infrastructure@DTSPO-35113/master")
+@Library("Infrastructure@2.13.6")
 
 def type = "nodejs"
 def product = "dtsse"

@@ -18,6 +18,8 @@ export type Cli = {
   printError: (message: string) => void;
   readStdin: () => string;
   cwd: () => string;
+  /** How long `disable` waits for the bridge to exit; `stopBridge`'s own wait unless a test says otherwise. */
+  bridgeStopWaitMs?: number;
 };
 
 /** A command's exit code, returned straight or once whatever it awaits has settled. */

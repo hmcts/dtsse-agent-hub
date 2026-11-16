@@ -121,6 +121,7 @@ function Option({ result }: { result: LookupResult }) {
     <span className="flex min-w-0 flex-col leading-tight">
       <span className="truncate text-[13px] font-medium">{page.title}</span>
       <span className="truncate text-xs text-asst-faint">{shortCrumb(breadcrumb(page).slice(0, -1))}</span>
+      {page.excerpt === undefined ? null : <span className="truncate text-xs text-asst-faint italic">{page.excerpt}</span>}
     </span>
   );
 }

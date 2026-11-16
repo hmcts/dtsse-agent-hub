@@ -1,15 +1,15 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { DEFAULT_CONFLUENCE_PARENT } from "@/assistant/confluence";
-import type { DefaultConfluencePage, DefaultJiraProject, ExportDefaults } from "@/assistant/export-defaults";
+import type { ExportDefaults } from "@/assistant/export-defaults";
 import { type GithubProjectChoice, repoOwner, sameOwner, TICKET_TOOLS, type TicketTool } from "@/assistant/github";
 import { DEFAULT_JIRA_PROJECT } from "@/assistant/jira";
 import { breadcrumb, type ConfluencePageResult, type GithubProjectResult, type GithubRepoResult, type JiraProjectResult } from "@/assistant/lookups";
 import { AtlassianSearch } from "@/components/assistant/AtlassianSearch";
 import type { JiraAccess } from "@/components/assistant/JiraExport";
 import type { LookUp } from "@/components/assistant/lookupClient";
+import { useSettingsDraft } from "@/components/assistant/useSettingsDraft";
 import type { ActionResult } from "@/web/action";
 
 type SaveExportDefaultsAction = (input: {
@@ -20,7 +20,7 @@ type SaveExportDefaultsAction = (input: {
   confluence: unknown;
 }) => Promise<ActionResult<{ defaults: ExportDefaults }>>;
 
-/** The export defaults as the settings edit them: what is stored, the action that replaces it, and the sign-in searches need. */
+/** The export defaults as the settings edit them: what is stored, the action the dialog's Save replaces it with, and the sign-in searches need. */
 export interface AssistantExportDefaults {
   defaults: ExportDefaults;
   save: SaveExportDefaultsAction;
@@ -204,45 +204,32 @@ function GithubChoices({
   );
 }
 
+function projectKey(project: GithubProjectChoice | null): string | null {
+  return project === null ? null : `${project.owner}/${project.number}`;
+}
+
+/** Whether two sets of defaults choose the same things, by the keys the store saves them under. */
+function sameDefaults(a: ExportDefaults, b: ExportDefaults): boolean {
+  return (
+    a.ticketTool === b.ticketTool &&
+    a.jira?.key === b.jira?.key &&
+    a.github === b.github &&
+    projectKey(a.githubProject) === projectKey(b.githubProject) &&
+    a.confluence?.id === b.confluence?.id
+  );
+}
+
 /**
  * Where the person's documents go by default: the tool their tickets go to, and in it a Jira backlog or a GitHub
  * repository; and a Confluence page to put new pages under. The document panel starts from these and can be changed
  * there for one document; a Confluence search in the panel starts in this page's space. Each is found by searching the
- * person's own Jira, Confluence or GitHub, as them.
+ * person's own Jira, Confluence or GitHub, as them, and the dialog's Save stores them.
  */
 export function ExportSettings({ exports }: { exports: AssistantExportDefaults }) {
-  const router = useRouter();
-  const [tool, setTool] = useState<TicketTool>(exports.defaults.ticketTool);
-  const [jira, setJira] = useState<DefaultJiraProject | null>(exports.defaults.jira);
-  const [github, setGithub] = useState<string | null>(exports.defaults.github);
-  const [githubProject, setGithubProject] = useState<GithubProjectChoice | null>(exports.defaults.githubProject);
-  const [confluence, setConfluence] = useState<DefaultConfluencePage | null>(exports.defaults.confluence);
+  const draft = useSettingsDraft("exports", exports.defaults, sameDefaults);
+  const { ticketTool: tool, jira, github, githubProject, confluence } = draft.value;
+  const change = (next: Partial<ExportDefaults>) => draft.set({ ...draft.value, ...next });
   const [searching, setSearching] = useState<"jira" | "confluence" | "github" | "github_project" | null>(null);
-  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
-  const [saving, setSaving] = useState(false);
-  const projectKey = (project: GithubProjectChoice | null) => (project === null ? null : `${project.owner}/${project.number}`);
-  const changed =
-    tool !== exports.defaults.ticketTool ||
-    jira?.key !== exports.defaults.jira?.key ||
-    github !== exports.defaults.github ||
-    projectKey(githubProject) !== projectKey(exports.defaults.githubProject) ||
-    confluence?.id !== exports.defaults.confluence?.id;
-
-  async function save(): Promise<void> {
-    setSaving(true);
-    setMessage(null);
-    try {
-      const result = await exports.save({ ticketTool: tool, jira, github, githubProject, confluence });
-      setMessage(result.ok ? { ok: true, text: "Your defaults are saved" } : { ok: false, text: result.error });
-      if (result.ok) {
-        router.refresh();
-      }
-    } catch {
-      setMessage({ ok: false, text: "that could not be done; try again" });
-    } finally {
-      setSaving(false);
-    }
-  }
 
   return (
     <section aria-labelledby="assistant-settings-exports" className="flex flex-col gap-3.5">
@@ -254,17 +241,19 @@ export function ExportSettings({ exports }: { exports: AssistantExportDefaults }
           Where your documents go when you send them on. You can still pick somewhere else for one document in its panel.
         </p>
       </div>
-      <TicketToolChoice tool={tool} onChange={setTool} />
+      <TicketToolChoice tool={tool} onChange={(ticketTool) => change({ ticketTool })} />
       {tool === "github" ? (
         <GithubChoices
           repo={github}
           project={githubProject}
-          onRepo={(repo) => {
-            setGithub(repo);
-            // A Project of another owner's does not go with this repository.
-            setGithubProject((project) => (repo !== null && project !== null && sameOwner(project.owner, repoOwner(repo)) ? project : null));
-          }}
-          onProject={setGithubProject}
+          onRepo={(repo) =>
+            change({
+              github: repo,
+              // A Project of another owner's does not go with this repository.
+              githubProject: repo !== null && githubProject !== null && sameOwner(githubProject.owner, repoOwner(repo)) ? githubProject : null
+            })
+          }
+          onProject={(project) => change({ githubProject: project })}
           searching={searching === "github" || searching === "github_project" ? searching : null}
           onSearch={setSearching}
           lookUp={exports.lookUp}
@@ -290,7 +279,7 @@ export function ExportSettings({ exports }: { exports: AssistantExportDefaults }
           }
           searching={searching === "jira"}
           onSearch={() => setSearching("jira")}
-          onClear={() => setJira(null)}
+          onClear={() => change({ jira: null })}
         >
           <AtlassianSearch
             kind="jira_project"
@@ -301,7 +290,7 @@ export function ExportSettings({ exports }: { exports: AssistantExportDefaults }
             onCancel={() => setSearching(null)}
             onPick={(result) => {
               const project = result as JiraProjectResult;
-              setJira({ key: project.key, name: project.name });
+              change({ jira: { key: project.key, name: project.name } });
               setSearching(null);
             }}
           />
@@ -327,7 +316,7 @@ export function ExportSettings({ exports }: { exports: AssistantExportDefaults }
         }
         searching={searching === "confluence"}
         onSearch={() => setSearching("confluence")}
-        onClear={() => setConfluence(null)}
+        onClear={() => change({ confluence: null })}
       >
         <AtlassianSearch
           kind="confluence_page"
@@ -339,31 +328,25 @@ export function ExportSettings({ exports }: { exports: AssistantExportDefaults }
           onCancel={() => setSearching(null)}
           onPick={(result) => {
             const page = result as ConfluencePageResult;
-            setConfluence({
-              id: page.id,
-              title: page.title,
-              space_id: page.space_id,
-              space_key: page.space_key,
-              space_name: page.space_name,
-              ancestors: page.ancestors
+            change({
+              confluence: {
+                id: page.id,
+                title: page.title,
+                space_id: page.space_id,
+                space_key: page.space_key,
+                space_name: page.space_name,
+                ancestors: page.ancestors
+              }
             });
             setSearching(null);
           }}
         />
       </Choice>
-      <div className="flex items-center gap-3">
-        <button
-          type="button"
-          onClick={() => void save()}
-          disabled={!changed || saving}
-          className="rounded-[10px] bg-asst-accent px-3.5 py-2 text-[13px] font-semibold text-asst-ink hover:bg-asst-accent-hover disabled:opacity-40"
-        >
-          {saving ? "Saving…" : "Save defaults"}
-        </button>
-        <p role="status" className={`text-xs ${message?.ok === false ? "text-asst-error" : "text-asst-ok"} empty:hidden`}>
-          {message?.text ?? ""}
+      {draft.error === null ? null : (
+        <p role="alert" className="text-xs text-asst-error">
+          {draft.error}
         </p>
-      </div>
+      )}
     </section>
   );
 }

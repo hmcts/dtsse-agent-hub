@@ -42,14 +42,30 @@ async function freeName(db: Database, ownerOid: string): Promise<string> {
  * name: the loser reads the winner's.
  */
 export async function ensureAssistant(prisma: PrismaClient, owner: { oid: string; modelRoute: ModelRoute }): Promise<VirtualAgentRow> {
-  const existing = await findAssistant(prisma, owner.oid);
+  return (await ensureAssistantWithClaims(prisma, owner)).assistant;
+}
+
+/** A virtual agent just created, whose pod has not booted, so has claimed nothing either way. */
+const NO_CLAIMS: PodClaims = { clientFeatures: null, agent: null };
+
+/**
+ * `ensureAssistant`, with the pod's client-features claims from the lookup that found it. Those read before a start
+ * still hold after it: every stop clears the pod's own claim and its launch token, so a stopped pod can have made no
+ * claim since, and the start leaves the main-session agent's claim alone.
+ */
+export async function ensureAssistantWithClaims(
+  prisma: PrismaClient,
+  owner: { oid: string; modelRoute: ModelRoute }
+): Promise<{ assistant: VirtualAgentRow; claims: PodClaims }> {
+  const existing = await findAssistantWithClaims(prisma, owner.oid);
   if (existing !== undefined) {
-    return existing.desired === "stopped" ? await setDesired(prisma, owner.oid, existing.id, "running") : existing;
+    const { assistant, claims } = existing;
+    return { assistant: assistant.desired === "stopped" ? await setDesired(prisma, owner.oid, assistant.id, "running") : assistant, claims };
   }
   try {
-    return await createVirtualAgent(prisma, { owner, modelRoute: owner.modelRoute, name: await freeName(prisma, owner.oid) });
+    return { assistant: await createVirtualAgent(prisma, { owner, modelRoute: owner.modelRoute, name: await freeName(prisma, owner.oid) }), claims: NO_CLAIMS };
   } catch (error) {
-    const raced = await findAssistant(prisma, owner.oid);
+    const raced = await findAssistantWithClaims(prisma, owner.oid);
     if (raced !== undefined) {
       return raced;
     }

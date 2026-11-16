@@ -1,7 +1,8 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId } from "react";
 import { ActionForm, type FormAction } from "@/components/ActionForm";
+import { useSettingsDraft } from "@/components/assistant/useSettingsDraft";
 import { Timestamp } from "@/components/time/Timestamp";
 import { claudeMdLength, DEFAULT_CLAUDE_MD, MAX_CLAUDE_MD_CHARACTERS } from "@/credentials/claude-md";
 import type { ClaudeMdSettings } from "@/web/data";
@@ -27,21 +28,21 @@ function count(value: number): string {
 }
 
 /**
- * The editor. The draft starts from what the server sent and is the person's from then on: the dialog unmounts when
- * it closes, so it reopens with whatever is stored, and a re-render while someone is typing never replaces their
- * text. A reset leaves the draft holding the default, which is what the pod will be given.
+ * The editor. The draft starts from what the server sent and is the person's from then on, held by the dialog so it
+ * outlives a move to another section; the dialog's Save sends it. A reset is an action of its own: it deletes what is
+ * stored at once, and leaves the editor holding the default, which is what the pod will be given.
  *
  * The count uses `claudeMdLength` and `MAX_CLAUDE_MD_CHARACTERS`, so the number shown is the one the store checks
- * against. Whether the text is acceptable is the store's decision alone, and `ActionForm` shows its words.
+ * against. Whether the text is acceptable is the store's decision alone, and its words are shown under the editor.
  */
-function Editor({ view, save, reset }: { view: ReadableClaudeMd; save: FormAction; reset: FormAction }) {
-  const [draft, setDraft] = useState(view.text);
+function Editor({ view, reset }: { view: ReadableClaudeMd; reset: FormAction }) {
+  const draft = useSettingsDraft("claudeMd", view.text);
   const id = useId();
-  const length = claudeMdLength(draft);
+  const length = claudeMdLength(draft.value);
   const over = length - MAX_CLAUDE_MD_CHARACTERS;
   return (
     <>
-      <ActionForm action={save} label="Save your CLAUDE.md" keepValues className="flex flex-col gap-2">
+      <div className="flex flex-col gap-2">
         <label htmlFor={`${id}-text`} className="text-[13px] font-medium">
           CLAUDE.md
         </label>
@@ -59,8 +60,8 @@ function Editor({ view, save, reset }: { view: ReadableClaudeMd; save: FormActio
           name="value"
           rows={8}
           spellCheck={false}
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
+          value={draft.value}
+          onChange={(event) => draft.set(event.target.value)}
           aria-describedby={`${id}-hint ${id}-count`}
           aria-invalid={over > 0}
           className={FIELD}
@@ -69,15 +70,14 @@ function Editor({ view, save, reset }: { view: ReadableClaudeMd; save: FormActio
           {count(length)} of {count(MAX_CLAUDE_MD_CHARACTERS)} characters
           {over > 0 ? `: ${count(over)} too many` : null}
         </p>
-        <button
-          type="submit"
-          className="self-start rounded-[10px] bg-asst-accent px-3.5 py-2 text-[13px] font-semibold text-asst-ink hover:bg-asst-accent-hover"
-        >
-          Save your CLAUDE.md
-        </button>
-      </ActionForm>
+        {draft.error === null ? null : (
+          <p role="alert" className="text-xs text-asst-error">
+            {draft.error}
+          </p>
+        )}
+      </div>
       {view.stored ? (
-        <ActionForm action={reset} label="Reset your CLAUDE.md to the default" onSuccess={() => setDraft(DEFAULT_CLAUDE_MD)}>
+        <ActionForm action={reset} label="Reset your CLAUDE.md to the default" onSuccess={() => draft.settle(DEFAULT_CLAUDE_MD)}>
           <button type="submit" className="text-xs text-asst-muted underline hover:text-asst-text">
             Reset to the default
           </button>
@@ -104,7 +104,7 @@ export function ClaudeMd({ claudeMd }: { claudeMd: AssistantClaudeMd }) {
         chat picks up a change when its session next starts, so a chat already running keeps the notes it started with.
       </p>
       {claudeMd.settings.available ? (
-        <Editor view={claudeMd.settings} save={claudeMd.save} reset={claudeMd.reset} />
+        <Editor view={claudeMd.settings} reset={claudeMd.reset} />
       ) : (
         <p className="text-[13px] text-asst-error">Your CLAUDE.md cannot be shown: {claudeMd.settings.reason}</p>
       )}

@@ -12,7 +12,7 @@ import { createMockHub, type MockHub } from "../__fixtures__/mock-hub.ts";
 import { podSecrets } from "../__fixtures__/pod-shims.ts";
 import { ApiError, createApi } from "../api.ts";
 import { readStdinText } from "../cli/command.ts";
-import { CREDENTIAL_KINDS } from "../wire.ts";
+import { POD_CREDENTIAL_KINDS } from "../wire.ts";
 import { isCredentialKind, OWNER_READABLE, requireCredentialKind, runCredentialCommand } from "./credentials.ts";
 import { EXIT_NO_CREDENTIAL } from "./phases.ts";
 
@@ -61,9 +61,10 @@ async function credential(argv: string[], input = ""): Promise<{ code: number; s
 }
 
 describe("isCredentialKind", () => {
-  it("should accept every kind the API defines when given one of them", () => {
+  it("should accept every kind a pod reads and stores, and not a Microsoft 365 connection, when given one", () => {
     // Act & Assert
-    expect(CREDENTIAL_KINDS.every((kind) => isCredentialKind(kind))).toBe(true);
+    expect(POD_CREDENTIAL_KINDS.every((kind) => isCredentialKind(kind))).toBe(true);
+    expect(isCredentialKind("microsoft")).toBe(false);
   });
 
   it("should refuse anything that is not a kind when given a near miss or a non-string", () => {
@@ -78,7 +79,7 @@ describe("requireCredentialKind", () => {
   it("should give the kind back when it is one, and name them all when it is not", () => {
     // Act & Assert
     expect(requireCredentialKind("azure")).toBe("azure");
-    expect(() => requireCredentialKind("nope")).toThrow(`credential kind must be one of ${CREDENTIAL_KINDS.join(", ")}`);
+    expect(() => requireCredentialKind("nope")).toThrow(`credential kind must be one of ${POD_CREDENTIAL_KINDS.join(", ")}`);
   });
 });
 

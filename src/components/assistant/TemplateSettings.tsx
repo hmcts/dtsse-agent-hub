@@ -19,6 +19,9 @@ export interface AssistantTemplates {
 const FIELD =
   "block w-full rounded-lg border border-asst-strong bg-asst-field px-2.5 py-2 text-[13px] leading-5 text-asst-text outline-hidden focus:border-asst-accent-line";
 
+/** Edit and Delete, the same height so the row centres them on one line. */
+const ROW_ACTION = "shrink-0 text-xs leading-4 text-asst-muted underline hover:text-asst-text";
+
 function count(value: number): string {
   return value.toLocaleString("en-GB");
 }
@@ -171,22 +174,19 @@ export function Templates({ templates }: { templates: AssistantTemplates }) {
         ) : (
           <ul aria-label="Your templates" className="flex flex-col overflow-hidden rounded-[10px] border border-asst-line">
             {mine.map((template) => (
-              <li key={template.id} className="flex items-start gap-3 border-b border-asst-line px-3.5 py-3 last:border-b-0">
+              <li key={template.id} className="flex items-center gap-3 border-b border-asst-line px-3.5 py-3 last:border-b-0">
                 <div className="flex min-w-0 flex-1 flex-col leading-tight">
                   <span className="truncate text-sm font-medium">{template.name}</span>
                   <span className="truncate text-xs text-asst-muted">{template.text}</span>
                 </div>
-                <button
-                  type="button"
-                  aria-label={`Edit ${template.name}`}
-                  onClick={() => setOpen({ edit: template.id })}
-                  className="shrink-0 text-xs text-asst-muted underline hover:text-asst-text"
-                >
+                <button type="button" aria-label={`Edit ${template.name}`} onClick={() => setOpen({ edit: template.id })} className={ROW_ACTION}>
                   Edit
                 </button>
-                <ActionForm action={remove} label={`Delete ${template.name}`} className="shrink-0">
+                {/* A flex box, so Delete is laid out as Edit is rather than on a line of the row's larger text, which sets it
+                    lower, and a refusal goes under it. */}
+                <ActionForm action={remove} label={`Delete ${template.name}`} className="flex shrink-0 flex-col items-end">
                   <input type="hidden" name="id" value={template.id} />
-                  <button type="submit" aria-label={`Delete ${template.name}`} className="text-xs text-asst-muted underline hover:text-asst-text">
+                  <button type="submit" aria-label={`Delete ${template.name}`} className={ROW_ACTION}>
                     Delete
                   </button>
                 </ActionForm>

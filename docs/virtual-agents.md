@@ -17,7 +17,7 @@ the `-staging` release.
 | `VIRTUAL_AGENTS_ENABLED` | off | `true` turns the feature on |
 | `ORCHESTRATOR_OIDS` | none | Comma-separated object ids of the orchestrator's service principals. With none, every orchestrator request answers 503 |
 | `ORCHESTRATOR_ROLE` | none | An app role the orchestrator's token must also carry, as `VirtualAgents.Orchestrate`. Unset, the `oid` alone is checked |
-| `VIRTUAL_AGENT_IDLE_MINUTES` | `120` | A running, cloning or failed agent with no activity for this long is stopped |
+| `VIRTUAL_AGENT_IDLE_MINUTES` | `120` | A running, cloning or failed agent with no activity for this long is stopped. A running or cloning one started on a UK weekday before that day's evening stop uses its owner's choice of 1 to 4 hours, or never (the evening stop then bounds it), instead when they have set one under Settings, Schedule; one started at the weekend or after the stop uses this whatever they chose, as nothing else bounds it. Auto start also pauses for a person who has not used their Assistant for 14 days, and the times it offers are those whose 30-minute window ends by `VIRTUAL_AGENT_EVENING_STOP` |
 | `VIRTUAL_AGENT_AWAITING_OWNER_MINUTES` | `30` | An agent waiting for its owner to finish a sign-in or store a credential for this long is stopped |
 | `VIRTUAL_AGENT_EVENING_STOP` | `19:00` | UK time, `HH:MM`, at which every virtual agent started before it is stopped, on weekdays |
 | `VIRTUAL_AGENT_DISK_TTL_DAYS` | `14` | Days a stopped agent's disk is kept before the orchestrator deletes it |
@@ -179,7 +179,7 @@ reports for itself.
 
 **Plugins.** An owner ticks any of the workspace plugins `VIRTUAL_AGENT_PLUGINS` offers, up to 20, under Plugins in
 the Assistant's settings. The orchestrator passes the names to the pod as `AGENT_HUB_PLUGINS`, comma-separated, and
-`hai` loads each from the checkout with `--plugin-dir`. A plugin the pod client carries in its own `plugins/` directory (`welsh`, `slides`) is copied onto the pod's disk instead and loaded into each conversation session; see Plugins in [`agent-api.md`](agent-api.md). `slides` is always on, because the Assistant's slides panel, history, editing and builds depend on it: the settings do not show it, it is never stored (an agent that still has it keeps it until a save changes its ticked plugins, which stores them without it; a save that changes none writes nothing), and every claim adds it to the plugins the orchestrator puts in `AGENT_HUB_PLUGINS`, so a pod loads it whichever client it runs. Adding it bumps no generation, so no running pod is replaced for it: a pod started before the hub added it, on a client that loads it only when it is named, gets it when its StatefulSet is next applied (a restart, a stop and start, a resize or a change of plugins), and until then the hub answers a deck build on it with `restart_needed`, which the page words as restarting the assistant to load the slide tools. A pod shows it is on a client that loads `slides` by itself by claiming the `slides-always-on` client feature. A change bumps `generation` and `pod_generation`, so a running
+`hai` loads each from the checkout with `--plugin-dir`. A plugin the pod client carries in its own `plugins/` directory (`welsh`, `slides`, `m365`, `m365-files`) is copied onto the pod's disk instead and loaded into each conversation session; see Plugins in [`agent-api.md`](agent-api.md). `slides` is always on, because the Assistant's slides panel, history, editing and builds depend on it, and so are `m365` and `m365-files`, whose opt-in is pressing Connect for Microsoft 365. For `slides`: the settings do not show it, it is never stored (an agent that still has it keeps it until a save changes its ticked plugins, which stores them without it; a save that changes none writes nothing), and every claim adds it to the plugins the orchestrator puts in `AGENT_HUB_PLUGINS`, so a pod loads it whichever client it runs. Adding it bumps no generation, so no running pod is replaced for it: a pod started before the hub added it, on a client that loads it only when it is named, gets it when its StatefulSet is next applied (a restart, a stop and start, a resize or a change of plugins), and until then the hub answers a deck build on it with `restart_needed`, which the page words as restarting the assistant to load the slide tools. A pod shows it is on a client that loads `slides` by itself by claiming the `slides-always-on` client feature. A change bumps `generation` and `pod_generation`, so a running
 pod is replaced and the conversation continues; a stopped agent loads them when it next starts. A ticked plugin the hub
 no longer offers stays on the agent until its owner unticks it, and is shown as no longer offered; the pod skips any
 name its checkout does not have.
@@ -198,6 +198,16 @@ serves its own pages there. A server that links to its assets from `/` needs tel
 as `X-Forwarded-Prefix`, and WebSockets are not forwarded. [`agent-api.md`](agent-api.md#the-viewer) has the detail. In AAT,
 Front Door (`azure-platform-terraform`, `environments/stg/stg.tfvars`) and both DNS zones carry the host, and the
 chart adds it to the Ingress as `additionalIngressHosts`.
+
+## Client updates
+
+A pod installs the current published client when it boots and keeps it until it is replaced, and each conversation's
+session keeps the bridge it started with, so a fix to the client reaches a running assistant only once it restarts.
+The hub reads what each client can do from its `client_features` (see Client features in
+[`agent-api.md`](agent-api.md#client-features)). Where a running client's claim leaves out something the person would
+otherwise be told is working, the Assistant says the assistant needs a restart and links to it in the settings'
+Assistant section: a deck build on a pod without `slides-always-on`, and a chat whose session has not claimed
+`plain-prompt`, which wraps the person's messages in an `[agent-hub]` envelope and can take them for someone else's.
 
 ## Standing in for the orchestrator locally
 
@@ -346,8 +356,7 @@ cft-workspace's, reached through the `prepare-workspace.sh` hook stage 1 calls a
 
 **The client the pod boots on.** `virtual-agent-boot` installs `@hmcts-cft/agent-hub@latest` over the one its image
 carries before handing over to stage 1, `virtual-agent/entrypoint.sh` in that same package, so a client release
-reaches both the client and the pod runtime without an image rebuild and a digest bump. Stage 1 is taken from the
-checkout instead when the installed client ships none, which only an older client does. It is never fatal: a pod whose feed is unreachable boots on the image's copy, and logs which version
+reaches both the client and the pod runtime without an image rebuild and a digest bump. It is never fatal: a pod whose feed is unreachable boots on the image's copy, and logs which version
 it ended up on either way. To hold a pod on that copy deliberately, set `VIRTUAL_AGENT_SKIP_CLIENT_UPGRADE=true` on its
 StatefulSet with `kubectl set env` — the pod's environment is a fixed list with no pass-through, and the next apply of
 the StatefulSet drops it again.

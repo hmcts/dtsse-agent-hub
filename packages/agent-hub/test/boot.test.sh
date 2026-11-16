@@ -21,8 +21,9 @@ set -u
 CASES=(no-token refused-token sign-in-not-completed sign-in-transient-failure stored-token-no-access checkout-client broken-checkout-client
     checkout-untracked-file checkout-modified-file checkout-modified-collision checkout-untracked-clobber checkout-local-commit
     checkout-refusal-flood checkout-refusal-silent no-client trailing-slash
-    client-upgrade client-upgrade-offline client-upgrade-no-npm client-upgrade-pinned package-entrypoint client-upgrade-ships-entrypoint
-    checkout-entrypoint)
+    client-upgrade client-upgrade-offline client-upgrade-no-npm client-upgrade-pinned client-upgrade-ships-entrypoint
+    org-member org-not-member org-invitation-pending org-invited-after-refusal org-check-forbidden org-check-without-read-org
+    org-member-clone-refused org-from-repo-url saml-reauth saml-after-reauth)
 
 if [ "${1:-}" = "--list" ]; then
     printf '%s\n' "${CASES[@]}"
@@ -70,15 +71,17 @@ no() {
 setup() {
     CASE="$1"
     C="$T/$1"
-    mkdir -p "$C/bin" "$C/home" "$C/pkg/bin"
+    mkdir -p "$C/bin" "$C/home" "$C/pkg/bin" "$C/pkg/virtual-agent"
     : >"$C/order.log"
 
     # The script under test runs from a package directory of the case's own, reached through a symlink as npm
     # installs a bin: stage 1 is resolved from this file's location, so a case controls whether the package it
-    # was installed from ships one. Only package-entrypoint does; every other case falls back to the checkout's.
+    # was installed from ships one. Every case starts with one; client-upgrade-ships-entrypoint removes it.
     cp "$BOOT" "$C/pkg/bin/virtual-agent-boot"
     chmod +x "$C/pkg/bin/virtual-agent-boot"
     ln -s "$C/pkg/bin/virtual-agent-boot" "$C/bin/virtual-agent-boot"
+    printf '#!/bin/sh\necho entrypoint >>"$FAKE_DIR/order.log"\n' >"$C/pkg/virtual-agent/entrypoint.sh"
+    chmod +x "$C/pkg/virtual-agent/entrypoint.sh"
 
     # The device flow is the client's own HTTP against $GITHUB_OAUTH_HOST, so gh only ever takes a token on
     # stdin here: a token the owner stored, or the one that sign-in ended with.
@@ -93,8 +96,37 @@ case "$1 $2" in
         echo "gh login-with-token" >>"$FAKE_DIR/order.log"
         touch "$FAKE_DIR/gh.signed-in" ;;
     "auth setup-git") echo "gh setup-git" >>"$FAKE_DIR/order.log" ;;
+    "auth logout")
+        [ -z "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ] || echo "GH_TOKEN reached gh auth logout" >>"$FAKE_DIR/gh-token.leaks"
+        echo "gh logout" >>"$FAKE_DIR/order.log"
+        rm -f "$FAKE_DIR/gh.signed-in" ;;
     "auth token") [ -f "$FAKE_DIR/gh.signed-in" ] && printf '%s\n' "$FAKE_GOOD_TOKEN" ;;
-    "api user") echo octocat ;;
+    "api user")
+        echo "api user" >>"$FAKE_DIR/api-user.calls"
+        echo octocat ;;
+    # The membership lookup after a refused clone. FAKE_MEMBERSHIP is the answer to each call in turn, the last
+    # one repeating: active or pending as GitHub's 200, or an HTTP error status. FAKE_SCOPES is the token's
+    # X-OAuth-Scopes. An invitation names the invitee, as GitHub's does, so a case can tell where the login came from.
+    "api --include")
+        [ -z "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ] || echo "GH_TOKEN reached gh api" >>"$FAKE_DIR/gh-token.leaks"
+        n=$(cat "$FAKE_DIR/membership-calls" 2>/dev/null || echo 0)
+        echo $((n + 1)) >"$FAKE_DIR/membership-calls"
+        printf '%s\n' "$3" >>"$FAKE_DIR/membership.paths"
+        read -ra answers <<<"${FAKE_MEMBERSHIP:-active}"
+        answer=${answers[$((n < ${#answers[@]} ? n : ${#answers[@]} - 1))]}
+        case "$answer" in
+            active | pending) printf 'HTTP/2.0 200 OK\n' ;;
+            *) printf 'HTTP/2.0 %s Error\n' "$answer" ;;
+        esac
+        printf 'Content-Type: application/json\r\nX-Oauth-Scopes: %s\r\n\r\n' "${FAKE_SCOPES-gist, read:org, repo, user:email}"
+        case "$answer" in
+            active) printf '{"state":"active","role":"member","user":{"login":"octocat"}}' ;;
+            pending) printf '{"state":"pending","role":"member","user":{"login":"invitee"}}' ;;
+            *)
+                printf '{"message":"Resource protected by organization SAML enforcement","status":"%s"}' "$answer"
+                echo "gh: Resource protected by organization SAML enforcement (HTTP $answer)" >&2
+                exit 1 ;;
+        esac ;;
 esac
 EOF
 
@@ -113,6 +145,14 @@ case "$1" in
             echo "fatal: could not read Username for 'https://github.com': terminal prompts disabled" >&2
             exit 128
         fi
+        # FAKE_CLONE_SAML clones are refused as GitHub refuses a token not authorised for the organisation's
+        # single sign-on, which gh accepted all the same.
+        saml=$(cat "$FAKE_DIR/saml" 2>/dev/null || echo "${FAKE_CLONE_SAML:-0}")
+        if [ "$saml" -gt 0 ]; then
+            echo $((saml - 1)) >"$FAKE_DIR/saml"
+            printf "remote: The 'hmcts' organization has enabled or enforced SAML SSO.\nremote: To access this repository, you must re-authorize the OAuth Application 'GitHub CLI'.\nfatal: unable to access 'https://github.com/hmcts/cft-workspace.git/': The requested URL returned error: 403\n" >&2
+            exit 128
+        fi
         denied=$(cat "$FAKE_DIR/denied" 2>/dev/null || echo "${FAKE_CLONE_DENIED:-0}")
         if [ "$denied" -gt 0 ]; then
             echo $((denied - 1)) >"$FAKE_DIR/denied"
@@ -120,9 +160,7 @@ case "$1" in
             exit 128
         fi
         dest="${*: -1}"
-        mkdir -p "$dest/.git" "$dest/.devcontainer/virtual-agent"
-        printf '#!/bin/sh\necho entrypoint >>"$FAKE_DIR/order.log"\n' >"$dest/.devcontainer/virtual-agent/entrypoint.sh"
-        chmod +x "$dest/.devcontainer/virtual-agent/entrypoint.sh" ;;
+        mkdir -p "$dest/.git" ;;
     -C)
         case "$3" in
             fetch) echo "git fetch" >>"$FAKE_DIR/order.log" ;;
@@ -231,11 +269,6 @@ rgit() { "$REAL_GIT" -c user.name="Boot Test" -c user.email=boot@example.com -c 
 real_checkout() {
     rgit init --quiet --bare "$C/origin"
     rgit init --quiet "$C/seed"
-    mkdir -p "$C/seed/.devcontainer/virtual-agent"
-    # Stage 1 comes from the checkout in these cases, so it is committed like cft-workspace's own: a file the
-    # fast-forward carries forward rather than one left in the working tree.
-    printf '#!/bin/sh\necho entrypoint >>"$FAKE_DIR/order.log"\n' >"$C/seed/.devcontainer/virtual-agent/entrypoint.sh"
-    chmod +x "$C/seed/.devcontainer/virtual-agent/entrypoint.sh"
     printf 'the commit the pod booted with\n' >"$C/seed/tracked.md"
     printf 'the commit the pod booted with\n' >"$C/seed/other.md"
     rgit -C "$C/seed" add -A
@@ -303,14 +336,14 @@ seed_github_when_asked() {
 }
 
 # The whole of what an owner who does not complete the sign-in goes through. The pod starts with a stored token
-# GitHub has already refused, so the codes are relayed; they go unanswered and the pod asks for a token instead,
-# in `awaiting_credentials`, the phase that puts the owner on the screen with the box to paste one into. Its
-# first pass re-reads the same refused token and must say nothing, or it replaces the message it has just sent
-# with one about a token the owner did not paste. The next token they paste is also refused, which does have to
-# be reported, and the one after it gets the pod booting — so exactly one refusal is reported, not two.
+# GitHub has already refused, so the codes are relayed; they go unanswered and the pod says to restart for another
+# code, in `awaiting_credentials`, while it watches for a token stored some other way. Its first pass re-reads the
+# same refused token and must say nothing, or it replaces the message it has just sent with one about a token
+# nobody stored. The next token stored is also refused, which does have to be reported, and the one after it gets
+# the pod booting — so exactly one refusal is reported, not two.
 #
 # An `rc 137` here is that silence breaking rather than a slow machine: the extra report overwrites the detail
-# the seeder waits for, so nothing is ever pasted and the boot runs until the watchdog kills it. The case takes
+# the seeder waits for, so nothing is ever stored and the boot runs until the watchdog kills it. The case takes
 # about a second and a half of the watchdog's thirty, so a timeout is not what a 137 means.
 case_sign_in_not_completed() {
     setup sign-in-not-completed
@@ -319,7 +352,7 @@ case_sign_in_not_completed() {
         # A second of the wait loop, whose sleep is the 0.05s fake, is twenty-odd passes over the refused token
         # already stored. Without it the next token could arrive before the first pass and the silence this
         # asserts would be silence about nothing.
-        seed_github_when_asked 'Paste a GitHub token at' "$STALE_TOKEN" && "$REAL_SLEEP" 1 &&
+        seed_github_when_asked 'not signed in to GitHub yet' "$STALE_TOKEN" && "$REAL_SLEEP" 1 &&
             seed_github "$OTHER_STALE_TOKEN" &&
             seed_github_when_asked 'refused the stored token' "$GOOD_TOKEN"
     ) &
@@ -334,11 +367,13 @@ case_sign_in_not_completed() {
         ok "stops asking, signs in with the token that works and boots on" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
     [ "$(hub '.prompts | length')" -eq 3 ] && ok "relays its budget of codes, and none while waiting" || no "prompts: $(hub -c '.prompts')"
     [ "$(hub '.loginFailures[0].state')" = failed ] && ok "tells the hub the sign-in did not complete" || no "loginFailures: $(hub -c '.loginFailures')"
-    # `failed` would route an onboarded owner to the warming-up screen, which offers no box to paste a token in.
+    # `failed` would route an onboarded owner to the warming-up screen, off the one that says what to do.
     [ "$(hub '[.status[] | select(.phase == "failed")] | length')" -eq 0 ] &&
-        ok "never fails the agent, which would route the owner off the screen that has the token form" || no "status: $(hub -c '.status')"
-    hub '.status[] | select(.phase == "awaiting_credentials") | .detail' | grep -q 'Paste a GitHub token at' &&
-        ok "asks for a token in the phase that offers one" || no "status: $(hub -c '.status')"
+        ok "never fails the agent, which would route the owner off the screen that says what to do" || no "status: $(hub -c '.status')"
+    hub '.status[] | select(.phase == "awaiting_credentials") | .detail' | grep -q 'Restart the assistant from its settings at .*settings=assistant to be sent another code' &&
+        ok "says to restart the assistant for another code, in the phase that waits on the owner" || no "status: $(hub -c '.status')"
+    [ "$(hub '[.status[] | select(.detail != null) | select(.detail | test("Paste"))] | length')" -eq 0 ] &&
+        ok "asks nobody to paste a GitHub token, which the settings have no box for" || no "status: $(hub -c '.status')"
     # $EXIT_NO_CREDENTIAL also covers an owner who entered a code and had the token it granted refused or lost on
     # the way to being stored, so a message here about what they did not do is false for two of the three ways
     # in. The remedy is the same for all of them; the diagnosis is the client's, and it has already reported it.
@@ -346,7 +381,7 @@ case_sign_in_not_completed() {
         [ "$(hub '[.status[] | select(.detail != null) | select(.detail | test("nobody completed"))] | length')" -eq 0 ] &&
         ok "says the condition rather than blaming the owner for a sign-in they may have completed" || no "status: $(hub -c '.status')"
     [ "$(hub '[.status[] | select(.detail != null) | select(.detail | test("refused the stored token"))] | length')" -eq 1 ] &&
-        ok "reports the token the owner pasted, and not the one already known refused" || no "status: $(hub -c '.status')"
+        ok "reports the token stored since, and not the one already known refused" || no "status: $(hub -c '.status')"
     grep -q 'GitHub answered access_denied' "$C/out" && ok "logs what GitHub answered" || no "the refusal was not logged: $(grep 'github:' "$C/out")"
 }
 
@@ -373,8 +408,8 @@ EOF
         ok "rides out a client failure that is not the owner's and signs in after it" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
     [ "$(cat "$C/client-calls")" -eq 3 ] && ok "retries the sign-in rather than giving up on the first failure" || no "client calls: $(cat "$C/client-calls")"
     grep -q 'github sign-in failed (exit 1); retrying in 30s' "$C/out" && ok "logs the exit code it is retrying" || no "retry not logged: $(grep 'github sign-in' "$C/out")"
-    [ "$(hub '[.status[] | select(.detail != null) | select(.detail | test("Paste a GitHub token"))] | length')" -eq 0 ] &&
-        ok "never asks the owner for a token over a fault of its own" || no "status: $(hub -c '.status')"
+    [ "$(hub '[.status[] | select(.detail != null) | select(.detail | test("not signed in to GitHub yet"))] | length')" -eq 0 ] &&
+        ok "never sends the owner to restart over a fault of its own" || no "status: $(hub -c '.status')"
 }
 
 case_stored_token_no_access() {
@@ -392,13 +427,11 @@ case_stored_token_no_access() {
 
 case_checkout_client() {
     setup checkout-client
-    mkdir -p "$C/ws/cft-workspace/.git" "$C/ws/cft-workspace/.devcontainer/virtual-agent" "$C/ws/cft-workspace/scripts"
+    mkdir -p "$C/ws/cft-workspace/.git" "$C/ws/cft-workspace/scripts"
     # cft-workspace keeps scripts/agent-hub as a shim over the installed client, so a checkout can
     # pin an older one through AGENT_HUB_CLI.
     printf '#!/usr/bin/env bash\nexec "${AGENT_HUB_CLI:-agent-hub}" "$@"\n' >"$C/ws/cft-workspace/scripts/agent-hub"
     chmod +x "$C/ws/cft-workspace/scripts/agent-hub"
-    printf '#!/bin/sh\necho entrypoint >>"$FAKE_DIR/order.log"\n' >"$C/ws/cft-workspace/.devcontainer/virtual-agent/entrypoint.sh"
-    chmod +x "$C/ws/cft-workspace/.devcontainer/virtual-agent/entrypoint.sh"
     boot
     [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git fetch git merge npm install entrypoint " &&
         ok "signs in, then fast-forwards the existing checkout" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
@@ -409,11 +442,9 @@ case_checkout_client() {
 # sign-in and back off forever, so the working installed client has to win.
 case_broken_checkout_client() {
     setup broken-checkout-client
-    mkdir -p "$C/ws/cft-workspace/.git" "$C/ws/cft-workspace/.devcontainer/virtual-agent" "$C/ws/cft-workspace/scripts"
+    mkdir -p "$C/ws/cft-workspace/.git" "$C/ws/cft-workspace/scripts"
     printf '#!/usr/bin/env bash\necho "agent-hub: cannot find module" >&2\nexit 127\n' >"$C/ws/cft-workspace/scripts/agent-hub"
     chmod +x "$C/ws/cft-workspace/scripts/agent-hub"
-    printf '#!/bin/sh\necho entrypoint >>"$FAKE_DIR/order.log"\n' >"$C/ws/cft-workspace/.devcontainer/virtual-agent/entrypoint.sh"
-    chmod +x "$C/ws/cft-workspace/.devcontainer/virtual-agent/entrypoint.sh"
     boot
     [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git fetch git merge npm install entrypoint " &&
         ok "boots through with a shim that cannot run" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
@@ -527,9 +558,7 @@ case_checkout_local_commit() {
 # canned_checkout: a checkout the canned fake git answers for, for the cases about what the script makes of
 # git's stderr rather than about git's rules. No scripts/agent-hub, so the installed client is used.
 canned_checkout() {
-    mkdir -p "$C/ws/cft-workspace/.git" "$C/ws/cft-workspace/.devcontainer/virtual-agent"
-    printf '#!/bin/sh\necho entrypoint >>"$FAKE_DIR/order.log"\n' >"$C/ws/cft-workspace/.devcontainer/virtual-agent/entrypoint.sh"
-    chmod +x "$C/ws/cft-workspace/.devcontainer/virtual-agent/entrypoint.sh"
+    mkdir -p "$C/ws/cft-workspace/.git"
 }
 
 # the_refusal: the sync detail the hub was told, out of the statuses it holds.
@@ -658,45 +687,155 @@ case_client_upgrade_pinned() {
         ok "says the pod is pinned" || no "no reason logged: $(grep 'client' "$C/out")"
 }
 
-# Stage 1 ships with the client, so the package's copy is the one a pod runs: a checkout pinning an older
-# runtime than the client it boots on is exactly what moving the runtime out of the checkout was for.
-case_package_entrypoint() {
-    setup package-entrypoint
-    mkdir -p "$C/pkg/virtual-agent"
-    printf '#!/bin/sh\necho package-entrypoint >>"$FAKE_DIR/order.log"\n' >"$C/pkg/virtual-agent/entrypoint.sh"
-    chmod +x "$C/pkg/virtual-agent/entrypoint.sh"
-    seed_github "$GOOD_TOKEN"
-    boot
-    [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git clone npm install package-entrypoint " &&
-        ok "hands over to the package's own stage 1" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
-    grep -q "handing over to $C/pkg/virtual-agent/entrypoint.sh" "$C/out" &&
-        ok "logs which stage 1 it ran, resolved through the symlink it was invoked by" || no "handover not logged: $(grep 'handing over' "$C/out")"
-}
-
 # The upgrade is what brings stage 1 to a pod whose image client predates it, and npm's global prefix is in the
 # container filesystem rather than on the volume, so that install happens again on every boot of that pod.
-# Resolving stage 1 before the upgrade sent every one of those boots to the checkout instead, for the pod's whole
-# life — which is the image rebuild and digest bump the upgrade exists to avoid.
 case_client_upgrade_ships_entrypoint() {
     setup client-upgrade-ships-entrypoint
+    rm "$C/pkg/virtual-agent/entrypoint.sh"
     seed_github "$GOOD_TOKEN"
     boot FAKE_NPM_SHIPS_ENTRYPOINT=1
     [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git clone npm install package-entrypoint " &&
         ok "upgrades the client before it resolves stage 1" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
     grep -q "handing over to $C/pkg/virtual-agent/entrypoint.sh" "$C/out" &&
-        ok "hands over to the stage 1 the upgrade installed, not the checkout's" || no "handover: $(grep 'handing over' "$C/out")"
+        ok "should hand over to the stage 1 the upgrade installed" || no "handover: $(grep 'handing over' "$C/out")"
 }
 
-# A pod whose client predates the move has stage 1 only in the checkout. The fallback goes once every pod image
-# floor carries a client that ships one.
-case_checkout_entrypoint() {
-    setup checkout-entrypoint
+# A clone that succeeds asks GitHub nothing about the organisation: the lookup only words a refusal.
+case_org_member() {
+    setup org-member
     seed_github "$GOOD_TOKEN"
     boot
     [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git clone npm install entrypoint " &&
-        ok "falls back to the checkout's stage 1 when the package ships none" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
-    grep -q "handing over to $C/ws/cft-workspace/.devcontainer/virtual-agent/entrypoint.sh" "$C/out" &&
-        ok "logs that the stage 1 it ran came from the checkout" || no "handover not logged: $(grep 'handing over' "$C/out")"
+        ok "clones as before" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
+    [ ! -f "$C/membership.paths" ] && ok "looks up no membership when the clone succeeds first time" || no "membership calls: $(cat "$C/membership.paths")"
+}
+
+# An account outside the organisation is answered "Repository not found", where the remedy is joining the
+# organisation rather than being granted the one repo.
+case_org_not_member() {
+    setup org-not-member
+    seed_github "$GOOD_TOKEN"
+    boot FAKE_CLONE_DENIED=3 FAKE_MEMBERSHIP=404 GH_TOKEN=stray-token
+    [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git clone git clone git clone git clone npm install entrypoint " &&
+        ok "goes on retrying the clone and boots once it succeeds, with no restart" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
+    [ "$(sort -u "$C/membership.paths" 2>/dev/null)" = "user/memberships/orgs/hmcts" ] && [ "$(wc -l <"$C/membership.paths")" -eq 3 ] &&
+        ok "looks the membership up on each refused clone, since joining does not change git's error" || no "membership calls: $(cat "$C/membership.paths" 2>/dev/null)"
+    [ ! -f "$C/gh-token.leaks" ] && ok "asks as the signed-in account, not a GH_TOKEN in the environment" || no "$(cat "$C/gh-token.leaks")"
+    [ "$(hub '[.status[] | select(.phase == "awaiting_credentials")] | length')" -eq 1 ] &&
+        hub '.status[] | select(.phase == "awaiting_credentials") | .detail' |
+        grep -q '^github: octocat is not a member of the hmcts GitHub organisation, so this agent cannot fetch its repositories. Ask to join the organisation, then restart this agent\.$' &&
+        ok "tells the owner once which account has to join which organisation" || no "status: $(hub -c '.status')"
+    hub '.status[].detail // empty' | grep -q 'needs read access' && no "also sent the read-access message" || ok "sends the join message in place of the read-access one"
+    [ "$(hub '.status[-1].detail')" = "cloned cft-workspace" ] && ok "reports provisioning again once cloned" || no "status: $(hub -c '.status')"
+}
+
+case_org_invitation_pending() {
+    setup org-invitation-pending
+    seed_github "$GOOD_TOKEN"
+    boot FAKE_CLONE_DENIED=2 FAKE_MEMBERSHIP=pending
+    [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git clone git clone git clone npm install entrypoint " &&
+        ok "boots once the clone succeeds" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
+    [ "$(hub '[.status[] | select(.phase == "awaiting_credentials")] | length')" -eq 1 ] &&
+        hub '.status[] | select(.phase == "awaiting_credentials") | .detail' |
+        grep -q '^github: invitee has been invited to the hmcts GitHub organisation but has not accepted yet. Accept the invitation at https://github.com/orgs/hmcts/invitation, then restart this agent\.$' &&
+        ok "sends the owner to accept the invitation, once" || no "status: $(hub -c '.status')"
+    [ ! -f "$C/api-user.calls" ] && ok "takes the login from the invitation rather than asking again" || no "gh api user was called"
+}
+
+# An owner told to join who is then invited is told to accept, though git's error has not changed.
+case_org_invited_after_refusal() {
+    setup org-invited-after-refusal
+    seed_github "$GOOD_TOKEN"
+    boot FAKE_CLONE_DENIED=2 FAKE_MEMBERSHIP="404 pending"
+    [ "$BOOT_RC" -eq 0 ] && ok "boots once the clone succeeds" || no "rc $BOOT_RC"
+    hub '[.status[] | select(.phase == "awaiting_credentials") | .detail]' | jq -e 'length == 2 and (.[0] | test("Ask to join")) and (.[1] | test("Accept the invitation"))' >/dev/null &&
+        ok "tells the owner to join, then to accept the invitation once they have one" || no "status: $(hub -c '.status')"
+}
+
+# GitHub withholding the answer, as SAML enforcement does, says nothing about membership.
+case_org_check_forbidden() {
+    setup org-check-forbidden
+    seed_github "$GOOD_TOKEN"
+    boot FAKE_CLONE_DENIED=2 FAKE_MEMBERSHIP=403
+    [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git clone git clone git clone npm install entrypoint " &&
+        ok "goes on retrying the clone when GitHub will not answer the lookup" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
+    [ "$(hub '[.status[] | select(.phase == "awaiting_credentials")] | length')" -eq 1 ] &&
+        hub '.status[] | select(.phase == "awaiting_credentials") | .detail' | grep -q 'cannot clone .*needs read access to the repo (remote: Repository not found' &&
+        ok "sends the read-access message" || no "status: $(hub -c '.status')"
+    grep -q 'membership of hmcts not checked: 403' "$C/out" && ok "logs why the lookup settled nothing" || no "not logged: $(grep membership "$C/out")"
+}
+
+# A hand-pasted token without read:org can be answered 404 for a membership that exists.
+case_org_check_without_read_org() {
+    setup org-check-without-read-org
+    seed_github "$GOOD_TOKEN"
+    boot FAKE_CLONE_DENIED=1 FAKE_MEMBERSHIP=404 FAKE_SCOPES="repo"
+    [ "$BOOT_RC" -eq 0 ] && ok "boots once the clone succeeds" || no "rc $BOOT_RC"
+    hub '.status[] | select(.phase == "awaiting_credentials") | .detail' | grep -q 'needs read access to the repo' &&
+        ! hub '.status[].detail // empty' | grep -q 'not a member' &&
+        ok "does not call the owner a non-member on a 404 it cannot trust" || no "status: $(hub -c '.status')"
+}
+
+# A member refused the repo needs access to that repo, which joining would not give them.
+case_org_member_clone_refused() {
+    setup org-member-clone-refused
+    seed_github "$GOOD_TOKEN"
+    boot FAKE_CLONE_DENIED=2 FAKE_MEMBERSHIP=active
+    [ "$BOOT_RC" -eq 0 ] && ok "boots once the clone succeeds" || no "rc $BOOT_RC"
+    [ "$(hub '[.status[] | select(.phase == "awaiting_credentials")] | length')" -eq 1 ] &&
+        hub '.status[] | select(.phase == "awaiting_credentials") | .detail' | grep -q 'cannot clone .*needs read access to the repo' &&
+        ok "sends a member the read-access message, once" || no "status: $(hub -c '.status')"
+}
+
+case_org_from_repo_url() {
+    setup org-from-repo-url
+    seed_github "$GOOD_TOKEN"
+    boot FAKE_CLONE_DENIED=1 VIRTUAL_AGENT_REPO=ssh://git@github.com/acme/cft-workspace.git
+    [ "$(cat "$C/membership.paths" 2>/dev/null)" = "user/memberships/orgs/acme" ] &&
+        ok "looks up the organisation named in an ssh:// repo URL" || no "membership calls: $(cat "$C/membership.paths" 2>/dev/null)"
+    setup org-from-repo-url-https
+    boot FAKE_CLONE_DENIED=1 VIRTUAL_AGENT_REPO=https://github.com/acme-two/cft-workspace.git
+    [ "$(cat "$C/membership.paths" 2>/dev/null)" = "user/memberships/orgs/acme-two" ] &&
+        ok "looks up the organisation named in an https:// repo URL" || no "membership calls: $(cat "$C/membership.paths" 2>/dev/null)"
+    setup org-from-repo-url-other-host
+    boot FAKE_CLONE_DENIED=1 VIRTUAL_AGENT_REPO=https://gitlab.example.com/acme/cft-workspace.git
+    [ "$BOOT_RC" -eq 0 ] && [ ! -f "$C/membership.paths" ] &&
+        ok "looks up nothing for a repo not on github.com" || no "rc $BOOT_RC, membership calls: $(cat "$C/membership.paths" 2>/dev/null)"
+    grep -q 'cannot tell which GitHub organisation owns https://gitlab.example.com/acme/cft-workspace.git' "$C/out" &&
+        ok "logs that it cannot tell the organisation" || no "not logged: $(grep -i organisation "$C/out")"
+}
+
+# A token issued before its account joined an organisation that enforces SAML single sign-on: gh accepts it,
+# and only the clone is refused, so the pod has to sign in afresh rather than retry the same token.
+case_saml_reauth() {
+    setup saml-reauth
+    seed_github "$GOOD_TOKEN"
+    boot FAKE_CLONE_SAML=1 GH_TOKEN=stray-token
+    [ "$BOOT_RC" -eq 0 ] &&
+        order_is "gh login-with-token gh setup-git git clone gh logout gh login-with-token gh setup-git git clone npm install entrypoint " &&
+        ok "signs gh out, signs in again and clones with the new token" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
+    [ "$(hub '.prompts | length')" -eq 1 ] && ok "relays one device code" || no "prompts: $(hub -c '.prompts')"
+    [ ! -f "$C/gh-token.leaks" ] && ok "signs out the account gh holds, not a GH_TOKEN in the environment" || no "$(cat "$C/gh-token.leaks")"
+    hub '.status[] | select(.phase == "awaiting_credentials") | .detail' |
+        grep -q "^github: your GitHub sign-in was made before it was authorised for the hmcts organisation's single sign-on. Open https://github.com/orgs/hmcts/sso to sign in to hmcts, then enter the code your assistant shows to sign in to GitHub again.$" &&
+        ok "tells the owner to sign in to the organisation, then enter the code" || no "status: $(hub -c '.status')"
+    hub '.status[].detail // empty' | grep -q 'needs read access' && no "sent the read-access message" || ok "sends the single sign-on message in place of the read-access one"
+    [ "$(hub '.github')" = "$GOOD_TOKEN" ] && ok "stores the new token on the hub" || no "the token was not stored"
+    [ "$(hub '.status[-1].detail')" = "cloned cft-workspace" ] && ok "reports provisioning again once cloned" || no "status: $(hub -c '.status')"
+}
+
+# A fresh sign-in made without signing in to the organisation first is refused the same way, and more codes would
+# only ask the owner the same thing again.
+case_saml_after_reauth() {
+    setup saml-after-reauth
+    seed_github "$GOOD_TOKEN"
+    boot FAKE_CLONE_SAML=3
+    [ "$BOOT_RC" -eq 0 ] &&
+        order_is "gh login-with-token gh setup-git git clone gh logout gh login-with-token gh setup-git git clone git clone git clone npm install entrypoint " &&
+        ok "signs in again once, then goes on retrying the clone" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
+    [ "$(hub '.prompts | length')" -eq 1 ] && ok "relays no second code" || no "prompts: $(hub -c '.prompts')"
+    [ "$(hub '[.status[] | select(.detail != null) | select(.detail | test("^github: your new GitHub sign-in was not authorised for the hmcts organisation.s single sign-on.*restart this agent to sign in to GitHub again"))] | length')" -eq 1 ] &&
+        ok "says once to sign in to the organisation and restart" || no "status: $(hub -c '.status')"
 }
 
 run_case() {
@@ -721,9 +860,17 @@ run_case() {
         client-upgrade-offline) case_client_upgrade_offline ;;
         client-upgrade-no-npm) case_client_upgrade_no_npm ;;
         client-upgrade-pinned) case_client_upgrade_pinned ;;
-        package-entrypoint) case_package_entrypoint ;;
         client-upgrade-ships-entrypoint) case_client_upgrade_ships_entrypoint ;;
-        checkout-entrypoint) case_checkout_entrypoint ;;
+        org-member) case_org_member ;;
+        org-not-member) case_org_not_member ;;
+        org-invitation-pending) case_org_invitation_pending ;;
+        org-invited-after-refusal) case_org_invited_after_refusal ;;
+        org-check-forbidden) case_org_check_forbidden ;;
+        org-check-without-read-org) case_org_check_without_read_org ;;
+        org-member-clone-refused) case_org_member_clone_refused ;;
+        org-from-repo-url) case_org_from_repo_url ;;
+        saml-reauth) case_saml_reauth ;;
+        saml-after-reauth) case_saml_after_reauth ;;
         *) printf 'unknown case %s (try --list)\n' "$1" >&2; exit 2 ;;
     esac
 }

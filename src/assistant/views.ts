@@ -2,6 +2,9 @@ import { storedClientFeatures } from "../agents/client-features.ts";
 import { repoFileBase } from "../agents/github.ts";
 import { type Skill, storedSkills } from "../agents/skills.ts";
 import type { CredentialKind } from "../credentials/names.ts";
+import { type NavProjectRow, navProjects, searchProjects } from "../feedback/nav-store.ts";
+import { feedbackEnabled } from "../feedback/settings.ts";
+import { hasFeedbackProjects } from "../feedback/store.ts";
 import { agentQuestions, type QuestionView } from "../questions/views.ts";
 import type { AgentStatus } from "../realtime/events.ts";
 import type { Database } from "../store/prisma.ts";
@@ -16,20 +19,27 @@ import { type Artefact, readArtefact } from "./artefact-store.ts";
 import type { ConfluenceExportView } from "./confluence.ts";
 import { readConfluenceExport } from "./confluence-store.ts";
 import type { ConversationRow, ProductChange, SessionState, StopMark } from "./conversation-row.ts";
-import { type ConversationListRow, hasLocalConversation, listConversations, unsentConversation } from "./conversation-store.ts";
+import {
+  type ConversationListRow,
+  hasLocalConversation,
+  hasPodConversation,
+  listConversations,
+  sidebarConversations,
+  unsentConversation
+} from "./conversation-store.ts";
 import { DECK_SELECT, type DeckSummary, deckSummary } from "./deck-store.ts";
 import { FORKED_SELECT, type ForkedView, forkedView } from "./forks.ts";
 import type { GithubExportView } from "./github.ts";
 import { readGithubExport } from "./github-store.ts";
-import { type DateGroup, groupByDate } from "./grouping.ts";
+import { bySidebarOrder, groupForSidebar, type SidebarGroup } from "./grouping.ts";
 import type { JiraExportView } from "./jira.ts";
 import { readJiraExport } from "./jira-store.ts";
 import { LOCAL_SESSION, type LocalSession } from "./local-session.ts";
 import { chatCredentials, onboarded, type Readiness, readiness } from "./onboarding.ts";
 import { hasPod } from "./pods.ts";
 import { productLabel } from "./products.ts";
-import { snippetOf } from "./search.ts";
-import { searchConversations } from "./search-store.ts";
+import { mergeMatches, SEARCH_LIMIT, searchTerms, snippetOf } from "./search.ts";
+import { type ConversationMatchRow, searchConversations } from "./search-store.ts";
 import { type MessageAttachment, unsentAttachments } from "./upload-store.ts";
 
 /** The CFT Workspace as its pages show it. Only ever the viewer's own: nobody sees anyone else's assistant. */
@@ -83,28 +93,71 @@ export function podSessionOf(agentStatus: AgentStatus, sessionState: SessionStat
  * What a chat's row in the sidebar, and its result in the search, is marked with.
  *
  * Decided here rather than in either list, so a chat found by searching is marked exactly as the same chat in the
- * list below it. Three cases and no more:
+ * list below it:
  *
- * - `computer` — a Claude Code session on the person's own machine, which has no pod behind it. It is the one thing
- *   about a chat that no title can say and that changes what the chat can do: it takes no files, cannot be stopped
- *   from here and answers only while the laptop is connected. `hasPod` is what decides it, so the screens and the
- *   stores cannot disagree. The state of its session rides along, because that is the other thing the person cannot
- *   see from the title and the mark is the only place it is said in the list.
- * - `assistant` — a chat running on their assistant's pod, marked to tell it apart from a local one, and carrying
- *   its session's state as the local mark does; see `podSessionOf`.
- * - `null` — nothing to mark. Every one of the person's chats runs on their assistant, so a cloud against each of
- *   them would distinguish them from nothing; see `hasLocalConversation`.
+ * - `computer` — a Claude Code session on the person's own machine, which has no pod behind it (`hasPod`). The state
+ *   of its session rides along, because the mark is the only place the list says it.
+ * - `assistant` — a chat running on their assistant's pod, carrying its session's state; see `podSessionOf`.
+ * - `null` — nothing to mark, because the person's list holds one kind of item only; see `showsMarks`.
  */
 export type ConversationMark = { where: "computer"; session: LocalSession } | { where: "assistant"; session: PodSession } | null;
 
+/** The kinds of item the sidebar lists: a chat on the person's computer, one on their pod, and a feedback project. */
+export type SidebarKind = "local" | "cloud" | "feedback";
+
+/**
+ * Whether every row carries the icon of its kind. Only when the person's list holds more than one kind: an icon
+ * against every row of a list with nothing else in it would distinguish it from nothing. Asked of the whole list
+ * rather than the page the sidebar loaded, which is capped and so could miss the only item of another kind.
+ */
+export function showsMarks(kinds: ReadonlySet<SidebarKind>): boolean {
+  return kinds.size > 1;
+}
+
+/** `feedback` given, whether the person has a feedback project, from projects the caller has read already. */
+async function listMarked(db: Database, ownerOid: string, feedback?: Promise<boolean>): Promise<boolean> {
+  const [local, cloud, hasFeedback] = await Promise.all([
+    hasLocalConversation(db, ownerOid),
+    hasPodConversation(db, ownerOid),
+    feedback ?? (feedbackEnabled() ? hasFeedbackProjects(db, ownerOid) : false)
+  ]);
+  const kinds: [SidebarKind, boolean][] = [
+    ["local", local],
+    ["cloud", cloud],
+    ["feedback", hasFeedback]
+  ];
+  return showsMarks(new Set(kinds.flatMap(([kind, has]) => (has ? [kind] : []))));
+}
+
 export interface ConversationLink {
+  kind: "local" | "cloud";
   id: string;
   title: string;
   product: string;
   productLabel: string;
   lastActiveAt: string;
+  /** When the owner pinned it, which puts it in the sidebar's Pinned section; null while it is not pinned. */
+  pinnedAt: string | null;
   mark: ConversationMark;
 }
+
+/** A feedback project the viewer owns or is on the team of, as a sidebar row. */
+export interface FeedbackProjectLink {
+  kind: "feedback";
+  id: string;
+  title: string;
+  lastActiveAt: string;
+  /** When the viewer pinned it, for them alone. */
+  pinnedAt: string | null;
+  /** Whether the row carries the feedback icon; see `showsMarks`. */
+  marked: boolean;
+  unread: number;
+  archivable: boolean;
+  /** Its live share links, which the row's menu copies. */
+  links: { label: string; token: string }[];
+}
+
+export type SidebarItem = ConversationLink | FeedbackProjectLink;
 
 export const UNTITLED = "New chat";
 
@@ -128,59 +181,142 @@ export async function assistantSummary(db: Database, assistant: VirtualAgentRow,
   };
 }
 
-type LinkRow = Pick<ConversationListRow, "id" | "title" | "product" | "lastActiveAt" | "virtualAgentId" | "agentStatus" | "sessionState">;
-
-/** `anyLocal` is `hasLocalConversation`'s answer for the whole of the person's list; see `ConversationMark`. */
-function markOf(row: LinkRow, anyLocal: boolean): ConversationMark {
-  if (!hasPod(row)) {
-    return { where: "computer", session: LOCAL_SESSION[row.agentStatus] };
-  }
-  return anyLocal ? { where: "assistant", session: podSessionOf(row.agentStatus, row.sessionState) } : null;
+/**
+ * The skills the assistant's pod reports, as the newest of its sessions to report any gave them: the same list the
+ * composer's "/" menu offers in that session's chat. Every session on a pod loads the plugins the pod booted with, so
+ * the newest stands for the pod running now.
+ *
+ * While the pod holds a launch token, only a session heard from since it was minted counts. A pod boots on a token
+ * minted for it, and every path that replaces a pod — a restart, a change of size or plugins, a stop, a takeover —
+ * drops the token first, which shuts the old pod's sessions out. So a session heard from since the mint is one of this
+ * boot's, and one from an earlier boot, with the plugins that boot loaded, is passed over. With no token the pod is
+ * stopped or not yet claimed, and the newest session of any boot stands for the next one: an idle or evening stop
+ * changes no plugins, and the new chat's list would otherwise vanish every time the pod sleeps.
+ *
+ * A conversation's agent is created with no skills and a fresh heartbeat before its session registers, so a row with
+ * none is passed over rather than read as a pod that has none. Empty until a session has reported its skills.
+ */
+export async function podSkills(db: Database, assistant: Pick<VirtualAgentRow, "id" | "ownerOid">): Promise<Skill[]> {
+  const [newest] = await db.$queryRaw<{ skills: unknown }[]>`
+    SELECT a.skills
+      FROM agent a
+      JOIN virtual_agent v ON v.id = a.virtual_agent_id
+     WHERE v.id = ${assistant.id}::uuid
+       AND a.owner_oid = ${assistant.ownerOid}
+       AND a.skills <> '[]'::jsonb
+       AND (v.launch_token_issued_at IS NULL OR a.last_heartbeat_at >= v.launch_token_issued_at)
+     ORDER BY a.last_heartbeat_at DESC
+     LIMIT 1
+  `;
+  return storedSkills(newest?.skills);
 }
 
-function toLink(row: LinkRow, anyLocal: boolean): ConversationLink {
+type LinkRow = Pick<ConversationListRow, "id" | "title" | "product" | "lastActiveAt" | "virtualAgentId" | "agentStatus" | "sessionState">;
+
+/** `marked` is `listMarked`'s answer for the whole of the person's list; see `ConversationMark`. */
+function markOf(row: LinkRow, marked: boolean): ConversationMark {
+  if (!marked) {
+    return null;
+  }
+  return hasPod(row)
+    ? { where: "assistant", session: podSessionOf(row.agentStatus, row.sessionState) }
+    : { where: "computer", session: LOCAL_SESSION[row.agentStatus] };
+}
+
+function toLink(row: LinkRow, marked: boolean): Omit<ConversationLink, "pinnedAt"> {
   return {
+    kind: hasPod(row) ? "cloud" : "local",
     id: row.id,
     title: row.title ?? UNTITLED,
     product: row.product,
     productLabel: productLabel(row.product),
     lastActiveAt: row.lastActiveAt.toISOString(),
-    mark: markOf(row, anyLocal)
+    mark: markOf(row, marked)
+  };
+}
+
+function listLink(row: ConversationListRow, marked: boolean): ConversationLink {
+  return { ...toLink(row, marked), pinnedAt: row.pinnedAt?.toISOString() ?? null };
+}
+
+function projectLink(row: NavProjectRow, marked: boolean): FeedbackProjectLink {
+  return {
+    kind: "feedback",
+    id: row.id,
+    title: row.name,
+    lastActiveAt: row.lastActiveAt.toISOString(),
+    pinnedAt: row.pinnedAt?.toISOString() ?? null,
+    marked,
+    unread: row.unread,
+    archivable: row.archivable,
+    links: row.links
   };
 }
 
 /** The chats running on one of the owner's virtual agents, for its page in the hub. */
 export async function conversationLinks(db: Database, ownerOid: string, virtualAgentId: string): Promise<ConversationLink[]> {
-  // Every chat here runs on the pod being asked about, so none of them is local; the question is still asked,
-  // because `mark` is a statement about the person's list and not about the page that happens to be reading it.
-  const [rows, anyLocal] = await Promise.all([listConversations(db, ownerOid, 200, virtualAgentId), hasLocalConversation(db, ownerOid)]);
-  return rows.map((row) => toLink(row, anyLocal));
+  // `mark` is a statement about the person's whole list, not about the page that happens to be reading it.
+  const [rows, marked] = await Promise.all([listConversations(db, ownerOid, 200, virtualAgentId), listMarked(db, ownerOid)]);
+  return rows.map((row) => listLink(row, marked));
 }
 
-export async function conversationGroups(db: Database, ownerOid: string, now: Date = new Date()): Promise<{ label: DateGroup; items: ConversationLink[] }[]> {
-  const [rows, anyLocal] = await Promise.all([listConversations(db, ownerOid), hasLocalConversation(db, ownerOid)]);
-  return groupByDate(
-    rows.map((row) => toLink(row, anyLocal)),
-    (link) => new Date(link.lastActiveAt),
+/** The sidebar: the viewer's chats and, while prototype feedback is on, their feedback projects, in one list. */
+export async function sidebarGroups(db: Database, ownerOid: string, now: Date = new Date()): Promise<{ label: SidebarGroup; items: SidebarItem[] }[]> {
+  const read = feedbackEnabled() ? navProjects(db, ownerOid) : Promise.resolve([]);
+  const [{ pinned, recent }, projects, marked] = await Promise.all([
+    sidebarConversations(db, ownerOid),
+    read,
+    listMarked(
+      db,
+      ownerOid,
+      read.then((rows) => rows.length > 0)
+    )
+  ]);
+  const items: SidebarItem[] = [...pinned, ...recent].map((row) => listLink(row, marked));
+  items.push(...projects.map((row) => projectLink(row, marked)));
+  return groupForSidebar(
+    items.sort(bySidebarOrder),
+    (item) => new Date(item.lastActiveAt),
+    (item) => item.pinnedAt !== null,
     now
   );
 }
 
-export interface ConversationMatch extends ConversationLink {
+/** A chat found by the sidebar's search, which says nothing of pinning: the results are one list in order of activity. */
+export interface ConversationMatch extends Omit<ConversationLink, "pinnedAt"> {
   /** Why the chat matched, when its title does not already show it: the words around the match in one message. */
   snippet: string | null;
 }
 
+/** A feedback project found by the sidebar's search, by its name. */
+export type FeedbackProjectMatch = Pick<FeedbackProjectLink, "kind" | "id" | "title" | "lastActiveAt" | "marked">;
+
+export type SidebarMatch = ConversationMatch | FeedbackProjectMatch;
+
+function chatMatch(row: ConversationMatchRow, marked: boolean): ConversationMatch {
+  return { ...toLink(row, marked), snippet: snippetOf(row.excerpt) };
+}
+
 /**
- * The viewer's own chats matching every word of `query`, for the sidebar's search.
- *
- * Marked through the same `toLink` and the same `hasLocalConversation` as the grouped list, so the search cannot
- * answer differently from the page for the same person: the mark is on the result rather than left to the browser to
- * work out from a list it can only see a page of.
+ * The viewer's own chats matching every word of `query`. Marked through the same `toLink` and the same `listMarked`
+ * as the grouped list, so the search cannot answer differently from the page for the same person.
  */
 export async function conversationMatches(db: Database, ownerOid: string, query: string): Promise<ConversationMatch[]> {
-  const [rows, anyLocal] = await Promise.all([searchConversations(db, ownerOid, query), hasLocalConversation(db, ownerOid)]);
-  return rows.map((row) => ({ ...toLink(row, anyLocal), snippet: snippetOf(row.excerpt) }));
+  const [rows, marked] = await Promise.all([searchConversations(db, ownerOid, query), listMarked(db, ownerOid)]);
+  return rows.map((row) => chatMatch(row, marked));
+}
+
+/** The sidebar's search: the chats `conversationMatches` finds, and the feedback projects the sidebar lists whose name matches. */
+export async function sidebarMatches(db: Database, ownerOid: string, query: string): Promise<SidebarMatch[]> {
+  const [rows, projects, marked] = await Promise.all([
+    searchConversations(db, ownerOid, query),
+    feedbackEnabled() ? searchProjects(db, ownerOid, searchTerms(query), SEARCH_LIMIT) : [],
+    listMarked(db, ownerOid)
+  ]);
+  return mergeMatches<SidebarMatch>(
+    rows.map((row) => chatMatch(row, marked)),
+    projects.map(({ id, name, lastActiveAt }) => ({ kind: "feedback", id, title: name, lastActiveAt: lastActiveAt.toISOString(), marked }))
+  );
 }
 
 /**
@@ -220,6 +356,8 @@ export interface ConversationView {
   title: string;
   product: string;
   productLabel: string;
+  /** Whether the owner pinned it, so its options menu offers Unpin rather than Pin. */
+  pinned: boolean;
   productHistory: ProductChange[];
   /** Every answer the person stopped, so the thread shows where each one was cut off. */
   stopHistory: StopMark[];
@@ -238,9 +376,10 @@ export interface ConversationView {
    */
   repoBase: string | null;
   /**
-   * What the composer's "/" autocomplete offers: the skills the conversation's session reported. Empty until one has
-   * registered, so a chat whose assistant is not running yet gets no list. No access check guards it, unlike the
-   * hub's agent page: a conversation is only ever read by its owner, who is the only person who can message it.
+   * What the composer's "/" autocomplete offers: the skills the conversation's session reported, or, on a pod before
+   * that session has reported any, the pod's (`podSkills`), which its session will load too. A chat on a laptop has
+   * no pod to ask, so it has none until its session reports them. No access check guards it, unlike the hub's agent
+   * page: a conversation is only ever read by its owner, who is the only person who can message it.
    */
   skills: Skill[];
   /**
@@ -295,18 +434,22 @@ export async function conversationView(db: Database, conversation: ConversationR
     agentConversation(db, conversation.ownerOid, agent),
     agentQuestions(db, conversation.ownerOid, agent)
   ]);
+  const ownSkills = storedSkills(current?.skills);
+  const skills =
+    ownSkills.length === 0 && hasPod(conversation) ? await podSkills(db, { id: conversation.virtualAgentId, ownerOid: conversation.ownerOid }) : ownSkills;
   return {
     id: conversation.id,
     title: conversation.title ?? UNTITLED,
     product: conversation.product,
     productLabel: productLabel(conversation.product),
+    pinned: conversation.pinnedAt !== null,
     productHistory: conversation.productHistory,
     stopHistory: conversation.stopHistory,
     local: !hasPod(conversation),
     agentId,
     agentStatus: current?.status ?? "offline",
     repoBase: repoFileBase(current?.repo ?? null, current?.branch ?? null),
-    skills: storedSkills(current?.skills),
+    skills,
     clientFeatures: storedClientFeatures(current?.clientFeatures),
     sessionState: conversation.sessionState,
     sessionDetail: conversation.sessionDetail,

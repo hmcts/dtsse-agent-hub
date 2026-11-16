@@ -703,6 +703,24 @@ describe("createApi requests", () => {
     expect(calls[0]?.init?.method).toBe("DELETE");
   });
 
+  it("should ask for a Microsoft 365 token on the person's own route, or on its virtual agent's for a pod", async () => {
+    // Arrange
+    const token = { access_token: "graph", expires_at: "2026-12-01T09:59:00.000Z", permissions: ["Mail.Read"] };
+    const { calls, fetchImpl } = recordingFetch(() => new Response(JSON.stringify(token), { status: 200 }));
+    const stubbed = createApi({ env: {}, baseUrl: "https://hub.example.net", devUser: DEV_USER, fetchImpl });
+
+    // Act
+    const mine = await stubbed.microsoftToken(null);
+    await stubbed.microsoftToken("va 1");
+
+    // Assert
+    expect(mine).toEqual(token);
+    expect(calls.map((call) => [call.init?.method, call.url])).toEqual([
+      ["GET", "https://hub.example.net/api/agent/microsoft/token"],
+      ["GET", "https://hub.example.net/api/virtual/va%201/microsoft/token"]
+    ]);
+  });
+
   it("should abort a request that outlives its timeout", async () => {
     // Arrange
     const { calls, fetchImpl } = recordingFetch(() => new Response("{}", { status: 200 }));

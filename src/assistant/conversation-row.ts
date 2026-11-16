@@ -24,6 +24,8 @@ export interface ConversationRow {
   sessionDetail: string | null;
   lastActiveAt: Date;
   createdAt: Date;
+  /** When the owner pinned it above the sidebar's date groups; null while it is not pinned. */
+  pinnedAt: Date | null;
 }
 
 export type SessionState = "starting" | "live" | "queued";
@@ -51,7 +53,8 @@ export const SELECT = {
   sessionState: true,
   sessionDetail: true,
   lastActiveAt: true,
-  createdAt: true
+  createdAt: true,
+  pinnedAt: true
 } as const;
 
 /** The stored product history, as the thread reads it. */
@@ -86,6 +89,7 @@ export function toRow(row: {
   sessionDetail: string | null;
   lastActiveAt: Date;
   createdAt: Date;
+  pinnedAt: Date | null;
 }): ConversationRow {
   const state = row.sessionState;
   return {

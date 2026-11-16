@@ -1,0 +1,49 @@
+query BriefingPullRequests($mine: String!, $asked: String!) {
+  mine: search(query: $mine, type: ISSUE, first: 30) {
+    issueCount
+    nodes {
+      ... on PullRequest {
+        url
+        title
+        isDraft
+        reviewDecision
+        updatedAt
+        commits(last: 1) {
+          nodes {
+            commit {
+              statusCheckRollup {
+                state
+                contexts(first: 50) {
+                  nodes {
+                    ... on CheckRun {
+                      name
+                      conclusion
+                    }
+                    ... on StatusContext {
+                      context
+                      state
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  asked: search(query: $asked, type: ISSUE, first: 30) {
+    issueCount
+    nodes {
+      ... on PullRequest {
+        url
+        title
+        isDraft
+        updatedAt
+        author {
+          login
+        }
+      }
+    }
+  }
+}

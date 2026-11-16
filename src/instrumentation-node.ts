@@ -1,3 +1,4 @@
+import { feedbackEnabled } from "./feedback/settings.ts";
 import { loadSecrets } from "./platform/secrets.ts";
 import { startRealtime } from "./realtime/start.ts";
 import { virtualAgentsEnabled } from "./virtual-agents/settings.ts";
@@ -48,7 +49,8 @@ async function startMonitoring(): Promise<void> {
  * Marks silent agents offline, and expires deliveries to long-offline ones, every 30 seconds; and trims transcripts
  * to their retention and per-agent cap, drops the bytes of Assistant uploads nothing fetched, and collects the local
  * chats nothing ever happened in, every 10 minutes; and, with virtual agents on, fails, expires and stops virtual
- * agents every minute, and times out and deletes deck builds every 10 minutes. Imported dynamically, after `readSecrets`, because
+ * agents every minute, and times out and deletes deck builds every 10 minutes; and, with prototype feedback on,
+ * deletes what is past each project's retention every 10 minutes. Imported dynamically, after `readSecrets`, because
  * `store/prisma.ts` resolves `POSTGRES_*` at module load and would otherwise capture the local default.
  */
 async function startSweeping(): Promise<void> {
@@ -62,6 +64,14 @@ async function startSweeping(): Promise<void> {
     startUploadSweep(prisma);
     const { startLocalConversationSweep } = await import("./assistant/local-sweep.ts");
     startLocalConversationSweep(prisma);
+    if (feedbackEnabled()) {
+      const { feedbackBlobs } = await import("./feedback/blob.ts");
+      const blobs = feedbackBlobs();
+      if (blobs !== undefined) {
+        const { startFeedbackSweep } = await import("./feedback/sweep.ts");
+        startFeedbackSweep(prisma, blobs);
+      }
+    }
     if (virtualAgentsEnabled()) {
       const { startVirtualAgentSweep } = await import("./virtual-agents/sweep.ts");
       startVirtualAgentSweep(prisma);

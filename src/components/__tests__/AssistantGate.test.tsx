@@ -94,6 +94,8 @@ function home(chat: AssistantHome["chat"], stored: CredentialStatus[] = [], over
     conversations: [],
     plugins: null,
     welsh: false,
+    briefing: false,
+    skills: [],
     chat
   };
 }
@@ -104,6 +106,7 @@ function conversation(local: boolean): ConversationView {
     title: "Writing a story",
     product: "ccd",
     productLabel: "CCD",
+    pinned: false,
     productHistory: [],
     stopHistory: [],
     local,
@@ -146,6 +149,7 @@ function actions(): ChatActions {
     stop: vi.fn(async () => ({ ok: true as const, stopped: true })),
     setProduct: ok(),
     rename: ok(),
+    pin: ok(),
     remove: ok(),
     answerQuestion: ok(),
     saveArtefact: vi.fn(async () => ({ ok: true as const, saved: true as const, version: 1 })),

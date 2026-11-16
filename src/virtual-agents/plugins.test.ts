@@ -13,9 +13,11 @@ import {
 } from "./plugins.ts";
 
 describe("ALWAYS_ON_PLUGINS", () => {
-  it("should hold slides and not welsh", () => {
-    expect(ALWAYS_ON_PLUGINS).toEqual(["slides"]);
+  it("should hold slides and the Microsoft 365 plugins and not welsh", () => {
+    expect(ALWAYS_ON_PLUGINS).toEqual(["slides", "m365", "m365-files"]);
     expect(isAlwaysOn("slides")).toBe(true);
+    expect(isAlwaysOn("m365")).toBe(true);
+    expect(isAlwaysOn("m365-files")).toBe(true);
     expect(isAlwaysOn("welsh")).toBe(false);
   });
 
@@ -152,9 +154,9 @@ describe("tickedPlugins", () => {
 });
 
 describe("podPlugins", () => {
-  it("should add slides to what is stored, once and in code-point order", () => {
-    expect(podPlugins([])).toEqual(["slides"]);
-    expect(podPlugins(["pcs", "welsh"])).toEqual(["pcs", "slides", "welsh"]);
+  it("should add the always-on plugins to what is stored, once and in code-point order", () => {
+    expect(podPlugins([])).toEqual(["m365", "m365-files", "slides"]);
+    expect(podPlugins(["pcs", "welsh"])).toEqual(["m365", "m365-files", "pcs", "slides", "welsh"]);
   });
 
   it("should give the same list when a row still holds slides", () => {

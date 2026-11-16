@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import type { Env } from "../env.ts";
 
 /** The plugins in this package, by name. */
-export const BUNDLED_PLUGINS: readonly string[] = ["welsh", "slides"];
+export const BUNDLED_PLUGINS: readonly string[] = ["welsh", "slides", "m365", "m365-files"];
 
 /** The plugin that carries `scripts/slides`, which deck builds run. */
 export const SLIDES_PLUGIN = "slides";
@@ -21,9 +21,11 @@ export const SLIDES_PLUGIN = "slides";
 /**
  * The bundled plugins every pod loads, ticked or not. Slides is one because the Assistant's own UI (the slides panel,
  * a deck's history, editing and builds) depends on it, so a pod without it would break a screen the person still sees.
- * The hub mirrors this list in `src/virtual-agents/plugins.ts`.
+ * The Microsoft 365 plugins are, because pressing Connect for Microsoft 365 in the Assistant's settings is the opt-in:
+ * a second choice to tick would only be a way to have connected and still not be able to use it. Their skills say to
+ * press Connect when the person has not. The hub mirrors this list in `src/virtual-agents/plugins.ts`.
  */
-export const ALWAYS_ON_PLUGINS: readonly string[] = [SLIDES_PLUGIN];
+export const ALWAYS_ON_PLUGINS: readonly string[] = [SLIDES_PLUGIN, "m365", "m365-files"];
 
 export const isAlwaysOn = (name: string): boolean => ALWAYS_ON_PLUGINS.includes(name);
 

@@ -6,7 +6,7 @@ describe("isSignInKind", () => {
     ["github", true],
     ["azure", true],
     ["atlassian", true],
-    ["claude", false],
+    ["claude", true],
     ["jenkins", false],
     ["claude_md", false],
     ["git_identity", false],

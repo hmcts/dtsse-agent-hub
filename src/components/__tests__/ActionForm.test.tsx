@@ -120,4 +120,22 @@ describe("ActionForm", () => {
     expect(screen.getByRole("link", { name: "Sign in again" })).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
   });
+
+  // Every one of these forms is the Assistant's, whose light theme the hub's pale greens and reds cannot be read on.
+  it("should word a confirmation and a refusal in the Assistant's colours when the action answers", async () => {
+    const action = vi
+      .fn<(form: FormData) => Promise<{ ok: true; confirmation: string } | { ok: false; error: string }>>()
+      .mockResolvedValueOnce({ ok: true, confirmation: "Saved" })
+      .mockResolvedValueOnce({ ok: false, error: "that name is taken" });
+    render(
+      <ActionForm action={action} label="Rename">
+        <input name="name" defaultValue="x" />
+      </ActionForm>
+    );
+
+    await submit();
+    expect(screen.getByRole("status").className).toContain("text-asst-ok");
+    await submit();
+    expect(screen.getByRole("alert").className).toContain("text-asst-error");
+  });
 });

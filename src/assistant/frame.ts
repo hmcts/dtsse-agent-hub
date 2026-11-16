@@ -33,7 +33,7 @@ export interface AssistantFrame {
   deck_updated_by: "user" | "agent" | null;
   /** Moved on by every write of the outline, so an amend of the person's latest version is seen though `deck_version` stays. */
   deck_revision: number;
-  /** The newest kept version the session wrote itself, 0 when none is: what the envelope tells it to diff from. */
+  /** The newest kept version the session wrote itself, 0 when none is: what the prompt's context tells it to diff from. */
   deck_agent_version: number;
   /** While an export to Jira is pending: what to create, which the session carries out with `twg`. */
   jira_export?: JiraExportFrame;

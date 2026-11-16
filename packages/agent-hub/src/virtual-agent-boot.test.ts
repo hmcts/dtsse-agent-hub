@@ -3,7 +3,8 @@
 // is bash, so what it asserts stays in bash and this reads its `ok <name>` / `FAIL <name>: …` lines.
 //
 // One hub per case, and one run of the script per case: every case reads a virtual agent whose status,
-// prompts and completes start empty, which the script used to get by restarting the mock hub between cases.
+// prompts and completes start empty. Nothing else is shared — each run has its own temp directory, state file
+// and fake github.com — so the cases run concurrently.
 // The hub runs in this process, so the script is spawned asynchronously — `spawnSync` would block the event
 // loop and the hub would never answer.
 import { spawn, spawnSync } from "node:child_process";
@@ -46,9 +47,17 @@ const CASES = [
   "client-upgrade-offline",
   "client-upgrade-no-npm",
   "client-upgrade-pinned",
-  "package-entrypoint",
   "client-upgrade-ships-entrypoint",
-  "checkout-entrypoint"
+  "org-member",
+  "org-not-member",
+  "org-invitation-pending",
+  "org-invited-after-refusal",
+  "org-check-forbidden",
+  "org-check-without-read-org",
+  "org-member-clone-refused",
+  "org-from-repo-url",
+  "saml-reauth",
+  "saml-after-reauth"
 ];
 
 let stateDir: string;
@@ -150,18 +159,14 @@ describe("test/boot.test.sh", () => {
     expect(result.stdout.trim().split("\n")).toEqual(CASES);
   });
 
-  it.each(CASES)(
-    "should pass every assertion when the pod boots in the %s case",
-    async (name) => {
-      // Act
-      const run = await runCase(name);
+  it.concurrent.for(CASES)("should pass every assertion when the pod boots in the %s case", { timeout: CASE_TIMEOUT }, async (name, { expect }) => {
+    // Act
+    const run = await runCase(name);
 
-      // Assert
-      expect(run.fails, run.out).toEqual([]);
-      expect(run.oks.length, run.out).toBeGreaterThan(0);
-      expect(run.summary, run.out).toEqual({ passed: run.oks.length, failed: 0 });
-      expect(run.code, run.out).toBe(0);
-    },
-    CASE_TIMEOUT
-  );
+    // Assert
+    expect(run.fails, run.out).toEqual([]);
+    expect(run.oks.length, run.out).toBeGreaterThan(0);
+    expect(run.summary, run.out).toEqual({ passed: run.oks.length, failed: 0 });
+    expect(run.code, run.out).toBe(0);
+  });
 });

@@ -556,6 +556,7 @@ function conversation(overrides: Partial<ConversationView> = {}): ConversationVi
     title: "Writing a story",
     product: "ccd",
     productLabel: "CCD",
+    pinned: false,
     productHistory: [],
     stopHistory: [],
     local: false,
@@ -585,6 +586,7 @@ function actions(): ChatActions {
     stop: vi.fn(async () => ({ ok: true as const, stopped: true })),
     setProduct: vi.fn(async () => ({ ok: true as const })),
     rename: vi.fn(async () => ({ ok: true as const })),
+    pin: vi.fn(async () => ({ ok: true as const })),
     remove: vi.fn(async () => ({ ok: true as const })),
     answerQuestion: vi.fn(async () => ({ ok: true as const })),
     saveArtefact: vi.fn(async () => ({ ok: true as const, saved: true as const, version: 1 })),
@@ -713,7 +715,7 @@ describe("EmptyChat attaching before the chat exists", () => {
   }
 
   function newChat(acts: EmptyChatActions, unsent?: UnsentChat) {
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={acts} unsent={unsent} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} skills={[]} actions={acts} unsent={unsent} />);
     return screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
   }
 
@@ -860,7 +862,7 @@ describe("EmptyChat when the first message into an opened conversation is refuse
       send: vi.fn(async () => ({ ok: false as const, error: "that conversation no longer exists" })),
       setProduct: vi.fn(async () => ({ ok: true as const }))
     };
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={acts} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} skills={[]} actions={acts} />);
     const box = screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
     fireEvent.change(box, { target: { value: "have a look" } });
     await choose(file("letter.pdf", 2048));
@@ -891,7 +893,7 @@ describe("EmptyChat when the person changes their mind while the chat is being o
       send: vi.fn(async () => ({ ok: true as const })),
       setProduct: vi.fn(async () => ({ ok: true as const }))
     };
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={acts} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} skills={[]} actions={acts} />);
     await choose(file("letter.pdf", 2048));
 
     // Removed while the conversation is still being created, so there is no upload id to discard yet.
@@ -916,7 +918,7 @@ describe("EmptyChat when a later change of product cannot be saved", () => {
       send: vi.fn(async () => ({ ok: true as const })),
       setProduct: vi.fn(async () => ({ ok: false as const, error: "that conversation no longer exists" }))
     };
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={acts} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} skills={[]} actions={acts} />);
     await choose(file("letter.pdf", 2048));
     await finished();
 
@@ -952,7 +954,7 @@ describe("EmptyChat remounted after a file was attached", () => {
   };
 
   function newChat(acts: EmptyChatActions, resumed?: UnsentChat) {
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={acts} unsent={resumed} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} skills={[]} actions={acts} unsent={resumed} />);
     return screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
   }
 
@@ -1050,6 +1052,7 @@ describe("EmptyChat remembering the product with no conversation yet", () => {
         viewerOid={VIEWER}
         starters={STARTERS}
         templates={TEMPLATES}
+        skills={[]}
         actions={{
           start: vi.fn(async () => ({ ok: true as const, id: "started" })),
           open: vi.fn(async () => ({ ok: true as const, id: CONVERSATION })),
@@ -1092,6 +1095,7 @@ describe("EmptyChat when the tab will not keep anything", () => {
         viewerOid={VIEWER}
         starters={STARTERS}
         templates={TEMPLATES}
+        skills={[]}
         actions={{
           start: vi.fn(async () => ({ ok: true as const, id: "started" })),
           open: vi.fn(async () => ({ ok: true as const, id: CONVERSATION })),

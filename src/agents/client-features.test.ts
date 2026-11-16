@@ -7,6 +7,7 @@ import {
   podGate,
   podLacks,
   podSupports,
+  sessionLacks,
   storedClientFeatures
 } from "./client-features.ts";
 
@@ -124,5 +125,20 @@ describe("podLacks", () => {
 
   it("should read the main session's claim when the pod reported none of its own", () => {
     expect(podLacks({ status: "running", clientFeatures: null, agent: { clientFeatures: ["lookups"] } }, "github-lookups")).toBe(true);
+  });
+});
+
+describe("sessionLacks", () => {
+  it("should say a running session lacks a feature when its claim leaves the feature out or claims nothing", () => {
+    expect(sessionLacks(["stop"], "idle", "plain-prompt")).toBe(true);
+    expect(sessionLacks(null, "busy", "plain-prompt")).toBe(true);
+  });
+
+  it("should not when the session claims the feature", () => {
+    expect(sessionLacks(["plain-prompt"], "idle", "plain-prompt")).toBe(false);
+  });
+
+  it("should not count a session that is offline, whose claim may be an earlier session's", () => {
+    expect(sessionLacks(["stop"], "offline", "plain-prompt")).toBe(false);
   });
 });

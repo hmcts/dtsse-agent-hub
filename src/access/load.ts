@@ -61,3 +61,15 @@ export async function virtualAgentSessions(db: Database, virtualAgentId: string)
   const rows = await db.agent.findMany({ where: { virtualAgentId }, select: { id: true } });
   return rows.map((row) => row.id);
 }
+
+/** A feedback project's team besides its owner, which `feedbackProjectAccess` and `feedbackLinkAccess` read. */
+export async function feedbackMemberOids(db: Database, projectId: string): Promise<string[]> {
+  const rows = await db.feedbackMember.findMany({ where: { projectId }, select: { memberOid: true }, orderBy: { memberOid: "asc" } });
+  return rows.map((row) => row.memberOid);
+}
+
+/** A feedback project's owner and team, for a rule asked of a project named only by its id; `undefined` for none. */
+export async function feedbackTeam(db: Database, projectId: string): Promise<{ ownerOid: string; memberOids: string[] } | undefined> {
+  const project = await db.feedbackProject.findUnique({ where: { id: projectId }, select: { ownerOid: true } });
+  return project === null ? undefined : { ownerOid: project.ownerOid, memberOids: await feedbackMemberOids(db, projectId) };
+}

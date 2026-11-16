@@ -342,8 +342,10 @@ describe("hubPlugins", () => {
     const l = layout();
     marketplacePlugin(l, "pcs");
     const slides = installBundled("slides", l.project);
+    const m365 = installBundled("m365", l.project);
+    const files = installBundled("m365-files", l.project);
     const welsh = installBundled("welsh", l.project);
-    const dirs = [welsh, slides].join(path.delimiter);
+    const dirs = [welsh, files, slides, m365].join(path.delimiter);
     const env = { AGENT_HUB_PLUGINS: "pcs,welsh,slides,welsh", [BUNDLED_DIRS_VAR]: dirs };
 
     // Act
@@ -352,10 +354,12 @@ describe("hubPlugins", () => {
     // Assert
     expect(found).toEqual([
       { name: "slides", dir: slides },
+      { name: "m365", dir: m365 },
+      { name: "m365-files", dir: files },
       { name: "welsh", dir: welsh },
       { name: "pcs", dir: path.join(l.project, "apps", "pcs", ".claude") }
     ]);
-    expect(found.slice(0, 2).map((plugin) => plugin.name)).toEqual(loadedBundled(env));
+    expect(found.slice(0, 4).map((plugin) => plugin.name)).toEqual(loadedBundled(env));
   });
 
   it("should skip an entry whose source is missing when the marketplace is malformed", () => {

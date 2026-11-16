@@ -24,6 +24,15 @@ describe("encodeEvent and decodeEvent", () => {
     });
   });
 
+  it("should keep the claim a status carries, a null one included, and drop one that is not a list of names", () => {
+    const status = { type: "agent_status", agent_id: "a", owner_oid: "o", status: "idle", local_conversation_id: null };
+
+    expect(decodeEvent(JSON.stringify({ ...status, client_features: ["plain-prompt"] }))).toEqual({ ...status, client_features: ["plain-prompt"] });
+    expect(decodeEvent(JSON.stringify({ ...status, client_features: null }))).toEqual({ ...status, client_features: null });
+    expect(decodeEvent(JSON.stringify({ ...status, client_features: ["plain-prompt", 7] }))).toEqual(status);
+    expect(decodeEvent(JSON.stringify({ ...status, client_features: "plain-prompt" }))).toEqual(status);
+  });
+
   it.each([
     ["no payload", undefined],
     ["something that is not JSON", "{"],

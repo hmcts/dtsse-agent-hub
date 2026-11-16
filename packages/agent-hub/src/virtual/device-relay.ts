@@ -35,6 +35,8 @@ export type RelayDeviceLoginOptions = {
    */
   isExpiry?: (output: string) => boolean;
   label: string;
+  /** How long each of the kill's last two steps waits on the one before it; `SIGKILL_AFTER_MS` unless a test says otherwise. */
+  killGraceMs?: number;
 };
 
 /**
@@ -93,7 +95,8 @@ export function relayDeviceLogin({
   respond,
   expiresIn = DEVICE_CODE_EXPIRES_S,
   isExpiry,
-  label
+  label,
+  killGraceMs = SIGKILL_AFTER_MS
 }: RelayDeviceLoginOptions): Promise<RelayDeviceLoginResult> {
   return new Promise((resolve, reject) => {
     let output = "";
@@ -159,8 +162,8 @@ export function relayDeviceLogin({
           child.stdout?.destroy();
           child.stderr?.destroy();
           void finish(null);
-        }, SIGKILL_AFTER_MS);
-      }, SIGKILL_AFTER_MS);
+        }, killGraceMs);
+      }, killGraceMs);
     };
     timer = setTimeout(endChild, (expiresIn + 30) * 1000);
     const onData = (d: unknown) => {

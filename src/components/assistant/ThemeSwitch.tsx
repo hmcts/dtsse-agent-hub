@@ -29,20 +29,20 @@ function Icon({ theme }: { theme: Theme }) {
   );
 }
 
-/**
- * Light, dark or the device's own setting. The choice applies at once, to the page's `.asst-theme` root, and is kept
- * in a cookie so the next page the server renders is already in it.
- */
-export function ThemeSwitch({ initial }: { initial: Theme }) {
-  const [theme, setTheme] = useState<Theme>(initial);
+/** Shows `theme` on the page's `.asst-theme` root, without keeping it for the next page. */
+export function showTheme(theme: Theme): void {
+  document.querySelector<HTMLElement>(".asst-theme")?.setAttribute("data-theme", theme);
+}
 
-  function choose(next: Theme): void {
-    setTheme(next);
-    // biome-ignore lint/suspicious/noDocumentCookie: the Cookie Store API is missing from browsers HMCTS staff still use
-    document.cookie = themeCookie(next);
-    document.querySelector<HTMLElement>(".asst-theme")?.setAttribute("data-theme", next);
-  }
+/** Shows `theme`, and keeps it in a cookie so the next page the server renders is already in it. */
+export function keepTheme(theme: Theme): void {
+  // biome-ignore lint/suspicious/noDocumentCookie: the Cookie Store API is missing from browsers HMCTS staff still use
+  document.cookie = themeCookie(theme);
+  showTheme(theme);
+}
 
+/** Light, dark or the device's own setting, as three radios; what choosing one does is the caller's. */
+export function ThemeChoice({ theme, onChoose }: { theme: Theme; onChoose: (theme: Theme) => void }) {
   return (
     <div role="radiogroup" aria-label="Appearance" className="flex shrink-0 rounded-[9px] bg-asst-hover p-[3px]">
       {THEMES.map((option) => (
@@ -53,12 +53,26 @@ export function ThemeSwitch({ initial }: { initial: Theme }) {
           aria-checked={theme === option}
           aria-label={LABELS[option]}
           title={LABELS[option]}
-          onClick={() => choose(option)}
+          onClick={() => onChoose(option)}
           className={`flex h-7 w-7 items-center justify-center rounded-[7px] ${theme === option ? "bg-asst-strong text-asst-text" : "text-asst-muted hover:text-asst-text"}`}
         >
           <Icon theme={option} />
         </button>
       ))}
     </div>
+  );
+}
+
+/** The choice applied and kept at once, where there is no Save to wait for. */
+export function ThemeSwitch({ initial }: { initial: Theme }) {
+  const [theme, setTheme] = useState<Theme>(initial);
+  return (
+    <ThemeChoice
+      theme={theme}
+      onChoose={(next) => {
+        setTheme(next);
+        keepTheme(next);
+      }}
+    />
   );
 }

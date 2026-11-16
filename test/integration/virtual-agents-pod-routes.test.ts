@@ -829,7 +829,7 @@ describe("PUT /api/virtual/{id}/ports", () => {
     vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "");
     actAs("alice");
 
-    expect(await actions.resizeVirtualAgent(form({ id: "x", size: "large" }))).toMatchObject({ ok: false, error: expect.stringContaining("not available") });
+    expect(await actions.saveVirtualAgentPod(form({ id: "x", size: "large" }))).toMatchObject({ ok: false, error: expect.stringContaining("not available") });
   });
 
   it("should answer 404 when virtual agents are off", async () => {

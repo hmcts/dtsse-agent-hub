@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { PREPARE_TIMEOUT_MS, prepareBundled, prepareEach, readyWithin, reason, safeSay, slidesScript } from "./plugin-deps.ts";
+import { hasBundledScript, PREPARE_TIMEOUT_MS, prepareBundled, prepareEach, readyWithin, reason, safeSay, slidesScript } from "./plugin-deps.ts";
 
 const WS = "/workspace/cft-workspace";
 const install = (name: string) => `/workspace/.agent-hub-plugins/${name}-0123456789ab`;
@@ -167,5 +167,17 @@ describe("reason", () => {
     expect(reason(new Error("boom"))).toBe("boom");
     expect(reason("plain")).toBe("plain");
     expect(reason(42)).toBe("42");
+  });
+});
+
+describe("hasBundledScript", () => {
+  it("should find the wrapper of a plugin that installs dependencies", () => {
+    expect(hasBundledScript("slides")).toBe(true);
+    expect(hasBundledScript("welsh")).toBe(true);
+  });
+
+  it("should find none for the Microsoft 365 plugins, which are skills alone, so a pod starting installs nothing for them", () => {
+    expect(hasBundledScript("m365")).toBe(false);
+    expect(hasBundledScript("m365-files")).toBe(false);
   });
 });

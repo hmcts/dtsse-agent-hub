@@ -1,4 +1,5 @@
 import { gunzipSync } from "node:zlib";
+import { parseSignIn } from "../microsoft/microsoft.ts";
 import { checkClaudeMd } from "./claude-md.ts";
 import { checkGitIdentity } from "./git-identity.ts";
 import type { CredentialKind } from "./names.ts";
@@ -44,7 +45,8 @@ const LABELS: Record<CredentialKind, string> = {
   jenkins: "a Jenkins API token",
   claude_md: "your CLAUDE.md",
   git_identity: "a git identity",
-  atlassian: "an Atlassian twg sign-in"
+  atlassian: "an Atlassian twg sign-in",
+  microsoft: "a Microsoft 365 connection"
 };
 
 /** The username of the first account an MSAL token cache holds, as the `az` login it came from shows it. */
@@ -199,6 +201,8 @@ export function checkCredential(kind: CredentialKind, raw: unknown): CheckedCred
       return checkAzureCache(value);
     case "atlassian":
       return checkAtlassianAuth(value);
+    case "microsoft":
+      return checkMicrosoftSignIn(value);
   }
 }
 
@@ -274,4 +278,15 @@ function checkJenkinsToken(value: string): CheckedCredential {
   return JENKINS_TOKEN.test(value)
     ? { ok: true, value, accountLabel: null }
     : { ok: false, error: "that is not a Jenkins API token: expected 20 to 200 printable characters with no spaces, from your Jenkins user's Configure page" };
+}
+
+/**
+ * The hub's own record of a Microsoft 365 connection, which only its connect callback writes (`isHubIssuedCredential`):
+ * checked all the same, so a value that is not one is never stored under the kind. The account becomes the label.
+ */
+function checkMicrosoftSignIn(value: string): CheckedCredential {
+  const signIn = parseSignIn(value);
+  return signIn === undefined
+    ? { ok: false, error: "that is not a Microsoft 365 connection: connect from the CFT Workspace's settings instead" }
+    : { ok: true, value, accountLabel: signIn.account };
 }

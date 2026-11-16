@@ -6,13 +6,16 @@ import type { ModelRoute } from "../viewer/identity.ts";
  * The person's saved credentials as the Assistant's Connections section lists them: which can be pasted, which can
  * be removed, and what removing each ends. Pure, so the rules are tested apart from the form.
  *
- * Pasted is what `saveCredential` accepts: a GitHub token, a Jenkins API token, and a Claude token while any agent of
- * the person's is on their own licence. The Azure token cache and the Atlassian sign-in only ever come from a pod's
- * own device-code sign-in, so they are removed here and never pasted. Every stored one can be removed.
+ * The settings paste a Jenkins API token, and a Claude token while any agent of the person's is on their own licence.
+ * GitHub, the Azure token cache and the Atlassian sign-in only ever come from a pod's own device-code sign-in here, and
+ * a Microsoft 365 connection only from the hub's own Connect, so they are removed here and never pasted. Every stored
+ * one can be removed. `saveCredential` still accepts a GitHub token, which the boot script of a client published before
+ * the settings dropped the box tells an owner to paste when their device sign-in does not finish; the settings offer no
+ * box for it.
  */
 
 /** The kinds the section is about: every credential but the CLAUDE.md and the git identity, which have sections of their own. */
-export const SAVED_KINDS = ["github", "azure", "claude", "jenkins", "atlassian"] as const satisfies readonly CredentialKind[];
+export const SAVED_KINDS = ["github", "azure", "claude", "jenkins", "atlassian", "microsoft"] as const satisfies readonly CredentialKind[];
 
 export type SavedKind = (typeof SAVED_KINDS)[number];
 
@@ -21,7 +24,8 @@ const TITLES: Record<SavedKind, string> = {
   azure: "Azure sign-in",
   claude: "Claude token",
   jenkins: "Jenkins API token",
-  atlassian: "Atlassian sign-in"
+  atlassian: "Atlassian sign-in",
+  microsoft: "Microsoft 365 connection"
 };
 
 export interface SavedCredential {
@@ -36,7 +40,7 @@ export interface SavedCredential {
 }
 
 function pasteable(kind: SavedKind, claudeTokenUsable: boolean): boolean {
-  return kind === "github" || kind === "jenkins" || (kind === "claude" && claudeTokenUsable);
+  return kind === "jenkins" || (kind === "claude" && claudeTokenUsable);
 }
 
 /** `route` is the assistant's own, which decides whether its Claude comes through Azure or through a Claude token. */
@@ -48,8 +52,11 @@ function removeQuestion(kind: SavedKind, route: ModelRoute): string {
   if (kind === "azure" && route === "gateway") {
     return `${ask} Your assistant reaches Claude through it, so it cannot answer again until you sign in to Azure again.`;
   }
+  if (kind === "microsoft") {
+    return `${ask} Your agents can no longer read your mail, calendar, Teams chats, meetings or files until you connect again.`;
+  }
   if (kind === "github") {
-    return `${ask} Your assistant cannot reach GitHub until you paste a new token or sign in to GitHub again.`;
+    return `${ask} Your assistant cannot reach GitHub until you sign in to GitHub again.`;
   }
   return `${ask} Your assistant stops using it the next time it starts.`;
 }

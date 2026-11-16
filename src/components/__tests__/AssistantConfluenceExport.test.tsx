@@ -128,7 +128,7 @@ describe("Confluence export in the document panel", () => {
   it("should publish under the page the person found by searching, within the default space first", async () => {
     vi.useFakeTimers();
     const exportTo = vi.fn<ExportToConfluenceAction>(async () => ({ ok: true }));
-    const lookUp = answering({ status: "done", results: [PAGE] });
+    const lookUp = answering({ status: "done", results: [{ ...PAGE, excerpt: "How the flags are designed" }] });
     render(panel({ exportTo, lookUp, defaultPage: DEFAULT_PAGE }));
 
     fireEvent.click(screen.getByRole("button", { name: "Change the Confluence page, now Team space" }));
@@ -333,6 +333,20 @@ describe("AtlassianSearch", () => {
 
     expect(onPick).toHaveBeenCalledWith(second);
     expect(onCancel).toHaveBeenCalled();
+  });
+
+  it("should show each page's opening words, so pages of the same title can be told apart, when the search gives them", async () => {
+    vi.useFakeTimers();
+    const first = { ...PAGE, excerpt: "Notes from the March design review" };
+    const second = { ...PAGE, id: "2", excerpt: "<b>Notes</b> from the April design review" };
+    search(answering({ status: "done", results: [first, second, { ...PAGE, id: "3" }] }));
+
+    await typeAndWait("Find a page", "design");
+    const options = screen.getAllByRole("option").map((option) => option.textContent);
+
+    expect(options[0]).toContain("Notes from the March design review");
+    expect(options[1]).toContain("<b>Notes</b> from the April design review");
+    expect(options[2]).toBe("Design notesCore Case Data › Guides");
   });
 
   it("should search all of Confluence once the person widens it from the default space", async () => {

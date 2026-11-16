@@ -64,7 +64,7 @@ export interface UploadSweepResult {
  * already on the pod's disk. The bytes are what the window bounds and they cost the same 25 MB whichever it is, so a
  * `fetched` upload is swept at the same instant a `pending` one is rather than being kept for as long as the thread
  * shows it. What the expiry must not be is silent, and that is two other things' job: `frameAttachments` still names
- * an `expired` upload, so a pod's fetch fails and the envelope tells the session the file could not be retrieved; and
+ * an `expired` upload, so a pod's fetch fails and the prompt's context tells the session the file could not be retrieved; and
  * the thread's chip stops offering a download the moment the window closes.
  *
  * The same transaction-scoped `pg_try_advisory_xact_lock` as the other sweeps, so one pod sweeps per tick.

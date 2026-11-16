@@ -8,6 +8,7 @@ import {
   lookupResponse,
   lookupResults,
   MAX_LOOKUP_RESULTS,
+  SPACE_KEY_RE,
   searchable
 } from "./lookups.ts";
 
@@ -60,6 +61,30 @@ describe("lookupAnswerBody and checkResults", () => {
     expect(checkResults("confluence_page", [{ ...PAGE, id: "12; DROP" }])).toBeUndefined();
     expect(checkResults("jira_project", [{ key: "VIBE", name: "Vibe-Coding Enablement" }])).toEqual([{ key: "VIBE", name: "Vibe-Coding Enablement" }]);
   });
+
+  it("should accept a page with or without its opening words, and refuse words longer than the limit", () => {
+    expect(checkResults("confluence_page", [{ ...PAGE, excerpt: "1. System Architecture" }])).toEqual([{ ...PAGE, excerpt: "1. System Architecture" }]);
+    expect(checkResults("confluence_page", [{ ...PAGE, excerpt: "x".repeat(161) }])).toBeUndefined();
+    expect(checkResults("confluence_page", [{ ...PAGE, excerpt: " " }])).toBeUndefined();
+  });
+
+  it("should accept a page in a personal space when its owner's username is an email address", () => {
+    const page = { ...PAGE, space_key: "~Martin.Fox1@justice.gov.uk" };
+    expect(checkResults("confluence_page", [page])).toEqual([page]);
+  });
+});
+
+describe("SPACE_KEY_RE", () => {
+  it.each([["PEG"], ["DTS_CCI-2"], ["~saz.ali"], ["~Martin.Fox1@justice.gov.uk"]])("should accept %j as a space key", (key) => {
+    expect(SPACE_KEY_RE.test(key)).toBe(true);
+  });
+
+  it.each([["PEG.X"], ["a@b"], ["~patrick.o'sullivan"], ['CCD" OR space = "HR'], ["~"], ["~a\\b"]])(
+    "should refuse %j, since a key goes inside the CQL's quotes",
+    (key) => {
+      expect(SPACE_KEY_RE.test(key)).toBe(false);
+    }
+  );
 });
 
 describe("lookupResults", () => {

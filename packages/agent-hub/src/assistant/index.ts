@@ -35,7 +35,6 @@ export {
   lookupArgs,
   MAX_RUNNING_LOOKUPS,
   pageIdOf,
-  parseConfluencePages,
   parseJiraProjects,
   parseLookupFrame,
   runLookup,

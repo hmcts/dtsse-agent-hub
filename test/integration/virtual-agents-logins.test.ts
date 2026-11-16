@@ -15,6 +15,7 @@ import {
   atlassianAuthFor,
   azureCacheFor,
   BOB,
+  CLAUDE,
   claim,
   form,
   GITHUB,
@@ -547,6 +548,34 @@ describe("signing in again", () => {
 
     expect(await readCredential(prisma, localStore(), ALICE.oid, "atlassian")).toBeUndefined();
     expect(await row(id)).toMatchObject({ desired: "running", status: "provisioning", statusDetail: "restarting to sign in to Atlassian again" });
+  });
+
+  // A lapsed Claude sign-in is mended the same way: with no token stored, the new pod drives `claude setup-token` and
+  // relays its link, which is the only way in for someone without Claude Code to make a token with.
+  it("should delete the Claude token and restart the agent when the owner signs in to Claude again", async () => {
+    const { id } = await started(ALICE, "pcs-api", "own-licence");
+    await putCredential(prisma, localStore(), { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "claude", value: CLAUDE, via: "web" });
+
+    actAs("alice");
+    expect(await actions.reconnectSignIn(form({ id, kind: "claude" }))).toEqual({ ok: true, confirmation: "pcs-api is restarting to sign in to Claude again" });
+
+    expect(await readCredential(prisma, localStore(), ALICE.oid, "claude")).toBeUndefined();
+    expect(await row(id)).toMatchObject({ desired: "running", status: "provisioning", statusDetail: "restarting to sign in to Claude again" });
+  });
+
+  it("should delete nothing and restart nothing when the owner of a gateway agent asks to sign in to Claude again", async () => {
+    const { id } = await started(ALICE, "pcs-api", "gateway");
+    await putCredential(prisma, localStore(), { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "claude", value: CLAUDE, via: "web" });
+    const before = await row(id);
+
+    actAs("alice");
+    expect(await actions.reconnectSignIn(form({ id, kind: "claude" }))).toEqual({
+      ok: false,
+      error: "that virtual agent reaches Claude through the HMCTS AI Gateway, not your own licence"
+    });
+
+    expect(await readCredential(prisma, localStore(), ALICE.oid, "claude")).toBe(CLAUDE);
+    expect(await row(id)).toMatchObject({ desired: before.desired, status: before.status, statusDetail: before.statusDetail });
   });
 
   it("should delete nothing and restart nothing when someone other than the owner asks", async () => {

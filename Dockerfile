@@ -30,6 +30,8 @@ COPY --chown=hmcts:hmcts public ./public
 COPY --chown=hmcts:hmcts prisma ./prisma
 
 RUN yarn db:generate
+# The widget goes into public/ before `next build`, which the runtime stage then copies public/ from.
+RUN yarn build:widget
 RUN yarn build:app
 RUN yarn build:cli
 

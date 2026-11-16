@@ -343,7 +343,7 @@ export async function unsentAttachments(db: Database, conversationId: string): P
  * The attachments a `direct` frame names, so the pod can fetch each one part by part before the message is delivered.
  *
  * An `expired` upload is named too, even though the sweep has taken its bytes: the pod's fetch for it then fails, and
- * the envelope tells the session the file could not be retrieved and to ask for it again. Leaving it out of the frame
+ * the prompt's context tells the session the file could not be retrieved and to ask for it again. Leaving it out of the frame
  * would take the file off the message altogether, and a message naming no file reads as though none was attached —
  * which leaves the person believing the agent read theirs.
  */

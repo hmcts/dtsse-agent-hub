@@ -111,6 +111,7 @@ function conversation(overrides: Partial<ConversationView> = {}): ConversationVi
     title: "Writing a story",
     product: "ccd",
     productLabel: "CCD",
+    pinned: false,
     productHistory: [],
     stopHistory: [],
     local: false,
@@ -149,6 +150,7 @@ function actions(overrides: Partial<ChatActions> = {}): ChatActions {
     stop: vi.fn(async () => ({ ok: true as const, stopped: true })),
     setProduct: ok(),
     rename: ok(),
+    pin: ok(),
     remove: ok(),
     answerQuestion: ok(),
     saveArtefact: vi.fn(async () => ({ ok: true as const, saved: true as const, version: 1 })),
@@ -650,6 +652,72 @@ describe("ChatView questions", () => {
     emit("agent_question", { agent_id: AGENT });
 
     expect(refresh).toHaveBeenCalled();
+  });
+});
+
+describe("ChatView on a session too old for plain prompts", () => {
+  it("should ask for a restart, linking to it in the settings, when the running session has not claimed plain-prompt", () => {
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ clientFeatures: ["stop"] })} templates={TEMPLATES} actions={actions()} />);
+
+    const note = screen.getByTestId("restart-needed");
+    expect(note.textContent).toMatch(/older version of your assistant/);
+    expect(within(note).getByRole("link", { name: "Restart it in Settings" }).getAttribute("href")).toBe("?settings=assistant");
+  });
+
+  it.each([
+    ["the session claims plain-prompt", conversation({ clientFeatures: ["plain-prompt", "stop"] })],
+    ["no session is running", conversation({ agentStatus: "offline", clientFeatures: ["stop"] })],
+    ["the chat has no pod", conversation({ local: true, clientFeatures: null })]
+  ])("should not ask for a restart when %s", (_when, view) => {
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={view} templates={TEMPLATES} actions={actions()} />);
+
+    expect(screen.queryByTestId("restart-needed")).toBeNull();
+  });
+
+  // The claim rides on the status frame it was written with, so the note follows it with no re-read of the page.
+  it("should take the note down when a frame carries a claim with plain-prompt, without re-reading the page", () => {
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ clientFeatures: ["stop"] })} templates={TEMPLATES} actions={actions()} />);
+    expect(screen.getByTestId("restart-needed")).toBeTruthy();
+
+    emit("agent_status", { agent_id: AGENT, status: "idle", client_features: ["plain-prompt", "stop"] });
+
+    expect(screen.queryByTestId("restart-needed")).toBeNull();
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("should never show the note for a session that comes online already claiming plain-prompt", () => {
+    render(
+      <ChatView
+        jira={NO_JIRA}
+        viewerOid={VIEWER}
+        view={conversation({ agentStatus: "offline", clientFeatures: null })}
+        templates={TEMPLATES}
+        actions={actions()}
+      />
+    );
+    expect(screen.queryByTestId("restart-needed")).toBeNull();
+
+    emit("agent_status", { agent_id: AGENT, status: "idle", client_features: ["plain-prompt"] });
+
+    expect(screen.queryByTestId("restart-needed")).toBeNull();
+  });
+
+  it("should show the note when a later claim leaves plain-prompt out", () => {
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ clientFeatures: ["plain-prompt"] })} templates={TEMPLATES} actions={actions()} />);
+    expect(screen.queryByTestId("restart-needed")).toBeNull();
+
+    emit("agent_status", { agent_id: AGENT, status: "idle", client_features: null });
+
+    expect(screen.getByTestId("restart-needed")).toBeTruthy();
+  });
+
+  it("should keep the claim it has when a frame carries none", () => {
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ clientFeatures: ["plain-prompt"] })} templates={TEMPLATES} actions={actions()} />);
+
+    emit("agent_status", { agent_id: AGENT, status: "busy" });
+    emit("agent_status", { agent_id: AGENT, status: "idle" });
+
+    expect(screen.queryByTestId("restart-needed")).toBeNull();
   });
 });
 
@@ -1193,6 +1261,32 @@ describe("ChatView menu", () => {
     expect(rename).toHaveBeenCalledWith({ conversationId: CONVERSATION, title: "Renamed" });
     expect(refresh).toHaveBeenCalled();
     expect(screen.queryByRole("textbox", { name: "Chat name" })).toBeNull();
+  });
+
+  it("should pin the chat when the person picks Pin from the options menu", async () => {
+    const pin = ok();
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions({ pin })} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Chat options" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+    });
+
+    expect(pin).toHaveBeenCalledWith({ conversationId: CONVERSATION, pinned: true });
+    expect(refresh).toHaveBeenCalled();
+  });
+
+  it("should offer Unpin and unpin the chat when it is pinned", async () => {
+    const pin = ok();
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ pinned: true })} templates={TEMPLATES} actions={actions({ pin })} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Chat options" }));
+    expect(screen.queryByRole("menuitem", { name: "Pin" })).toBeNull();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("menuitem", { name: "Unpin" }));
+    });
+
+    expect(pin).toHaveBeenCalledWith({ conversationId: CONVERSATION, pinned: false });
   });
 
   it("should delete the chat and go to a new chat when the person confirms the delete", async () => {
@@ -1816,7 +1910,7 @@ describe("Composer draft", () => {
 describe("EmptyChat", () => {
   it("should fill the box with the card's template and send nothing when the person picks a starter card", () => {
     const start = vi.fn(async () => ({ ok: true as const, id: "abc" }));
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} skills={[]} actions={emptyActions(start)} />);
 
     fireEvent.click(starterCard("Create user story"));
 
@@ -1826,7 +1920,7 @@ describe("EmptyChat", () => {
   });
 
   it("should focus the box with the first gap selected when the person picks a starter card", () => {
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(vi.fn())} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} skills={[]} actions={emptyActions(vi.fn())} />);
 
     fireEvent.click(starterCard("Create user story"));
 
@@ -1837,7 +1931,7 @@ describe("EmptyChat", () => {
   });
 
   it("should swap one card's template for another's when the first was left untouched", () => {
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(vi.fn())} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} skills={[]} actions={emptyActions(vi.fn())} />);
 
     fireEvent.click(starterCard("Create user story"));
     fireEvent.click(starterCard("Research"));
@@ -1847,7 +1941,7 @@ describe("EmptyChat", () => {
 
   it("should start a conversation with the filled template and the chosen product when the person sends it", async () => {
     const start = vi.fn(async () => ({ ok: true as const, id: "abc" }));
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} skills={[]} actions={emptyActions(start)} />);
     fireEvent.change(screen.getByRole("combobox", { name: "Product" }), { target: { value: "pcs" } });
     fireEvent.click(starterCard("Analysis"));
 
@@ -1859,9 +1953,25 @@ describe("EmptyChat", () => {
     expect(push).toHaveBeenCalledWith("/assistant/abc");
   });
 
-  it("should offer no skill list when the person types a slash, because a new chat has no session yet", () => {
+  it("should offer the pod's skills when the person types a slash", () => {
+    const skills = [{ name: "cft-explain", description: "Answer a what is X question" }];
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} skills={skills} actions={emptyActions(vi.fn())} />);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Message" }), { target: { value: "/" } });
+
+    expect(screen.getByRole("listbox", { name: "Skills" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: /cft-explain/ })).toBeTruthy();
+  });
+
+  it("should offer no skill list when the person types a slash and the pod has reported no skills", () => {
     render(
-      <EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(vi.fn(async () => ({ ok: true as const, id: "abc" })))} />
+      <EmptyChat
+        viewerOid={VIEWER}
+        starters={STARTERS}
+        templates={TEMPLATES}
+        skills={[]}
+        actions={emptyActions(vi.fn(async () => ({ ok: true as const, id: "abc" })))}
+      />
     );
 
     fireEvent.change(screen.getByRole("textbox", { name: "Message" }), { target: { value: "/" } });
@@ -1873,7 +1983,7 @@ describe("EmptyChat", () => {
 
   it("should start with the default product when the person has not chosen one", async () => {
     const start = vi.fn(async () => ({ ok: true as const, id: "abc" }));
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} skills={[]} actions={emptyActions(start)} />);
 
     expect((screen.getByRole("combobox", { name: "Product" }) as HTMLSelectElement).value).toBe("general");
     await type("my own words");
@@ -1885,11 +1995,11 @@ describe("EmptyChat", () => {
   it("should keep what was typed in the new chat when the person goes away and comes back", () => {
     const start = vi.fn(async () => ({ ok: true as const, id: "abc" }));
     const box = () => screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} skills={[]} actions={emptyActions(start)} />);
     fireEvent.change(box(), { target: { value: "a thought I have not finished" } });
 
     cleanup();
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} skills={[]} actions={emptyActions(start)} />);
 
     expect(box().value).toBe("a thought I have not finished");
     expect(sessionStorage.getItem(draftKey("assistant-draft", VIEWER, NEW_CHAT_DRAFT))).toBe("a thought I have not finished");
@@ -1897,7 +2007,7 @@ describe("EmptyChat", () => {
 
   it("should forget the new chat's draft once the first message has created the conversation", async () => {
     const start = vi.fn(async () => ({ ok: true as const, id: "abc" }));
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} skills={[]} actions={emptyActions(start)} />);
 
     await type("my own words");
 
@@ -1912,13 +2022,13 @@ describe("EmptyChat", () => {
       fireEvent.change(screen.getByRole("textbox", { name: "Message" }), { target: { value: "my own words and a second thought" } });
       return { ok: true as const, id: "abc" };
     });
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} skills={[]} actions={emptyActions(start)} />);
 
     await type("my own words");
 
     expect(sessionStorage.getItem(draftKey("assistant-draft", VIEWER, NEW_CHAT_DRAFT))).toBe(" and a second thought");
     cleanup();
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} skills={[]} actions={emptyActions(start)} />);
     expect((screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement).value).toBe(" and a second thought");
   });
 
@@ -1926,7 +2036,7 @@ describe("EmptyChat", () => {
     // A click on a card is too easy to make by accident to cost the person their words.
     const start = vi.fn(async () => ({ ok: true as const, id: "abc" }));
     const filled = `a thought I have not finished\n\n${starterText("Research")}`;
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} skills={[]} actions={emptyActions(start)} />);
     fireEvent.change(newChatBox(), { target: { value: "a thought I have not finished" } });
 
     fireEvent.click(starterCard("Research"));
@@ -1935,7 +2045,7 @@ describe("EmptyChat", () => {
     expect(newChatBox().selectionStart).toBe(filled.indexOf("…"));
     expect(start).not.toHaveBeenCalled();
     cleanup();
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} skills={[]} actions={emptyActions(start)} />);
     expect(newChatBox().value).toBe(filled);
   });
 });

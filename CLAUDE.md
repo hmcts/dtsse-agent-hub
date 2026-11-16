@@ -19,7 +19,7 @@ contract changes. Running virtual agents is [`docs/virtual-agents.md`](docs/virt
 
 | Path | What it holds |
 | --- | --- |
-| `packages/agent-hub/` | The published client, `@hmcts-cft/agent-hub`: hooks, bridge, CLI and the pod runtime (`virtual-agent/entrypoint.sh`, the Assistant's supervisor), and the plugins it carries in `plugins/` (`welsh`, `slides`), which a pod copies onto its disk: `slides` always, `welsh` when its owner ticks it. Its own tests, typecheck and README |
+| `packages/agent-hub/` | The published client, `@hmcts-cft/agent-hub`: hooks, bridge, CLI and the pod runtime (`virtual-agent/entrypoint.sh`, the Assistant's supervisor), and the plugins it carries in `plugins/` (`welsh`, `slides`, `m365`, `m365-files`), which a pod copies onto its disk: `slides`, `m365` and `m365-files` always, `welsh` when its owner ticks it. Its own tests, typecheck and README |
 | `src/app/api/agent/**` | Agent API route handlers, each wrapped in `agentRoute` / `ownedAgentRoute` (`src/agent-api/route.ts`) |
 | `src/app/api/virtual/**`, `src/app/api/orchestrator/**` | Pod routes (`virtualRoute`, its own launch token only) and orchestrator routes (`orchestratorRoute`); 404 unless `VIRTUAL_AGENTS_ENABLED=true` |
 | `src/agent-auth/` | Bearer validation against the tenant JWKS, launch-token callers, the orchestrator's app-only token, and the `AGENT_AUTH_DISABLED` dev bypasses |
@@ -36,8 +36,8 @@ contract changes. Running virtual agents is [`docs/virtual-agents.md`](docs/virt
 | `src/transcripts/` | Uploaded session transcripts: schema and limits, store, retention sweep, and the conversation view |
 | `src/credentials/` | Per-person credentials, CLAUDE.md and git identity: value checks, Key Vault and local encrypted stores, metadata rows |
 | `src/virtual-agents/` | Virtual agents: flag and settings, lifecycle, limits, launch tokens, plugins, store, sign-ins, sweep and views |
-| `src/assistant/`, `src/app/assistant/` | The CFT Workspace. Stores by concern (`conversation-row.ts`, `assistant-store.ts`, `conversation-store.ts`, `local-chat-store.ts`, `session-store.ts`, `artefact-store.ts`, `search-store.ts`, …), each beside a pure `<name>.ts`: exports, lookups, uploads, shares, forks, models, memory, templates, Welsh. Settings are `components/assistant/SettingsDialog.tsx` |
-| `src/port-viewer/` | The viewer that serves virtual agents' web servers on `AGENT_HUB_VIEWER_HOST`, and the ticket route `/assistant/ports/{id}/{port}` hands out |
+| `src/assistant/`, `src/app/assistant/` | The CFT Workspace. Stores by concern (`conversation-row.ts`, `assistant-store.ts`, `conversation-store.ts`, `local-chat-store.ts`, `session-store.ts`, `artefact-store.ts`, `search-store.ts`, …), each beside a pure `<name>.ts`: exports, lookups, uploads, shares, forks, models, memory, templates, Welsh, the morning briefing. Settings are `components/assistant/SettingsDialog.tsx` |
+| `src/port-viewer/` | The viewer that serves virtual agents' web servers and feedback links' prototypes on `AGENT_HUB_VIEWER_HOST`, the tickets the hub hands out for each, and the feedback widget's bundle |
 | `src/realtime/` | `hub_events` NOTIFY payloads, the per-pod LISTEN connection and in-process hub, SSE framing, the agent and UI streams |
 | `src/orchestrator/`, `src/cli/orchestrator.ts` | The virtual-agent orchestrator, run from the same image. Nothing here uses the `@/` alias |
 | `src/platform/` | Where the database is (`database-target.ts`) and whether a process may read the Key Vault (`secrets.ts`) |
@@ -80,7 +80,7 @@ contract changes. Running virtual agents is [`docs/virtual-agents.md`](docs/virt
 | `yarn lint` | `biome check --error-on-warnings .` |
 | `yarn typecheck` | the app, `tsconfig.cli.json` and `tsconfig.e2e.json` |
 | `yarn test:e2e` | Playwright and axe against `TEST_URL`; see the README for a full local run |
-| `yarn test` | unit suite |
+| `yarn test` | unit suites of the app and the published client, with coverage and its thresholds. `test:coverage` is a no-op: the pipeline calls both, so collecting it in `test` runs the suites once |
 | `yarn test:integration` | needs `yarn deps:up`; a database per worker, migrated on use. `INTEGRATION_WORKERS` sets how many (default 6). Always collects coverage for the pipeline's Sonar scan; add `--coverage.enabled=false` locally to skip it |
 | `yarn build` | `next build` plus the CLIs, `dist/cli/migrate.js` and `dist/cli/orchestrator.js` |
 

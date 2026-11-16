@@ -16,10 +16,11 @@ export const SLIDES_PLUGIN = "slides";
 /**
  * The plugins every pod loads without being ticked, mirroring the pod client's own `ALWAYS_ON_PLUGINS`
  * (`packages/agent-hub/src/virtual/bundled-plugins.ts`). Slides is one because the Assistant's slides panel, history,
- * editing and builds depend on it. None is offered or stored; every claim adds them to the plugins it hands the
+ * editing and builds depend on it, and the Microsoft 365 plugins because pressing Connect for Microsoft 365 is their
+ * opt-in, so there is nothing to tick. None is offered or stored; every claim adds them to the plugins it hands the
  * orchestrator (`podPlugins`), so a pod on a client that loads only what `AGENT_HUB_PLUGINS` names loads them too.
  */
-export const ALWAYS_ON_PLUGINS: readonly string[] = [SLIDES_PLUGIN];
+export const ALWAYS_ON_PLUGINS: readonly string[] = [SLIDES_PLUGIN, "m365", "m365-files"];
 
 export const isAlwaysOn = (name: string): boolean => ALWAYS_ON_PLUGINS.includes(name);
 

@@ -1,6 +1,6 @@
 // Files the person attached to an Assistant message, pulled from the hub to this pod's disk before the message is
 // delivered. The hub never calls a pod, so every byte comes this way round: the frame names each file, this module
-// fetches it part by part, and the envelope then names the absolute path — so nothing depends on the model choosing
+// fetches it part by part, and the prompt then names the absolute path — so nothing depends on the model choosing
 // to go and look for it.
 import nodeFs from "node:fs";
 import path from "node:path";
@@ -76,7 +76,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 /** What a frame's `attachments` came to: the entries this client will act on, and an outcome for each it will not. */
 export type ReadAttachments = {
   attachments: Attachment[];
-  /** Error outcomes for the entries that were refused, so the envelope says a file was lost rather than nothing. */
+  /** Error outcomes for the entries that were refused, so the prompt says a file was lost rather than nothing. */
   dropped: AttachmentOutcome[];
 };
 
@@ -119,13 +119,13 @@ function readEntry(entry: unknown, partBytesFallback: number | undefined): { att
  * Anything missing, out of range or of the wrong type is refused: the frame comes from a hub that may be older or
  * newer than this client, and a half-understood attachment is worse than acting on none of it, because the message
  * would name a path that holds the wrong bytes. But refusing it is not the same as dropping it — an entry that was on
- * the frame is a file the person attached, so it comes back as an outcome the envelope names and says could not be
+ * the frame is a file the person attached, so it comes back as an outcome the prompt names and says could not be
  * retrieved. Today the hub's caps and the checks here agree and nothing reaches this, which is exactly why the
  * outcome matters: the one frame that ever does disagree must not deliver in silence.
  *
  * Entries past `MAX_ATTACHMENTS` are the exception, and are left out with nothing said. The hub refuses a message
  * carrying more than that on the send and again on the claim, so a longer array is not a disagreement about one file
- * but a hub this client does not understand at all, and an unbounded array would otherwise word an unbounded envelope.
+ * but a hub this client does not understand at all, and an unbounded array would otherwise word an unbounded prompt.
  */
 export function readAttachments(value: unknown, partBytesFallback?: number): ReadAttachments {
   if (!Array.isArray(value)) {
@@ -150,7 +150,7 @@ export function parseAttachments(value: unknown, partBytesFallback?: number): At
 }
 
 /**
- * Error outcomes for attachments this pod cannot even attempt to fetch, so the envelope names each file and says it
+ * Error outcomes for attachments this pod cannot even attempt to fetch, so the prompt names each file and says it
  * could not be retrieved. Delivering the message with them left out would read as though nothing had been attached.
  */
 export function unfetchedAttachments(attachments: readonly Attachment[], reason: string): AttachmentOutcome[] {
@@ -186,13 +186,13 @@ export type FetchAttachmentsOptions = {
 };
 
 /**
- * Writes each attachment to disk and reports it fetched, answering what the envelope should say about each.
+ * Writes each attachment to disk and reports it fetched, answering what the prompt should say about each.
  *
  * Part by part, straight into the open file: the pod holds one part at a time, as the hub does, so neither end ever
  * has the whole file in memory. The byte count is checked against what the frame claimed before anything is reported
  * fetched, because the report is what makes the hub throw the bytes away — there is no second chance at them.
  *
- * **A failure here never stops the message.** It comes back as an outcome with `error`, which the envelope turns into
+ * **A failure here never stops the message.** It comes back as an outcome with `error`, which the prompt turns into
  * a line telling the session the file could not be retrieved. Silently dropping it would leave the person believing
  * the agent had read their file.
  */
@@ -227,7 +227,7 @@ export async function fetchAttachments({
       outcomes.push({ name: safeName(attachment.name), path: file, media_type: attachment.mediaType, bytes: attachment.bytes });
     } catch (e) {
       const reason = (e as Error).message;
-      // Nothing half-written left at the path. An error outcome carries no `path`, so the envelope never names it, but
+      // Nothing half-written left at the path. An error outcome carries no `path`, so the prompt never names it, but
       // the file is in the conversation's uploads directory and a session listing that directory would find it and
       // read it as the attachment — an empty file for a refused first part, a truncated one for a refused later part.
       // Guarded on the length rather than on how far the fetch got: a file at its full claimed length is the one a

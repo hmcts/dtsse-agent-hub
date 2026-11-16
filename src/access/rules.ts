@@ -1,3 +1,5 @@
+import type { ModelRoute } from "../viewer/identity.ts";
+
 /**
  * Who may do what, as pure functions over rows the caller has already loaded.
  *
@@ -14,12 +16,16 @@
  * - **A conversation is read by its owner and by whoever they share it with**, one named person and one chat at a
  *   time. `conversationAccess` is the one rule that reads the share rows and `canForkConversation` the one that reads
  *   fork offers. A share or a fork is never of the agent, so every agent rule answers a recipient as a stranger.
+ * - **A prototype feedback project is its owner's and its team's, and a live share link opens it to reviewers.**
+ *   `feedbackProjectAccess` reads the member rows, and only the owner changes the project. `feedbackLinkAccess` is the
+ *   one rule where holding something, rather than being named, lets a signed-in person in, and what it lets them do is
+ *   held to that link: comment on its prototype and see their own recordings.
  *
  * A direct message is between one owner's sessions, or is an agent's reply to a person (`canReadMessage`,
  * `replyRoute`). A launch token acts as its owner only for its own virtual agent and the agents its sessions
  * registered. Only its owner saves, replaces or deletes a credential (`isOwner`), and its value is write-only for
  * them except the kinds `canOwnerReadCredential` allows; which kinds a pod may store is
- * `canVirtualAgentStoreCredential`.
+ * `canVirtualAgentStoreCredential`. Only people on the AI Gateway may connect Microsoft 365 (`canConnectMicrosoft`).
  */
 
 export interface AgentRef {
@@ -197,6 +203,7 @@ export function replyRoute(sender: AgentRef, message: MessageRef): ReplyRoute {
  * acts as the person in GitHub, Azure, Claude, Jenkins or Atlassian, so it stays write-only.
  */
 export function canOwnerReadCredential(kind: string): boolean {
+  // A Microsoft 365 connection is write-only like every sign-in: the person gets access tokens from it, not the token.
   return kind === "claude_md" || kind === "git_identity";
 }
 
@@ -207,7 +214,42 @@ export function canOwnerReadCredential(kind: string): boolean {
  * has to, again each time `twg` replaces the refresh token in it.
  */
 export function canVirtualAgentStoreCredential(kind: string): boolean {
-  return kind !== "claude_md" && kind !== "git_identity";
+  return kind !== "claude_md" && kind !== "git_identity" && !isHubIssuedCredential(kind);
+}
+
+/**
+ * Whether a credential of `kind` is one only the hub itself writes, from a sign-in the person makes in the web UI, so
+ * that no route takes a pasted or uploaded value of it: their Microsoft 365 connection, whose refresh token comes from
+ * the hub's own code exchange in `/auth/callback`, for a connect begun at `/auth/microsoft/connect`, and nowhere
+ * else. Deleting one is still the person's.
+ */
+export function isHubIssuedCredential(kind: string): boolean {
+  return kind === "microsoft";
+}
+
+/**
+ * Whether a virtual agent's pod may read its owner's stored credential of `kind` back. Every kind but a Microsoft 365
+ * connection: that refresh token, with the client secret it is redeemed with, stays in the hub, and a pod is given
+ * only a short-lived Graph access token minted from it (`GET /api/virtual/{id}/microsoft/token`), so a pod that is
+ * compromised loses at most an hour's access rather than a token that lasts until the person disconnects.
+ */
+export function canPodReadCredential(kind: string): boolean {
+  return kind !== "microsoft";
+}
+
+/**
+ * Whether someone may connect Microsoft 365: people on the HMCTS AI Gateway alone, which is the `gateway` route of
+ * their web session, from their `AIGateway.User` role when they signed in (`modelRouteFor`). Settings offers Connect,
+ * the connect sign-in starts and its callback keeps a connection only for them, and the sidebar offers the morning
+ * briefing only to them.
+ *
+ * Someone who signs in without the role has any connection they hold deleted then, as Disconnect deletes it. Until
+ * that next sign-in, up to a session's eight hours away, a connection they already hold keeps working: the token
+ * routes, for a pod and at the command line alike, ask only that a connection is stored.
+ * Disconnecting is never refused.
+ */
+export function canConnectMicrosoft(route: ModelRoute): boolean {
+  return route === "gateway";
 }
 
 export type UploadState = "pending" | "stored" | "fetched" | "expired";
@@ -356,11 +398,12 @@ export type ConversationAccess = "owner" | "reader" | "none";
  * What the viewer may do with a CFT Workspace conversation: own it, read the share of it they were named in, or
  * nothing.
  *
- * **This is the only way anyone reads anything of somebody else's in this application**, and a share row is the whole
- * of it. It is per conversation by design: a person decides one chat at a time, so they can hand over the one that is
- * about the work and nothing about the rest of their day. Access to a session is not granted at all — reaching
- * somebody else's agent is a tagged post, which is public — so there is no second rule beside this one to keep in
- * step with it, and there should not be.
+ * **This is the only way anyone reads somebody else's Assistant**, and a share row is the whole of it. Prototype
+ * feedback is the other read across people, and is of a project rather than of anyone's Assistant
+ * (`feedbackLinkAccess`). It is per conversation by design: a person decides one chat at a time, so they can hand
+ * over the one that is about the work and nothing about the rest of their day. Access to a session is not granted at
+ * all — reaching somebody else's agent is a tagged post, which is public — so there is no second rule beside this one
+ * to keep in step with it, and there should not be.
  *
  * A link to a shared conversation is a convenience for reaching one of these, never what grants it: someone handed
  * the link who is not named in a row gets `none`, exactly as if the conversation did not exist.
@@ -435,7 +478,7 @@ export type PeopleLookup = { ok: true; query: string; limit: number } | { ok: fa
  *
  * What those two prevent is one request that hands over everyone. What they do not prevent is many: the answer is
  * ordered and never offset, so walking the prefixes and going deeper wherever a full eight come back recovers the
- * list. Nothing in this application is rate limited, so that is true of its other reads as well, and closing it here
+ * list. No read in this application is rate limited, so that is true of its other reads as well, and closing it here
  * alone would be a false comfort. Treat the set of people who use the hub as known to anyone signed in.
  *
  * Anyone signed in may ask. The people it matches are colleagues in the same Entra tenant whose names and work
@@ -475,4 +518,61 @@ export function canLaunchTokenReadMessage(sessionAgentIds: readonly string[], me
   }
   const ours = (agent: AgentRef | null) => agent !== null && sessionAgentIds.includes(agent.id);
   return ours(message.targetAgent) || ours(message.authorAgent);
+}
+
+export type FeedbackProjectAccess = "owner" | "member" | "none";
+
+/**
+ * What the viewer is to a prototype feedback project: its owner, a member of its team, or nobody. The team sees every
+ * thread and recording and replies and resolves; only the owner changes the project (`canChangeFeedbackProject`).
+ * `memberOids` are the project's member rows, which are the whole of the team.
+ */
+export function feedbackProjectAccess(viewerOid: string, project: { ownerOid: string }, memberOids: readonly string[]): FeedbackProjectAccess {
+  if (isOwner(viewerOid, project)) {
+    return "owner";
+  }
+  return memberOids.includes(viewerOid) ? "member" : "none";
+}
+
+/** Whether the viewer may rename a project, change its settings, links or team, or archive it: its owner alone. */
+export function canChangeFeedbackProject(access: FeedbackProjectAccess): boolean {
+  return access === "owner";
+}
+
+export type FeedbackLinkAccess = "team" | "reviewer" | "none";
+
+/** The columns `feedbackLinkAccess` reads: the link's own, and its project's. */
+export interface FeedbackLinkRef {
+  revokedAt: Date | null;
+  project: { ownerOid: string; archivedAt: Date | null };
+}
+
+/**
+ * What the viewer is to a prototype feedback share link: the project's team, a reviewer, or nobody.
+ *
+ * **Holding a live link is the capability**: anyone signed in who opens one reviews through it, which is the one place
+ * this application lets a person reach something of somebody else's without being named in a row. It is narrow on
+ * purpose. A reviewer comments, replies and resolves on that link's prototype, sees the others' comments there, and
+ * sees no recording but their own (`canSeeFeedbackRecording`); nothing of the project beyond the link is theirs. Sign-in
+ * is enforced before this is asked, so a leaked link alone reaches nothing, and revoking the link or archiving the
+ * project ends it for everyone at once, the team included.
+ */
+export function feedbackLinkAccess(viewerOid: string, link: FeedbackLinkRef, memberOids: readonly string[]): FeedbackLinkAccess {
+  if (link.revokedAt !== null || link.project.archivedAt !== null) {
+    return "none";
+  }
+  return feedbackProjectAccess(viewerOid, link.project, memberOids) === "none" ? "reviewer" : "team";
+}
+
+/** Whether the viewer may play a recording: the team plays every one, a reviewer only their own. */
+export function canSeeFeedbackRecording(access: FeedbackLinkAccess, viewerOid: string, authorOid: string): boolean {
+  return access === "team" || (access === "reviewer" && viewerOid === authorOid);
+}
+
+/**
+ * Whether the viewer may add to a recording, or stop it: whoever made it, through a link that is still live. Nobody
+ * else, the team included, since the segments are that person's voice and screen.
+ */
+export function canRecordFeedback(access: FeedbackLinkAccess, viewerOid: string, authorOid: string): boolean {
+  return access !== "none" && viewerOid === authorOid;
 }

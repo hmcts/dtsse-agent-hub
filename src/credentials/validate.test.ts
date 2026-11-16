@@ -430,3 +430,17 @@ describe("checkCredential for atlassian", () => {
     expect(JSON.stringify(checked)).not.toContain(REFRESH);
   });
 });
+
+describe("checkCredential for microsoft", () => {
+  it("should keep the hub's own record of a connection and label it with the account when it is one", () => {
+    const value = JSON.stringify({ refresh_token: "1.AQ-refresh", account: "a.person@hmcts.net", scope: "Mail.Read offline_access" });
+    expect(checkCredential("microsoft", value)).toEqual({ ok: true, value, accountLabel: "a.person@hmcts.net" });
+  });
+
+  it("should refuse a value that is not a connection when one is sent under the kind", () => {
+    expect(checkCredential("microsoft", "eyJ0eXAiOiJKV1Qi.access.token")).toEqual({
+      ok: false,
+      error: "that is not a Microsoft 365 connection: connect from the CFT Workspace's settings instead"
+    });
+  });
+});

@@ -20,7 +20,14 @@ import * as statusRoute from "../../src/app/api/virtual/[virtualAgentId]/status/
 import { writeArtefact } from "../../src/assistant/artefact-store.ts";
 import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
 import { CONFLUENCE_EXPORT_TIMEOUT_MS } from "../../src/assistant/confluence.ts";
-import { createConversation, findConversation, hasLocalConversation, listConversations } from "../../src/assistant/conversation-store.ts";
+import {
+  createConversation,
+  findConversation,
+  hasLocalConversation,
+  listConversations,
+  pinConversation,
+  sidebarConversations
+} from "../../src/assistant/conversation-store.ts";
 import { readExportDefaults, saveExportDefaults } from "../../src/assistant/export-default-store.ts";
 import { assistantFrame } from "../../src/assistant/frame.ts";
 import { GITHUB_EXPORT_TIMEOUT_MS } from "../../src/assistant/github.ts";
@@ -39,7 +46,7 @@ import { appendEntries } from "../../src/transcripts/store.ts";
 import { MAX_VIRTUAL_AGENTS_PER_USER } from "../../src/virtual-agents/limits.ts";
 import { type ClaimedVirtualAgent, type ClaimResult, createVirtualAgent, setDesired } from "../../src/virtual-agents/store.ts";
 import { sweepVirtualAgents } from "../../src/virtual-agents/sweep.ts";
-import { form } from "./assistant-pod.ts";
+import { form, podFixture } from "./assistant-pod.ts";
 import { assistantSuite } from "./assistant-suite.ts";
 import { insertUser, type Person, prisma } from "./database.ts";
 import { call, jsonOf } from "./routes.ts";
@@ -299,6 +306,23 @@ describe("the person's assistant", () => {
       expect(home.credentials).toMatchObject({ modelRoute: viewerRoute, claudeTokenUsable });
     }
   );
+
+  // Microsoft 365 stored and the briefing claimed either way, so the viewer's route is all that differs.
+  it.each([
+    ["gateway", true],
+    ["own-licence", false]
+  ] as const)("should offer the morning briefing only to an AI Gateway user when the viewer is on %s", async (modelRoute, offered) => {
+    await podFixture(["morning-briefing"])(ALICE);
+    const viewer = { ...VIEWER, modelRoute };
+    const backend = credentialBackend(prisma);
+    if (!backend.available) {
+      throw new Error(backend.reason);
+    }
+    const connection = JSON.stringify({ refresh_token: "a-refresh-token", account: "alice@hmcts.net", scope: "Mail.Read" });
+    await putCredential(prisma, backend.store, { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "microsoft", value: connection, via: "web" });
+
+    expect((await openAssistant(viewer)).briefing).toBe(offered);
+  });
 });
 
 describe("conversations", () => {
@@ -474,12 +498,13 @@ describe("conversations", () => {
     expect(await assistantConversation({ ...BOB, tid: "dev", modelRoute: "gateway" }, id)).toBeUndefined();
   });
 
-  it("should carry the session's skills to the conversation page, and none before a session registers", async () => {
+  it("should carry a session's skills to the conversation page and the new chat when it registers", async () => {
     const { token } = await startedAssistant();
     const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
     const { sessionId } = await sessionOf(id);
 
     expect((await assistantConversation(VIEWER, id))?.skills).toEqual([]);
+    expect((await openAssistant(VIEWER)).skills).toEqual([]);
     await register(token, sessionId, id, {
       skills: [
         { name: "cft-how-to", description: "Find a how-to recipe" },
@@ -491,6 +516,31 @@ describe("conversations", () => {
       { name: "cft-explain", description: "Answer a what is X question" },
       { name: "cft-how-to", description: "Find a how-to recipe" }
     ]);
+    expect((await openAssistant(VIEWER)).skills).toEqual([
+      { name: "cft-explain", description: "Answer a what is X question" },
+      { name: "cft-how-to", description: "Find a how-to recipe" }
+    ]);
+  });
+
+  it("should offer the pod's skills on the conversation page when the conversation's own session has not registered", async () => {
+    const { token } = await startedAssistant();
+    const first = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+    await register(token, (await sessionOf(first)).sessionId, first, { skills: [{ name: "cft-explain", description: "Answer a what is X question" }] });
+    const second = ((await actions.startConversation({ product: "general", body: "and another" })) as { id: string }).id;
+
+    expect((await assistantConversation(VIEWER, second))?.skills).toEqual([{ name: "cft-explain", description: "Answer a what is X question" }]);
+
+    await register(token, (await sessionOf(second)).sessionId, second, { skills: [{ name: "cft-how-to", description: "Find a how-to recipe" }] });
+    expect((await assistantConversation(VIEWER, second))?.skills).toEqual([{ name: "cft-how-to", description: "Find a how-to recipe" }]);
+  });
+
+  it("should offer no skills on a laptop chat's page when its session has reported none, whatever the pod has", async () => {
+    const { token } = await startedAssistant();
+    const onPod = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+    await register(token, (await sessionOf(onPod)).sessionId, onPod, { skills: [{ name: "cft-explain", description: "Answer a what is X question" }] });
+    const local = await laptopChat();
+
+    expect((await assistantConversation(VIEWER, local))?.skills).toEqual([]);
   });
 
   /** Where a repo-relative path in an answer resolves to, which is the registering session's repo and branch. */
@@ -700,6 +750,77 @@ describe("conversations", () => {
     expect(await prisma.message.count({ where: { kind: "direct" } })).toBe(0);
   });
 
+  it("should pin and unpin a conversation, list it under Pinned alone while pinned, and back under its date when not", async () => {
+    await startedAssistant();
+    const first = ((await actions.startConversation({ product: "general", body: "first" })) as { id: string }).id;
+    const second = ((await actions.startConversation({ product: "general", body: "second" })) as { id: string }).id;
+    const sections = async () => (await openAssistant(VIEWER)).conversations.map((group) => [group.label, group.items.map((item) => item.id)]);
+
+    expect(await sections()).toEqual([["Today", [second, first]]]);
+
+    expect(await actions.pinConversation({ conversationId: first, pinned: true })).toEqual({ ok: true });
+    expect((await findConversation(prisma, ALICE.oid, first))!.pinnedAt).toEqual(expect.any(Date));
+    expect(await sections()).toEqual([
+      ["Pinned", [first]],
+      ["Today", [second]]
+    ]);
+
+    expect(await actions.pinConversation({ conversationId: second, pinned: true })).toEqual({ ok: true });
+    expect(await sections()).toEqual([["Pinned", [second, first]]]);
+
+    expect(await actions.pinConversation({ conversationId: second, pinned: false })).toEqual({ ok: true });
+    expect((await findConversation(prisma, ALICE.oid, second))!.pinnedAt).toBeNull();
+    expect(await sections()).toEqual([
+      ["Pinned", [first]],
+      ["Today", [second]]
+    ]);
+    expect((await assistantConversation(VIEWER, first))!.pinned).toBe(true);
+    expect((await assistantConversation(VIEWER, second))!.pinned).toBe(false);
+    expect((await searchConversations(prisma, ALICE.oid, "first")).map((match) => match.id)).toEqual([first]);
+  });
+
+  it("should keep the time a conversation was first pinned when it is pinned again", async () => {
+    await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+    const pinnedAt = new Date("2026-10-21T08:00:00.000Z");
+
+    await pinConversation(prisma, ALICE.oid, id, true, pinnedAt);
+    await pinConversation(prisma, ALICE.oid, id, true, new Date("2026-10-22T08:00:00.000Z"));
+
+    expect((await findConversation(prisma, ALICE.oid, id))!.pinnedAt).toEqual(pinnedAt);
+  });
+
+  it("should read pinned conversations apart from the limit, so recent unpinned ones still fill it however many are pinned", async () => {
+    await startedAssistant();
+    const start = async (body: string, lastActiveAt: string) => {
+      const id = ((await actions.startConversation({ product: "general", body })) as { id: string }).id;
+      await prisma.assistantConversation.update({ where: { id }, data: { lastActiveAt: new Date(lastActiveAt) } });
+      return id;
+    };
+    const oldest = await start("oldest", "2026-01-01T00:00:00.000Z");
+    const older = await start("older", "2026-02-01T00:00:00.000Z");
+    const newer = await start("newer", "2026-03-01T00:00:00.000Z");
+    const newest = await start("newest", "2026-04-01T00:00:00.000Z");
+    await pinConversation(prisma, ALICE.oid, older, true, new Date("2026-10-01T00:00:00.000Z"));
+    await pinConversation(prisma, ALICE.oid, oldest, true, new Date("2026-10-02T00:00:00.000Z"));
+    const ids = (rows: { id: string }[]) => rows.map((row) => row.id);
+
+    const sidebar = await sidebarConversations(prisma, ALICE.oid, 2);
+
+    expect(ids(sidebar.pinned)).toEqual([oldest, older]);
+    expect(ids(sidebar.recent)).toEqual([newest, newer]);
+    expect(ids(await listConversations(prisma, ALICE.oid, 2))).toEqual([newest, newer]);
+  });
+
+  it("should refuse to pin someone else's conversation, or one with no pinned state given", async () => {
+    await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+
+    expect(await actions.pinConversation({ conversationId: id, pinned: "yes" })).toEqual({ ok: false, error: "say whether the chat is pinned" });
+    await expect(pinConversation(prisma, BOB.oid, id, true)).rejects.toThrow("no such conversation");
+    expect((await findConversation(prisma, ALICE.oid, id))!.pinnedAt).toBeNull();
+  });
+
   /**
    * A conversation with no pod is a session on the person's own computer, and removing the chat has to leave that
    * session exactly as it was and keep the chat gone. `agent.assistant_conversation_id` is `ON DELETE CASCADE` and the
@@ -819,7 +940,7 @@ describe("conversations", () => {
     expect((await assistantConversation(VIEWER, onLaptop))!.local).toBe(true);
     expect((await assistantConversation(VIEWER, onPod))!.local).toBe(false);
     const listed = (await openAssistant(VIEWER)).conversations.flatMap((group) => group.items);
-    expect(new Map(listed.map((item) => [item.id, item.mark?.where ?? null]))).toEqual(
+    expect(new Map(listed.map((item) => [item.id, item.kind === "feedback" ? null : (item.mark?.where ?? null)]))).toEqual(
       new Map([
         [onLaptop, "computer"],
         [onPod, "assistant"]
@@ -838,18 +959,19 @@ describe("conversations", () => {
     ["offline", "disconnected"]
   ] as const)("should mark a listed local chat as %s with the state of its session", async (status, session) => {
     await startedAssistant();
+    await actions.startConversation({ product: "general", body: "on my assistant" });
     const onLaptop = await laptopChat();
     await typedAtLaptop(onLaptop);
     await prisma.agent.updateMany({ where: { assistantConversationId: onLaptop }, data: { status } });
 
     const listed = (await openAssistant(VIEWER)).conversations.flatMap((group) => group.items);
 
-    expect(listed.map((item) => [item.id, item.mark])).toEqual([[onLaptop, { where: "computer", session }]]);
+    expect(listed.flatMap((item) => (item.id === onLaptop && item.kind !== "feedback" ? [item.mark] : []))).toEqual([{ where: "computer", session }]);
   });
 
   /**
-   * The cloud is there only to tell a pod chat from a local one, so somebody who has never run a session on their
-   * own computer sees no marks at all. One read answers it for the whole list; see `hasLocalConversation`.
+   * A mark is there only to tell one kind of item from another, so somebody whose chats all run on their assistant
+   * sees no marks at all. One read answers it for the whole list; see `showsMarks`.
    */
   it("should mark no chat when every one of the person's chats runs on their assistant", async () => {
     const { token } = await startedAssistant();
@@ -858,7 +980,7 @@ describe("conversations", () => {
 
     const listed = (await openAssistant(VIEWER)).conversations.flatMap((group) => group.items);
 
-    expect(listed.map((item) => [item.id, item.mark])).toEqual([[onPod, null]]);
+    expect(listed.map((item) => [item.id, item.kind === "feedback" ? null : item.mark])).toEqual([[onPod, null]]);
   });
 
   it("should wake a conversation when its composer is focused and the session is offline", async () => {

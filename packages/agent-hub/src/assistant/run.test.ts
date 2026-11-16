@@ -163,7 +163,11 @@ describe("runAssistantSupervisor", () => {
     fs.rmSync(path.join(hubHome(), "virtual"), { recursive: true, force: true });
     const { hub, api } = await mockHub();
     const lookupId = "5b0e7c1a-1111-4222-8333-444455556666";
-    const projects = JSON.stringify({ data: { status: 200, body: { values: [{ key: "VIBE", name: "Vibe-Coding Enablement" }] } } });
+    const projects = JSON.stringify({
+      apiVersion: "v2",
+      command: "jira.space.query",
+      data: { projects: [{ id: "10120", key: "VIBE", name: "Vibe-Coding Enablement" }], total: 1 }
+    });
     const twg: string[][] = [];
     const assistant = supervise({
       api,
@@ -185,7 +189,7 @@ describe("runAssistantSupervisor", () => {
       // Assert
       await waitUntil(() => hub.lookupAnswers.length === 1, "the lookup to be answered");
       expect(hub.lookupAnswers[0]).toEqual({ virtual_id: VID, lookup_id: lookupId, body: { results: [{ key: "VIBE", name: "Vibe-Coding Enablement" }] } });
-      expect(twg[0]?.slice(0, 2)).toEqual(["api", "jira:/rest/api/3/project/search"]);
+      expect(twg[0]?.slice(0, 3)).toEqual(["jira", "space", "query"]);
     } finally {
       await assistant.stop();
       await hub.close();

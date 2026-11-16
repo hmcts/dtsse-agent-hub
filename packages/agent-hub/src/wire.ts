@@ -5,7 +5,13 @@
 import type { NameSource } from "./session.ts";
 
 /** The credential kinds `docs/agent-api.md` defines; any other gives 404. */
-export const CREDENTIAL_KINDS = ["github", "azure", "claude", "jenkins", "atlassian", "claude_md", "git_identity"] as const;
+export const CREDENTIAL_KINDS = ["github", "azure", "claude", "jenkins", "atlassian", "claude_md", "git_identity", "microsoft"] as const;
+
+/**
+ * The kinds a pod reads and stores through its own routes: all but a Microsoft 365 connection, which the hub keeps to
+ * itself and hands a pod only access tokens from.
+ */
+export const POD_CREDENTIAL_KINDS = CREDENTIAL_KINDS.filter((kind) => kind !== "microsoft");
 
 export type CredentialKind = (typeof CREDENTIAL_KINDS)[number];
 
@@ -110,6 +116,11 @@ export type HeartbeatBody = {
   /** Where `name` came from; read as `derived` when left out, and ignored by a heartbeat that sends no `name`. */
   name_source?: NameSource;
   skills?: Skill[];
+  /**
+   * This build's claim, sent until the hub has taken it, which only a `HeartbeatResponse` naming the same features
+   * says: a hub from before the field drops it and still answers `204`. It replaces the stored claim and nothing else.
+   */
+  client_features?: string[];
 };
 
 export type PostBody = {
@@ -196,6 +207,8 @@ export type ConfluencePageFound = {
   space_key: string;
   space_name: string;
   ancestors: string[];
+  /** The page's opening words, as Confluence's search gives them, which tell it from another page of the same title. */
+  excerpt?: string;
 };
 
 /** The answer to one Welsh translation job: what scripts/welsh printed, or why it did not run. */
@@ -302,6 +315,8 @@ export type MemoryReportBody = {
 };
 
 export type RegisterResponse = { agent_id: string; name: string };
+/** A heartbeat that sent `client_features` is answered with the claim as stored; one that did not, with no body. */
+export type HeartbeatResponse = { client_features: string[] | null };
 export type MessageResponse = { message: Message };
 export type MessagesResponse = { messages: Message[] };
 export type FeedResponse = { messages: Message[]; cursor: string };
@@ -310,6 +325,8 @@ export type TopicsResponse = { topics: TopicSummary[] };
 export type AgentsResponse = { agents: AgentSummary[] };
 export type TranscriptResponse = { accepted: number };
 export type CredentialResponse = { value: string };
+/** A Microsoft Graph access token minted from the owner's Microsoft 365 connection; see "Microsoft 365" in docs/agent-api.md. */
+export type MicrosoftTokenResponse = { access_token: string; expires_at: string; permissions: string[] };
 export type LoginCodeResponse = { code: string };
 /** Whether the owner has asked for a sign-in of this kind; see `GET /api/virtual/{id}/login/{kind}`. */
 export type SignInRequestResponse = { requested: boolean };

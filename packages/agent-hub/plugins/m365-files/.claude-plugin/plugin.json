@@ -1,0 +1,8 @@
+{
+  "name": "m365-files",
+  "description": "Your OneDrive and SharePoint files, once Microsoft 365 is connected",
+  "version": "0.1.0",
+  "author": {
+    "name": "DTSSE team"
+  }
+}

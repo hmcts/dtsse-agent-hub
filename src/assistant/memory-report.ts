@@ -359,7 +359,7 @@ export function memoryAdvice(pressure: MemoryPressure): string {
   return said.join(" ");
 }
 
-/** The chats a change of size would stop, as the question names them. */
+/** The chats a restart would stop, as the question names them. */
 function chatsStopped(openChats: number): string {
   if (openChats === 0) {
     return "whatever it is working on";
@@ -371,14 +371,11 @@ function chatsStopped(openChats: number): string {
 }
 
 /**
- * What a change of size is going to do, asked before it is made.
- *
- * Size is in the pod template, so a change replaces a running pod and every conversation session on it stops where it
- * is. `rollsPod` is the difference between that and a pod the orchestrator has not made yet, which simply starts at
- * the new size — and saying the first of those as if it were the second is the one thing this must not do.
+ * What saving the settings is going to do to a pod that is up, asked once before the save however many of the changes
+ * replace it: `changes` names them, as "size" and "plugins". Each is in the pod template, so the pod is replaced and
+ * every conversation session on it stops where it is. A pod the orchestrator has not made yet simply starts with the
+ * change, so the dialog asks nothing for it.
  */
-export function sizeChangeQuestion(size: string, rollsPod: boolean, openChats: number): string {
-  return rollsPod
-    ? `Change to ${size}? Your assistant restarts, which stops ${chatsStopped(openChats)}.`
-    : `Change to ${size}? Your assistant starts at the new size the next time you use it.`;
+export function restartQuestion(changes: readonly string[], openChats: number): string {
+  return `Save and restart your assistant? Changing its ${changes.join(" and ")} restarts it, which stops ${chatsStopped(openChats)}.`;
 }

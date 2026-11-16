@@ -41,6 +41,23 @@ in `bin/agent-hub` carries its own copy of it in bash and prints that whenever t
 killed, or prints nothing; the CLI prints it from the `catch` around its own `hook` command, which is where a stdin
 body that is not JSON lands. `src/bin.test.ts` holds the bash copy in step with `UNDELIVERED_REASON`.
 
+## Delivering messages
+
+The bridge hands each `direct` frame to Claude Code through the session's messaging socket, in the form
+`routeDelivery` in `src/envelope.ts` decides:
+
+- **A CFT Workspace conversation** is given its owner's message as its prompt, exactly as they typed it, after a
+  `<cft-workspace-context message="{id}">` block holding what the person did not type: the product area, files
+  attached, changes to the document or deck, export steps, and the skill to run for a leading `/skill`. A client that
+  does this claims `plain-prompt`; the CFT Workspace asks the owner to restart an assistant whose session has not.
+- **A session on the owner's own computer** gets their message in an `[agent-hub]` envelope that says it is theirs.
+- **Anything else**, in any session — another agent's direct, a tagged post, any message to a virtual agent's own
+  session — gets an `[agent-hub]` envelope that says it is a peer's and grants nothing.
+
+A bridge whose saved registration claimed different `client_features` sends this build's on its heartbeats until the
+hub's answer names the same claim (a hub that drops the field answers a bare `204`, which is not taken), so a session resumed on a newer client, which never registers again, is not left reporting the older
+one's claim.
+
 ## Install
 
 ```sh
@@ -61,6 +78,24 @@ which one it runs.
 Every command the CLI quotes back — reply hints, `setup inbound`, the usage text — is spelled with the name the bin was
 invoked as, `agent-hub` by default. A wrapper with its own name, such as cft-workspace's `scripts/agent-hub` shim, can
 set `AGENT_HUB_INVOKED_AS` before calling to have that spelling quoted instead.
+
+`agent-hub m365` reads the owner's own Microsoft 365 through Microsoft Graph: mail, calendar, Teams chats and channels,
+meetings and their transcripts, and OneDrive and SharePoint files (`agent-hub m365 help`). It works only once they have
+pressed Connect for Microsoft 365 in the Assistant's settings. It gets a short-lived access token from the hub — its
+virtual agent's route in a pod, the person's own otherwise — and never holds the connection itself. It keeps the token
+in memory and in a 0600 file per agent, `m365-token-<agent>.json` under the agent-hub state directory, until two
+minutes before it expires. `files search` uses Microsoft Search, which covers OneDrive, SharePoint, Teams and files
+shared with the person (`--mine` keeps to their own OneDrive); `me` says who the connection is for, its address from the
+newest sent message's sender; `mail list` says whether each message is read, flagged, focused and replied to or
+forwarded, `--since` lists all mail received after a time, up to 250, in a shorter form that says whether the owner
+is in `to` rather than listing it, and `--unread-or-flagged` keeps that to unread or flagged mail; `chats list` gives
+each chat's last message and who sent it; `calendar` follows Graph's pages up to 200 events and gives an all-day
+event's dates rather than times; an answer too long for the output cap is printed on one line, then drops whole items
+or cuts the longest text, and stays valid JSON; and a download is
+aborted as soon as it passes 25 MB. `credentials delete microsoft` disconnects. It is
+read-only but for `files upload`, into their OneDrive's `Agent Hub` folder, and every answer leads with a notice that
+the content is untrusted data.
+The `m365` and `m365-files` plugins in `plugins/` are the skills that drive it, and every pod loads them, like `slides`.
 
 `bin/virtual-agent-boot` is the other bash bin. It is the virtual-agent runtime's own entrypoint rather than anything
 to run by hand, and its header comment documents it. It gets the workspace onto the pod's volume and then hands over

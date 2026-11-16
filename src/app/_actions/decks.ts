@@ -24,7 +24,7 @@ const wholeFrom = (value: unknown, least: number): number | undefined =>
 /**
  * The owner's restore of an older version of their conversation's deck, written as the next version and said to be
  * theirs, if nobody has written one since `baseVersion`; otherwise nothing is written and the version there now comes
- * back, for the panel to say so. The session learns of it from its next message's envelope, as of any change of theirs.
+ * back, for the panel to say so. The session learns of it from its next message's context, as of any change of theirs.
  */
 export async function restoreDeckVersion(input: { conversationId: unknown; version: unknown; baseVersion: unknown }): Promise<ActionResult<RestoreDeckResult>> {
   return await runAction<RestoreDeckResult>("restore deck version", async () => {
@@ -72,7 +72,7 @@ const NOT_THERE: { ok: false; error: string } = { ok: false, error: "those slide
  * The owner's save of their deck from the slides panel's editor, if the deck is still at `baseVersion` and
  * `baseRevision`; otherwise nothing is written and the deck as it is now comes back, for the panel to offer it or the
  * person's own edit on top of it. A save soon after their last amends that version (`saveDeckEdit`), and one the same as
- * the version it was made from writes nothing (`unchanged`). The session learns of it from its next message's envelope.
+ * the version it was made from writes nothing (`unchanged`). The session learns of it from its next message's context.
  */
 export async function saveDeck(input: {
   conversationId: unknown;

@@ -8,6 +8,8 @@ import {
   canAgentMessageAgent,
   canAttachUpload,
   canChangeDeck,
+  canChangeFeedbackProject,
+  canConnectMicrosoft,
   canForkConversation,
   canLaunchTokenActForAgent,
   canLaunchTokenReadMessage,
@@ -15,9 +17,12 @@ import {
   canOpenVirtualAgentPort,
   canOwnerReadCredential,
   canPersonDirectAgent,
+  canPodReadCredential,
   canReadDeck,
   canReadMessage,
+  canRecordFeedback,
   canRemoveUploadFromDisk,
+  canSeeFeedbackRecording,
   canSessionUseAttachment,
   canShareConversationWith,
   canSuggestPerson,
@@ -26,6 +31,9 @@ import {
   canVirtualAgentStoreCredential,
   canWriteUpload,
   conversationAccess,
+  feedbackLinkAccess,
+  feedbackProjectAccess,
+  isHubIssuedCredential,
   isOwner,
   isPodConversationAgent,
   MAX_PEOPLE_SUGGESTIONS,
@@ -384,6 +392,16 @@ describe("canUseCredentialRoutes", () => {
   });
 });
 
+describe("canConnectMicrosoft", () => {
+  it("should allow Microsoft 365 when the person is on the gateway route", () => {
+    expect(canConnectMicrosoft("gateway")).toBe(true);
+  });
+
+  it("should refuse Microsoft 365 when the person is on their own Claude licence", () => {
+    expect(canConnectMicrosoft("own-licence")).toBe(false);
+  });
+});
+
 describe("canOwnerReadCredential", () => {
   it("should let the owner read their CLAUDE.md back when the page shows it for editing", () => {
     expect(canOwnerReadCredential("claude_md")).toBe(true);
@@ -415,6 +433,30 @@ describe("canVirtualAgentStoreCredential", () => {
 
   it("should refuse a pod when it would change its owner's git identity", () => {
     expect(canVirtualAgentStoreCredential("git_identity")).toBe(false);
+  });
+
+  it("should refuse a pod when it would write a Microsoft 365 connection, which only the hub writes", () => {
+    expect(canVirtualAgentStoreCredential("microsoft")).toBe(false);
+  });
+});
+
+describe("isHubIssuedCredential", () => {
+  it("should count a Microsoft 365 connection as written by the hub alone when asked", () => {
+    expect(isHubIssuedCredential("microsoft")).toBe(true);
+  });
+
+  it.each(["github", "azure", "claude", "jenkins", "atlassian", "claude_md", "git_identity"])("should not count %s as hub-issued when asked", (kind) => {
+    expect(isHubIssuedCredential(kind)).toBe(false);
+  });
+});
+
+describe("canPodReadCredential", () => {
+  it("should keep a Microsoft 365 connection from a pod when it asks for the value", () => {
+    expect(canPodReadCredential("microsoft")).toBe(false);
+  });
+
+  it.each(["github", "azure", "claude", "jenkins", "atlassian", "claude_md", "git_identity"])("should let a pod read its owner's %s when it asks", (kind) => {
+    expect(canPodReadCredential(kind)).toBe(true);
   });
 });
 
@@ -843,5 +885,84 @@ describe("tagRefusal", () => {
   it("should refuse an agent tagging itself, and not the same agent in a person's post", () => {
     expect(tagRefusal(TARGET.id, TARGET)).toBe("itself");
     expect(tagRefusal(null, TARGET)).toBeUndefined();
+  });
+});
+
+describe("prototype feedback", () => {
+  const PROJECT = { ownerOid: OWNER };
+  const MEMBERS = [COLLEAGUE];
+  const live = { revokedAt: null, project: { ownerOid: OWNER, archivedAt: null } };
+
+  describe("feedbackProjectAccess", () => {
+    it("should answer owner when the viewer owns the project", () => {
+      expect(feedbackProjectAccess(OWNER, PROJECT, MEMBERS)).toBe("owner");
+    });
+
+    it("should answer member when the viewer is in a member row", () => {
+      expect(feedbackProjectAccess(COLLEAGUE, PROJECT, MEMBERS)).toBe("member");
+    });
+
+    it("should answer none when the viewer is in no member row", () => {
+      expect(feedbackProjectAccess(ELSEWHERE, PROJECT, MEMBERS)).toBe("none");
+      expect(feedbackProjectAccess(COLLEAGUE, PROJECT, [])).toBe("none");
+    });
+  });
+
+  describe("canChangeFeedbackProject", () => {
+    it("should let the owner alone change the project", () => {
+      expect(canChangeFeedbackProject("owner")).toBe(true);
+      expect(canChangeFeedbackProject("member")).toBe(false);
+      expect(canChangeFeedbackProject("none")).toBe(false);
+    });
+  });
+
+  describe("feedbackLinkAccess", () => {
+    it("should answer team for the owner and a member when the link is live", () => {
+      expect(feedbackLinkAccess(OWNER, live, MEMBERS)).toBe("team");
+      expect(feedbackLinkAccess(COLLEAGUE, live, MEMBERS)).toBe("team");
+    });
+
+    it("should answer reviewer for anyone else signed in when the link is live", () => {
+      expect(feedbackLinkAccess(ELSEWHERE, live, MEMBERS)).toBe("reviewer");
+    });
+
+    it.each([
+      ["revoked", { ...live, revokedAt: new Date() }],
+      ["on an archived project", { ...live, project: { ...live.project, archivedAt: new Date() } }]
+    ])("should answer none to everyone, the owner included, when the link is %s", (_label, link) => {
+      for (const viewer of [OWNER, COLLEAGUE, ELSEWHERE]) {
+        expect(feedbackLinkAccess(viewer, link, MEMBERS)).toBe("none");
+      }
+    });
+  });
+
+  describe("canSeeFeedbackRecording", () => {
+    it("should let the team play anyone's recording", () => {
+      expect(canSeeFeedbackRecording("team", OWNER, ELSEWHERE)).toBe(true);
+    });
+
+    it("should let a reviewer play their own recording and nobody else's", () => {
+      expect(canSeeFeedbackRecording("reviewer", ELSEWHERE, ELSEWHERE)).toBe(true);
+      expect(canSeeFeedbackRecording("reviewer", ELSEWHERE, COLLEAGUE)).toBe(false);
+    });
+
+    it("should let nobody play one when the link gives no access", () => {
+      expect(canSeeFeedbackRecording("none", ELSEWHERE, ELSEWHERE)).toBe(false);
+    });
+  });
+
+  describe("canRecordFeedback", () => {
+    it("should let the recording's author add to it whether they are team or a reviewer", () => {
+      expect(canRecordFeedback("reviewer", ELSEWHERE, ELSEWHERE)).toBe(true);
+      expect(canRecordFeedback("team", OWNER, OWNER)).toBe(true);
+    });
+
+    it("should refuse anyone else, the team included", () => {
+      expect(canRecordFeedback("team", OWNER, ELSEWHERE)).toBe(false);
+    });
+
+    it("should refuse the author when the link gives no access", () => {
+      expect(canRecordFeedback("none", ELSEWHERE, ELSEWHERE)).toBe(false);
+    });
   });
 });

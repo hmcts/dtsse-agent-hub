@@ -10,6 +10,7 @@ import {
   conversationAgent,
   createConversation,
   findConversation,
+  pinConversation as pin,
   deleteConversation as remove,
   renameConversation as rename,
   setProduct
@@ -71,7 +72,7 @@ async function gated(viewer: Viewer, conversation: ConversationRow): Promise<boo
 
 /**
  * The message body, or the refusal. A message of files and no words is a message: handing the assistant a document is
- * a whole ask on its own, and the envelope names the files whether or not anything was typed. Only a message that is
+ * a whole ask on its own, and the prompt's context names the files whether or not anything was typed. Only a message that is
  * empty of both is nothing to send.
  */
 function checkBody(raw: unknown, attachments: number): string | { ok: false; error: string } {
@@ -122,8 +123,12 @@ async function send(oid: string, conversation: ConversationRow, typed: string, u
   });
 }
 
-/** A new conversation, started with its first message: a starter card's prompt, or what the person typed. */
-export async function startConversation(input: { product: unknown; body: unknown }): Promise<ActionResult<{ id: string }>> {
+/**
+ * A new conversation, started with its first message: a starter card's prompt, what the person typed, or a workflow's
+ * prompt such as the morning briefing's. `title` names it where the first message would make a poor name, as a
+ * skill's invocation does; left out, the first message names it.
+ */
+export async function startConversation(input: { product: unknown; body: unknown; title?: unknown }): Promise<ActionResult<{ id: string }>> {
   return await runAction<{ id: string }>("start conversation", async () => {
     if (!virtualAgentsEnabled()) {
       return OFF;
@@ -136,7 +141,7 @@ export async function startConversation(input: { product: unknown; body: unknown
     if (typeof body !== "string") {
       return body;
     }
-    const conversation = await createConversation(prisma, viewer.oid, { product: input.product });
+    const conversation = await createConversation(prisma, viewer.oid, { product: input.product, title: text(input.title) });
     await send(viewer.oid, conversation, body);
     revalidatePath("/assistant");
     return { ok: true, id: conversation.id };
@@ -297,6 +302,18 @@ export async function renameConversation(input: { conversationId: unknown; title
     }
     const viewer = await requireViewer();
     await rename(prisma, viewer.oid, text(input.conversationId), text(input.title));
+    revalidatePath("/assistant");
+    return { ok: true };
+  });
+}
+
+export async function pinConversation(input: { conversationId: unknown; pinned: unknown }): Promise<ActionResult> {
+  return await runAction("pin conversation", async () => {
+    if (!virtualAgentsEnabled()) {
+      return OFF;
+    }
+    const viewer = await requireViewer();
+    await pin(prisma, viewer.oid, text(input.conversationId), input.pinned);
     revalidatePath("/assistant");
     return { ok: true };
   });

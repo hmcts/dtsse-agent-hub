@@ -6,9 +6,11 @@ import { DEV_OID_PREFIX } from "../agent-auth/dev.ts";
  * a Jenkins API token (which also needs Azure, for their Entra object id); their
  * own CLAUDE.md, which is not a sign-in but is kept here because it may hold private context; if they want to
  * override the default, the git identity their agents commit as; and, if they want Jira and Confluence, the sign-in
- * of the Atlassian Teamwork Graph CLI, `twg`.
+ * of the Atlassian Teamwork Graph CLI, `twg`; and, if they connect Microsoft 365, the Microsoft Graph refresh token the hub
+ * keeps for them, which unlike every other kind never leaves the hub
+ * (`canPodReadCredential`).
  */
-export const CREDENTIAL_KINDS = ["github", "azure", "claude", "jenkins", "claude_md", "git_identity", "atlassian"] as const;
+export const CREDENTIAL_KINDS = ["github", "azure", "claude", "jenkins", "claude_md", "git_identity", "atlassian", "microsoft"] as const;
 
 export type CredentialKind = (typeof CREDENTIAL_KINDS)[number];
 

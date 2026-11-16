@@ -24,9 +24,19 @@ export type HubEvent =
   /**
    * `owner_oid`'s agent changed status. `local_conversation_id` is the listed chat with no pod whose current session
    * it is, so the sidebar can recolour that chat's mark without a read per event; null for every other agent
-   * (`localConversationSql`).
+   * (`localConversationSql`). `client_features` is present whenever the agent's claim was written, by a registration
+   * or a heartbeat that reported one, and is the claim as stored, `null` for a client that claimed nothing; a page
+   * showing what the client claims takes it from here rather than reading the agent again. A claim is at most 50 short
+   * names, well inside the NOTIFY payload's 8000 bytes.
    */
-  | { type: "agent_status"; agent_id: string; owner_oid: string; status: AgentStatus; local_conversation_id: string | null }
+  | {
+      type: "agent_status";
+      agent_id: string;
+      owner_oid: string;
+      status: AgentStatus;
+      local_conversation_id: string | null;
+      client_features?: string[] | null;
+    }
   /** The skills `owner_oid`'s agent reported changed. Never carries the list, which only some viewers may see. */
   | { type: "agent_skills"; agent_id: string; owner_oid: string }
   /**
@@ -89,6 +99,12 @@ export type HubEvent =
    */
   | { type: "assistant_deck_build"; job_id: string; virtual_agent_id: string; owner_oid: string }
   /**
+   * Something of a prototype feedback project changed: a thread, a comment, a recording, or the project itself, its
+   * links or its team. `link_id` is the link it came through, null for a change to the project. Ids only, as every
+   * event: who may see the change is a project rule, which a subscriber applies when it re-reads.
+   */
+  | { type: "feedback"; project_id: string; link_id: string | null }
+  /**
    * Published in-process only, when the listener reconnects. NOTIFYs sent while it was disconnected are lost, so
    * every stream re-reads its queued deliveries.
    */
@@ -106,6 +122,11 @@ function isId(value: unknown): value is string {
 
 function isOptionalId(value: unknown): value is string | null {
   return value === null || isId(value);
+}
+
+// Read as the store wrote it: a list of names, which a subscriber only compares against the feature it needs.
+function isClaim(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((name) => typeof name === "string");
 }
 
 const STATUSES: readonly string[] = ["busy", "idle", "offline"];
@@ -147,7 +168,8 @@ export function decodeEvent(payload: string | undefined): NotifiedEvent | undefi
             agent_id: event.agent_id,
             owner_oid: event.owner_oid,
             status: event.status as AgentStatus,
-            local_conversation_id: event.local_conversation_id ?? null
+            local_conversation_id: event.local_conversation_id ?? null,
+            ...(event.client_features === null || isClaim(event.client_features) ? { client_features: event.client_features } : {})
           }
         : undefined;
     case "agent_skills":
@@ -190,6 +212,8 @@ export function decodeEvent(payload: string | undefined): NotifiedEvent | undefi
       return isId(event.job_id) && isId(event.virtual_agent_id) && isId(event.owner_oid)
         ? { type: event.type, job_id: event.job_id, virtual_agent_id: event.virtual_agent_id, owner_oid: event.owner_oid }
         : undefined;
+    case "feedback":
+      return isId(event.project_id) && isOptionalId(event.link_id) ? { type: "feedback", project_id: event.project_id, link_id: event.link_id } : undefined;
     default:
       return undefined;
   }

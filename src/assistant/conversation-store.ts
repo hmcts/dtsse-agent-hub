@@ -11,7 +11,7 @@ import { DEFAULT_PRODUCT, isProduct } from "./products.ts";
 import { messageTitle, TITLE_MAX, type TitleSource } from "./titles.ts";
 
 /**
- * The CFT Workspace's conversations: reading, listing, creating, renaming and removing them.
+ * The CFT Workspace's conversations: reading, listing, creating, renaming, pinning and removing them.
  *
  * A conversation's agent is created with it, offline and with a session id the hub chose, so a message can queue for
  * it before any session runs. The pod's supervisor starts a session under that id when the conversation is woken,
@@ -52,16 +52,47 @@ export interface ConversationListRow extends ConversationRow {
  * chat's own page saying the same thing about the same session.
  */
 export async function listConversations(db: Database, ownerOid: string, limit = 200, virtualAgentId?: string): Promise<ConversationListRow[]> {
+  return await listed(db, { ownerOid, ...(virtualAgentId === undefined ? {} : { virtualAgentId }) }, [{ lastActiveAt: "desc" }, { id: "asc" }], limit);
+}
+
+/** How many pinned chats the sidebar shows; far more than anyone pins, so it only bounds the page. */
+export const PINNED_LIMIT = 200;
+
+/**
+ * The sidebar's two reads: the owner's pinned conversations, most recently pinned first, and up to `limit` of the
+ * rest, most recently active first. Read apart so a pinned chat never takes a recent one's place under the limit, and
+ * each read has an index of its own: `assistant_conversation_owner_pinned_idx` and
+ * `assistant_conversation_owner_active_idx`.
+ */
+export async function sidebarConversations(
+  db: Database,
+  ownerOid: string,
+  limit = 200
+): Promise<{ pinned: ConversationListRow[]; recent: ConversationListRow[] }> {
+  const [pinned, recent] = await Promise.all([
+    listed(db, { ownerOid, pinnedAt: { not: null } }, [{ pinnedAt: "desc" }, { id: "asc" }], PINNED_LIMIT),
+    listed(db, { ownerOid, pinnedAt: null }, [{ lastActiveAt: "desc" }, { id: "asc" }], limit)
+  ]);
+  return { pinned, recent };
+}
+
+type ListedOrder = { lastActiveAt: "desc" } | { pinnedAt: "desc" } | { id: "asc" };
+
+async function listed(
+  db: Database,
+  filter: { ownerOid: string; virtualAgentId?: string; pinnedAt?: null | { not: null } },
+  orderBy: ListedOrder[],
+  take: number
+): Promise<ConversationListRow[]> {
   const rows = await db.assistantConversation.findMany({
     where: {
-      ownerOid,
+      ...filter,
       firstContentAt: { not: null },
-      OR: [{ virtualAgentId: null }, { virtualAgent: { desired: { not: "deleted" } } }],
-      ...(virtualAgentId === undefined ? {} : { virtualAgentId })
+      OR: [{ virtualAgentId: null }, { virtualAgent: { desired: { not: "deleted" } } }]
     },
     select: { ...SELECT, agent: { select: { status: true } } },
-    orderBy: [{ lastActiveAt: "desc" }, { id: "asc" }],
-    take: limit
+    orderBy,
+    take
   });
   return rows.map(({ agent, ...row }) => ({ ...toRow(row), agentStatus: agent?.status ?? "offline" }));
 }
@@ -69,14 +100,12 @@ export async function listConversations(db: Database, ownerOid: string, limit = 
 /**
  * Whether any of the owner's conversations is a session on their own computer.
  *
- * A fact about the whole list rather than about any one row, and so its own read: it is what decides whether a chat
- * running on a pod is marked as one at all, since a cloud beside every row of a list that holds nothing else tells
- * nobody anything. Asked here, by both the sidebar's list and its search, so the two cannot answer it differently
- * for the same person — and asked of every one of their conversations rather than of the page the sidebar loaded,
- * which is capped and so could miss the only local chat they have.
+ * A fact about the whole list rather than about any one row, and so its own read: one of the kinds `showsMarks` counts
+ * to decide whether any row is marked. Asked of every one of their conversations rather than of the page the sidebar
+ * loaded, which is capped and so could miss the only local chat they have.
  *
  * Only a chat the list would show counts (`first_content_at`): one left out for having nothing in it would otherwise put a
- * mark against every pod chat for a reason the person cannot see.
+ * mark against every row for a reason the person cannot see.
  *
  * No `virtual_agent` filter, unlike `listConversations`: these rows have no related virtual agent to be deleted.
  */
@@ -84,6 +113,15 @@ export async function hasLocalConversation(db: Database, ownerOid: string): Prom
   return (
     (await db.assistantConversation.findFirst({ where: { ownerOid, virtualAgentId: null, firstContentAt: { not: null } }, select: { id: true } })) !== null
   );
+}
+
+/** Whether any of the owner's conversations the list would show runs on a pod: `hasLocalConversation`'s other half. */
+export async function hasPodConversation(db: Database, ownerOid: string): Promise<boolean> {
+  const row = await db.assistantConversation.findFirst({
+    where: { ownerOid, firstContentAt: { not: null }, virtualAgent: { desired: { not: "deleted" } } },
+    select: { id: true }
+  });
+  return row !== null;
 }
 
 /**
@@ -224,6 +262,29 @@ export async function renameConversation(prisma: PrismaClient, ownerOid: string,
     // `user` is what makes this the last word on the title: nothing the hub derives replaces one a person chose.
     await tx.assistantConversation.update({ where: { id }, data: { title: trimmed, titleSource: "user" satisfies TitleSource, updatedAt: new Date() } });
     await announce(tx, conversation);
+  });
+}
+
+/**
+ * Pins the conversation above the sidebar's date groups, or unpins it. Pinning one already pinned keeps the time it
+ * was first pinned, so its place in the Pinned section does not move on a repeated request from another tab.
+ */
+export async function pinConversation(prisma: PrismaClient, ownerOid: string, id: string, pinned: unknown, now: Date = new Date()): Promise<void> {
+  if (typeof pinned !== "boolean") {
+    throw new HttpError(400, "say whether the chat is pinned");
+  }
+  const conversation = await findConversation(prisma, ownerOid, id);
+  if (conversation === undefined) {
+    throw new ConversationNotFound();
+  }
+  await prisma.$transaction(async (tx) => {
+    const { count } = await tx.assistantConversation.updateMany({
+      where: { id, pinnedAt: pinned ? null : { not: null } },
+      data: { pinnedAt: pinned ? now : null, updatedAt: now }
+    });
+    if (count > 0) {
+      await announce(tx, conversation);
+    }
   });
 }
 

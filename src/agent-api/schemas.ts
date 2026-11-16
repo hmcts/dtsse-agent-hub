@@ -88,7 +88,8 @@ export const heartbeatBody = z.object({
   status: z.enum(["busy", "idle"]),
   name: z.string().trim().min(1).max(MAX_NAME).nullish(),
   name_source: nameSource,
-  skills
+  skills,
+  client_features: clientFeatures
 });
 
 const messageId = z.union([

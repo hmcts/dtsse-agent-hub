@@ -1,14 +1,16 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { ActionForm, type FormAction } from "@/components/ActionForm";
 import { useSettingsData } from "@/components/assistant/useSettingsData";
+import { useSettingsDraft, useSettingsSaves } from "@/components/assistant/useSettingsDraft";
 import { MAX_GIT_EMAIL_LENGTH, MAX_GIT_NAME_CHARACTERS } from "@/credentials/git-identity";
 import type { GitIdentitySettings } from "@/web/data";
 
 /**
  * The person's optional override of the name and email their agents commit as: the `git_identity` credential, read
- * through `readGitIdentity` once the section opens and written by `saveGitIdentity` and `clearGitIdentity`. Whether a
+ * through `readGitIdentity` once the section opens, saved by the dialog's Save through `saveGitIdentity`, and cleared
+ * by `clearGitIdentity`. Whether a
  * value is acceptable is `checkGitIdentity`'s decision alone, and `ActionForm` shows its words.
  */
 export interface AssistantGitIdentity {
@@ -20,24 +22,26 @@ export interface AssistantGitIdentity {
 const FIELD =
   "block w-full rounded-lg border border-asst-strong bg-asst-field px-2.5 py-2 text-[13px] text-asst-text outline-hidden focus:border-asst-accent-line";
 
+function sameIdentity(a: { name: string; email: string }, b: { name: string; email: string }): boolean {
+  return a.name === b.name && a.email === b.email;
+}
+
 function Form({
   git,
   settings,
-  onSaved,
   onCleared
 }: {
   git: AssistantGitIdentity;
   settings: Extract<GitIdentitySettings, { available: true }>;
-  onSaved: () => void;
   onCleared: (confirmation: string | undefined) => void;
 }) {
   const id = useId();
-  // The person's own from the first read on, so a re-read after a save never replaces what they are typing.
-  const [name, setName] = useState(settings.identity.name ?? "");
-  const [email, setEmail] = useState(settings.identity.email ?? "");
+  // Held by the dialog from the first read on, so a re-read after a save never replaces what the person is typing.
+  const draft = useSettingsDraft("git", { name: settings.identity.name ?? "", email: settings.identity.email ?? "" }, sameIdentity);
+  const { name, email } = draft.value;
   return (
     <>
-      <ActionForm action={git.save} label="Save your git identity" keepValues onSuccess={onSaved} className="flex flex-col gap-2">
+      <div className="flex flex-col gap-2">
         <label htmlFor={`${id}-name`} className="text-[13px] font-medium">
           Name
         </label>
@@ -46,7 +50,7 @@ function Form({
           name="name"
           type="text"
           value={name}
-          onChange={(event) => setName(event.target.value)}
+          onChange={(event) => draft.set({ name: event.target.value, email })}
           maxLength={MAX_GIT_NAME_CHARACTERS}
           autoComplete="name"
           className={FIELD}
@@ -59,26 +63,24 @@ function Form({
           name="email"
           type="email"
           value={email}
-          onChange={(event) => setEmail(event.target.value)}
+          onChange={(event) => draft.set({ name, email: event.target.value })}
           maxLength={MAX_GIT_EMAIL_LENGTH}
           autoComplete="email"
           spellCheck={false}
           className={FIELD}
         />
-        <button
-          type="submit"
-          className="self-start rounded-[10px] bg-asst-accent px-3.5 py-2 text-[13px] font-semibold text-asst-ink hover:bg-asst-accent-hover"
-        >
-          Save your git identity
-        </button>
-      </ActionForm>
+        {draft.error === null ? null : (
+          <p role="alert" className="text-xs text-asst-error">
+            {draft.error}
+          </p>
+        )}
+      </div>
       {settings.stored ? (
         <ActionForm
           action={git.clear}
           label="Go back to the default git identity"
           onSuccess={(result: { confirmation?: string }) => {
-            setName("");
-            setEmail("");
+            draft.settle({ name: "", email: "" });
             onCleared(result.confirmation);
           }}
         >
@@ -93,8 +95,19 @@ function Form({
 
 export function GitIdentity({ git }: { git: AssistantGitIdentity }) {
   const { data: settings, failed, reload } = useSettingsData("git", git.load);
+  const saves = useSettingsSaves();
   // The clear's confirmation is said here, since its form goes once nothing is stored.
   const [said, setSaid] = useState<string | null>(null);
+  const seen = useRef(saves);
+  // Read again after the dialog's Save, which may have stored this section's draft: what is stored is what the
+  // "Go back to the default" beside the fields depends on.
+  useEffect(() => {
+    if (seen.current !== saves) {
+      seen.current = saves;
+      setSaid(null);
+      reload();
+    }
+  }, [saves, reload]);
   return (
     <section aria-labelledby="assistant-settings-git" aria-busy={settings === undefined && !failed} className="flex flex-col gap-2.5">
       <h3 id="assistant-settings-git" className="text-sm font-semibold">
@@ -117,10 +130,6 @@ export function GitIdentity({ git }: { git: AssistantGitIdentity }) {
         <Form
           git={git}
           settings={settings}
-          onSaved={() => {
-            setSaid(null);
-            reload();
-          }}
           onCleared={(confirmation) => {
             setSaid(confirmation ?? null);
             reload();

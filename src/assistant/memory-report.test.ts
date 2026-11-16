@@ -13,7 +13,7 @@ import {
   nextSizeUp,
   offerMemory,
   POD_BASELINE_MEMORY_BYTES,
-  sizeChangeQuestion,
+  restartQuestion,
   sizeOffer,
   sizeOffers,
   sizeSentence
@@ -289,19 +289,19 @@ describe("memoryAdvice", () => {
   });
 });
 
-describe("sizeChangeQuestion", () => {
+describe("restartQuestion", () => {
   it.each([
     [0, "whatever it is working on"],
     [1, "the one chat you have open"],
     [3, "all 3 chats you have open"]
-  ])("should count the chats a change ends when %i are open", (openChats, said) => {
-    expect(sizeChangeQuestion("medium", true, openChats)).toBe(`Change to medium? Your assistant restarts, which stops ${said}.`);
+  ])("should count the chats a restart ends when %i are open", (openChats, said) => {
+    expect(restartQuestion(["size"], openChats)).toBe(`Save and restart your assistant? Changing its size restarts it, which stops ${said}.`);
   });
 
-  // A pod the orchestrator has not made yet is not restarted by this, and saying it is would be a cost that is not
-  // being paid.
-  it("should promise the new size at the next start when no pod is up", () => {
-    expect(sizeChangeQuestion("large", false, 3)).toBe("Change to large? Your assistant starts at the new size the next time you use it.");
+  it("should ask once, naming both, when the size and the plugins both change", () => {
+    expect(restartQuestion(["size", "plugins"], 1)).toBe(
+      "Save and restart your assistant? Changing its size and plugins restarts it, which stops the one chat you have open."
+    );
   });
 });
 

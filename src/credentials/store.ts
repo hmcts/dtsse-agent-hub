@@ -124,3 +124,97 @@ export async function readCredential(db: Database, store: SecretStore, ownerOid:
   const row = await db.credential.findUnique({ where: { ownerOid_kind: { ownerOid, kind } }, select: { secretName: true } });
   return row === null ? undefined : await store.get(row.secretName);
 }
+
+/** A stored value and the version it is: when its row was last written, which every write moves on. */
+export interface CredentialVersion {
+  value: string;
+  updatedAt: Date;
+}
+
+/** The owner's credential with its version, for a write that must not overwrite one made since it was read. */
+export async function readCredentialVersion(db: Database, store: SecretStore, ownerOid: string, kind: CredentialKind): Promise<CredentialVersion | undefined> {
+  const row = await db.credential.findUnique({ where: { ownerOid_kind: { ownerOid, kind } }, select: { secretName: true, updatedAt: true } });
+  if (row === null) {
+    return undefined;
+  }
+  const value = await store.get(row.secretName);
+  return value === undefined ? undefined : { value, updatedAt: row.updatedAt };
+}
+
+/** When a credential's row was last written, or `undefined` for none: the version, without touching the value. */
+export async function credentialVersion(db: Database, ownerOid: string, kind: CredentialKind): Promise<Date | undefined> {
+  const row = await db.credential.findUnique({ where: { ownerOid_kind: { ownerOid, kind } }, select: { updatedAt: true } });
+  return row?.updatedAt;
+}
+
+/** The time a write that is not a person's change must wait for the row behind a credential, before giving up. */
+const CONDITIONAL_WRITE_TIMEOUT_MS = 15_000;
+
+/**
+ * Holds the credential's row until commit, so a delete or a save waits behind a conditional write rather than
+ * interleaving with it, and answers its version, or `undefined` when there is no row.
+ */
+async function lockedVersion(db: Database, ownerOid: string, kind: CredentialKind): Promise<Date | undefined> {
+  const rows = await db.$queryRaw<{ updated_at: Date }[]>`
+    SELECT updated_at FROM "credential" WHERE owner_oid = ${ownerOid} AND kind::text = ${kind} FOR UPDATE`;
+  return rows[0]?.updated_at;
+}
+
+export type ConditionalWrite = { written: true; updatedAt: Date } | { written: false; reason: "gone" | "changed" };
+
+/**
+ * Replaces a credential only while it is still the version `expected`, for a write the hub makes by itself — a refresh
+ * token Entra rotated — that must never undo something the person did since: a disconnect, which deletes the row, or
+ * a fresh connect, which moves it on. The row is locked across the write, so either the person's change waits for
+ * this one and then wins, or this one finds it made and writes nothing.
+ *
+ * Nothing the UI shows changes (the kind is still stored, for the same account), so it sends no NOTIFY.
+ */
+export async function replaceCredentialIf(prisma: PrismaClient, store: SecretStore, write: CredentialWrite, expected: Date): Promise<ConditionalWrite> {
+  checkTarget(store, write);
+  const checked = checkCredential(write.kind, write.value);
+  if (!checked.ok) {
+    throw new HttpError(400, checked.error);
+  }
+  const name = secretName(write.ownerOid, write.kind);
+  return await prisma.$transaction(
+    async (tx): Promise<ConditionalWrite> => {
+      const current = await lockedVersion(tx, write.ownerOid, write.kind);
+      if (current === undefined) {
+        return { written: false, reason: "gone" };
+      }
+      if (current.getTime() !== expected.getTime()) {
+        return { written: false, reason: "changed" };
+      }
+      await store.put(name, checked.value, { owner: write.ownerOid, kind: write.kind, via: write.via });
+      const updatedAt = new Date();
+      await tx.credential.update({
+        where: { ownerOid_kind: { ownerOid: write.ownerOid, kind: write.kind } },
+        data: { accountLabel: checked.accountLabel, updatedAt, updatedVia: write.via }
+      });
+      return { written: true, updatedAt };
+    },
+    { timeout: CONDITIONAL_WRITE_TIMEOUT_MS }
+  );
+}
+
+/**
+ * Deletes a credential only while it is still the version `expected`: a connection Entra refused is removed, but a
+ * new one the person made after it was read is not. Locked as `replaceCredentialIf` is. Answers whether it deleted.
+ */
+export async function deleteCredentialIf(prisma: PrismaClient, store: SecretStore, target: CredentialTarget, expected: Date): Promise<boolean> {
+  checkTarget(store, target);
+  return await prisma.$transaction(
+    async (tx) => {
+      const current = await lockedVersion(tx, target.ownerOid, target.kind);
+      if (current === undefined || current.getTime() !== expected.getTime()) {
+        return false;
+      }
+      await store.remove(secretName(target.ownerOid, target.kind));
+      await tx.credential.delete({ where: { ownerOid_kind: { ownerOid: target.ownerOid, kind: target.kind } } });
+      await notify(tx, { type: "credential", owner_oid: target.ownerOid, kind: target.kind });
+      return true;
+    },
+    { timeout: CONDITIONAL_WRITE_TIMEOUT_MS }
+  );
+}

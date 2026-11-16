@@ -41,3 +41,59 @@ export function groupByDate<T>(items: readonly T[], at: (item: T) => Date, now: 
     return grouped === undefined ? [] : [{ label, items: grouped }];
   });
 }
+
+export const PINNED = "Pinned";
+
+/** A heading in the sidebar: the Pinned section, then the date groups. */
+export type SidebarGroup = typeof PINNED | DateGroup;
+
+/**
+ * The sidebar's sections: the pinned items, then every other item under its date group, each in the order given — the
+ * caller's, which for the sidebar is the database's: most recently pinned first, and most recently active first. A
+ * pinned item is in Pinned alone, and the section is left out while nothing is pinned.
+ */
+export function groupForSidebar<T>(
+  items: readonly T[],
+  at: (item: T) => Date,
+  isPinned: (item: T) => boolean,
+  now: Date
+): { label: SidebarGroup; items: T[] }[] {
+  const pinned: T[] = [];
+  const rest: T[] = [];
+  for (const item of items) {
+    (isPinned(item) ? pinned : rest).push(item);
+  }
+  const section: { label: SidebarGroup; items: T[] }[] = pinned.length === 0 ? [] : [{ label: PINNED, items: pinned }];
+  return [...section, ...groupByDate(rest, at, now)];
+}
+
+/** What `bySidebarOrder` reads of an item, chat or feedback project alike. */
+export interface SidebarOrdered {
+  id: string;
+  lastActiveAt: string;
+  pinnedAt: string | null;
+}
+
+/**
+ * The order `groupForSidebar` keeps for a list merged from several sources: the pinned ones first, most recently pinned
+ * first, then the rest most recently active first, the id settling a tie so the order does not change between renders.
+ */
+export function bySidebarOrder(a: SidebarOrdered, b: SidebarOrdered): number {
+  if ((a.pinnedAt === null) !== (b.pinnedAt === null)) {
+    return a.pinnedAt === null ? 1 : -1;
+  }
+  const pinned = a.pinnedAt === null || b.pinnedAt === null ? 0 : Date.parse(b.pinnedAt) - Date.parse(a.pinnedAt);
+  if (pinned !== 0) {
+    return pinned;
+  }
+  const active = Date.parse(b.lastActiveAt) - Date.parse(a.lastActiveAt);
+  if (active !== 0) {
+    return active;
+  }
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
+/** A row's count of what is new, as its badge shows it: past 99 the exact figure says nothing more. */
+export function unreadLabel(count: number): string {
+  return count > 99 ? "99+" : String(count);
+}

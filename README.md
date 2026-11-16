@@ -125,8 +125,8 @@ pod's in-process hub; Home without channels asks for `?everything=1` instead of 
   their own computer, naming that chat as `conversation_id` so the sidebar and its search recolour its laptop mark live;
 - `direct` and `delivery`: a message in the watched agent's thread, or a change to its delivery;
 - `transcript`: new transcript entries of the watched agent, by id;
-- `agent_skills`: the watched agent's skills changed, so the Assistant's chat re-renders and its "/" autocomplete
-  offers the new list;
+- `agent_skills`: the watched agent's skills changed, or, on a page watching no agent, any of the viewer's agents', so the
+  Assistant's chat or new-chat screen re-renders and its "/" autocomplete offers the new list;
 - `agent_question`: the watched agent asked a question, or one was answered;
 - `virtual_agent`: one of the viewer's virtual agents changed;
 - `assistant_conversation`: one of the viewer's conversations changed;
@@ -184,6 +184,11 @@ Conversations section of [`docs/agent-api.md`](docs/agent-api.md#conversations).
 - **Questions** the model asks with `AskUserQuestion` are shown as cards in the chat, and the answer goes back as an
   ordinary message.
 - **Templates** are a person's saved prompts.
+- **The sidebar's plus** offers workflows beside the chats: Scheduled to everyone, Welsh translations to someone whose
+  assistant has the `welsh` plugin, and, once they have connected Microsoft 365 and their pod's client claims the `morning-briefing` feature,
+  Morning briefing. That one is not a page: it starts a chat on the default product whose first message runs the
+  `m365` plugin's `morning-briefing` skill (`src/assistant/briefing.ts`), which reads today's calendar, mail and
+  Teams waiting on them, their Jira and their GitHub, and opens it.
 - **The thread** shows only what the person and the assistant said (`src/assistant/thread.ts`); tool calls become one
   line of what it is doing.
 
@@ -193,7 +198,7 @@ directly with `?settings=<id>`:
 | Id | Label | What it holds |
 | --- | --- | --- |
 | `appearance` | Appearance | light, dark, or the device's setting |
-| `connections` | Connections | the sign-ins (GitHub, Azure, Atlassian and the rest), then the saved credentials: paste a GitHub, Jenkins or, on your own licence, Claude token; remove any saved credential. `?settings=credentials`, which older pod clients link, opens it too |
+| `connections` | Connections | one row per service (GitHub, Azure, Claude, Jenkins, Atlassian, Microsoft 365), each with all of its actions: connect or sign in again (GitHub is connected by its device sign-in only), paste a Jenkins or, on your own licence, Claude token, and remove what is saved. Microsoft 365 is connected by AI Gateway users only: anyone else has no Connect, is not offered Morning briefing, and has any connection deleted when they next sign in (see "Microsoft 365" in `docs/agent-api.md`). `?settings=credentials`, which older pod clients link, opens it too |
 | `templates` | Templates | saved prompts |
 | `exports` | Jira & Confluence | export defaults |
 | `sharing` | Sharing | the chats you have shared or offered to fork, and those shared with or offered to you |
@@ -204,7 +209,13 @@ directly with `?settings=<id>`:
 | `ports` | Web servers | the web servers its pod reports |
 | `files` | Files | the files the pod holds, and deleting them |
 
-A section is offered only when the page has something for it. There is no stop and no delete, because opening the Assistant would start or create the agent again; the
+A section is offered only when the page has something for it. The settings values — the appearance, the model, the size, the
+plugins, the CLAUDE.md, the git identity and the Jira and Confluence defaults — are kept as drafts while the person
+moves between sections and stored by the dialog's one Save, which runs only the actions for what changed and marks the
+sections still holding changes; closing with changes asks first. The size and the plugins go in one action,
+`saveVirtualAgentPod`, so changing both asks once and restarts the pod once. Everything else (connecting, pasting or
+removing a credential, templates, files, a restart, a reset to the default) is an action its own button does at once.
+There is no stop and no delete, because opening the Assistant would start or create the agent again; the
 idle sweep stops it when nobody is using it.
 
 **Open:** people who already had a second or third virtual agent keep them, still counted against the limit of 3, and
@@ -279,6 +290,39 @@ The local store refuses to start under `NODE_ENV=production`. With sign-in disab
 route except `own-licence` and `own-licence-…`, which are on their own Claude licence — so
 `ah_dev_persona=own-licence` shows the Claude token field and any other persona shows the gateway.
 
+### Prototype feedback locally
+
+Prototype feedback is off unless `FEEDBACK_ENABLED=true` and both the viewer and Blob Storage are configured. `yarn
+deps:up` starts Azurite on 10000 beside Postgres, and the hub makes its container and opens its CORS on first use. The
+viewer needs a host of its own on the same site as the hub's, or the browser will not keep the frame's cookie, so
+serve the hub on `hub.localhost` and the viewer on `viewer.hub.localhost`, which browsers resolve to this machine.
+`localhost` beside `127.0.0.1` is two sites, and every framed page answers that the review has timed out. Outside
+production the viewer takes the hub's scheme and port, so both are served over http from the one dev server. The
+feedback pages sit in the CFT Workspace, which needs `VIRTUAL_AGENTS_ENABLED=true`, and
+`FEEDBACK_ALLOW_PRIVATE_TARGETS=true` lets a link point at a prototype on this machine, over http on any port:
+
+```bash
+FEEDBACK_ENABLED=true \
+FEEDBACK_STORAGE_CONNECTION_STRING=UseDevelopmentStorage=true \
+FEEDBACK_ALLOW_PRIVATE_TARGETS=true \
+VIRTUAL_AGENTS_ENABLED=true \
+AGENT_HUB_VIEWER_HOST=viewer.hub.localhost \
+ENTRA_REDIRECT_URI=http://hub.localhost:3000/auth/callback \
+SESSION_SECRET=$(openssl rand -base64 48) AUTH_DISABLED=true AGENT_AUTH_DISABLED=true yarn dev
+```
+
+Open the Assistant at `http://hub.localhost:3000/assistant/feedback`; with no orchestrator its home page waits for an
+assistant that never starts, but the feedback pages do not. A second reviewer is a second persona: set the
+`ah_dev_persona` cookie on `hub.localhost` to a short name.
+
+| Variable | Default | What it is |
+| --- | --- | --- |
+| `FEEDBACK_ENABLED` | off | `true` turns prototype feedback on, when the two below are also configured |
+| `FEEDBACK_STORAGE_ACCOUNT_URL` | none | The storage account, as `https://dtsseagenthubaat.blob.core.windows.net`, reached as the hub's managed identity, which signs every SAS from a user delegation key |
+| `FEEDBACK_STORAGE_CONNECTION_STRING` | none | A connection string, which wins over the account URL: `UseDevelopmentStorage=true` for Azurite |
+| `FEEDBACK_STORAGE_CONTAINER` | `feedback` | The container every project's blobs are under |
+| `FEEDBACK_SIGN_IN_ORIGINS` | none | Sign-in services, as comma-separated origins, a prototype's sign-in may always pass through the viewer (AAT IDAM's `https://idam-web-public.aat.platform.hmcts.net` and `https://hmcts-access.aat.platform.hmcts.net` deployed). Any other, such as a prototype's own IDAM simulator, is detected when the prototype redirects to another host, not the hub's or the viewer's, with a `client_id` or `response_type` and a `redirect_uri` back to itself, and served for that link for an hour |
+
 ### The deployed secrets are opt-in
 
 `yarn dev` reads the `dtsse-aat` Key Vault only with `USE_KEY_VAULT=true`; otherwise it uses the compose defaults.
@@ -291,7 +335,7 @@ database: localhost:5432/agent_hub
 ## Tests
 
 ```bash
-yarn test                # unit
+yarn test                # unit, with coverage and its thresholds
 yarn test:integration    # needs `yarn deps:up`; a database per worker, migrated on use
 yarn lint
 yarn typecheck
@@ -403,6 +447,12 @@ Created through `hmcts/central-app-registration`. It needs:
 - `accessTokenAcceptedVersion: 2`, so tokens carry the v2 issuer the service checks;
 - the Azure CLI (`04b07795-8ddb-461a-bbee-02f9e1bf7b46`) pre-authorised for that scope, so `az account get-access-token`
   needs no consent prompt.
+- for Microsoft 365, the delegated Graph permissions `Mail.Read`, `Calendars.Read`, `Files.ReadWrite`, `Files.Read.All`,
+  `Sites.Read.All`, `Chat.Read`, `ChannelMessage.Read.All`, `OnlineMeetings.Read`, `OnlineMeetingTranscript.Read.All`
+  and `offline_access`, with tenant admin consent, since HMCTS.NET lets people consent to `User.Read` alone. Only a
+  person who presses Connect is asked for them; see "Microsoft 365" in `docs/agent-api.md`. The connect sign-in sends `prompt=select_account`
+  rather than `prompt=consent`, since the permissions are admin-consented and a non-admin cannot consent to them. Connect needs the client
+  secret, so it works where the web sign-in does (AAT), and the token routes answer `503` without it.
 
 A v2 access token's `aud` is the application's client id, so the service accepts that as well as
 `AGENT_API_AUDIENCE` (`api://dtsse-agent-hub`).

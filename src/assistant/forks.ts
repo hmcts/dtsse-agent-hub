@@ -10,7 +10,7 @@ import type { SharedThreadItem } from "./sharing.ts";
  *
  * The copy's session starts with no history of its own, because the earlier turns happened in another person's
  * session on another pod. So the words go to it as a file attached to the first message sent in the copy, which is
- * the one route into a session the pod already fetches and the envelope already names by its path. Everything here
+ * the one route into a session the pod already fetches and the prompt's context already names by its path. Everything here
  * is pure; `fork-store.ts` reads and writes the rows.
  */
 

@@ -23,6 +23,7 @@ const MIN_LOOKUP_CHARS = 2;
 export const MAX_LOOKUP_RESULTS = 10;
 export const MAX_LOOKUP_ANCESTORS = 8;
 const MAX_LOOKUP_DETAIL = 300;
+export const MAX_LOOKUP_EXCERPT = 160;
 /** How long the browser's request waits for the pod. A search that takes longer is not one anybody is still typing for. */
 export const LOOKUP_WAIT_MS = 10_000;
 /** How long a lookup's row is kept; long enough to be answered, and nothing reads it after. */
@@ -33,8 +34,11 @@ export const LOOKUP_RATE_LIMIT = 30;
 const CONFLUENCE_SITE_URL = `${JIRA_SITE_URL}/wiki`;
 
 export const JIRA_PROJECT_RE = /^[A-Z][A-Z0-9_]{1,9}$/;
-/** A Confluence space key: letters, digits and `_-`, with `~` in front of a personal space's. */
-export const SPACE_KEY_RE = /^~?[A-Za-z0-9_-]{1,100}$/;
+/**
+ * A Confluence space key: a global space's is letters, digits and `_-`; a personal space's is `~` and its owner's
+ * username, which can be an email address. None has a quote or a backslash, so a key is safe inside the CQL's quotes.
+ */
+export const SPACE_KEY_RE = /^(?:[A-Za-z0-9_-]{1,100}|~[A-Za-z0-9_.@-]{1,100})$/;
 export const NUMERIC_ID_RE = /^[0-9]{1,20}$/;
 
 /** Whether a kind is searched in GitHub, with gh, rather than in Atlassian with twg. */
@@ -67,14 +71,18 @@ const text = (max: number) => z.string().trim().min(1).max(max);
 /** One Jira project, as the pod answers it. */
 const jiraProjectAnswer = z.strictObject({ key: z.string().regex(JIRA_PROJECT_RE), name: text(200) });
 
-/** One Confluence page, as the pod answers it: the ids an export needs and the titles that say where it is. */
+/**
+ * One Confluence page, as the pod answers it: the ids an export needs, the titles that say where it is, and its
+ * opening words, which tell it from another page of the same title. A pod whose client predates `excerpt` leaves it out.
+ */
 const confluencePageAnswer = z.strictObject({
   id: z.string().regex(NUMERIC_ID_RE),
   title: text(255),
   space_id: z.string().regex(NUMERIC_ID_RE),
   space_key: z.string().regex(SPACE_KEY_RE),
   space_name: text(200),
-  ancestors: boundedArray(text(255), MAX_LOOKUP_ANCESTORS)
+  ancestors: boundedArray(text(255), MAX_LOOKUP_ANCESTORS),
+  excerpt: text(MAX_LOOKUP_EXCERPT).optional()
 });
 
 /** One GitHub repository, as the pod answers it. */
@@ -134,6 +142,8 @@ export interface ConfluencePageResult {
   space_key: string;
   space_name: string;
   ancestors: string[];
+  /** The page's opening words, Confluence's text rather than the hub's, shown as text only. */
+  excerpt?: string;
   url: string;
 }
 

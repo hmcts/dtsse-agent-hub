@@ -5,11 +5,13 @@ import { type ModelRoute, modelRouteFor } from "../viewer/identity.ts";
 import { isSignInKind, type LoginState, type LoginView } from "../virtual-agents/logins.ts";
 import { neededCredentials, OPTIONAL_CREDENTIALS, optionalCredentials } from "../virtual-agents/views.ts";
 import {
+  awaitsGithub,
   CONNECTION_DETAILS,
   CONNECTION_STATES,
   CONNECTORS,
   type Connection,
   type ConnectionState,
+  type ConnectionsData,
   canSignInAgain,
   checklistState,
   codeCollectable,
@@ -20,10 +22,12 @@ import {
   connectionsWarning,
   connectorFor,
   connectRestarts,
+  GITHUB_FIRST,
   hasLapsed,
   inWords,
   isConnection,
   lapsedSinceStored,
+  microsoftConnection,
   modelAccess,
   modelAccessAfter,
   needsPerson,
@@ -32,8 +36,10 @@ import {
   offeredConnections,
   offersConnect,
   PROMPTED_WHEN_MISSING,
+  pasteIsFallback,
   type StoredCredential,
   screenDetail,
+  signInComing,
   signInPrompt,
   signsInOnRequest
 } from "./connections.ts";
@@ -95,10 +101,17 @@ describe("CONNECTORS", () => {
     expect(new Set(Object.keys(CONNECTORS))).toEqual(new Set(CREDENTIAL_KINDS));
   });
 
-  it("should ask the person to paste exactly the connections their assistant cannot sign in to itself", () => {
-    const pasted = CREDENTIAL_KINDS.filter((kind) => isConnection(kind) && CONNECTORS[kind]?.paste !== null);
+  it("should mark a connection as relayed when the hub lets its owner ask to sign in to it again", () => {
+    const relayed = CREDENTIAL_KINDS.filter((kind) => isConnection(kind) && CONNECTORS[kind]?.relays === true);
 
-    expect(pasted).toEqual(CREDENTIAL_KINDS.filter((kind) => isConnection(kind) && !isSignInKind(kind)));
+    expect(relayed).toEqual(CREDENTIAL_KINDS.filter(isSignInKind));
+  });
+
+  it("should give a connection something to paste when its assistant does not relay it", () => {
+    const unrelayed = CREDENTIAL_KINDS.filter((kind) => isConnection(kind) && CONNECTORS[kind]?.relays === false);
+
+    expect(unrelayed).toEqual(["jenkins"]);
+    expect(unrelayed.map((kind) => CONNECTORS[kind]?.paste)).toEqual(["Jenkins API token"]);
   });
 
   it("should word every connection the Assistant can ask for, on every model route", () => {
@@ -120,7 +133,7 @@ describe("isConnection", () => {
     expect(isConnection(kind)).toBe(true);
   });
 
-  it.each(["claude_md", "git_identity"] as const)("should not count %s as a sign-in when asked", (kind) => {
+  it.each(["claude_md", "git_identity", "microsoft"] as const)("should not count %s as a sign-in when asked", (kind) => {
     expect(isConnection(kind)).toBe(false);
   });
 
@@ -237,19 +250,21 @@ describe("lapsedSinceStored", () => {
  */
 describe("canSignInAgain", () => {
   const NOTHING: CredentialKind[] = [];
+  /** The sign-ins only the assistant can make, with nothing for the person to paste. */
+  const relayedOnly = CREDENTIAL_KINDS.filter((kind) => isSignInKind(kind) && CONNECTORS[kind]?.paste === null);
 
   it.each([
     ["it uses nothing else", NOTHING],
     ["it uses its own route's credentials", neededCredentials("own-licence")],
     ["it uses every credential there is", [...CREDENTIAL_KINDS]]
-  ])("should offer every sign-in the assistant makes for itself when %s", (_what, uses) => {
+  ])("should offer every sign-in only the assistant can make when %s", (_what, uses) => {
     const offered = CREDENTIAL_KINDS.filter((kind) => canSignInAgain(kind, uses));
 
-    expect(CREDENTIAL_KINDS.filter(isSignInKind).filter((kind) => !offered.includes(kind))).toEqual([]);
+    expect(relayedOnly.filter((kind) => !offered.includes(kind))).toEqual([]);
   });
 
   it("should offer no more than those when the assistant uses nothing the person pastes", () => {
-    expect(CREDENTIAL_KINDS.filter((kind) => canSignInAgain(kind, NOTHING))).toEqual(CREDENTIAL_KINDS.filter(isSignInKind));
+    expect(CREDENTIAL_KINDS.filter((kind) => canSignInAgain(kind, NOTHING))).toEqual(relayedOnly);
   });
 
   it("should offer a credential the person pastes only while their assistant uses it", () => {
@@ -461,42 +476,96 @@ describe("connectorFor", () => {
 });
 
 /**
- * The getting-ready screen's words for where a sign-in stands, which both of its rows read: the sign-in's own and the
- * derived model-access row above it. One answer per state, so the two cannot describe one credential two ways.
+ * The getting-ready screen's words for where a sign-in stands, which every one of its rows reads: each sign-in's own
+ * and the derived model-access row above them. One answer per state, so two rows cannot describe one credential two
+ * ways.
  */
 describe("screenDetail", () => {
+  /** A sign-in only the assistant can make, which is also how the derived model-access row is read. */
+  const RELAYED = { relays: true, paste: null };
+
   it("should tick a connected sign-in, which the settings list does not", () => {
-    expect(screenDetail("connected", null, false)).toBe("✓ Connected");
+    expect(screenDetail("connected", RELAYED, false)).toBe("✓ Connected");
     expect(CONNECTION_DETAILS.connected).toBe("Connected");
   });
 
   // What the person does about either is the same — enter the code their assistant is holding — and the screen is
   // where they do it, so it does not split them the way the settings list does.
   it("should word both ways a sign-in waits on the person alike", () => {
-    expect(screenDetail("refreshing", null, false)).toBe("Waiting for you");
-    expect(screenDetail("signing-in", null, false)).toBe("Waiting for you");
+    expect(screenDetail("refreshing", RELAYED, false)).toBe("Waiting for you");
+    expect(screenDetail("signing-in", RELAYED, false)).toBe("Waiting for you");
   });
 
   it("should say a sign-in is on its way while the assistant is still starting", () => {
-    expect(screenDetail("waiting", null, true)).toBe("Connecting…");
+    expect(screenDetail("waiting", RELAYED, true)).toBe("Connecting…");
+    expect(screenDetail("waiting", CONNECTORS.claude, true)).toBe("Connecting…");
   });
 
   it("should say so when a sign-in the assistant makes for itself has lapsed", () => {
-    expect(screenDetail("expired", null, false)).toBe(CONNECTION_DETAILS.expired);
-    expect(screenDetail("failed", null, false)).toBe(CONNECTION_DETAILS.failed);
+    expect(screenDetail("expired", RELAYED, false)).toBe(CONNECTION_DETAILS.expired);
+    expect(screenDetail("failed", RELAYED, false)).toBe(CONNECTION_DETAILS.failed);
   });
 
-  // Where the row has a control, the words are the control's: a Connect for one nobody has started, and the box again
-  // for a lapsed value the person pastes.
+  // Where the row has a control, the words are the control's: a Connect for one nobody has started, and Connect again
+  // for a lapsed one the person can paste for — the box for Jenkins, the restart that deletes nothing for Claude.
   it("should leave a row with something to press to say it in the control rather than in words", () => {
-    expect(screenDetail("waiting", null, false)).toBeNull();
-    expect(screenDetail("expired", "Claude token", false)).toBeNull();
-    expect(screenDetail("waiting", "Claude token", true)).toBeNull();
+    expect(screenDetail("waiting", RELAYED, false)).toBeNull();
+    expect(screenDetail("waiting", CONNECTORS.claude, false)).toBeNull();
+    expect(screenDetail("expired", CONNECTORS.claude, false)).toBeNull();
+    expect(screenDetail("expired", CONNECTORS.jenkins, false)).toBeNull();
+    expect(screenDetail("waiting", CONNECTORS.jenkins, true)).toBeNull();
+  });
+
+  it("should say it is connecting when a lapsed sign-in the assistant relays is being restarted", () => {
+    expect(screenDetail("expired", CONNECTORS.claude, true)).toBe("Connecting…");
+    expect(screenDetail("failed", CONNECTORS.claude, true)).toBe("Connecting…");
+    expect(screenDetail("expired", CONNECTORS.jenkins, true)).toBeNull();
+    expect(screenDetail("expired", RELAYED, true)).toBe(CONNECTION_DETAILS.expired);
   });
 
   // The derived row has no control of its own, so a state with no words would be a row with an empty status column.
   it.each(CONNECTION_STATES)("should word %s for a sign-in the assistant makes for itself while it is starting", (state) => {
-    expect(screenDetail(state, null, true)).not.toBeNull();
+    expect(screenDetail(state, RELAYED, true)).not.toBeNull();
+  });
+});
+
+/**
+ * Which connections the getting-ready screen leads with a relayed sign-in for, even though the person could paste a
+ * value: the screen is for people who may have no Claude Code to make a token with.
+ */
+describe("pasteIsFallback", () => {
+  it("should lead with the relayed sign-in for Claude when its token can be pasted as well", () => {
+    expect(pasteIsFallback(CONNECTORS.claude)).toBe(true);
+  });
+
+  it("should keep the box as the way in when the assistant relays nothing for the connection", () => {
+    expect(pasteIsFallback(CONNECTORS.jenkins)).toBe(false);
+  });
+
+  it.each(["github", "azure", "atlassian"] as const)("should have no box to fall back to when %s is only ever relayed", (kind) => {
+    expect(pasteIsFallback(CONNECTORS[kind])).toBe(false);
+  });
+});
+
+/**
+ * Whether a row reads "Connecting…" by itself. An own-licence pod signs in to Claude once, after stage 0 and before it
+ * first reports running, so past that step — or stopped, or given up in `awaiting_credentials` — no link is coming and
+ * the row has to offer the restart instead.
+ */
+describe("signInComing", () => {
+  it.each(["requested", "provisioning", "cloning", "awaiting_login"] as const)("should expect the Claude link when the assistant is %s", (status) => {
+    expect(signInComing(CONNECTORS.claude, status)).toBe(true);
+  });
+
+  it.each(["awaiting_credentials", "running", "stopping", "stopped", "failed"] as const)("should expect no Claude link when the assistant is %s", (status) => {
+    expect(signInComing(CONNECTORS.claude, status)).toBe(false);
+  });
+
+  it("should keep reading any assistant neither running nor failed as on its way when the connection has no paste fallback", () => {
+    expect(signInComing(CONNECTORS.github, "stopped")).toBe(true);
+    expect(signInComing(CONNECTORS.github, "awaiting_credentials")).toBe(true);
+    expect(signInComing(CONNECTORS.github, "running")).toBe(false);
+    expect(signInComing(CONNECTORS.github, "failed")).toBe(false);
   });
 });
 
@@ -1005,12 +1074,12 @@ describe("sign-ins made on request", () => {
     expect(offersConnect({ kind: "github", state })).toBe(expected);
   });
 
-  it("should restart the assistant to connect Azure and GitHub, and nothing else", () => {
+  it("should restart the assistant to connect Azure, GitHub and Claude, and nothing else", () => {
     expect(connectRestarts("azure")).toBe(true);
     expect(connectRestarts("github")).toBe(true);
     expect(connectRestarts("atlassian")).toBe(false);
     expect(connectRestarts("jenkins")).toBe(false);
-    expect(connectRestarts("claude")).toBe(false);
+    expect(connectRestarts("claude")).toBe(true);
   });
 
   it("should say whether a value is saved on each row", () => {
@@ -1089,5 +1158,81 @@ describe("inWords", () => {
     [["A", "B", "C"], "A, B and C"]
   ])("should read %j as %j", (names, expected) => {
     expect(inWords(names)).toBe(expected);
+  });
+});
+
+describe("microsoftConnection", () => {
+  const data = (statuses: ConnectionsData["statuses"], unavailable: string | null = null): ConnectionsData => ({
+    route: "gateway",
+    kinds: [],
+    statuses,
+    logins: [],
+    unavailable
+  });
+
+  it("should offer Connect, coming back to the Connections section, when nothing is stored", () => {
+    expect(microsoftConnection(data([]), "gateway")).toEqual({
+      stored: false,
+      accountLabel: null,
+      connectable: true,
+      connectPath: "/auth/microsoft/connect",
+      returnTo: "/assistant?settings=connections"
+    });
+  });
+
+  it("should name the account when a connection is stored", () => {
+    const status = { kind: "microsoft" as const, stored: true, accountLabel: "a.person@hmcts.net", updatedAt: "2026-12-01T09:00:00.000Z" };
+    expect(microsoftConnection(data([status]), "gateway")).toMatchObject({ stored: true, accountLabel: "a.person@hmcts.net" });
+  });
+
+  it.each([
+    ["own-licence", "own-licence"],
+    ["not known", undefined]
+  ] as const)("should offer no Connect, whatever the assistant's route, when the viewer's own route is %s", (_, viewerRoute) => {
+    expect(microsoftConnection(data([]), viewerRoute)).toMatchObject({ connectable: false });
+  });
+
+  it("should keep the stored connection, for its Disconnect, when the viewer may not connect Microsoft 365", () => {
+    const status = { kind: "microsoft" as const, stored: true, accountLabel: "a.person@hmcts.net", updatedAt: "2026-12-01T09:00:00.000Z" };
+    expect(microsoftConnection(data([status]), "own-licence")).toMatchObject({ stored: true, connectable: false });
+  });
+
+  it("should say nothing when the hub cannot read the credentials", () => {
+    expect(microsoftConnection(data([], "no store"), "gateway")).toBeNull();
+    expect(microsoftConnection(undefined, "gateway")).toBeNull();
+  });
+});
+
+/**
+ * Nothing but GitHub is offered until GitHub is connected: a connected GitHub is the hub's word that the person is in
+ * the hmcts organisation, since a pod gets no further than a clone the organisation refuses.
+ */
+describe("awaitsGithub", () => {
+  const rows = (github: ConnectionState | null) => [
+    ...(github === null ? [] : [{ kind: "github" as const, state: github }]),
+    { kind: "claude" as const, state: "waiting" as const }
+  ];
+
+  it.each(CONNECTION_STATES.filter((state) => state !== "connected"))("should hold back every other connection when GitHub is %s", (state) => {
+    for (const key of ["claude", "azure", "jenkins", "atlassian", "microsoft", "model-access"]) {
+      expect(awaitsGithub(key, rows(state))).toBe(true);
+    }
+  });
+
+  it("should hold back nothing when GitHub is connected", () => {
+    expect(awaitsGithub("claude", rows("connected"))).toBe(false);
+  });
+
+  it.each(CONNECTION_STATES)("should never hold back GitHub itself when it is %s", (state) => {
+    expect(awaitsGithub("github", rows(state))).toBe(false);
+  });
+
+  // "Connect GitHub first" with no GitHub row to connect would be a dead end.
+  it("should hold back nothing when the list has no GitHub row", () => {
+    expect(awaitsGithub("claude", rows(null))).toBe(false);
+  });
+
+  it("should say what to do instead of offering a control when a connection waits", () => {
+    expect(GITHUB_FIRST).toBe("Connect GitHub first");
   });
 });

@@ -1,25 +1,36 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { LookupAnswer } from "../wire.ts";
 import {
   confluenceCql,
+  confluencePages,
   createLookupRunner,
   type LookupFrame,
   lookupArgs,
   pageIdOf,
-  parseConfluencePages,
+  parseConfluenceHits,
+  parseConfluenceSpaces,
   parseJiraProjects,
   parseLookupFrame,
   type Run,
   runLookup,
+  type SpaceCache,
   searchWords,
+  spaceArgs,
+  spaceKeyOf,
   twgSignedOut
 } from "./lookups.ts";
 
 const LOOKUP = "5b0e7c1a-1111-4222-8333-444455556666";
 
-// Cut down from what `twg api confluence:/wiki/rest/api/search … -o json --output-summary=none` (twg 1.3.3) prints.
+// Cut down from what `twg confluence search query --cql=… -o json --output-summary=none` (twg 1.3.9) prints.
 function confluenceOutput(results: unknown[]): string {
-  return JSON.stringify({ apiVersion: "v2", command: "api", data: { status: 200, statusText: "", headers: {}, body: { results, size: results.length } } });
+  return JSON.stringify({
+    apiVersion: "v2",
+    command: "confluence.search.query",
+    request: { site: "hmcts.atlassian.net", cql: "type = page", limit: 10, excerpt: false, cursor: null },
+    data: { results, start: 0, limit: 10, size: results.length, totalSize: results.length, nextCursor: null },
+    meta: { resourceClass: "entity", sourceMode: "native", resourceType: "confluence.search" }
+  });
 }
 
 const PAGE_RESULT = {
@@ -28,25 +39,89 @@ const PAGE_RESULT = {
     type: "page",
     status: "current",
     title: "CP AI Assistant - Technical Specification",
-    space: { id: 280952876, key: "PEG", name: "Platform Engineering", type: "global" },
-    ancestors: [
-      { id: "280952878", type: "page", title: "Platform Engineering" },
-      { id: "352814743", type: "folder", title: "OLD PAGES PRE OCT 2026" }
-    ],
-    _links: { webui: "/spaces/PEG/pages/280959611/CP+AI+Assistant" }
+    _expandable: { ancestors: "", history: "/rest/api/content/280959611/history", space: "/rest/api/space/PEG" },
+    _links: { webui: "/spaces/PEG/pages/280959611/CP+AI+Assistant", self: "https://hmcts.atlassian.net/wiki/rest/api/content/280959611" }
   },
   title: "CP AI Assistant - Technical Specification",
-  excerpt: "1. System Architecture"
+  excerpt: "1. System Architecture",
+  url: "/spaces/PEG/pages/280959611/CP+AI+Assistant",
+  resultGlobalContainer: { title: "Platform Engineering", displayUrl: "/spaces/PEG" },
+  breadcrumbs: [],
+  entityType: "content"
 };
 
-const JIRA_OUTPUT = JSON.stringify({
-  data: { status: 200, body: { total: 1, values: [{ id: "10120", key: "VIBE", name: "Vibe-Coding Enablement", projectTypeKey: "software" }] } }
+// Cut down from what `twg confluence space list --keys=… -o json --output-summary=none` (twg 1.3.9) prints.
+const SPACES_OUTPUT = JSON.stringify({
+  apiVersion: "v2",
+  command: "confluence.space.list",
+  request: { site: "hmcts.atlassian.net", keys: ["PEG"], limit: 10 },
+  data: [{ id: "280952876", spaceId: "280952876", name: "Platform Engineering", key: "PEG", type: "global", status: "current", homepageId: "280952878" }],
+  meta: { resourceClass: "entity", sourceMode: "native", resourceType: "confluence.space" }
 });
+
+// Cut down from what `twg confluence space list --keys=~saz.ali` (twg 1.3.9) prints for a personal space.
+const PERSONAL_SPACES_OUTPUT = JSON.stringify({
+  apiVersion: "v2",
+  command: "confluence.space.list",
+  data: [{ id: "275349639", spaceId: "275349639", name: "Saz Ali", key: "~saz.ali", type: "personal", status: "current" }]
+});
+
+// Cut down from what `twg jira space query --query=… -o json --output-summary=none` (twg 1.3.9) prints.
+const JIRA_OUTPUT = JSON.stringify({
+  apiVersion: "v2",
+  command: "jira.space.query",
+  request: { site: "hmcts.atlassian.net", maxResults: 10, orderBy: "key", query: "vibe" },
+  data: {
+    projects: [{ id: "10120", key: "VIBE", name: "Vibe-Coding Enablement", projectTypeKey: "software", simplified: false, style: "classic", isPrivate: false }],
+    total: 1,
+    startAt: 0,
+    maxResults: 10,
+    isLast: true
+  },
+  meta: { resourceClass: "entity", sourceMode: "native", resourceType: "jira.space" }
+});
+
+// What twg 1.3.9 prints for a search Atlassian refused, cut down.
+function twgError(message: string): string {
+  return JSON.stringify({ ok: false, error: { code: "TWG_TOOL_EXECUTION_FAILED", kind: "twg_tool_execution_failed", message, statusCode: 400 } });
+}
+
+// What twg 1.3.9 prints when Atlassian answers 401 to a sign-in twg still holds, cut down.
+const REJECTED_SIGN_IN = {
+  code: 1,
+  stdout: JSON.stringify({
+    ok: false,
+    error: { code: "TWG_TOOL_EXECUTION_FAILED", kind: "twg_tool_execution_failed", message: "Unauthorized", statusCode: 401 }
+  }),
+  stderr: ""
+};
 
 const SIGNED_OUT = { code: 77, stdout: JSON.stringify({ ok: false, error: { code: "AUTH_REQUIRED", message: "authentication required." } }), stderr: "" };
 
 function frame(overrides: Partial<LookupFrame> = {}): LookupFrame {
   return { lookup_id: LOOKUP, kind: "confluence_page", query: "case flags", space: null, owner: null, sign_in: false, ...overrides };
+}
+
+/** The answers one runner gives to two lookups of `kind`, the second sent once the first is answered. */
+async function answersToTwoLookups(run: Run, kind: LookupFrame["kind"], queries: [string, string]): Promise<LookupAnswer[]> {
+  const answers: LookupAnswer[] = [];
+  const runner = createLookupRunner({
+    api: {
+      putLookup: async (_va, _id, body) => {
+        answers.push(body);
+        return null;
+      }
+    },
+    id: "va-1",
+    env: {},
+    run,
+    login: async () => true
+  });
+  for (const [n, query] of queries.entries()) {
+    runner.lookup({ lookup_id: `5b0e7c1a-1111-4222-8333-44445555666${n + 1}`, kind, query });
+    await runner.idle();
+  }
+  return answers;
 }
 
 describe("parseLookupFrame", () => {
@@ -56,6 +131,11 @@ describe("parseLookupFrame", () => {
       frame({ query: "flags", space: "CCD" })
     );
     expect(parseLookupFrame({ lookup_id: LOOKUP, kind: "jira_project", query: "vibe", space: "CCD" })?.space).toBeNull();
+  });
+
+  it("should keep a Confluence lookup narrowed to a personal space when the key is its owner's email address", () => {
+    // Act & Assert
+    expect(parseLookupFrame({ ...frame(), space: "~Martin.Fox1@justice.gov.uk" })?.space).toBe("~Martin.Fox1@justice.gov.uk");
   });
 
   it("should keep a GitHub lookup, with the owner only for a Project, and never ask it to sign in", () => {
@@ -108,40 +188,105 @@ describe("the search a lookup runs", () => {
 
     // Assert
     expect(confluence).toEqual([
-      "api",
-      "confluence:/wiki/rest/api/search",
-      "-X",
-      "GET",
-      "-f",
-      'cql=type = page AND space = "PEG" AND title ~ "case* flags*"',
-      "-f",
-      "limit=10",
-      "-f",
-      "expand=content.ancestors,content.space",
+      "confluence",
+      "search",
+      "query",
+      '--cql=type = page AND space = "PEG" AND title ~ "case* flags*"',
+      "--limit=10",
       "-o",
       "json",
       "--output-summary=none"
     ]);
-    expect(jira).toEqual([
-      "api",
-      "jira:/rest/api/3/project/search",
-      "-X",
-      "GET",
-      "-f",
-      "query=vibe coding",
-      "-f",
-      "maxResults=10",
-      "-o",
-      "json",
-      "--output-summary=none"
-    ]);
+    expect(jira).toEqual(["jira", "space", "query", "--query=vibe coding", "--limit=10", "-o", "json", "--output-summary=none"]);
+    expect(spaceArgs(["PEG", "CCD"])).toEqual(["confluence", "space", "list", "--keys=PEG,CCD", "--limit=10", "-o", "json", "--output-summary=none"]);
+  });
+});
+
+describe("spaceKeyOf", () => {
+  it("should take the key from the page's own space link when it has one", () => {
+    // Act & Assert
+    expect(spaceKeyOf({ ...PAGE_RESULT, resultGlobalContainer: { displayUrl: "/spaces/OTHER" } })).toBe("PEG");
+  });
+
+  it("should take the key from the result's container when the page does not name its space", () => {
+    // Act & Assert
+    expect(spaceKeyOf({ content: { _expandable: {} }, resultGlobalContainer: { displayUrl: "/spaces/PEG" } })).toBe("PEG");
+  });
+
+  it("should take a personal space's key when its owner's username is an email address", () => {
+    // Act & Assert
+    expect(spaceKeyOf({ content: { _expandable: { space: "/rest/api/space/~Martin.Fox1@justice.gov.uk" } } })).toBe("~Martin.Fox1@justice.gov.uk");
+  });
+
+  it.each([
+    [{}],
+    [{ content: { _expandable: { space: "/rest/api/space/" } } }],
+    [{ resultGlobalContainer: { displayUrl: '/spaces/A" OR space = "B' } }],
+    [null]
+  ])("should give null when the result is %j", (result) => {
+    // Act & Assert
+    expect(spaceKeyOf(result)).toBeNull();
   });
 });
 
 describe("parsing what twg found", () => {
-  it("should keep only the fields the hub accepts when Confluence answers", () => {
+  it("should keep only pages, with their space's key, when Confluence answers a search", () => {
     // Act
-    const pages = parseConfluencePages(confluenceOutput([PAGE_RESULT, { content: { ...PAGE_RESULT.content, type: "blogpost" } }]));
+    const hits = parseConfluenceHits(confluenceOutput([PAGE_RESULT, { ...PAGE_RESULT, content: { ...PAGE_RESULT.content, type: "blogpost" } }]));
+
+    // Assert
+    expect(hits).toEqual([{ id: "280959611", title: "CP AI Assistant - Technical Specification", space_key: "PEG", excerpt: "1. System Architecture" }]);
+  });
+
+  it("should take the space's key from the result's container when the page does not name its space", () => {
+    // Arrange
+    const result = { ...PAGE_RESULT, content: { ...PAGE_RESULT.content, _expandable: {} } };
+
+    // Act & Assert
+    expect(parseConfluenceHits(confluenceOutput([result]))?.[0]?.space_key).toBe("PEG");
+  });
+
+  it("should leave a page out when its space key is not one a lookup could narrow to", () => {
+    // Arrange
+    const result = {
+      ...PAGE_RESULT,
+      content: { ...PAGE_RESULT.content, _expandable: { space: "/rest/api/space/~patrick.o'sullivan" } },
+      resultGlobalContainer: { title: "Patrick", displayUrl: "/spaces/~patrick.o'sullivan" }
+    };
+
+    // Act & Assert
+    expect(parseConfluenceHits(confluenceOutput([result]))).toEqual([]);
+  });
+
+  it("should give every page the space it was narrowed to when the search was narrowed", () => {
+    // Arrange
+    const result = { ...PAGE_RESULT, content: { ...PAGE_RESULT.content, _expandable: {} }, resultGlobalContainer: {} };
+
+    // Act & Assert
+    expect(parseConfluenceHits(confluenceOutput([result]), "CCD")?.[0]?.space_key).toBe("CCD");
+  });
+
+  it("should keep a page's opening words as plain text, cut short, when the search gives an excerpt", () => {
+    // Arrange
+    const result = { ...PAGE_RESULT, excerpt: `Overview &amp; \n  &quot;scope&quot; &#39;now&#39;  ${"x".repeat(300)}` };
+
+    // Act
+    const [hit] = parseConfluenceHits(confluenceOutput([result])) ?? [];
+
+    // Assert
+    expect(hit?.excerpt?.startsWith(`Overview & "scope" 'now' xxx`)).toBe(true);
+    expect(hit?.excerpt).toHaveLength(160);
+    expect(hit?.excerpt?.endsWith("…")).toBe(true);
+    expect(parseConfluenceHits(confluenceOutput([{ ...PAGE_RESULT, excerpt: "  " }]))?.[0]?.excerpt).toBeNull();
+  });
+
+  it("should give each page its space's id and name, and its opening words, when its space was read", () => {
+    // Arrange
+    const hits = parseConfluenceHits(confluenceOutput([PAGE_RESULT])) ?? [];
+    const spaces = parseConfluenceSpaces(SPACES_OUTPUT);
+
+    // Act
+    const pages = confluencePages(hits, spaces ?? new Map());
 
     // Assert
     expect(pages).toEqual([
@@ -151,20 +296,36 @@ describe("parsing what twg found", () => {
         space_id: "280952876",
         space_key: "PEG",
         space_name: "Platform Engineering",
-        ancestors: ["Platform Engineering", "OLD PAGES PRE OCT 2026"]
+        ancestors: [],
+        excerpt: "1. System Architecture"
       }
     ]);
   });
 
-  it("should keep the nearest ancestors when a page is deeper than the hub keeps", () => {
+  it("should leave a page out when its space was not read", () => {
     // Arrange
-    const ancestors = Array.from({ length: 12 }, (_, index) => ({ title: `Level ${index}` }));
+    const hits =
+      parseConfluenceHits(confluenceOutput([{ ...PAGE_RESULT, content: { ...PAGE_RESULT.content, _expandable: { space: "/rest/api/space/HR" } } }])) ?? [];
+
+    // Act & Assert
+    expect(confluencePages(hits, parseConfluenceSpaces(SPACES_OUTPUT) ?? new Map())).toEqual([]);
+  });
+
+  it("should find a page's space whatever the case of its key, and answer the key as Confluence spells it", () => {
+    // Arrange
+    const hits = [{ id: "280959611", title: "Specification", space_key: "peg", excerpt: null }];
 
     // Act
-    const [page] = parseConfluencePages(confluenceOutput([{ content: { ...PAGE_RESULT.content, ancestors } }])) ?? [];
+    const [page] = confluencePages(hits, parseConfluenceSpaces(SPACES_OUTPUT) ?? new Map());
 
     // Assert
-    expect(page?.ancestors).toEqual(["Level 4", "Level 5", "Level 6", "Level 7", "Level 8", "Level 9", "Level 10", "Level 11"]);
+    expect(page).toMatchObject({ space_id: "280952876", space_key: "PEG" });
+    expect(page).not.toHaveProperty("excerpt");
+  });
+
+  it("should read a personal space's key, id and name when its owner's username has dots", () => {
+    // Act & Assert
+    expect(parseConfluenceSpaces(PERSONAL_SPACES_OUTPUT)?.get("~saz.ali")).toEqual({ key: "~saz.ali", id: "275349639", name: "Saz Ali" });
   });
 
   it("should keep a project's key and name when Jira answers", () => {
@@ -174,39 +335,164 @@ describe("parsing what twg found", () => {
 
   it("should give nothing for an answer that is not a successful search", () => {
     // Act & Assert
-    expect(parseConfluencePages("not json")).toBeNull();
-    expect(parseJiraProjects(JSON.stringify({ data: { status: 400, body: { message: "bad" } } }))).toBeNull();
+    expect(parseConfluenceHits("not json")).toBeNull();
+    expect(parseConfluenceSpaces(twgError("Space not found"))).toBeNull();
+    expect(parseJiraProjects(twgError("Bad request"))).toBeNull();
   });
 
   it("should tell a missing sign-in from any other failure", () => {
     // Act & Assert
     expect(twgSignedOut(SIGNED_OUT)).toBe(true);
     expect(twgSignedOut({ code: 1, stdout: "{}", stderr: "boom" })).toBe(false);
+    expect(twgSignedOut({ code: 1, stdout: twgError("Bad request"), stderr: "" })).toBe(false);
+  });
+
+  it("should count a sign-in as missing when Atlassian answers 401 to the one twg holds", () => {
+    // Act & Assert
+    expect(twgSignedOut(REJECTED_SIGN_IN)).toBe(true);
   });
 });
 
 describe("runLookup", () => {
   function deps(results: Record<string, { code: number; stdout: string; stderr: string }>, login = vi.fn(async () => true)) {
-    const run = vi.fn<Run>(async (_cmd, args) => results[args[0] as string] ?? { code: 0, stdout: "", stderr: "" });
+    const run = vi.fn<Run>(async (_cmd, args) => results[args.slice(0, 3).join(" ")] ?? results[args[0] as string] ?? { code: 0, stdout: "", stderr: "" });
     return { run, login, env: {} };
   }
 
-  it("should answer what Confluence found when twg is signed in", async () => {
+  it("should answer what Confluence found, with each page's space read once, when twg is signed in", async () => {
     // Arrange
-    const d = deps({ api: { code: 0, stdout: confluenceOutput([PAGE_RESULT]), stderr: "" } });
+    const d = deps({
+      "confluence search query": {
+        code: 0,
+        stdout: confluenceOutput([PAGE_RESULT, { ...PAGE_RESULT, content: { ...PAGE_RESULT.content, id: "280959612" } }]),
+        stderr: ""
+      },
+      "confluence space list": { code: 0, stdout: SPACES_OUTPUT, stderr: "" }
+    });
 
     // Act
     const answer = await runLookup(d, frame());
 
     // Assert
-    expect(answer).toMatchObject({ results: [{ id: "280959611", space_key: "PEG" }] });
-    expect(d.run).toHaveBeenCalledWith("twg", expect.arrayContaining(["confluence:/wiki/rest/api/search"]), { env: {}, timeoutMs: expect.any(Number) });
+    expect(answer).toMatchObject({ results: [{ id: "280959611", space_id: "280952876", space_key: "PEG" }, { id: "280959612" }] });
+    expect(d.run).toHaveBeenCalledWith("twg", expect.arrayContaining(["confluence", "search", "query"]), { env: {}, timeoutMs: expect.any(Number) });
+    expect(d.run).toHaveBeenCalledWith("twg", expect.arrayContaining(["--keys=PEG"]), { env: {}, timeoutMs: expect.any(Number) });
     expect(d.login).not.toHaveBeenCalled();
+  });
+
+  it("should answer no results without reading any space when Confluence found no pages", async () => {
+    // Arrange
+    const d = deps({ "confluence search query": { code: 0, stdout: confluenceOutput([]), stderr: "" } });
+
+    // Act & Assert
+    expect(await runLookup(d, frame())).toEqual({ results: [] });
+    expect(d.run).toHaveBeenCalledTimes(1);
+  });
+
+  it("should say why in a sentence when the spaces of the pages found could not be read", async () => {
+    // Arrange
+    const d = deps({
+      "confluence search query": { code: 0, stdout: confluenceOutput([PAGE_RESULT]), stderr: "" },
+      "confluence space list": { code: 1, stdout: twgError("Space lookup failed"), stderr: "" }
+    });
+
+    // Act & Assert
+    expect(await runLookup(d, frame())).toEqual({ error: "failed", detail: "Confluence could not search that: Space lookup failed" });
+  });
+
+  it("should read only the spaces it does not already know, and remember the ones it read", async () => {
+    // Arrange
+    const d = deps({
+      "confluence search query": {
+        code: 0,
+        stdout: confluenceOutput([
+          PAGE_RESULT,
+          { ...PAGE_RESULT, content: { ...PAGE_RESULT.content, id: "1234567", _expandable: { space: "/rest/api/space/~saz.ali" } } }
+        ]),
+        stderr: ""
+      },
+      "confluence space list": { code: 0, stdout: PERSONAL_SPACES_OUTPUT, stderr: "" }
+    });
+    const spaces: SpaceCache = new Map([["peg", { key: "PEG", id: "280952876", name: "Platform Engineering" }]]);
+
+    // Act
+    const answer = await runLookup({ ...d, spaces }, frame());
+
+    // Assert
+    expect(answer).toMatchObject({ results: [{ space_key: "PEG" }, { id: "1234567", space_id: "275349639", space_key: "~saz.ali", space_name: "Saz Ali" }] });
+    expect(d.run.mock.calls[1]?.[1]).toContain("--keys=~saz.ali");
+    expect(spaces.has("~saz.ali")).toBe(true);
+  });
+
+  it("should answer the pages whose spaces it knows, and leave out the rest, when only some spaces could be read", async () => {
+    // Arrange
+    const d = deps({
+      "confluence search query": {
+        code: 0,
+        stdout: confluenceOutput([
+          PAGE_RESULT,
+          { ...PAGE_RESULT, content: { ...PAGE_RESULT.content, id: "1234567", _expandable: { space: "/rest/api/space/HR" } } }
+        ]),
+        stderr: ""
+      },
+      "confluence space list": { code: 0, stdout: SPACES_OUTPUT, stderr: "" }
+    });
+
+    // Act & Assert
+    expect(await runLookup(d, frame())).toMatchObject({ results: [{ id: "280959611" }] });
+  });
+
+  it("should say so rather than answer nothing when Confluence lists none of the spaces the pages are in", async () => {
+    // Arrange
+    const d = deps({
+      "confluence search query": { code: 0, stdout: confluenceOutput([PAGE_RESULT]), stderr: "" },
+      "confluence space list": { code: 0, stdout: JSON.stringify({ data: [] }), stderr: "" }
+    });
+
+    // Act & Assert
+    expect(await runLookup(d, frame())).toEqual({ error: "failed", detail: expect.stringMatching(/did not say which spaces/) });
+  });
+
+  it("should take each page's space from the frame when the search was narrowed to it", async () => {
+    // Arrange
+    const d = deps({
+      "confluence search query": {
+        code: 0,
+        stdout: confluenceOutput([{ ...PAGE_RESULT, content: { ...PAGE_RESULT.content, _expandable: {} }, resultGlobalContainer: {} }]),
+        stderr: ""
+      },
+      "confluence space list": { code: 0, stdout: SPACES_OUTPUT, stderr: "" }
+    });
+
+    // Act & Assert
+    expect(await runLookup(d, frame({ space: "PEG" }))).toMatchObject({ results: [{ id: "280959611", space_key: "PEG" }] });
+  });
+
+  it("should take the page's space from the search when a page id is looked up in a narrowed panel", async () => {
+    // Arrange
+    const d = deps({
+      "confluence search query": { code: 0, stdout: confluenceOutput([PAGE_RESULT]), stderr: "" },
+      "confluence space list": { code: 0, stdout: SPACES_OUTPUT, stderr: "" }
+    });
+
+    // Act
+    await runLookup(d, frame({ query: "280959611", space: "CCD" }));
+
+    // Assert
+    expect(d.run.mock.calls[1]?.[1]).toContain("--keys=PEG");
+  });
+
+  it("should answer signed_out when Atlassian refuses twg's sign-in with a 401", async () => {
+    // Arrange
+    const d = deps({ confluence: REJECTED_SIGN_IN });
+
+    // Act & Assert
+    expect(await runLookup(d, frame())).toEqual({ error: "signed_out" });
   });
 
   it("should answer signed_out, without signing in, when twg has no sign-in and nobody asked for one", async () => {
     // Arrange
-    const d = deps({ api: SIGNED_OUT });
+    const d = deps({ confluence: SIGNED_OUT });
 
     // Act & Assert
     expect(await runLookup(d, frame())).toEqual({ error: "signed_out" });
@@ -215,7 +501,7 @@ describe("runLookup", () => {
 
   it("should sign in first and then search when the person asked to sign in", async () => {
     // Arrange
-    const d = deps({ whoami: SIGNED_OUT, api: { code: 0, stdout: JIRA_OUTPUT, stderr: "" } });
+    const d = deps({ whoami: SIGNED_OUT, jira: { code: 0, stdout: JIRA_OUTPUT, stderr: "" } });
 
     // Act
     const answer = await runLookup(d, frame({ kind: "jira_project", query: "vibe", sign_in: true }));
@@ -238,10 +524,69 @@ describe("runLookup", () => {
 
   it("should say why in a sentence when the search failed for another reason", async () => {
     // Arrange
-    const d = deps({ api: { code: 1, stdout: JSON.stringify({ data: { status: 400, body: { message: "Could not parse cql" } } }), stderr: "" } });
+    const d = deps({ confluence: { code: 1, stdout: twgError("Could not parse cql"), stderr: "" } });
 
     // Act & Assert
     expect(await runLookup(d, frame())).toEqual({ error: "failed", detail: "Confluence could not search that: Could not parse cql" });
+  });
+});
+
+describe("runLookup's time limit", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // A search that takes `ms` of the clock, answering `stdout`; every other twg call answers the spaces.
+  function slowSearch(ms: number, stdout: string) {
+    return vi.fn<Run>(async (_cmd, args) => {
+      if (args[1] === "search") {
+        vi.setSystemTime(Date.now() + ms);
+        return { code: 0, stdout, stderr: "" };
+      }
+      return { code: 0, stdout: SPACES_OUTPUT, stderr: "" };
+    });
+  }
+
+  it("should give the space list only what is left of the search's 8 seconds when the search was slow", async () => {
+    // Arrange
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const run = slowSearch(5000, confluenceOutput([PAGE_RESULT]));
+
+    // Act
+    const answer = await runLookup({ run, env: {}, login: async () => true }, frame());
+
+    // Assert
+    expect(answer).toMatchObject({ results: [{ id: "280959611" }] });
+    expect(run.mock.calls[0]?.[2].timeoutMs).toBe(8000);
+    expect(run.mock.calls[1]?.[2].timeoutMs).toBe(3000);
+  });
+
+  it("should not start the space list, and say the search ran out of time, when under a second is left", async () => {
+    // Arrange
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const run = slowSearch(7500, confluenceOutput([PAGE_RESULT]));
+
+    // Act
+    const answer = await runLookup({ run, env: {}, login: async () => true }, frame());
+
+    // Assert
+    expect(answer).toEqual({ error: "failed", detail: "Confluence did not answer in time. Try again in a moment." });
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("should answer the pages in spaces it already knows when there is no time left to read the others", async () => {
+    // Arrange
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const other = { ...PAGE_RESULT, content: { ...PAGE_RESULT.content, id: "1234567", _expandable: { space: "/rest/api/space/HR" } } };
+    const run = slowSearch(7500, confluenceOutput([PAGE_RESULT, other]));
+    const spaces: SpaceCache = new Map([["peg", { key: "PEG", id: "280952876", name: "Platform Engineering" }]]);
+
+    // Act
+    const answer = await runLookup({ run, env: {}, login: async () => true, spaces }, frame());
+
+    // Assert
+    expect(answer).toMatchObject({ results: [{ id: "280959611", space_id: "280952876" }] });
+    expect(run).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -284,26 +629,10 @@ describe("runLookup for GitHub", () => {
 
   it("should ask for the person's accounts once for every search a runner makes", async () => {
     // Arrange
-    const answers: LookupAnswer[] = [];
     const run = vi.fn<Run>(async (_cmd, args) => (args[0] === "api" ? { code: 0, stdout: "hmcts\n", stderr: "" } : { code: 0, stdout: REPOS, stderr: "" }));
-    const runner = createLookupRunner({
-      api: {
-        putLookup: async (_va, _id, body) => {
-          answers.push(body);
-          return null;
-        }
-      },
-      id: "va-1",
-      env: {},
-      run,
-      login: async () => true
-    });
 
     // Act
-    runner.lookup({ lookup_id: "5b0e7c1a-1111-4222-8333-444455556661", kind: "github_repo", query: "cft" });
-    await runner.idle();
-    runner.lookup({ lookup_id: "5b0e7c1a-1111-4222-8333-444455556662", kind: "github_repo", query: "ccd" });
-    await runner.idle();
+    const answers = await answersToTwoLookups(run, "github_repo", ["cft", "ccd"]);
 
     // Assert
     expect(answers).toHaveLength(2);
@@ -355,6 +684,21 @@ describe("createLookupRunner", () => {
     expect(runningAtOnce).toBe(2);
     expect(answers.find((a) => a.id === id(3))?.body).toEqual({ error: "superseded" });
     expect(answers.filter((a) => "results" in a.body).map((a) => a.id)).toEqual([id(1), id(2), id(4)]);
+  });
+
+  it("should read each Confluence space once for every search a runner makes", async () => {
+    // Arrange
+    const run = vi.fn<Run>(async (_cmd, args) => ({ code: 0, stdout: args[1] === "search" ? confluenceOutput([PAGE_RESULT]) : SPACES_OUTPUT, stderr: "" }));
+
+    // Act
+    const answers = await answersToTwoLookups(run, "confluence_page", ["spec", "assistant"]);
+
+    // Assert
+    expect(answers).toEqual([
+      { results: [expect.objectContaining({ space_id: "280952876" })] },
+      { results: [expect.objectContaining({ space_id: "280952876" })] }
+    ]);
+    expect(run.mock.calls.filter((call) => call[1][1] === "space")).toHaveLength(1);
   });
 
   it("should ignore a frame that is not a lookup", () => {

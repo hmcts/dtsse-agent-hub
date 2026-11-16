@@ -10,7 +10,7 @@ import { setGitIdentity } from "../git-identity.ts";
 import { watchPorts } from "../ports.ts";
 import { withRetry } from "../retry.ts";
 import { requireVirtualAgent } from "../virtual-agent.ts";
-import { CREDENTIAL_KINDS } from "../wire.ts";
+import { POD_CREDENTIAL_KINDS } from "../wire.ts";
 import { atlassianLogin } from "./atlassian.ts";
 import { azureLogin } from "./azure-login.ts";
 import { cacheSync } from "./cache-sync.ts";
@@ -46,7 +46,7 @@ export const VIRTUAL_USAGE = `usage: ${CLI} virtual <command>
   credential get <kind>       print a stored credential (exit ${EXIT_NO_CREDENTIAL} if there is none)
   credential put <kind>       store a credential read from stdin
 
-Kinds: ${CREDENTIAL_KINDS.join(", ")}. Exit ${EXIT_FATAL} means the hub failed the agent: do not retry.
+Kinds: ${POD_CREDENTIAL_KINDS.join(", ")}. Exit ${EXIT_FATAL} means the hub failed the agent: do not retry.
 Environment: AGENT_HUB_URL, AGENT_HUB_VIRTUAL_AGENT_ID, AGENT_HUB_LAUNCH_TOKEN, AZURE_TENANT_ID,
 VIRTUAL_AGENT_IGNORE_PORTS (ports watch-ports never reports), AGENT_HUB_MAX_SESSIONS (conversation sessions at
 once, 2 by default), AGENT_HUB_SESSION_IDLE_MINUTES (20 by default) and AGENT_HUB_GITHUB_SIGN_IN_GAP_MS (the

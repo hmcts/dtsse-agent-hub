@@ -10,12 +10,13 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type TempClaudeHome, tempClaudeHome } from "./__fixtures__/claude-home.ts";
 import { createMockHub, type MockHubOptions, type RecordedCall } from "./__fixtures__/mock-hub.ts";
-import { createApi } from "./api.ts";
+import { type Api, ApiError, createApi } from "./api.ts";
 import { modelPath } from "./assistant/models.ts";
 import { tmuxName } from "./assistant/tmux.ts";
 import { type RunBridgeOptions, runBridge, sessionKind } from "./bridge.ts";
 import { readDirects } from "./directs.ts";
 import type { Env } from "./env.ts";
+import { ANSWER_HERE, CONTEXT_CLOSE, contextOpen } from "./envelope.ts";
 import { CLIENT_FEATURES } from "./features.ts";
 import {
   parseAssistantFrame,
@@ -102,11 +103,24 @@ async function waitUntil(fn: () => boolean, what: string, timeoutMs = 8000): Pro
 
 const gaps = (calls: RecordedCall[]) => calls.slice(1).map((c, i) => (c.at ?? 0) - ((calls[i] as RecordedCall).at ?? 0));
 
-type StartBridgeOptions = Omit<RunBridgeOptions, "sid" | "api" | "deliver"> & { env?: Env };
+// A shorter rapid-close threshold than `reconnect.ts`'s, so a stream that outlives it can end in a fraction of a
+// second. The refused-stream case keeps the real backoff: its bounds need the slack the full doubling gives.
+const FAST_RECONNECT = { rapidCloseMs: 200 };
+const STREAM_MS = FAST_RECONNECT.rapidCloseMs + 200;
+
+type StartBridgeOptions = Omit<RunBridgeOptions, "sid" | "api" | "deliver"> & {
+  env?: Env;
+  /** Stands in for some of the bridge's API calls; the setup's own registration goes to the mock hub as it is. */
+  wrapApi?: (api: Api) => Api;
+};
 
 // Registers an agent on a fresh mock hub and runs a bridge for it until `stop` is called. `env` adds to the
 // bridge's environment; `savedAgent` adds fields to the agent.json it starts from.
-async function startBridge(hubOptions: MockHubOptions, { env: extraEnv, ...bridgeOptions }: StartBridgeOptions = {}, savedAgent: Record<string, unknown> = {}) {
+async function startBridge(
+  hubOptions: MockHubOptions,
+  { env: extraEnv, wrapApi, ...bridgeOptions }: StartBridgeOptions = {},
+  savedAgent: Record<string, unknown> = {}
+) {
   const hub = createMockHub({ pingMs: 5000, ...hubOptions });
   const url = await hub.listen();
   const api = createApi({ baseUrl: url, devUser: DEV_USER });
@@ -114,13 +128,13 @@ async function startBridge(hubOptions: MockHubOptions, { env: extraEnv, ...bridg
   const { agent_id: agentId } = await api.register({ session_id: sid, name: sid, name_source: "derived", client_features: [...CLIENT_FEATURES] });
   ensureStateDir(sid);
   fs.writeFileSync(statePath(sid, "enabled"), "");
-  writeJson(statePath(sid, "agent.json"), { agent_id: agentId, session_id: sid, name: sid, ...savedAgent });
+  writeJson(statePath(sid, "agent.json"), { agent_id: agentId, session_id: sid, name: sid, client_features: [...CLIENT_FEATURES], ...savedAgent });
   const socketWrites: string[] = [];
   const deliver = async (_socketPath: string | null | undefined, _token: string | null | undefined, content: string) => {
     socketWrites.push(content);
   };
   const env = { ...process.env, AGENT_HUB_CLAUDE_PID: String(process.pid), CLAUDE_CODE_MESSAGING_TOKEN: "tok", ...extraEnv };
-  const running = runBridge({ sid, env, api, deliver, heartbeatMs: 100, ...bridgeOptions });
+  const running = runBridge({ sid, env, api: wrapApi ? wrapApi(api) : api, deliver, heartbeatMs: 100, ...bridgeOptions });
   const streamOpens = () => hub.calls.filter((c) => c.method === "GET" && c.path === `/api/agent/${agentId}/stream`);
   return {
     hub,
@@ -439,7 +453,7 @@ describe("runBridge", () => {
   for (const reconnectEvent of [true, false]) {
     it(`should reopen the stream at once when the server ends it ${reconnectEvent ? "with a reconnect event" : "without one"}`, async () => {
       // Arrange
-      const bridge = await startBridge({ maxLifetimeMs: 2200, reconnectEvent });
+      const bridge = await startBridge({ maxLifetimeMs: STREAM_MS, reconnectEvent }, { reconnect: FAST_RECONNECT });
 
       try {
         // Act
@@ -447,7 +461,7 @@ describe("runBridge", () => {
 
         // Assert
         for (const gap of gaps(bridge.streamOpens())) {
-          expect(gap).toBeLessThan(2200 + 500);
+          expect(gap).toBeLessThan(STREAM_MS + 500);
         }
       } finally {
         await bridge.stop();
@@ -457,7 +471,7 @@ describe("runBridge", () => {
 
   it("should write a message to the inbox once and ack it again when it is replayed after it was acked", async () => {
     // Arrange
-    const bridge = await startBridge({ maxLifetimeMs: 2200, replayAcked: true });
+    const bridge = await startBridge({ maxLifetimeMs: STREAM_MS, replayAcked: true }, { reconnect: FAST_RECONNECT });
 
     try {
       await waitUntil(() => bridge.streamOpens().length >= 1, "the first stream");
@@ -475,7 +489,7 @@ describe("runBridge", () => {
 
   it("should replay, ack and write a message to the inbox once when its first ack failed", async () => {
     // Arrange
-    const bridge = await startBridge({ maxLifetimeMs: 2200 });
+    const bridge = await startBridge({ maxLifetimeMs: STREAM_MS }, { reconnect: FAST_RECONNECT });
 
     try {
       await waitUntil(() => bridge.streamOpens().length >= 1, "the first stream");
@@ -602,7 +616,7 @@ describe("runBridge", () => {
 
   it("should retry with backoff when the stream is refused", async () => {
     // Arrange
-    const bridge = await startBridge({});
+    const bridge = await startBridge({}, { reconnect: FAST_RECONNECT });
     bridge.hub.failNextStreams(2);
 
     try {
@@ -802,6 +816,154 @@ describe("runBridge", () => {
     }
   });
 
+  // A resumed session finds the registration an older client made on the volume and never registers, so the hub would
+  // go on reading that client's claim.
+  it.each([
+    ["an older client's claim", { client_features: ["stop"] }],
+    ["no claim at all", { client_features: undefined }]
+  ])("should send this build's claim on heartbeats until the hub takes it when the saved agent was registered with %s", async (_what, saved) => {
+    // Arrange
+    const bridge = await startBridge({}, {}, saved);
+    const beats = () => bridge.hub.calls.filter((c) => c.path === `/api/agent/${bridge.agentId}/heartbeat`);
+
+    try {
+      // Act
+      await waitUntil(() => beats().length >= 3, "three heartbeats");
+
+      // Assert
+      expect(beats()[0]?.body.client_features).toEqual([...CLIENT_FEATURES]);
+      expect(
+        beats()
+          .slice(1)
+          .every((c) => c.body.client_features === undefined)
+      ).toBe(true);
+      expect(bridge.hub.agents.get(bridge.agentId)?.client_features).toEqual([...CLIENT_FEATURES]);
+      expect(JSON.parse(fs.readFileSync(statePath(bridge.sid, "agent.json"), "utf8")).client_features).toEqual([...CLIENT_FEATURES]);
+      expect(bridge.hub.calls.filter((c) => c.path === "/api/agent/register")).toHaveLength(1);
+    } finally {
+      await bridge.stop();
+    }
+  });
+
+  // The client is published on merge, so a pod can boot on it before the hub that reads the field is deployed.
+  it("should keep sending the claim, and record nothing, while the hub answers as one that drops the field", async () => {
+    // Arrange
+    const bridge = await startBridge({ heartbeatDropsClaim: true }, {}, { client_features: ["stop"] });
+    const beats = () => bridge.hub.calls.filter((c) => c.path === `/api/agent/${bridge.agentId}/heartbeat`);
+
+    try {
+      // Act
+      await waitUntil(() => beats().length >= 3, "three heartbeats");
+
+      // Assert
+      expect(beats().every((c) => JSON.stringify(c.body.client_features) === JSON.stringify([...CLIENT_FEATURES]))).toBe(true);
+      expect(JSON.parse(fs.readFileSync(statePath(bridge.sid, "agent.json"), "utf8")).client_features).toEqual(["stop"]);
+      expect(bridge.logText().match(/the hub did not confirm this client's features/g)).toHaveLength(1);
+    } finally {
+      await bridge.stop();
+    }
+  });
+
+  // The answer is about the agent the heartbeat went to; a re-registration while it was out made another.
+  it("should not put back the old agent when a heartbeat's answer arrives after the session registered as a new one", async () => {
+    // Arrange
+    let hub: ReturnType<typeof createMockHub> | null = null;
+    let held = false;
+    const bridge = await startBridge(
+      {},
+      {
+        wrapApi: (api) => ({
+          ...api,
+          heartbeat: async (id, body) => {
+            if (body.client_features === undefined || held || hub === null) {
+              return await api.heartbeat(id, body);
+            }
+            if (hub.calls.filter((c) => c.path === `/api/agent/${id}/heartbeat`).length === 0) {
+              // The first, from the loop, is left unconfirmed so the stream can run; the timer's is the one held.
+              await api.heartbeat(id, { ...body, client_features: undefined });
+              return null;
+            }
+            held = true;
+            const live = hub;
+            live.agents.delete(id);
+            live.streams.get(id)?.end();
+            await waitUntil(() => live.calls.filter((c) => c.path === "/api/agent/register").length >= 2, "the new registration");
+            return { client_features: body.client_features };
+          }
+        })
+      },
+      { client_features: ["stop"] }
+    );
+    hub = bridge.hub;
+    const newId = () => [...bridge.hub.agents.keys()].find((id) => id !== bridge.agentId);
+
+    try {
+      // Act
+      await waitUntil(() => held && newId() !== undefined, "the re-registration");
+      const fresh = newId() as string;
+      await waitUntil(() => bridge.hub.calls.filter((c) => c.path === `/api/agent/${fresh}/heartbeat`).length >= 2, "heartbeats as the new agent");
+
+      // Assert
+      expect(JSON.parse(fs.readFileSync(statePath(bridge.sid, "agent.json"), "utf8")).agent_id).toBe(fresh);
+      const late = bridge.hub.calls.slice(-5).filter((c) => c.path.endsWith("/heartbeat"));
+      expect(late.every((c) => c.path === `/api/agent/${fresh}/heartbeat`)).toBe(true);
+    } finally {
+      await bridge.stop();
+    }
+  });
+
+  it("should keep sending the claim while the hub refuses the heartbeat", async () => {
+    // Arrange
+    let refusals = 2;
+    const sent: (string[] | undefined)[] = [];
+    const bridge = await startBridge(
+      {},
+      {
+        wrapApi: (api) => ({
+          ...api,
+          heartbeat: async (id, body) => {
+            sent.push(body.client_features);
+            if (refusals > 0) {
+              refusals--;
+              throw new ApiError(400, { error: "client_features: at most 50" }, "POST", `/api/agent/${id}/heartbeat`);
+            }
+            return await api.heartbeat(id, body);
+          }
+        })
+      },
+      { client_features: ["stop"] }
+    );
+
+    try {
+      // Act
+      await waitUntil(() => sent.length >= 4, "four heartbeats");
+
+      // Assert
+      expect(sent.slice(0, 3)).toEqual([[...CLIENT_FEATURES], [...CLIENT_FEATURES], [...CLIENT_FEATURES]]);
+      expect(sent[3]).toBeUndefined();
+      expect(bridge.logText()).toMatch(/heartbeat failed: POST .*heartbeat failed: 400/);
+    } finally {
+      await bridge.stop();
+    }
+  });
+
+  it("should send no claim when the saved agent was registered with this build's", async () => {
+    // Arrange
+    const bridge = await startBridge({});
+    const beats = () => bridge.hub.calls.filter((c) => c.path === `/api/agent/${bridge.agentId}/heartbeat`);
+
+    try {
+      // Act
+      await waitUntil(() => beats().length >= 2, "two heartbeats");
+
+      // Assert
+      expect(beats().every((c) => c.body.client_features === undefined)).toBe(true);
+      expect(bridge.hub.calls.filter((c) => c.path === "/api/agent/register")).toHaveLength(1);
+    } finally {
+      await bridge.stop();
+    }
+  });
+
   it("should hold direct messages unacked, log it once and deliver them once accepted, when Claude Code would hold them", async () => {
     await withoutUserSettings(async () => {
       // Arrange
@@ -877,7 +1039,7 @@ describe("runBridge", () => {
     });
   });
 
-  it("should frame messages for the assistant, and say when the product changed, when direct frames carry assistant", async () => {
+  it("should give the assistant the person's words as its prompt, and say when the product changed, when direct frames carry assistant", async () => {
     // Arrange
     const bridge = await startBridge({ pingMs: 5000 }, { env: { ...VIRTUAL, AGENT_HUB_CONVERSATION_ID: "c1" } });
     const assistant = { conversation_id: "c1", product: "pcs", product_label: "Possession claims", artefact_version: 0, artefact_updated_by: null };
@@ -895,11 +1057,10 @@ describe("runBridge", () => {
 
       // Assert
       const [one, two] = bridge.socketWrites as [string, string];
-      expect(one).toMatch(new RegExp(`^\\[agent-hub\\] Direct message #${first.id} from your user, Me Tester, `));
-      expect(one).toMatch(/\nProduct area: Possession claims\.\n/);
-      expect(one).not.toMatch(/switched/);
+      expect(one).toBe(`${contextOpen(first.id)}\n${ANSWER_HERE}\nProduct area: Possession claims.\n${CONTEXT_CLOSE}\n\nwhat is a possession claim?`);
       expect(two).toMatch(/\nProduct area: Core Case Data\.\n/);
       expect(two).toMatch(/switched the product context from Possession claims to Core Case Data/);
+      expect(two.endsWith(`${CONTEXT_CLOSE}\n\nand in CCD?`)).toBe(true);
       expect(two).toMatch(/edited the conversation's document \(version 2\)/);
       expect(JSON.parse(fs.readFileSync(statePath(bridge.sid, "assistant-product.json"), "utf8"))).toEqual({
         product: "ccd",
@@ -910,7 +1071,7 @@ describe("runBridge", () => {
     }
   });
 
-  it("should keep the owner's framing in a conversation, and keep the message out of the direct thread, when its frame is missing or unreadable", async () => {
+  it("should still give a conversation the owner's words as its prompt, and keep the message out of the direct thread, when its frame is missing or unreadable", async () => {
     // Arrange
     const bridge = await startBridge({ pingMs: 5000 }, { env: { ...VIRTUAL, AGENT_HUB_CONVERSATION_ID: "c1" } });
 
@@ -927,12 +1088,8 @@ describe("runBridge", () => {
 
       // Assert
       const [one, two] = bridge.socketWrites as [string, string];
-      expect(one).toMatch(new RegExp(`^\\[agent-hub\\] Direct message #${missing.id} from your user, Me Tester, typed into the CFT Workspace chat app\\.`));
-      expect(two).toMatch(new RegExp(`^\\[agent-hub\\] Direct message #${unreadable.id} from your user, Me Tester, typed into the CFT Workspace chat app\\.`));
-      for (const text of [one, two]) {
-        expect(text).toMatch(/This IS your user/);
-        expect(text).not.toMatch(/NOT from your user/);
-      }
+      expect(one).toBe(`${contextOpen(missing.id)}\n${ANSWER_HERE}\n${CONTEXT_CLOSE}\n\nno frame`);
+      expect(two).toBe(`${contextOpen(unreadable.id)}\n${ANSWER_HERE}\n${CONTEXT_CLOSE}\n\na frame that is not an object`);
       expect(readDirects(bridge.sid)).toEqual([]);
       expect(fs.existsSync(statePath(bridge.sid, "assistant-product.json"))).toBe(false);
     } finally {
@@ -940,7 +1097,7 @@ describe("runBridge", () => {
     }
   });
 
-  it("should record a peer's direct in a conversation's direct thread, as anywhere else", async () => {
+  it("should frame a peer's direct to a conversation as a peer's and record it in the direct thread, as anywhere else", async () => {
     // Arrange
     const bridge = await startBridge({ pingMs: 5000 }, { env: { ...VIRTUAL, AGENT_HUB_CONVERSATION_ID: "c1" } });
 
@@ -952,6 +1109,7 @@ describe("runBridge", () => {
       await waitUntil(() => bridge.socketWrites.length >= 1, "the message");
 
       // Assert
+      expect(bridge.socketWrites[0]).toMatch(new RegExp(`^\\[agent-hub\\] Direct message #${peer.id} from Pat Peer`));
       expect(bridge.socketWrites[0]).toMatch(/NOT from your user/);
       expect(readDirects(bridge.sid).map((entry) => entry.id)).toEqual([peer.id]);
     } finally {
@@ -1070,7 +1228,7 @@ describe("runBridge", () => {
 
     // Assert
     expect(delivered).toMatch(/could not be retrieved and is not on this machine: scan\.png/);
-    expect(delivered).toMatch(/\n---\nwhat does this say\?$/);
+    expect(delivered.endsWith(`${CONTEXT_CLOSE}\n\nwhat does this say?`)).toBe(true);
   });
 
   it("should say the file could not be retrieved when the frame names one but no conversation to fetch it for", async () => {
@@ -1086,7 +1244,7 @@ describe("runBridge", () => {
     // file left out would read as though nothing had been attached, which is the one thing this must not do.
     expect(delivered).toMatch(/could not be retrieved and is not on this machine: scan\.png/);
     expect(delivered).toMatch(/ask them to attach it again/);
-    expect(delivered).toMatch(/\n---\nwhat does this say\?$/);
+    expect(delivered.endsWith(`${CONTEXT_CLOSE}\n\nwhat does this say?`)).toBe(true);
   });
 
   it("should ask the assistant conversation to run the skill when the user's message starts with one the session has", async () => {
@@ -1107,7 +1265,9 @@ describe("runBridge", () => {
       await waitUntil(() => bridge.socketWrites.length >= 2, "the second message");
 
       // Assert
-      expect(bridge.socketWrites[0]).toMatch(/\nIt starts with \/cft-explain: run the cft-explain skill with the rest of the message as its arguments/);
+      expect(bridge.socketWrites[0]).toContain(
+        "\nThe message below starts with /cft-explain: run the cft-explain skill with the rest of the message as its arguments.\n"
+      );
       expect(bridge.socketWrites[1]).not.toMatch(/skill/);
     } finally {
       await bridge.stop();
