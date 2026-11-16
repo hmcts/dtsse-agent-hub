@@ -10,11 +10,12 @@ import {
   startConversation
 } from "@/app/_actions/assistant";
 import { deleteAllAssistantFiles, deleteAssistantFile } from "@/app/_actions/assistant-files";
-import { readAssistantAgent, readGitIdentity } from "@/app/_actions/assistant-settings";
+import { readAssistantAgent, readGitIdentity, readSchedule, saveSchedule } from "@/app/_actions/assistant-settings";
 import { clearGitIdentity, removeCredential, resetClaudeMd, saveClaudeMd, saveCredential, saveGitIdentity } from "@/app/_actions/credentials";
 import { saveExportDefaults } from "@/app/_actions/export-defaults";
+import { archiveFeedbackProject, pinFeedbackProject } from "@/app/_actions/feedback";
 import { deleteTemplate, saveTemplate } from "@/app/_actions/templates";
-import { reconnectSignIn, restartVirtualAgent, saveVirtualAgentPod } from "@/app/_actions/virtual-agents";
+import { pasteLoginCode, reconnectSignIn, restartVirtualAgent, saveVirtualAgentPod } from "@/app/_actions/virtual-agents";
 import { SHARING_SETTINGS } from "@/app/assistant/sharing";
 import { connectionsData } from "@/assistant/connections";
 import { savedCredentialsData } from "@/assistant/saved-credentials";
@@ -26,6 +27,7 @@ import { WAITING_COOKIE } from "@/assistant/waiting";
 import { AssistantGate } from "@/components/assistant/AssistantGate";
 import { AssistantShell, type ConversationActions } from "@/components/assistant/AssistantShell";
 import { EmptyChat, type EmptyChatActions } from "@/components/assistant/EmptyChat";
+import { feedbackEnabled } from "@/feedback/settings";
 import { requireViewer } from "@/viewer/current";
 import {
   assistantExportDefaults,
@@ -49,7 +51,13 @@ const CHAT_ACTIONS: EmptyChatActions = {
 };
 
 /** What a conversation's row in the sidebar offers. */
-const ROW_ACTIONS: ConversationActions = { rename: renameConversation, pin: pinConversation, remove: deleteConversation };
+const ROW_ACTIONS: ConversationActions = {
+  rename: renameConversation,
+  pin: pinConversation,
+  remove: deleteConversation,
+  pinFeedback: pinFeedbackProject,
+  archiveFeedback: archiveFeedbackProject
+};
 
 /** A new chat. Opening it creates the viewer's assistant on their first visit, and starts it whenever it is stopped. */
 export default async function AssistantPage() {
@@ -82,11 +90,12 @@ export default async function AssistantPage() {
       actions={ROW_ACTIONS}
       connections={connectionsData(home.assistant, home.credentials)}
       viewerRoute={home.credentials.modelRoute}
-      connect={{ assistantId: home.assistant.id, running: home.assistant.desired === "running", reconnect: reconnectSignIn }}
+      connect={{ assistantId: home.assistant.id, running: home.assistant.desired === "running", reconnect: reconnectSignIn, paste: pasteLoginCode }}
       now={Date.now()}
       plugins={pluginSettings}
       welsh={home.welsh}
       briefing={home.briefing}
+      feedback={feedbackEnabled()}
       start={startConversation}
       claudeMd={{ settings: claudeMd, save: saveClaudeMd, reset: resetClaudeMd }}
       templates={{ mine, save: saveTemplate, remove: deleteTemplate }}
@@ -97,6 +106,7 @@ export default async function AssistantPage() {
       sharing={SHARING_SETTINGS}
       agent={{ load: readAssistantAgent, restart: restartVirtualAgent }}
       git={{ load: readGitIdentity, save: saveGitIdentity, clear: clearGitIdentity }}
+      schedule={{ load: readSchedule, save: saveSchedule }}
       tokens={{ ...savedCredentialsData(home.credentials, home.assistant.modelRoute), save: saveCredential, remove: removeCredential }}
     >
       {/* No `local` here: this screen is about to start a chat on a pod, so it needs what a pod needs. */}

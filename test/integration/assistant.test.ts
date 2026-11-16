@@ -940,7 +940,7 @@ describe("conversations", () => {
     expect((await assistantConversation(VIEWER, onLaptop))!.local).toBe(true);
     expect((await assistantConversation(VIEWER, onPod))!.local).toBe(false);
     const listed = (await openAssistant(VIEWER)).conversations.flatMap((group) => group.items);
-    expect(new Map(listed.map((item) => [item.id, item.mark?.where ?? null]))).toEqual(
+    expect(new Map(listed.map((item) => [item.id, item.kind === "feedback" ? null : (item.mark?.where ?? null)]))).toEqual(
       new Map([
         [onLaptop, "computer"],
         [onPod, "assistant"]
@@ -959,18 +959,19 @@ describe("conversations", () => {
     ["offline", "disconnected"]
   ] as const)("should mark a listed local chat as %s with the state of its session", async (status, session) => {
     await startedAssistant();
+    await actions.startConversation({ product: "general", body: "on my assistant" });
     const onLaptop = await laptopChat();
     await typedAtLaptop(onLaptop);
     await prisma.agent.updateMany({ where: { assistantConversationId: onLaptop }, data: { status } });
 
     const listed = (await openAssistant(VIEWER)).conversations.flatMap((group) => group.items);
 
-    expect(listed.map((item) => [item.id, item.mark])).toEqual([[onLaptop, { where: "computer", session }]]);
+    expect(listed.flatMap((item) => (item.id === onLaptop && item.kind !== "feedback" ? [item.mark] : []))).toEqual([{ where: "computer", session }]);
   });
 
   /**
-   * The cloud is there only to tell a pod chat from a local one, so somebody who has never run a session on their
-   * own computer sees no marks at all. One read answers it for the whole list; see `hasLocalConversation`.
+   * A mark is there only to tell one kind of item from another, so somebody whose chats all run on their assistant
+   * sees no marks at all. One read answers it for the whole list; see `showsMarks`.
    */
   it("should mark no chat when every one of the person's chats runs on their assistant", async () => {
     const { token } = await startedAssistant();
@@ -979,7 +980,7 @@ describe("conversations", () => {
 
     const listed = (await openAssistant(VIEWER)).conversations.flatMap((group) => group.items);
 
-    expect(listed.map((item) => [item.id, item.mark])).toEqual([[onPod, null]]);
+    expect(listed.map((item) => [item.id, item.kind === "feedback" ? null : item.mark])).toEqual([[onPod, null]]);
   });
 
   it("should wake a conversation when its composer is focused and the session is offline", async () => {

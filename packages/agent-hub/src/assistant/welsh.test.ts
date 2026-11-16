@@ -363,8 +363,16 @@ describe("runWelsh", () => {
   });
 
   it("should answer that the tools are still being set up, running nothing, when the install leaves no time for the job", async () => {
+    // The install is waited on for the ten seconds the budget has over the least a job runs with, on a faked clock.
+    vi.useFakeTimers();
     const { d, answers } = deps({ ready: new Promise<void>(() => {}), budgetMs: 40_000 });
-    await runWelsh(d, parseWelshFrame({ job_id: JOB, kind: "info", product: "cath", args: {} }) as NonNullable<ReturnType<typeof parseWelshFrame>>);
+    try {
+      const job = runWelsh(d, parseWelshFrame({ job_id: JOB, kind: "info", product: "cath", args: {} }) as NonNullable<ReturnType<typeof parseWelshFrame>>);
+      await vi.advanceTimersByTimeAsync(10_000);
+      await job;
+    } finally {
+      vi.useRealTimers();
+    }
     expect(d.run).not.toHaveBeenCalled();
     expect(answers[0]?.body).toEqual({ error: "failed", detail: STILL_PREPARING });
   });

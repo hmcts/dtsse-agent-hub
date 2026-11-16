@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ForeignConversation, MAX_TERM, MAX_TERMS, searchTerms, snippetOf, visibleMatches } from "./search.ts";
+import { ForeignConversation, MAX_TERM, MAX_TERMS, mergeMatches, searchTerms, snippetOf, visibleMatches } from "./search.ts";
 
 describe("searchTerms", () => {
   it("should take the words of a query, lower-cased, when one is typed", () => {
@@ -89,5 +89,29 @@ describe("visibleMatches", () => {
         { ownerOid: "bob", id: "c2" }
       ])
     ).toThrow(ForeignConversation);
+  });
+});
+
+describe("mergeMatches", () => {
+  it("should interleave chats and feedback projects most recently active first", () => {
+    const chats = [
+      { id: "c2", lastActiveAt: "2026-10-21T09:00:00.000Z" },
+      { id: "c1", lastActiveAt: "2026-10-19T09:00:00.000Z" }
+    ];
+    const projects = [{ id: "p1", lastActiveAt: "2026-10-20T09:00:00.000Z" }];
+
+    expect(mergeMatches(chats, projects).map((match) => match.id)).toEqual(["c2", "p1", "c1"]);
+  });
+
+  it("should settle a tie by id when two were last active at once", () => {
+    const at = "2026-10-21T09:00:00.000Z";
+
+    expect(mergeMatches([{ id: "b", lastActiveAt: at }], [{ id: "a", lastActiveAt: at }]).map((match) => match.id)).toEqual(["a", "b"]);
+  });
+
+  it("should answer with the chats alone when no project matches", () => {
+    const chats = [{ id: "c1", lastActiveAt: "2026-10-21T09:00:00.000Z" }];
+
+    expect(mergeMatches(chats, [])).toEqual(chats);
   });
 });

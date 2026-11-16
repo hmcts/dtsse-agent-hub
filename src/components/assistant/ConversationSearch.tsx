@@ -3,11 +3,12 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useState } from "react";
 import { MAX_QUERY, searchTerms } from "@/assistant/search";
-import type { ConversationMatch } from "@/assistant/views";
+import type { SidebarMatch } from "@/assistant/views";
 import { ChatMark } from "@/components/assistant/ChatMark";
 
 /**
- * Finding one of the person's own chats from the sidebar, by a word in its title or in anything said in it.
+ * Finding one of the person's own chats from the sidebar, by a word in its title or in anything said in it, or one of
+ * their feedback projects by its name.
  *
  * The results take the place of the date-grouped list rather than hanging over it: the sidebar is as narrow as 240px
  * and already has a drag handle down its inner edge, so a popover there would be both cramped and in the way. The
@@ -22,7 +23,7 @@ import { ChatMark } from "@/components/assistant/ChatMark";
 /** How long after the last keystroke the search runs, so a typed word is one request rather than one per letter. */
 export const SEARCH_AFTER_MS = 180;
 
-export type SearchChats = (query: string, signal: AbortSignal) => Promise<ConversationMatch[]>;
+export type SearchSidebar = (query: string, signal: AbortSignal) => Promise<SidebarMatch[]>;
 
 /**
  * What the list is showing, and why. A search in flight keeps the answer before it on screen rather than emptying
@@ -30,17 +31,17 @@ export type SearchChats = (query: string, signal: AbortSignal) => Promise<Conver
  */
 interface Results {
   state: "idle" | "searching" | "found" | "failed";
-  chats: ConversationMatch[];
+  found: SidebarMatch[];
 }
 
-const IDLE: Results = { state: "idle", chats: [] };
+const IDLE: Results = { state: "idle", found: [] };
 
-async function fetchChats(query: string, signal: AbortSignal): Promise<ConversationMatch[]> {
+async function fetchMatches(query: string, signal: AbortSignal): Promise<SidebarMatch[]> {
   const response = await fetch(`/api/ui/assistant/search?q=${encodeURIComponent(query)}`, { signal });
   if (!response.ok) {
-    throw new Error(`the chat search answered ${response.status}`);
+    throw new Error(`the search answered ${response.status}`);
   }
-  return ((await response.json()) as { chats: ConversationMatch[] }).chats;
+  return ((await response.json()) as { results: SidebarMatch[] }).results;
 }
 
 /** What the live region reads out, and what the list shows above itself while a search is on. */
@@ -49,15 +50,15 @@ function summary(results: Results): string {
     return "";
   }
   if (results.state === "searching") {
-    return "Searching your chats…";
+    return "Searching…";
   }
   if (results.state === "failed") {
-    return "Your chats could not be searched. Check your connection and try again.";
+    return "The search did not finish. Check your connection and try again.";
   }
-  return results.chats.length === 0 ? "No chats match that." : `${results.chats.length} ${results.chats.length === 1 ? "chat" : "chats"} found.`;
+  return results.found.length === 0 ? "Nothing matches that." : `${results.found.length} ${results.found.length === 1 ? "result" : "results"} found.`;
 }
 
-export function ConversationSearch({ search = fetchChats, children }: { search?: SearchChats; children: React.ReactNode }) {
+export function ConversationSearch({ search = fetchMatches, children }: { search?: SearchSidebar; children: React.ReactNode }) {
   const router = useRouter();
   const listId = useId();
   const [query, setQuery] = useState("");
@@ -67,7 +68,7 @@ export function ConversationSearch({ search = fetchChats, children }: { search?:
   // A query with no word worth searching for is not a search at all: the sidebar keeps its usual list and nothing is
   // asked of the server, because one letter matches nearly every chat.
   const searching = searchTerms(query).length > 0;
-  const chats = results.chats;
+  const chats = results.found;
   const current = chats.length === 0 ? -1 : Math.min(active, chats.length - 1);
   const optionId = (index: number) => `${listId}-${index}`;
 
@@ -77,16 +78,16 @@ export function ConversationSearch({ search = fetchChats, children }: { search?:
       return;
     }
     const controller = new AbortController();
-    setResults((previous) => ({ state: "searching", chats: previous.chats }));
+    setResults((previous) => ({ state: "searching", found: previous.found }));
     setActive(0);
     const timer = setTimeout(() => {
       void (async () => {
         try {
-          setResults({ state: "found", chats: await search(query, controller.signal) });
+          setResults({ state: "found", found: await search(query, controller.signal) });
         } catch {
           // An aborted request is this effect being replaced by the next keystroke, not a failure to report.
           if (!controller.signal.aborted) {
-            setResults({ state: "failed", chats: [] });
+            setResults({ state: "failed", found: [] });
           }
         }
       })();
@@ -97,10 +98,10 @@ export function ConversationSearch({ search = fetchChats, children }: { search?:
     };
   }, [query, search]);
 
-  /** Opens a chat and empties the box, so the sidebar is back on its list with the chat just opened marked on it. */
-  function open(chat: ConversationMatch): void {
+  /** Opens what was found and empties the box, so the sidebar is back on its list with it marked as open. */
+  function open(found: SidebarMatch): void {
     setQuery("");
-    router.push(`/assistant/${chat.id}`);
+    router.push(found.kind === "feedback" ? `/assistant/feedback/${found.id}` : `/assistant/${found.id}`);
   }
 
   function onKeyDown(event: React.KeyboardEvent<HTMLInputElement>): void {
@@ -141,8 +142,8 @@ export function ConversationSearch({ search = fetchChats, children }: { search?:
           maxLength={MAX_QUERY}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={onKeyDown}
-          aria-label="Search chats"
-          placeholder="Search chats"
+          aria-label="Search"
+          placeholder="Search"
           role="combobox"
           aria-autocomplete="list"
           aria-expanded={chats.length > 0}
@@ -159,7 +160,7 @@ export function ConversationSearch({ search = fetchChats, children }: { search?:
           <p role="status" className="px-2.5 text-[13px] text-asst-faint empty:h-0 empty:overflow-hidden">
             {said}
           </p>
-          <div id={listId} role="listbox" aria-label="Chats found" hidden={chats.length === 0} className="flex flex-col gap-0.5">
+          <div id={listId} role="listbox" aria-label="Search results" hidden={chats.length === 0} className="flex flex-col gap-0.5">
             {chats.map((chat, index) => (
               <div
                 key={chat.id}
@@ -182,10 +183,10 @@ export function ConversationSearch({ search = fetchChats, children }: { search?:
                 {/* Marked as the grouped list marks it, from the same component: a chat found by searching is the
                     same chat, and a result that looked like any other would be the one place the mark was missing. */}
                 <span className="flex min-w-0 items-center gap-1.5 text-sm">
-                  <ChatMark conversationId={chat.id} mark={chat.mark} />
+                  <ChatMark item={chat} />
                   <span className="min-w-0 truncate">{chat.title}</span>
                 </span>
-                {chat.snippet === null ? null : <span className="line-clamp-2 text-xs text-asst-faint">{chat.snippet}</span>}
+                {chat.kind === "feedback" || chat.snippet === null ? null : <span className="line-clamp-2 text-xs text-asst-faint">{chat.snippet}</span>}
               </div>
             ))}
           </div>

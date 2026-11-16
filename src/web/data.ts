@@ -15,6 +15,7 @@ import type { SidebarGroup } from "../assistant/grouping.ts";
 import { type AssistantMemory, assistantMemory } from "../assistant/memory.ts";
 import { type AssistantModelChoice, assistantModelChoice } from "../assistant/model-store.ts";
 import { type ChatGate, chatCredentials, chatGate } from "../assistant/onboarding.ts";
+import { readAssistantSchedule } from "../assistant/schedule-store.ts";
 import {
   accessToConversation,
   conversationRef,
@@ -31,11 +32,11 @@ import { type UploadsOnDisk, uploadsOnDisk } from "../assistant/upload-disk.ts";
 import {
   type AssistantSummary,
   assistantSummary,
-  type ConversationLink,
   type ConversationView,
-  conversationGroups,
   conversationView,
   podSkills,
+  type SidebarItem,
+  sidebarGroups,
   type UnsentChat,
   unsentChat
 } from "../assistant/views.ts";
@@ -56,6 +57,8 @@ import { listTopics, mostActiveTopics } from "../topics/store.ts";
 import type { Identity } from "../users/identity.ts";
 import type { ModelRoute, Viewer } from "../viewer/identity.ts";
 import { availablePlugins, PluginConfigurationError, type PluginOffer, type PluginOption } from "../virtual-agents/plugins.ts";
+import { autoStartTimes, idleOffers, idleSelected, NO_AUTO_START } from "../virtual-agents/schedule.ts";
+import { eveningStop, idleMinutes } from "../virtual-agents/settings.ts";
 import { liveModelRoutes, type VirtualAgentRow } from "../virtual-agents/store.ts";
 import { claudeTokenUsable, neededCredentials, type PortLink, portLinks } from "../virtual-agents/views.ts";
 import { type AgentAddress, NO_AGENT } from "./home.ts";
@@ -165,6 +168,27 @@ export async function gitIdentitySettings(viewer: Identity): Promise<GitIdentity
   return { available: true, stored: stored !== undefined, identity: readGitIdentity(stored) };
 }
 
+/** What the Schedule section shows: the selected value of each control, and the idle periods on offer. */
+export interface ScheduleSettings {
+  autoStart: string;
+  idleAfter: string;
+  idleOffers: { value: string; label: string }[];
+  /** The times the deployment's evening stop leaves room to start at. */
+  autoStartTimes: string[];
+}
+
+/** The viewer's own schedule for their virtual agents, with the deployment's idle period standing in for one they have not set. */
+export async function scheduleSettings(viewer: Identity): Promise<ScheduleSettings> {
+  const stored = await readAssistantSchedule(prisma, viewer.oid);
+  const fallback = idleMinutes();
+  return {
+    autoStart: stored.autoStartTime ?? NO_AUTO_START,
+    idleAfter: idleSelected(stored.idleAfter, fallback),
+    idleOffers: idleOffers(fallback),
+    autoStartTimes: autoStartTimes(eveningStop())
+  };
+}
+
 export interface MessagePageView {
   message: ThreadMessage;
   /** The message this one replies to, or `null` when it is not a reply or the viewer may not read the parent. */
@@ -230,7 +254,7 @@ async function virtualAddress(viewer: Identity, virtualAgentId: string): Promise
 export interface AssistantHome {
   assistant: AssistantSummary;
   credentials: CredentialSettings;
-  conversations: { label: SidebarGroup; items: ConversationLink[] }[];
+  conversations: { label: SidebarGroup; items: SidebarItem[] }[];
   /**
    * The workspace plugins this hub offers, and the ones the viewer's assistant loads; `null` when the configuration
    * cannot be read, which is not the same as its offering nothing.
@@ -294,11 +318,7 @@ function pluginSettings(assistant: { plugins: string[] }): AssistantHome["plugin
  */
 export async function openAssistant(viewer: Viewer): Promise<AssistantHome> {
   const { assistant, claims } = await ensureAssistantWithClaims(prisma, viewer);
-  const [credentials, conversations, skills] = await Promise.all([
-    credentialSettings(viewer),
-    conversationGroups(prisma, viewer.oid),
-    podSkills(prisma, assistant)
-  ]);
+  const [credentials, conversations, skills] = await Promise.all([credentialSettings(viewer), sidebarGroups(prisma, viewer.oid), podSkills(prisma, assistant)]);
   const stored = storedKinds(credentials);
   const summary = await assistantSummary(prisma, assistant, stored);
   return {

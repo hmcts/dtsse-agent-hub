@@ -290,6 +290,39 @@ The local store refuses to start under `NODE_ENV=production`. With sign-in disab
 route except `own-licence` and `own-licence-…`, which are on their own Claude licence — so
 `ah_dev_persona=own-licence` shows the Claude token field and any other persona shows the gateway.
 
+### Prototype feedback locally
+
+Prototype feedback is off unless `FEEDBACK_ENABLED=true` and both the viewer and Blob Storage are configured. `yarn
+deps:up` starts Azurite on 10000 beside Postgres, and the hub makes its container and opens its CORS on first use. The
+viewer needs a host of its own on the same site as the hub's, or the browser will not keep the frame's cookie, so
+serve the hub on `hub.localhost` and the viewer on `viewer.hub.localhost`, which browsers resolve to this machine.
+`localhost` beside `127.0.0.1` is two sites, and every framed page answers that the review has timed out. Outside
+production the viewer takes the hub's scheme and port, so both are served over http from the one dev server. The
+feedback pages sit in the CFT Workspace, which needs `VIRTUAL_AGENTS_ENABLED=true`, and
+`FEEDBACK_ALLOW_PRIVATE_TARGETS=true` lets a link point at a prototype on this machine, over http on any port:
+
+```bash
+FEEDBACK_ENABLED=true \
+FEEDBACK_STORAGE_CONNECTION_STRING=UseDevelopmentStorage=true \
+FEEDBACK_ALLOW_PRIVATE_TARGETS=true \
+VIRTUAL_AGENTS_ENABLED=true \
+AGENT_HUB_VIEWER_HOST=viewer.hub.localhost \
+ENTRA_REDIRECT_URI=http://hub.localhost:3000/auth/callback \
+SESSION_SECRET=$(openssl rand -base64 48) AUTH_DISABLED=true AGENT_AUTH_DISABLED=true yarn dev
+```
+
+Open the Assistant at `http://hub.localhost:3000/assistant/feedback`; with no orchestrator its home page waits for an
+assistant that never starts, but the feedback pages do not. A second reviewer is a second persona: set the
+`ah_dev_persona` cookie on `hub.localhost` to a short name.
+
+| Variable | Default | What it is |
+| --- | --- | --- |
+| `FEEDBACK_ENABLED` | off | `true` turns prototype feedback on, when the two below are also configured |
+| `FEEDBACK_STORAGE_ACCOUNT_URL` | none | The storage account, as `https://dtsseagenthubaat.blob.core.windows.net`, reached as the hub's managed identity, which signs every SAS from a user delegation key |
+| `FEEDBACK_STORAGE_CONNECTION_STRING` | none | A connection string, which wins over the account URL: `UseDevelopmentStorage=true` for Azurite |
+| `FEEDBACK_STORAGE_CONTAINER` | `feedback` | The container every project's blobs are under |
+| `FEEDBACK_SIGN_IN_ORIGINS` | none | Sign-in services, as comma-separated origins, a prototype's sign-in may always pass through the viewer (AAT IDAM's `https://idam-web-public.aat.platform.hmcts.net` and `https://hmcts-access.aat.platform.hmcts.net` deployed). Any other, such as a prototype's own IDAM simulator, is detected when the prototype redirects to another host, not the hub's or the viewer's, with a `client_id` or `response_type` and a `redirect_uri` back to itself, and served for that link for an hour |
+
 ### The deployed secrets are opt-in
 
 `yarn dev` reads the `dtsse-aat` Key Vault only with `USE_KEY_VAULT=true`; otherwise it uses the compose defaults.
@@ -302,7 +335,7 @@ database: localhost:5432/agent_hub
 ## Tests
 
 ```bash
-yarn test                # unit
+yarn test                # unit, with coverage and its thresholds
 yarn test:integration    # needs `yarn deps:up`; a database per worker, migrated on use
 yarn lint
 yarn typecheck

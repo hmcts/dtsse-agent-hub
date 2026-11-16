@@ -17,7 +17,7 @@ the `-staging` release.
 | `VIRTUAL_AGENTS_ENABLED` | off | `true` turns the feature on |
 | `ORCHESTRATOR_OIDS` | none | Comma-separated object ids of the orchestrator's service principals. With none, every orchestrator request answers 503 |
 | `ORCHESTRATOR_ROLE` | none | An app role the orchestrator's token must also carry, as `VirtualAgents.Orchestrate`. Unset, the `oid` alone is checked |
-| `VIRTUAL_AGENT_IDLE_MINUTES` | `120` | A running, cloning or failed agent with no activity for this long is stopped |
+| `VIRTUAL_AGENT_IDLE_MINUTES` | `120` | A running, cloning or failed agent with no activity for this long is stopped. A running or cloning one started on a UK weekday before that day's evening stop uses its owner's choice of 1 to 4 hours, or never (the evening stop then bounds it), instead when they have set one under Settings, Schedule; one started at the weekend or after the stop uses this whatever they chose, as nothing else bounds it. Auto start also pauses for a person who has not used their Assistant for 14 days, and the times it offers are those whose 30-minute window ends by `VIRTUAL_AGENT_EVENING_STOP` |
 | `VIRTUAL_AGENT_AWAITING_OWNER_MINUTES` | `30` | An agent waiting for its owner to finish a sign-in or store a credential for this long is stopped |
 | `VIRTUAL_AGENT_EVENING_STOP` | `19:00` | UK time, `HH:MM`, at which every virtual agent started before it is stopped, on weekdays |
 | `VIRTUAL_AGENT_DISK_TTL_DAYS` | `14` | Days a stopped agent's disk is kept before the orchestrator deletes it |
@@ -356,8 +356,7 @@ cft-workspace's, reached through the `prepare-workspace.sh` hook stage 1 calls a
 
 **The client the pod boots on.** `virtual-agent-boot` installs `@hmcts-cft/agent-hub@latest` over the one its image
 carries before handing over to stage 1, `virtual-agent/entrypoint.sh` in that same package, so a client release
-reaches both the client and the pod runtime without an image rebuild and a digest bump. Stage 1 is taken from the
-checkout instead when the installed client ships none, which only an older client does. It is never fatal: a pod whose feed is unreachable boots on the image's copy, and logs which version
+reaches both the client and the pod runtime without an image rebuild and a digest bump. It is never fatal: a pod whose feed is unreachable boots on the image's copy, and logs which version
 it ended up on either way. To hold a pod on that copy deliberately, set `VIRTUAL_AGENT_SKIP_CLIENT_UPGRADE=true` on its
 StatefulSet with `kubectl set env` — the pod's environment is a fixed list with no pass-through, and the next apply of
 the StatefulSet drops it again.

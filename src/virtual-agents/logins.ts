@@ -297,8 +297,12 @@ export async function completeLogin(
   });
 }
 
-/** The kinds a virtual agent signs in to itself, relaying a device code to its owner, rather than being pasted. */
-const SIGN_IN_KINDS = ["github", "azure", "atlassian"] as const satisfies readonly CredentialKind[];
+/**
+ * The kinds a virtual agent signs in to itself, relaying a code or a link to its owner, so a restart with nothing stored
+ * relays a fresh one. Claude is one on the own-licence route, where its pod drives `claude setup-token` at boot; its
+ * token can be pasted as well, but someone without Claude Code has no way to make one.
+ */
+const SIGN_IN_KINDS = ["github", "azure", "atlassian", "claude"] as const satisfies readonly CredentialKind[];
 
 export type SignInKind = (typeof SIGN_IN_KINDS)[number];
 
@@ -307,7 +311,7 @@ export function isSignInKind(kind: string): kind is SignInKind {
 }
 
 /** What the owner is told they are signing in to again. */
-export const SIGN_IN_TITLES: Record<SignInKind, string> = { github: "GitHub", azure: "Azure", atlassian: "Atlassian" };
+export const SIGN_IN_TITLES: Record<SignInKind, string> = { github: "GitHub", azure: "Azure", atlassian: "Atlassian", claude: "Claude" };
 
 /**
  * The owner's request to sign in to `kind`, again or for the first time: their stored credential is deleted and the
@@ -337,6 +341,10 @@ export async function reconnectSignIn(
   }
   if (virtualAgent.desired === "deleted") {
     throw new HttpError(409, "that virtual agent is being deleted");
+  }
+  // A gateway agent's pod never signs in to Claude, so deleting the token and restarting would relay nothing.
+  if (kind === "claude" && virtualAgent.modelRoute !== "own-licence") {
+    throw new HttpError(409, "that virtual agent reaches Claude through the HMCTS AI Gateway, not your own licence");
   }
   if (!keepStored) {
     await deleteCredential(prisma, store, { actorOid, ownerOid: virtualAgent.ownerOid, kind });

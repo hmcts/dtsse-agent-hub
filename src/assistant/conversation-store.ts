@@ -100,14 +100,12 @@ async function listed(
 /**
  * Whether any of the owner's conversations is a session on their own computer.
  *
- * A fact about the whole list rather than about any one row, and so its own read: it is what decides whether a chat
- * running on a pod is marked as one at all, since a cloud beside every row of a list that holds nothing else tells
- * nobody anything. Asked here, by both the sidebar's list and its search, so the two cannot answer it differently
- * for the same person — and asked of every one of their conversations rather than of the page the sidebar loaded,
- * which is capped and so could miss the only local chat they have.
+ * A fact about the whole list rather than about any one row, and so its own read: one of the kinds `showsMarks` counts
+ * to decide whether any row is marked. Asked of every one of their conversations rather than of the page the sidebar
+ * loaded, which is capped and so could miss the only local chat they have.
  *
  * Only a chat the list would show counts (`first_content_at`): one left out for having nothing in it would otherwise put a
- * mark against every pod chat for a reason the person cannot see.
+ * mark against every row for a reason the person cannot see.
  *
  * No `virtual_agent` filter, unlike `listConversations`: these rows have no related virtual agent to be deleted.
  */
@@ -115,6 +113,15 @@ export async function hasLocalConversation(db: Database, ownerOid: string): Prom
   return (
     (await db.assistantConversation.findFirst({ where: { ownerOid, virtualAgentId: null, firstContentAt: { not: null } }, select: { id: true } })) !== null
   );
+}
+
+/** Whether any of the owner's conversations the list would show runs on a pod: `hasLocalConversation`'s other half. */
+export async function hasPodConversation(db: Database, ownerOid: string): Promise<boolean> {
+  const row = await db.assistantConversation.findFirst({
+    where: { ownerOid, firstContentAt: { not: null }, virtualAgent: { desired: { not: "deleted" } } },
+    select: { id: true }
+  });
+  return row !== null;
 }
 
 /**

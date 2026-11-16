@@ -5,25 +5,26 @@
   "description": "Relay and topic boards that let Claude Code sessions across HMCTS message each other, with a web UI behind Entra SSO.",
   "license": "MIT",
   "engines": {
-    "node": ">=24.0.0"
+    "node": ">=24.22.3"
   },
   "packageManager": "yarn@4.18.1",
   "workspaces": [
     "packages/*"
   ],
   "scripts": {
-    "dev": "yarn deps:up && yarn db:generate && yarn db:migrate && next dev",
-    "build": "yarn build:app && yarn build:cli",
+    "dev": "yarn deps:up && yarn db:generate && yarn db:migrate && yarn build:widget && next dev",
+    "build": "yarn build:widget && yarn build:app && yarn build:cli",
     "build:app": "next build",
     "build:cli": "tsc -p tsconfig.cli.json",
+    "build:widget": "esbuild src/feedback/widget/index.ts --bundle --format=iife --minify --target=es2022 --legal-comments=none --outfile=public/feedback/widget.js",
     "build:client": "yarn workspace @hmcts-cft/agent-hub run build",
     "clean": "rm -rf .next dist && yarn workspace @hmcts-cft/agent-hub run clean",
     "start": "node .next/standalone/server.js",
     "deps:up": "docker compose up -d --wait",
     "deps:down": "docker compose down",
-    "test": "vitest run && yarn workspace @hmcts-cft/agent-hub run test",
+    "test": "vitest run --coverage && yarn workspace @hmcts-cft/agent-hub run test:coverage",
     "test:watch": "vitest watch",
-    "test:coverage": "vitest run --coverage && yarn workspace @hmcts-cft/agent-hub run test:coverage",
+    "test:coverage": "echo \"coverage and its thresholds are collected by yarn test, which the pipeline runs first\"",
     "test:integration": "vitest run --config vitest.integration.config.mts",
     "test:a11y": "echo \"no build-time accessibility suite: the axe pass needs a deployed URL, and runs from test:fullfunctional\"",
     "test:smoke": "yarn e2e:browser && playwright test --config test/e2e/playwright.config.ts --grep @smoke",
@@ -42,9 +43,12 @@
   "dependencies": {
     "@azure/identity": "4.14.1",
     "@azure/keyvault-secrets": "4.12.0",
+    "@azure/storage-blob": "12.34.0",
     "@hmcts-cft/cloud-native-platform": "2.3.0",
     "@prisma/adapter-pg": "7.10.1",
     "@prisma/client": "7.10.1",
+    "@rrweb/record": "2.2.2",
+    "@rrweb/replay": "2.2.2",
     "jose": "6.2.15",
     "next": "16.4.3",
     "openid-client": "6.8.9",
@@ -52,11 +56,12 @@
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "server-only": "0.0.1",
+    "undici": "8.12.4",
     "zod": "4.6.7"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.14.0",
-    "@biomejs/biome": "2.6.4",
+    "@biomejs/biome": "2.6.6",
     "@playwright/test": "1.64.1",
     "@tailwindcss/postcss": "4.3.3",
     "@testing-library/dom": "10.4.2",
@@ -68,6 +73,7 @@
     "@vitejs/plugin-react": "6.1.2",
     "@vitest/coverage-v8": "5.0.5",
     "axe-core": "4.14.0",
+    "esbuild": "0.28.2",
     "jsdom": "30.1.3",
     "playwright-core": "1.64.1",
     "postcss": "8.5.32",
@@ -79,6 +85,8 @@
     "vitest": "5.0.5"
   },
   "resolutions": {
+    "@azure/identity": "4.14.1",
+    "@opentelemetry/instrumentation-http": "0.222.0",
     "applicationinsights": "3.17.0",
     "pg": "8.23.1"
   },

@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { feedbackTeam } from "@/access/load";
 import { isOwner } from "@/access/rules";
 import { errorResponse } from "@/agent-api/http";
 import { findAgent, isUuid } from "@/agents/store";
@@ -7,7 +8,7 @@ import { loadThreadMessage } from "@/messages/direct-thread";
 import { realtime } from "@/realtime/process";
 import { openSseStream, SSE_HEADERS } from "@/realtime/sse";
 import { streamLimits } from "@/realtime/stream-slots";
-import { sharedPostLoader, uiStream } from "@/realtime/ui-stream";
+import { sharedFeedbackTeamLoader, sharedPostLoader, uiStream } from "@/realtime/ui-stream";
 import { prisma } from "@/store/prisma";
 import { uiViewer } from "../request";
 
@@ -56,7 +57,8 @@ export async function GET(request: NextRequest): Promise<Response> {
         listener,
         viewerOid: viewer.oid,
         post: sharedPostLoader(prisma),
-        direct: (id) => loadThreadMessage(prisma, id)
+        direct: (id) => loadThreadMessage(prisma, id),
+        feedbackTeam: sharedFeedbackTeamLoader((projectId) => feedbackTeam(prisma, projectId))
       }
     )
   });

@@ -1,10 +1,14 @@
 const securityHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
-  { key: "X-Frame-Options", value: "DENY" },
-  // frame-ancestors only: a default-src or script-src would block the inline scripts Next renders.
-  { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" }
+];
+
+// The framing headers are set by src/proxy.ts, since a header set here cannot be lifted for the feedback pages the
+// viewer lets the hub frame. These are for the paths outside its matcher, which never reach the viewer's route.
+const framingHeaders = [
+  { key: "X-Frame-Options", value: "DENY" },
+  { key: "Content-Security-Policy", value: "frame-ancestors 'none'" }
 ];
 
 const nextConfig = {
@@ -34,12 +38,17 @@ const nextConfig = {
     // The largest action is a post or direct message, bounded by the same worst case as MAX_REQUEST_BYTES.
     serverActions: { bodySizeLimit: "256kb" }
   },
-  serverExternalPackages: ["@hmcts-cft/cloud-native-platform", "applicationinsights", "@prisma/client", "pg"],
+  serverExternalPackages: ["@hmcts-cft/cloud-native-platform", "applicationinsights", "@prisma/client", "pg", "undici"],
   // No `redirects()`. The hub's bare addresses are redirected from `src/proxy.ts` instead, because Next checks
   // config redirects ahead of the proxy and a 308 from here would repeat a pasted secret into its own `Location`,
   // before `carriesSecret` ever sees the request.
   headers() {
-    return [{ source: "/:path*", headers: securityHeaders }];
+    return [
+      { source: "/:path*", headers: securityHeaders },
+      { source: "/_next/static/:path*", headers: framingHeaders },
+      { source: "/_next/image", headers: framingHeaders },
+      { source: "/favicon.ico", headers: framingHeaders }
+    ];
   }
 };
 

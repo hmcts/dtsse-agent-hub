@@ -121,7 +121,7 @@ export async function pasteLoginCode(form: FormData): Promise<ActionResult<{ con
 }
 
 /**
- * Signs the owner in to GitHub, Azure or Atlassian again: their stored credential goes, and the agent, if running,
+ * Signs the owner in to GitHub, Azure, Atlassian or Claude again: their stored credential goes, and the agent, if running,
  * restarts so its pod relays a fresh sign-in. The credential is the owner's, so their other virtual agents lose it
  * too. A form sending `keep=stored` restarts without deleting anything (see `reconnectSignIn` in logins).
  */

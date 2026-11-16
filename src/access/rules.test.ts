@@ -8,6 +8,7 @@ import {
   canAgentMessageAgent,
   canAttachUpload,
   canChangeDeck,
+  canChangeFeedbackProject,
   canConnectMicrosoft,
   canForkConversation,
   canLaunchTokenActForAgent,
@@ -19,7 +20,9 @@ import {
   canPodReadCredential,
   canReadDeck,
   canReadMessage,
+  canRecordFeedback,
   canRemoveUploadFromDisk,
+  canSeeFeedbackRecording,
   canSessionUseAttachment,
   canShareConversationWith,
   canSuggestPerson,
@@ -28,6 +31,8 @@ import {
   canVirtualAgentStoreCredential,
   canWriteUpload,
   conversationAccess,
+  feedbackLinkAccess,
+  feedbackProjectAccess,
   isHubIssuedCredential,
   isOwner,
   isPodConversationAgent,
@@ -880,5 +885,84 @@ describe("tagRefusal", () => {
   it("should refuse an agent tagging itself, and not the same agent in a person's post", () => {
     expect(tagRefusal(TARGET.id, TARGET)).toBe("itself");
     expect(tagRefusal(null, TARGET)).toBeUndefined();
+  });
+});
+
+describe("prototype feedback", () => {
+  const PROJECT = { ownerOid: OWNER };
+  const MEMBERS = [COLLEAGUE];
+  const live = { revokedAt: null, project: { ownerOid: OWNER, archivedAt: null } };
+
+  describe("feedbackProjectAccess", () => {
+    it("should answer owner when the viewer owns the project", () => {
+      expect(feedbackProjectAccess(OWNER, PROJECT, MEMBERS)).toBe("owner");
+    });
+
+    it("should answer member when the viewer is in a member row", () => {
+      expect(feedbackProjectAccess(COLLEAGUE, PROJECT, MEMBERS)).toBe("member");
+    });
+
+    it("should answer none when the viewer is in no member row", () => {
+      expect(feedbackProjectAccess(ELSEWHERE, PROJECT, MEMBERS)).toBe("none");
+      expect(feedbackProjectAccess(COLLEAGUE, PROJECT, [])).toBe("none");
+    });
+  });
+
+  describe("canChangeFeedbackProject", () => {
+    it("should let the owner alone change the project", () => {
+      expect(canChangeFeedbackProject("owner")).toBe(true);
+      expect(canChangeFeedbackProject("member")).toBe(false);
+      expect(canChangeFeedbackProject("none")).toBe(false);
+    });
+  });
+
+  describe("feedbackLinkAccess", () => {
+    it("should answer team for the owner and a member when the link is live", () => {
+      expect(feedbackLinkAccess(OWNER, live, MEMBERS)).toBe("team");
+      expect(feedbackLinkAccess(COLLEAGUE, live, MEMBERS)).toBe("team");
+    });
+
+    it("should answer reviewer for anyone else signed in when the link is live", () => {
+      expect(feedbackLinkAccess(ELSEWHERE, live, MEMBERS)).toBe("reviewer");
+    });
+
+    it.each([
+      ["revoked", { ...live, revokedAt: new Date() }],
+      ["on an archived project", { ...live, project: { ...live.project, archivedAt: new Date() } }]
+    ])("should answer none to everyone, the owner included, when the link is %s", (_label, link) => {
+      for (const viewer of [OWNER, COLLEAGUE, ELSEWHERE]) {
+        expect(feedbackLinkAccess(viewer, link, MEMBERS)).toBe("none");
+      }
+    });
+  });
+
+  describe("canSeeFeedbackRecording", () => {
+    it("should let the team play anyone's recording", () => {
+      expect(canSeeFeedbackRecording("team", OWNER, ELSEWHERE)).toBe(true);
+    });
+
+    it("should let a reviewer play their own recording and nobody else's", () => {
+      expect(canSeeFeedbackRecording("reviewer", ELSEWHERE, ELSEWHERE)).toBe(true);
+      expect(canSeeFeedbackRecording("reviewer", ELSEWHERE, COLLEAGUE)).toBe(false);
+    });
+
+    it("should let nobody play one when the link gives no access", () => {
+      expect(canSeeFeedbackRecording("none", ELSEWHERE, ELSEWHERE)).toBe(false);
+    });
+  });
+
+  describe("canRecordFeedback", () => {
+    it("should let the recording's author add to it whether they are team or a reviewer", () => {
+      expect(canRecordFeedback("reviewer", ELSEWHERE, ELSEWHERE)).toBe(true);
+      expect(canRecordFeedback("team", OWNER, OWNER)).toBe(true);
+    });
+
+    it("should refuse anyone else, the team included", () => {
+      expect(canRecordFeedback("team", OWNER, ELSEWHERE)).toBe(false);
+    });
+
+    it("should refuse the author when the link gives no access", () => {
+      expect(canRecordFeedback("none", ELSEWHERE, ELSEWHERE)).toBe(false);
+    });
   });
 });

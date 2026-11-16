@@ -179,8 +179,8 @@ test.describe("accessibility @nightly", () => {
    *
    * Not a path in the list above, where every route is a fixed address: a conversation's is its id, and the id of
    * this one is published nowhere but the sidebar that links to it. It is also the only chat in the Assistant with
-   * markup of its own — the sidebar's local marker, and in the thread a row per tool call, named for a screen reader
-   * and with a redacted call and a failed one among `sampleTranscript`'s.
+   * markup of its own — a row per tool call in the thread, named for a screen reader and with a redacted call and a
+   * failed one among `sampleTranscript`'s.
    *
    * It skips on the same 404 as the test above, and for the same reason. Unlike every other test here it needs a
    * person of its own: the thread is behind the screen asking for accounts, and only a persona on the own-licence

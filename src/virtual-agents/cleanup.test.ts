@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  autoStartSlot,
+  boundedByEveningStop,
   DISK_WARNING_DAYS,
   diskExpiresAt,
   diskWarningDays,
@@ -172,5 +174,89 @@ describe("disk expiry", () => {
 
   it("should not warn when there is no expiry", () => {
     expect(diskWarningDays(null, stopped)).toBeUndefined();
+  });
+});
+
+describe("boundedByEveningStop", () => {
+  it("should be true when the agent started on a weekday before that day's stop", () => {
+    expect(boundedByEveningStop(at("2026-10-26T09:00:00.000Z"), SEVEN_PM)).toBe(true);
+  });
+
+  it("should be false when the agent started at the stop", () => {
+    expect(boundedByEveningStop(at("2026-10-26T19:00:00.000Z"), SEVEN_PM)).toBe(false);
+  });
+
+  it("should be false when the agent started after the stop", () => {
+    expect(boundedByEveningStop(at("2026-10-26T20:30:00.000Z"), SEVEN_PM)).toBe(false);
+  });
+
+  it.each(["2026-10-24T10:00:00.000Z", "2026-10-25T10:00:00.000Z"])("should be false when the agent started at the weekend, at %s", (iso) => {
+    expect(boundedByEveningStop(at(iso), SEVEN_PM)).toBe(false);
+  });
+
+  it("should read the stop in UK time when the date is in British Summer Time", () => {
+    expect(boundedByEveningStop(at("2026-07-06T17:59:00.000Z"), SEVEN_PM)).toBe(true);
+    expect(boundedByEveningStop(at("2026-07-06T18:00:00.000Z"), SEVEN_PM)).toBe(false);
+  });
+
+  it("should use the UK date when UTC is still the day before", () => {
+    expect(boundedByEveningStop(at("2026-07-03T23:30:00.000Z"), SEVEN_PM)).toBe(false);
+  });
+});
+
+describe("autoStartSlot", () => {
+  it("should be the slot at its own time when it is a weekday", () => {
+    expect(autoStartSlot(at("2026-10-26T08:00:00.000Z"), SEVEN_PM)).toBe("08:00");
+  });
+
+  it("should still be the slot when the sweep is 29 minutes into its window", () => {
+    expect(autoStartSlot(at("2026-10-26T08:29:59.000Z"), SEVEN_PM)).toBe("08:00");
+  });
+
+  it("should be the next slot when the window of the one before has closed", () => {
+    expect(autoStartSlot(at("2026-10-26T08:30:00.000Z"), SEVEN_PM)).toBe("08:30");
+  });
+
+  it("should be nothing when the time is before the first slot", () => {
+    expect(autoStartSlot(at("2026-10-26T07:29:59.000Z"), SEVEN_PM)).toBeUndefined();
+  });
+
+  it("should be the first slot when it is 07:30", () => {
+    expect(autoStartSlot(at("2026-10-26T07:30:00.000Z"), SEVEN_PM)).toBe("07:30");
+  });
+
+  it("should be the last slot until the evening stop when it is 18:59", () => {
+    expect(autoStartSlot(at("2026-10-26T18:59:00.000Z"), SEVEN_PM)).toBe("18:30");
+  });
+
+  it("should be nothing at the evening stop", () => {
+    expect(autoStartSlot(at("2026-10-26T19:00:00.000Z"), SEVEN_PM)).toBeUndefined();
+  });
+
+  it("should be nothing when an earlier evening stop has come, whatever slot the time is in", () => {
+    expect(autoStartSlot(at("2026-10-26T18:30:00.000Z"), { hour: 18, minute: 0 })).toBeUndefined();
+  });
+
+  it("should be the last slot whose window ends by an earlier evening stop, and nothing in the window that would cross it", () => {
+    expect(autoStartSlot(at("2026-10-26T17:45:00.000Z"), { hour: 18, minute: 0 })).toBe("17:30");
+    expect(autoStartSlot(at("2026-10-26T18:00:00.000Z"), { hour: 18, minute: 0 })).toBeUndefined();
+    expect(autoStartSlot(at("2026-10-26T18:15:00.000Z"), { hour: 18, minute: 15 })).toBeUndefined();
+  });
+
+  it.each(["2026-10-24T09:00:00.000Z", "2026-10-25T09:00:00.000Z"])("should be nothing at the weekend when it is %s", (iso) => {
+    expect(autoStartSlot(at(iso), SEVEN_PM)).toBeUndefined();
+  });
+
+  it("should read UK clocks when the date is in British Summer Time", () => {
+    expect(autoStartSlot(at("2026-07-06T07:00:00.000Z"), SEVEN_PM)).toBe("08:00");
+    expect(autoStartSlot(at("2026-07-06T08:00:00.000Z"), SEVEN_PM)).toBe("09:00");
+  });
+
+  it("should be nothing in the UTC hour before the first BST slot", () => {
+    expect(autoStartSlot(at("2026-07-06T06:29:59.000Z"), SEVEN_PM)).toBeUndefined();
+  });
+
+  it("should be the slot on a Friday in British Summer Time", () => {
+    expect(autoStartSlot(at("2026-07-10T09:30:00.000Z"), SEVEN_PM)).toBe("10:30");
   });
 });

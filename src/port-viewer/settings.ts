@@ -1,4 +1,4 @@
-import { type Environment, sessionSecret } from "../auth/settings.ts";
+import { type Environment, publicOrigin, sessionSecret } from "../auth/settings.ts";
 
 /**
  * What the viewer needs, read per call from the environment because the chart's secrets reach `process.env` only once
@@ -7,6 +7,8 @@ import { type Environment, sessionSecret } from "../auth/settings.ts";
 export interface ViewerSettings {
   /** The viewer's own host, lower case, as `agent-hub-viewer.aat.platform.hmcts.net`. */
   host: string;
+  /** The viewer's origin, which tickets send the browser to and the pages it serves are on. */
+  origin: string;
   /** Where the viewer sends a person to be signed in and given a ticket: the hub's public origin. */
   hubOrigin: string;
   /** Tickets and viewer cookies are sealed under keys derived from the session secret. */
@@ -27,16 +29,6 @@ export function viewerHost(env: Environment = process.env): string | undefined {
   return host && HOST.test(host) ? host : undefined;
 }
 
-/** The origin of `ENTRA_REDIRECT_URI`, which is the hub's public address whichever host a request came in on. */
-function hubOrigin(env: Environment): string | undefined {
-  const raw = env.ENTRA_REDIRECT_URI?.trim();
-  if (!raw || !URL.canParse(raw)) {
-    return undefined;
-  }
-  const url = new URL(raw);
-  return url.protocol === "https:" || url.protocol === "http:" ? url.origin : undefined;
-}
-
 /**
  * The host whose requests are the viewer's rather than the hub's, which is `AGENT_HUB_VIEWER_HOST` unless that is the
  * hub's own: agents' pages do not belong on the hub's origin, and routing the hub's host to the viewer would answer
@@ -45,11 +37,24 @@ function hubOrigin(env: Environment): string | undefined {
  */
 export function viewerRouteHost(env: Environment = process.env): string | undefined {
   const host = viewerHost(env);
-  const origin = hubOrigin(env);
+  const origin = publicOrigin(env);
   if (host === undefined || (origin !== undefined && new URL(origin).hostname === host)) {
     return undefined;
   }
   return host;
+}
+
+/**
+ * The viewer's origin: https on the default port in production, whatever the hub's address. Elsewhere it takes the
+ * hub's scheme and port, since the same server answers both hosts, so `yarn dev` serves the viewer over http beside
+ * the hub on one port.
+ */
+export function viewerOrigin(host: string, hubOrigin: string, env: Environment = process.env): string {
+  if (env.NODE_ENV === "production") {
+    return `https://${host}`;
+  }
+  const hub = new URL(hubOrigin);
+  return `${hub.protocol}//${host}${hub.port === "" ? "" : `:${hub.port}`}`;
 }
 
 /**
@@ -58,12 +63,12 @@ export function viewerRouteHost(env: Environment = process.env): string | undefi
  */
 export function viewerSettings(env: Environment = process.env): ViewerSettings | undefined {
   const host = viewerRouteHost(env);
-  const origin = hubOrigin(env);
+  const origin = publicOrigin(env);
   const secret = sessionSecret(env);
   if (host === undefined || origin === undefined || secret === undefined) {
     return undefined;
   }
-  return { host, hubOrigin: origin, secret };
+  return { host, origin: viewerOrigin(host, origin, env), hubOrigin: origin, secret };
 }
 
 /** The host a request was made to, lower case and without a port, from `Host` as Traefik routed it. */

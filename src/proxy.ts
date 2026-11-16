@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { carriesSecret, exempt } from "@/auth/guard";
+import { carriesSecret, exempt, sameOriginRequest } from "@/auth/guard";
 import { readSession, SESSION_COOKIE } from "@/auth/session";
-import { authRequired, sessionSecret } from "@/auth/settings";
+import { authRequired, publicOrigin, sessionSecret } from "@/auth/settings";
 import { requestHost, VIEWER_ROUTE, VIEWER_URL_HEADER, viewerRouteHost, viewerSettings } from "@/port-viewer/settings";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
 import { movedHubPath, movedPortTicketPath, retiredPath } from "@/web/home";
@@ -25,22 +25,62 @@ function ownPath(pathname: string): string {
   return `/${pathname.replace(/^[/\\]+/, "")}`;
 }
 
+/**
+ * The framing headers every answer carries but the viewer route's, which sets its own: it alone knows which of its
+ * answers are a feedback link's, which the hub's review page frames.
+ *
+ * Here rather than in next.config.mjs, because Next writes a config header onto the response before the route runs
+ * and then skips any header of the same name the route returns (`sendResponse` in next/dist/server/send-response.js),
+ * so a config value cannot be lifted for one route. The proxy's own response headers are written the same way, which
+ * is why the viewer's rewrite carries none.
+ */
+const FRAMING_HEADERS = [
+  ["x-frame-options", "DENY"],
+  // frame-ancestors only: a default-src or script-src would block the inline scripts Next renders.
+  ["content-security-policy", "frame-ancestors 'none'"]
+] as const;
+
 export async function proxy(request: NextRequest): Promise<NextResponse> {
-  const { pathname, search } = request.nextUrl;
-  // Ahead of everything else: the viewer's host serves agents' pages, whose paths and queries are theirs, and never
-  // the hub's own, even when the rest of the viewer's settings are missing.
+  if (forViewer(request) && !isHealthPath(request.nextUrl.pathname) && viewerSettings() !== undefined) {
+    return toViewer(request);
+  }
+  const response = await hubProxy(request);
+  for (const [name, value] of FRAMING_HEADERS) {
+    response.headers.set(name, value);
+  }
+  return response;
+}
+
+/** Whether the request is to the viewer's host, which serves agents' and prototypes' pages and never the hub's own. */
+function forViewer(request: NextRequest): boolean {
   const host = viewerRouteHost();
-  if (host !== undefined && requestHost(request.headers, request.nextUrl.host) === host) {
+  return host !== undefined && requestHost(request.headers, request.nextUrl.host) === host;
+}
+
+/** Methods that change nothing, which a cross-origin page can already send with a link or an image. */
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+async function hubProxy(request: NextRequest): Promise<NextResponse> {
+  const { pathname, search } = request.nextUrl;
+  // Ahead of everything else: what `proxy` has not sent to the viewer's route on its host is still never the hub's
+  // own, even when the rest of the viewer's settings are missing.
+  if (forViewer(request)) {
     // Except the health routes, which the Application Gateway in front probes on every host it serves, at
     // `/health/liveness`: answered by the viewer they are a 404, and the gateway marks the backend unhealthy and
     // gives 502 for the whole host. An agent's pages are only ever under `/<id>/<port>/`, so none is shadowed.
     if (isHealthPath(pathname)) {
       return NextResponse.next();
     }
-    return viewerSettings() === undefined ? new NextResponse(null, { status: 404 }) : toViewer(request);
+    return new NextResponse(null, { status: 404 });
   }
   if (pathname === VIEWER_ROUTE || pathname.startsWith(`${VIEWER_ROUTE}/`)) {
     return new NextResponse(null, { status: 404 });
+  }
+  // Every write the browser's own routes take is checked here, once, rather than in each route: a script on the
+  // viewer's host is same-site with the hub, so `ah_session` rides on its `no-cors` POSTs, which no route's body
+  // parsing refuses.
+  if (pathname.startsWith("/api/ui/") && !SAFE_METHODS.has(request.method) && !sameOriginRequest(request, publicOrigin())) {
+    return NextResponse.json({ error: "that request did not come from the hub's own page" }, { status: 403 });
   }
   // Ahead of the sign-in check, which would otherwise copy the query into the login's `redirect=`.
   if (carriesSecret(request.method, request.nextUrl.pathname, request.nextUrl.searchParams)) {

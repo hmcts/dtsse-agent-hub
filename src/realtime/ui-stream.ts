@@ -1,4 +1,4 @@
-import { type AgentRef, canReadMessage, canViewTranscript, isOwner } from "../access/rules.ts";
+import { type AgentRef, canReadMessage, canViewTranscript, feedbackProjectAccess, isOwner } from "../access/rules.ts";
 import type { LoadedThreadMessage } from "../messages/direct-thread.ts";
 import type { Match, PostScope } from "../messages/feed.ts";
 import type { ApiMessage } from "../messages/shape.ts";
@@ -36,13 +36,17 @@ import { type OnOpen, type Send, sseEvent } from "./sse.ts";
  *   read under its own rule.
  * - `assistant_conversation`: one of the viewer's own assistant conversations changed. Only the id is sent, and only
  *   to its owner; the page re-reads it.
+ * - `feedback`: something of a prototype feedback project changed, when the viewer is its owner or on its team. Only
+ *   the ids are sent; the project's pages re-read it under their own rule. The review shell polls instead, since a
+ *   reviewer is on no team. The team is read once per event per pod (`sharedFeedbackTeamLoader`), as a post is.
  * - `resync`: the pod's listener reconnected and NOTIFYs may have been missed, or the viewer saved or deleted a
  *   credential, perhaps from the CLI; either way the page should re-read. Also sent once `LISTEN` becomes active
  *   when the stream opened before it was, since anything committed until then was never notified.
  *
- * A post is read once per pod and shared by every stream, since anyone may read it. Nothing else is cached or
- * re-read: every rule below is answered from the event's own `owner_oid` or from the agent the stream opened on, and
- * what either says cannot change while a connection is open — an agent does not change hands. Work is chained so
+ * A post is read once per pod and shared by every stream, since anyone may read it, and a feedback project's team is
+ * read once per pod per event and judged per viewer, since a team does change while a connection is open. Every other
+ * rule below is answered from the event's own `owner_oid` or from the agent the stream opened on, and what either says
+ * cannot change while a connection is open — an agent does not change hands. Work is chained so
  * frames leave in the order the hub published them.
  */
 
@@ -60,6 +64,13 @@ export interface UiStreamSources {
   viewerOid: string;
   post: (id: bigint) => Promise<ApiMessage | undefined>;
   direct: (id: bigint) => Promise<LoadedThreadMessage | undefined>;
+  /** A feedback project's owner and team, or `undefined` for none; without it, no `feedback` frame is sent. */
+  feedbackTeam?: (projectId: string) => Promise<FeedbackTeam | undefined>;
+}
+
+export interface FeedbackTeam {
+  ownerOid: string;
+  memberOids: string[];
 }
 
 const RESYNC = sseEvent({ event: "resync", data: "{}" });
@@ -194,6 +205,13 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
     // An instruction to the pod; the slides panel reads its own build back.
     case "assistant_deck_build":
       return undefined;
+    case "feedback": {
+      const team = await sources.feedbackTeam?.(event.project_id);
+      if (team === undefined || feedbackProjectAccess(sources.viewerOid, team, team.memberOids) === "none") {
+        return undefined;
+      }
+      return sseEvent({ event: "feedback", data: JSON.stringify({ project_id: event.project_id, link_id: event.link_id }) });
+    }
     case "resync":
       return RESYNC;
   }
@@ -230,4 +248,17 @@ export function uiStream(watch: UiWatch, { hub, listener, ...sources }: UiStream
       unsubscribe();
     };
   };
+}
+
+/** Short, because a member taken off a team should stop hearing of it; the frame carries only ids either way. */
+const SHARED_TEAM_TTL_MS = 2_000;
+
+const globalForFeedbackTeams = globalThis as unknown as { agentHubFeedbackTeams?: (projectId: string) => Promise<FeedbackTeam | undefined> };
+
+/** The pod's one feedback-team loader for every UI stream, so a feedback event costs one read however many tabs are open. */
+export function sharedFeedbackTeamLoader(
+  load: (projectId: string) => Promise<FeedbackTeam | undefined>
+): (projectId: string) => Promise<FeedbackTeam | undefined> {
+  globalForFeedbackTeams.agentHubFeedbackTeams ??= sharedLoads(load, { ttlMs: SHARED_TEAM_TTL_MS });
+  return globalForFeedbackTeams.agentHubFeedbackTeams;
 }

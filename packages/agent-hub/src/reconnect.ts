@@ -7,8 +7,8 @@ const MAX_BACKOFF_MS = 60000;
 export const RAPID_CLOSE_MS = 2000;
 export const RAPID_CLOSES_BEFORE_BACKOFF = 3;
 
-export function nextBackoff(current: number): number {
-  return Math.min(MAX_BACKOFF_MS, current ? current * 2 : MIN_BACKOFF_MS);
+export function nextBackoff(current: number, minBackoffMs = MIN_BACKOFF_MS): number {
+  return Math.min(MAX_BACKOFF_MS, current ? current * 2 : minBackoffMs);
 }
 
 /** How the last stream ended, as `reconnectDelay` reads it. */
@@ -28,20 +28,30 @@ export type ReconnectDecision = {
   rapidCloses: number;
 };
 
+/** The two thresholds `reconnectDelay` works from; the constants above unless a test says otherwise. */
+export type ReconnectTiming = {
+  rapidCloseMs?: number;
+  minBackoffMs?: number;
+};
+
 // How long to wait before the next connection. `clean` is a stream that ended without an error,
 // with or without a `reconnect` event; `lastedMs` is how long it was open.
-export function reconnectDelay({ backoff = 0, rapidCloses = 0 }: RetryState = {}, { clean, lastedMs }: StreamEnd): ReconnectDecision {
+export function reconnectDelay(
+  { backoff = 0, rapidCloses = 0 }: RetryState = {},
+  { clean, lastedMs }: StreamEnd,
+  { rapidCloseMs = RAPID_CLOSE_MS, minBackoffMs = MIN_BACKOFF_MS }: ReconnectTiming = {}
+): ReconnectDecision {
   if (!clean) {
-    const next = nextBackoff(lastedMs > 60000 ? 0 : backoff);
+    const next = nextBackoff(lastedMs > 60000 ? 0 : backoff, minBackoffMs);
     return { delay: next, backoff: next, rapidCloses: 0 };
   }
-  if (lastedMs >= RAPID_CLOSE_MS) {
+  if (lastedMs >= rapidCloseMs) {
     return { delay: 0, backoff: 0, rapidCloses: 0 };
   }
   const rapid = rapidCloses + 1;
   if (rapid < RAPID_CLOSES_BEFORE_BACKOFF) {
     return { delay: 0, backoff: 0, rapidCloses: rapid };
   }
-  const next = nextBackoff(backoff);
+  const next = nextBackoff(backoff, minBackoffMs);
   return { delay: next, backoff: next, rapidCloses: rapid };
 }

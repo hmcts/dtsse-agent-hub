@@ -1,23 +1,30 @@
 "use client";
 
-import type { ConversationMark } from "@/assistant/views";
+import type { ConversationMark, SidebarKind } from "@/assistant/views";
 import { useLiveLocalSession } from "@/components/assistant/LiveLocalSessions";
 import { LocalMark } from "@/components/assistant/LocalMark";
 import { PodMark } from "@/components/assistant/PodMark";
+import { SessionMark } from "@/components/assistant/SessionMark";
+import { FeedbackIcon } from "@/components/sidebar/icons";
+
+/** What `ChatMark` reads of a sidebar row or a search result. */
+export type MarkedItem = { kind: Exclude<SidebarKind, "feedback">; id: string; mark: ConversationMark } | { kind: "feedback"; id: string; marked: boolean };
 
 /**
- * The mark beside a chat's title, wherever one of the person's own chats is listed: the sidebar's grouped list and
- * the results of its search.
+ * The mark beside an item's title, wherever the person's sidebar items are listed: the grouped list and the results
+ * of its search.
  *
- * One component for both, rather than the same choice written out twice, because the two lists showing the same
- * chat differently is the fault this is here to prevent — the search's results once carried no mark at all while
- * the rows below them did. What to mark is `ConversationMark`'s, decided on the server; all that is left here is
- * which component says it. A local chat's session follows its live status where one holds (`LiveLocalSessions`).
+ * One component for both, because the two lists showing the same item differently is the fault this is here to
+ * prevent. Whether to mark is decided on the server (`showsMarks`); all that is left here is which component says it.
+ * A local chat's session follows its live status where one holds (`LiveLocalSessions`).
  */
-export function ChatMark({ conversationId, mark }: { conversationId: string; mark: ConversationMark }) {
-  const live = useLiveLocalSession(conversationId);
-  if (mark === null) {
+export function ChatMark({ item }: { item: MarkedItem }) {
+  const live = useLiveLocalSession(item.id);
+  if (item.kind === "feedback") {
+    return item.marked ? <SessionMark words="Feedback project" colour="text-asst-muted" working={false} icon={<FeedbackIcon />} /> : null;
+  }
+  if (item.mark === null) {
     return null;
   }
-  return mark.where === "computer" ? <LocalMark session={live ?? mark.session} /> : <PodMark session={mark.session} />;
+  return item.mark.where === "computer" ? <LocalMark session={live ?? item.mark.session} /> : <PodMark session={item.mark.session} />;
 }

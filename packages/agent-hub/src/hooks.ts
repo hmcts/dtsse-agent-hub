@@ -159,7 +159,7 @@ export function virtualAgentStateDir(env: Env = process.env): string {
 }
 
 // Said when `repos-state` names a state but carries no `note=` line. Deliberately generic: this package knows
-// nothing about the workspace layout or the entrypoint's scripts, so it names no directory and no command, and
+// nothing about the workspace layout or its clone step, so it names no directory and no command, and
 // says only what a session has to know — that a repository it cannot find may still be on its way or may have
 // failed to arrive, and that nothing is gained by starting a second fetch.
 const REPOS_ARRIVING =
@@ -169,11 +169,11 @@ const REPOS_FAILED =
 const REPOS_FALLBACK: Record<string, string> = { cloning: REPOS_ARRIVING, syncing: REPOS_ARRIVING, failed: REPOS_FAILED };
 
 /**
- * A virtual agent's entrypoint starts Claude before its background clone or sync of the workspace repos has
- * finished, and keeps `repos-state` up to date until it has. The entrypoint owns the wording when it writes a
- * `note=` line beside `state=`, so the sentence can live with the code that does the cloning; an entrypoint
- * that writes only `state=` gets the generic fallback above, because a session told nothing goes looking for
- * repositories that have not arrived and starts a second sync of its own.
+ * A virtual agent's entrypoint starts Claude before the workspace's clone step has finished, and that step keeps
+ * `repos-state` up to date until it has. The step owns the wording when it writes a `note=` line beside
+ * `state=`, so the sentence can live with the code that does the cloning; a `repos-state` with only `state=`
+ * gets the generic fallback above, because a session told nothing goes looking for repositories that have not
+ * arrived and starts a second sync of its own.
  */
 export function reposNote(env: Env = process.env): string {
   if (!virtualAgent(env)) {

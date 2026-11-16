@@ -19,7 +19,7 @@ const PANEL_WIDTH = 240;
 const PANEL_INSET = 4;
 
 /** What an action that rejects gets instead of its own refusal, having never reached the server to be refused. */
-const UNREACHABLE = (what: string) => `the ${what} could not be sent; check your connection and try again`;
+export const UNREACHABLE = (what: string) => `the ${what} could not be sent; check your connection and try again`;
 
 /**
  * The room around `element` before the nearest edge that would clip the panel: whichever is closer, the window or a
@@ -43,6 +43,17 @@ function room(element: HTMLElement): { above: number; below: number; beside: num
     }
   }
   return { above: rect.top - top, below: bottom - rect.bottom, beside: rect.right - left - PANEL_INSET };
+}
+
+/** Which way a sidebar row's panel opens and how wide it is, from the room around its trigger. */
+export function panelPlacement(trigger: HTMLElement | null): { above: boolean; width: number } {
+  const space = trigger === null ? null : room(trigger);
+  // An environment without layout, such as jsdom, measures zeros, so the panel opens downward at its full width,
+  // as it does wherever there is room for it.
+  return {
+    above: space !== null && space.below < PANEL_HEIGHT && space.above >= PANEL_HEIGHT,
+    width: space === null || space.beside <= 0 ? PANEL_WIDTH : Math.min(PANEL_WIDTH, space.beside)
+  };
 }
 
 const LOCAL_DELETE_NOTE = "The session on your computer will not come back to your chats, even if you resume it. A new session starts a new chat.";
@@ -129,11 +140,9 @@ export function ChatMenu({
       close();
       return;
     }
-    const space = trigger.current === null ? null : room(trigger.current);
-    // An environment without layout, such as jsdom, measures zeros, so the panel opens downward at its full width,
-    // as it does wherever there is room for it.
-    setAbove(space !== null && space.below < PANEL_HEIGHT && space.above >= PANEL_HEIGHT);
-    setWidth(space === null || space.beside <= 0 ? PANEL_WIDTH : Math.min(PANEL_WIDTH, space.beside));
+    const placed = panelPlacement(trigger.current);
+    setAbove(placed.above);
+    setWidth(placed.width);
     onOpen?.();
     show("menu");
   }

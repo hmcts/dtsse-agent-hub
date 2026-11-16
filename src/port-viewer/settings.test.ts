@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { requestHost, viewerHost, viewerRouteHost, viewerSettings } from "./settings.ts";
+import { requestHost, viewerHost, viewerOrigin, viewerRouteHost, viewerSettings } from "./settings.ts";
 
 const COMPLETE = {
   AGENT_HUB_VIEWER_HOST: "agent-hub-viewer.aat.platform.hmcts.net",
@@ -40,9 +40,10 @@ describe("viewerRouteHost", () => {
 });
 
 describe("viewerSettings", () => {
-  it("should give the host, the hub's origin and the trimmed secret when all three are set", () => {
+  it("should give the host, its origin, the hub's origin and the trimmed secret when all three are set", () => {
     expect(viewerSettings(COMPLETE)).toEqual({
       host: "agent-hub-viewer.aat.platform.hmcts.net",
+      origin: "https://agent-hub-viewer.aat.platform.hmcts.net",
       hubOrigin: "https://agent-hub.aat.platform.hmcts.net",
       secret: "a-test-session-secret-long-enough-to-be-plausible"
     });
@@ -68,5 +69,19 @@ describe("requestHost", () => {
 
   it("should fall back to the given host when no Host is sent", () => {
     expect(requestHost(new Headers(), "Fallback.Example")).toBe("fallback.example");
+  });
+});
+
+describe("viewerOrigin", () => {
+  it("should take the hub's scheme and port outside production, where one dev server answers both hosts", () => {
+    expect(viewerOrigin("viewer.hub.localhost", "http://hub.localhost:3000", { NODE_ENV: "development" })).toBe("http://viewer.hub.localhost:3000");
+  });
+
+  it("should be https on the default port when the hub is", () => {
+    expect(viewerOrigin("agent-hub-viewer.example", "https://agent-hub.example", { NODE_ENV: "development" })).toBe("https://agent-hub-viewer.example");
+  });
+
+  it("should always be https on the default port in production, whatever the hub's address", () => {
+    expect(viewerOrigin("agent-hub-viewer.example", "http://agent-hub.example:3000", { NODE_ENV: "production" })).toBe("https://agent-hub-viewer.example");
   });
 });

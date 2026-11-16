@@ -156,6 +156,7 @@ export type RunCliOptions = {
   cwd?: () => string;
   /** The running Node version, so the "needs Node 22" refusal is testable on a newer one. */
   nodeVersion?: string;
+  bridgeStopWaitMs?: number;
 };
 
 /** Entry point for `agent-hub …`; returns the exit code. */
@@ -168,9 +169,10 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
     printError = console.error,
     readStdin = readStdinText,
     cwd = process.cwd,
-    nodeVersion = process.versions.node
+    nodeVersion = process.versions.node,
+    bridgeStopWaitMs
   } = options;
-  const cli: Cli = { env, api: () => api ?? createApi({ env }), stdout, print, printError, readStdin, cwd };
+  const cli: Cli = { env, api: () => api ?? createApi({ env }), stdout, print, printError, readStdin, cwd, bridgeStopWaitMs };
   const [command, ...args] = argv;
   if (!command || command === "help" || command === "--help" || command === "-h") {
     print(USAGE);

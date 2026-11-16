@@ -42,6 +42,8 @@ function missing(kind: CredentialStatus["kind"]): CredentialStatus {
 function credentials(rows: ReturnType<typeof savedCredentials>): ConnectionsView {
   return {
     list: [],
+    logins: [],
+    now: Date.now(),
     access: null,
     connect: undefined,
     microsoft: null,

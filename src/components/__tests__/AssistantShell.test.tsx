@@ -61,7 +61,16 @@ afterEach(() => {
 });
 
 function link(id: string, title: string, mark: ConversationMark = null): ConversationLink {
-  return { id, title, product: "ccd", productLabel: "CCD", lastActiveAt: "2026-10-21T09:00:00.000Z", pinnedAt: null, mark };
+  return {
+    kind: mark?.where === "computer" ? "local" : "cloud",
+    id,
+    title,
+    product: "ccd",
+    productLabel: "CCD",
+    lastActiveAt: "2026-10-21T09:00:00.000Z",
+    pinnedAt: null,
+    mark
+  };
 }
 
 /** A chat on the person's own computer, whose session is in one of the three states its mark carries. */
@@ -250,6 +259,26 @@ describe("AssistantShell", () => {
         .getAllByRole("menuitem")
         .map((item) => item.getAttribute("href"))
     ).toEqual(["/assistant/scheduled"]);
+  });
+
+  it("should offer a new feedback project, and not the list of them, when feedback is on", () => {
+    render(shell({ welsh: true, feedback: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
+
+    const hrefs = () =>
+      within(screen.getByRole("menu", { name: "Workflows" }))
+        .getAllByRole("menuitem")
+        .map((item) => item.getAttribute("href"));
+    expect(hrefs()).toEqual(["/assistant/welsh", "/assistant/feedback/new", "/assistant/scheduled"]);
+    expect(screen.getByRole("menuitem", { name: /New feedback project/ }).textContent).toContain("Share a prototype for comments and recorded feedback");
+  });
+
+  it("should offer nothing of feedback while it is off", () => {
+    render(shell());
+
+    fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
+
+    expect(screen.queryByRole("menuitem", { name: /feedback/i })).toBeNull();
   });
 
   it("should offer the morning briefing first when the page says it is offered", () => {
@@ -914,7 +943,7 @@ describe("AssistantMarkdown", () => {
 });
 
 describe("AssistantRefresh", () => {
-  it.each(["assistant_conversation", "virtual_agent", "agent_skills"])("should refresh the page once for a burst of %s events", async (type) => {
+  it.each(["assistant_conversation", "virtual_agent", "agent_skills", "feedback"])("should refresh the page once for a burst of %s events", async (type) => {
     vi.useFakeTimers();
     render(<AssistantRefresh />);
 

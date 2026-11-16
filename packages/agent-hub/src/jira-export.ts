@@ -42,6 +42,8 @@ export type JiraExportDeps = {
   print: (message: string) => void;
   /** Where created keys are remembered; `hubHome()/jira-exports` unless a test says otherwise. */
   dir?: string;
+  /** How a retry of a call to the hub waits; a real sleep unless a test passes its own. */
+  retryWait?: (ms: number) => Promise<void>;
 };
 
 export type JiraExportOutcome = { key: string; again: boolean } | { error: string };
@@ -111,7 +113,7 @@ export function twgFailure(result: RunResult): string {
 
 async function create(deps: JiraExportDeps, request: JiraExportRequest): Promise<JiraExportOutcome> {
   // The document first: it is one quick request, and an empty one should not ask anybody to sign in.
-  const doc = await withRetry(() => deps.api.getArtefact(deps.agentId), { attempts: 3 });
+  const doc = await withRetry(() => deps.api.getArtefact(deps.agentId), { attempts: 3, wait: deps.retryWait });
   if (!doc.markdown.trim()) {
     return { error: "The document is empty, so there was nothing to export." };
   }
@@ -169,6 +171,6 @@ export async function runJiraExport(deps: JiraExportDeps, request: JiraExportReq
     }
   }
   const report: JiraExportReport = "key" in outcome ? { export_id: request.exportId, key: outcome.key } : { export_id: request.exportId, error: outcome.error };
-  await withRetry(() => deps.api.putJiraExport(deps.agentId, report), { attempts: 3 });
+  await withRetry(() => deps.api.putJiraExport(deps.agentId, report), { attempts: 3, wait: deps.retryWait });
   return outcome;
 }

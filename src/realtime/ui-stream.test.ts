@@ -5,7 +5,7 @@ import type { LoadedThreadMessage } from "../messages/direct-thread.ts";
 import type { ApiMessage } from "../messages/shape.ts";
 import { createEventHub } from "./hub.ts";
 import { sharedLoads } from "./shared-load.ts";
-import { matchesTopics, selectFrame, sharedPostLoader, type UiStreamSources, type UiWatch, uiStream } from "./ui-stream.ts";
+import { matchesTopics, selectFrame, sharedFeedbackTeamLoader, sharedPostLoader, type UiStreamSources, type UiWatch, uiStream } from "./ui-stream.ts";
 
 const VIEWER = "oid-viewer";
 /** Somebody else, whose agents and virtual agents the viewer is told nothing about. */
@@ -345,6 +345,38 @@ describe("selectFrame", () => {
     expect(
       await selectFrame({ type: "assistant_conversation", conversation_id: "c-1", virtual_agent_id: "va-1", owner_oid: OTHER }, TOPICS, sources())
     ).toBeUndefined();
+  });
+
+  const FEEDBACK = { type: "feedback" as const, project_id: "p-1", link_id: "l-1" };
+  const team = (ownerOid: string, memberOids: string[] = []) => ({
+    ...sources(),
+    feedbackTeam: async (projectId: string) => (projectId === "p-1" ? { ownerOid, memberOids } : undefined)
+  });
+
+  it.each([
+    ["owns the project", team(VIEWER)],
+    ["is on its team", team(OTHER, [VIEWER])]
+  ])("should tell the viewer which feedback project changed when the viewer %s", async (_, from) => {
+    expect(await selectFrame(FEEDBACK, TOPICS, from)).toBe(`event: feedback\ndata: ${JSON.stringify({ project_id: "p-1", link_id: "l-1" })}\n\n`);
+  });
+
+  it.each([
+    ["is not on the project's team", team(OTHER, ["someone-else"]), FEEDBACK],
+    ["names a project that is not there", team(VIEWER), { ...FEEDBACK, project_id: "p-gone" }],
+    ["has no way to read a team", sources(), FEEDBACK]
+  ])("should send nothing about a feedback project when the viewer %s", async (_, from, event) => {
+    expect(await selectFrame(event, TOPICS, from)).toBeUndefined();
+  });
+});
+
+describe("sharedFeedbackTeamLoader", () => {
+  it("should read a project's team once for every stream asking about the same event", async () => {
+    const load = vi.fn(async () => ({ ownerOid: VIEWER, memberOids: [] }));
+    const shared = sharedFeedbackTeamLoader(load);
+
+    await Promise.all([shared("p-shared"), shared("p-shared"), sharedFeedbackTeamLoader(vi.fn())("p-shared")]);
+
+    expect(load).toHaveBeenCalledTimes(1);
   });
 });
 
