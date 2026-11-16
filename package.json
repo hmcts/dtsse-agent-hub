@@ -42,7 +42,7 @@
   },
   "dependencies": {
     "@azure/identity": "4.14.1",
-    "@azure/keyvault-secrets": "4.11.2",
+    "@azure/keyvault-secrets": "4.12.0",
     "@azure/storage-blob": "12.34.0",
     "@hmcts-cft/cloud-native-platform": "2.3.0",
     "@prisma/adapter-pg": "7.10.1",
