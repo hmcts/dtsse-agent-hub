@@ -58,6 +58,7 @@ export function useSidebarWidth(): number {
 
 /** Remembers on a wide screen whether the sidebar is collapsed, for the server to render the next page with. */
 function rememberCollapsed(collapsed: boolean): void {
+  // biome-ignore lint/suspicious/noDocumentCookie: the Cookie Store API is missing from browsers HMCTS staff still use, as for the theme
   document.cookie = sidebarCookie(collapsed);
 }
 

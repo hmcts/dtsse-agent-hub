@@ -38,6 +38,7 @@ beforeEach(() => {
   narrow = false;
   viewport(1024);
   window.localStorage.clear();
+  // biome-ignore lint/suspicious/noDocumentCookie: jsdom has no Cookie Store API, and the shell writes the cookie this way
   document.cookie = "asst_sidebar=; Path=/; Max-Age=0";
   Object.defineProperty(window, "matchMedia", {
     configurable: true,
