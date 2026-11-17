@@ -73,7 +73,7 @@ export function plainText(text: string | null | undefined): string {
 export function describeAuthorShort(author: EnvelopeAuthor = {}): string {
   if (author.type === "agent") {
     const id = author.agent_id ? ` [agent ${plainText(author.agent_id).slice(0, SHORT_ID_LENGTH)}]` : "";
-    return `@${plainText(author.agent_name ?? author.agent_id) || "unknown"}${id}`;
+    return `@${plainText(author.agent_name) || plainText(author.agent_id) || "unknown"}${id}`;
   }
   const email = plainText(author.owner_email);
   return `${plainText(author.owner_name) || "unknown"}${email ? ` <${email}>` : ""} (a person)`;

@@ -25,7 +25,7 @@ import {
 import type { Message } from "../wire.ts";
 import { candidateTopics } from "./candidates.ts";
 import { runHaiku } from "./haiku.ts";
-import { attributeNote, buildPrompt, formatFeed, parseHaikuResult, validateHaikuOutput } from "./summarise.ts";
+import { attributeNote, buildPrompt, citedIds, formatFeed, parseHaikuResult, validateHaikuOutput } from "./summarise.ts";
 import { NO_TOUCHES, type Touches, workedInRepos } from "./touches.ts";
 import { readTranscriptSlice, type TranscriptSlice } from "./transcript.ts";
 
@@ -253,7 +253,8 @@ async function summarise(ctx: PassContext, { agent, cursors, cursorsFile, slice,
 const OWN_AGENTS_TIMEOUT_MS = 5000;
 
 async function ownAgentIdsFor(api: StopWorkerApi, note: string, messages: readonly Message[]): Promise<Set<string> | null> {
-  const cites = messages.some((m) => m.author?.type === "agent" && new RegExp(`#${m.id}(?!\\d)`).test(note));
+  const cited = citedIds(note);
+  const cites = messages.some((m) => m.author?.type === "agent" && cited.has(m.id));
   return cites ? ownAgentIdSet(api, { timeoutMs: OWN_AGENTS_TIMEOUT_MS }) : null;
 }
 

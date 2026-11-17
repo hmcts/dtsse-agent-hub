@@ -1,7 +1,7 @@
 // Direct messages between a person's own agents, and the advice that points anything else at the board.
 import { ApiError } from "../api.ts";
 import { type DirectPeer, peerOf, peerOfReply, recordDirect } from "../directs.ts";
-import { authorAgentTag, boardAnswerCommand, CLI, describeAuthorShort } from "../envelope.ts";
+import { authorAgentTag, boardAnswerCommand, CLI, describeAuthorShort, plainText, SHORT_ID_LENGTH } from "../envelope.ts";
 import { requireSessionId } from "../session.ts";
 import type { AgentSummary, Message, MessageAuthor } from "../wire.ts";
 import { type Cli, type Command, refuseSecrets, requireAgent, textArg, UsageError } from "./command.ts";
@@ -77,9 +77,9 @@ function replyOnBoard(cli: Cli, id: string, original: Message | null, error: Api
 }
 
 /** The shortest agent id prefix `reply --to` accepts: anything shorter could name several agents. */
-export const MIN_ID_PREFIX = 8;
+export const MIN_ID_PREFIX = SHORT_ID_LENGTH;
 
-const MISPLACED_TO = "put --to before the message";
+const MISPLACED_TO = "put --to before the message, and quote the message text if it contains --to";
 
 const isToFlag = (arg: string | undefined) => arg === "--to" || !!arg?.startsWith("--to=");
 
@@ -119,6 +119,9 @@ function takeTo(args: string[]): { to: string | null; rest: string[] } {
   return { to, rest: [...rest, ...text] };
 }
 
+// Names and emails as a copied note label shows them, which plainText has already cleaned, so a label always matches.
+const same = (text: string | null | undefined) => plainText(text).toLowerCase();
+
 type Match = { ok: true } | { ok: false; why?: string };
 const MATCH: Match = { ok: true };
 const NO_MATCH: Match = { ok: false };
@@ -130,26 +133,25 @@ const NO_MATCH: Match = { ok: false };
  * needs more than "not the author" to explain.
  */
 async function matchesAuthor(author: MessageAuthor, to: string, ownAgents: () => Promise<AgentSummary[]>): Promise<Match> {
-  const wanted = to.trim().replace(/^@/, "").trim().toLowerCase();
+  const wanted = same(to.trim().replace(/^@/, ""));
   if (!wanted) {
     return NO_MATCH;
   }
   if (author.type !== "agent") {
-    const email = author.owner_email?.trim().toLowerCase();
-    return wanted === email || wanted === author.owner_name?.trim().toLowerCase() ? MATCH : NO_MATCH;
+    return wanted === same(author.owner_email) || wanted === same(author.owner_name) ? MATCH : NO_MATCH;
   }
   const id = (author.agent_id ?? "").toLowerCase();
-  if (author.agent_name && author.agent_name.trim().toLowerCase() === wanted) {
+  if (same(author.agent_name) === wanted) {
     let agents: AgentSummary[];
     try {
       agents = await ownAgents();
     } catch {
       return { ok: false, why: "could not check that the name is unambiguous; give the agent id" };
     }
-    const sameName = agents.filter((a) => a.name.trim().toLowerCase() === wanted);
+    const sameName = agents.filter((a) => same(a.name) === wanted);
     const ambiguous = sameName.length > 1 && sameName.some((a) => a.id.toLowerCase() === id);
     return ambiguous
-      ? { ok: false, why: `more than one of your agents is called "${wanted}"; give the agent id or an ${MIN_ID_PREFIX}-character prefix of it` }
+      ? { ok: false, why: `more than one of your agents is called "${to.trim()}"; give the agent id or an ${MIN_ID_PREFIX}-character prefix of it` }
       : MATCH;
   }
   if (!id.startsWith(wanted)) {
@@ -185,12 +187,14 @@ export const reply: Command = async (cli, args) => {
   // Without --to the read only names the recipient afterwards, so a post the caller cannot read is left for the hub
   // to refuse in its own words.
   let original: Message | null = null;
+  let unread = false;
   try {
     original = (await api.message(id)).message;
   } catch (e) {
     if (to !== null) {
       throw e;
     }
+    unread = true;
   }
   if (to !== null && original) {
     let agents: Promise<AgentSummary[]> | undefined;
@@ -220,6 +224,8 @@ export const reply: Command = async (cli, args) => {
   await keepDirect(sid, res.message, () => peerOfReply(sid, id, null) ?? (author ? peerOf(author) : null));
   if (author) {
     cli.printError(`replied to ${describeAuthorShort(author)}`);
+  } else if (unread) {
+    cli.printError(`replied, but #${id} could not be read, so who it went to is not confirmed`);
   }
   cli.print(`replied with #${res.message.id}`);
   return 0;

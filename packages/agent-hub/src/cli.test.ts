@@ -27,6 +27,7 @@ import { createApi } from "./api.ts";
 import { parseFlags, readStdinText, UsageError } from "./cli/command.ts";
 import { runCli, USAGE } from "./cli.ts";
 import type { Env } from "./env.ts";
+import { describeAuthorShort } from "./envelope.ts";
 import { CLIENT_FEATURES } from "./features.ts";
 import { denyOutput, UNDELIVERED_REASON } from "./questions.ts";
 import { VIRTUAL_USAGE } from "./virtual/index.ts";
@@ -828,7 +829,7 @@ describe("the commands, in process against the mock hub", () => {
       expect(sends().map((c) => c.body.body)).toEqual(["from stdin"]);
       for (const r of [after, afterDash, equalsAfter]) {
         expect(r.code).toBe(2);
-        expect(r.errors.join("\n")).toMatch(/put --to before the message/);
+        expect(r.errors.join("\n")).toMatch(/put --to before the message, and quote the message text/);
       }
     });
 
@@ -878,6 +879,50 @@ describe("the commands, in process against the mock hub", () => {
       expect(r.code).toBe(1);
       expect(r.errors.join("\n")).toMatch(/^agent-hub reply: GET \/api\/agent\/messages\/\d+ failed: 40[34]/);
       expect(sends()).toHaveLength(0);
+    });
+
+    it("should send when --to is a name exactly as the note label shows it, though the real name has characters the label strips", async () => {
+      // Arrange
+      const post = ownPost("pcs(api) #3");
+      const label = describeAuthorShort(post.author).replace(/ \[agent .*$/, "");
+
+      // Act
+      const r = await cli(["reply", post.id, "--to", label, "hi"]);
+
+      // Assert
+      expect(label).toBe("@pcs api 3");
+      expect(r.code).toBe(0);
+      expect(sends()).toHaveLength(1);
+    });
+
+    it("should quote what was typed when it refuses an ambiguous name", async () => {
+      // Arrange
+      const post = ownPost("Twin-Quote");
+      hub.agents.set("twin-quote-other", { id: "twin-quote-other", owner_oid: me.oid, name: "twin-quote", status: "idle" });
+
+      // Act
+      const r = await cli(["reply", post.id, "--to", "  @TWIN-quote ", "hi"]);
+
+      // Assert
+      expect(r.code).toBe(2);
+      expect(r.errors.join("\n")).toMatch(/more than one of your agents is called "@TWIN-quote"/);
+    });
+
+    it("should say the recipient is not confirmed, and still send, when the post cannot be read and no --to was given", async () => {
+      // Arrange: a reply to a direct this agent can read about as little as the hub lets it send; the hub decides.
+      const post = ownPost("unread-target");
+      const env = cliEnv();
+      const real = createApi({ env });
+      const api = { ...real, message: async () => Promise.reject(new Error("down")) };
+      const out = sink();
+
+      // Act
+      const code = await runCli(["reply", post.id, "hi"], { ...out.options, env, api, readStdin: () => "", cwd: () => home.root });
+
+      // Assert
+      expect(code).toBe(0);
+      expect(out.errors).toEqual([`replied, but #${post.id} could not be read, so who it went to is not confirmed`]);
+      expect(sends()).toHaveLength(1);
     });
 
     it("should refuse an agent's id given to a person's post, and a --to with no value", async () => {

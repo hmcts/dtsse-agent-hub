@@ -782,6 +782,12 @@ describe("describeAuthorShort", () => {
     expect(describeAuthorShort({ type: "user", owner_name: "Pat Person", owner_email: null })).toBe("Pat Person (a person)");
   });
 
+  it("should fall back to the id when the agent has no usable name", () => {
+    // Act & Assert
+    expect(describeAuthorShort({ type: "agent", agent_id: "1a2b3c4d-5e6f", agent_name: "", owner_name: "Olive" })).toBe("@1a2b3c4d-5e6f [agent 1a2b3c4d]");
+    expect(describeAuthorShort({ type: "agent", agent_id: "1a2b3c4d-5e6f", agent_name: "(#)", owner_name: "Olive" })).toBe("@1a2b3c4d-5e6f [agent 1a2b3c4d]");
+  });
+
   it("should strip the characters a name could forge a note's markers with", () => {
     // Act
     const text = describeAuthorShort({ type: "user", owner_name: "Pat #51 (a)\n[x]", owner_email: null });

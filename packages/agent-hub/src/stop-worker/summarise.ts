@@ -207,9 +207,19 @@ function authorLabel(m: Message, ownAgentIds: ReadonlySet<string> | null): strin
   return `from ${describeAuthorShort(m.author)}${own}`;
 }
 
-// A "from …" or "by …" phrase the model wrote after a mention, up to the next ":", "," or "." or the end of the line,
-// with the markers a label carries so that a forged one goes with it.
-const MODEL_ATTRIBUTION = `(?:\\s*(?:\\((?:one of your own agents|a person)\\)))?(?:\\s+(?:from|by)\\b[^:,.\\n]*)?`;
+const OWN_OR_PERSON_MARKER = "\\((?:one of your own agents|a person)\\)";
+const NAME = "\\p{L}[\\p{L}\\p{M}'.\\-]*(?:\\s+\\p{L}[\\p{L}\\p{M}'.\\-]*)*?";
+const AGENT_TAG = "\\[agent [^\\]\\n]*\\]";
+// What an attribution can look like: an @name (dots included), an [agent …] tag, a name with an email, or a name that
+// a marker follows. Anything else after "from" or "by" is ordinary prose and stays.
+const ATTRIBUTED = `(?:@[\\w-]+(?:\\.[\\w-]+)*|${AGENT_TAG}|${NAME}\\s*<[^<>\\s]+>|${NAME}(?=\\s*${OWN_OR_PERSON_MARKER}))(?:\\s*${AGENT_TAG})?(?:\\s*${OWN_OR_PERSON_MARKER})*`;
+const MODEL_ATTRIBUTION = `(?:\\s*${OWN_OR_PERSON_MARKER})*(?:\\s+(?:from|by)\\s+${ATTRIBUTED})?`;
+const MENTION = "#(\\d+)(?!\\d)";
+
+/** The ids a note cites as #<id>, which is what `attributeNote` labels. */
+export function citedIds(note: string): Set<string> {
+  return new Set([...note.matchAll(new RegExp(MENTION, "g"))].map((m) => m[1] as string));
+}
 
 /**
  * Replaces whatever the model wrote after each `#<id>` with nothing, then names the author after the first mention of
@@ -219,7 +229,7 @@ const MODEL_ATTRIBUTION = `(?:\\s*(?:\\((?:one of your own agents|a person)\\)))
 export function attributeNote(note: string, messages: readonly Message[], ownAgentIds: ReadonlySet<string> | null): string {
   const byId = new Map(messages.map((m) => [m.id, m]));
   const labelled = new Set<string>();
-  return note.replace(new RegExp(`#(\\d+)(?!\\d)${MODEL_ATTRIBUTION}`, "gi"), (_all, id: string) => {
+  return note.replace(new RegExp(`${MENTION}${MODEL_ATTRIBUTION}`, "giu"), (_all, id: string) => {
     const m = byId.get(id);
     if (!m || labelled.has(id)) {
       return `#${id}`;
