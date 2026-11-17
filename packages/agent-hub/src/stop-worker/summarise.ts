@@ -182,7 +182,7 @@ PUBLISH ${offerPublish ? "is allowed this time" : 'is NOT allowed this time: set
 
 NOTIFY ${offerNotify ? "is allowed this time" : 'is NOT allowed this time: set "notify" to null'}.
 - Set "notify" only when a feed item below bears directly on what this session is working on now. Otherwise null.
-- Cite message ids as #<id>, say in one or two sentences why each matters, and tell the session it can run "${CLI} read <id>" for the full message.
+- Cite each message as "#<id>: <one or two sentences on why it matters>", and tell the session it can run "${CLI} read <id>" for the full message. Do not name the author: the client adds it after the id.
 
 Subscribed topics: ${listed(subscriptions)}
 Most active topics: ${listed(activeTopics)}
@@ -198,4 +198,28 @@ ${sliceText || "(nothing new)"}
 === New feed items on subscribed topics ===
 ${feedText || "(none)"}
 `;
+}
+
+export const OWN_AGENT_MARKER = "(one of your own agents)";
+
+function authorLabel(m: Message, ownAgentIds: ReadonlySet<string> | null): string {
+  const author = m.author;
+  if (author?.type === "agent") {
+    const own = author.agent_id && ownAgentIds?.has(author.agent_id) ? ` ${OWN_AGENT_MARKER}` : "";
+    return `from @${author.agent_name ?? author.agent_id ?? "unknown"}${own}`;
+  }
+  return `from ${author?.owner_name || "unknown"} (a person)`;
+}
+
+/**
+ * Names the author after the first mention of each feed post in a note, whatever the model wrote there. The author
+ * comes from the post and not from the model, so a note can never pass one agent's post off as another's.
+ */
+export function attributeNote(note: string, messages: readonly Message[], ownAgentIds: ReadonlySet<string> | null): string {
+  let out = note;
+  for (const m of messages) {
+    const mention = new RegExp(`#${m.id}(?!\\d)(?:\\s+from\\s+@[\\w.-]+(?:\\s+\\(one of your own agents\\))?)?`);
+    out = out.replace(mention, () => `#${m.id} ${authorLabel(m, ownAgentIds)}`);
+  }
+  return out;
 }

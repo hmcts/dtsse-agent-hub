@@ -65,7 +65,7 @@ const feedItem = message({
 type Call = [string, unknown];
 type FakeApi = StopWorkerApi & { calls: Call[] };
 
-function fakeApi(feedMessages: Message[] = []): FakeApi {
+function fakeApi(feedMessages: Message[] = [], ownAgentIds: string[] = []): FakeApi {
   const calls: Call[] = [];
   return {
     calls,
@@ -74,6 +74,9 @@ function fakeApi(feedMessages: Message[] = []): FakeApi {
       const since = Number(q.since ?? 0);
       const out = feedMessages.filter((m) => Number(m.id) > since);
       return { messages: out, cursor: out.length ? (out[out.length - 1] as Message).id : String(since) };
+    },
+    async agents() {
+      return { agents: ownAgentIds.map((id) => ({ id, name: id, status: "idle", repo: null, branch: null, last_heartbeat_at: null, owner: {} })) };
     },
     async subscriptions(): Promise<TopicListResponse> {
       return { topics: ["pcs-api"] };
@@ -259,7 +262,7 @@ describe("runStopWorker", () => {
 
     // Assert
     expect(callsOf(api, "post")[0]?.[1]).toEqual({ topics: ["pcs-api"], title: "Renamed cases table", body: "V030 renames cases to claim." });
-    expect(heldNotes()).toEqual([{ at: new Date(100 * MIN).toISOString(), text: "#50 touches the same table.", message_ids: ["50"] }]);
+    expect(heldNotes()).toEqual([{ at: new Date(100 * MIN).toISOString(), text: "#50 from @bob touches the same table.", message_ids: ["50"] }]);
     expect(logText()).toMatch(/stop-worker: held note for next prompt/);
     expect(prompts[0]).toMatch(/Renamed cases to claim/);
     expect(prompts[0]).toMatch(/#50 \[pcs-api\] @bob: Schema change/);
@@ -268,6 +271,46 @@ describe("runStopWorker", () => {
     expect(cursors()?.last_publish_at).toBe(100 * MIN);
     expect(cursors()?.last_notify_at).toBe(100 * MIN);
     expect(callsOf(api, "cursor")[0]).toEqual(["cursor", "50"]);
+  });
+
+  it("should name the author of each cited post, whatever the model wrote, and mark the session's own agents when a note is held", async () => {
+    // Arrange
+    const person = message({ id: "51", author: { type: "user", agent_id: null, agent_name: null, owner_name: "Pat Person", owner_email: "pat@example.com" } });
+    const api = fakeApi([feedItem, person], ["agent-9"]);
+
+    // Act
+    await runStopWorker({
+      sid: SID,
+      transcriptPath: transcript,
+      api,
+      haiku: haikuReturning({ publish: null, notify: "#50 from @someone-else bears on this. #51: asks about it. #99 is unknown." }),
+      now: () => 100 * MIN,
+      config: cfg
+    });
+
+    // Assert
+    expect(heldNotes()[0]?.text).toBe("#50 from @bob (one of your own agents) bears on this. #51 from Pat Person (a person): asks about it. #99 is unknown.");
+  });
+
+  it("should name the author without saying whose it is when the hub cannot list the session's agents", async () => {
+    // Arrange
+    const api = fakeApi([feedItem], ["agent-9"]);
+    api.agents = async () => {
+      throw new Error("down");
+    };
+
+    // Act
+    await runStopWorker({
+      sid: SID,
+      transcriptPath: transcript,
+      api,
+      haiku: haikuReturning({ publish: null, notify: "#50: same table." }),
+      now: () => 100 * MIN,
+      config: cfg
+    });
+
+    // Assert
+    expect(heldNotes()[0]?.text).toBe("#50 from @bob: same table.");
   });
 
   it("should not hold another note or publish when a pass falls inside the rate-limit window", async () => {

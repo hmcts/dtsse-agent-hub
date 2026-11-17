@@ -23,7 +23,7 @@ import {
 } from "../session.ts";
 import { candidateTopics } from "./candidates.ts";
 import { runHaiku } from "./haiku.ts";
-import { buildPrompt, formatFeed, parseHaikuResult, validateHaikuOutput } from "./summarise.ts";
+import { attributeNote, buildPrompt, formatFeed, parseHaikuResult, validateHaikuOutput } from "./summarise.ts";
 import { NO_TOUCHES, type Touches, workedInRepos } from "./touches.ts";
 import { readTranscriptSlice, type TranscriptSlice } from "./transcript.ts";
 
@@ -109,7 +109,7 @@ export function decide({ now, cursors, config, sliceText, secretInSlice, feedCou
 }
 
 /** The hub calls the summariser makes. A subset of `Api`, so a test can stand in for it without the rest. */
-export type StopWorkerApi = Pick<Api, "feed" | "post" | "setCursor" | "subscriptions" | "topics" | "register" | "subscribe">;
+export type StopWorkerApi = Pick<Api, "feed" | "agents" | "post" | "setCursor" | "subscriptions" | "topics" | "register" | "subscribe">;
 
 export type Haiku = (prompt: string) => Promise<string>;
 
@@ -225,7 +225,7 @@ async function summarise(ctx: PassContext, { agent, cursors, cursorsFile, slice,
           log(sid, "stop-worker: secret-shaped string in notification; dropped");
         } else {
           // Held for the user's next prompt: delivering it now would start a turn of its own.
-          holdNote(sid, notify, now());
+          holdNote(sid, attributeNote(notify, messages, await ownAgentIds(api)), now());
           cursors.last_notify_at = now();
           log(sid, "stop-worker: held note for next prompt");
         }
@@ -245,6 +245,15 @@ async function summarise(ctx: PassContext, { agent, cursors, cursorsFile, slice,
     }
   }
   writeJson(cursorsFile, cursors);
+}
+
+// Null when the hub cannot say, in which case a note names its authors and claims nothing about whose they are.
+async function ownAgentIds(api: StopWorkerApi): Promise<Set<string> | null> {
+  try {
+    return new Set((await api.agents()).agents.map((a) => a.id));
+  } catch {
+    return null;
+  }
 }
 
 export type FollowWorkState = {

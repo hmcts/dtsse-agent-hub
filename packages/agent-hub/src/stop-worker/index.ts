@@ -7,7 +7,7 @@ export { haikuCommand, runHaiku, summariserCwd, summariserSettings } from "./hai
 export type { Cursors, DecideOptions, Decision, FollowWorkState, Haiku, PassContext, RunStopWorkerOptions, StopWorkerApi } from "./run.ts";
 export { decide, followWork, parseCursors, runPass, runStopWorker } from "./run.ts";
 export type { BuildPromptOptions, HaikuOutput, HaikuPublish, HaikuValidation } from "./summarise.ts";
-export { buildPrompt, formatFeed, parseHaikuResult, validateHaikuOutput, WORK_TYPES } from "./summarise.ts";
+export { attributeNote, buildPrompt, formatFeed, parseHaikuResult, validateHaikuOutput, WORK_TYPES } from "./summarise.ts";
 export type { ExtractTouchesOptions, ProductTouch, RepoTouch, ShellSeparator, ShellToken, ShellWord, Touches, TouchKind } from "./touches.ts";
 export { bashPaths, extractTouches, NO_TOUCHES, shellWords, workedInRepos } from "./touches.ts";
 export type { TranscriptSlice } from "./transcript.ts";
