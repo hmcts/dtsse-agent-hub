@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LocalSession } from "@/assistant/local-session";
 import type { ConversationLink, ConversationMark, PodSession } from "@/assistant/views";
 import { ArtefactPanel } from "@/components/assistant/ArtefactPanel";
-import { AssistantMarkdown } from "@/components/assistant/AssistantMarkdown";
+import { AssistantMarkdown, copyLabel } from "@/components/assistant/AssistantMarkdown";
 import { AssistantRefresh } from "@/components/assistant/AssistantRefresh";
 import { AssistantShell, SidebarToggle } from "@/components/assistant/AssistantShell";
 import { ProductSelect } from "@/components/assistant/ProductSelect";
@@ -875,7 +875,7 @@ describe("AssistantMarkdown", () => {
       expect(screen.getByText("json")).toBeTruthy();
       expect(container.querySelector("code[data-language='json']")?.textContent).toBe('{ "a": 1 }');
       await act(async () => {
-        fireEvent.click(screen.getByRole("button", { name: "Copy code" }));
+        fireEvent.click(screen.getByRole("button", { name: 'Copy json code: { "a": 1 }' }));
       });
 
       expect(writeText).toHaveBeenCalledWith('{ "a": 1 }');
@@ -896,7 +896,7 @@ describe("AssistantMarkdown", () => {
     try {
       render(<AssistantMarkdown source={"```\nplain\n```"} />);
       await act(async () => {
-        fireEvent.click(screen.getByRole("button", { name: "Copy code" }));
+        fireEvent.click(screen.getByRole("button", { name: "Copy code: plain" }));
       });
 
       expect(screen.getByRole("status").textContent).toBe("Could not copy. Select the text and copy it yourself.");
@@ -905,13 +905,21 @@ describe("AssistantMarkdown", () => {
     }
   });
 
+  it("should name each Copy button for its own fence, and keep the bar off a printed page, when an answer has several", () => {
+    const { container } = render(<AssistantMarkdown source={"```ts\nconst a = 1;\n```\n\n```\n\n  npm run build\n```"} />);
+
+    expect(screen.getByRole("button", { name: "Copy ts code: const a = 1;" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Copy code: npm run build" })).toBeTruthy();
+    expect(container.querySelector("pre")?.previousElementSibling?.className).toContain("print:hidden");
+  });
+
   it("should clear the copied tick after a moment", async () => {
     vi.useFakeTimers();
     vi.stubGlobal("navigator", { clipboard: { writeText: vi.fn(async () => undefined) } });
     try {
       render(<AssistantMarkdown source={"```\nplain\n```"} />);
       await act(async () => {
-        fireEvent.click(screen.getByRole("button", { name: "Copy code" }));
+        fireEvent.click(screen.getByRole("button", { name: "Copy code: plain" }));
       });
       expect(screen.getByRole("status").textContent).toBe("Copied");
 
@@ -1124,5 +1132,16 @@ describe("ProductSelect", () => {
     fireEvent.change(select, { target: { value: "nfdiv" } });
 
     expect(onChange).toHaveBeenCalledWith("nfdiv");
+  });
+});
+
+describe("copyLabel", () => {
+  it("should cut a long first line short when naming the fence", () => {
+    expect(copyLabel(`${"x".repeat(45)}\nmore`, "sh")).toBe(`Copy sh code: ${"x".repeat(40)}…`);
+  });
+
+  it("should name only the language when the fence is empty", () => {
+    expect(copyLabel("\n  \n", "json")).toBe("Copy json code");
+    expect(copyLabel("", null)).toBe("Copy code");
   });
 });

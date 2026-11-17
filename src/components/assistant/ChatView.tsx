@@ -578,11 +578,8 @@ export function ChatView({
   };
 
   async function send(body: string, uploadIds: string[]): Promise<string | null> {
-    // A slide the person asked about goes in front of their words, which is the whole of how the session is told. Its
-    // room is kept whatever its length, so the limit the person is told is the same for every slide.
-    if (ask !== null && body.length > MAX_ASKED_BODY) {
-      return `Your message about this slide is too long. Keep it to ${MAX_ASKED_BODY.toLocaleString("en-GB")} characters or fewer.`;
-    }
+    // A slide the person asked about goes in front of their words, which is the whole of how the session is told. The
+    // box holds their words to the room the slide leaves (`limit` below), so the two together never pass `MAX_BODY`.
     const asked = ask === null ? body : `${ask.reference}\n${body}`;
     const result = await actions.send({ conversationId: view.id, body: asked, uploadIds });
     if (!result.ok) {

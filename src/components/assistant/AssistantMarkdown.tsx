@@ -31,6 +31,24 @@ function Heading({ level, document, children }: { level: number; document: boole
   return <h5 className="pt-2 text-base font-semibold text-asst-text">{children}</h5>;
 }
 
+/** How long a fence's first line may run in its Copy button's name before it is cut short. */
+const LABEL_SNIPPET = 40;
+
+/**
+ * A Copy button's name, which says which fence it copies: an answer with several has several buttons, and a list of
+ * buttons all called "Copy code" leaves a screen-reader user guessing. The language, and the fence's first line.
+ */
+export function copyLabel(text: string, language: string | null): string {
+  const first =
+    text
+      .split("\n")
+      .find((line) => line.trim() !== "")
+      ?.trim() ?? "";
+  const snippet = first.length > LABEL_SNIPPET ? `${first.slice(0, LABEL_SNIPPET)}…` : first;
+  const what = language === null ? "code" : `${language} code`;
+  return snippet === "" ? `Copy ${what}` : `Copy ${what}: ${snippet}`;
+}
+
 function assistantTheme(document: boolean): MarkupTheme {
   return {
     // The space before the interpolation is load-bearing: Tailwind's scanner does not see a class written up against
@@ -43,8 +61,9 @@ function assistantTheme(document: boolean): MarkupTheme {
     unordered: "flex list-disc flex-col gap-1 pl-6",
     fence: "overflow-x-auto whitespace-pre rounded-lg bg-asst-rail px-3 py-2 font-plex-mono text-[13px] leading-5",
     fenceLabel: "font-plex-mono text-xs text-asst-muted",
-    fenceBar: "flex min-h-7 items-center justify-between gap-2 pb-1 pl-1",
-    fenceActions: (text) => <CopyButton text={text} label="Copy code" />,
+    // Off the page when printed: a printed page has no use for a Copy button, and its label would be a stray line.
+    fenceBar: "flex min-h-7 items-center justify-between gap-2 pb-1 pl-1 print:hidden",
+    fenceActions: (text, language) => <CopyButton text={text} label={copyLabel(text, language)} />,
     tableScroller: "overflow-x-auto rounded-lg",
     cell: "border border-asst-line px-2 py-1 align-top",
     header: "bg-asst-raised font-semibold text-asst-text",

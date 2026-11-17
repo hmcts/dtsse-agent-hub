@@ -81,7 +81,7 @@ function checkBody(raw: unknown, attachments: number): string | { ok: false; err
     return { ok: false, error: "write something to send" };
   }
   if (body.length > MAX_BODY) {
-    return { ok: false, error: `Your message is too long. Keep it to ${MAX_BODY.toLocaleString("en-GB")} characters or fewer, or attach it as a file.` };
+    return { ok: false, error: `Your message is too long. Keep it to ${MAX_BODY.toLocaleString("en-GB")} characters or fewer.` };
   }
   return body;
 }

@@ -84,6 +84,8 @@ export function ActionForm<T extends object & { confirmation?: string }>({
     }
   }
 
+  const waits = pendingText !== undefined && !signedOut;
+  const said = pending ? (pendingText ?? "") : message?.ok ? message.text : "";
   // A submit React does not intercept (before hydration, or when the page's script failed to load) is a native one,
   // and a native GET would put every field, a pasted credential included, in the URL.
   return (
@@ -102,15 +104,18 @@ export function ActionForm<T extends object & { confirmation?: string }>({
       className={className}
     >
       {typeof children === "function" ? children({ pending }) : children}
+      {/* A form that says what it is doing keeps one status mounted and changes its words, from the wait to the
+          confirmation: a live region inserted with its text already in it is often not read at all. */}
+      {waits ? (
+        <p role="status" className={said === "" ? "sr-only" : `text-xs ${pending ? "text-asst-muted" : "text-asst-ok"}`}>
+          {said}
+        </p>
+      ) : null}
       {signedOut ? (
         <p role="status" className="text-xs text-asst-error">
           <SessionEndedMessage />
         </p>
-      ) : pending && pendingText !== undefined ? (
-        <p role="status" className="text-xs text-asst-muted">
-          {pendingText}
-        </p>
-      ) : message ? (
+      ) : message && !(waits && message.ok) ? (
         <p role={message.ok ? "status" : "alert"} className={`text-xs ${message.ok ? "text-asst-ok" : "text-asst-error"}`}>
           {message.text}
         </p>

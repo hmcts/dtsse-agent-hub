@@ -161,21 +161,38 @@ describe("ActionForm", () => {
     expect(screen.getByRole("alert").textContent).toBe("That name is taken.");
   });
 
-  it("should say what it is doing while the post is in flight when it is given words for the wait", async () => {
-    let answer: (result: { ok: true }) => void = () => undefined;
-    const action = vi.fn(() => new Promise<{ ok: true }>((resolve) => (answer = resolve)));
+  it("should say what it is doing, then the confirmation, in the one status that was already there, when it is given words for the wait", async () => {
+    let answer: (result: { ok: true; confirmation: string }) => void = () => undefined;
+    const action = vi.fn(() => new Promise<{ ok: true; confirmation: string }>((resolve) => (answer = resolve)));
     render(
       <ActionForm action={action} label="Rename" pendingText="Saving…">
         <span />
       </ActionForm>
     );
+    const status = screen.getByRole("status");
+    expect(status.textContent).toBe("");
 
     await submit();
-    expect(screen.getByRole("status").textContent).toBe("Saving…");
+    expect(status.textContent).toBe("Saving…");
 
     await act(async () => {
-      answer({ ok: true });
+      answer({ ok: true, confirmation: "Saved" });
     });
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getByRole("status")).toBe(status);
+    expect(status.textContent).toBe("Saved");
+    expect(status.className).toContain("text-asst-ok");
+  });
+
+  it("should still raise a refusal as an alert when it is given words for the wait", async () => {
+    render(
+      <ActionForm action={vi.fn(async () => ({ ok: false as const, error: "That name is taken." }))} label="Rename" pendingText="Saving…">
+        <span />
+      </ActionForm>
+    );
+
+    await submit();
+
+    expect(screen.getByRole("alert").textContent).toBe("That name is taken.");
+    expect(screen.getByRole("status").textContent).toBe("");
   });
 });
