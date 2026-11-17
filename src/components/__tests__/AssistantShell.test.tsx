@@ -38,6 +38,7 @@ beforeEach(() => {
   narrow = false;
   viewport(1024);
   window.localStorage.clear();
+  document.cookie = "asst_sidebar=; Path=/; Max-Age=0";
   Object.defineProperty(window, "matchMedia", {
     configurable: true,
     writable: true,
@@ -508,18 +509,21 @@ describe("AssistantShell", () => {
     expect(sidebar().hasAttribute("inert")).toBe(false);
   });
 
-  it("should open collapsed after a reload when the person collapsed it on a wide screen, and open again once they reopen it", () => {
-    const { unmount } = render(shell());
-    fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
-    unmount();
+  it("should start collapsed with no flash of the open sidebar when the server says the person collapsed it", () => {
+    render(shell({ collapsed: true }));
 
-    const { unmount: unmountAgain } = render(shell());
     expect(sidebar().hasAttribute("inert")).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Open sidebar" }));
-    unmountAgain();
+    expect(screen.getByRole("button", { name: "Open sidebar" })).toBeTruthy();
+  });
 
+  it("should remember collapsing and reopening in the cookie when the screen is wide", () => {
     render(shell());
-    expect(sidebar().hasAttribute("inert")).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+    expect(document.cookie).toContain("asst_sidebar=collapsed");
+
+    fireEvent.click(screen.getByRole("button", { name: "Open sidebar" }));
+    expect(document.cookie).not.toContain("asst_sidebar");
   });
 
   it("should not remember the drawer being closed when the screen is narrow", () => {
@@ -528,34 +532,7 @@ describe("AssistantShell", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open sidebar" }));
     fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
 
-    expect(window.localStorage.getItem("hmcts-assistant-sidebar-collapsed")).toBeNull();
-  });
-
-  it("should open the sidebar as before when storage cannot be read or written", () => {
-    // Only the collapsed state's key: the width the sidebar was dragged to is read through storage of its own.
-    const realGet = Storage.prototype.getItem;
-    const realSet = Storage.prototype.setItem;
-    const getItem = vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (this: Storage, key: string) {
-      if (key === "hmcts-assistant-sidebar-collapsed") {
-        throw new Error("blocked");
-      }
-      return realGet.call(this, key);
-    });
-    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key: string, value: string) {
-      if (key === "hmcts-assistant-sidebar-collapsed") {
-        throw new Error("blocked");
-      }
-      realSet.call(this, key, value);
-    });
-    try {
-      render(shell());
-      expect(sidebar().hasAttribute("inert")).toBe(false);
-      fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
-      expect(sidebar().hasAttribute("inert")).toBe(true);
-    } finally {
-      getItem.mockRestore();
-      setItem.mockRestore();
-    }
+    expect(document.cookie).not.toContain("asst_sidebar");
   });
 
   it("should start closed as a drawer and close with Escape or the backdrop when the screen is narrow", () => {

@@ -7,6 +7,7 @@ import type { ConnectionsData } from "@/assistant/connections";
 import type { SidebarGroup } from "@/assistant/grouping";
 import { unreadLabel } from "@/assistant/grouping";
 import type { LocalSession } from "@/assistant/local-session";
+import { sidebarCookie } from "@/assistant/sidebar";
 import type { Theme } from "@/assistant/theme";
 import type { SidebarItem } from "@/assistant/views";
 import type { AssistantAgentSettings } from "@/components/assistant/AgentSettings";
@@ -55,31 +56,9 @@ export function useSidebarWidth(): number {
   return useContext(ShellContext).sidebarWidth;
 }
 
-/** Where a wide screen remembers that the person collapsed the sidebar. Absent means open, the default. */
-const COLLAPSED_KEY = "hmcts-assistant-sidebar-collapsed";
-
-/**
- * Storage throws in Safari private browsing and when the quota is full, and remembering a sidebar is never worth
- * breaking the page over, so both directions fall back to the default.
- */
-function rememberedCollapsed(): boolean {
-  try {
-    return window.localStorage.getItem(COLLAPSED_KEY) === "true";
-  } catch {
-    return false;
-  }
-}
-
+/** Remembers on a wide screen whether the sidebar is collapsed, for the server to render the next page with. */
 function rememberCollapsed(collapsed: boolean): void {
-  try {
-    if (collapsed) {
-      window.localStorage.setItem(COLLAPSED_KEY, "true");
-    } else {
-      window.localStorage.removeItem(COLLAPSED_KEY);
-    }
-  } catch {
-    // Not remembered; the sidebar opens next time, as it always used to.
-  }
+  document.cookie = sidebarCookie(collapsed);
 }
 
 /** The button a page's header shows while the sidebar is collapsed, or always on a narrow screen. */
@@ -139,6 +118,7 @@ export function AssistantShell({
   groups,
   activeId,
   theme = "system",
+  collapsed = false,
   connections,
   viewerRoute,
   connect,
@@ -167,6 +147,8 @@ export function AssistantShell({
   activeId: string | null;
   /** The appearance the person chose, which the switch in the footer's settings starts from. */
   theme?: Theme;
+  /** The person collapsed the sidebar on a wide screen, as the `asst_sidebar` cookie says, so it starts collapsed. */
+  collapsed?: boolean;
   /** The person's sign-ins, which the footer's settings lists and warns about. */
   connections?: ConnectionsData;
   /** The viewer's own model route, which the footer's settings judge Microsoft 365's Connect on. */
@@ -214,7 +196,9 @@ export function AssistantShell({
   children: React.ReactNode;
 }) {
   const router = useRouter();
-  const [open, setOpen] = useState(true);
+  // As the server rendered it, from the cookie, so a sidebar the person collapsed never shows open first. A narrow
+  // screen closes it as a drawer once mounted, and a drawer is never remembered, since it closes on every pick.
+  const [open, setOpen] = useState(!collapsed);
   const [narrow, setNarrow] = useState(false);
   const [failed, setFailed] = useState<{ id: string; error: string } | null>(null);
   const sidebar = useRef<HTMLElement>(null);
@@ -248,11 +232,6 @@ export function AssistantShell({
       }
     };
     update();
-    // Only on arrival: a wide screen opens the sidebar as the person last left it there. A drawer is never remembered,
-    // since it closes on every pick, and a screen that widens later keeps whatever the person has now.
-    if (!query.matches && rememberedCollapsed()) {
-      setOpen(false);
-    }
     query.addEventListener("change", update);
     return () => query.removeEventListener("change", update);
   }, []);
