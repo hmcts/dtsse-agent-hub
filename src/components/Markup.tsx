@@ -36,6 +36,14 @@ export interface MarkupTheme {
   heading: (level: number, children: ReactNode) => ReactNode;
   /** Whether a fence's language is named to this reader, as a label above it and a `data-language` on it. */
   fenceLanguage: boolean;
+  /**
+   * Controls shown in a bar above every fence, beside its language when that is named, such as a Copy button. They are
+   * given the fence's text and its language, named or not, so a control can say which fence it acts on. Without them a
+   * fence has only its label.
+   */
+  fenceActions?: (text: string, language: string | null) => ReactNode;
+  /** The bar `fenceActions` sit in. */
+  fenceBar?: string;
 }
 
 function renderInline(nodes: Inline[], theme: MarkupTheme): ReactNode[] {
@@ -148,6 +156,17 @@ function Fence({ block, theme }: { block: Block & { type: "code" }; theme: Marku
       <code {...(named ? { "data-language": block.language } : {})}>{block.text}</code>
     </ScrollPane>
   );
+  if (theme.fenceActions !== undefined) {
+    return (
+      <div>
+        <div className={theme.fenceBar}>
+          {named ? <span className={theme.fenceLabel}>{block.language}</span> : <span />}
+          {theme.fenceActions(block.text, block.language)}
+        </div>
+        {pane}
+      </div>
+    );
+  }
   return named ? (
     <div>
       <span className={theme.fenceLabel}>{block.language}</span>

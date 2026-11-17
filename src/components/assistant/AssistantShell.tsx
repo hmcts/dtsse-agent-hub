@@ -7,6 +7,7 @@ import type { ConnectionsData } from "@/assistant/connections";
 import type { SidebarGroup } from "@/assistant/grouping";
 import { unreadLabel } from "@/assistant/grouping";
 import type { LocalSession } from "@/assistant/local-session";
+import { sidebarCookie } from "@/assistant/sidebar";
 import type { Theme } from "@/assistant/theme";
 import type { SidebarItem } from "@/assistant/views";
 import type { AssistantAgentSettings } from "@/components/assistant/AgentSettings";
@@ -53,6 +54,12 @@ const ShellContext = createContext<ShellContextValue>({ sidebarOpen: true, openS
 /** How much of the row the Assistant's sidebar takes, which a panel on the other side of the chat must leave. */
 export function useSidebarWidth(): number {
   return useContext(ShellContext).sidebarWidth;
+}
+
+/** Remembers on a wide screen whether the sidebar is collapsed, for the server to render the next page with. */
+function rememberCollapsed(collapsed: boolean): void {
+  // biome-ignore lint/suspicious/noDocumentCookie: the Cookie Store API is missing from browsers HMCTS staff still use, as for the theme
+  document.cookie = sidebarCookie(collapsed);
 }
 
 /** The button a page's header shows while the sidebar is collapsed, or always on a narrow screen. */
@@ -112,6 +119,7 @@ export function AssistantShell({
   groups,
   activeId,
   theme = "system",
+  collapsed = false,
   connections,
   viewerRoute,
   connect,
@@ -140,6 +148,8 @@ export function AssistantShell({
   activeId: string | null;
   /** The appearance the person chose, which the switch in the footer's settings starts from. */
   theme?: Theme;
+  /** The person collapsed the sidebar on a wide screen, as the `asst_sidebar` cookie says, so it starts collapsed. */
+  collapsed?: boolean;
   /** The person's sign-ins, which the footer's settings lists and warns about. */
   connections?: ConnectionsData;
   /** The viewer's own model route, which the footer's settings judge Microsoft 365's Connect on. */
@@ -187,7 +197,9 @@ export function AssistantShell({
   children: React.ReactNode;
 }) {
   const router = useRouter();
-  const [open, setOpen] = useState(true);
+  // As the server rendered it, from the cookie, so a sidebar the person collapsed never shows open first. A narrow
+  // screen closes it as a drawer once mounted, and a drawer is never remembered, since it closes on every pick.
+  const [open, setOpen] = useState(!collapsed);
   const [narrow, setNarrow] = useState(false);
   const [failed, setFailed] = useState<{ id: string; error: string } | null>(null);
   const sidebar = useRef<HTMLElement>(null);
@@ -252,7 +264,18 @@ export function AssistantShell({
   useEffect(() => setFailed(null), [activeId]);
 
   return (
-    <ShellContext.Provider value={{ sidebarOpen: open, openSidebar: () => setOpen(true), sidebarWidth: narrow || !open ? 0 : width }}>
+    <ShellContext.Provider
+      value={{
+        sidebarOpen: open,
+        openSidebar: () => {
+          setOpen(true);
+          if (!narrow) {
+            rememberCollapsed(false);
+          }
+        },
+        sidebarWidth: narrow || !open ? 0 : width
+      }}
+    >
       <div className="relative flex min-h-0 flex-1 overflow-hidden bg-asst-bg font-plex text-[15px] leading-normal text-asst-text">
         {narrow && open ? (
           <button type="button" aria-label="Close sidebar" onClick={() => setOpen(false)} className="fixed inset-0 z-[19] bg-black/55" />
@@ -270,7 +293,12 @@ export function AssistantShell({
             <span className="text-sm font-semibold">CFT Workspace</span>
             <button
               type="button"
-              onClick={() => setOpen(false)}
+              onClick={() => {
+                setOpen(false);
+                if (!narrow) {
+                  rememberCollapsed(true);
+                }
+              }}
               aria-label="Collapse sidebar"
               title="Collapse sidebar"
               className="ml-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-asst-muted hover:bg-asst-hover hover:text-asst-text"

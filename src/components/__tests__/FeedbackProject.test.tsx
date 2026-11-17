@@ -360,7 +360,7 @@ describe("ProjectPage", () => {
     act$.reply.mockRejectedValue(new TypeError("Failed to fetch"));
     fireEvent.change(screen.getByRole("combobox", { name: /Reply to/ }), { target: { value: "Again" } });
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Reply" })));
-    expect(screen.getByRole("alert").textContent).toContain("check your connection");
+    expect(screen.getByRole("alert").textContent).toContain("Check your connection");
   });
 });
 

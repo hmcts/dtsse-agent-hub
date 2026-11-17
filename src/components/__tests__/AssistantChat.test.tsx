@@ -14,6 +14,7 @@ import { SAVE_AFTER_MS } from "@/components/assistant/DeckEditor";
 import { EmptyChat, type EmptyChatActions, NEW_CHAT_DRAFT } from "@/components/assistant/EmptyChat";
 import { draftKey } from "@/components/useDraft";
 import type { ThreadMessage } from "@/messages/direct-thread";
+import { MAX_BODY } from "@/messages/limits";
 import type { QuestionView } from "@/questions/views";
 import type { ConversationPage, TranscriptEntryView } from "@/transcripts/conversation";
 import { ACTION_FAULT } from "@/web/action-fault";
@@ -1464,6 +1465,56 @@ describe("Composer", () => {
     expect(box.getAttribute("aria-describedby")).toBe(alert.id);
     expect(box.value).toBe("too long a message");
   });
+
+  it("should show no character count when the message is well inside the limit", () => {
+    const box = composer(undefined, { limit: 100 });
+
+    fireEvent.change(box, { target: { value: "x".repeat(79) } });
+
+    expect(screen.queryByText(/characters$/)).toBeNull();
+    expect(box.getAttribute("aria-describedby")).toBeNull();
+  });
+
+  it("should count characters and describe the box with the count when the message nears the limit", () => {
+    const box = composer(undefined, { limit: 100 });
+
+    fireEvent.change(box, { target: { value: "x".repeat(80) } });
+
+    const count = screen.getByText("80 / 100 characters");
+    expect(box.getAttribute("aria-describedby")).toBe(count.id);
+    expect(screen.getByRole("button", { name: "Send" }).hasAttribute("disabled")).toBe(false);
+  });
+
+  it("should refuse to send and suggest attaching the text when the message is over the limit and files can be attached", async () => {
+    const onSend = vi.fn(async () => null);
+    const box = composer(onSend, { limit: 100, conversationId: CONVERSATION });
+
+    fireEvent.change(box, { target: { value: "x".repeat(101) } });
+    await act(async () => {
+      fireEvent.keyDown(box, { key: "Enter" });
+    });
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByText("101 / 100 characters").className).toContain("text-asst-error");
+    expect(screen.getByRole("alert").textContent).toBe("Your message is too long. Shorten it, or attach the text as a file.");
+    expect(screen.getByRole("button", { name: "Send" }).hasAttribute("disabled")).toBe(true);
+  });
+
+  it("should only ask to shorten the message when it is over the limit and files cannot be attached", () => {
+    const box = composer(undefined, { limit: 100, attach: false });
+
+    fireEvent.change(box, { target: { value: "x".repeat(101) } });
+
+    expect(screen.getByRole("alert").textContent).toBe("Your message is too long. Shorten it, then send.");
+  });
+
+  it("should count against the messages' own limit when the page sets none", () => {
+    const box = composer();
+
+    fireEvent.change(box, { target: { value: "x".repeat(MAX_BODY) } });
+
+    expect(screen.getByText(`${MAX_BODY.toLocaleString("en-GB")} / ${MAX_BODY.toLocaleString("en-GB")} characters`)).toBeTruthy();
+  });
 });
 
 describe("Composer skills", () => {
@@ -2414,7 +2465,8 @@ describe("ChatView slides", () => {
     await type("x".repeat(MAX_ASKED_BODY + 1));
 
     expect(send).not.toHaveBeenCalled();
-    expect(screen.getByRole("alert").textContent).toBe(`a message about a slide is at most ${MAX_ASKED_BODY} characters`);
+    expect(screen.getByRole("alert").textContent).toBe("Your message is too long. Shorten it, or attach the text as a file.");
+    expect(screen.getByRole("button", { name: "Send" }).hasAttribute("disabled")).toBe(true);
 
     await type("x".repeat(MAX_ASKED_BODY));
 

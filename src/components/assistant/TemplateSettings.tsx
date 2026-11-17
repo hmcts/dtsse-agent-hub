@@ -78,6 +78,7 @@ function Editor({
       action={save}
       label={template === null ? "Save a new template" : `Save your changes to ${template.name}`}
       keepValues
+      pendingText="Saving…"
       onSuccess={
         template === null
           ? () => {

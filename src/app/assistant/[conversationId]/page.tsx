@@ -30,6 +30,7 @@ import { SHARING_SETTINGS } from "@/app/assistant/sharing";
 import { connectionsData } from "@/assistant/connections";
 import { savedCredentialsData } from "@/assistant/saved-credentials";
 import { assistantPluginsData } from "@/assistant/settings";
+import { SIDEBAR_COOKIE, sidebarCollapsedOf } from "@/assistant/sidebar";
 import { offeredTemplates } from "@/assistant/templates";
 import { THEME_COOKIE, themeOf } from "@/assistant/theme";
 import { WAITING_COOKIE } from "@/assistant/waiting";
@@ -115,6 +116,7 @@ export default async function ConversationPage({
       groups={home.conversations}
       activeId={view.id}
       theme={theme}
+      collapsed={sidebarCollapsedOf(jar.get(SIDEBAR_COOKIE)?.value)}
       actions={{ ...ACTIONS, pinFeedback: pinFeedbackProject, archiveFeedback: archiveFeedbackProject }}
       connections={connectionsData(home.assistant, home.credentials)}
       viewerRoute={home.credentials.modelRoute}

@@ -319,7 +319,7 @@ describe("ShareDialog", () => {
       fireEvent.click(screen.getByRole("option", { name: /Bob Tester/ }));
     });
 
-    expect(screen.getByRole("alert").textContent).toContain("check your connection");
+    expect(screen.getByRole("alert").textContent).toContain("Check your connection");
     expect(screen.getByRole("button", { name: "Done" }).hasAttribute("disabled")).toBe(false);
   });
 

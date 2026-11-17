@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LocalSession } from "@/assistant/local-session";
 import type { ConversationLink, ConversationMark, PodSession } from "@/assistant/views";
 import { ArtefactPanel } from "@/components/assistant/ArtefactPanel";
-import { AssistantMarkdown } from "@/components/assistant/AssistantMarkdown";
+import { AssistantMarkdown, copyLabel } from "@/components/assistant/AssistantMarkdown";
 import { AssistantRefresh } from "@/components/assistant/AssistantRefresh";
 import { AssistantShell, SidebarToggle } from "@/components/assistant/AssistantShell";
 import { ProductSelect } from "@/components/assistant/ProductSelect";
@@ -38,6 +38,8 @@ beforeEach(() => {
   narrow = false;
   viewport(1024);
   window.localStorage.clear();
+  // biome-ignore lint/suspicious/noDocumentCookie: jsdom has no Cookie Store API, and the shell writes the cookie this way
+  document.cookie = "asst_sidebar=; Path=/; Max-Age=0";
   Object.defineProperty(window, "matchMedia", {
     configurable: true,
     writable: true,
@@ -351,7 +353,7 @@ describe("AssistantShell", () => {
 
     expect(push).not.toHaveBeenCalled();
     expect(within(screen.getByRole("menu", { name: "Workflows" })).getByRole("alert").textContent).toBe(
-      "that could not be done; check your connection and try again"
+      "That could not be done. Check your connection and try again."
     );
     expect(screen.getByRole("menuitem", { name: /Morning briefing/ }).hasAttribute("disabled")).toBe(false);
   });
@@ -506,6 +508,32 @@ describe("AssistantShell", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Open sidebar" }));
     expect(sidebar().hasAttribute("inert")).toBe(false);
+  });
+
+  it("should start collapsed with no flash of the open sidebar when the server says the person collapsed it", () => {
+    render(shell({ collapsed: true }));
+
+    expect(sidebar().hasAttribute("inert")).toBe(true);
+    expect(screen.getByRole("button", { name: "Open sidebar" })).toBeTruthy();
+  });
+
+  it("should remember collapsing and reopening in the cookie when the screen is wide", () => {
+    render(shell());
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+    expect(document.cookie).toContain("asst_sidebar=collapsed");
+
+    fireEvent.click(screen.getByRole("button", { name: "Open sidebar" }));
+    expect(document.cookie).not.toContain("asst_sidebar");
+  });
+
+  it("should not remember the drawer being closed when the screen is narrow", () => {
+    narrow = true;
+    render(shell());
+    fireEvent.click(screen.getByRole("button", { name: "Open sidebar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+
+    expect(document.cookie).not.toContain("asst_sidebar");
   });
 
   it("should start closed as a drawer and close with Escape or the backdrop when the screen is narrow", () => {
@@ -829,11 +857,80 @@ describe("AssistantMarkdown", () => {
     expect(screen.getByRole("heading", { level: 5, name: "Detail" })).toBeTruthy();
   });
 
-  it("should render headings as bold lines when showing an answer", () => {
-    render(<AssistantMarkdown source="# Title" />);
+  it("should render headings as real headings from h2 when showing an answer", () => {
+    render(<AssistantMarkdown source={"# Title\n\n## Section\n\n### Detail\n\n#### Deeper"} />);
 
-    expect(screen.queryByRole("heading")).toBeNull();
-    expect(screen.getByText("Title").tagName).toBe("P");
+    expect(screen.getByRole("heading", { level: 2, name: "Title" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 3, name: "Section" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 4, name: "Detail" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 4, name: "Deeper" })).toBeTruthy();
+  });
+
+  it("should name a code block's language and copy its text when the copy button is pressed", async () => {
+    const writeText = vi.fn(async () => undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    try {
+      const { container } = render(<AssistantMarkdown source={'```json\n{ "a": 1 }\n```'} />);
+
+      expect(screen.getByText("json")).toBeTruthy();
+      expect(container.querySelector("code[data-language='json']")?.textContent).toBe('{ "a": 1 }');
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: 'Copy json code: { "a": 1 }' }));
+      });
+
+      expect(writeText).toHaveBeenCalledWith('{ "a": 1 }');
+      expect(screen.getByRole("status").textContent).toBe("Copied");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("should offer copy on a code block with no language, and say so on screen when copying fails", async () => {
+    vi.stubGlobal("navigator", {
+      clipboard: {
+        writeText: vi.fn(async () => {
+          throw new Error("denied");
+        })
+      }
+    });
+    try {
+      render(<AssistantMarkdown source={"```\nplain\n```"} />);
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Copy code: plain" }));
+      });
+
+      expect(screen.getByRole("status").textContent).toBe("Could not copy. Select the text and copy it yourself.");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("should name each Copy button for its own fence, and keep the bar off a printed page, when an answer has several", () => {
+    const { container } = render(<AssistantMarkdown source={"```ts\nconst a = 1;\n```\n\n```\n\n  npm run build\n```"} />);
+
+    expect(screen.getByRole("button", { name: "Copy ts code: const a = 1;" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Copy code: npm run build" })).toBeTruthy();
+    expect(container.querySelector("pre")?.previousElementSibling?.className).toContain("print:hidden");
+  });
+
+  it("should clear the copied tick after a moment", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("navigator", { clipboard: { writeText: vi.fn(async () => undefined) } });
+    try {
+      render(<AssistantMarkdown source={"```\nplain\n```"} />);
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Copy code: plain" }));
+      });
+      expect(screen.getByRole("status").textContent).toBe("Copied");
+
+      act(() => {
+        vi.advanceTimersByTime(1500);
+      });
+
+      expect(screen.getByRole("status").textContent).toBe("");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("should open allowed links in a new tab without an opener and leave others as text", () => {
@@ -1035,5 +1132,16 @@ describe("ProductSelect", () => {
     fireEvent.change(select, { target: { value: "nfdiv" } });
 
     expect(onChange).toHaveBeenCalledWith("nfdiv");
+  });
+});
+
+describe("copyLabel", () => {
+  it("should cut a long first line short when naming the fence", () => {
+    expect(copyLabel(`${"x".repeat(45)}\nmore`, "sh")).toBe(`Copy sh code: ${"x".repeat(40)}…`);
+  });
+
+  it("should name only the language when the fence is empty", () => {
+    expect(copyLabel("\n  \n", "json")).toBe("Copy json code");
+    expect(copyLabel("", null)).toBe("Copy code");
   });
 });

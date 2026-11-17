@@ -25,5 +25,16 @@ export function useStickToBottom<T extends HTMLElement>(content: unknown) {
       stick.current = element.scrollHeight - element.scrollTop - element.clientHeight < STICK_DISTANCE;
     }
   }
-  return { ref, onScroll };
+  /**
+   * Follows the newest entry again whatever the reader was doing, and goes there now: for an action of their own,
+   * such as sending, whose result they expect to see.
+   */
+  function stickNow(): void {
+    stick.current = true;
+    const element = ref.current;
+    if (element) {
+      element.scrollTop = element.scrollHeight;
+    }
+  }
+  return { ref, onScroll, stickNow };
 }

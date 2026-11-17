@@ -5,4 +5,4 @@
 export const ACTION_FAULT = "something went wrong on our side; try again";
 
 /** What a client component says when a call to an action threw, so it never reached the hub or never came back. */
-export const ACTION_UNREACHABLE = "that could not be done; check your connection and try again";
+export const ACTION_UNREACHABLE = "That could not be done. Check your connection and try again.";

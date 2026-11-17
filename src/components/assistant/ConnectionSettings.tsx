@@ -141,7 +141,7 @@ function Paste({ saved, save, onCancel, onSaved }: { saved: SavedCredential; sav
   const id = useId();
   const field = useFocusOnMount<HTMLInputElement>();
   return (
-    <ActionForm action={save} label={`Save your ${saved.title}`} onSuccess={onSaved} className={BELOW}>
+    <ActionForm action={save} label={`Save your ${saved.title}`} onSuccess={onSaved} className={BELOW} pendingText="Saving…">
       <input type="hidden" name="kind" value={saved.kind} />
       <label htmlFor={`${id}-value`} className="text-[13px] font-medium">
         {saved.stored ? `New ${saved.title}` : saved.title}
