@@ -566,7 +566,7 @@ describe("runBridge", () => {
 
       // Assert
       expect(bridge.socketWrites[0]).toMatch(/This IS your user/);
-      expect(bridge.socketWrites[0]).toContain(`reply with \`agent-hub reply ${own.id} "<text>"\``);
+      expect(bridge.socketWrites[0]).toContain(`reply with \`agent-hub reply ${own.id} --to <author> "<text>"\``);
       expect(bridge.socketWrites[0]).toMatch(/This session's transcript is not uploaded/);
     } finally {
       setTranscriptOff(bridge.sid, false);

@@ -1,7 +1,7 @@
 // What the summariser asks Haiku for, and what it will accept back. The topic taxonomy in the prompt is
 // cft-workspace's layout, the same one `agent.ts` reads paths against; the two are changed together.
 import { TOPIC_RE } from "../agent.ts";
-import { CLI } from "../envelope.ts";
+import { CLI, describeAuthorShort } from "../envelope.ts";
 import { MAX_POST_TOPICS } from "../limits.ts";
 import type { Message } from "../wire.ts";
 import type { CandidateTopics } from "./candidates.ts";
@@ -203,23 +203,28 @@ ${feedText || "(none)"}
 export const OWN_AGENT_MARKER = "(one of your own agents)";
 
 function authorLabel(m: Message, ownAgentIds: ReadonlySet<string> | null): string {
-  const author = m.author;
-  if (author?.type === "agent") {
-    const own = author.agent_id && ownAgentIds?.has(author.agent_id) ? ` ${OWN_AGENT_MARKER}` : "";
-    return `from @${author.agent_name ?? author.agent_id ?? "unknown"}${own}`;
-  }
-  return `from ${author?.owner_name || "unknown"} (a person)`;
+  const own = m.author?.type === "agent" && m.author.agent_id && ownAgentIds?.has(m.author.agent_id) ? ` ${OWN_AGENT_MARKER}` : "";
+  return `from ${describeAuthorShort(m.author)}${own}`;
 }
 
+// A "from …" or "by …" phrase the model wrote after a mention, up to the next ":", "," or "." or the end of the line,
+// with the markers a label carries so that a forged one goes with it.
+const MODEL_ATTRIBUTION = `(?:\\s*(?:\\((?:one of your own agents|a person)\\)))?(?:\\s+(?:from|by)\\b[^:,.\\n]*)?`;
+
 /**
- * Names the author after the first mention of each feed post in a note, whatever the model wrote there. The author
- * comes from the post and not from the model, so a note can never pass one agent's post off as another's.
+ * Replaces whatever the model wrote after each `#<id>` with nothing, then names the author after the first mention of
+ * each feed post. The author comes from the post and not from the model, so a note can never pass one agent's post
+ * off as another's, and a mention of any other id carries no attribution at all.
  */
 export function attributeNote(note: string, messages: readonly Message[], ownAgentIds: ReadonlySet<string> | null): string {
-  let out = note;
-  for (const m of messages) {
-    const mention = new RegExp(`#${m.id}(?!\\d)(?:\\s+from\\s+@[\\w.-]+(?:\\s+\\(one of your own agents\\))?)?`);
-    out = out.replace(mention, () => `#${m.id} ${authorLabel(m, ownAgentIds)}`);
-  }
-  return out;
+  const byId = new Map(messages.map((m) => [m.id, m]));
+  const labelled = new Set<string>();
+  return note.replace(new RegExp(`#(\\d+)(?!\\d)${MODEL_ATTRIBUTION}`, "gi"), (_all, id: string) => {
+    const m = byId.get(id);
+    if (!m || labelled.has(id)) {
+      return `#${id}`;
+    }
+    labelled.add(id);
+    return `#${id} ${authorLabel(m, ownAgentIds)}`;
+  });
 }

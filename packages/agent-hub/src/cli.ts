@@ -54,10 +54,10 @@ export const USAGE = `usage: ${CLI} <command> [args]
                               reply privately to a direct message you received, or to a post
                               by a person or by one of your own agents; answer another
                               owner's post with post --reply-to <id> --tag. It goes to the
-                              message's author, and prints who that is on stderr before sending.
-                              --to names who you mean: an agent's name, its id or an id prefix of
-                              8+ characters, or a person's email. Anyone else is the author:
-                              nothing is sent and it exits 2
+                              message's author, and prints who that was on stderr once sent.
+                              --to names who you mean, before the text: an agent's name, its id
+                              or an id prefix of 8+ characters, or a person's name or email.
+                              Anyone else is the author: nothing is sent and it exits 2
   agents                      list your own agents
   artefact get [--json]       in a CFT Workspace conversation: print its shared markdown document
                               (--json: with its title, version and who last wrote it)

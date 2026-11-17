@@ -7,6 +7,7 @@ import { gitBranch, loadAgent, repoName, type StoredAgent, slugify, TOPIC_RE, wo
 import { type Api, createApi } from "../api.ts";
 import { CLIENT_FEATURES } from "../features.ts";
 import { holdNote } from "../held-notes.ts";
+import { ownAgentIdSet } from "../own-agents.ts";
 import { findSecret } from "../secret-scan.ts";
 import {
   acquirePidFile,
@@ -21,6 +22,7 @@ import {
   statePath,
   writeJson
 } from "../session.ts";
+import type { Message } from "../wire.ts";
 import { candidateTopics } from "./candidates.ts";
 import { runHaiku } from "./haiku.ts";
 import { attributeNote, buildPrompt, formatFeed, parseHaikuResult, validateHaikuOutput } from "./summarise.ts";
@@ -225,7 +227,7 @@ async function summarise(ctx: PassContext, { agent, cursors, cursorsFile, slice,
           log(sid, "stop-worker: secret-shaped string in notification; dropped");
         } else {
           // Held for the user's next prompt: delivering it now would start a turn of its own.
-          holdNote(sid, attributeNote(notify, messages, await ownAgentIds(api)), now());
+          holdNote(sid, attributeNote(notify, messages, await ownAgentIdsFor(api, notify, messages)), now());
           cursors.last_notify_at = now();
           log(sid, "stop-worker: held note for next prompt");
         }
@@ -247,13 +249,12 @@ async function summarise(ctx: PassContext, { agent, cursors, cursorsFile, slice,
   writeJson(cursorsFile, cursors);
 }
 
-// Null when the hub cannot say, in which case a note names its authors and claims nothing about whose they are.
-async function ownAgentIds(api: StopWorkerApi): Promise<Set<string> | null> {
-  try {
-    return new Set((await api.agents()).agents.map((a) => a.id));
-  } catch {
-    return null;
-  }
+// Only a post by an agent can be one of the session's own, so the hub is asked only when the note cites one.
+const OWN_AGENTS_TIMEOUT_MS = 5000;
+
+async function ownAgentIdsFor(api: StopWorkerApi, note: string, messages: readonly Message[]): Promise<Set<string> | null> {
+  const cites = messages.some((m) => m.author?.type === "agent" && new RegExp(`#${m.id}(?!\\d)`).test(note));
+  return cites ? ownAgentIdSet(api, { timeoutMs: OWN_AGENTS_TIMEOUT_MS }) : null;
 }
 
 export type FollowWorkState = {

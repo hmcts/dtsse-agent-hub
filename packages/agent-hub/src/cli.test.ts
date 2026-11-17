@@ -612,7 +612,6 @@ describe("the commands, in process against the mock hub", () => {
     // Assert
     expect(r.code).toBe(1);
     expect(r.errors).toEqual([
-      `→ replying to @bob-reply-target (${post.author.agent_id})`,
       "agent-hub reply: a private reply to another owner's post is not allowed; post on the topic and tag that agent instead",
       "Answer on the board instead:",
       `  agent-hub post --topics zz-dup,pcs-api --title "<title>" --reply-to ${post.id} --tag @${post.author.agent_id}`
@@ -648,7 +647,7 @@ describe("the commands, in process against the mock hub", () => {
 
       // Assert
       expect(r.code).toBe(0);
-      expect(r.errors).toEqual([`→ replying to @Reply-Target (${post.author.agent_id})`]);
+      expect(r.errors).toEqual([`replied to @Reply-Target [agent ${(post.author.agent_id as string).slice(0, 8)}]`]);
       expect(r.lines).toEqual([expect.stringMatching(/^replied with #\d+$/)]);
     });
 
@@ -661,7 +660,7 @@ describe("the commands, in process against the mock hub", () => {
 
       // Assert
       expect(r.code).toBe(0);
-      expect(r.errors).toEqual(["→ replying to Me Tester (me@example.com)"]);
+      expect(r.errors).toEqual(["replied to Me Tester <me@example.com> (a person)"]);
     });
 
     it.each([
@@ -767,7 +766,7 @@ describe("the commands, in process against the mock hub", () => {
       // Assert
       expect(r.code).toBe(2);
       expect(r.errors).toEqual([
-        `agent-hub reply: #${post.id} was written by @actual-author (${post.author.agent_id}), not "@somebody-else"; nothing was sent`
+        `agent-hub reply: #${post.id} was written by @actual-author [agent ${(post.author.agent_id as string).slice(0, 8)}], not "@somebody-else"; nothing was sent`
       ]);
       expect(r.lines).toEqual([]);
       expect(sends()).toHaveLength(0);
@@ -783,9 +782,102 @@ describe("the commands, in process against the mock hub", () => {
 
       // Assert
       expect(wrong.code).toBe(2);
-      expect(wrong.errors[0]).toBe(`agent-hub reply: #${post.id} was written by Me Tester (me@example.com), not "other@example.com"; nothing was sent`);
+      expect(wrong.errors[0]).toBe(
+        `agent-hub reply: #${post.id} was written by Me Tester <me@example.com> (a person), not "other@example.com"; nothing was sent`
+      );
       expect(right.code).toBe(0);
       expect(sends()).toHaveLength(1);
+    });
+
+    it("should send when --to is the name of the person who wrote the post, in any case, and print no email in what it was given", async () => {
+      // Arrange
+      const post = hub.addPost({ topics: ["zz-reply"], title: "t", bodyText: "x", user: me });
+
+      // Act
+      const r = await cli(["reply", post.id, "--to", "  me TESTER ", "hi"]);
+
+      // Assert
+      expect(r.code).toBe(0);
+      expect(sends()).toHaveLength(1);
+    });
+
+    it("should send when --to is @ and the whole agent id", async () => {
+      // Arrange
+      const post = ownPost("at-id");
+
+      // Act
+      const r = await cli(["reply", post.id, "--to", `@${post.author.agent_id}`, "hi"]);
+
+      // Assert
+      expect(r.code).toBe(0);
+      expect(sends()).toHaveLength(1);
+    });
+
+    it("should accept --to before the id and before - for stdin, and refuse it after the message with exit 2", async () => {
+      // Arrange
+      const post = ownPost("place-to");
+
+      // Act
+      const stdin = await cli(["reply", post.id, "--to", "place-to", "-"], { input: "from stdin" });
+      const after = await cli(["reply", post.id, "hi", "--to", "place-to"]);
+      const afterDash = await cli(["reply", post.id, "-", "--to", "place-to"], { input: "from stdin" });
+      const equalsAfter = await cli(["reply", post.id, "hi", "--to=place-to"]);
+
+      // Assert
+      expect(stdin.code).toBe(0);
+      expect(sends().map((c) => c.body.body)).toEqual(["from stdin"]);
+      for (const r of [after, afterDash, equalsAfter]) {
+        expect(r.code).toBe(2);
+        expect(r.errors.join("\n")).toMatch(/put --to before the message/);
+      }
+    });
+
+    it("should refuse with exit 2 and send nothing when two of the caller's agents share the name and the author is one of them", async () => {
+      // Arrange
+      const post = ownPost("twin-name");
+      hub.agents.set("twin-other", { id: "twin-other", owner_oid: me.oid, name: "Twin-Name", status: "idle" });
+
+      // Act
+      const byName = await cli(["reply", post.id, "--to", "twin-name", "hi"]);
+      const byId = await cli(["reply", post.id, "--to", post.author.agent_id as string, "hi"]);
+
+      // Assert
+      expect(byName.code).toBe(2);
+      expect(byName.errors.join("\n")).toMatch(
+        /more than one of your agents is called "twin-name"; give the agent id or an 8-character prefix of it; nothing was sent/
+      );
+      expect(byId.code).toBe(0);
+      expect(sends()).toHaveLength(1);
+    });
+
+    it("should refuse with exit 2 and send nothing when a name cannot be checked against the caller's agents", async () => {
+      // Arrange
+      const post = ownPost("unchecked-name");
+      const env = cliEnv();
+      const api = { ...createApi({ env }), agents: async () => Promise.reject(new Error("down")) };
+      const out = sink();
+
+      // Act
+      const code = await runCli(["reply", post.id, "--to", "unchecked-name", "hi"], { ...out.options, env, api, readStdin: () => "", cwd: () => home.root });
+
+      // Assert
+      expect(code).toBe(2);
+      expect(out.errors.join("\n")).toMatch(/give the agent id/);
+      expect(sends()).toHaveLength(0);
+    });
+
+    it("should refuse and send nothing when --to is given and the post cannot be read", async () => {
+      // Arrange
+      const bobs = hub.addPost({ topics: ["zz-dup"], bodyText: "x", title: "x", fromAgent: "bob-unreadable" }).author.agent_id as string;
+      const theirs = hub.sendDirectFromOwner(bobs, "for bob");
+
+      // Act
+      const r = await cli(["reply", theirs.id, "--to", "bob-unreadable", "hi"]);
+
+      // Assert
+      expect(r.code).toBe(1);
+      expect(r.errors.join("\n")).toMatch(/^agent-hub reply: GET \/api\/agent\/messages\/\d+ failed: 40[34]/);
+      expect(sends()).toHaveLength(0);
     });
 
     it("should refuse an agent's id given to a person's post, and a --to with no value", async () => {
@@ -804,7 +896,7 @@ describe("the commands, in process against the mock hub", () => {
     });
   });
 
-  it("should print the hub's refusal to read it, send nothing and exit 1 when reply names a direct message the agent did not receive", async () => {
+  it("should print only the hub's refusal and exit 1 when reply names a direct message the agent did not receive", async () => {
     // Arrange: a direct between two of Bob's agents, which this session can neither answer nor read.
     const bobs = hub.addPost({ topics: ["zz-dup"], bodyText: "x", title: "x", fromAgent: "bob-direct-elsewhere" }).author.agent_id as string;
     const theirs = hub.sendDirectFromOwner(bobs, "for bob");
@@ -814,8 +906,7 @@ describe("the commands, in process against the mock hub", () => {
 
     // Assert
     expect(r.code).toBe(1);
-    expect(r.errors.join("\n")).toMatch(/^agent-hub reply: GET \/api\/agent\/messages\/\d+ failed: 40[34]/);
-    expect(hub.calls.some((c) => c.method === "POST" && c.path === `/api/agent/${agentId}/direct` && c.body.reply_to_message === theirs.id)).toBe(false);
+    expect(r.errors).toEqual([`agent-hub reply: POST /api/agent/${agentId}/direct failed: 403 an agent can only reply to a direct message it received`]);
   });
 
   it("should refuse send and reply when the arguments are wrong", async () => {
@@ -3516,7 +3607,7 @@ process.stdout.write(JSON.stringify({ type: 'result', is_error: false, result: J
     expect(ctx.status).toBe(0);
     const out = JSON.parse(ctx.stdout);
     expect(out.hookSpecificOutput.hookEventName).toBe("UserPromptSubmit");
-    expect(out.hookSpecificOutput.additionalContext).toMatch(new RegExp(`#${feed.id} from @carol-pcs is about the same table`));
+    expect(out.hookSpecificOutput.additionalContext).toMatch(new RegExp(`#${feed.id} from @carol-pcs \\[agent [0-9a-f]{8}\\] is about the same table`));
     expect(fs.existsSync(stateFile("held-notes.jsonl"))).toBe(false);
 
     expect(hub.calls.filter((c) => c.path === "/api/agent/register").length).toBe(registers + 1);

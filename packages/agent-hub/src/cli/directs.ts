@@ -1,10 +1,9 @@
 // Direct messages between a person's own agents, and the advice that points anything else at the board.
-import type { Api } from "../api.ts";
 import { ApiError } from "../api.ts";
 import { type DirectPeer, peerOf, peerOfReply, recordDirect } from "../directs.ts";
-import { authorAgentTag, boardAnswerCommand, CLI } from "../envelope.ts";
+import { authorAgentTag, boardAnswerCommand, CLI, describeAuthorShort } from "../envelope.ts";
 import { requireSessionId } from "../session.ts";
-import type { Message, MessageAuthor } from "../wire.ts";
+import type { AgentSummary, Message, MessageAuthor } from "../wire.ts";
 import { type Cli, type Command, refuseSecrets, requireAgent, textArg, UsageError } from "./command.ts";
 
 // The message is already sent; failing to keep a local copy must not fail the command.
@@ -69,13 +68,9 @@ function isOtherOwnersPost(e: unknown): e is ApiError {
   return refusal(e, 403, "a private reply to another owner's post is not allowed");
 }
 
-/** Prints the hub's refusal and the `post` that answers on the board, filled in from the post when it can be read. */
-async function replyOnBoard(cli: Cli, api: Api, id: string, error: ApiError): Promise<number> {
+/** Prints the hub's refusal and the `post` that answers on the board, filled in from the post when it was read. */
+function replyOnBoard(cli: Cli, id: string, original: Message | null, error: ApiError): number {
   cli.printError(`${CLI} reply: ${error.body?.error}`);
-  const original = await api.message(id).then(
-    (res) => res.message,
-    () => null
-  );
   cli.printError("Answer on the board instead:");
   cli.printError(`  ${boardAnswerCommand({ topics: original?.topics, replyTo: id, tag: authorAgentTag(original?.author) ?? "<agent id>" })}`);
   return 1;
@@ -84,67 +79,96 @@ async function replyOnBoard(cli: Cli, api: Api, id: string, error: ApiError): Pr
 /** The shortest agent id prefix `reply --to` accepts: anything shorter could name several agents. */
 export const MIN_ID_PREFIX = 8;
 
-/** Who a reply to a post by `author` reaches, as printed before it is sent. */
-export function recipientLine(author: MessageAuthor): string {
-  return `→ replying to ${describeRecipient(author)}`;
-}
+const MISPLACED_TO = "put --to before the message";
 
-function describeRecipient(author: MessageAuthor): string {
-  if (author.type === "agent") {
-    return `@${author.agent_name ?? "unknown"} (${author.agent_id ?? "no agent id"})`;
-  }
-  return author.owner_email ? `${author.owner_name} (${author.owner_email})` : author.owner_name;
-}
+const isToFlag = (arg: string | undefined) => arg === "--to" || !!arg?.startsWith("--to=");
 
-/** The `--to` and its value, in front of the text or after the id, and what is left. Text after them is never read as options. */
+/**
+ * The `--to` and its value, wherever they come before the message text, and what is left. The text starts at the
+ * argument after the id, so a `--to` after it is an error rather than words of the message that were never meant
+ * as an option: it would otherwise send without the check the caller asked for. Other option-like words in the text
+ * are left alone.
+ */
 function takeTo(args: string[]): { to: string | null; rest: string[] } {
-  for (const i of [0, 1]) {
-    const arg = args[i];
+  let to: string | null = null;
+  const rest: string[] = [];
+  let i = 0;
+  for (; i < args.length && rest.length < 2; i++) {
+    const arg = args[i] as string;
+    if (!isToFlag(arg)) {
+      rest.push(arg);
+      continue;
+    }
+    if (to !== null) {
+      throw new UsageError("--to given twice");
+    }
     if (arg === "--to") {
-      const value = args[i + 1];
+      const value = args[++i];
       if (value === undefined) {
         throw new UsageError("--to needs a value");
       }
-      return { to: value, rest: [...args.slice(0, i), ...args.slice(i + 2)] };
-    }
-    if (arg?.startsWith("--to=")) {
-      return { to: arg.slice("--to=".length), rest: [...args.slice(0, i), ...args.slice(i + 1)] };
+      to = value;
+    } else {
+      to = arg.slice("--to=".length);
     }
   }
-  return { to: null, rest: args };
+  const text = args.slice(i);
+  if (text.some(isToFlag)) {
+    throw new UsageError(MISPLACED_TO);
+  }
+  return { to, rest: [...rest, ...text] };
 }
 
+type Match = { ok: true } | { ok: false; why?: string };
+const MATCH: Match = { ok: true };
+const NO_MATCH: Match = { ok: false };
+
 /**
- * Whether `to` names the author: an agent by its name (case-insensitive, with or without the `@`) or its id, exact or
- * as a prefix of at least `MIN_ID_PREFIX` characters that none of the caller's other agents shares; a person by email.
- * A string is a refusal that needs more than "not the author" to explain.
+ * Whether `to` names the author, after one leading `@` is dropped: an agent by its name (case-insensitive), unless
+ * several of the caller's agents share it, or by its id, exact or as a prefix of at least `MIN_ID_PREFIX`
+ * characters that none of the caller's other agents shares; a person by name or email. A `why` is a refusal that
+ * needs more than "not the author" to explain.
  */
-async function matchesAuthor(author: MessageAuthor, to: string, agentIds: () => Promise<string[]>): Promise<boolean | string> {
-  const wanted = to.trim().toLowerCase();
-  if (author.type !== "agent") {
-    return !!author.owner_email && author.owner_email.toLowerCase() === wanted;
+async function matchesAuthor(author: MessageAuthor, to: string, ownAgents: () => Promise<AgentSummary[]>): Promise<Match> {
+  const wanted = to.trim().replace(/^@/, "").trim().toLowerCase();
+  if (!wanted) {
+    return NO_MATCH;
   }
-  if (author.agent_name && author.agent_name.toLowerCase() === wanted.replace(/^@\s*/, "")) {
-    return true;
+  if (author.type !== "agent") {
+    const email = author.owner_email?.trim().toLowerCase();
+    return wanted === email || wanted === author.owner_name?.trim().toLowerCase() ? MATCH : NO_MATCH;
   }
   const id = (author.agent_id ?? "").toLowerCase();
-  if (!wanted || !id.startsWith(wanted)) {
-    return false;
+  if (author.agent_name && author.agent_name.trim().toLowerCase() === wanted) {
+    let agents: AgentSummary[];
+    try {
+      agents = await ownAgents();
+    } catch {
+      return { ok: false, why: "could not check that the name is unambiguous; give the agent id" };
+    }
+    const sameName = agents.filter((a) => a.name.trim().toLowerCase() === wanted);
+    const ambiguous = sameName.length > 1 && sameName.some((a) => a.id.toLowerCase() === id);
+    return ambiguous
+      ? { ok: false, why: `more than one of your agents is called "${wanted}"; give the agent id or an ${MIN_ID_PREFIX}-character prefix of it` }
+      : MATCH;
+  }
+  if (!id.startsWith(wanted)) {
+    return NO_MATCH;
   }
   if (wanted === id) {
-    return true;
+    return MATCH;
   }
   if (wanted.length < MIN_ID_PREFIX) {
-    return `an agent id prefix needs at least ${MIN_ID_PREFIX} characters`;
+    return { ok: false, why: `an agent id prefix needs at least ${MIN_ID_PREFIX} characters` };
   }
-  let ids: string[];
+  let agents: AgentSummary[];
   try {
-    ids = await agentIds();
+    agents = await ownAgents();
   } catch {
-    return "could not check that the id prefix is unambiguous; give the whole id";
+    return { ok: false, why: "could not check that the id prefix is unambiguous; give the whole id" };
   }
-  const shared = ids.filter((other) => other.toLowerCase() !== id && other.toLowerCase().startsWith(wanted));
-  return shared.length ? `"${to.trim()}" is also a prefix of another of your agents' ids` : true;
+  const shared = agents.filter((other) => other.id.toLowerCase() !== id && other.id.toLowerCase().startsWith(wanted));
+  return shared.length ? { ok: false, why: `"${to.trim()}" is also a prefix of another of your agents' ids` } : MATCH;
 }
 
 export const reply: Command = async (cli, args) => {
@@ -158,25 +182,45 @@ export const reply: Command = async (cli, args) => {
   const body = textArg(cli, rest.slice(1), "reply");
   refuseSecrets(body);
   const api = cli.api();
-  const original = (await api.message(id)).message;
-  if (to !== null) {
-    const match = await matchesAuthor(original.author, to, async () => (await api.agents()).agents.map((a) => a.id));
-    if (match !== true) {
-      const why = typeof match === "string" ? ` (${match})` : "";
-      throw new UsageError(`#${id} was written by ${describeRecipient(original.author)}, not "${to.trim()}"${why}; nothing was sent`);
+  // Without --to the read only names the recipient afterwards, so a post the caller cannot read is left for the hub
+  // to refuse in its own words.
+  let original: Message | null = null;
+  try {
+    original = (await api.message(id)).message;
+  } catch (e) {
+    if (to !== null) {
+      throw e;
     }
   }
-  cli.printError(recipientLine(original.author));
+  if (to !== null && original) {
+    let agents: Promise<AgentSummary[]> | undefined;
+    const match = await matchesAuthor(original.author, to, () => {
+      agents ??= api.agents().then((res) => res.agents);
+      return agents;
+    });
+    if (!match.ok) {
+      const writer = describeAuthorShort(original.author);
+      throw new UsageError(
+        match.why
+          ? `can't confirm "${to.trim()}" as the author of #${id}, ${writer}: ${match.why}; nothing was sent`
+          : `#${id} was written by ${writer}, not "${to.trim()}"; nothing was sent`
+      );
+    }
+  }
   let res: Awaited<ReturnType<typeof api.direct>>;
   try {
     res = await api.direct(agent.agent_id, { reply_to_message: id, body });
   } catch (e) {
     if (isOtherOwnersPost(e)) {
-      return await replyOnBoard(cli, api, id, e);
+      return replyOnBoard(cli, id, original, e);
     }
     throw e;
   }
-  await keepDirect(sid, res.message, () => peerOfReply(sid, id, null) ?? peerOf(original.author));
+  const author = original?.author;
+  await keepDirect(sid, res.message, () => peerOfReply(sid, id, null) ?? (author ? peerOf(author) : null));
+  if (author) {
+    cli.printError(`replied to ${describeAuthorShort(author)}`);
+  }
   cli.print(`replied with #${res.message.id}`);
   return 0;
 };
