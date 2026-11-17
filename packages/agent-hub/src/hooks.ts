@@ -325,7 +325,7 @@ function slidesNote(env: Env): string {
  * Pod conversations can have one Docmosis template, published with the cft-docmosis-template skill's tools; a person's
  * change to its data is read back with `docmosis get`.
  */
-const DOCMOSIS_NOTE = ` A Docmosis template the person should see is published with \`docmosis schema\`, \`docmosis render-file\` and \`${CLI} docmosis put\`; after a person has changed its data, run \`${CLI} docmosis get\` before changing the template.`;
+const DOCMOSIS_NOTE = ` A Docmosis template the person should see is published with \`docmosis schema\`, \`docmosis render-file\` and \`${CLI} docmosis put\` (or, for a PDF that did not reach the hub, \`${CLI} docmosis pdf\`); after a person has changed its data, run \`${CLI} docmosis get\` before changing the template.`;
 
 export async function runHook(
   event: string,

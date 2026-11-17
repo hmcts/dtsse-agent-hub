@@ -283,6 +283,27 @@ describe("DocmosisPanel rendering", () => {
     expect(renders[1]?.body.base_version).toBe(4);
     expect(renders[1]?.body.data.claimant).toEqual({ name: "Mine" });
   });
+
+  it("should keep what was typed during a busy wait as unsaved, and offer a conflict when an agent version arrives", async () => {
+    const served = serve();
+    const props = { conversationId: CONVERSATION, owner: true, onClose: () => undefined, narrow: false, announce: () => undefined };
+    const { rerender } = render(<DocmosisPanel {...props} docmosis={SUMMARY} />);
+    await wait(0);
+    const name = () => within(screen.getByRole("group", { name: "claimant" })).getByLabelText("name") as HTMLInputElement;
+    fireEvent.change(name(), { target: { value: "Sent" } });
+    await wait(RENDER_AFTER_MS);
+    fireEvent.change(name(), { target: { value: "Typed later" } });
+    await act(async () => served.renders[0]?.answer(503, { error: "busy", retry_after: 30, version: 4, revision: 1 }));
+    const base = served.fetchMock.getMockImplementation();
+    const agent = view({ version: 5, data: { claimant: { name: "Agent" } } });
+    served.fetchMock.mockImplementation(async (url: string, init?: RequestInit) =>
+      init?.method !== "POST" && url.endsWith(`/docmosis/${CONVERSATION}`) ? new Response(JSON.stringify(agent)) : (base?.(url, init) as Promise<Response>)
+    );
+    rerender(<DocmosisPanel {...props} docmosis={{ ...SUMMARY, version: 5 }} />);
+    await wait(0);
+    expect(screen.getByRole("alert").textContent).toContain("The assistant has changed this template.");
+    expect(name().value).toBe("Typed later");
+  });
 });
 
 const mainReads = (reads: string[]) => reads.filter((url) => url.endsWith(`/docmosis/${CONVERSATION}`)).length;
@@ -395,40 +416,45 @@ describe("DocmosisPanel render refusals", () => {
     return { ...served, closed };
   }
 
-  it("should honour retry-after on a 429, and send again from the version the answer names", async () => {
-    const { renders } = await edit();
-    await act(async () => {
-      const reply = renders[0]?.answer;
-      reply?.(429, { error: "slow down", version: 4, revision: 2 });
-    });
-    await wait(4999);
-    expect(renders).toHaveLength(1);
-    await wait(1);
-    expect(renders).toHaveLength(2);
-    expect(renders[1]?.body.base_version).toBe(4);
-    expect(renders[1]?.body.base_revision).toBe(2);
-    expect(renders[1]?.body.data.claimant).toEqual({ name: "Z" });
-  });
-
-  it("should wait the retry_after a 429 names in its body", async () => {
-    const { renders } = await edit();
-    await act(async () => renders[0]?.answer(429, { error: "slow down", retry_after: 9, version: 4, revision: 1 }));
-    expect(screen.getByText("The renderer is busy, trying again in 9s")).toBeTruthy();
-    await wait(9000);
-    expect(renders).toHaveLength(2);
-  });
-
   it("should prefer the retry-after header to the body", async () => {
     const served = serve();
     const fetchMock = served.fetchMock;
     const base = fetchMock.getMockImplementation();
     fetchMock.mockImplementation(async (url: string, init?: RequestInit) =>
-      init?.method === "POST" ? new Response("{}", { status: 429, headers: { "retry-after": "3" } }) : (base?.(url, init) as Promise<Response>)
+      init?.method === "POST" ? new Response("{}", { status: 503, headers: { "retry-after": "3" } }) : (base?.(url, init) as Promise<Response>)
     );
     await open();
     fireEvent.change(within(screen.getByRole("group", { name: "claimant" })).getByLabelText("name"), { target: { value: "Z" } });
     await wait(RENDER_AFTER_MS);
     expect(screen.getByText("The renderer is busy, trying again in 3s")).toBeTruthy();
+  });
+
+  it("should take a newer base from a superseded answer, and leave the phase and the pdf to the newer render", async () => {
+    const { renders, reads } = await edit();
+    const pdfReads = () => reads.filter((url) => url.endsWith("/pdf")).length;
+    const before = pdfReads();
+    await act(async () => renders[0]?.answer(200, { version: 6, revision: 2, status: "superseded" }));
+    await wait(0);
+    expect(pdfReads()).toBe(before);
+    expect(screen.queryByText("The renderer could not be reached.")).toBeNull();
+    fireEvent.change(within(screen.getByRole("group", { name: "claimant" })).getByLabelText("name"), { target: { value: "ZZ" } });
+    await wait(RENDER_AFTER_MS);
+    expect(renders[1]?.body.base_version).toBe(6);
+    expect(renders[1]?.body.base_revision).toBe(2);
+  });
+
+  it("should not move the base back for a superseded answer older than it", async () => {
+    const { renders } = await edit();
+    await act(async () => renders[0]?.answer(200, { version: 1, revision: 0, status: "superseded" }));
+    fireEvent.change(within(screen.getByRole("group", { name: "claimant" })).getByLabelText("name"), { target: { value: "ZZ" } });
+    await wait(RENDER_AFTER_MS);
+    expect(renders[1]?.body.base_version).toBe(3);
+  });
+
+  it("should reject any other 4xx, a 429 included, and not mark the data saved", async () => {
+    const { renders } = await edit();
+    await act(async () => renders[0]?.answer(429, { error: "slow down", version: 4, revision: 2 }));
+    expect(screen.getByRole("alert").textContent).toContain("turned the request down (status 429)");
   });
 
   it("should say the renderer could not be reached on a 502, adopt the version it names, and send again on request", async () => {

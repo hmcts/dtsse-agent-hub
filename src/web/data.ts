@@ -550,8 +550,11 @@ export async function docmosisPdf(viewer: Identity, id: string, version: number)
   if ((await docmosisAccess(viewer, id)) === undefined) {
     return undefined;
   }
-  const [view, bytes] = await Promise.all([docmosisView(prisma, id, version), readDocmosisPdf(prisma, id, version)]);
-  return view === null || bytes === null ? undefined : { name: view.name, bytes };
+  const [row, bytes] = await Promise.all([
+    prisma.assistantDocmosisVersion.findUnique({ where: { conversationId_version: { conversationId: id, version } }, select: { name: true } }),
+    readDocmosisPdf(prisma, id, version)
+  ]);
+  return row === null || bytes === null ? undefined : { name: row.name, bytes };
 }
 
 /** Who one of the viewer's own conversations is shared with, or `undefined` when it is not theirs to share. */

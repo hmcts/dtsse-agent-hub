@@ -26,6 +26,46 @@ const DOCX_REF_RE = /^sha256:([0-9a-f]{64})$/;
 /** How often a PDF is sent before giving up: the version is already published, and putting again would publish another. */
 export const PDF_RETRY: RetryOptions = { attempts: 3, baseMs: 500 };
 
+const utf8 = new TextEncoder();
+
+function compareBytes(a: Uint8Array, b: Uint8Array): number {
+  for (let at = 0; at < Math.min(a.length, b.length); at += 1) {
+    if (a[at] !== b[at]) {
+      return (a[at] ?? 0) - (b[at] ?? 0);
+    }
+  }
+  return a.length - b.length;
+}
+
+/** Whether Postgres refuses this text as a jsonb is written: it holds a NUL, or half of a surrogate pair. */
+const unstorable = (text: string): boolean =>
+  text.includes(String.fromCharCode(0)) || /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/.test(text);
+
+/**
+ * `value` as Postgres prints a jsonb, which is what the hub measures against its limit: `", "` between items, `": "`
+ * after a key, and an object's keys shortest first. A copy of the hub's `jsonbText`, which the client cannot import.
+ * `undefined` for text a jsonb cannot hold.
+ */
+export function jsonbText(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    return unstorable(value) ? undefined : JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    const items = value.map(jsonbText);
+    return items.includes(undefined) ? undefined : `[${items.join(", ")}]`;
+  }
+  if (value !== null && typeof value === "object") {
+    const entries = Object.entries(value)
+      .filter(([, item]) => item !== undefined)
+      .map(([key, item]) => ({ key, bytes: utf8.encode(key), text: jsonbText(item) }));
+    if (entries.some((entry) => entry.text === undefined || unstorable(entry.key))) {
+      return undefined;
+    }
+    entries.sort((a, b) => a.bytes.length - b.bytes.length || compareBytes(a.bytes, b.bytes));
+    return `{${entries.map((entry) => `${JSON.stringify(entry.key)}: ${entry.text}`).join(", ")}}`;
+  }
+  return JSON.stringify(value);
+}
 const sha256 = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
 
 function noAsset(e: unknown): never {
@@ -110,9 +150,13 @@ function readJsonObject(file: string, what: string): Record<string, unknown> {
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     throw new UsageError(`${file} must hold the ${what} object`);
   }
-  // The hub measures the JSON it stores, not the file's formatting.
-  if (Buffer.byteLength(JSON.stringify(parsed)) > MAX_JSON_BYTES) {
-    throw new UsageError(`${what} ${file} is larger than the hub takes, ${MAX_JSON_BYTES} bytes as compact JSON`);
+  // The hub measures the JSON as Postgres stores it, not the file's formatting.
+  const stored = jsonbText(parsed);
+  if (stored === undefined) {
+    throw new UsageError(`${what} ${file} has text the hub cannot store: a NUL character, or half of a surrogate pair`);
+  }
+  if (utf8.encode(stored).byteLength > MAX_JSON_BYTES) {
+    throw new UsageError(`${what} ${file} is larger than the hub takes, ${MAX_JSON_BYTES} bytes as the hub stores it`);
   }
   refuseSecrets(text);
   return parsed as Record<string, unknown>;
@@ -244,11 +288,11 @@ async function putDocmosis(cli: Cli, argv: string[]): Promise<number> {
   record(dir, written.version, written.revision, name);
   if (pdf !== undefined && pdfFile !== undefined) {
     try {
-      await withRetry(() => api.putDocmosisPdf(agent.agent_id, written.version, pdf), PDF_RETRY);
+      await withRetry(() => api.putDocmosisPdf(agent.agent_id, written.version, written.revision, pdf), PDF_RETRY);
     } catch (e) {
       cli.printError(`agent-hub docmosis: published the template as version ${written.version}, but its PDF did not reach the hub: ${(e as Error).message}`);
       cli.printError(
-        `Do not put the template again, which would publish another version, unless you have changed it. The person can still render it from the panel; to send this PDF, put the template again with --pdf ${shellWord(pdfFile)}.`
+        `Do not put the template again, which would publish another version. The person can still render it from the panel; to send this PDF, run ${CLI} docmosis pdf --version ${written.version} ${shellWord(pdfFile)}.`
       );
       return 1;
     }
@@ -328,6 +372,58 @@ async function getDocmosis(cli: Cli, argv: string[]): Promise<number> {
   return 0;
 }
 
+function pdfArgs(argv: string[]): { file: string; version: number } {
+  const { flags, rest } = parseFlags(argv, ["version"]);
+  const [file, ...extra] = rest;
+  if (!file) {
+    throw new UsageError("docmosis pdf takes the PDF file");
+  }
+  if (extra.length) {
+    throw new UsageError(`unexpected argument: ${extra[0]}`);
+  }
+  if (flags.version === undefined || !/^[1-9]\d{0,8}$/.test(flags.version)) {
+    throw new UsageError("docmosis pdf needs --version, the version the PDF was rendered from");
+  }
+  return { file, version: Number(flags.version) };
+}
+
+/** Sends the PDF rendered from a version already published, which is how a `put` whose PDF failed is finished. */
+async function putPdf(cli: Cli, argv: string[]): Promise<number> {
+  const { file, version } = pdfArgs(argv);
+  const pdf = readPdf(path.resolve(cli.cwd(), file));
+  const agent = requireAgent(requireSessionId(cli.env));
+  const api = cli.api();
+  const missing = () => {
+    cli.printError(`agent-hub docmosis: the template does not keep version ${version}, or this session is not a CFT Workspace conversation. Nothing was sent.`);
+    return 1;
+  };
+  let revision: number;
+  try {
+    revision = (await api.getDocmosis(agent.agent_id, version)).revision;
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) {
+      return missing();
+    }
+    throw e;
+  }
+  try {
+    await withRetry(() => api.putDocmosisPdf(agent.agent_id, version, revision, pdf), PDF_RETRY);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 409) {
+      cli.printError(
+        `agent-hub docmosis: version ${version} of the template changed while the PDF was being sent, so the PDF may no longer match it. Nothing was sent. Run ${CLI} docmosis get again.`
+      );
+      return 1;
+    }
+    if (e instanceof ApiError && e.status === 404) {
+      return missing();
+    }
+    throw e;
+  }
+  cli.print(`agent-hub: sent the PDF for version ${version} of the template`);
+  return 0;
+}
+
 export const docmosis: Command = async (cli, argv) => {
   const [action, ...rest] = argv;
   if (action === "get") {
@@ -336,5 +432,8 @@ export const docmosis: Command = async (cli, argv) => {
   if (action === "put") {
     return putDocmosis(cli, rest);
   }
-  throw new UsageError("docmosis takes get or put");
+  if (action === "pdf") {
+    return putPdf(cli, rest);
+  }
+  throw new UsageError("docmosis takes get, put or pdf");
 };

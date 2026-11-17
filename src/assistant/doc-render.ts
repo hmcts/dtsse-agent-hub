@@ -1,9 +1,8 @@
-import { MAX_PDF_BYTES } from "./docmosis.ts";
+import { isPdf, MAX_PDF_BYTES } from "./docmosis.ts";
 
 const DEFAULT_DOC_RENDER_URL = "https://doc-render.aat.platform.hmcts.net";
 const RENDER_TIMEOUT_MS = 60_000;
 const DEFAULT_RETRY_AFTER_SECONDS = 5;
-const PDF_MAGIC = [0x25, 0x50, 0x44, 0x46, 0x2d];
 
 export type RenderResult =
   | { ok: true; pdf: Uint8Array }
@@ -30,10 +29,6 @@ function unreachable(message: string): RenderResult {
 function tooLarge(): RenderResult {
   const short = "The rendered PDF is larger than 5 MiB";
   return { ok: false, kind: "merge", short, long: `${short}, which is more than the hub keeps. Shorten the template's content or the data and render again.` };
-}
-
-function isPdf(bytes: Uint8Array): boolean {
-  return PDF_MAGIC.every((byte, index) => bytes[index] === byte);
 }
 
 function retryAfterSeconds(header: string | null): number {

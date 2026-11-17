@@ -84,6 +84,9 @@ export const USAGE = `usage: ${CLI} <command> [args]
                               render-file); --name is the template's name (the file's name by default);
                               --base is the version it was changed from, and a newer one is refused.
                               Omitted, it is the version docmosis get recorded, or the hub's current one
+  docmosis pdf <file.pdf> --version N
+                              send the PDF rendered from version N alone, for a docmosis put that
+                              published the template but could not send its PDF
   docmosis get [--version N]  write the template, its schema and the data to
                               ~/.agent-hub/docmosis/<conversation>/ (template.docx, schema.json,
                               data.json, and the version and revision it read); the person may have

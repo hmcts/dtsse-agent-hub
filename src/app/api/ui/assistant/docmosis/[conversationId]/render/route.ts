@@ -16,9 +16,6 @@ const RenderBody = z.object({
   base_revision: z.number().int().min(0)
 });
 
-/** The conversations with a render under way: one at a time each, so a person typing cannot queue doc-render up behind themselves. */
-const rendering = new Set<string>();
-
 /**
  * Saves the owner's data as their version of the conversation's template, has dtsse-doc-render render it, and keeps the
  * PDF or the merge error with that version. The panel then reads the PDF back from `…/versions/{version}/pdf`.
@@ -38,32 +35,23 @@ export async function POST(request: NextRequest, context: { params: Promise<{ co
       return errorResponse(403, "only the owner of a chat can change its template");
     }
     const body = parse(RenderBody, await readJson(request));
-    if (rendering.has(conversationId)) {
-      return errorResponse(429, "a render is already under way", { version: body.base_version, revision: body.base_revision }, { "retry-after": "2" });
-    }
-    rendering.add(conversationId);
-    try {
-      return await renderAndStore(viewer.oid, conversationId, body);
-    } finally {
-      rendering.delete(conversationId);
-    }
+    return await renderAndStore(viewer.oid, conversationId, body, request.signal);
   });
 }
 
-async function renderAndStore(editorOid: string, conversationId: string, body: z.output<typeof RenderBody>): Promise<Response> {
-  const saved = await writeUserDocmosisData(prisma, {
+async function renderAndStore(editorOid: string, conversationId: string, body: z.output<typeof RenderBody>, signal: AbortSignal): Promise<Response> {
+  const { name, docxSha256, ...saved } = await writeUserDocmosisData(prisma, {
     conversationId,
     editorOid,
     data: body.data,
     baseVersion: body.base_version,
     baseRevision: body.base_revision
   });
-  const view = await docmosisView(prisma, conversationId, saved.version);
-  const docx = view === null ? null : await readDocmosisDocx(prisma, conversationId, view.docx.replace(/^sha256:/, ""));
-  if (view === null || docx === null) {
+  const docx = await readDocmosisDocx(prisma, conversationId, docxSha256);
+  if (docx === null) {
     return errorResponse(404, "the template's .docx is not held");
   }
-  const result = await renderTemplate({ docx, data: body.data, name: view.name });
+  const result = await renderTemplate({ docx, data: body.data, name, signal });
   const headers = { "cache-control": "no-store" };
   if (!result.ok && result.kind === "busy") {
     return Response.json(
@@ -80,7 +68,11 @@ async function renderAndStore(editorOid: string, conversationId: string, body: z
     ...(result.ok ? { pdf: result.pdf } : { error: { short: result.short, long: result.long } })
   });
   if (!stored) {
-    return Response.json({ error: "the template changed while it rendered", current: await docmosisView(prisma, conversationId) }, { status: 409, headers });
+    const current = await docmosisView(prisma, conversationId);
+    if (current !== null && current.version === saved.version && current.revision > saved.revision && current.by === "user") {
+      return Response.json({ ...saved, status: "superseded" }, { headers });
+    }
+    return Response.json({ error: "the template changed while it rendered", current }, { status: 409, headers });
   }
   if (result.ok) {
     return Response.json({ ...saved, status: "rendered" }, { headers });

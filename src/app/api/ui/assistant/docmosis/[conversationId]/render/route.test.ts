@@ -41,8 +41,7 @@ describe("POST /api/ui/assistant/docmosis/{id}/render", () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     mocks.viewerFrom.mockResolvedValue({ oid: "owner" });
     mocks.docmosisAccess.mockResolvedValue("owner");
-    mocks.writeUserDocmosisData.mockResolvedValue({ version: 3, revision: 1 });
-    mocks.docmosisView.mockResolvedValue({ name: "Claim", docx: "sha256:abc" });
+    mocks.writeUserDocmosisData.mockResolvedValue({ version: 3, revision: 1, name: "Claim", docxSha256: "abc" });
     mocks.readDocmosisDocx.mockResolvedValue(DOCX);
     mocks.renderTemplate.mockResolvedValue({ ok: true, pdf: PDF });
     mocks.storeDocmosisRender.mockResolvedValue(true);
@@ -79,7 +78,8 @@ describe("POST /api/ui/assistant/docmosis/{id}/render", () => {
     expect(await response.json()).toEqual({ version: 3, revision: 1, status: "rendered" });
     expect(mocks.writeUserDocmosisData).toHaveBeenCalledWith({}, { conversationId: ID, editorOid: "owner", data: BODY.data, baseVersion: 2, baseRevision: 0 });
     expect(mocks.readDocmosisDocx).toHaveBeenCalledWith({}, ID, "abc");
-    expect(mocks.renderTemplate).toHaveBeenCalledWith({ docx: DOCX, data: BODY.data, name: "Claim" });
+    expect(mocks.renderTemplate).toHaveBeenCalledWith({ docx: DOCX, data: BODY.data, name: "Claim", signal: expect.any(AbortSignal) });
+    expect(mocks.docmosisView).not.toHaveBeenCalled();
     expect(mocks.storeDocmosisRender).toHaveBeenCalledWith({}, { conversationId: ID, version: 3, revision: 1, pdf: PDF });
   });
 
@@ -112,10 +112,24 @@ describe("POST /api/ui/assistant/docmosis/{id}/render", () => {
 
   it("should answer 409 with the current version when the render was superseded", async () => {
     mocks.storeDocmosisRender.mockResolvedValue(false);
-    mocks.docmosisView.mockResolvedValueOnce({ name: "Claim", docx: "sha256:abc" }).mockResolvedValueOnce({ version: 4 });
+    mocks.docmosisView.mockResolvedValue({ version: 4, revision: 0, by: "agent" });
     const response = await post(BODY);
     expect(response.status).toBe(409);
-    expect((await response.json()).current).toEqual({ version: 4 });
+    expect((await response.json()).current).toEqual({ version: 4, revision: 0, by: "agent" });
+  });
+
+  it("should answer 200 superseded when the person amended the same version again while it rendered", async () => {
+    mocks.storeDocmosisRender.mockResolvedValue(false);
+    mocks.docmosisView.mockResolvedValue({ version: 3, revision: 2, by: "user" });
+    const response = await post(BODY);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ version: 3, revision: 1, status: "superseded" });
+  });
+
+  it("should answer 409 when the agent wrote a newer version while it rendered", async () => {
+    mocks.storeDocmosisRender.mockResolvedValue(false);
+    mocks.docmosisView.mockResolvedValue({ version: 4, revision: 0, by: "agent" });
+    expect((await post(BODY)).status).toBe(409);
   });
 
   it("should pass on a 409 from the save with the current version", async () => {
@@ -126,42 +140,9 @@ describe("POST /api/ui/assistant/docmosis/{id}/render", () => {
     expect(mocks.renderTemplate).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ["version", () => mocks.docmosisView.mockResolvedValue(null)],
-    ["docx", () => mocks.readDocmosisDocx.mockResolvedValue(null)]
-  ])("should answer 404 when the saved %s is not held", async (_label, arrange) => {
-    arrange();
+  it("should answer 404 when the saved docx is not held", async () => {
+    mocks.readDocmosisDocx.mockResolvedValue(null);
     expect((await post(BODY)).status).toBe(404);
     expect(mocks.renderTemplate).not.toHaveBeenCalled();
-  });
-
-  it("should answer 429 to a second render of the same conversation while one is under way, then let the next through", async () => {
-    let finish: (value: unknown) => void = () => undefined;
-    mocks.renderTemplate.mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
-    const first = post(BODY);
-    await vi.waitFor(() => expect(mocks.renderTemplate).toHaveBeenCalled());
-    const second = await post(BODY);
-    expect(second.status).toBe(429);
-    expect(second.headers.get("retry-after")).toBe("2");
-    expect(await second.json()).toMatchObject({ version: 2, revision: 0 });
-    finish({ ok: true, pdf: PDF });
-    expect((await first).status).toBe(200);
-    expect((await post(BODY)).status).toBe(200);
-  });
-
-  it("should let two different conversations render at once", async () => {
-    let finish: (value: unknown) => void = () => undefined;
-    mocks.renderTemplate.mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
-    const first = post(BODY);
-    await vi.waitFor(() => expect(mocks.renderTemplate).toHaveBeenCalled());
-    expect((await post(BODY, "c2")).status).toBe(200);
-    finish({ ok: true, pdf: PDF });
-    await first;
-  });
-
-  it("should release the conversation's slot when the render throws", async () => {
-    mocks.renderTemplate.mockRejectedValueOnce(new Error("boom"));
-    expect((await post(BODY)).status).toBe(500);
-    expect((await post(BODY)).status).toBe(200);
   });
 });

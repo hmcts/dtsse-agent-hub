@@ -135,25 +135,42 @@ describe("GET /api/agent/{id}/docmosis", () => {
   });
 });
 
+const pdfRequest = (body: BodyInit, query = "?revision=2") => new Request(`http://localhost/x${query}`, { method: "PUT", body });
+
 describe("PUT /api/agent/{id}/docmosis/versions/{version}/pdf", () => {
   it("should store the PDF and answer 204", async () => {
-    store.putDocmosisPdf.mockResolvedValue(true);
+    store.putDocmosisPdf.mockResolvedValue("stored");
 
-    const response = await pdf.PUT(request("PUT", PDF.slice()), params({ agentId: "a", version: "3" }));
+    const response = await pdf.PUT(pdfRequest(PDF.slice()), params({ agentId: "a", version: "3" }));
 
     expect(response.status).toBe(204);
-    expect(store.putDocmosisPdf).toHaveBeenCalledWith(expect.anything(), "conv-1", 3, expect.any(Uint8Array));
+    expect(store.putDocmosisPdf).toHaveBeenCalledWith(expect.anything(), "conv-1", 3, 2, expect.any(Uint8Array));
   });
 
   it("should refuse a version that is not a number, bytes that are not a PDF, and one over 5 MiB", async () => {
-    expect((await refusal(pdf.PUT(request("PUT", PDF.slice()), params({ agentId: "a", version: "0" })))).status).toBe(400);
-    expect((await refusal(pdf.PUT(request("PUT", DOCX.slice()), params({ agentId: "a", version: "1" })))).status).toBe(400);
-    expect((await refusal(pdf.PUT(request("PUT", new Uint8Array(5 * 1024 * 1024 + 1)), params({ agentId: "a", version: "1" })))).status).toBe(413);
+    expect((await refusal(pdf.PUT(pdfRequest(PDF.slice()), params({ agentId: "a", version: "0" })))).status).toBe(400);
+    expect((await refusal(pdf.PUT(pdfRequest(DOCX.slice()), params({ agentId: "a", version: "1" })))).status).toBe(400);
+    expect((await refusal(pdf.PUT(pdfRequest(new Uint8Array(5 * 1024 * 1024 + 1)), params({ agentId: "a", version: "1" })))).status).toBe(413);
   });
 
   it("should answer 404 for a version that does not keep a PDF", async () => {
-    store.putDocmosisPdf.mockResolvedValue(false);
+    store.putDocmosisPdf.mockResolvedValue("gone");
 
-    expect((await refusal(pdf.PUT(request("PUT", PDF.slice()), params({ agentId: "a", version: "9" })))).status).toBe(404);
+    expect((await refusal(pdf.PUT(pdfRequest(PDF.slice()), params({ agentId: "a", version: "9" })))).status).toBe(404);
+  });
+
+  it("should answer 409 with the current version when the PDF was rendered at a revision the version has left", async () => {
+    store.putDocmosisPdf.mockResolvedValue("stale");
+    store.docmosisView.mockResolvedValue({ version: 3, revision: 3 });
+
+    const error = await refusal(pdf.PUT(pdfRequest(PDF.slice()), params({ agentId: "a", version: "3" })));
+
+    expect(error.status).toBe(409);
+    expect(error.extra).toEqual({ current: { version: 3, revision: 3 } });
+  });
+
+  it.each(["", "?revision=", "?revision=-1", "?revision=x", "?revision=1.5"])("should answer 400 when the revision is %j", async (query) => {
+    expect((await refusal(pdf.PUT(pdfRequest(PDF.slice(), query), params({ agentId: "a", version: "3" })))).status).toBe(400);
+    expect(store.putDocmosisPdf).not.toHaveBeenCalled();
   });
 });

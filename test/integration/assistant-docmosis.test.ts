@@ -174,13 +174,36 @@ describe("the docmosis routes", () => {
   it("should take a PDF for a kept version and 404 for one that is not", async () => {
     const mine = await chat();
     await agentWrite(mine, 1);
-    const put = (version: number, bytes: Uint8Array) =>
-      agent(pdfRoute.PUT, `/api/agent/${mine.agentId}/docmosis/versions/${version}/pdf`, { agentId: mine.agentId, version: String(version) }, "PUT", bytes);
+    const put = (version: number, bytes: Uint8Array, revision = 0) =>
+      agent(
+        pdfRoute.PUT,
+        `/api/agent/${mine.agentId}/docmosis/versions/${version}/pdf?revision=${revision}`,
+        { agentId: mine.agentId, version: String(version) },
+        "PUT",
+        bytes
+      );
 
     expect((await put(1, new Uint8Array(PDF))).status).toBe(204);
     expect(Buffer.from((await readDocmosisPdf(prisma, mine.id, 1))!)).toEqual(PDF);
     expect((await put(2, new Uint8Array(PDF))).status).toBe(404);
     expect((await put(1, new Uint8Array(Buffer.from("not a pdf")))).status).toBe(400);
+  });
+
+  it("should refuse a PDF made at a revision the version has left, with the current version, and one with no revision", async () => {
+    const mine = await chat();
+    await agentWrite(mine, 1);
+    await personSave(mine, { name: "Ada" }, { version: 1, revision: 0 });
+    await personSave(mine, { name: "Grace" }, { version: 2, revision: 0 });
+    const put = (query: string) =>
+      agent(pdfRoute.PUT, `/api/agent/${mine.agentId}/docmosis/versions/2/pdf${query}`, { agentId: mine.agentId, version: "2" }, "PUT", new Uint8Array(PDF));
+
+    const stale = await put("?revision=0");
+    expect(stale.status).toBe(409);
+    expect(((await jsonOf(stale)) as { current: { version: number; revision: number } }).current).toMatchObject({ version: 2, revision: 1 });
+    expect(await readDocmosisPdf(prisma, mine.id, 2)).toBeNull();
+    expect((await put("")).status).toBe(400);
+    expect((await put("?revision=1")).status).toBe(204);
+    expect(Buffer.from((await readDocmosisPdf(prisma, mine.id, 2))!)).toEqual(PDF);
   });
 });
 
@@ -229,10 +252,10 @@ describe("the docmosis store's versions", () => {
   it("should amend the person's own latest version in place, clearing its PDF and error", async () => {
     const mine = await chat();
     await agentWrite(mine, 1);
-    expect(await personSave(mine, { name: "Bea" }, { version: 1, revision: 0 })).toEqual({ version: 2, revision: 0 });
-    await putDocmosisPdf(prisma, mine.id, 2, PDF);
+    expect(await personSave(mine, { name: "Bea" }, { version: 1, revision: 0 })).toMatchObject({ version: 2, revision: 0 });
+    await putDocmosisPdf(prisma, mine.id, 2, 0, PDF);
 
-    expect(await personSave(mine, { name: "Cy" }, { version: 2, revision: 0 })).toEqual({ version: 2, revision: 1 });
+    expect(await personSave(mine, { name: "Cy" }, { version: 2, revision: 0 })).toMatchObject({ version: 2, revision: 1 });
 
     const view = await docmosisView(prisma, mine.id);
     expect(view).toMatchObject({ version: 2, revision: 1, by: "user", data: { name: "Cy" }, has_pdf: false, render_error: null, summary: "Edited form data" });
@@ -248,7 +271,7 @@ describe("the docmosis store's versions", () => {
     await agentWrite(mine, 1, { name: "Letter" });
     await personSave(mine, { name: "Bea" }, { version: 1, revision: 0 }, BOB.oid);
 
-    expect(await personSave(mine, { name: "Cy" }, { version: 2, revision: 0 }, ALICE.oid)).toEqual({ version: 3, revision: 0 });
+    expect(await personSave(mine, { name: "Cy" }, { version: 2, revision: 0 }, ALICE.oid)).toMatchObject({ version: 3, revision: 0 });
 
     const [first, third] = [await docmosisView(prisma, mine.id, 1), await docmosisView(prisma, mine.id, 3)];
     expect(third).toMatchObject({ name: "Letter", docx: first!.docx, schema: SCHEMA, by: "user", data: { name: "Cy" } });
@@ -335,7 +358,7 @@ describe("the docmosis store's retention", () => {
     const total = KEEP_VERSIONS + 2;
     for (let version = 1; version <= total; version += 1) {
       await agentWrite(mine, version, { base_version: version - 1 });
-      await putDocmosisPdf(prisma, mine.id, version, PDF);
+      await putDocmosisPdf(prisma, mine.id, version, 0, PDF);
     }
 
     const versions = await listDocmosisVersions(prisma, mine.id);
@@ -350,7 +373,7 @@ describe("the docmosis store's retention", () => {
     const mine = await chat();
     await agentWrite(mine, 1);
     expect(await pdfState(mine.id)).toBe("pending");
-    await putDocmosisPdf(prisma, mine.id, 1, PDF);
+    await putDocmosisPdf(prisma, mine.id, 1, 0, PDF);
     expect(await pdfState(mine.id)).toBe("ready");
 
     await personSave(mine, { a: 1 }, { version: 1, revision: 0 });
@@ -363,9 +386,10 @@ describe("the docmosis store's retention", () => {
       await agentWrite(mine, version, { base_version: version - 1 });
     }
 
-    expect(await putDocmosisPdf(prisma, mine.id, 1, PDF)).toBe(false);
-    expect(await putDocmosisPdf(prisma, mine.id, 2, PDF)).toBe(true);
-    expect(await putDocmosisPdf(prisma, mine.id, KEEP_PDF + 2, PDF)).toBe(false);
+    expect(await putDocmosisPdf(prisma, mine.id, 1, 0, PDF)).toBe("gone");
+    expect(await putDocmosisPdf(prisma, mine.id, 2, 0, PDF)).toBe("stored");
+    expect(await putDocmosisPdf(prisma, mine.id, 2, 1, PDF)).toBe("stale");
+    expect(await putDocmosisPdf(prisma, mine.id, KEEP_PDF + 2, 0, PDF)).toBe("gone");
   });
 
   it("should delete a .docx no kept version names once its grace is over, and keep the others", async () => {
@@ -419,6 +443,46 @@ describe("the docmosis store's retention", () => {
     // What is left to drop is the latest KEEP_PDF, which are never deleted for room.
     await expect(held(mine, big(902))).rejects.toMatchObject({ status: 409 });
     expect(await versionsAfter()).toHaveLength(KEEP_PDF);
+  });
+
+  it("should free the .docx of a version it drops for room even when it was uploaded a minute ago", async () => {
+    const mine = await chat();
+    const big = (seed: number) => {
+      const bytes = Buffer.alloc(5 * 1024 * 1024);
+      bytes.set([0x50, 0x4b, 0x03, 0x04]);
+      bytes.writeUInt32BE(seed, 8);
+      return bytes;
+    };
+    const copies = Math.floor(MAX_HELD_DOCX_BYTES / (5 * 1024 * 1024)) + 1;
+    for (let version = 1; version < copies; version += 1) {
+      const sha = await held(mine, big(version));
+      await writeAgentDocmosis(prisma, { conversationId: mine.id, body: body(sha, { base_version: version - 1 }) });
+    }
+
+    const sha = await held(mine, big(copies));
+
+    expect(await readDocmosisDocx(prisma, mine.id, digest(big(1)))).toBeNull();
+    expect(await readDocmosisDocx(prisma, mine.id, sha)).not.toBeNull();
+    expect((await listDocmosisVersions(prisma, mine.id)).map((entry) => entry.version)).not.toContain(1);
+  });
+
+  it("should refuse an upload that does not fit when the rest is unnamed uploads still in their grace", async () => {
+    const mine = await chat();
+    const big = (seed: number) => {
+      const bytes = Buffer.alloc(5 * 1024 * 1024);
+      bytes.set([0x50, 0x4b, 0x03, 0x04]);
+      bytes.writeUInt32BE(seed, 8);
+      return bytes;
+    };
+    const copies = Math.floor(MAX_HELD_DOCX_BYTES / (5 * 1024 * 1024)) + 1;
+    for (let at = 1; at <= copies; at += 1) {
+      await held(mine, big(at)).catch((error: unknown) => {
+        expect(error).toMatchObject({ status: 409, message: expect.stringContaining("too much .docx") });
+      });
+    }
+
+    expect(await readDocmosisDocx(prisma, mine.id, digest(big(1)))).not.toBeNull();
+    expect(await readDocmosisDocx(prisma, mine.id, digest(big(copies)))).toBeNull();
   });
 
   it("should hold the same .docx again without storing it twice", async () => {

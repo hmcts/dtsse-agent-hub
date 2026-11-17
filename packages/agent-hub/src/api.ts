@@ -201,8 +201,11 @@ export type Api = {
   /** The .docx a template version names, under the SHA-256 of its bytes. At most 5 MiB. */
   putDocmosisAsset: (agentId: string, sha256: string, bytes: Uint8Array) => Promise<DocmosisAssetResponse>;
   docmosisAsset: (agentId: string, sha256: string) => Promise<Uint8Array>;
-  /** The PDF rendered from one version of the template. At most 5 MiB. */
-  putDocmosisPdf: (agentId: string, version: number, bytes: Uint8Array) => Promise<null>;
+  /**
+   * The PDF rendered from one version of the template, at the revision it was rendered from. At most 5 MiB. A `409`
+   * means the version's revision has moved since.
+   */
+  putDocmosisPdf: (agentId: string, version: number, revision: number, bytes: Uint8Array) => Promise<null>;
   /**
    * A question this session's model asked with `AskUserQuestion`, for the person to answer in the web UI. Idempotent
    * on `tool_use_id`, so a retry after a lost response does not put the question on screen twice.
@@ -427,8 +430,8 @@ export function createApi({
     putDocmosis: (agentId, body) => request<DocmosisWritten>("PUT", `${a(agentId)}/docmosis`, body),
     putDocmosisAsset: (agentId, sha256, bytes) => putBytes<DocmosisAssetResponse>(`${a(agentId)}/docmosis/assets/${encodeURIComponent(sha256)}`, null, bytes),
     docmosisAsset: (agentId, sha256) => requestBytes(`${a(agentId)}/docmosis/assets/${encodeURIComponent(sha256)}`),
-    putDocmosisPdf: (agentId, version, bytes) =>
-      putBytes<null>(`${a(agentId)}/docmosis/versions/${version}/pdf`, null, bytes, PART_TIMEOUT_MS, "application/pdf"),
+    putDocmosisPdf: (agentId, version, revision, bytes) =>
+      putBytes<null>(`${a(agentId)}/docmosis/versions/${version}/pdf${qs({ revision })}`, null, bytes, PART_TIMEOUT_MS, "application/pdf"),
     postQuestion: (agentId, body, opts) => request<null>("POST", `${a(agentId)}/question`, body, opts),
     putJiraExport: (agentId, body) => request<null>("PUT", `${a(agentId)}/jira`, body),
     putGithubExport: (agentId, body) => request<null>("PUT", `${a(agentId)}/github`, body),

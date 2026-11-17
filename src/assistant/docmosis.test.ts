@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { jsonbText } from "./deck.ts";
 import {
   checkDocmosisData,
   checkDocmosisPut,
@@ -186,5 +187,13 @@ describe("storableError", () => {
     expect(cut.short).toHaveLength(500);
     expect(cut.short.startsWith("ab")).toBe(true);
     expect(cut.long).toHaveLength(8000);
+  });
+
+  it("should replace a lone surrogate so the jsonb cast cannot throw, and keep a real pair", () => {
+    const cleaned = storableError({ short: `a\ud800b\udc00`, long: "\u{1f600}\ud83d" });
+
+    expect(cleaned.short).toBe("a\ufffdb\ufffd");
+    expect(cleaned.long).toBe("\u{1f600}\ufffd");
+    expect(jsonbText(cleaned)).toBeDefined();
   });
 });

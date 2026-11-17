@@ -253,7 +253,7 @@ export const EDITED_SUMMARY = "Edited form data";
 
 /**
  * The person's save of the form's data, if the template is still at `baseVersion` and `baseRevision`; otherwise
- * `HttpError(409, {current})`. It amends the latest version in place when that is this person's own, and otherwise
+ * `HttpError(409, {current})`. It answers with the version and revision written and the name and .docx digest it holds. It amends the latest version in place when that is this person's own, and otherwise
  * writes the next version, `by: user`, from the latest one's name, .docx and schema. Announced.
  */
 export async function writeUserDocmosisData(
@@ -266,7 +266,7 @@ export async function writeUserDocmosisData(
     baseRevision,
     now = new Date()
   }: { conversationId: string; editorOid: string; data: unknown; baseVersion: number; baseRevision: number; now?: Date }
-): Promise<{ version: number; revision: number }> {
+): Promise<{ version: number; revision: number; name: string; docxSha256: string }> {
   const checked = checkDocmosisData(data);
   if (!checked.ok) {
     throw new HttpError(400, checked.error);
@@ -300,7 +300,7 @@ export async function writeUserDocmosisData(
       `;
       await prune(tx, conversationId, baseVersion, now);
       await announce(tx, conversation);
-      return { version: baseVersion, revision };
+      return { version: baseVersion, revision, name: latest.name, docxSha256: latest.docxSha256 };
     }
     const version = baseVersion + 1;
     await tx.$executeRaw`
@@ -316,7 +316,7 @@ export async function writeUserDocmosisData(
     `;
     await prune(tx, conversationId, version, now);
     await announce(tx, conversation);
-    return { version, revision: 0 };
+    return { version, revision: 0, name: latest.name, docxSha256: latest.docxSha256 };
   });
 }
 
@@ -358,35 +358,51 @@ export async function storeDocmosisRender(
   });
 }
 
-/** Whether a PDF for `version` can be stored: kept, and one of the newest `KEEP_PDF`. */
-export async function putDocmosisPdf(prisma: PrismaClient, conversationId: string, version: number, bytes: Uint8Array): Promise<boolean> {
+/**
+ * Stores a PDF for `version` when that version is kept, is one of the newest `KEEP_PDF`, and is still at `revision`:
+ * `"stored"`; `"gone"` when it is not kept or too old; `"stale"` when the person has amended it since, so the PDF was
+ * rendered from data it no longer holds.
+ */
+export async function putDocmosisPdf(
+  prisma: PrismaClient,
+  conversationId: string,
+  version: number,
+  revision: number,
+  bytes: Uint8Array
+): Promise<"stored" | "gone" | "stale"> {
   return await prisma.$transaction(async (tx) => {
     const conversation = await conversationOf(tx, conversationId);
     await lockConversation(tx, conversationId);
     const latest = await latestVersion(tx, conversationId);
     if (version > latest || version <= latest - KEEP_PDF) {
-      return false;
+      return "gone";
     }
-    const count = await tx.$executeRaw`
+    const row = await versionRow(tx, conversationId, version);
+    if (row === undefined) {
+      return "gone";
+    }
+    if (row.revision !== revision) {
+      return "stale";
+    }
+    await tx.$executeRaw`
       UPDATE assistant_docmosis_version SET pdf = ${Buffer.from(bytes)}, render_error = NULL
        WHERE conversation_id = ${conversationId}::uuid AND version = ${version}::int
     `;
-    if (count === 0) {
-      return false;
-    }
     if (version === latest) {
       await tx.$executeRaw`UPDATE assistant_conversation SET docmosis_pdf_state = 'ready' WHERE id = ${conversationId}::uuid`;
     }
     await announce(tx, conversation);
-    return true;
+    return "stored";
   });
 }
 
 /**
  * Makes room for `incoming` more bytes under `MAX_HELD_DOCX_BYTES` by deleting the oldest versions, never one of the
- * newest `KEEP_PDF`, and then the .docx files nothing names. `false` when only those would make room.
+ * newest `KEEP_PDF`, and the .docx of each that no remaining version names, whatever its age: the grace is for an
+ * upload no version has named yet, and one this frees was named. `keep` is the digest the write in hand names, which
+ * is not freed. `false` when only the newest `KEEP_PDF` versions and uploads still in their grace would make room.
  */
-async function makeRoom(db: Database, conversationId: string, incoming: number, now: Date): Promise<boolean> {
+async function makeRoom(db: Database, conversationId: string, incoming: number, now: Date, keep: string): Promise<boolean> {
   const latest = await latestVersion(db, conversationId);
   for (;;) {
     const [held] = await db.$queryRaw<{ bytes: bigint | null }[]>`
@@ -395,15 +411,24 @@ async function makeRoom(db: Database, conversationId: string, incoming: number, 
     if (Number(held?.bytes ?? 0) + incoming <= MAX_HELD_DOCX_BYTES) {
       return true;
     }
-    const dropped = await db.$executeRaw`
+    const dropped = await db.$queryRaw<{ docx_sha256: string }[]>`
       DELETE FROM assistant_docmosis_version
        WHERE conversation_id = ${conversationId}::uuid
          AND version = (SELECT MIN(version) FROM assistant_docmosis_version WHERE conversation_id = ${conversationId}::uuid)
          AND version <= ${latest - KEEP_PDF}::int
+      RETURNING docx_sha256
     `;
-    if (dropped === 0) {
+    const [gone] = dropped;
+    if (gone === undefined) {
       return false;
     }
+    await db.$executeRaw`
+      DELETE FROM assistant_docmosis_asset a
+       WHERE a.conversation_id = ${conversationId}::uuid AND a.sha256 = ${gone.docx_sha256} AND a.sha256 <> ${keep}
+         AND NOT EXISTS (
+           SELECT 1 FROM assistant_docmosis_version v WHERE v.conversation_id = a.conversation_id AND v.docx_sha256 = a.sha256
+         )
+    `;
     await deleteUnnamedAssets(db, conversationId, now);
   }
 }
@@ -421,10 +446,10 @@ export async function putDocmosisAsset(prisma: PrismaClient, conversationId: str
     if (count > 0) {
       return;
     }
-    if (!(await makeRoom(tx, conversationId, bytes.byteLength, now))) {
+    if (!(await makeRoom(tx, conversationId, bytes.byteLength, now, sha256))) {
       throw new HttpError(
         409,
-        `a conversation holds at most ${MAX_HELD_DOCX_BYTES} bytes of .docx files, and the latest ${KEEP_PDF} versions, which are never deleted to make room, name too many to take this one`
+        `a conversation holds at most ${MAX_HELD_DOCX_BYTES} bytes of .docx files, and it holds too much .docx to take this one: what is left is named by the latest ${KEEP_PDF} versions, which are never deleted to make room, or was uploaded within the last hour`
       );
     }
     await tx.assistantDocmosisAsset.create({ data: { conversationId, sha256, bytes: Buffer.from(bytes), createdAt: now } });

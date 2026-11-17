@@ -1872,6 +1872,114 @@ describe("artefact, in an assistant conversation", () => {
       expect(hub.docmosisTemplates.get(agentId)?.versions).toHaveLength(1);
     });
 
+    it("should send the version's revision with the PDF, when docmosis put has --pdf", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      const dir = workDir();
+
+      // Act
+      const r = await cli(putArgs(dir, "--pdf", path.join(dir, "claim.pdf")), { sid });
+
+      // Assert
+      expect(r.code, r.errors.join("\n")).toBe(0);
+      expect(calls(agentId, "PUT", "/versions/1/pdf").map((c) => c.query)).toEqual([{ revision: "0" }]);
+    });
+
+    it("should name docmosis pdf as the way to send the PDF, when the PDF keeps failing", async () => {
+      // Arrange
+      const { sid } = await session();
+      const dir = workDir();
+      hub.failNextDocmosisPdf(3);
+
+      // Act
+      const r = await cli(putArgs(dir, "--pdf", path.join(dir, "claim.pdf")), { sid });
+
+      // Assert
+      expect(r.errors.join("\n")).toMatch(/Do not put the template again/);
+      expect(r.errors.join("\n")).toContain(`agent-hub docmosis pdf --version 1 ${path.join(dir, "claim.pdf")}`);
+      expect(r.errors.join("\n")).not.toMatch(/put the template again with --pdf/);
+    });
+
+    it("should send the PDF at the version's current revision, when docmosis pdf runs", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      const dir = workDir();
+      expect((await cli(putArgs(dir), { sid })).code).toBe(0);
+
+      // Act
+      const r = await cli(["docmosis", "pdf", path.join(dir, "claim.pdf"), "--version", "1"], { sid });
+
+      // Assert
+      expect(r.code, r.errors.join("\n")).toBe(0);
+      expect(r.text()).toMatch(/sent the PDF for version 1/);
+      expect(calls(agentId, "GET", "").filter((c) => c.query.version === "1")).toHaveLength(1);
+      expect(calls(agentId, "PUT", "/versions/1/pdf")[0]?.query).toEqual({ revision: "0" });
+      expect(hub.docmosisTemplates.get(agentId)?.versions[0]?.pdf).toEqual(PDF);
+    });
+
+    it("should say the version changed and to run docmosis get again, when the hub answers 409 to the PDF", async () => {
+      // Arrange
+      const { sid } = await session();
+      const dir = workDir();
+      expect((await cli(putArgs(dir), { sid })).code).toBe(0);
+      hub.failNextDocmosisPdf(1, 409);
+
+      // Act
+      const r = await cli(["docmosis", "pdf", path.join(dir, "claim.pdf"), "--version", "1"], { sid });
+
+      // Assert
+      expect(r.code).toBe(1);
+      expect(r.errors.join("\n")).toMatch(/version 1 of the template changed .*Run agent-hub docmosis get again/);
+    });
+
+    it("should refuse docmosis pdf with no --version, no file or a file that is not a PDF, before sending", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      const dir = workDir();
+      fs.writeFileSync(path.join(dir, "bad.pdf"), "nope");
+
+      // Act
+      const noVersion = await cli(["docmosis", "pdf", path.join(dir, "claim.pdf")], { sid });
+      const noFile = await cli(["docmosis", "pdf", "--version", "1"], { sid });
+      const notPdf = await cli(["docmosis", "pdf", path.join(dir, "bad.pdf"), "--version", "1"], { sid });
+
+      // Assert
+      expect([noVersion.code, noFile.code, notPdf.code]).toEqual([2, 2, 2]);
+      expect(calls(agentId, "PUT", "")).toHaveLength(0);
+    });
+
+    it("should say the version is not kept, when docmosis pdf names one the template does not have", async () => {
+      // Arrange
+      const { sid } = await session();
+      const dir = workDir();
+      expect((await cli(putArgs(dir), { sid })).code).toBe(0);
+
+      // Act
+      const r = await cli(["docmosis", "pdf", path.join(dir, "claim.pdf"), "--version", "9"], { sid });
+
+      // Assert
+      expect(r.code).toBe(1);
+      expect(r.errors.join("\n")).toMatch(/does not keep version 9/);
+    });
+
+    it("should refuse data that fits compactly but not as the hub stores it, when many keys sit near the limit", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      const dir = workDir();
+      const data = Object.fromEntries(Array.from({ length: 10_000 }, (_, i) => [`k${String(i).padStart(5, "0")}`, 1]));
+      const compact = Buffer.byteLength(JSON.stringify(data));
+      fs.writeFileSync(path.join(dir, "data.json"), JSON.stringify(data));
+
+      // Act
+      const r = await cli(putArgs(dir), { sid });
+
+      // Assert
+      expect(compact).toBeLessThanOrEqual(120_000);
+      expect(r.code).toBe(2);
+      expect(r.errors.join("\n")).toMatch(/larger than the hub takes, 120000 bytes/);
+      expect(hub.docmosisTemplates.get(agentId)?.versions ?? []).toHaveLength(0);
+    });
+
     it("should write the unsuffixed files and record it, when docmosis get --version names the latest version", async () => {
       // Arrange
       const { sid } = await session();
@@ -1957,7 +2065,7 @@ describe("artefact, in an assistant conversation", () => {
 
       // Assert
       expect(r.code).toBe(2);
-      expect(r.errors.join("\n")).toMatch(/docmosis takes get or put/);
+      expect(r.errors.join("\n")).toMatch(/docmosis takes get, put or pdf/);
     });
   });
 

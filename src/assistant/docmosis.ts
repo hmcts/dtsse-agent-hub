@@ -98,12 +98,7 @@ const utf8 = new TextEncoder();
 
 const storable = (text: string): boolean => jsonbText(text) !== undefined;
 
-const SHA256_RE = /^[0-9a-f]{64}$/;
 const DOCX_REF_RE = /^sha256:([0-9a-f]{64})$/;
-
-export function isSha256(value: string): boolean {
-  return SHA256_RE.test(value);
-}
 
 /** The hex digest a version's `docx` names, or `undefined` when it is not `sha256:` and 64 lowercase hex digits. */
 export function docxSha(ref: string): string | undefined {
@@ -227,10 +222,10 @@ export function checkDocmosisPut(value: unknown): Checked<DocmosisPut> {
   return { ok: true, value: { ...rest, schema: schema.value, data: data.value } };
 }
 
-/** A merge error as it is stored, its texts cut to what the column takes and cleaned of what Postgres cannot hold. */
+/** A merge error as it is stored, its texts cut to what the column takes and cleaned of NULs and lone surrogates, which Postgres cannot hold. */
 export function storableError(error: { short: string; long: string }): { short: string; long: string } {
   const clean = (text: string, max: number) =>
-    Array.from(text.replaceAll(String.fromCharCode(0), "").normalize())
+    Array.from(text.replaceAll(String.fromCharCode(0), "").toWellFormed().normalize())
       .slice(0, max)
       .join("");
   return { short: clean(error.short, MAX_ERROR_SHORT), long: clean(error.long, MAX_ERROR_LONG) };

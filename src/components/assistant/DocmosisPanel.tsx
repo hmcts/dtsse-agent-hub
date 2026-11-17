@@ -419,7 +419,7 @@ export function DocmosisPanel({
       const body = (await response.json().catch(() => null)) as {
         version: number;
         revision: number;
-        status: "rendered" | "failed";
+        status: "rendered" | "failed" | "superseded";
         error?: RenderError;
       } | null;
       if (!mounted.current) {
@@ -428,6 +428,16 @@ export function DocmosisPanel({
       if (body === null) {
         setPhase("unreachable");
         setSettled((count) => count + 1);
+        return;
+      }
+      if (body.status === "superseded") {
+        // A newer save of the person's own overtook this one, so the render of that save, queued or in flight, decides the PDF
+        // and the phase; only a newer base is taken from this answer.
+        const have = baseNow.current;
+        if (have === null || isNewer(body, have)) {
+          baseNow.current = { version: body.version, revision: body.revision };
+          setBase(baseNow.current);
+        }
         return;
       }
       unrendered.current = false;
@@ -475,7 +485,7 @@ export function DocmosisPanel({
       setSettled((count) => count + 1);
       return;
     }
-    if (response.status === 429 || response.status === 502 || response.status === 503) {
+    if (response.status === 502 || response.status === 503) {
       const body = (await response.json().catch(() => null)) as { retry_after?: number; version?: number; revision?: number } | null;
       if (!mounted.current) {
         return;

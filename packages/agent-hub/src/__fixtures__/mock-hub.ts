@@ -1335,9 +1335,16 @@ export function createMockHub({
         if (octets?.subarray(0, 5).toString("latin1") !== "%PDF-") {
           return send(res, 400, { error: "that is not a PDF" });
         }
+        const asked = url.searchParams.get("revision");
+        if (asked === null || !/^\d+$/.test(asked)) {
+          return send(res, 400, { error: "revision is required" });
+        }
         const found = stored.versions.find((v) => v.version === Number(parts[5]));
         if (!found) {
           return send(res, 404, { error: "the template has no such version" });
+        }
+        if (found.revision !== Number(asked)) {
+          return send(res, 409, { error: "the template version has changed since that revision", current: docmosisBody(stored, found) });
         }
         found.pdf = octets;
         return send(res, 204);

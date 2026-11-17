@@ -658,6 +658,7 @@ describe("runHook in an assistant conversation", () => {
     expect(out[0]).toContain("docmosis schema");
     expect(out[0]).toContain("docmosis render-file");
     expect(out[0]).toContain("agent-hub docmosis put");
+    expect(out[0]).toContain("agent-hub docmosis pdf");
     expect(out[0]).toContain("run `agent-hub docmosis get` before changing the template");
   });
 
