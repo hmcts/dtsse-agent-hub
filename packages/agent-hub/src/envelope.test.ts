@@ -399,6 +399,23 @@ describe("assistantPrompt", () => {
     expect(assistantPrompt(personMessage, { ...pcs, deck_version: 0, deck_updated_by: "user" }, null)).not.toMatch(/slide deck/);
   });
 
+  it("should tell the session to read the template first when the user last changed its data", () => {
+    // Act
+    const text = assistantPrompt(personMessage, { ...pcs, docmosis_version: 3, docmosis_revision: 1, docmosis_updated_by: "user" }, null);
+
+    // Assert
+    expect(context(text)).toContain(
+      "The user has changed the conversation's template data (version 3). Read it with `agent-hub docmosis get` before changing the template."
+    );
+  });
+
+  it("should say nothing of the template when the session wrote it last or there is none", () => {
+    // Act & Assert
+    expect(assistantPrompt(personMessage, { ...pcs, docmosis_version: 3, docmosis_updated_by: "agent" }, null)).not.toMatch(/docmosis/);
+    expect(assistantPrompt(personMessage, { ...pcs, docmosis_version: 0, docmosis_updated_by: "user" }, null)).not.toMatch(/docmosis/);
+    expect(assistantPrompt(personMessage, { ...pcs, docmosis_updated_by: "user" }, null)).not.toMatch(/docmosis/);
+  });
+
   it("should give the session the command that shows what the user changed since its own version when the user has edited the slides", () => {
     // Act
     const text = assistantPrompt(personMessage, { ...pcs, deck_version: 5, deck_updated_by: "user", deck_revision: 9, deck_agent_version: 4 }, null);

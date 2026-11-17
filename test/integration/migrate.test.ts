@@ -161,6 +161,8 @@ describe("migrate", () => {
       "assistant_deck_asset",
       "assistant_deck_build",
       "assistant_deck_version",
+      "assistant_docmosis_asset",
+      "assistant_docmosis_version",
       "assistant_export_default",
       "assistant_lookup",
       "assistant_model_choice",

@@ -13,6 +13,7 @@ import { type Cli, type Command, errorMessage, readStdinText, UsageError } from 
 import { credentials } from "./cli/credentials.ts";
 import { deck } from "./cli/deck.ts";
 import { reply, send } from "./cli/directs.ts";
+import { docmosis } from "./cli/docmosis.ts";
 import { m365 } from "./cli/m365.ts";
 import { disable, enable, setup, status, transcript } from "./cli/session.ts";
 import { autoEnable, bridge, hook, stopWorker } from "./cli/workers.ts";
@@ -76,6 +77,20 @@ export const USAGE = `usage: ${CLI} <command> [args]
   deck pptx <deck.pptx> --version N
                               send the .pptx built from version N alone, for a deck put that published
                               the outline but could not send its .pptx
+  docmosis put <template.docx> --schema <schema.json> --data <data.json> [--pdf file.pdf] [--name N] [--summary S] [--base N]
+                              in a CFT Workspace conversation: upload the Docmosis template, publish it
+                              with its form schema (docmosis schema) and the data it was rendered with as
+                              the template's next version, then the PDF rendered from it (docmosis
+                              render-file); --name is the template's name (the file's name by default);
+                              --base is the version it was changed from, and a newer one is refused.
+                              Omitted, it is the version docmosis get recorded, or the hub's current one
+  docmosis pdf <file.pdf> --version N
+                              send the PDF rendered from version N alone, for a docmosis put that
+                              published the template but could not send its PDF
+  docmosis get [--version N]  write the template, its schema and the data to
+                              ~/.agent-hub/docmosis/<conversation>/ (template.docx, schema.json,
+                              data.json, and the version and revision it read); the person may have
+                              changed the data; --version writes an older kept version instead
   jira export <export-id> --project P --type T [--labels a,b]
                               in a CFT Workspace conversation: create the Jira ticket for an export the
                               user asked for with twg, signing in first if it is not, and report it; run
@@ -134,6 +149,7 @@ export const COMMANDS: Record<string, Command> = {
   agents,
   artefact,
   deck,
+  docmosis,
   jira,
   github,
   confluence,

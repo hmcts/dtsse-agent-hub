@@ -32,6 +32,7 @@ import type { ExportToConfluenceAction } from "@/components/assistant/Confluence
 import type { SaveDeckAction, UnsavedDeckDraft } from "@/components/assistant/DeckEditor";
 import type { RestoreDeckAction } from "@/components/assistant/DeckHistory";
 import { DeckPanel, type SlideAsk } from "@/components/assistant/DeckPanel";
+import { DocmosisPanel } from "@/components/assistant/DocmosisPanel";
 import { ticketsOffered } from "@/components/assistant/ExportFooter";
 import { ForkedThread } from "@/components/assistant/ForkedThread";
 import type { ExportToGithubAction } from "@/components/assistant/GithubExport";
@@ -356,10 +357,10 @@ export function ChatView({
   const [claim, setClaim] = useState<string[] | null>(view.clientFeatures);
   const [pendingProduct, setPendingProduct] = useState<string | null>(null);
   /**
-   * The one panel beside the chat: the document or the deck, never both, since two panels beside a chat leave the chat
+   * The one panel beside the chat: the document, the deck or the Docmosis template, never two, since two panels beside a chat leave the chat
    * no room to read in. Each has its own button in the header, so either is one press from the other.
    */
-  const [panel, setPanel] = useState<"document" | "deck" | null>(null);
+  const [panel, setPanel] = useState<"document" | "deck" | "docmosis" | null>(null);
   // Read by a closed editor's late answer, which comes back through the props of the render that last showed it.
   const panelNow = useRef(panel);
   panelNow.current = panel;
@@ -367,6 +368,10 @@ export function ChatView({
   const documentBusy = useRef(false);
   /** The same for the slides' editor. */
   const deckBusy = useRef(false);
+  /** The same for the Docmosis form: edits typed and not yet rendered, or a newer version to settle. */
+  const docmosisBusy = useRef(false);
+  /** The assistant wrote a newer Docmosis version while another panel was busy, so the template waits behind its button instead. */
+  const [docmosisWaiting, setDocmosisWaiting] = useState(false);
   /** The assistant wrote a newer deck while the document was busy, so the slides wait behind their button instead. */
   const [slidesWaiting, setSlidesWaiting] = useState(false);
   /** The assistant wrote the document while the slides' editor was busy, so the document waits behind its button. */
@@ -386,6 +391,8 @@ export function ChatView({
   const warmed = useRef(false);
   const seenVersion = useRef(view.artefact.version);
   const seenDeck = useRef(view.deck?.version ?? 0);
+  const docmosis = view.docmosis;
+  const seenDocmosis = useRef(docmosis?.version ?? 0);
   const narrow = useNarrow();
 
   useEffect(() => setStatus(view.agentStatus), [view.agentStatus]);
@@ -409,7 +416,7 @@ export function ChatView({
   // through editing the slides, when it is announced and its button marked instead.
   useEffect(() => {
     if (view.artefact.version > seenVersion.current && view.artefact.updatedBy === "agent") {
-      if (panel === "deck" && deckBusy.current) {
+      if ((panel === "deck" && deckBusy.current) || (panel === "docmosis" && docmosisBusy.current)) {
         setDocumentWaiting(true);
         arrivals.announce("The assistant updated the document. Open document to see it.");
       } else {
@@ -429,7 +436,7 @@ export function ChatView({
   const deckBy = view.deck?.updatedBy ?? null;
   useEffect(() => {
     if (deckVersion > seenDeck.current && deckBy === "agent") {
-      if (panel === "document" && documentBusy.current) {
+      if ((panel === "document" && documentBusy.current) || (panel === "docmosis" && docmosisBusy.current)) {
         setSlidesWaiting(true);
         arrivals.announce("The assistant updated the slides. Open slides to see them.");
       } else {
@@ -439,12 +446,35 @@ export function ChatView({
     }
     seenDeck.current = Math.max(seenDeck.current, deckVersion);
   }, [deckVersion, deckBy, arrivals, panel]);
+
+  /**
+   * The same for the Docmosis template: a newer version from the assistant opens it in the other panel's place, unless
+   * the person is part-way through the document or the slides, when it is announced and its button marked instead. The
+   * panel itself takes in a newer version, or offers it against what the person has typed.
+   */
+  const docmosisVersion = docmosis?.version ?? 0;
+  const docmosisBy = docmosis?.updatedBy ?? null;
+  useEffect(() => {
+    if (docmosisVersion > seenDocmosis.current && docmosisBy === "agent") {
+      if ((panel === "document" && documentBusy.current) || (panel === "deck" && deckBusy.current)) {
+        setDocmosisWaiting(true);
+        arrivals.announce("The assistant updated the template. Open template to see it.");
+      } else {
+        setPanel("docmosis");
+        arrivals.announce("The assistant updated the template");
+      }
+    }
+    seenDocmosis.current = Math.max(seenDocmosis.current, docmosisVersion);
+  }, [docmosisVersion, docmosisBy, arrivals, panel]);
   useEffect(() => {
     if (panel === "deck") {
       setSlidesWaiting(false);
     }
     if (panel === "document") {
       setDocumentWaiting(false);
+    }
+    if (panel === "docmosis") {
+      setDocmosisWaiting(false);
     }
   }, [panel]);
   /**
@@ -453,7 +483,7 @@ export function ChatView({
    */
   function reopenDeck(draft: UnsavedDeckDraft): void {
     setUnsavedDeck((before) => ({ draft, key: before.key + 1 }));
-    if (panelNow.current === "document" && documentBusy.current) {
+    if ((panelNow.current === "document" && documentBusy.current) || (panelNow.current === "docmosis" && docmosisBusy.current)) {
       arrivals.announce(
         draft.conflict === null
           ? "Your slides could not be saved. Open slides to see your changes."
@@ -471,7 +501,7 @@ export function ChatView({
   /** The same for the document, which waits behind its button while the slides' editor is busy. */
   function reopenDocument(draft: UnsavedDraft): void {
     setUnsaved((before) => ({ draft, key: before.key + 1 }));
-    if (panelNow.current === "deck" && deckBusy.current) {
+    if ((panelNow.current === "deck" && deckBusy.current) || (panelNow.current === "docmosis" && docmosisBusy.current)) {
       arrivals.announce(
         draft.conflict === null
           ? "Your document could not be saved. Open document to see your changes."
@@ -535,6 +565,9 @@ export function ChatView({
   }
   function markDeckBusy(busy: boolean): void {
     deckBusy.current = busy;
+  }
+  function markDocmosisBusy(busy: boolean): void {
+    docmosisBusy.current = busy;
   }
   const artefact: ArtefactSnapshot = {
     title: view.artefact.title,
@@ -615,6 +648,20 @@ export function ChatView({
             </select>
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-1.5">
+            {docmosis === null || panel === "docmosis" ? null : (
+              <button
+                type="button"
+                onClick={() => setPanel("docmosis")}
+                aria-label={docmosisWaiting ? "Open template, updated by the assistant" : "Open template"}
+                className={`flex h-[34px] items-center whitespace-nowrap rounded-[9px] border px-2.5 text-[13px] hover:border-asst-accent-line hover:bg-asst-field min-[480px]:gap-2 min-[480px]:pr-3 ${docmosisWaiting ? "border-asst-accent bg-asst-field" : "border-asst-strong"}`}
+              >
+                <span aria-hidden="true" className="text-sm leading-none text-asst-accent">
+                  ▤
+                </span>
+                <span className="hidden min-[480px]:inline">Open template</span>
+                {docmosisWaiting ? <span aria-hidden="true" data-testid="docmosis-updated" className="h-1.5 w-1.5 rounded-full bg-asst-accent" /> : null}
+              </button>
+            )}
             {view.deck === null || panel === "deck" ? null : (
               <button
                 type="button"
@@ -817,6 +864,17 @@ export function ChatView({
               setPanel(null);
             }
           }}
+        />
+      ) : null}
+      {panel === "docmosis" && docmosis !== null ? (
+        <DocmosisPanel
+          conversationId={view.id}
+          docmosis={docmosis}
+          owner
+          onClose={() => setPanel(null)}
+          onBusy={markDocmosisBusy}
+          narrow={narrow}
+          announce={arrivals.announce}
         />
       ) : null}
       {panel === "document" ? (

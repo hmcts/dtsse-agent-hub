@@ -118,6 +118,26 @@ export type MockDeck = {
 /** A deck build the hub has asked a pod for, with the outline and pictures `GET …/deck-builds/{job_id}` serves. */
 export type MockDeckBuild = { conversation_id: string; version: number; outline: Body; assets: Record<string, Buffer> };
 
+/**
+ * A conversation's Docmosis template, as the hub keeps it: every version with its data and who wrote it, the .docx
+ * by digest and the PDF of each version sent one. The hub's schema checks are not repeated beyond the two the client
+ * relies on: the docx is held, and the schema and data have the right shape.
+ */
+export type MockDocmosisVersion = {
+  version: number;
+  revision: number;
+  name: string;
+  docx: string;
+  schema: Body;
+  data: Body;
+  by: "agent" | "user";
+  summary: string | null;
+  updated_at: string;
+  pdf: Buffer | null;
+  render_error: { short: string; long: string } | null;
+};
+export type MockDocmosis = { versions: MockDocmosisVersion[]; assets: Map<string, Buffer> };
+
 const DECK_ASSET_RE = /^sha256:([0-9a-f]{64})$/;
 const DECK_MAX_BYTES = 5 * 1024 * 1024;
 
@@ -214,8 +234,9 @@ export function createMockHub({
   heartbeatDropsClaim = false
 }: MockHubOptions = {}) {
   const options = { maxLifetimeMs, reconnectEvent, replayAcked };
-  const failures: { stream: number[]; ack: number[]; transcript: number[]; credential: number[]; status: number[]; pptx: number[] } = {
+  const failures: { stream: number[]; ack: number[]; transcript: number[]; credential: number[]; status: number[]; pptx: number[]; pdf: number[] } = {
     pptx: [],
+    pdf: [],
     stream: [],
     ack: [],
     transcript: [],
@@ -256,6 +277,21 @@ export function createMockHub({
     updated_at: stored.updated_at,
     pptx: stored.pptx.has(stored.version)
   });
+  // agent id → the conversation's Docmosis template
+  const docmosisTemplates = new Map<string, MockDocmosis>();
+  const docmosisOf = (agentId: string): MockDocmosis => {
+    let found = docmosisTemplates.get(agentId);
+    if (!found) {
+      found = { versions: [], assets: new Map() };
+      docmosisTemplates.set(agentId, found);
+    }
+    return found;
+  };
+  const docmosisBody = (stored: MockDocmosis, v: MockDocmosisVersion) => {
+    const { pdf, ...rest } = v;
+    const latest = stored.versions[stored.versions.length - 1];
+    return { ...rest, has_pdf: pdf !== null, ...(latest && latest.version !== v.version ? { current_version: latest.version } : {}) };
+  };
   const jiraReports: Record<string, unknown>[] = [];
   const githubReports: Record<string, unknown>[] = [];
   const confluenceReports: Record<string, unknown>[] = [];
@@ -390,7 +426,7 @@ export function createMockHub({
       chunks.push(Buffer.from(chunk));
     }
     const bytes = Buffer.concat(chunks);
-    if (req.headers["content-type"] === "application/octet-stream") {
+    if (req.headers["content-type"] === "application/octet-stream" || req.headers["content-type"] === "application/pdf") {
       return { body: {}, rawBytes: bytes.byteLength, octets: bytes };
     }
     const raw = bytes.toString("utf8");
@@ -1215,6 +1251,105 @@ export function createMockHub({
         return send(res, 204);
       }
     }
+    if (action === "docmosis") {
+      if (!agent.conversation_id) {
+        return send(res, 404, { error: "not a conversation" });
+      }
+      const stored = docmosisOf(agent.id);
+      const latest = stored.versions[stored.versions.length - 1];
+      const sub = parts[4];
+      if (sub === undefined && req.method === "GET") {
+        const asked = url.searchParams.get("version");
+        if (!latest) {
+          return send(res, 404, { error: "the conversation has no template" });
+        }
+        const found = asked === null ? latest : stored.versions.find((v) => v.version === Number(asked));
+        return found ? send(res, 200, docmosisBody(stored, found)) : send(res, 404, { error: `the template does not keep version ${asked}` });
+      }
+      if (sub === undefined && req.method === "PUT") {
+        const docx = typeof body.docx === "string" ? DECK_ASSET_RE.exec(body.docx)?.[1] : undefined;
+        if (
+          typeof body.name !== "string" ||
+          body.name === "" ||
+          docx === undefined ||
+          body.schema?.root?.kind !== "object" ||
+          typeof body.data !== "object" ||
+          body.data === null ||
+          Array.isArray(body.data) ||
+          !Number.isInteger(body.base_version)
+        ) {
+          return send(res, 400, { error: "bad template" });
+        }
+        if (body.base_version !== (latest?.version ?? 0) || (body.base_revision !== undefined && body.base_revision !== latest?.revision)) {
+          return send(res, 409, { error: "the template has changed since that version", current: latest ? docmosisBody(stored, latest) : undefined });
+        }
+        if (!stored.assets.has(docx)) {
+          return send(res, 400, { error: "the template's .docx is not held", missing_assets: [docx] });
+        }
+        const next: MockDocmosisVersion = {
+          version: (latest?.version ?? 0) + 1,
+          revision: 0,
+          name: body.name,
+          docx: body.docx,
+          schema: body.schema,
+          data: body.data,
+          by: "agent",
+          summary: body.summary ?? null,
+          updated_at: new Date().toISOString(),
+          pdf: null,
+          render_error: null
+        };
+        stored.versions.push(next);
+        return send(res, 200, { version: next.version, revision: 0 });
+      }
+      if (sub === "assets") {
+        const sha = parts[5] ?? "";
+        if (!/^[0-9a-f]{64}$/.test(sha)) {
+          return send(res, 400, { error: "not a sha256" });
+        }
+        if (req.method === "GET") {
+          const bytes = stored.assets.get(sha);
+          if (!bytes) {
+            return send(res, 404, { error: "the template does not hold that .docx" });
+          }
+          beforeRespond?.();
+          res.writeHead(200, { "Content-Type": "application/octet-stream", "Content-Length": String(bytes.byteLength) });
+          return res.end(bytes);
+        }
+        if (req.method === "PUT") {
+          if (!octets || octets.byteLength === 0 || octets.byteLength > DECK_MAX_BYTES || octets.subarray(0, 4).toString("hex") !== "504b0304") {
+            return send(res, octets && octets.byteLength > DECK_MAX_BYTES ? 413 : 400, { error: "bad .docx" });
+          }
+          if (createHash("sha256").update(octets).digest("hex") !== sha) {
+            return send(res, 400, { error: "the bytes' SHA-256 is not the one in the path" });
+          }
+          stored.assets.set(sha, octets);
+          return send(res, 200, { asset: `sha256:${sha}` });
+        }
+      }
+      if (sub === "versions" && parts[6] === "pdf" && req.method === "PUT") {
+        const refused = failures.pdf.shift();
+        if (refused !== undefined) {
+          return send(res, refused, { error: "the hub could not store the PDF" });
+        }
+        if (octets?.subarray(0, 5).toString("latin1") !== "%PDF-") {
+          return send(res, 400, { error: "that is not a PDF" });
+        }
+        const asked = url.searchParams.get("revision");
+        if (asked === null || !/^\d+$/.test(asked)) {
+          return send(res, 400, { error: "revision is required" });
+        }
+        const found = stored.versions.find((v) => v.version === Number(parts[5]));
+        if (!found) {
+          return send(res, 404, { error: "the template has no such version" });
+        }
+        if (found.revision !== Number(asked)) {
+          return send(res, 409, { error: "the template version has changed since that revision", current: docmosisBody(stored, found) });
+        }
+        found.pdf = octets;
+        return send(res, 204);
+      }
+    }
     if (action === "jira" && req.method === "PUT") {
       if (!agent.conversation_id) {
         return send(res, 404, { error: "not a conversation" });
@@ -1335,6 +1470,7 @@ export function createMockHub({
     personCredentials,
     artefacts,
     decks,
+    docmosisTemplates,
     jiraReports,
     githubReports,
     confluenceReports,
@@ -1455,6 +1591,43 @@ export function createMockHub({
     failNextStatuses(count: number, status = 500) {
       for (let i = 0; i < count; i++) {
         failures.status.push(status);
+      }
+    },
+    failNextDocmosisPdf(count: number, status = 500) {
+      for (let i = 0; i < count; i++) {
+        failures.pdf.push(status);
+      }
+    },
+    // A template written in the web UI as the person's: new data on a new version, or on the latest one amended.
+    writeDocmosisAsUser(agentId: string, data: Body, { amend = false }: { amend?: boolean } = {}) {
+      const stored = docmosisOf(agentId);
+      const latest = stored.versions[stored.versions.length - 1];
+      if (!latest) {
+        throw new Error("no template to change");
+      }
+      if (amend && latest.by === "user") {
+        latest.revision += 1;
+        latest.data = data;
+        latest.pdf = null;
+        latest.render_error = null;
+        return;
+      }
+      stored.versions.push({
+        ...latest,
+        version: latest.version + 1,
+        revision: 0,
+        data,
+        by: "user",
+        summary: null,
+        updated_at: new Date().toISOString(),
+        pdf: null,
+        render_error: null
+      });
+    },
+    setDocmosisRenderError(agentId: string, error: { short: string; long: string }) {
+      const latest = docmosisOf(agentId).versions.at(-1);
+      if (latest) {
+        latest.render_error = error;
       }
     },
     failNextDeckPptx(count: number, status = 500) {

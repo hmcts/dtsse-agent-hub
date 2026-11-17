@@ -3,6 +3,7 @@ import type { Database } from "../store/prisma.ts";
 import { ARTEFACT_SELECT } from "./artefact-store.ts";
 import { CONFLUENCE_SELECT } from "./confluence.ts";
 import { DECK_SELECT } from "./deck-store.ts";
+import { DOCMOSIS_SELECT } from "./docmosis-store.ts";
 import { assistantFrame } from "./frame.ts";
 import { GITHUB_SELECT } from "./github.ts";
 import { JIRA_SELECT } from "./jira.ts";
@@ -14,10 +15,18 @@ import { JIRA_SELECT } from "./jira.ts";
 
 const CONVERSATION = "00000000-0000-4000-8000-000000000001";
 
-function stub(deck: { deckVersion: number; deckUpdatedBy: string | null }, newestAgent: number | null = null) {
+function stub(
+  deck: { deckVersion: number; deckUpdatedBy: string | null },
+  newestAgent: number | null = null,
+  docmosis: { docmosisVersion: number; docmosisRevision: number; docmosisUpdatedBy: string | null } = {
+    docmosisVersion: 0,
+    docmosisRevision: 0,
+    docmosisUpdatedBy: null
+  }
+) {
   const versionQueries: unknown[] = [];
   const nulls = Object.fromEntries(
-    Object.keys({ ...ARTEFACT_SELECT, ...DECK_SELECT, ...JIRA_SELECT, ...GITHUB_SELECT, ...CONFLUENCE_SELECT }).map((key) => [key, null])
+    Object.keys({ ...ARTEFACT_SELECT, ...DECK_SELECT, ...DOCMOSIS_SELECT, ...JIRA_SELECT, ...GITHUB_SELECT, ...CONFLUENCE_SELECT }).map((key) => [key, null])
   );
   const conversation = {
     ...nulls,
@@ -27,6 +36,7 @@ function stub(deck: { deckVersion: number; deckUpdatedBy: string | null }, newes
     artefactMarkdown: "",
     artefactVersion: 0,
     deckRevision: deck.deckVersion,
+    ...docmosis,
     ...deck
   };
   const db = {
@@ -69,5 +79,25 @@ describe("assistantFrame's deck_agent_version", () => {
 
     expect((await assistantFrame(db, "va-1"))?.deck_agent_version).toBe(0);
     expect(versionQueries).toEqual([]);
+  });
+});
+
+describe("assistantFrame's docmosis fields", () => {
+  it("should carry the template's version, revision and author", async () => {
+    const { db } = stub({ deckVersion: 0, deckUpdatedBy: null }, null, { docmosisVersion: 3, docmosisRevision: 2, docmosisUpdatedBy: "user" });
+
+    expect(await assistantFrame(db, "va-1")).toMatchObject({ docmosis_version: 3, docmosis_revision: 2, docmosis_updated_by: "user" });
+  });
+
+  it("should say 0, 0 and no author before there is a template", async () => {
+    const { db } = stub({ deckVersion: 0, deckUpdatedBy: null });
+
+    expect(await assistantFrame(db, "va-1")).toMatchObject({ docmosis_version: 0, docmosis_revision: 0, docmosis_updated_by: null });
+  });
+
+  it("should say no author for a value that is neither the person nor the session", async () => {
+    const { db } = stub({ deckVersion: 0, deckUpdatedBy: null }, null, { docmosisVersion: 1, docmosisRevision: 0, docmosisUpdatedBy: "other" });
+
+    expect((await assistantFrame(db, "va-1"))?.docmosis_updated_by).toBeNull();
   });
 });

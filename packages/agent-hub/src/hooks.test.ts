@@ -650,6 +650,18 @@ describe("runHook in an assistant conversation", () => {
     }
   });
 
+  it("should say how a Docmosis template is published and read back, for a pod conversation", async () => {
+    // Act
+    const out = await virtualStart("conv-template", { ...reposState(null), ...CONVERSATION });
+
+    // Assert
+    expect(out[0]).toContain("docmosis schema");
+    expect(out[0]).toContain("docmosis render-file");
+    expect(out[0]).toContain("agent-hub docmosis put");
+    expect(out[0]).toContain("agent-hub docmosis pdf");
+    expect(out[0]).toContain("run `agent-hub docmosis get` before changing the template");
+  });
+
   it("should not mention the slide deck when the session was started without a copy of the slides plugin", async () => {
     // Act
     const out = await virtualStart("conv-no-copy", { ...reposState(null), ...CONVERSATION, AGENT_HUB_PLUGINS: "slides" });

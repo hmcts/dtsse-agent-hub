@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { SharedConversationView } from "@/assistant/sharing";
 import { AssistantMarkdown } from "@/components/assistant/AssistantMarkdown";
 import { SharedDeck } from "@/components/assistant/DeckPanel";
+import { SharedDocmosis } from "@/components/assistant/DocmosisPanel";
 import { ForkButton, type ForkChatAction } from "@/components/assistant/ForkButton";
 import { ForkedThread } from "@/components/assistant/ForkedThread";
 import { SharedItem } from "@/components/assistant/SharedItem";
@@ -63,6 +64,7 @@ export function SharedChat({ view, forkChat }: { view: SharedConversationView; f
             </section>
           )}
           {view.deck === null ? null : <SharedDeck conversationId={view.id} deck={view.deck} />}
+          {view.docmosis === null ? null : <SharedDocmosis conversationId={view.id} docmosis={view.docmosis} />}
           <p className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs text-asst-faint">
             <Link href={SHARED_CHATS} className="text-asst-accent underline hover:text-asst-accent-hover">
               {view.access === "owner" ? "See all your shared chats" : "See other chats shared with you"}

@@ -58,7 +58,9 @@ export type ApiErrorBody = {
    * A `409` from `putArtefact`: the document as `getArtefact` returns it, to merge the refused change into; from
    * `putDeck`, the deck as `getDeck` returns it.
    */
-  current?: Artefact | Deck;
+  current?: Artefact | Deck | DocmosisResponse;
+  /** A `400` from `putDocmosis`: the .docx digests the hub does not hold. */
+  missing_assets?: string[];
   /** A `400` from `putDeck`: the pictures the outline names that the hub does not hold. */
   missing?: string[];
 };
@@ -278,6 +280,47 @@ export type DeckBody = {
 export type DeckResponse = { version: number; revision?: number; outline: DeckOutline };
 
 export type DeckAssetResponse = { asset: string };
+
+/** One field of a Docmosis template's form schema, as `docmosis schema` infers it. */
+export type DocmosisField =
+  | { kind: "string" | "boolean" | "date"; controls: string[]; notes: string[]; inputFormat?: string }
+  | { kind: "object"; controls: string[]; notes: string[]; properties: Record<string, DocmosisField> }
+  | { kind: "array"; controls: string[]; notes: string[]; item: Extract<DocmosisField, { kind: "object" }> };
+
+export type DocmosisSchema = { root: Extract<DocmosisField, { kind: "object" }>; warnings: string[] };
+
+/** A conversation's Docmosis template at one version, as `GET …/docmosis` returns it. */
+export type DocmosisResponse = {
+  version: number;
+  revision: number;
+  name: string;
+  /** `sha256:<hex>`, the digest `GET …/docmosis/assets/{sha256}` takes. */
+  docx: string;
+  schema: DocmosisSchema;
+  data: Record<string, unknown>;
+  by: "agent" | "user";
+  summary: string | null;
+  updated_at: string;
+  has_pdf: boolean;
+  render_error: { short: string; long: string } | null;
+  /** Only when a version other than the latest was asked for: the version the template is at now. */
+  current_version?: number;
+};
+
+export type DocmosisBody = {
+  name: string;
+  docx: string;
+  schema: DocmosisSchema;
+  data: Record<string, unknown>;
+  base_version: number;
+  /** The revision read with the version, so a person's amend since is refused rather than overwritten. */
+  base_revision?: number;
+  summary?: string;
+};
+
+export type DocmosisWritten = { version: number; revision: number };
+
+export type DocmosisAssetResponse = { asset: string };
 
 /** One conversation of a virtual agent, as `conversations` lists them for the uploads reconciliation. */
 export type ConversationSummary = { id: string };

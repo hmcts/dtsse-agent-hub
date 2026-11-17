@@ -8,6 +8,7 @@ import {
   canAgentMessageAgent,
   canAttachUpload,
   canChangeDeck,
+  canChangeDocmosis,
   canChangeFeedbackProject,
   canConnectMicrosoft,
   canForkConversation,
@@ -19,6 +20,7 @@ import {
   canPersonDirectAgent,
   canPodReadCredential,
   canReadDeck,
+  canReadDocmosis,
   canReadMessage,
   canRecordFeedback,
   canRemoveUploadFromDisk,
@@ -707,6 +709,37 @@ describe("the conversation share rules", () => {
 
     it.each(EVERYONE_ELSE)("should refuse %s a restore and a build", (_label, viewerOid) => {
       expect(canChangeDeck(conversationAccess(viewerOid, CONVERSATION, SHARES))).toBe(false);
+    });
+  });
+
+  describe("canReadDocmosis", () => {
+    it("should let the owner and a share's recipient read the template", () => {
+      expect(canReadDocmosis(conversationAccess(OWNER, CONVERSATION, SHARES))).toBe(true);
+      expect(canReadDocmosis(conversationAccess(RECIPIENT, CONVERSATION, SHARES))).toBe(true);
+    });
+
+    it.each(EVERYONE_ELSE)("should refuse %s the template", (_label, viewerOid) => {
+      expect(canReadDocmosis(conversationAccess(viewerOid, CONVERSATION, SHARES))).toBe(false);
+    });
+
+    it("should refuse the template when the access answered is none", () => {
+      expect(canReadDocmosis("none")).toBe(false);
+    });
+  });
+
+  describe("canChangeDocmosis", () => {
+    it("should let the owner change the template", () => {
+      expect(canChangeDocmosis(conversationAccess(OWNER, CONVERSATION, SHARES))).toBe(true);
+    });
+
+    it("should refuse a share's recipient when the share lets them read the template", () => {
+      const access = conversationAccess(RECIPIENT, CONVERSATION, SHARES);
+      expect(canReadDocmosis(access)).toBe(true);
+      expect(canChangeDocmosis(access)).toBe(false);
+    });
+
+    it.each(EVERYONE_ELSE)("should refuse %s a change to the template", (_label, viewerOid) => {
+      expect(canChangeDocmosis(conversationAccess(viewerOid, CONVERSATION, SHARES))).toBe(false);
     });
   });
 

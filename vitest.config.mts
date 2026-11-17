@@ -77,6 +77,7 @@ export default defineConfig({
         "src/assistant/artefact-store.ts",
         "src/assistant/deck-store.ts",
         "src/assistant/deck-edit-store.ts",
+        "src/assistant/docmosis-store.ts",
         "src/assistant/assistant-store.ts",
         "src/assistant/conversation-store.ts",
         "src/assistant/first-content.ts",
