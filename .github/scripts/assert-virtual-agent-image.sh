@@ -42,3 +42,12 @@ docker run --rm --entrypoint bash "$image" -ec '
         }
     done'
 echo "both bins link into nvm's tree"
+
+# The docmosis CLI runs in Claude's sessions, whose PATH comes from a shell that has sourced nvm.sh,
+# so that is the shell this checks from. `schema` is the command the agent-hub publishing steps need;
+# a version without it would install cleanly and fail only when an agent first used it.
+docker run --rm --entrypoint bash "$image" -ec '
+    . "$HOME/.nvm/nvm.sh" >/dev/null
+    command -v docmosis >/dev/null || { echo "docmosis is not on an nvm shell'"'"'s PATH" >&2; exit 1; }
+    docmosis --help 2>&1 | grep -q "^  schema " || { echo "docmosis has no schema command" >&2; exit 1; }'
+echo "docmosis resolves from an nvm shell and has the schema command"

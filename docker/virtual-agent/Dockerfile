@@ -43,6 +43,22 @@ RUN bash -c 'export NVM_DIR="$HOME/.nvm"; \
     && boot="$(command -v virtual-agent-boot)" && sudo ln -sf "$boot" /usr/local/bin/virtual-agent-boot \
     && npm ls -g --depth=0 @hmcts-cft/agent-hub'
 
+# The docmosis CLI (@hmcts-cft/docmosis-tools), which the agent runs to read a template's schema and
+# render it before publishing it with `agent-hub docmosis put`. A developer gets it from the VS Code
+# extension's terminals, and a pod runs no VS Code, so this layer is how it reaches one. Unpinned and
+# uncached for the same reason as the client above.
+#
+# It is not linked into /usr/local/bin: only Claude's sessions run it, and they inherit the pod
+# entrypoint's PATH, which has sourced nvm.sh. --ignore-scripts because the package declares none and
+# has no dependencies.
+RUN bash -c 'export NVM_DIR="$HOME/.nvm"; \
+    . "$NVM_DIR/nvm.sh"; \
+    nvm use default; \
+    npm install -g --ignore-scripts \
+        --@hmcts-cft:registry=https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/npm/registry/ \
+        @hmcts-cft/docmosis-tools@latest \
+    && npm ls -g --depth=0 @hmcts-cft/docmosis-tools'
+
 # Numeric, where the base names the same user: given only a name the kubelet cannot tell whether it
 # is root, and refuses a pod that asks for runAsNonRoot. The orchestrator sets runAsUser: 1000 for
 # that reason (src/orchestrator/manifests.ts), and this makes the image say it too, so it does not
