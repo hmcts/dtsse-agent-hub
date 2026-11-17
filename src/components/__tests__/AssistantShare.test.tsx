@@ -443,6 +443,7 @@ function view(overrides: Partial<SharedConversationView> = {}): SharedConversati
     earlierHidden: false,
     document: null,
     deck: null,
+    docmosis: null,
     access: "reader",
     forked: null,
     fork: null,

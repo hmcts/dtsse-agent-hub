@@ -5,6 +5,7 @@ import { agentConversation } from "../transcripts/views.ts";
 import { readArtefact } from "./artefact-store.ts";
 import { storedHistory, storedStops } from "./conversation-row.ts";
 import { DECK_SELECT, type DeckSummary, deckSummary } from "./deck-store.ts";
+import { DOCMOSIS_SELECT, type DocmosisSummary, docmosisSummary } from "./docmosis-store.ts";
 import { FORKED_SELECT, type ForkedView, forkedView } from "./forks.ts";
 import { hasPod } from "./pods.ts";
 import { productLabel } from "./products.ts";
@@ -93,6 +94,8 @@ export interface SharedConversationView {
   document: { title: string; markdown: string } | null;
   /** The latest version of the conversation's slide deck, without its outline, which the viewer reads; `null` when it has none. Read-only here, as the document is. */
   deck: DeckSummary | null;
+  /** The latest version of the conversation's Docmosis template, without its schema and data, which the viewer reads; `null` when it has none. */
+  docmosis: DocmosisSummary | null;
   /** `owner` when the owner is looking at their own share, which is how they see what a recipient sees. */
   access: ConversationAccess;
   /**
@@ -135,7 +138,8 @@ export async function sharedConversation(
       agentId: true,
       owner: { select: { name: true } },
       ...FORKED_SELECT,
-      ...DECK_SELECT
+      ...DECK_SELECT,
+      ...DOCMOSIS_SELECT
     }
   });
   if (row === null) {
@@ -163,6 +167,7 @@ export async function sharedConversation(
     earlierHidden: page?.olderBefore !== null && page?.olderBefore !== undefined,
     document: artefact.version === 0 ? null : { title: artefact.title ?? "Untitled document", markdown: artefact.markdown },
     deck,
+    docmosis: docmosisSummary(row),
     access,
     fork
   };

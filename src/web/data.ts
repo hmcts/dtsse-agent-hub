@@ -1,5 +1,14 @@
 import "server-only";
-import { canConnectMicrosoft, canManageVirtualAgent, canOwnerReadCredential, canReadDeck, canReadMessage, isOwner } from "../access/rules.ts";
+import {
+  type ConversationAccess,
+  canConnectMicrosoft,
+  canManageVirtualAgent,
+  canOwnerReadCredential,
+  canReadDeck,
+  canReadDocmosis,
+  canReadMessage,
+  isOwner
+} from "../access/rules.ts";
 import type { Skill } from "../agents/skills.ts";
 import { isUuid } from "../agents/store.ts";
 import { ensureAssistantWithClaims, findAssistant } from "../assistant/assistant-store.ts";
@@ -8,6 +17,7 @@ import { conversationAgent, findConversation } from "../assistant/conversation-s
 import { isSha256 } from "../assistant/deck.ts";
 import { type DeckVersionEntry, type DeckVersionView, listDeckVersions, readDeckVersion, readVersionPptx } from "../assistant/deck-history-store.ts";
 import { type DeckAsset, type DeckView, deckView, holdsDeckAsset, readDeckAsset } from "../assistant/deck-store.ts";
+import { docmosisView, listDocmosisVersions, readDocmosisPdf } from "../assistant/docmosis-store.ts";
 import { readExportDefaults } from "../assistant/export-default-store.ts";
 import type { ExportDefaults } from "../assistant/export-defaults.ts";
 import { conversationsForkableBy, conversationsOfferedBy, forkChoice, forkRecipients } from "../assistant/fork-store.ts";
@@ -503,6 +513,45 @@ export async function deckVersion(viewer: Identity, id: string, version: number)
     return undefined;
   }
   return await readDeckVersion(prisma, id, version);
+}
+
+/** What the viewer may do with the conversation's Docmosis template: `owner` or `reader`, and `undefined` for everyone else. */
+export async function docmosisAccess(viewer: Identity, id: string): Promise<Exclude<ConversationAccess, "none"> | undefined> {
+  const allowed = await accessToConversation(prisma, viewer.oid, id);
+  if (allowed === undefined || allowed.access === "none" || !canReadDocmosis(allowed.access)) {
+    return undefined;
+  }
+  return allowed.access;
+}
+
+/** One kept version of a conversation's template, or its latest without `version`, for anyone `canReadDocmosis` lets read it; `undefined` for everyone else and when there is none. */
+export async function readableDocmosis(
+  viewer: Identity,
+  id: string,
+  version?: number
+): Promise<NonNullable<Awaited<ReturnType<typeof docmosisView>>> | undefined> {
+  if ((await docmosisAccess(viewer, id)) === undefined) {
+    return undefined;
+  }
+  return (await docmosisView(prisma, id, version)) ?? undefined;
+}
+
+/** Every kept version of a conversation's template, newest first, under the same rule; `undefined` for anyone else and for a chat with none. */
+export async function docmosisVersions(viewer: Identity, id: string): Promise<Awaited<ReturnType<typeof listDocmosisVersions>> | undefined> {
+  if ((await docmosisAccess(viewer, id)) === undefined) {
+    return undefined;
+  }
+  const versions = await listDocmosisVersions(prisma, id);
+  return versions.length === 0 ? undefined : versions;
+}
+
+/** One version's rendered PDF with the template's name, under the same rule; `undefined` when there is none or the viewer may not read it. */
+export async function docmosisPdf(viewer: Identity, id: string, version: number): Promise<{ name: string; bytes: Uint8Array } | undefined> {
+  if ((await docmosisAccess(viewer, id)) === undefined) {
+    return undefined;
+  }
+  const [view, bytes] = await Promise.all([docmosisView(prisma, id, version), readDocmosisPdf(prisma, id, version)]);
+  return view === null || bytes === null ? undefined : { name: view.name, bytes };
 }
 
 /** Who one of the viewer's own conversations is shared with, or `undefined` when it is not theirs to share. */

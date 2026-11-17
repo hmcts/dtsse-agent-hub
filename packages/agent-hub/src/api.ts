@@ -22,6 +22,10 @@ import type {
   DeckBuild,
   DeckResponse,
   DirectBody,
+  DocmosisAssetResponse,
+  DocmosisBody,
+  DocmosisResponse,
+  DocmosisWritten,
   FeedResponse,
   GithubExportReport,
   HeartbeatBody,
@@ -191,6 +195,14 @@ export type Api = {
   deckAsset: (agentId: string, sha256: string) => Promise<Uint8Array>;
   /** The .pptx built from one version of the deck. At most 5 MiB. */
   putDeckPptx: (agentId: string, version: number, bytes: Uint8Array) => Promise<null>;
+  /** The latest version of the conversation's Docmosis template, or one kept version of it. */
+  getDocmosis: (agentId: string, version?: number) => Promise<DocmosisResponse>;
+  putDocmosis: (agentId: string, body: DocmosisBody) => Promise<DocmosisWritten>;
+  /** The .docx a template version names, under the SHA-256 of its bytes. At most 5 MiB. */
+  putDocmosisAsset: (agentId: string, sha256: string, bytes: Uint8Array) => Promise<DocmosisAssetResponse>;
+  docmosisAsset: (agentId: string, sha256: string) => Promise<Uint8Array>;
+  /** The PDF rendered from one version of the template. At most 5 MiB. */
+  putDocmosisPdf: (agentId: string, version: number, bytes: Uint8Array) => Promise<null>;
   /**
    * A question this session's model asked with `AskUserQuestion`, for the person to answer in the web UI. Idempotent
    * on `tool_use_id`, so a retry after a lost response does not put the question on screen twice.
@@ -304,11 +316,17 @@ export function createApi({
    * Raw bytes up to the hub, on the part timeout since they can be 5 MiB: a Welsh spreadsheet with its name in a
    * header, or a deck's picture or .pptx with none.
    */
-  async function putBytes<T>(path: string, name: string | null, bytes: Uint8Array, timeoutMs = PART_TIMEOUT_MS): Promise<T> {
+  async function putBytes<T>(
+    path: string,
+    name: string | null,
+    bytes: Uint8Array,
+    timeoutMs = PART_TIMEOUT_MS,
+    contentType = "application/octet-stream"
+  ): Promise<T> {
     const named: Record<string, string> = name === null ? {} : { "X-File-Name": encodeURIComponent(name) };
     const res = await fetchImpl(`${base}${path}`, {
       method: "PUT",
-      headers: await headers({ "Content-Type": "application/octet-stream", ...named }),
+      headers: await headers({ "Content-Type": contentType, ...named }),
       body: bytes,
       signal: AbortSignal.timeout(timeoutMs)
     });
@@ -405,6 +423,12 @@ export function createApi({
     putDeckAsset: (agentId, sha256, bytes) => putBytes<DeckAssetResponse>(`${a(agentId)}/deck/assets/${encodeURIComponent(sha256)}`, null, bytes),
     deckAsset: (agentId, sha256) => requestBytes(`${a(agentId)}/deck/assets/${encodeURIComponent(sha256)}`),
     putDeckPptx: (agentId, version, bytes) => putBytes<null>(`${a(agentId)}/deck/versions/${version}/pptx`, null, bytes),
+    getDocmosis: (agentId, version) => request<DocmosisResponse>("GET", `${a(agentId)}/docmosis${qs({ version })}`),
+    putDocmosis: (agentId, body) => request<DocmosisWritten>("PUT", `${a(agentId)}/docmosis`, body),
+    putDocmosisAsset: (agentId, sha256, bytes) => putBytes<DocmosisAssetResponse>(`${a(agentId)}/docmosis/assets/${encodeURIComponent(sha256)}`, null, bytes),
+    docmosisAsset: (agentId, sha256) => requestBytes(`${a(agentId)}/docmosis/assets/${encodeURIComponent(sha256)}`),
+    putDocmosisPdf: (agentId, version, bytes) =>
+      putBytes<null>(`${a(agentId)}/docmosis/versions/${version}/pdf`, null, bytes, PART_TIMEOUT_MS, "application/pdf"),
     postQuestion: (agentId, body, opts) => request<null>("POST", `${a(agentId)}/question`, body, opts),
     putJiraExport: (agentId, body) => request<null>("PUT", `${a(agentId)}/jira`, body),
     putGithubExport: (agentId, body) => request<null>("PUT", `${a(agentId)}/github`, body),

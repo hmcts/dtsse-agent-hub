@@ -443,6 +443,23 @@ export function canChangeDeck(access: ConversationAccess): boolean {
 }
 
 /**
+ * Whether the viewer may read a conversation's Docmosis template in the browser — its data, its versions and the PDF
+ * rendered from it — given what `conversationAccess` answered for them: its owner, and anyone it is shared with or
+ * offered to, as for the deck. Read-only for all but the owner.
+ */
+export function canReadDocmosis(access: ConversationAccess): boolean {
+  return access === "owner" || access === "reader";
+}
+
+/**
+ * Whether the viewer may change a conversation's template data from the browser, which saves a version and has the hub
+ * render it: its owner alone, since a reader would be writing to someone else's conversation.
+ */
+export function canChangeDocmosis(access: ConversationAccess): boolean {
+  return access === "owner";
+}
+
+/**
  * Whether `actorOid` may share their conversation with `recipientOid`: only the owner shares, as only they see or
  * change who it is shared with (`isOwner`). `recipientKnown` means a `user` row exists: the hub shares with a
  * person it has seen, not with an address.

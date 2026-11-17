@@ -2,6 +2,7 @@ import type { Database } from "../store/prisma.ts";
 import { ARTEFACT_SELECT, toArtefact } from "./artefact-store.ts";
 import { CONFLUENCE_SELECT, type ConfluenceExportFrame, pendingConfluenceExport } from "./confluence.ts";
 import { DECK_SELECT, deckAuthor, newestAgentVersion } from "./deck-store.ts";
+import { DOCMOSIS_SELECT, docmosisAuthor } from "./docmosis-store.ts";
 import { GITHUB_SELECT, type GithubExportFrame, pendingGithubExport } from "./github.ts";
 import { JIRA_SELECT, type JiraExportFrame, pendingJiraExport } from "./jira.ts";
 import { readAssistantModel } from "./model-store.ts";
@@ -35,6 +36,10 @@ export interface AssistantFrame {
   deck_revision: number;
   /** The newest kept version the session wrote itself, 0 when none is: what the prompt's context tells it to diff from. */
   deck_agent_version: number;
+  /** The conversation's Docmosis template's latest version, 0 before there is one, its revision, and who wrote it. */
+  docmosis_version: number;
+  docmosis_revision: number;
+  docmosis_updated_by: "user" | "agent" | null;
   /** While an export to Jira is pending: what to create, which the session carries out with `twg`. */
   jira_export?: JiraExportFrame;
   /** While an export to GitHub is pending: the repository to create the issue in, which the session does with `gh`. */
@@ -69,7 +74,17 @@ export async function assistantFrame(db: Database, agentId: string, messageId?: 
     where: { id: agentId },
     select: {
       assistantConversation: {
-        select: { id: true, ownerOid: true, product: true, ...ARTEFACT_SELECT, ...DECK_SELECT, ...JIRA_SELECT, ...GITHUB_SELECT, ...CONFLUENCE_SELECT }
+        select: {
+          id: true,
+          ownerOid: true,
+          product: true,
+          ...ARTEFACT_SELECT,
+          ...DECK_SELECT,
+          ...DOCMOSIS_SELECT,
+          ...JIRA_SELECT,
+          ...GITHUB_SELECT,
+          ...CONFLUENCE_SELECT
+        }
       }
     }
   });
@@ -100,6 +115,9 @@ export async function assistantFrame(db: Database, agentId: string, messageId?: 
     deck_updated_by: deckBy,
     deck_revision: conversation.deckRevision,
     deck_agent_version: agentVersion,
+    docmosis_version: conversation.docmosisVersion,
+    docmosis_revision: conversation.docmosisRevision,
+    docmosis_updated_by: docmosisAuthor(conversation),
     ...(jira === undefined ? {} : { jira_export: jira }),
     ...(github === undefined ? {} : { github_export: github }),
     ...(confluence === undefined ? {} : { confluence_export: confluence }),

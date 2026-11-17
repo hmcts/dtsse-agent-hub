@@ -538,6 +538,16 @@ model AssistantConversation {
   deckUpdatedAt     DateTime? @map("deck_updated_at") @db.Timestamptz(6)
   /// Moved on by every write of the outline, an amend of the latest version included. See "Revisions" in docs/agent-api.md.
   deckRevision      Int       @default(0) @map("deck_revision")
+  /// The latest version of the conversation's Docmosis template, 0 before there is one. See src/assistant/docmosis-store.ts.
+  docmosisVersion   Int       @default(0) @map("docmosis_version")
+  /// The latest version's revision: the person's amends of its data.
+  docmosisRevision  Int       @default(0) @map("docmosis_revision")
+  docmosisName      String?   @map("docmosis_name")
+  /// user or agent.
+  docmosisUpdatedBy String?   @map("docmosis_updated_by")
+  docmosisUpdatedAt DateTime? @map("docmosis_updated_at") @db.Timestamptz(6)
+  /// Whether the latest version has a PDF (ready), a render_error (failed) or neither (pending); kept by every write so the page summary moves with it.
+  docmosisPdfState  String    @default("pending") @map("docmosis_pdf_state")
   jiraExportId      String?   @map("jira_export_id") @db.Uuid
   jiraProject       String?   @map("jira_project")
   /// pending, done or failed; null before the first export.
@@ -605,6 +615,8 @@ model AssistantConversation {
   deckVersions AssistantDeckVersion[]
   deckAssets   AssistantDeckAsset[]
   deckBuilds   AssistantDeckBuild[]
+  docmosisVersions AssistantDocmosisVersion[]
+  docmosisAssets   AssistantDocmosisAsset[]
 
   @@index([ownerOid, lastActiveAt(sort: Desc)], map: "assistant_conversation_owner_active_idx")
   @@map("assistant_conversation")
@@ -630,6 +642,46 @@ model AssistantDeckVersion {
 
   @@id([conversationId, version])
   @@map("assistant_deck_version")
+}
+
+/// One version of a conversation's Docmosis template. The latest 50 are kept, and the latest 10 keep their PDF.
+model AssistantDocmosisVersion {
+  conversationId String    @map("conversation_id") @db.Uuid
+  version        Int
+  /// The person's amends of this version's data.
+  revision       Int       @default(0)
+  name           String
+  docxSha256     String    @map("docx_sha256")
+  /// The form schema, in src/assistant/docmosis.ts's shape.
+  schema         Json
+  data           Json
+  /// user or agent.
+  by             String
+  /// Who wrote it through the web UI, which only they may amend; null for every other write.
+  editorOid      String?   @map("editor_oid")
+  summary        String?
+  pdf            Bytes?
+  /// {short, long} when the last render of this version failed.
+  renderError    Json?     @map("render_error")
+  updatedAt      DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  conversation AssistantConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@id([conversationId, version])
+  @@map("assistant_docmosis_version")
+}
+
+/// A .docx a Docmosis version names by its SHA-256.
+model AssistantDocmosisAsset {
+  conversationId String   @map("conversation_id") @db.Uuid
+  sha256         String
+  bytes          Bytes
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  conversation AssistantConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@id([conversationId, sha256])
+  @@map("assistant_docmosis_asset")
 }
 
 /// A picture a deck's outline names by its SHA-256. Its type and size are read from the bytes.

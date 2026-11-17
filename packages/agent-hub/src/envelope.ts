@@ -204,6 +204,10 @@ export type AssistantFrame = {
   deck_revision?: number | null;
   /** The newest kept version this session wrote, 0 when none is; null from a hub older than either. */
   deck_agent_version?: number | null;
+  /** The conversation's Docmosis template: its latest version and revision, and who wrote it. Absent before there is one. */
+  docmosis_version?: number | null;
+  docmosis_revision?: number | null;
+  docmosis_updated_by?: string | null;
   jira_export?: JiraExportFrame | null;
   github_export?: GithubExportFrame | null;
   confluence_export?: ConfluenceExportFrame | null;
@@ -444,6 +448,15 @@ function productLines(assistant: AssistantFrame, previousProduct: AssistantProdu
 }
 
 /**
+ * What the session is told while the latest version of the template is the person's: they changed its data in the web
+ * UI. Like the deck's line, it is said on every message while that is so, since the frame says who wrote it last and
+ * not whether this session has read it since.
+ */
+export function docmosisChangedLine(assistant: AssistantFrame): string {
+  return `The user has changed the conversation's template data (version ${assistant.docmosis_version}). Read it with \`${CLI} docmosis get\` before changing the template.`;
+}
+
+/**
  * What the CFT Workspace knows about a conversation's message that the person did not type, after `ANSWER_HERE`: the
  * product area, a document or deck the person changed, the files attached and an export waiting on this session.
  * `assistant` is null for a frame the client could not read, which leaves `ANSWER_HERE` and the skill line.
@@ -468,6 +481,9 @@ export function assistantContextLines(
     }
     if (assistant.deck_updated_by === "user" && (assistant.deck_version ?? 0) > 0) {
       lines.push(deckChangedLine(assistant));
+    }
+    if (assistant.docmosis_updated_by === "user" && (assistant.docmosis_version ?? 0) > 0) {
+      lines.push(docmosisChangedLine(assistant));
     }
   }
   lines.push(...attachmentLines(attachments));
