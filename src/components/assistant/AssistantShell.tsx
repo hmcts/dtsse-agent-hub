@@ -55,6 +55,33 @@ export function useSidebarWidth(): number {
   return useContext(ShellContext).sidebarWidth;
 }
 
+/** Where a wide screen remembers that the person collapsed the sidebar. Absent means open, the default. */
+const COLLAPSED_KEY = "hmcts-assistant-sidebar-collapsed";
+
+/**
+ * Storage throws in Safari private browsing and when the quota is full, and remembering a sidebar is never worth
+ * breaking the page over, so both directions fall back to the default.
+ */
+function rememberedCollapsed(): boolean {
+  try {
+    return window.localStorage.getItem(COLLAPSED_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function rememberCollapsed(collapsed: boolean): void {
+  try {
+    if (collapsed) {
+      window.localStorage.setItem(COLLAPSED_KEY, "true");
+    } else {
+      window.localStorage.removeItem(COLLAPSED_KEY);
+    }
+  } catch {
+    // Not remembered; the sidebar opens next time, as it always used to.
+  }
+}
+
 /** The button a page's header shows while the sidebar is collapsed, or always on a narrow screen. */
 export function SidebarToggle() {
   const { sidebarOpen, openSidebar } = useContext(ShellContext);
@@ -221,6 +248,11 @@ export function AssistantShell({
       }
     };
     update();
+    // Only on arrival: a wide screen opens the sidebar as the person last left it there. A drawer is never remembered,
+    // since it closes on every pick, and a screen that widens later keeps whatever the person has now.
+    if (!query.matches && rememberedCollapsed()) {
+      setOpen(false);
+    }
     query.addEventListener("change", update);
     return () => query.removeEventListener("change", update);
   }, []);
@@ -252,7 +284,18 @@ export function AssistantShell({
   useEffect(() => setFailed(null), [activeId]);
 
   return (
-    <ShellContext.Provider value={{ sidebarOpen: open, openSidebar: () => setOpen(true), sidebarWidth: narrow || !open ? 0 : width }}>
+    <ShellContext.Provider
+      value={{
+        sidebarOpen: open,
+        openSidebar: () => {
+          setOpen(true);
+          if (!narrow) {
+            rememberCollapsed(false);
+          }
+        },
+        sidebarWidth: narrow || !open ? 0 : width
+      }}
+    >
       <div className="relative flex min-h-0 flex-1 overflow-hidden bg-asst-bg font-plex text-[15px] leading-normal text-asst-text">
         {narrow && open ? (
           <button type="button" aria-label="Close sidebar" onClick={() => setOpen(false)} className="fixed inset-0 z-[19] bg-black/55" />
@@ -270,7 +313,12 @@ export function AssistantShell({
             <span className="text-sm font-semibold">CFT Workspace</span>
             <button
               type="button"
-              onClick={() => setOpen(false)}
+              onClick={() => {
+                setOpen(false);
+                if (!narrow) {
+                  rememberCollapsed(true);
+                }
+              }}
               aria-label="Collapse sidebar"
               title="Collapse sidebar"
               className="ml-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-asst-muted hover:bg-asst-hover hover:text-asst-text"

@@ -8,6 +8,13 @@ import { admitFiles, discardUpload, fileSizeLabel, pastedName, UploadAborted, up
 import { AnnouncerRegion, useAnnouncer } from "@/components/live/Announcer";
 import { type SkillMenuTheme, useSkillMenu } from "@/components/SkillMenu";
 import { useDraft } from "@/components/useDraft";
+import { MAX_BODY } from "@/messages/limits";
+
+/**
+ * The share of the limit at which the box starts counting characters: soon enough to cut a long paste before
+ * pressing Send, late enough that an ordinary message never shows a number.
+ */
+const COUNT_FROM = 0.8;
 
 /** Above this the box scrolls rather than grows. Eight lines, which is a quarter of a phone's screen. */
 const MAX_HEIGHT = 200;
@@ -121,7 +128,8 @@ export function Composer({
   skills = [],
   dropZone,
   filler,
-  reference
+  reference,
+  limit = MAX_BODY
 }: {
   templates: readonly Template[];
   /** Resolves to an error to show, or `null` once sent, which clears the box and its attachments. */
@@ -149,6 +157,8 @@ export function Composer({
    * The page puts the words in front of the message as it sends it; the box holds only what the person types.
    */
   reference?: { label: string; onRemove: () => void };
+  /** The most characters the message may have: the counter shows from `COUNT_FROM` of it, and past it Send is off. */
+  limit?: number;
 }) {
   const { body: text, setBody: setText, discard } = useDraft({ kind: "assistant-draft", viewerOid, draftId });
   const [sending, setSending] = useState(false);
@@ -167,6 +177,7 @@ export function Composer({
   const picker = useRef<HTMLInputElement>(null);
   const menuId = useId();
   const errorId = useId();
+  const countId = useId();
   const files = useAnnouncer("files");
   const skillMenu = useSkillMenu({ skills, body: text, setBody: setText, field: box, theme: SKILL_MENU });
 
@@ -402,12 +413,19 @@ export function Composer({
   const uploading = attachments.some((file) => file.state.stage === "uploading");
   const unattached = attachments.some((file) => file.state.stage === "failed");
   const empty = text.trim() === "" && attachments.length === 0;
+  const counted = text.length >= limit * COUNT_FROM;
+  const tooLong = text.length > limit;
   const blocked = uploading
     ? "Wait for your files to finish uploading, then send."
     : unattached
       ? "One of your files could not be attached. Try again, or remove it."
-      : null;
+      : tooLong
+        ? attachable
+          ? "Your message is too long. Shorten it, or attach the text as a file."
+          : "Your message is too long. Shorten it, then send."
+        : null;
   const notice = error ?? blocked;
+  const describedBy = [notice === null ? null : errorId, counted ? countId : null].filter((id) => id !== null).join(" ");
 
   async function send(): Promise<void> {
     if (empty || sending || disabled || blocked !== null) {
@@ -653,7 +671,7 @@ export function Composer({
             }}
             placeholder="Message CFT Workspace"
             aria-label="Message"
-            aria-describedby={notice === null ? undefined : errorId}
+            aria-describedby={describedBy === "" ? undefined : describedBy}
             className="max-h-[200px] min-w-0 flex-1 resize-none border-none bg-transparent py-1.5 text-[15px] leading-normal text-asst-text outline-hidden placeholder:text-asst-faint"
           />
           <button
@@ -667,6 +685,13 @@ export function Composer({
           </button>
         </div>
       </div>
+      {/* Not live: read with the box it describes, since a region announcing every keystroke would drown the typing.
+          Going over the limit is announced once, by the alert below. */}
+      {counted ? (
+        <p id={countId} className={`text-right text-xs tabular-nums ${tooLong ? "text-asst-error" : "text-asst-muted"}`}>
+          {text.length.toLocaleString("en-GB")} / {limit.toLocaleString("en-GB")} characters
+        </p>
+      ) : null}
       {notice === null ? null : (
         <p id={errorId} role="alert" className="text-center text-[13px] text-asst-error">
           {notice}

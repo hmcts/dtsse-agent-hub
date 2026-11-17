@@ -19,7 +19,7 @@ const PANEL_WIDTH = 240;
 const PANEL_INSET = 4;
 
 /** What an action that rejects gets instead of its own refusal, having never reached the server to be refused. */
-export const UNREACHABLE = (what: string) => `the ${what} could not be sent; check your connection and try again`;
+export const UNREACHABLE = (what: string) => `The ${what} could not be sent. Check your connection and try again.`;
 
 /**
  * The room around `element` before the nearest edge that would clip the panel: whichever is closer, the window or a

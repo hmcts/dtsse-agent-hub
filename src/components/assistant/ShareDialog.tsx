@@ -134,7 +134,7 @@ export function ShareEditor({
         setError(result.error);
       }
     } catch {
-      setError("that could not be saved; check your connection and try again");
+      setError("That could not be saved. Check your connection and try again.");
     } finally {
       setPending(false);
     }

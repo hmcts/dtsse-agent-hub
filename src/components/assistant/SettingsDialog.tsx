@@ -832,7 +832,7 @@ function Dialog({
         try {
           return { task, result: await task.run() };
         } catch {
-          return { task, result: (await sessionEnded()) ? null : ({ ok: false, error: "that could not be done; try again" } as const) };
+          return { task, result: (await sessionEnded()) ? null : ({ ok: false, error: "That could not be done. Try again." } as const) };
         }
       })
     );

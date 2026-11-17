@@ -8,9 +8,14 @@ import { useStickToBottom } from "./useStickToBottom.ts";
 function List({ entries }: { entries: string[] }) {
   const scroller = useStickToBottom<HTMLDivElement>(entries);
   return (
-    <div ref={scroller.ref} onScroll={scroller.onScroll} data-testid="scroller">
-      {entries.join(",")}
-    </div>
+    <>
+      <div ref={scroller.ref} onScroll={scroller.onScroll} data-testid="scroller">
+        {entries.join(",")}
+      </div>
+      <button type="button" onClick={scroller.stickNow}>
+        Send
+      </button>
+    </>
   );
 }
 
@@ -59,6 +64,19 @@ describe("useStickToBottom", () => {
     scrollTo(scroller, 130);
     rerender(<List entries={["a", "b", "c", "d"]} />);
 
+    expect(scroller.scrollTop).toBe(400);
+  });
+
+  it("should go to the bottom and follow the next entries when asked to stick after the reader scrolled up", () => {
+    const { rerender } = render(<List entries={["a", "b", "c"]} />);
+    const scroller = screen.getByTestId("scroller");
+    sized(scroller, 100, 100);
+
+    scrollTo(scroller, 50);
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(scroller.scrollTop).toBe(300);
+    rerender(<List entries={["a", "b", "c", "d"]} />);
     expect(scroller.scrollTop).toBe(400);
   });
 });

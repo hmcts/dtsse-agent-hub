@@ -138,4 +138,44 @@ describe("ActionForm", () => {
     await submit();
     expect(screen.getByRole("alert").className).toContain("text-asst-error");
   });
+
+  it("should clear a confirmation once the person changes a field, and keep a refusal", async () => {
+    const action = vi
+      .fn<(form: FormData) => Promise<{ ok: true; confirmation: string } | { ok: false; error: string }>>()
+      .mockResolvedValueOnce({ ok: true, confirmation: "Saved" })
+      .mockResolvedValueOnce({ ok: false, error: "That name is taken." });
+    render(
+      <ActionForm action={action} label="Rename" keepValues>
+        <input name="name" aria-label="Name" defaultValue="x" />
+      </ActionForm>
+    );
+    const field = screen.getByRole("textbox", { name: "Name" });
+
+    await submit();
+    expect(screen.getByRole("status").textContent).toBe("Saved");
+    fireEvent.input(field, { target: { value: "y" } });
+    expect(screen.queryByRole("status")).toBeNull();
+
+    await submit();
+    fireEvent.input(field, { target: { value: "z" } });
+    expect(screen.getByRole("alert").textContent).toBe("That name is taken.");
+  });
+
+  it("should say what it is doing while the post is in flight when it is given words for the wait", async () => {
+    let answer: (result: { ok: true }) => void = () => undefined;
+    const action = vi.fn(() => new Promise<{ ok: true }>((resolve) => (answer = resolve)));
+    render(
+      <ActionForm action={action} label="Rename" pendingText="Saving…">
+        <span />
+      </ActionForm>
+    );
+
+    await submit();
+    expect(screen.getByRole("status").textContent).toBe("Saving…");
+
+    await act(async () => {
+      answer({ ok: true });
+    });
+    expect(screen.queryByRole("status")).toBeNull();
+  });
 });

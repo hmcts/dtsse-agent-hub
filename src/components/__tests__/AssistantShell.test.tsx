@@ -351,7 +351,7 @@ describe("AssistantShell", () => {
 
     expect(push).not.toHaveBeenCalled();
     expect(within(screen.getByRole("menu", { name: "Workflows" })).getByRole("alert").textContent).toBe(
-      "that could not be done; check your connection and try again"
+      "That could not be done. Check your connection and try again."
     );
     expect(screen.getByRole("menuitem", { name: /Morning briefing/ }).hasAttribute("disabled")).toBe(false);
   });
@@ -506,6 +506,56 @@ describe("AssistantShell", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Open sidebar" }));
     expect(sidebar().hasAttribute("inert")).toBe(false);
+  });
+
+  it("should open collapsed after a reload when the person collapsed it on a wide screen, and open again once they reopen it", () => {
+    const { unmount } = render(shell());
+    fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+    unmount();
+
+    const { unmount: unmountAgain } = render(shell());
+    expect(sidebar().hasAttribute("inert")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Open sidebar" }));
+    unmountAgain();
+
+    render(shell());
+    expect(sidebar().hasAttribute("inert")).toBe(false);
+  });
+
+  it("should not remember the drawer being closed when the screen is narrow", () => {
+    narrow = true;
+    render(shell());
+    fireEvent.click(screen.getByRole("button", { name: "Open sidebar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+
+    expect(window.localStorage.getItem("hmcts-assistant-sidebar-collapsed")).toBeNull();
+  });
+
+  it("should open the sidebar as before when storage cannot be read or written", () => {
+    // Only the collapsed state's key: the width the sidebar was dragged to is read through storage of its own.
+    const realGet = Storage.prototype.getItem;
+    const realSet = Storage.prototype.setItem;
+    const getItem = vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (this: Storage, key: string) {
+      if (key === "hmcts-assistant-sidebar-collapsed") {
+        throw new Error("blocked");
+      }
+      return realGet.call(this, key);
+    });
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key: string, value: string) {
+      if (key === "hmcts-assistant-sidebar-collapsed") {
+        throw new Error("blocked");
+      }
+      realSet.call(this, key, value);
+    });
+    try {
+      render(shell());
+      expect(sidebar().hasAttribute("inert")).toBe(false);
+      fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+      expect(sidebar().hasAttribute("inert")).toBe(true);
+    } finally {
+      getItem.mockRestore();
+      setItem.mockRestore();
+    }
   });
 
   it("should start closed as a drawer and close with Escape or the backdrop when the screen is narrow", () => {
@@ -829,11 +879,72 @@ describe("AssistantMarkdown", () => {
     expect(screen.getByRole("heading", { level: 5, name: "Detail" })).toBeTruthy();
   });
 
-  it("should render headings as bold lines when showing an answer", () => {
-    render(<AssistantMarkdown source="# Title" />);
+  it("should render headings as real headings from h2 when showing an answer", () => {
+    render(<AssistantMarkdown source={"# Title\n\n## Section\n\n### Detail\n\n#### Deeper"} />);
 
-    expect(screen.queryByRole("heading")).toBeNull();
-    expect(screen.getByText("Title").tagName).toBe("P");
+    expect(screen.getByRole("heading", { level: 2, name: "Title" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 3, name: "Section" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 4, name: "Detail" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 4, name: "Deeper" })).toBeTruthy();
+  });
+
+  it("should name a code block's language and copy its text when the copy button is pressed", async () => {
+    const writeText = vi.fn(async () => undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    try {
+      const { container } = render(<AssistantMarkdown source={'```json\n{ "a": 1 }\n```'} />);
+
+      expect(screen.getByText("json")).toBeTruthy();
+      expect(container.querySelector("code[data-language='json']")?.textContent).toBe('{ "a": 1 }');
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Copy code" }));
+      });
+
+      expect(writeText).toHaveBeenCalledWith('{ "a": 1 }');
+      expect(screen.getByRole("status").textContent).toBe("Copied");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("should offer copy on a code block with no language, and say so on screen when copying fails", async () => {
+    vi.stubGlobal("navigator", {
+      clipboard: {
+        writeText: vi.fn(async () => {
+          throw new Error("denied");
+        })
+      }
+    });
+    try {
+      render(<AssistantMarkdown source={"```\nplain\n```"} />);
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Copy code" }));
+      });
+
+      expect(screen.getByRole("status").textContent).toBe("Could not copy. Select the text and copy it yourself.");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("should clear the copied tick after a moment", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("navigator", { clipboard: { writeText: vi.fn(async () => undefined) } });
+    try {
+      render(<AssistantMarkdown source={"```\nplain\n```"} />);
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Copy code" }));
+      });
+      expect(screen.getByRole("status").textContent).toBe("Copied");
+
+      act(() => {
+        vi.advanceTimersByTime(1500);
+      });
+
+      expect(screen.getByRole("status").textContent).toBe("");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("should open allowed links in a new tab without an opener and leave others as text", () => {

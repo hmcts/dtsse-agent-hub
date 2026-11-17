@@ -44,6 +44,7 @@ import { AnnouncerRegion, useAnnouncer } from "@/components/live/Announcer";
 import { useHubEvent } from "@/components/live/HubStream";
 import { type AnswerQuestionAction, QuestionCard } from "@/components/questions/QuestionCard";
 import type { ThreadMessage } from "@/messages/direct-thread";
+import { MAX_BODY } from "@/messages/limits";
 import type { AgentStatus } from "@/realtime/events";
 import type { ActionResult } from "@/web/action";
 import { duration } from "@/web/format";
@@ -580,7 +581,7 @@ export function ChatView({
     // A slide the person asked about goes in front of their words, which is the whole of how the session is told. Its
     // room is kept whatever its length, so the limit the person is told is the same for every slide.
     if (ask !== null && body.length > MAX_ASKED_BODY) {
-      return `a message about a slide is at most ${MAX_ASKED_BODY} characters`;
+      return `Your message about this slide is too long. Keep it to ${MAX_ASKED_BODY.toLocaleString("en-GB")} characters or fewer.`;
     }
     const asked = ask === null ? body : `${ask.reference}\n${body}`;
     const result = await actions.send({ conversationId: view.id, body: asked, uploadIds });
@@ -588,6 +589,8 @@ export function ChatView({
       return result.error;
     }
     setAsk(null);
+    // Someone who scrolled up to re-read and then sent wants to see their message and the reply coming, not stay put.
+    scroller.stickNow();
     live.addMessage(result.message);
     return null;
   }
@@ -832,6 +835,7 @@ export function ChatView({
               attach={pod}
               skills={view.skills}
               reference={ask === null ? undefined : { label: ask.label, onRemove: () => setAsk(null) }}
+              limit={ask === null ? MAX_BODY : MAX_ASKED_BODY}
               dropZone={scroller.ref}
               onFocus={() => {
                 if (pod && !warmed.current && status === "offline") {

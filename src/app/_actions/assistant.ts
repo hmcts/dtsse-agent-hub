@@ -81,7 +81,7 @@ function checkBody(raw: unknown, attachments: number): string | { ok: false; err
     return { ok: false, error: "write something to send" };
   }
   if (body.length > MAX_BODY) {
-    return { ok: false, error: `a message is at most ${MAX_BODY} characters` };
+    return { ok: false, error: `Your message is too long. Keep it to ${MAX_BODY.toLocaleString("en-GB")} characters or fewer, or attach it as a file.` };
   }
   return body;
 }
@@ -357,7 +357,7 @@ export async function saveArtefact(input: {
     const viewer = await requireViewer();
     const markdown = typeof input.markdown === "string" ? input.markdown.replace(/\r\n?/g, "\n") : "";
     if (markdown.length > MAX_ARTEFACT_MARKDOWN) {
-      return { ok: false, error: `a document is at most ${MAX_ARTEFACT_MARKDOWN.toLocaleString("en-GB")} characters` };
+      return { ok: false, error: `The document is too long. Keep it to ${MAX_ARTEFACT_MARKDOWN.toLocaleString("en-GB")} characters or fewer.` };
     }
     const title = text(input.title).slice(0, MAX_ARTEFACT_TITLE) || null;
     const baseVersion = typeof input.baseVersion === "number" && Number.isInteger(input.baseVersion) && input.baseVersion >= 0 ? input.baseVersion : 0;
