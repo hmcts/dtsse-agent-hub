@@ -37,6 +37,7 @@ import {
   conversationsSharedWith,
   type SharedChatLink,
   type SharePerson,
+  sharedWithSince,
   shareRecipients
 } from "../assistant/shares.ts";
 import { type SharedConversationView, sharedConversation } from "../assistant/sharing.ts";
@@ -467,7 +468,11 @@ export async function sharedChat(viewer: Identity, id: string): Promise<SharedCo
   if (allowed === undefined) {
     return undefined;
   }
-  return await sharedConversation(prisma, allowed.conversation, allowed.access, await forkChoice(prisma, viewer.oid, allowed.conversation, allowed.forks));
+  const [fork, sharedAt] = await Promise.all([
+    forkChoice(prisma, viewer.oid, allowed.conversation, allowed.forks),
+    allowed.access === "owner" ? null : sharedWithSince(prisma, id, viewer.oid)
+  ]);
+  return await sharedConversation(prisma, allowed.conversation, allowed.access, fork, sharedAt);
 }
 
 /** Whether the viewer may read the conversation's deck: its owner, or someone it is shared with or offered to. */

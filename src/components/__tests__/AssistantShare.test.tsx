@@ -202,6 +202,65 @@ describe("ShareDialog", () => {
 
     expect(screen.queryByRole("option")).toBeNull();
     expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(screen.getByText("Search is not working just now. Try again.")).toBeTruthy();
+  });
+
+  it("should say the search failed when the lookup answers with an error", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("no", { status: 500 }))
+    );
+    render(dialog());
+
+    await type("bob");
+
+    expect(screen.getByText("Search is not working just now. Try again.").className).toContain("text-asst-error");
+  });
+
+  it("should say how much to type, then that it is searching, then who matches, as the person types", async () => {
+    people([{ oid: "bob", name: "Bob Tester", email: null }]);
+    render(dialog());
+
+    fireEvent.change(box(), { target: { value: "b" } });
+    expect(screen.getByText("Type at least 2 letters.")).toBeTruthy();
+
+    fireEvent.change(box(), { target: { value: "bo" } });
+    expect(screen.getByText("Searching…")).toBeTruthy();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    expect(screen.getByText("1 person matches. Only people who have used the hub can be named.")).toBeTruthy();
+  });
+
+  it("should say nobody of that name has used the hub when the search finds no one", async () => {
+    people([]);
+    render(dialog());
+
+    await type("zed");
+
+    expect(screen.getByText('No one called "zed" has used the hub yet.')).toBeTruthy();
+  });
+
+  it("should say everyone who matches is already on the list when the search finds only them", async () => {
+    people([{ oid: "bob", name: "Bob Tester", email: null }]);
+    render(dialog({ people: [person("bob", "Bob Tester")] }));
+
+    await type("bob");
+
+    expect(screen.getByText('Everyone called "bob" is already on the list.')).toBeTruthy();
+  });
+
+  it("should count several people when the search finds more than one", async () => {
+    people([
+      { oid: "bob", name: "Bob Tester", email: null },
+      { oid: "bobby", name: "Bobby Tester", email: null }
+    ]);
+    render(dialog());
+
+    await type("bob");
+
+    expect(screen.getByText("2 people match. Only people who have used the hub can be named.")).toBeTruthy();
   });
 
   it("should leave out the people it is already shared with, so nobody is offered twice", async () => {
@@ -276,7 +335,8 @@ describe("ShareDialog", () => {
     const onClose = vi.fn();
     render(dialog({ onClose }));
 
-    fireEvent.keyDown(window, { key: "Escape" });
+    // From where focus is, as a key press is: it reaches `document`, where the dialog listens, on its way up.
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
 
     expect(onClose).toHaveBeenCalled();
   });
@@ -334,6 +394,14 @@ describe("ShareDialog", () => {
 
     expect(writeText).toHaveBeenCalledWith(expect.stringContaining(`/assistant/shared/${CONVERSATION}`));
     expect(screen.getByRole("button", { name: "Copied" })).toBeTruthy();
+    expect(screen.getByText("Link copied").getAttribute("role")).toBe("status");
+
+    // Back to a button that reads as one, so a second copy is not a button that already says it is done.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2100);
+    });
+    expect(screen.getByRole("button", { name: "Copy" })).toBeTruthy();
+    expect(screen.queryByText("Link copied")).toBeNull();
   });
 
   // Without a clipboard permission there is nothing to copy with, so the box is selected for the person to copy by
@@ -356,6 +424,7 @@ describe("ShareDialog", () => {
 
     expect(select).toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Copy" })).toBeTruthy();
+    expect(screen.getByText("The link is selected. Press Ctrl+C, or Command+C on a Mac, to copy it.")).toBeTruthy();
   });
 });
 
@@ -364,6 +433,101 @@ describe("ShareDialog as a frame round the editor", () => {
     render(dialog());
 
     expect(document.activeElement).toBe(box());
+  });
+
+  it("should close from its × and from its backdrop", () => {
+    const onClose = vi.fn();
+    render(dialog({ onClose }));
+
+    const closers = screen.getAllByRole("button", { name: "Close sharing" });
+    expect(closers).toHaveLength(2);
+    for (const closer of closers) {
+      fireEvent.click(closer);
+    }
+
+    expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
+  it("should keep Tab inside the dialog, wrapping from its last control to its first and back", () => {
+    render(dialog());
+    const panel = screen.getByRole("dialog");
+    const close = within(panel).getByRole("button", { name: "Close sharing" });
+    const done = within(panel).getByRole("button", { name: "Done" });
+
+    done.focus();
+    fireEvent.keyDown(done, { key: "Tab" });
+    expect(document.activeElement).toBe(close);
+
+    fireEvent.keyDown(close, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(done);
+  });
+
+  it("should give focus back to what opened it when it closes", () => {
+    const opener = document.createElement("button");
+    document.body.append(opener);
+    opener.focus();
+    const { unmount } = render(dialog());
+    expect(document.activeElement).toBe(box());
+
+    unmount();
+
+    expect(document.activeElement).toBe(opener);
+    opener.remove();
+  });
+});
+
+describe("removing someone", () => {
+  it("should offer Undo for a few seconds, and share with them again when it is pressed", async () => {
+    const share = ok([person("bob", "Bob Tester")]);
+    render(dialog({ people: [person("bob", "Bob Tester")], unshare: ok([]), share }));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    });
+    expect(screen.getByText(/Bob Tester can no longer read this chat\./).getAttribute("role")).toBe("status");
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    });
+
+    expect(share).toHaveBeenCalledWith({ conversationId: CONVERSATION, recipientOid: "bob" });
+    expect(within(screen.getByRole("list", { name: "Shared with" })).getByText("Bob Tester")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
+  });
+
+  it("should take Undo away once its few seconds are up", async () => {
+    render(dialog({ people: [person("bob", "Bob Tester")], unshare: ok([]) }));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    });
+    expect(screen.getByRole("button", { name: "Undo" })).toBeTruthy();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5100);
+    });
+    expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
+  });
+
+  it("should word Undo for forking when the dialog offers the chat to fork", async () => {
+    render(dialog({ mode: "fork", people: [person("bob", "Bob Tester")], unshare: ok([]) }));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    });
+
+    expect(screen.getByText(/Bob Tester can no longer fork this chat\./)).toBeTruthy();
+  });
+
+  it("should offer no Undo when the removal is refused", async () => {
+    render(dialog({ people: [person("bob", "Bob Tester")], unshare: vi.fn(async () => ({ ok: false as const, error: "That chat is not yours to share." })) }));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    });
+
+    expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
+    expect(screen.getByRole("alert").textContent).toBe("That chat is not yours to share.");
   });
 });
 
@@ -449,11 +613,24 @@ function view(overrides: Partial<SharedConversationView> = {}): SharedConversati
     access: "reader",
     forked: null,
     fork: null,
+    sharedAt: "2026-11-12T10:00:00.000Z",
     ...overrides
   };
 }
 
 describe("SharedChat", () => {
+  it("should say when the chat was shared with the reader", () => {
+    render(<SharedChat view={view({ sharedAt: "2026-11-12T10:00:00.000Z" })} />);
+
+    expect(screen.getByText(/Shared on Thursday 12 November\./)).toBeTruthy();
+  });
+
+  it("should say no date when there is none, as for the owner", () => {
+    render(<SharedChat view={view({ access: "owner", sharedAt: null })} />);
+
+    expect(screen.queryByText(/Shared on/)).toBeNull();
+  });
+
   it("should show the thread, whose chat it is, and nothing to write with", () => {
     render(<SharedChat view={view()} />);
 

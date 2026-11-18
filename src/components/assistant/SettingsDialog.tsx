@@ -10,6 +10,7 @@ import { pluginChoices } from "@/assistant/settings";
 import { type Theme, themeOf } from "@/assistant/theme";
 import type { FormAction } from "@/components/ActionForm";
 import { AgentSettings, type AssistantAgentSettings } from "@/components/assistant/AgentSettings";
+import { FOCUSABLE, useModalKeys } from "@/components/assistant/AssistantModal";
 import { type AssistantClaudeMd, ClaudeMd } from "@/components/assistant/ClaudeMdSettings";
 import { type AssistantConnect, type AssistantTokens, Connections, type ConnectionsView, hasConnections } from "@/components/assistant/ConnectionSettings";
 import { type AssistantExportDefaults, ExportSettings } from "@/components/assistant/ExportSettings";
@@ -60,27 +61,10 @@ interface SettingsView extends ConnectionsView {
 }
 
 /**
- * Everything in the dialog a Tab can reach, and so everything its focus trap has to account for. Exported so a test
- * asks the dialog which its own tab stops are rather than keeping a second copy of this list, which would pass while
- * a control the trap has been left out of still takes focus off the end of it.
- *
- * `tabindex="-1"` is excluded from every clause, not only the last, so that what this matches is what Tab can reach:
- * the navigation is a roving tabindex, and all but one of its buttons are deliberately not tab stops. The trap below
- * reads only the two ends of the list and those are the close button and the open section's last control either way,
- * with the navigation between them — so this is about the constant meaning what it says, not about fixing the wrap.
- * A hidden input is left out for the same reason: Tab never lands on one, and a form posting a hidden field (Microsoft
- * 365's Connect) would otherwise be counted as a stop.
+ * Everything in the dialog a Tab can reach, and so everything its focus trap has to account for: the Assistant's one
+ * list, shared with every dialog. Exported here too, so a test asks the dialog which its own tab stops are.
  */
-export const FOCUSABLE = [
-  "a[href]",
-  "button:not([disabled])",
-  'input:not([disabled]):not([type="hidden"])',
-  "select:not([disabled])",
-  "textarea:not([disabled])",
-  "[tabindex]"
-]
-  .map((selector) => `${selector}:not([tabindex="-1"])`)
-  .join(", ");
+export { FOCUSABLE };
 
 /**
  * Where the dialog has room for its navigation beside a section: the Tailwind `sm` breakpoint, which is where the
@@ -903,30 +887,9 @@ function Dialog({
   const onEscape = useRef(() => {});
   onEscape.current = () => (asking === null ? requestClose() : setAsking(null));
 
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        // Escape dismisses the innermost thing only. The shell closes its drawer on Escape from `window`, which is
-        // the next stop after `document`, so the dialog would otherwise take the whole sidebar with it — and the cog
-        // focus is handed back to goes `inert` with it, which drops focus to the body.
-        event.stopPropagation();
-        onEscape.current();
-        return;
-      }
-      const items = event.key === "Tab" ? [...(panel.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])] : [];
-      if (items.length === 0) {
-        return;
-      }
-      // Tab off either end of the dialog wraps to the other, so it never reaches the page behind.
-      const edge = event.shiftKey ? items[0] : items.at(-1);
-      if (document.activeElement === edge || !panel.current?.contains(document.activeElement)) {
-        event.preventDefault();
-        (event.shiftKey ? items.at(-1) : items[0])?.focus();
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, []);
+  // Tab wraps inside the dialog, and Escape goes no further than it: otherwise it would take the shell's drawer with
+  // it, and the cog focus is handed back to goes `inert` with that, which drops focus to the body.
+  useModalKeys(panel, () => onEscape.current());
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-5 font-plex text-[15px] leading-normal text-asst-text">

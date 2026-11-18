@@ -112,6 +112,8 @@ export interface SharedConversationView {
   forked: ForkedView | null;
   /** What the viewer may do about forking it: `null` unless they were offered it. `copyId` is their copy, once taken. */
   fork: { copyId: string | null } | null;
+  /** When it was first shared with or offered to the viewer, as an ISO instant; `null` for the owner, and when unknown. */
+  sharedAt: string | null;
 }
 
 /**
@@ -133,7 +135,8 @@ export async function sharedConversation(
   db: Database,
   conversation: SharedConversationRow,
   access: ConversationAccess,
-  fork: SharedConversationView["fork"] = null
+  fork: SharedConversationView["fork"] = null,
+  sharedAt: string | null = null
 ): Promise<SharedConversationView | undefined> {
   const row = await db.assistantConversation.findUnique({
     where: { id: conversation.id },
@@ -180,6 +183,7 @@ export async function sharedConversation(
     notifyTemplates,
     video: videoSummary(row),
     access,
-    fork
+    fork,
+    sharedAt
   };
 }

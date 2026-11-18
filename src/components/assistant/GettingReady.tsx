@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useId, useRef, useState } from "react";
 import {
   awaitsGithub,
   type Connection,
@@ -21,7 +21,8 @@ import {
   pasteIsFallback,
   screenDetail,
   signInComing,
-  signInPrompt
+  signInPrompt,
+  stillNeededLine
 } from "@/assistant/connections";
 import { type ConnectionsAsk, chatGate, connectionsAsk } from "@/assistant/onboarding";
 import type { Theme } from "@/assistant/theme";
@@ -41,6 +42,7 @@ import {
 import { ActionForm, type FormAction } from "@/components/ActionForm";
 import { Mark } from "@/components/assistant/AssistantShell";
 import { useVisit } from "@/components/assistant/AssistantVisit";
+import { PasteHelp } from "@/components/assistant/PasteHelp";
 import { SignIn } from "@/components/assistant/SignIn";
 import { ThemeSwitch } from "@/components/assistant/ThemeSwitch";
 import type { CredentialKind } from "@/credentials/names";
@@ -54,7 +56,7 @@ const PRIMARY = "shrink-0 rounded-[9px] bg-asst-accent px-3.5 py-1.5 text-[13px]
 const CONNECT =
   "h-[34px] shrink-0 rounded-[9px] border border-asst-accent-line px-3.5 text-[13px] font-medium text-asst-accent-soft hover:bg-asst-accent hover:text-asst-ink disabled:opacity-40";
 const FOOTER = "h-[42px] rounded-[10px] px-5 text-sm";
-const FOOTER_PRIMARY = `${FOOTER} bg-asst-accent font-semibold text-asst-ink disabled:opacity-40`;
+const FOOTER_PRIMARY = `${FOOTER} bg-asst-accent font-semibold text-asst-ink disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:opacity-40`;
 const FOOTER_QUIET = `${FOOTER} border border-asst-strong font-medium text-asst-body hover:bg-asst-active`;
 
 /** How often the warming-up screen re-reads the clock, which only decides whether a wait has become a long one. */
@@ -248,7 +250,8 @@ function ConnectionRow({
   save,
   reconnect,
   now,
-  first
+  first,
+  required
 }: {
   kind: CredentialKind;
   connector: Connector;
@@ -266,9 +269,12 @@ function ConnectionRow({
   reconnect: FormAction;
   now: number;
   first: boolean;
+  /** One of the connections the chat cannot start without, marked so, as an optional one is in its description. */
+  required: boolean;
 }) {
   const [connecting, setConnecting] = useState(false);
   const [pasting, setPasting] = useState(false);
+  const helpId = useId();
   const answer = checklistState(status?.stored === true, login, now);
   const state = connectionState(answer, login, status, now);
   const starting = signInComing(connector, agentStatus);
@@ -330,10 +336,22 @@ function ConnectionRow({
   const pasteForm = (label: string) => (
     <ActionForm action={save} label={`Save your ${label}`} className="flex flex-wrap items-center gap-2">
       <input type="hidden" name="kind" value={kind} />
-      <input name="value" type="password" required autoComplete="off" spellCheck={false} aria-label={label} className={INPUT} />
+      <input
+        name="value"
+        type="password"
+        required
+        autoComplete="off"
+        spellCheck={false}
+        aria-label={label}
+        aria-describedby={connector.help === null ? undefined : helpId}
+        className={INPUT}
+      />
       <button type="submit" className={PRIMARY}>
         Save
       </button>
+      <div className="basis-full">
+        <PasteHelp help={connector.help} id={helpId} />
+      </div>
     </ActionForm>
   );
   // One thing to do at a time, chosen here rather than by three conditions that have to agree: a relayed sign-in and
@@ -363,7 +381,10 @@ function ConnectionRow({
         {connector.initial}
       </span>
       <div className="flex min-w-0 flex-1 flex-col leading-tight">
-        <span className="text-[15px] font-medium">{connector.name}</span>
+        <span className="flex items-center gap-2 text-[15px] font-medium">
+          {connector.name}
+          {required ? <span className="rounded-full border border-asst-line px-1.5 text-[11px] font-normal text-asst-muted">Required</span> : null}
+        </span>
         <span className="text-[13px] text-asst-muted">{connector.desc}</span>
       </div>
       {control}
@@ -465,7 +486,7 @@ function continueLabel(ask: ConnectionsAsk, returning: boolean): string {
     return "Carry on";
   }
   if (ask === "connect") {
-    return "Connect the accounts above to continue";
+    return "Start chatting";
   }
   return returning ? "Carry on without waiting" : "Start chatting";
 }
@@ -607,6 +628,8 @@ export function GettingReady({
   const rows = connectionRows({ assistant, statuses, unavailable }, now);
   const access = modelAccess(assistant.modelRoute, rows);
   const starting = !assistant.readiness.failed && assistant.status !== "running";
+  const stored = new Set(statuses.filter((status) => status.stored).map((status) => status.kind));
+  const neededId = useId();
   return (
     <ReadyShell
       assistant={assistant}
@@ -638,20 +661,38 @@ export function GettingReady({
                 reconnect={reconnect}
                 now={now}
                 first={index === 0}
+                required={assistant.needed.includes(kind)}
               />
               {access !== null && modelAccessAfter(index) ? <ModelAccessRow row={access} starting={starting} /> : null}
             </Fragment>
           ))}
         </ul>
       )}
+      {/* What is between the person and their chats, by name, beside the button it holds back. */}
+      {ask === "connect" ? (
+        <p id={neededId} className="text-pretty text-right text-[13px] text-asst-muted">
+          {stillNeededLine(assistant.needed, stored)}
+        </p>
+      ) : null}
       <div className="flex justify-end gap-3">
-        {/* Beside the one button that is ever disabled, so the screen they opened is never one they cannot close. */}
+        {/* Beside the one button that is ever held back, so the screen they opened is never one they cannot close. */}
         {ask === "connect" && onLeave !== undefined ? (
           <button type="button" onClick={onLeave} className={FOOTER_QUIET}>
             Go to your chats
           </button>
         ) : null}
-        <button type="button" onClick={onDone} disabled={ask === "connect"} className={FOOTER_PRIMARY}>
+        {/* Held back with aria-disabled rather than disabled, so a keyboard user can still reach it and hear why. */}
+        <button
+          type="button"
+          onClick={() => {
+            if (ask !== "connect") {
+              onDone();
+            }
+          }}
+          aria-disabled={ask === "connect" ? true : undefined}
+          aria-describedby={ask === "connect" ? neededId : undefined}
+          className={FOOTER_PRIMARY}
+        >
           {continueLabel(ask, returning)}
         </button>
       </div>

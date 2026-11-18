@@ -39,7 +39,7 @@ export function CopyButton({ text, label, className = "" }: { text: string; labe
   }
 
   return (
-    <span className={`flex items-center gap-1.5 print:hidden ${className}`}>
+    <span className={`inline-flex items-center gap-1.5 align-middle print:hidden ${className}`}>
       <span role="status" className={state === "failed" ? "text-xs text-asst-error" : "sr-only"}>
         {state === "copied" ? "Copied" : state === "failed" ? "Could not copy. Select the text and copy it yourself." : ""}
       </span>

@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { type Ref, useEffect, useId, useRef, useState } from "react";
 import { MIN_PEOPLE_QUERY } from "@/access/rules";
 import type { SharePerson } from "@/assistant/shares";
-import { useSuggestions } from "@/components/useSuggestions";
+import { AssistantModal } from "@/components/assistant/AssistantModal";
+import { type SuggestionStatus, useSuggestions } from "@/components/useSuggestions";
 import type { ActionResult } from "@/web/action";
 import { SHARED_CHATS } from "@/web/home";
 
@@ -51,6 +52,31 @@ const WORDS: Record<ShareMode, { title: string; who: string; can: string; nobody
   }
 };
 
+/** How long Undo is offered after someone is taken off. */
+const UNDO_FOR_MS = 5000;
+
+/** How long the Copy button reads "Copied" before it can be read as a button again. */
+const COPIED_FOR_MS = 2000;
+
+/** What the name box says under it, so an empty list says why it is empty. */
+export function searchLine(status: SuggestionStatus, query: string, shown: number, found: boolean): string {
+  switch (status) {
+    case "short":
+      return `Type at least ${MIN_PEOPLE_QUERY} letters.`;
+    case "searching":
+      return "Searching…";
+    case "failed":
+      return "Search is not working just now. Try again.";
+    case "answered":
+      if (shown > 0) {
+        return `${shown === 1 ? "1 person matches" : `${shown} people match`}. Only people who have used the hub can be named.`;
+      }
+      return found ? `Everyone called "${query}" is already on the list.` : `No one called "${query}" has used the hub yet.`;
+    default:
+      return "Only people who have used the hub can be named.";
+  }
+}
+
 export type ShareAction = (input: { conversationId: unknown; recipientOid: unknown }) => Promise<ActionResult<{ people: SharePerson[] }>>;
 
 interface Candidate {
@@ -93,7 +119,10 @@ export function ShareEditor({
   const [fromPage, setFromPage] = useState(initial);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"no" | "yes" | "by-hand">("no");
+  const [removed, setRemoved] = useState<SharePerson | null>(null);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const path = `/assistant/shared/${conversationId}`;
   // The whole address, once there is a browser to ask for the origin: the server has no origin to render, and a first
   // render that disagreed with the server's would be a hydration mismatch on the box's value.
@@ -109,6 +138,17 @@ export function ShareEditor({
 
   useEffect(() => setLink(`${window.location.origin}${path}`), [path]);
 
+  useEffect(
+    () => () => {
+      for (const timer of [copiedTimer.current, undoTimer.current]) {
+        if (timer !== null) {
+          clearTimeout(timer);
+        }
+      }
+    },
+    []
+  );
+
   const suggestions = useSuggestions<Candidate>({
     path: "/api/ui/people",
     field: "people",
@@ -119,9 +159,11 @@ export function ShareEditor({
   const { shown, open, current } = suggestions;
   const optionId = (index: number) => `${listId}-${index}`;
 
-  async function run(action: ShareAction, recipientOid: string): Promise<void> {
+  /** Whether the change was saved, for a caller that says something once it has been. */
+  async function run(action: ShareAction, recipientOid: string): Promise<boolean> {
     setPending(true);
     setError(null);
+    forget();
     try {
       const result = await action({ conversationId, recipientOid });
       if (result.ok) {
@@ -130,26 +172,53 @@ export function ShareEditor({
         // The chat's own page shows nothing about its shares, but the sidebar does.
         router.refresh();
         onChange?.();
-      } else {
-        setError(result.error);
+        return true;
       }
+      setError(result.error);
     } catch {
       setError("That could not be saved. Check your connection and try again.");
     } finally {
       setPending(false);
     }
+    return false;
+  }
+
+  /** Puts the last removal's Undo away, which any later change does: it would undo something no longer the latest. */
+  function forget(): void {
+    if (undoTimer.current !== null) {
+      clearTimeout(undoTimer.current);
+      undoTimer.current = null;
+    }
+    setRemoved(null);
+  }
+
+  /**
+   * Taking someone off is the revocation and takes effect at once, so it is offered back for a few seconds rather than
+   * asked about first: a removal is quick to make by mistake, and a question before every one would be slow to answer.
+   */
+  async function remove(person: SharePerson): Promise<void> {
+    if (await run(unshare, person.oid)) {
+      setRemoved(person);
+      undoTimer.current = setTimeout(() => setRemoved(null), UNDO_FOR_MS);
+    }
   }
 
   async function copy(): Promise<void> {
+    if (copiedTimer.current !== null) {
+      clearTimeout(copiedTimer.current);
+      copiedTimer.current = null;
+    }
     try {
       await navigator.clipboard.writeText(link);
-      setCopied(true);
+      setCopied("yes");
+      copiedTimer.current = setTimeout(() => setCopied("no"), COPIED_FOR_MS);
     } catch {
-      // No clipboard permission, so the box beside the button is the way: select it for them to copy by hand.
+      // No clipboard permission, so the box beside the button is the way: select it for them to copy by hand, and say so.
       const field = document.getElementById(`${ids}-link`);
       if (field instanceof HTMLInputElement) {
         field.select();
       }
+      setCopied("by-hand");
     }
   }
 
@@ -234,8 +303,25 @@ export function ShareEditor({
               : null}
           </div>
         </div>
-        <p className="text-xs text-asst-faint">Only people who have used the hub can be named.</p>
+        {/* Polite and always there, so why the list is empty is read out as it changes rather than left to guess. */}
+        <p aria-live="polite" className={`text-xs ${suggestions.status === "failed" ? "text-asst-error" : "text-asst-faint"}`}>
+          {searchLine(suggestions.status, suggestions.query.trim(), shown.length, suggestions.found)}
+        </p>
       </form>
+
+      {removed === null ? null : (
+        <p role="status" className="flex flex-wrap items-center gap-2 text-[13px] text-asst-body">
+          {removed.name} {mode === "fork" ? "can no longer fork this chat." : "can no longer read this chat."}
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => void run(share, removed.oid)}
+            className="rounded-md px-1.5 text-asst-accent underline hover:text-asst-accent-hover"
+          >
+            Undo
+          </button>
+        </p>
+      )}
 
       {people.length === 0 ? (
         <p className="text-[13px] text-asst-muted">{words.nobody}</p>
@@ -251,7 +337,7 @@ export function ShareEditor({
               <button
                 type="button"
                 disabled={pending}
-                onClick={() => void run(unshare, person.oid)}
+                onClick={() => void remove(person)}
                 className="shrink-0 rounded-md px-1.5 text-xs text-asst-error hover:bg-asst-field"
               >
                 Remove
@@ -273,9 +359,13 @@ export function ShareEditor({
             className="min-w-0 flex-1 rounded-lg border border-asst-strong bg-asst-field px-2.5 py-1.5 text-xs text-asst-muted outline-hidden"
           />
           <button type="button" onClick={() => void copy()} className="shrink-0 rounded-lg border border-asst-strong px-3 py-1.5 text-sm hover:bg-asst-field">
-            {copied ? "Copied" : "Copy"}
+            {copied === "yes" ? "Copied" : "Copy"}
           </button>
         </div>
+        {/* Mounted from the start, so the copy is announced: a region inserted with its words already in it often is not. */}
+        <p role="status" className={copied === "by-hand" ? "text-xs text-asst-body" : "sr-only"}>
+          {copied === "yes" ? "Link copied" : copied === "by-hand" ? "The link is selected. Press Ctrl+C, or Command+C on a Mac, to copy it." : ""}
+        </p>
         <p className="text-xs text-asst-faint">{words.link}</p>
       </div>
 
@@ -289,8 +379,9 @@ export function ShareEditor({
 }
 
 /**
- * The editor as a modal over the chat, for the chat's own menu and the sidebar's `?share=1` and `?fork=1`. Focus goes
- * to the name box as it opens, and Escape closes it once the box has no list of its own to shut.
+ * The editor as a modal over the chat, for the chat's own menu and the sidebar's `?share=1` and `?fork=1`. The frame
+ * is the Assistant's: focus goes to the name box as it opens and stays in the dialog, the backdrop, the × and Escape
+ * close it — Escape once the box has no list of its own to shut — and focus goes back to what opened it.
  */
 export function ShareDialog({
   conversationId,
@@ -307,43 +398,19 @@ export function ShareDialog({
   unshare: ShareAction;
   onClose: () => void;
 }) {
-  const ids = useId();
   const box = useRef<HTMLInputElement>(null);
-
-  useEffect(() => box.current?.focus(), []);
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-5">
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={`${ids}-title`}
-        className="flex max-h-full w-full max-w-[520px] flex-col gap-4 overflow-y-auto rounded-2xl border border-asst-line bg-asst-hover p-[22px] shadow-2xl"
-      >
-        <h2 id={`${ids}-title`} className="text-lg font-semibold">
-          {WORDS[mode].title}
-        </h2>
-        <ShareEditor mode={mode} conversationId={conversationId} people={people} share={share} unshare={unshare} boxRef={box} />
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          {/* Every chat the person has shared or offered, and every one shared with them, in one place. */}
-          <Link href={SHARED_CHATS} className="text-[13px] text-asst-accent underline hover:text-asst-accent-hover">
-            See all your shared chats
-          </Link>
-          <button type="button" onClick={onClose} className="rounded-[10px] border border-asst-strong px-4 py-2.5 text-sm hover:bg-asst-active">
-            Done
-          </button>
-        </div>
+    <AssistantModal title={WORDS[mode].title} onClose={onClose} initialFocus={box} closeLabel="Close sharing" className="max-w-[520px]">
+      <ShareEditor mode={mode} conversationId={conversationId} people={people} share={share} unshare={unshare} boxRef={box} />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        {/* Every chat the person has shared or offered, and every one shared with them, in one place. */}
+        <Link href={SHARED_CHATS} className="text-[13px] text-asst-accent underline hover:text-asst-accent-hover">
+          See all your shared chats
+        </Link>
+        <button type="button" onClick={onClose} className="rounded-[10px] border border-asst-strong px-4 py-2.5 text-sm hover:bg-asst-active">
+          Done
+        </button>
       </div>
-    </div>
+    </AssistantModal>
   );
 }

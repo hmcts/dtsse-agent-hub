@@ -4,9 +4,10 @@ import { useSearchParams } from "next/navigation";
 import { useId, useState } from "react";
 import { type ConnectionRow, connectionRows } from "@/assistant/connection-rows";
 import type { Connection, ConnectionState, MicrosoftConnection, ModelAccess } from "@/assistant/connections";
-import { awaitsGithub, checklistState, codeCollectable, GITHUB_FIRST, offersConnect } from "@/assistant/connections";
+import { awaitsGithub, CONNECTORS, checklistState, codeCollectable, GITHUB_FIRST, offersConnect } from "@/assistant/connections";
 import type { SavedCredential } from "@/assistant/saved-credentials";
 import { ActionForm, type FormAction } from "@/components/ActionForm";
+import { PasteHelp } from "@/components/assistant/PasteHelp";
 import { SignIn } from "@/components/assistant/SignIn";
 import { useFocusOnMount } from "@/components/assistant/useFocusOnMount";
 import { CONNECT_OUTCOME_PARAMETER, CONNECT_OUTCOME_WORDS, isConnectOutcome, MICROSOFT_UNAVAILABLE } from "@/microsoft/microsoft";
@@ -140,13 +141,25 @@ function ConnectQuestion({
 function Paste({ saved, save, onCancel, onSaved }: { saved: SavedCredential; save: FormAction; onCancel: () => void; onSaved: () => void }) {
   const id = useId();
   const field = useFocusOnMount<HTMLInputElement>();
+  const help = CONNECTORS[saved.kind]?.help ?? null;
   return (
     <ActionForm action={save} label={`Save your ${saved.title}`} onSuccess={onSaved} className={BELOW} pendingText="Saving…">
       <input type="hidden" name="kind" value={saved.kind} />
       <label htmlFor={`${id}-value`} className="text-[13px] font-medium">
         {saved.stored ? `New ${saved.title}` : saved.title}
       </label>
-      <input ref={field} id={`${id}-value`} name="value" type="password" required autoComplete="off" spellCheck={false} className={FIELD} />
+      <input
+        ref={field}
+        id={`${id}-value`}
+        name="value"
+        type="password"
+        required
+        autoComplete="off"
+        spellCheck={false}
+        aria-describedby={help === null ? undefined : `${id}-help`}
+        className={FIELD}
+      />
+      <PasteHelp help={help} id={`${id}-help`} />
       <div className="flex items-center gap-3">
         {/* Named for what it saves, so it is never read as the dialog's own Save, which saves the settings. */}
         <button type="submit" className="rounded-[10px] bg-asst-accent px-3.5 py-2 text-[13px] font-semibold text-asst-ink hover:bg-asst-accent-hover">
