@@ -6,7 +6,6 @@ import {
   type DocmosisIndexFrame,
   INDEX_TOTAL_MS,
   indexEntries,
-  isLibraryPath,
   MAX_INDEX_BYTES,
   MAX_INDEX_ENTRIES,
   parseIndexFrame,
@@ -95,31 +94,26 @@ describe("parseIndexFrame", () => {
   });
 });
 
-describe("isLibraryPath", () => {
-  it("should hold to the hub's rule", () => {
-    expect(isLibraryPath("Templates/Base/a.docx", "Templates")).toBe(true);
-    expect(isLibraryPath("Templates/Base/~$a.docx", "Templates")).toBe(false);
-    expect(isLibraryPath("Templates/a\\b.docx", "Templates")).toBe(false);
-    expect(isLibraryPath("Templates/a\u0001.docx", "Templates")).toBe(false);
-    expect(isLibraryPath("Templates//a.docx", "Templates")).toBe(false);
-    expect(isLibraryPath(`Templates/${"x".repeat(400)}.docx`, "Templates")).toBe(false);
-  });
-});
-
 describe("indexEntries", () => {
-  it("should keep library paths as tuples and drop the rest", () => {
+  it("should keep the templates as tuples, in the order given", () => {
     const found = [
-      { path: "Templates/a.docx", sha: BLOB, size: 3 },
-      { path: `Templates/${"x".repeat(400)}.docx`, sha: BLOB, size: 1 }
+      { path: "Templates/b.docx", sha: BLOB, size: 3 },
+      { path: "Templates/a.docx", sha: BLOB, size: 1 }
     ];
 
-    expect(indexEntries(found, "Templates")).toEqual({ entries: [["Templates/a.docx", BLOB, 3]], dropped: 1 });
+    expect(indexEntries(found)).toEqual({
+      entries: [
+        ["Templates/b.docx", BLOB, 3],
+        ["Templates/a.docx", BLOB, 1]
+      ],
+      dropped: 0
+    });
   });
 
   it("should stop at the hub's count", () => {
     const found = Array.from({ length: MAX_INDEX_ENTRIES + 5 }, (_, i) => ({ path: `Templates/${i}.docx`, sha: BLOB, size: 1 }));
 
-    const { entries, dropped } = indexEntries(found, "Templates");
+    const { entries, dropped } = indexEntries(found);
 
     expect(entries).toHaveLength(MAX_INDEX_ENTRIES);
     expect(dropped).toBe(5);
@@ -128,7 +122,7 @@ describe("indexEntries", () => {
   it("should stop within the hub's 1 MiB, as it measures the stored entries", () => {
     const found = Array.from({ length: 5000 }, (_, i) => ({ path: `Templates/${"y".repeat(300)}-${i}.docx`, sha: BLOB, size: 123456 }));
 
-    const { entries, dropped } = indexEntries(found, "Templates");
+    const { entries, dropped } = indexEntries(found);
     const stored = Buffer.byteLength(JSON.stringify(entries)) + 3 * entries.length;
     const body = Buffer.byteLength(JSON.stringify({ commit: MOVED, etag: `"${"e".repeat(198)}"`, entries }));
 
@@ -173,10 +167,10 @@ describe("runIndex", () => {
     expect(asked[0]?.headers["if-none-match"]).toBeUndefined();
   });
 
-  it("should say how many templates it left out, when some are not library paths", async () => {
+  it("should never answer a path the hub would refuse, when the tree holds one", async () => {
     const { fetch } = github(new Response(MOVED), () => tree([{ path: "Templates/a.docx" }, { path: `Templates/${"x".repeat(400)}.docx` }]));
 
-    expect(await runIndex(deps(fetch), FRAME)).toMatchObject({ entries: [["Templates/a.docx", BLOB, 1]], dropped: 1 });
+    expect(await runIndex(deps(fetch), FRAME)).toEqual({ commit: MOVED, etag: null, entries: [["Templates/a.docx", BLOB, 1]], dropped: 0 });
   });
 
   it("should give the token read only what is left of the total, when the frame arrived a minute ago", async () => {
@@ -299,6 +293,21 @@ describe("runIndex", () => {
     expect(JSON.stringify(answers)).toContain("[redacted]");
     expect(JSON.stringify(answers)).not.toContain(TOKEN);
     expect(said.join("\n")).not.toContain(TOKEN);
+  });
+});
+
+describe("runIndex redaction", () => {
+  it("should redact a credential that is not the token, when what fetch threw says one", async () => {
+    const other = `${"gh"}p_${"Z9y8X7w6".repeat(4)}`;
+    const fetch: FetchLike = async () => {
+      throw new Error(`refused ${other}`);
+    };
+
+    const answer = await runIndex(deps(fetch), FRAME);
+
+    expect(answer).toMatchObject({ error: "failed" });
+    expect(JSON.stringify(answer)).not.toContain(other);
+    expect(JSON.stringify(answer)).toContain("[redacted]");
   });
 });
 

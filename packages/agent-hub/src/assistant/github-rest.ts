@@ -3,9 +3,7 @@
 // from the HMCTS Template Preview extension's library client (dtsse-docmosis-tools `vscode/src/library/github.ts`),
 // as functions. The token is the owner's own `gh` sign-in, read for each call and only ever put in a header: it is
 // never logged, printed or written, and no error says it.
-import type { Env } from "../env.ts";
 import { GITHUB_OWNER_RE, GITHUB_REPO_RE } from "../github.ts";
-import type { Run } from "./lookups.ts";
 
 export type FetchLike = (url: string, init: { headers: Record<string, string>; signal?: AbortSignal }) => Promise<Response>;
 
@@ -40,6 +38,12 @@ export const TOKEN_TIMEOUT_MS = 15_000;
 /** The hub's rule for an `sso_url`, which refuses the whole answer for one that breaks it. */
 const SSO_URL_PREFIX = "https://github.com/";
 const MAX_SSO_URL = 500;
+/** The furthest ahead a rate limit's reset is believed: a header past this is wrong, and the hub would refuse to wait for it. */
+export const MAX_RESET_MS = 60 * 60_000;
+/** The hub's limit on a library path. */
+export const MAX_LIBRARY_PATH = 400;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what this refuses.
+const CONTROL_RE = /[\u0000-\u001f\u007f]/;
 const SHA1_RE = /^[0-9a-f]{40}$/;
 // A ref as a path segment: `HEAD`, a branch or a tag, never climbing with `..`.
 const REF_RE = /^(?!.*\.\.)[A-Za-z0-9._/-]{1,200}$/;
@@ -50,13 +54,6 @@ export function isGitSha(value: unknown): value is string {
 
 export function isGitRef(value: unknown): value is string {
   return typeof value === "string" && REF_RE.test(value) && !value.startsWith("/") && !value.endsWith("/");
-}
-
-/** The owner's GitHub token from the pod's `gh`, or null when it has none. Never logged. */
-export async function githubToken(run: Run, env: Env, timeoutMs: number = TOKEN_TIMEOUT_MS): Promise<string | null> {
-  const result = await run("gh", ["auth", "token", "--hostname", "github.com"], { env, timeoutMs });
-  const token = result.code === 0 ? result.stdout.trim() : "";
-  return token === "" || /\s/.test(token) ? null : token;
 }
 
 function repoPath(owner: string, repo: string): string {
@@ -79,6 +76,15 @@ export function githubPage(candidate: string | undefined): string | undefined {
   return href.startsWith(SSO_URL_PREFIX) && href.length <= MAX_SSO_URL ? href : undefined;
 }
 
+/** A reset at most `MAX_RESET_MS` from `now`, or none for one that is not a time. */
+function resetTime(ms: number | undefined, now: number): Date | undefined {
+  if (ms === undefined || !Number.isFinite(ms)) {
+    return undefined;
+  }
+  const at = new Date(Math.min(ms, now + MAX_RESET_MS));
+  return Number.isNaN(at.getTime()) ? undefined : at;
+}
+
 /** What a refusal from GitHub means for the person, as one of the hub's reasons. */
 export function errorFor(response: Pick<Response, "status" | "statusText" | "headers">, repo: string, now: number = Date.now()): GithubFailure {
   const { status, headers } = response;
@@ -98,8 +104,7 @@ export function errorFor(response: Pick<Response, "status" | "statusText" | "hea
     // retry-after comes with a secondary limit, which applies even when the primary limit has requests left.
     const retry = Number(headers.get("retry-after"));
     const reset = Number(headers.get("x-ratelimit-reset"));
-    const resetAt =
-      Number.isFinite(retry) && retry > 0 ? new Date(now + retry * 1000) : Number.isFinite(reset) && reset > 0 ? new Date(reset * 1000) : undefined;
+    const resetAt = resetTime(Number.isFinite(retry) && retry > 0 ? now + retry * 1000 : Number.isFinite(reset) && reset > 0 ? reset * 1000 : undefined, now);
     return {
       error: "rate_limited",
       detail: "Your GitHub rate limit is used up for now.",
@@ -189,12 +194,20 @@ export async function blob(gh: GithubRest, owner: string, repo: string, sha: str
   return new Uint8Array(await response.arrayBuffer());
 }
 
-/** A blob the listing keeps: a .docx under the folder, skipping Word's `~$` lock files. */
-function isTemplate(file: string, prefix: string): boolean {
-  if (prefix && !file.startsWith(`${prefix}/`)) {
+/**
+ * A blob the listing keeps, which is the hub's rule for a path its index holds (`isLibraryPath` in the service's
+ * `src/assistant/docmosis-library.ts`): a `.docx` under `folder` that is not one of Word's `~$` lock files, every
+ * segment a real name, no control character or backslash, and at most `MAX_LIBRARY_PATH` characters.
+ */
+export function isLibraryPath(path: string, folder: string): boolean {
+  if (path.length > MAX_LIBRARY_PATH || (folder !== "" && !path.startsWith(`${folder}/`)) || CONTROL_RE.test(path) || path.includes("\\")) {
     return false;
   }
-  const name = file.slice(file.lastIndexOf("/") + 1);
+  const segments = path.split("/");
+  if (segments.some((segment) => segment === "" || segment === "." || segment === "..")) {
+    return false;
+  }
+  const name = segments.at(-1) as string;
   return name.toLowerCase().endsWith(".docx") && !name.startsWith("~$");
 }
 
@@ -205,7 +218,7 @@ function toTemplates(entries: readonly TreeEntry[], base: string, prefix: string
       continue;
     }
     const file = base ? `${base}/${entry.path}` : entry.path;
-    if (isTemplate(file, prefix)) {
+    if (isLibraryPath(file, prefix)) {
       out.push({ path: file, sha: entry.sha, size: typeof entry.size === "number" && entry.size >= 0 ? entry.size : 0 });
     }
   }

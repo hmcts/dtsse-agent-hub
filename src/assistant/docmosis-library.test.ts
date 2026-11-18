@@ -2,15 +2,19 @@ import { describe, expect, it } from "vitest";
 import {
   DOCMOSIS_LIBRARY_ID,
   FORCED_REFRESH_MIN_MS,
+  FORCED_REPLACES_PENDING_MS,
   forcedTooSoon,
   INDEX_REFRESH_PENDING_MS,
   INDEX_REVALIDATE_MS,
   type IndexEntry,
   indexAnswerBody,
+  isEntriesKey,
   isLibraryPath,
+  keptResetAt,
   type LibraryRow,
   libraryStatus,
   MAX_INDEX_ENTRIES,
+  MAX_RESET_MS,
   refreshDecision,
   storedEntriesBytes
 } from "./docmosis-library.ts";
@@ -166,12 +170,8 @@ describe("storedEntriesBytes", () => {
 });
 
 describe("refreshDecision", () => {
-  it("should ask when there is no row", () => {
-    expect(refreshDecision(null, NOW, false)).toBe("ask");
-  });
-
-  it("should ask when there is no index yet or it has never been checked", () => {
-    expect(refreshDecision(row({ commitSha: null, entryCount: 0 }), NOW, false)).toBe("ask");
+  it("should ask when no check has been answered, with or without an index", () => {
+    expect(refreshDecision(row({ commitSha: null, entryCount: 0, checkedAt: null }), NOW, false)).toBe("ask");
     expect(refreshDecision(row({ checkedAt: null }), NOW, false)).toBe("ask");
   });
 
@@ -187,11 +187,18 @@ describe("refreshDecision", () => {
     expect(refreshDecision(row({ checkedAt: NOW }), NOW, true)).toBe("ask");
   });
 
-  it("should join a check still pending, forced or not", () => {
-    const pending = row({ refreshId: "r", refreshRequestedAt: ago(INDEX_REFRESH_PENDING_MS - 1) });
+  it("should join a check still pending when not forced, however long it has waited", () => {
+    expect(refreshDecision(row({ refreshId: "r", refreshRequestedAt: ago(1) }), NOW, false)).toBe("join");
+    expect(refreshDecision(row({ refreshId: "r", refreshRequestedAt: ago(INDEX_REFRESH_PENDING_MS - 1) }), NOW, false)).toBe("join");
+  });
 
-    expect(refreshDecision(pending, NOW, false)).toBe("join");
-    expect(refreshDecision(pending, NOW, true)).toBe("join");
+  it("should join a check pending for less than 15 seconds when forced", () => {
+    expect(refreshDecision(row({ refreshId: "r", refreshRequestedAt: ago(FORCED_REPLACES_PENDING_MS - 1) }), NOW, true)).toBe("join");
+  });
+
+  it("should replace a check pending for 15 seconds or more when forced", () => {
+    expect(refreshDecision(row({ refreshId: "r", refreshRequestedAt: ago(FORCED_REPLACES_PENDING_MS) }), NOW, true)).toBe("ask");
+    expect(refreshDecision(row({ refreshId: "r", refreshRequestedAt: ago(INDEX_REFRESH_PENDING_MS - 1) }), NOW, true)).toBe("ask");
   });
 
   it("should ask again when the pending check is two minutes old and so lost", () => {
@@ -263,8 +270,41 @@ describe("forcedTooSoon", () => {
     expect(forcedTooSoon(null, NOW)).toBe(false);
   });
 
-  it("should never refuse one while a check is pending, which it joins", () => {
+  it("should never refuse one that joins the check pending", () => {
     expect(forcedTooSoon(row({ forcedAt: ago(1), refreshId: "r", refreshRequestedAt: ago(1) }), NOW)).toBe(false);
+  });
+
+  it("should refuse one that would replace a pending check, when the last forced one was within 30 seconds", () => {
+    const pending = { refreshId: "r", refreshRequestedAt: ago(FORCED_REPLACES_PENDING_MS) };
+
+    expect(forcedTooSoon(row({ ...pending, forcedAt: ago(FORCED_REPLACES_PENDING_MS) }), NOW)).toBe(true);
+    expect(forcedTooSoon(row({ ...pending, forcedAt: ago(FORCED_REFRESH_MIN_MS) }), NOW)).toBe(false);
+    expect(forcedTooSoon(row({ ...pending, forcedAt: null }), NOW)).toBe(false);
+  });
+});
+
+describe("keptResetAt", () => {
+  it("should keep a reset within the hour", () => {
+    expect(keptResetAt(later(60_000).toISOString(), NOW)).toEqual(later(60_000));
+    expect(keptResetAt(ago(60_000).toISOString(), NOW)).toEqual(ago(60_000));
+  });
+
+  it("should hold a reset to an hour from now when it is further out", () => {
+    expect(keptResetAt("9999-12-31T23:59:59Z", NOW)).toEqual(later(MAX_RESET_MS));
+  });
+
+  it("should drop a reset that is not a date, or none", () => {
+    expect(keptResetAt("not a date", NOW)).toBeNull();
+    expect(keptResetAt(undefined, NOW)).toBeNull();
+  });
+});
+
+describe("isEntriesKey", () => {
+  it("should take a UUID in either case, and nothing else", () => {
+    expect(isEntriesKey(KEY)).toBe(true);
+    expect(isEntriesKey(KEY.toUpperCase())).toBe(true);
+    expect(isEntriesKey("not-a-uuid")).toBe(false);
+    expect(isEntriesKey(42)).toBe(false);
   });
 });
 
@@ -299,6 +339,13 @@ describe("libraryStatus", () => {
       refreshing: true,
       failure: null
     });
+  });
+
+  it("should say it is no longer refreshing once a check has gone two minutes unanswered", () => {
+    const lost = row({ refreshId: "r", refreshRequestedAt: ago(INDEX_REFRESH_PENDING_MS) });
+
+    expect(libraryStatus(row({ refreshId: "r", refreshRequestedAt: ago(INDEX_REFRESH_PENDING_MS - 1) }), "ok", NOW).refreshing).toBe(true);
+    expect(libraryStatus(lost, "ok", NOW).refreshing).toBe(false);
   });
 
   it("should say how many templates the index left out, when the pod dropped some", () => {

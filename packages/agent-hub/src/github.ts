@@ -1,5 +1,6 @@
-// What the client's GitHub export and GitHub lookups share: the shape of an owner and a repository, which every value
-// is checked against before it goes into a gh argument, and the one line said when gh refuses.
+// What the client's GitHub export, GitHub lookups, sign-in and template library share: the token gh holds, the shape of
+// an owner and a repository, which every value is checked against before it goes into a gh argument, and the one line
+// said when gh refuses.
 import { type RunResult, stripAnsi } from "./virtual/process.ts";
 
 /** A GitHub user or organisation login: letters, digits and hyphens, not starting with a hyphen. */
@@ -10,6 +11,20 @@ export const GITHUB_OWNER_RE = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/;
  * `hmcts/.github` does, but is never `.` or `..`. The hub's `src/assistant/github.ts` and its migrations check the same.
  */
 export const GITHUB_REPO_RE = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/(?!\.\.?$)[A-Za-z0-9._-]{1,100}$/;
+
+/**
+ * The token the pod's `gh` holds for github.com, or null when it has none: a `gh auth token` that fails, prints
+ * nothing or prints something with whitespace in it, which no token has. Never logged.
+ */
+export async function ghAuthToken<E>(
+  run: (cmd: string, args: string[], opts: { env: E; timeoutMs: number }) => Promise<RunResult>,
+  env: E,
+  timeoutMs: number
+): Promise<string | null> {
+  const result = await run("gh", ["auth", "token", "--hostname", "github.com"], { env, timeoutMs });
+  const token = result.code === 0 ? result.stdout.trim() : "";
+  return token === "" || /\s/.test(token) ? null : token;
+}
 
 /**
  * Why gh failed, in one line the person can read: `said`, then the first line gh wrote that is not JSON, ANSI escapes

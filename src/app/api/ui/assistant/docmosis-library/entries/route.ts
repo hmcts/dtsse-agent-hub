@@ -12,8 +12,10 @@ export const dynamic = "force-dynamic";
 /**
  * The entries of the signed-in person's template library index at one commit, at the `entries_url` the status gives.
  * Cached by the browser for a day as immutable, since a commit's entries never change: the page asks again only when
- * the status names another address. The owner's own `key` in that address, and `Vary: Cookie`, keep one person's
- * cached list from being served to the next person signed in on the same browser.
+ * the status names another address. There is no `Vary: Cookie`: the owner's own `key` in that address is what keeps
+ * one person's cached list from the next person signed in on the same browser, since the next person's status names
+ * their own key and so another address, and `Vary` would key the cached list on every cookie the browser sends,
+ * dropping it whenever any of them changed.
  */
 export async function GET(request: NextRequest): Promise<Response> {
   const viewer = await uiViewer(request);
@@ -36,6 +38,6 @@ export async function GET(request: NextRequest): Promise<Response> {
     if (index === undefined) {
       return errorResponse(404, "that is not the template library index you hold");
     }
-    return Response.json(index, { headers: { "Cache-Control": "private, max-age=86400, immutable", Vary: "Cookie" } });
+    return Response.json(index, { headers: { "Cache-Control": "private, max-age=86400, immutable" } });
   });
 }

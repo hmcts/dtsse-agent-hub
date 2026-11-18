@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { blob, commitCheck, errorFor, type FetchLike, type GithubRest, GithubRestError, githubPage, githubToken, isGitRef, templates } from "./github-rest.ts";
+import {
+  blob,
+  commitCheck,
+  errorFor,
+  type FetchLike,
+  type GithubRest,
+  GithubRestError,
+  githubPage,
+  isGitRef,
+  isLibraryPath,
+  MAX_RESET_MS,
+  templates
+} from "./github-rest.ts";
 
 const TOKEN = "gho_abcdefghijklmnopqrstuvwxyz";
 const COMMIT = "c".repeat(40);
@@ -33,18 +45,25 @@ async function failureOf(call: Promise<unknown>) {
   return (error as GithubRestError).failure;
 }
 
-describe("githubToken", () => {
-  it("should read the token from gh, and nothing when gh has none", async () => {
-    const asked: string[][] = [];
-    const run = async (cmd: string, args: string[]) => {
-      asked.push([cmd, ...args]);
-      return { code: 0, stdout: `${TOKEN}\n`, stderr: "" };
-    };
+describe("isLibraryPath", () => {
+  it("should hold to the hub's rule", () => {
+    expect(isLibraryPath("Templates/Base/a.docx", "Templates")).toBe(true);
+    expect(isLibraryPath("Templates/a.DOCX", "Templates")).toBe(true);
+    expect(isLibraryPath(`Templates/${"x".repeat(385)}.docx`, "Templates")).toBe(true);
+    expect(isLibraryPath("Other/a.docx", "Templates")).toBe(false);
+    expect(isLibraryPath("TemplatesX/a.docx", "Templates")).toBe(false);
+    expect(isLibraryPath("Templates/notes.txt", "Templates")).toBe(false);
+    expect(isLibraryPath("Templates/Base/~$a.docx", "Templates")).toBe(false);
+    expect(isLibraryPath("Templates/a\\b.docx", "Templates")).toBe(false);
+    expect(isLibraryPath("Templates/a\u0001.docx", "Templates")).toBe(false);
+    expect(isLibraryPath("Templates//a.docx", "Templates")).toBe(false);
+    expect(isLibraryPath("Templates/../a.docx", "Templates")).toBe(false);
+    expect(isLibraryPath(`Templates/${"x".repeat(386)}.docx`, "Templates")).toBe(false);
+  });
 
-    expect(await githubToken(run, {})).toBe(TOKEN);
-    expect(asked).toEqual([["gh", "auth", "token", "--hostname", "github.com"]]);
-    expect(await githubToken(async () => ({ code: 1, stdout: "", stderr: "not logged in" }), {})).toBeNull();
-    expect(await githubToken(async () => ({ code: 0, stdout: "two words", stderr: "" }), {})).toBeNull();
+  it("should take a template anywhere in the repository when the folder is empty", () => {
+    expect(isLibraryPath("a/b.docx", "")).toBe(true);
+    expect(isLibraryPath("/b.docx", "")).toBe(false);
   });
 });
 
@@ -104,7 +123,7 @@ describe("commitCheck", () => {
 });
 
 describe("templates", () => {
-  it("should list the .docx files under the folder from one recursive tree, leaving out lock files, in path order", async () => {
+  it("should list the library paths under the folder from one recursive tree, leaving out lock files and paths the hub refuses, in path order", async () => {
     const { fetch, calls } = fakeFetch({
       "/git/trees/": () =>
         Response.json({
@@ -115,6 +134,8 @@ describe("templates", () => {
             { path: "Templates/a.DOCX", type: "blob", sha: sha(1), size: 10 },
             { path: "Templates/~$a.docx", type: "blob", sha: sha(3), size: 1 },
             { path: "Templates/notes.txt", type: "blob", sha: sha(4), size: 1 },
+            { path: `Templates/${"x".repeat(400)}.docx`, type: "blob", sha: sha(7), size: 1 },
+            { path: "Templates/a\\b.docx", type: "blob", sha: sha(8), size: 1 },
             { path: "Other/c.docx", type: "blob", sha: sha(5), size: 1 },
             { path: "Templates/Sub", type: "tree", sha: sha(6) }
           ]
@@ -289,6 +310,18 @@ describe("errorFor", () => {
       reset_at: "2026-11-18T12:02:00.000Z"
     });
     expect(errorFor(answer(403, { "retry-after": "0" }), "hmcts/r", NOW)).toEqual({ error: "rate_limited", detail: expect.any(String) });
+  });
+
+  it("should hold a reset to an hour from now, when GitHub's headers put it further out", () => {
+    const anHour = new Date(NOW + MAX_RESET_MS).toISOString();
+
+    expect(errorFor(answer(429, { "retry-after": String(2 * 3600) }), "hmcts/r", NOW).reset_at).toBe(anHour);
+    expect(errorFor(answer(403, { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(NOW / 1000 + 7200) }), "hmcts/r", NOW).reset_at).toBe(anHour);
+  });
+
+  it("should give a reset rather than throw, when a header is past any date", () => {
+    expect(errorFor(answer(429, { "retry-after": "1e300" }), "hmcts/r", NOW).reset_at).toBe(new Date(NOW + MAX_RESET_MS).toISOString());
+    expect(errorFor(answer(429, { "x-ratelimit-reset": "9e15" }), "hmcts/r", NOW).reset_at).toBe(new Date(NOW + MAX_RESET_MS).toISOString());
   });
 
   it("should read a 404 as not found, and anything else as failed", () => {

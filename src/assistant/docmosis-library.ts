@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { boundedArray } from "../agent-api/bounded-array.ts";
+import { isUuid } from "../agents/ids.ts";
 
 /**
  * The Docmosis template library: an index of the `.docx` files in one folder of a GitHub repository, read by the
@@ -21,6 +22,14 @@ export const INDEX_REVALIDATE_MS = 5 * 60_000;
 export const FORCED_REFRESH_MIN_MS = 30_000;
 /** How long a check sent to the pod is waited for; past this it counts as lost, and its answer is ignored. */
 export const INDEX_REFRESH_PENDING_MS = 2 * 60_000;
+/**
+ * How long a forced check joins the one pending rather than replacing it. A check that has gone this long unanswered
+ * was most likely lost, to a reconnect of the sessions stream or a failed answer, and the person pressing Refresh
+ * should not wait out the rest of `INDEX_REFRESH_PENDING_MS` for it.
+ */
+export const FORCED_REPLACES_PENDING_MS = 15_000;
+/** The furthest ahead a rate limit's reset is kept: a later one is wrong, and would leave the library unchecked for it. */
+export const MAX_RESET_MS = 60 * 60_000;
 export const MAX_INDEX_DETAIL = 300;
 export const MAX_ETAG = 200;
 const MAX_SSO_URL = 500;
@@ -31,7 +40,6 @@ export const INDEX_FAILURES = ["signed_out", "sso", "not_found", "rate_limited",
 export type IndexFailureReason = (typeof INDEX_FAILURES)[number];
 
 const SHA1_RE = /^[0-9a-f]{40}$/;
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 export const ETAG_RE = /^(W\/)?"[\x21\x23-\x7e]*"$/;
 // biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what this refuses.
 const CONTROL_RE = /[\u0000-\u001f\u007f]/;
@@ -40,9 +48,9 @@ export function isCommitSha(value: unknown): value is string {
   return typeof value === "string" && SHA1_RE.test(value);
 }
 
-/** Whether `value` could be an index's entries key: a UUID as Postgres prints one, in lowercase. */
+/** Whether `value` could be an index's entries key: a UUID, which is compared lowercased, as Postgres prints one. */
 export function isEntriesKey(value: unknown): value is string {
-  return typeof value === "string" && UUID_RE.test(value);
+  return typeof value === "string" && isUuid(value);
 }
 
 /**
@@ -134,12 +142,17 @@ export function refreshPending(row: Pick<LibraryRow, "refreshId" | "refreshReque
   return row.refreshId !== null && row.refreshRequestedAt !== null && now.getTime() - row.refreshRequestedAt.getTime() < INDEX_REFRESH_PENDING_MS;
 }
 
+/** Whether a forced check joins the one pending: only while it is younger than `FORCED_REPLACES_PENDING_MS`. */
+function forceJoins(row: LibraryRow, now: Date): boolean {
+  return refreshPending(row, now) && now.getTime() - (row.refreshRequestedAt as Date).getTime() < FORCED_REPLACES_PENDING_MS;
+}
+
 /**
  * Whether a forced check is refused because the last forced one was asked for within `FORCED_REFRESH_MIN_MS`. One
- * still pending is joined instead, which costs nothing, so it is never refused.
+ * that joins the check pending costs nothing, so it is never refused; one that would replace it is held to the limit.
  */
 export function forcedTooSoon(row: LibraryRow | null, now: Date): boolean {
-  if (row === null || row.forcedAt === null || refreshPending(row, now)) {
+  if (row === null || row.forcedAt === null || forceJoins(row, now)) {
     return false;
   }
   return now.getTime() - row.forcedAt.getTime() < FORCED_REFRESH_MIN_MS;
@@ -162,19 +175,24 @@ function nextCheckAt(row: LibraryRow, checkedAt: Date): number {
 
 /**
  * What opening the library asks of the pod: nothing, a new check, or the one already pending. A check is asked for
- * when none has been answered, when the last answer is due another (`nextCheckAt`), or when forced.
+ * when none has been answered, when the last answer is due another (`nextCheckAt`), or when forced; a forced one
+ * replaces a pending check that `forceJoins` says has waited too long. Every answer sets `checkedAt` with an index or
+ * a failure, so a row with `checkedAt` set always has one of the two.
  */
-export function refreshDecision(row: LibraryRow | null, now: Date, force: boolean): "none" | "ask" | "join" {
-  if (row === null) {
-    return "ask";
-  }
-  if (refreshPending(row, now)) {
+export function refreshDecision(row: LibraryRow, now: Date, force: boolean): "none" | "ask" | "join" {
+  if (refreshPending(row, now) && (!force || forceJoins(row, now))) {
     return "join";
   }
-  if (force || row.checkedAt === null || (row.commitSha === null && row.error === null)) {
+  if (force || row.checkedAt === null) {
     return "ask";
   }
   return now.getTime() >= nextCheckAt(row, row.checkedAt) ? "ask" : "none";
+}
+
+/** A pod's `reset_at` as the hub keeps it: no later than `MAX_RESET_MS` from `now`, and none for a date that is not one. */
+export function keptResetAt(resetAt: string | undefined, now: Date): Date | null {
+  const at = resetAt === undefined ? Number.NaN : Date.parse(resetAt);
+  return Number.isNaN(at) ? null : new Date(Math.min(at, now.getTime() + MAX_RESET_MS));
 }
 
 /** Whether the pod can be asked now; `stopped` is a stopped pod the hub has an index for, and so does not start. */
@@ -196,7 +214,7 @@ export interface LibraryStatus {
   pod: LibraryPodGate;
   commit: string | null;
   entry_count: number;
-  /** Templates the pod found and left out of the index, past its limits or not library paths: the list is incomplete. */
+  /** Templates the pod found and left out of the index, past its limits: the list is incomplete. */
   dropped: number;
   /** Where the browser reads the entries; null while there is no index. */
   entries_url: string | null;
@@ -227,7 +245,12 @@ function failureOf(row: LibraryRow): IndexFailure | null {
   };
 }
 
-/** What `POST /api/ui/assistant/docmosis-library` answers, from the row as it stands after any check was asked for. */
+/**
+ * What `GET` and `POST /api/ui/assistant/docmosis-library` answer, from the row as it stands after any check was asked
+ * for. `refreshing` is false once a check has gone `INDEX_REFRESH_PENDING_MS` unanswered, whether or not anything has
+ * happened since, so a tab that saw it true reads the status again after that long rather than waiting for a frame
+ * that a lost check never sends.
+ */
 export function libraryStatus(row: LibraryRow | null, gate: LibraryPodGate, now: Date): LibraryStatus {
   const indexed = row === null || row.commitSha === null ? null : { ...row, commitSha: row.commitSha };
   return {
