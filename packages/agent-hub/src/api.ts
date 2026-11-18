@@ -224,7 +224,7 @@ export type Api = {
   /** A spreadsheet the owner uploaded for a Welsh job to read. At most 5 MiB, so read whole. */
   welshFile: (virtualId: string, fileId: string) => Promise<Uint8Array>;
   /** The supervisor's answer to one check of its owner's template library. At most 1 MiB. */
-  putDocmosisIndex: (virtualId: string, requestId: string, body: DocmosisIndexAnswer) => Promise<null>;
+  putDocmosisIndex: (virtualId: string, requestId: string, body: DocmosisIndexAnswer, options?: RequestOptions) => Promise<null>;
   /** The version one of its owner's pending deck builds is of, outline and all. */
   deckBuild: (virtualId: string, jobId: string) => Promise<DeckBuild>;
   /** One picture a pending deck build's outline names. At most 5 MiB, so read whole. */
@@ -443,7 +443,8 @@ export function createApi({
     putWelsh: (virtualId, jobId, body) => request<null>("PUT", v(virtualId, `welsh/${encodeURIComponent(jobId)}`), body),
     putWelshFile: (virtualId, jobId, name, bytes) => putBytes<{ file_id: string }>(v(virtualId, `welsh/${encodeURIComponent(jobId)}/files`), name, bytes),
     welshFile: (virtualId, fileId) => requestBytes(v(virtualId, `welsh/files/${encodeURIComponent(fileId)}`)),
-    putDocmosisIndex: (virtualId, requestId, body) => request<null>("PUT", v(virtualId, `docmosis-library/${encodeURIComponent(requestId)}`), body),
+    putDocmosisIndex: (virtualId, requestId, body, options) =>
+      request<null>("PUT", v(virtualId, `docmosis-library/${encodeURIComponent(requestId)}`), body, options),
     deckBuild: (virtualId, jobId) => request<DeckBuild>("GET", v(virtualId, `deck-builds/${encodeURIComponent(jobId)}`)),
     deckBuildAsset: (virtualId, jobId, sha256) => requestBytes(v(virtualId, `deck-builds/${encodeURIComponent(jobId)}/assets/${encodeURIComponent(sha256)}`)),
     putDeckBuild: (virtualId, jobId, answer) =>

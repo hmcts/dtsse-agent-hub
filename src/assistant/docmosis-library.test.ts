@@ -17,8 +17,10 @@ import {
 
 const NOW = new Date("2026-11-18T12:00:00.000Z");
 const ago = (ms: number) => new Date(NOW.getTime() - ms);
+const later = (ms: number) => new Date(NOW.getTime() + ms);
 const SHA = "a".repeat(40);
 const BLOB = "b".repeat(40);
+const KEY = "0f8a6a1e-1234-4000-8000-00000000000a";
 
 function row(overrides: Partial<LibraryRow> = {}): LibraryRow {
   return {
@@ -28,7 +30,9 @@ function row(overrides: Partial<LibraryRow> = {}): LibraryRow {
     checkedAt: ago(60_000),
     refreshId: null,
     refreshRequestedAt: null,
-    refreshForced: false,
+    forcedAt: null,
+    dropped: 0,
+    entriesKey: KEY,
     error: null,
     detail: null,
     ssoUrl: null,
@@ -83,6 +87,12 @@ describe("indexAnswerBody", () => {
     expect(indexAnswerBody.safeParse({ commit: SHA, etag: '"abc"', entries }).success).toBe(true);
     expect(indexAnswerBody.safeParse({ commit: SHA, etag: 'W/"abc"', entries }).success).toBe(true);
     expect(indexAnswerBody.safeParse({ commit: SHA, etag: null, entries: [] }).success).toBe(true);
+  });
+
+  it("should take a count of the templates left out, when the pod dropped some", () => {
+    expect(indexAnswerBody.parse({ commit: SHA, etag: null, entries, dropped: 3 })).toMatchObject({ dropped: 3 });
+    expect(indexAnswerBody.safeParse({ commit: SHA, etag: null, entries, dropped: -1 }).success).toBe(false);
+    expect(indexAnswerBody.safeParse({ commit: SHA, etag: null, entries, dropped: 2 ** 31 }).success).toBe(false);
   });
 
   it.each([
@@ -187,25 +197,74 @@ describe("refreshDecision", () => {
   it("should ask again when the pending check is two minutes old and so lost", () => {
     expect(refreshDecision(row({ refreshId: "r", refreshRequestedAt: ago(INDEX_REFRESH_PENDING_MS), checkedAt: null }), NOW, false)).toBe("ask");
   });
+
+  it.each(["signed_out", "sso", "not_found", "failed"])(
+    "should not ask again within five minutes when a %s failure was answered and there is no index",
+    (error) => {
+      const failed = row({ commitSha: null, entryCount: 0, error });
+
+      expect(refreshDecision({ ...failed, checkedAt: ago(1) }, NOW, false)).toBe("none");
+      expect(refreshDecision({ ...failed, checkedAt: ago(INDEX_REVALIDATE_MS - 1) }, NOW, false)).toBe("none");
+      expect(refreshDecision({ ...failed, checkedAt: ago(INDEX_REVALIDATE_MS) }, NOW, false)).toBe("ask");
+    }
+  );
+
+  it("should ask when forced, when a failure was answered and there is no index", () => {
+    expect(refreshDecision(row({ commitSha: null, entryCount: 0, error: "failed", checkedAt: ago(1) }), NOW, true)).toBe("ask");
+  });
+
+  it("should wait for the reset when a rate limit was answered and there is no index", () => {
+    const limited = row({ commitSha: null, entryCount: 0, error: "rate_limited", checkedAt: ago(FORCED_REFRESH_MIN_MS), resetAt: later(60_000) });
+
+    expect(refreshDecision(limited, NOW, false)).toBe("none");
+    expect(refreshDecision(limited, later(60_000 - 1), false)).toBe("none");
+    expect(refreshDecision(limited, later(60_000), false)).toBe("ask");
+  });
+
+  it("should wait 30 seconds when a rate limit's reset is already past and there is no index", () => {
+    const limited = row({ commitSha: null, entryCount: 0, error: "rate_limited", checkedAt: ago(1), resetAt: ago(60_000) });
+
+    expect(refreshDecision(limited, NOW, false)).toBe("none");
+    expect(refreshDecision(limited, later(FORCED_REFRESH_MIN_MS - 1), false)).toBe("ask");
+  });
+
+  it("should wait five minutes when a rate limit with no reset time was answered and there is no index", () => {
+    const limited = row({ commitSha: null, entryCount: 0, error: "rate_limited", checkedAt: ago(INDEX_REVALIDATE_MS - 1) });
+
+    expect(refreshDecision(limited, NOW, false)).toBe("none");
+    expect(refreshDecision(limited, later(1), false)).toBe("ask");
+  });
+
+  it("should wait for the later of the reset and five minutes when a rate limit was answered and an index is held", () => {
+    const soon = row({ error: "rate_limited", checkedAt: ago(INDEX_REVALIDATE_MS - 1), resetAt: ago(1) });
+    const late = row({ error: "rate_limited", checkedAt: ago(INDEX_REVALIDATE_MS), resetAt: later(1) });
+
+    expect(refreshDecision(soon, NOW, false)).toBe("none");
+    expect(refreshDecision(late, NOW, false)).toBe("none");
+    expect(refreshDecision(late, later(1), false)).toBe("ask");
+  });
 });
 
 describe("forcedTooSoon", () => {
   it("should refuse a forced check within 30 seconds of the last forced one", () => {
-    expect(forcedTooSoon(row({ refreshForced: true, refreshRequestedAt: ago(FORCED_REFRESH_MIN_MS - 1) }), NOW)).toBe(true);
+    expect(forcedTooSoon(row({ forcedAt: ago(FORCED_REFRESH_MIN_MS - 1), refreshRequestedAt: ago(FORCED_REFRESH_MIN_MS - 1) }), NOW)).toBe(true);
   });
 
   it("should allow one 30 seconds after", () => {
-    expect(forcedTooSoon(row({ refreshForced: true, refreshRequestedAt: ago(FORCED_REFRESH_MIN_MS) }), NOW)).toBe(false);
+    expect(forcedTooSoon(row({ forcedAt: ago(FORCED_REFRESH_MIN_MS), refreshRequestedAt: ago(FORCED_REFRESH_MIN_MS) }), NOW)).toBe(false);
   });
 
-  it("should allow one when the last check asked for was not forced, or none was", () => {
-    expect(forcedTooSoon(row({ refreshForced: false, refreshRequestedAt: ago(1) }), NOW)).toBe(false);
-    expect(forcedTooSoon(row({ refreshForced: true, refreshRequestedAt: null }), NOW)).toBe(false);
+  it("should still refuse one when a check without force was asked for since the last forced one", () => {
+    expect(forcedTooSoon(row({ forcedAt: ago(FORCED_REFRESH_MIN_MS - 1), refreshRequestedAt: ago(1) }), NOW)).toBe(true);
+  });
+
+  it("should allow one when no forced check has been asked for", () => {
+    expect(forcedTooSoon(row({ forcedAt: null, refreshRequestedAt: ago(1) }), NOW)).toBe(false);
     expect(forcedTooSoon(null, NOW)).toBe(false);
   });
 
   it("should never refuse one while a check is pending, which it joins", () => {
-    expect(forcedTooSoon(row({ refreshForced: true, refreshId: "r", refreshRequestedAt: ago(1) }), NOW)).toBe(false);
+    expect(forcedTooSoon(row({ forcedAt: ago(1), refreshId: "r", refreshRequestedAt: ago(1) }), NOW)).toBe(false);
   });
 });
 
@@ -220,6 +279,8 @@ describe("libraryStatus", () => {
       pod: "waking",
       commit: null,
       entry_count: 0,
+      dropped: 0,
+      entries_url: null,
       checked_at: null,
       refreshing: false,
       failure: null
@@ -229,7 +290,19 @@ describe("libraryStatus", () => {
   it("should describe an index being checked", () => {
     const status = libraryStatus(row({ refreshId: "r", refreshRequestedAt: ago(1) }), "ok", NOW);
 
-    expect(status).toMatchObject({ pod: "ok", commit: SHA, entry_count: 2, checked_at: ago(60_000).toISOString(), refreshing: true, failure: null });
+    expect(status).toMatchObject({
+      pod: "ok",
+      commit: SHA,
+      entry_count: 2,
+      entries_url: `/api/ui/assistant/docmosis-library/entries?commit=${SHA}&key=${KEY}`,
+      checked_at: ago(60_000).toISOString(),
+      refreshing: true,
+      failure: null
+    });
+  });
+
+  it("should say how many templates the index left out, when the pod dropped some", () => {
+    expect(libraryStatus(row({ dropped: 7 }), "ok", NOW).dropped).toBe(7);
   });
 
   it("should give a failure with only what it carries", () => {
@@ -249,7 +322,9 @@ describe("libraryStatus", () => {
     expect(libraryStatus(row({ error: "other" }), "ok", NOW).failure).toBeNull();
   });
 
-  it("should count no entries while there is no index", () => {
-    expect(libraryStatus(row({ commitSha: null, entryCount: 5 }), "ok", NOW).entry_count).toBe(0);
+  it("should count no entries and give no entries address while there is no index", () => {
+    const status = libraryStatus(row({ commitSha: null, entryCount: 5, dropped: 2 }), "ok", NOW);
+
+    expect(status).toMatchObject({ entry_count: 0, dropped: 0, entries_url: null });
   });
 });

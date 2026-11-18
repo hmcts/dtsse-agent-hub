@@ -9,7 +9,7 @@ import * as libraryRoute from "../../src/app/api/ui/assistant/docmosis-library/r
 import { FORCED_REFRESH_MIN_MS, INDEX_REFRESH_PENDING_MS, INDEX_REVALIDATE_MS, type IndexEntry } from "../../src/assistant/docmosis-library.ts";
 import { answerIndex, openLibrary, pendingIndexFrame, readLibraryEntries } from "../../src/assistant/docmosis-library-store.ts";
 import { decodeEvent, HUB_CHANNEL, type NotifiedEvent } from "../../src/realtime/events.ts";
-import { setDesired } from "../../src/virtual-agents/store.ts";
+import { createVirtualAgent, setDesired } from "../../src/virtual-agents/store.ts";
 import { ALICE, type AssistantFixture, BOB, podFixture } from "./assistant-pod.ts";
 import { connect, prisma, resetDatabase } from "./database.ts";
 import { jsonOf } from "./routes.ts";
@@ -74,20 +74,31 @@ async function requestIdOf(ownerOid: string): Promise<string> {
   return row.refreshId as string;
 }
 
-function open(body: unknown, persona = "alice") {
+function openRaw(body: string, persona = "alice") {
   return libraryRoute.POST(
     new NextRequest("http://localhost:3000/api/ui/assistant/docmosis-library", {
       method: "POST",
       headers: { cookie: `ah_dev_persona=${persona}`, "content-type": "application/json" },
-      body: JSON.stringify(body)
+      body
     })
   );
 }
 
-function entriesOf(commit: string, persona = "alice") {
-  return entriesRoute.GET(
-    new NextRequest(`http://localhost:3000/api/ui/assistant/docmosis-library/entries?commit=${commit}`, { headers: { cookie: `ah_dev_persona=${persona}` } })
-  );
+function open(body: unknown, persona = "alice") {
+  return openRaw(JSON.stringify(body), persona);
+}
+
+function entriesAt(url: string, persona = "alice") {
+  return entriesRoute.GET(new NextRequest(`http://localhost:3000${url}`, { headers: { cookie: `ah_dev_persona=${persona}` } }));
+}
+
+async function keyOf(ownerOid: string): Promise<string> {
+  return (await prisma.assistantDocmosisLibrary.findFirstOrThrow({ where: { ownerOid }, select: { entriesKey: true } })).entriesKey;
+}
+
+/** The entries at `commit`, read with `ownerOid`'s key, which is Alice's unless said otherwise. */
+async function entriesOf(commit: string, persona = "alice", ownerOid = ALICE.oid) {
+  return entriesAt(`/api/ui/assistant/docmosis-library/entries?commit=${commit}&key=${await keyOf(ownerOid)}`, persona);
 }
 
 describe("the template library", () => {
@@ -113,9 +124,17 @@ describe("the template library", () => {
       { type: "assistant_docmosis_index", request_id: requestId, virtual_agent_id: assistant, owner_oid: ALICE.oid }
     ]);
     expect(await events("assistant_docmosis_library")).toEqual([{ type: "assistant_docmosis_library", owner_oid: ALICE.oid }]);
-    expect(after).toMatchObject({ commit: COMMIT, entry_count: 2, refreshing: false, failure: null });
+    expect(after).toMatchObject({
+      commit: COMMIT,
+      entry_count: 2,
+      dropped: 0,
+      entries_url: `/api/ui/assistant/docmosis-library/entries?commit=${COMMIT}&key=${await keyOf(ALICE.oid)}`,
+      refreshing: false,
+      failure: null
+    });
     expect(served.status).toBe(200);
     expect(served.headers.get("cache-control")).toBe("private, max-age=86400, immutable");
+    expect(served.headers.get("vary")).toBe("Cookie");
     expect(await jsonOf(served)).toEqual({ commit: COMMIT, entries: ENTRIES });
     expect((await entriesOf(COMMIT, "bob")).status).toBe(404);
     expect(await pendingIndexFrame(prisma, assistant, requestId)).toBeUndefined();
@@ -232,7 +251,7 @@ describe("the template library", () => {
 
     // Assert
     await expect(refused).rejects.toMatchObject({ status: 400 });
-    expect(await readLibraryEntries(prisma, ALICE.oid, COMMIT)).toEqual({ commit: COMMIT, entries: ENTRIES });
+    expect(await readLibraryEntries(prisma, ALICE.oid, COMMIT, await keyOf(ALICE.oid))).toEqual({ commit: COMMIT, entries: ENTRIES });
     expect(await requestIdOf(ALICE.oid)).toBe(requestId);
   });
 
@@ -302,7 +321,7 @@ describe("the template library", () => {
       failure: { reason: "sso", detail: "Authorise the token", sso_url: "https://github.com/orgs/hmcts/sso" }
     });
     expect(recovered).toMatchObject({ commit: NEXT, entry_count: 1, failure: null });
-    expect(await readLibraryEntries(prisma, ALICE.oid, COMMIT)).toBeUndefined();
+    expect(await readLibraryEntries(prisma, ALICE.oid, COMMIT, await keyOf(ALICE.oid))).toBeUndefined();
   });
 
   it("should keep a rate limit's reset time", async () => {
@@ -376,7 +395,7 @@ describe("the template library", () => {
     const nobody = await open({}, "bob");
     vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "false");
     const off = await open({});
-    const offEntries = await entriesOf(COMMIT);
+    const offEntries = await entriesAt(`/api/ui/assistant/docmosis-library/entries?commit=${COMMIT}&key=0f8a6a1e-1234-4000-8000-00000000000a`);
 
     // Assert
     expect(nobody.status).toBe(404);
@@ -387,6 +406,7 @@ describe("the template library", () => {
   it("should refuse a force that is not a boolean, and a commit that is not one", async () => {
     // Arrange
     await assistantOf(ALICE);
+    await open({});
 
     // Act
     const badForce = await open({ force: "yes" });
@@ -397,5 +417,160 @@ describe("the template library", () => {
     expect(badForce.status).toBe(400);
     expect(badCommit.status).toBe(400);
     expect(unknown.status).toBe(404);
+  });
+
+  it.each([
+    ["null", "null"],
+    ["a number", "7"],
+    ["a string", '"force"'],
+    ["an array", "[true]"]
+  ])("should answer 400 rather than 500 when the body is %s", async (_label, body) => {
+    // Arrange
+    await assistantOf(ALICE);
+
+    // Act
+    const response = await openRaw(body);
+
+    // Assert
+    expect(response.status).toBe(400);
+    expect(await prisma.assistantDocmosisLibrary.count()).toBe(0);
+  });
+
+  it("should open the library when the body is empty", async () => {
+    // Arrange
+    await assistantOf(ALICE);
+
+    // Act
+    const response = await openRaw("");
+
+    // Assert
+    expect(response.status).toBe(200);
+    expect(await jsonOf(response)).toMatchObject({ pod: "ok", refreshing: true });
+  });
+
+  it("should not ask again when the first check failed and there is no index, until five minutes have passed", async () => {
+    // Arrange
+    const assistant = await assistantOf(ALICE);
+    await openLibrary(prisma, ALICE.oid, { force: false }, NOW);
+    await answerIndex(prisma, { id: assistant, ownerOid: ALICE.oid }, await requestIdOf(ALICE.oid), { error: "signed_out" }, later(1000));
+
+    // Act
+    const reopened = await openLibrary(prisma, ALICE.oid, { force: false }, later(2000));
+    const stillWaiting = await openLibrary(prisma, ALICE.oid, { force: false }, later(1000 + INDEX_REVALIDATE_MS - 1));
+    const asked = await openLibrary(prisma, ALICE.oid, { force: false }, later(1000 + INDEX_REVALIDATE_MS));
+
+    // Assert
+    expect(reopened).toMatchObject({ refreshing: false, commit: null, failure: { reason: "signed_out" } });
+    expect(stillWaiting.refreshing).toBe(false);
+    expect(asked.refreshing).toBe(true);
+    expect(await events("assistant_docmosis_index")).toHaveLength(2);
+  });
+
+  it("should ask again when forced, when the first check failed and there is no index", async () => {
+    // Arrange
+    const assistant = await assistantOf(ALICE);
+    await openLibrary(prisma, ALICE.oid, { force: false }, NOW);
+    await answerIndex(prisma, { id: assistant, ownerOid: ALICE.oid }, await requestIdOf(ALICE.oid), { error: "not_found" }, later(1000));
+
+    // Act
+    const forced = await openLibrary(prisma, ALICE.oid, { force: true }, later(2000));
+
+    // Assert
+    expect(forced.refreshing).toBe(true);
+  });
+
+  it("should not ask again before a rate limit resets when there is no index, and ask once it has", async () => {
+    // Arrange
+    const assistant = await assistantOf(ALICE);
+    await openLibrary(prisma, ALICE.oid, { force: false }, NOW);
+    await answerIndex(
+      prisma,
+      { id: assistant, ownerOid: ALICE.oid },
+      await requestIdOf(ALICE.oid),
+      { error: "rate_limited", reset_at: later(60_000).toISOString() },
+      NOW
+    );
+
+    // Act
+    const before = await openLibrary(prisma, ALICE.oid, { force: false }, later(60_000 - 1));
+    const after = await openLibrary(prisma, ALICE.oid, { force: false }, later(60_000));
+
+    // Assert
+    expect(before.refreshing).toBe(false);
+    expect(after.refreshing).toBe(true);
+  });
+
+  it("should refuse a forced check within 30 seconds of the last forced one when a check without force was asked for between them", async () => {
+    // Arrange
+    const assistant = await assistantOf(ALICE);
+    await openLibrary(prisma, ALICE.oid, { force: true }, NOW);
+    await answerIndex(prisma, { id: assistant, ownerOid: ALICE.oid }, await requestIdOf(ALICE.oid), { commit: COMMIT, etag: null, entries: ENTRIES }, NOW);
+    await prisma.assistantDocmosisLibrary.update({
+      where: { ownerOid_libraryId: { ownerOid: ALICE.oid, libraryId: "hmcts/rdo-docmosis@HEAD:Templates" } },
+      data: { checkedAt: new Date(NOW.getTime() - INDEX_REVALIDATE_MS) }
+    });
+    await openLibrary(prisma, ALICE.oid, { force: false }, later(1000));
+    await answerIndex(prisma, { id: assistant, ownerOid: ALICE.oid }, await requestIdOf(ALICE.oid), { unchanged: true }, later(2000));
+
+    // Act
+    const refused = openLibrary(prisma, ALICE.oid, { force: true }, later(FORCED_REFRESH_MIN_MS - 1));
+
+    // Assert
+    await expect(refused).rejects.toMatchObject({ status: 429 });
+  });
+
+  it("should serve the entries only at the owner's own address, when two people hold the same commit", async () => {
+    // Arrange
+    const alices = await assistantOf(ALICE);
+    const bobs = await assistantOf(BOB);
+    await openLibrary(prisma, ALICE.oid, { force: false }, NOW);
+    await openLibrary(prisma, BOB.oid, { force: false }, NOW);
+    await answerIndex(prisma, { id: alices, ownerOid: ALICE.oid }, await requestIdOf(ALICE.oid), { commit: COMMIT, etag: null, entries: ENTRIES }, NOW);
+    await answerIndex(prisma, { id: bobs, ownerOid: BOB.oid }, await requestIdOf(BOB.oid), { commit: COMMIT, etag: null, entries: ENTRIES.slice(0, 1) }, NOW);
+
+    // Act
+    const alicesStatus = await openLibrary(prisma, ALICE.oid, { force: false }, later(1000));
+    const bobsStatus = await openLibrary(prisma, BOB.oid, { force: false }, later(1000));
+    const bobAtAlices = await entriesAt(alicesStatus.entries_url as string, "bob");
+    const bobAtHis = await entriesAt(bobsStatus.entries_url as string, "bob");
+    const noKey = await entriesAt(`/api/ui/assistant/docmosis-library/entries?commit=${COMMIT}`, "bob");
+
+    // Assert
+    expect(alicesStatus.entries_url).not.toBe(bobsStatus.entries_url);
+    expect(bobAtAlices.status).toBe(404);
+    expect(await jsonOf(bobAtHis)).toEqual({ commit: COMMIT, entries: ENTRIES.slice(0, 1) });
+    expect(noKey.status).toBe(400);
+  });
+
+  it("should keep how many templates the pod left out, and keep it through an unchanged answer", async () => {
+    // Arrange
+    const assistant = await assistantOf(ALICE);
+    const va = { id: assistant, ownerOid: ALICE.oid };
+    await openLibrary(prisma, ALICE.oid, { force: false }, NOW);
+    await answerIndex(prisma, va, await requestIdOf(ALICE.oid), { commit: COMMIT, etag: null, entries: ENTRIES, dropped: 12 }, NOW);
+    await openLibrary(prisma, ALICE.oid, { force: true }, later(FORCED_REFRESH_MIN_MS));
+
+    // Act
+    await answerIndex(prisma, va, await requestIdOf(ALICE.oid), { unchanged: true }, later(FORCED_REFRESH_MIN_MS));
+    const status = await openLibrary(prisma, ALICE.oid, { force: false }, later(FORCED_REFRESH_MIN_MS + 1000));
+
+    // Assert
+    expect(status).toMatchObject({ commit: COMMIT, entry_count: 2, dropped: 12 });
+  });
+
+  it("should neither frame nor keep a check for another of the owner's virtual agents", async () => {
+    // Arrange
+    await assistantOf(ALICE);
+    const other = await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "own-licence", name: "other" });
+    await openLibrary(prisma, ALICE.oid, { force: false }, NOW);
+    const requestId = await requestIdOf(ALICE.oid);
+
+    // Act
+    const frame = await pendingIndexFrame(prisma, other.id, requestId, NOW);
+    await answerIndex(prisma, { id: other.id, ownerOid: ALICE.oid }, requestId, { commit: COMMIT, etag: null, entries: ENTRIES }, NOW);
+
+    // Assert
+    expect(frame).toBeUndefined();
+    expect(await prisma.assistantDocmosisLibrary.findFirstOrThrow({ where: { ownerOid: ALICE.oid } })).toMatchObject({ commitSha: null, refreshId: requestId });
   });
 });

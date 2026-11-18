@@ -24,17 +24,25 @@ export const INDEX_REFRESH_PENDING_MS = 2 * 60_000;
 export const MAX_INDEX_DETAIL = 300;
 export const MAX_ETAG = 200;
 const MAX_SSO_URL = 500;
+/** The most templates an answer may say it left out: what the column's INTEGER holds. */
+export const MAX_DROPPED = 2_147_483_647;
 
 export const INDEX_FAILURES = ["signed_out", "sso", "not_found", "rate_limited", "failed"] as const;
 export type IndexFailureReason = (typeof INDEX_FAILURES)[number];
 
 const SHA1_RE = /^[0-9a-f]{40}$/;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 export const ETAG_RE = /^(W\/)?"[\x21\x23-\x7e]*"$/;
 // biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what this refuses.
 const CONTROL_RE = /[\u0000-\u001f\u007f]/;
 
 export function isCommitSha(value: unknown): value is string {
   return typeof value === "string" && SHA1_RE.test(value);
+}
+
+/** Whether `value` could be an index's entries key: a UUID as Postgres prints one, in lowercase. */
+export function isEntriesKey(value: unknown): value is string {
+  return typeof value === "string" && UUID_RE.test(value);
 }
 
 /**
@@ -73,7 +81,8 @@ const indexBody = z.strictObject({
   entries: boundedArray(entry, MAX_INDEX_ENTRIES, {
     message: `an index holds at most ${MAX_INDEX_ENTRIES} entries`,
     refine: { check: (entries) => new Set(entries.map(([path]) => path)).size === entries.length, message: "names a path more than once" }
-  })
+  }),
+  dropped: z.number().int().min(0).max(MAX_DROPPED).optional()
 });
 
 const unchangedBody = z.strictObject({ unchanged: z.literal(true), etag: etag.nullable().optional() });
@@ -110,7 +119,10 @@ export interface LibraryRow {
   checkedAt: Date | null;
   refreshId: string | null;
   refreshRequestedAt: Date | null;
-  refreshForced: boolean;
+  /** When a forced check was last asked for, which a check asked for since without `force` does not move. */
+  forcedAt: Date | null;
+  dropped: number;
+  entriesKey: string;
   error: string | null;
   detail: string | null;
   ssoUrl: string | null;
@@ -127,15 +139,30 @@ export function refreshPending(row: Pick<LibraryRow, "refreshId" | "refreshReque
  * still pending is joined instead, which costs nothing, so it is never refused.
  */
 export function forcedTooSoon(row: LibraryRow | null, now: Date): boolean {
-  if (row === null || !row.refreshForced || row.refreshRequestedAt === null || refreshPending(row, now)) {
+  if (row === null || row.forcedAt === null || refreshPending(row, now)) {
     return false;
   }
-  return now.getTime() - row.refreshRequestedAt.getTime() < FORCED_REFRESH_MIN_MS;
+  return now.getTime() - row.forcedAt.getTime() < FORCED_REFRESH_MIN_MS;
+}
+
+/**
+ * When an answered check is due another. Every answer sends the owner's tabs `assistant_docmosis_library`, and they
+ * open the library again, so an answer must never make the next one due at once or the two loop: a failure with no
+ * index waits as long as an index does. A rate limit waits until GitHub's reset, though never less than
+ * `FORCED_REFRESH_MIN_MS` in case that is already past, and while an index is held never less than the usual interval.
+ */
+function nextCheckAt(row: LibraryRow, checkedAt: Date): number {
+  const revalidateAt = checkedAt.getTime() + INDEX_REVALIDATE_MS;
+  if (row.error !== "rate_limited" || row.resetAt === null) {
+    return revalidateAt;
+  }
+  const resetAt = Math.max(row.resetAt.getTime(), checkedAt.getTime() + FORCED_REFRESH_MIN_MS);
+  return row.commitSha === null ? resetAt : Math.max(resetAt, revalidateAt);
 }
 
 /**
  * What opening the library asks of the pod: nothing, a new check, or the one already pending. A check is asked for
- * when there is no index, when the last check is `INDEX_REVALIDATE_MS` old, or when forced.
+ * when none has been answered, when the last answer is due another (`nextCheckAt`), or when forced.
  */
 export function refreshDecision(row: LibraryRow | null, now: Date, force: boolean): "none" | "ask" | "join" {
   if (row === null) {
@@ -144,10 +171,10 @@ export function refreshDecision(row: LibraryRow | null, now: Date, force: boolea
   if (refreshPending(row, now)) {
     return "join";
   }
-  if (force || row.checkedAt === null || row.commitSha === null) {
+  if (force || row.checkedAt === null || (row.commitSha === null && row.error === null)) {
     return "ask";
   }
-  return now.getTime() - row.checkedAt.getTime() >= INDEX_REVALIDATE_MS ? "ask" : "none";
+  return now.getTime() >= nextCheckAt(row, row.checkedAt) ? "ask" : "none";
 }
 
 /** Whether the pod can be asked now; `stopped` is a stopped pod the hub has an index for, and so does not start. */
@@ -169,9 +196,23 @@ export interface LibraryStatus {
   pod: LibraryPodGate;
   commit: string | null;
   entry_count: number;
+  /** Templates the pod found and left out of the index, past its limits or not library paths: the list is incomplete. */
+  dropped: number;
+  /** Where the browser reads the entries; null while there is no index. */
+  entries_url: string | null;
   checked_at: string | null;
   refreshing: boolean;
   failure: IndexFailure | null;
+}
+
+export const ENTRIES_PATH = "/api/ui/assistant/docmosis-library/entries";
+
+/**
+ * Where the entries of an index are read. The browser caches them for a day, so the owner's own `key` is in the
+ * address: two people on one browser never share a cached list, even of the same commit.
+ */
+export function entriesUrl(commit: string, key: string): string {
+  return `${ENTRIES_PATH}?commit=${commit}&key=${key}`;
 }
 
 function failureOf(row: LibraryRow): IndexFailure | null {
@@ -188,12 +229,15 @@ function failureOf(row: LibraryRow): IndexFailure | null {
 
 /** What `POST /api/ui/assistant/docmosis-library` answers, from the row as it stands after any check was asked for. */
 export function libraryStatus(row: LibraryRow | null, gate: LibraryPodGate, now: Date): LibraryStatus {
+  const indexed = row === null || row.commitSha === null ? null : { ...row, commitSha: row.commitSha };
   return {
     library: DOCMOSIS_LIBRARY_ID,
     ...DOCMOSIS_LIBRARY,
     pod: gate,
-    commit: row?.commitSha ?? null,
-    entry_count: row === null || row.commitSha === null ? 0 : row.entryCount,
+    commit: indexed?.commitSha ?? null,
+    entry_count: indexed?.entryCount ?? 0,
+    dropped: indexed?.dropped ?? 0,
+    entries_url: indexed === null ? null : entriesUrl(indexed.commitSha, indexed.entriesKey),
     checked_at: row?.checkedAt?.toISOString() ?? null,
     refreshing: row !== null && refreshPending(row, now),
     failure: row === null ? null : failureOf(row)

@@ -686,7 +686,14 @@ model AssistantDocmosisLibrary {
   /// The check last sent to the pod; only an answer naming it is kept.
   refreshId          String?   @unique(map: "assistant_docmosis_library_refresh_id") @map("refresh_id") @db.Uuid
   refreshRequestedAt DateTime? @map("refresh_requested_at") @db.Timestamptz(6)
-  refreshForced      Boolean   @default(false) @map("refresh_forced")
+  /// The virtual agent the check in flight was sent to; only its answer is kept.
+  refreshAgentId     String?   @map("refresh_agent_id") @db.Uuid
+  /// When a forced check was last asked for, which spaces forced checks apart.
+  forcedAt           DateTime? @map("forced_at") @db.Timestamptz(6)
+  /// Templates the pod found and left out of the index.
+  dropped            Int       @default(0)
+  /// The owner's own part of the address the browser caches the entries under.
+  entriesKey         String    @default(dbgenerated("gen_random_uuid()")) @map("entries_key") @db.Uuid
   /// signed_out, sso, not_found, rate_limited or failed: why the last check failed.
   error              String?
   detail             String?

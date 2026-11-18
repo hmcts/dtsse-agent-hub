@@ -36,7 +36,10 @@ const API = "https://api.github.com";
 const API_VERSION = "2022-11-28";
 const WALK_CONCURRENCY = 8;
 const REQUEST_TIMEOUT_MS = 30_000;
-const TOKEN_TIMEOUT_MS = 15_000;
+export const TOKEN_TIMEOUT_MS = 15_000;
+/** The hub's rule for an `sso_url`, which refuses the whole answer for one that breaks it. */
+const SSO_URL_PREFIX = "https://github.com/";
+const MAX_SSO_URL = 500;
 const SHA1_RE = /^[0-9a-f]{40}$/;
 // A ref as a path segment: `HEAD`, a branch or a tag, never climbing with `..`.
 const REF_RE = /^(?!.*\.\.)[A-Za-z0-9._/-]{1,200}$/;
@@ -50,8 +53,8 @@ export function isGitRef(value: unknown): value is string {
 }
 
 /** The owner's GitHub token from the pod's `gh`, or null when it has none. Never logged. */
-export async function githubToken(run: Run, env: Env): Promise<string | null> {
-  const result = await run("gh", ["auth", "token", "--hostname", "github.com"], { env, timeoutMs: TOKEN_TIMEOUT_MS });
+export async function githubToken(run: Run, env: Env, timeoutMs: number = TOKEN_TIMEOUT_MS): Promise<string | null> {
+  const result = await run("gh", ["auth", "token", "--hostname", "github.com"], { env, timeoutMs });
   const token = result.code === 0 ? result.stdout.trim() : "";
   return token === "" || /\s/.test(token) ? null : token;
 }
@@ -63,13 +66,17 @@ function repoPath(owner: string, repo: string): string {
   return `/repos/${owner}/${repo}`;
 }
 
-/** The SSO link is opened in the person's browser, so only an https page on github.com is kept. */
-function githubPage(candidate: string | undefined): string | undefined {
+/**
+ * The SSO link is opened in the person's browser, so only an https page on github.com is kept, and only in the form
+ * the hub takes: a link it refuses would cost the whole answer, and so the `sso` failure with it. Normalised first, so
+ * `GitHub.com`, `:443` or a bare query is still kept.
+ */
+export function githubPage(candidate: string | undefined): string | undefined {
   if (!candidate || !URL.canParse(candidate)) {
     return undefined;
   }
-  const { protocol, hostname } = new URL(candidate);
-  return protocol === "https:" && hostname === "github.com" ? candidate : undefined;
+  const { href } = new URL(candidate);
+  return href.startsWith(SSO_URL_PREFIX) && href.length <= MAX_SSO_URL ? href : undefined;
 }
 
 /** What a refusal from GitHub means for the person, as one of the hub's reasons. */
@@ -236,24 +243,41 @@ export async function templates(gh: GithubRest, owner: string, repo: string, sha
   visit(root, prefix);
   // The first failure stops the other workers taking folders and cancels their requests.
   const stop = new AbortController();
-  const worker = async (): Promise<void> => {
-    try {
-      while (!stop.signal.aborted) {
-        const item = queue.shift();
-        if (!item) {
-          return;
-        }
-        visit(await tree(gh, owner, repo, item.sha, false, stop.signal), item.base);
-      }
-    } catch (error) {
-      stop.abort();
-      throw error;
+  // A worker that finds the queue empty while another's folder is still being read waits for what that one finds,
+  // rather than exiting: a tree that opens out below a single folder would otherwise be walked one folder at a time.
+  let inFlight = 0;
+  let idle: (() => void)[] = [];
+  const wakeIdle = (): void => {
+    const waking = idle;
+    idle = [];
+    for (const wake of waking) {
+      wake();
     }
   };
-  // Workers that find the queue empty exit early, so more are started while folders are still queued.
-  while (queue.length > 0) {
-    await Promise.all(Array.from({ length: Math.min(WALK_CONCURRENCY, queue.length) }, worker));
-  }
+  const worker = async (): Promise<void> => {
+    while (!stop.signal.aborted) {
+      const item = queue.shift();
+      if (!item) {
+        if (inFlight === 0) {
+          wakeIdle();
+          return;
+        }
+        await new Promise<void>((resolve) => idle.push(resolve));
+        continue;
+      }
+      inFlight += 1;
+      try {
+        visit(await tree(gh, owner, repo, item.sha, false, stop.signal), item.base);
+      } catch (error) {
+        stop.abort();
+        throw error;
+      } finally {
+        inFlight -= 1;
+        wakeIdle();
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: WALK_CONCURRENCY }, worker));
   return found.sort(byPath);
 }
 

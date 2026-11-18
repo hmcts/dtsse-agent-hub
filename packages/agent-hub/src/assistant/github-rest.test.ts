@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { blob, commitCheck, errorFor, type FetchLike, type GithubRest, GithubRestError, githubToken, isGitRef, templates } from "./github-rest.ts";
+import { blob, commitCheck, errorFor, type FetchLike, type GithubRest, GithubRestError, githubPage, githubToken, isGitRef, templates } from "./github-rest.ts";
 
 const TOKEN = "gho_abcdefghijklmnopqrstuvwxyz";
 const COMMIT = "c".repeat(40);
@@ -161,6 +161,35 @@ describe("templates", () => {
     ]);
   });
 
+  it("should keep 8 folders in flight when the walk opens out below a single folder", async () => {
+    const leaves = Array.from({ length: 24 }, (_, i) => sha(100 + i));
+    const trees: Record<string, unknown> = {
+      [`${COMMIT}?recursive=1`]: { sha: COMMIT, truncated: true, tree: [] },
+      [COMMIT]: { sha: COMMIT, truncated: false, tree: [{ path: "Templates", type: "tree", sha: sha(10) }] },
+      [sha(10)]: { sha: sha(10), truncated: false, tree: [{ path: "Only", type: "tree", sha: sha(11) }] },
+      [sha(11)]: { sha: sha(11), truncated: false, tree: leaves.map((leaf, i) => ({ path: `F${i}`, type: "tree", sha: leaf })) },
+      ...Object.fromEntries(
+        leaves.map((leaf, i) => [leaf, { sha: leaf, truncated: false, tree: [{ path: `t${i}.docx`, type: "blob", sha: sha(200 + i), size: 1 }] }])
+      )
+    };
+    let inFlight = 0;
+    let most = 0;
+    const { fetch } = fakeFetch({
+      "/git/trees/": async ({ url }) => {
+        inFlight += 1;
+        most = Math.max(most, inFlight);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        inFlight -= 1;
+        return Response.json(trees[url.slice(url.lastIndexOf("/") + 1)]);
+      }
+    });
+
+    const found = await templates(rest(fetch), "hmcts", "rdo-docmosis", COMMIT, "Templates");
+
+    expect(found).toHaveLength(24);
+    expect(most).toBe(8);
+  });
+
   it("should find nothing when the truncated tree has no such folder", async () => {
     const { fetch } = fakeFetch({
       "?recursive=1": () => Response.json({ sha: COMMIT, truncated: true, tree: [] }),
@@ -202,6 +231,17 @@ describe("blob", () => {
   });
 });
 
+describe("githubPage", () => {
+  it("should keep a page of exactly 500 characters, and nothing that does not parse", () => {
+    const page = `https://github.com/${"x".repeat(500 - 19)}`;
+
+    expect(githubPage(page)).toBe(page);
+    expect(githubPage(`${page}x`)).toBeUndefined();
+    expect(githubPage("not a url")).toBeUndefined();
+    expect(githubPage(undefined)).toBeUndefined();
+  });
+});
+
 describe("errorFor", () => {
   const NOW = Date.parse("2026-11-18T12:00:00.000Z");
   const answer = (status: number, headers: Record<string, string> = {}) => new Response(null, { status, headers });
@@ -217,6 +257,26 @@ describe("errorFor", () => {
     });
     expect(errorFor(answer(403, { "x-github-sso": "required; url=https://evil.example/sso" }), "hmcts/r").sso_url).toBeUndefined();
     expect(errorFor(answer(403, { "x-github-sso": "required" }), "hmcts/r")).toMatchObject({ error: "sso" });
+  });
+
+  it.each([
+    ["an explicit default port", "https://github.com:443/orgs/hmcts/sso?a=1", "https://github.com/orgs/hmcts/sso?a=1"],
+    ["a host in capitals", "https://GitHub.com/orgs/hmcts/sso", "https://github.com/orgs/hmcts/sso"],
+    ["a query with no path", "https://github.com?authorization_request=1", "https://github.com/?authorization_request=1"]
+  ])("should keep an SSO page in the form the hub takes when it has %s", (_label, url, kept) => {
+    expect(errorFor(answer(403, { "x-github-sso": `required; url=${url}` }), "hmcts/r")).toMatchObject({ error: "sso", sso_url: kept });
+  });
+
+  it.each([
+    ["is over 500 characters", `https://github.com/orgs/hmcts/sso?a=${"x".repeat(470)}`],
+    ["is not https", "http://github.com/orgs/hmcts/sso"],
+    ["names a user", "https://someone@github.com/orgs/hmcts/sso"],
+    ["is on another port", "https://github.com:8443/orgs/hmcts/sso"]
+  ])("should still say sso, with no link, when the SSO page %s", (_label, url) => {
+    const failure = errorFor(answer(403, { "x-github-sso": `required; url=${url}` }), "hmcts/r");
+
+    expect(failure.error).toBe("sso");
+    expect(failure).not.toHaveProperty("sso_url");
   });
 
   it("should read a rate limit, preferring retry-after to the reset header", () => {

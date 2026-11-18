@@ -94,13 +94,15 @@ export async function runAssistantSupervisor({
   const install = welshDeps.install ?? installBundled;
   const pluginDirs = () => installLoaded(env, workspace, say, install);
   const supervisor: AssistantSupervisor = createAssistantSupervisor({ api, id, env, say, pluginDirs, ...options });
+  const processRun: Run = (cmd, args, opts) => run(cmd, args, { env: opts.env as NodeJS.ProcessEnv, timeoutMs: opts.timeoutMs });
+  const lookupRun = lookupDeps.run ?? processRun;
   // Lookups run beside the supervisor rather than on its chain: see `createLookupRunner`.
   const lookups = createLookupRunner({
     api,
     id,
     env,
     say,
-    run: lookupDeps.run ?? ((cmd, args, opts) => run(cmd, args, { env: opts.env as NodeJS.ProcessEnv, timeoutMs: opts.timeoutMs })),
+    run: lookupRun,
     login: lookupDeps.login ?? (async () => (await atlassianLogin({ env })) !== "not-signed-in"),
     ...(lookupDeps.env === undefined ? {} : { env: lookupDeps.env })
   });
@@ -111,7 +113,7 @@ export async function runAssistantSupervisor({
     id,
     env,
     say,
-    run: welshDeps.run ?? ((cmd, args, opts) => run(cmd, args, { env: opts.env as NodeJS.ProcessEnv, timeoutMs: opts.timeoutMs })),
+    run: welshDeps.run ?? processRun,
     workspace,
     install
   };
@@ -133,7 +135,7 @@ export async function runAssistantSupervisor({
     id,
     env,
     say,
-    run: lookupDeps.run ?? ((cmd, args, opts) => run(cmd, args, { env: opts.env as NodeJS.ProcessEnv, timeoutMs: opts.timeoutMs })),
+    run: lookupRun,
     ...(githubFetch === undefined ? {} : { fetch: githubFetch })
   });
   const uploads = {

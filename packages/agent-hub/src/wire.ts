@@ -232,7 +232,7 @@ export type DocmosisIndexEntry = [path: string, blobSha: string, size: number];
 
 /** The answer to one check of the template library: a new index, the one the hub holds is current, or why neither. */
 export type DocmosisIndexAnswer =
-  | { commit: string; etag: string | null; entries: DocmosisIndexEntry[] }
+  | { commit: string; etag: string | null; entries: DocmosisIndexEntry[]; dropped?: number }
   | { unchanged: true; etag?: string }
   | { error: "signed_out" | "sso" | "not_found" | "rate_limited" | "failed"; detail?: string; sso_url?: string; reset_at?: string };
 

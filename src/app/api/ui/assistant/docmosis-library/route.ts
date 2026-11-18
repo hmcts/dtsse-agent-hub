@@ -22,11 +22,15 @@ export async function POST(request: NextRequest): Promise<Response> {
     return errorResponse(404, "the template library is not available on this deployment");
   }
   return await uiRefusals("template library", async () => {
-    const body = (await readJson(request)) as { force?: unknown };
-    if (body.force !== undefined && typeof body.force !== "boolean") {
+    const body = await readJson(request);
+    if (typeof body !== "object" || body === null || Array.isArray(body)) {
+      return errorResponse(400, "the request body must be a JSON object");
+    }
+    const { force } = body as { force?: unknown };
+    if (force !== undefined && typeof force !== "boolean") {
       return errorResponse(400, "force must be true or false");
     }
-    const status = await openLibrary(prisma, viewer.oid, { force: body.force === true });
+    const status = await openLibrary(prisma, viewer.oid, { force: force === true });
     return Response.json(status, { headers: { "Cache-Control": "no-store" } });
   });
 }

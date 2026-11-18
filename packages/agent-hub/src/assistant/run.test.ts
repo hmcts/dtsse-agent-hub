@@ -226,7 +226,7 @@ describe("runAssistantSupervisor", () => {
       expect(hub.docmosisIndexAnswers[0]).toEqual({
         virtual_id: VID,
         request_id: requestId,
-        body: { commit, etag: '"e1"', entries: [["Templates/a.docx", "b".repeat(40), 5]] }
+        body: { commit, etag: '"e1"', entries: [["Templates/a.docx", "b".repeat(40), 5]], dropped: 0 }
       });
       expect(asked).toHaveLength(2);
     } finally {

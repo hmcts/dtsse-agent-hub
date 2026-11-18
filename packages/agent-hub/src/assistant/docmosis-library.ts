@@ -5,9 +5,9 @@
 import type { Api } from "../api.ts";
 import type { Env } from "../env.ts";
 import { GITHUB_OWNER_RE, GITHUB_REPO_RE } from "../github.ts";
-import { withRetry } from "../retry.ts";
+import { retryableByStatus, withRetry } from "../retry.ts";
 import type { DocmosisIndexAnswer, DocmosisIndexEntry } from "../wire.ts";
-import { commitCheck, type FetchLike, GithubRestError, githubToken, isGitRef, isGitSha, type Template, templates } from "./github-rest.ts";
+import { commitCheck, type FetchLike, GithubRestError, githubToken, isGitRef, isGitSha, type Template, TOKEN_TIMEOUT_MS, templates } from "./github-rest.ts";
 import type { Run } from "./lookups.ts";
 
 /** The hub's limits on an answer. */
@@ -18,8 +18,19 @@ const MAX_DETAIL = 300;
 const MAX_ETAG = 200;
 /** Room in the 1 MiB for the commit, the ETag and the JSON around the entries. */
 const ANSWER_OVERHEAD = 1024;
-/** Inside the two minutes the hub waits for an answer, so one is never thrown away. */
-export const INDEX_BUDGET_MS = 100_000;
+/** The most templates an answer says it left out: the hub's column is an INTEGER. */
+const MAX_DROPPED = 2_147_483_647;
+/**
+ * The whole of one check, from its frame arriving to its answer landing: the token read, GitHub and the answer with its
+ * retry. The hub waits two minutes from sending the frame and throws away an answer after that, so this leaves half a
+ * minute for the frame's delivery, a check queued behind another, and the two clocks disagreeing.
+ */
+export const INDEX_TOTAL_MS = 90_000;
+/** One attempt at the answer; two attempts and the wait between them are kept back from GitHub's share of the total. */
+const ANSWER_TIMEOUT_MS = 10_000;
+const ANSWER_RETRY_MS = 1_000;
+const ANSWER_RESERVE_MS = 2 * ANSWER_TIMEOUT_MS + ANSWER_RETRY_MS;
+const TOO_SLOW = "The check of the template library took too long. Try again.";
 
 const UUID_RE = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
 const ETAG_RE = /^(W\/)?"[\x21\x23-\x7e]*"$/;
@@ -116,16 +127,30 @@ export type DocmosisIndexDeps = {
   env: Env;
   fetch?: FetchLike;
   say?: (message: string) => void;
-  budgetMs?: number;
+  clock?: () => number;
+  /** The whole of one check, `INDEX_TOTAL_MS` unless a test says otherwise. */
+  totalMs?: number;
 };
 
-/** One check, answered as the hub takes it. Never throws, and never says the token. */
-export async function runIndex(deps: DocmosisIndexDeps, frame: DocmosisIndexFrame): Promise<DocmosisIndexAnswer> {
-  const token = await githubToken(deps.run, deps.env).catch(() => null);
+/**
+ * One check, answered as the hub takes it, within the total counted from `arrivedAt`, when its frame arrived, less
+ * what the answer is kept. Never throws, and never says the token.
+ */
+export async function runIndex(deps: DocmosisIndexDeps, frame: DocmosisIndexFrame, arrivedAt?: number): Promise<DocmosisIndexAnswer> {
+  const clock = deps.clock ?? Date.now;
+  const workUntil = (arrivedAt ?? clock()) + (deps.totalMs ?? INDEX_TOTAL_MS) - ANSWER_RESERVE_MS;
+  const left = () => workUntil - clock();
+  if (left() <= 0) {
+    return { error: "failed", detail: TOO_SLOW };
+  }
+  const token = await githubToken(deps.run, deps.env, Math.min(TOKEN_TIMEOUT_MS, left())).catch(() => null);
   if (token === null) {
     return { error: "signed_out", detail: "Your assistant isn't signed in to GitHub. Sign in to GitHub again." };
   }
-  const gh = { fetch: deps.fetch ?? globalThis.fetch, token, signal: AbortSignal.timeout(deps.budgetMs ?? INDEX_BUDGET_MS) };
+  if (left() <= 0) {
+    return { error: "failed", detail: TOO_SLOW };
+  }
+  const gh = { fetch: deps.fetch ?? globalThis.fetch, token, signal: AbortSignal.timeout(left()) };
   try {
     // An ETag is only worth sending for an index the hub still holds: a 304 says nothing to a hub with none.
     const check = await commitCheck(gh, frame.owner, frame.repo, frame.ref, frame.commit === null ? null : frame.etag);
@@ -138,7 +163,7 @@ export async function runIndex(deps: DocmosisIndexDeps, frame: DocmosisIndexFram
     if (dropped > 0) {
       deps.say?.(`docmosis index ${frame.request_id}: left out ${dropped} template(s) the hub cannot hold`);
     }
-    return { commit: check.sha, etag, entries };
+    return { commit: check.sha, etag, entries, dropped: Math.min(dropped, MAX_DROPPED) };
   } catch (e) {
     // What fetch threw is passed on to the person, so the token is taken out of it in case it ever says the header.
     const hidden = (text: string) => clip(text.replaceAll(token, "[redacted]"));
@@ -156,18 +181,46 @@ export type DocmosisIndexRunner = {
   idle: () => Promise<void>;
 };
 
+type Arrived = { frame: DocmosisIndexFrame; at: number };
+
+class TooLate extends Error {
+  constructor() {
+    super("too late for the hub to keep the answer");
+    this.name = "TooLate";
+  }
+}
+
+/** The answer, each attempt given no more than is left of the check's total, and none made once it is spent. */
+async function answer(deps: DocmosisIndexDeps, { frame, at }: Arrived, body: DocmosisIndexAnswer): Promise<void> {
+  const clock = deps.clock ?? Date.now;
+  const deadline = at + (deps.totalMs ?? INDEX_TOTAL_MS);
+  await withRetry(
+    () => {
+      const timeoutMs = Math.min(ANSWER_TIMEOUT_MS, deadline - clock());
+      if (timeoutMs <= 0) {
+        return Promise.reject(new TooLate());
+      }
+      return deps.api.putDocmosisIndex(deps.id, frame.request_id, body, { timeoutMs });
+    },
+    { attempts: 2, baseMs: ANSWER_RETRY_MS, retryable: (e) => !(e instanceof TooLate) && retryableByStatus(e) }
+  );
+}
+
 /**
  * One check at a time. A frame that arrives while one runs waits, replacing any frame already waiting: the hub sends
- * another only once it has stopped waiting for the last, so the replaced one has nobody to answer to.
+ * another only once it has stopped waiting for the last, so the replaced one has nobody to answer to. A check's total
+ * is counted from its frame's arrival, the wait included, since the hub's two minutes started before that.
  */
 export function createDocmosisIndexRunner(deps: DocmosisIndexDeps): DocmosisIndexRunner {
   const say = deps.say ?? (() => {});
+  const clock = deps.clock ?? Date.now;
   let running: Promise<void> | null = null;
-  let waiting: DocmosisIndexFrame | null = null;
+  let waiting: Arrived | null = null;
 
-  const start = (frame: DocmosisIndexFrame): void => {
-    running = runIndex(deps, frame)
-      .then((answer) => withRetry(() => deps.api.putDocmosisIndex(deps.id, frame.request_id, answer), { attempts: 2 }))
+  const start = (arrived: Arrived): void => {
+    const { frame } = arrived;
+    running = runIndex(deps, frame, arrived.at)
+      .then((body) => answer(deps, arrived, body))
       .then(
         () => undefined,
         (e: unknown) => say(`docmosis index ${frame.request_id}: could not answer it: ${(e as Error).message}`)
@@ -189,10 +242,11 @@ export function createDocmosisIndexRunner(deps: DocmosisIndexDeps): DocmosisInde
         say(`ignoring a docmosis index check that is not one: ${JSON.stringify(data).slice(0, 200)}`);
         return;
       }
+      const arrived = { frame, at: clock() };
       if (running === null) {
-        start(frame);
+        start(arrived);
       } else {
-        waiting = frame;
+        waiting = arrived;
       }
     },
     async idle() {

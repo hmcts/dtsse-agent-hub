@@ -4,6 +4,7 @@ import {
   createDocmosisIndexRunner,
   type DocmosisIndexDeps,
   type DocmosisIndexFrame,
+  INDEX_TOTAL_MS,
   indexEntries,
   isLibraryPath,
   MAX_INDEX_BYTES,
@@ -166,15 +167,68 @@ describe("runIndex", () => {
       entries: [
         ["Templates/a.docx", BLOB, 1],
         ["Templates/b.docx", BLOB, 2]
-      ]
+      ],
+      dropped: 0
     });
     expect(asked[0]?.headers["if-none-match"]).toBeUndefined();
+  });
+
+  it("should say how many templates it left out, when some are not library paths", async () => {
+    const { fetch } = github(new Response(MOVED), () => tree([{ path: "Templates/a.docx" }, { path: `Templates/${"x".repeat(400)}.docx` }]));
+
+    expect(await runIndex(deps(fetch), FRAME)).toMatchObject({ entries: [["Templates/a.docx", BLOB, 1]], dropped: 1 });
+  });
+
+  it("should give the token read only what is left of the total, when the frame arrived a minute ago", async () => {
+    const now = 1_000_000;
+    const timeouts: number[] = [];
+    const d = deps(github(new Response(null, { status: 304 })).fetch, {
+      clock: () => now,
+      run: async (_cmd, _args, opts) => {
+        timeouts.push(opts.timeoutMs);
+        return signedIn();
+      }
+    });
+
+    await runIndex(d, FRAME, now - 60_000);
+
+    expect(timeouts).toEqual([INDEX_TOTAL_MS - 60_000 - 21_000]);
+  });
+
+  it("should answer failed without asking GitHub, when the token read used up GitHub's share of the total", async () => {
+    let now = 1_000_000;
+    const { fetch, asked } = github(new Response(MOVED));
+    const d = deps(fetch, {
+      clock: () => now,
+      run: async () => {
+        now += INDEX_TOTAL_MS - 21_000;
+        return signedIn();
+      }
+    });
+
+    expect(await runIndex(d, FRAME, now)).toMatchObject({ error: "failed" });
+    expect(asked).toEqual([]);
+  });
+
+  it("should answer failed without reading the token, when the frame arrived too long ago", async () => {
+    const now = 1_000_000;
+    let reads = 0;
+    const d = deps(github(new Response(MOVED)).fetch, {
+      clock: () => now,
+      run: async () => {
+        reads += 1;
+        return signedIn();
+      }
+    });
+
+    expect(await runIndex(d, FRAME, now - INDEX_TOTAL_MS)).toMatchObject({ error: "failed" });
+    expect(reads).toBe(0);
   });
 
   it("should send a null ETag rather than one the hub would refuse", async () => {
     const { fetch } = github(new Response(MOVED, { headers: { etag: "unquoted" } }));
 
-    expect(await runIndex(deps(fetch), FRAME)).toEqual({ commit: MOVED, etag: null, entries: [] });
+    expect(await runIndex(deps(fetch), FRAME)).toEqual({ commit: MOVED, etag: null, entries: [], dropped: 0 });
   });
 
   it.each<[string, Response, Partial<DocmosisIndexAnswer>]>([
@@ -297,6 +351,56 @@ describe("createDocmosisIndexRunner", () => {
 
     expect(d.answers).toEqual([]);
     expect(d.said[0]).toContain("ignoring a docmosis index check");
+  });
+
+  it("should give each attempt at the answer only what is left of the total, and make none once it is spent", async () => {
+    let now = 1_000_000;
+    const timeouts: (number | undefined)[] = [];
+    const d = deps(github(new Response(null, { status: 304 })).fetch, {
+      clock: () => now,
+      run: async () => {
+        now += 64_000;
+        return signedIn();
+      },
+      api: {
+        putDocmosisIndex: async (_id, _requestId, _body, options) => {
+          timeouts.push(options?.timeoutMs);
+          now += 30_000;
+          throw new Error("hub slow");
+        }
+      }
+    });
+    const runner = createDocmosisIndexRunner(d);
+
+    runner.docmosisIndex(FRAME);
+    await runner.idle();
+
+    expect(timeouts).toEqual([10_000]);
+    expect(d.said.join("\n")).toContain("too late for the hub to keep the answer");
+  });
+
+  it("should give the answer the rest of the total, when GitHub answered near the end of its share", async () => {
+    let now = 1_000_000;
+    const timeouts: (number | undefined)[] = [];
+    const fetch: FetchLike = async () => {
+      now += INDEX_TOTAL_MS - 5_000;
+      return new Response(null, { status: 304 });
+    };
+    const d = deps(fetch, {
+      clock: () => now,
+      api: {
+        putDocmosisIndex: async (_id, _requestId, _body, options) => {
+          timeouts.push(options?.timeoutMs);
+          return null;
+        }
+      }
+    });
+    const runner = createDocmosisIndexRunner(d);
+
+    runner.docmosisIndex(FRAME);
+    await runner.idle();
+
+    expect(timeouts).toEqual([5_000]);
   });
 
   it("should say it could not answer when the hub refuses twice", async () => {

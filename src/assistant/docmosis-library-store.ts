@@ -14,6 +14,7 @@ import {
   type IndexAnswer,
   type IndexEntry,
   isCommitSha,
+  isEntriesKey,
   isLibraryPath,
   type LibraryPodGate,
   type LibraryRow,
@@ -39,7 +40,9 @@ const ROW_COLUMNS = {
   checkedAt: true,
   refreshId: true,
   refreshRequestedAt: true,
-  refreshForced: true,
+  forcedAt: true,
+  dropped: true,
+  entriesKey: true,
   error: true,
   detail: true,
   ssoUrl: true,
@@ -86,7 +89,7 @@ export async function openLibrary(prisma: PrismaClient, viewerOid: string, { for
     const requestId = randomUUID();
     const asked = await tx.assistantDocmosisLibrary.update({
       where: key(viewerOid),
-      data: { refreshId: requestId, refreshRequestedAt: now, refreshForced: force, updatedAt: now },
+      data: { refreshId: requestId, refreshRequestedAt: now, refreshAgentId: assistantId, ...(force ? { forcedAt: now } : {}), updatedAt: now },
       select: ROW_COLUMNS
     });
     await notify(tx, { type: "assistant_docmosis_index", request_id: requestId, virtual_agent_id: assistantId, owner_oid: viewerOid });
@@ -107,13 +110,13 @@ export interface DocmosisIndexFrame {
   etag: string | null;
 }
 
-/** The check last sent for the owner of this virtual agent's index, when it is still waited for; `undefined` otherwise. */
-async function pendingRow(db: Database, ownerOid: string, requestId: string, now: Date) {
+/** The check last sent to this virtual agent for its owner's index, when it is still waited for; `undefined` otherwise. */
+async function pendingRow(db: Database, virtualAgentId: string, ownerOid: string, requestId: string, now: Date) {
   if (!isUuid(requestId)) {
     return undefined;
   }
   const row = await db.assistantDocmosisLibrary.findFirst({
-    where: { refreshId: requestId, libraryId: DOCMOSIS_LIBRARY_ID, refreshRequestedAt: { gt: pendingSince(now) } },
+    where: { refreshId: requestId, refreshAgentId: virtualAgentId, libraryId: DOCMOSIS_LIBRARY_ID, refreshRequestedAt: { gt: pendingSince(now) } },
     select: { ownerOid: true, commitSha: true, etag: true }
   });
   return row === null || !canUseDocmosisLibrary(ownerOid, row) ? undefined : row;
@@ -126,7 +129,7 @@ export async function pendingIndexFrame(
   now: Date = new Date()
 ): Promise<DocmosisIndexFrame | undefined> {
   const agent = await db.virtualAgent.findUnique({ where: { id: virtualAgentId }, select: { ownerOid: true } });
-  const row = agent === null ? undefined : await pendingRow(db, agent.ownerOid, requestId, now);
+  const row = agent === null ? undefined : await pendingRow(db, virtualAgentId, agent.ownerOid, requestId, now);
   if (row === undefined) {
     return undefined;
   }
@@ -144,8 +147,8 @@ function checkEntries(entries: readonly IndexEntry[]): void {
 }
 
 /**
- * The pod's answer, kept only for the check the hub last sent for the virtual agent's owner and only while it is still
- * waited for, so a late, repeated or stray answer changes nothing. Every path is checked before anything is written,
+ * The pod's answer, kept only for the check the hub last sent to that virtual agent for its owner and only while it is
+ * still waited for, so a late, repeated or stray answer changes nothing. Every path is checked before anything is written,
  * so a bad index is refused with the one held kept. A failure is recorded beside the last good entries rather than in
  * place of them.
  */
@@ -165,16 +168,23 @@ export async function answerIndex(
   await prisma.$transaction(async (tx) => {
     const [row] = await tx.$queryRaw<{ owner_oid: string; commit_sha: string | null; etag: string | null }[]>`
       SELECT owner_oid, commit_sha, etag FROM assistant_docmosis_library
-       WHERE refresh_id = ${requestId}::uuid AND library_id = ${DOCMOSIS_LIBRARY_ID} AND refresh_requested_at > ${pendingSince(now)}
+       WHERE refresh_id = ${requestId}::uuid AND refresh_agent_id = ${virtualAgent.id}::uuid AND library_id = ${DOCMOSIS_LIBRARY_ID} AND refresh_requested_at > ${pendingSince(now)}
        FOR UPDATE
     `;
     if (row === undefined || !canUseDocmosisLibrary(virtualAgent.ownerOid, { ownerOid: row.owner_oid })) {
       return;
     }
-    const cleared = { refreshId: null, checkedAt: now, updatedAt: now, error: null, detail: null, ssoUrl: null, resetAt: null };
+    const cleared = { refreshId: null, refreshAgentId: null, checkedAt: now, updatedAt: now, error: null, detail: null, ssoUrl: null, resetAt: null };
     let data: Record<string, unknown>;
     if ("entries" in answer) {
-      data = { ...cleared, commitSha: answer.commit, etag: answer.etag, entries: answer.entries, entryCount: answer.entries.length };
+      data = {
+        ...cleared,
+        commitSha: answer.commit,
+        etag: answer.etag,
+        entries: answer.entries,
+        entryCount: answer.entries.length,
+        dropped: answer.dropped ?? 0
+      };
     } else if ("unchanged" in answer) {
       if (row.commit_sha === null) {
         throw new HttpError(400, "there is no index to keep; answer with the entries");
@@ -194,13 +204,24 @@ export async function answerIndex(
   });
 }
 
-/** The entries of the viewer's index at `commit`; `undefined` unless that is the index they hold now. */
-export async function readLibraryEntries(db: Database, viewerOid: string, commit: string): Promise<{ commit: string; entries: IndexEntry[] } | undefined> {
-  if (!isCommitSha(commit)) {
+/**
+ * The entries of the viewer's index at `commit`; `undefined` unless that is the index they hold now and `entriesKey`
+ * is their own, so an address cached for another person on the same browser is never theirs.
+ */
+export async function readLibraryEntries(
+  db: Database,
+  viewerOid: string,
+  commit: string,
+  entriesKey: string
+): Promise<{ commit: string; entries: IndexEntry[] } | undefined> {
+  if (!isCommitSha(commit) || !isEntriesKey(entriesKey)) {
     return undefined;
   }
-  const row = await db.assistantDocmosisLibrary.findUnique({ where: key(viewerOid), select: { ownerOid: true, commitSha: true, entries: true } });
-  if (row === null || row.commitSha !== commit || !canUseDocmosisLibrary(viewerOid, row)) {
+  const row = await db.assistantDocmosisLibrary.findUnique({
+    where: key(viewerOid),
+    select: { ownerOid: true, commitSha: true, entriesKey: true, entries: true }
+  });
+  if (row === null || row.commitSha !== commit || row.entriesKey !== entriesKey || !canUseDocmosisLibrary(viewerOid, row)) {
     return undefined;
   }
   return { commit, entries: row.entries as unknown as IndexEntry[] };
