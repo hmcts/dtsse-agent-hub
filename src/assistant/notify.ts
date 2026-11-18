@@ -1,4 +1,4 @@
-import { BUILT_IN_PRODUCTS } from "@hmcts-cft/docmosis-tools/notify/products";
+import { BUILT_IN_PRODUCTS } from "@hmcts-cft/notify-tools/products";
 import { z } from "zod";
 import { jsonbText } from "./deck.ts";
 

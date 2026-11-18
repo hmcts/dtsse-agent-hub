@@ -10,7 +10,7 @@ describe("loadNotify", () => {
   });
 
   it("should answer tools_missing with how to install it when the package is not installed", async () => {
-    await expect(loadNotify(() => Promise.reject(missing("Cannot find package '@hmcts-cft/docmosis-tools' imported from x")))).rejects.toMatchObject({
+    await expect(loadNotify(() => Promise.reject(missing("Cannot find package '@hmcts-cft/notify-tools' imported from x")))).rejects.toMatchObject({
       code: "tools_missing",
       detail: TOOLS_MISSING
     });
@@ -18,12 +18,12 @@ describe("loadNotify", () => {
 
   it("should answer tools_missing when the installed package is too old to have the notify exports", async () => {
     const unexported = Object.assign(
-      new Error("Package subpath './notify/node' is not defined by \"exports\" in /g/node_modules/@hmcts-cft/docmosis-tools/package.json"),
+      new Error("Package subpath './node' is not defined by \"exports\" in /g/node_modules/@hmcts-cft/notify-tools/package.json"),
       {
         code: "ERR_PACKAGE_PATH_NOT_EXPORTED"
       }
     );
-    const noExport = new SyntaxError("The requested module '@hmcts-cft/docmosis-tools/notify/node' does not provide an export named 'KeyVaultError'");
+    const noExport = new SyntaxError("The requested module '@hmcts-cft/notify-tools/node' does not provide an export named 'KeyVaultError'");
     for (const failure of [unexported, noExport]) {
       await expect(loadNotify(() => Promise.reject(failure))).rejects.toMatchObject({ code: "tools_missing", detail: TOOLS_MISSING });
     }

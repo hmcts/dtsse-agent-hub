@@ -43,22 +43,24 @@ RUN bash -c 'export NVM_DIR="$HOME/.nvm"; \
     && boot="$(command -v virtual-agent-boot)" && sudo ln -sf "$boot" /usr/local/bin/virtual-agent-boot \
     && npm ls -g --depth=0 @hmcts-cft/agent-hub'
 
-# The docmosis CLI (@hmcts-cft/docmosis-tools), which the agent runs to read a template's schema and
+# Two packages. The docmosis CLI (@hmcts-cft/docmosis-tools), which the agent runs to read a template's schema and
 # render it before publishing it with `agent-hub docmosis put`. A developer gets it from the VS Code
 # extension's terminals, and a pod runs no VS Code, so this layer is how it reaches one. Unpinned and
-# uncached for the same reason as the client above.
+# uncached for the same reason as the client above. The other is @hmcts-cft/notify-tools, the GOV.UK
+# Notify library behind the client's `agent-hub notify` and the Notify panel's pod jobs, which the
+# client imports from this same global prefix, beside it.
 #
-# It is not linked into /usr/local/bin: only Claude's sessions run it, and they inherit the pod
-# entrypoint's PATH, which has sourced nvm.sh. --ignore-scripts because the package declares none and
-# has no dependencies. The client's GOV.UK Notify support (agent-hub notify, and the Notify panel's
-# pod jobs) imports it as a library from this same global prefix, beside the client.
+# The CLI is not linked into /usr/local/bin: only Claude's sessions run it, and they inherit the pod
+# entrypoint's PATH, which has sourced nvm.sh. --ignore-scripts because neither package declares any
+# and neither has dependencies.
 RUN bash -c 'export NVM_DIR="$HOME/.nvm"; \
     . "$NVM_DIR/nvm.sh"; \
     nvm use default; \
     npm install -g --ignore-scripts \
         --@hmcts-cft:registry=https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/npm/registry/ \
         @hmcts-cft/docmosis-tools@latest \
-    && npm ls -g --depth=0 @hmcts-cft/docmosis-tools'
+        @hmcts-cft/notify-tools@latest \
+    && npm ls -g --depth=0 @hmcts-cft/docmosis-tools @hmcts-cft/notify-tools'
 
 # Numeric, where the base names the same user: given only a name the kubelet cannot tell whether it
 # is root, and refuses a pod that asks for runAsNonRoot. The orchestrator sets runAsUser: 1000 for
