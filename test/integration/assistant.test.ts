@@ -715,7 +715,10 @@ describe("conversations", () => {
       deck_agent_version: 0,
       docmosis_version: 0,
       docmosis_revision: 0,
-      docmosis_updated_by: null
+      docmosis_updated_by: null,
+      notify_version: 0,
+      notify_revision: 0,
+      notify_updated_by: null
     };
 
     // A wake is "this conversation needs a session", so there is no message whose files the field could name.

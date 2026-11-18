@@ -549,6 +549,14 @@ model AssistantConversation {
   docmosisUpdatedAt DateTime? @map("docmosis_updated_at") @db.Timestamptz(6)
   /// Whether the latest version has a PDF (ready), a render_error (failed) or neither (pending); kept by every write so the page summary moves with it.
   docmosisPdfState  String    @default("pending") @map("docmosis_pdf_state")
+  /// The latest version of the conversation's GOV.UK Notify template, 0 before there is one. See src/assistant/notify-store.ts.
+  notifyVersion     Int       @default(0) @map("notify_version")
+  /// The latest version's revision: the person's amends of it.
+  notifyRevision    Int       @default(0) @map("notify_revision")
+  notifyName        String?   @map("notify_name")
+  /// user or agent.
+  notifyUpdatedBy   String?   @map("notify_updated_by")
+  notifyUpdatedAt   DateTime? @map("notify_updated_at") @db.Timestamptz(6)
   jiraExportId      String?   @map("jira_export_id") @db.Uuid
   jiraProject       String?   @map("jira_project")
   /// pending, done or failed; null before the first export.
@@ -619,6 +627,7 @@ model AssistantConversation {
   podJobs      AssistantPodJob[]
   docmosisVersions AssistantDocmosisVersion[]
   docmosisAssets   AssistantDocmosisAsset[]
+  notifyVersions   AssistantNotifyVersion[]
 
   @@index([ownerOid, lastActiveAt(sort: Desc)], map: "assistant_conversation_owner_active_idx")
   @@map("assistant_conversation")
@@ -709,6 +718,42 @@ model AssistantDocmosisLibrary {
 
   @@id([ownerOid, libraryId])
   @@map("assistant_docmosis_library")
+}
+
+/// One version of a conversation's GOV.UK Notify template draft. The latest 50 are kept.
+model AssistantNotifyVersion {
+  conversationId String   @map("conversation_id") @db.Uuid
+  version        Int
+  /// The person's amends of this version.
+  revision       Int      @default(0)
+  /// An id from @hmcts-cft/docmosis-tools/notify/products.
+  product        String
+  templateId     String   @map("template_id") @db.Uuid
+  serviceId      String   @map("service_id") @db.Uuid
+  /// email, sms or letter.
+  type           String
+  name           String
+  /// Null for a text message.
+  subject        String?
+  body           String
+  /// The Notify template version the draft was taken from, and its subject and body then.
+  notifyVersion  Int      @map("notify_version")
+  notifySubject  String?  @map("notify_subject")
+  notifyBody     String   @map("notify_body")
+  /// Notify's own preview of that version: HTML for an email, text otherwise.
+  notifyPreview  String?  @map("notify_preview")
+  data           Json
+  /// user or agent.
+  by             String
+  /// Who wrote it through the web UI, which only they may amend; null for every other write.
+  editorOid      String?  @map("editor_oid")
+  summary        String?
+  updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  conversation AssistantConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@id([conversationId, version])
+  @@map("assistant_notify_version")
 }
 
 /// A .docx a Docmosis version names by its SHA-256.

@@ -58,7 +58,7 @@ export type ApiErrorBody = {
    * A `409` from `putArtefact`: the document as `getArtefact` returns it, to merge the refused change into; from
    * `putDeck`, the deck as `getDeck` returns it.
    */
-  current?: Artefact | Deck | DocmosisResponse;
+  current?: Artefact | Deck | DocmosisResponse | NotifyResponse;
   /** A `400` from `putDocmosis`: the .docx digests the hub does not hold. */
   missing_assets?: string[];
   /** A `409` from `putDocmosis` with a `pick` already loaded: the version that load wrote. */
@@ -352,6 +352,53 @@ export type DocmosisBody = {
 export type DocmosisWritten = { version: number; revision: number };
 
 export type DocmosisAssetResponse = { asset: string };
+
+export type NotifyTemplateType = "email" | "sms" | "letter";
+
+/** Where a Notify draft came from: the template as Notify held it when the pod read it. */
+export type NotifySource = {
+  product: string;
+  template_id: string;
+  service_id: string;
+  type: NotifyTemplateType;
+  name: string;
+  notify_version: number;
+  notify_subject: string | null;
+  notify_body: string;
+  /** Notify's own preview with no personalisation: HTML for an email, text otherwise; null when too big to keep. */
+  notify_preview: string | null;
+};
+
+/** A conversation's GOV.UK Notify template at one version, as `GET …/notify` returns it. */
+export type NotifyResponse = NotifySource & {
+  version: number;
+  revision: number;
+  /** The draft: null for a text message. */
+  subject: string | null;
+  body: string;
+  data: Record<string, unknown>;
+  by: "agent" | "user";
+  summary: string | null;
+  updated_at: string;
+  /** Only when a version other than the latest was asked for: the version the template is at now. */
+  current_version?: number;
+};
+
+export type NotifyBody = {
+  subject: string | null;
+  body: string;
+  data: Record<string, unknown>;
+  base_version: number;
+  /** The revision read with the version, so a person's amend since is refused rather than overwritten. */
+  base_revision?: number;
+  summary?: string;
+  /** Needed for the first version; left out, the version keeps the source of the one it is based on. */
+  source?: NotifySource;
+  /** Sent only for the panel's picker, whose load the owner asked for. */
+  by?: "user";
+};
+
+export type NotifyWritten = { version: number; revision: number };
 
 /** One conversation of a virtual agent, as `conversations` lists them for the uploads reconciliation. */
 export type ConversationSummary = { id: string };

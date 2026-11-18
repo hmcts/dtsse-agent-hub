@@ -104,6 +104,8 @@ function hub({ conflict = false, refuse, loaded }: { conflict?: boolean; refuse?
     getArtefact: unused,
     putArtefact: unused,
     getDocmosis: unused,
+    getNotify: unused,
+    putNotify: unused,
     putDocmosisAsset: async (_agent, sha256, bytes) => {
       assets.push({ sha256, bytes });
       return { asset: `sha256:${sha256}` };

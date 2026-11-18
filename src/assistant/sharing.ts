@@ -7,6 +7,7 @@ import { storedHistory, storedStops } from "./conversation-row.ts";
 import { DECK_SELECT, type DeckSummary, deckSummary } from "./deck-store.ts";
 import { DOCMOSIS_SELECT, type DocmosisSummary, docmosisSummary } from "./docmosis-store.ts";
 import { FORKED_SELECT, type ForkedView, forkedView } from "./forks.ts";
+import { NOTIFY_SELECT, type NotifySummary, notifySummary } from "./notify-store.ts";
 import { hasPod } from "./pods.ts";
 import { productLabel } from "./products.ts";
 import type { SharedConversationRow } from "./shares.ts";
@@ -96,6 +97,8 @@ export interface SharedConversationView {
   deck: DeckSummary | null;
   /** The latest version of the conversation's Docmosis template, without its schema and data, which the viewer reads; `null` when it has none. */
   docmosis: DocmosisSummary | null;
+  /** The latest version of the conversation's Notify template, without its text, which the viewer reads; `null` when it has none. */
+  notify: NotifySummary | null;
   /** `owner` when the owner is looking at their own share, which is how they see what a recipient sees. */
   access: ConversationAccess;
   /**
@@ -139,7 +142,8 @@ export async function sharedConversation(
       owner: { select: { name: true } },
       ...FORKED_SELECT,
       ...DECK_SELECT,
-      ...DOCMOSIS_SELECT
+      ...DOCMOSIS_SELECT,
+      ...NOTIFY_SELECT
     }
   });
   if (row === null) {
@@ -168,6 +172,7 @@ export async function sharedConversation(
     document: artefact.version === 0 ? null : { title: artefact.title ?? "Untitled document", markdown: artefact.markdown },
     deck,
     docmosis: docmosisSummary(row),
+    notify: notifySummary(row),
     access,
     fork
   };

@@ -50,7 +50,8 @@ RUN bash -c 'export NVM_DIR="$HOME/.nvm"; \
 #
 # It is not linked into /usr/local/bin: only Claude's sessions run it, and they inherit the pod
 # entrypoint's PATH, which has sourced nvm.sh. --ignore-scripts because the package declares none and
-# has no dependencies.
+# has no dependencies. The client's GOV.UK Notify support (agent-hub notify, and the Notify panel's
+# pod jobs) imports it as a library from this same global prefix, beside the client.
 RUN bash -c 'export NVM_DIR="$HOME/.nvm"; \
     . "$NVM_DIR/nvm.sh"; \
     nvm use default; \

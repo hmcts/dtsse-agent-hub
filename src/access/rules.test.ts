@@ -10,6 +10,7 @@ import {
   canChangeDeck,
   canChangeDocmosis,
   canChangeFeedbackProject,
+  canChangeNotify,
   canConnectMicrosoft,
   canForkConversation,
   canLaunchTokenActForAgent,
@@ -22,6 +23,7 @@ import {
   canReadDeck,
   canReadDocmosis,
   canReadMessage,
+  canReadNotify,
   canReadPodJob,
   canRecordFeedback,
   canRecordPickAsOwner,
@@ -755,6 +757,37 @@ describe("the conversation share rules", () => {
 
     it.each(EVERYONE_ELSE)("should refuse %s a change to the template", (_label, viewerOid) => {
       expect(canChangeDocmosis(conversationAccess(viewerOid, CONVERSATION, SHARES))).toBe(false);
+    });
+  });
+
+  describe("canReadNotify", () => {
+    it("should let the owner and a share's recipient read the Notify template", () => {
+      expect(canReadNotify(conversationAccess(OWNER, CONVERSATION, SHARES))).toBe(true);
+      expect(canReadNotify(conversationAccess(RECIPIENT, CONVERSATION, SHARES))).toBe(true);
+    });
+
+    it.each(EVERYONE_ELSE)("should refuse %s the Notify template", (_label, viewerOid) => {
+      expect(canReadNotify(conversationAccess(viewerOid, CONVERSATION, SHARES))).toBe(false);
+    });
+
+    it("should refuse the Notify template when the access answered is none", () => {
+      expect(canReadNotify("none")).toBe(false);
+    });
+  });
+
+  describe("canChangeNotify", () => {
+    it("should let the owner change the Notify template", () => {
+      expect(canChangeNotify(conversationAccess(OWNER, CONVERSATION, SHARES))).toBe(true);
+    });
+
+    it("should refuse a share's recipient when the share lets them read the Notify template", () => {
+      const access = conversationAccess(RECIPIENT, CONVERSATION, SHARES);
+      expect(canReadNotify(access)).toBe(true);
+      expect(canChangeNotify(access)).toBe(false);
+    });
+
+    it.each(EVERYONE_ELSE)("should refuse %s a change to the Notify template", (_label, viewerOid) => {
+      expect(canChangeNotify(conversationAccess(viewerOid, CONVERSATION, SHARES))).toBe(false);
     });
   });
 

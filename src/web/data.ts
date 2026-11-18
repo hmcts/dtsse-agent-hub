@@ -7,6 +7,7 @@ import {
   canReadDeck,
   canReadDocmosis,
   canReadMessage,
+  canReadNotify,
   isOwner
 } from "../access/rules.ts";
 import type { Skill } from "../agents/skills.ts";
@@ -24,6 +25,7 @@ import { conversationsForkableBy, conversationsOfferedBy, forkChoice, forkRecipi
 import type { SidebarGroup } from "../assistant/grouping.ts";
 import { type AssistantMemory, assistantMemory } from "../assistant/memory.ts";
 import { type AssistantModelChoice, assistantModelChoice } from "../assistant/model-store.ts";
+import { listNotifyVersions, notifyView } from "../assistant/notify-store.ts";
 import { type ChatGate, chatCredentials, chatGate } from "../assistant/onboarding.ts";
 import { readAssistantSchedule } from "../assistant/schedule-store.ts";
 import {
@@ -555,6 +557,32 @@ export async function docmosisPdf(viewer: Identity, id: string, version: number)
     readDocmosisPdf(prisma, id, version)
   ]);
   return row === null || bytes === null ? undefined : { name: row.name, bytes };
+}
+
+/** What the viewer may do with the conversation's Notify template: `owner` or `reader`, and `undefined` for everyone else. */
+export async function notifyAccess(viewer: Identity, id: string): Promise<Exclude<ConversationAccess, "none"> | undefined> {
+  const allowed = await accessToConversation(prisma, viewer.oid, id);
+  if (allowed === undefined || allowed.access === "none" || !canReadNotify(allowed.access)) {
+    return undefined;
+  }
+  return allowed.access;
+}
+
+/** One kept version of a conversation's Notify template, or its latest without `version`, for anyone `canReadNotify` lets read it; `undefined` for everyone else and when there is none. */
+export async function readableNotify(viewer: Identity, id: string, version?: number): Promise<NonNullable<Awaited<ReturnType<typeof notifyView>>> | undefined> {
+  if ((await notifyAccess(viewer, id)) === undefined) {
+    return undefined;
+  }
+  return (await notifyView(prisma, id, version)) ?? undefined;
+}
+
+/** Every kept version of a conversation's Notify template, newest first, under the same rule; `undefined` for anyone else and for a chat with none. */
+export async function notifyVersions(viewer: Identity, id: string): Promise<Awaited<ReturnType<typeof listNotifyVersions>> | undefined> {
+  if ((await notifyAccess(viewer, id)) === undefined) {
+    return undefined;
+  }
+  const versions = await listNotifyVersions(prisma, id);
+  return versions.length === 0 ? undefined : versions;
 }
 
 /** Who one of the viewer's own conversations is shared with, or `undefined` when it is not theirs to share. */

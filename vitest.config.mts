@@ -78,6 +78,7 @@ export default defineConfig({
         "src/assistant/deck-store.ts",
         "src/assistant/deck-edit-store.ts",
         "src/assistant/docmosis-store.ts",
+        "src/assistant/notify-store.ts",
         "src/assistant/pod-job-store.ts",
         "src/assistant/docmosis-library-store.ts",
         "src/assistant/assistant-store.ts",

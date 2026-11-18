@@ -416,6 +416,23 @@ describe("assistantPrompt", () => {
     expect(assistantPrompt(personMessage, { ...pcs, docmosis_updated_by: "user" }, null)).not.toMatch(/docmosis/);
   });
 
+  it("should tell the session to read the Notify template first when the user last changed it", () => {
+    // Act
+    const text = assistantPrompt(personMessage, { ...pcs, notify_version: 4, notify_revision: 2, notify_updated_by: "user" }, null);
+
+    // Assert
+    expect(context(text)).toContain(
+      "The user has changed the conversation's Notify template (version 4). Read it with `agent-hub notify get` before changing it."
+    );
+  });
+
+  it("should say nothing of the Notify template when the session wrote it last or there is none", () => {
+    // Act & Assert
+    expect(assistantPrompt(personMessage, { ...pcs, notify_version: 4, notify_updated_by: "agent" }, null)).not.toMatch(/notify get/);
+    expect(assistantPrompt(personMessage, { ...pcs, notify_version: 0, notify_updated_by: "user" }, null)).not.toMatch(/notify get/);
+    expect(assistantPrompt(personMessage, { ...pcs, notify_updated_by: "user" }, null)).not.toMatch(/notify get/);
+  });
+
   it("should give the session the command that shows what the user changed since its own version when the user has edited the slides", () => {
     // Act
     const text = assistantPrompt(personMessage, { ...pcs, deck_version: 5, deck_updated_by: "user", deck_revision: 9, deck_agent_version: 4 }, null);

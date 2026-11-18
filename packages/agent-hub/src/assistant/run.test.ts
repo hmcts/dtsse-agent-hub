@@ -64,6 +64,8 @@ function stubApi(overrides: Partial<SupervisorApi> = {}): SupervisorApi {
     putDocmosisAsset: unused("putDocmosisAsset"),
     docmosisAsset: unused("docmosisAsset"),
     putDocmosisPdf: unused("putDocmosisPdf"),
+    getNotify: unused("getNotify"),
+    putNotify: unused("putNotify"),
     postQuestion: unused("postQuestion"),
     putDocmosisIndex: async () => null,
     putMemory: async () => null,

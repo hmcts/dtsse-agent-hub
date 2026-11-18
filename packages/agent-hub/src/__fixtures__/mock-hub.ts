@@ -292,6 +292,20 @@ export function createMockHub({
     const latest = stored.versions[stored.versions.length - 1];
     return { ...rest, has_pdf: pdf !== null, ...(latest && latest.version !== v.version ? { current_version: latest.version } : {}) };
   };
+  // agent id → the conversation's Notify template, every version as `GET …/notify` answers it
+  const notifyTemplates = new Map<string, Body[]>();
+  const notifyOf = (agentId: string): Body[] => {
+    let found = notifyTemplates.get(agentId);
+    if (!found) {
+      found = [];
+      notifyTemplates.set(agentId, found);
+    }
+    return found;
+  };
+  const notifyBody = (versions: Body[], v: Body) => {
+    const latest = versions[versions.length - 1];
+    return { ...v, ...(latest && latest.version !== v.version ? { current_version: latest.version } : {}) };
+  };
   const jiraReports: Record<string, unknown>[] = [];
   const githubReports: Record<string, unknown>[] = [];
   const confluenceReports: Record<string, unknown>[] = [];
@@ -1287,6 +1301,51 @@ export function createMockHub({
         return send(res, 204);
       }
     }
+    if (action === "notify" && parts[4] === undefined) {
+      if (!agent.conversation_id) {
+        return send(res, 404, { error: "not a conversation" });
+      }
+      const versions = notifyOf(agent.id);
+      const latest = versions[versions.length - 1];
+      if (req.method === "GET") {
+        const asked = url.searchParams.get("version");
+        if (!latest) {
+          return send(res, 404, { error: "the conversation has no Notify template" });
+        }
+        const found = asked === null ? latest : versions.find((v) => v.version === Number(asked));
+        return found ? send(res, 200, notifyBody(versions, found)) : send(res, 404, { error: `the template does not keep version ${asked}` });
+      }
+      if (req.method === "PUT") {
+        const source = body.source ?? (latest ? { ...latest } : undefined);
+        if (typeof body.body !== "string" || typeof body.data !== "object" || body.data === null || !Number.isInteger(body.base_version) || !source) {
+          return send(res, 400, { error: "bad Notify template" });
+        }
+        if (body.base_version !== (latest?.version ?? 0) || (body.base_revision !== undefined && body.base_revision !== latest?.revision)) {
+          return send(res, 409, { error: "the Notify template has changed since that version", current: latest ? notifyBody(versions, latest) : null });
+        }
+        const next = {
+          product: source.product,
+          template_id: source.template_id,
+          service_id: source.service_id,
+          type: source.type,
+          name: source.name,
+          notify_version: source.notify_version,
+          notify_subject: source.notify_subject,
+          notify_body: source.notify_body,
+          notify_preview: source.notify_preview,
+          version: (latest?.version ?? 0) + 1,
+          revision: 0,
+          subject: body.subject,
+          body: body.body,
+          data: body.data,
+          by: "agent",
+          summary: body.summary ?? null,
+          updated_at: new Date().toISOString()
+        };
+        versions.push(next);
+        return send(res, 200, { version: next.version, revision: 0 });
+      }
+    }
     if (action === "docmosis") {
       if (!agent.conversation_id) {
         return send(res, 404, { error: "not a conversation" });
@@ -1507,6 +1566,7 @@ export function createMockHub({
     artefacts,
     decks,
     docmosisTemplates,
+    notifyTemplates,
     jiraReports,
     githubReports,
     confluenceReports,
@@ -1644,6 +1704,19 @@ export function createMockHub({
       for (let i = 0; i < count; i++) {
         failures.pdf.push(status);
       }
+    },
+    // The person's edit of the Notify template in the web UI: a new version, or the latest one amended.
+    writeNotifyAsUser(agentId: string, change: Body, { amend = false }: { amend?: boolean } = {}) {
+      const versions = notifyOf(agentId);
+      const latest = versions[versions.length - 1];
+      if (!latest) {
+        throw new Error("no Notify template to change");
+      }
+      if (amend && latest.by === "user") {
+        Object.assign(latest, change, { revision: latest.revision + 1 });
+        return;
+      }
+      versions.push({ ...latest, ...change, version: latest.version + 1, revision: 0, by: "user", summary: "Edited the template" });
     },
     // A template written in the web UI as the person's: new data on a new version, or on the latest one amended.
     writeDocmosisAsUser(agentId: string, data: Body, { amend = false }: { amend?: boolean } = {}) {

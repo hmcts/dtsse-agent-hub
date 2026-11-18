@@ -41,6 +41,9 @@ import type {
   MessageResponse,
   MessagesResponse,
   MicrosoftTokenResponse,
+  NotifyBody,
+  NotifyResponse,
+  NotifyWritten,
   PodJobAnswer,
   PostBody,
   RegisterBody,
@@ -208,6 +211,9 @@ export type Api = {
    * means the version's revision has moved since.
    */
   putDocmosisPdf: (agentId: string, version: number, revision: number, bytes: Uint8Array) => Promise<null>;
+  /** The latest version of the conversation's GOV.UK Notify template, or one kept version of it. */
+  getNotify: (agentId: string, version?: number) => Promise<NotifyResponse>;
+  putNotify: (agentId: string, body: NotifyBody) => Promise<NotifyWritten>;
   /**
    * A question this session's model asked with `AskUserQuestion`, for the person to answer in the web UI. Idempotent
    * on `tool_use_id`, so a retry after a lost response does not put the question on screen twice.
@@ -437,6 +443,8 @@ export function createApi({
     docmosisAsset: (agentId, sha256) => requestBytes(`${a(agentId)}/docmosis/assets/${encodeURIComponent(sha256)}`),
     putDocmosisPdf: (agentId, version, revision, bytes) =>
       putBytes<null>(`${a(agentId)}/docmosis/versions/${version}/pdf${qs({ revision })}`, null, bytes, PART_TIMEOUT_MS, "application/pdf"),
+    getNotify: (agentId, version) => request<NotifyResponse>("GET", `${a(agentId)}/notify${qs({ version })}`),
+    putNotify: (agentId, body) => request<NotifyWritten>("PUT", `${a(agentId)}/notify`, body),
     postQuestion: (agentId, body, opts) => request<null>("POST", `${a(agentId)}/question`, body, opts),
     putJiraExport: (agentId, body) => request<null>("PUT", `${a(agentId)}/jira`, body),
     putGithubExport: (agentId, body) => request<null>("PUT", `${a(agentId)}/github`, body),

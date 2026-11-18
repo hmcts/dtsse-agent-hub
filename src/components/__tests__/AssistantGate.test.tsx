@@ -121,6 +121,7 @@ function conversation(local: boolean): ConversationView {
     artefact: { title: null, markdown: "", version: 0, updatedBy: null, updatedAt: null },
     deck: null,
     docmosis: null,
+    notify: null,
     jira: { status: "none" },
     github: { status: "none" },
     confluence: { status: "none" },
