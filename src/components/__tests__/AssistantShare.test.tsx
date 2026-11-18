@@ -442,9 +442,9 @@ function view(overrides: Partial<SharedConversationView> = {}): SharedConversati
     ],
     earlierHidden: false,
     documents: [],
-    deck: null,
-    docmosis: null,
-    notify: null,
+    decks: [],
+    docmosisTemplates: [],
+    notifyTemplates: [],
     video: null,
     access: "reader",
     forked: null,
@@ -549,12 +549,21 @@ describe("SharedChat", () => {
     };
     const reads = vi.fn(async (_url: string) => new Response(JSON.stringify(outline)));
     vi.stubGlobal("fetch", reads);
-    render(<SharedChat view={view({ deck: { title: "Ways of working", version: 2, revision: 2, updatedBy: "agent", pptx: true } })} />);
+    render(
+      <SharedChat
+        view={view({
+          decks: [{ id: "55555555-5555-5555-5555-555555555555", title: "Ways of working", version: 2, revision: 2, updatedBy: "agent", pptx: true }]
+        })}
+      />
+    );
     await act(async () => {
       await Promise.resolve();
     });
 
-    expect(reads).toHaveBeenCalledWith(`/api/ui/assistant/decks/${view().id}`, expect.objectContaining({ cache: "no-store" }));
+    expect(reads).toHaveBeenCalledWith(
+      `/api/ui/assistant/decks/${view().id}/55555555-5555-5555-5555-555555555555`,
+      expect.objectContaining({ cache: "no-store" })
+    );
 
     expect(screen.getByRole("heading", { level: 2, name: "Ways of working" })).toBeTruthy();
     expect(screen.getByRole("region", { name: "Slide 1 of 2: Ways of working" })).toBeTruthy();

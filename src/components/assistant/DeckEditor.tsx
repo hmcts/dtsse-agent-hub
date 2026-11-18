@@ -38,6 +38,7 @@ import { ACTION_FAULT } from "@/web/action-fault";
 
 export type SaveDeckAction = (input: {
   conversationId: unknown;
+  itemId: unknown;
   outline: unknown;
   baseVersion: unknown;
   baseRevision: unknown;
@@ -503,8 +504,8 @@ export function DeckEditor({
       : status === "unsaved" || status === "failed" || status === "invalid"
         ? { outline, base, conflict: null }
         : null;
-  const closing = useRef({ conversationId, save, onBusy, onUnsaved });
-  closing.current = { conversationId, save, onBusy, onUnsaved };
+  const closing = useRef({ conversationId, itemId: deck.id, save, onBusy, onUnsaved });
+  closing.current = { conversationId, itemId: deck.id, save, onBusy, onUnsaved };
 
   const total = outline.slides.length + 1;
   const at = Math.min(chosen, total - 1);
@@ -572,7 +573,9 @@ export function DeckEditor({
     setState("saving");
     setFailure(null);
     const from = baseNow.current;
-    const result = await settled(closing.current.save({ conversationId, outline: next, baseVersion: from.version, baseRevision: from.revision }));
+    const result = await settled(
+      closing.current.save({ conversationId, itemId: deck.id, outline: next, baseVersion: from.version, baseRevision: from.revision })
+    );
     inFlight.current = false;
     if (!mounted.current) {
       settleAfterClose(next, from, result);
@@ -623,7 +626,7 @@ export function DeckEditor({
       lost?.({ outline: latest, base: moved, conflict: null });
       return;
     }
-    void settled(saveNow({ conversationId, outline: latest, baseVersion: moved.version, baseRevision: moved.revision })).then((again) => {
+    void settled(saveNow({ conversationId, itemId: deck.id, outline: latest, baseVersion: moved.version, baseRevision: moved.revision })).then((again) => {
       if (!(again.ok && again.saved)) {
         lost?.(lostDraft(latest, moved, again));
       }
@@ -680,19 +683,19 @@ export function DeckEditor({
         clearTimeout(timer.current);
       }
       const pending = unsaved.current;
-      const { conversationId: id, save: saveNow, onBusy: told, onUnsaved: lost } = closing.current;
+      const { conversationId: id, itemId, save: saveNow, onBusy: told, onUnsaved: lost } = closing.current;
       if (pending !== null && !discarded.current && !inFlight.current) {
         const problemNow = checked.current?.outline === pending.outline ? checked.current.problem : blockingProblem(pending.outline);
         if (pending.conflict !== null || problemNow !== null) {
           lost?.(pending);
         } else {
-          void settled(saveNow({ conversationId: id, outline: pending.outline, baseVersion: pending.base.version, baseRevision: pending.base.revision })).then(
-            (result) => {
-              if (!(result.ok && result.saved)) {
-                lost?.(lostDraft(pending.outline, pending.base, result));
-              }
+          void settled(
+            saveNow({ conversationId: id, itemId, outline: pending.outline, baseVersion: pending.base.version, baseRevision: pending.base.revision })
+          ).then((result) => {
+            if (!(result.ok && result.saved)) {
+              lost?.(lostDraft(pending.outline, pending.base, result));
             }
-          );
+          });
         }
       }
       told?.(false);

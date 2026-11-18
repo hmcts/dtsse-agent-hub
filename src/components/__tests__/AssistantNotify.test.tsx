@@ -9,7 +9,8 @@ import type { ListedTemplate, NotifySummary, NotifyVersionEntry, NotifyView } fr
 const CONVERSATION = "33333333-3333-3333-3333-333333333333";
 const TEMPLATE = "ab1f3d4a-0000-4000-8000-000000000002";
 const SERVICE = "5c1f3d4a-0000-4000-8000-000000000001";
-const SUMMARY: NotifySummary = { name: "Claim received", version: 2, revision: 0, updatedBy: "agent" };
+const ITEM = "0b1f3d4a-0000-4000-8000-0000000000c1";
+const SUMMARY: NotifySummary = { id: ITEM, name: "Claim received", version: 2, revision: 0, updatedBy: "agent" };
 
 function view(overrides: Partial<NotifyView> = {}): NotifyView {
   return {
@@ -367,9 +368,13 @@ describe("NotifyPanel picker", () => {
   it("should list a product's templates by type through the pod, and load the one picked", async () => {
     const { podJobs, state } = serve({
       latest: null,
-      jobs: { "notify.list": { status: "done", result: { templates: LISTED, truncated: false } }, "notify.pull": { status: "done", result: { version: 1 } } }
+      jobs: {
+        "notify.list": { status: "done", result: { templates: LISTED, truncated: false } },
+        "notify.pull": { status: "done", result: { version: 1, item_id: ITEM } }
+      }
     });
-    const { announce } = await open({ notify: null });
+    const onCreated = vi.fn();
+    const { announce } = await open({ notify: null, onCreated });
     expect(screen.getByText("Choose a product and one of its templates to work on it here.")).toBeTruthy();
 
     fireEvent.change(screen.getByLabelText("Product"), { target: { value: "pcs" } });
@@ -384,8 +389,23 @@ describe("NotifyPanel picker", () => {
     await wait();
 
     expect(podJobs[1]).toEqual({ kind: "notify.pull", args: { product: "pcs", template_id: TEMPLATE } });
+    expect(onCreated).toHaveBeenCalledWith(ITEM);
     expect(announce).toHaveBeenCalledWith("The Notify template is loaded");
-    expect(screen.getByRole("heading", { name: "Claim received" })).toBeTruthy();
+  });
+
+  it("should name the open template as the target when a load replaces it", async () => {
+    const { podJobs } = serve({
+      jobs: { "notify.list": { status: "done", result: { templates: LISTED, truncated: false } }, "notify.pull": { status: "done", result: { version: 3 } } }
+    });
+    const onCreated = vi.fn();
+    await open({ onCreated });
+
+    fireEvent.change(screen.getByLabelText("Template"), { target: { value: TEMPLATE } });
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    await wait();
+
+    expect(podJobs.find((job) => job.kind === "notify.pull")).toEqual({ kind: "notify.pull", args: { product: "pcs", template_id: TEMPLATE, item_id: ITEM } });
+    expect(onCreated).not.toHaveBeenCalled();
   });
 
   it("should ask a waking pod again until it takes the job", async () => {
@@ -640,5 +660,49 @@ describe("NotifyPanel versions and readers", () => {
     await open({ notify: null, owner: false });
 
     expect(screen.getByText("This chat has no Notify template.")).toBeTruthy();
+  });
+});
+
+describe("NotifyPanel Remove", () => {
+  it("should offer no Remove without onRemove or for a template that is not made yet", async () => {
+    serve();
+    await open();
+    expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
+    cleanup();
+
+    serve({ latest: null });
+    await open({ notify: null, onRemove: async () => null });
+    expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
+  });
+
+  it("should ask first, and remove only once the person confirms", async () => {
+    serve();
+    const onRemove = vi.fn(async () => null);
+    await open({ onRemove });
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    expect(screen.getByRole("alertdialog", { name: "Remove this Notify template?" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onRemove).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Remove" }));
+    await wait();
+
+    expect(onRemove).toHaveBeenCalledTimes(1);
+  });
+
+  it("should show why the template could not be removed, and save nothing typed after it asked", async () => {
+    const { saves } = serve();
+    const onRemove = vi.fn(async () => "that Notify template no longer exists");
+    await open({ onRemove });
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Remove" }));
+    await wait();
+
+    expect(screen.getByRole("alert").textContent).toBe("that Notify template no longer exists");
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(saves).toHaveLength(0);
   });
 });

@@ -1,6 +1,7 @@
 import { canRecordPickAsOwner } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
+import { OLDEST_FIRST, podLacksItems, UUID_RE } from "./artefact-store.ts";
 import { announce, type ConversationRow } from "./conversation-row.ts";
 import { lockConversation } from "./deck-store.ts";
 import {
@@ -11,6 +12,7 @@ import {
   type DocmosisSchema,
   docxRef,
   docxSha,
+  ITEMS_CREATE_REFUSED_DOCMOSIS,
   KEEP_PDF,
   KEEP_VERSIONS,
   MAX_HELD_DOCX_BYTES,
@@ -22,12 +24,15 @@ import { gitBlobSha1 } from "./git-blob.ts";
 import { finishPodJob, type LockedPodJob, lockPendingPodJob } from "./pod-job-store.ts";
 
 /**
- * A conversation's Docmosis template, written in versions the way its deck is (`deck-store.ts`): a write names the
- * version it was made from, and a newer one refuses it with what is there now. See "Docmosis templates" in docs/agent-api.md.
+ * A conversation's Docmosis templates, any number of them, each written in versions the way a deck is (`deck-store.ts`):
+ * a write names the version it was made from, and a newer one refuses it with what is there now. The primary template
+ * is the oldest, which is what `/api/agent/{id}/docmosis` and an older client read. See "Docmosis templates" in
+ * docs/agent-api.md.
  *
- * Every write applies the retention in its own transaction: the newest `KEEP_VERSIONS` versions stay, only the newest
- * `KEEP_PDF` keep their PDF, and a .docx no kept version names goes once it is older than `ASSET_GRACE_MS`. A write
- * locks the conversation's row, as an upload does, so the two cannot interleave.
+ * Every write applies the retention to its template in its own transaction: the newest `KEEP_VERSIONS` versions stay,
+ * only the newest `KEEP_PDF` keep their PDF, and a .docx no kept version of the conversation names goes once it is
+ * older than `ASSET_GRACE_MS`. The .docx files are the conversation's, not a template's, so two templates can name one.
+ * A write locks the conversation's row, as an upload does, so the two cannot interleave.
  */
 
 type Conversation = Pick<ConversationRow, "id" | "virtualAgentId" | "ownerOid">;
@@ -58,18 +63,15 @@ export interface DocmosisVersionEntry {
   has_pdf: boolean;
 }
 
-export const DOCMOSIS_SELECT = { docmosisName: true, docmosisVersion: true, docmosisRevision: true, docmosisUpdatedBy: true, docmosisPdfState: true } as const;
+export const DOCMOSIS_SELECT = { id: true, name: true, version: true, revision: true, updatedBy: true, pdfState: true } as const;
 
 const author = (value: string | null): DocmosisAuthor | null => (value === "user" || value === "agent" ? value : null);
 
 const pdfState = (value: string): DocmosisSummary["pdf"] => (value === "ready" || value === "failed" ? value : "pending");
 
-export function docmosisAuthor(row: { docmosisUpdatedBy: string | null }): DocmosisAuthor | null {
-  return author(row.docmosisUpdatedBy);
-}
-
 /** What a page carries about the latest version of a Docmosis template; the panel reads the rest itself. */
 export interface DocmosisSummary {
+  id: string;
   name: string;
   version: number;
   revision: number;
@@ -78,19 +80,26 @@ export interface DocmosisSummary {
   pdf: "pending" | "ready" | "failed";
 }
 
-/** From the conversation's Docmosis columns (`DOCMOSIS_SELECT`); `null` for a conversation with no Docmosis template. */
+/** From a template's row (`DOCMOSIS_SELECT`); `null` for one with no version. */
 export function docmosisSummary(row: {
-  docmosisName: string | null;
-  docmosisVersion: number;
-  docmosisRevision: number;
-  docmosisUpdatedBy: string | null;
-  docmosisPdfState: string;
+  id: string;
+  name: string | null;
+  version: number;
+  revision: number;
+  updatedBy: string | null;
+  pdfState: string;
 }): DocmosisSummary | null {
-  const updatedBy = author(row.docmosisUpdatedBy);
-  if (row.docmosisVersion === 0 || row.docmosisName === null || updatedBy === null) {
+  const updatedBy = author(row.updatedBy);
+  if (row.version === 0 || row.name === null || updatedBy === null) {
     return null;
   }
-  return { name: row.docmosisName, version: row.docmosisVersion, revision: row.docmosisRevision, updatedBy, pdf: pdfState(row.docmosisPdfState) };
+  return { id: row.id, name: row.name, version: row.version, revision: row.revision, updatedBy, pdf: pdfState(row.pdfState) };
+}
+
+/** Every template of the conversation, oldest first, which is the order the switcher lists them in. */
+export async function listDocmosisSummaries(db: Database, conversationId: string): Promise<DocmosisSummary[]> {
+  const rows = await db.assistantDocmosis.findMany({ where: { conversationId, version: { gt: 0 } }, select: DOCMOSIS_SELECT, orderBy: [...OLDEST_FIRST] });
+  return rows.flatMap((row) => docmosisSummary(row) ?? []);
 }
 
 interface VersionRow {
@@ -123,38 +132,58 @@ const responseOf = (row: VersionRow): DocmosisResponse => ({
   source_path: row.source_path
 });
 
-async function latestVersion(db: Database, conversationId: string): Promise<number> {
-  const row = await db.assistantConversation.findUnique({ where: { id: conversationId }, select: { docmosisVersion: true } });
-  return row?.docmosisVersion ?? 0;
+/** The template `item` of the conversation, or its primary, the oldest, without `item`. */
+async function itemRow(db: Database, conversationId: string, item?: string): Promise<{ id: string; version: number; revision: number } | undefined> {
+  if (item !== undefined && !UUID_RE.test(item)) {
+    return undefined;
+  }
+  const row = await db.assistantDocmosis.findFirst({
+    where: { conversationId, version: { gt: 0 }, ...(item === undefined ? {} : { id: item }) },
+    select: { id: true, version: true, revision: true },
+    orderBy: [...OLDEST_FIRST]
+  });
+  return row ?? undefined;
 }
 
-async function versionRow(db: Database, conversationId: string, version: number): Promise<VersionRow | undefined> {
+/** The id of the conversation's primary template, the oldest; `undefined` when it has none. */
+export async function primaryDocmosisId(db: Database, conversationId: string): Promise<string | undefined> {
+  return (await itemRow(db, conversationId))?.id;
+}
+
+async function versionRow(db: Database, itemId: string, version: number): Promise<VersionRow | undefined> {
   const [row] = await db.$queryRaw<VersionRow[]>`
     SELECT version, revision, name, docx_sha256, schema, data, by, summary, updated_at, pdf IS NOT NULL AS has_pdf, render_error, source_path
       FROM assistant_docmosis_version
-     WHERE conversation_id = ${conversationId}::uuid AND version = ${version}::int
+     WHERE item_id = ${itemId}::uuid AND version = ${version}::int
   `;
   return row;
 }
 
-/** The latest version, or `version` when it is kept; `null` for a conversation with no Docmosis template and for a version not kept. */
-export async function docmosisView(db: Database, conversationId: string, version?: number): Promise<DocmosisResponse | null> {
-  const latest = await latestVersion(db, conversationId);
-  if (latest === 0) {
+/**
+ * The latest version of template `item`, or of the primary without it, or `version` when it is kept; `null` for a
+ * conversation with no such template and for a version not kept.
+ */
+export async function docmosisView(db: Database, conversationId: string, item?: string, version?: number): Promise<DocmosisResponse | null> {
+  const found = await itemRow(db, conversationId, item);
+  if (found === undefined) {
     return null;
   }
-  const row = await versionRow(db, conversationId, version ?? latest);
+  const row = await versionRow(db, found.id, version ?? found.version);
   if (row === undefined) {
     return null;
   }
-  return version === undefined || version === latest ? responseOf(row) : { ...responseOf(row), current_version: latest };
+  return version === undefined || version === found.version ? responseOf(row) : { ...responseOf(row), current_version: found.version };
 }
 
 /** Every kept version, newest first. */
-export async function listDocmosisVersions(db: Database, conversationId: string): Promise<DocmosisVersionEntry[]> {
+export async function listDocmosisVersions(db: Database, conversationId: string, item?: string): Promise<DocmosisVersionEntry[]> {
+  const found = await itemRow(db, conversationId, item);
+  if (found === undefined) {
+    return [];
+  }
   const rows = await db.$queryRaw<Omit<VersionRow, "revision" | "name" | "docx_sha256" | "schema" | "data" | "render_error" | "source_path">[]>`
     SELECT version, by, summary, updated_at, pdf IS NOT NULL AS has_pdf
-      FROM assistant_docmosis_version WHERE conversation_id = ${conversationId}::uuid ORDER BY version DESC
+      FROM assistant_docmosis_version WHERE item_id = ${found.id}::uuid ORDER BY version DESC
   `;
   return rows.map((row) => ({
     version: row.version,
@@ -165,11 +194,11 @@ export async function listDocmosisVersions(db: Database, conversationId: string)
   }));
 }
 
-export async function readDocmosisPdf(db: Database, conversationId: string, version: number): Promise<Uint8Array | null> {
-  const row = await db.assistantDocmosisVersion.findUnique({
-    where: { conversationId_version: { conversationId, version } },
-    select: { pdf: true }
-  });
+export async function readDocmosisPdf(db: Database, conversationId: string, item: string, version: number): Promise<Uint8Array | null> {
+  if (!UUID_RE.test(item)) {
+    return null;
+  }
+  const row = await db.assistantDocmosisVersion.findFirst({ where: { itemId: item, conversationId, version }, select: { pdf: true } });
   return row?.pdf ?? null;
 }
 
@@ -179,13 +208,13 @@ export async function readDocmosisDocx(db: Database, conversationId: string, sha
 }
 
 /** The retention: old versions, old PDFs, and .docx files no kept version names. */
-async function prune(db: Database, conversationId: string, latest: number, now: Date): Promise<void> {
+async function prune(db: Database, conversationId: string, itemId: string, latest: number, now: Date): Promise<void> {
   await db.$executeRaw`
-    DELETE FROM assistant_docmosis_version WHERE conversation_id = ${conversationId}::uuid AND version <= ${latest - KEEP_VERSIONS}::int
+    DELETE FROM assistant_docmosis_version WHERE item_id = ${itemId}::uuid AND version <= ${latest - KEEP_VERSIONS}::int
   `;
   await db.$executeRaw`
     UPDATE assistant_docmosis_version SET pdf = NULL
-     WHERE conversation_id = ${conversationId}::uuid AND version <= ${latest - KEEP_PDF}::int AND pdf IS NOT NULL
+     WHERE item_id = ${itemId}::uuid AND version <= ${latest - KEEP_PDF}::int AND pdf IS NOT NULL
   `;
   await deleteUnnamedAssets(db, conversationId, now);
 }
@@ -209,8 +238,32 @@ async function conversationOf(db: Database, conversationId: string): Promise<Con
   return row;
 }
 
-async function conflict(db: Database, conversationId: string): Promise<HttpError> {
-  return new HttpError(409, "the Docmosis template has changed since that version", { current: await docmosisView(db, conversationId) });
+async function conflict(db: Database, conversationId: string, item?: string): Promise<HttpError> {
+  return new HttpError(409, "the Docmosis template has changed since that version", { current: await docmosisView(db, conversationId, item) });
+}
+
+const NO_TEMPLATE = "the conversation has no such Docmosis template";
+
+/** A write is something in the chat, so the first one records the conversation's first content. */
+async function touchConversation(tx: Database, conversationId: string, now: Date, firstContent: boolean): Promise<void> {
+  await tx.$executeRaw`
+    UPDATE assistant_conversation
+       SET first_content_at = CASE WHEN ${firstContent} THEN COALESCE(first_content_at, ${now}) ELSE first_content_at END, updated_at = ${now}
+     WHERE id = ${conversationId}::uuid
+  `;
+}
+
+/**
+ * Makes a template with no version yet, to be written to at base 0 in the same transaction, so one that cannot be
+ * written leaves nothing behind. Refused when the conversation holds one already and its pod runs a client older than
+ * `items`, which would read only the primary (`ITEMS_CREATE_REFUSED_DOCMOSIS`). The conversation's row is locked by the caller.
+ */
+async function insertItem(tx: Database, conversation: Conversation): Promise<string> {
+  if ((await tx.assistantDocmosis.count({ where: { conversationId: conversation.id } })) > 0 && (await podLacksItems(tx, conversation))) {
+    throw new HttpError(409, ITEMS_CREATE_REFUSED_DOCMOSIS);
+  }
+  const row = await tx.assistantDocmosis.create({ data: { conversationId: conversation.id }, select: { id: true } });
+  return row.id;
 }
 
 /** A pick `writeAgentDocmosis` holds the job of, and what it records the version as. */
@@ -245,10 +298,10 @@ type WritingAgent = { virtualAgentId: string | null };
 /**
  * The `docmosis.load` job `pick` names, locked for the write's transaction, once it is pending and in its time, was
  * asked for in this conversation by its owner, on the virtual agent the conversation and the writing agent are still
- * on (`canRecordPickAsOwner`), and names a template. Refused otherwise (`pickRefused`), so a write naming somebody
+ * on (`canRecordPickAsOwner`), names a template, and targets the template the write is to (`item`, none for a new one). Refused otherwise (`pickRefused`), so a write naming somebody
  * else's pick, or one already used, writes nothing at all.
  */
-async function bindPick(tx: Database, conversation: Conversation, agent: WritingAgent, pick: string, now: Date): Promise<BoundPick> {
+async function bindPick(tx: Database, conversation: Conversation, agent: WritingAgent, pick: string, item: string | undefined, now: Date): Promise<BoundPick> {
   const job = await lockPendingPodJob(tx, pick, DOCMOSIS_LOAD_KIND, now);
   if (job === undefined || !canRecordPickAsOwner(job, conversation, agent)) {
     throw await pickRefused(tx, conversation, agent, pick);
@@ -257,13 +310,17 @@ async function bindPick(tx: Database, conversation: Conversation, agent: Writing
   if (!args.success) {
     throw new HttpError(400, "pick names a job that loads no template");
   }
+  if (args.data.item !== item) {
+    throw new HttpError(400, args.data.item === undefined ? "pick loads a new template, not into an existing one" : "pick loads into another template");
+  }
   return { job, path: args.data.path, blobSha: args.data.blob_sha };
 }
 
 /**
- * Writes a new version if `baseVersion` is still the template's version, and `baseRevision`, when given, its revision.
- * Otherwise `HttpError(409, {current})`; a .docx the hub does not hold is `HttpError(400, {missing_assets})` and
- * nothing is written. Announced.
+ * Writes a new version of template `item` if `baseVersion` is still its version, and `baseRevision`, when given, its
+ * revision. Without `item` it writes the primary, which a write at base 0 makes while there is none, and with `create`
+ * it makes a new template whatever the conversation holds (`insertItem`). Otherwise `HttpError(409, {current})`; a
+ * .docx the hub does not hold is `HttpError(400, {missing_assets})` and nothing is written. Announced.
  *
  * With `pick`, the version is the person's own pick from their template library rather than the agent's: written
  * `by: user` as the conversation's owner, with where it came from, and the pick's job finished in the same
@@ -273,33 +330,44 @@ async function bindPick(tx: Database, conversation: Conversation, agent: Writing
  */
 export async function writeAgentDocmosis(
   prisma: PrismaClient,
-  { conversationId, body, agent, now = new Date() }: { conversationId: string; body: DocmosisPut; agent?: WritingAgent; now?: Date }
-): Promise<{ version: number; revision: number }> {
+  {
+    conversationId,
+    item,
+    create = false,
+    body,
+    agent,
+    now = new Date()
+  }: { conversationId: string; item?: string; create?: boolean; body: DocmosisPut; agent?: WritingAgent; now?: Date }
+): Promise<{ id: string; version: number; revision: number }> {
   return await prisma.$transaction(async (tx) => {
     await lockConversation(tx, conversationId);
     const conversation = await conversationOf(tx, conversationId);
     const writer = agent ?? { virtualAgentId: null };
-    const pick = body.pick === undefined ? undefined : await bindPick(tx, conversation, writer, body.pick, now);
+    const pick = body.pick === undefined ? undefined : await bindPick(tx, conversation, writer, body.pick, item, now);
     const by: DocmosisAuthor = pick === undefined ? "agent" : "user";
     const summary = pick === undefined ? (body.summary ?? null) : loadedSummary(pick.path);
     const sha = docxSha(body.docx) ?? "";
+    const found = create ? undefined : await itemRow(tx, conversationId, item);
+    if (item !== undefined && found === undefined) {
+      throw new HttpError(404, NO_TEMPLATE);
+    }
+    const id = found?.id ?? (await insertItem(tx, conversation));
     const [moved] = await tx.$queryRaw<{ version: number }[]>`
-      UPDATE assistant_conversation
-         SET docmosis_version = docmosis_version + 1,
-             docmosis_revision = 0,
-             docmosis_name = ${body.name},
-             docmosis_updated_by = ${by},
-             docmosis_pdf_state = 'pending',
-             docmosis_updated_at = ${now},
-             first_content_at = COALESCE(first_content_at, ${now}),
+      UPDATE assistant_docmosis
+         SET version = version + 1,
+             revision = 0,
+             name = ${body.name},
+             updated_by = ${by},
+             pdf_state = 'pending',
              updated_at = ${now}
-       WHERE id = ${conversationId}::uuid AND docmosis_version = ${body.base_version}::int
-         AND (${body.base_revision ?? null}::int IS NULL OR docmosis_revision = ${body.base_revision ?? null}::int)
-      RETURNING docmosis_version AS version
+       WHERE id = ${id}::uuid AND version = ${body.base_version}::int
+         AND (${body.base_revision ?? null}::int IS NULL OR revision = ${body.base_revision ?? null}::int)
+      RETURNING version
     `;
     if (moved === undefined) {
-      throw await conflict(tx, conversationId);
+      throw await conflict(tx, conversationId, item);
     }
+    await touchConversation(tx, conversationId, now, true);
     const missing = () => new HttpError(400, `docx names a .docx the hub does not hold: ${body.docx}; upload it first`, { missing_assets: [body.docx] });
     if (pick === undefined) {
       if ((await tx.assistantDocmosisAsset.count({ where: { conversationId, sha256: sha } })) === 0) {
@@ -316,18 +384,18 @@ export async function writeAgentDocmosis(
     }
     await tx.$executeRaw`
       INSERT INTO assistant_docmosis_version
-        (conversation_id, version, revision, name, docx_sha256, schema, data, by, editor_oid, summary, source_path, source_blob_sha, updated_at)
-      VALUES (${conversationId}::uuid, ${moved.version}::int, 0, ${body.name}, ${sha}, ${JSON.stringify(body.schema)}::jsonb,
+        (conversation_id, item_id, version, revision, name, docx_sha256, schema, data, by, editor_oid, summary, source_path, source_blob_sha, updated_at)
+      VALUES (${conversationId}::uuid, ${id}::uuid, ${moved.version}::int, 0, ${body.name}, ${sha}, ${JSON.stringify(body.schema)}::jsonb,
               ${JSON.stringify(body.data)}::jsonb, ${by}, ${pick === undefined ? null : conversation.ownerOid}, ${summary},
               ${pick?.path ?? null}, ${pick?.blobSha ?? null}, ${now})
     `;
-    await prune(tx, conversationId, moved.version, now);
-    const written = { version: moved.version, revision: 0 };
+    await prune(tx, conversationId, id, moved.version, now);
+    const written = { item: id, version: moved.version, revision: 0 };
     if (pick !== undefined && !(await finishPodJob(tx, pick.job, written, now))) {
       throw await pickRefused(tx, conversation, writer, pick.job.id);
     }
     await announce(tx, conversation);
-    return written;
+    return { id, version: moved.version, revision: 0 };
   });
 }
 
@@ -342,12 +410,13 @@ export async function writeUserDocmosisData(
   prisma: PrismaClient,
   {
     conversationId,
+    item,
     editorOid,
     data,
     baseVersion,
     baseRevision,
     now = new Date()
-  }: { conversationId: string; editorOid: string; data: unknown; baseVersion: number; baseRevision: number; now?: Date }
+  }: { conversationId: string; item: string; editorOid: string; data: unknown; baseVersion: number; baseRevision: number; now?: Date }
 ): Promise<{ version: number; revision: number; name: string; docxSha256: string }> {
   const checked = checkDocmosisData(data);
   if (!checked.ok) {
@@ -357,15 +426,15 @@ export async function writeUserDocmosisData(
   return await prisma.$transaction(async (tx) => {
     const conversation = await conversationOf(tx, conversationId);
     await lockConversation(tx, conversationId);
-    const held = await tx.assistantConversation.findUnique({ where: { id: conversationId }, select: { docmosisVersion: true, docmosisRevision: true } });
-    if (held === null || held.docmosisVersion === 0) {
-      throw new HttpError(404, "the conversation has no Docmosis template");
+    const held = await itemRow(tx, conversationId, item);
+    if (held === undefined) {
+      throw new HttpError(404, NO_TEMPLATE);
     }
-    if (held.docmosisVersion !== baseVersion || held.docmosisRevision !== baseRevision) {
-      throw await conflict(tx, conversationId);
+    if (held.version !== baseVersion || held.revision !== baseRevision) {
+      throw await conflict(tx, conversationId, item);
     }
     const latest = await tx.assistantDocmosisVersion.findUniqueOrThrow({
-      where: { conversationId_version: { conversationId, version: baseVersion } },
+      where: { itemId_version: { itemId: held.id, version: baseVersion } },
       select: { by: true, editorOid: true, name: true, docxSha256: true }
     });
     if (latest.by === "user" && latest.editorOid === editorOid) {
@@ -373,30 +442,31 @@ export async function writeUserDocmosisData(
       await tx.$executeRaw`
         UPDATE assistant_docmosis_version
            SET data = ${stored}::jsonb, revision = ${revision}::int, pdf = NULL, render_error = NULL, updated_at = ${now}
-         WHERE conversation_id = ${conversationId}::uuid AND version = ${baseVersion}::int
+         WHERE item_id = ${item}::uuid AND version = ${baseVersion}::int
       `;
       await tx.$executeRaw`
-        UPDATE assistant_conversation
-           SET docmosis_revision = ${revision}::int, docmosis_pdf_state = 'pending', docmosis_updated_by = 'user', docmosis_updated_at = ${now}, updated_at = ${now}
-         WHERE id = ${conversationId}::uuid
+        UPDATE assistant_docmosis
+           SET revision = ${revision}::int, pdf_state = 'pending', updated_by = 'user', updated_at = ${now}
+         WHERE id = ${item}::uuid
       `;
-      await prune(tx, conversationId, baseVersion, now);
+      await touchConversation(tx, conversationId, now, false);
+      await prune(tx, conversationId, item, baseVersion, now);
       await announce(tx, conversation);
       return { version: baseVersion, revision, name: latest.name, docxSha256: latest.docxSha256 };
     }
     const version = baseVersion + 1;
     await tx.$executeRaw`
-      INSERT INTO assistant_docmosis_version (conversation_id, version, revision, name, docx_sha256, schema, data, by, editor_oid, summary, updated_at)
-      SELECT conversation_id, ${version}::int, 0, name, docx_sha256, schema, ${stored}::jsonb, 'user', ${editorOid}, ${EDITED_SUMMARY}, ${now}
-        FROM assistant_docmosis_version WHERE conversation_id = ${conversationId}::uuid AND version = ${baseVersion}::int
+      INSERT INTO assistant_docmosis_version (conversation_id, item_id, version, revision, name, docx_sha256, schema, data, by, editor_oid, summary, updated_at)
+      SELECT conversation_id, item_id, ${version}::int, 0, name, docx_sha256, schema, ${stored}::jsonb, 'user', ${editorOid}, ${EDITED_SUMMARY}, ${now}
+        FROM assistant_docmosis_version WHERE item_id = ${item}::uuid AND version = ${baseVersion}::int
     `;
     await tx.$executeRaw`
-      UPDATE assistant_conversation
-         SET docmosis_version = ${version}::int, docmosis_revision = 0, docmosis_name = ${latest.name}, docmosis_updated_by = 'user', docmosis_pdf_state = 'pending',
-             docmosis_updated_at = ${now}, updated_at = ${now}
-       WHERE id = ${conversationId}::uuid
+      UPDATE assistant_docmosis
+         SET version = ${version}::int, revision = 0, name = ${latest.name}, updated_by = 'user', pdf_state = 'pending', updated_at = ${now}
+       WHERE id = ${item}::uuid
     `;
-    await prune(tx, conversationId, version, now);
+    await touchConversation(tx, conversationId, now, false);
+    await prune(tx, conversationId, item, version, now);
     await announce(tx, conversation);
     return { version, revision: 0, name: latest.name, docxSha256: latest.docxSha256 };
   });
@@ -410,11 +480,12 @@ export async function storeDocmosisRender(
   prisma: PrismaClient,
   {
     conversationId,
+    item,
     version,
     revision,
     pdf,
     error
-  }: { conversationId: string; version: number; revision: number; pdf?: Uint8Array; error?: { short: string; long: string } }
+  }: { conversationId: string; item: string; version: number; revision: number; pdf?: Uint8Array; error?: { short: string; long: string } }
 ): Promise<boolean> {
   if (pdf !== undefined && (pdf.byteLength < 1 || pdf.byteLength > MAX_PDF_BYTES)) {
     throw new HttpError(413, `a PDF is 1 to ${MAX_PDF_BYTES} bytes`);
@@ -423,17 +494,17 @@ export async function storeDocmosisRender(
   return await prisma.$transaction(async (tx) => {
     const conversation = await conversationOf(tx, conversationId);
     await lockConversation(tx, conversationId);
-    const held = await tx.assistantConversation.findUnique({ where: { id: conversationId }, select: { docmosisVersion: true, docmosisRevision: true } });
-    if (held?.docmosisVersion !== version || held.docmosisRevision !== revision) {
+    const held = await itemRow(tx, conversationId, item);
+    if (held?.version !== version || held.revision !== revision) {
       return false;
     }
     await tx.$executeRaw`
       UPDATE assistant_docmosis_version
          SET pdf = ${pdf === undefined ? null : Buffer.from(pdf)}, render_error = ${errorJson}::jsonb
-       WHERE conversation_id = ${conversationId}::uuid AND version = ${version}::int
+       WHERE item_id = ${item}::uuid AND version = ${version}::int
     `;
     await tx.$executeRaw`
-      UPDATE assistant_conversation SET docmosis_pdf_state = ${pdf === undefined ? "failed" : "ready"} WHERE id = ${conversationId}::uuid
+      UPDATE assistant_docmosis SET pdf_state = ${pdf === undefined ? "failed" : "ready"} WHERE id = ${item}::uuid
     `;
     await announce(tx, conversation);
     return true;
@@ -441,13 +512,15 @@ export async function storeDocmosisRender(
 }
 
 /**
- * Stores a PDF for `version` when that version is kept, is one of the newest `KEEP_PDF`, and is still at `revision`:
+ * Stores a PDF for `version` of template `item`, or of the primary, when that version is kept, is one of the newest
+ * `KEEP_PDF` of its template, and is still at `revision`:
  * `"stored"`; `"gone"` when it is not kept or too old; `"stale"` when the person has amended it since, so the PDF was
  * rendered from data it no longer holds.
  */
 export async function putDocmosisPdf(
   prisma: PrismaClient,
   conversationId: string,
+  item: string | undefined,
   version: number,
   revision: number,
   bytes: Uint8Array
@@ -455,11 +528,15 @@ export async function putDocmosisPdf(
   return await prisma.$transaction(async (tx) => {
     const conversation = await conversationOf(tx, conversationId);
     await lockConversation(tx, conversationId);
-    const latest = await latestVersion(tx, conversationId);
+    const held = await itemRow(tx, conversationId, item);
+    if (held === undefined) {
+      return "gone";
+    }
+    const latest = held.version;
     if (version > latest || version <= latest - KEEP_PDF) {
       return "gone";
     }
-    const row = await versionRow(tx, conversationId, version);
+    const row = await versionRow(tx, held.id, version);
     if (row === undefined) {
       return "gone";
     }
@@ -468,10 +545,10 @@ export async function putDocmosisPdf(
     }
     await tx.$executeRaw`
       UPDATE assistant_docmosis_version SET pdf = ${Buffer.from(bytes)}, render_error = NULL
-       WHERE conversation_id = ${conversationId}::uuid AND version = ${version}::int
+       WHERE item_id = ${held.id}::uuid AND version = ${version}::int
     `;
     if (version === latest) {
-      await tx.$executeRaw`UPDATE assistant_conversation SET docmosis_pdf_state = 'ready' WHERE id = ${conversationId}::uuid`;
+      await tx.$executeRaw`UPDATE assistant_docmosis SET pdf_state = 'ready' WHERE id = ${held.id}::uuid`;
     }
     await announce(tx, conversation);
     return "stored";
@@ -479,13 +556,12 @@ export async function putDocmosisPdf(
 }
 
 /**
- * Makes room for `incoming` more bytes under `MAX_HELD_DOCX_BYTES` by deleting the oldest versions, never one of the
- * newest `KEEP_PDF`, and the .docx of each that no remaining version names, whatever its age: the grace is for an
+ * Makes room for `incoming` more bytes under `MAX_HELD_DOCX_BYTES` by deleting the oldest versions of the conversation's
+ * templates, never one of the newest `KEEP_PDF` of its template, and the .docx of each that no remaining version names, whatever its age: the grace is for an
  * upload no version has named yet, and one this frees was named. `keep` is the digest the write in hand names, which
  * is not freed. `false` when only the newest `KEEP_PDF` versions and uploads still in their grace would make room.
  */
 async function makeRoom(db: Database, conversationId: string, incoming: number, now: Date, keep: string): Promise<boolean> {
-  const latest = await latestVersion(db, conversationId);
   for (;;) {
     const [held] = await db.$queryRaw<{ bytes: bigint | null }[]>`
       SELECT SUM(octet_length(bytes))::bigint AS bytes FROM assistant_docmosis_asset WHERE conversation_id = ${conversationId}::uuid
@@ -495,9 +571,11 @@ async function makeRoom(db: Database, conversationId: string, incoming: number, 
     }
     const dropped = await db.$queryRaw<{ docx_sha256: string }[]>`
       DELETE FROM assistant_docmosis_version
-       WHERE conversation_id = ${conversationId}::uuid
-         AND version = (SELECT MIN(version) FROM assistant_docmosis_version WHERE conversation_id = ${conversationId}::uuid)
-         AND version <= ${latest - KEEP_PDF}::int
+       WHERE (item_id, version) = (
+         SELECT v.item_id, v.version FROM assistant_docmosis_version v JOIN assistant_docmosis d ON d.id = v.item_id
+          WHERE v.conversation_id = ${conversationId}::uuid AND v.version <= d.version - ${KEEP_PDF}::int
+          ORDER BY v.updated_at ASC, v.item_id ASC, v.version ASC LIMIT 1
+       )
       RETURNING docx_sha256
     `;
     const [gone] = dropped;
@@ -536,4 +614,22 @@ export async function putDocmosisAsset(prisma: PrismaClient, conversationId: str
     }
     await tx.assistantDocmosisAsset.create({ data: { conversationId, sha256, bytes: Buffer.from(bytes), createdAt: now } });
   });
+}
+
+/** Removes a template with its versions, and the .docx files no remaining version of the conversation names. */
+export async function removeDocmosisTemplate(prisma: PrismaClient, conversation: Conversation, item: string, now: Date = new Date()): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    await lockConversation(tx, conversation.id);
+    const { count } = await tx.assistantDocmosis.deleteMany({ where: { id: item, conversationId: conversation.id } });
+    if (count === 0) {
+      throw new HttpError(404, NO_TEMPLATE);
+    }
+    await deleteUnnamedAssets(tx, conversation.id, now);
+    await announce(tx, conversation);
+  });
+}
+
+/** One entry of `GET /docmosis-templates`: everything but the schema and data. */
+export function docmosisSummaryJson(summary: DocmosisSummary) {
+  return { id: summary.id, name: summary.name, version: summary.version, revision: summary.revision, updated_by: summary.updatedBy };
 }

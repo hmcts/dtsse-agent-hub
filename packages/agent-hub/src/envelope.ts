@@ -207,19 +207,54 @@ export type AssistantFrame = {
   deck_revision?: number | null;
   /** The newest kept version this session wrote, 0 when none is; null from a hub older than either. */
   deck_agent_version?: number | null;
+  /** Every deck, oldest first; null from a hub older than several decks. */
+  decks?: FrameDeck[] | null;
   /** The conversation's Docmosis template: its latest version and revision, and who wrote it. Absent before there is one. */
   docmosis_version?: number | null;
   docmosis_revision?: number | null;
   docmosis_updated_by?: string | null;
+  /** Every Docmosis template, oldest first; null from a hub older than several templates. */
+  docmosis_templates?: FrameDocmosisTemplate[] | null;
   /** The conversation's GOV.UK Notify template: its latest version and revision, and who wrote it. Absent before there is one. */
   notify_version?: number | null;
   notify_revision?: number | null;
   notify_updated_by?: string | null;
+  /** Every Notify template, oldest first; null from a hub older than several templates. */
+  notify_templates?: FrameNotifyTemplate[] | null;
   jira_export?: JiraExportFrame | null;
   github_export?: GithubExportFrame | null;
   confluence_export?: ConfluenceExportFrame | null;
   /** The files attached to this message. Absent from a hub with uploads off, or one older than them. */
   attachments?: unknown;
+};
+
+/** One of the conversation's Docmosis templates, as the frame lists them, without its schema and data. */
+export type FrameDocmosisTemplate = {
+  id: string;
+  name: string;
+  version: number;
+  revision: number;
+  updated_by: string | null;
+};
+
+/** One of the conversation's Notify templates, as the frame lists them, without its text. */
+export type FrameNotifyTemplate = {
+  id: string;
+  name: string;
+  version: number;
+  revision: number;
+  updated_by: string | null;
+};
+
+/** One of the conversation's slide decks, as the frame lists them, without its outline. */
+export type FrameDeck = {
+  id: string;
+  title: string;
+  version: number;
+  revision: number;
+  updated_by: string | null;
+  /** The newest kept version of this deck the session wrote, 0 when none is. */
+  agent_version: number;
 };
 
 /** One of the conversation's documents, as the frame lists them, without its markdown. */
@@ -453,6 +488,25 @@ export function deckChangedLine(assistant: AssistantFrame): string {
   return `The conversation's slide deck (version ${assistant.deck_version}${revision}) was last changed by the user, not by you; read it with \`${CLI} deck get\` before changing it, and build on their version.`;
 }
 
+/**
+ * What the session is told of the decks the person has changed: one line for each, by its id, or, from a hub that lists
+ * none, the one line about the conversation's only deck.
+ */
+export function deckChangedLines(assistant: AssistantFrame): string[] {
+  if (!assistant.decks) {
+    return assistant.deck_updated_by === "user" && (assistant.deck_version ?? 0) > 0 ? [deckChangedLine(assistant)] : [];
+  }
+  return assistant.decks
+    .filter((deck) => deck.updated_by === "user" && deck.version > 0)
+    .map((deck) => {
+      const name = `"${deck.title}" (${deck.id}, version ${deck.version}, revision ${deck.revision})`;
+      if (deck.agent_version > 0) {
+        return `The user has changed the slide deck ${name} since you last wrote it. Before changing anything, run \`${CLI} deck get --id ${deck.id} --diff-from ${deck.agent_version}\`, which writes their latest version for you to work on and prints what they changed since your version ${deck.agent_version}; then build on their version, keeping their changes.`;
+      }
+      return `The slide deck ${name} was last changed by the user, not by you; read it with \`${CLI} deck get --id ${deck.id}\` before changing it, and build on their version.`;
+    });
+}
+
 /** The tag of the block of context a conversation's prompt carries ahead of the person's words. */
 export const CONTEXT_TAG = "cft-workspace-context";
 
@@ -507,9 +561,41 @@ export function docmosisChangedLine(assistant: AssistantFrame): string {
   return `The user has changed the conversation's template data (version ${assistant.docmosis_version}). Read it with \`${CLI} docmosis get\` before changing the template.`;
 }
 
-/** The same for the Notify template: the person edited its draft or personalisation, or loaded another template, in the web UI. */
-export function notifyChangedLine(assistant: AssistantFrame): string {
-  return `The user has changed the conversation's Notify template (version ${assistant.notify_version}). Read it with \`${CLI} notify get\` before changing it.`;
+/**
+ * The same for the Docmosis templates: one line for each the person changed, by its id, or, from a hub that lists none,
+ * the one line about the conversation's only template.
+ */
+export function docmosisChangedLines(assistant: AssistantFrame): string[] {
+  if (!assistant.docmosis_templates) {
+    return assistant.docmosis_updated_by === "user" && (assistant.docmosis_version ?? 0) > 0 ? [docmosisChangedLine(assistant)] : [];
+  }
+  return assistant.docmosis_templates
+    .filter((template) => template.updated_by === "user" && template.version > 0)
+    .map(
+      (template) =>
+        `The user has changed the data of the Docmosis template "${template.name}" (${template.id}, version ${template.version}). Read it with \`${CLI} docmosis get --id ${template.id}\` before changing the template.`
+    );
+}
+
+/**
+ * The same for the Notify templates: the person edited a draft or its personalisation, or loaded another template, in
+ * the web UI. One line for each, by its id, or, from a hub that lists none, the one line about the conversation's only
+ * template.
+ */
+export function notifyChangedLines(assistant: AssistantFrame): string[] {
+  if (!assistant.notify_templates) {
+    return assistant.notify_updated_by === "user" && (assistant.notify_version ?? 0) > 0
+      ? [
+          `The user has changed the conversation's Notify template (version ${assistant.notify_version}). Read it with \`${CLI} notify get\` before changing it.`
+        ]
+      : [];
+  }
+  return assistant.notify_templates
+    .filter((template) => template.updated_by === "user" && template.version > 0)
+    .map(
+      (template) =>
+        `The user has changed the Notify template "${template.name}" (${template.id}, version ${template.version}). Read it with \`${CLI} notify get --id ${template.id}\` before changing it.`
+    );
 }
 
 /**
@@ -531,15 +617,9 @@ export function assistantContextLines(
   if (assistant !== null) {
     lines.push(...productLines(assistant, previousProduct));
     lines.push(...documentChangedLines(assistant));
-    if (assistant.deck_updated_by === "user" && (assistant.deck_version ?? 0) > 0) {
-      lines.push(deckChangedLine(assistant));
-    }
-    if (assistant.docmosis_updated_by === "user" && (assistant.docmosis_version ?? 0) > 0) {
-      lines.push(docmosisChangedLine(assistant));
-    }
-    if (assistant.notify_updated_by === "user" && (assistant.notify_version ?? 0) > 0) {
-      lines.push(notifyChangedLine(assistant));
-    }
+    lines.push(...deckChangedLines(assistant));
+    lines.push(...docmosisChangedLines(assistant));
+    lines.push(...notifyChangedLines(assistant));
   }
   lines.push(...attachmentLines(attachments));
   if (assistant?.jira_export) {

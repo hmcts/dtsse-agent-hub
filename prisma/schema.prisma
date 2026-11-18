@@ -533,32 +533,33 @@ model AssistantConversation {
   /// user or agent.
   artefactUpdatedBy String?   @map("artefact_updated_by") @ignore
   artefactUpdatedAt DateTime? @map("artefact_updated_at") @db.Timestamptz(6) @ignore
-  /// The latest version of the conversation's slide deck, 0 before there is one. See src/assistant/deck-store.ts.
-  deckVersion       Int       @default(0) @map("deck_version")
-  deckTitle         String?   @map("deck_title")
+  /// The deck_*, docmosis_* and notify_* columns are not read or written by the app: the decks and templates are in
+  /// assistant_deck, assistant_docmosis and assistant_notify, and a later migration drops them.
+  deckVersion       Int       @default(0) @map("deck_version") @ignore
+  deckTitle         String?   @map("deck_title") @ignore
   /// user or agent.
-  deckUpdatedBy     String?   @map("deck_updated_by")
-  deckUpdatedAt     DateTime? @map("deck_updated_at") @db.Timestamptz(6)
+  deckUpdatedBy     String?   @map("deck_updated_by") @ignore
+  deckUpdatedAt     DateTime? @map("deck_updated_at") @db.Timestamptz(6) @ignore
   /// Moved on by every write of the outline, an amend of the latest version included. See "Revisions" in docs/agent-api.md.
-  deckRevision      Int       @default(0) @map("deck_revision")
+  deckRevision      Int       @default(0) @map("deck_revision") @ignore
   /// The latest version of the conversation's Docmosis template, 0 before there is one. See src/assistant/docmosis-store.ts.
-  docmosisVersion   Int       @default(0) @map("docmosis_version")
+  docmosisVersion   Int       @default(0) @map("docmosis_version") @ignore
   /// The latest version's revision: the person's amends of its data.
-  docmosisRevision  Int       @default(0) @map("docmosis_revision")
-  docmosisName      String?   @map("docmosis_name")
+  docmosisRevision  Int       @default(0) @map("docmosis_revision") @ignore
+  docmosisName      String?   @map("docmosis_name") @ignore
   /// user or agent.
-  docmosisUpdatedBy String?   @map("docmosis_updated_by")
-  docmosisUpdatedAt DateTime? @map("docmosis_updated_at") @db.Timestamptz(6)
+  docmosisUpdatedBy String?   @map("docmosis_updated_by") @ignore
+  docmosisUpdatedAt DateTime? @map("docmosis_updated_at") @db.Timestamptz(6) @ignore
   /// Whether the latest version has a PDF (ready), a render_error (failed) or neither (pending); kept by every write so the page summary moves with it.
-  docmosisPdfState  String    @default("pending") @map("docmosis_pdf_state")
+  docmosisPdfState  String    @default("pending") @map("docmosis_pdf_state") @ignore
   /// The latest version of the conversation's GOV.UK Notify template, 0 before there is one. See src/assistant/notify-store.ts.
-  notifyVersion     Int       @default(0) @map("notify_version")
+  notifyVersion     Int       @default(0) @map("notify_version") @ignore
   /// The latest version's revision: the person's amends of it.
-  notifyRevision    Int       @default(0) @map("notify_revision")
-  notifyName        String?   @map("notify_name")
+  notifyRevision    Int       @default(0) @map("notify_revision") @ignore
+  notifyName        String?   @map("notify_name") @ignore
   /// user or agent.
-  notifyUpdatedBy   String?   @map("notify_updated_by")
-  notifyUpdatedAt   DateTime? @map("notify_updated_at") @db.Timestamptz(6)
+  notifyUpdatedBy   String?   @map("notify_updated_by") @ignore
+  notifyUpdatedAt   DateTime? @map("notify_updated_at") @db.Timestamptz(6) @ignore
   /// How many journey videos the conversation has finished, 0 before there is one. The ready video is its latest.
   videoVersion      Int       @default(0) @map("video_version")
   videoName         String?   @map("video_name")
@@ -625,6 +626,9 @@ model AssistantConversation {
   forks        AssistantConversationFork[]
   forkedFrom   AssistantConversation?  @relation("forkedFrom", fields: [forkedFromId], references: [id], onDelete: SetNull)
   copies       AssistantConversation[] @relation("forkedFrom")
+  decks         AssistantDeck[]
+  docmosisItems AssistantDocmosis[]
+  notifyItems   AssistantNotify[]
   deckVersions AssistantDeckVersion[]
   deckAssets   AssistantDeckAsset[]
   deckBuilds   AssistantDeckBuild[]
@@ -693,8 +697,75 @@ model AssistantDocument {
   @@map("assistant_document")
 }
 
-/// One version of a conversation's slide deck outline. The latest 100 are kept, and the latest 3 keep their .pptx.
+/// One of a conversation's slide decks, with its latest version's summary; the oldest is the primary. See src/assistant/deck-store.ts.
+model AssistantDeck {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversationId String    @map("conversation_id") @db.Uuid
+  /// The latest version, 0 only inside the transaction that makes it.
+  version        Int       @default(0)
+  /// The latest version's revision: the person's amends of it.
+  revision       Int       @default(0)
+  title          String?
+  /// user or agent.
+  updatedBy      String?   @map("updated_by")
+  updatedAt      DateTime? @map("updated_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  conversation AssistantConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  versions     AssistantDeckVersion[]
+  builds       AssistantDeckBuild[]
+
+  @@index([conversationId, createdAt], map: "assistant_deck_conversation_idx")
+  @@map("assistant_deck")
+}
+
+/// One of a conversation's Docmosis templates, with its latest version's summary; the oldest is the primary. See src/assistant/docmosis-store.ts.
+model AssistantDocmosis {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversationId String    @map("conversation_id") @db.Uuid
+  /// The latest version, 0 only inside the transaction that makes it.
+  version        Int       @default(0)
+  /// The latest version's revision: the person's amends of it.
+  revision       Int       @default(0)
+  name           String?
+  /// user or agent.
+  updatedBy      String?   @map("updated_by")
+  updatedAt      DateTime? @map("updated_at") @db.Timestamptz(6)
+  /// Whether the latest version has a PDF (ready), a render_error (failed) or neither (pending); kept by every write so the page summary moves with it.
+  pdfState       String    @default("pending") @map("pdf_state")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  conversation AssistantConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  versions     AssistantDocmosisVersion[]
+
+  @@index([conversationId, createdAt], map: "assistant_docmosis_conversation_idx")
+  @@map("assistant_docmosis")
+}
+
+/// One of a conversation's GOV.UK Notify templates, with its latest version's summary; the oldest is the primary. See src/assistant/notify-store.ts.
+model AssistantNotify {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversationId String    @map("conversation_id") @db.Uuid
+  /// The latest version, 0 only inside the transaction that makes it.
+  version        Int       @default(0)
+  /// The latest version's revision: the person's amends of it.
+  revision       Int       @default(0)
+  name           String?
+  /// user or agent.
+  updatedBy      String?   @map("updated_by")
+  updatedAt      DateTime? @map("updated_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  conversation AssistantConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  versions     AssistantNotifyVersion[]
+
+  @@index([conversationId, createdAt], map: "assistant_notify_conversation_idx")
+  @@map("assistant_notify")
+}
+
+/// One version of a slide deck's outline. The latest 100 are kept, and the latest 3 keep their .pptx.
 model AssistantDeckVersion {
+  itemId         String   @map("item_id") @db.Uuid
   conversationId String   @map("conversation_id") @db.Uuid
   version        Int
   /// The outline, in src/assistant/deck.ts's shape.
@@ -710,13 +781,15 @@ model AssistantDeckVersion {
   updatedAt      DateTime? @map("updated_at") @db.Timestamptz(6)
 
   conversation AssistantConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  item         AssistantDeck @relation(fields: [itemId], references: [id], onDelete: Cascade)
 
-  @@id([conversationId, version])
+  @@id([itemId, version])
   @@map("assistant_deck_version")
 }
 
 /// One version of a conversation's Docmosis template. The latest 50 are kept, and the latest 10 keep their PDF.
 model AssistantDocmosisVersion {
+  itemId         String   @map("item_id") @db.Uuid
   conversationId String    @map("conversation_id") @db.Uuid
   version        Int
   /// The person's amends of this version's data.
@@ -740,8 +813,9 @@ model AssistantDocmosisVersion {
   sourceBlobSha  String?   @map("source_blob_sha")
 
   conversation AssistantConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  item         AssistantDocmosis @relation(fields: [itemId], references: [id], onDelete: Cascade)
 
-  @@id([conversationId, version])
+  @@id([itemId, version])
   @@map("assistant_docmosis_version")
 }
 
@@ -813,6 +887,7 @@ model AssistantVideo {
 
 /// One version of a conversation's GOV.UK Notify template draft. The latest 50 are kept.
 model AssistantNotifyVersion {
+  itemId         String   @map("item_id") @db.Uuid
   conversationId String   @map("conversation_id") @db.Uuid
   version        Int
   /// The person's amends of this version.
@@ -842,8 +917,9 @@ model AssistantNotifyVersion {
   updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
 
   conversation AssistantConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  item         AssistantNotify @relation(fields: [itemId], references: [id], onDelete: Cascade)
 
-  @@id([conversationId, version])
+  @@id([itemId, version])
   @@map("assistant_notify_version")
 }
 
@@ -880,6 +956,7 @@ model AssistantDeckAsset {
 /// one pending per (conversation, version): a partial unique index in the migration, which this schema cannot express.
 model AssistantDeckBuild {
   id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  itemId         String    @map("item_id") @db.Uuid
   conversationId String    @map("conversation_id") @db.Uuid
   version        Int
   /// pending, done, failed or timeout.
@@ -890,8 +967,9 @@ model AssistantDeckBuild {
   finishedAt     DateTime? @map("finished_at") @db.Timestamptz(6)
 
   conversation AssistantConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  item         AssistantDeck         @relation(fields: [itemId], references: [id], onDelete: Cascade)
 
-  @@index([conversationId, version, createdAt(sort: Desc)], map: "assistant_deck_build_conversation_idx")
+  @@index([itemId, version, createdAt(sort: Desc)], map: "assistant_deck_build_item_idx")
   @@index([createdAt], map: "assistant_deck_build_created_at_idx")
   @@map("assistant_deck_build")
 }

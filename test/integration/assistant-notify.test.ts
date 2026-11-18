@@ -1,8 +1,20 @@
 import { describe, expect, it, vi } from "vitest";
 import * as notifyRoute from "../../src/app/api/agent/[agentId]/notify/route.ts";
+import { DELETE as deleteItem, GET as getItem, PUT as putItem } from "../../src/app/api/agent/[agentId]/notify-templates/[itemId]/route.ts";
+import { GET as getList, POST as postList } from "../../src/app/api/agent/[agentId]/notify-templates/route.ts";
 import { assistantFrame } from "../../src/assistant/frame.ts";
-import { KEEP_NOTIFY_VERSIONS, type NotifyPut, type NotifySource } from "../../src/assistant/notify.ts";
-import { listNotifyVersions, notifySummary, notifyView, writeAgentNotify, writeUserNotify } from "../../src/assistant/notify-store.ts";
+import { ITEMS_CREATE_REFUSED_NOTIFY, KEEP_NOTIFY_VERSIONS, type NotifyPut, type NotifySource } from "../../src/assistant/notify.ts";
+import { NOTIFY_PULL } from "../../src/assistant/notify-jobs.ts";
+import {
+  listNotifySummaries,
+  listNotifyVersions,
+  type NotifyTarget,
+  notifyView,
+  primaryNotifyView,
+  readPrimaryNotifyId,
+  writeAgentNotify,
+  writeUserNotify
+} from "../../src/assistant/notify-store.ts";
 import { sharedConversation } from "../../src/assistant/sharing.ts";
 import { conversationView } from "../../src/assistant/views.ts";
 import { notifyAccess, notifyVersions, readableNotify } from "../../src/web/data.ts";
@@ -42,16 +54,29 @@ const put = (overrides: Partial<NotifyPut> = {}): NotifyPut => ({
   ...overrides
 });
 
-const agentWrite = (of: Chat, overrides: Partial<NotifyPut> = {}) => writeAgentNotify(prisma, { conversationId: of.id, body: put(overrides) });
+/** A session's write of the primary template, or of `target`, without the id the store also answers. */
+async function agentWrite(of: Chat, overrides: Partial<NotifyPut> = {}, target: NotifyTarget = "primary") {
+  const { version, revision } = await writeAgentNotify(prisma, { conversationId: of.id, target, body: put(overrides) });
+  return { version, revision };
+}
 
-const personSave = (
+/** A new template, whatever the conversation holds, answered by its id. */
+async function newTemplate(of: Chat, overrides: Partial<NotifyPut> = {}): Promise<string> {
+  return (await writeAgentNotify(prisma, { conversationId: of.id, target: "new", body: put(overrides) })).id;
+}
+
+const primaryId = async (of: Chat): Promise<string> => (await readPrimaryNotifyId(prisma, of.id)) as string;
+
+const personSave = async (
   of: Chat,
   change: { subject?: string | null; body?: string; data?: unknown },
   base: { version: number; revision: number },
-  editorOid = ALICE.oid
+  editorOid = ALICE.oid,
+  itemId?: string
 ) =>
-  writeUserNotify(prisma, {
+  await writeUserNotify(prisma, {
     conversationId: of.id,
+    itemId: itemId ?? (await readPrimaryNotifyId(prisma, of.id)) ?? "00000000-0000-4000-8000-000000000000",
     editorOid,
     subject: change.subject === undefined ? SOURCE.notify_subject : change.subject,
     body: change.body ?? SOURCE.notify_body,
@@ -132,10 +157,10 @@ describe("the notify store", () => {
     expect(await agentWrite(mine)).toEqual({ version: 1, revision: 0 });
     expect(await agentWrite(mine, { base_version: 1, base_revision: 0, source: undefined, body: "Edited" })).toEqual({ version: 2, revision: 0 });
 
-    const row = await prisma.assistantConversation.findUniqueOrThrow({ where: { id: mine.id } });
-    expect(row).toMatchObject({ notifyVersion: 2, notifyRevision: 0, notifyName: "Claim received", notifyUpdatedBy: "agent" });
-    expect(row.firstContentAt).not.toBeNull();
-    expect(await listNotifyVersions(prisma, mine.id)).toMatchObject([
+    const row = await prisma.assistantNotify.findFirstOrThrow({ where: { conversationId: mine.id } });
+    expect(row).toMatchObject({ version: 2, revision: 0, name: "Claim received", updatedBy: "agent" });
+    expect((await prisma.assistantConversation.findUniqueOrThrow({ where: { id: mine.id } })).firstContentAt).not.toBeNull();
+    expect(await listNotifyVersions(prisma, row.id)).toMatchObject([
       { version: 2, by: "agent", name: "Claim received", notify_version: 4 },
       { version: 1, by: "agent" }
     ]);
@@ -147,7 +172,7 @@ describe("the notify store", () => {
 
     await agentWrite(mine, { by: "user" });
 
-    expect(await notifyView(prisma, mine.id)).toMatchObject({ version: 1, by: "user" });
+    expect(await primaryNotifyView(prisma, mine.id)).toMatchObject({ version: 1, by: "user" });
     expect(await assistantFrame(prisma, mine.agentId)).toMatchObject({ notify_version: 1, notify_updated_by: "user" });
     expect(await personSave(mine, { body: "Mine" }, { version: 1, revision: 0 })).toEqual({ version: 2, revision: 0, amended: false });
   });
@@ -159,9 +184,9 @@ describe("the notify store", () => {
 
     await agentWrite(mine, { base_version: 1, subject: null, body: "Hi", source: other });
 
-    expect(await notifyView(prisma, mine.id)).toMatchObject({ version: 2, type: "sms", name: "Reminder", subject: null });
-    expect(await notifyView(prisma, mine.id, 1)).toMatchObject({ type: "email", name: "Claim received" });
-    expect((await prisma.assistantConversation.findUniqueOrThrow({ where: { id: mine.id } })).notifyName).toBe("Reminder");
+    expect(await primaryNotifyView(prisma, mine.id)).toMatchObject({ version: 2, type: "sms", name: "Reminder", subject: null });
+    expect(await primaryNotifyView(prisma, mine.id, 1)).toMatchObject({ type: "email", name: "Claim received" });
+    expect((await prisma.assistantNotify.findFirstOrThrow({ where: { conversationId: mine.id } })).name).toBe("Reminder");
   });
 
   it("should refuse a stale version or revision with the current one, and write nothing", async () => {
@@ -171,12 +196,14 @@ describe("the notify store", () => {
 
     const staleVersion = await conflictOf(agentWrite(mine, { base_version: 1 }));
     const staleRevision = await conflictOf(agentWrite(mine, { base_version: 2, base_revision: 1 }));
-    const none = await conflictOf(writeAgentNotify(prisma, { conversationId: (await chat()).id, body: put({ base_version: 3 }) }));
+    const empty = await chat();
+    const none = await conflictOf(writeAgentNotify(prisma, { conversationId: empty.id, target: "primary", body: put({ base_version: 3 }) }));
 
     expect(staleVersion).toMatchObject({ version: 2, revision: 0, by: "user" });
     expect(staleRevision).toMatchObject({ version: 2 });
     expect(none).toBeNull();
-    expect((await prisma.assistantConversation.findUniqueOrThrow({ where: { id: mine.id } })).notifyVersion).toBe(2);
+    expect((await prisma.assistantNotify.findFirstOrThrow({ where: { conversationId: mine.id } })).version).toBe(2);
+    expect(await prisma.assistantNotify.count({ where: { conversationId: empty.id } })).toBe(0);
   });
 
   it("should refuse an edit whose subject does not fit the template it keeps", async () => {
@@ -207,7 +234,7 @@ describe("the notify store", () => {
       amended: true
     });
 
-    expect(await notifyView(prisma, mine.id)).toMatchObject({
+    expect(await primaryNotifyView(prisma, mine.id)).toMatchObject({
       version: 2,
       revision: 1,
       by: "user",
@@ -216,9 +243,9 @@ describe("the notify store", () => {
       summary: "Edited the template",
       ...SOURCE
     });
-    expect(await listNotifyVersions(prisma, mine.id)).toHaveLength(2);
+    expect(await listNotifyVersions(prisma, await primaryId(mine))).toHaveLength(2);
     expect(await assistantFrame(prisma, mine.agentId)).toMatchObject({ notify_version: 2, notify_revision: 1, notify_updated_by: "user" });
-    expect(await notifyView(prisma, mine.id, 1)).toMatchObject({ body: "Dear ((name))", by: "agent" });
+    expect(await primaryNotifyView(prisma, mine.id, 1)).toMatchObject({ body: "Dear ((name))", by: "agent" });
   });
 
   it("should copy the source into a new user version when the latest is the session's or another person's", async () => {
@@ -227,7 +254,7 @@ describe("the notify store", () => {
     await personSave(mine, { body: "Bob's" }, { version: 1, revision: 0 }, BOB.oid);
 
     expect(await personSave(mine, { body: "Alice's" }, { version: 2, revision: 0 }, ALICE.oid)).toEqual({ version: 3, revision: 0, amended: false });
-    expect(await notifyView(prisma, mine.id, 3)).toMatchObject({ ...SOURCE, by: "user", body: "Alice's" });
+    expect(await primaryNotifyView(prisma, mine.id, 3)).toMatchObject({ ...SOURCE, by: "user", body: "Alice's" });
   });
 
   it("should refuse a person's save from a stale base, from a conversation with none, and of data it cannot hold", async () => {
@@ -245,7 +272,8 @@ describe("the notify store", () => {
     const results = await Promise.allSettled([agentWrite(mine), agentWrite(mine)]);
 
     expect(results.map((result) => result.status).sort((a, b) => a.localeCompare(b))).toEqual(["fulfilled", "rejected"]);
-    expect((await prisma.assistantConversation.findUniqueOrThrow({ where: { id: mine.id } })).notifyVersion).toBe(1);
+    expect((await prisma.assistantNotify.findFirstOrThrow({ where: { conversationId: mine.id } })).version).toBe(1);
+    expect(await prisma.assistantNotify.count({ where: { conversationId: mine.id } })).toBe(1);
   });
 
   it("should keep the latest versions alone", async () => {
@@ -254,11 +282,11 @@ describe("the notify store", () => {
       await agentWrite(mine, { base_version: version, body: `v${version + 1}` });
     }
 
-    const kept = await listNotifyVersions(prisma, mine.id);
+    const kept = await listNotifyVersions(prisma, await primaryId(mine));
     expect(kept).toHaveLength(KEEP_NOTIFY_VERSIONS);
     expect(kept[0]?.version).toBe(KEEP_NOTIFY_VERSIONS + 2);
     expect(kept.at(-1)?.version).toBe(3);
-    expect(await notifyView(prisma, mine.id, 2)).toBeNull();
+    expect(await primaryNotifyView(prisma, mine.id, 2)).toBeNull();
   });
 
   it("should refuse what the migration's checks refuse even when a caller skips the body's checks", async () => {
@@ -273,11 +301,11 @@ describe("the notify store", () => {
     await agentWrite(mine);
     const row = await prisma.assistantConversation.findUniqueOrThrow({ where: { id: mine.id } });
 
-    const summary = { name: "Claim received", version: 1, revision: 0, updatedBy: "agent" };
-    expect(notifySummary(row)).toEqual(summary);
-    expect((await conversationView(prisma, row as never, mine.agentId)).notify).toEqual(summary);
-    expect((await sharedConversation(prisma, row as never, "reader"))?.notify).toEqual(summary);
-    expect(notifySummary({ notifyName: null, notifyVersion: 0, notifyRevision: 0, notifyUpdatedBy: null })).toBeNull();
+    const summary = { id: await primaryId(mine), name: "Claim received", version: 1, revision: 0, updatedBy: "agent" };
+    expect(await listNotifySummaries(prisma, mine.id)).toEqual([summary]);
+    expect((await conversationView(prisma, row as never, mine.agentId)).notifyTemplates).toEqual([summary]);
+    expect((await sharedConversation(prisma, row as never, "reader"))?.notifyTemplates).toEqual([summary]);
+    expect(await listNotifySummaries(prisma, (await chat()).id)).toEqual([]);
   });
 
   it("should delete the template with the conversation", async () => {
@@ -287,6 +315,7 @@ describe("the notify store", () => {
     await prisma.assistantConversation.delete({ where: { id: mine.id } });
 
     expect(await prisma.assistantNotifyVersion.count({ where: { conversationId: mine.id } })).toBe(0);
+    expect(await prisma.assistantNotify.count({ where: { conversationId: mine.id } })).toBe(0);
   });
 });
 
@@ -296,20 +325,259 @@ describe("who may read and change the Notify template", () => {
     await agentWrite(mine);
     await prisma.assistantConversationShare.create({ data: { conversationId: mine.id, recipientOid: BOB.oid, sharedByOid: ALICE.oid } });
 
-    expect(await notifyAccess(viewerOf(ALICE), mine.id)).toBe("owner");
-    expect(await notifyAccess(viewerOf(BOB), mine.id)).toBe("reader");
-    expect(await notifyAccess(viewerOf(CAROL), mine.id)).toBeUndefined();
-    expect(await readableNotify(viewerOf(BOB), mine.id)).toMatchObject({ version: 1 });
-    expect(await readableNotify(viewerOf(BOB), mine.id, 1)).toMatchObject({ version: 1 });
-    expect(await readableNotify(viewerOf(CAROL), mine.id)).toBeUndefined();
-    expect(await notifyVersions(viewerOf(BOB), mine.id)).toHaveLength(1);
-    expect(await notifyVersions(viewerOf(CAROL), mine.id)).toBeUndefined();
+    const item = await primaryId(mine);
+
+    expect(await notifyAccess(viewerOf(ALICE), mine.id, item)).toBe("owner");
+    expect(await notifyAccess(viewerOf(BOB), mine.id, item)).toBe("reader");
+    expect(await notifyAccess(viewerOf(CAROL), mine.id, item)).toBeUndefined();
+    expect(await readableNotify(viewerOf(BOB), mine.id, item)).toMatchObject({ version: 1 });
+    expect(await readableNotify(viewerOf(BOB), mine.id, item, 1)).toMatchObject({ version: 1 });
+    expect(await readableNotify(viewerOf(CAROL), mine.id, item)).toBeUndefined();
+    expect(await notifyVersions(viewerOf(BOB), mine.id, item)).toHaveLength(1);
+    expect(await notifyVersions(viewerOf(CAROL), mine.id, item)).toBeUndefined();
+  });
+
+  it("should let a reader see every template of the chat, and refuse an id that is another chat's or not an id", async () => {
+    const mine = await chat();
+    const other = await chat();
+    await agentWrite(other);
+    await agentWrite(mine);
+    const second = await newTemplate(mine, { source: { ...SOURCE, name: "Second" } });
+    await prisma.assistantConversationShare.create({ data: { conversationId: mine.id, recipientOid: BOB.oid, sharedByOid: ALICE.oid } });
+
+    expect(await notifyAccess(viewerOf(BOB), mine.id, second)).toBe("reader");
+    expect(await notifyAccess(viewerOf(ALICE), mine.id, await primaryId(other))).toBeUndefined();
+    expect(await notifyAccess(viewerOf(ALICE), mine.id, "not-an-id")).toBeUndefined();
+    const shared = await sharedConversation(prisma, (await prisma.assistantConversation.findUniqueOrThrow({ where: { id: mine.id } })) as never, "reader");
+    expect(shared?.notifyTemplates.map((template) => template.name)).toEqual(["Claim received", "Second"]);
   });
 
   it("should answer nothing to read for a chat with no Notify template", async () => {
     const mine = await chat();
 
-    expect(await readableNotify(viewerOf(ALICE), mine.id)).toBeUndefined();
-    expect(await notifyVersions(viewerOf(ALICE), mine.id)).toBeUndefined();
+    expect(await readableNotify(viewerOf(ALICE), mine.id, "00000000-0000-4000-8000-000000000000")).toBeUndefined();
+    expect(await notifyVersions(viewerOf(ALICE), mine.id, "00000000-0000-4000-8000-000000000000")).toBeUndefined();
+  });
+});
+
+const OTHER_SOURCE: NotifySource = {
+  ...SOURCE,
+  template_id: "ab1f3d4a-0000-4000-8000-000000000003",
+  type: "sms",
+  name: "Hearing reminder",
+  notify_subject: null
+};
+const otherPut = (overrides: Partial<NotifyPut> = {}): Partial<NotifyPut> => ({
+  subject: null,
+  body: "Your hearing is on ((date))",
+  source: OTHER_SOURCE,
+  ...overrides
+});
+
+async function itemCall(method: "GET" | "PUT" | "DELETE", of: Chat, id: string, query = "", body?: unknown): Promise<Response> {
+  const request = new Request(`http://localhost:3000/api/agent/${of.agentId}/notify-templates/${id}${query}`, {
+    method,
+    headers: { "x-dev-user": devUser(ALICE), ...(body === undefined ? {} : { "content-type": "application/json" }) },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) })
+  });
+  return await (method === "GET" ? getItem : method === "PUT" ? putItem : deleteItem)(request, {
+    params: Promise.resolve({ agentId: of.agentId, itemId: id })
+  });
+}
+
+async function listCall(method: "GET" | "POST", of: Chat, body?: unknown): Promise<Response> {
+  const request = new Request(`http://localhost:3000/api/agent/${of.agentId}/notify-templates`, {
+    method,
+    headers: { "x-dev-user": devUser(ALICE), ...(body === undefined ? {} : { "content-type": "application/json" }) },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) })
+  });
+  return await (method === "GET" ? getList : postList)(request, { params: Promise.resolve({ agentId: of.agentId }) });
+}
+
+describe("several Notify templates in one conversation", () => {
+  it("should list them oldest first, and keep the single route on the oldest, which the first write makes", async () => {
+    const mine = await chat();
+    const created = await listCall("POST", mine, put());
+    const secondCreated = await listCall("POST", mine, { ...put(), ...otherPut() });
+
+    expect(created.status).toBe(201);
+    const first = (await jsonOf(created)) as { id: string; version: number; revision: number };
+    const second = (await jsonOf(secondCreated)) as { id: string };
+    expect(first).toMatchObject({ version: 1, revision: 0 });
+    expect(await jsonOf(await listCall("GET", mine))).toEqual({
+      notify_templates: [
+        { id: first.id, name: "Claim received", version: 1, revision: 0, updated_by: "agent" },
+        { id: second.id, name: "Hearing reminder", version: 1, revision: 0, updated_by: "agent" }
+      ]
+    });
+    expect(await jsonOf(await agent("GET", mine))).toMatchObject({ name: "Claim received" });
+    expect(await jsonOf(await agent("PUT", mine, "", { subject: "Edited", body: "Edited", data: {}, base_version: 1 }))).toEqual({ version: 2, revision: 0 });
+    expect(await jsonOf(await itemCall("GET", mine, second.id))).toMatchObject({ name: "Hearing reminder", version: 1 });
+    expect(await jsonOf(await itemCall("GET", mine, first.id))).toMatchObject({ version: 2, body: "Edited" });
+  });
+
+  it("should write, read at a version and conflict on one template without touching another", async () => {
+    const mine = await chat();
+    const first = await newTemplate(mine);
+    const second = await newTemplate(mine, otherPut());
+
+    const written = await itemCall("PUT", mine, second, "", { subject: null, body: "Moved", data: {}, base_version: 1 });
+    const stale = await itemCall("PUT", mine, second, "", { subject: null, body: "Again", data: {}, base_version: 1 });
+    const older = await itemCall("GET", mine, second, "?version=1");
+    const bad = await itemCall("GET", mine, second, "?version=0");
+
+    expect(await jsonOf(written)).toEqual({ version: 2, revision: 0 });
+    expect(stale.status).toBe(409);
+    expect(await jsonOf(stale)).toMatchObject({ current: { version: 2, body: "Moved" } });
+    expect(await jsonOf(older)).toMatchObject({ version: 1, body: "Your hearing is on ((date))", current_version: 2 });
+    expect(bad.status).toBe(400);
+    expect(await jsonOf(await itemCall("GET", mine, first))).toMatchObject({ version: 1 });
+  });
+
+  it("should answer 404 for an id that is not a template of the conversation, another conversation's included", async () => {
+    const mine = await chat();
+    const other = await chat();
+    await agentWrite(mine);
+    const foreign = await newTemplate(other);
+
+    expect((await itemCall("GET", mine, foreign)).status).toBe(404);
+    expect((await itemCall("PUT", mine, foreign, "", put({ base_version: 1 }))).status).toBe(404);
+    expect((await itemCall("DELETE", mine, foreign)).status).toBe(404);
+    expect((await itemCall("GET", mine, "nope")).status).toBe(404);
+    expect(await prisma.assistantNotify.count({ where: { id: foreign } })).toBe(1);
+  });
+
+  it("should refuse a post at any base but 0", async () => {
+    const mine = await chat();
+
+    const response = await listCall("POST", mine, put({ base_version: 2 }));
+
+    expect(response.status).toBe(400);
+    expect(await prisma.assistantNotify.count({ where: { conversationId: mine.id } })).toBe(0);
+  });
+
+  it("should remove a template with its versions, and make the next oldest the primary", async () => {
+    const mine = await chat();
+    const first = await newTemplate(mine);
+    const second = await newTemplate(mine, otherPut());
+    await agentWrite(mine, { base_version: 1, source: undefined, body: "v2" });
+
+    const removed = await itemCall("DELETE", mine, first);
+
+    expect(removed.status).toBe(204);
+    expect(await prisma.assistantNotifyVersion.count({ where: { itemId: first } })).toBe(0);
+    expect(await readPrimaryNotifyId(prisma, mine.id)).toBe(second);
+    expect(await jsonOf(await agent("GET", mine))).toMatchObject({ name: "Hearing reminder" });
+    expect(await assistantFrame(prisma, mine.agentId)).toMatchObject({ notify_version: 1, notify_templates: [{ id: second, name: "Hearing reminder" }] });
+  });
+
+  it("should keep each template's own latest versions, whatever the others hold", async () => {
+    const mine = await chat();
+    const first = await newTemplate(mine);
+    const second = await newTemplate(mine, otherPut());
+    for (let version = 1; version < KEEP_NOTIFY_VERSIONS + 2; version += 1) {
+      await agentWrite(mine, { base_version: version, source: undefined, body: `v${version + 1}` }, { item: first });
+    }
+
+    expect(await listNotifyVersions(prisma, first)).toHaveLength(KEEP_NOTIFY_VERSIONS);
+    expect(await listNotifyVersions(prisma, second)).toHaveLength(1);
+    expect(await notifyView(prisma, mine.id, second, 1)).toMatchObject({ version: 1 });
+  });
+
+  it("should refuse a second template for a pod whose client does not claim items, and allow the first and any with the claim", async () => {
+    const mine = await chat();
+    await prisma.virtualAgent.update({ where: { id: mine.virtualAgentId }, data: { status: "running", clientFeatures: ["lookups"] } });
+
+    const first = await listCall("POST", mine, put());
+    const second = await listCall("POST", mine, { ...put(), ...otherPut() });
+    const primaryWrite = await agent("PUT", mine, "", { subject: "Edited", body: "Edited", data: {}, base_version: 1 });
+
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(409);
+    expect(await jsonOf(second)).toEqual({ error: ITEMS_CREATE_REFUSED_NOTIFY });
+    expect(primaryWrite.status).toBe(200);
+    expect(await prisma.assistantNotify.count({ where: { conversationId: mine.id } })).toBe(1);
+
+    await prisma.virtualAgent.update({ where: { id: mine.virtualAgentId }, data: { clientFeatures: ["lookups", "items"] } });
+
+    expect((await listCall("POST", mine, { ...put(), ...otherPut() })).status).toBe(201);
+  });
+});
+
+describe("the notify.pull pod job's target", () => {
+  const precheck = (of: Chat, args: Record<string, unknown>) =>
+    NOTIFY_PULL.precheck?.(prisma, { viewerOid: ALICE.oid, conversationId: of.id, args: { product: "pcs", template_id: SOURCE.template_id, ...args } });
+
+  it("should take a load that makes the first template, or one into the primary, whatever the pod claims", async () => {
+    const mine = await chat();
+    await prisma.virtualAgent.update({ where: { id: mine.virtualAgentId }, data: { status: "running", clientFeatures: ["lookups"] } });
+
+    expect(await precheck(mine, {})).toBeUndefined();
+    const first = await newTemplate(mine);
+    expect(await precheck(mine, { item_id: first })).toBeUndefined();
+  });
+
+  it("should refuse a load into a new template, or into one that is not the primary, for a pod that does not claim items", async () => {
+    const mine = await chat();
+    await agentWrite(mine);
+    const second = await newTemplate(mine, otherPut());
+    await prisma.virtualAgent.update({ where: { id: mine.virtualAgentId }, data: { status: "running", clientFeatures: ["lookups"] } });
+
+    expect(await precheck(mine, {})).toEqual({ status: 409, error: ITEMS_CREATE_REFUSED_NOTIFY });
+    expect(await precheck(mine, { item_id: second })).toEqual({ status: 409, error: ITEMS_CREATE_REFUSED_NOTIFY });
+
+    await prisma.virtualAgent.update({ where: { id: mine.virtualAgentId }, data: { clientFeatures: ["lookups", "items"] } });
+
+    expect(await precheck(mine, {})).toBeUndefined();
+    expect(await precheck(mine, { item_id: second })).toBeUndefined();
+  });
+
+  it("should refuse a target the conversation does not hold with 404", async () => {
+    const mine = await chat();
+    const other = await chat();
+    await agentWrite(mine);
+    const foreign = await newTemplate(other);
+
+    expect(await precheck(mine, { item_id: foreign })).toMatchObject({ status: 404 });
+    expect(await precheck(mine, { item_id: "00000000-0000-4000-8000-000000000000" })).toMatchObject({ status: 404 });
+  });
+
+  it("should write a load by the person into a target as that template's next version, and into a new template when none is named", async () => {
+    const mine = await chat();
+    const first = await newTemplate(mine);
+
+    const next = await writeAgentNotify(prisma, { conversationId: mine.id, target: { item: first }, body: put({ base_version: 1, by: "user" }) });
+    const fresh = await writeAgentNotify(prisma, { conversationId: mine.id, target: "new", body: put({ by: "user", ...otherPut() }) });
+
+    expect(next).toMatchObject({ id: first, version: 2 });
+    expect(fresh.id).not.toBe(first);
+    expect(await listNotifySummaries(prisma, mine.id)).toMatchObject([
+      { id: first, version: 2, updatedBy: "user" },
+      { id: fresh.id, version: 1, updatedBy: "user" }
+    ]);
+  });
+});
+
+describe("the frame's Notify templates", () => {
+  it("should list every template oldest first, and report the oldest's fields for a client that reads one", async () => {
+    const mine = await chat();
+    const first = await newTemplate(mine);
+    const second = await newTemplate(mine, otherPut());
+    await personSave(mine, { subject: null, body: "Mine" }, { version: 1, revision: 0 }, ALICE.oid, second);
+
+    expect(await assistantFrame(prisma, mine.agentId)).toMatchObject({
+      notify_version: 1,
+      notify_updated_by: "agent",
+      notify_templates: [
+        { id: first, name: "Claim received", version: 1, revision: 0, updated_by: "agent" },
+        { id: second, name: "Hearing reminder", version: 2, revision: 0, updated_by: "user" }
+      ]
+    });
+  });
+
+  it("should say no template before there is one", async () => {
+    const mine = await chat();
+
+    expect(await assistantFrame(prisma, mine.agentId)).toMatchObject({ notify_version: 0, notify_revision: 0, notify_updated_by: null, notify_templates: [] });
   });
 });

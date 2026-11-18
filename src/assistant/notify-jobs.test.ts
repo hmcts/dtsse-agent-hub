@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { HttpError } from "../agent-api/http.ts";
+import type { Database } from "../store/prisma.ts";
+import { ITEMS_CREATE_REFUSED_NOTIFY } from "./notify.ts";
 import { MAX_LISTED_TEMPLATES, NOTIFY_JOB_ERRORS, NOTIFY_LIST, NOTIFY_PULL } from "./notify-jobs.ts";
 import { checkPodJobAnswer, checkPodJobArgs } from "./pod-jobs.ts";
 
 const ID = "ab1f3d4a-0000-4000-8000-000000000002";
+const ITEM = "0b1f3d4a-0000-4000-8000-0000000000c1";
 
 function refused(call: () => unknown): HttpError {
   try {
@@ -63,8 +66,59 @@ describe("notify.pull", () => {
     expect(refused(() => checkPodJobAnswer(NOTIFY_PULL, { status: "done", result: { version: 0 } })).status).toBe(400);
   });
 
+  it("should take an optional target template, which has to be a uuid, and answer the template it went into", () => {
+    expect(checkPodJobArgs(NOTIFY_PULL, { product: "sptribs", template_id: ID, item_id: ITEM })).toEqual({
+      product: "sptribs",
+      template_id: ID,
+      item_id: ITEM
+    });
+    expect(refused(() => checkPodJobArgs(NOTIFY_PULL, { product: "sptribs", template_id: ID, item_id: "x" })).status).toBe(400);
+    expect(checkPodJobAnswer(NOTIFY_PULL, { status: "done", result: { version: 2, item_id: ITEM } })).toEqual({
+      status: "done",
+      result: { version: 2, item_id: ITEM }
+    });
+  });
+
   it("should run one at a time in a conversation", () => {
     expect(NOTIFY_PULL.oneAtATime).toBe(true);
     expect(NOTIFY_PULL.timeoutMs).toBe(150_000);
+  });
+});
+
+describe("the notify.pull precheck", () => {
+  const OTHER = "0b1f3d4a-0000-4000-8000-0000000000c2";
+  const PULL = { product: "pcs", template_id: ID };
+
+  function database(held: string[], claims: string[]): Database {
+    return {
+      assistantNotify: { findMany: async () => held.map((id) => ({ id })) },
+      assistantConversation: { findUnique: async () => ({ id: "c", virtualAgentId: "v", ownerOid: "oid-a" }) },
+      virtualAgent: { findUnique: async () => ({ status: "running", clientFeatures: claims, agent: null }) }
+    } as unknown as Database;
+  }
+
+  const precheck = (db: Database, args: object) => NOTIFY_PULL.precheck?.(db, { viewerOid: "oid-a", conversationId: "c", args });
+
+  it("should pass a pull that makes the first template when the conversation holds none", async () => {
+    expect(await precheck(database([], []), PULL)).toBeUndefined();
+  });
+
+  it("should refuse with 404 when the target template is not in the conversation", async () => {
+    expect(await precheck(database([ITEM], ["items"]), { ...PULL, item_id: OTHER })).toEqual({
+      status: 404,
+      error: "that Notify template is no longer in the chat"
+    });
+  });
+
+  it("should pass a pull into the primary template when the pod's client is older than items", async () => {
+    expect(await precheck(database([ITEM], []), { ...PULL, item_id: ITEM })).toBeUndefined();
+  });
+
+  it("should refuse a pull that makes a second template when the pod's client is older than items", async () => {
+    expect(await precheck(database([ITEM], []), PULL)).toEqual({ status: 409, error: ITEMS_CREATE_REFUSED_NOTIFY });
+  });
+
+  it("should pass a pull that makes a second template when the pod's client claims items", async () => {
+    expect(await precheck(database([ITEM], ["items"]), PULL)).toBeUndefined();
   });
 });

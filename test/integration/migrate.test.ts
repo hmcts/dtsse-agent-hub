@@ -161,9 +161,11 @@ describe("migrate", () => {
       "assistant_conversation",
       "assistant_conversation_fork",
       "assistant_conversation_share",
+      "assistant_deck",
       "assistant_deck_asset",
       "assistant_deck_build",
       "assistant_deck_version",
+      "assistant_docmosis",
       "assistant_docmosis_asset",
       "assistant_docmosis_library",
       "assistant_docmosis_version",
@@ -171,6 +173,7 @@ describe("migrate", () => {
       "assistant_export_default",
       "assistant_lookup",
       "assistant_model_choice",
+      "assistant_notify",
       "assistant_notify_version",
       "assistant_pod_job",
       "assistant_schedule",
@@ -1039,6 +1042,206 @@ describe("the assistant document migration", () => {
     }
 
     expect(await query(DOCUMENTS, `SELECT jira_status, jira_key FROM "assistant_document"`)).toEqual([{ jira_status: "done", jira_key: "VIBE-12" }]);
+  });
+});
+
+describe("the assistant items migration's Notify templates", () => {
+  const MIGRATION = "20261212090000_assistant_items";
+  const { database: ITEMS, earlier } = migrationFixture("migrate_items_notify", MIGRATION);
+
+  const version = (conversation: string, number: number, extra: { name?: string; by?: string } = {}) =>
+    `INSERT INTO "assistant_notify_version" (conversation_id, version, revision, product, template_id, service_id, type, name, subject, body,
+       notify_version, notify_subject, notify_body, data, by)
+     SELECT id, ${number}, 0, 'pcs', gen_random_uuid(), gen_random_uuid(), 'email', '${extra.name ?? "Claim received"}', 'Claim', 'Dear ((name))',
+       4, 'Claim', 'Dear ((name))', '{}'::jsonb, '${extra.by ?? "agent"}' FROM "assistant_conversation" WHERE title = '${conversation}'`;
+
+  it("should make each conversation's Notify template its one primary template, with its versions, and leave a conversation with none alone, when it is applied", async () => {
+    await migrate(earlier());
+    await query(ITEMS, `INSERT INTO "user" (oid, tid, name) VALUES ('dev-alice', 'dev', 'Alice')`);
+    await query(
+      ITEMS,
+      `INSERT INTO "assistant_conversation" (owner_oid, title, notify_version, notify_revision, notify_name, notify_updated_by, notify_updated_at)
+       VALUES ('dev-alice', 'templated', 2, 1, 'Claim received', 'user', now()), ('dev-alice', 'bare', 0, 0, NULL, NULL, NULL)`
+    );
+    await query(ITEMS, version("templated", 1));
+    await query(ITEMS, version("templated", 2, { by: "user" }));
+
+    expect((await migrate())[0]).toBe(MIGRATION);
+
+    expect(
+      await query(
+        ITEMS,
+        `SELECT c.title, n.version, n.revision, n.name, n.updated_by FROM "assistant_notify" n JOIN "assistant_conversation" c ON c.id = n.conversation_id`
+      )
+    ).toEqual([{ title: "templated", version: 2, revision: 1, name: "Claim received", updated_by: "user" }]);
+    expect(
+      await query(
+        ITEMS,
+        `SELECT v.version FROM "assistant_notify_version" v JOIN "assistant_notify" n ON n.id = v.item_id AND n.conversation_id = v.conversation_id ORDER BY v.version`
+      )
+    ).toEqual([{ version: 1 }, { version: 2 }]);
+  });
+
+  it("should key versions on the template, so a second template of a conversation has a version 1 of its own, once it is applied", async () => {
+    await query(
+      ITEMS,
+      `INSERT INTO "assistant_notify" (conversation_id, version, name, updated_by) SELECT id, 1, 'Second', 'agent' FROM "assistant_conversation" WHERE title = 'templated'`
+    );
+    await query(
+      ITEMS,
+      `INSERT INTO "assistant_notify_version" (conversation_id, item_id, version, revision, product, template_id, service_id, type, name, subject, body,
+         notify_version, notify_subject, notify_body, data, by)
+       SELECT conversation_id, id, 1, 0, 'pcs', gen_random_uuid(), gen_random_uuid(), 'email', 'Second', 'S', 'B', 1, 'S', 'B', '{}'::jsonb, 'agent'
+         FROM "assistant_notify" WHERE name = 'Second'`
+    );
+
+    expect(await query(ITEMS, `SELECT count(*)::int AS n FROM "assistant_notify_version" WHERE version = 1`)).toEqual([{ n: 2 }]);
+    await query(ITEMS, `DELETE FROM "assistant_notify" WHERE name = 'Second'`);
+    expect(await query(ITEMS, `SELECT count(*)::int AS n FROM "assistant_notify_version"`)).toEqual([{ n: 2 }]);
+    await query(ITEMS, `DELETE FROM "assistant_conversation" WHERE title = 'templated'`);
+    expect(await query(ITEMS, `SELECT count(*)::int AS n FROM "assistant_notify_version"`)).toEqual([{ n: 0 }]);
+  });
+});
+
+describe("the assistant items migration's decks", () => {
+  const MIGRATION = "20261212090000_assistant_items";
+  const { database: DECKS, earlier } = migrationFixture("migrate_items_deck", MIGRATION);
+  const OUTLINE = `'{"title":"Plan","slides":[]}'::jsonb`;
+  const version = (conversation: string, number: number, by = "agent") =>
+    `INSERT INTO "assistant_deck_version" (conversation_id, version, outline, by, pptx)
+     SELECT id, ${number}, ${OUTLINE}, '${by}', ${number === 2 ? "'\\x504b0304'::bytea" : "NULL"} FROM "assistant_conversation" WHERE title = '${conversation}'`;
+
+  it("should make each conversation's deck its one primary deck, with its versions and its builds, and leave a conversation with none alone, when it is applied", async () => {
+    await migrate(earlier());
+    await query(DECKS, `INSERT INTO "user" (oid, tid, name) VALUES ('dev-alice', 'dev', 'Alice')`);
+    await query(
+      DECKS,
+      `INSERT INTO "assistant_conversation" (owner_oid, title, deck_version, deck_revision, deck_title, deck_updated_by, deck_updated_at)
+       VALUES ('dev-alice', 'decked', 2, 4, 'Plan', 'user', now()), ('dev-alice', 'bare', 0, 0, NULL, NULL, NULL)`
+    );
+    await query(DECKS, version("decked", 1));
+    await query(DECKS, version("decked", 2, "user"));
+    await query(
+      DECKS,
+      `INSERT INTO "assistant_deck_build" (conversation_id, version, status, error, finished_at)
+       SELECT id, 1, 'failed', 'no', now() FROM "assistant_conversation" WHERE title = 'decked'`
+    );
+
+    expect((await migrate())[0]).toBe(MIGRATION);
+
+    expect(
+      await query(
+        DECKS,
+        `SELECT c.title AS conversation, d.version, d.revision, d.title, d.updated_by FROM "assistant_deck" d JOIN "assistant_conversation" c ON c.id = d.conversation_id`
+      )
+    ).toEqual([{ conversation: "decked", version: 2, revision: 4, title: "Plan", updated_by: "user" }]);
+    expect(
+      await query(
+        DECKS,
+        `SELECT v.version, v.pptx IS NOT NULL AS pptx FROM "assistant_deck_version" v JOIN "assistant_deck" d ON d.id = v.item_id AND d.conversation_id = v.conversation_id ORDER BY v.version`
+      )
+    ).toEqual([
+      { version: 1, pptx: false },
+      { version: 2, pptx: true }
+    ]);
+    expect(
+      await query(DECKS, `SELECT b.version FROM "assistant_deck_build" b JOIN "assistant_deck" d ON d.id = b.item_id AND d.conversation_id = b.conversation_id`)
+    ).toEqual([{ version: 1 }]);
+  });
+
+  it("should key versions on the deck, so a second deck of a conversation has a version 1 of its own, and take them with the deck, once it is applied", async () => {
+    await query(
+      DECKS,
+      `INSERT INTO "assistant_deck" (conversation_id, version, title, updated_by) SELECT id, 1, 'Second', 'agent' FROM "assistant_conversation" WHERE title = 'decked'`
+    );
+    await query(
+      DECKS,
+      `INSERT INTO "assistant_deck_version" (conversation_id, item_id, version, outline, by)
+       SELECT conversation_id, id, 1, ${OUTLINE}, 'agent' FROM "assistant_deck" WHERE title = 'Second'`
+    );
+
+    expect(await query(DECKS, `SELECT count(*)::int AS n FROM "assistant_deck_version" WHERE version = 1`)).toEqual([{ n: 2 }]);
+    await query(DECKS, `DELETE FROM "assistant_deck" WHERE title = 'Second'`);
+    expect(await query(DECKS, `SELECT count(*)::int AS n FROM "assistant_deck_version"`)).toEqual([{ n: 2 }]);
+    await query(DECKS, `DELETE FROM "assistant_conversation" WHERE title = 'decked'`);
+    expect(await query(DECKS, `SELECT count(*)::int AS n FROM "assistant_deck_version"`)).toEqual([{ n: 0 }]);
+  });
+
+  it("should allow one pending build of a version for each deck, and refuse a second for the same deck, once it is applied", async () => {
+    await query(DECKS, `INSERT INTO "assistant_conversation" (owner_oid, title) VALUES ('dev-alice', 'builds')`);
+    const decks = await query<{ id: string; conversation_id: string }>(
+      DECKS,
+      `INSERT INTO "assistant_deck" (conversation_id, version, title, updated_by)
+       SELECT id, 1, d.title, 'agent' FROM "assistant_conversation", (VALUES ('One'), ('Two')) d (title) WHERE "assistant_conversation".title = 'builds'
+       RETURNING id::text, conversation_id::text`
+    );
+    const pending = (deck: { id: string; conversation_id: string }) =>
+      query(DECKS, `INSERT INTO "assistant_deck_build" (item_id, conversation_id, version) VALUES ('${deck.id}', '${deck.conversation_id}', 1)`);
+
+    await pending(decks[0]!);
+    await pending(decks[1]!);
+
+    await expect(pending(decks[0]!)).rejects.toThrow(/assistant_deck_build_pending_key/);
+  });
+});
+
+describe("the assistant items migration's Docmosis templates", () => {
+  const MIGRATION = "20261212090000_assistant_items";
+  const { database: TEMPLATES, earlier } = migrationFixture("migrate_items_docmosis", MIGRATION);
+  const SHA = "a".repeat(64);
+
+  const version = (conversation: string, number: number, extra: { by?: string; name?: string } = {}) =>
+    `INSERT INTO "assistant_docmosis_version" (conversation_id, version, revision, name, docx_sha256, schema, data, by)
+     SELECT id, ${number}, 0, '${extra.name ?? "Claim form"}', '${SHA}', '{}'::jsonb, '{}'::jsonb, '${extra.by ?? "agent"}'
+       FROM "assistant_conversation" WHERE title = '${conversation}'`;
+
+  it("should make each conversation's Docmosis template its one primary template, with its versions and PDF state, and leave a conversation with none alone, when it is applied", async () => {
+    await migrate(earlier());
+    await query(TEMPLATES, `INSERT INTO "user" (oid, tid, name) VALUES ('dev-alice', 'dev', 'Alice')`);
+    await query(
+      TEMPLATES,
+      `INSERT INTO "assistant_conversation" (owner_oid, title, docmosis_version, docmosis_revision, docmosis_name, docmosis_updated_by, docmosis_updated_at, docmosis_pdf_state)
+       VALUES ('dev-alice', 'templated', 2, 1, 'Claim form', 'user', now(), 'ready'), ('dev-alice', 'bare', 0, 0, NULL, NULL, NULL, 'pending')`
+    );
+    await query(
+      TEMPLATES,
+      `INSERT INTO "assistant_docmosis_asset" (conversation_id, sha256, bytes) SELECT id, '${SHA}', '\\x504b0304' FROM "assistant_conversation" WHERE title = 'templated'`
+    );
+    await query(TEMPLATES, version("templated", 1));
+    await query(TEMPLATES, version("templated", 2, { by: "user" }));
+
+    expect((await migrate())[0]).toBe(MIGRATION);
+
+    expect(
+      await query(
+        TEMPLATES,
+        `SELECT c.title, d.version, d.revision, d.name, d.updated_by, d.pdf_state FROM "assistant_docmosis" d JOIN "assistant_conversation" c ON c.id = d.conversation_id`
+      )
+    ).toEqual([{ title: "templated", version: 2, revision: 1, name: "Claim form", updated_by: "user", pdf_state: "ready" }]);
+    expect(
+      await query(
+        TEMPLATES,
+        `SELECT v.version FROM "assistant_docmosis_version" v JOIN "assistant_docmosis" d ON d.id = v.item_id AND d.conversation_id = v.conversation_id ORDER BY v.version`
+      )
+    ).toEqual([{ version: 1 }, { version: 2 }]);
+    expect(await query(TEMPLATES, `SELECT count(*)::int AS count FROM "assistant_docmosis_asset"`)).toEqual([{ count: 1 }]);
+  });
+
+  it("should let a conversation hold a second template whose versions start at 1 again, and delete its versions with it", async () => {
+    await query(
+      TEMPLATES,
+      `INSERT INTO "assistant_docmosis" (conversation_id, version, name, updated_by) SELECT id, 1, 'Order', 'agent' FROM "assistant_conversation" WHERE title = 'templated'`
+    );
+    const [second] = await query<{ id: string }>(TEMPLATES, `SELECT id::text AS id FROM "assistant_docmosis" WHERE name = 'Order'`);
+    await query(
+      TEMPLATES,
+      `INSERT INTO "assistant_docmosis_version" (conversation_id, item_id, version, name, docx_sha256, schema, data, by)
+       SELECT conversation_id, id, 1, 'Order', '${SHA}', '{}'::jsonb, '{}'::jsonb, 'agent' FROM "assistant_docmosis" WHERE id = '${second?.id}'`
+    );
+
+    await query(TEMPLATES, `DELETE FROM "assistant_docmosis" WHERE id = '${second?.id}'`);
+
+    expect(await query(TEMPLATES, `SELECT count(*)::int AS count FROM "assistant_docmosis_version"`)).toEqual([{ count: 2 }]);
   });
 });
 

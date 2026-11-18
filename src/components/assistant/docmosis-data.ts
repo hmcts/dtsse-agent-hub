@@ -57,6 +57,7 @@ export interface DocmosisView {
 
 /** What the page carries of the latest version, which the panel reads the rest of when it changes. */
 export interface DocmosisSummary {
+  id: string;
   name: string;
   version: number;
   revision: number;
@@ -73,13 +74,14 @@ export interface DocmosisVersionEntry {
   has_pdf: boolean;
 }
 
-export function docmosisUrl(conversationId: string): string {
-  return `/api/ui/assistant/docmosis/${encodeURIComponent(conversationId)}`;
+export function docmosisUrl(conversationId: string, itemId: string): string {
+  return `/api/ui/assistant/docmosis/${encodeURIComponent(conversationId)}/${encodeURIComponent(itemId)}`;
 }
-export const docmosisVersionsUrl = (conversationId: string): string => `${docmosisUrl(conversationId)}/versions`;
-export const docmosisVersionUrl = (conversationId: string, version: number): string => `${docmosisUrl(conversationId)}/versions/${version}`;
-export const docmosisPdfUrl = (conversationId: string, version: number): string => `${docmosisVersionUrl(conversationId, version)}/pdf`;
-export const docmosisRenderUrl = (conversationId: string): string => `${docmosisUrl(conversationId)}/render`;
+export const docmosisVersionsUrl = (conversationId: string, itemId: string): string => `${docmosisUrl(conversationId, itemId)}/versions`;
+export const docmosisVersionUrl = (conversationId: string, itemId: string, version: number): string =>
+  `${docmosisUrl(conversationId, itemId)}/versions/${version}`;
+export const docmosisPdfUrl = (conversationId: string, itemId: string, version: number): string => `${docmosisVersionUrl(conversationId, itemId, version)}/pdf`;
+export const docmosisRenderUrl = (conversationId: string, itemId: string): string => `${docmosisUrl(conversationId, itemId)}/render`;
 
 export const isObject = (value: unknown): value is JsonObject => typeof value === "object" && value !== null && !Array.isArray(value);
 

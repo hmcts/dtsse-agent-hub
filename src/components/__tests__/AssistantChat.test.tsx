@@ -146,9 +146,9 @@ function conversation(overrides: Partial<ConversationView> = {}): ConversationVi
     sessionState: null,
     sessionDetail: null,
     documents: [],
-    deck: null,
-    docmosis: null,
-    notify: null,
+    decks: [],
+    docmosisTemplates: [],
+    notifyTemplates: [],
     video: null,
     canPostVideo: false,
     page: page(),
@@ -1383,15 +1383,15 @@ describe("ChatView Create", () => {
     expect(offered()).toEqual(["Document"]);
   });
 
-  it("should offer to open the kinds a local chat's session already wrote when it holds them", () => {
+  it("should offer only a document when a local chat's session already wrote the other kinds", () => {
     const view = conversation({
       local: true,
-      deck: { title: "Plan", version: 1, revision: 1, updatedBy: "agent", pptx: false },
-      docmosis: { name: "Claim form.docx", version: 1, revision: 0, updatedBy: "agent", pdf: "pending" },
-      notify: { name: "Reminder", version: 1, revision: 0, updatedBy: "agent" }
+      decks: [{ id: "deck-1", title: "Plan", version: 1, revision: 1, updatedBy: "agent", pptx: false }],
+      docmosisTemplates: [{ id: "docmosis-1", name: "Claim form.docx", version: 1, revision: 0, updatedBy: "agent", pdf: "pending" }],
+      notifyTemplates: [{ id: "notify-1", name: "Reminder", version: 1, revision: 0, updatedBy: "agent" }]
     });
     render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={view} templates={TEMPLATES} actions={actions()} />);
-    expect(offered()).toEqual(["Document", "Slides, already in this chat", "Docmosis template, already in this chat", "Notify template, already in this chat"]);
+    expect(offered()).toEqual(["Document"]);
   });
 
   it("should ask the assistant for slides as the person's message when they create slides", async () => {
@@ -1471,7 +1471,97 @@ describe("ChatView Create", () => {
 
     create("Notify template");
 
-    expect(screen.getByRole("button", { name: "Items, Notify template open" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Items, New Notify template open" })).toBeTruthy();
+  });
+
+  it("should list every deck, Docmosis template and Notify template in the switcher by its name when the conversation holds several", () => {
+    const view = conversation({
+      decks: [
+        { id: "deck-1", title: "Plan", version: 1, revision: 1, updatedBy: "user", pptx: false },
+        { id: "deck-2", title: "Review", version: 1, revision: 1, updatedBy: "user", pptx: false }
+      ],
+      docmosisTemplates: [
+        { id: "docmosis-1", name: "Claim form.docx", version: 1, revision: 0, updatedBy: "user", pdf: "pending" },
+        { id: "docmosis-2", name: "Order.docx", version: 1, revision: 0, updatedBy: "user", pdf: "pending" }
+      ],
+      notifyTemplates: [
+        { id: "notify-1", name: "Reminder", version: 1, revision: 0, updatedBy: "user" },
+        { id: "notify-2", name: "Receipt", version: 1, revision: 0, updatedBy: "user" }
+      ]
+    });
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={view} templates={TEMPLATES} actions={actions()} />);
+
+    openSwitcher();
+
+    const names = screen.getAllByRole("menuitemradio").map((row) => row.textContent);
+    expect(names).toEqual(["Plan", "Review", "Claim form.docx", "Order.docx", "Reminder", "Receipt"]);
+  });
+
+  it("should offer a new Docmosis template and a new Notify template each time when the conversation already holds one", () => {
+    const view = conversation({
+      docmosisTemplates: [{ id: "docmosis-1", name: "Claim form.docx", version: 1, revision: 0, updatedBy: "user", pdf: "pending" }],
+      notifyTemplates: [{ id: "notify-1", name: "Reminder", version: 1, revision: 0, updatedBy: "user" }]
+    });
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={view} templates={TEMPLATES} actions={actions()} />);
+
+    expect(offered()).toEqual(["Document", "Jira backlog", "Confluence page", "Slides", "Docmosis template", "Notify template"]);
+  });
+
+  it("should remove the open deck by its id when the person confirms Remove", async () => {
+    const removeDeck = ok();
+    const view = conversation({ decks: [{ id: "deck-2", title: "Review", version: 1, revision: 1, updatedBy: "user", pptx: false }] });
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={view} templates={TEMPLATES} actions={actions({ removeDeck })} />);
+
+    switchTo("Review");
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await act(async () => {
+      fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Remove" }));
+    });
+
+    expect(removeDeck).toHaveBeenCalledWith({ conversationId: CONVERSATION, itemId: "deck-2" });
+  });
+
+  it("should remove the open Docmosis template and the open Notify template by id when the person confirms Remove", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => new Promise<never>(() => undefined))
+    );
+    const removeDocmosisTemplate = ok();
+    const removeNotifyTemplate = ok();
+    const view = conversation({
+      docmosisTemplates: [{ id: "docmosis-2", name: "Order.docx", version: 1, revision: 0, updatedBy: "user", pdf: "pending" }],
+      notifyTemplates: [{ id: "notify-2", name: "Receipt", version: 1, revision: 0, updatedBy: "user" }]
+    });
+    render(
+      <ChatView jira={NO_JIRA} viewerOid={VIEWER} view={view} templates={TEMPLATES} actions={actions({ removeDocmosisTemplate, removeNotifyTemplate })} />
+    );
+
+    switchTo("Order.docx");
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await act(async () => {
+      fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Remove" }));
+    });
+    expect(removeDocmosisTemplate).toHaveBeenCalledWith({ conversationId: CONVERSATION, itemId: "docmosis-2" });
+
+    switchTo("Receipt");
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await act(async () => {
+      fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Remove" }));
+    });
+    expect(removeNotifyTemplate).toHaveBeenCalledWith({ conversationId: CONVERSATION, itemId: "notify-2" });
+  });
+
+  it("should keep the new template open when the person chooses its row in the switcher", () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => new Promise<never>(() => undefined))
+    );
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions()} />);
+
+    create("Notify template");
+    switchTo("New Notify template");
+
+    expect(screen.getByRole("button", { name: "Items, New Notify template open" })).toBeTruthy();
   });
 });
 
@@ -2359,7 +2449,7 @@ describe("ChatView slides", () => {
       { id: "s_ab12", layout: "HMCTS_CONTENT" as const, title: "Releases take three weeks", bullets: ["Build"] }
     ]
   };
-  const DECK: NonNullable<ConversationView["deck"]> = { title: "Ways of working", version: 7, revision: 7, updatedBy: "user", pptx: false };
+  const DECK: ConversationView["decks"][number] = { id: "deck-1", title: "Ways of working", version: 7, revision: 7, updatedBy: "user", pptx: false };
   const WRITTEN = { title: "Story", markdown: "x", version: 1, updatedBy: "user" as const, updatedAt: "2026-10-21T09:00:00.000Z" };
 
   beforeEach(() => {
@@ -2375,7 +2465,7 @@ describe("ChatView slides", () => {
   });
 
   /** Opens the slides through the switcher, opening it first unless the test already has. */
-  async function openSlides(name = "Slides"): Promise<void> {
+  async function openSlides(name = "Ways of working"): Promise<void> {
     if (screen.queryByRole("menu", { name: "Items" }) === null) {
       openSwitcher();
     }
@@ -2415,38 +2505,37 @@ describe("ChatView slides", () => {
     const { rerender } = render(chat({}));
     expect(screen.queryByRole("button", { name: /^Items/ })).toBeNull();
 
-    rerender(chat({ deck: DECK, documents: [doc(WRITTEN)] }));
+    rerender(chat({ decks: [DECK], documents: [doc(WRITTEN)] }));
     switchTo("Story");
     expect(screen.getByRole("region", { name: "Document" })).toBeTruthy();
 
     await openSlides();
     expect(screen.getByRole("region", { name: "Slides" })).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Document" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Items, Slides open" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Items, Ways of working open" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Close slides" }));
     expect(screen.queryByRole("region", { name: "Slides" })).toBeNull();
   });
 
-  it("should open the slides rather than ask for more when the person creates slides in a chat that has a deck", async () => {
+  it("should ask for a new deck when the person creates slides in a chat that already has one", async () => {
     const chatActions = actions();
-    render(chat({ deck: DECK }, chatActions));
+    render(chat({ decks: [DECK] }, chatActions));
 
-    create("Slides, already in this chat");
+    create("Slides");
     await act(async () => {
       await Promise.resolve();
     });
 
-    expect(screen.getByRole("region", { name: "Slides" })).toBeTruthy();
-    expect(chatActions.send).not.toHaveBeenCalled();
+    expect(chatActions.send).toHaveBeenCalledWith({ conversationId: CONVERSATION, body: CREATE_SLIDES, uploadIds: [] });
   });
 
   it("should open the slides and say so when the assistant writes a newer version, and not for the person's own", async () => {
     vi.useFakeTimers();
-    const { rerender } = render(chat({ deck: DECK }));
+    const { rerender } = render(chat({ decks: [DECK] }));
     expect(screen.queryByRole("region", { name: "Slides" })).toBeNull();
 
-    rerender(chat({ deck: { ...DECK, version: 8, updatedBy: "agent" } }));
+    rerender(chat({ decks: [{ ...DECK, version: 8, updatedBy: "agent" }] }));
 
     expect(await announced()).toContain("The assistant updated the slides");
     expect(screen.getByRole("region", { name: "Slides" })).toBeTruthy();
@@ -2454,10 +2543,10 @@ describe("ChatView slides", () => {
 
   it("should open the slides in the document's place when the assistant writes a newer deck and the document has nothing unsaved", async () => {
     vi.useFakeTimers();
-    const { rerender } = render(chat({ deck: DECK, documents: [doc(WRITTEN)] }));
+    const { rerender } = render(chat({ decks: [DECK], documents: [doc(WRITTEN)] }));
     switchTo("Story");
 
-    rerender(chat({ deck: { ...DECK, version: 8, updatedBy: "agent" }, documents: [doc(WRITTEN)] }));
+    rerender(chat({ decks: [{ ...DECK, version: 8, updatedBy: "agent" }], documents: [doc(WRITTEN)] }));
     await announced();
 
     expect(screen.getByRole("region", { name: "Slides" })).toBeTruthy();
@@ -2467,33 +2556,33 @@ describe("ChatView slides", () => {
   it("should leave the document open, say the slides changed and mark their row in the switcher, when the assistant writes a newer deck mid-edit", async () => {
     vi.useFakeTimers();
     const chatActions = actions();
-    const { rerender } = render(chat({ deck: DECK, documents: [doc(WRITTEN)] }, chatActions));
+    const { rerender } = render(chat({ decks: [DECK], documents: [doc(WRITTEN)] }, chatActions));
     switchTo("Story");
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Document, in markdown" }), { target: { value: "x and more" } });
 
-    rerender(chat({ deck: { ...DECK, version: 8, updatedBy: "agent" }, documents: [doc(WRITTEN)] }, chatActions));
+    rerender(chat({ decks: [{ ...DECK, version: 8, updatedBy: "agent" }], documents: [doc(WRITTEN)] }, chatActions));
 
     expect(await announced()).toContain("The assistant updated the slides. Open them from Items to see them.");
     expect(screen.getByRole("region", { name: "Document" })).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Slides" })).toBeNull();
     openSwitcher();
-    expect(screen.getByTestId("slides-updated")).toBeTruthy();
+    expect(screen.getByTestId("deck:deck-1-updated")).toBeTruthy();
 
     // The pause saved the edit, so the document is no longer busy, but the update already waits behind its row in the switcher.
     expect(chatActions.saveArtefact).toHaveBeenCalledWith(expect.objectContaining({ markdown: "x and more" }));
-    await openSlides("Slides, updated by the assistant");
+    await openSlides("Ways of working, updated by the assistant");
     expect(screen.getByRole("region", { name: "Slides" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Close slides" }));
     expect(screen.getByRole("button", { name: "Items" })).toBeTruthy();
     openSwitcher();
-    expect(screen.getByRole("menuitemradio", { name: "Slides" })).toBeTruthy();
-    expect(screen.queryByTestId("slides-updated")).toBeNull();
+    expect(screen.getByRole("menuitemradio", { name: "Ways of working" })).toBeTruthy();
+    expect(screen.queryByTestId("deck:deck-1-updated")).toBeNull();
   });
 
   it("should save the person's edit rather than drop it when they open the slides before the pause has saved it", async () => {
     const chatActions = actions();
-    render(chat({ deck: DECK, documents: [doc(WRITTEN)] }, chatActions));
+    render(chat({ decks: [DECK], documents: [doc(WRITTEN)] }, chatActions));
     switchTo("Story");
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Document, in markdown" }), { target: { value: "x, edited" } });
@@ -2513,7 +2602,7 @@ describe("ChatView slides", () => {
 
   it("should open the document again with the edit, saying it could not save, when the save made as it closed fails", async () => {
     const saveArtefact = vi.fn(async () => ({ ok: false as const, error: "down" }));
-    render(chat({ deck: DECK, documents: [doc(WRITTEN)] }, actions({ saveArtefact })));
+    render(chat({ decks: [DECK], documents: [doc(WRITTEN)] }, actions({ saveArtefact })));
     switchTo("Story");
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Document, in markdown" }), { target: { value: "x, edited" } });
@@ -2535,7 +2624,7 @@ describe("ChatView slides", () => {
   it("should open the document again with the edit and the conflict banner, in the slides' place, when the save made as it closed finds a newer version", async () => {
     const theirs = { title: "Story", markdown: "theirs", version: 2, updatedBy: "agent" as const };
     const saveArtefact = vi.fn(async () => ({ ok: true as const, saved: false as const, current: theirs }));
-    render(chat({ deck: DECK, documents: [doc(WRITTEN)] }, actions({ saveArtefact })));
+    render(chat({ decks: [DECK], documents: [doc(WRITTEN)] }, actions({ saveArtefact })));
     switchTo("Story");
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Document, in markdown" }), { target: { value: "x, edited" } });
@@ -2576,18 +2665,55 @@ describe("ChatView slides", () => {
     expect(screen.getByTestId(`document:${DOCUMENT_ID}-unsaved`)).toBeTruthy();
   });
 
+  it("should leave the document open and mark the template rows in the switcher when the assistant writes newer templates mid-edit", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => new Promise<never>(() => undefined))
+    );
+    const chatActions = actions();
+    const docmosisTemplate = { id: "docmosis-1", name: "Order.docx", version: 1, revision: 0, updatedBy: "user" as const, pdf: "pending" as const };
+    const notifyTemplate = { id: "notify-1", name: "Receipt", version: 1, revision: 0, updatedBy: "user" as const };
+    const { rerender } = render(chat({ docmosisTemplates: [docmosisTemplate], notifyTemplates: [notifyTemplate], documents: [doc(WRITTEN)] }, chatActions));
+    switchTo("Story");
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Document, in markdown" }), { target: { value: "x and more" } });
+
+    rerender(
+      chat(
+        {
+          docmosisTemplates: [{ ...docmosisTemplate, version: 2, updatedBy: "agent" }],
+          notifyTemplates: [{ ...notifyTemplate, version: 2, updatedBy: "agent" }],
+          documents: [doc(WRITTEN)]
+        },
+        chatActions
+      )
+    );
+
+    expect(screen.getByRole("region", { name: "Document" })).toBeTruthy();
+    openSwitcher();
+    expect(screen.getByTestId("docmosis:docmosis-1-updated")).toBeTruthy();
+    expect(screen.getByTestId("notify:notify-1-updated")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Order.docx, updated by the assistant" }));
+    switchTo("Receipt, updated by the assistant");
+    openSwitcher();
+    expect(screen.queryByTestId("docmosis:docmosis-1-updated")).toBeNull();
+    expect(screen.queryByTestId("notify:notify-1-updated")).toBeNull();
+  });
+
   it("should keep the slides' editor open, say the document changed and mark its row in the switcher, when the assistant writes the document mid-edit", async () => {
     vi.useFakeTimers();
     const saveDeck = vi.fn(() => new Promise<never>(() => undefined));
     const chatActions = actions({ saveDeck });
-    const { rerender } = render(chat({ deck: DECK, documents: [doc(WRITTEN)] }, chatActions));
+    const { rerender } = render(chat({ decks: [DECK], documents: [doc(WRITTEN)] }, chatActions));
     await openSlides();
     fireEvent.click(screen.getByRole("button", { name: "Edit slides" }));
     // The page's announcer reads a burst as a count, so each announcement is let through on its own.
     await announced();
     fireEvent.change(screen.getByRole("textbox", { name: "Deck title" }), { target: { value: "Mine" } });
 
-    rerender(chat({ deck: DECK, documents: [doc({ ...WRITTEN, version: 2, updatedBy: "agent" })] }, chatActions));
+    rerender(chat({ decks: [DECK], documents: [doc({ ...WRITTEN, version: 2, updatedBy: "agent" })] }, chatActions));
 
     expect(await announced()).toContain('The assistant updated "Story". Open it from Items to see it.');
     expect(screen.getByRole("toolbar", { name: "Editing slides" })).toBeTruthy();
@@ -2602,7 +2728,7 @@ describe("ChatView slides", () => {
   it("should open the slides' editor again with the edit, saying so, when the save made as it closes fails", async () => {
     vi.useFakeTimers();
     const saveDeck = vi.fn(async () => ({ ok: false as const, error: "down" }));
-    render(chat({ deck: DECK }, actions({ saveDeck })));
+    render(chat({ decks: [DECK] }, actions({ saveDeck })));
     await openSlides();
     fireEvent.click(screen.getByRole("button", { name: "Edit slides" }));
     // The page's announcer reads a burst as a count, so each announcement is let through on its own.
@@ -2626,7 +2752,7 @@ describe("ChatView slides", () => {
       .mockResolvedValueOnce({ ok: false as const, error: ACTION_FAULT })
       .mockResolvedValue({ ok: true as const, saved: true as const, version: 8, revision: 8, amended: false, unchanged: false });
     const chatActions = actions({ saveDeck });
-    const { rerender } = render(chat({ deck: DECK }, chatActions));
+    const { rerender } = render(chat({ decks: [DECK] }, chatActions));
     await openSlides();
     fireEvent.click(screen.getByRole("button", { name: "Edit slides" }));
     await announced();
@@ -2655,7 +2781,7 @@ describe("ChatView slides", () => {
           )
       )
     );
-    rerender(chat({ deck: { ...DECK, version: 8, revision: 8 } }, chatActions));
+    rerender(chat({ decks: [{ ...DECK, version: 8, revision: 8 }] }, chatActions));
     await act(async () => {
       await Promise.resolve();
     });
@@ -2676,7 +2802,7 @@ describe("ChatView slides", () => {
     let answer: (result: { ok: false; error: string }) => void = () => undefined;
     const saveDeck = vi.fn(() => new Promise<{ ok: false; error: string }>((resolve) => (answer = resolve)));
     const saveArtefact = vi.fn(() => new Promise<never>(() => undefined));
-    render(chat({ deck: DECK, documents: [doc(WRITTEN)] }, actions({ saveDeck, saveArtefact })));
+    render(chat({ decks: [DECK], documents: [doc(WRITTEN)] }, actions({ saveDeck, saveArtefact })));
     await openSlides();
     fireEvent.click(screen.getByRole("button", { name: "Edit slides" }));
     await announced();
@@ -2693,11 +2819,11 @@ describe("ChatView slides", () => {
     expect(screen.getByRole("region", { name: "Document" })).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Slides" })).toBeNull();
     openSwitcher();
-    expect(screen.getByTestId("slides-unsaved")).toBeTruthy();
+    expect(screen.getByTestId("deck:deck-1-unsaved")).toBeTruthy();
 
-    await openSlides("Slides, with your unsaved changes");
+    await openSlides("Ways of working, with your unsaved changes");
     expect((screen.getByRole("textbox", { name: "Deck title" }) as HTMLInputElement).value).toBe("Mine");
-    expect(screen.queryByTestId("slides-unsaved")).toBeNull();
+    expect(screen.queryByTestId("deck:deck-1-unsaved")).toBeNull();
   });
 
   it("should keep the slides' editor open, mark the document in the switcher and keep the edit for it, when the document's closing save fails mid-edit of the slides", async () => {
@@ -2705,7 +2831,7 @@ describe("ChatView slides", () => {
     let answer: (result: { ok: false; error: string }) => void = () => undefined;
     const saveArtefact = vi.fn(() => new Promise<{ ok: false; error: string }>((resolve) => (answer = resolve)));
     const saveDeck = vi.fn(() => new Promise<never>(() => undefined));
-    render(chat({ deck: DECK, documents: [doc(WRITTEN)] }, actions({ saveDeck, saveArtefact })));
+    render(chat({ decks: [DECK], documents: [doc(WRITTEN)] }, actions({ saveDeck, saveArtefact })));
     switchTo("Story");
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Document, in markdown" }), { target: { value: "x, edited" } });
@@ -2731,7 +2857,7 @@ describe("ChatView slides", () => {
 
   it("should put the slide in front of the message as it is sent, and drop it afterwards, when the person asks about a slide", async () => {
     const send = vi.fn(async () => ({ ok: true as const, message: message("99", { body: "sent" }) }));
-    render(chat({ deck: DECK }, actions({ send })));
+    render(chat({ decks: [DECK] }, actions({ send })));
     await openSlides();
     fireEvent.click(within(screen.getByRole("list", { name: "Slide thumbnails" })).getByRole("button", { name: "Slide 3: Releases take three weeks" }));
 
@@ -2750,7 +2876,7 @@ describe("ChatView slides", () => {
 
   it("should send the message as typed once the person takes the slide off it", async () => {
     const send = vi.fn(async () => ({ ok: true as const, message: message("99", { body: "sent" }) }));
-    render(chat({ deck: DECK }, actions({ send })));
+    render(chat({ decks: [DECK] }, actions({ send })));
     await openSlides();
     fireEvent.click(screen.getByRole("button", { name: "Ask about this slide" }));
 
@@ -2762,8 +2888,8 @@ describe("ChatView slides", () => {
 
   it("should refuse words past the room the slide leaves, sending nothing, and send words that fill it, when the person asks about a slide", async () => {
     const send = vi.fn(async () => ({ ok: true as const, message: message("99", { body: "sent" }) }));
-    render(chat({ deck: { ...DECK, title: "D".repeat(200) } }, actions({ send })));
-    await openSlides();
+    render(chat({ decks: [{ ...DECK, title: "D".repeat(200) }] }, actions({ send })));
+    await openSlides("D".repeat(200));
     fireEvent.click(screen.getByRole("button", { name: "Ask about this slide" }));
 
     await type("x".repeat(MAX_ASKED_BODY + 1));
@@ -2782,7 +2908,7 @@ describe("ChatView slides", () => {
 
   it("should keep the slide on the message when the send is refused", async () => {
     const send = vi.fn(async () => ({ ok: false as const, error: "Could not send" }));
-    render(chat({ deck: DECK }, actions({ send })));
+    render(chat({ decks: [DECK] }, actions({ send })));
     await openSlides();
     fireEvent.click(screen.getByRole("button", { name: "Ask about this slide" }));
 
@@ -2797,7 +2923,7 @@ describe("ChatView slides", () => {
       writable: true,
       value: () => ({ matches: true, addEventListener: () => undefined, removeEventListener: () => undefined })
     });
-    render(chat({ deck: DECK }));
+    render(chat({ decks: [DECK] }));
     await openSlides();
 
     fireEvent.click(screen.getByRole("button", { name: "Ask about this slide" }));

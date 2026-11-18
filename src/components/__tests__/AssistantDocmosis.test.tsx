@@ -15,7 +15,9 @@ vi.mock("@/components/assistant/docmosis-pdf", () => ({
 }));
 
 const CONVERSATION = "22222222-2222-2222-2222-222222222222";
-const SUMMARY: DocmosisSummary = { name: "claim-form", version: 3, revision: 0, updatedBy: "agent", pdf: "ready" };
+const ITEM = "33333333-3333-4333-8333-333333333333";
+const BASE = `/api/ui/assistant/docmosis/${CONVERSATION}/${ITEM}`;
+const SUMMARY: DocmosisSummary = { id: ITEM, name: "claim-form", version: 3, revision: 0, updatedBy: "agent", pdf: "ready" };
 
 function view(overrides: Partial<DocmosisView> = {}): DocmosisView {
   return {
@@ -298,7 +300,7 @@ describe("DocmosisPanel rendering", () => {
     const base = served.fetchMock.getMockImplementation();
     const agent = view({ version: 5, data: { claimant: { name: "Agent" } } });
     served.fetchMock.mockImplementation(async (url: string, init?: RequestInit) =>
-      init?.method !== "POST" && url.endsWith(`/docmosis/${CONVERSATION}`) ? new Response(JSON.stringify(agent)) : (base?.(url, init) as Promise<Response>)
+      init?.method !== "POST" && url.endsWith(BASE) ? new Response(JSON.stringify(agent)) : (base?.(url, init) as Promise<Response>)
     );
     rerender(<DocmosisPanel {...props} docmosis={{ ...SUMMARY, version: 5 }} />);
     await wait(0);
@@ -307,7 +309,7 @@ describe("DocmosisPanel rendering", () => {
   });
 });
 
-const mainReads = (reads: string[]) => reads.filter((url) => url.endsWith(`/docmosis/${CONVERSATION}`)).length;
+const mainReads = (reads: string[]) => reads.filter((url) => url.endsWith(BASE)).length;
 
 describe("DocmosisPanel reading", () => {
   it("should read the template again when the page says its pdf has changed, and not poll for it", async () => {
@@ -383,7 +385,7 @@ describe("DocmosisPanel reading", () => {
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
     await open();
     const pdf = screen.getByRole("link", { name: /Download PDF/ }) as HTMLAnchorElement;
-    expect(pdf.getAttribute("href")).toBe(`/api/ui/assistant/docmosis/${CONVERSATION}/versions/3/pdf`);
+    expect(pdf.getAttribute("href")).toBe(`${BASE}/versions/3/pdf`);
     expect(pdf.getAttribute("download")).toBe("claim-form-v3.pdf");
     fireEvent.click(screen.getByRole("button", { name: /Download data.json/ }));
     expect(create).toHaveBeenCalledTimes(1);
@@ -526,6 +528,54 @@ describe("DocmosisPanel closing", () => {
     await wait(RENDER_AFTER_MS);
     await act(async () => renders[0]?.answer(200, { version: 4, revision: 1, status: "rendered" }));
     expect(onBusy).toHaveBeenLastCalledWith(false);
+  });
+});
+
+describe("DocmosisPanel remove", () => {
+  it("should offer no Remove when the chat gives it no way to", async () => {
+    serve();
+    await open();
+    expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
+  });
+
+  it("should ask before removing and leave the template alone when the person cancels", async () => {
+    serve();
+    const onRemove = vi.fn(async () => null);
+    await open({ onRemove });
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    expect(screen.getByRole("alertdialog", { name: "Remove this template?" })).toBeTruthy();
+    expect(onRemove).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(onRemove).not.toHaveBeenCalled();
+  });
+
+  it("should remove the template when the person confirms", async () => {
+    serve();
+    const onRemove = vi.fn(async () => null);
+    await open({ onRemove });
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await act(async () => {
+      fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Remove" }));
+    });
+    expect(onRemove).toHaveBeenCalledTimes(1);
+  });
+
+  it("should say why when the template could not be removed", async () => {
+    serve();
+    await open({ onRemove: async () => "that template no longer exists" });
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await act(async () => {
+      fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Remove" }));
+    });
+    expect(screen.getByRole("alert").textContent).toBe("that template no longer exists");
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("should offer no Remove to a reader", async () => {
+    serve();
+    await open({ owner: false, onRemove: async () => null });
+    expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
   });
 });
 

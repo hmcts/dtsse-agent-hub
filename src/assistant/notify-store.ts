@@ -1,9 +1,12 @@
 import { HttpError } from "../agent-api/http.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
+import { OLDEST_FIRST, podLacksItems } from "./artefact-store.ts";
 import { announce, type ConversationRow } from "./conversation-row.ts";
+import { versionParam } from "./deck-build.ts";
 import { lockConversation } from "./deck-store.ts";
 import {
   checkNotifyData,
+  ITEMS_CREATE_REFUSED_NOTIFY,
   KEEP_NOTIFY_VERSIONS,
   type NotifyAuthor,
   type NotifyPut,
@@ -14,10 +17,11 @@ import {
 } from "./notify.ts";
 
 /**
- * A conversation's GOV.UK Notify template, written in versions the way its Docmosis template is (`docmosis-store.ts`):
- * a write names the version and revision it was made from, and a newer one refuses it with what is there now. Every
- * write keeps the newest `KEEP_NOTIFY_VERSIONS` versions, in its own transaction, and locks the conversation's row. See
- * "Notify templates" in docs/agent-api.md.
+ * A conversation's GOV.UK Notify templates, any number of them, each written in versions the way its Docmosis template
+ * is (`docmosis-store.ts`): a write names the version and revision it was made from, and a newer one refuses it with
+ * what is there now. Every write keeps the template's newest `KEEP_NOTIFY_VERSIONS` versions, in its own transaction,
+ * and locks the conversation's row. The primary template is the conversation's oldest, which `/api/agent/{id}/notify`
+ * and every client older than several templates read. See "Notify templates" in docs/agent-api.md.
  */
 
 type Conversation = Pick<ConversationRow, "id" | "virtualAgentId" | "ownerOid">;
@@ -53,34 +57,42 @@ export interface NotifyVersionEntry {
   updated_at: string;
 }
 
-export const NOTIFY_SELECT = { notifyName: true, notifyVersion: true, notifyRevision: true, notifyUpdatedBy: true } as const;
+export const NOTIFY_SELECT = { id: true, name: true, version: true, revision: true, updatedBy: true } as const;
 
 const author = (value: string | null): NotifyAuthor | null => (value === "user" || value === "agent" ? value : null);
 
-export function notifyAuthor(row: { notifyUpdatedBy: string | null }): NotifyAuthor | null {
-  return author(row.notifyUpdatedBy);
+export function notifyAuthor(row: { updatedBy: string | null }): NotifyAuthor | null {
+  return author(row.updatedBy);
 }
 
 /** What a page carries about the latest version of a Notify template; the panel reads the rest itself. */
 export interface NotifySummary {
+  id: string;
   name: string;
   version: number;
   revision: number;
   updatedBy: NotifyAuthor;
 }
 
-/** From the conversation's Notify columns (`NOTIFY_SELECT`); `null` for a conversation with no Notify template. */
-export function notifySummary(row: {
-  notifyName: string | null;
-  notifyVersion: number;
-  notifyRevision: number;
-  notifyUpdatedBy: string | null;
-}): NotifySummary | null {
-  const updatedBy = author(row.notifyUpdatedBy);
-  if (row.notifyVersion === 0 || row.notifyName === null || updatedBy === null) {
+/** From a template's row (`NOTIFY_SELECT`); `null` for one with no version. */
+export function notifySummary(row: { id: string; name: string | null; version: number; revision: number; updatedBy: string | null }): NotifySummary | null {
+  const updatedBy = author(row.updatedBy);
+  if (row.version === 0 || row.name === null || updatedBy === null) {
     return null;
   }
-  return { name: row.notifyName, version: row.notifyVersion, revision: row.notifyRevision, updatedBy };
+  return { id: row.id, name: row.name, version: row.version, revision: row.revision, updatedBy };
+}
+
+/** Every Notify template of the conversation, oldest first, which is the order the switcher lists them in. */
+export async function listNotifySummaries(db: Database, conversationId: string): Promise<NotifySummary[]> {
+  const rows = await db.assistantNotify.findMany({ where: { conversationId }, select: NOTIFY_SELECT, orderBy: [...OLDEST_FIRST] });
+  return rows.flatMap((row) => notifySummary(row) ?? []);
+}
+
+/** The conversation's primary Notify template: its oldest, which `/notify` and an older client read. */
+export async function readPrimaryNotifyId(db: Database, conversationId: string): Promise<string | undefined> {
+  const row = await db.assistantNotify.findFirst({ where: { conversationId }, select: { id: true }, orderBy: [...OLDEST_FIRST] });
+  return row?.id;
 }
 
 interface VersionRow {
@@ -125,39 +137,46 @@ const responseOf = (row: VersionRow): NotifyResponse => ({
   updated_at: row.updated_at.toISOString()
 });
 
-async function latestVersion(db: Database, conversationId: string): Promise<number> {
-  const row = await db.assistantConversation.findUnique({ where: { id: conversationId }, select: { notifyVersion: true } });
-  return row?.notifyVersion ?? 0;
+/** The template's latest version, 0 when the conversation has no template of that id. */
+async function latestVersion(db: Database, conversationId: string, itemId: string): Promise<number> {
+  const row = await db.assistantNotify.findFirst({ where: { id: itemId, conversationId }, select: { version: true } });
+  return row?.version ?? 0;
 }
 
-async function versionRow(db: Database, conversationId: string, version: number): Promise<VersionRow | undefined> {
+async function versionRow(db: Database, itemId: string, version: number): Promise<VersionRow | undefined> {
   const [row] = await db.$queryRaw<VersionRow[]>`
     SELECT version, revision, product, template_id::text AS template_id, service_id::text AS service_id, type, name, subject, body,
            notify_version, notify_subject, notify_body, notify_preview, data, by, summary, updated_at
       FROM assistant_notify_version
-     WHERE conversation_id = ${conversationId}::uuid AND version = ${version}::int
+     WHERE item_id = ${itemId}::uuid AND version = ${version}::int
   `;
   return row;
 }
 
-/** The latest version, or `version` when it is kept; `null` for a conversation with no Notify template and for a version not kept. */
-export async function notifyView(db: Database, conversationId: string, version?: number): Promise<NotifyResponse | null> {
-  const latest = await latestVersion(db, conversationId);
+/** The latest version of the template, or `version` when it is kept; `null` for a conversation without that template and for a version not kept. */
+export async function notifyView(db: Database, conversationId: string, itemId: string, version?: number): Promise<NotifyResponse | null> {
+  const latest = await latestVersion(db, conversationId, itemId);
   if (latest === 0) {
     return null;
   }
-  const row = await versionRow(db, conversationId, version ?? latest);
+  const row = await versionRow(db, itemId, version ?? latest);
   if (row === undefined) {
     return null;
   }
   return version === undefined || version === latest ? responseOf(row) : { ...responseOf(row), current_version: latest };
 }
 
-/** Every kept version, newest first. */
-export async function listNotifyVersions(db: Database, conversationId: string): Promise<NotifyVersionEntry[]> {
+/** What `/notify` answers: the primary template, as `notifyView` answers it; `null` for a conversation with none. */
+export async function primaryNotifyView(db: Database, conversationId: string, version?: number): Promise<NotifyResponse | null> {
+  const id = await readPrimaryNotifyId(db, conversationId);
+  return id === undefined ? null : await notifyView(db, conversationId, id, version);
+}
+
+/** Every kept version of the template, newest first. */
+export async function listNotifyVersions(db: Database, itemId: string): Promise<NotifyVersionEntry[]> {
   const rows = await db.$queryRaw<Pick<VersionRow, "version" | "by" | "name" | "notify_version" | "summary" | "updated_at">[]>`
     SELECT version, by, name, notify_version, summary, updated_at
-      FROM assistant_notify_version WHERE conversation_id = ${conversationId}::uuid ORDER BY version DESC
+      FROM assistant_notify_version WHERE item_id = ${itemId}::uuid ORDER BY version DESC
   `;
   return rows.map((row) => ({
     version: row.version,
@@ -169,9 +188,9 @@ export async function listNotifyVersions(db: Database, conversationId: string): 
   }));
 }
 
-async function prune(db: Database, conversationId: string, latest: number): Promise<void> {
+async function prune(db: Database, itemId: string, latest: number): Promise<void> {
   await db.$executeRaw`
-    DELETE FROM assistant_notify_version WHERE conversation_id = ${conversationId}::uuid AND version <= ${latest - KEEP_NOTIFY_VERSIONS}::int
+    DELETE FROM assistant_notify_version WHERE item_id = ${itemId}::uuid AND version <= ${latest - KEEP_NOTIFY_VERSIONS}::int
   `;
 }
 
@@ -183,15 +202,17 @@ async function conversationOf(db: Database, conversationId: string): Promise<Con
   return row;
 }
 
-async function conflict(db: Database, conversationId: string): Promise<HttpError> {
-  return new HttpError(409, "the Notify template has changed since that version", { current: await notifyView(db, conversationId) });
+async function conflict(db: Database, conversationId: string, itemId: string): Promise<HttpError> {
+  return new HttpError(409, "the Notify template has changed since that version", { current: await notifyView(db, conversationId, itemId) });
 }
 
+const MISSING = "the conversation has no such Notify template";
+
 /** The source of `version`, which a write without a source of its own takes on. */
-async function sourceOf(db: Database, conversationId: string, version: number): Promise<NotifySource> {
-  const row = await versionRow(db, conversationId, version);
+async function sourceOf(db: Database, itemId: string, version: number): Promise<NotifySource> {
+  const row = await versionRow(db, itemId, version);
   if (row === undefined) {
-    throw new HttpError(404, "the conversation has no Notify template");
+    throw new HttpError(404, MISSING);
   }
   return {
     product: row.product,
@@ -210,6 +231,7 @@ async function insertVersion(
   db: Database,
   {
     conversationId,
+    itemId,
     version,
     source,
     subject,
@@ -221,6 +243,7 @@ async function insertVersion(
     now
   }: {
     conversationId: string;
+    itemId: string;
     version: number;
     source: NotifySource;
     subject: string | null;
@@ -233,37 +256,65 @@ async function insertVersion(
   }
 ): Promise<void> {
   await db.$executeRaw`
-    INSERT INTO assistant_notify_version (conversation_id, version, revision, product, template_id, service_id, type, name, subject, body,
+    INSERT INTO assistant_notify_version (conversation_id, item_id, version, revision, product, template_id, service_id, type, name, subject, body,
                                           notify_version, notify_subject, notify_body, notify_preview, data, by, editor_oid, summary, updated_at)
-    VALUES (${conversationId}::uuid, ${version}::int, 0, ${source.product}, ${source.template_id}::uuid, ${source.service_id}::uuid, ${source.type},
+    VALUES (${conversationId}::uuid, ${itemId}::uuid, ${version}::int, 0, ${source.product}, ${source.template_id}::uuid, ${source.service_id}::uuid, ${source.type},
             ${source.name}, ${subject}, ${body}, ${source.notify_version}::int, ${source.notify_subject}, ${source.notify_body}, ${source.notify_preview},
             ${data}::jsonb, ${by}, ${editorOid}, ${summary}, ${now})
   `;
 }
 
+/** Which template a session's write is of: one by id, the primary (made when there is none), or a new one. */
+export type NotifyTarget = { item: string } | "primary" | "new";
+
+/** A new template's row, at version 0 until the write that makes it has run in the same transaction. Refused for a second one on a pod that reads only the primary. */
+async function insertNotify(tx: Database, conversation: Conversation, now: Date): Promise<string> {
+  if ((await tx.assistantNotify.count({ where: { conversationId: conversation.id } })) > 0 && (await podLacksItems(tx, conversation))) {
+    throw new HttpError(409, ITEMS_CREATE_REFUSED_NOTIFY);
+  }
+  const [row] = await tx.$queryRaw<{ id: string }[]>`
+    INSERT INTO assistant_notify (conversation_id, version, created_at) VALUES (${conversation.id}::uuid, 0, ${now}) RETURNING id::text AS id
+  `;
+  return (row as { id: string }).id;
+}
+
 /**
  * Writes a new version by the session, or by the person for a put with `by: "user"`, if `base_version` is still the
  * template's version, and `base_revision`, when given, its revision; otherwise `HttpError(409, {current})`. A put
- * with no `source` keeps the latest version's, so an edit of the draft names only what it changes. Announced.
+ * with no `source` keeps the latest version's, so an edit of the draft names only what it changes. `target` is the
+ * template: one by id, the primary, which a write at base 0 makes while there is none, or a new one, which a pod that
+ * reads only the primary is refused (`ITEMS_CREATE_REFUSED_NOTIFY`). Announced.
  */
 export async function writeAgentNotify(
   prisma: PrismaClient,
-  { conversationId, body, now = new Date() }: { conversationId: string; body: NotifyPut; now?: Date }
-): Promise<{ version: number; revision: number }> {
+  { conversationId, target, body, now = new Date() }: { conversationId: string; target: NotifyTarget; body: NotifyPut; now?: Date }
+): Promise<{ id: string; version: number; revision: number }> {
   return await prisma.$transaction(async (tx) => {
     const conversation = await conversationOf(tx, conversationId);
     await lockConversation(tx, conversationId);
-    const held = await tx.assistantConversation.findUniqueOrThrow({ where: { id: conversationId }, select: { notifyVersion: true, notifyRevision: true } });
-    if (held.notifyVersion !== body.base_version || (body.base_revision !== undefined && held.notifyRevision !== body.base_revision)) {
-      throw await conflict(tx, conversationId);
+    let id: string | undefined;
+    if (target === "new") {
+      id = await insertNotify(tx, conversation, now);
+    } else if (target === "primary") {
+      id = (await readPrimaryNotifyId(tx, conversationId)) ?? (await insertNotify(tx, conversation, now));
+    } else {
+      id = (await tx.assistantNotify.findFirst({ where: { id: target.item, conversationId }, select: { id: true } }))?.id;
+      if (id === undefined) {
+        throw new HttpError(404, MISSING);
+      }
     }
-    const source = body.source ?? (await sourceOf(tx, conversationId, held.notifyVersion));
+    const held = await tx.assistantNotify.findUniqueOrThrow({ where: { id }, select: { version: true, revision: true } });
+    if (held.version !== body.base_version || (body.base_revision !== undefined && held.revision !== body.base_revision)) {
+      throw await conflict(tx, conversationId, id);
+    }
+    const source = body.source ?? (await sourceOf(tx, id, held.version));
     if (!subjectFits(source.type, body.subject)) {
       throw new HttpError(400, subjectRefusal(source.type));
     }
-    const version = held.notifyVersion + 1;
+    const version = held.version + 1;
     await insertVersion(tx, {
       conversationId,
+      itemId: id,
       version,
       source,
       subject: body.subject,
@@ -275,21 +326,28 @@ export async function writeAgentNotify(
       now
     });
     await tx.$executeRaw`
-      UPDATE assistant_conversation
-         SET notify_version = ${version}::int, notify_revision = 0, notify_name = ${source.name}, notify_updated_by = ${body.by ?? "agent"},
-             notify_updated_at = ${now}, first_content_at = COALESCE(first_content_at, ${now}), updated_at = ${now}
-       WHERE id = ${conversationId}::uuid
+      UPDATE assistant_notify
+         SET version = ${version}::int, revision = 0, name = ${source.name}, updated_by = ${body.by ?? "agent"}, updated_at = ${now}
+       WHERE id = ${id}::uuid
     `;
-    await prune(tx, conversationId, version);
+    await touchConversation(tx, conversationId, now);
+    await prune(tx, id, version);
     await announce(tx, conversation);
-    return { version, revision: 0 };
+    return { id, version, revision: 0 };
   });
+}
+
+/** A template is something in the chat, so the first write of one records the conversation's first content. */
+async function touchConversation(tx: Database, conversationId: string, now: Date): Promise<void> {
+  await tx.$executeRaw`
+    UPDATE assistant_conversation SET first_content_at = COALESCE(first_content_at, ${now}), updated_at = ${now} WHERE id = ${conversationId}::uuid
+  `;
 }
 
 export const EDITED_NOTIFY_SUMMARY = "Edited the template";
 
 /**
- * The person's save of the draft, if the template is still at `baseVersion` and `baseRevision`; otherwise
+ * The person's save of the draft of template `itemId`, if it is still at `baseVersion` and `baseRevision`; otherwise
  * `HttpError(409, {current})`. It amends the latest version in place when that is this person's own, and otherwise
  * writes the next version, `by: user`, from the latest one's source. Announced.
  */
@@ -297,6 +355,7 @@ export async function writeUserNotify(
   prisma: PrismaClient,
   {
     conversationId,
+    itemId,
     editorOid,
     subject,
     body,
@@ -304,7 +363,17 @@ export async function writeUserNotify(
     baseVersion,
     baseRevision,
     now = new Date()
-  }: { conversationId: string; editorOid: string; subject: string | null; body: string; data: unknown; baseVersion: number; baseRevision: number; now?: Date }
+  }: {
+    conversationId: string;
+    itemId: string;
+    editorOid: string;
+    subject: string | null;
+    body: string;
+    data: unknown;
+    baseVersion: number;
+    baseRevision: number;
+    now?: Date;
+  }
 ): Promise<{ version: number; revision: number; amended: boolean }> {
   const checked = checkNotifyData(data);
   if (!checked.ok) {
@@ -314,15 +383,15 @@ export async function writeUserNotify(
   return await prisma.$transaction(async (tx) => {
     const conversation = await conversationOf(tx, conversationId);
     await lockConversation(tx, conversationId);
-    const held = await tx.assistantConversation.findUniqueOrThrow({ where: { id: conversationId }, select: { notifyVersion: true, notifyRevision: true } });
-    if (held.notifyVersion === 0) {
-      throw new HttpError(404, "the conversation has no Notify template");
+    const held = await tx.assistantNotify.findFirst({ where: { id: itemId, conversationId }, select: { version: true, revision: true } });
+    if (held === null || held.version === 0) {
+      throw new HttpError(404, MISSING);
     }
-    if (held.notifyVersion !== baseVersion || held.notifyRevision !== baseRevision) {
-      throw await conflict(tx, conversationId);
+    if (held.version !== baseVersion || held.revision !== baseRevision) {
+      throw await conflict(tx, conversationId, itemId);
     }
     const latest = await tx.assistantNotifyVersion.findUniqueOrThrow({
-      where: { conversationId_version: { conversationId, version: baseVersion } },
+      where: { itemId_version: { itemId, version: baseVersion } },
       select: { by: true, editorOid: true, type: true }
     });
     const type = typeOf(latest.type);
@@ -334,20 +403,20 @@ export async function writeUserNotify(
       await tx.$executeRaw`
         UPDATE assistant_notify_version
            SET subject = ${subject}, body = ${body}, data = ${stored}::jsonb, revision = ${revision}::int, updated_at = ${now}
-         WHERE conversation_id = ${conversationId}::uuid AND version = ${baseVersion}::int
+         WHERE item_id = ${itemId}::uuid AND version = ${baseVersion}::int
       `;
       await tx.$executeRaw`
-        UPDATE assistant_conversation
-           SET notify_revision = ${revision}::int, notify_updated_by = 'user', notify_updated_at = ${now}, updated_at = ${now}
-         WHERE id = ${conversationId}::uuid
+        UPDATE assistant_notify SET revision = ${revision}::int, updated_by = 'user', updated_at = ${now} WHERE id = ${itemId}::uuid
       `;
+      await tx.$executeRaw`UPDATE assistant_conversation SET updated_at = ${now} WHERE id = ${conversationId}::uuid`;
       await announce(tx, conversation);
       return { version: baseVersion, revision, amended: true };
     }
-    const source = await sourceOf(tx, conversationId, baseVersion);
+    const source = await sourceOf(tx, itemId, baseVersion);
     const version = baseVersion + 1;
     await insertVersion(tx, {
       conversationId,
+      itemId,
       version,
       source,
       subject,
@@ -359,13 +428,42 @@ export async function writeUserNotify(
       now
     });
     await tx.$executeRaw`
-      UPDATE assistant_conversation
-         SET notify_version = ${version}::int, notify_revision = 0, notify_name = ${source.name}, notify_updated_by = 'user',
-             notify_updated_at = ${now}, updated_at = ${now}
-       WHERE id = ${conversationId}::uuid
+      UPDATE assistant_notify
+         SET version = ${version}::int, revision = 0, name = ${source.name}, updated_by = 'user', updated_at = ${now}
+       WHERE id = ${itemId}::uuid
     `;
-    await prune(tx, conversationId, version);
+    await tx.$executeRaw`UPDATE assistant_conversation SET updated_at = ${now} WHERE id = ${conversationId}::uuid`;
+    await prune(tx, itemId, version);
     await announce(tx, conversation);
     return { version, revision: 0, amended: false };
   });
+}
+
+/** Removes a template and its versions. */
+export async function removeNotify(prisma: PrismaClient, conversation: Conversation, itemId: string): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    const { count } = await tx.assistantNotify.deleteMany({ where: { id: itemId, conversationId: conversation.id } });
+    if (count === 0) {
+      throw new HttpError(404, MISSING);
+    }
+    await announce(tx, conversation);
+  });
+}
+
+/** One entry of `GET /notify-templates`: a template without its text. */
+export function notifySummaryJson(summary: NotifySummary) {
+  return { id: summary.id, name: summary.name, version: summary.version, revision: summary.revision, updated_by: summary.updatedBy };
+}
+
+/** The `?version=N` of a read: `undefined` for the latest, and a 400 for anything that is not a version number. */
+export function askedNotifyVersion(request: Request): number | undefined {
+  const asked = new URL(request.url).searchParams.get("version");
+  if (asked === null) {
+    return undefined;
+  }
+  const version = versionParam(asked);
+  if (version === undefined) {
+    throw new HttpError(400, "the version must be a whole number from 1");
+  }
+  return version;
 }

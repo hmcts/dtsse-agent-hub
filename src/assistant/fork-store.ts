@@ -241,8 +241,8 @@ export async function acceptFork(prisma: PrismaClient, viewer: { oid: string; mo
              forked_earlier_hidden = ${earlierHidden}
        WHERE id = ${created.id}::uuid
     `;
-    // The latest deck, with its pictures and its .pptx, as the copy's version 1: said to be the person's for the same
-    // reason as the document above.
+    // Each deck's latest version, with its pictures and its .pptx, as version 1 of a deck of the copy's: said to be the
+    // person's for the same reason as the document above.
     await copyDeck(tx, id, created.id, now);
     await createConversationAgent(tx, created);
     await announce(tx, created);

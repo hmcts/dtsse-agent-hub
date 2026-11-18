@@ -15,6 +15,7 @@ import {
   renameConversation as rename,
   setProduct
 } from "@/assistant/conversation-store";
+import { removeDocmosisTemplate as removeDocmosis } from "@/assistant/docmosis-store";
 import { type DocumentKind, isDocumentKind } from "@/assistant/documents";
 import { attachForkContext, forkContextPending } from "@/assistant/fork-store";
 import { readGithubProject } from "@/assistant/github";
@@ -22,6 +23,7 @@ import { requestGithubExport } from "@/assistant/github-store";
 import { requestJiraExport } from "@/assistant/jira-store";
 import { saveAssistantModel as saveModel } from "@/assistant/model-store";
 import { modelLabel } from "@/assistant/models";
+import { removeNotify } from "@/assistant/notify-store";
 import { CHAT_BLOCKED } from "@/assistant/onboarding";
 import { hasPod } from "@/assistant/pods";
 import { MAX_ARTEFACT_MARKDOWN, MAX_ARTEFACT_TITLE } from "@/assistant/schemas";
@@ -348,6 +350,7 @@ export interface ArtefactSnapshot {
 export type SaveArtefactResult = { saved: true; version: number } | { saved: false; current: ArtefactSnapshot };
 
 const NO_DOCUMENT: { ok: false; error: string } = { ok: false, error: "that document no longer exists" };
+const NO_NOTIFY_TEMPLATE: { ok: false; error: string } = { ok: false, error: "that Notify template no longer exists" };
 
 /**
  * The person's edit of one of the conversation's documents, if nobody has changed it since `baseVersion`. Otherwise
@@ -412,6 +415,46 @@ export async function removeArtefact(input: { conversationId: unknown; documentI
       return NO_DOCUMENT;
     }
     await removeDocument(prisma, conversation, documentId);
+    return { ok: true };
+  });
+}
+
+/** Removes one of the conversation's Notify templates, with its versions. */
+export async function removeNotifyTemplate(input: { conversationId: unknown; itemId: unknown }): Promise<ActionResult> {
+  return await runAction("remove notify template", async () => {
+    if (!virtualAgentsEnabled()) {
+      return OFF;
+    }
+    const viewer = await requireViewer();
+    const conversation = await findConversation(prisma, viewer.oid, text(input.conversationId));
+    if (conversation === undefined) {
+      return MISSING;
+    }
+    const itemId = text(input.itemId);
+    if (!UUID_RE.test(itemId)) {
+      return NO_NOTIFY_TEMPLATE;
+    }
+    await removeNotify(prisma, conversation, itemId);
+    return { ok: true };
+  });
+}
+
+/** Removes one of the conversation's Docmosis templates, with its versions. */
+export async function removeDocmosisTemplate(input: { conversationId: unknown; itemId: unknown }): Promise<ActionResult> {
+  return await runAction("remove docmosis template", async () => {
+    if (!virtualAgentsEnabled()) {
+      return OFF;
+    }
+    const viewer = await requireViewer();
+    const conversation = await findConversation(prisma, viewer.oid, text(input.conversationId));
+    if (conversation === undefined) {
+      return MISSING;
+    }
+    const itemId = text(input.itemId);
+    if (!UUID_RE.test(itemId)) {
+      return { ok: false, error: "that template no longer exists" };
+    }
+    await removeDocmosis(prisma, conversation, itemId);
     return { ok: true };
   });
 }

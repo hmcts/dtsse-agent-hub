@@ -74,6 +74,12 @@ export interface ChatActions {
   /** Left out, a person whose ticket tool is GitHub is offered no ticket export. */
   exportToGithub?: ExportToGithubAction;
   exportToConfluence?: ExportToConfluenceAction;
+  /** Left out, the slides panel offers no Remove. */
+  removeDeck?: (input: { conversationId: unknown; itemId: unknown }) => Promise<ActionResult>;
+  /** Left out, the Docmosis panel offers no Remove. */
+  removeDocmosisTemplate?: (input: { conversationId: unknown; itemId: unknown }) => Promise<ActionResult>;
+  /** Left out, the Notify panel offers no Remove. */
+  removeNotifyTemplate?: (input: { conversationId: unknown; itemId: unknown }) => Promise<ActionResult>;
   /** Left out, the slides panel offers no restore of an older version. */
   restoreDeck?: RestoreDeckAction;
   /** Left out, the slides panel offers no editing. */
@@ -142,7 +148,7 @@ type DocumentDraft = UnsavedDraft & { id: string; kind: DocumentKind };
 const NOT_EXPORTED = { status: "none" } as const;
 
 /** What Create's Slides sends, as the person's own message. */
-export const CREATE_SLIDES = "Create slides for this conversation.";
+export const CREATE_SLIDES = "Create a new slide deck for this conversation.";
 
 /** How long each warming quip stands before the next, which is a few seconds of a wait that is usually a few more. */
 export const QUIP_INTERVAL_MS = 3000;
@@ -375,7 +381,7 @@ export function ChatView({
   const [claim, setClaim] = useState<string[] | null>(view.clientFeatures);
   const [pendingProduct, setPendingProduct] = useState<string | null>(null);
   /**
-   * The one panel beside the chat: the document, the deck or the Docmosis template, never two, since two panels beside a chat leave the chat
+   * The one panel beside the chat: a document, a deck or a template, never two, since two panels beside a chat leave the chat
    * no room to read in. The header's switcher moves between them, so each is two presses from another.
    */
   const [panel, setPanel] = useState<"document" | "deck" | "docmosis" | "notify" | "video" | null>(null);
@@ -384,9 +390,17 @@ export function ChatView({
    * yet, whose id the browser makes so that its first save creates it under that id.
    */
   const [openDocument, setOpenDocument] = useState<{ id: string; kind: DocumentKind } | null>(null);
+  /** Which deck the slides panel shows. */
+  const [openDeck, setOpenDeck] = useState<string | null>(null);
+  /** Which Docmosis template the panel shows; `null` is a new one, which the panel's picker makes. */
+  const [openDocmosis, setOpenDocmosis] = useState<string | null>(null);
+  /** The same for the Notify panel. */
+  const [openNotify, setOpenNotify] = useState<string | null>(null);
   // Read by a closed editor's late answer, which comes back through the props of the render that last showed it.
   const panelNow = useRef(panel);
   panelNow.current = panel;
+  const openDocmosisNow = useRef(openDocmosis);
+  openDocmosisNow.current = openDocmosis;
   const openDocumentNow = useRef(openDocument);
   openDocumentNow.current = openDocument;
   /** The document panel has edits not yet saved, or a conflict showing, which a panel opened in its place would cut short. */
@@ -395,16 +409,16 @@ export function ChatView({
   const deckBusy = useRef(false);
   /** The same for the Docmosis form: edits typed and not yet rendered, or a newer version to settle. */
   const docmosisBusy = useRef(false);
-  /** The assistant wrote a newer Docmosis version while another panel was busy, so the template waits behind its row in the switcher instead. */
-  const [docmosisWaiting, setDocmosisWaiting] = useState(false);
+  /** The Docmosis templates the assistant wrote while another panel was busy, which wait behind their rows in the switcher. */
+  const [docmosisWaiting, setDocmosisWaiting] = useState<readonly string[]>([]);
   /** The same for the Notify template: a draft not yet saved, or a newer version to settle. */
   const notifyBusy = useRef(false);
-  /** The assistant wrote a newer Notify version while another panel was busy, so it waits behind its row in the switcher instead. */
-  const [notifyWaiting, setNotifyWaiting] = useState(false);
+  /** The Notify templates the assistant wrote while another panel was busy, which wait behind their rows in the switcher. */
+  const [notifyWaiting, setNotifyWaiting] = useState<readonly string[]>([]);
   /** The assistant published a video while another panel was busy, so it waits in the switcher. */
   const [videoWaiting, setVideoWaiting] = useState(false);
-  /** The assistant wrote a newer deck while the document was busy, so the slides wait behind their row in the switcher instead. */
-  const [slidesWaiting, setSlidesWaiting] = useState(false);
+  /** The decks the assistant wrote while another panel was busy, which wait behind their rows in the switcher. */
+  const [decksWaiting, setDecksWaiting] = useState<readonly string[]>([]);
   /** The documents the assistant wrote while another panel was busy, which wait behind their rows in the switcher. */
   const [documentsWaiting, setDocumentsWaiting] = useState<readonly string[]>([]);
   /**
@@ -413,25 +427,28 @@ export function ChatView({
    * waits behind the document's row in the switcher. The panel that takes it clears it, so it is handed to one panel only.
    */
   const [unsaved, setUnsaved] = useState<{ draft: DocumentDraft | null; key: number }>({ draft: null, key: 0 });
-  /** The same for an edit the slides' editor was closed on. */
-  const [unsavedDeck, setUnsavedDeck] = useState<{ draft: UnsavedDeckDraft | null; key: number }>({ draft: null, key: 0 });
-  const deckDraftWaiting = unsavedDeck.draft !== null && panel !== "deck";
+  /** The same for an edit the slides' editor was closed on, with the deck it was of. */
+  const [unsavedDeck, setUnsavedDeck] = useState<{ draft: UnsavedDeckDraft | null; deckId: string | null; key: number }>({ draft: null, deckId: null, key: 0 });
+  const deckOpen = panel === "deck" ? openDeck : null;
+  const decksDraftWaiting = (id: string): boolean => unsavedDeck.draft !== null && unsavedDeck.deckId === id && deckOpen !== id;
   const documentOpen = panel === "document" ? openDocument : null;
   const documentDraftWaiting = unsaved.draft !== null && documentOpen?.id !== unsaved.draft.id;
   const [ask, setAsk] = useState<SlideAsk | null>(null);
   /**
-   * Create has asked the assistant for slides, so it waits for the deck rather than asking again. The chat is keyed by
-   * conversation, so another conversation starts clear.
+   * How many decks the conversation held when Create asked the assistant for slides, so it waits for the new one
+   * rather than asking again. The chat is keyed by conversation, so another conversation starts clear.
    */
-  const [slidesAsked, setSlidesAsked] = useState(false);
+  const [slidesAskedAt, setSlidesAskedAt] = useState<number | null>(null);
+  const slidesAsked = slidesAskedAt !== null && view.decks.length <= slidesAskedAt;
   const [error, setError] = useState<string | null>(null);
   const warmed = useRef(false);
   const seenVersions = useRef(new Map(view.documents.map((document) => [document.id, document.version])));
-  const seenDeck = useRef(view.deck?.version ?? 0);
-  const docmosis = view.docmosis;
-  const seenDocmosis = useRef(docmosis?.version ?? 0);
-  const notify = view.notify;
-  const seenNotify = useRef(notify?.version ?? 0);
+  const seenDecks = useRef(new Map(view.decks.map((deck) => [deck.id, deck.version])));
+  const seenDocmosis = useRef(new Map(view.docmosisTemplates.map((template) => [template.id, template.version])));
+  const seenNotify = useRef(new Map(view.notifyTemplates.map((template) => [template.id, template.version])));
+  const deck = view.decks.find((one) => one.id === openDeck);
+  const docmosis = view.docmosisTemplates.find((one) => one.id === openDocmosis) ?? null;
+  const notify = view.notifyTemplates.find((one) => one.id === openNotify) ?? null;
   const video = view.video;
   const seenVideo = useRef(video?.version ?? 0);
   const narrow = useNarrow();
@@ -485,61 +502,86 @@ export function ChatView({
   }, [view.documents, arrivals, panel, openDocument, ticketTool]);
 
   /**
-   * The same for the deck: a newer version from the assistant opens the slides in the document's place, unless the
-   * person is part-way through the document, when it is announced and its row in the switcher marked instead. The slides' own
-   * editor takes in a newer deck itself, or offers it against the person's edit.
+   * The same for a deck: a newer version from the assistant opens the slides in the other panel's place, unless the
+   * person is part-way through another panel or another deck, when it is announced and its row in the switcher marked
+   * instead. The slides' own editor takes in a newer version of its deck itself, or offers it against the person's edit.
    */
-  const deckVersion = view.deck?.version ?? 0;
-  const deckBy = view.deck?.updatedBy ?? null;
   useEffect(() => {
-    if (deckVersion > seenDeck.current && deckBy === "agent") {
-      if ((panel === "document" && documentBusy.current) || (panel === "docmosis" && docmosisBusy.current) || (panel === "notify" && notifyBusy.current)) {
-        setSlidesWaiting(true);
-        arrivals.announce("The assistant updated the slides. Open them from Items to see them.");
-      } else {
-        setPanel("deck");
-        arrivals.announce("The assistant updated the slides");
-      }
+    const seen = seenDecks.current;
+    const arrived = view.decks.filter((one) => one.version > (seen.get(one.id) ?? 0) && one.updatedBy === "agent");
+    for (const one of view.decks) {
+      seen.set(one.id, Math.max(seen.get(one.id) ?? 0, one.version));
     }
-    seenDeck.current = Math.max(seenDeck.current, deckVersion);
-  }, [deckVersion, deckBy, arrivals, panel]);
+    const newest = arrived.at(-1);
+    if (newest === undefined) {
+      return;
+    }
+    if ((panel === "document" && documentBusy.current) || (panel === "docmosis" && docmosisBusy.current) || (panel === "notify" && notifyBusy.current)) {
+      setDecksWaiting((before) => [...before, ...arrived.map((one) => one.id).filter((id) => !before.includes(id))]);
+      arrivals.announce("The assistant updated the slides. Open them from Items to see them.");
+    } else {
+      setOpenDeck(newest.id);
+      setPanel("deck");
+      arrivals.announce("The assistant updated the slides");
+    }
+  }, [view.decks, arrivals, panel]);
 
   /**
-   * The same for the Docmosis template: a newer version from the assistant opens it in the other panel's place, unless
-   * the person is part-way through the document or the slides, when it is announced and its row in the switcher marked instead. The
+   * The same for a Docmosis template: a newer version from the assistant opens it in the other panel's place, unless
+   * the person is part-way through another panel, when it is announced and its row in the switcher marked instead. The
    * panel itself takes in a newer version, or offers it against what the person has typed. The person's own versions,
    * a template they loaded from the library among them, never open it: they are already looking at it.
    */
-  const docmosisVersion = docmosis?.version ?? 0;
-  const docmosisBy = docmosis?.updatedBy ?? null;
   useEffect(() => {
-    if (docmosisVersion > seenDocmosis.current && docmosisBy === "agent") {
-      if ((panel === "document" && documentBusy.current) || (panel === "deck" && deckBusy.current) || (panel === "notify" && notifyBusy.current)) {
-        setDocmosisWaiting(true);
-        arrivals.announce("The assistant updated the template. Open it from Items to see it.");
-      } else {
-        setPanel("docmosis");
-        arrivals.announce("The assistant updated the template");
-      }
+    const seen = seenDocmosis.current;
+    const arrived = view.docmosisTemplates.filter((one) => one.version > (seen.get(one.id) ?? 0) && one.updatedBy === "agent");
+    for (const one of view.docmosisTemplates) {
+      seen.set(one.id, Math.max(seen.get(one.id) ?? 0, one.version));
     }
-    seenDocmosis.current = Math.max(seenDocmosis.current, docmosisVersion);
-  }, [docmosisVersion, docmosisBy, arrivals, panel]);
+    const newest = arrived.at(-1);
+    if (newest === undefined) {
+      return;
+    }
+    if (
+      (panel === "document" && documentBusy.current) ||
+      (panel === "deck" && deckBusy.current) ||
+      (panel === "notify" && notifyBusy.current) ||
+      (panel === "docmosis" && docmosisBusy.current && openDocmosis !== newest.id)
+    ) {
+      setDocmosisWaiting((before) => [...before, ...arrived.map((one) => one.id).filter((id) => !before.includes(id))]);
+      arrivals.announce("The assistant updated the template. Open it from Items to see it.");
+    } else {
+      setOpenDocmosis(newest.id);
+      setPanel("docmosis");
+      arrivals.announce("The assistant updated the template");
+    }
+  }, [view.docmosisTemplates, arrivals, panel, openDocmosis]);
 
-  /** The same for the Notify template, which the assistant loads with `notify pull` or changes with `notify put`. */
-  const notifyVersion = notify?.version ?? 0;
-  const notifyBy = notify?.updatedBy ?? null;
+  /** The same for a Notify template, which the assistant loads with `notify pull` or changes with `notify put`. */
   useEffect(() => {
-    if (notifyVersion > seenNotify.current && notifyBy === "agent") {
-      if ((panel === "document" && documentBusy.current) || (panel === "deck" && deckBusy.current) || (panel === "docmosis" && docmosisBusy.current)) {
-        setNotifyWaiting(true);
-        arrivals.announce("The assistant updated the Notify template. Open it from Items to see it.");
-      } else if (panel !== "notify") {
-        setPanel("notify");
-        arrivals.announce("The assistant updated the Notify template");
-      }
+    const seen = seenNotify.current;
+    const arrived = view.notifyTemplates.filter((one) => one.version > (seen.get(one.id) ?? 0) && one.updatedBy === "agent");
+    for (const one of view.notifyTemplates) {
+      seen.set(one.id, Math.max(seen.get(one.id) ?? 0, one.version));
     }
-    seenNotify.current = Math.max(seenNotify.current, notifyVersion);
-  }, [notifyVersion, notifyBy, arrivals, panel]);
+    const newest = arrived.at(-1);
+    if (newest === undefined) {
+      return;
+    }
+    if (
+      (panel === "document" && documentBusy.current) ||
+      (panel === "deck" && deckBusy.current) ||
+      (panel === "docmosis" && docmosisBusy.current) ||
+      (panel === "notify" && notifyBusy.current && openNotify !== newest.id)
+    ) {
+      setNotifyWaiting((before) => [...before, ...arrived.map((one) => one.id).filter((id) => !before.includes(id))]);
+      arrivals.announce("The assistant updated the Notify template. Open it from Items to see it.");
+    } else if (panel !== "notify" || openNotify !== newest.id) {
+      setOpenNotify(newest.id);
+      setPanel("notify");
+      arrivals.announce("The assistant updated the Notify template");
+    }
+  }, [view.notifyTemplates, arrivals, panel, openNotify]);
   /** The same for the journey video, which the assistant publishes with `video put`. Only the person's own edits are ever busy, and the video has none. */
   const videoVersion = video?.version ?? 0;
   useEffect(() => {
@@ -560,28 +602,28 @@ export function ChatView({
     seenVideo.current = Math.max(seenVideo.current, videoVersion);
   }, [videoVersion, arrivals, panel]);
   useEffect(() => {
-    if (panel === "deck") {
-      setSlidesWaiting(false);
-    }
     if (documentOpen !== null) {
       setDocumentsWaiting((before) => (before.includes(documentOpen.id) ? before.filter((id) => id !== documentOpen.id) : before));
     }
-    if (panel === "docmosis") {
-      setDocmosisWaiting(false);
+    if (deckOpen !== null) {
+      setDecksWaiting((before) => (before.includes(deckOpen) ? before.filter((id) => id !== deckOpen) : before));
+    }
+    if (panel === "docmosis" && openDocmosis !== null) {
+      setDocmosisWaiting((before) => (before.includes(openDocmosis) ? before.filter((id) => id !== openDocmosis) : before));
     }
     if (panel === "video") {
       setVideoWaiting(false);
     }
-    if (panel === "notify") {
-      setNotifyWaiting(false);
+    if (panel === "notify" && openNotify !== null) {
+      setNotifyWaiting((before) => (before.includes(openNotify) ? before.filter((id) => id !== openNotify) : before));
     }
-  }, [panel, documentOpen]);
+  }, [panel, documentOpen, deckOpen, openDocmosis, openNotify]);
   /**
    * An edit the slides' editor could not save as it closed opens the slides again with it, unless the person is
    * part-way through the document, which keeps the panel: the edit then waits behind the slides' row in the switcher.
    */
-  function reopenDeck(draft: UnsavedDeckDraft): void {
-    setUnsavedDeck((before) => ({ draft, key: before.key + 1 }));
+  function reopenDeck(draft: UnsavedDeckDraft, deckId: string): void {
+    setUnsavedDeck((before) => ({ draft, deckId, key: before.key + 1 }));
     if (
       (panelNow.current === "document" && documentBusy.current) ||
       (panelNow.current === "docmosis" && docmosisBusy.current) ||
@@ -594,6 +636,7 @@ export function ChatView({
       );
       return;
     }
+    setOpenDeck(deckId);
     setPanel("deck");
     arrivals.announce(
       draft.conflict === null
@@ -641,14 +684,12 @@ export function ChatView({
     setPanel("document");
   }
   /**
-   * What Create offers. Any number of documents, of each of the three kinds: a ticket or a Confluence page is a document
-   * that goes to that one place, so it is offered only where there is a pod to export it, and the ones already made are
-   * reached through the switcher. A conversation holds one of each other kind, so a kind it already holds is opened
-   * rather than made again. Slides, a Docmosis template and a Notify template are each made through the pod — the
-   * assistant drafts the slides, and the two templates are chosen from libraries the pod reads — so a local chat is
-   * offered only one its session already wrote. Every pod booted on the current hub has the slides tools (`podPlugins`),
-   * and the view does not carry the stored plugins an older client would need checking against, so a pod chat is always
-   * offered Slides.
+   * What Create offers: a new item, of any kind, as many times as the person likes; the ones already made are reached
+   * through the switcher. A ticket or a Confluence page is a document that goes to that one place, so it is offered only
+   * where there is a pod to export it. Slides, a Docmosis template and a Notify template are each made through the pod —
+   * the assistant drafts the slides, and the two templates are chosen from libraries the pod reads — so a local chat is
+   * offered none of them. Every pod booted on the current hub has the slides tools (`podPlugins`), and the view does
+   * not carry the stored plugins an older client would need checking against, so a pod chat is always offered Slides.
    */
   const creatable: CreateOption[] = [
     { key: "document", label: "Document", choose: () => createDocument("document") },
@@ -658,18 +699,27 @@ export function ChatView({
           { key: "confluence", label: "Confluence page", choose: () => createDocument("confluence") }
         ]
       : []),
-    ...(pod || view.deck !== null
+    ...(pod
       ? [
+          { key: "slides", label: slidesAsked ? "Slides, being made" : "Slides", choose: () => void createSlides() },
           {
-            key: "slides",
-            label: view.deck === null && slidesAsked ? "Slides, being made" : "Slides",
-            exists: view.deck !== null,
-            choose: view.deck === null ? () => void createSlides() : () => setPanel("deck")
+            key: "docmosis",
+            label: "Docmosis template",
+            choose: () => {
+              setOpenDocmosis(null);
+              setPanel("docmosis");
+            }
+          },
+          {
+            key: "notify",
+            label: "Notify template",
+            choose: () => {
+              setOpenNotify(null);
+              setPanel("notify");
+            }
           }
         ]
-      : []),
-    ...(pod || docmosis !== null ? [{ key: "docmosis", label: "Docmosis template", exists: docmosis !== null, choose: () => setPanel("docmosis") }] : []),
-    ...(pod || notify !== null ? [{ key: "notify", label: "Notify template", exists: notify !== null, choose: () => setPanel("notify") }] : [])
+      : [])
   ];
   const shownDocument = documentOpen === null ? undefined : view.documents.find((document) => document.id === documentOpen.id);
   const tickets = ticketsOffered(ticketTool, shownDocument?.jira ?? NOT_EXPORTED, shownDocument?.github ?? NOT_EXPORTED);
@@ -725,7 +775,10 @@ export function ChatView({
    * A load from the template library ended while the panel was closed: the panel opens on its outcome, unless the
    * person is part-way through the document or the slides, when the outcome waits for them to open it.
    */
-  function templateLoadSettled(outcome: LoadSettled): void {
+  function templateLoadSettled(outcome: LoadSettled, item?: string): void {
+    if (item !== undefined && outcome === "loaded" && (panelNow.current === "docmosis" || openDocmosisNow.current === null)) {
+      setOpenDocmosis(item);
+    }
     if (panelNow.current === "docmosis") {
       return;
     }
@@ -740,7 +793,13 @@ export function ChatView({
       arrivals.announce("Your template did not load");
     }
   }
-  const templateLoad = useTemplateLoad({ conversationId: view.id, docmosis, announce: arrivals.announce, onSettled: templateLoadSettled });
+  const templateLoad = useTemplateLoad({
+    conversationId: view.id,
+    templates: view.docmosisTemplates,
+    target: openDocmosis,
+    announce: arrivals.announce,
+    onSettled: templateLoadSettled
+  });
   // A load's outcome waits in the Docmosis panel, so its row stays in the switcher until the person has seen it.
   const loadFailed = templateLoad.load.phase === "failed";
   /**
@@ -758,22 +817,69 @@ export function ChatView({
       waiting: documentsWaiting.includes(id),
       unsaved: documentDraftWaiting && unsaved.draft?.id === id
     })),
-    ...(view.deck === null ? [] : [{ key: "slides", label: "Slides", open: () => setPanel("deck"), waiting: slidesWaiting, unsaved: deckDraftWaiting }]),
-    ...(docmosis === null && panel !== "docmosis" && !templateLoad.pending && !loadFailed
-      ? []
-      : [
+    ...view.decks.map((one) => ({
+      key: `deck:${one.id}`,
+      label: one.title,
+      open: () => {
+        setOpenDeck(one.id);
+        setPanel("deck");
+      },
+      waiting: decksWaiting.includes(one.id),
+      unsaved: decksDraftWaiting(one.id)
+    })),
+    ...view.docmosisTemplates.map((one) => ({
+      key: `docmosis:${one.id}`,
+      label: one.name,
+      open: () => {
+        setOpenDocmosis(one.id);
+        setPanel("docmosis");
+      },
+      waiting: docmosisWaiting.includes(one.id)
+    })),
+    ...(openDocmosis === null && (panel === "docmosis" || templateLoad.pending || loadFailed)
+      ? [
           {
-            key: "docmosis",
-            label: "Docmosis template",
-            open: () => setPanel("docmosis"),
-            waiting: docmosisWaiting,
+            key: "docmosis:new",
+            label: "New Docmosis template",
+            open: () => {
+              setOpenDocmosis(null);
+              setPanel("docmosis");
+            },
             failed: loadFailed && panel !== "docmosis"
           }
-        ]),
-    ...(notify === null && panel !== "notify" ? [] : [{ key: "notify", label: "Notify template", open: () => setPanel("notify"), waiting: notifyWaiting }]),
+        ]
+      : []),
+    ...view.notifyTemplates.map((one) => ({
+      key: `notify:${one.id}`,
+      label: one.name,
+      open: () => {
+        setOpenNotify(one.id);
+        setPanel("notify");
+      },
+      waiting: notifyWaiting.includes(one.id)
+    })),
+    ...(openNotify === null && panel === "notify"
+      ? [
+          {
+            key: "notify:new",
+            label: "New Notify template",
+            open: () => {
+              setOpenNotify(null);
+              setPanel("notify");
+            }
+          }
+        ]
+      : []),
     ...(video === null ? [] : [{ key: "video", label: "Video", open: () => setPanel("video"), waiting: videoWaiting }])
   ];
-  const switcherPanel = documentOpen !== null ? `document:${documentOpen.id}` : panel === "deck" ? "slides" : panel;
+  const switcherPanel =
+    documentOpen !== null
+      ? `document:${documentOpen.id}`
+      : panel === "deck"
+        ? `deck:${openDeck}`
+        : panel === "docmosis" || panel === "notify"
+          ? `${panel}:${(panel === "docmosis" ? openDocmosis : openNotify) ?? "new"}`
+          : panel;
   const artefact: ArtefactSnapshot = {
     title: shownDocument?.title ?? null,
     markdown: shownDocument?.markdown ?? "",
@@ -808,6 +914,46 @@ export function ChatView({
     return null;
   }
 
+  async function removeDeck(id: string): Promise<string | null> {
+    if (actions.removeDeck !== undefined) {
+      const result = await actions.removeDeck({ conversationId: view.id, itemId: id });
+      if (!result.ok) {
+        return result.error;
+      }
+      router.refresh();
+    }
+    setUnsavedDeck((before) => (before.deckId === id ? { draft: null, deckId: null, key: before.key } : before));
+    setPanel(null);
+    setOpenDeck(null);
+    return null;
+  }
+
+  async function removeDocmosisTemplate(id: string): Promise<string | null> {
+    if (actions.removeDocmosisTemplate !== undefined) {
+      const result = await actions.removeDocmosisTemplate({ conversationId: view.id, itemId: id });
+      if (!result.ok) {
+        return result.error;
+      }
+      router.refresh();
+    }
+    setPanel(null);
+    setOpenDocmosis(null);
+    return null;
+  }
+
+  async function removeNotifyTemplate(id: string): Promise<string | null> {
+    if (actions.removeNotifyTemplate !== undefined) {
+      const result = await actions.removeNotifyTemplate({ conversationId: view.id, itemId: id });
+      if (!result.ok) {
+        return result.error;
+      }
+      router.refresh();
+    }
+    setPanel(null);
+    setOpenNotify(null);
+    return null;
+  }
+
   async function send(body: string, uploadIds: string[]): Promise<string | null> {
     // A slide the person asked about goes in front of their words, which is the whole of how the session is told. The
     // box holds their words to the room the slide leaves (`limit` below), so the two together never pass `MAX_BODY`.
@@ -823,12 +969,12 @@ export function ChatView({
     return null;
   }
 
-  /** There is no blank deck to edit: slides are drafted by the assistant, so Create asks it to. */
+  /** There is no blank deck to edit: slides are drafted by the assistant, so Create asks it to make a new one. */
   async function createSlides(): Promise<void> {
     if (slidesAsked) {
       return;
     }
-    setSlidesAsked(true);
+    setSlidesAskedAt(view.decks.length);
     let problem: string | null;
     try {
       problem = await send(CREATE_SLIDES, []);
@@ -837,7 +983,7 @@ export function ChatView({
     }
     if (problem !== null) {
       setError(problem);
-      setSlidesAsked(false);
+      setSlidesAskedAt(null);
     }
   }
 
@@ -1032,16 +1178,17 @@ export function ChatView({
           </div>
         </div>
       </div>
-      {panel === "deck" && view.deck !== null ? (
+      {panel === "deck" && deck !== undefined ? (
         <DeckPanel
-          key={unsavedDeck.key}
-          draft={unsavedDeck.draft ?? undefined}
-          onDraftTaken={() => setUnsavedDeck((before) => ({ draft: null, key: before.key }))}
-          onUnsaved={reopenDeck}
+          key={`${deck.id}:${unsavedDeck.key}`}
+          draft={unsavedDeck.deckId === deck.id ? (unsavedDeck.draft ?? undefined) : undefined}
+          onDraftTaken={() => setUnsavedDeck((before) => ({ draft: null, deckId: null, key: before.key }))}
+          onUnsaved={(draft) => reopenDeck(draft, deck.id)}
+          onRemove={actions.removeDeck === undefined ? undefined : () => removeDeck(deck.id)}
           save={actions.saveDeck}
           onBusy={markDeckBusy}
           conversationId={view.id}
-          deck={view.deck}
+          deck={deck}
           onClose={() => setPanel(null)}
           narrow={narrow}
           announce={arrivals.announce}
@@ -1057,8 +1204,10 @@ export function ChatView({
       ) : null}
       {panel === "docmosis" ? (
         <DocmosisPanel
+          key={openDocmosis ?? "new"}
           conversationId={view.id}
           docmosis={docmosis}
+          onRemove={docmosis === null || actions.removeDocmosisTemplate === undefined ? undefined : () => removeDocmosisTemplate(docmosis.id)}
           owner
           loader={pod ? templateLoad : undefined}
           onClose={() => setPanel(null)}
@@ -1069,8 +1218,11 @@ export function ChatView({
       ) : null}
       {panel === "notify" ? (
         <NotifyPanel
+          key={openNotify ?? "new"}
+          onCreated={(id) => setOpenNotify(id)}
           conversationId={view.id}
           notify={notify}
+          onRemove={notify === null || actions.removeNotifyTemplate === undefined ? undefined : () => removeNotifyTemplate(notify.id)}
           owner
           canPick={pod}
           onClose={() => setPanel(null)}

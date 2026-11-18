@@ -1,9 +1,11 @@
-// `agent-hub deck`: a CFT Workspace conversation's slide deck, between the hub and the files the slides plugin builds
+// `agent-hub deck`: a CFT Workspace conversation's slide decks, between the hub and the files the slides plugin builds
 // from. The hub names each picture by the SHA-256 of its bytes; the plugin reads pictures from paths beside the
 // outline. `get` writes the hub's outline out with its pictures downloaded beside it and named by path, so `slides
 // build` runs on it unchanged, and `put` turns the paths back into uploaded pictures before it sends the outline.
 // `get` also records the version and revision it wrote, which `put` sends as its base for an outline in that directory,
 // so a version someone else wrote in between, or the person's amend of the one read, is refused rather than overwritten.
+// A conversation holds any number of decks. Without `--id` a command is about the primary deck, which is all a hub
+// older than several decks has; with it, the deck `deck list` prints. `deck new` makes another.
 // The revision goes with the version `get` recorded, so it is sent only for a put on that version: an explicit `--base`
 // naming any other is put on the hub's version check alone.
 import { createHash } from "node:crypto";
@@ -41,16 +43,27 @@ function pictureExtension(bytes: Uint8Array): string {
 
 const sha256 = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
 
-function noDeck(e: unknown): never {
+/** A 404 for the primary deck is the session; for `id` it is a deck that is gone, or a hub that holds one deck and has no such route. */
+function noDeck(e: unknown, id?: string): never {
   if (e instanceof ApiError && e.status === 404) {
-    throw new Error("this session is not a CFT Workspace conversation, so it has no slide deck");
+    throw new Error(
+      id === undefined
+        ? "this session is not a CFT Workspace conversation, so it has no slide deck"
+        : `there is no slide deck ${id} in this conversation; list them with ${CLI} deck list`
+    );
   }
   throw e;
 }
 
-/** Where `get` writes a conversation's deck: one directory per conversation, under the home directory. */
-export function deckDir(cli: Cli, conversation: string): string {
-  return path.join(cli.env.HOME || os.homedir(), ".agent-hub", "decks", conversation);
+/** The flag that names a deck other than the primary, as the commands printed for the session spell it. */
+const idFlag = (id: string | undefined): string => (id === undefined ? "" : ` --id ${id}`);
+
+const DECK_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Where `get` writes a conversation's deck: one directory per conversation, under the home directory, and one inside it for each deck named by `--id`. */
+export function deckDir(cli: Cli, conversation: string, id?: string): string {
+  const base = path.join(cli.env.HOME || os.homedir(), ".agent-hub", "decks", conversation);
+  return id === undefined ? base : path.join(base, id);
 }
 
 /** The file in the deck's directory naming the version its outline was read at, or last put as. */
@@ -125,11 +138,25 @@ export async function materialise(fetchAsset: (sha: string) => Promise<Uint8Arra
   return { ...outline, slides };
 }
 
-function getArgs(argv: string[]): { json: boolean; slide: string | undefined; version: number | undefined; diffFrom: number | undefined } {
+/** `--id`, which names a deck as `deck list` prints it. */
+function idArg(flags: Record<string, string>): string | undefined {
+  if (flags.id !== undefined && !DECK_ID_RE.test(flags.id)) {
+    throw new UsageError("--id must be a deck's id, as deck list prints it");
+  }
+  return flags.id;
+}
+
+function getArgs(argv: string[]): {
+  json: boolean;
+  id: string | undefined;
+  slide: string | undefined;
+  version: number | undefined;
+  diffFrom: number | undefined;
+} {
   const json = argv.includes("--json");
   const { flags, rest } = parseFlags(
     argv.filter((a) => a !== "--json"),
-    ["slide", "version", "diff-from"]
+    ["slide", "version", "diff-from", "id"]
   );
   if (rest.length) {
     throw new UsageError(`unexpected argument: ${rest[0]}`);
@@ -150,6 +177,7 @@ function getArgs(argv: string[]): { json: boolean; slide: string | undefined; ve
   }
   return {
     json,
+    id: idArg(flags),
     slide: flags.slide,
     version: flags.version === undefined ? undefined : Number(flags.version),
     diffFrom: diffFrom === undefined ? undefined : Number(diffFrom)
@@ -210,20 +238,20 @@ export function diffText(diff: DeckDiff, from: number, to: number): string {
 }
 
 async function getDeck(cli: Cli, argv: string[]): Promise<number> {
-  const { json, slide, version, diffFrom } = getArgs(argv);
+  const { json, id, slide, version, diffFrom } = getArgs(argv);
   const agent = requireAgent(requireSessionId(cli.env));
   const api = cli.api();
-  const deck = await api.getDeck(agent.agent_id, version).catch((e: unknown) => {
-    if (version !== undefined && e instanceof ApiError && e.status === 404 && agent.conversation_id) {
+  const deck = await api.getDeck(agent.agent_id, version, id).catch((e: unknown) => {
+    if (version !== undefined && e instanceof ApiError && e.status === 404 && agent.conversation_id && /does not keep version/.test(e.message)) {
       throw new Error(`the slide deck does not keep version ${version}; the hub keeps the latest 100`);
     }
-    return noDeck(e);
+    return noDeck(e, id);
   });
   if (deck.outline === null) {
     cli.printError(`agent-hub: the conversation has no slide deck yet (version ${deck.version})`);
     return slide === undefined ? 0 : 1;
   }
-  const dir = deckDir(cli, agent.conversation_id ?? agent.agent_id);
+  const dir = deckDir(cli, agent.conversation_id ?? agent.agent_id, id);
   fs.mkdirSync(dir, { recursive: true });
   const outline = await materialise((sha) => api.deckAsset(agent.agent_id, sha), deck.outline, dir);
   // An older version is written beside the working copy rather than over it.
@@ -235,7 +263,7 @@ async function getDeck(cli: Cli, argv: string[]): Promise<number> {
     recordRevision(dir, deck.revision);
   }
   if (diffFrom !== undefined) {
-    return await printDiff(cli, api, agent.agent_id, { deck, diffFrom, file, dir, json });
+    return await printDiff(cli, api, agent.agent_id, { deck, diffFrom, file, dir, json, id });
   }
   if (slide !== undefined) {
     const index = (outline.slides ?? []).findIndex((one) => one.id === slide);
@@ -250,6 +278,7 @@ async function getDeck(cli: Cli, argv: string[]): Promise<number> {
   if (json) {
     cli.print(
       JSON.stringify({
+        ...(id === undefined ? {} : { id }),
         title: deck.title,
         version: deck.version,
         updated_by: deck.updated_by,
@@ -265,12 +294,14 @@ async function getDeck(cli: Cli, argv: string[]): Promise<number> {
     cli.print(
       `agent-hub: wrote version ${deck.version} of the slide deck, which is not the latest (version ${deck.latest_version}), to ${file}, with its pictures beside it`
     );
-    cli.print(`To bring it back, build it with slides build, then publish it with ${CLI} deck put ${file} --pptx <deck.pptx> --base ${deck.latest_version}`);
+    cli.print(
+      `To bring it back, build it with slides build, then publish it with ${CLI} deck put ${file}${idFlag(id)} --pptx <deck.pptx> --base ${deck.latest_version}`
+    );
     return 0;
   }
   cli.print(`agent-hub: wrote version ${deck.version} of the slide deck to ${file}, with its pictures beside it`);
   cli.print(
-    `Change it there, build it with slides build, then publish it with ${CLI} deck put ${shellWord(file)} --pptx <deck.pptx>, which puts it as a change to version ${deck.version} and is refused if someone has written a newer one`
+    `Change it there, build it with slides build, then publish it with ${CLI} deck put ${shellWord(file)}${idFlag(id)} --pptx <deck.pptx>, which puts it as a change to version ${deck.version} and is refused if someone has written a newer one`
   );
   return 0;
 }
@@ -280,11 +311,11 @@ async function printDiff(
   cli: Cli,
   api: Api,
   agentId: string,
-  { deck, diffFrom, file, dir, json }: { deck: Deck; diffFrom: number; file: string; dir: string; json: boolean }
+  { deck, diffFrom, file, dir, json, id }: { deck: Deck; diffFrom: number; file: string; dir: string; json: boolean; id: string | undefined }
 ): Promise<number> {
   let older: Deck;
   try {
-    older = await api.getDeck(agentId, diffFrom);
+    older = await api.getDeck(agentId, diffFrom, id);
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) {
       cli.printError(
@@ -302,16 +333,16 @@ async function printDiff(
   }
   cli.print(diffText(diff, diffFrom, deck.version));
   cli.print(
-    `agent-hub: wrote version ${deck.version} of the slide deck to ${file}, with its pictures beside it. Make your change to that, build it with slides build, and publish it with ${CLI} deck put ${shellWord(file)} --pptx <deck.pptx>`
+    `agent-hub: wrote version ${deck.version} of the slide deck to ${file}, with its pictures beside it. Make your change to that, build it with slides build, and publish it with ${CLI} deck put ${shellWord(file)}${idFlag(id)} --pptx <deck.pptx>`
   );
   return 0;
 }
 
-function putArgs(argv: string[]): { file: string; flags: Record<string, string> } {
-  const { flags, rest } = parseFlags(argv, ["pptx", "base", "summary"]);
+function putArgs(argv: string[], command: "put" | "new"): { file: string; id: string | undefined; flags: Record<string, string> } {
+  const { flags, rest } = parseFlags(argv, command === "put" ? ["pptx", "base", "summary", "id"] : ["pptx", "summary"]);
   const [file, ...extra] = rest;
   if (!file) {
-    throw new UsageError("deck put takes the outline file");
+    throw new UsageError(`deck ${command} takes the outline file`);
   }
   if (extra.length) {
     throw new UsageError(`unexpected argument: ${extra[0]}`);
@@ -322,7 +353,7 @@ function putArgs(argv: string[]): { file: string; flags: Record<string, string> 
   if (flags.summary !== undefined && (flags.summary.trim() === "" || flags.summary.length > 200)) {
     throw new UsageError("--summary is 1 to 200 characters saying what changed");
   }
-  return { file, flags };
+  return { file, id: idArg(flags), flags };
 }
 
 function readFile(file: string, what: string): Uint8Array {
@@ -394,14 +425,14 @@ async function uploadPictures(api: Api, agentId: string, outline: DeckOutline, b
  * the user's amend of the one read, and how to put the change again on top of it: by reading it again, which records
  * the version and revision the next put sends.
  */
-function printConflict(cli: Cli, base: number, current: Deck | undefined, baseRevision: number | undefined): void {
+function printConflict(cli: Cli, base: number, current: Deck | undefined, baseRevision: number | undefined, id?: string): void {
   const by = current?.updated_by ? `, last written by ${current.updated_by === "user" ? "the user" : "this conversation"}` : "";
   if (baseRevision !== undefined && current?.version === base && current.revision !== baseRevision) {
     cli.printError(`agent-hub deck: the user has changed version ${base} of the deck since you read it. Nothing was saved.`);
   } else {
     cli.printError(`agent-hub deck: the deck has changed since version ${base}: it is now version ${current?.version ?? "?"}${by}. Nothing was saved.`);
   }
-  cli.printError(`Run ${CLI} deck get, make your change to the outline it writes, build it, and put again.`);
+  cli.printError(`Run ${CLI} deck get${idFlag(id)}, make your change to the outline it writes, build it, and put again.`);
 }
 
 /**
@@ -423,38 +454,51 @@ function keepIds(file: string, local: DeckOutline, stored: DeckOutline): void {
   }
 }
 
-async function putDeck(cli: Cli, argv: string[]): Promise<number> {
-  const { file, flags } = putArgs(argv);
+async function putDeck(cli: Cli, argv: string[], command: "put" | "new" = "put"): Promise<number> {
+  const { file, id, flags } = putArgs(argv, command);
+  const creating = command === "new";
   const outlineFile = path.resolve(cli.cwd(), file);
   const local = readOutline(outlineFile);
   const pptxFile = flags.pptx === undefined ? undefined : path.resolve(cli.cwd(), flags.pptx);
   const pptx = pptxFile === undefined ? undefined : readPptx(pptxFile, flags.pptx as string);
   const agent = requireAgent(requireSessionId(cli.env));
   const api = cli.api();
-  const dir = deckDir(cli, agent.conversation_id ?? agent.agent_id);
-  const fromGet = isInside(dir, outlineFile);
+  const dir = deckDir(cli, agent.conversation_id ?? agent.agent_id, id);
+  const fromGet = !creating && isInside(dir, outlineFile);
   // An outline `get` wrote is a change to the version it read; any other is a new deck, put on whatever is there.
   const recorded = fromGet ? recordedVersion(dir) : undefined;
-  const base = flags.base !== undefined ? Number(flags.base) : recorded !== undefined ? recorded : (await api.getDeck(agent.agent_id).catch(noDeck)).version;
+  const base = creating
+    ? 0
+    : flags.base !== undefined
+      ? Number(flags.base)
+      : recorded !== undefined
+        ? recorded
+        : (await api.getDeck(agent.agent_id, undefined, id).catch((e: unknown) => noDeck(e, id))).version;
   // Only the revision `get` read, and only with the version it read: one taken from the hub now would let the put
   // over an amend it never saw, and one sent with another version could never match.
   const baseRevision = recorded !== undefined && base === recorded ? recordedRevision(dir) : undefined;
-  const outline = await uploadPictures(api, agent.agent_id, local, path.dirname(outlineFile)).catch(noDeck);
+  const outline = await uploadPictures(api, agent.agent_id, local, path.dirname(outlineFile)).catch((e: unknown) => noDeck(e, id));
+  const body = {
+    outline,
+    base_version: base,
+    ...(baseRevision === undefined ? {} : { base_revision: baseRevision }),
+    ...(flags.summary === undefined ? {} : { summary: flags.summary.trim() })
+  };
   let written: DeckResponse;
   try {
-    written = await api.putDeck(agent.agent_id, {
-      outline,
-      base_version: base,
-      ...(baseRevision === undefined ? {} : { base_revision: baseRevision }),
-      ...(flags.summary === undefined ? {} : { summary: flags.summary.trim() })
-    });
+    written = creating ? await api.createDeck(agent.agent_id, body) : await api.putDeck(agent.agent_id, body, id);
   } catch (e) {
-    if (!(e instanceof ApiError && e.status === 409)) {
-      return noDeck(e);
+    if (e instanceof ApiError && e.status === 409 && e.body?.current === undefined) {
+      cli.printError(`agent-hub deck: ${e.message}`);
+      return 1;
     }
-    printConflict(cli, base, e.body?.current as Deck | undefined, baseRevision);
+    if (!(e instanceof ApiError && e.status === 409)) {
+      return creating ? oneDeckHub(e) : noDeck(e, id);
+    }
+    printConflict(cli, base, e.body?.current as Deck | undefined, baseRevision, id);
     return 1;
   }
+  const madeId = creating ? written.id : id;
   keepIds(outlineFile, local, written.outline);
   if (fromGet) {
     recordVersion(dir, written.version);
@@ -462,22 +506,75 @@ async function putDeck(cli: Cli, argv: string[]): Promise<number> {
   }
   if (pptx !== undefined && pptxFile !== undefined) {
     try {
-      await withRetry(() => api.putDeckPptx(agent.agent_id, written.version, pptx), PPTX_RETRY);
+      await withRetry(() => api.putDeckPptx(agent.agent_id, written.version, pptx, madeId), PPTX_RETRY);
     } catch (e) {
       cli.printError(`agent-hub deck: published the slide deck as version ${written.version}, but its .pptx did not reach the hub: ${(e as Error).message}`);
       cli.printError(
-        `Do not put the outline again, which would publish another version. Send the .pptx alone: ${CLI} deck pptx ${shellWord(pptxFile)} --version ${written.version}`
+        `Do not put the outline again, which would publish another version. Send the .pptx alone: ${CLI} deck pptx ${shellWord(pptxFile)} --version ${written.version}${idFlag(madeId)}`
       );
       return 1;
     }
   }
   const built = pptx === undefined ? "; the person sees it as not built until a .pptx is put with --pptx" : ", with its .pptx";
-  cli.print(`agent-hub: published the slide deck as version ${written.version}${built}`);
+  cli.print(
+    creating
+      ? `agent-hub: created slide deck ${madeId} at version ${written.version}${built}; change it with ${CLI} deck get --id ${madeId}`
+      : `agent-hub: published the slide deck as version ${written.version}${built}`
+  );
   return 0;
 }
 
-function pptxArgs(argv: string[]): { file: string; version: number } {
-  const { flags, rest } = parseFlags(argv, ["version"]);
+/** A hub older than several decks has no `/decks` route, so it can hold only the deck `deck put` writes. */
+function oneDeckHub(e: unknown): never {
+  if (e instanceof ApiError && (e.status === 404 || e.status === 405)) {
+    throw new Error(`this hub holds one slide deck per conversation, or this session is not a CFT Workspace conversation; write it with ${CLI} deck put`);
+  }
+  throw e;
+}
+
+async function listDecks(cli: Cli, argv: string[]): Promise<number> {
+  const json = argv.includes("--json");
+  const rest = argv.filter((a) => a !== "--json");
+  if (rest.length) {
+    throw new UsageError(`unexpected argument: ${rest[0]}`);
+  }
+  const agent = requireAgent(requireSessionId(cli.env));
+  const { decks } = await cli.api().listDecks(agent.agent_id).catch(oneDeckHub);
+  if (json) {
+    cli.print(JSON.stringify(decks));
+    return 0;
+  }
+  if (decks.length === 0) {
+    cli.print("agent-hub: the conversation has no slide decks yet");
+    return 0;
+  }
+  for (const one of decks) {
+    const by = one.updated_by === "user" ? ", last edited by the user" : "";
+    cli.print(`${one.id}  version ${one.version}${by}  ${one.title}`);
+  }
+  return 0;
+}
+
+async function removeDeck(cli: Cli, argv: string[]): Promise<number> {
+  const { flags, rest } = parseFlags(argv, ["id"]);
+  if (rest.length) {
+    throw new UsageError(`unexpected argument: ${rest[0]}`);
+  }
+  const id = idArg(flags);
+  if (id === undefined) {
+    throw new UsageError("deck remove needs --id, the deck to remove");
+  }
+  const agent = requireAgent(requireSessionId(cli.env));
+  await cli
+    .api()
+    .deleteDeck(agent.agent_id, id)
+    .catch((e: unknown) => noDeck(e, id));
+  cli.print(`agent-hub: removed the slide deck ${id}`);
+  return 0;
+}
+
+function pptxArgs(argv: string[]): { file: string; version: number; id: string | undefined } {
+  const { flags, rest } = parseFlags(argv, ["version", "id"]);
   const [file, ...extra] = rest;
   if (!file) {
     throw new UsageError("deck pptx takes the .pptx file");
@@ -488,17 +585,17 @@ function pptxArgs(argv: string[]): { file: string; version: number } {
   if (flags.version === undefined || !/^[1-9]\d*$/.test(flags.version)) {
     throw new UsageError("deck pptx needs --version, the version the .pptx was built from");
   }
-  return { file, version: Number(flags.version) };
+  return { file, version: Number(flags.version), id: idArg(flags) };
 }
 
 /** Sends the .pptx built from a version already published, which is how a `deck put` whose .pptx failed is finished. */
 async function putPptx(cli: Cli, argv: string[]): Promise<number> {
-  const { file, version } = pptxArgs(argv);
+  const { file, version, id } = pptxArgs(argv);
   const pptx = readPptx(path.resolve(cli.cwd(), file), file);
   const agent = requireAgent(requireSessionId(cli.env));
   const api = cli.api();
   try {
-    await withRetry(() => api.putDeckPptx(agent.agent_id, version, pptx), PPTX_RETRY);
+    await withRetry(() => api.putDeckPptx(agent.agent_id, version, pptx, id), PPTX_RETRY);
   } catch (e) {
     if (e instanceof ApiError && e.status === 409) {
       cli.printError(`agent-hub deck: version ${version} is older than the latest 3, which are the only ones the hub keeps a .pptx for. Nothing was sent.`);
@@ -525,5 +622,14 @@ export const deck: Command = async (cli, argv) => {
   if (action === "pptx") {
     return putPptx(cli, rest);
   }
-  throw new UsageError("deck takes get, put or pptx");
+  if (action === "list") {
+    return listDecks(cli, rest);
+  }
+  if (action === "new") {
+    return putDeck(cli, rest, "new");
+  }
+  if (action === "remove") {
+    return removeDeck(cli, rest);
+  }
+  throw new UsageError("deck takes get, put, new, list, remove or pptx");
 };

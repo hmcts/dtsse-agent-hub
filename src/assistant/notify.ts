@@ -180,3 +180,6 @@ export function checkNotifyPut(value: unknown): Checked<NotifyPut> {
   }
   return { ok: true, value: { ...rest, data: data.value, ...(source === undefined ? {} : { source }) } };
 }
+
+/** Refused for a conversation whose pod runs a client older than `items`, which reads only the primary Notify template. */
+export const ITEMS_CREATE_REFUSED_NOTIFY = "your assistant needs an update to hold more than one Notify template; it gets one the next time it restarts";

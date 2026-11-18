@@ -89,7 +89,7 @@ async function touchConversation(tx: Database, conversationId: string, now: Date
 }
 
 /** Whether the conversation's pod is running a client that reads only the primary document. */
-async function podLacksItems(tx: Database, conversation: ConversationRef): Promise<boolean> {
+export async function podLacksItems(tx: Database, conversation: ConversationRef): Promise<boolean> {
   if (!hasPod(conversation)) {
     return false;
   }

@@ -76,6 +76,7 @@ export default defineConfig({
         "src/assistant/fork-store.ts",
         "src/assistant/artefact-store.ts",
         "src/assistant/deck-store.ts",
+        "src/assistant/deck-agent.ts",
         "src/assistant/deck-edit-store.ts",
         "src/assistant/docmosis-store.ts",
         "src/assistant/notify-store.ts",

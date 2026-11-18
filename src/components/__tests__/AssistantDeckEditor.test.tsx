@@ -13,6 +13,7 @@ import type { ActionResult } from "@/web/action";
 import { ACTION_FAULT } from "@/web/action-fault";
 
 const CONVERSATION = "22222222-2222-2222-2222-222222222222";
+const ITEM = "55555555-5555-5555-5555-555555555555";
 const SHA = "c".repeat(64);
 
 afterEach(() => {
@@ -44,6 +45,7 @@ function outline(overrides: Partial<DeckOutline> = {}): DeckOutline {
 
 function deck(overrides: Partial<DeckView> = {}): DeckView {
   return {
+    id: ITEM,
     title: "Ways of working",
     outline: outline(),
     version: 7,
@@ -128,7 +130,7 @@ describe("DeckEditor", () => {
     await pause();
 
     expect(save).toHaveBeenCalledTimes(1);
-    expect(save.mock.calls[0]?.[0]).toMatchObject({ conversationId: CONVERSATION, baseVersion: 7, baseRevision: 9 });
+    expect(save.mock.calls[0]?.[0]).toMatchObject({ conversationId: CONVERSATION, itemId: ITEM, baseVersion: 7, baseRevision: 9 });
     expect(savedOutline(save).title).toBe("Ways of shipping");
     expect(screen.getByRole("status", { name: "" }).textContent).toBe("Saved");
 
@@ -613,7 +615,7 @@ describe("DeckEditor", () => {
 });
 
 describe("DeckPanel's editing", () => {
-  const SUMMARY: DeckSummary = { title: "Ways of working", version: 7, revision: 9, updatedBy: "agent", pptx: true };
+  const SUMMARY: DeckSummary = { id: ITEM, title: "Ways of working", version: 7, revision: 9, updatedBy: "agent", pptx: true };
 
   function serve() {
     vi.stubGlobal(

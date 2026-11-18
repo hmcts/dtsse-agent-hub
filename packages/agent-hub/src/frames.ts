@@ -1,7 +1,17 @@
 // How the bridge reads a `direct` stream event. The stream is untrusted input from a hub that may be older or newer
 // than this client, so every field is checked here and anything that does not fit is dropped or left absent.
 import { parseModel } from "./assistant/models.ts";
-import type { AssistantFrame, AssistantProduct, ConfluenceExportFrame, FrameArtefact, GithubExportFrame, JiraExportFrame } from "./envelope.ts";
+import type {
+  AssistantFrame,
+  AssistantProduct,
+  ConfluenceExportFrame,
+  FrameArtefact,
+  FrameDeck,
+  FrameDocmosisTemplate,
+  FrameNotifyTemplate,
+  GithubExportFrame,
+  JiraExportFrame
+} from "./envelope.ts";
 import { GITHUB_OWNER_RE, GITHUB_REPO_RE } from "./github.ts";
 
 // Structural, and every field optional: it is the shape both `directs` and `envelope` read, so a message
@@ -113,12 +123,15 @@ export function parseAssistantFrame(value: unknown): AssistantFrame | null {
     deck_updated_by: asNullableString(raw.deck_updated_by),
     deck_revision: typeof raw.deck_revision === "number" ? raw.deck_revision : null,
     deck_agent_version: typeof raw.deck_agent_version === "number" ? raw.deck_agent_version : null,
+    decks: parseDecks(raw.decks),
     docmosis_version: typeof raw.docmosis_version === "number" ? raw.docmosis_version : null,
     docmosis_revision: typeof raw.docmosis_revision === "number" ? raw.docmosis_revision : null,
     docmosis_updated_by: asNullableString(raw.docmosis_updated_by),
+    docmosis_templates: parseDocmosisTemplates(raw.docmosis_templates),
     notify_version: typeof raw.notify_version === "number" ? raw.notify_version : null,
     notify_revision: typeof raw.notify_revision === "number" ? raw.notify_revision : null,
     notify_updated_by: asNullableString(raw.notify_updated_by),
+    notify_templates: parseNotifyTemplates(raw.notify_templates),
     jira_export: withDocument(parseJiraExportFrame(raw.jira_export), raw.jira_export),
     github_export: withDocument(parseGithubExportFrame(raw.github_export), raw.github_export),
     confluence_export: withDocument(parseConfluenceExportFrame(raw.confluence_export), raw.confluence_export),
@@ -151,6 +164,83 @@ export function parseArtefacts(value: unknown): FrameArtefact[] | null {
     artefacts.push({ id: raw.id, kind: raw.kind as FrameArtefact["kind"], title, version: raw.version, updated_by: asNullableString(raw.updated_by) ?? null });
   }
   return artefacts;
+}
+
+/**
+ * The conversation's slide decks on the frame, or null from a hub older than several. An entry that is not one is
+ * dropped: its id goes into the commands the session is told to run, so it is a uuid or nothing.
+ */
+export function parseDecks(value: unknown): FrameDeck[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const decks: FrameDeck[] = [];
+  for (const entry of value) {
+    const raw = asRecord(entry);
+    if (!raw || typeof raw.id !== "string" || !EXPORT_ID_RE.test(raw.id) || typeof raw.version !== "number") {
+      continue;
+    }
+    decks.push({
+      id: raw.id,
+      title: typeof raw.title === "string" ? raw.title.replace(/\s+/g, " ").slice(0, MAX_TITLE) : "",
+      version: raw.version,
+      revision: typeof raw.revision === "number" ? raw.revision : 0,
+      updated_by: asNullableString(raw.updated_by) ?? null,
+      agent_version: typeof raw.agent_version === "number" ? raw.agent_version : 0
+    });
+  }
+  return decks;
+}
+
+/**
+ * The conversation's Notify templates on the frame, or null from a hub older than several. An entry that is not one is
+ * dropped: its id goes into the commands the session is told to run, so it is a uuid or nothing.
+ */
+/**
+ * The conversation's Docmosis templates on the frame, or null from a hub older than several. An entry that is not one is
+ * dropped: its id goes into the commands the session is told to run, so it is a uuid or nothing.
+ */
+export function parseDocmosisTemplates(value: unknown): FrameDocmosisTemplate[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const templates: FrameDocmosisTemplate[] = [];
+  for (const entry of value) {
+    const raw = asRecord(entry);
+    if (!raw || typeof raw.id !== "string" || !EXPORT_ID_RE.test(raw.id) || typeof raw.version !== "number") {
+      continue;
+    }
+    templates.push({
+      id: raw.id,
+      name: typeof raw.name === "string" ? raw.name.replace(/\s+/g, " ").slice(0, MAX_TITLE) : "",
+      version: raw.version,
+      revision: typeof raw.revision === "number" ? raw.revision : 0,
+      updated_by: asNullableString(raw.updated_by) ?? null
+    });
+  }
+  return templates;
+}
+
+export function parseNotifyTemplates(value: unknown): FrameNotifyTemplate[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const templates: FrameNotifyTemplate[] = [];
+  for (const entry of value) {
+    const raw = asRecord(entry);
+    if (!raw || typeof raw.id !== "string" || !EXPORT_ID_RE.test(raw.id) || typeof raw.version !== "number") {
+      continue;
+    }
+    const name = typeof raw.name === "string" ? raw.name.replace(/\s+/g, " ").slice(0, MAX_TITLE) : "";
+    templates.push({
+      id: raw.id,
+      name,
+      version: raw.version,
+      revision: typeof raw.revision === "number" ? raw.revision : 0,
+      updated_by: asNullableString(raw.updated_by) ?? null
+    });
+  }
+  return templates;
 }
 
 /** An export frame with the document it is of, when the hub named one that is a uuid; without, from an older hub. */

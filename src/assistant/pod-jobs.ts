@@ -51,6 +51,13 @@ export interface PodJobPrecheckInput {
  */
 export type PodJobPrecheck = (db: Database, input: PodJobPrecheckInput) => Promise<PodJobRefusal | undefined>;
 
+/**
+ * A kind's rewrite of the `args` it stores and sends to the pod, after its `precheck` has passed, for an argument a
+ * pod on an older client would refuse as unknown. Whatever it answers is what the job holds and what a repeated request
+ * is compared with.
+ */
+export type PodJobStoredArgs = (db: Database, input: PodJobPrecheckInput) => Promise<unknown>;
+
 export interface PodJobKind {
   readonly kind: string;
   /** What the browser sends. A strict object, so a field the handler would not read is refused rather than ignored. */
@@ -68,6 +75,7 @@ export interface PodJobKind {
   /** The largest answer body the pod may send, `{status, result}` and all. */
   readonly maxResultBytes: number;
   readonly precheck?: PodJobPrecheck;
+  readonly storedArgs?: PodJobStoredArgs;
 }
 
 export interface PodJobKindDefinition {
@@ -80,6 +88,7 @@ export interface PodJobKindDefinition {
   oneAtATime?: boolean;
   maxResultBytes?: number;
   precheck?: PodJobPrecheck;
+  storedArgs?: PodJobStoredArgs;
 }
 
 /**
@@ -123,7 +132,8 @@ export function definePodJobKind(definition: PodJobKindDefinition): PodJobKind {
     rateLimit: Object.freeze({ ...rateLimit }),
     oneAtATime,
     maxResultBytes,
-    ...(definition.precheck === undefined ? {} : { precheck: definition.precheck })
+    ...(definition.precheck === undefined ? {} : { precheck: definition.precheck }),
+    ...(definition.storedArgs === undefined ? {} : { storedArgs: definition.storedArgs })
   });
 }
 

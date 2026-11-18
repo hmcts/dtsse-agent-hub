@@ -1,5 +1,7 @@
 import { z } from "zod";
-import { MAX_DOCX_BYTES, MAX_SUMMARY } from "./docmosis.ts";
+import type { Database } from "../store/prisma.ts";
+import { OLDEST_FIRST, podLacksItems } from "./artefact-store.ts";
+import { ITEMS_CREATE_REFUSED_DOCMOSIS, MAX_DOCX_BYTES, MAX_SUMMARY } from "./docmosis.ts";
 import { DOCMOSIS_LIBRARY, isLibraryPath } from "./docmosis-library.ts";
 import { libraryEntrySize } from "./docmosis-library-store.ts";
 import { definePodJobKind, type PodJobRefusal } from "./pod-jobs.ts";
@@ -26,6 +28,8 @@ export const docmosisLoadArgs = z.strictObject({
   folder: z.literal(DOCMOSIS_LIBRARY.path).default(DOCMOSIS_LIBRARY.path),
   path: z.string().refine((path) => isLibraryPath(path), { message: "must be a .docx in the template library" }),
   blob_sha: z.string().regex(/^[0-9a-f]{40}$/, "must be the blob's git SHA-1, 40 lowercase hex digits"),
+  /** The template the load replaces; left out, it makes a new one. */
+  item: z.uuid().optional(),
   base_version: z.number().int().nonnegative(),
   base_revision: z.number().int().nonnegative()
 });
@@ -33,6 +37,8 @@ export const docmosisLoadArgs = z.strictObject({
 export type DocmosisLoadArgs = z.output<typeof docmosisLoadArgs>;
 
 export const docmosisLoadResult = z.strictObject({
+  /** The template written; absent from a job that finished before a conversation held several. */
+  item: z.uuid().optional(),
   version: z.number().int().positive(),
   revision: z.number().int().nonnegative()
 });
@@ -86,6 +92,39 @@ export function pickRefusal(size: number | undefined): PodJobRefusal | undefined
   return undefined;
 }
 
+/**
+ * A load into template `item`, or into a new one without it, must name a template the conversation holds, and on a pod
+ * whose client is older than `items` can only replace the primary or make the first: that client writes the primary, so
+ * any other load would overwrite the wrong template.
+ */
+async function targetRefusal(db: Database, conversationId: string, item: string | undefined): Promise<PodJobRefusal | undefined> {
+  const primary = await db.assistantDocmosis.findFirst({ where: { conversationId, version: { gt: 0 } }, select: { id: true }, orderBy: [...OLDEST_FIRST] });
+  if (item !== undefined && (await db.assistantDocmosis.count({ where: { id: item, conversationId, version: { gt: 0 } } })) === 0) {
+    return { status: 404, error: "that chat has no such template" };
+  }
+  if (item !== undefined ? item === primary?.id : primary === null) {
+    return undefined;
+  }
+  const conversation = await db.assistantConversation.findUnique({ where: { id: conversationId }, select: { id: true, virtualAgentId: true, ownerOid: true } });
+  return conversation !== null && (await podLacksItems(db, conversation)) ? { status: 409, error: ITEMS_CREATE_REFUSED_DOCMOSIS } : undefined;
+}
+
+/**
+ * A load into the primary template for a pod on a client older than `items` is sent without `item`, which that client
+ * refuses as an unknown argument and writes the primary anyway.
+ */
+async function withoutPrimaryItem(db: Database, conversationId: string, args: DocmosisLoadArgs): Promise<DocmosisLoadArgs> {
+  if (args.item === undefined) {
+    return args;
+  }
+  const conversation = await db.assistantConversation.findUnique({ where: { id: conversationId }, select: { id: true, virtualAgentId: true, ownerOid: true } });
+  if (conversation === null || !(await podLacksItems(db, conversation))) {
+    return args;
+  }
+  const { item: _item, ...rest } = args;
+  return rest;
+}
+
 export const DOCMOSIS_LOAD = definePodJobKind({
   kind: DOCMOSIS_LOAD_KIND,
   args: docmosisLoadArgs,
@@ -94,8 +133,9 @@ export const DOCMOSIS_LOAD = definePodJobKind({
   timeoutMs: 2 * 60_000,
   rateLimit: { limit: 20, windowMs: 10 * 60_000 },
   oneAtATime: true,
-  precheck: async (db, { viewerOid, args }) => {
-    const { path, blob_sha } = args as DocmosisLoadArgs;
-    return pickRefusal(await libraryEntrySize(db, viewerOid, path, blob_sha));
+  storedArgs: (db, { conversationId, args }) => withoutPrimaryItem(db, conversationId, args as DocmosisLoadArgs),
+  precheck: async (db, { viewerOid, conversationId, args }) => {
+    const { path, blob_sha, item } = args as DocmosisLoadArgs;
+    return pickRefusal(await libraryEntrySize(db, viewerOid, path, blob_sha)) ?? (await targetRefusal(db, conversationId, item));
   }
 });

@@ -649,7 +649,9 @@ describe("runHook in an assistant conversation", () => {
 
     // Assert
     for (const out of [unticked, none, ticked]) {
-      expect(out[0]).toContain("It can also have one slide deck, which the slides plugin's deck skill reads with `agent-hub deck get`");
+      expect(out[0]).toContain(
+        "It can also have slide decks, which the slides plugin's deck skill lists with `agent-hub deck list`, reads with `agent-hub deck get --id <id>`"
+      );
     }
   });
 
@@ -662,7 +664,25 @@ describe("runHook in an assistant conversation", () => {
     expect(out[0]).toContain("docmosis render-file");
     expect(out[0]).toContain("agent-hub docmosis put");
     expect(out[0]).toContain("agent-hub docmosis pdf");
-    expect(out[0]).toContain("run `agent-hub docmosis get` before changing the template");
+    expect(out[0]).toContain("agent-hub docmosis new");
+    expect(out[0]).toContain("agent-hub docmosis list");
+    expect(out[0]).toContain("agent-hub docmosis get --id <id>");
+    expect(out[0]).toContain("agent-hub docmosis put --id <id>");
+    expect(out[0]).toContain("agent-hub docmosis remove --id <id>");
+    expect(out[0]).toContain("without --id, get, put and pdf use the primary template");
+    expect(out[0]).toContain("run `agent-hub docmosis get` (with its --id) before changing the template");
+  });
+
+  it("should say how several Notify templates are loaded, listed, read, published and removed, for a pod conversation", async () => {
+    // Act
+    const out = await virtualStart("conv-notify", { ...reposState(null), ...CONVERSATION });
+
+    // Assert
+    expect(out[0]).toContain("`agent-hub notify list`");
+    expect(out[0]).toContain("`agent-hub notify get --id <id>`");
+    expect(out[0]).toContain("`agent-hub notify put --id <id>`");
+    expect(out[0]).toContain("`agent-hub notify remove --id <id>`");
+    expect(out[0]).toContain("without --id, get and put use the primary template, the oldest");
   });
 
   it("should not mention the slide deck when the session was started without a copy of the slides plugin", async () => {

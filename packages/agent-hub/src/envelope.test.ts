@@ -456,6 +456,31 @@ describe("assistantPrompt", () => {
     );
   });
 
+  it("should name each template the user changed by its id when the frame lists them", () => {
+    // Arrange
+    const templates = [
+      { id: "d1", name: "Claim", version: 2, revision: 0, updated_by: "agent" },
+      { id: "d2", name: "Order", version: 3, revision: 1, updated_by: "user" }
+    ];
+
+    // Act
+    const text = assistantPrompt(personMessage, { ...pcs, docmosis_version: 2, docmosis_updated_by: "agent", docmosis_templates: templates }, null);
+
+    // Assert
+    expect(context(text)).toContain(
+      'The user has changed the data of the Docmosis template "Order" (d2, version 3). Read it with `agent-hub docmosis get --id d2` before changing the template.'
+    );
+    expect(context(text)).not.toContain("Claim");
+  });
+
+  it("should say nothing of the templates when the frame lists some and the user changed none", () => {
+    const templates = [{ id: "d1", name: "Claim", version: 2, revision: 0, updated_by: "agent" }];
+
+    expect(assistantPrompt(personMessage, { ...pcs, docmosis_version: 2, docmosis_updated_by: "user", docmosis_templates: templates }, null)).not.toMatch(
+      /docmosis/
+    );
+  });
+
   it("should say nothing of the template when the session wrote it last or there is none", () => {
     // Act & Assert
     expect(assistantPrompt(personMessage, { ...pcs, docmosis_version: 3, docmosis_updated_by: "agent" }, null)).not.toMatch(/docmosis/);
@@ -473,6 +498,26 @@ describe("assistantPrompt", () => {
     );
   });
 
+  it("should name each Notify template the user changed by its id when the frame lists them, and none the session wrote last", () => {
+    // Arrange
+    const ID = "0b1f3d4a-0000-4000-8000-0000000000c1";
+    const OTHER = "0b1f3d4a-0000-4000-8000-0000000000c2";
+    const templates = [
+      { id: ID, name: "Claim received", version: 4, revision: 0, updated_by: "user" },
+      { id: OTHER, name: "Hearing booked", version: 2, revision: 0, updated_by: "agent" }
+    ];
+
+    // Act
+    const text = assistantPrompt(personMessage, { ...pcs, notify_version: 4, notify_updated_by: "user", notify_templates: templates }, null);
+
+    // Assert
+    expect(context(text)).toContain(
+      `The user has changed the Notify template "Claim received" (${ID}, version 4). Read it with \`agent-hub notify get --id ${ID}\` before changing it.`
+    );
+    expect(context(text)).not.toContain(OTHER);
+    expect(context(text)).not.toContain("conversation's Notify template (version");
+  });
+
   it("should say nothing of the Notify template when the session wrote it last or there is none", () => {
     // Act & Assert
     expect(assistantPrompt(personMessage, { ...pcs, notify_version: 4, notify_updated_by: "agent" }, null)).not.toMatch(/notify get/);
@@ -488,6 +533,39 @@ describe("assistantPrompt", () => {
     expect(context(text)).toContain(
       "The user has changed the conversation's slide deck since you last wrote it: it is now version 5, revision 9. Before changing anything, run `agent-hub deck get --diff-from 4`, which writes their latest version for you to work on and prints what they changed since your version 4; then build on their version, keeping their changes."
     );
+  });
+
+  it("should name each deck the user has changed by its id, once, when the hub lists several decks", () => {
+    // Arrange
+    const A = "0b1f3d4a-0000-4000-8000-0000000000a1";
+    const B = "0b1f3d4a-0000-4000-8000-0000000000b2";
+    const C = "0b1f3d4a-0000-4000-8000-0000000000c3";
+    const decks = [
+      { id: A, title: "Plan", version: 5, revision: 9, updated_by: "user", agent_version: 4 },
+      { id: B, title: "Retro", version: 2, revision: 2, updated_by: "agent", agent_version: 2 },
+      { id: C, title: "Fork", version: 1, revision: 1, updated_by: "user", agent_version: 0 }
+    ];
+
+    // Act
+    const text = context(assistantPrompt(personMessage, { ...pcs, deck_version: 5, deck_updated_by: "user", decks }, null));
+
+    // Assert
+    expect(text).toContain(
+      `The user has changed the slide deck "Plan" (${A}, version 5, revision 9) since you last wrote it. Before changing anything, run \`agent-hub deck get --id ${A} --diff-from 4\`, which writes their latest version for you to work on and prints what they changed since your version 4; then build on their version, keeping their changes.`
+    );
+    expect(text).toContain(
+      `The slide deck "Fork" (${C}, version 1, revision 1) was last changed by the user, not by you; read it with \`agent-hub deck get --id ${C}\` before changing it, and build on their version.`
+    );
+    expect(text).not.toContain(B);
+    expect(text).not.toContain("conversation's slide deck");
+  });
+
+  it("should say nothing of decks the user has not changed when the hub lists several", () => {
+    // Act
+    const text = assistantPrompt(personMessage, { ...pcs, deck_version: 2, deck_updated_by: "agent", decks: [] }, null);
+
+    // Assert
+    expect(text).not.toMatch(/slide deck/);
   });
 
   it("should name the revision an amend moved on to when the version is the same as before", () => {

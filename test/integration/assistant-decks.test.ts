@@ -4,14 +4,18 @@ import { describe, expect, it, vi } from "vitest";
 import * as assetRoute from "../../src/app/api/agent/[agentId]/deck/assets/[sha256]/route.ts";
 import * as deckRoute from "../../src/app/api/agent/[agentId]/deck/route.ts";
 import * as pptxRoute from "../../src/app/api/agent/[agentId]/deck/versions/[version]/pptx/route.ts";
+import * as deckItemRoute from "../../src/app/api/agent/[agentId]/decks/[itemId]/route.ts";
+import * as itemPptxRoute from "../../src/app/api/agent/[agentId]/decks/[itemId]/versions/[version]/pptx/route.ts";
+import * as decksRoute from "../../src/app/api/agent/[agentId]/decks/route.ts";
+import * as browserDeckRoute from "../../src/app/api/ui/assistant/decks/[conversationId]/[itemId]/route.ts";
+import * as browserPptxRoute from "../../src/app/api/ui/assistant/decks/[conversationId]/[itemId]/versions/[version]/pptx/route.ts";
 import * as browserAssetRoute from "../../src/app/api/ui/assistant/decks/[conversationId]/assets/[sha256]/route.ts";
-import * as browserDeckRoute from "../../src/app/api/ui/assistant/decks/[conversationId]/route.ts";
-import * as browserPptxRoute from "../../src/app/api/ui/assistant/decks/[conversationId]/versions/[version]/pptx/route.ts";
 import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
 import {
   ASSET_GRACE_MS,
   assetRef,
   type DeckOutline,
+  ITEMS_CREATE_REFUSED_DECK,
   imageInfo,
   jsonbText,
   KEEP_PPTX,
@@ -21,7 +25,8 @@ import {
   MAX_OUTLINE_BYTES,
   withSlideIds
 } from "../../src/assistant/deck.ts";
-import { putDeckAsset, putDeckPptx, readDeck, writeDeck } from "../../src/assistant/deck-store.ts";
+import { requestDeckBuild } from "../../src/assistant/deck-build-store.ts";
+import { putDeckAsset, putDeckPptx, readDeck, removeDeck, writeDeck } from "../../src/assistant/deck-store.ts";
 import { assistantFrame } from "../../src/assistant/frame.ts";
 import { devIdentity } from "../../src/viewer/identity.ts";
 import { assistantSuite } from "./assistant-suite.ts";
@@ -130,6 +135,12 @@ async function upload(chatOf: Chat, bytes: Buffer, sha = digest(bytes)): Promise
   return await agent(assetRoute.PUT, `/api/agent/${chatOf.agentId}/deck/assets/${sha}`, { agentId: chatOf.agentId, sha256: sha }, "PUT", new Uint8Array(bytes));
 }
 
+/** The id of the chat's primary deck, its oldest; an id nothing holds while it has none. */
+async function primaryDeck(of: { id: string }): Promise<string> {
+  const row = await prisma.assistantDeck.findFirst({ where: { conversationId: of.id }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: { id: true } });
+  return row?.id ?? "00000000-0000-4000-8000-000000000000";
+}
+
 async function store(chatOf: Chat, bytes: Buffer): Promise<string> {
   const sha = digest(bytes);
   expect(await putDeckAsset(prisma, chatOf.id, sha, bytes, imageInfo(bytes)!)).toBe("stored");
@@ -159,7 +170,7 @@ describe("the deck routes", () => {
 
     const read = await jsonOf(await route("GET"));
     expect(read).toMatchObject({ title: "Ways of working", version: 2, updated_by: "agent", outline: second.outline });
-    const row = await prisma.assistantDeckVersion.findUniqueOrThrow({ where: { conversationId_version: { conversationId: mine.id, version: 1 } } });
+    const row = await prisma.assistantDeckVersion.findUniqueOrThrow({ where: { itemId_version: { itemId: await primaryDeck(mine), version: 1 } } });
     expect(row).toMatchObject({ by: "agent", summary: "First draft" });
     expect(await prisma.assistantConversation.findUniqueOrThrow({ where: { id: mine.id }, select: { firstContentAt: true } })).not.toMatchObject({
       firstContentAt: null
@@ -280,7 +291,7 @@ describe("the deck routes", () => {
     }
     expect((await readDeck(prisma, mine.id)).pptx).toBe(false);
     expect((await put("1")).status).toBe(409);
-    expect(await putDeckPptx(prisma, mine.row, 2, PPTX)).toBe("stored");
+    expect(await putDeckPptx(prisma, mine.row, await primaryDeck(mine), 2, PPTX)).toBe("stored");
   });
 });
 
@@ -289,7 +300,7 @@ describe("the deck's retention", () => {
     const mine = await chat();
     for (let base = 0; base < KEEP_VERSIONS + 3; base += 1) {
       await writeDeck(prisma, mine.row, { outline: outline(), baseVersion: base, by: "agent", summary: null });
-      await putDeckPptx(prisma, mine.row, base + 1, PPTX);
+      await putDeckPptx(prisma, mine.row, await primaryDeck(mine), base + 1, PPTX);
     }
 
     const versions = await prisma.assistantDeckVersion.findMany({
@@ -316,7 +327,7 @@ describe("the deck's retention", () => {
     expect((await prisma.assistantDeckAsset.findMany({ where: { conversationId: mine.id } })).length).toBe(2);
 
     // Once version 1 is pruned, no kept version names `old`, and its grace is long over.
-    await prisma.assistantDeckVersion.delete({ where: { conversationId_version: { conversationId: mine.id, version: 1 } } });
+    await prisma.assistantDeckVersion.delete({ where: { itemId_version: { itemId: await primaryDeck(mine), version: 1 } } });
     await writeDeck(prisma, mine.row, { outline: outline(), baseVersion: 2, by: "agent", summary: null }, later);
 
     const left = await prisma.assistantDeckAsset.findMany({ where: { conversationId: mine.id }, select: { sha256: true } });
@@ -431,15 +442,20 @@ describe("reading a deck in the browser", () => {
     const mine = await chat();
     const sha = await store(mine, png(1));
     await writeDeck(prisma, mine.row, { outline: outline([sha], 'Plan: "Q4"/é'), baseVersion: 0, by: "agent", summary: null });
-    await putDeckPptx(prisma, mine.row, 1, PPTX);
+    await putDeckPptx(prisma, mine.row, await primaryDeck(mine), 1, PPTX);
     return { mine, sha };
   }
 
   const picture = (as: string, id: string, sha: string, headers: Record<string, string> = {}) =>
     browser(browserAssetRoute.GET, as, `/api/ui/assistant/decks/${id}/assets/${sha}`, { conversationId: id, sha256: sha }, headers);
-  const outlineOf = (as: string, id: string) => browser(browserDeckRoute.GET, as, `/api/ui/assistant/decks/${id}`, { conversationId: id });
-  const download = (as: string, id: string, version = "1") =>
-    browser(browserPptxRoute.GET, as, `/api/ui/assistant/decks/${id}/versions/${version}/pptx`, { conversationId: id, version });
+  const outlineOf = async (as: string, id: string) => {
+    const itemId = await primaryDeck({ id });
+    return await browser(browserDeckRoute.GET, as, `/api/ui/assistant/decks/${id}/${itemId}`, { conversationId: id, itemId });
+  };
+  const download = async (as: string, id: string, version = "1") => {
+    const itemId = await primaryDeck({ id });
+    return await browser(browserPptxRoute.GET, as, `/api/ui/assistant/decks/${id}/${itemId}/versions/${version}/pptx`, { conversationId: id, itemId, version });
+  };
 
   it("should give the owner the deck's pictures to revalidate on every use, and its .pptx to download under the deck's title", async () => {
     const { mine, sha } = await deckWithPicture();
@@ -462,7 +478,7 @@ describe("reading a deck in the browser", () => {
   it("should encode every character RFC 5987 does not allow in the download's filename*", async () => {
     const mine = await chat();
     await writeDeck(prisma, mine.row, { outline: outline([], "Team's plan (draft)"), baseVersion: 0, by: "agent", summary: null });
-    await putDeckPptx(prisma, mine.row, 1, PPTX);
+    await putDeckPptx(prisma, mine.row, await primaryDeck(mine), 1, PPTX);
 
     const file = await download("alice", mine.id);
 
@@ -474,7 +490,7 @@ describe("reading a deck in the browser", () => {
   it("should download the .pptx, with the emoji left out whole, when the deck's title has one straddling the filename's limit", async () => {
     const mine = await chat();
     await writeDeck(prisma, mine.row, { outline: outline([], `${"a".repeat(79)}😀 plan`), baseVersion: 0, by: "agent", summary: null });
-    await putDeckPptx(prisma, mine.row, 1, PPTX);
+    await putDeckPptx(prisma, mine.row, await primaryDeck(mine), 1, PPTX);
 
     const file = await download("alice", mine.id);
 
@@ -547,11 +563,12 @@ describe("reading a deck in the browser", () => {
 
     const own = await assistantConversation(viewerOf(ALICE), mine.id);
     // The version and no more: the panel reads the outline itself.
-    expect(own?.deck).toEqual({ title: 'Plan: "Q4"/é', version: 1, revision: 1, updatedBy: "agent", pptx: true });
+    const itemId = await primaryDeck(mine);
+    expect(own?.decks).toEqual([{ id: itemId, title: 'Plan: "Q4"/é', version: 1, revision: 1, updatedBy: "agent", pptx: true }]);
     expect(sha).toBeDefined();
 
     const shared = await sharedChat(viewerOf(CAROL), mine.id);
-    expect(shared?.deck).toEqual({ title: 'Plan: "Q4"/é', version: 1, revision: 1, updatedBy: "agent", pptx: true });
+    expect(shared?.decks).toEqual([{ id: itemId, title: 'Plan: "Q4"/é', version: 1, revision: 1, updatedBy: "agent", pptx: true }]);
   });
 });
 
@@ -562,7 +579,7 @@ describe("forking a chat with a deck", () => {
     const unnamed = await store(mine, png(2));
     await writeDeck(prisma, mine.row, { outline: outline([unnamed]), baseVersion: 0, by: "agent", summary: null });
     const latest = await writeDeck(prisma, mine.row, { outline: outline([named], "Final deck"), baseVersion: 1, by: "agent", summary: "Final" });
-    await putDeckPptx(prisma, mine.row, 2, PPTX);
+    await putDeckPptx(prisma, mine.row, await primaryDeck(mine), 2, PPTX);
     await forkActions.offerChatFork({ conversationId: mine.id, recipientOid: BOB.oid });
 
     actAs("bob");
@@ -586,4 +603,289 @@ describe("forking a chat with a deck", () => {
 
     expect((await readDeck(prisma, (taken as { ok: true; id: string }).id)).version).toBe(0);
   });
+});
+
+describe("a conversation's several decks", () => {
+  const list = async (mine: Chat) =>
+    (
+      await jsonOf<{ decks: { id: string; title: string; version: number; revision: number; updated_by: string | null; pptx: boolean }[] }>(
+        await agent(decksRoute.GET, `/api/agent/${mine.agentId}/decks`, { agentId: mine.agentId })
+      )
+    ).decks;
+  const create = (mine: Chat, title: string, base = 0) =>
+    agent(decksRoute.POST, `/api/agent/${mine.agentId}/decks`, { agentId: mine.agentId }, "POST", { outline: outline([], title), base_version: base });
+  const one = (mine: Chat, id: string, method = "GET", body?: unknown, query = "") =>
+    agent(
+      method === "GET" ? deckItemRoute.GET : method === "PUT" ? deckItemRoute.PUT : deckItemRoute.DELETE,
+      `/api/agent/${mine.agentId}/decks/${id}${query}`,
+      { agentId: mine.agentId, itemId: id },
+      method,
+      body
+    );
+  const claim = async (mine: Chat, clientFeatures: string[]) =>
+    await prisma.virtualAgent.update({ where: { id: mine.row.virtualAgentId as string }, data: { status: "running", clientFeatures } });
+
+  it("should keep /deck on the oldest deck, however many are made after it, and make the primary when /deck is written to first", async () => {
+    const mine = await chat();
+    const primary = await jsonOf(
+      await agent(deckRoute.PUT, `/api/agent/${mine.agentId}/deck`, { agentId: mine.agentId }, "PUT", { outline: outline([], "First"), base_version: 0 })
+    );
+    const made = await create(mine, "Second");
+
+    const read = await jsonOf(await agent(deckRoute.GET, `/api/agent/${mine.agentId}/deck`, { agentId: mine.agentId }));
+    const written = await jsonOf(
+      await agent(deckRoute.PUT, `/api/agent/${mine.agentId}/deck`, { agentId: mine.agentId }, "PUT", { outline: outline([], "First, again"), base_version: 1 })
+    );
+
+    expect(made.status).toBe(201);
+    expect(read).toMatchObject({ id: primary.id, title: "First", version: 1 });
+    expect(written).toMatchObject({ id: primary.id, version: 2 });
+    expect((await list(mine)).map((deck) => [deck.title, deck.version])).toEqual([
+      ["First, again", 2],
+      ["Second", 1]
+    ]);
+  });
+
+  it("should list each deck oldest first with its id, title, version, revision and author, and answer an empty list for a chat with none", async () => {
+    const mine = await chat();
+    expect(await list(mine)).toEqual([]);
+    const first = await jsonOf(await create(mine, "First"));
+    const second = await jsonOf(await create(mine, "Second"));
+
+    expect(await list(mine)).toEqual([
+      { id: first.id, title: "First", version: 1, revision: 1, updated_by: "agent", pptx: false },
+      { id: second.id, title: "Second", version: 1, revision: 1, updated_by: "agent", pptx: false }
+    ]);
+    expect(first.id).not.toBe(second.id);
+    expect(await assistantFrame(prisma, mine.agentId)).toMatchObject({
+      deck_version: 1,
+      decks: [
+        { id: first.id, title: "First", version: 1, revision: 1, updated_by: "agent", agent_version: 1 },
+        { id: second.id, title: "Second", version: 1, revision: 1, updated_by: "agent", agent_version: 1 }
+      ]
+    });
+  });
+
+  it("should write, read and keep versions of each deck on its own, refusing a stale base for that deck alone", async () => {
+    const mine = await chat();
+    const first = await jsonOf(await create(mine, "First"));
+    const second = await jsonOf(await create(mine, "Second"));
+
+    const next = await jsonOf(await one(mine, second.id, "PUT", { outline: outline([], "Second v2"), base_version: 1, summary: "Again" }));
+    const stale = await one(mine, second.id, "PUT", { outline: outline([], "Nope"), base_version: 1 });
+    const old = await jsonOf(await one(mine, second.id, "GET", undefined, "?version=1"));
+
+    expect(next).toMatchObject({ id: second.id, version: 2 });
+    expect(stale.status).toBe(409);
+    expect((await jsonOf(stale)).current).toMatchObject({ id: second.id, title: "Second v2", version: 2 });
+    expect(old).toMatchObject({ id: second.id, title: "Second", version: 1, latest_version: 2 });
+    expect(await jsonOf(await one(mine, first.id))).toMatchObject({ id: first.id, title: "First", version: 1 });
+    expect((await one(mine, second.id, "GET", undefined, "?version=9")).status).toBe(404);
+  });
+
+  it("should answer 404 for a deck the conversation does not hold, one that is not an id, and another conversation's deck", async () => {
+    const mine = await chat();
+    const other = await chat();
+    const theirs = await jsonOf(await create(other, "Theirs"));
+
+    for (const id of ["00000000-0000-4000-8000-000000000000", "not-an-id", theirs.id]) {
+      expect((await one(mine, id)).status, id).toBe(404);
+      expect((await one(mine, id, "PUT", { outline: outline(), base_version: 0 })).status, id).toBe(404);
+      expect((await one(mine, id, "DELETE")).status, id).toBe(404);
+    }
+    expect(await list(other)).toHaveLength(1);
+  });
+
+  it("should refuse a second deck for a pod whose client reads only the primary one, and make one for a pod that claims items", async () => {
+    const mine = await chat();
+    await claim(mine, ["lookups", "github-lookups"]);
+
+    const first = await create(mine, "First");
+    const refused = await create(mine, "Second");
+    const primary = await agent(deckRoute.PUT, `/api/agent/${mine.agentId}/deck`, { agentId: mine.agentId }, "PUT", {
+      outline: outline([], "First, again"),
+      base_version: 1
+    });
+    await claim(mine, ["lookups", "github-lookups", "items"]);
+    const allowed = await create(mine, "Second");
+
+    expect(first.status).toBe(201);
+    expect(refused.status).toBe(409);
+    expect(await jsonOf(refused)).toEqual({ error: ITEMS_CREATE_REFUSED_DECK });
+    expect(primary.status).toBe(200);
+    expect(allowed.status).toBe(201);
+    expect(await list(mine)).toHaveLength(2);
+  });
+
+  it("should delete a deck with its versions and builds, leave the others, and refuse a write that names it afterwards", async () => {
+    const mine = await chat();
+    const first = await jsonOf(await create(mine, "First"));
+    const second = await jsonOf(await create(mine, "Second"));
+    await prisma.assistantDeckBuild.create({
+      data: { itemId: second.id, conversationId: mine.id, version: 1, status: "failed", error: "no", finishedAt: new Date() }
+    });
+
+    const removed = await one(mine, second.id, "DELETE");
+
+    expect(removed.status).toBe(204);
+    expect((await list(mine)).map((deck) => deck.id)).toEqual([first.id]);
+    expect(await prisma.assistantDeckVersion.count({ where: { itemId: second.id } })).toBe(0);
+    expect(await prisma.assistantDeckBuild.count({ where: { itemId: second.id } })).toBe(0);
+    expect((await one(mine, second.id, "PUT", { outline: outline(), base_version: 1 })).status).toBe(404);
+  });
+
+  it("should delete the pictures only a removed deck's versions named once they are past their grace, and keep one another deck names", async () => {
+    const mine = await chat();
+    const shared = await store(mine, png(1));
+    const alone = await store(mine, png(2));
+    const first = await writeDeck(prisma, mine.row, { create: true, outline: outline([shared]), baseVersion: 0, by: "agent", summary: null });
+    const second = await writeDeck(prisma, mine.row, { create: true, outline: outline([shared, alone]), baseVersion: 0, by: "agent", summary: null });
+
+    await removeDeck(prisma, mine.row, second.id, new Date(Date.now() + ASSET_GRACE_MS + 60_000));
+
+    expect((await prisma.assistantDeckAsset.findMany({ where: { conversationId: mine.id }, select: { sha256: true } })).map((row) => row.sha256)).toEqual([
+      shared
+    ]);
+    expect((await readDeck(prisma, mine.id)).id).toBe(first.id);
+  });
+
+  it("should apply the retention to each deck, so one deck's many versions leave another's alone", async () => {
+    const mine = await chat();
+    const other = await writeDeck(prisma, mine.row, { create: true, outline: outline([], "Other"), baseVersion: 0, by: "agent", summary: null });
+    const busy = await writeDeck(prisma, mine.row, { create: true, outline: outline([], "Busy"), baseVersion: 0, by: "agent", summary: null });
+    for (let base = 1; base < KEEP_VERSIONS + 3; base += 1) {
+      await writeDeck(prisma, mine.row, { itemId: busy.id, outline: outline([], "Busy"), baseVersion: base, by: "agent", summary: null });
+      await putDeckPptx(prisma, mine.row, busy.id, base + 1, PPTX);
+    }
+    await putDeckPptx(prisma, mine.row, other.id, 1, PPTX);
+
+    const kept = await prisma.assistantDeckVersion.findMany({ where: { itemId: busy.id }, select: { version: true, pptx: true }, orderBy: { version: "asc" } });
+
+    expect(kept).toHaveLength(KEEP_VERSIONS);
+    expect(kept.filter((row) => row.pptx !== null).map((row) => row.version)).toEqual([101, 102, 103]);
+    const left = await prisma.assistantDeckVersion.findMany({ where: { itemId: other.id }, select: { version: true, pptx: true } });
+    expect(left.map((row) => [row.version, row.pptx !== null])).toEqual([[1, true]]);
+  });
+
+  it("should keep a picture that any deck's kept versions name when another deck's versions are pruned", async () => {
+    const mine = await chat();
+    const pic = await store(mine, png(3));
+    const named = await writeDeck(prisma, mine.row, { create: true, outline: outline([pic]), baseVersion: 0, by: "agent", summary: null });
+    const busy = await writeDeck(prisma, mine.row, { create: true, outline: outline(), baseVersion: 0, by: "agent", summary: null });
+    const later = new Date(Date.now() + ASSET_GRACE_MS + 60_000);
+
+    await writeDeck(prisma, mine.row, { itemId: busy.id, outline: outline(), baseVersion: 1, by: "agent", summary: null }, later);
+
+    expect(await prisma.assistantDeckAsset.count({ where: { conversationId: mine.id, sha256: pic } })).toBe(1);
+    expect(named.version).toBe(1);
+  });
+
+  it("should store a .pptx against the deck it names, and refuse a version the deck has not reached", async () => {
+    const mine = await chat();
+    const first = await jsonOf(await create(mine, "First"));
+    const second = await jsonOf(await create(mine, "Second"));
+    const put = (id: string, version: string) =>
+      agent(
+        itemPptxRoute.PUT,
+        `/api/agent/${mine.agentId}/decks/${id}/versions/${version}/pptx`,
+        { agentId: mine.agentId, itemId: id, version },
+        "PUT",
+        new Uint8Array(PPTX)
+      );
+
+    expect((await put(second.id, "1")).status).toBe(204);
+    expect((await put(second.id, "2")).status).toBe(404);
+    expect((await put("00000000-0000-4000-8000-000000000000", "1")).status).toBe(404);
+
+    expect((await list(mine)).map((deck) => [deck.id, deck.pptx])).toEqual([
+      [first.id, false],
+      [second.id, true]
+    ]);
+  });
+
+  it("should read and build each deck from the browser by its id, and refuse an id the chat does not hold", async () => {
+    const mine = await chat();
+    const first = await writeDeck(prisma, mine.row, { create: true, outline: outline([], "First"), baseVersion: 0, by: "agent", summary: null });
+    const second = await writeDeck(prisma, mine.row, { create: true, outline: outline([], "Second"), baseVersion: 0, by: "agent", summary: null });
+    const read = (id: string) => browser(browserDeckRoute.GET, "alice", `/api/ui/assistant/decks/${mine.id}/${id}`, { conversationId: mine.id, itemId: id });
+
+    expect(await jsonOf(await read(first.id))).toMatchObject({ id: first.id, title: "First" });
+    expect(await jsonOf(await read(second.id))).toMatchObject({ id: second.id, title: "Second" });
+    expect((await read("00000000-0000-4000-8000-000000000000")).status).toBe(404);
+    expect((await read("not-an-id")).status).toBe(404);
+    expect(
+      await requestDeckBuild(prisma, ALICE.oid, mine.id, "00000000-0000-4000-8000-000000000000", 1).catch((error: { status: number }) => error.status)
+    ).toBe(404);
+  });
+
+  it("should show every deck on the owner's page and on a share, oldest first", async () => {
+    const mine = await chat();
+    await writeDeck(prisma, mine.row, { create: true, outline: outline([], "First"), baseVersion: 0, by: "agent", summary: null });
+    await writeDeck(prisma, mine.row, { create: true, outline: outline([], "Second"), baseVersion: 0, by: "agent", summary: null });
+    actAs("alice");
+    await shareActions.shareChat({ conversationId: mine.id, recipientOid: CAROL.oid });
+
+    const own = await assistantConversation(viewerOf(ALICE), mine.id);
+    const shared = await sharedChat(viewerOf(CAROL), mine.id);
+
+    expect(own?.decks.map((deck) => deck.title)).toEqual(["First", "Second"]);
+    expect(shared?.decks.map((deck) => deck.title)).toEqual(["First", "Second"]);
+  });
+
+  it("should copy every deck into a fork, in the source's order, each as its own version 1 said to be the person's", async () => {
+    const mine = await chat();
+    const pic = await store(mine, png(4));
+    await writeDeck(prisma, mine.row, { create: true, outline: outline([pic], "First"), baseVersion: 0, by: "agent", summary: null });
+    const second = await writeDeck(prisma, mine.row, { create: true, outline: outline([], "Second"), baseVersion: 0, by: "agent", summary: null });
+    await writeDeck(prisma, mine.row, { itemId: second.id, outline: outline([], "Second, edited"), baseVersion: 1, by: "agent", summary: null });
+    await forkActions.offerChatFork({ conversationId: mine.id, recipientOid: BOB.oid });
+
+    actAs("bob");
+    const taken = await forkActions.forkChat({ conversationId: mine.id });
+    const copy = (taken as { ok: true; id: string }).id;
+
+    const copies = await prisma.assistantDeck.findMany({ where: { conversationId: copy }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
+    expect(copies.map((deck) => [deck.title, deck.version, deck.updatedBy])).toEqual([
+      ["First", 1, "user"],
+      ["Second, edited", 1, "user"]
+    ]);
+    expect(copies.map((deck) => deck.id)).not.toContain(second.id);
+    expect((await prisma.assistantDeckAsset.findMany({ where: { conversationId: copy } })).map((asset) => asset.sha256)).toEqual([pic]);
+    expect(await prisma.assistantDeckVersion.count({ where: { conversationId: copy } })).toBe(2);
+  });
+
+  it("should drop the conversation's oldest version, whichever deck it is of, and keep each deck's newest 3, when an upload would pass the ceiling", async () => {
+    const mine = await chat();
+    const pictures = MAX_HELD_ASSET_BYTES / MAX_ASSET_BYTES;
+    const long = new Date(Date.now() - ASSET_GRACE_MS - 60_000);
+    const first = await writeDeck(prisma, mine.row, { create: true, outline: outline(), baseVersion: 0, by: "agent", summary: null });
+    const second = await writeDeck(prisma, mine.row, { create: true, outline: outline(), baseVersion: 0, by: "agent", summary: null });
+    const decks = [first.id, second.id];
+    const versions = [1, 1];
+    // Each version names one picture of its own, written alternately to the two decks, so every picture is held by one version.
+    for (let seed = 1; seed <= pictures; seed += 1) {
+      const sha = await store(mine, png(seed, MAX_ASSET_BYTES));
+      const at = seed % 2;
+      await writeDeck(prisma, mine.row, {
+        itemId: decks[at] as string,
+        outline: outline([sha]),
+        baseVersion: versions[at] as number,
+        by: "agent",
+        summary: null
+      });
+      versions[at] = (versions[at] as number) + 1;
+      await prisma.assistantDeckAsset.update({ where: { conversationId_sha256: { conversationId: mine.id, sha256: sha } }, data: { createdAt: long } });
+    }
+
+    expect((await upload(mine, png(100, MAX_ASSET_BYTES))).status).toBe(201);
+
+    // Room for the first picture needs the two decks' empty first versions and the second deck's version 2 gone: the
+    // conversation's oldest versions in turn, until what is left names few enough pictures.
+    const left = (id: string) => prisma.assistantDeckVersion.findMany({ where: { itemId: id }, select: { version: true }, orderBy: { version: "asc" } });
+    expect((await left(first.id)).map((row) => row.version)).toEqual([2, 3, 4, 5, 6, 7]);
+    expect((await left(second.id)).map((row) => row.version)).toEqual([3, 4, 5, 6, 7]);
+    expect(
+      (await prisma.assistantDeckAsset.findMany({ where: { conversationId: mine.id }, select: { sha256: true } })).map((asset) => asset.sha256)
+    ).not.toContain(digest(png(1, MAX_ASSET_BYTES)));
+  }, 60_000);
 });

@@ -43,18 +43,26 @@ function fakes({
   return { client, readKey, deps };
 }
 
+const ITEM_ID = "0b1f3d4a-0000-4000-8000-0000000000c1";
+
+/** A hub holding `current` as the conversation's one Notify template, or none. */
 function hubApi(
   current?: NotifyResponse,
   put: (body: NotifyBody) => Promise<{ version: number; revision: number }> = async () => ({ version: 1, revision: 0 })
 ) {
   return {
-    getNotify: vi.fn(async () => {
+    listNotify: vi.fn(async () => ({
+      notify_templates:
+        current === undefined ? [] : [{ id: ITEM_ID, name: current.name, version: current.version, revision: current.revision, updated_by: current.by }]
+    })),
+    getNotifyById: vi.fn(async () => {
       if (current === undefined) {
-        throw new ApiError(404, { error: "none" }, "GET", "/notify");
+        throw new ApiError(404, { error: "none" }, "GET", "/notify-templates");
       }
       return current;
     }),
-    putNotify: vi.fn(async (_agentId: string, body: NotifyBody) => await put(body))
+    putNotifyById: vi.fn(async (_agentId: string, _id: string, body: NotifyBody) => await put(body)),
+    createNotify: vi.fn(async (_agentId: string, body: NotifyBody) => ({ id: ITEM_ID, ...(await put(body)) }))
   };
 }
 
@@ -201,15 +209,15 @@ describe("listNotifyTemplates", () => {
 });
 
 describe("pullNotifyTemplate", () => {
-  it("should load the template with Notify's preview of its placeholders as the next version", async () => {
+  it("should load the template with Notify's preview of its placeholders as a new template when no target is named", async () => {
     const { deps, client } = fakes();
     const api = hubApi(undefined, async () => ({ version: 1, revision: 0 }));
 
     const pulled = await pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", api, deps });
 
-    expect(pulled).toEqual({ version: 1, name: "Claim received", written: true });
+    expect(pulled).toEqual({ id: ITEM_ID, version: 1, name: "Claim received", written: true });
     expect(client.previewTemplate).toHaveBeenCalledWith(TEMPLATE_ID, { ref: "((ref))", name: "((name))" }, undefined);
-    expect(api.putNotify).toHaveBeenCalledWith("a1", {
+    expect(api.createNotify).toHaveBeenCalledWith("a1", {
       subject: "Your claim ((ref))",
       body: "Dear ((name))",
       data: {},
@@ -229,16 +237,19 @@ describe("pullNotifyTemplate", () => {
     });
   });
 
-  it("should put on the version there is, and keep a text message's preview as text with no subject", async () => {
+  it("should put on the target's version, and keep a text message's preview as text with no subject", async () => {
     const { deps } = fakes({
       got: template({ type: "sms", subject: null, body: "Hi ((name))" }),
       preview: { id: TEMPLATE_ID, type: "sms", version: 4, body: "Hi ((name))", html: null }
     });
     const api = hubApi(loaded({ version: 5, template_id: "00000000-0000-4000-8000-000000000099" }), async () => ({ version: 6, revision: 0 }));
 
-    await pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", api, deps });
+    const pulled = await pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", target: ITEM_ID, api, deps });
 
-    const body = api.putNotify.mock.calls[0]?.[1];
+    expect(pulled).toEqual({ id: ITEM_ID, version: 6, name: "Claim received", written: true });
+    expect(api.putNotifyById.mock.calls[0]?.[1]).toBe(ITEM_ID);
+    expect(api.createNotify).not.toHaveBeenCalled();
+    const body = api.putNotifyById.mock.calls[0]?.[2];
     expect(body?.base_version).toBe(5);
     expect(body?.subject).toBeNull();
     expect(body?.source?.notify_subject).toBeNull();
@@ -264,8 +275,8 @@ describe("pullNotifyTemplate", () => {
     await pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", api: panel, deps, by: "user" });
     await pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", api: session, deps });
 
-    expect(panel.putNotify.mock.calls[0]?.[1].by).toBe("user");
-    expect(session.putNotify.mock.calls[0]?.[1]).not.toHaveProperty("by");
+    expect(panel.createNotify.mock.calls[0]?.[1].by).toBe("user");
+    expect(session.createNotify.mock.calls[0]?.[1]).not.toHaveProperty("by");
   });
 
   it("should keep no preview when Notify cannot be reached for it", async () => {
@@ -274,7 +285,7 @@ describe("pullNotifyTemplate", () => {
 
     await pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", api, deps });
 
-    expect(api.putNotify.mock.calls[0]?.[1].source?.notify_preview).toBeNull();
+    expect(api.createNotify.mock.calls[0]?.[1].source?.notify_preview).toBeNull();
   });
 
   it("should write nothing once the job is aborted", async () => {
@@ -287,7 +298,7 @@ describe("pullNotifyTemplate", () => {
     const api = hubApi();
 
     await expect(pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", api, deps, signal: job.signal })).rejects.toThrow();
-    expect(api.putNotify).not.toHaveBeenCalled();
+    expect(api.createNotify).not.toHaveBeenCalled();
   });
 
   it("should stop every Notify call with the job's signal", async () => {
@@ -312,7 +323,7 @@ describe("pullNotifyTemplate", () => {
 
     await pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", api, deps });
 
-    const body = api.putNotify.mock.calls[0]?.[1];
+    const body = api.createNotify.mock.calls[0]?.[1];
     expect(body?.subject).toBe("");
     expect(body?.source?.notify_preview).toBeNull();
   });
@@ -326,8 +337,8 @@ describe("pullNotifyTemplate", () => {
     await pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", api: first, deps: none.deps });
     await pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", api: second, deps: big.deps });
 
-    expect(first.putNotify.mock.calls[0]?.[1].source?.notify_preview).toBeNull();
-    expect(second.putNotify.mock.calls[0]?.[1].source?.notify_preview).toBeNull();
+    expect(first.createNotify.mock.calls[0]?.[1].source?.notify_preview).toBeNull();
+    expect(second.createNotify.mock.calls[0]?.[1].source?.notify_preview).toBeNull();
   });
 
   it("should drop the preview rather than the template when the whole would pass the hub's request cap", async () => {
@@ -337,7 +348,7 @@ describe("pullNotifyTemplate", () => {
 
     await pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", api, deps });
 
-    expect(api.putNotify.mock.calls[0]?.[1].source?.notify_preview).toBeNull();
+    expect(api.createNotify.mock.calls[0]?.[1].source?.notify_preview).toBeNull();
   });
 
   it("should refuse a template too big for the hub with too_large", async () => {
@@ -358,8 +369,40 @@ describe("pullNotifyTemplate", () => {
 
     const pulled = await pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", api, deps });
 
-    expect(pulled).toEqual({ version: 2, name: "Claim received", written: false });
-    expect(api.putNotify).not.toHaveBeenCalled();
+    expect(pulled).toEqual({ id: ITEM_ID, version: 2, name: "Claim received", written: false });
+    expect(api.createNotify).not.toHaveBeenCalled();
+    expect(api.putNotifyById).not.toHaveBeenCalled();
+  });
+
+  it("should write nothing when the target is already this template at this Notify version, unchanged", async () => {
+    const { deps } = fakes();
+    const api = hubApi(loaded());
+
+    const pulled = await pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", target: ITEM_ID, api, deps });
+
+    expect(pulled).toEqual({ id: ITEM_ID, version: 2, name: "Claim received", written: false });
+    expect(api.putNotifyById).not.toHaveBeenCalled();
+  });
+
+  it("should check a load that makes a new template against the conversation's newest, and make it when that is another template", async () => {
+    const { deps } = fakes();
+    const api = hubApi(loaded({ template_id: "00000000-0000-4000-8000-000000000099" }), async () => ({ version: 1, revision: 0 }));
+
+    const pulled = await pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", api, deps });
+
+    expect(pulled.written).toBe(true);
+    expect(api.getNotifyById).toHaveBeenCalledWith("a1", ITEM_ID);
+    expect(api.createNotify.mock.calls[0]?.[1].base_version).toBe(0);
+  });
+
+  it("should answer conflict when the target is no longer in the chat", async () => {
+    const { deps } = fakes();
+    const api = hubApi();
+
+    await expect(pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", target: ITEM_ID, api, deps })).rejects.toMatchObject({
+      code: "conflict"
+    });
+    expect(api.putNotifyById).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -371,35 +414,35 @@ describe("pullNotifyTemplate", () => {
     const { deps } = fakes();
     const api = hubApi(loaded(change), async () => ({ version: 3, revision: 0 }));
 
-    const pulled = await pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", api, deps });
+    const pulled = await pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", target: ITEM_ID, api, deps });
 
     expect(pulled.written).toBe(true);
   });
 
   it("should answer the version a repeated job already wrote when the put is refused as stale", async () => {
     const { deps } = fakes();
-    const api = hubApi(undefined, async () => {
+    const api = hubApi(loaded({ version: 0, notify_version: 3 }), async () => {
       throw new ApiError(409, { error: "changed", current: loaded({ version: 1 }) }, "PUT", "/notify");
     });
 
-    const pulled = await pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", api, deps });
+    const pulled = await pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", target: ITEM_ID, api, deps });
 
-    expect(pulled).toEqual({ version: 1, name: "Claim received", written: false });
+    expect(pulled).toEqual({ id: ITEM_ID, version: 1, name: "Claim received", written: false });
   });
 
   it("should answer conflict when another version was written while it loaded", async () => {
     const { deps } = fakes();
-    const stale = hubApi(undefined, async () => {
+    const stale = hubApi(loaded({ notify_version: 3 }), async () => {
       throw new ApiError(409, { error: "changed", current: loaded({ by: "user", body: "mine" }) }, "PUT", "/notify");
     });
-    const empty = hubApi(undefined, async () => {
+    const empty = hubApi(loaded({ notify_version: 3 }), async () => {
       throw new ApiError(409, { error: "changed" }, "PUT", "/notify");
     });
 
-    await expect(pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", api: stale, deps })).rejects.toMatchObject({
+    await expect(pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", target: ITEM_ID, api: stale, deps })).rejects.toMatchObject({
       code: "conflict"
     });
-    await expect(pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", api: empty, deps })).rejects.toMatchObject({
+    await expect(pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", target: ITEM_ID, api: empty, deps })).rejects.toMatchObject({
       code: "conflict"
     });
   });
@@ -409,7 +452,7 @@ describe("pullNotifyTemplate", () => {
     const refused = hubApi(undefined, async () => {
       throw new ApiError(400, { error: "bad" }, "PUT", "/notify");
     });
-    const unreadable = { ...hubApi(), getNotify: vi.fn(async () => Promise.reject(new ApiError(500, { error: "down" }, "GET", "/notify"))) };
+    const unreadable = { ...hubApi(), listNotify: vi.fn(async () => Promise.reject(new ApiError(500, { error: "down" }, "GET", "/notify-templates"))) };
 
     await expect(pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", api: refused, deps })).rejects.toMatchObject({ status: 400 });
     await expect(pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", api: unreadable, deps })).rejects.toMatchObject({

@@ -150,7 +150,7 @@ function serve() {
     if (url.endsWith("/pdf")) {
       return new Response(new Uint8Array([37, 80, 68, 70]));
     }
-    if (url === `/api/ui/assistant/docmosis/${CONVERSATION}`) {
+    if (url === `/api/ui/assistant/docmosis/${CONVERSATION}/${ITEM}`) {
       return server.view === null ? json({ error: "none" }, { status: 404 }) : json(server.view);
     }
     return json({ error: "not served" }, { status: 404 });
@@ -425,13 +425,14 @@ describe("TemplateLibrary status", () => {
   });
 });
 
-const SUMMARY: DocmosisSummary = { name: "Claim form.docx", version: 1, revision: 0, updatedBy: "user", pdf: "pending" };
+const ITEM = "44444444-4444-4444-8444-444444444444";
+const SUMMARY: DocmosisSummary = { id: ITEM, name: "Claim form.docx", version: 1, revision: 0, updatedBy: "user", pdf: "pending" };
 
 /** The panel with a loader of its own, as the chat gives it; rerendering with new props keeps the loader's state. */
 function Panel({ library = true, ...props }: Partial<React.ComponentProps<typeof DocmosisPanel>> & { library?: boolean }) {
   const docmosis = props.docmosis ?? null;
   const announce = props.announce ?? (() => undefined);
-  const loader = useTemplateLoad({ conversationId: CONVERSATION, docmosis, announce });
+  const loader = useTemplateLoad({ conversationId: CONVERSATION, templates: docmosis === null ? [] : [docmosis], target: docmosis?.id ?? null, announce });
   return (
     <DocmosisPanel
       conversationId={CONVERSATION}
@@ -493,7 +494,7 @@ describe("DocmosisPanel choosing a template", () => {
       { kind: "docmosis.load", args: { path: "Templates/Base/Claim form.docx", blob_sha: "2".repeat(40), base_version: 0, base_revision: 0 } }
     ]);
     expect(liveStatus().join(" ")).toContain("Loading Claim form.docx…");
-    server.job = { job_id: JOB, kind: "docmosis.load", status: "done", result: { version: 1, revision: 0 } };
+    server.job = { job_id: JOB, kind: "docmosis.load", status: "done", result: { item: ITEM, version: 1, revision: 0 } };
     act(() => {
       for (const listener of jobListeners) {
         listener({ job_id: JOB, conversation_id: CONVERSATION });
@@ -540,7 +541,9 @@ describe("DocmosisPanel choosing a template", () => {
     const server = serve();
     server.job = { job_id: JOB, kind: "docmosis.load", status: "failed", error: "conflict" };
     server.view = view({ version: 4, revision: 2, by: "agent", summary: "Newer", has_pdf: true });
-    const { rerender } = render(<Panel />);
+    const { rerender } = render(<Panel docmosis={SUMMARY} />);
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Change template" }));
     await settle();
     await pickClaimForm();
     const alert = screen.getByRole("alert");
@@ -550,13 +553,13 @@ describe("DocmosisPanel choosing a template", () => {
     await settle();
     expect(loadRequests(server).at(-1)?.body).toEqual({
       kind: "docmosis.load",
-      args: { path: "Templates/Base/Claim form.docx", blob_sha: "2".repeat(40), base_version: 4, base_revision: 2 }
+      args: { item: ITEM, path: "Templates/Base/Claim form.docx", blob_sha: "2".repeat(40), base_version: 4, base_revision: 2 }
     });
 
     server.job = { job_id: JOB, kind: "docmosis.load", status: "failed", error: "conflict" };
     await settle(2000);
     fireEvent.click(within(screen.getByRole("alert")).getByRole("button", { name: "Keep theirs" }));
-    rerender(<Panel docmosis={{ name: "Newer.docx", version: 4, revision: 2, updatedBy: "agent", pdf: "ready" }} />);
+    rerender(<Panel docmosis={{ id: ITEM, name: "Newer.docx", version: 4, revision: 2, updatedBy: "agent", pdf: "ready" }} />);
     await settle();
     expect(screen.queryByRole("combobox", { name: "Search templates" })).toBeNull();
     expect(screen.getByRole("button", { name: "Change template" })).toBeTruthy();
@@ -624,16 +627,18 @@ function finishJob(server: ReturnType<typeof serve>, job: PodJobView): void {
   });
 }
 
-const DONE: PodJobView = { job_id: JOB, kind: "docmosis.load", status: "done", result: { version: 1, revision: 0 } };
+const DONE: PodJobView = { job_id: JOB, kind: "docmosis.load", status: "done", result: { item: ITEM, version: 1, revision: 0 } };
 const CONFLICT: PodJobView = { job_id: JOB, kind: "docmosis.load", status: "failed", error: "conflict" };
 
 describe("DocmosisPanel while a load runs", () => {
-  it("should keep the load and its conflict on screen when the assistant writes the chat's first template mid-load", async () => {
+  it("should keep the load and its conflict on screen when the assistant writes the template it replaces mid-load", async () => {
     const server = serve();
-    const { rerender } = render(<Panel />);
+    const { rerender } = render(<Panel docmosis={SUMMARY} />);
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Change template" }));
     await settle();
     await pickClaimForm();
-    rerender(<Panel docmosis={{ ...SUMMARY, name: "Draft.docx", updatedBy: "agent" }} />);
+    rerender(<Panel docmosis={{ ...SUMMARY, name: "Draft.docx", version: 2, updatedBy: "agent" }} />);
     await settle();
     expect(screen.getByRole("heading", { name: "Choose a template" })).toBeTruthy();
     expect(liveStatus().join(" ")).toContain("Loading Claim form.docx…");
@@ -666,7 +671,9 @@ describe("DocmosisPanel while a load runs", () => {
     server.job = CONFLICT;
     server.view = view({ version: 4, revision: 2, name: "Newer.docx", by: "agent", summary: "Newer", has_pdf: true, source_path: null });
     const announce = vi.fn();
-    render(<Panel announce={announce} />);
+    render(<Panel announce={announce} docmosis={SUMMARY} />);
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Change template" }));
     await settle();
     await pickClaimForm();
     fireEvent.click(within(screen.getByRole("alert")).getByRole("button", { name: "Keep theirs" }));
@@ -739,6 +746,51 @@ describe("DocmosisPanel Change template", () => {
     expect(screen.getByRole("heading", { name: "Claim form.docx" })).toBeTruthy();
   });
 
+  it("should load into the template shown, naming it, and name none when the load makes a new template", async () => {
+    const server = serve();
+    server.view = view({ has_pdf: true });
+    const { unmount } = render(<Panel docmosis={SUMMARY} />);
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Change template" }));
+    await settle();
+    await pickClaimForm();
+    expect(loadRequests(server)[0]?.body).toEqual(expect.objectContaining({ args: expect.objectContaining({ item: ITEM }) }));
+    unmount();
+    const fresh = serve();
+    render(<Panel />);
+    await settle();
+    await pickClaimForm();
+    expect(loadRequests(fresh)[0]?.body).toEqual({
+      kind: "docmosis.load",
+      args: { path: "Templates/Base/Claim form.docx", blob_sha: "2".repeat(40), base_version: 0, base_revision: 0 }
+    });
+  });
+
+  it("should tell the chat which template a load wrote when it lands", async () => {
+    const server = serve();
+    const onSettled = vi.fn();
+    function Chosen() {
+      const loader = useTemplateLoad({ conversationId: CONVERSATION, templates: [SUMMARY], target: null, announce: () => undefined, onSettled });
+      return (
+        <DocmosisPanel
+          conversationId={CONVERSATION}
+          docmosis={null}
+          owner
+          onClose={() => undefined}
+          narrow={false}
+          announce={() => undefined}
+          loader={loader}
+        />
+      );
+    }
+    render(<Chosen />);
+    await settle();
+    await pickClaimForm();
+    finishJob(server, DONE);
+    await settle();
+    expect(onSettled).toHaveBeenCalledWith("loaded", ITEM);
+  });
+
   it("should load the new template on the version shown", async () => {
     const server = serve();
     server.view = view({ has_pdf: true });
@@ -785,9 +837,9 @@ function conversation(overrides: Partial<ConversationView> = {}): ConversationVi
     sessionState: null,
     sessionDetail: null,
     documents: [],
-    deck: null,
-    docmosis: null,
-    notify: null,
+    decks: [],
+    docmosisTemplates: [],
+    notifyTemplates: [],
     video: null,
     canPostVideo: false,
     page: { messages: [], entries: [], olderBefore: null, lastId: null, more: false },
@@ -830,16 +882,16 @@ describe("ChatView template button", () => {
     createTemplate();
     await settle();
     expect(screen.getByRole("heading", { name: "Choose a template" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Items, Docmosis template open" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Items, New Docmosis template open" })).toBeTruthy();
   });
 
-  it("should offer the template in the switcher, and Create should open it, when the chat has a template", () => {
+  it("should offer the template in the switcher, and Create should offer a new one, when the chat has a template", () => {
     serve();
-    render(<Chat view={conversation({ docmosis: SUMMARY })} />);
+    render(<Chat view={conversation({ docmosisTemplates: [SUMMARY] })} />);
     fireEvent.click(screen.getByRole("button", { name: /^Items/ }));
-    expect(screen.getByRole("menuitemradio", { name: "Docmosis template" })).toBeTruthy();
+    expect(screen.getByRole("menuitemradio", { name: SUMMARY.name })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
-    expect(screen.getByRole("menuitem", { name: "Docmosis template, already in this chat" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Docmosis template" })).toBeTruthy();
   });
 
   it("should offer no Docmosis template when a local chat has none", () => {
@@ -853,10 +905,10 @@ describe("ChatView template button", () => {
   it("should not open the panel for a version the person loaded, and should for one the assistant wrote", async () => {
     serve();
     const { rerender } = render(<Chat view={conversation()} />);
-    rerender(<Chat view={conversation({ docmosis: SUMMARY })} />);
+    rerender(<Chat view={conversation({ docmosisTemplates: [SUMMARY] })} />);
     await settle();
     expect(screen.queryByRole("region", { name: "Template" })).toBeNull();
-    rerender(<Chat view={conversation({ docmosis: { ...SUMMARY, version: 2, updatedBy: "agent" } })} />);
+    rerender(<Chat view={conversation({ docmosisTemplates: [{ ...SUMMARY, version: 2, updatedBy: "agent" }] })} />);
     await settle();
     expect(screen.getByRole("region", { name: "Template" })).toBeTruthy();
   });
@@ -871,7 +923,7 @@ describe("ChatView template button", () => {
     expect(screen.queryByRole("region", { name: "Template" })).toBeNull();
     finishJob(server, DONE);
     await settle();
-    rerender(<Chat view={conversation({ docmosis: SUMMARY })} />);
+    rerender(<Chat view={conversation({ docmosisTemplates: [SUMMARY] })} />);
     await settle();
     expect(screen.getByRole("heading", { name: "Claim form.docx" })).toBeTruthy();
     await settle(ANNOUNCE_AFTER_MS);
@@ -887,7 +939,7 @@ describe("ChatView template button", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Document" }));
     fireEvent.click(screen.getByRole("button", { name: /^Items/ }));
-    expect(screen.getByRole("menuitemradio", { name: "Docmosis template" })).toBeTruthy();
+    expect(screen.getByRole("menuitemradio", { name: "New Docmosis template" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /^Items/ }));
 
     finishJob(server, { job_id: JOB, kind: "docmosis.load", status: "failed", error: "not_docx" });
@@ -895,8 +947,8 @@ describe("ChatView template button", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Document" }));
     fireEvent.click(screen.getByRole("button", { name: /^Items/ }));
-    expect(screen.getByRole("menuitemradio", { name: "Docmosis template, which did not load" })).toBeTruthy();
-    expect(screen.getByTestId("docmosis-failed")).toBeTruthy();
+    expect(screen.getByRole("menuitemradio", { name: "New Docmosis template, which did not load" })).toBeTruthy();
+    expect(screen.getByTestId("docmosis:new-failed")).toBeTruthy();
   });
 
   it("should open on the conflict choice when a load the panel was closed on is refused for a newer version", async () => {

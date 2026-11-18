@@ -57,6 +57,8 @@ export async function libraryEntries(url: string, { signal, fetchImpl = fetch }:
 }
 
 export interface LoadRequest {
+  /** The template the load replaces; left out, it makes a new one. */
+  item?: string;
   path: string;
   blob_sha: string;
   base_version: number;
@@ -65,7 +67,7 @@ export interface LoadRequest {
 
 /** How a load ended. `refused` is the hub turning the request down before anything ran on the pod. */
 export type LoadOutcome =
-  | { status: "done"; version: number; revision: number }
+  | { status: "done"; item: string | undefined; version: number; revision: number }
   | { status: "failed"; error: string; detail?: string }
   | { status: "refused"; httpStatus: number; error: string }
   | { status: "waking" | "unsupported" | "no_pod" | "assistant_gone" | "missing" };
@@ -119,8 +121,8 @@ export async function loadTemplate(
       return { status: "missing" };
     }
     if (job.status === "done") {
-      const result = job.result as { version: number; revision: number };
-      return { status: "done", version: result.version, revision: result.revision };
+      const result = job.result as { item?: string; version: number; revision: number };
+      return { status: "done", item: result.item, version: result.version, revision: result.revision };
     }
     if (job.status === "timeout") {
       return { status: "failed", error: "timeout" };
