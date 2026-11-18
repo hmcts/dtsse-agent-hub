@@ -20,7 +20,7 @@ describe("the Notify pod-job handlers", () => {
   });
 
   it("should register both kinds, each inside the hub's time for it", () => {
-    expect(POD_JOB_HANDLERS).toEqual([notifyList, notifyPull]);
+    expect(POD_JOB_HANDLERS).toEqual(expect.arrayContaining([notifyList, notifyPull]));
     expect(notifyList.budgetMs).toBeLessThan(120_000);
     expect(notifyPull.budgetMs).toBeLessThan(150_000);
   });

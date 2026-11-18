@@ -132,7 +132,8 @@ export const docmosisPutBody = z.object({
   data: z.unknown(),
   base_version: z.number().int().nonnegative(),
   base_revision: z.number().int().nonnegative().optional(),
-  summary: storableText(MAX_SUMMARY).optional()
+  summary: storableText(MAX_SUMMARY).optional(),
+  pick: z.uuid({ message: "must be the id of the template library pick this write loads" }).optional()
 });
 
 export interface DocmosisPut {
@@ -143,6 +144,8 @@ export interface DocmosisPut {
   base_version: number;
   base_revision?: number;
   summary?: string;
+  /** The `docmosis.load` pod job this write loads a template for, which records it as the person's own pick. */
+  pick?: string;
 }
 
 export type Checked<T> = { ok: true; value: T } | { ok: false; error: string };

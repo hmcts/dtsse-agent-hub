@@ -24,6 +24,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: 
 vi.mock("@/components/live/HubStream", () => ({
   useHubEvent: () => undefined,
   useEndSession: () => () => undefined,
+  useHubSubscribe: () => () => () => undefined,
   useWatch: () => undefined
 }));
 

@@ -163,6 +163,18 @@ describe("checkDocmosisPut", () => {
   it("should refuse a name the database cannot hold", () => {
     expect(refused(put({ name: `a${String.fromCharCode(0)}` }))).toMatch(/^name /);
   });
+
+  it("should carry the pick when it names a job", () => {
+    const pick = "0b9d6c1e-3c1f-4a5e-9f43-8d2a7c6b5e41";
+
+    const result = checkDocmosisPut(put({ pick }));
+
+    expect(result.ok && result.value.pick).toBe(pick);
+  });
+
+  it("should refuse a pick when it is not a job's id", () => {
+    expect(refused(put({ pick: "job-1" }))).toMatch(/^pick /);
+  });
 });
 
 describe("the byte checks", () => {

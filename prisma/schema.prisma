@@ -675,6 +675,9 @@ model AssistantDocmosisVersion {
   /// {short, long} when the last render of this version failed.
   renderError    Json?     @map("render_error")
   updatedAt      DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  /// The library path and git blob SHA-1 of a version loaded from the template library; null for every other version.
+  sourcePath     String?   @map("source_path")
+  sourceBlobSha  String?   @map("source_blob_sha")
 
   conversation AssistantConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 

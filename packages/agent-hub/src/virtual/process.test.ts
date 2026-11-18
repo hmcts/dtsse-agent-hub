@@ -36,6 +36,30 @@ describe("run", () => {
     expect(r.code).toBe(1);
   });
 
+  it("should kill the command well inside its timeout when the caller's signal aborts", async () => {
+    // Arrange
+    const controller = new AbortController();
+    const started = Date.now();
+    setTimeout(() => controller.abort(), 50);
+
+    // Act
+    const r = await run("bash", ["-c", "sleep 5"], { env: pod.env(), timeoutMs: 60_000, signal: controller.signal });
+
+    // Assert
+    expect(r.code).toBe(1);
+    expect(Date.now() - started).toBeLessThan(4000);
+  });
+
+  it("should kill the command at once when the caller's signal has already aborted", async () => {
+    // Act
+    const started = Date.now();
+    const r = await run("bash", ["-c", "sleep 5"], { env: pod.env(), timeoutMs: 60_000, signal: AbortSignal.abort() });
+
+    // Assert
+    expect(r.code).toBe(1);
+    expect(Date.now() - started).toBeLessThan(4000);
+  });
+
   it("should answer for a command whose descendants hold its pipes open past the kill", async () => {
     // Arrange: the kill is certain and `close` is not — it waits for the pipes, and this leaves a subshell
     // holding them. Without the giving-up step the timeout bounds nothing and the caller waits for ever.

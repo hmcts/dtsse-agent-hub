@@ -27,7 +27,8 @@ export type LookupFrame = {
 };
 
 export type RunResult = { code: number; stdout: string; stderr: string };
-export type Run = (cmd: string, args: string[], opts: { env: Env; timeoutMs: number }) => Promise<RunResult>;
+/** `signal`, when a caller gives one, kills the command once it aborts. */
+export type Run = (cmd: string, args: string[], opts: { env: Env; timeoutMs: number; signal?: AbortSignal }) => Promise<RunResult>;
 
 export const MAX_LOOKUP_RESULTS = 10;
 /** At most two twg searches at once: the pod is also running the person's sessions, and typing makes many. */

@@ -22,6 +22,17 @@ export class GithubRestError extends Error {
   }
 }
 
+/** A blob larger than the caller's cap, refused from its `content-length` or once that much of it has arrived. */
+export class BlobTooLargeError extends Error {
+  readonly maxBytes: number;
+
+  constructor(maxBytes: number) {
+    super(`the blob is larger than ${maxBytes} bytes`);
+    this.name = "BlobTooLargeError";
+    this.maxBytes = maxBytes;
+  }
+}
+
 /** How to reach GitHub: the fetch, the token, and a signal that cancels every request made with it. */
 export type GithubRest = { fetch: FetchLike; token: string; api?: string; signal?: AbortSignal; timeoutMs?: number };
 
@@ -185,13 +196,45 @@ export async function tree(gh: GithubRest, owner: string, repo: string, sha: str
   return { sha: String(body.sha ?? sha), tree: body.tree, truncated: body.truncated === true };
 }
 
-/** A blob's raw bytes, by its git SHA-1. */
-export async function blob(gh: GithubRest, owner: string, repo: string, sha: string): Promise<Uint8Array> {
+/**
+ * A blob's raw bytes, by its git SHA-1. Read as it arrives rather than buffered whole, so a blob over `maxBytes` costs
+ * no more than the cap before `BlobTooLargeError`, and one whose `content-length` already says so costs nothing.
+ */
+export async function blob(gh: GithubRest, owner: string, repo: string, sha: string, maxBytes: number = Number.POSITIVE_INFINITY): Promise<Uint8Array> {
   if (!isGitSha(sha)) {
     throw new GithubRestError({ error: "failed", detail: "That is not a git blob." });
   }
   const response = await request(gh, `${repoPath(owner, repo)}/git/blobs/${sha}`, "application/vnd.github.raw", `${owner}/${repo}`);
-  return new Uint8Array(await response.arrayBuffer());
+  const declared = response.headers.get("content-length");
+  if (declared !== null && Number(declared) > maxBytes) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new BlobTooLargeError(maxBytes);
+  }
+  if (response.body === null) {
+    return new Uint8Array(0);
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      throw new BlobTooLargeError(maxBytes);
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let at = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return bytes;
 }
 
 /**

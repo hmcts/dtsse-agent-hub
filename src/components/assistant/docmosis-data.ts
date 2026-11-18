@@ -50,6 +50,8 @@ export interface DocmosisView {
   updated_at: string;
   has_pdf: boolean;
   render_error: RenderError | null;
+  /** The template library path a version loaded from the library came from, else `null`. */
+  source_path: string | null;
   current_version?: number;
 }
 

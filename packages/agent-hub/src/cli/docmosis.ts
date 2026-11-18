@@ -396,11 +396,14 @@ export type DocmosisPublishInput = {
   /** The revision read with `base`, so the person's amend since is refused rather than overwritten. */
   baseRevision?: number;
   summary?: string;
+  /** The `docmosis.load` pod job this publishes a template for, which the hub records as the person's own pick. */
+  pick?: string;
 };
 
 /**
  * `conflict` is given when the hub says the template has changed since `base`. Its `current` is the template as it is
- * now, or `null` when the hub did not say.
+ * now, or `null` when the hub did not say. With a `pick` an earlier run of its job already loaded, `written` is
+ * the version that run wrote.
  */
 export type DocmosisPublishResult = { written: DocmosisWritten } | { conflict: { current: DocmosisResponse | null } };
 
@@ -410,12 +413,16 @@ export type DocmosisPublishResult = { written: DocmosisWritten } | { conflict: {
  * `checkSchemaObject` and `checkJsonObject` apply the hub's limits first. Throws `DocmosisConversationMissingError`
  * when the hub has no conversation for the agent.
  */
-export async function publishDocmosis(api: Api, agentId: string, input: DocmosisPublishInput): Promise<DocmosisPublishResult> {
+export async function publishDocmosis(
+  api: Pick<Api, "putDocmosisAsset" | "putDocmosis">,
+  agentId: string,
+  input: DocmosisPublishInput
+): Promise<DocmosisPublishResult> {
   return publish(api, agentId, { ...input, name: checkName(input.name), summary: input.summary === undefined ? undefined : checkSummary(input.summary) });
 }
 
 /** `publishDocmosis` for a name and summary already checked. */
-async function publish(api: Api, agentId: string, input: DocmosisPublishInput): Promise<DocmosisPublishResult> {
+async function publish(api: Pick<Api, "putDocmosisAsset" | "putDocmosis">, agentId: string, input: DocmosisPublishInput): Promise<DocmosisPublishResult> {
   const missing = noConversation(agentId);
   const { asset } = await api.putDocmosisAsset(agentId, sha256(input.docx), input.docx).catch(missing);
   try {
@@ -426,12 +433,17 @@ async function publish(api: Api, agentId: string, input: DocmosisPublishInput): 
       data: input.data,
       base_version: input.base,
       ...(input.baseRevision === undefined ? {} : { base_revision: input.baseRevision }),
-      ...(input.summary === undefined ? {} : { summary: input.summary })
+      ...(input.summary === undefined ? {} : { summary: input.summary }),
+      ...(input.pick === undefined ? {} : { pick: input.pick })
     });
     return { written };
   } catch (e) {
     if (!(e instanceof ApiError && e.status === 409)) {
       return missing(e);
+    }
+    // The pick was loaded by an earlier run of the same job, which wrote this version; nothing is written again.
+    if (input.pick !== undefined && e.body?.loaded !== undefined) {
+      return { written: e.body.loaded };
     }
     return { conflict: { current: (e.body?.current as DocmosisResponse | undefined) ?? null } };
   }

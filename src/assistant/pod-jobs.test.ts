@@ -50,6 +50,13 @@ describe("definePodJobKind", () => {
     expect(Object.isFrozen(defined)).toBe(true);
   });
 
+  it("should keep a kind's precheck when it has one, and give it none otherwise", () => {
+    const precheck = async () => undefined;
+
+    expect(kind({ precheck }).precheck).toBe(precheck);
+    expect("precheck" in kind()).toBe(false);
+  });
+
   it.each([
     ["a kind that is not dotted lowercase words", { kind: "Test.Echo" }],
     ["a kind ending in a dot", { kind: "test." }],
@@ -94,9 +101,10 @@ describe("podJobRegistry", () => {
     expect(() => podJobRegistry([kind(), kind()])).toThrow(/registered twice/);
   });
 
-  it("should register the Notify panel's kinds", () => {
-    expect(POD_JOB_KINDS.map((each) => each.kind)).toEqual(["notify.list", "notify.pull"]);
-    expect(POD_JOB_REGISTRY.size).toBe(2);
+  it("should register the production kinds when the registry is built", () => {
+    expect(POD_JOB_KINDS.map((definition) => definition.kind)).toEqual(["docmosis.load", "notify.list", "notify.pull"]);
+    expect(POD_JOB_REGISTRY.get("docmosis.load")).toBe(POD_JOB_KINDS[0]);
+    expect(POD_JOB_REGISTRY.size).toBe(3);
   });
 });
 
