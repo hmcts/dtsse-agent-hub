@@ -52,6 +52,7 @@ function stubApi(overrides: Partial<SupervisorApi> = {}): SupervisorApi {
     deckBuild: async () => Promise.reject(new Error("no builds here")),
     deckBuildAsset: async () => new Uint8Array(),
     putDeckBuild: async () => null,
+    putPodJob: async () => null,
     putMemory: async () => null,
     sessionsStream: async () => new Response("", { status: 200 }),
     ...overrides
@@ -265,6 +266,53 @@ describe("runAssistantSupervisor", () => {
       await assistant.stop();
       await hub.close();
       plugins.cleanup();
+    }
+  });
+
+  it("should run a pod job on the sessions stream with the kind's handler and answer the hub", async () => {
+    // Arrange
+    const { hub, api } = await mockHub();
+    const jobId = "7d2a9e3c-1111-4222-8333-444455558888";
+    const assistant = supervise({
+      api,
+      podJobs: [{ kind: "test.echo", budgetMs: 5000, run: async (args) => ({ echoed: (args as { text: string }).text }) }]
+    });
+
+    try {
+      await waitUntil(() => hub.sessionStreams.has(VID), "the sessions stream to open");
+
+      // Act
+      hub.sendPodJob(VID, { job_id: jobId, kind: "test.echo", conversation_id: "0f8a6a1e-0000-4000-8000-0000000000c4", args: { text: "hi" } });
+      hub.sendPodJob(VID, { job_id: jobId, kind: "test.echo", conversation_id: "not-a-conversation" });
+
+      // Assert
+      await waitUntil(() => hub.podJobAnswers.length === 1, "the pod job to be answered");
+      expect(hub.podJobAnswers[0]).toEqual({ virtual_id: VID, job_id: jobId, body: { status: "done", result: { echoed: "hi" } } });
+    } finally {
+      await assistant.stop();
+      await hub.close();
+    }
+  });
+
+  it("should answer a pod job of a kind this build has no handler for as failed", async () => {
+    // Arrange
+    const { hub, api } = await mockHub();
+    const jobId = "7d2a9e3c-1111-4222-8333-444455559999";
+    const assistant = supervise({ api });
+
+    try {
+      await waitUntil(() => hub.sessionStreams.has(VID), "the sessions stream to open");
+
+      // Act
+      hub.sessionStreams.get(VID)?.write("event: pod_job\ndata: {not json\n\n");
+      hub.sendPodJob(VID, { job_id: jobId, kind: "test.unclaimed", conversation_id: "0f8a6a1e-0000-4000-8000-0000000000c5", args: {} });
+
+      // Assert
+      await waitUntil(() => hub.podJobAnswers.length === 1, "the pod job to be answered");
+      expect(hub.podJobAnswers[0]?.body).toMatchObject({ status: "failed", error: "failed" });
+    } finally {
+      await assistant.stop();
+      await hub.close();
     }
   });
 

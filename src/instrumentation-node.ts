@@ -77,6 +77,8 @@ async function startSweeping(): Promise<void> {
       startVirtualAgentSweep(prisma);
       const { startDeckBuildSweep } = await import("./assistant/deck-build-store.ts");
       startDeckBuildSweep(prisma);
+      const { startPodJobSweep } = await import("./assistant/pod-job-store.ts");
+      startPodJobSweep(prisma);
     }
   } catch (error) {
     console.warn(`could not start the sweeps: ${error instanceof Error ? error.message : String(error)}`);

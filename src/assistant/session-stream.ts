@@ -2,6 +2,7 @@ import type { EventHub } from "../realtime/hub.ts";
 import { type OnOpen, sseEvent } from "../realtime/sse.ts";
 import type { DeckBuildFrame } from "./deck-build-store.ts";
 import type { LookupFrame } from "./lookup-store.ts";
+import type { PodJobFrame } from "./pod-job-store.ts";
 import type { Wake } from "./session-store.ts";
 import type { UploadDeletion } from "./upload-disk.ts";
 import type { WelshFrame } from "./welsh-store.ts";
@@ -22,6 +23,11 @@ export interface SessionStreamSources {
   welsh: (jobId: string) => Promise<WelshFrame | undefined>;
   /** The deck build to send the pod, `undefined` once it is answered or when it is not this assistant's. */
   deckBuild: (jobId: string) => Promise<DeckBuildFrame | undefined>;
+  /**
+   * The pod job to send the pod, `undefined` once it is answered or when it is not this assistant's. Optional so a
+   * stream for a test about something else need not name it; the sessions route always does.
+   */
+  podJob?: (jobId: string) => Promise<PodJobFrame | undefined>;
 }
 
 export function wakeFrame(wake: Wake): string {
@@ -48,6 +54,10 @@ export function deckBuildFrame(build: DeckBuildFrame): string {
   return sseEvent({ event: "deck_build", data: JSON.stringify(build) });
 }
 
+export function podJobFrame(job: PodJobFrame): string {
+  return sseEvent({ event: "pod_job", data: JSON.stringify(job) });
+}
+
 export function deleteUploadsFrame(deletion: UploadDeletion): string {
   return sseEvent({ event: "delete_uploads", data: JSON.stringify(deletion) });
 }
@@ -71,7 +81,8 @@ export function deleteUploadsFrame(deletion: UploadDeletion): string {
  * by the time another stream opens. A read that fails loses that one lookup, which the browser reports as a timeout,
  * rather than ending the stream. A Welsh job is sent the same way: once, as it is started, and never replayed — a job
  * lost to a reconnect times out, and the person starts it again, which is safer than running a pull request twice. A
- * deck build is too: a build lost to a reconnect times out, and the person asks again.
+ * deck build is too: a build lost to a reconnect times out, and the person asks again. So is a pod job, for the same
+ * reason.
  *
  * An interrupt is the exception to all of that: it is neither replayed on connect nor resent on a `resync`, because
  * it names no state to reach but a turn to end, and the turn a missed one would have ended is over by the time
@@ -160,6 +171,15 @@ export function sessionStream(virtualAgentId: string, sources: SessionStreamSour
           (build) => {
             if (open && build !== undefined) {
               send(deckBuildFrame(build));
+            }
+          },
+          () => undefined
+        );
+      } else if (event.type === "assistant_pod_job_requested" && event.virtual_agent_id === virtualAgentId) {
+        sources.podJob?.(event.job_id).then(
+          (job) => {
+            if (open && job !== undefined) {
+              send(podJobFrame(job));
             }
           },
           () => undefined

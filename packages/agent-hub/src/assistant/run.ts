@@ -13,6 +13,8 @@ import { type DiskFs, reportUploads } from "./disk.ts";
 import { createLookupRunner, type LookupDeps, type Run } from "./lookups.ts";
 import { type MemoryFs, reportMemory } from "./memory.ts";
 import { prepareEach } from "./plugin-deps.ts";
+import { POD_JOB_HANDLERS } from "./pod-job-handlers.ts";
+import { createPodJobRunner, type PodJobHandler } from "./pod-jobs.ts";
 import { type AssistantSupervisor, type CreateAssistantSupervisorOptions, createAssistantSupervisor, idleMinutes } from "./supervisor.ts";
 import { createWelshRunner, WELSH_PLUGIN, type WelshDeps } from "./welsh.ts";
 
@@ -41,6 +43,7 @@ export type RunAssistantSupervisorOptions = Omit<CreateAssistantSupervisorOption
     | "deckBuild"
     | "deckBuildAsset"
     | "putDeckBuild"
+    | "putPodJob"
   >;
   id: string;
   /** The filesystem the uploads report and the deletions use; a test passes its own. */
@@ -56,6 +59,8 @@ export type RunAssistantSupervisorOptions = Omit<CreateAssistantSupervisorOption
    * plugin is made. A test passes its own.
    */
   welsh?: { run?: Run; workspace?: string; install?: (name: string, workspace: string) => string };
+  /** The pod-job kinds this supervisor runs; a test passes its own. `POD_JOB_HANDLERS` otherwise. */
+  podJobs?: readonly PodJobHandler[];
   /** Stops the supervisor, as SIGTERM and SIGINT do; a test owns neither signal. */
   signal?: AbortSignal;
   tickMs?: number;
@@ -79,6 +84,7 @@ export async function runAssistantSupervisor({
   uploadsFs,
   lookups: lookupDeps = {},
   welsh: welshDeps = {},
+  podJobs: podJobHandlers = POD_JOB_HANDLERS,
   cgroupRoot,
   memoryFs,
   ...options
@@ -121,6 +127,8 @@ export async function runAssistantSupervisor({
   // Deck builds run beside the supervisor as well, on the same runner and workspace as the Welsh jobs: a build is a
   // minute of Node that no wake should wait behind.
   const deckBuilds = createDeckBuildRunner({ ...welshOptions, api, ready: installs.get(SLIDES_PLUGIN) });
+  // Pod jobs run beside the supervisor too, each kind in its own slots: see `createPodJobRunner`.
+  const podJobs = createPodJobRunner({ api, id, env, say, handlers: podJobHandlers });
   const uploads = {
     api,
     id,
@@ -224,6 +232,13 @@ export async function runAssistantSupervisor({
             deckBuilds.deckBuild(JSON.parse(event.data));
           } catch {
             say("unparseable deck_build event");
+          }
+        } else if (event.event === "pod_job") {
+          // Not through `handle`: somebody is waiting on a panel for this, and it may take a while.
+          try {
+            podJobs.podJob(JSON.parse(event.data));
+          } catch {
+            say("unparseable pod_job event");
           }
         } else if (event.event === "delete_uploads") {
           handle(removeUploads, event);

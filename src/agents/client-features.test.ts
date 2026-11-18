@@ -20,6 +20,12 @@ describe("normaliseClientFeatures", () => {
     expect(normaliseClientFeatures(["some-later-field"])).toEqual(["some-later-field"]);
   });
 
+  it("should keep a pod job's claim when its kind is dotted", () => {
+    expect(normaliseClientFeatures(["pod-job:docmosis.load", "lookups"])).toEqual(["lookups", "pod-job:docmosis.load"]);
+    expect(podGate({ status: "running", clientFeatures: ["pod-job:docmosis.load"] }, "pod-job:docmosis.load")).toBe("ok");
+    expect(podGate({ status: "running", clientFeatures: ["lookups"] }, "pod-job:docmosis.load")).toBe("unsupported");
+  });
+
   it("should drop an entry that is not a valid name rather than refuse the list, so one bad name costs only itself", () => {
     expect(normaliseClientFeatures(["Attachments", "-leading", "has space", "", 7, null, undefined, {}, ["attachments"], "attachments"])).toEqual([
       "attachments"

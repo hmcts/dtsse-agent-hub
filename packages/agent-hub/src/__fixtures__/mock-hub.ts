@@ -306,6 +306,9 @@ export function createMockHub({
   // job id → a deck build a pod may read, and every answer a supervisor gave to one
   const deckBuilds = new Map<string, MockDeckBuild & { virtualId: string; answered: boolean }>();
   const deckBuildAnswers: { virtual_id: string; job_id: string; pptx?: Buffer; error?: string }[] = [];
+  // Every answer a supervisor gave to a pod job; `podJobRefusals` makes the next answers fail with these statuses.
+  const podJobAnswers: { virtual_id: string; job_id: string; body: Record<string, unknown> }[] = [];
+  const podJobRefusals: number[] = [];
   // upload id → the parts the pod may still fetch, and whether it has reported having the whole file
   const attachments = new Map<string, { parts: Uint8Array[]; fetched: boolean }>();
   // virtual agent id → { owner, status: [], credentials: Map, prompts: [], codes: Map, completes: [], ports: [], wakes: [], sessionReports: [] }
@@ -603,6 +606,23 @@ export function createMockHub({
         return send(res, 400, { error: "bad welsh answer" });
       }
       welshAnswers.push({ virtual_id: id, job_id: kind, body });
+      return send(res, 204);
+    }
+    if (req.method === "PUT" && area === "pod-jobs" && kind && !sub) {
+      const refused = podJobRefusals.shift();
+      if (refused !== undefined) {
+        return send(res, refused, { error: "pod job answer refused" });
+      }
+      const answered =
+        (body.status === "done" && body.result !== undefined && body.result !== null) ||
+        (body.status === "failed" &&
+          typeof body.error === "string" &&
+          /^[a-z][a-z0-9_]{0,39}$/.test(body.error) &&
+          (body.detail === undefined || (typeof body.detail === "string" && body.detail.length <= 300)));
+      if (!answered) {
+        return send(res, 400, { error: "bad pod job answer" });
+      }
+      podJobAnswers.push({ virtual_id: id, job_id: kind, body });
       return send(res, 204);
     }
     if (area === "deck-builds" && kind) {
@@ -1479,6 +1499,8 @@ export function createMockHub({
     welshAnswers,
     deckBuilds,
     deckBuildAnswers,
+    podJobAnswers,
+    podJobRefusals,
     attachments,
     sessionStreams,
     // A wake for one of a virtual agent's conversations: kept, and sent on every sessions stream, until a session
@@ -1504,6 +1526,10 @@ export function createMockHub({
     // The owner starting a Welsh translation job. Sent once and never replayed, as the hub does.
     sendWelsh(virtualId: string, data: Record<string, unknown>) {
       sessionStreams.get(virtualId)?.write(`event: welsh\ndata: ${JSON.stringify(data)}\n\n`);
+    },
+    // The owner asking for a pod job. Sent once and never replayed, as the hub does.
+    sendPodJob(virtualId: string, data: Record<string, unknown>) {
+      sessionStreams.get(virtualId)?.write(`event: pod_job\ndata: ${JSON.stringify(data)}\n\n`);
     },
     // The owner asking for a deck version's .pptx: the build is kept for the pod to read, and the frame sent once and
     // never replayed, as the hub does.

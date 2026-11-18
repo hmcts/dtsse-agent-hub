@@ -789,6 +789,14 @@ describe("createApi credentials", () => {
     expect(hub.virtuals.get(VID)?.statusClaims.slice(-2)).toEqual([[...CLIENT_FEATURES], [...CLIENT_FEATURES]]);
   });
 
+  it("should answer a pod job through the pod's pod-jobs route", async () => {
+    // Act
+    await pod.putPodJob(VID, "job-1", { status: "failed", error: "signed_out", detail: "Sign in first." });
+
+    // Assert
+    expect(hub.podJobAnswers.at(-1)).toEqual({ virtual_id: VID, job_id: "job-1", body: { status: "failed", error: "signed_out", detail: "Sign in first." } });
+  });
+
   it("should report listening ports through the pod's ports route", async () => {
     // Act
     await pod.putPorts(VID, { ports: [3000], local_only: [5173] });

@@ -166,6 +166,7 @@ describe("migrate", () => {
       "assistant_export_default",
       "assistant_lookup",
       "assistant_model_choice",
+      "assistant_pod_job",
       "assistant_schedule",
       "assistant_template",
       "assistant_upload",

@@ -35,9 +35,17 @@ export type ClientFeature =
   | "welsh"
   | "welsh-review";
 
+/**
+ * A pod job's claim, `pod-job:<kind>`: one per kind the pod has a handler for, so a kind needs no name added to the
+ * union above. The kinds are the hub's own registry (`src/assistant/pod-job-kinds.ts`), which is what keeps a gate on
+ * one from naming something neither side defines. See "Pod jobs" in `docs/agent-api.md`.
+ */
+export type PodJobFeature = `pod-job:${string}`;
+
 export const MAX_CLIENT_FEATURES = 50;
 export const MAX_CLIENT_FEATURE_NAME = 50;
-const CLIENT_FEATURE_NAME = /^[a-z0-9][a-z0-9:_-]*$/;
+// Dots for a pod job's claim, `pod-job:<kind>`, whose kind is dotted (`src/assistant/pod-jobs.ts`).
+const CLIENT_FEATURE_NAME = /^[a-z0-9][a-z0-9:._-]*$/;
 
 /**
  * Sorted and de-duplicated, with anything that is not a valid name dropped.
@@ -114,7 +122,7 @@ export function podLacks(pod: PodClaims & { status: string }, feature: ClientFea
  * running but has claimed nothing yet, which is a pod still booting; `unsupported` for one whose claim leaves the
  * feature out.
  */
-export function podGate(pod: PodClaims & { status: string }, feature: ClientFeature): "waking" | "unsupported" | "ok" {
+export function podGate(pod: PodClaims & { status: string }, feature: ClientFeature | PodJobFeature): "waking" | "unsupported" | "ok" {
   if (pod.status !== "running") {
     return "waking";
   }

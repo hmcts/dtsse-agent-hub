@@ -677,6 +677,71 @@ The page is for people whose assistant has the `welsh` plugin ticked (`WELSH_PLU
 
 **An older client.** Gated on the `welsh` client feature, claimed by the pod's own session, as `lookups` is: the hub answers `unsupported` rather than send a frame nobody will read. `request` and `keep_english` came later and are gated on `welsh-review` instead, since a client that claims only `welsh` ignores them.
 
+## Pod jobs
+
+Some panel actions have to run as the person, with sign-ins only their pod holds — `gh` for GitHub, `az` for Azure — and the hub holds none of them. A pod job is one generic request and answer for all of them: a feature registers a **kind** on the hub and a **handler** for it in the published client, and gets the routes, the frame, the claim, the limits, the expiry and the browser's wait below without writing any of its own. Lookups, Welsh jobs and deck builds predate it and keep their own routes.
+
+**From the browser.** `POST /api/ui/assistant/pod-jobs/{conversation_id}`, same-origin and cookie-authenticated, `{kind, args}`, `no-store`. It runs on the conversation's own pod, for its owner alone (`canRequestPodJob`), whatever the kind: a job runs with the owner's credentials, so somebody the chat is shared with is refused with `403`, and anyone else gets `404`, as for a conversation that is not there. The checks run in this order:
+
+1. `kind` names no registered kind: `400`. `args` fail the kind's schema, or are over 8 KiB as JSON: `400`, naming the field (`args.<path>: …`). `args` left out reads as `{}`.
+2. Access: `404`, then `403`, as above.
+3. The conversation is a local session's: `200 {status: "no_pod"}`. Its assistant has been replaced by another, which holds none of its sessions: `200 {status: "assistant_gone"}`.
+4. The pod cannot be asked now (`podReady` on the claim `pod-job:<kind>`): `200 {status: "waking"}` for a stopped pod, which is asked to start, for one still booting and for one with a change the orchestrator has not applied; `200 {status: "unsupported"}` for a running pod whose claim leaves the kind out, which is a client without its handler. Nothing is recorded for any of 3 or 4; ask again once it is awake.
+5. A one-at-a-time kind (below) with a job of that kind pending in this conversation: the same `args` (jsonb equality) join it, answering its `job_id`; different `args` are refused with `409 {error, job_id}`. A pending job past its time is written down as `timeout` first, so it never blocks a new one.
+6. The kind's rate limit, counted per owner and kind over its window, every request recorded counting whatever became of it: `429`. Joining a running job is not counted, since it starts nothing.
+7. The job is recorded and the pod sent a `pod_job` frame in the same transaction: `200 {status: "pending", job_id}`.
+
+`virtual_agents` off answers `404`. `GET /api/ui/assistant/pod-jobs/{conversation_id}/{job_id}`, `no-store`, reads one back: `200 {job_id, kind, status, result?, error?, detail?}`. Only the person it ran for may read it (`canReadPodJob`, on the job's own `owner_oid`), so sharing a chat never shares what a job found; `404` for anybody else, for a job of another conversation and for one past its 24 hours. `status` is:
+
+- `pending`: the pod has not answered and the kind's `timeoutMs` has not passed;
+- `done`, with `result` in the kind's result schema;
+- `failed`, with `error`, one of the kind's codes or `failed` or `timeout`, and `detail` when the pod gave words for the person;
+- `timeout`: the pod did not answer within the kind's `timeoutMs`. The hub reads the clock on every read, so a job reads as `timeout` from that moment whether or not the sweep has written it down, and a late answer is ignored.
+
+When a job finishes, the owner's open tabs get `event: assistant_pod_job` on `/api/ui/stream`, `{job_id, conversation_id}`, to the owner alone; a tab reads the job back on it. `src/components/assistant/podJobClient.ts` is the browser's end: `requestPodJob(conversationId, kind, args)` (a refusal is thrown as `PodJobRefused`, with the status and the hub's words) and `waitForPodJob(conversationId, jobId, {events, signal, pollMs})`, which reads on each matching frame from `events` (`useHubSubscribe("assistant_pod_job")` in a component) and polls every 2 seconds as well, since a frame sent while the stream was reconnecting is gone. It resolves with the job once it is not `pending`, or `{job_id, status: "missing"}` for a `404`; it rejects on any other refusal, and with the signal's reason on abort. A job whose answer timed out is not resolved by a frame: the poll reads it as `timeout`.
+
+**To the pod.** `event: pod_job` on the sessions stream, `{job_id, kind, conversation_id, agent_id?, args}`, `agent_id` being the conversation's current session agent when it has one. Sent once, as the job is recorded, and never replayed, like `deck_build`: a job whose pod restarted meanwhile times out, and the panel asks again. The supervisor checks the frame and ignores one that fails, then runs the kind's handler beside the wakes rather than behind them, at most `concurrency` of a kind at once (1 unless the handler says), within the handler's `budgetMs` from the frame's arrival, which a handler sets under the hub's `timeoutMs`. It answers with `PUT /api/virtual/{id}/pod-jobs/{job_id}`, retried on a fault or a 5xx:
+
+- `{status: "done", result}`: the handler's return value. The hub checks it against the kind's result schema (`400` naming the field) and the 1 MiB cap;
+- `{status: "failed", error, detail?}`: `error` 1–40 characters matching `^[a-z][a-z0-9_]{0,39}$`, which must be one of the kind's codes or `failed` or `timeout` (`400` otherwise), and `detail` at most 300 characters for the person. A handler throwing `PodJobError(code, detail)` answers its code; anything else it throws answers `failed` with the error's message. A handler past its budget is aborted (its `signal`) and answers `timeout`. A frame of a kind the pod has no handler for answers `failed`.
+
+A result the hub refuses with `400` or `413` is answered again as `failed`, so the panel is not left waiting out the timeout. The body is read with the agent API's 256 KiB cap unless the kind declares a larger `maxResultBytes`, up to 1 MiB; it is `413` beyond it. `204` either way. The answer is kept only for a pending job of that virtual agent's, not past its time, in a conversation still on that virtual agent; anything else is ignored, unread, still `204`.
+
+**A feature whose success is its own write.** A job whose effect is a row of the feature's own, such as a template loaded into a conversation through an agent-path write, binds that write to the job rather than answering `done` with a copy of it: in the write's transaction it calls `lockPendingPodJob(tx, jobId, kind)`, which locks the job and answers it only while it is pending, of that kind and inside its time, and then `finishPodJob(tx, job, result)`, which checks `result` against the kind and marks it done. The write and the job's end commit together or not at all, and the `assistant_pod_job` frame goes out on commit.
+
+**What is kept.** A job is kept 24 hours from when it was asked for, whatever became of it; every rate-limit window fits inside that. A sweep every 10 minutes, under its own advisory lock, writes down pending jobs past their time as `timeout` and deletes those older than 24 hours. Nothing relies on it having run.
+
+**Registering a kind.** On the hub, define it with `definePodJobKind` in the feature's own module and add it to `POD_JOB_KINDS` in `src/assistant/pod-job-kinds.ts`, an explicit list, so registration never depends on import order:
+
+```ts
+export const LIST_THINGS = definePodJobKind({
+  kind: "things.list",                                    // ^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)*$, at most 40
+  args: z.strictObject({ repo: z.string().max(200) }),
+  result: z.strictObject({ things: z.array(z.strictObject({ name: z.string() })).max(100) }),
+  errors: ["signed_out", "not_found"],                    // beside failed and timeout
+  timeoutMs: 60_000,                                      // 1 second to 1 hour
+  rateLimit: { limit: 30, windowMs: 60_000 },             // per owner per kind; window at most 24 hours
+  oneAtATime: false,                                      // true: one pending per conversation
+  maxResultBytes: 256 * 1024                              // the default; at most 1 MiB
+});
+```
+
+A bad definition throws as the module loads. In the client, add a handler to `POD_JOB_HANDLERS` in `packages/agent-hub/src/assistant/pod-job-handlers.ts` in the same change:
+
+```ts
+export const listThings: PodJobHandler = {
+  kind: "things.list",
+  budgetMs: 50_000,                                       // under the hub's timeoutMs
+  run: async (args, { signal }) => {
+    const { repo } = parseArgs(args);                     // checked again here
+    if (!(await signedIn(signal))) throw new PodJobError("signed_out", "Sign in to GitHub in your assistant first.");
+    return { things: await listIn(repo, signal) };
+  }
+};
+```
+
+**Its claim.** The pod claims `pod-job:<kind>` for each handler in `POD_JOB_HANDLERS`, and for no other kind, on every `POST /api/virtual/{id}/status` (`claimedFeatures()`); a conversation session's registration claims none, since only the supervisor runs jobs. The hub gates each kind on its own claim, so a pod on a client from before the kind's handler answers `unsupported` rather than a job that times out, and no name is added to `ClientFeature` on either side for a kind. Nothing else changes on a kind's arrival: the table checks a kind's shape rather than listing kinds, so a new kind needs no migration.
+
 ## Client features
 
 `client_features` on register is what the session's client claims it understands of the hub's **optional** wire fields — the ones a client that has never heard of them simply does not read:
@@ -691,7 +756,7 @@ is understood. A field a client does not read is not an error it reports — it 
 who caused the hub to send it reads as success. `client_features` is how the hub finds out, so it can leave such a
 field out and the UI can say that the feature is not available on that session yet.
 
-- Every name is at most 50 characters matching `^[a-z0-9][a-z0-9:_-]*$`, and there are at most 50 of them. More than
+- Every name is at most 50 characters matching `^[a-z0-9][a-z0-9:._-]*$` (the dot for a pod job's `pod-job:<kind>`; see Pod jobs), and there are at most 50 of them. More than
   50 refuses the request with `400` naming `client_features`. An entry that is not a string, or not a valid name, is
   **dropped rather than refused**: an unrecognised name is a newer client claiming a field a later hub will send, and
   refusing its registration would lock it out instead of degrading it. The list is stored sorted, de-duplicated.
@@ -719,7 +784,7 @@ field out and the UI can say that the feature is not available on that session y
 
 ### A pod's claim
 
-The features a pod's supervisor acts on — `files`, `lookups`, `github-lookups`, `welsh`, `welsh-review`, `deck-build`, `slides-always-on`, `memory-anon` and `model-alias` — and `morning-briefing`, which is about the plugins its sessions load, are gated
+The features a pod's supervisor acts on — `files`, `lookups`, `github-lookups`, `welsh`, `welsh-review`, `deck-build`, `slides-always-on`, `memory-anon`, `model-alias` and every `pod-job:<kind>` (see Pod jobs) — and `morning-briefing`, which is about the plugins its sessions load, are gated
 on the **pod's** claim, not on any conversation session's. A pod makes it with `client_features` on
 `POST /api/virtual/{id}/status`, which the client sends on every phase report it makes. The boot script
 (`bin/virtual-agent-boot`) reports its early phases before it upgrades the client and sends no claim, and a report
@@ -952,6 +1017,7 @@ Every `/api/virtual/{virtual_agent_id}/…` route needs that virtual agent's own
 |---|---|---|
 | `POST /api/virtual/{id}/status` | `{phase, detail?, client_features?}` | `204`. `phase` is `provisioning`, `awaiting_credentials`, `awaiting_login`, `cloning`, `running` or `failed`; `detail` is at most 500 characters. `client_features` is the pod's own claim, validated as a registration's is and stored on the virtual agent. A report with it replaces the stored claim; a report without it leaves the claim alone (see A pod's claim, under Client features). A report the lifecycle refuses gives `409` and leaves the stored claim as it was. A report counts as activity, except `awaiting_credentials` and `awaiting_login`: in those the pod is waiting on its owner rather than getting anywhere, and a pod relaying a sign-in nobody finishes reports a fresh code every few minutes. |
 | `PUT /api/virtual/{id}/ports` | `{ports, local_only?}` | `204`. What the pod finds listening (see Web ports below): `ports` those the Service can reach, `local_only` those bound to loopback only. Each is at most 10 distinct whole numbers from 1024 to 65535, in any order; a port in both counts as reachable. Stores both ascending and notifies the owner's UI; a change to `ports` bumps `generation` but not `pod_generation`. Reporting what is already stored changes nothing. Out of range, repeated or more than 10 gives `400`. |
+| `PUT /api/virtual/{id}/pod-jobs/{job_id}` | `{status: "done", result}` or `{status: "failed", error, detail?}` | `204`. The answer to one of the owner's pod jobs; see Pod jobs. The body cap is the kind's `maxResultBytes` (256 KiB unless it declares more, up to 1 MiB). `400` for an answer the kind does not allow; a job that is not this pod's or no longer pending is ignored. |
 | `GET /api/virtual/{id}/credentials/{kind}` | — | `200 {value}`, the owner's stored credential, or `404` when none is stored. A `claude_md` the owner has not stored answers `200` with the default text instead (see Credentials). The only route that returns a credential's value, for every kind but `microsoft`, which gives `403` (see Microsoft 365). |
 | `PUT /api/virtual/{id}/credentials/{kind}` | `{value}` | `204`. Stores the owner's credential as saved by the pod (`updated_via: pod`), with the checks of Credentials above, except that an Azure token cache the Credentials checks refuse as anyone but the owner's, or as in another tenant, gives `409`: it is not stored, and the agent is `failed`, as `complete` with another account does. A `claude_md` or `git_identity` gives `403`: only its owner changes them. |
 | `GET /api/virtual/{id}/microsoft/token` | — | `200 {access_token, expires_at, permissions}`, a Microsoft Graph access token for the owner, minted from their Microsoft 365 connection, with the same refusals as `GET /api/agent/microsoft/token`. The pod never gets the connection itself. |

@@ -460,6 +460,23 @@ export function canChangeDocmosis(access: ConversationAccess): boolean {
 }
 
 /**
+ * Whether the viewer may have a conversation's pod run a pod job (see "Pod jobs" in docs/agent-api.md), given what
+ * `conversationAccess` answered for them: its owner alone, for every kind. A job runs in the owner's pod with the
+ * owner's own `gh` and `az` sign-ins, so a reader asking for one would be borrowing someone else's credentials.
+ */
+export function canRequestPodJob(access: ConversationAccess): boolean {
+  return access === "owner";
+}
+
+/**
+ * Whether the viewer may read a pod job back: the person it was run for, whose credentials made the result. Read from
+ * the job's own `owner_oid` rather than the conversation's shares, so sharing a chat never shares what a job found.
+ */
+export function canReadPodJob(viewerOid: string, job: { ownerOid: string }): boolean {
+  return isOwner(viewerOid, job);
+}
+
+/**
  * Whether `actorOid` may share their conversation with `recipientOid`: only the owner shares, as only they see or
  * change who it is shared with (`isOwner`). `recipientKnown` means a `user` row exists: the hub shares with a
  * person it has seen, not with an address.

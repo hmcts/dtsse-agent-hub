@@ -1,6 +1,6 @@
 import type { PrismaClient } from "../store/prisma.ts";
 import { setDesired } from "../virtual-agents/store.ts";
-import { type ClientFeature, type PodClaims, podGate } from "./client-features.ts";
+import { type ClientFeature, type PodClaims, type PodJobFeature, podGate } from "./client-features.ts";
 
 /** What `podReady` needs of a virtual agent: its lifecycle columns and the claims `podGate` reads. */
 export interface PodReadiness {
@@ -17,7 +17,7 @@ export async function podReady(
   prisma: PrismaClient,
   actorOid: string,
   { assistant, claims }: PodReadiness,
-  feature: ClientFeature,
+  feature: ClientFeature | PodJobFeature,
   now: Date
 ): Promise<"waking" | "unsupported" | "ok"> {
   if (assistant.desired === "stopped") {
