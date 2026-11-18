@@ -2,7 +2,7 @@ import type { TicketTool } from "./github.ts";
 
 /**
  * A conversation's documents: any number of them, each of one kind. A `document` can go to the person's ticket tool
- * and to Confluence; a `ticket` is a Jira backlog item or a GitHub issue and goes only to the ticket tool; a
+ * and to Confluence; a `ticket` is a Jira issue or a GitHub issue and goes only to the ticket tool; a
  * `confluence` page goes only to Confluence. The store is `artefact-store.ts`; see "Artefacts" in docs/agent-api.md.
  */
 

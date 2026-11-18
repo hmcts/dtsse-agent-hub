@@ -38,7 +38,8 @@ import { DocmosisPanel, type LoadSettled, useTemplateLoad } from "@/components/a
 import { ticketsOffered } from "@/components/assistant/ExportFooter";
 import { ForkedThread } from "@/components/assistant/ForkedThread";
 import type { ExportToGithubAction } from "@/components/assistant/GithubExport";
-import { ItemSwitcher, type SwitcherItem } from "@/components/assistant/ItemSwitcher";
+import { ItemButtons } from "@/components/assistant/ItemButtons";
+import type { SwitcherItem } from "@/components/assistant/ItemSwitcher";
 import type { ExportToJiraAction, JiraAccess } from "@/components/assistant/JiraExport";
 import { ARTEFACT_OVERLAY_MAX_WIDTH } from "@/components/assistant/layout";
 import { MessageAttachments } from "@/components/assistant/MessageAttachments";
@@ -495,7 +496,7 @@ export function ChatView({
       (panel === "document" && documentBusy.current && openDocument?.id !== newest.id);
     if (busyElsewhere) {
       setDocumentsWaiting((before) => [...before, ...arrived.map((document) => document.id).filter((id) => !before.includes(id))]);
-      arrivals.announce(`The assistant updated "${documentLabel(newest.kind, newest.title, ticketTool)}". Open it from Items to see it.`);
+      arrivals.announce(`The assistant updated "${documentLabel(newest.kind, newest.title, ticketTool)}". Open it from the header to see it.`);
     } else {
       setOpenDocument({ id: newest.id, kind: newest.kind });
       setPanel("document");
@@ -525,7 +526,7 @@ export function ChatView({
       (panel === "deck" && deckBusy.current && openDeck !== newest.id)
     ) {
       setDecksWaiting((before) => [...before, ...arrived.map((one) => one.id).filter((id) => !before.includes(id))]);
-      arrivals.announce("The assistant updated the slides. Open them from Items to see them.");
+      arrivals.announce("The assistant updated the slides. Open them from the header to see them.");
     } else {
       setOpenDeck(newest.id);
       setPanel("deck");
@@ -556,7 +557,7 @@ export function ChatView({
       (panel === "docmosis" && docmosisBusy.current && openDocmosis !== newest.id)
     ) {
       setDocmosisWaiting((before) => [...before, ...arrived.map((one) => one.id).filter((id) => !before.includes(id))]);
-      arrivals.announce("The assistant updated the template. Open it from Items to see it.");
+      arrivals.announce("The assistant updated the template. Open it from the header to see it.");
     } else {
       setOpenDocmosis(newest.id);
       setPanel("docmosis");
@@ -582,7 +583,7 @@ export function ChatView({
       (panel === "notify" && notifyBusy.current && openNotify !== newest.id)
     ) {
       setNotifyWaiting((before) => [...before, ...arrived.map((one) => one.id).filter((id) => !before.includes(id))]);
-      arrivals.announce("The assistant updated the Notify template. Open it from Items to see it.");
+      arrivals.announce("The assistant updated the Notify template. Open it from the header to see it.");
     } else if (panel !== "notify" || openNotify !== newest.id) {
       setOpenNotify(newest.id);
       setPanel("notify");
@@ -600,7 +601,7 @@ export function ChatView({
         (panel === "notify" && notifyBusy.current)
       ) {
         setVideoWaiting(true);
-        arrivals.announce("The assistant published a video. Open it from Items to see it.");
+        arrivals.announce("The assistant published a video. Open it from the header to see it.");
       } else if (panel !== "video") {
         setPanel("video");
         arrivals.announce("The assistant published a video");
@@ -638,8 +639,8 @@ export function ChatView({
     ) {
       arrivals.announce(
         draft.conflict === null
-          ? "Your slides could not be saved. Open them from Items to see your changes."
-          : "The slides changed while you were editing them. Open them from Items to see your changes."
+          ? "Your slides could not be saved. Open them from the header to see your changes."
+          : "The slides changed while you were editing them. Open them from the header to see your changes."
       );
       return;
     }
@@ -664,8 +665,8 @@ export function ChatView({
     ) {
       arrivals.announce(
         draft.conflict === null
-          ? "Your document could not be saved. Open it from Items to see your changes."
-          : "The document changed while you were editing it. Open it from Items to see your changes."
+          ? "Your document could not be saved. Open it from the header to see your changes."
+          : "The document changed while you were editing it. Open it from the header to see your changes."
       );
       return;
     }
@@ -702,7 +703,7 @@ export function ChatView({
     { key: "document", label: "Document", choose: () => createDocument("document") },
     ...(pod
       ? [
-          { key: "ticket", label: ticketTool === "github" ? "GitHub issue" : "Jira backlog", choose: () => createDocument("ticket") },
+          { key: "ticket", label: ticketTool === "github" ? "GitHub issue" : "Jira", choose: () => createDocument("ticket") },
           { key: "confluence", label: "Confluence page", choose: () => createDocument("confluence") }
         ]
       : []),
@@ -799,7 +800,7 @@ export function ChatView({
     }
     if ((panelNow.current === "document" && documentBusy.current) || (panelNow.current === "deck" && deckBusy.current)) {
       if (outcome === "failed") {
-        arrivals.announce("Your template did not load. Open it from Items to see why.");
+        arrivals.announce("Your template did not load. Open it from the header to see why.");
       }
       return;
     }
@@ -1057,8 +1058,8 @@ export function ChatView({
               ))}
             </select>
           </div>
-          <div className="ml-auto flex shrink-0 items-center gap-1.5">
-            <ItemSwitcher items={items} current={switcherPanel} />
+          <ItemButtons items={items} current={switcherPanel} />
+          <div className="flex shrink-0 items-center gap-1.5">
             <CreateMenu options={creatable} />
             <ChatMenu
               title={view.title}
@@ -1280,7 +1281,7 @@ export function ChatView({
            * The panel keeps copy, download and print, which are the ways a document leaves a local chat.
            * `requestJiraExport` and `requestConfluenceExport` refuse it as well, so this is the convenience half.
            */
-          // The person's ticket tool, a Jira backlog or a GitHub repository, and the other tool too when the document
+          // The person's ticket tool, Jira or a GitHub repository, and the other tool too when the document
           // already has a ticket there (`ticketsOffered`).
           jira={
             pod && tickets.jira

@@ -882,14 +882,13 @@ describe("ChatView template button", () => {
     createTemplate();
     await settle();
     expect(screen.getByRole("heading", { name: "Choose a template" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Items, New Docmosis template open" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "New Docmosis template" }).getAttribute("aria-current")).toBe("true");
   });
 
   it("should offer the template in the switcher, and Create should offer a new one, when the chat has a template", () => {
     serve();
     render(<Chat view={conversation({ docmosisTemplates: [SUMMARY] })} />);
-    fireEvent.click(screen.getByRole("button", { name: /^Items/ }));
-    expect(screen.getByRole("menuitemradio", { name: SUMMARY.name })).toBeTruthy();
+    expect(screen.getByRole("button", { name: SUMMARY.name })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
     expect(screen.getByRole("menuitem", { name: "Docmosis template" })).toBeTruthy();
   });
@@ -897,7 +896,7 @@ describe("ChatView template button", () => {
   it("should offer no Docmosis template when a local chat has none", () => {
     serve();
     render(<Chat view={conversation({ local: true })} />);
-    expect(screen.queryByRole("button", { name: /^Items/ })).toBeNull();
+    expect(within(screen.getByRole("group", { name: "Items" })).queryAllByRole("button")).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
     expect(screen.queryByRole("menuitem", { name: /^Docmosis template/ })).toBeNull();
   });
@@ -938,16 +937,13 @@ describe("ChatView template button", () => {
     await pickClaimForm();
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Document" }));
-    fireEvent.click(screen.getByRole("button", { name: /^Items/ }));
-    expect(screen.getByRole("menuitemradio", { name: "New Docmosis template" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /^Items/ }));
+    expect(screen.getByRole("button", { name: "New Docmosis template" })).toBeTruthy();
 
     finishJob(server, { job_id: JOB, kind: "docmosis.load", status: "failed", error: "not_docx" });
     await settle();
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Document" }));
-    fireEvent.click(screen.getByRole("button", { name: /^Items/ }));
-    expect(screen.getByRole("menuitemradio", { name: "New Docmosis template, which did not load" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "New Docmosis template, which did not load" })).toBeTruthy();
     expect(screen.getByTestId("docmosis:new-failed")).toBeTruthy();
   });
 
