@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { PreparedTemplate } from "@/assistant/docmosis-library-search";
 import { useSidebarWidth } from "@/components/assistant/AssistantShell";
 import { DocmosisForm, type DocmosisFormHandlers } from "@/components/assistant/DocmosisForm";
 import {
@@ -21,9 +22,12 @@ import {
   validateData
 } from "@/components/assistant/docmosis-data";
 import { drawPdf } from "@/components/assistant/docmosis-pdf";
+import { type LoadOutcome, loadFailureSentence, loadTemplate } from "@/components/assistant/docmosisLoadClient";
 import { ARTEFACT_MIN_WIDTH, CHAT_MIN_WIDTH } from "@/components/assistant/layout";
+import { TemplateLibrary } from "@/components/assistant/TemplateLibrary";
 import { useResizableWidth } from "@/components/assistant/useResizableWidth";
 import { AnnouncerRegion, useAnnouncer } from "@/components/live/Announcer";
+import { useHubSubscribe } from "@/components/live/HubStream";
 import { DownloadIcon } from "@/components/sidebar/icons";
 
 const button = "flex h-[30px] shrink-0 items-center gap-1.5 rounded-lg border border-asst-strong px-2.5 text-[13px] hover:bg-asst-field disabled:opacity-40";
@@ -242,6 +246,17 @@ interface Base {
 
 const isNewer = (view: Base, base: Base): boolean => view.version > base.version || (view.version === base.version && view.revision > base.revision);
 
+/** The summary the hub gives every version a load from the library writes, whatever summary the pod sent. */
+const LOADED_SUMMARY_PREFIX = "Loaded ";
+
+/**
+ * A version a load from the library wrote, not yet rendered: the person's own, as first written, with no PDF and no
+ * merge error. An edit's version is rendered by the tab it was typed in, so it never counts.
+ */
+function awaitsFirstRender(view: DocmosisView): boolean {
+  return view.by === "user" && view.revision === 0 && !view.has_pdf && view.render_error === null && view.summary?.startsWith(LOADED_SUMMARY_PREFIX) === true;
+}
+
 function describeVersion(entry: DocmosisVersionEntry): string {
   const who = entry.by === "agent" ? "assistant" : "you";
   return `Version ${entry.version}, by ${who}${entry.summary === null ? "" : `: ${entry.summary}`}`;
@@ -256,7 +271,7 @@ function describeVersion(entry: DocmosisVersionEntry): string {
  * form is read-only. `onBusy` says whether the owner has edits not yet rendered, which taking the panel away would
  * cut short.
  */
-export function DocmosisPanel({
+function DocmosisTemplate({
   conversationId,
   docmosis,
   owner,
@@ -264,7 +279,8 @@ export function DocmosisPanel({
   narrow,
   announce,
   onBusy,
-  embedded = false
+  onChange,
+  embedded
 }: {
   conversationId: string;
   docmosis: DocmosisSummary;
@@ -273,8 +289,9 @@ export function DocmosisPanel({
   narrow: boolean;
   announce: (text: string) => void;
   onBusy?: (busy: boolean) => void;
-  /** Fills the box it is placed in instead of standing beside the chat at a width the person sets. */
-  embedded?: boolean;
+  /** Offers Change template, which swaps the form for the template library. */
+  onChange?: () => void;
+  embedded: boolean;
 }) {
   const latest = useDocmosisView(docmosis, conversationId);
   const versions = useVersions(conversationId, docmosis.version);
@@ -304,6 +321,8 @@ export function DocmosisPanel({
   const [rejection, setRejection] = useState<number | null>(null);
   const mounted = useRef(true);
   const edits = useRef(0);
+  /** The loaded version whose first render has been sent, so it is sent once however often the version is adopted. */
+  const firstRendered = useRef<number | null>(null);
   const closing = useRef({ owner });
   closing.current = { owner };
   const announceNow = useRef(announce);
@@ -336,6 +355,12 @@ export function DocmosisPanel({
       setPdfFor({ version: arrived.version, revision: arrived.revision });
     }
     setPhase("idle");
+    // A template the person loaded from the library arrives with no PDF, since only their own render makes one.
+    if (closing.current.owner && awaitsFirstRender(arrived) && firstRendered.current !== arrived.version) {
+      firstRendered.current = arrived.version;
+      unrendered.current = true;
+      void flush();
+    }
   }
 
   // The assistant, or this person in another tab, wrote a newer version or revision, or the first read has arrived. A
@@ -607,6 +632,14 @@ export function DocmosisPanel({
     onClose();
   }
 
+  function requestChange(): void {
+    // The library takes the form's place, so what is typed and not yet rendered would be lost the same way.
+    if (busy && !window.confirm("Your changes are still being saved. Change the template anyway and lose them?")) {
+      return;
+    }
+    onChange?.();
+  }
+
   useEffect(() => {
     onBusyNow.current?.(busy);
   }, [busy]);
@@ -640,16 +673,6 @@ export function DocmosisPanel({
   const pdfSource: PdfSource = lookingBack ? (older.view?.has_pdf === true ? { version: older.view.version, revision: older.view.revision } : null) : pdfFor;
   const shownError = lookingBack ? (older.view?.render_error ?? null) : renderError;
   const name = shownView?.name ?? docmosis.name;
-  const sidebarWidth = useSidebarWidth();
-  const resize = useResizableWidth({
-    storageKey: "hmcts-assistant-docmosis-width",
-    label: "Resize template panel",
-    initial: 860,
-    min: ARTEFACT_MIN_WIDTH,
-    reserve: () => CHAT_MIN_WIDTH + sidebarWidth,
-    edge: "right"
-  });
-
   function downloadData(): void {
     const text = `${JSON.stringify(shownData, null, 2)}\n`;
     const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
@@ -667,37 +690,19 @@ export function DocmosisPanel({
       : null;
 
   return (
-    <section
-      aria-label="Template"
-      className={
-        embedded
-          ? "flex h-full min-h-0 w-full flex-col bg-asst-panel"
-          : `z-[25] flex h-full shrink-0 flex-col border-l border-asst-line bg-asst-panel ${narrow ? "fixed inset-0" : "relative"}`
-      }
-      style={narrow || embedded ? undefined : { width: resize.width }}
-    >
-      {narrow || embedded ? null : (
-        <div
-          {...resize.separator}
-          className="absolute -left-1 bottom-0 top-0 z-[2] w-2 cursor-col-resize hover:bg-asst-accent/25 focus:bg-asst-accent/40 focus:outline-hidden"
-        />
-      )}
-      <div className="flex h-14 shrink-0 items-center gap-2.5 border-b border-asst-field pl-4 pr-3">
-        <span aria-hidden="true" className="shrink-0 font-plex-mono text-[11px] uppercase tracking-wider text-asst-accent-soft">
-          .docx
-        </span>
-        <h2 className="min-w-0 flex-1 truncate text-[15px] font-medium text-asst-text">{name}</h2>
-        {embedded ? null : (
-          <button
-            type="button"
-            onClick={requestClose}
-            aria-label="Close template"
-            className="h-8 w-8 shrink-0 rounded-lg text-xl leading-none text-asst-muted hover:bg-asst-field hover:text-asst-text"
-          >
-            ×
+    <PanelShell
+      title={name}
+      narrow={narrow}
+      embedded={embedded}
+      onClose={requestClose}
+      actions={
+        onChange === undefined || lookingBack ? null : (
+          <button type="button" onClick={requestChange} className={button}>
+            Change template
           </button>
-        )}
-      </div>
+        )
+      }
+    >
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-asst-field px-4 py-2">
         <label htmlFor="template-version" className="sr-only">
           Version
@@ -821,7 +826,7 @@ export function DocmosisPanel({
           </div>
         </div>
       )}
-    </section>
+    </PanelShell>
   );
 }
 
@@ -846,6 +851,293 @@ function statusLine(phase: Phase, busyFor: number, lookingBack: boolean, owner: 
       return "";
     default:
       return owner ? "Up to date" : "";
+  }
+}
+
+/** The panel's frame: its width, the handle that sets it, and the header with the title and the close. */
+function PanelShell({
+  title,
+  narrow,
+  embedded,
+  onClose,
+  actions = null,
+  children
+}: {
+  title: string;
+  narrow: boolean;
+  embedded: boolean;
+  onClose: () => void;
+  actions?: ReactNode;
+  children: ReactNode;
+}) {
+  const sidebarWidth = useSidebarWidth();
+  const resize = useResizableWidth({
+    storageKey: "hmcts-assistant-docmosis-width",
+    label: "Resize template panel",
+    initial: 860,
+    min: ARTEFACT_MIN_WIDTH,
+    reserve: () => CHAT_MIN_WIDTH + sidebarWidth,
+    edge: "right"
+  });
+  return (
+    <section
+      aria-label="Template"
+      className={
+        embedded
+          ? "flex h-full min-h-0 w-full flex-col bg-asst-panel"
+          : `z-[25] flex h-full shrink-0 flex-col border-l border-asst-line bg-asst-panel ${narrow ? "fixed inset-0" : "relative"}`
+      }
+      style={narrow || embedded ? undefined : { width: resize.width }}
+    >
+      {narrow || embedded ? null : (
+        <div
+          {...resize.separator}
+          className="absolute -left-1 bottom-0 top-0 z-[2] w-2 cursor-col-resize hover:bg-asst-accent/25 focus:bg-asst-accent/40 focus:outline-hidden"
+        />
+      )}
+      <div className="flex h-14 shrink-0 items-center gap-2.5 border-b border-asst-field pl-4 pr-3">
+        <span aria-hidden="true" className="shrink-0 font-plex-mono text-[11px] uppercase tracking-wider text-asst-accent-soft">
+          .docx
+        </span>
+        <h2 className="min-w-0 flex-1 truncate text-[15px] font-medium text-asst-text">{title}</h2>
+        {actions}
+        {embedded ? null : (
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close template"
+            className="h-8 w-8 shrink-0 rounded-lg text-xl leading-none text-asst-muted hover:bg-asst-field hover:text-asst-text"
+          >
+            ×
+          </button>
+        )}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+type Load =
+  | { phase: "idle" }
+  | { phase: "loading" | "waking"; name: string }
+  /** The load has written its version, and the page has yet to bring the summary that names it. */
+  | { phase: "arriving"; name: string; version: number; revision: number }
+  | { phase: "conflict"; template: PreparedTemplate; theirs: Base }
+  | { phase: "failed"; message: string };
+
+/** The version and revision the conversation holds now, read afresh, since the page's summary may not have caught up. */
+async function currentBase(conversationId: string, fallback: Base): Promise<Base> {
+  try {
+    const response = await fetch(docmosisUrl(conversationId), { cache: "no-store" });
+    if (response.ok) {
+      const view = (await response.json()) as DocmosisView;
+      return { version: view.version, revision: view.revision };
+    }
+  } catch {
+    // The summary's base is then the best there is; a load on it that is stale is refused as a conflict again.
+  }
+  return fallback;
+}
+
+/**
+ * The conversation's Docmosis template beside the chat, or, for its owner, the template library to choose one from:
+ * when the chat has none yet, and after Change template. A load writes the person's own version, which reaches the
+ * panel through the page's summary like any other, and the panel renders it.
+ */
+export function DocmosisPanel({
+  conversationId,
+  docmosis,
+  owner,
+  onClose,
+  narrow,
+  announce,
+  onBusy,
+  library = false,
+  embedded = false
+}: {
+  conversationId: string;
+  docmosis: DocmosisSummary | null;
+  owner: boolean;
+  /** The chat has a pod to load a template from the library with, which a local chat does not. */
+  library?: boolean;
+  onClose: () => void;
+  narrow: boolean;
+  announce: (text: string) => void;
+  onBusy?: (busy: boolean) => void;
+  /** Fills the box it is placed in instead of standing beside the chat at a width the person sets. */
+  embedded?: boolean;
+}) {
+  const [choosing, setChoosing] = useState(false);
+  const [load, setLoad] = useState<Load>({ phase: "idle" });
+  const [reread, setReread] = useState(0);
+  const podJobs = useHubSubscribe("assistant_pod_job");
+  const loading = useRef<AbortController | null>(null);
+  const summaryNow = useRef(docmosis);
+  summaryNow.current = docmosis;
+  const announceNow = useRef(announce);
+  announceNow.current = announce;
+  const chooser = owner && library && !embedded;
+
+  useEffect(() => () => loading.current?.abort(), []);
+
+  useEffect(() => {
+    if (load.phase !== "arriving" || docmosis === null) {
+      return;
+    }
+    if (docmosis.version > load.version || (docmosis.version === load.version && docmosis.revision >= load.revision)) {
+      setLoad({ phase: "idle" });
+      setChoosing(false);
+      announceNow.current(`Loaded ${load.name}`);
+    }
+  }, [load, docmosis]);
+
+  async function start(template: PreparedTemplate, base: Base): Promise<void> {
+    loading.current?.abort();
+    const controller = new AbortController();
+    loading.current = controller;
+    setLoad({ phase: "loading", name: template.name });
+    let outcome: LoadOutcome;
+    try {
+      outcome = await loadTemplate(
+        conversationId,
+        { path: template.path, blob_sha: template.blobSha, base_version: base.version, base_revision: base.revision },
+        {
+          signal: controller.signal,
+          events: podJobs,
+          onWaking: () => setLoad({ phase: "waking", name: template.name }),
+          onPending: () => setLoad({ phase: "loading", name: template.name })
+        }
+      );
+    } catch {
+      if (!controller.signal.aborted) {
+        setLoad({ phase: "failed", message: "The template could not be loaded: the hub could not be reached. Try again." });
+      }
+      return;
+    }
+    if (controller.signal.aborted) {
+      return;
+    }
+    if (outcome.status === "done") {
+      setLoad({ phase: "arriving", name: template.name, version: outcome.version, revision: outcome.revision });
+      return;
+    }
+    if (outcome.status === "failed" && outcome.error === "conflict") {
+      const summary = summaryNow.current;
+      const theirs = await currentBase(conversationId, { version: summary?.version ?? 0, revision: summary?.revision ?? 0 });
+      if (!controller.signal.aborted) {
+        setLoad({ phase: "conflict", template, theirs });
+        announceNow.current("The assistant changed the template while yours was loading");
+      }
+      return;
+    }
+    if (outcome.status === "refused" && outcome.httpStatus === 409) {
+      setReread((count) => count + 1);
+    }
+    setLoad({ phase: "failed", message: loadFailureSentence(outcome) });
+  }
+
+  function pick(template: PreparedTemplate): void {
+    const summary = summaryNow.current;
+    void start(template, { version: summary?.version ?? 0, revision: summary?.revision ?? 0 });
+  }
+
+  function back(): void {
+    loading.current?.abort();
+    setLoad({ phase: "idle" });
+    setChoosing(false);
+  }
+
+  if (chooser && (docmosis === null || choosing)) {
+    const busy = load.phase === "loading" || load.phase === "waking" || load.phase === "arriving";
+    return (
+      <PanelShell
+        title="Choose a template"
+        narrow={narrow}
+        embedded={embedded}
+        onClose={onClose}
+        actions={
+          docmosis === null ? null : (
+            <button type="button" onClick={back} className={button}>
+              Back to template
+            </button>
+          )
+        }
+      >
+        <LoadNotice
+          load={load}
+          onLoadAnyway={(template, theirs) => void start(template, theirs)}
+          onKeepTheirs={(theirs) => setLoad({ phase: "arriving", name: summaryNow.current?.name ?? "the template", ...theirs })}
+        />
+        <TemplateLibrary onPick={pick} onCancel={docmosis === null ? onClose : back} busy={busy} reread={reread} />
+      </PanelShell>
+    );
+  }
+  if (docmosis === null) {
+    return (
+      <PanelShell title="Template" narrow={narrow} embedded={embedded} onClose={onClose}>
+        <p className="px-4 py-5 text-[13px] text-asst-muted">There is no template in this chat yet.</p>
+      </PanelShell>
+    );
+  }
+  return (
+    <DocmosisTemplate
+      conversationId={conversationId}
+      docmosis={docmosis}
+      owner={owner}
+      onClose={onClose}
+      narrow={narrow}
+      announce={announce}
+      onBusy={onBusy}
+      embedded={embedded}
+      {...(chooser ? { onChange: () => setChoosing(true) } : {})}
+    />
+  );
+}
+
+function LoadNotice({
+  load,
+  onLoadAnyway,
+  onKeepTheirs
+}: {
+  load: Load;
+  onLoadAnyway: (template: PreparedTemplate, theirs: Base) => void;
+  onKeepTheirs: (theirs: Base) => void;
+}) {
+  const row = "flex shrink-0 flex-wrap items-center gap-2 border-b border-asst-field px-4 py-2.5 text-[13px]";
+  switch (load.phase) {
+    case "idle":
+      return null;
+    case "loading":
+    case "arriving":
+      return (
+        <p role="status" className={`${row} text-asst-muted`}>
+          Loading {load.name}…
+        </p>
+      );
+    case "waking":
+      return (
+        <p role="status" className={`${row} text-asst-muted`}>
+          Your assistant is starting, so it can load {load.name}. This takes a minute or two.
+        </p>
+      );
+    case "failed":
+      return (
+        <p role="alert" className={`${row} text-asst-error`}>
+          {load.message}
+        </p>
+      );
+    case "conflict":
+      return (
+        <div role="alert" className={`${row} bg-asst-raised`}>
+          <span className="min-w-0 flex-1">The assistant wrote version {load.theirs.version} while yours was loading.</span>
+          <button type="button" onClick={() => onLoadAnyway(load.template, load.theirs)} className={button}>
+            Load mine anyway
+          </button>
+          <button type="button" onClick={() => onKeepTheirs(load.theirs)} className={button}>
+            Keep theirs
+          </button>
+        </div>
+      );
   }
 }
 

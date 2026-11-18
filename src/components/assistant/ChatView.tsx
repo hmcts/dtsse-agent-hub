@@ -451,7 +451,8 @@ export function ChatView({
   /**
    * The same for the Docmosis template: a newer version from the assistant opens it in the other panel's place, unless
    * the person is part-way through the document or the slides, when it is announced and its button marked instead. The
-   * panel itself takes in a newer version, or offers it against what the person has typed.
+   * panel itself takes in a newer version, or offers it against what the person has typed. The person's own versions,
+   * a template they loaded from the library among them, never open it: they are already looking at it.
    */
   const docmosisVersion = docmosis?.version ?? 0;
   const docmosisBy = docmosis?.updatedBy ?? null;
@@ -525,6 +526,11 @@ export function ChatView({
    * disagree about where the chat is.
    */
   const pod = !view.local;
+  /**
+   * A pod chat can always have a template: with none yet, the panel opens on the library to choose one from. A local
+   * chat has no pod to load one with, so it offers only a template its session wrote.
+   */
+  const templateLabel = docmosis === null ? "Choose template" : "Open template";
   const tickets = ticketsOffered(defaults.ticketTool, view.jira, view.github);
   const thread = threadItems(live.items, view.productHistory, view.stopHistory, view.local);
   const doing: Progress = progress(live.items, thread, status, view.sessionState, view.local);
@@ -648,17 +654,17 @@ export function ChatView({
             </select>
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-1.5">
-            {docmosis === null || panel === "docmosis" ? null : (
+            {(!pod && docmosis === null) || panel === "docmosis" ? null : (
               <button
                 type="button"
                 onClick={() => setPanel("docmosis")}
-                aria-label={docmosisWaiting ? "Open template, updated by the assistant" : "Open template"}
+                aria-label={docmosisWaiting ? "Open template, updated by the assistant" : templateLabel}
                 className={`flex h-[34px] items-center whitespace-nowrap rounded-[9px] border px-2.5 text-[13px] hover:border-asst-accent-line hover:bg-asst-field min-[480px]:gap-2 min-[480px]:pr-3 ${docmosisWaiting ? "border-asst-accent bg-asst-field" : "border-asst-strong"}`}
               >
                 <span aria-hidden="true" className="text-sm leading-none text-asst-accent">
                   ▤
                 </span>
-                <span className="hidden min-[480px]:inline">Open template</span>
+                <span className="hidden min-[480px]:inline">{templateLabel}</span>
                 {docmosisWaiting ? <span aria-hidden="true" data-testid="docmosis-updated" className="h-1.5 w-1.5 rounded-full bg-asst-accent" /> : null}
               </button>
             )}
@@ -867,11 +873,12 @@ export function ChatView({
           }}
         />
       ) : null}
-      {panel === "docmosis" && docmosis !== null ? (
+      {panel === "docmosis" ? (
         <DocmosisPanel
           conversationId={view.id}
           docmosis={docmosis}
           owner
+          library={pod}
           onClose={() => setPanel(null)}
           onBusy={markDocmosisBusy}
           narrow={narrow}
