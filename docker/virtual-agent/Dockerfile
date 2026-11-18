@@ -51,8 +51,7 @@ RUN bash -c 'export NVM_DIR="$HOME/.nvm"; \
 # client imports from this same global prefix, beside it.
 #
 # The CLI is not linked into /usr/local/bin: only Claude's sessions run it, and they inherit the pod
-# entrypoint's PATH, which has sourced nvm.sh. --ignore-scripts because neither package declares any
-# and neither has dependencies.
+# entrypoint's PATH, which has sourced nvm.sh. --ignore-scripts because neither package declares install scripts.
 RUN bash -c 'export NVM_DIR="$HOME/.nvm"; \
     . "$NVM_DIR/nvm.sh"; \
     nvm use default; \

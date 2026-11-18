@@ -16,7 +16,7 @@ describe("loadNotify", () => {
     });
   });
 
-  it("should answer tools_missing when the installed package is too old to have the notify exports", async () => {
+  it("should answer tools_missing when the installed package is incompatible, missing an export the client needs", async () => {
     const unexported = Object.assign(
       new Error("Package subpath './node' is not defined by \"exports\" in /g/node_modules/@hmcts-cft/notify-tools/package.json"),
       {
