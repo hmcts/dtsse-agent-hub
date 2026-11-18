@@ -1,7 +1,7 @@
 // How the bridge reads a `direct` stream event. The stream is untrusted input from a hub that may be older or newer
 // than this client, so every field is checked here and anything that does not fit is dropped or left absent.
 import { parseModel } from "./assistant/models.ts";
-import type { AssistantFrame, AssistantProduct, ConfluenceExportFrame, GithubExportFrame, JiraExportFrame } from "./envelope.ts";
+import type { AssistantFrame, AssistantProduct, ConfluenceExportFrame, FrameArtefact, GithubExportFrame, JiraExportFrame } from "./envelope.ts";
 import { GITHUB_OWNER_RE, GITHUB_REPO_RE } from "./github.ts";
 
 // Structural, and every field optional: it is the shape both `directs` and `envelope` read, so a message
@@ -108,6 +108,7 @@ export function parseAssistantFrame(value: unknown): AssistantFrame | null {
     model: parseModel(raw.model),
     artefact_version: typeof raw.artefact_version === "number" ? raw.artefact_version : null,
     artefact_updated_by: asNullableString(raw.artefact_updated_by),
+    artefacts: parseArtefacts(raw.artefacts),
     deck_version: typeof raw.deck_version === "number" ? raw.deck_version : null,
     deck_updated_by: asNullableString(raw.deck_updated_by),
     deck_revision: typeof raw.deck_revision === "number" ? raw.deck_revision : null,
@@ -118,9 +119,9 @@ export function parseAssistantFrame(value: unknown): AssistantFrame | null {
     notify_version: typeof raw.notify_version === "number" ? raw.notify_version : null,
     notify_revision: typeof raw.notify_revision === "number" ? raw.notify_revision : null,
     notify_updated_by: asNullableString(raw.notify_updated_by),
-    jira_export: parseJiraExportFrame(raw.jira_export),
-    github_export: parseGithubExportFrame(raw.github_export),
-    confluence_export: parseConfluenceExportFrame(raw.confluence_export),
+    jira_export: withDocument(parseJiraExportFrame(raw.jira_export), raw.jira_export),
+    github_export: withDocument(parseGithubExportFrame(raw.github_export), raw.github_export),
+    confluence_export: withDocument(parseConfluenceExportFrame(raw.confluence_export), raw.confluence_export),
     // Left as it came: `readAttachments`, at the point of delivery, is what decides which entries this client will
     // fetch and what the prompt says about the rest, so checking them here would only do it twice.
     attachments: raw.attachments
@@ -128,6 +129,35 @@ export function parseAssistantFrame(value: unknown): AssistantFrame | null {
 }
 
 const EXPORT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const KINDS = ["document", "ticket", "confluence"];
+/** Longer than the hub allows, so a title is only ever cut short by a hub that changed its limit. */
+const MAX_TITLE = 300;
+
+/**
+ * The conversation's documents on the frame, or null from a hub older than several. An entry that is not one is
+ * dropped: its id goes into the commands the session is told to run, so it is a uuid or nothing.
+ */
+export function parseArtefacts(value: unknown): FrameArtefact[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const artefacts: FrameArtefact[] = [];
+  for (const entry of value) {
+    const raw = asRecord(entry);
+    if (!raw || typeof raw.id !== "string" || !EXPORT_ID_RE.test(raw.id) || typeof raw.version !== "number" || !KINDS.includes(raw.kind as string)) {
+      continue;
+    }
+    const title = typeof raw.title === "string" ? raw.title.replace(/\s+/g, " ").slice(0, MAX_TITLE) : null;
+    artefacts.push({ id: raw.id, kind: raw.kind as FrameArtefact["kind"], title, version: raw.version, updated_by: asNullableString(raw.updated_by) ?? null });
+  }
+  return artefacts;
+}
+
+/** An export frame with the document it is of, when the hub named one that is a uuid; without, from an older hub. */
+function withDocument<T extends object>(frame: T | null, value: unknown): (T & { document_id?: string }) | null {
+  const id = asRecord(value)?.document_id;
+  return frame !== null && typeof id === "string" && EXPORT_ID_RE.test(id) ? { ...frame, document_id: id } : frame;
+}
 const PROJECT_RE = /^[A-Z][A-Z0-9_]{1,9}$/;
 const WORD_RE = /^[A-Za-z0-9_-]{1,64}$/;
 

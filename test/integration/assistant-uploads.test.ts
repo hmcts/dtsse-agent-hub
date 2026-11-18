@@ -1743,7 +1743,7 @@ describe("the sweep of conversations attaching left behind", () => {
     // Arrange
     await startedAssistant();
     const id = await abandoned(5);
-    await prisma.assistantConversation.update({ where: { id }, data: { artefactVersion: 1, artefactMarkdown: "# what I found" } });
+    await prisma.assistantDocument.create({ data: { conversationId: id, kind: "document", markdown: "# what I found", version: 1 } });
 
     // Act
     const result = await sweepUploads(prisma);
@@ -1751,6 +1751,21 @@ describe("the sweep of conversations attaching left behind", () => {
     // Assert
     expect(result).toMatchObject({ conversations: 0 });
     expect(await prisma.assistantConversation.count({ where: { id } })).toBe(1);
+  });
+
+  it("should remove one whose only document was removed before the person said anything", async () => {
+    // Arrange
+    await startedAssistant();
+    const id = await abandoned(5);
+    const document = await prisma.assistantDocument.create({ data: { conversationId: id, kind: "ticket", markdown: "As a clerk", version: 1 } });
+    await prisma.assistantDocument.delete({ where: { id: document.id } });
+
+    // Act
+    const result = await sweepUploads(prisma);
+
+    // Assert
+    expect(result).toMatchObject({ conversations: 1 });
+    expect(await prisma.assistantConversation.count({ where: { id } })).toBe(0);
   });
 
   it("should announce each deletion, so a sidebar still open stops showing a chat that has gone", async () => {

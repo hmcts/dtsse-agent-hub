@@ -828,6 +828,7 @@ describe("AssistantShell sidebar width", () => {
     render(
       <AssistantShell now={Date.now()} viewerName="Alice Smith" groups={[]} activeId={null}>
         <ArtefactPanel
+          documentId="33333333-3333-4333-8333-333333333333"
           conversationId="22222222-2222-2222-2222-222222222222"
           artefact={{ title: "Story", markdown: "# Original", version: 2, updatedBy: "user" }}
           productLabel="CCD"

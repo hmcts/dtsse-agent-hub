@@ -739,6 +739,9 @@ describe("atlassianLogin", () => {
           updated_by: "agent",
           updated_at: null
         }),
+        getArtefactById: async () => {
+          throw new Error("an export with no document reads /artefact");
+        },
         putJiraExport: async (_agentId: string, body: JiraExportReport) => {
           reports.push(body);
           return null;

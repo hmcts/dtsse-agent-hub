@@ -7,7 +7,7 @@ import type { Skill } from "@/agents/skills";
 import { MAX_ASKED_BODY, MAX_SLIDE_REFERENCE } from "@/assistant/deck";
 import { STARTERS, TEMPLATES } from "@/assistant/starters";
 import { WARMING_QUIPS } from "@/assistant/thread";
-import type { ConversationView } from "@/assistant/views";
+import type { ConversationView, DocumentView } from "@/assistant/views";
 import { type ChatActions, ChatView, CREATE_SLIDES, QUIP_INTERVAL_MS } from "@/components/assistant/ChatView";
 import { Composer } from "@/components/assistant/Composer";
 import { SAVE_AFTER_MS } from "@/components/assistant/DeckEditor";
@@ -107,6 +107,27 @@ function page(overrides: Partial<ConversationPage> = {}): ConversationPage {
   return { messages: [], entries: [], olderBefore: null, lastId: null, more: false, ...overrides };
 }
 
+const DOCUMENT_ID = "0f8a6a1e-0000-4000-8000-00000000d0c1";
+const TICKET_ID = "0f8a6a1e-0000-4000-8000-00000000d0c2";
+const PAGE_ID = "0f8a6a1e-0000-4000-8000-00000000d0c3";
+
+/** One written document, as the page reads it. */
+function doc(overrides: Partial<DocumentView> = {}): DocumentView {
+  return {
+    id: DOCUMENT_ID,
+    kind: "document",
+    title: "Notes",
+    markdown: "# Notes",
+    version: 1,
+    updatedBy: "user",
+    updatedAt: "2026-10-21T09:00:00.000Z",
+    jira: { status: "none" },
+    github: { status: "none" },
+    confluence: { status: "none" },
+    ...overrides
+  };
+}
+
 function conversation(overrides: Partial<ConversationView> = {}): ConversationView {
   return {
     id: CONVERSATION,
@@ -124,15 +145,12 @@ function conversation(overrides: Partial<ConversationView> = {}): ConversationVi
     clientFeatures: null,
     sessionState: null,
     sessionDetail: null,
-    artefact: { title: null, markdown: "", version: 0, updatedBy: null, updatedAt: null },
+    documents: [],
     deck: null,
     docmosis: null,
     notify: null,
     video: null,
     canPostVideo: false,
-    jira: { status: "none" },
-    github: { status: "none" },
-    confluence: { status: "none" },
     page: page(),
     forked: null,
     questions: [],
@@ -948,9 +966,9 @@ describe("ChatView on a local chat", () => {
    * pod never gets: the footer would say "Creating ticket…" for fifteen minutes and then report a failure.
    */
   it("should offer the document but neither export, which nothing behind this chat could carry out", () => {
-    const written = laptop({ artefact: { title: "Notes", markdown: "# Notes", version: 1, updatedBy: "user", updatedAt: "2026-10-21T09:00:00.000Z" } });
+    const written = laptop({ documents: [doc({ title: "Notes", markdown: "# Notes", version: 1, updatedBy: "user", updatedAt: "2026-10-21T09:00:00.000Z" })] });
     render(<ChatView jira={JIRA} viewerOid={VIEWER} view={written} templates={TEMPLATES} actions={actions({ exportToConfluence: ok() })} />);
-    switchTo("Document");
+    switchTo("Notes");
 
     expect(screen.getByRole("region", { name: "Document" })).toBeTruthy();
     expect(screen.getByRole("textbox", { name: "Document title" })).toBeTruthy();
@@ -1149,7 +1167,7 @@ describe("ChatView document", () => {
     create("Document");
 
     expect(screen.getByRole("region", { name: "Document" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Items, Document open" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Items, Untitled document open" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Close document" }));
     expect(screen.queryByRole("region", { name: "Document" })).toBeNull();
@@ -1159,9 +1177,11 @@ describe("ChatView document", () => {
   // The other half of the local chat's "neither export": on a pod there is a session the frame reaches, so both are
   // offered, and taking them away everywhere would have been a regression rather than a fix.
   it("should offer both exports on a chat that has a pod to carry them out", () => {
-    const written = conversation({ artefact: { title: "Notes", markdown: "# Notes", version: 1, updatedBy: "user", updatedAt: "2026-10-21T09:00:00.000Z" } });
+    const written = conversation({
+      documents: [doc({ title: "Notes", markdown: "# Notes", version: 1, updatedBy: "user", updatedAt: "2026-10-21T09:00:00.000Z" })]
+    });
     render(<ChatView jira={JIRA} viewerOid={VIEWER} view={written} templates={TEMPLATES} actions={actions({ exportToConfluence: ok() })} />);
-    switchTo("Document");
+    switchTo("Notes");
 
     expect(screen.getByRole("group", { name: "Send this document to" })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Export to Jira backlog/ })).toBeTruthy();
@@ -1172,8 +1192,7 @@ describe("ChatView document", () => {
 
   it("should keep showing the document's Jira ticket, and offer no GitHub issue, after the person switches to GitHub", () => {
     const written = conversation({
-      artefact: { title: "Notes", markdown: "# Notes", version: 1, updatedBy: "user", updatedAt: "2026-10-21T09:00:00.000Z" },
-      jira: { status: "done", project: "VIBE", key: "VIBE-7", url: "https://hmcts.atlassian.net/browse/VIBE-7" }
+      documents: [doc({ jira: { status: "done", project: "VIBE", key: "VIBE-7", url: "https://hmcts.atlassian.net/browse/VIBE-7" } })]
     });
     render(
       <ChatView
@@ -1185,7 +1204,7 @@ describe("ChatView document", () => {
         defaults={{ ticketTool: "github", jira: null, github: "hmcts/cft-workspace", githubProject: null, confluence: null }}
       />
     );
-    switchTo("Document");
+    switchTo("Notes");
 
     expect(screen.getByText("In Jira")).toBeTruthy();
     expect(screen.getByRole("radio", { name: /Jira backlog/ })).toBeTruthy();
@@ -1194,7 +1213,9 @@ describe("ChatView document", () => {
   });
 
   it("should offer a GitHub issue in the Jira backlog's place when the person's ticket tool is GitHub", () => {
-    const written = conversation({ artefact: { title: "Notes", markdown: "# Notes", version: 1, updatedBy: "user", updatedAt: "2026-10-21T09:00:00.000Z" } });
+    const written = conversation({
+      documents: [doc({ title: "Notes", markdown: "# Notes", version: 1, updatedBy: "user", updatedAt: "2026-10-21T09:00:00.000Z" })]
+    });
     render(
       <ChatView
         jira={JIRA}
@@ -1205,7 +1226,7 @@ describe("ChatView document", () => {
         defaults={{ ticketTool: "github", jira: null, github: "hmcts/cft-workspace", githubProject: null, confluence: null }}
       />
     );
-    switchTo("Document");
+    switchTo("Notes");
 
     expect(screen.getByRole("radio", { name: /GitHub issue/ })).toBeTruthy();
     expect(screen.queryByRole("radio", { name: /Jira backlog/ })).toBeNull();
@@ -1214,21 +1235,97 @@ describe("ChatView document", () => {
     expect(screen.getByRole("button", { name: "Create GitHub issue" })).toBeTruthy();
   });
 
-  it("should offer to open the document when one has been written", () => {
+  it("should list every document by its title, marking tickets and Confluence pages, when the chat holds several", () => {
+    const view = conversation({
+      documents: [
+        doc({ title: "Story" }),
+        doc({ id: TICKET_ID, kind: "ticket", title: "Add a hearing" }),
+        doc({ id: PAGE_ID, kind: "confluence", title: "Design notes" })
+      ]
+    });
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={view} templates={TEMPLATES} actions={actions()} />);
+
+    openSwitcher();
+    expect(screen.getAllByRole("menuitemradio").map((row) => row.textContent)).toEqual(["Story", "Jira: Add a hearing", "Confluence: Design notes"]);
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Jira: Add a hearing" }));
+    expect((screen.getByRole("textbox", { name: "Document title" }) as HTMLInputElement).value).toBe("Add a hearing");
+    expect(screen.getByRole("button", { name: "Items, Jira: Add a hearing open" })).toBeTruthy();
+  });
+
+  it("should name tickets as GitHub issues when the person's ticket tool is GitHub", () => {
+    const view = conversation({ documents: [doc({ id: TICKET_ID, kind: "ticket", title: "Add a hearing" })] });
     render(
       <ChatView
         jira={NO_JIRA}
         viewerOid={VIEWER}
-        view={conversation({ artefact: { title: "Story", markdown: "x", version: 1, updatedBy: "user", updatedAt: "2026-10-21T09:00:00.000Z" } })}
+        view={view}
         templates={TEMPLATES}
         actions={actions()}
+        defaults={{ ticketTool: "github", jira: null, github: null, githubProject: null, confluence: null }}
       />
     );
 
     openSwitcher();
-    expect(screen.getByRole("menuitemradio", { name: "Document" })).toBeTruthy();
+    expect(screen.getByRole("menuitemradio", { name: "GitHub: Add a hearing" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
-    expect(screen.getByRole("menuitem", { name: "Document, already in this chat" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "GitHub issue" })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: "Jira backlog" })).toBeNull();
+  });
+
+  it("should open a new document beside the existing one, and save it under its own id, when the person creates another", () => {
+    vi.useFakeTimers();
+    const chatActions = actions();
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ documents: [doc()] })} templates={TEMPLATES} actions={chatActions} />);
+
+    create("Jira backlog");
+    fireEvent.change(screen.getByRole("textbox", { name: "Document, in markdown" }), { target: { value: "As a clerk" } });
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    vi.useRealTimers();
+
+    const [saved] = vi.mocked(chatActions.saveArtefact).mock.calls[0] as unknown as [{ documentId: string; kind: string; baseVersion: number }];
+    expect(saved).toMatchObject({ kind: "ticket", baseVersion: 0, markdown: "As a clerk" });
+    expect(saved.documentId).not.toBe(DOCUMENT_ID);
+    openSwitcher();
+    expect(screen.getAllByRole("menuitemradio").map((row) => row.textContent)).toEqual(["Notes", "Jira: Untitled document"]);
+  });
+
+  it("should offer only the Jira export, with no Send to choice, for a Jira backlog document", () => {
+    const view = conversation({ documents: [doc({ id: TICKET_ID, kind: "ticket", title: "Add a hearing" })] });
+    render(<ChatView jira={JIRA} viewerOid={VIEWER} view={view} templates={TEMPLATES} actions={actions({ exportToConfluence: ok() })} />);
+    switchTo("Jira: Add a hearing");
+
+    expect(screen.getByRole("button", { name: /Export to Jira backlog/ })).toBeTruthy();
+    expect(screen.queryByRole("group", { name: "Send this document to" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Publish to Confluence/ })).toBeNull();
+  });
+
+  it("should remove the document and close its panel when the person confirms Remove", async () => {
+    const removeArtefact = vi.fn(async () => ({ ok: true as const }));
+    render(
+      <ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ documents: [doc()] })} templates={TEMPLATES} actions={actions({ removeArtefact })} />
+    );
+    switchTo("Notes");
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await act(async () => {
+      fireEvent.click(within(screen.getByRole("alertdialog", { name: "Remove this document?" })).getByRole("button", { name: "Remove" }));
+      await Promise.resolve();
+    });
+
+    expect(removeArtefact).toHaveBeenCalledWith({ conversationId: CONVERSATION, documentId: DOCUMENT_ID });
+    expect(screen.queryByRole("region", { name: "Document" })).toBeNull();
+  });
+
+  it("should open the document the assistant wrote, of several, when it writes a newer version of one", () => {
+    const before = conversation({ documents: [doc(), doc({ id: TICKET_ID, kind: "ticket", title: "Add a hearing" })] });
+    const { rerender } = render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={before} templates={TEMPLATES} actions={actions()} />);
+
+    const after = conversation({ documents: [doc(), doc({ id: TICKET_ID, kind: "ticket", title: "Add a hearing", version: 2, updatedBy: "agent" })] });
+    rerender(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={after} templates={TEMPLATES} actions={actions()} />);
+
+    expect((screen.getByRole("textbox", { name: "Document title" }) as HTMLInputElement).value).toBe("Add a hearing");
   });
 
   it("should open the panel when the assistant writes a newer version of the document", () => {
@@ -1238,7 +1335,9 @@ describe("ChatView document", () => {
       <ChatView
         jira={NO_JIRA}
         viewerOid={VIEWER}
-        view={conversation({ artefact: { title: "Story", markdown: "# Drafted", version: 1, updatedBy: "agent", updatedAt: "2026-10-21T09:00:00.000Z" } })}
+        view={conversation({
+          documents: [doc({ title: "Story", markdown: "# Drafted", version: 1, updatedBy: "agent", updatedAt: "2026-10-21T09:00:00.000Z" })]
+        })}
         templates={TEMPLATES}
         actions={actions()}
       />
@@ -1254,7 +1353,7 @@ describe("ChatView document", () => {
       <ChatView
         jira={NO_JIRA}
         viewerOid={VIEWER}
-        view={conversation({ artefact: { title: "Story", markdown: "# Mine", version: 1, updatedBy: "user", updatedAt: "2026-10-21T09:00:00.000Z" } })}
+        view={conversation({ documents: [doc({ title: "Story", markdown: "# Mine", version: 1, updatedBy: "user", updatedAt: "2026-10-21T09:00:00.000Z" })] })}
         templates={TEMPLATES}
         actions={actions()}
       />
@@ -1276,7 +1375,7 @@ describe("ChatView Create", () => {
 
   it("should offer every kind, in the order the header lists them, when the chat is on a pod", () => {
     render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions()} />);
-    expect(offered()).toEqual(["Document", "Slides", "Docmosis template", "Notify template"]);
+    expect(offered()).toEqual(["Document", "Jira backlog", "Confluence page", "Slides", "Docmosis template", "Notify template"]);
   });
 
   it("should offer only a document when a local chat holds nothing else", () => {
@@ -2316,8 +2415,8 @@ describe("ChatView slides", () => {
     const { rerender } = render(chat({}));
     expect(screen.queryByRole("button", { name: /^Items/ })).toBeNull();
 
-    rerender(chat({ deck: DECK, artefact: WRITTEN }));
-    switchTo("Document");
+    rerender(chat({ deck: DECK, documents: [doc(WRITTEN)] }));
+    switchTo("Story");
     expect(screen.getByRole("region", { name: "Document" })).toBeTruthy();
 
     await openSlides();
@@ -2355,10 +2454,10 @@ describe("ChatView slides", () => {
 
   it("should open the slides in the document's place when the assistant writes a newer deck and the document has nothing unsaved", async () => {
     vi.useFakeTimers();
-    const { rerender } = render(chat({ deck: DECK, artefact: WRITTEN }));
-    switchTo("Document");
+    const { rerender } = render(chat({ deck: DECK, documents: [doc(WRITTEN)] }));
+    switchTo("Story");
 
-    rerender(chat({ deck: { ...DECK, version: 8, updatedBy: "agent" }, artefact: WRITTEN }));
+    rerender(chat({ deck: { ...DECK, version: 8, updatedBy: "agent" }, documents: [doc(WRITTEN)] }));
     await announced();
 
     expect(screen.getByRole("region", { name: "Slides" })).toBeTruthy();
@@ -2368,12 +2467,12 @@ describe("ChatView slides", () => {
   it("should leave the document open, say the slides changed and mark their row in the switcher, when the assistant writes a newer deck mid-edit", async () => {
     vi.useFakeTimers();
     const chatActions = actions();
-    const { rerender } = render(chat({ deck: DECK, artefact: WRITTEN }, chatActions));
-    switchTo("Document");
+    const { rerender } = render(chat({ deck: DECK, documents: [doc(WRITTEN)] }, chatActions));
+    switchTo("Story");
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Document, in markdown" }), { target: { value: "x and more" } });
 
-    rerender(chat({ deck: { ...DECK, version: 8, updatedBy: "agent" }, artefact: WRITTEN }, chatActions));
+    rerender(chat({ deck: { ...DECK, version: 8, updatedBy: "agent" }, documents: [doc(WRITTEN)] }, chatActions));
 
     expect(await announced()).toContain("The assistant updated the slides. Open them from Items to see them.");
     expect(screen.getByRole("region", { name: "Document" })).toBeTruthy();
@@ -2394,21 +2493,28 @@ describe("ChatView slides", () => {
 
   it("should save the person's edit rather than drop it when they open the slides before the pause has saved it", async () => {
     const chatActions = actions();
-    render(chat({ deck: DECK, artefact: WRITTEN }, chatActions));
-    switchTo("Document");
+    render(chat({ deck: DECK, documents: [doc(WRITTEN)] }, chatActions));
+    switchTo("Story");
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Document, in markdown" }), { target: { value: "x, edited" } });
 
     await openSlides();
 
     expect(chatActions.saveArtefact).toHaveBeenCalledTimes(1);
-    expect(chatActions.saveArtefact).toHaveBeenCalledWith({ conversationId: CONVERSATION, title: "Story", markdown: "x, edited", baseVersion: 1 });
+    expect(chatActions.saveArtefact).toHaveBeenCalledWith({
+      conversationId: CONVERSATION,
+      documentId: DOCUMENT_ID,
+      kind: "document",
+      title: "Story",
+      markdown: "x, edited",
+      baseVersion: 1
+    });
   });
 
   it("should open the document again with the edit, saying it could not save, when the save made as it closed fails", async () => {
     const saveArtefact = vi.fn(async () => ({ ok: false as const, error: "down" }));
-    render(chat({ deck: DECK, artefact: WRITTEN }, actions({ saveArtefact })));
-    switchTo("Document");
+    render(chat({ deck: DECK, documents: [doc(WRITTEN)] }, actions({ saveArtefact })));
+    switchTo("Story");
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Document, in markdown" }), { target: { value: "x, edited" } });
 
@@ -2429,8 +2535,8 @@ describe("ChatView slides", () => {
   it("should open the document again with the edit and the conflict banner, in the slides' place, when the save made as it closed finds a newer version", async () => {
     const theirs = { title: "Story", markdown: "theirs", version: 2, updatedBy: "agent" as const };
     const saveArtefact = vi.fn(async () => ({ ok: true as const, saved: false as const, current: theirs }));
-    render(chat({ deck: DECK, artefact: WRITTEN }, actions({ saveArtefact })));
-    switchTo("Document");
+    render(chat({ deck: DECK, documents: [doc(WRITTEN)] }, actions({ saveArtefact })));
+    switchTo("Story");
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Document, in markdown" }), { target: { value: "x, edited" } });
 
@@ -2452,23 +2558,23 @@ describe("ChatView slides", () => {
     vi.useFakeTimers();
     const saveDeck = vi.fn(() => new Promise<never>(() => undefined));
     const chatActions = actions({ saveDeck });
-    const { rerender } = render(chat({ deck: DECK, artefact: WRITTEN }, chatActions));
+    const { rerender } = render(chat({ deck: DECK, documents: [doc(WRITTEN)] }, chatActions));
     await openSlides();
     fireEvent.click(screen.getByRole("button", { name: "Edit slides" }));
     // The page's announcer reads a burst as a count, so each announcement is let through on its own.
     await announced();
     fireEvent.change(screen.getByRole("textbox", { name: "Deck title" }), { target: { value: "Mine" } });
 
-    rerender(chat({ deck: DECK, artefact: { ...WRITTEN, version: 2, updatedBy: "agent" } }, chatActions));
+    rerender(chat({ deck: DECK, documents: [doc({ ...WRITTEN, version: 2, updatedBy: "agent" })] }, chatActions));
 
-    expect(await announced()).toContain("The assistant updated the document. Open it from Items to see it.");
+    expect(await announced()).toContain('The assistant updated "Story". Open it from Items to see it.');
     expect(screen.getByRole("toolbar", { name: "Editing slides" })).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Document" })).toBeNull();
     openSwitcher();
-    expect(screen.getByTestId("document-updated")).toBeTruthy();
-    fireEvent.click(screen.getByRole("menuitemradio", { name: "Document, updated by the assistant" }));
+    expect(screen.getByTestId(`document:${DOCUMENT_ID}-updated`)).toBeTruthy();
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Story, updated by the assistant" }));
     expect(screen.getByRole("region", { name: "Document" })).toBeTruthy();
-    expect(screen.queryByTestId("document-updated")).toBeNull();
+    expect(screen.queryByTestId(`document:${DOCUMENT_ID}-updated`)).toBeNull();
   });
 
   it("should open the slides' editor again with the edit, saying so, when the save made as it closes fails", async () => {
@@ -2548,12 +2654,12 @@ describe("ChatView slides", () => {
     let answer: (result: { ok: false; error: string }) => void = () => undefined;
     const saveDeck = vi.fn(() => new Promise<{ ok: false; error: string }>((resolve) => (answer = resolve)));
     const saveArtefact = vi.fn(() => new Promise<never>(() => undefined));
-    render(chat({ deck: DECK, artefact: WRITTEN }, actions({ saveDeck, saveArtefact })));
+    render(chat({ deck: DECK, documents: [doc(WRITTEN)] }, actions({ saveDeck, saveArtefact })));
     await openSlides();
     fireEvent.click(screen.getByRole("button", { name: "Edit slides" }));
     await announced();
     fireEvent.change(screen.getByRole("textbox", { name: "Deck title" }), { target: { value: "Mine" } });
-    switchTo("Document");
+    switchTo("Story");
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Document, in markdown" }), { target: { value: "x, edited" } });
 
@@ -2577,8 +2683,8 @@ describe("ChatView slides", () => {
     let answer: (result: { ok: false; error: string }) => void = () => undefined;
     const saveArtefact = vi.fn(() => new Promise<{ ok: false; error: string }>((resolve) => (answer = resolve)));
     const saveDeck = vi.fn(() => new Promise<never>(() => undefined));
-    render(chat({ deck: DECK, artefact: WRITTEN }, actions({ saveDeck, saveArtefact })));
-    switchTo("Document");
+    render(chat({ deck: DECK, documents: [doc(WRITTEN)] }, actions({ saveDeck, saveArtefact })));
+    switchTo("Story");
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Document, in markdown" }), { target: { value: "x, edited" } });
     await openSlides();
@@ -2594,9 +2700,9 @@ describe("ChatView slides", () => {
     expect(screen.getByRole("toolbar", { name: "Editing slides" })).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Document" })).toBeNull();
     openSwitcher();
-    expect(screen.getByTestId("document-unsaved")).toBeTruthy();
+    expect(screen.getByTestId(`document:${DOCUMENT_ID}-unsaved`)).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("menuitemradio", { name: "Document, with your unsaved changes" }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Story, with your unsaved changes" }));
     const reopened = screen.getByRole("region", { name: "Document" });
     expect((within(reopened).getByRole("textbox", { name: "Document, in markdown" }) as HTMLTextAreaElement).value).toBe("x, edited");
   });

@@ -19,7 +19,7 @@ describe("CLIENT_FEATURES", () => {
   // an assertion below, which the per-name list cannot, and which is how this file came to claim a standard it did
   // not meet.
   it("should hold every feature this build claims, so a name dropped in a merge fails here", () => {
-    expect(CLIENT_FEATURES).toHaveLength(14);
+    expect(CLIENT_FEATURES).toHaveLength(15);
   });
 
   /**
@@ -43,6 +43,8 @@ describe("CLIENT_FEATURES", () => {
    * `slides-always-on` is worse: the slides panel tells a person with nothing ticked to restart their assistant to
    * build a version, and a restart does not change the answer.
    * `plain-prompt` is the same: every chat on this build tells its person to restart their assistant, for ever.
+   * `items` is refused in words: the document panel says the assistant needs an update to hold a second document or a
+   * ticket, which a restart onto this build would not change.
    * `morning-briefing` is withheld with nothing said: the sidebar's plus never offers Morning briefing on this build.
    */
   it.each([
@@ -51,6 +53,7 @@ describe("CLIENT_FEATURES", () => {
     "docmosis-library",
     "files",
     "github-lookups",
+    "items",
     "lookups",
     "memory-anon",
     "model-alias",

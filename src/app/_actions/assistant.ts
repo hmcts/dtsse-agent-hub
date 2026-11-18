@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { HttpError } from "@/agent-api/http";
-import { type Artefact, ArtefactConflict, writeArtefact } from "@/assistant/artefact-store";
+import { type Artefact, ArtefactConflict, removeDocument, UUID_RE, writeDocument } from "@/assistant/artefact-store";
 import { confluenceExportRequest } from "@/assistant/confluence";
 import { requestConfluenceExport } from "@/assistant/confluence-store";
 import type { ConversationRow } from "@/assistant/conversation-row";
@@ -15,6 +15,7 @@ import {
   renameConversation as rename,
   setProduct
 } from "@/assistant/conversation-store";
+import { type DocumentKind, isDocumentKind } from "@/assistant/documents";
 import { attachForkContext, forkContextPending } from "@/assistant/fork-store";
 import { readGithubProject } from "@/assistant/github";
 import { requestGithubExport } from "@/assistant/github-store";
@@ -331,6 +332,12 @@ export async function deleteConversation(input: { conversationId: unknown }): Pr
   });
 }
 
+/** How the request in the chat names the document, once the export has found it: by its title, in quotes. */
+async function named(conversationId: string, documentId: unknown): Promise<string> {
+  const row = await prisma.assistantDocument.findFirst({ where: { id: String(documentId), conversationId }, select: { title: true } });
+  return row?.title ? `the document "${row.title}"` : "this document";
+}
+
 export interface ArtefactSnapshot {
   title: string | null;
   markdown: string;
@@ -340,12 +347,18 @@ export interface ArtefactSnapshot {
 
 export type SaveArtefactResult = { saved: true; version: number } | { saved: false; current: ArtefactSnapshot };
 
+const NO_DOCUMENT: { ok: false; error: string } = { ok: false, error: "that document no longer exists" };
+
 /**
- * The person's edit of the conversation's document, if nobody has changed it since `baseVersion`. Otherwise nothing
- * is saved and the current document comes back, for the panel to offer it or to overwrite it.
+ * The person's edit of one of the conversation's documents, if nobody has changed it since `baseVersion`. Otherwise
+ * nothing is saved and the current document comes back, for the panel to offer it or to overwrite it. A document the
+ * panel opened new has an id the browser made, and its first save, at base 0, creates it as `kind`, a plain document
+ * unless it says otherwise.
  */
 export async function saveArtefact(input: {
   conversationId: unknown;
+  documentId: unknown;
+  kind?: unknown;
   title: unknown;
   markdown: unknown;
   baseVersion: unknown;
@@ -361,12 +374,17 @@ export async function saveArtefact(input: {
     }
     const title = text(input.title).slice(0, MAX_ARTEFACT_TITLE) || null;
     const baseVersion = typeof input.baseVersion === "number" && Number.isInteger(input.baseVersion) && input.baseVersion >= 0 ? input.baseVersion : 0;
+    const documentId = text(input.documentId);
+    if (!UUID_RE.test(documentId)) {
+      return NO_DOCUMENT;
+    }
+    const create: DocumentKind = isDocumentKind(input.kind) ? input.kind : "document";
     const conversation = await findConversation(prisma, viewer.oid, text(input.conversationId));
     if (conversation === undefined) {
       return MISSING;
     }
     try {
-      const version = await writeArtefact(prisma, conversation, { title, markdown, baseVersion, by: "user" });
+      const version = await writeDocument(prisma, conversation, documentId, { title, markdown, baseVersion, by: "user", create });
       return { ok: true, saved: true, version };
     } catch (error) {
       if (error instanceof ArtefactConflict) {
@@ -378,13 +396,33 @@ export async function saveArtefact(input: {
   });
 }
 
+/** Removes one of the conversation's documents. A ticket or page already made from it stays where it was made. */
+export async function removeArtefact(input: { conversationId: unknown; documentId: unknown }): Promise<ActionResult> {
+  return await runAction("remove artefact", async () => {
+    if (!virtualAgentsEnabled()) {
+      return OFF;
+    }
+    const viewer = await requireViewer();
+    const conversation = await findConversation(prisma, viewer.oid, text(input.conversationId));
+    if (conversation === undefined) {
+      return MISSING;
+    }
+    const documentId = text(input.documentId);
+    if (!UUID_RE.test(documentId)) {
+      return NO_DOCUMENT;
+    }
+    await removeDocument(prisma, conversation, documentId);
+    return { ok: true };
+  });
+}
+
 /**
- * Asks the person's assistant to create the conversation's saved document in the Jira backlog of `project`, as a Story
+ * Asks the person's assistant to create one of the conversation's saved documents in the Jira backlog of `project`, as a Story
  * it makes with `twg` and their Atlassian sign-in. The request is an ordinary message in the chat, so the person sees
  * what was asked; how to carry it out goes to the session in the message's frame. The panel follows the export
  * through the conversation's events.
  */
-export async function exportArtefactToJira(input: { conversationId: unknown; project: unknown }): Promise<ActionResult> {
+export async function exportArtefactToJira(input: { conversationId: unknown; documentId: unknown; project: unknown }): Promise<ActionResult> {
   return await runAction("export artefact to jira", async () => {
     if (!virtualAgentsEnabled()) {
       return OFF;
@@ -394,18 +432,18 @@ export async function exportArtefactToJira(input: { conversationId: unknown; pro
     if (conversation === undefined) {
       return MISSING;
     }
-    await requestJiraExport(prisma, conversation, input.project);
-    await send(viewer.oid, conversation, `Please export this document to the ${String(input.project)} backlog in Jira.`);
+    await requestJiraExport(prisma, conversation, input.documentId, input.project);
+    await send(viewer.oid, conversation, `Please export ${await named(conversation.id, input.documentId)} to the ${String(input.project)} backlog in Jira.`);
     return { ok: true };
   });
 }
 
 /**
- * Asks the person's assistant to create the conversation's saved document as an issue in the GitHub repository
+ * Asks the person's assistant to create one of the conversation's saved documents as an issue in the GitHub repository
  * `repo`, which it makes with `gh` and their own GitHub token, and adds to `project` when the person chose one. As with Jira, the request is an ordinary message in the
  * chat and how to carry it out goes to the session in the message's frame.
  */
-export async function exportArtefactToGithub(input: { conversationId: unknown; repo: unknown; project?: unknown }): Promise<ActionResult> {
+export async function exportArtefactToGithub(input: { conversationId: unknown; documentId: unknown; repo: unknown; project?: unknown }): Promise<ActionResult> {
   return await runAction("export artefact to github", async () => {
     if (!virtualAgentsEnabled()) {
       return OFF;
@@ -415,20 +453,20 @@ export async function exportArtefactToGithub(input: { conversationId: unknown; r
     if (conversation === undefined) {
       return MISSING;
     }
-    const repo = await requestGithubExport(prisma, conversation, input.repo, input.project ?? null);
+    const repo = await requestGithubExport(prisma, conversation, input.documentId, input.repo, input.project ?? null);
     const project = readGithubProject(input.project ?? null);
     const board = project ? `, on the "${project.title}" Project` : "";
-    await send(viewer.oid, conversation, `Please create a GitHub issue for this document in ${repo}${board}.`);
+    await send(viewer.oid, conversation, `Please create a GitHub issue for ${await named(conversation.id, input.documentId)} in ${repo}${board}.`);
     return { ok: true };
   });
 }
 
 /**
- * Asks the person's assistant to publish the conversation's saved document to Confluence, as a new page under
+ * Asks the person's assistant to publish one of the conversation's saved documents to Confluence, as a new page under
  * `parent`, which it creates with `twg` and their Atlassian sign-in. As with Jira, the request is an ordinary message
  * in the chat and how to carry it out goes to the session in the message's frame.
  */
-export async function exportArtefactToConfluence(input: { conversationId: unknown; parent: unknown }): Promise<ActionResult> {
+export async function exportArtefactToConfluence(input: { conversationId: unknown; documentId: unknown; parent: unknown }): Promise<ActionResult> {
   return await runAction("export artefact to confluence", async () => {
     if (!virtualAgentsEnabled()) {
       return OFF;
@@ -438,8 +476,8 @@ export async function exportArtefactToConfluence(input: { conversationId: unknow
     if (conversation === undefined) {
       return MISSING;
     }
-    const parent = await requestConfluenceExport(prisma, conversation, input.parent);
-    await send(viewer.oid, conversation, confluenceExportRequest(parent));
+    const parent = await requestConfluenceExport(prisma, conversation, input.documentId, input.parent);
+    await send(viewer.oid, conversation, confluenceExportRequest(parent, await named(conversation.id, input.documentId)));
     return { ok: true };
   });
 }

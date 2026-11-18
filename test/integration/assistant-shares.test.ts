@@ -5,7 +5,7 @@ import { GET as chatPeople } from "../../src/app/api/ui/assistant/shares/[conver
 import { GET as people } from "../../src/app/api/ui/people/route.ts";
 import { GET as stream } from "../../src/app/api/ui/stream/route.ts";
 import { GET as attachmentContent } from "../../src/app/api/ui/uploads/[uploadId]/content/route.ts";
-import { readArtefact, writeArtefact } from "../../src/assistant/artefact-store.ts";
+import { createDocument, readArtefact, readPrimaryDocument, writeArtefact } from "../../src/assistant/artefact-store.ts";
 import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
 import { shareRecipients } from "../../src/assistant/shares.ts";
 import { conversationMatches } from "../../src/assistant/views.ts";
@@ -207,6 +207,17 @@ describe("sharing a conversation", () => {
 });
 
 describe("reading a shared conversation", () => {
+  it("should show a recipient every document, oldest first, when the chat holds several", async () => {
+    const { id } = await chat();
+    const conversation = await prisma.assistantConversation.findUniqueOrThrow({ where: { id }, select: { id: true, virtualAgentId: true, ownerOid: true } });
+    await createDocument(prisma, conversation, { kind: "ticket", title: "Add a hearing", markdown: "As a clerk", by: "agent" });
+    await shareActions.shareChat({ conversationId: id, recipientOid: BOB.oid });
+
+    const view = await sharedChat(viewerOf(BOB), id);
+
+    expect(view?.documents.map((document) => document.title)).toEqual(["Draft order", "Add a hearing"]);
+  });
+
   it("should show a named recipient the words of the thread and the document", async () => {
     const { id } = await chat();
     await shareActions.shareChat({ conversationId: id, recipientOid: BOB.oid });
@@ -218,7 +229,7 @@ describe("reading a shared conversation", () => {
       title: "What goes in a possession order?",
       ownerName: ALICE.name,
       access: "reader",
-      document: { title: "Draft order", markdown: "## Draft order\n\nThe property, the date and the costs." }
+      documents: [{ id: expect.any(String), title: "Draft order", markdown: "## Draft order\n\nThe property, the date and the costs." }]
     });
     expect(view?.thread.map((item) => ("text" in item ? item.text : item.type))).toEqual([
       "What goes in a possession order?",
@@ -384,7 +395,15 @@ describe("what a recipient cannot do", () => {
     });
     expect(await assistantActions.renameConversation({ conversationId: id, title: "Mine now" })).toEqual({ ok: false, error: "no such conversation" });
     expect(await assistantActions.setConversationProduct({ conversationId: id, product: "ccd" })).toEqual({ ok: false, error: "no such conversation" });
-    expect(await assistantActions.saveArtefact({ conversationId: id, title: "Theirs", markdown: "rewritten", baseVersion: 1 })).toEqual({
+    expect(
+      await assistantActions.saveArtefact({
+        conversationId: id,
+        documentId: (await readPrimaryDocument(prisma, id))?.id,
+        title: "Theirs",
+        markdown: "rewritten",
+        baseVersion: 1
+      })
+    ).toEqual({
       ok: false,
       error: "that conversation no longer exists"
     });
@@ -471,7 +490,15 @@ describe("the owner's own chat", () => {
 
     expect(await assistantActions.sendAssistantMessage({ conversationId: id, body: "And the costs?" })).toMatchObject({ ok: true });
     expect(await assistantActions.renameConversation({ conversationId: id, title: "Possession orders" })).toMatchObject({ ok: true });
-    expect(await assistantActions.saveArtefact({ conversationId: id, title: "Draft order", markdown: "Still mine", baseVersion: 1 })).toMatchObject({
+    expect(
+      await assistantActions.saveArtefact({
+        conversationId: id,
+        documentId: (await readPrimaryDocument(prisma, id))?.id,
+        title: "Draft order",
+        markdown: "Still mine",
+        baseVersion: 1
+      })
+    ).toMatchObject({
       ok: true,
       saved: true
     });

@@ -2,9 +2,12 @@ import { createHash, randomBytes } from "node:crypto";
 import { appendFile, cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { PrismaPg } from "@prisma/adapter-pg";
 import pg from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { recordJiraExport } from "../../src/assistant/jira-store.ts";
 import { resolveDatabaseUrl } from "../../src/store/database-url.ts";
+import { PrismaClient } from "../../src/store/generated/client.js";
 import { migrate, migrationsDirectory } from "../../src/store/migrate.ts";
 import { isTypedPrompt, withoutIdeContext } from "../../src/transcripts/harness-turn.ts";
 
@@ -164,6 +167,7 @@ describe("migrate", () => {
       "assistant_docmosis_asset",
       "assistant_docmosis_library",
       "assistant_docmosis_version",
+      "assistant_document",
       "assistant_export_default",
       "assistant_lookup",
       "assistant_model_choice",
@@ -972,6 +976,72 @@ describe("the unread columns migration", () => {
  * The sweep's pattern and the name generator have to agree, and nothing else in the suite would notice if they
  * stopped: an unswept name leaks silently, and `dropAbandonedScratchDatabases` swallows its own errors by design.
  */
+describe("the assistant document migration", () => {
+  const MIGRATION = "20261211090000_assistant_document";
+  const { database: DOCUMENTS, earlier } = migrationFixture("migrate_assistant_document", MIGRATION);
+  const PENDING = "5b0e7c1a-1111-4222-8333-444455556666";
+
+  it("should give each conversation with a document or an export one primary document carrying both, and leave an empty one with none, when it is applied", async () => {
+    await migrate(earlier());
+    await query(DOCUMENTS, `INSERT INTO "user" (oid, tid, name) VALUES ('dev-alice', 'dev', 'Alice')`);
+    await query(
+      DOCUMENTS,
+      `INSERT INTO "assistant_conversation" (owner_oid, title, artefact_title, artefact_markdown, artefact_version, artefact_updated_by,
+         artefact_updated_at, jira_export_id, jira_project, jira_status, jira_requested_at, confluence_status, confluence_page_id,
+         confluence_space_key, confluence_space_id, confluence_parent_id)
+       VALUES ('dev-alice', 'written', 'Plan', '# Plan', 3, 'user', now(), '${PENDING}', 'VIBE', 'pending', now(), 'done', '300000001',
+         'CCD', '280952876', '280959611'),
+              ('dev-alice', 'empty', NULL, '', 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)`
+    );
+
+    expect((await migrate())[0]).toBe(MIGRATION);
+
+    const documents = await query<Record<string, unknown>>(
+      DOCUMENTS,
+      `SELECT c.title AS conversation, d.kind, d.title, d.markdown, d.version, d.updated_by, d.jira_export_id::text AS jira_export_id,
+              d.jira_status, d.confluence_page_id
+         FROM "assistant_document" d JOIN "assistant_conversation" c ON c.id = d.conversation_id`
+    );
+    expect(documents).toEqual([
+      {
+        conversation: "written",
+        kind: "document",
+        title: "Plan",
+        markdown: "# Plan",
+        version: 3,
+        updated_by: "user",
+        jira_export_id: PENDING,
+        jira_status: "pending",
+        confluence_page_id: "300000001"
+      }
+    ]);
+  });
+
+  it("should record a report the pod makes after it is applied for an export claimed before it", async () => {
+    const [conversation] = await query<{ id: string; virtual_agent_id: string | null; owner_oid: string }>(
+      DOCUMENTS,
+      `SELECT id::text AS id, virtual_agent_id, owner_oid FROM "assistant_conversation" WHERE title = 'written'`
+    );
+    const pool = new pg.Pool({ connectionString: urlFor(DOCUMENTS) });
+    const client = new PrismaClient({ adapter: new PrismaPg(pool) });
+    try {
+      await recordJiraExport(
+        client,
+        { id: conversation!.id, virtualAgentId: conversation!.virtual_agent_id, ownerOid: conversation!.owner_oid },
+        {
+          export_id: PENDING,
+          key: "VIBE-12"
+        }
+      );
+    } finally {
+      await client.$disconnect();
+      await pool.end();
+    }
+
+    expect(await query(DOCUMENTS, `SELECT jira_status, jira_key FROM "assistant_document"`)).toEqual([{ jira_status: "done", jira_key: "VIBE-12" }]);
+  });
+});
+
 describe("the scratch database sweep's pattern", () => {
   const pattern = new RegExp(SCRATCH_PATTERN);
 

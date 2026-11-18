@@ -17,7 +17,7 @@ import {
 import { heldBuildSince } from "./deck-build.ts";
 
 /**
- * A conversation's slide deck, written in versions the way its document is (`artefact-store.ts`): a write names the
+ * A conversation's slide deck, written in versions the way each of its documents is (`artefact-store.ts`): a write names the
  * version it was made from, and a newer one refuses it with what is there now. The pod builds each version's .pptx and
  * sends it after the outline, so a version can be read before its .pptx exists.
  *

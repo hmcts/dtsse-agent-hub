@@ -525,12 +525,14 @@ model AssistantConversation {
   sessionState      String?   @map("session_state")
   sessionDetail     String?   @map("session_detail")
   lastActiveAt      DateTime  @default(now()) @map("last_active_at") @db.Timestamptz(6)
-  artefactTitle     String?   @map("artefact_title")
-  artefactMarkdown  String    @default("") @map("artefact_markdown")
-  artefactVersion   Int       @default(0) @map("artefact_version")
+  /// The artefact_*, jira_*, confluence_* and github_* columns are not read or written by the app: the document and its
+  /// exports are in assistant_document, and a later migration drops them.
+  artefactTitle     String?   @map("artefact_title") @ignore
+  artefactMarkdown  String    @default("") @map("artefact_markdown") @ignore
+  artefactVersion   Int       @default(0) @map("artefact_version") @ignore
   /// user or agent.
-  artefactUpdatedBy String?   @map("artefact_updated_by")
-  artefactUpdatedAt DateTime? @map("artefact_updated_at") @db.Timestamptz(6)
+  artefactUpdatedBy String?   @map("artefact_updated_by") @ignore
+  artefactUpdatedAt DateTime? @map("artefact_updated_at") @db.Timestamptz(6) @ignore
   /// The latest version of the conversation's slide deck, 0 before there is one. See src/assistant/deck-store.ts.
   deckVersion       Int       @default(0) @map("deck_version")
   deckTitle         String?   @map("deck_title")
@@ -561,43 +563,41 @@ model AssistantConversation {
   videoVersion      Int       @default(0) @map("video_version")
   videoName         String?   @map("video_name")
   videoUpdatedAt    DateTime? @map("video_updated_at") @db.Timestamptz(6)
-  jiraExportId      String?   @map("jira_export_id") @db.Uuid
-  jiraProject       String?   @map("jira_project")
+  jiraExportId      String?   @map("jira_export_id") @db.Uuid @ignore
+  jiraProject       String?   @map("jira_project") @ignore
   /// pending, done or failed; null before the first export.
-  jiraStatus        String?   @map("jira_status")
-  jiraKey           String?   @map("jira_key")
-  jiraError         String?   @map("jira_error")
-  jiraRequestedAt   DateTime? @map("jira_requested_at") @db.Timestamptz(6)
-  /// Not read or written by the app.
+  jiraStatus        String?   @map("jira_status") @ignore
+  jiraKey           String?   @map("jira_key") @ignore
+  jiraError         String?   @map("jira_error") @ignore
+  jiraRequestedAt   DateTime? @map("jira_requested_at") @db.Timestamptz(6) @ignore
   jiraExportedAt    DateTime? @map("jira_exported_at") @db.Timestamptz(6) @ignore
-  confluenceExportId    String?   @map("confluence_export_id") @db.Uuid
-  confluenceSpaceId     String?   @map("confluence_space_id")
-  confluenceSpaceKey    String?   @map("confluence_space_key")
-  confluenceSpaceName   String?   @map("confluence_space_name")
-  confluenceParentId    String?   @map("confluence_parent_id")
-  confluenceParentTitle String?   @map("confluence_parent_title")
+  confluenceExportId    String?   @map("confluence_export_id") @db.Uuid @ignore
+  confluenceSpaceId     String?   @map("confluence_space_id") @ignore
+  confluenceSpaceKey    String?   @map("confluence_space_key") @ignore
+  confluenceSpaceName   String?   @map("confluence_space_name") @ignore
+  confluenceParentId    String?   @map("confluence_parent_id") @ignore
+  confluenceParentTitle String?   @map("confluence_parent_title") @ignore
   /// pending, done or failed; null before the first export.
-  confluenceStatus      String?   @map("confluence_status")
-  confluencePageId      String?   @map("confluence_page_id")
-  confluencePageTitle   String?   @map("confluence_page_title")
-  confluenceError       String?   @map("confluence_error")
-  confluenceRequestedAt DateTime? @map("confluence_requested_at") @db.Timestamptz(6)
-  /// Not read or written by the app.
+  confluenceStatus      String?   @map("confluence_status") @ignore
+  confluencePageId      String?   @map("confluence_page_id") @ignore
+  confluencePageTitle   String?   @map("confluence_page_title") @ignore
+  confluenceError       String?   @map("confluence_error") @ignore
+  confluenceRequestedAt DateTime? @map("confluence_requested_at") @db.Timestamptz(6) @ignore
   confluenceExportedAt  DateTime? @map("confluence_exported_at") @db.Timestamptz(6) @ignore
-  githubExportId        String?   @map("github_export_id") @db.Uuid
+  githubExportId        String?   @map("github_export_id") @db.Uuid @ignore
   /// owner/name of the repository the issue goes to.
-  githubRepo            String?   @map("github_repo")
+  githubRepo            String?   @map("github_repo") @ignore
   /// pending, done or failed; null before the first export.
-  githubStatus          String?   @map("github_status")
-  githubNumber          Int?      @map("github_number")
-  githubError           String?   @map("github_error")
-  githubRequestedAt     DateTime? @map("github_requested_at") @db.Timestamptz(6)
+  githubStatus          String?   @map("github_status") @ignore
+  githubNumber          Int?      @map("github_number") @ignore
+  githubError           String?   @map("github_error") @ignore
+  githubRequestedAt     DateTime? @map("github_requested_at") @db.Timestamptz(6) @ignore
   /// The Project the issue is added to, when the person chose one: its owner, number and title together.
-  githubProjectOwner    String?   @map("github_project_owner")
-  githubProjectNumber   Int?      @map("github_project_number")
-  githubProjectTitle    String?   @map("github_project_title")
+  githubProjectOwner    String?   @map("github_project_owner") @ignore
+  githubProjectNumber   Int?      @map("github_project_number") @ignore
+  githubProjectTitle    String?   @map("github_project_title") @ignore
   /// Why the issue, though made, could not be added to the Project.
-  githubProjectError    String?   @map("github_project_error")
+  githubProjectError    String?   @map("github_project_error") @ignore
   /// Where a copy was forked from; null once the source is deleted, and for a conversation that is not a copy.
   forkedFromId          String?   @map("forked_from_id") @db.Uuid
   forkedFromOwnerName   String?   @map("forked_from_owner_name")
@@ -633,9 +633,64 @@ model AssistantConversation {
   docmosisAssets   AssistantDocmosisAsset[]
   notifyVersions   AssistantNotifyVersion[]
   videos           AssistantVideo[]
+  documents        AssistantDocument[]
 
   @@index([ownerOid, lastActiveAt(sort: Desc)], map: "assistant_conversation_owner_active_idx")
   @@map("assistant_conversation")
+}
+
+/// One of a conversation's documents, of kind document, ticket or confluence, with its own Jira, GitHub and Confluence
+/// exports. The primary document is the oldest of kind document. See src/assistant/artefact-store.ts.
+model AssistantDocument {
+  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversationId        String    @map("conversation_id") @db.Uuid
+  /// document, ticket or confluence.
+  kind                  String
+  title                 String?
+  markdown              String    @default("")
+  version               Int       @default(0)
+  /// user or agent.
+  updatedBy             String?   @map("updated_by")
+  updatedAt             DateTime? @map("updated_at") @db.Timestamptz(6)
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  jiraExportId          String?   @map("jira_export_id") @db.Uuid
+  jiraProject           String?   @map("jira_project")
+  /// pending, done or failed; null before the first export.
+  jiraStatus            String?   @map("jira_status")
+  jiraKey               String?   @map("jira_key")
+  jiraError             String?   @map("jira_error")
+  jiraRequestedAt       DateTime? @map("jira_requested_at") @db.Timestamptz(6)
+  githubExportId        String?   @map("github_export_id") @db.Uuid
+  /// owner/name of the repository the issue goes to.
+  githubRepo            String?   @map("github_repo")
+  /// pending, done or failed; null before the first export.
+  githubStatus          String?   @map("github_status")
+  githubNumber          Int?      @map("github_number")
+  githubError           String?   @map("github_error")
+  githubRequestedAt     DateTime? @map("github_requested_at") @db.Timestamptz(6)
+  /// The Project the issue is added to, when the person chose one: its owner, number and title together.
+  githubProjectOwner    String?   @map("github_project_owner")
+  githubProjectNumber   Int?      @map("github_project_number")
+  githubProjectTitle    String?   @map("github_project_title")
+  /// Why the issue, though made, could not be added to the Project.
+  githubProjectError    String?   @map("github_project_error")
+  confluenceExportId    String?   @map("confluence_export_id") @db.Uuid
+  confluenceSpaceId     String?   @map("confluence_space_id")
+  confluenceSpaceKey    String?   @map("confluence_space_key")
+  confluenceSpaceName   String?   @map("confluence_space_name")
+  confluenceParentId    String?   @map("confluence_parent_id")
+  confluenceParentTitle String?   @map("confluence_parent_title")
+  /// pending, done or failed; null before the first export.
+  confluenceStatus      String?   @map("confluence_status")
+  confluencePageId      String?   @map("confluence_page_id")
+  confluencePageTitle   String?   @map("confluence_page_title")
+  confluenceError       String?   @map("confluence_error")
+  confluenceRequestedAt DateTime? @map("confluence_requested_at") @db.Timestamptz(6)
+
+  conversation AssistantConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt], map: "assistant_document_conversation_idx")
+  @@map("assistant_document")
 }
 
 /// One version of a conversation's slide deck outline. The latest 100 are kept, and the latest 3 keep their .pptx.

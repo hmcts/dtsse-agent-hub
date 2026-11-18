@@ -238,7 +238,7 @@ export type DocmosisIndexAnswer =
   | { unchanged: true; etag?: string }
   | { error: "signed_out" | "sso" | "not_found" | "rate_limited" | "failed"; detail?: string; sso_url?: string; reset_at?: string };
 
-/** A conversation's one markdown document, which the person and the session both edit. */
+/** One of a conversation's markdown documents, which the person and the session both edit. */
 export type Artefact = {
   title: string | null;
   markdown: string;
@@ -254,6 +254,21 @@ export type ArtefactBody = {
 };
 
 export type ArtefactResponse = { version: number };
+
+/** What a document is for: a plain document, a ticket for the person's ticket tool, or a Confluence page. */
+export type ArtefactKind = "document" | "ticket" | "confluence";
+
+/** One document, as `GET …/artefacts/{id}` returns it. */
+export type ArtefactById = Artefact & { id: string; kind: ArtefactKind };
+
+/** One entry of `GET …/artefacts`: a document without its markdown. */
+export type ArtefactSummary = Omit<ArtefactById, "markdown">;
+
+export type ArtefactList = { artefacts: ArtefactSummary[] };
+
+export type ArtefactCreateBody = { kind: ArtefactKind; title?: string; markdown: string };
+
+export type ArtefactCreated = { id: string; version: number };
 
 /**
  * A conversation's slide deck, as `GET …/deck` returns it: an outline in the slides plugin's shape whose pictures are

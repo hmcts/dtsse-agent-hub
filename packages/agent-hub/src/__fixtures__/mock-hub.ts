@@ -49,6 +49,11 @@ export type StoredAgent = {
 export type Wake = { conversation_id: string; session_id: string; resume?: boolean };
 export type SessionsReport = { sessions: { conversation_id: string; state: string; detail?: string }[]; max: number };
 export type Artefact = { title: string | null; markdown: string; version: number; updated_by: string | null; updated_at: string | null };
+/** A document beyond the primary, which `/artefact` does not reach. */
+export type StoredArtefact = Artefact & { id: string; kind: string };
+
+/** The id the mock answers for the primary document, which it keeps in `artefacts` as the hub's `/artefact` does. */
+export const PRIMARY_ARTEFACT_ID = "00000000-0000-4000-8000-0000000000a1";
 
 export type StoredMessage = {
   id: number;
@@ -258,6 +263,8 @@ export function createMockHub({
   const sessionStreams = new Map<string, ServerResponse>();
   // agent id → the conversation's document, for conversations' agents
   const artefacts = new Map<string, Artefact>();
+  // agent id → the conversation's other documents, oldest first
+  const moreArtefacts = new Map<string, StoredArtefact[]>();
   // agent id → the conversation's slide deck
   const decks = new Map<string, MockDeck>();
   const deckOf = (agentId: string): MockDeck => {
@@ -1229,6 +1236,77 @@ export function createMockHub({
         return send(res, 200, { version: next.version });
       }
     }
+    if (action === "artefacts") {
+      if (!agent.conversation_id) {
+        return send(res, 404, { error: "not a conversation" });
+      }
+      const primary = artefacts.get(agent.id);
+      const more = moreArtefacts.get(agent.id) ?? [];
+      const all: StoredArtefact[] = [...(primary && primary.version > 0 ? [{ ...primary, id: PRIMARY_ARTEFACT_ID, kind: "document" }] : []), ...more];
+      const id = parts[4];
+      if (id === undefined) {
+        if (req.method === "GET") {
+          return send(res, 200, { artefacts: all.map(({ markdown: _markdown, ...summary }) => summary) });
+        }
+        if (req.method === "POST") {
+          if (typeof body.markdown !== "string" || !["document", "ticket", "confluence"].includes(body.kind)) {
+            return send(res, 400, { error: "bad artefact" });
+          }
+          const made: StoredArtefact = {
+            id: randomUUID(),
+            kind: body.kind,
+            title: body.title ?? "Untitled document",
+            markdown: body.markdown,
+            version: 1,
+            updated_by: "agent",
+            updated_at: new Date().toISOString()
+          };
+          moreArtefacts.set(agent.id, [...more, made]);
+          return send(res, 201, { id: made.id, version: 1 });
+        }
+      }
+      const found = all.find((doc) => doc.id === id);
+      if (found === undefined) {
+        return send(res, 404, { error: "that document no longer exists" });
+      }
+      const store = (next: StoredArtefact | null) => {
+        if (found.id === PRIMARY_ARTEFACT_ID) {
+          if (next === null) {
+            artefacts.delete(agent.id);
+          } else {
+            const { id: _id, kind: _kind, ...rest } = next;
+            artefacts.set(agent.id, rest);
+          }
+        } else {
+          moreArtefacts.set(agent.id, next === null ? more.filter((doc) => doc.id !== found.id) : more.map((doc) => (doc.id === found.id ? next : doc)));
+        }
+      };
+      if (req.method === "GET") {
+        return send(res, 200, found);
+      }
+      if (req.method === "DELETE") {
+        store(null);
+        return send(res, 204);
+      }
+      if (req.method === "PUT") {
+        if (typeof body.markdown !== "string" || !Number.isInteger(body.base_version)) {
+          return send(res, 400, { error: "bad artefact" });
+        }
+        const { id: _id, kind: _kind, ...current } = found;
+        if (body.base_version !== found.version) {
+          return send(res, 409, { error: "version conflict", current });
+        }
+        store({
+          ...found,
+          title: body.title ?? found.title,
+          markdown: body.markdown,
+          version: found.version + 1,
+          updated_by: "agent",
+          updated_at: new Date().toISOString()
+        });
+        return send(res, 200, { version: found.version + 1 });
+      }
+    }
     if (action === "deck") {
       if (!agent.conversation_id) {
         return send(res, 404, { error: "not a conversation" });
@@ -1648,6 +1726,7 @@ export function createMockHub({
     virtuals,
     personCredentials,
     artefacts,
+    moreArtefacts,
     decks,
     docmosisTemplates,
     notifyTemplates,

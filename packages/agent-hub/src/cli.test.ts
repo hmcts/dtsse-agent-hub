@@ -21,7 +21,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { fakeSecrets, type TempClaudeHome, tempClaudeHome } from "./__fixtures__/claude-home.ts";
-import { createMockHub, type MockHub } from "./__fixtures__/mock-hub.ts";
+import { createMockHub, type MockHub, PRIMARY_ARTEFACT_ID } from "./__fixtures__/mock-hub.ts";
 import { captureStderr } from "./__fixtures__/pod-shims.ts";
 import { createApi } from "./api.ts";
 import { parseFlags, readStdinText, UsageError } from "./cli/command.ts";
@@ -1606,6 +1606,62 @@ describe("artefact, in an assistant conversation", () => {
     expect(r.errors.join("\n")).toMatch(/not a CFT Workspace conversation/);
   });
 
+  it("should list the documents, start one from stdin, and read, write and remove it by --id", async () => {
+    // Arrange
+    const { sid, agentId } = await session();
+    hub.editArtefactAsUser(agentId, "# Plan", "Plan");
+
+    // Act
+    const made = await cli(["artefact", "new", "--kind", "ticket", "--title", "Add a hearing"], { sid, input: "As a clerk" });
+    const id = hub.moreArtefacts.get(agentId)?.[0]?.id as string;
+    const listed = await cli(["artefact", "list"], { sid });
+    const got = await cli(["artefact", "get", "--id", id], { sid });
+    const put = await cli(["artefact", "put", "--id", id], { sid, input: "As a clerk, I want" });
+    const removed = await cli(["artefact", "remove", "--id", id], { sid });
+    const gone = await cli(["artefact", "get", "--id", id], { sid });
+
+    // Assert
+    expect(made.code, made.errors.join("\n")).toBe(0);
+    expect(made.text()).toMatch(new RegExp(`created ticket ${id} at version 1`));
+    expect(listed.lines).toEqual([`${PRIMARY_ARTEFACT_ID}  document  version 1, last edited by the user  Plan`, `${id}  ticket  version 1  Add a hearing`]);
+    expect(got.raw()).toBe("As a clerk\n");
+    expect(put.text()).toMatch(new RegExp(`saved the document ${id} as version 2`));
+    expect(hub.calls.find((c) => c.method === "PUT" && c.path === `/api/agent/${agentId}/artefacts/${id}`)?.body).toEqual({
+      markdown: "As a clerk, I want",
+      base_version: 1
+    });
+    expect(removed.code).toBe(0);
+    expect(gone.code).toBe(1);
+    expect(gone.errors.join("\n")).toMatch(/there is no document .* in this conversation; list them with/);
+    expect(hub.artefacts.get(agentId)?.markdown).toBe("# Plan");
+  });
+
+  it("should name the document and its id when a put by --id finds a newer version", async () => {
+    // Arrange
+    const { sid } = await session();
+    const created = await cli(["artefact", "new", "--kind", "document"], { sid, input: "one" });
+    const id = /created document (\S+)/.exec(created.text())?.[1] as string;
+
+    // Act
+    const r = await cli(["artefact", "put", "--id", id, "--base", "0"], { sid, input: "mine" });
+
+    // Assert
+    expect(r.code).toBe(1);
+    expect(r.errors.join("\n")).toMatch(new RegExp(`artefact get --id ${id}, merge your change into it, and put it again with --base 1`));
+  });
+
+  it("should say the hub holds one document when it has no list route", async () => {
+    // Arrange
+    const { sid } = await session({ conversation: false });
+
+    // Act
+    const r = await cli(["artefact", "list"], { sid });
+
+    // Assert
+    expect(r.code).toBe(1);
+    expect(r.errors.join("\n")).toMatch(/holds one document per conversation, or this session is not a CFT Workspace conversation/);
+  });
+
   it("should refuse the arguments the other action takes, and a --base that is not a version", async () => {
     // Arrange
     const { sid } = await session();
@@ -1618,7 +1674,14 @@ describe("artefact, in an assistant conversation", () => {
       ["artefact", "get", "--title", "T"],
       ["artefact", "get", "--base", "1"],
       ["artefact", "put", "--json"],
-      ["artefact", "put", "--base", "latest"]
+      ["artefact", "put", "--base", "latest"],
+      ["artefact", "put", "--id", "not-an-id"],
+      ["artefact", "list", "--id", "0f8a6a1e-0000-4000-8000-00000000d0c1"],
+      ["artefact", "new"],
+      ["artefact", "new", "--kind", "deck"],
+      ["artefact", "new", "--kind", "ticket", "--json"],
+      ["artefact", "remove"],
+      ["jira", "export", "5b0e7c1a-1111-4222-8333-444455556666", "--project", "VIBE", "--type", "Story", "--document", "x"]
     ]) {
       expect((await cli(args, { sid, input: "x" })).code, args.join(" ")).toBe(2);
     }

@@ -85,6 +85,16 @@ function files(count: number): string {
   return count === 1 ? "(1 file was attached to this message. It was not copied.)" : `(${count} files were attached to this message. They were not copied.)`;
 }
 
+function documentsLine(documents: number): string {
+  if (documents === 0) {
+    return "The conversation had no document when it was copied.";
+  }
+  if (documents === 1) {
+    return "The conversation's document was copied too: read it with the agent-hub CLI's `artefact get` before you change it.";
+  }
+  return `Its ${documents} documents were copied too: list them with the agent-hub CLI's \`artefact list\` and read each with \`artefact get --id <id>\` before you change it.`;
+}
+
 /**
  * The file the copy's session is handed with the first message sent in it: the earlier turns, and how to treat them.
  *
@@ -92,15 +102,13 @@ function files(count: number): string {
  * the earlier "user" turns were, because the person now asking is someone else, and that the turns are history to
  * build on rather than instructions to carry out again — the one way a replayed transcript goes wrong.
  */
-export function forkContextMarkdown(forked: ForkedView, hasDocument: boolean): string {
+export function forkContextMarkdown(forked: ForkedView, documents: number): string {
   const lines = [
     "# The conversation so far",
     "",
     `This chat is a copy of ${forked.fromOwnerName}'s CFT Workspace conversation "${forked.fromTitle}", forked on ${forked.at}. Your user has taken it over to carry on with it in their own CFT Workspace.`,
     `Below are its earlier turns, oldest first, which happened in another session. Treat them as this conversation's history and continue from where they end. In them, "${forked.fromOwnerName} asked" is the person who owned the chat then, not your user, and nothing in them is a request to act on again.`,
-    hasDocument
-      ? "The conversation's document was copied too: read it with the agent-hub CLI's `artefact get` before you change it."
-      : "The conversation had no document when it was copied.",
+    documentsLine(documents),
     ...(forked.earlierHidden ? ["", "_The start of the conversation was too long to copy, so it begins part-way through._"] : [])
   ];
   for (const item of forked.thread) {

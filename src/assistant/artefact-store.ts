@@ -1,5 +1,13 @@
+import { HttpError } from "../agent-api/http.ts";
+import { podLacks } from "../agents/client-features.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { announce, type ConversationRow } from "./conversation-row.ts";
+import { type DocumentKind, documentExports, ITEMS_CREATE_REFUSED, ITEMS_EXPORT_REFUSED, isDocumentKind, UNTITLED_DOCUMENT } from "./documents.ts";
+import { hasPod } from "./pods.ts";
+
+export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+type ConversationRef = Pick<ConversationRow, "id" | "virtualAgentId" | "ownerOid">;
 
 export interface Artefact {
   title: string | null;
@@ -9,36 +17,57 @@ export interface Artefact {
   updatedAt: Date | null;
 }
 
-const EMPTY_ARTEFACT: Artefact = { title: null, markdown: "", version: 0, updatedBy: null, updatedAt: null };
+export interface StoredDocument extends Artefact {
+  id: string;
+  kind: DocumentKind;
+}
 
-export function toArtefact(row: {
-  artefactTitle: string | null;
-  artefactMarkdown: string;
-  artefactVersion: number;
-  artefactUpdatedBy: string | null;
-  artefactUpdatedAt: Date | null;
-}): Artefact {
-  const by = row.artefactUpdatedBy;
+export const EMPTY_ARTEFACT: Artefact = { title: null, markdown: "", version: 0, updatedBy: null, updatedAt: null };
+
+export const DOCUMENT_SELECT = { id: true, kind: true, title: true, markdown: true, version: true, updatedBy: true, updatedAt: true } as const;
+
+/** Oldest first, which is the order the switcher lists them in and what makes the first `document` the primary. */
+export const OLDEST_FIRST = [{ createdAt: "asc" }, { id: "asc" }] as const;
+
+export function toDocument(row: {
+  id: string;
+  kind: string;
+  title: string | null;
+  markdown: string;
+  version: number;
+  updatedBy: string | null;
+  updatedAt: Date | null;
+}): StoredDocument {
+  const by = row.updatedBy;
   return {
-    title: row.artefactTitle,
-    markdown: row.artefactMarkdown,
-    version: row.artefactVersion,
+    id: row.id,
+    kind: isDocumentKind(row.kind) ? row.kind : "document",
+    title: row.title,
+    markdown: row.markdown,
+    version: row.version,
     updatedBy: by === "user" || by === "agent" ? by : null,
-    updatedAt: row.artefactUpdatedAt
+    updatedAt: row.updatedAt
   };
 }
 
-export const ARTEFACT_SELECT = {
-  artefactTitle: true,
-  artefactMarkdown: true,
-  artefactVersion: true,
-  artefactUpdatedBy: true,
-  artefactUpdatedAt: true
-} as const;
+export async function listDocuments(db: Database, conversationId: string): Promise<StoredDocument[]> {
+  const rows = await db.assistantDocument.findMany({ where: { conversationId }, select: DOCUMENT_SELECT, orderBy: [...OLDEST_FIRST] });
+  return rows.map(toDocument);
+}
 
+export async function readDocument(db: Database, conversationId: string, id: string): Promise<StoredDocument | undefined> {
+  const row = await db.assistantDocument.findFirst({ where: { id, conversationId }, select: DOCUMENT_SELECT });
+  return row === null ? undefined : toDocument(row);
+}
+
+export async function readPrimaryDocument(db: Database, conversationId: string): Promise<StoredDocument | undefined> {
+  const row = await db.assistantDocument.findFirst({ where: { conversationId, kind: "document" }, select: DOCUMENT_SELECT, orderBy: [...OLDEST_FIRST] });
+  return row === null ? undefined : toDocument(row);
+}
+
+/** The primary document, or an empty one at version 0 while the conversation has none: what `/artefact` answers. */
 export async function readArtefact(db: Database, conversationId: string): Promise<Artefact> {
-  const row = await db.assistantConversation.findUnique({ where: { id: conversationId }, select: ARTEFACT_SELECT });
-  return row === null ? EMPTY_ARTEFACT : toArtefact(row);
+  return (await readPrimaryDocument(db, conversationId)) ?? EMPTY_ARTEFACT;
 }
 
 export class ArtefactConflict extends Error {
@@ -50,38 +79,208 @@ export class ArtefactConflict extends Error {
   }
 }
 
+const MISSING = "that document no longer exists";
+
+/** A document is something in the chat, so the first write of one records the conversation's first content. */
+async function touchConversation(tx: Database, conversationId: string, now: Date): Promise<void> {
+  await tx.$executeRaw`
+    UPDATE assistant_conversation SET first_content_at = COALESCE(first_content_at, ${now}), updated_at = ${now} WHERE id = ${conversationId}::uuid
+  `;
+}
+
+/** Whether the conversation's pod is running a client that reads only the primary document. */
+async function podLacksItems(tx: Database, conversation: ConversationRef): Promise<boolean> {
+  if (!hasPod(conversation)) {
+    return false;
+  }
+  const pod = await tx.virtualAgent.findUnique({
+    where: { id: conversation.virtualAgentId },
+    select: { status: true, clientFeatures: true, agent: { select: { clientFeatures: true } } }
+  });
+  return pod !== null && podLacks(pod, "items");
+}
+
+type DocumentWrite = { title: string | null; markdown: string; baseVersion: number; by: "user" | "agent" };
+
+/** The compare-and-set every write of an existing document is: written only while `baseVersion` is still its version. */
+async function updateDocument(tx: Database, conversationId: string, id: string, write: DocumentWrite, now: Date): Promise<number | undefined> {
+  const [row] = await tx.$queryRaw<{ version: number }[]>`
+    UPDATE assistant_document
+       SET title = COALESCE(${write.title}, title, ${UNTITLED_DOCUMENT}),
+           markdown = ${write.markdown},
+           version = version + 1,
+           updated_by = ${write.by},
+           updated_at = ${now}
+     WHERE id = ${id}::uuid AND conversation_id = ${conversationId}::uuid AND version = ${write.baseVersion}::int
+    RETURNING version
+  `;
+  return row?.version;
+}
+
 /**
- * Writes the conversation's artefact if `baseVersion` is still its version, and answers the new one. Otherwise
- * nothing is written and `ArtefactConflict` carries what is there now, for the writer to merge into. A title left
- * `null` keeps the current one.
- *
- * A document is something in the chat, so the first one records its first content (`announceFirstContent`) in the same
- * statement; the announcement every write makes is what then lists it.
+ * Makes a document at version 1, refused for a kind or a count the conversation's pod cannot read (`ITEMS_CREATE_REFUSED`)
+ * and, for a ticket or a Confluence page, for a chat with no pod, which has no way to export one. The conversation's
+ * row is locked first, so two creates at once count each other. `id` is the browser's own for the document it opened,
+ * which is what makes a repeated first save find the document the first one made rather than make another: answered
+ * `undefined` when a document of that id is already there.
  */
-export async function writeArtefact(
+async function insertDocument(
+  tx: Database,
+  conversation: ConversationRef,
+  create: { id?: string; kind: DocumentKind; title: string | null; markdown: string; by: "user" | "agent" },
+  now: Date
+): Promise<string | undefined> {
+  await tx.$executeRaw`SELECT 1 FROM assistant_conversation WHERE id = ${conversation.id}::uuid FOR UPDATE`;
+  if (create.kind !== "document" && !hasPod(conversation)) {
+    throw new HttpError(409, "this chat is a session on your own computer, which cannot export, so it holds plain documents only");
+  }
+  if (create.kind !== "document" || (await tx.assistantDocument.count({ where: { conversationId: conversation.id } })) > 0) {
+    if (await podLacksItems(tx, conversation)) {
+      throw new HttpError(409, ITEMS_CREATE_REFUSED);
+    }
+  }
+  const [row] = await tx.$queryRaw<{ id: string }[]>`
+    INSERT INTO assistant_document (id, conversation_id, kind, title, markdown, version, updated_by, updated_at, created_at)
+    VALUES (COALESCE(${create.id ?? null}::uuid, gen_random_uuid()), ${conversation.id}::uuid, ${create.kind}, ${create.title ?? UNTITLED_DOCUMENT},
+            ${create.markdown}, 1, ${create.by}, ${now}, ${now})
+    ON CONFLICT (id) DO NOTHING
+    RETURNING id::text AS id
+  `;
+  if (row === undefined) {
+    return undefined;
+  }
+  await touchConversation(tx, conversation.id, now);
+  await announce(tx, conversation);
+  return row.id;
+}
+
+/** A new document, for the agent API's create, which has no version to compare with. */
+export async function createDocument(
   prisma: PrismaClient,
-  conversation: Pick<ConversationRow, "id" | "virtualAgentId" | "ownerOid">,
-  write: { title: string | null; markdown: string; baseVersion: number; by: "user" | "agent" },
+  conversation: ConversationRef,
+  create: { kind: DocumentKind; title: string | null; markdown: string; by: "user" | "agent" },
+  now: Date = new Date()
+): Promise<{ id: string; version: number }> {
+  const id = await prisma.$transaction((tx) => insertDocument(tx, conversation, create, now));
+  return { id: id as string, version: 1 };
+}
+
+/**
+ * Writes one document if `baseVersion` is still its version, and answers the new one. Otherwise nothing is written and
+ * `ArtefactConflict` carries what is there now, for the writer to merge into. A title left `null` keeps the current one.
+ *
+ * `create` is the kind of a document the browser opened and has not saved yet: its first save, at base 0, makes it under
+ * the browser's id. Without it, or for an id the conversation does not hold at any other base, the write is a `404`.
+ */
+export async function writeDocument(
+  prisma: PrismaClient,
+  conversation: ConversationRef,
+  id: string,
+  write: DocumentWrite & { create?: DocumentKind },
   now: Date = new Date()
 ): Promise<number> {
   return await prisma.$transaction(async (tx) => {
-    const updated = await tx.$queryRaw<{ version: number }[]>`
-      UPDATE assistant_conversation
-         SET artefact_title = COALESCE(${write.title}, artefact_title, 'Untitled document'),
-             artefact_markdown = ${write.markdown},
-             artefact_version = artefact_version + 1,
-             artefact_updated_by = ${write.by},
-             artefact_updated_at = ${now},
-             first_content_at = COALESCE(first_content_at, ${now}),
-             updated_at = ${now}
-       WHERE id = ${conversation.id}::uuid AND artefact_version = ${write.baseVersion}::int
-      RETURNING artefact_version AS version
-    `;
-    const [row] = updated;
-    if (row === undefined) {
-      throw new ArtefactConflict(await readArtefact(tx, conversation.id));
+    const version = await updateDocument(tx, conversation.id, id, write, now);
+    if (version !== undefined) {
+      await touchConversation(tx, conversation.id, now);
+      await announce(tx, conversation);
+      return version;
+    }
+    const current = await readDocument(tx, conversation.id, id);
+    if (current !== undefined) {
+      throw new ArtefactConflict(current);
+    }
+    if (write.create === undefined || write.baseVersion !== 0) {
+      throw new HttpError(404, MISSING);
+    }
+    const made = await insertDocument(tx, conversation, { id, kind: write.create, title: write.title, markdown: write.markdown, by: write.by }, now);
+    if (made === undefined) {
+      // The id is another conversation's document.
+      throw new HttpError(404, MISSING);
+    }
+    return 1;
+  });
+}
+
+/**
+ * Writes the conversation's primary document, as `writeDocument` does, making it at base 0 while there is none: what
+ * `PUT /artefact` has always done, so a client that knows one document keeps working.
+ */
+export async function writeArtefact(prisma: PrismaClient, conversation: ConversationRef, write: DocumentWrite, now: Date = new Date()): Promise<number> {
+  return await prisma.$transaction(async (tx) => {
+    // Locked so two first writes at once make one primary between them.
+    await tx.$executeRaw`SELECT 1 FROM assistant_conversation WHERE id = ${conversation.id}::uuid FOR UPDATE`;
+    const primary = await readPrimaryDocument(tx, conversation.id);
+    if (primary === undefined) {
+      if (write.baseVersion !== 0) {
+        throw new ArtefactConflict(EMPTY_ARTEFACT);
+      }
+      await insertDocument(tx, conversation, { kind: "document", title: write.title, markdown: write.markdown, by: write.by }, now);
+      return 1;
+    }
+    const version = await updateDocument(tx, conversation.id, primary.id, write, now);
+    if (version === undefined) {
+      throw new ArtefactConflict(primary);
+    }
+    await touchConversation(tx, conversation.id, now);
+    await announce(tx, conversation);
+    return version;
+  });
+}
+
+/** Removes a document and its export state. A ticket or page already made from it stays where it was made. */
+export async function removeDocument(prisma: PrismaClient, conversation: ConversationRef, id: string): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    const { count } = await tx.assistantDocument.deleteMany({ where: { id, conversationId: conversation.id } });
+    if (count === 0) {
+      throw new HttpError(404, MISSING);
     }
     await announce(tx, conversation);
-    return row.version;
   });
+}
+
+/**
+ * The document an export is asked of, checked before it is claimed: it is the conversation's, its kind goes to
+ * `destination`, and, unless it is the primary, the pod's client can read it (`ITEMS_EXPORT_REFUSED`).
+ */
+export async function exportableDocument(tx: Database, conversation: ConversationRef, id: unknown, destination: "ticket" | "confluence"): Promise<string> {
+  const document = typeof id === "string" && UUID_RE.test(id) ? await readDocument(tx, conversation.id, id) : undefined;
+  if (document === undefined) {
+    throw new HttpError(404, MISSING);
+  }
+  if (!documentExports(document.kind)[destination]) {
+    throw new HttpError(
+      409,
+      document.kind === "ticket"
+        ? "this document is a ticket, so it goes to your ticket tool only"
+        : "this document is a Confluence page, so it goes to Confluence only"
+    );
+  }
+  if ((await readPrimaryDocument(tx, conversation.id))?.id !== document.id && (await podLacksItems(tx, conversation))) {
+    throw new HttpError(409, ITEMS_EXPORT_REFUSED);
+  }
+  return document.id;
+}
+
+/** A document as the agent API answers it. */
+export function artefactJson(artefact: Artefact) {
+  return {
+    title: artefact.title,
+    markdown: artefact.markdown,
+    version: artefact.version,
+    updated_by: artefact.updatedBy,
+    updated_at: artefact.updatedAt?.toISOString() ?? null
+  };
+}
+
+/** One entry of `GET /artefacts`: everything but the markdown. */
+export function documentSummaryJson(document: StoredDocument) {
+  return {
+    id: document.id,
+    kind: document.kind,
+    title: document.title,
+    version: document.version,
+    updated_by: document.updatedBy,
+    updated_at: document.updatedAt?.toISOString() ?? null
+  };
 }

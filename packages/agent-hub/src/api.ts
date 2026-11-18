@@ -11,6 +11,10 @@ import type {
   ApiErrorBody,
   Artefact,
   ArtefactBody,
+  ArtefactById,
+  ArtefactCreateBody,
+  ArtefactCreated,
+  ArtefactList,
   ArtefactResponse,
   ConfluenceExportReport,
   ConversationsResponse,
@@ -195,6 +199,12 @@ export type Api = {
   putMemory: (virtualId: string, body: MemoryReportBody) => Promise<null>;
   getArtefact: (agentId: string) => Promise<Artefact>;
   putArtefact: (agentId: string, body: ArtefactBody) => Promise<ArtefactResponse>;
+  /** Every document of the conversation, oldest first, without their markdown. A hub older than several documents answers 404. */
+  listArtefacts: (agentId: string) => Promise<ArtefactList>;
+  getArtefactById: (agentId: string, id: string) => Promise<ArtefactById>;
+  putArtefactById: (agentId: string, id: string, body: ArtefactBody) => Promise<ArtefactResponse>;
+  createArtefact: (agentId: string, body: ArtefactCreateBody) => Promise<ArtefactCreated>;
+  deleteArtefact: (agentId: string, id: string) => Promise<null>;
   /** The latest version of the deck, or one kept version of it, which then says the version the deck is at now. */
   getDeck: (agentId: string, version?: number) => Promise<Deck>;
   putDeck: (agentId: string, body: DeckBody) => Promise<DeckResponse>;
@@ -443,6 +453,11 @@ export function createApi({
     putMemory: (virtualId, body) => request<null>("PUT", v(virtualId, "memory"), body),
     getArtefact: (agentId) => request<Artefact>("GET", `${a(agentId)}/artefact`),
     putArtefact: (agentId, body) => request<ArtefactResponse>("PUT", `${a(agentId)}/artefact`, body),
+    listArtefacts: (agentId) => request<ArtefactList>("GET", `${a(agentId)}/artefacts`),
+    getArtefactById: (agentId, id) => request<ArtefactById>("GET", `${a(agentId)}/artefacts/${encodeURIComponent(id)}`),
+    putArtefactById: (agentId, id, body) => request<ArtefactResponse>("PUT", `${a(agentId)}/artefacts/${encodeURIComponent(id)}`, body),
+    createArtefact: (agentId, body) => request<ArtefactCreated>("POST", `${a(agentId)}/artefacts`, body),
+    deleteArtefact: (agentId, id) => request<null>("DELETE", `${a(agentId)}/artefacts/${encodeURIComponent(id)}`),
     getDeck: (agentId, version) => request<Deck>("GET", `${a(agentId)}/deck${qs({ version })}`),
     putDeck: (agentId, body) => request<DeckResponse>("PUT", `${a(agentId)}/deck`, body),
     putDeckAsset: (agentId, sha256, bytes) => putBytes<DeckAssetResponse>(`${a(agentId)}/deck/assets/${encodeURIComponent(sha256)}`, null, bytes),

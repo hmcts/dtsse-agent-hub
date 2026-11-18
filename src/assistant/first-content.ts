@@ -14,7 +14,7 @@ import { announce } from "./conversation-row.ts";
  * Called in the transaction of every write by an agent that can be a chat's first content: a transcript batch with an
  * answer, a tool call or a prompt the person typed in it (`appendEntries`); a direct message to or from any of its
  * agents (`createDirect`), which is also a pod chat's first message; a question its session asked (`recordQuestion`).
- * The document write and the fork copy set the column in their own statement instead (`writeArtefact`, `acceptFork`).
+ * The document write and the fork copy set the column in their own statement instead (`artefact-store.ts`, `acceptFork`).
  * An announcement the same transaction also makes for another reason, such as the rename a first prompt brings, goes
  * out once: Postgres folds identical notifications in one transaction into one.
  *

@@ -61,6 +61,15 @@ function fake({
   const deps: JiraExportDeps = {
     api: {
       getArtefact: async () => ({ ...doc, version: 3, updated_by: "agent", updated_at: null }),
+      getArtefactById: vi.fn(async (_agentId: string, id: string) => ({
+        id,
+        kind: "ticket" as const,
+        title: "Second document",
+        markdown: "# Second",
+        version: 2,
+        updated_by: "agent" as const,
+        updated_at: null
+      })),
       putJiraExport: async (_agentId, body) => {
         if (reportFailures-- > 0) {
           throw new Error("hub unreachable");
@@ -89,6 +98,18 @@ function fake({
 const creates = (calls: string[][]) => calls.filter((call) => call[1] === "jira");
 
 describe("runJiraExport", () => {
+  it("should export the document the frame names when the export carries a document id", async () => {
+    // Arrange
+    const f = fake();
+
+    // Act
+    await runJiraExport(f.deps, { ...REQUEST, documentId: "0f8a6a1e-0000-4000-8000-00000000d0c2" });
+
+    // Assert
+    expect(f.deps.api.getArtefactById).toHaveBeenCalledWith("a-conversation", "0f8a6a1e-0000-4000-8000-00000000d0c2");
+    expect(f.calls.flat().some((arg) => arg.includes("Second document"))).toBe(true);
+  });
+
   it("should create the ticket with the document as plain arguments and report its key when twg is signed in", async () => {
     // Arrange
     const f = fake({ doc: { title: 'Fee "stories"; $(rm -rf ~)', markdown: "# Stories\n\n`whoami` and $HOME" } });
