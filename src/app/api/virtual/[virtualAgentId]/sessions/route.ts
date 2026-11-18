@@ -37,7 +37,7 @@ export const GET = virtualRoute<{ virtualAgentId: string }>(async ({ virtualAgen
       lookup: (lookupId) => pendingLookup(prisma, virtualAgent.id, lookupId),
       welsh: (jobId) => pendingWelsh(prisma, virtualAgent.id, jobId),
       deckBuild: (jobId) => pendingDeckBuild(prisma, virtualAgent.id, jobId),
-      docmosisIndex: (requestId) => pendingIndexFrame(prisma, virtualAgent.id, requestId)
+      docmosisIndex: (requestId) => pendingIndexFrame(prisma, virtualAgent, requestId)
     })
   });
   return new Response(body, { headers: SSE_HEADERS });

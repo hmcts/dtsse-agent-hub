@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { canManageVirtualAgent, canUseDocmosisLibrary } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
-import { podReady } from "../agents/pod-ready.ts";
-import { isUuid } from "../agents/store.ts";
+import { isUuid } from "../agents/ids.ts";
+import { podReady, podState } from "../agents/pod-ready.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { findAssistantWithClaims } from "./assistant-store.ts";
@@ -16,6 +16,7 @@ import {
   isCommitSha,
   isEntriesKey,
   isLibraryPath,
+  keptResetAt,
   type LibraryPodGate,
   type LibraryRow,
   type LibraryStatus,
@@ -53,23 +54,38 @@ const key = (ownerOid: string) => ({ ownerOid_libraryId: { ownerOid, libraryId: 
 
 const pendingSince = (now: Date): Date => new Date(now.getTime() - INDEX_REFRESH_PENDING_MS);
 
-/**
- * The library's status for the viewer, asking their pod for a check when one is due (`refreshDecision`). Only a pod
- * that can answer is asked; a stopped one is started only while there is no index yet, since an index that is a few
- * minutes old serves the browser as well as a pod booting for a minute would. Two tabs opening it at once ask once:
- * the row is locked while the decision is made, and the second joins the first's check. A forced check within 30
- * seconds of the last forced one is `429`.
- */
-export async function openLibrary(prisma: PrismaClient, viewerOid: string, { force }: { force: boolean }, now: Date = new Date()): Promise<LibraryStatus> {
+async function viewersAssistant(prisma: PrismaClient, viewerOid: string) {
   const found = await findAssistantWithClaims(prisma, viewerOid);
   if (found === undefined || !canManageVirtualAgent(viewerOid, found.assistant)) {
     throw new HttpError(404, "you have no assistant to read the template library with yet");
   }
+  return found;
+}
+
+/**
+ * The library's status for the viewer as it stands, asking nothing of their pod and starting none: what a tab reads
+ * when it is told the status changed, or when a check it saw pending has had its two minutes.
+ */
+export async function readLibrary(prisma: PrismaClient, viewerOid: string, now: Date = new Date()): Promise<LibraryStatus> {
+  const found = await viewersAssistant(prisma, viewerOid);
+  const held = await prisma.assistantDocmosisLibrary.findUnique({ where: key(viewerOid), select: ROW_COLUMNS });
+  return libraryStatus(held, podState(found, "docmosis-library"), now);
+}
+
+/**
+ * The library's status for the viewer, asking their pod for a check when one is due (`refreshDecision`). Only a pod
+ * that can answer is asked; a stopped one is started only while there is no index yet, since an index that is a few
+ * minutes old serves the browser as well as a pod booting for a minute would. The row is locked only when a check may
+ * be needed, and the decision made again under the lock, so two tabs opening it at once ask once and the second joins
+ * the first's check. A forced check within 30 seconds of the last forced one is `429`.
+ */
+export async function openLibrary(prisma: PrismaClient, viewerOid: string, { force }: { force: boolean }, now: Date = new Date()): Promise<LibraryStatus> {
+  const found = await viewersAssistant(prisma, viewerOid);
   const held = await prisma.assistantDocmosisLibrary.findUnique({ where: key(viewerOid), select: ROW_COLUMNS });
   const hasIndex = held !== null && held.commitSha !== null;
   const gate: LibraryPodGate =
     found.assistant.desired === "stopped" && hasIndex ? "stopped" : await podReady(prisma, viewerOid, found, "docmosis-library", now);
-  if (gate !== "ok") {
+  if (gate !== "ok" || (held !== null && refreshDecision(held, now, force) === "none")) {
     return libraryStatus(held, gate, now);
   }
   const assistantId = found.assistant.id;
@@ -111,26 +127,20 @@ export interface DocmosisIndexFrame {
 }
 
 /** The check last sent to this virtual agent for its owner's index, when it is still waited for; `undefined` otherwise. */
-async function pendingRow(db: Database, virtualAgentId: string, ownerOid: string, requestId: string, now: Date) {
+export async function pendingIndexFrame(
+  db: Database,
+  virtualAgent: { id: string; ownerOid: string },
+  requestId: string,
+  now: Date = new Date()
+): Promise<DocmosisIndexFrame | undefined> {
   if (!isUuid(requestId)) {
     return undefined;
   }
   const row = await db.assistantDocmosisLibrary.findFirst({
-    where: { refreshId: requestId, refreshAgentId: virtualAgentId, libraryId: DOCMOSIS_LIBRARY_ID, refreshRequestedAt: { gt: pendingSince(now) } },
+    where: { refreshId: requestId, refreshAgentId: virtualAgent.id, libraryId: DOCMOSIS_LIBRARY_ID, refreshRequestedAt: { gt: pendingSince(now) } },
     select: { ownerOid: true, commitSha: true, etag: true }
   });
-  return row === null || !canUseDocmosisLibrary(ownerOid, row) ? undefined : row;
-}
-
-export async function pendingIndexFrame(
-  db: Database,
-  virtualAgentId: string,
-  requestId: string,
-  now: Date = new Date()
-): Promise<DocmosisIndexFrame | undefined> {
-  const agent = await db.virtualAgent.findUnique({ where: { id: virtualAgentId }, select: { ownerOid: true } });
-  const row = agent === null ? undefined : await pendingRow(db, virtualAgentId, agent.ownerOid, requestId, now);
-  if (row === undefined) {
+  if (row === null || !canUseDocmosisLibrary(virtualAgent.ownerOid, row)) {
     return undefined;
   }
   return { request_id: requestId, ...DOCMOSIS_LIBRARY, commit: row.commitSha, etag: row.etag };
@@ -196,7 +206,7 @@ export async function answerIndex(
         error: answer.error,
         detail: answer.detail ?? null,
         ssoUrl: answer.sso_url ?? null,
-        resetAt: answer.reset_at === undefined ? null : new Date(answer.reset_at)
+        resetAt: keptResetAt(answer.reset_at, now)
       };
     }
     await tx.assistantDocmosisLibrary.update({ where: key(row.owner_oid), data });
@@ -221,7 +231,7 @@ export async function readLibraryEntries(
     where: key(viewerOid),
     select: { ownerOid: true, commitSha: true, entriesKey: true, entries: true }
   });
-  if (row === null || row.commitSha !== commit || row.entriesKey !== entriesKey || !canUseDocmosisLibrary(viewerOid, row)) {
+  if (row === null || row.commitSha !== commit || row.entriesKey !== entriesKey.toLowerCase() || !canUseDocmosisLibrary(viewerOid, row)) {
     return undefined;
   }
   return { commit, entries: row.entries as unknown as IndexEntry[] };
