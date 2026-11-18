@@ -40,8 +40,10 @@ function kindOf(kind: unknown): PodJobKind {
 /**
  * Asks the conversation's pod to run a job of `kind`, for its owner alone (`canRequestPodJob`): a reader is refused,
  * anyone else finds nothing. Nothing is recorded when the conversation is a local session's, when its assistant has
- * been replaced, or when the pod cannot be asked now or has no handler for the kind. A one-at-a-time kind joins the
- * conversation's pending job when the arguments are the same, and is refused with 409 when they are not.
+ * been replaced, or when the pod cannot be asked now or has no handler for the kind. The kind's `precheck`, when it
+ * has one, may refuse the request with its own status, and is asked before the pod's readiness, so a refused request
+ * never wakes a stopped pod. A one-at-a-time kind joins the conversation's pending job when the arguments are the
+ * same, and is refused with 409 when they are not.
  */
 export async function requestPodJob(
   prisma: PrismaClient,
@@ -67,6 +69,10 @@ export async function requestPodJob(
   const found = await findAssistantWithClaims(prisma, viewerOid);
   if (found === undefined || found.assistant.id !== conversation.virtualAgentId) {
     return { status: "assistant_gone" };
+  }
+  const refused = await definition.precheck?.(prisma, { viewerOid, conversationId, args });
+  if (refused !== undefined) {
+    throw new HttpError(refused.status, refused.error);
   }
   const ready = await podReady(prisma, viewerOid, found, podJobFeature(definition.kind), now);
   if (ready !== "ok") {
@@ -318,7 +324,9 @@ export async function lockPendingPodJob(tx: Database, jobId: string, kind: strin
 
 /**
  * Marks a job `lockPendingPodJob` locked as done with `result`, checked against its kind, and tells the owner's open
- * tabs on commit. `false` when the job is no longer pending, which a caller holding the lock never sees.
+ * tabs on commit. Only while its conversation is still on the job's virtual agent, as `answerPodJob` keeps an answer:
+ * `false` otherwise, or when the job is no longer pending, which a caller holding the lock never sees, and the
+ * caller rolls its write back.
  */
 export async function finishPodJob(tx: Database, job: LockedPodJob, result: unknown, now: Date = new Date()): Promise<boolean> {
   const definition = POD_JOB_REGISTRY.get(job.kind);
@@ -327,7 +335,7 @@ export async function finishPodJob(tx: Database, job: LockedPodJob, result: unkn
   }
   const checked = checkPodJobResult(definition, result);
   const { count } = await tx.assistantPodJob.updateMany({
-    where: { id: job.id, status: "pending" },
+    where: { id: job.id, virtualAgentId: job.virtualAgentId, status: "pending", conversation: { virtualAgentId: job.virtualAgentId } },
     data: { status: "done", result: checked as object, finishedAt: now }
   });
   if (count === 0) {

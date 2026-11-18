@@ -31,5 +31,5 @@ export const PUT = ownedAgentRoute<{ agentId: string }>(async ({ agent, request 
   if (!checked.ok) {
     throw new HttpError(400, checked.error);
   }
-  return json(await writeAgentDocmosis(prisma, { conversationId: conversation.id, body: checked.value }));
+  return json(await writeAgentDocmosis(prisma, { conversationId: conversation.id, body: checked.value, agent }));
 });

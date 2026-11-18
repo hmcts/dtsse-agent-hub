@@ -88,7 +88,7 @@ describe("PUT /api/agent/{id}/docmosis/assets/{sha256}", () => {
 });
 
 describe("PUT /api/agent/{id}/docmosis", () => {
-  it("should write the version and answer it", async () => {
+  it("should write the version through the agent asked for and answer it when the body is valid", async () => {
     store.writeAgentDocmosis.mockResolvedValue({ version: 1, revision: 0 });
 
     const response = await root.PUT(request("PUT", JSON.stringify(bodyOf({ summary: "First" }))), params({ agentId: "a" }));
@@ -96,7 +96,8 @@ describe("PUT /api/agent/{id}/docmosis", () => {
     expect(await response.json()).toEqual({ version: 1, revision: 0 });
     expect(store.writeAgentDocmosis).toHaveBeenCalledWith(expect.anything(), {
       conversationId: "conv-1",
-      body: expect.objectContaining({ name: "Claim", summary: "First" })
+      body: expect.objectContaining({ name: "Claim", summary: "First" }),
+      agent: expect.objectContaining({ id: "agent-1" })
     });
   });
 

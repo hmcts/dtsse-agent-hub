@@ -1,4 +1,21 @@
+import { DOCMOSIS_LOAD_KIND, LOAD_BUDGET_MS } from "./docmosis-load-kind.ts";
 import type { PodJobHandler } from "./pod-jobs.ts";
+
+/**
+ * `docmosis.load`, its module loaded only when a job of it arrives: it reaches the agent API's client, which imports
+ * the claim this list is part of.
+ */
+const docmosisLoad: PodJobHandler = {
+  kind: DOCMOSIS_LOAD_KIND,
+  budgetMs: LOAD_BUDGET_MS,
+  run: async (args, context) => {
+    const [{ docmosisLoadHandler }, { run }] = await Promise.all([import("./docmosis-load.ts"), import("../virtual/process.ts")]);
+    const handler = docmosisLoadHandler({
+      run: (cmd, argv, opts) => run(cmd, argv, { env: opts.env as NodeJS.ProcessEnv, timeoutMs: opts.timeoutMs, signal: opts.signal })
+    });
+    return await handler.run(args, context);
+  }
+};
 
 /**
  * Every pod-job kind this build runs, and so claims as `pod-job:<kind>`. A feature adds its handler here in the same
@@ -8,4 +25,4 @@ import type { PodJobHandler } from "./pod-jobs.ts";
  * Imported by `features.ts` and so by everything that reports a claim: a handler's module should import its heavy
  * dependencies inside `run`, not at the top.
  */
-export const POD_JOB_HANDLERS: readonly PodJobHandler[] = [];
+export const POD_JOB_HANDLERS: readonly PodJobHandler[] = [docmosisLoad];

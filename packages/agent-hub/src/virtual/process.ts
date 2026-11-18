@@ -15,6 +15,8 @@ export type RunOptions = {
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
   input?: string;
+  /** Kills the command as the timeout does once it aborts, for a caller whose own budget can run out first. */
+  signal?: AbortSignal;
   /** How long after the kill to stop waiting for the pipes to close; `SIGKILL_AFTER_MS` unless a test says otherwise. */
   killGraceMs?: number;
 };
@@ -39,7 +41,7 @@ export function childEnv(env: Env, drop: string[] = []): NodeJS.ProcessEnv {
 export function run(
   cmd: string,
   args: string[],
-  { env = process.env, timeoutMs = 60000, input, killGraceMs = SIGKILL_AFTER_MS }: RunOptions = {}
+  { env = process.env, timeoutMs = 60000, input, signal, killGraceMs = SIGKILL_AFTER_MS }: RunOptions = {}
 ): Promise<RunResult> {
   return new Promise((resolve) => {
     let stdout = "";
@@ -65,20 +67,27 @@ export function run(
       if (abandon) {
         clearTimeout(abandon);
       }
+      signal?.removeEventListener("abort", kill);
       resolve(result);
     };
     // The kill is certain and `close` is not: it waits for these pipes to close, and a command that forked
     // leaves descendants holding the write ends, so the timeout alone bounds nothing. `relayDeviceLogin` gives
     // up the same way and for the same reason — the handles are ref'd, and the CLI exits only when the loop
     // drains, so a caller would wait on this for ever rather than for `timeoutMs`.
-    timer = setTimeout(() => {
+    function kill() {
       child.kill("SIGKILL");
       abandon ??= setTimeout(() => {
         child.stdout?.destroy();
         child.stderr?.destroy();
         finish({ code: 1, stdout, stderr });
       }, killGraceMs);
-    }, timeoutMs);
+    }
+    timer = setTimeout(kill, timeoutMs);
+    if (signal?.aborted) {
+      kill();
+    } else {
+      signal?.addEventListener("abort", kill, { once: true });
+    }
     child.stdout?.on("data", (d) => {
       stdout += d;
     });

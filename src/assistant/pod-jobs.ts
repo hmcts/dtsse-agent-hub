@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { HttpError, MAX_REQUEST_BYTES } from "../agent-api/http.ts";
 import type { PodJobFeature } from "../agents/client-features.ts";
+import type { Database } from "../store/prisma.ts";
 import { jsonbText } from "./deck.ts";
 
 /**
@@ -30,6 +31,26 @@ const MAX_TIMEOUT_MS = 60 * 60_000;
 
 export type PodJobStatus = "pending" | "done" | "failed" | "timeout";
 
+/** Why a kind's `precheck` refuses a request: the status and the words the browser gets, as `{error}`. */
+export interface PodJobRefusal {
+  status: 400 | 403 | 404 | 409 | 413 | 422;
+  error: string;
+}
+
+/** What a kind's `precheck` is asked about: who asks, in which conversation, with the `args` its schema parsed. */
+export interface PodJobPrecheckInput {
+  viewerOid: string;
+  conversationId: string;
+  args: unknown;
+}
+
+/**
+ * A kind's own check of a request against rows the hub holds, which the `args` schema alone cannot make. Run after
+ * access and before the pod's readiness is read, so a refused request neither wakes a stopped pod nor is joined,
+ * counted or recorded, and costs nothing against the rate limit.
+ */
+export type PodJobPrecheck = (db: Database, input: PodJobPrecheckInput) => Promise<PodJobRefusal | undefined>;
+
 export interface PodJobKind {
   readonly kind: string;
   /** What the browser sends. A strict object, so a field the handler would not read is refused rather than ignored. */
@@ -46,6 +67,7 @@ export interface PodJobKind {
   readonly oneAtATime: boolean;
   /** The largest answer body the pod may send, `{status, result}` and all. */
   readonly maxResultBytes: number;
+  readonly precheck?: PodJobPrecheck;
 }
 
 export interface PodJobKindDefinition {
@@ -57,6 +79,7 @@ export interface PodJobKindDefinition {
   rateLimit: { limit: number; windowMs: number };
   oneAtATime?: boolean;
   maxResultBytes?: number;
+  precheck?: PodJobPrecheck;
 }
 
 /**
@@ -99,7 +122,8 @@ export function definePodJobKind(definition: PodJobKindDefinition): PodJobKind {
     timeoutMs,
     rateLimit: Object.freeze({ ...rateLimit }),
     oneAtATime,
-    maxResultBytes
+    maxResultBytes,
+    ...(definition.precheck === undefined ? {} : { precheck: definition.precheck })
   });
 }
 

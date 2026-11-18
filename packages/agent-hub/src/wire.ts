@@ -61,6 +61,8 @@ export type ApiErrorBody = {
   current?: Artefact | Deck | DocmosisResponse;
   /** A `400` from `putDocmosis`: the .docx digests the hub does not hold. */
   missing_assets?: string[];
+  /** A `409` from `putDocmosis` with a `pick` already loaded: the version that load wrote. */
+  loaded?: DocmosisWritten;
   /** A `400` from `putDeck`: the pictures the outline names that the hub does not hold. */
   missing?: string[];
 };
@@ -328,6 +330,8 @@ export type DocmosisResponse = {
   updated_at: string;
   has_pdf: boolean;
   render_error: { short: string; long: string } | null;
+  /** The library path a version loaded from the template library came from; null for every other version, absent from an older hub. */
+  source_path?: string | null;
   /** Only when a version other than the latest was asked for: the version the template is at now. */
   current_version?: number;
 };
@@ -341,6 +345,8 @@ export type DocmosisBody = {
   /** The revision read with the version, so a person's amend since is refused rather than overwritten. */
   base_revision?: number;
   summary?: string;
+  /** The `docmosis.load` pod job this write loads a template for; see "Docmosis template library" in docs/agent-api.md. */
+  pick?: string;
 };
 
 export type DocmosisWritten = { version: number; revision: number };
