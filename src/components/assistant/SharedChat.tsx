@@ -8,6 +8,7 @@ import { ForkedThread } from "@/components/assistant/ForkedThread";
 import { SharedNotify } from "@/components/assistant/NotifyPanel";
 import { SharedItem } from "@/components/assistant/SharedItem";
 import { SharedVideo } from "@/components/assistant/VideoPanel";
+import { ukDate } from "@/web/format";
 import { SHARED_CHATS } from "@/web/home";
 
 /**
@@ -34,12 +35,16 @@ function headline(view: SharedConversationView): string {
 export function SharedChat({ view, forkChat }: { view: SharedConversationView; forkChat?: ForkChatAction }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-asst-field px-4">
-        <h1 className="min-w-[4rem] shrink-[999] truncate text-[15px] font-medium">{view.title}</h1>
+      {/* Wraps rather than squeezing: on a phone the sentence goes under the title instead of crushing it to a few letters. */}
+      <header className="flex min-h-14 shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-asst-field px-4 py-2.5">
+        <h1 className="min-w-0 max-w-full truncate text-[15px] font-medium">{view.title}</h1>
         <span className="shrink-0 rounded-md border border-asst-accent-line px-2 py-1 font-plex-mono text-[11px] uppercase leading-none tracking-wider text-asst-accent-soft">
           {view.productLabel}
         </span>
-        <span className="ml-auto shrink-0 text-xs text-asst-faint">{headline(view)}</span>
+        <span className="text-pretty text-xs text-asst-faint sm:ml-auto max-sm:basis-full">
+          {headline(view)}
+          {view.sharedAt === null ? null : <> Shared on {ukDate(new Date(view.sharedAt))}.</>}
+        </span>
         {view.fork === null || forkChat === undefined ? null : <ForkButton conversationId={view.id} copyId={view.fork.copyId} forkChat={forkChat} />}
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto">

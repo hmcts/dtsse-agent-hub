@@ -491,6 +491,15 @@ describe("the Assistant's Connections, one row per service", () => {
     expect(within(rowOf("Azure")).getByText("alice@hmcts.net")).toBeTruthy();
   });
 
+  it("should say where a Jenkins API token comes from under the box it is pasted into", async () => {
+    await open({ tokens: tokens([]) }, "Connections");
+
+    fireEvent.click(screen.getByRole("button", { name: "Add your Jenkins API token" }));
+
+    const field = screen.getByLabelText("Jenkins API token");
+    expect(document.getElementById(field.getAttribute("aria-describedby") ?? "")?.textContent).toContain("add a new API token");
+  });
+
   it("should send the kind and the new value when a Jenkins API token is pasted, and say so after the form has closed", async () => {
     const save = ok();
     await open({ tokens: tokens([], { save }) }, "Connections");

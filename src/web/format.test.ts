@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { age, duration, fullInstant, instant, ukIsoDate, ukLongDate } from "./format.ts";
+import { age, duration, fullInstant, instant, ukDate, ukIsoDate, ukLongDate } from "./format.ts";
 
 const NOW = Date.parse("2026-09-29T14:05:00.000Z");
 
@@ -132,5 +132,15 @@ describe("ukLongDate", () => {
 
   it("should name the UK's day when UTC is still on the day before", () => {
     expect(ukLongDate(new Date("2026-06-30T23:30:00Z"))).toBe("Wednesday 1 July");
+  });
+});
+
+describe("ukDate", () => {
+  it("should give the day, month and year in the UK when given an instant", () => {
+    expect(ukDate(new Date("2025-03-03T09:00:00Z"))).toBe("3 March 2025");
+  });
+
+  it("should take the UK day, not the UTC one, just before midnight in summer", () => {
+    expect(ukDate(new Date("2026-06-30T23:30:00Z"))).toBe("1 July 2026");
   });
 });

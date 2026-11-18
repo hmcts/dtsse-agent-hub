@@ -647,8 +647,11 @@ describe("GettingReady continue", () => {
     const onDone = vi.fn();
     render(ready({ onDone }));
 
-    const button = screen.getByRole("button", { name: "Connect the accounts above to continue" }) as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
+    // Held back but still reachable, and described by what is missing, so a keyboard user can hear why.
+    const button = screen.getByRole("button", { name: "Start chatting" }) as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+    expect(button.getAttribute("aria-disabled")).toBe("true");
+    expect(document.getElementById(button.getAttribute("aria-describedby") ?? "")?.textContent).toMatch(/^Connect .+ to start\.$/);
     fireEvent.click(button);
     expect(onDone).not.toHaveBeenCalled();
   });
@@ -705,7 +708,7 @@ describe("GettingReady when the hub cannot read the credentials", () => {
     render(unreadable({ onDone }));
 
     expect(screen.queryByRole("button", { name: "Connect" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Connect the accounts above to continue" })).toBeNull();
+    expect(document.querySelector("[aria-disabled='true']")).toBeNull();
     const carryOn = screen.getByRole("button", { name: "Carry on" }) as HTMLButtonElement;
     expect(carryOn.disabled).toBe(false);
 
@@ -1300,7 +1303,8 @@ describe("OnboardingGate holding the person at GitHub and Claude", () => {
     render(held(assistant("awaiting_credentials", OWN_LICENCE), statuses("github", "azure")));
 
     expect(screen.queryByRole("button", { name: "Go to your chats" })).toBeNull();
-    expect((screen.getByRole("button", { name: "Connect the accounts above to continue" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole("button", { name: "Start chatting" }).getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByText("Connect Claude to start.")).toBeTruthy();
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.getByRole("dialog", { name: "Your assistant is getting ready" })).toBeTruthy();
   });
@@ -1573,5 +1577,63 @@ describe("GettingReady before GitHub is connected", () => {
     );
 
     expect(formsIn("Claude")).toEqual(["Paste the Claude code"]);
+  });
+});
+
+describe("GettingReady guidance", () => {
+  it("should mark the connections the chat cannot start without as required, and no others", () => {
+    render(ready({ assistant: assistant("provisioning", { needed: ["github", "claude"] }), statuses: [] }));
+
+    expect(within(connector("GitHub")).getByText("Required")).toBeTruthy();
+    expect(within(connector("Claude")).getByText("Required")).toBeTruthy();
+    expect(within(connector("Atlassian")).queryByText("Required")).toBeNull();
+  });
+
+  it("should name what is still to connect beside the held-back button", () => {
+    render(ready({ assistant: assistant("provisioning", { needed: ["github", "claude"] }), statuses: statuses("github") }));
+
+    const button = screen.getByRole("button", { name: "Start chatting" });
+    const line = document.getElementById(button.getAttribute("aria-describedby") ?? "");
+    expect(line?.textContent).toBe("Connect Claude to start.");
+  });
+
+  it("should offer the code to copy beside a sign-in the assistant relayed", async () => {
+    const writeText = vi.fn(async () => undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    render(ready({ assistant: assistant("awaiting_login", { logins: [login("github")] }) }));
+
+    await act(async () => {
+      fireEvent.click(within(connector("GitHub")).getByRole("button", { name: "Copy the GitHub code" }));
+    });
+
+    expect(writeText).toHaveBeenCalledWith("ABCD-1234");
+    vi.unstubAllGlobals();
+  });
+
+  it("should say where a Jenkins API token comes from under the box it is pasted in", () => {
+    render(
+      ready({
+        assistant: assistant("provisioning", { needed: ["github", "azure", "claude"], logins: [login("jenkins", { state: "failed" })] }),
+        statuses: statuses("github")
+      })
+    );
+    fireEvent.click(within(connector("Jenkins")).getByRole("button", { name: "Connect" }));
+
+    const field = within(connector("Jenkins")).getByLabelText("Jenkins API token");
+    const help = document.getElementById(field.getAttribute("aria-describedby") ?? "");
+    expect(help?.textContent).toContain("add a new API token");
+    const link = within(help as HTMLElement).getByRole("link", { name: /^Open Jenkins/ });
+    expect(link.textContent).toBe("Open Jenkins (opens in a new tab)");
+    expect(link.getAttribute("href")).toBe("https://build.hmcts.net/");
+  });
+
+  it("should say how to make a Claude token, with no link, under the Claude token box", () => {
+    render(ready({ assistant: assistant("provisioning", { needed: ["github", "azure", "claude"] }), statuses: statuses("github") }));
+    fireEvent.click(within(connector("Claude")).getByRole("button", { name: "Already have a Claude token? Paste it instead" }));
+
+    const field = within(connector("Claude")).getByLabelText("Claude token");
+    const help = document.getElementById(field.getAttribute("aria-describedby") ?? "");
+    expect(help?.textContent).toContain("claude setup-token");
+    expect(within(help as HTMLElement).queryByRole("link")).toBeNull();
   });
 });

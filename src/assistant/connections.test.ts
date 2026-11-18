@@ -41,7 +41,8 @@ import {
   screenDetail,
   signInComing,
   signInPrompt,
-  signsInOnRequest
+  signsInOnRequest,
+  stillNeededLine
 } from "./connections.ts";
 
 const NOW = Date.parse("2026-10-25T12:00:00.000Z");
@@ -1234,5 +1235,20 @@ describe("awaitsGithub", () => {
 
   it("should say what to do instead of offering a control when a connection waits", () => {
     expect(GITHUB_FIRST).toBe("Connect GitHub first");
+  });
+});
+
+describe("stillNeededLine", () => {
+  it("should name the needed connections not yet stored", () => {
+    expect(stillNeededLine(["github", "claude"], new Set<CredentialKind>())).toBe("Connect GitHub and Claude to start.");
+    expect(stillNeededLine(["github", "claude"], new Set<CredentialKind>(["github"]))).toBe("Connect Claude to start.");
+  });
+
+  it("should say the hub is catching up, not ask again, when everything needed is stored but the screen still holds", () => {
+    expect(stillNeededLine(["github"], new Set<CredentialKind>(["github"]))).toBe("Checking your sign-ins. This takes a moment.");
+  });
+
+  it("should name a kind with no wording of its own by its kind", () => {
+    expect(stillNeededLine(["claude_md"], new Set<CredentialKind>())).toBe("Connect claude_md to start.");
   });
 });

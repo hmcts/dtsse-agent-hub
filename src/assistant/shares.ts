@@ -77,6 +77,21 @@ export async function accessToConversation(
   return access === "none" ? undefined : { conversation, access, forks };
 }
 
+/**
+ * When the conversation was first shared with or offered to `viewerOid`, whichever came first, for the share page to
+ * say; `null` when it is neither, which is the owner.
+ */
+export async function sharedWithSince(db: Database, conversationId: string, viewerOid: string): Promise<string | null> {
+  // By primary key: one person has at most one share and one offer of a conversation.
+  const where = { conversationId_recipientOid: { conversationId, recipientOid: viewerOid } };
+  const [share, fork] = await Promise.all([
+    db.assistantConversationShare.findUnique({ where, select: { createdAt: true } }),
+    db.assistantConversationFork.findUnique({ where, select: { createdAt: true } })
+  ]);
+  const times = [share?.createdAt, fork?.createdAt].filter((at): at is Date => at !== undefined).map((at) => at.getTime());
+  return times.length === 0 ? null : new Date(Math.min(...times)).toISOString();
+}
+
 export interface SharePerson {
   oid: string;
   name: string;
