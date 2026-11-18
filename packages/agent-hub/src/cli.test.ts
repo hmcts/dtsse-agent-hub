@@ -1742,6 +1742,86 @@ describe("artefact, in an assistant conversation", () => {
       expect(fs.readFileSync(path.join(out, "revision"), "utf8")).toBe("0\n");
       expect(r.text()).toContain(path.join(out, "data.json"));
       expect(r.text()).toMatch(/Last changed by the user; render error: Bad field; has no PDF\./);
+      expect(r.text()).not.toMatch(/^Summary:/m);
+    });
+
+    it("should print the version's summary, when docmosis get reads a version that has one", async () => {
+      // Arrange
+      const { sid } = await session();
+      const dir = workDir();
+      expect((await cli(putArgs(dir, "--summary", "Added the hearing date"), { sid })).code).toBe(0);
+
+      // Act
+      const r = await cli(["docmosis", "get"], { sid });
+
+      // Assert
+      expect(r.code, r.errors.join("\n")).toBe(0);
+      expect(r.lines).toContain("Summary: Added the hearing date");
+    });
+
+    it("should print the summary on one line with its whitespace collapsed, when the summary spans several lines", async () => {
+      // Arrange
+      const { sid } = await session();
+      const dir = workDir();
+      expect((await cli(putArgs(dir, "--summary", "Added the\n  hearing\t\tdate\r\nand the judge"), { sid })).code).toBe(0);
+
+      // Act
+      const r = await cli(["docmosis", "get"], { sid });
+
+      // Assert
+      expect(r.code, r.errors.join("\n")).toBe(0);
+      expect(r.lines.filter((line) => line.startsWith("Summary:"))).toEqual(["Summary: Added the hearing date and the judge"]);
+      expect(r.text()).not.toMatch(/^\s*hearing/m);
+    });
+
+    it("should print the name and summary without their control characters, when the hub stored them with some", async () => {
+      // Arrange: the hub refuses only a NUL and half of a surrogate pair, so it stores these as they are.
+      const { sid } = await session();
+      const dir = workDir();
+      const esc = String.fromCharCode(27);
+      const put = putArgs(dir, "--name", `Claim${esc}[2J form`, "--summary", `Added${String.fromCharCode(7)} the${esc}[31m date\u0085now`);
+      expect((await cli(put, { sid })).code).toBe(0);
+
+      // Act
+      const r = await cli(["docmosis", "get"], { sid });
+
+      // Assert
+      expect(r.code, r.errors.join("\n")).toBe(0);
+      expect(r.text()).toContain(`of the template "Claim[2J form" to`);
+      expect(r.lines).toContain("Summary: Added the[31m datenow");
+      expect(r.text()).not.toContain(esc);
+    });
+
+    it("should refuse --name and --summary with their own words and send nothing, when either holds a NUL", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      const dir = workDir();
+      const nul = String.fromCharCode(0);
+
+      // Act
+      const name = await cli(putArgs(dir, "--name", `Claim${nul}`), { sid });
+      const summary = await cli(putArgs(dir, "--summary", `Added${nul}`), { sid });
+
+      // Assert
+      expect(name.code).toBe(2);
+      expect(name.errors.join("\n")).toContain("--name must not contain a NUL character or half of a surrogate pair");
+      expect(summary.errors.join("\n")).toContain("--summary must not contain a NUL character or half of a surrogate pair");
+      expect(calls(agentId, "PUT", "")).toEqual([]);
+    });
+
+    it("should refuse the put as a usage error and send nothing, when the data holds secret-shaped text", async () => {
+      // Arrange: built at runtime so no secret-shaped literal sits in the repo.
+      const { sid, agentId } = await session();
+      const dir = workDir();
+      fs.writeFileSync(path.join(dir, "data.json"), JSON.stringify({ name: `token ${"gh"}p_${"Q".repeat(30)}` }));
+
+      // Act
+      const r = await cli(putArgs(dir), { sid });
+
+      // Assert
+      expect(r.code).toBe(2);
+      expect(r.errors.join("\n")).toMatch(/refusing to send: the text contains a secret-shaped string \(pattern /);
+      expect(calls(agentId, "PUT", "")).toEqual([]);
     });
 
     it("should write an older version beside the working copy and leave the recorded version alone, when docmosis get has --version", async () => {
