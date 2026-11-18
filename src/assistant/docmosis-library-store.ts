@@ -236,3 +236,18 @@ export async function readLibraryEntries(
   }
   return { commit, entries: row.entries as unknown as IndexEntry[] };
 }
+
+/**
+ * The size of the entry with this path and blob in the viewer's own index as it stands now; `undefined` when their
+ * index holds no such pair, because it has moved on since they picked, or because they never had it.
+ */
+export async function libraryEntrySize(db: Database, viewerOid: string, path: string, blobSha: string): Promise<number | undefined> {
+  const [row] = await db.$queryRaw<{ owner_oid: string; size: number }[]>`
+    SELECT l.owner_oid, (e ->> 2)::float8 AS size
+      FROM assistant_docmosis_library l, jsonb_array_elements(l.entries) e
+     WHERE l.owner_oid = ${viewerOid} AND l.library_id = ${DOCMOSIS_LIBRARY_ID} AND l.commit_sha IS NOT NULL
+       AND e ->> 0 = ${path} AND e ->> 1 = ${blobSha}
+     LIMIT 1
+  `;
+  return row === undefined || !canUseDocmosisLibrary(viewerOid, { ownerOid: row.owner_oid }) ? undefined : row.size;
+}

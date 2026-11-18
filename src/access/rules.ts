@@ -486,6 +486,16 @@ export function canReadPodJob(viewerOid: string, job: { ownerOid: string }): boo
 }
 
 /**
+ * Whether a session's write of a Docmosis template may be recorded as the person's own pick from their template
+ * library: the job it names was asked for in this conversation, by the person who owns it. The job's id reaches only
+ * the owner's browser and their pod, never a session, so a session cannot claim a pick it was not handed; this is what
+ * stops a job of one chat crediting a write to another, or to somebody else's.
+ */
+export function canRecordPickAsOwner(job: { conversationId: string; ownerOid: string }, conversation: { id: string; ownerOid: string }): boolean {
+  return job.conversationId === conversation.id && isOwner(job.ownerOid, conversation);
+}
+
+/**
  * Whether `actorOid` may share their conversation with `recipientOid`: only the owner shares, as only they see or
  * change who it is shared with (`isOwner`). `recipientKnown` means a `user` row exists: the hub shares with a
  * person it has seen, not with an address.

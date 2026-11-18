@@ -1,3 +1,4 @@
+import { canRecordPickAsOwner } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { announce, type ConversationRow } from "./conversation-row.ts";
@@ -16,6 +17,9 @@ import {
   MAX_PDF_BYTES,
   storableError
 } from "./docmosis.ts";
+import { DOCMOSIS_LOAD_KIND, docmosisLoadArgs, docmosisLoadResult, loadedSummary } from "./docmosis-load.ts";
+import { gitBlobSha1 } from "./git-blob.ts";
+import { finishPodJob, type LockedPodJob, lockPendingPodJob } from "./pod-job-store.ts";
 
 /**
  * A conversation's Docmosis template, written in versions the way its deck is (`deck-store.ts`): a write names the
@@ -40,6 +44,8 @@ export interface DocmosisResponse {
   updated_at: string;
   has_pdf: boolean;
   render_error: { short: string; long: string } | null;
+  /** The library path a version loaded from the template library came from; null for every other version. */
+  source_path: string | null;
   /** Only when a version other than the latest was asked for. */
   current_version?: number;
 }
@@ -99,6 +105,7 @@ interface VersionRow {
   updated_at: Date;
   has_pdf: boolean;
   render_error: { short: string; long: string } | null;
+  source_path: string | null;
 }
 
 const responseOf = (row: VersionRow): DocmosisResponse => ({
@@ -112,7 +119,8 @@ const responseOf = (row: VersionRow): DocmosisResponse => ({
   summary: row.summary,
   updated_at: row.updated_at.toISOString(),
   has_pdf: row.has_pdf,
-  render_error: row.render_error
+  render_error: row.render_error,
+  source_path: row.source_path
 });
 
 async function latestVersion(db: Database, conversationId: string): Promise<number> {
@@ -122,7 +130,7 @@ async function latestVersion(db: Database, conversationId: string): Promise<numb
 
 async function versionRow(db: Database, conversationId: string, version: number): Promise<VersionRow | undefined> {
   const [row] = await db.$queryRaw<VersionRow[]>`
-    SELECT version, revision, name, docx_sha256, schema, data, by, summary, updated_at, pdf IS NOT NULL AS has_pdf, render_error
+    SELECT version, revision, name, docx_sha256, schema, data, by, summary, updated_at, pdf IS NOT NULL AS has_pdf, render_error, source_path
       FROM assistant_docmosis_version
      WHERE conversation_id = ${conversationId}::uuid AND version = ${version}::int
   `;
@@ -144,7 +152,7 @@ export async function docmosisView(db: Database, conversationId: string, version
 
 /** Every kept version, newest first. */
 export async function listDocmosisVersions(db: Database, conversationId: string): Promise<DocmosisVersionEntry[]> {
-  const rows = await db.$queryRaw<Omit<VersionRow, "revision" | "name" | "docx_sha256" | "schema" | "data" | "render_error">[]>`
+  const rows = await db.$queryRaw<Omit<VersionRow, "revision" | "name" | "docx_sha256" | "schema" | "data" | "render_error" | "source_path">[]>`
     SELECT version, by, summary, updated_at, pdf IS NOT NULL AS has_pdf
       FROM assistant_docmosis_version WHERE conversation_id = ${conversationId}::uuid ORDER BY version DESC
   `;
@@ -205,10 +213,58 @@ async function conflict(db: Database, conversationId: string): Promise<HttpError
   return new HttpError(409, "the Docmosis template has changed since that version", { current: await docmosisView(db, conversationId) });
 }
 
+/** A pick `writeAgentDocmosis` holds the job of, and what it records the version as. */
+interface BoundPick {
+  job: LockedPodJob;
+  path: string;
+  blobSha: string;
+}
+
+export const PICK_LOADED = "that template has already been loaded";
+
+/**
+ * Why a write naming a pick that is not waiting is refused. A pick of this conversation already loaded is
+ * `409 {loaded}` with the version it wrote, so a pod that runs the job again after a restart finds its own earlier
+ * write and ends there, rather than writing the template twice. Anything else is a 400.
+ */
+async function pickRefused(tx: Database, conversation: Conversation, pick: string): Promise<HttpError> {
+  const job = await tx.assistantPodJob.findUnique({
+    where: { id: pick },
+    select: { kind: true, conversationId: true, ownerOid: true, status: true, result: true }
+  });
+  const loaded = job === null ? undefined : docmosisLoadResult.safeParse(job.result);
+  if (job !== null && job.kind === DOCMOSIS_LOAD_KIND && job.status === "done" && canRecordPickAsOwner(job, conversation) && loaded?.success) {
+    return new HttpError(409, PICK_LOADED, { loaded: loaded.data });
+  }
+  return new HttpError(400, "pick names no template pick waiting in this conversation");
+}
+
+/**
+ * The `docmosis.load` job `pick` names, locked for the write's transaction, once it is pending and in its time, was
+ * asked for in this conversation by its owner (`canRecordPickAsOwner`), and names a template. Refused otherwise
+ * (`pickRefused`), so a write naming somebody else's pick, or one already used, writes nothing at all.
+ */
+async function bindPick(tx: Database, conversation: Conversation, pick: string, now: Date): Promise<BoundPick> {
+  const job = await lockPendingPodJob(tx, pick, DOCMOSIS_LOAD_KIND, now);
+  if (job === undefined || !canRecordPickAsOwner(job, conversation)) {
+    throw await pickRefused(tx, conversation, pick);
+  }
+  const args = docmosisLoadArgs.safeParse(job.args);
+  if (!args.success) {
+    throw new HttpError(400, "pick names a job that loads no template");
+  }
+  return { job, path: args.data.path, blobSha: args.data.blob_sha };
+}
+
 /**
  * Writes a new version if `baseVersion` is still the template's version, and `baseRevision`, when given, its revision.
  * Otherwise `HttpError(409, {current})`; a .docx the hub does not hold is `HttpError(400, {missing_assets})` and
  * nothing is written. Announced.
+ *
+ * With `pick`, the version is the person's own pick from their template library rather than the agent's: written
+ * `by: user` as the conversation's owner, with where it came from, and the pick's job finished in the same
+ * transaction, so the two commit together or not at all. The .docx must be the very blob the person picked, by its
+ * git SHA-1. A stale base rolls the whole write back and leaves the job pending, for the pod to answer.
  */
 export async function writeAgentDocmosis(
   prisma: PrismaClient,
@@ -217,13 +273,16 @@ export async function writeAgentDocmosis(
   return await prisma.$transaction(async (tx) => {
     const conversation = await conversationOf(tx, conversationId);
     await lockConversation(tx, conversationId);
+    const pick = body.pick === undefined ? undefined : await bindPick(tx, conversation, body.pick, now);
+    const by: DocmosisAuthor = pick === undefined ? "agent" : "user";
+    const summary = pick === undefined ? (body.summary ?? null) : loadedSummary(pick.path);
     const sha = docxSha(body.docx) ?? "";
     const [moved] = await tx.$queryRaw<{ version: number }[]>`
       UPDATE assistant_conversation
          SET docmosis_version = docmosis_version + 1,
              docmosis_revision = 0,
              docmosis_name = ${body.name},
-             docmosis_updated_by = 'agent',
+             docmosis_updated_by = ${by},
              docmosis_pdf_state = 'pending',
              docmosis_updated_at = ${now},
              first_content_at = COALESCE(first_content_at, ${now}),
@@ -235,17 +294,34 @@ export async function writeAgentDocmosis(
     if (moved === undefined) {
       throw await conflict(tx, conversationId);
     }
-    if ((await tx.assistantDocmosisAsset.count({ where: { conversationId, sha256: sha } })) === 0) {
-      throw new HttpError(400, `docx names a .docx the hub does not hold: ${body.docx}; upload it first`, { missing_assets: [body.docx] });
+    const missing = () => new HttpError(400, `docx names a .docx the hub does not hold: ${body.docx}; upload it first`, { missing_assets: [body.docx] });
+    if (pick === undefined) {
+      if ((await tx.assistantDocmosisAsset.count({ where: { conversationId, sha256: sha } })) === 0) {
+        throw missing();
+      }
+    } else {
+      const asset = await tx.assistantDocmosisAsset.findUnique({ where: { conversationId_sha256: { conversationId, sha256: sha } }, select: { bytes: true } });
+      if (asset === null) {
+        throw missing();
+      }
+      if (gitBlobSha1(asset.bytes) !== pick.blobSha) {
+        throw new HttpError(400, "docx is not the template that was picked: its git blob SHA-1 does not match");
+      }
     }
     await tx.$executeRaw`
-      INSERT INTO assistant_docmosis_version (conversation_id, version, revision, name, docx_sha256, schema, data, by, summary, updated_at)
+      INSERT INTO assistant_docmosis_version
+        (conversation_id, version, revision, name, docx_sha256, schema, data, by, editor_oid, summary, source_path, source_blob_sha, updated_at)
       VALUES (${conversationId}::uuid, ${moved.version}::int, 0, ${body.name}, ${sha}, ${JSON.stringify(body.schema)}::jsonb,
-              ${JSON.stringify(body.data)}::jsonb, 'agent', ${body.summary ?? null}, ${now})
+              ${JSON.stringify(body.data)}::jsonb, ${by}, ${pick === undefined ? null : conversation.ownerOid}, ${summary},
+              ${pick?.path ?? null}, ${pick?.blobSha ?? null}, ${now})
     `;
     await prune(tx, conversationId, moved.version, now);
+    const written = { version: moved.version, revision: 0 };
+    if (pick !== undefined) {
+      await finishPodJob(tx, pick.job, written, now);
+    }
     await announce(tx, conversation);
-    return { version: moved.version, revision: 0 };
+    return written;
   });
 }
 

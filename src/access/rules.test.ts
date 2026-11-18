@@ -24,6 +24,7 @@ import {
   canReadMessage,
   canReadPodJob,
   canRecordFeedback,
+  canRecordPickAsOwner,
   canRemoveUploadFromDisk,
   canRequestPodJob,
   canSeeFeedbackRecording,
@@ -770,6 +771,22 @@ describe("the conversation share rules", () => {
 
     it.each(EVERYONE_ELSE)("should refuse %s a job", (_label, viewerOid) => {
       expect(canRequestPodJob(conversationAccess(viewerOid, CONVERSATION, SHARES))).toBe(false);
+    });
+  });
+
+  describe("canRecordPickAsOwner", () => {
+    const CHAT = { id: "conversation-a", ownerOid: OWNER };
+
+    it("should record a write as the owner's pick when the job was asked for in this conversation by its owner", () => {
+      expect(canRecordPickAsOwner({ conversationId: "conversation-a", ownerOid: OWNER }, CHAT)).toBe(true);
+    });
+
+    it("should refuse when the job was asked for in another conversation", () => {
+      expect(canRecordPickAsOwner({ conversationId: "conversation-b", ownerOid: OWNER }, CHAT)).toBe(false);
+    });
+
+    it.each(EVERYONE_ELSE)("should refuse when the job is %s's and the conversation is the owner's", (_label, ownerOid) => {
+      expect(canRecordPickAsOwner({ conversationId: "conversation-a", ownerOid }, CHAT)).toBe(false);
     });
   });
 

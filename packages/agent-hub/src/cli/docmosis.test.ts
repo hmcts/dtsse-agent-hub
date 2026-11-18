@@ -100,6 +100,23 @@ describe("publishDocmosis", () => {
     expect(puts.at(-1)?.body).not.toHaveProperty("summary");
   });
 
+  it.each([
+    ["the version that load wrote, when the pick is one an earlier run of its job already loaded", "pick-1", { written: { version: 4, revision: 0 } }],
+    ["a conflict, when the write named no pick", undefined, { conflict: { current: null } }]
+  ])("should answer %s", async (_label, pick, expected) => {
+    // Arrange
+    const loadedAlready = {
+      putDocmosisAsset: async () => ({ asset: `sha256:${digest(DOCX)}` }),
+      putDocmosis: async () => Promise.reject(new ApiError(409, { error: "already loaded", loaded: { version: 4, revision: 0 } }, "PUT", "/docmosis"))
+    };
+
+    // Act
+    const result = await publishDocmosis(loadedAlready, "agent-1", { ...input, ...(pick === undefined ? {} : { pick }) });
+
+    // Assert
+    expect(result).toEqual(expected);
+  });
+
   it("should return the template as it is now and publish nothing, when someone wrote a newer version", async () => {
     // Arrange
     const agentId = await conversationAgent();
