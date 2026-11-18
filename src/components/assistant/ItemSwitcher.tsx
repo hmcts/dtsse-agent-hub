@@ -34,6 +34,26 @@ export function Dot({ testId }: { testId?: string }) {
   return <span aria-hidden="true" data-testid={testId} className="h-1.5 w-1.5 shrink-0 rounded-full bg-asst-accent" />;
 }
 
+export function moreButtonClass(attention: boolean): string {
+  return `flex h-[34px] items-center gap-1.5 whitespace-nowrap rounded-[9px] border px-2.5 text-[13px] hover:border-asst-accent-line hover:bg-asst-field ${attention ? "border-asst-accent bg-asst-field" : "border-asst-strong"}`;
+}
+
+/** What the "+N more" button holds, shared with the invisible copy the header row measures. */
+export function MoreLabel({ count, attention }: Readonly<{ count: number; attention: boolean }>) {
+  return (
+    <>
+      <span aria-hidden="true" className="text-sm leading-none text-asst-accent">
+        ▤
+      </span>
+      <span aria-hidden="true">
+        +{count}
+        <span className="hidden min-[480px]:inline"> more</span>
+      </span>
+      {attention ? <Dot /> : null}
+    </>
+  );
+}
+
 /**
  * The menu behind a header row's "+N more" button, listing the items there was no room for. The button carries a dot
  * while any of them has something the person has not seen.
@@ -54,16 +74,9 @@ export function ItemSwitcher({ items, current }: Readonly<{ items: readonly Swit
         aria-expanded={menu.open}
         onClick={menu.toggle}
         onKeyDown={menu.onTriggerKeyDown}
-        className={`flex h-[34px] items-center gap-1.5 whitespace-nowrap rounded-[9px] border px-2.5 text-[13px] hover:border-asst-accent-line hover:bg-asst-field ${attention ? "border-asst-accent bg-asst-field" : "border-asst-strong"}`}
+        className={moreButtonClass(attention)}
       >
-        <span aria-hidden="true" className="text-sm leading-none text-asst-accent">
-          ▤
-        </span>
-        <span aria-hidden="true">
-          +{items.length}
-          <span className="hidden min-[480px]:inline"> more</span>
-        </span>
-        {attention ? <Dot /> : null}
+        <MoreLabel count={items.length} attention={attention} />
       </button>
       {menu.open ? (
         <div

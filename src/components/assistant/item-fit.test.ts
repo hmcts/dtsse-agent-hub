@@ -21,8 +21,17 @@ describe("fitItems", () => {
     expect(fitItems({ ...base, widths: [100, 100, 100, 100], available: 300, current: 1 })).toEqual({ shown: [0, 1], hidden: [2, 3] });
   });
 
-  it("should hide every item when not even the first fits beside the overflow button", () => {
-    expect(fitItems({ ...base, widths: [100, 100], available: 120, current: 1 })).toEqual({ shown: [], hidden: [0, 1] });
+  it("should show only the open item when not even the first fits beside the overflow button", () => {
+    expect(fitItems({ ...base, widths: [100, 100], available: 120, current: 1 })).toEqual({ shown: [1], hidden: [0] });
+  });
+
+  it("should show no item when not even the first fits and none is open", () => {
+    expect(fitItems({ ...base, widths: [100, 100], available: 120 })).toEqual({ shown: [], hidden: [0, 1] });
+  });
+
+  it("should drop trailing items until the open item fits beside those shown", () => {
+    // Room is 240: the open item's 200 leaves space for no other item, though one fit before it took the last place.
+    expect(fitItems({ ...base, widths: [100, 100, 100, 200], available: 300, current: 3 })).toEqual({ shown: [3], hidden: [0, 1, 2] });
   });
 
   it("should show nothing when there are no items", () => {

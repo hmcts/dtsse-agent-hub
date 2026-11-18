@@ -190,6 +190,11 @@ beforeEach(() => {
     writable: true,
     value: () => ({ matches: false, addEventListener: () => undefined, removeEventListener: () => undefined })
   });
+  // jsdom does no layout, so the header's item row is given room for every item.
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    const width = this.getAttribute("role") === "group" ? 1000 : 10;
+    return { width, height: 0, top: 0, left: 0, right: width, bottom: 0, x: 0, y: 0, toJSON: () => ({}) };
+  });
   Object.defineProperty(globalThis, "ResizeObserver", {
     configurable: true,
     writable: true,

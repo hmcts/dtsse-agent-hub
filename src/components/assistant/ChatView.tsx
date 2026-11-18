@@ -1028,7 +1028,7 @@ export function ChatView({
         <header className="flex h-14 shrink-0 items-center gap-3 border-b border-asst-field px-4">
           <SidebarToggle />
           {/* Gives way long before the product chip beside it, keeping 4rem so the start of the name always shows. */}
-          <h1 className="min-w-[4rem] shrink-[999] truncate text-[15px] font-medium">{view.title}</h1>
+          <h1 className="min-w-[4rem] shrink-[999] min-[480px]:min-w-[10rem] truncate text-[15px] font-medium">{view.title}</h1>
           <label className="sr-only" htmlFor="chat-product">
             Product
           </label>
@@ -1038,7 +1038,7 @@ export function ChatView({
             to 40 characters, and how a select renders a value too long for it is the engine's business rather than
             `text-overflow`'s. The chip never goes below 4rem, so it stays readable and operable in a 320px header.
           */}
-          <div className="relative flex min-w-[4rem] max-w-[9.5rem] shrink items-center gap-1.5 rounded-md border border-asst-accent-line px-2 py-1 font-plex-mono text-[11px] uppercase leading-none tracking-wider text-asst-accent-soft focus-within:border-asst-accent">
+          <div className="relative flex min-w-[4rem] max-w-[9.5rem] shrink items-center min-[480px]:shrink-0 gap-1.5 rounded-md border border-asst-accent-line px-2 py-1 font-plex-mono text-[11px] uppercase leading-none tracking-wider text-asst-accent-soft focus-within:border-asst-accent">
             <span aria-hidden="true" className="min-w-0 truncate">
               {productLabel(product)}
             </span>

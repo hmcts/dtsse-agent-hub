@@ -11,11 +11,13 @@ const layout = { room: 0, button: 100 };
 const resizes: (() => void)[] = [];
 
 beforeEach(() => {
-  layout.room = 0;
+  layout.room = 1000;
   layout.button = 100;
   resizes.length = 0;
-  Object.defineProperty(HTMLElement.prototype, "clientWidth", { configurable: true, get: () => layout.room });
-  Object.defineProperty(HTMLElement.prototype, "offsetWidth", { configurable: true, get: () => layout.button });
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    const width = this.getAttribute("role") === "group" ? layout.room : layout.button;
+    return { width, height: 0, top: 0, left: 0, right: width, bottom: 0, x: 0, y: 0, toJSON: () => ({}) };
+  });
   vi.stubGlobal(
     "ResizeObserver",
     class {
@@ -31,8 +33,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
-  Reflect.deleteProperty(HTMLElement.prototype, "clientWidth");
-  Reflect.deleteProperty(HTMLElement.prototype, "offsetWidth");
+  vi.restoreAllMocks();
 });
 
 function item(key: string, label: string, overrides: Partial<SwitcherItem> = {}): SwitcherItem {
@@ -119,6 +120,20 @@ describe("ItemButtons", () => {
     });
     expect(shown()).toHaveLength(4);
     expect(screen.queryByRole("button", { name: /more item/ })).toBeNull();
+  });
+
+  it("should show the overflow button and only the open item when the row measures no width", () => {
+    layout.room = 0;
+    render(<ItemButtons items={FOUR} current="b" />);
+    expect(shown()).toEqual(["Beta"]);
+    expect(screen.getByRole("button", { name: "3 more items" })).toBeTruthy();
+  });
+
+  it("should show the overflow button and no item when the row measures no width and none is open", () => {
+    layout.room = 0;
+    render(<ItemButtons items={FOUR} current={null} />);
+    expect(shown()).toEqual([]);
+    expect(screen.getByRole("button", { name: "4 more items" })).toBeTruthy();
   });
 
   it("should show nothing when the conversation holds no item", () => {
