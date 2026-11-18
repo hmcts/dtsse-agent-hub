@@ -1,6 +1,8 @@
+import { MAX_DOCX_BYTES } from "@/assistant/docmosis";
 import type { IndexEntry, LibraryStatus } from "@/assistant/docmosis-library";
-import { WAKING_RETRY_MS } from "@/components/assistant/AtlassianSearch";
+import { WAKING_RETRIES, WAKING_RETRY_MS } from "@/components/assistant/AtlassianSearch";
 import { type PodJobEvents, PodJobRefused, requestPodJob, waitForPodJob } from "@/components/assistant/podJobClient";
+import { fileSizeLabel } from "@/components/assistant/uploadClient";
 
 /**
  * The browser's end of the Docmosis template library and of loading a template from it. See "Docmosis template
@@ -9,8 +11,6 @@ import { type PodJobEvents, PodJobRefused, requestPodJob, waitForPodJob } from "
 
 const LIBRARY_URL = "/api/ui/assistant/docmosis-library";
 const LOAD_KIND = "docmosis.load";
-/** How many times a load asks again while the assistant starts: about three minutes. */
-const WAKING_RETRIES = 36;
 
 export type LibraryRead = { ok: true; status: LibraryStatus } | { ok: false; status: number; error: string };
 
@@ -134,14 +134,19 @@ export async function loadTemplate(
   }
 }
 
+const TOO_LARGE = `That template is larger than ${fileSizeLabel(MAX_DOCX_BYTES)}, more than the Assistant can open.`;
+
 function sentence(words: string): string {
   const trimmed = words.trim();
   const capital = `${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}`;
   return /[.!?]$/.test(capital) ? capital : `${capital}.`;
 }
 
-/** One plain sentence for a load that did not end in a new version; `conflict` is the panel's own choice, not this. */
-export function loadFailureSentence(outcome: Exclude<LoadOutcome, { status: "done" }>): string {
+/**
+ * One plain sentence for a load that did not end in a new version; `conflict` is the panel's own choice, not this.
+ * `owner` is the GitHub organisation the library is in, whose single sign-on a sign-in may need.
+ */
+export function loadFailureSentence(outcome: Exclude<LoadOutcome, { status: "done" }>, { owner }: { owner: string }): string {
   switch (outcome.status) {
     case "waking":
       return "Your assistant is still starting. Try again in a minute.";
@@ -157,19 +162,22 @@ export function loadFailureSentence(outcome: Exclude<LoadOutcome, { status: "don
       if (outcome.httpStatus === 429) {
         return "You have loaded a lot of templates in the last few minutes. Try again shortly.";
       }
+      if (outcome.httpStatus === 413) {
+        return TOO_LARGE;
+      }
       return sentence(outcome.error);
     case "failed":
       switch (outcome.error) {
         case "signed_out":
           return "Sign in to GitHub in your assistant, then pick the template again.";
         case "sso":
-          return "Your GitHub sign-in is not authorised for the hmcts organisation's single sign-on.";
+          return `Your GitHub sign-in is not authorised for the ${owner} organisation's single sign-on.`;
         case "not_found":
           return "GitHub could not find that template, or your account cannot see it.";
         case "rate_limited":
           return "GitHub's rate limit has been reached. Try again later.";
         case "too_large":
-          return "That template is larger than 5 MB, more than the Assistant can open.";
+          return TOO_LARGE;
         case "not_docx":
           return "That file is not a Word document the Assistant can open.";
         case "checksum":

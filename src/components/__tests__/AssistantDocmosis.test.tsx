@@ -56,6 +56,7 @@ function view(overrides: Partial<DocmosisView> = {}): DocmosisView {
     updated_at: "2026-11-03T09:00:00.000Z",
     has_pdf: true,
     render_error: null,
+    source_path: null,
     ...overrides
   };
 }

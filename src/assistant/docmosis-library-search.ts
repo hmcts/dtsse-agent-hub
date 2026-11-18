@@ -59,22 +59,64 @@ function tokenRank(template: PreparedTemplate, token: string): number | undefine
   return template.folderLower.includes(token) ? 3 : undefined;
 }
 
+interface Ranked {
+  template: PreparedTemplate;
+  rank: number;
+}
+
+const byRank = (a: Ranked, b: Ranked): number =>
+  a.rank - b.rank || a.template.path.length - b.template.path.length || byCodePoint(a.template.path, b.template.path);
+
+/** The first `limit` of `ranked` in `byRank` order, kept in a list that long rather than by sorting every match. */
+function firstPage(ranked: readonly Ranked[], limit: number): Ranked[] {
+  const kept: Ranked[] = [];
+  for (const candidate of ranked) {
+    const last = kept.at(-1);
+    if (kept.length === limit && (last === undefined || byRank(candidate, last) >= 0)) {
+      continue;
+    }
+    let low = 0;
+    let high = kept.length;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (byRank(kept[middle] as Ranked, candidate) <= 0) {
+        low = middle + 1;
+      } else {
+        high = middle;
+      }
+    }
+    kept.splice(low, 0, candidate);
+    if (kept.length > limit) {
+      kept.pop();
+    }
+  }
+  return kept;
+}
+
+export interface SearchResult {
+  /** The best matches, best first, no more than the limit. */
+  results: PreparedTemplate[];
+  /** How many templates match in all. */
+  total: number;
+}
+
 /**
  * The templates every word of `query` matches, in the name or the folder, best first: a name that starts with the
  * word, then one with a word starting with it, then one containing it, then a match on the folder alone. An entry
  * ranks as its worst-matched word. Ties go to the shorter path, then code-point order, so the list never reshuffles.
- * An empty query lists everything, in that order, within `folder` when one is given.
+ * An empty query lists everything, in that order, within `folder` when one is given. Every match is counted but only
+ * the page returned is put in order, since a short query matches most of the index.
  */
 export function searchTemplates(
   prepared: readonly PreparedTemplate[],
   query: string,
   { folder, limit = DEFAULT_SEARCH_LIMIT }: { folder?: string; limit?: number } = {}
-): PreparedTemplate[] {
+): SearchResult {
   const tokens = query
     .toLowerCase()
     .split(/\s+/)
     .filter((token) => token !== "");
-  const ranked: { template: PreparedTemplate; rank: number }[] = [];
+  const ranked: Ranked[] = [];
   for (const template of prepared) {
     if (folder !== undefined && template.folder !== folder) {
       continue;
@@ -92,8 +134,9 @@ export function searchTemplates(
       ranked.push({ template, rank });
     }
   }
-  ranked.sort((a, b) => a.rank - b.rank || a.template.path.length - b.template.path.length || byCodePoint(a.template.path, b.template.path));
-  return ranked.slice(0, Math.max(0, limit)).map(({ template }) => template);
+  const page = Math.max(0, limit);
+  const shown = ranked.length <= page ? ranked.sort(byRank) : firstPage(ranked, page);
+  return { results: shown.map(({ template }) => template), total: ranked.length };
 }
 
 /** The folders the index has templates in, with how many each, in code-point order. A file at the top has none. */

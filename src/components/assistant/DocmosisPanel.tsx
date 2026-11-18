@@ -37,6 +37,15 @@ export const RENDER_AFTER_MS = 800;
 /** How long the renderer is left alone when it is busy and says nothing of when to come back. */
 const BUSY_RETRY_SECONDS = 5;
 
+/** The latest version of the conversation's template, as the hub holds it now. */
+async function readDocmosisView(conversationId: string, signal?: AbortSignal): Promise<DocmosisView> {
+  const response = await fetch(docmosisUrl(conversationId), { cache: "no-store", ...(signal === undefined ? {} : { signal }) });
+  if (!response.ok) {
+    throw new Error(`the template read answered ${response.status}`);
+  }
+  return (await response.json()) as DocmosisView;
+}
+
 /**
  * The latest version of the template, read when the panel opens and again whenever the page says `version`,
  * `revision` or `pdf` has moved on, which is how a PDF put after the version the assistant wrote reaches the panel.
@@ -50,11 +59,7 @@ export function useDocmosisView(docmosis: DocmosisSummary, conversationId: strin
     const controller = new AbortController();
     void (async () => {
       try {
-        const response = await fetch(docmosisUrl(conversationId), { cache: "no-store", signal: controller.signal });
-        if (!response.ok) {
-          throw new Error(`the template read answered ${response.status}`);
-        }
-        const view = (await response.json()) as DocmosisView;
+        const view = await readDocmosisView(conversationId, controller.signal);
         setRead({ view, failed: false });
       } catch {
         if (!controller.signal.aborted) {
@@ -246,15 +251,12 @@ interface Base {
 
 const isNewer = (view: Base, base: Base): boolean => view.version > base.version || (view.version === base.version && view.revision > base.revision);
 
-/** The summary the hub gives every version a load from the library writes, whatever summary the pod sent. */
-const LOADED_SUMMARY_PREFIX = "Loaded ";
-
 /**
- * A version a load from the library wrote, not yet rendered: the person's own, as first written, with no PDF and no
- * merge error. An edit's version is rendered by the tab it was typed in, so it never counts.
+ * A version a load from the library wrote, not yet rendered: the person's own, as first written, from a library path,
+ * with no PDF and no merge error. An edit's version is rendered by the tab it was typed in, so it never counts.
  */
 function awaitsFirstRender(view: DocmosisView): boolean {
-  return view.by === "user" && view.revision === 0 && !view.has_pdf && view.render_error === null && view.summary?.startsWith(LOADED_SUMMARY_PREFIX) === true;
+  return view.by === "user" && view.revision === 0 && view.source_path !== null && !view.has_pdf && view.render_error === null;
 }
 
 function describeVersion(entry: DocmosisVersionEntry): string {
@@ -922,79 +924,135 @@ type Load =
   | { phase: "loading" | "waking"; name: string }
   /** The load has written its version, and the page has yet to bring the summary that names it. */
   | { phase: "arriving"; name: string; version: number; revision: number }
-  | { phase: "conflict"; template: PreparedTemplate; theirs: Base }
+  /** `view` is the assistant's version as read when the load was refused, or `null` when that read failed. */
+  | { phase: "conflict"; template: PreparedTemplate; owner: string; theirs: Base; view: DocmosisView | null }
   | { phase: "failed"; message: string };
 
-/** The version and revision the conversation holds now, read afresh, since the page's summary may not have caught up. */
-async function currentBase(conversationId: string, fallback: Base): Promise<Base> {
-  try {
-    const response = await fetch(docmosisUrl(conversationId), { cache: "no-store" });
-    if (response.ok) {
-      const view = (await response.json()) as DocmosisView;
-      return { version: view.version, revision: view.revision };
-    }
-  } catch {
-    // The summary's base is then the best there is; a load on it that is stale is refused as a conflict again.
+/** How long a written load waits for the page's summary before the panel reads the template itself. */
+export const ARRIVAL_TIMEOUT_MS = 10_000;
+
+const summaryOf = (view: DocmosisView): DocmosisSummary => ({
+  name: view.name,
+  version: view.version,
+  revision: view.revision,
+  updatedBy: view.by,
+  pdf: view.has_pdf ? "ready" : view.render_error === null ? "pending" : "failed"
+});
+
+/** The later of the page's summary and one the panel read for itself; the page's on a tie. */
+function newest(page: DocmosisSummary | null, read: DocmosisSummary | null): DocmosisSummary | null {
+  if (read === null) {
+    return page;
   }
-  return fallback;
+  return page === null || isNewer(read, page) ? read : page;
 }
 
+const baseOf = (summary: DocmosisSummary | null): Base => ({ version: summary?.version ?? 0, revision: summary?.revision ?? 0 });
+
+export interface TemplateLoader {
+  load: Load;
+  /** The library is showing in the template's place, for a load or after Change template. */
+  choosing: boolean;
+  /** A load is running on the pod, which cannot be called back, so nothing may leave it behind or start another. */
+  pending: boolean;
+  /** The template as the panel last read it, for when the page's summary has not caught up with a load. */
+  adopted: DocmosisSummary | null;
+  reread: number;
+  choose: () => void;
+  back: () => void;
+  pick: (template: PreparedTemplate, library: { owner: string }) => void;
+  loadAnyway: () => void;
+  keepTheirs: () => void;
+}
+
+export type LoadSettled = "loaded" | "conflict" | "failed";
+
 /**
- * The conversation's Docmosis template beside the chat, or, for its owner, the template library to choose one from:
- * when the chat has none yet, and after Change template. A load writes the person's own version, which reaches the
- * panel through the page's summary like any other, and the panel renders it.
+ * A load from the template library and what the person decides about it. It lives with the chat rather than in the
+ * panel, because the pod's job cannot be stopped: closing the panel leaves it running, and its outcome waits here for
+ * the panel to open again. `onSettled` is told once the load ends, so the chat can bring the panel back.
  */
-export function DocmosisPanel({
+export function useTemplateLoad({
   conversationId,
   docmosis,
-  owner,
-  onClose,
-  narrow,
   announce,
-  onBusy,
-  library = false,
-  embedded = false
+  onSettled
 }: {
   conversationId: string;
   docmosis: DocmosisSummary | null;
-  owner: boolean;
-  /** The chat has a pod to load a template from the library with, which a local chat does not. */
-  library?: boolean;
-  onClose: () => void;
-  narrow: boolean;
   announce: (text: string) => void;
-  onBusy?: (busy: boolean) => void;
-  /** Fills the box it is placed in instead of standing beside the chat at a width the person sets. */
-  embedded?: boolean;
-}) {
+  onSettled?: (outcome: LoadSettled) => void;
+}): TemplateLoader {
   const [choosing, setChoosing] = useState(false);
   const [load, setLoad] = useState<Load>({ phase: "idle" });
+  const [adopted, setAdopted] = useState<DocmosisSummary | null>(null);
   const [reread, setReread] = useState(0);
   const podJobs = useHubSubscribe("assistant_pod_job");
   const loading = useRef<AbortController | null>(null);
-  const summaryNow = useRef(docmosis);
-  summaryNow.current = docmosis;
+  const summaryNow = useRef<DocmosisSummary | null>(null);
+  summaryNow.current = newest(docmosis, adopted);
   const announceNow = useRef(announce);
   announceNow.current = announce;
-  const chooser = owner && library && !embedded;
+  const settledNow = useRef(onSettled);
+  settledNow.current = onSettled;
 
   useEffect(() => () => loading.current?.abort(), []);
 
+  function settle(next: Load, outcome: LoadSettled): void {
+    setLoad(next);
+    settledNow.current?.(outcome);
+  }
+
+  function landed(name: string): void {
+    setChoosing(false);
+    settle({ phase: "idle" }, "loaded");
+    announceNow.current(`Loaded ${name}`);
+  }
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a load arriving or the summary moving on is what can end the wait
   useEffect(() => {
     if (load.phase !== "arriving" || docmosis === null) {
       return;
     }
     if (docmosis.version > load.version || (docmosis.version === load.version && docmosis.revision >= load.revision)) {
-      setLoad({ phase: "idle" });
-      setChoosing(false);
-      announceNow.current(`Loaded ${load.name}`);
+      landed(load.name);
     }
   }, [load, docmosis]);
 
-  async function start(template: PreparedTemplate, base: Base): Promise<void> {
+  // The summary can be lost on its way to the tab, so a load that has written its version is read for itself in the end.
+  const arriving = load.phase === "arriving" ? load : null;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the load being waited for is all that sets the timer
+  useEffect(() => {
+    if (arriving === null) {
+      return;
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const view = await readDocmosisView(conversationId, controller.signal);
+          if (!controller.signal.aborted) {
+            setAdopted(summaryOf(view));
+            landed(arriving.name);
+          }
+        } catch {
+          if (!controller.signal.aborted) {
+            settle({ phase: "failed", message: `${arriving.name} was loaded, but it could not be shown. Reload the page to see it.` }, "failed");
+          }
+        }
+      })();
+    }, ARRIVAL_TIMEOUT_MS);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [arriving, conversationId]);
+
+  async function start(template: PreparedTemplate, owner: string, base: Base): Promise<void> {
     loading.current?.abort();
     const controller = new AbortController();
     loading.current = controller;
+    setChoosing(true);
     setLoad({ phase: "loading", name: template.name });
     let outcome: LoadOutcome;
     try {
@@ -1010,7 +1068,7 @@ export function DocmosisPanel({
       );
     } catch {
       if (!controller.signal.aborted) {
-        setLoad({ phase: "failed", message: "The template could not be loaded: the hub could not be reached. Try again." });
+        settle({ phase: "failed", message: "The template could not be loaded: the hub could not be reached. Try again." }, "failed");
       }
       return;
     }
@@ -1022,10 +1080,15 @@ export function DocmosisPanel({
       return;
     }
     if (outcome.status === "failed" && outcome.error === "conflict") {
-      const summary = summaryNow.current;
-      const theirs = await currentBase(conversationId, { version: summary?.version ?? 0, revision: summary?.revision ?? 0 });
+      let view: DocmosisView | null = null;
+      try {
+        view = await readDocmosisView(conversationId, controller.signal);
+      } catch {
+        // The summary's base is then the best there is; a load on it that is stale is refused as a conflict again.
+      }
       if (!controller.signal.aborted) {
-        setLoad({ phase: "conflict", template, theirs });
+        const theirs = view === null ? baseOf(summaryNow.current) : { version: view.version, revision: view.revision };
+        settle({ phase: "conflict", template, owner, theirs, view }, "conflict");
         announceNow.current("The assistant changed the template while yours was loading");
       }
       return;
@@ -1033,22 +1096,81 @@ export function DocmosisPanel({
     if (outcome.status === "refused" && outcome.httpStatus === 409) {
       setReread((count) => count + 1);
     }
-    setLoad({ phase: "failed", message: loadFailureSentence(outcome) });
+    settle({ phase: "failed", message: loadFailureSentence(outcome, { owner }) }, "failed");
   }
 
-  function pick(template: PreparedTemplate): void {
-    const summary = summaryNow.current;
-    void start(template, { version: summary?.version ?? 0, revision: summary?.revision ?? 0 });
-  }
+  const pending = load.phase === "loading" || load.phase === "waking" || load.phase === "arriving";
+  return {
+    load,
+    choosing,
+    pending,
+    adopted,
+    reread,
+    choose: () => setChoosing(true),
+    back: () => {
+      if (!pending) {
+        setLoad({ phase: "idle" });
+        setChoosing(false);
+      }
+    },
+    pick: (template, { owner }) => {
+      if (!pending) {
+        void start(template, owner, baseOf(summaryNow.current));
+      }
+    },
+    loadAnyway: () => {
+      if (load.phase === "conflict") {
+        void start(load.template, load.owner, load.theirs);
+      }
+    },
+    keepTheirs: () => {
+      if (load.phase !== "conflict") {
+        return;
+      }
+      if (load.view !== null) {
+        setAdopted(summaryOf(load.view));
+      }
+      setLoad({ phase: "idle" });
+      setChoosing(false);
+      announceNow.current("Kept the assistant's version");
+    }
+  };
+}
 
-  function back(): void {
-    loading.current?.abort();
-    setLoad({ phase: "idle" });
-    setChoosing(false);
-  }
+/**
+ * The conversation's Docmosis template beside the chat, or, for its owner, the template library to choose one from:
+ * when the chat has none yet, after Change template, and for as long as a load from it is running or waits on a
+ * decision. A load writes the person's own version, which reaches the panel through the page's summary like any
+ * other, and the panel renders it. `loader` is the chat's, so the load outlives the panel; without one, as on a local
+ * or shared chat, there is no library.
+ */
+export function DocmosisPanel({
+  conversationId,
+  docmosis,
+  owner,
+  onClose,
+  narrow,
+  announce,
+  onBusy,
+  loader,
+  embedded = false
+}: {
+  conversationId: string;
+  docmosis: DocmosisSummary | null;
+  owner: boolean;
+  loader?: TemplateLoader;
+  onClose: () => void;
+  narrow: boolean;
+  announce: (text: string) => void;
+  onBusy?: (busy: boolean) => void;
+  /** Fills the box it is placed in instead of standing beside the chat at a width the person sets. */
+  embedded?: boolean;
+}) {
+  const summary = newest(docmosis, loader?.adopted ?? null);
+  const chooser = owner && !embedded ? (loader ?? null) : null;
 
-  if (chooser && (docmosis === null || choosing)) {
-    const busy = load.phase === "loading" || load.phase === "waking" || load.phase === "arriving";
+  if (chooser !== null && (summary === null || chooser.choosing || chooser.load.phase !== "idle")) {
+    const { pending } = chooser;
     return (
       <PanelShell
         title="Choose a template"
@@ -1056,23 +1178,19 @@ export function DocmosisPanel({
         embedded={embedded}
         onClose={onClose}
         actions={
-          docmosis === null ? null : (
-            <button type="button" onClick={back} className={button}>
+          summary === null || pending ? null : (
+            <button type="button" onClick={chooser.back} className={button}>
               Back to template
             </button>
           )
         }
       >
-        <LoadNotice
-          load={load}
-          onLoadAnyway={(template, theirs) => void start(template, theirs)}
-          onKeepTheirs={(theirs) => setLoad({ phase: "arriving", name: summaryNow.current?.name ?? "the template", ...theirs })}
-        />
-        <TemplateLibrary onPick={pick} onCancel={docmosis === null ? onClose : back} busy={busy} reread={reread} />
+        <LoadNotice load={chooser.load} replacing={summary?.name ?? null} onLoadAnyway={chooser.loadAnyway} onKeepTheirs={chooser.keepTheirs} />
+        <TemplateLibrary onPick={chooser.pick} onCancel={summary === null || pending ? onClose : chooser.back} busy={pending} reread={chooser.reread} />
       </PanelShell>
     );
   }
-  if (docmosis === null) {
+  if (summary === null) {
     return (
       <PanelShell title="Template" narrow={narrow} embedded={embedded} onClose={onClose}>
         <p className="px-4 py-5 text-[13px] text-asst-muted">There is no template in this chat yet.</p>
@@ -1082,28 +1200,32 @@ export function DocmosisPanel({
   return (
     <DocmosisTemplate
       conversationId={conversationId}
-      docmosis={docmosis}
+      docmosis={summary}
       owner={owner}
       onClose={onClose}
       narrow={narrow}
       announce={announce}
       onBusy={onBusy}
       embedded={embedded}
-      {...(chooser ? { onChange: () => setChoosing(true) } : {})}
+      {...(chooser === null ? {} : { onChange: chooser.choose })}
     />
   );
 }
 
 function LoadNotice({
   load,
+  replacing,
   onLoadAnyway,
   onKeepTheirs
 }: {
   load: Load;
-  onLoadAnyway: (template: PreparedTemplate, theirs: Base) => void;
-  onKeepTheirs: (theirs: Base) => void;
+  /** The template the chat has now, which a load replaces. */
+  replacing: string | null;
+  onLoadAnyway: () => void;
+  onKeepTheirs: () => void;
 }) {
   const row = "flex shrink-0 flex-wrap items-center gap-2 border-b border-asst-field px-4 py-2.5 text-[13px]";
+  const after = `${replacing === null ? "" : ` It replaces ${replacing} when it arrives.`} You can close this panel while it loads.`;
   switch (load.phase) {
     case "idle":
       return null;
@@ -1111,13 +1233,13 @@ function LoadNotice({
     case "arriving":
       return (
         <p role="status" className={`${row} text-asst-muted`}>
-          Loading {load.name}…
+          {`Loading ${load.name}…${after}`}
         </p>
       );
     case "waking":
       return (
         <p role="status" className={`${row} text-asst-muted`}>
-          Your assistant is starting, so it can load {load.name}. This takes a minute or two.
+          {`Your assistant is starting, so it can load ${load.name}. This takes a minute or two.${after}`}
         </p>
       );
     case "failed":
@@ -1130,10 +1252,10 @@ function LoadNotice({
       return (
         <div role="alert" className={`${row} bg-asst-raised`}>
           <span className="min-w-0 flex-1">The assistant wrote version {load.theirs.version} while yours was loading.</span>
-          <button type="button" onClick={() => onLoadAnyway(load.template, load.theirs)} className={button}>
+          <button type="button" onClick={onLoadAnyway} className={button}>
             Load mine anyway
           </button>
-          <button type="button" onClick={() => onKeepTheirs(load.theirs)} className={button}>
+          <button type="button" onClick={onKeepTheirs} className={button}>
             Keep theirs
           </button>
         </div>

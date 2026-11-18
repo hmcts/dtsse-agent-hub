@@ -32,7 +32,7 @@ import type { ExportToConfluenceAction } from "@/components/assistant/Confluence
 import type { SaveDeckAction, UnsavedDeckDraft } from "@/components/assistant/DeckEditor";
 import type { RestoreDeckAction } from "@/components/assistant/DeckHistory";
 import { DeckPanel, type SlideAsk } from "@/components/assistant/DeckPanel";
-import { DocmosisPanel } from "@/components/assistant/DocmosisPanel";
+import { DocmosisPanel, type LoadSettled, useTemplateLoad } from "@/components/assistant/DocmosisPanel";
 import { ticketsOffered } from "@/components/assistant/ExportFooter";
 import { ForkedThread } from "@/components/assistant/ForkedThread";
 import type { ExportToGithubAction } from "@/components/assistant/GithubExport";
@@ -576,6 +576,26 @@ export function ChatView({
   function markDocmosisBusy(busy: boolean): void {
     docmosisBusy.current = busy;
   }
+  /**
+   * A load from the template library ended while the panel was closed: the panel opens on its outcome, unless the
+   * person is part-way through the document or the slides, when the outcome waits for them to open it.
+   */
+  function templateLoadSettled(outcome: LoadSettled): void {
+    if (panelNow.current === "docmosis") {
+      return;
+    }
+    if ((panelNow.current === "document" && documentBusy.current) || (panelNow.current === "deck" && deckBusy.current)) {
+      if (outcome === "failed") {
+        arrivals.announce("Your template did not load. Open the template to see why.");
+      }
+      return;
+    }
+    setPanel("docmosis");
+    if (outcome === "failed") {
+      arrivals.announce("Your template did not load");
+    }
+  }
+  const templateLoad = useTemplateLoad({ conversationId: view.id, docmosis, announce: arrivals.announce, onSettled: templateLoadSettled });
   const artefact: ArtefactSnapshot = {
     title: view.artefact.title,
     markdown: view.artefact.markdown,
@@ -878,7 +898,7 @@ export function ChatView({
           conversationId={view.id}
           docmosis={docmosis}
           owner
-          library={pod}
+          loader={pod ? templateLoad : undefined}
           onClose={() => setPanel(null)}
           onBusy={markDocmosisBusy}
           narrow={narrow}

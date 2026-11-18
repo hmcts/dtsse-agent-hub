@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { MAX_DOCX_BYTES } from "@/assistant/docmosis";
 import { INDEX_REFRESH_PENDING_MS, type LibraryStatus } from "@/assistant/docmosis-library";
-import { DEFAULT_SEARCH_LIMIT, folders, type PreparedTemplate, prepare, searchTemplates } from "@/assistant/docmosis-library-search";
-import { WAKING_RETRY_MS } from "@/components/assistant/AtlassianSearch";
+import { folders, type PreparedTemplate, prepare, searchTemplates } from "@/assistant/docmosis-library-search";
+import { WAKING_RETRIES, WAKING_RETRY_MS } from "@/components/assistant/AtlassianSearch";
 import { type LibraryRead, libraryEntries, openLibrary, readLibrary } from "@/components/assistant/docmosisLoadClient";
 import { fileSizeLabel } from "@/components/assistant/uploadClient";
 import { useHubEvent } from "@/components/live/HubStream";
@@ -20,8 +20,6 @@ import { instant } from "@/web/format";
  */
 
 const MAX_QUERY = 200;
-/** How many times opening the library is asked again while the assistant starts: about three minutes. */
-const WAKING_RETRIES = 36;
 
 type Read = { phase: "opening" } | { phase: "unreachable"; message: string } | { phase: "ready"; status: LibraryStatus };
 
@@ -97,7 +95,8 @@ export function TemplateLibrary({
   busy = false,
   reread = 0
 }: {
-  onPick: (template: PreparedTemplate) => void;
+  /** Told the library's GitHub owner as well, whose single sign-on a load may need. */
+  onPick: (template: PreparedTemplate, library: { owner: string }) => void;
   onCancel: () => void;
   /** A load is under way, so no other template may be picked until it ends. */
   busy?: boolean;
@@ -113,6 +112,8 @@ export function TemplateLibrary({
   const [folder, setFolder] = useState<string | undefined>(undefined);
   const [active, setActive] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  const [downloadFailed, setDownloadFailed] = useState(false);
+  const [downloadAttempt, setDownloadAttempt] = useState(0);
   const mounted = useRef(true);
   const retries = useRef(0);
   const wakeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -188,6 +189,7 @@ export function TemplateLibrary({
   }, [pending, readAgain]);
 
   const entriesUrl = status?.entries_url ?? null;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: another attempt is what makes a failed download worth trying again
   useEffect(() => {
     if (entriesUrl === null) {
       return;
@@ -198,28 +200,40 @@ export function TemplateLibrary({
         const body = await libraryEntries(entriesUrl, { signal: controller.signal });
         if (!controller.signal.aborted) {
           setIndex({ url: entriesUrl, prepared: prepare(body.entries) });
+          setDownloadFailed(false);
         }
       } catch {
         if (!controller.signal.aborted) {
-          setNotice("The template list could not be downloaded. Try Refresh.");
+          setDownloadFailed(true);
         }
       }
     })();
     return () => controller.abort();
-  }, [entriesUrl]);
+  }, [entriesUrl, downloadAttempt]);
 
   async function refresh(): Promise<void> {
     setRefreshing(true);
     setNotice(null);
     try {
       const answer = await openLibrary(true);
-      if (!answer.ok && answer.status === 429) {
+      if (!mounted.current) {
+        return;
+      }
+      if (answer.ok) {
+        take(answer);
+        if (downloadFailed) {
+          setDownloadAttempt((count) => count + 1);
+        }
+      } else if (answer.status === 429) {
         setNotice("The list was checked a moment ago. Try again in half a minute.");
       } else {
-        take(answer);
+        // The list on screen is still the last one read, so it stays, with why it could not be checked again.
+        setNotice(answer.error);
       }
     } catch {
-      setNotice(UNREACHABLE);
+      if (mounted.current) {
+        setNotice(UNREACHABLE);
+      }
     } finally {
       if (mounted.current) {
         setRefreshing(false);
@@ -230,18 +244,16 @@ export function TemplateLibrary({
   // The index of the commit the status names, or the one before it while the new one downloads.
   const prepared = index?.prepared ?? null;
   const chips = useMemo(() => (prepared === null ? [] : folders(prepared)), [prepared]);
-  const matches = useMemo(
-    () => (prepared === null ? [] : searchTemplates(prepared, query, { folder, limit: Number.MAX_SAFE_INTEGER })),
-    [prepared, query, folder]
-  );
-  const results = matches.slice(0, DEFAULT_SEARCH_LIMIT);
+  const found = useMemo(() => (prepared === null ? { results: [], total: 0 } : searchTemplates(prepared, query, { folder })), [prepared, query, folder]);
+  const results = found.results;
   const current = results.length === 0 ? -1 : Math.min(active, results.length - 1);
   const optionId = (at: number) => `${listId}-${at}`;
-  const lines = statusLines(read, prepared, matches.length, results.length);
+  const lines = statusLines(read, prepared, found.total, results.length);
+  const notices = [...(downloadFailed ? ["The template list could not be downloaded. Try Refresh."] : []), ...(notice === null ? [] : [notice])];
 
   function pick(template: PreparedTemplate): void {
-    if (!busy && !tooLarge(template)) {
-      onPick(template);
+    if (!busy && !tooLarge(template) && status !== null) {
+      onPick(template, { owner: status.owner });
     }
   }
 
@@ -328,7 +340,7 @@ export function TemplateLibrary({
       )}
       {/* Mounted whether or not there is anything to say, because a live region that appears with its text is not reliably read. */}
       <p role="status" className="text-xs text-asst-faint empty:hidden">
-        {[...lines, ...(notice === null ? [] : [notice])].join(" ")}
+        {[...lines, ...notices].join(" ")}
       </p>
       {status?.failure?.reason === "sso" && status.failure.sso_url !== undefined ? (
         <a href={status.failure.sso_url} target="_blank" rel="noreferrer" className="self-start text-xs text-asst-accent underline">

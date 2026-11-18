@@ -34,7 +34,7 @@ import { lookUp as fetchLookup, type LookUp } from "@/components/assistant/looku
 export const LOOKUP_AFTER_MS = 300;
 /** How often a search is tried again while the assistant starts, and for how long. */
 export const WAKING_RETRY_MS = 5000;
-const WAKING_RETRIES = 36;
+export const WAKING_RETRIES = 36;
 
 type Phase = "idle" | "searching" | "found" | "waking" | "signed_out" | "signing_in" | "unsupported" | "failed" | "timeout";
 

@@ -10,9 +10,10 @@ import { TEMPLATES } from "@/assistant/starters";
 import type { ConversationView } from "@/assistant/views";
 import { WAKING_RETRY_MS } from "@/components/assistant/AtlassianSearch";
 import { type ChatActions, ChatView } from "@/components/assistant/ChatView";
-import { DocmosisPanel, RENDER_AFTER_MS, SharedDocmosis } from "@/components/assistant/DocmosisPanel";
+import { ARRIVAL_TIMEOUT_MS, DocmosisPanel, RENDER_AFTER_MS, SharedDocmosis, useTemplateLoad } from "@/components/assistant/DocmosisPanel";
 import type { DocmosisSummary, DocmosisView } from "@/components/assistant/docmosis-data";
 import { TemplateLibrary } from "@/components/assistant/TemplateLibrary";
+import { ANNOUNCE_AFTER_MS } from "@/components/live/Announcer";
 import { instant } from "@/web/format";
 
 vi.mock("@/components/assistant/docmosis-pdf", () => ({
@@ -82,6 +83,7 @@ function view(overrides: Partial<DocmosisView> = {}): DocmosisView {
     updated_at: "2026-11-18T09:00:00.000Z",
     has_pdf: false,
     render_error: null,
+    source_path: "Templates/Base/Claim form.docx",
     ...overrides
   };
 }
@@ -104,7 +106,8 @@ function serve() {
     requests: [{ status: "pending", job_id: JOB }] as PodJobRequest[],
     job: { job_id: JOB, kind: "docmosis.load", status: "pending" } as PodJobView,
     view: view() as DocmosisView | null,
-    renders: [] as unknown[]
+    renders: [] as unknown[],
+    entriesFail: false
   };
   const json = (body: unknown, init?: ResponseInit) => new Response(JSON.stringify(body), init);
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
@@ -121,6 +124,9 @@ function serve() {
       return json(server.status);
     }
     if (url === ENTRIES_URL) {
+      if (server.entriesFail) {
+        return json({ error: "gone" }, { status: 500 });
+      }
       return json({ commit: COMMIT, entries: ENTRIES });
     }
     if (url === `/api/ui/assistant/pod-jobs/${CONVERSATION}`) {
@@ -248,7 +254,7 @@ describe("TemplateLibrary search", () => {
     expect(box().getAttribute("aria-activedescendant")).toBe(first?.id);
     fireEvent.keyDown(box(), { key: "ArrowUp" });
     fireEvent.keyDown(box(), { key: "Enter" });
-    expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ path: "Templates/AAT/Claim letter.docx", blobSha: "1".repeat(40) }));
+    expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ path: "Templates/AAT/Claim letter.docx", blobSha: "1".repeat(40) }), { owner: "hmcts" });
     fireEvent.keyDown(box(), { key: "Escape" });
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
@@ -282,7 +288,9 @@ describe("TemplateLibrary search", () => {
     const { onPick } = await openLibrary();
     fireEvent.change(box(), { target: { value: "notice" } });
     fireEvent.click(screen.getByRole("option"));
-    expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ path: "Templates/Prod/Notice.docx", name: "Notice.docx", folder: "Prod" }));
+    expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ path: "Templates/Prod/Notice.docx", name: "Notice.docx", folder: "Prod" }), {
+      owner: "hmcts"
+    });
   });
 
   it("should have no axe violations when the list is showing", async () => {
@@ -382,13 +390,59 @@ describe("TemplateLibrary status", () => {
     await settle();
     expect(liveStatus().join(" ")).toContain("The list was checked a moment ago");
   });
+
+  it("should say why and keep the list when a Refresh fails after the list is showing", async () => {
+    const server = serve();
+    await openLibrary();
+    server.libraryPost = new Response(JSON.stringify({ error: "The hub could not ask your assistant." }), { status: 502 });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await settle();
+    expect(liveStatus().join(" ")).toContain("The hub could not ask your assistant.");
+    expect(options()).toHaveLength(5);
+  });
+
+  it("should clear the download error when a later download succeeds", async () => {
+    const server = serve();
+    server.entriesFail = true;
+    await openLibrary();
+    expect(liveStatus().join(" ")).toContain("The template list could not be downloaded");
+    server.entriesFail = false;
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await settle();
+    expect(liveStatus().join(" ")).not.toContain("could not be downloaded");
+    expect(options()).toHaveLength(5);
+  });
+
+  it("should count every match while listing only the first page when more match than it shows", async () => {
+    const many: IndexEntry[] = Array.from({ length: 60 }, (_, i) => [`Templates/Base/form ${i}.docx`, "6".repeat(40), 1_000]);
+    serve();
+    vi.mocked(fetch).mockImplementation(async (url) =>
+      url === ENTRIES_URL ? new Response(JSON.stringify({ commit: COMMIT, entries: many })) : new Response(JSON.stringify(status()))
+    );
+    await openLibrary();
+    expect(options()).toHaveLength(50);
+    expect(liveStatus().join(" ")).toContain("60 templates match; showing the first 50.");
+  });
 });
 
 const SUMMARY: DocmosisSummary = { name: "Claim form.docx", version: 1, revision: 0, updatedBy: "user", pdf: "pending" };
 
-function Panel(props: Partial<React.ComponentProps<typeof DocmosisPanel>>) {
+/** The panel with a loader of its own, as the chat gives it; rerendering with new props keeps the loader's state. */
+function Panel({ library = true, ...props }: Partial<React.ComponentProps<typeof DocmosisPanel>> & { library?: boolean }) {
+  const docmosis = props.docmosis ?? null;
+  const announce = props.announce ?? (() => undefined);
+  const loader = useTemplateLoad({ conversationId: CONVERSATION, docmosis, announce });
   return (
-    <DocmosisPanel conversationId={CONVERSATION} docmosis={null} owner library onClose={() => undefined} narrow={false} announce={() => undefined} {...props} />
+    <DocmosisPanel
+      conversationId={CONVERSATION}
+      owner
+      onClose={() => undefined}
+      narrow={false}
+      {...props}
+      docmosis={docmosis}
+      announce={announce}
+      loader={library ? loader : undefined}
+    />
   );
 }
 
@@ -438,7 +492,7 @@ describe("DocmosisPanel choosing a template", () => {
     expect(loadRequests(server).map((call) => call.body)).toEqual([
       { kind: "docmosis.load", args: { path: "Templates/Base/Claim form.docx", blob_sha: "2".repeat(40), base_version: 0, base_revision: 0 } }
     ]);
-    expect(liveStatus()).toContain("Loading Claim form.docx…");
+    expect(liveStatus().join(" ")).toContain("Loading Claim form.docx…");
     server.job = { job_id: JOB, kind: "docmosis.load", status: "done", result: { version: 1, revision: 0 } };
     act(() => {
       for (const listener of jobListeners) {
@@ -446,7 +500,7 @@ describe("DocmosisPanel choosing a template", () => {
       }
     });
     await settle();
-    expect(liveStatus()).toContain("Loading Claim form.docx…");
+    expect(liveStatus().join(" ")).toContain("Loading Claim form.docx…");
     rerender(<Panel announce={announce} docmosis={SUMMARY} />);
     await settle();
     expect(announce).toHaveBeenCalledWith("Loaded Claim form.docx");
@@ -464,7 +518,7 @@ describe("DocmosisPanel choosing a template", () => {
     const { unmount } = render(<Panel docmosis={{ ...SUMMARY, updatedBy: "agent" }} />);
     await settle(RENDER_AFTER_MS * 2);
     unmount();
-    server.view = view({ summary: "Edited form data" });
+    server.view = view({ summary: "Edited form data", source_path: null });
     render(<Panel docmosis={SUMMARY} />);
     await settle(RENDER_AFTER_MS * 2);
     expect(server.renders).toEqual([]);
@@ -479,7 +533,7 @@ describe("DocmosisPanel choosing a template", () => {
     expect(liveStatus().join(" ")).toContain("Your assistant is starting, so it can load Claim form.docx");
     await settle(WAKING_RETRY_MS);
     expect(loadRequests(server)).toHaveLength(2);
-    expect(liveStatus()).toContain("Loading Claim form.docx…");
+    expect(liveStatus().join(" ")).toContain("Loading Claim form.docx…");
   });
 
   it("should offer the person's load or the assistant's version when the assistant wrote one while it loaded", async () => {
@@ -518,7 +572,11 @@ describe("DocmosisPanel choosing a template", () => {
     ["not authorised for SSO", { job_id: JOB, kind: "docmosis.load", status: "failed", error: "sso" }, "single sign-on"],
     ["not found", { job_id: JOB, kind: "docmosis.load", status: "failed", error: "not_found" }, "GitHub could not find that template"],
     ["rate limited", { job_id: JOB, kind: "docmosis.load", status: "failed", error: "rate_limited" }, "GitHub's rate limit has been reached."],
-    ["too large", { job_id: JOB, kind: "docmosis.load", status: "failed", error: "too_large" }, "larger than 5 MB"],
+    [
+      "too large",
+      { job_id: JOB, kind: "docmosis.load", status: "failed", error: "too_large" },
+      "That template is larger than 5.0 MB, more than the Assistant can open."
+    ],
     ["not a docx", { job_id: JOB, kind: "docmosis.load", status: "failed", error: "not_docx" }, "not a Word document"],
     ["a checksum mismatch", { job_id: JOB, kind: "docmosis.load", status: "failed", error: "checksum" }, "did not match the template list"],
     [
@@ -528,7 +586,11 @@ describe("DocmosisPanel choosing a template", () => {
     ],
     ["timed out", { job_id: JOB, kind: "docmosis.load", status: "timeout" }, "did not load the template in time"],
     ["any other failure", { job_id: JOB, kind: "docmosis.load", status: "failed", error: "failed", detail: "the disk is full" }, "The disk is full."],
-    ["too large for the hub", { httpStatus: 413, error: "that template is larger than 5242880 bytes" }, "That template is larger than 5242880 bytes."]
+    [
+      "too large for the hub",
+      { httpStatus: 413, error: "that template is larger than 5242880 bytes" },
+      "That template is larger than 5.0 MB, more than the Assistant can open."
+    ]
   ])("should say so in one sentence when the load is %s", async (_when, answer, sentence) => {
     const server = serve();
     if ("httpStatus" in answer) {
@@ -550,6 +612,118 @@ describe("DocmosisPanel choosing a template", () => {
     await pickClaimForm();
     expect(screen.getByRole("alert").textContent).toBe("The template list has changed; pick again.");
     expect(server.calls.filter((call) => call.url === "/api/ui/assistant/docmosis-library" && call.method === "GET")).toHaveLength(1);
+  });
+});
+
+function finishJob(server: ReturnType<typeof serve>, job: PodJobView): void {
+  server.job = job;
+  act(() => {
+    for (const listener of jobListeners) {
+      listener({ job_id: JOB, conversation_id: CONVERSATION });
+    }
+  });
+}
+
+const DONE: PodJobView = { job_id: JOB, kind: "docmosis.load", status: "done", result: { version: 1, revision: 0 } };
+const CONFLICT: PodJobView = { job_id: JOB, kind: "docmosis.load", status: "failed", error: "conflict" };
+
+describe("DocmosisPanel while a load runs", () => {
+  it("should keep the load and its conflict on screen when the assistant writes the chat's first template mid-load", async () => {
+    const server = serve();
+    const { rerender } = render(<Panel />);
+    await settle();
+    await pickClaimForm();
+    rerender(<Panel docmosis={{ ...SUMMARY, name: "Draft.docx", updatedBy: "agent" }} />);
+    await settle();
+    expect(screen.getByRole("heading", { name: "Choose a template" })).toBeTruthy();
+    expect(liveStatus().join(" ")).toContain("Loading Claim form.docx…");
+    server.view = view({ name: "Draft.docx", by: "agent", summary: "Draft", source_path: null });
+    finishJob(server, CONFLICT);
+    await settle();
+    expect(within(screen.getByRole("alert")).getByRole("button", { name: "Load mine anyway" })).toBeTruthy();
+  });
+
+  it("should offer no Back, say what the load replaces, and close on Escape when a load is pending", async () => {
+    serve();
+    const onClose = vi.fn();
+    render(<Panel docmosis={SUMMARY} onClose={onClose} />);
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Change template" }));
+    await settle();
+    expect(screen.getByRole("button", { name: "Back to template" })).toBeTruthy();
+    fireEvent.change(box(), { target: { value: "notice" } });
+    fireEvent.keyDown(box(), { key: "Enter" });
+    await settle();
+    expect(screen.queryByRole("button", { name: "Back to template" })).toBeNull();
+    expect(liveStatus().join(" ")).toContain("Loading Notice.docx… It replaces Claim form.docx when it arrives.");
+    fireEvent.keyDown(box(), { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("heading", { name: "Choose a template" })).toBeTruthy();
+  });
+
+  it("should go back to the assistant's version and say it was kept, not loaded, when Keep theirs is pressed", async () => {
+    const server = serve();
+    server.job = CONFLICT;
+    server.view = view({ version: 4, revision: 2, name: "Newer.docx", by: "agent", summary: "Newer", has_pdf: true, source_path: null });
+    const announce = vi.fn();
+    render(<Panel announce={announce} />);
+    await settle();
+    await pickClaimForm();
+    fireEvent.click(within(screen.getByRole("alert")).getByRole("button", { name: "Keep theirs" }));
+    await settle();
+    expect(announce).toHaveBeenLastCalledWith("Kept the assistant's version");
+    expect(announce).not.toHaveBeenCalledWith(expect.stringMatching(/^Loaded/));
+    expect(screen.getByRole("heading", { name: "Newer.docx" })).toBeTruthy();
+    expect(server.renders).toEqual([]);
+  });
+
+  it("should read the template itself and stop waiting when the summary has not arrived in time", async () => {
+    const server = serve();
+    const announce = vi.fn();
+    render(<Panel announce={announce} />);
+    await settle();
+    await pickClaimForm();
+    finishJob(server, DONE);
+    await settle();
+    expect(liveStatus().join(" ")).toContain("Loading Claim form.docx…");
+    await settle(ARRIVAL_TIMEOUT_MS);
+    await settle();
+    expect(announce).toHaveBeenCalledWith("Loaded Claim form.docx");
+    expect(screen.getByRole("heading", { name: "Claim form.docx" })).toBeTruthy();
+    expect(server.renders).toEqual([{ data: {}, base_version: 1, base_revision: 0 }]);
+  });
+
+  it("should say so and let another template be picked when the summary has not arrived in time and the template cannot be read", async () => {
+    const server = serve();
+    render(<Panel />);
+    await settle();
+    await pickClaimForm();
+    server.view = null;
+    finishJob(server, DONE);
+    await settle();
+    await settle(ARRIVAL_TIMEOUT_MS);
+    await settle();
+    expect(screen.getByRole("alert").textContent).toContain("Claim form.docx was loaded, but it could not be shown.");
+    fireEvent.change(box(), { target: { value: "notice" } });
+    expect(screen.getByRole("option").getAttribute("aria-disabled")).toBeNull();
+  });
+
+  it("should name the library's own GitHub owner when the sign-in needs its single sign-on", async () => {
+    const server = serve();
+    server.status = status({ owner: "acme" });
+    server.job = { job_id: JOB, kind: "docmosis.load", status: "failed", error: "sso" };
+    render(<Panel />);
+    await settle();
+    await pickClaimForm();
+    expect(screen.getByRole("alert").textContent).toBe("Your GitHub sign-in is not authorised for the acme organisation's single sign-on.");
+  });
+
+  it("should render a loaded version first whatever its summary says when it came from a library path", async () => {
+    const server = serve();
+    server.view = view({ summary: "Whatever the pod said" });
+    render(<Panel docmosis={SUMMARY} />);
+    await settle();
+    expect(server.renders).toEqual([{ data: {}, base_version: 1, base_revision: 0 }]);
   });
 });
 
@@ -675,5 +849,35 @@ describe("ChatView template button", () => {
     rerender(<Chat view={conversation({ docmosis: { ...SUMMARY, version: 2, updatedBy: "agent" } })} />);
     await settle();
     expect(screen.getByRole("region", { name: "Template" })).toBeTruthy();
+  });
+
+  it("should keep a load running when the panel is closed, and open on the loaded template when it lands", async () => {
+    const server = serve();
+    const { rerender } = render(<Chat view={conversation()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Choose template" }));
+    await settle();
+    await pickClaimForm();
+    fireEvent.click(screen.getByRole("button", { name: "Close template" }));
+    expect(screen.queryByRole("region", { name: "Template" })).toBeNull();
+    finishJob(server, DONE);
+    await settle();
+    rerender(<Chat view={conversation({ docmosis: SUMMARY })} />);
+    await settle();
+    expect(screen.getByRole("heading", { name: "Claim form.docx" })).toBeTruthy();
+    await settle(ANNOUNCE_AFTER_MS);
+    expect(screen.getAllByTestId("arrivals").map((region) => region.textContent)).toContain("Loaded Claim form.docx");
+  });
+
+  it("should open on the conflict choice when a load the panel was closed on is refused for a newer version", async () => {
+    const server = serve();
+    render(<Chat view={conversation()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Choose template" }));
+    await settle();
+    await pickClaimForm();
+    fireEvent.click(screen.getByRole("button", { name: "Close template" }));
+    server.view = view({ version: 2, by: "agent", summary: "Newer", source_path: null });
+    finishJob(server, CONFLICT);
+    await settle();
+    expect(within(screen.getByRole("region", { name: "Template" })).getByRole("button", { name: "Load mine anyway" })).toBeTruthy();
   });
 });
