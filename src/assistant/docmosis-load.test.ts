@@ -6,6 +6,7 @@ import { checkPodJobArgs, checkPodJobResult } from "./pod-jobs.ts";
 
 const BLOB = "b".repeat(40);
 const ARGS = { path: "Templates/Base/Claim form.docx", blob_sha: BLOB, base_version: 0, base_revision: 0 };
+const LIBRARY = { owner: "hmcts", repo: "rdo-docmosis", folder: "Templates" };
 
 /** A database whose one query answers `rows`, recording what it was asked. */
 function databaseAnswering(rows: unknown[]): { db: Database; asked: unknown[][] } {
@@ -20,7 +21,7 @@ function databaseAnswering(rows: unknown[]): { db: Database; asked: unknown[][] 
 }
 
 describe("the docmosis.load kind", () => {
-  it("should be one at a time, under two minutes and 20 loads in ten minutes", () => {
+  it("should be one at a time, under two minutes and 20 loads in ten minutes when registered", () => {
     expect(DOCMOSIS_LOAD.kind).toBe("docmosis.load");
     expect(DOCMOSIS_LOAD.oneAtATime).toBe(true);
     expect(DOCMOSIS_LOAD.timeoutMs).toBe(120_000);
@@ -28,8 +29,14 @@ describe("the docmosis.load kind", () => {
     expect(DOCMOSIS_LOAD.errors).toEqual(["signed_out", "sso", "not_found", "rate_limited", "too_large", "not_docx", "checksum", "schema_failed", "conflict"]);
   });
 
-  it("should take a library path, a blob and the base when the args are a pick", () => {
-    expect(checkPodJobArgs(DOCMOSIS_LOAD, ARGS)).toEqual(ARGS);
+  it("should take a library path, a blob and the base, and add the library, when the args are a pick", () => {
+    expect(checkPodJobArgs(DOCMOSIS_LOAD, ARGS)).toEqual({ ...LIBRARY, ...ARGS });
+  });
+
+  it("should keep the library when stored args that carry it are parsed again", () => {
+    const stored = checkPodJobArgs(DOCMOSIS_LOAD, ARGS);
+
+    expect(docmosisLoadArgs.parse(stored)).toEqual(stored);
   });
 
   it.each([
@@ -38,12 +45,15 @@ describe("the docmosis.load kind", () => {
     ["a blob that is not a SHA-1", { ...ARGS, blob_sha: "B".repeat(40) }, /^args\.blob_sha: /],
     ["a negative base", { ...ARGS, base_version: -1 }, /^args\.base_version: /],
     ["a missing base revision", { path: ARGS.path, blob_sha: BLOB, base_version: 0 }, /^args\.base_revision: /],
-    ["a field the pod would not read", { ...ARGS, name: "x" }, /^args/]
-  ])("should refuse %s", (_label, args, message) => {
+    ["a field the pod would not read", { ...ARGS, name: "x" }, /^args/],
+    ["another owner", { ...ARGS, owner: "someone" }, /^args\.owner: /],
+    ["another repository", { ...ARGS, repo: "elsewhere" }, /^args\.repo: /],
+    ["another folder", { ...ARGS, folder: "Base" }, /^args\.folder: /]
+  ])("should refuse the args when they have %s", (_label, args, message) => {
     expect(() => checkPodJobArgs(DOCMOSIS_LOAD, args)).toThrow(message);
   });
 
-  it("should take the version and revision written as its result, and nothing else", () => {
+  it("should take the version and revision written as its result, and nothing else, when the pod answers", () => {
     expect(checkPodJobResult(DOCMOSIS_LOAD, { version: 3, revision: 0 })).toEqual({ version: 3, revision: 0 });
     expect(docmosisLoadResult.safeParse({ version: 0, revision: 0 }).success).toBe(false);
     expect(docmosisLoadResult.safeParse({ version: 1, revision: 0, extra: true }).success).toBe(false);
@@ -83,7 +93,7 @@ describe("the docmosis.load precheck", () => {
 });
 
 describe("loadedSummary", () => {
-  it("should name the file without its folders", () => {
+  it("should name the file without its folders when the path has some", () => {
     expect(basename("Templates/Base/Claim form.docx")).toBe("Claim form.docx");
     expect(loadedSummary("Templates/Base/Claim form.docx")).toBe("Loaded Claim form.docx");
   });
@@ -93,5 +103,13 @@ describe("loadedSummary", () => {
 
     expect(summary).toHaveLength(200);
     expect(summary.endsWith("…")).toBe(true);
+  });
+
+  it("should never split a surrogate pair when the cut falls inside one", () => {
+    // "Loaded a" is 8 units, so the 199th unit of the summary is the first half of the 96th emoji.
+    const summary = loadedSummary(`Templates/a${"😀".repeat(150)}.docx`);
+
+    expect(summary.isWellFormed()).toBe(true);
+    expect(summary).toBe(`Loaded a${"😀".repeat(95)}…`);
   });
 });

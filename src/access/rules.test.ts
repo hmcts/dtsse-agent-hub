@@ -775,18 +775,34 @@ describe("the conversation share rules", () => {
   });
 
   describe("canRecordPickAsOwner", () => {
-    const CHAT = { id: "conversation-a", ownerOid: OWNER };
+    const CHAT = { id: "conversation-a", ownerOid: OWNER, virtualAgentId: "assistant-a" };
+    const JOB = { conversationId: "conversation-a", ownerOid: OWNER, virtualAgentId: "assistant-a" };
+    const SESSION = { virtualAgentId: "assistant-a" };
 
     it("should record a write as the owner's pick when the job was asked for in this conversation by its owner", () => {
-      expect(canRecordPickAsOwner({ conversationId: "conversation-a", ownerOid: OWNER }, CHAT)).toBe(true);
+      expect(canRecordPickAsOwner(JOB, CHAT, SESSION)).toBe(true);
     });
 
     it("should refuse when the job was asked for in another conversation", () => {
-      expect(canRecordPickAsOwner({ conversationId: "conversation-b", ownerOid: OWNER }, CHAT)).toBe(false);
+      expect(canRecordPickAsOwner({ ...JOB, conversationId: "conversation-b" }, CHAT, SESSION)).toBe(false);
     });
 
     it.each(EVERYONE_ELSE)("should refuse when the job is %s's and the conversation is the owner's", (_label, ownerOid) => {
-      expect(canRecordPickAsOwner({ conversationId: "conversation-a", ownerOid }, CHAT)).toBe(false);
+      expect(canRecordPickAsOwner({ ...JOB, ownerOid }, CHAT, SESSION)).toBe(false);
+    });
+
+    it.each([
+      ["another assistant", "assistant-b"],
+      ["no assistant", null]
+    ])("should refuse when the conversation has moved to %s since the job was sent", (_label, virtualAgentId) => {
+      expect(canRecordPickAsOwner(JOB, { ...CHAT, virtualAgentId }, SESSION)).toBe(false);
+    });
+
+    it.each([
+      ["another assistant's session", "assistant-b"],
+      ["an agent no assistant registered", null]
+    ])("should refuse when the writing agent is %s", (_label, virtualAgentId) => {
+      expect(canRecordPickAsOwner(JOB, CHAT, { virtualAgentId })).toBe(false);
     });
   });
 

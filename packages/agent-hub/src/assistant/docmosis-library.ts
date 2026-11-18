@@ -47,6 +47,11 @@ export type DocmosisIndexFrame = {
   etag: string | null;
 };
 
+/** A folder of the repository the library is read from, as the hub sends one. */
+export function isLibraryFolder(value: unknown): value is string {
+  return typeof value === "string" && value.length <= 200 && FOLDER_RE.test(value);
+}
+
 function isEtag(value: unknown): value is string {
   return typeof value === "string" && value.length <= MAX_ETAG && ETAG_RE.test(value);
 }
@@ -63,9 +68,7 @@ export function parseIndexFrame(value: unknown): DocmosisIndexFrame | null {
     typeof raw.repo !== "string" ||
     !GITHUB_REPO_RE.test(`${raw.owner}/${raw.repo}`) ||
     !isGitRef(raw.ref) ||
-    typeof raw.path !== "string" ||
-    raw.path.length > 200 ||
-    !FOLDER_RE.test(raw.path) ||
+    !isLibraryFolder(raw.path) ||
     !(raw.commit === null || isGitSha(raw.commit)) ||
     !(raw.etag === null || isEtag(raw.etag))
   ) {

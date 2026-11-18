@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { MAX_DOCX_BYTES, MAX_SUMMARY } from "./docmosis.ts";
-import { isLibraryPath } from "./docmosis-library.ts";
+import { DOCMOSIS_LIBRARY, isLibraryPath } from "./docmosis-library.ts";
 import { libraryEntrySize } from "./docmosis-library-store.ts";
 import { definePodJobKind, type PodJobRefusal } from "./pod-jobs.ts";
 
@@ -15,7 +15,15 @@ export const DOCMOSIS_LOAD_KIND = "docmosis.load";
 
 export const STALE_PICK = "the template list has changed; pick again";
 
+/**
+ * What the browser sends, and the library it is from, which the hub adds as it accepts the request so the pod reads the
+ * blob from the library the precheck found the pick in. The browser may leave the library out, and nothing but
+ * `DOCMOSIS_LIBRARY` is taken for it.
+ */
 export const docmosisLoadArgs = z.strictObject({
+  owner: z.literal(DOCMOSIS_LIBRARY.owner).default(DOCMOSIS_LIBRARY.owner),
+  repo: z.literal(DOCMOSIS_LIBRARY.repo).default(DOCMOSIS_LIBRARY.repo),
+  folder: z.literal(DOCMOSIS_LIBRARY.path).default(DOCMOSIS_LIBRARY.path),
   path: z.string().refine((path) => isLibraryPath(path), { message: "must be a .docx in the template library" }),
   blob_sha: z.string().regex(/^[0-9a-f]{40}$/, "must be the blob's git SHA-1, 40 lowercase hex digits"),
   base_version: z.number().int().nonnegative(),
@@ -41,10 +49,23 @@ export const DOCMOSIS_LOAD_ERRORS = [
   "conflict"
 ] as const;
 
-/** `Loaded <name>`, the summary of a version a pick wrote, from the file's name without its folders, cut to the column's cap. */
+/**
+ * `Loaded <name>`, the summary of a version a pick wrote, from the file's name without its folders, cut to the
+ * column's cap between code points, since a split surrogate pair is text the hub refuses to store.
+ */
 export function loadedSummary(path: string): string {
   const summary = `Loaded ${basename(path)}`;
-  return summary.length > MAX_SUMMARY ? `${summary.slice(0, MAX_SUMMARY - 1)}…` : summary;
+  if (summary.length <= MAX_SUMMARY) {
+    return summary;
+  }
+  let cut = "";
+  for (const point of summary) {
+    if (cut.length + point.length > MAX_SUMMARY - 1) {
+      break;
+    }
+    cut += point;
+  }
+  return `${cut}…`;
 }
 
 export function basename(path: string): string {

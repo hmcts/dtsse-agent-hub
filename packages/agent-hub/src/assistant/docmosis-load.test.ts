@@ -2,20 +2,25 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api.ts";
 import type { DocmosisBody } from "../wire.ts";
 import {
   blobCacheDir,
+  clip,
   type DocmosisLoadDeps,
   docmosisCommand,
   docmosisLoadHandler,
+  GITHUB_TIMEOUT_MS,
   gitBlobSha1,
-  LOAD_BUDGET_MS,
   MAX_TEMPLATE_BYTES,
+  PUBLISH_RESERVE_MS,
   parseLoadArgs,
-  pruneCache
+  pruneCache,
+  SCHEMA_TIMEOUT_MS,
+  TOKEN_TIMEOUT_MS
 } from "./docmosis-load.ts";
+import { DOCMOSIS_LOAD_KIND, LOAD_BUDGET_MS } from "./docmosis-load-kind.ts";
 import type { FetchLike } from "./github-rest.ts";
 import type { Run } from "./lookups.ts";
 import { POD_JOB_HANDLERS } from "./pod-job-handlers.ts";
@@ -25,6 +30,7 @@ const TOKEN = "gho_supersecrettokenvalue123";
 const JOB = "0b9d6c1e-3c1f-4a5e-9f43-8d2a7c6b5e41";
 const AGENT = "7a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
 const PATH = "Templates/Base/Claim form.docx";
+const LIBRARY = { owner: "hmcts", repo: "rdo-docmosis", folder: "Templates" };
 const SCHEMA = { root: { kind: "object", controls: [], notes: [], properties: {} }, warnings: [] };
 
 function docx(seed: number, length = 64): Uint8Array {
@@ -36,7 +42,21 @@ function docx(seed: number, length = 64): Uint8Array {
 
 const TEMPLATE = docx(1);
 const BLOB = gitBlobSha1(TEMPLATE);
-const ARGS = { path: PATH, blob_sha: BLOB, base_version: 2, base_revision: 1 };
+const ARGS = { ...LIBRARY, path: PATH, blob_sha: BLOB, base_version: 2, base_revision: 1 };
+
+const { sha1Hashes } = vi.hoisted(() => ({ sha1Hashes: { count: 0 } }));
+vi.mock("node:crypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:crypto")>();
+  return {
+    ...actual,
+    createHash: (algorithm: string, ...rest: unknown[]) => {
+      if (algorithm === "sha1") {
+        sha1Hashes.count += 1;
+      }
+      return actual.createHash(algorithm, ...(rest as []));
+    }
+  };
+});
 
 let home: string;
 beforeEach(() => {
@@ -47,17 +67,22 @@ afterEach(() => {
 });
 
 /** A pod whose `gh` is signed in and whose `docmosis schema` prints `SCHEMA`, recording every command it ran. */
-function runner(overrides: { token?: string | null; schema?: { code: number; stdout: string; stderr: string } } = {}) {
+function runner(overrides: { token?: string | null; schema?: { code: number; stdout: string; stderr: string }; onSchema?: () => void } = {}) {
   const ran: { cmd: string; args: string[]; path: string | undefined }[] = [];
+  const signals: (AbortSignal | undefined)[] = [];
+  const timeouts: number[] = [];
   const run: Run = async (cmd, args, opts) => {
     ran.push({ cmd, args, path: opts.env.PATH });
+    signals.push(opts.signal);
+    timeouts.push(opts.timeoutMs);
     if (cmd === "gh") {
       const token = overrides.token === undefined ? TOKEN : overrides.token;
       return token === null ? { code: 1, stdout: "", stderr: "not logged in" } : { code: 0, stdout: `${token}\n`, stderr: "" };
     }
+    overrides.onSchema?.();
     return overrides.schema ?? { code: 0, stdout: JSON.stringify(SCHEMA), stderr: "" };
   };
-  return { run, ran };
+  return { run, ran, signals, timeouts };
 }
 
 /** A GitHub whose blob route answers `respond`, recording the URLs asked and the headers sent. */
@@ -217,6 +242,43 @@ describe("docmosisLoadHandler", () => {
     expect(failure.code).toBe("too_large");
   });
 
+  it("should answer too_large and cache nothing when GitHub's content-length is over 5 MiB", async () => {
+    const { run } = runner();
+    const { fetch } = github(() => new Response(Buffer.from(TEMPLATE), { headers: { "content-length": String(MAX_TEMPLATE_BYTES + 1) } }));
+    const { api, puts } = hub();
+
+    const failure = await failureOf(load({ run, fetch }, api));
+
+    expect(failure.code).toBe("too_large");
+    expect(fs.existsSync(cacheFile())).toBe(false);
+    expect(puts).toEqual([]);
+  });
+
+  it("should read the blob from the library the hub named when the job's arguments carry one", async () => {
+    const { run } = runner();
+    const { fetch, asked } = github();
+    const { api } = hub();
+
+    await load({ run, fetch }, api, { ...ARGS, owner: "hmcts-other", repo: "letters", folder: "Templates/Base" });
+
+    expect(asked.map((call) => call.url)).toEqual([`https://api.github.com/repos/hmcts-other/letters/git/blobs/${BLOB}`]);
+  });
+
+  it("should hash a cached blob once when the cache holds it", async () => {
+    // Arrange
+    fs.mkdirSync(path.dirname(cacheFile()), { recursive: true });
+    fs.writeFileSync(cacheFile(), TEMPLATE);
+    const { run } = runner();
+    const { api } = hub();
+    sha1Hashes.count = 0;
+
+    // Act
+    await load({ run, fetch: github().fetch }, api);
+
+    // Assert
+    expect(sha1Hashes.count).toBe(1);
+  });
+
   it("should answer not_docx when the blob is not a zip", async () => {
     const text = new TextEncoder().encode("not a template");
     const { run } = runner();
@@ -284,7 +346,7 @@ describe("docmosisLoadHandler", () => {
     [403, { "x-github-sso": "required; url=https://github.com/orgs/hmcts/sso?authorization_request=1" }, "sso"],
     [404, {}, "not_found"],
     [429, { "retry-after": "30" }, "rate_limited"]
-  ])("should answer GitHub's %i with its code", async (status, headers, code) => {
+  ])("should answer with GitHub's code when GitHub answers %i", async (status, headers, code) => {
     const { run } = runner();
     const { fetch } = github(() => new Response("{}", { status, headers }));
     const { api } = hub();
@@ -355,7 +417,7 @@ describe("docmosisLoadHandler", () => {
     expect(puts).toEqual([]);
   });
 
-  it("should refuse arguments that are not a library pick, and ask nothing", async () => {
+  it("should refuse and ask nothing when the arguments are not a library pick", async () => {
     const { run, ran } = runner();
     const { api } = hub();
 
@@ -372,12 +434,97 @@ describe("docmosisLoadHandler", () => {
     expect((await failureOf(load({ run }, api, ARGS, { agentId: undefined }))).code).toBe("failed");
   });
 
-  it("should be the handler POD_JOB_HANDLERS registers, inside the hub's two minutes", () => {
+  it("should pass the job's signal to every command it runs when it runs gh and docmosis", async () => {
+    const { run, signals, timeouts } = runner();
+    const controller = new AbortController();
+
+    await load({ run, fetch: github().fetch }, hub().api, ARGS, { signal: controller.signal });
+
+    expect(signals).toEqual([controller.signal, controller.signal]);
+    expect(timeouts).toEqual([TOKEN_TIMEOUT_MS, SCHEMA_TIMEOUT_MS]);
+  });
+
+  it("should publish nothing when the budget runs out while docmosis schema runs", async () => {
+    // Arrange
+    const controller = new AbortController();
+    const { run } = runner({ onSchema: () => controller.abort(), schema: { code: 1, stdout: "", stderr: "killed" } });
+    const { api, assets, puts } = hub();
+
+    // Act
+    const failure = await failureOf(load({ run, fetch: github().fetch }, api, ARGS, { signal: controller.signal }));
+
+    // Assert
+    expect(failure.code).toBe("failed");
+    expect(assets).toEqual([]);
+    expect(puts).toEqual([]);
+  });
+
+  it("should publish nothing when the budget runs out after docmosis schema succeeds", async () => {
+    const controller = new AbortController();
+    const { run } = runner({ onSchema: () => controller.abort() });
+    const { api, assets, puts } = hub();
+
+    await failureOf(load({ run, fetch: github().fetch }, api, ARGS, { signal: controller.signal }));
+
+    expect(assets).toEqual([]);
+    expect(puts).toEqual([]);
+  });
+
+  it("should write no version when the budget runs out while the .docx uploads", async () => {
+    // Arrange
+    const controller = new AbortController();
+    const { run } = runner();
+    const { api, puts } = hub();
+    const slow: PodJobHandlerApi = {
+      ...api,
+      putDocmosisAsset: async (agent, sha256, bytes) => {
+        const uploaded = await api.putDocmosisAsset(agent, sha256, bytes);
+        controller.abort();
+        return uploaded;
+      }
+    };
+
+    // Act
+    await failureOf(load({ run, fetch: github().fetch }, slow, ARGS, { signal: controller.signal }));
+
+    // Assert
+    expect(puts).toEqual([]);
+  });
+
+  it("should ask GitHub nothing when the budget has run out by the time the token is read", async () => {
+    const { run } = runner();
+    const { fetch, asked } = github();
+
+    await failureOf(load({ run, fetch }, hub().api, ARGS, { signal: AbortSignal.abort() }));
+
+    expect(asked).toEqual([]);
+  });
+
+  it("should redact other credential-shaped words when a failure carries them", async () => {
+    // Arrange
+    const other = "ghp_abcdefghijklmnopqrstuvwxyz0123";
+    const { run } = runner({ schema: { code: 1, stdout: "", stderr: `token ${other} refused` } });
+
+    // Act
+    const failure = await failureOf(load({ run, fetch: github().fetch }, hub().api));
+
+    // Assert
+    expect(failure.code).toBe("schema_failed");
+    expect(failure.detail).not.toContain(other);
+    expect(failure.detail).toContain("[redacted]");
+  });
+
+  it("should leave a margin inside the budget when every step runs to its cap", () => {
+    expect(TOKEN_TIMEOUT_MS + GITHUB_TIMEOUT_MS + SCHEMA_TIMEOUT_MS + PUBLISH_RESERVE_MS).toBeLessThan(LOAD_BUDGET_MS);
+  });
+
+  it("should fit the registered handler's budget inside the hub's two minutes when POD_JOB_HANDLERS lists it", () => {
     const registered = POD_JOB_HANDLERS.find((handler) => handler.kind === "docmosis.load");
 
     expect(registered?.budgetMs).toBe(LOAD_BUDGET_MS);
     expect(LOAD_BUDGET_MS).toBeLessThan(120_000);
-    expect(docmosisLoadHandler({ run: runner().run }).kind).toBe("docmosis.load");
+    expect(registered?.kind).toBe(DOCMOSIS_LOAD_KIND);
+    expect(docmosisLoadHandler({ run: runner().run }).kind).toBe(DOCMOSIS_LOAD_KIND);
   });
 
   it("should load the handler's module when the registered handler runs a job", async () => {
@@ -390,24 +537,48 @@ describe("docmosisLoadHandler", () => {
 });
 
 describe("parseLoadArgs", () => {
-  it("should take a pick as the hub's schema does", () => {
+  it("should take a pick when it is one the hub's schema took, with the library the hub added", () => {
     expect(parseLoadArgs(ARGS)).toEqual(ARGS);
   });
 
   it.each([
-    ["not an object", "x"],
+    ["no object at all", "x"],
     ["an extra field", { ...ARGS, name: "x" }],
     ["a path outside the library", { ...ARGS, path: "Other/x.docx" }],
+    ["a path outside the folder the hub named", { ...ARGS, folder: "Letters" }],
+    ["no library", { path: PATH, blob_sha: BLOB, base_version: 2, base_revision: 1 }],
+    ["an owner that is not a GitHub login", { ...ARGS, owner: "hm cts" }],
+    ["a repository name that is not one", { ...ARGS, repo: ".." }],
+    ["a folder that climbs", { ...ARGS, folder: "Templates/..", path: "Templates/../x.docx" }],
+    ["a folder that is not a string", { ...ARGS, folder: 1 }],
     ["a blob that is not a SHA-1", { ...ARGS, blob_sha: "x" }],
     ["a base that is not a whole number", { ...ARGS, base_version: 1.5 }],
     ["a negative revision", { ...ARGS, base_revision: -1 }]
-  ])("should refuse %s", (_label, value) => {
+  ])("should refuse the arguments when they have %s", (_label, value) => {
     expect(parseLoadArgs(value)).toBeNull();
   });
 });
 
+describe("clip", () => {
+  it("should keep the text whole when it fits", () => {
+    expect(clip("abc", 3)).toBe("abc");
+  });
+
+  it("should cut to the cap with an ellipsis when the text is longer", () => {
+    expect(clip("abcdef", 4)).toBe("abc…");
+  });
+
+  it("should never split a surrogate pair when the cut falls inside one", () => {
+    const clipped = clip(`ab${"😀".repeat(3)}`, 4);
+
+    expect(clipped).toBe("ab…");
+    expect(clipped.length).toBeLessThanOrEqual(4);
+    expect(clipped.isWellFormed()).toBe(true);
+  });
+});
+
 describe("gitBlobSha1", () => {
-  it("should hash bytes as git names a blob", () => {
+  it("should hash the bytes as git names a blob when given its contents", () => {
     expect(gitBlobSha1(new TextEncoder().encode("hello\n"))).toBe("ce013625030ba8dba906f756967f9e9ca394464a");
   });
 });
@@ -420,7 +591,7 @@ describe("docmosisCommand", () => {
 });
 
 describe("pruneCache", () => {
-  it("should remove the oldest blobs past the limit, but never the one in hand", async () => {
+  it("should remove the oldest blobs but never the one in hand when the cache is past its limit", async () => {
     // Arrange
     const dir = blobCacheDir({ HOME: home });
     fs.mkdirSync(dir, { recursive: true });

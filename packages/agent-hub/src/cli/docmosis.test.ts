@@ -101,9 +101,9 @@ describe("publishDocmosis", () => {
   });
 
   it.each([
-    ["the version that load wrote, when the pick is one an earlier run of its job already loaded", "pick-1", { written: { version: 4, revision: 0 } }],
-    ["a conflict, when the write named no pick", undefined, { conflict: { current: null } }]
-  ])("should answer %s", async (_label, pick, expected) => {
+    ["the version that load wrote, for a pick an earlier run of its job already loaded", "pick-1", { written: { version: 4, revision: 0 } }],
+    ["a conflict, for a write that named no pick", undefined, { conflict: { current: null } }]
+  ])("should answer %s when the hub refuses the write with a 409 naming a loaded version", async (_label, pick, expected) => {
     // Arrange
     const loadedAlready = {
       putDocmosisAsset: async () => ({ asset: `sha256:${digest(DOCX)}` }),

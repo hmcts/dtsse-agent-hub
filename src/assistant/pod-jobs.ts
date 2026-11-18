@@ -45,9 +45,9 @@ export interface PodJobPrecheckInput {
 }
 
 /**
- * A kind's own check of a request against rows the hub holds, which the `args` schema alone cannot make. Run inside
- * the request's transaction, after access and before the job is joined, counted or recorded, so a refused request
- * starts nothing and costs nothing against the rate limit.
+ * A kind's own check of a request against rows the hub holds, which the `args` schema alone cannot make. Run after
+ * access and before the pod's readiness is read, so a refused request neither wakes a stopped pod nor is joined,
+ * counted or recorded, and costs nothing against the rate limit.
  */
 export type PodJobPrecheck = (db: Database, input: PodJobPrecheckInput) => Promise<PodJobRefusal | undefined>;
 

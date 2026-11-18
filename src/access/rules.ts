@@ -487,12 +487,23 @@ export function canReadPodJob(viewerOid: string, job: { ownerOid: string }): boo
 
 /**
  * Whether a session's write of a Docmosis template may be recorded as the person's own pick from their template
- * library: the job it names was asked for in this conversation, by the person who owns it. The job's id reaches only
- * the owner's browser and their pod, never a session, so a session cannot claim a pick it was not handed; this is what
- * stops a job of one chat crediting a write to another, or to somebody else's.
+ * library: the job it names was asked for in this conversation, by the person who owns it, the conversation is still
+ * on the virtual agent the job was sent to, and the agent writing is one that virtual agent's sessions registered. The
+ * job's id reaches only the owner's browser and their pod, never a session, so a session cannot claim a pick it was
+ * not handed; this is what stops a job of one chat crediting a write to another, or to somebody else's, and a job
+ * sent to an assistant since replaced being finished through another.
  */
-export function canRecordPickAsOwner(job: { conversationId: string; ownerOid: string }, conversation: { id: string; ownerOid: string }): boolean {
-  return job.conversationId === conversation.id && isOwner(job.ownerOid, conversation);
+export function canRecordPickAsOwner(
+  job: { conversationId: string; ownerOid: string; virtualAgentId: string },
+  conversation: { id: string; ownerOid: string; virtualAgentId: string | null },
+  agent: { virtualAgentId: string | null }
+): boolean {
+  return (
+    job.conversationId === conversation.id &&
+    isOwner(job.ownerOid, conversation) &&
+    conversation.virtualAgentId === job.virtualAgentId &&
+    agent.virtualAgentId === job.virtualAgentId
+  );
 }
 
 /**

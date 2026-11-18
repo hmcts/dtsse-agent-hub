@@ -1,3 +1,4 @@
+import { DOCMOSIS_LOAD_KIND, LOAD_BUDGET_MS } from "./docmosis-load-kind.ts";
 import type { PodJobHandler } from "./pod-jobs.ts";
 
 /**
@@ -5,11 +6,13 @@ import type { PodJobHandler } from "./pod-jobs.ts";
  * the claim this list is part of.
  */
 const docmosisLoad: PodJobHandler = {
-  kind: "docmosis.load",
-  budgetMs: 100_000,
+  kind: DOCMOSIS_LOAD_KIND,
+  budgetMs: LOAD_BUDGET_MS,
   run: async (args, context) => {
     const [{ docmosisLoadHandler }, { run }] = await Promise.all([import("./docmosis-load.ts"), import("../virtual/process.ts")]);
-    const handler = docmosisLoadHandler({ run: (cmd, argv, opts) => run(cmd, argv, { env: opts.env as NodeJS.ProcessEnv, timeoutMs: opts.timeoutMs }) });
+    const handler = docmosisLoadHandler({
+      run: (cmd, argv, opts) => run(cmd, argv, { env: opts.env as NodeJS.ProcessEnv, timeoutMs: opts.timeoutMs, signal: opts.signal })
+    });
     return await handler.run(args, context);
   }
 };

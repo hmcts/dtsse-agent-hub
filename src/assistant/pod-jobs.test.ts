@@ -101,7 +101,7 @@ describe("podJobRegistry", () => {
     expect(() => podJobRegistry([kind(), kind()])).toThrow(/registered twice/);
   });
 
-  it("should register docmosis.load as the one production kind", () => {
+  it("should register docmosis.load as the one production kind when the registry is built", () => {
     expect(POD_JOB_KINDS.map((definition) => definition.kind)).toEqual(["docmosis.load"]);
     expect(POD_JOB_REGISTRY.get("docmosis.load")).toBe(POD_JOB_KINDS[0]);
   });

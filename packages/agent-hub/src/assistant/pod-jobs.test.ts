@@ -118,7 +118,7 @@ describe("podJobFeatures and claimedFeatures", () => {
     expect(claimedFeatures([...POD_JOB_HANDLERS, echo]).length).toBeLessThanOrEqual(MAX_CLIENT_FEATURES);
   });
 
-  it("should claim exactly the kinds this build has a handler for", () => {
+  it("should claim exactly the kinds this build has a handler for when it reports its claim", () => {
     expect(POD_JOB_HANDLERS.map((handler) => handler.kind)).toEqual(["docmosis.load"]);
     expect(claimedFeatures().filter((name) => name.startsWith("pod-job:"))).toEqual(["pod-job:docmosis.load"]);
     expect(claimedFeatures([echo])).toContain("pod-job:test.echo");

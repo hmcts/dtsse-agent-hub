@@ -466,6 +466,23 @@ describe("pod jobs", () => {
     expect(await prisma.$transaction((tx) => lockPendingPodJob(tx, "not-a-job", "test.single"))).toBeUndefined();
   });
 
+  it("should not finish a job when its conversation has left the job's virtual agent", async () => {
+    // Arrange
+    const { conversation } = await chatOf(ALICE);
+    const jobId = jobOf(await requestPodJob(prisma, ALICE.oid, conversation, { kind: "test.single", args: { name: "claim" } }));
+
+    // Act
+    const finished = await prisma.$transaction(async (tx) => {
+      const locked = await lockPendingPodJob(tx, jobId, "test.single");
+      await tx.assistantConversation.update({ where: { id: conversation }, data: { virtualAgentId: null } });
+      return await finishPodJob(tx, locked!, { loaded: true });
+    });
+
+    // Assert
+    expect(finished).toBe(false);
+    expect((await prisma.assistantPodJob.findUniqueOrThrow({ where: { id: jobId }, select: { status: true } })).status).toBe("pending");
+  });
+
   it("should roll back the feature's write and leave the job pending when the result is not the kind's", async () => {
     // Arrange
     const { conversation } = await chatOf(ALICE);

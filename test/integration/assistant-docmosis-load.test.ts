@@ -106,13 +106,19 @@ async function loadJob(chat: Chat, overrides: Record<string, unknown> = {}): Pro
   return body.job_id;
 }
 
-/** What the pod's publish does: the .docx, then the version naming the pick. */
-async function publish(chat: Chat, pick: string, bytes: Buffer = TEMPLATE, base = { base_version: 0, base_revision: 0 }): Promise<Response> {
+/** What the pod's publish does: the .docx, then the version naming the pick, through `agent`, the chat's own by default. */
+async function publish(
+  chat: Chat,
+  pick: string,
+  bytes: Buffer = TEMPLATE,
+  base = { base_version: 0, base_revision: 0 },
+  agent: string = chat.agent
+): Promise<Response> {
   await putDocmosisAsset(prisma, chat.conversation, sha256(bytes), bytes);
   return await call(docmosisRoute.PUT, {
     as: ALICE,
-    path: `/api/agent/${chat.agent}/docmosis`,
-    params: { agentId: chat.agent },
+    path: `/api/agent/${agent}/docmosis`,
+    params: { agentId: agent },
     method: "PUT",
     body: { name: "Claim form.docx", docx: docxRef(sha256(bytes)), schema: SCHEMA, data: {}, ...base, summary: "Loaded Claim form.docx", pick }
   });
@@ -125,6 +131,8 @@ const versionsOf = (conversation: string) =>
     select: { version: true, by: true, editorOid: true, summary: true, sourcePath: true, sourceBlobSha: true }
   });
 
+const LIBRARY = { owner: "hmcts", repo: "rdo-docmosis", folder: "Templates" };
+
 const statusOf = async (chat: Chat, job: string) => (await readPodJob(prisma, ALICE.oid, chat.conversation, job))?.status;
 
 describe("asking for a docmosis.load", () => {
@@ -135,6 +143,42 @@ describe("asking for a docmosis.load", () => {
     const job = await loadJob(chat);
 
     expect(await statusOf(chat, job)).toBe("pending");
+  });
+
+  it("should send the pod the library with the pick when the request is accepted", async () => {
+    const chat = await chatOf(ALICE);
+    await indexOf(ALICE);
+
+    const job = await loadJob(chat);
+
+    const row = await prisma.assistantPodJob.findUniqueOrThrow({ where: { id: job }, select: { args: true } });
+    expect(row.args).toEqual({ ...LIBRARY, ...args() });
+  });
+
+  it("should refuse a stale pick without waking the pod when the pod is stopped", async () => {
+    // Arrange
+    const chat = await chatOf(ALICE);
+    const { virtualAgentId } = await prisma.assistantConversation.findUniqueOrThrow({ where: { id: chat.conversation }, select: { virtualAgentId: true } });
+    await prisma.virtualAgent.update({ where: { id: virtualAgentId as string }, data: { desired: "stopped", status: "stopped" } });
+
+    // Act
+    const response = await ask(chat.conversation, { kind: "docmosis.load", args: args() });
+
+    // Assert
+    expect(response.status).toBe(409);
+    expect((await prisma.virtualAgent.findUniqueOrThrow({ where: { id: virtualAgentId as string }, select: { desired: true } })).desired).toBe("stopped");
+  });
+
+  it("should wake the pod when the pod is stopped and the pick is in the index", async () => {
+    const chat = await chatOf(ALICE);
+    await indexOf(ALICE);
+    const { virtualAgentId } = await prisma.assistantConversation.findUniqueOrThrow({ where: { id: chat.conversation }, select: { virtualAgentId: true } });
+    await prisma.virtualAgent.update({ where: { id: virtualAgentId as string }, data: { desired: "stopped", status: "stopped" } });
+
+    const response = await ask(chat.conversation, { kind: "docmosis.load", args: args() });
+
+    expect(await jsonOf(response)).toEqual({ status: "waking" });
+    expect((await prisma.virtualAgent.findUniqueOrThrow({ where: { id: virtualAgentId as string }, select: { desired: true } })).desired).toBe("running");
   });
 
   it("should refuse with 409 when the person's index no longer holds the pick", async () => {
@@ -164,7 +208,7 @@ describe("asking for a docmosis.load", () => {
     expect(await prisma.assistantPodJob.count()).toBe(0);
   });
 
-  it("should not count refused picks against the rate limit", async () => {
+  it("should not count refused picks against the rate limit when the index refuses them", async () => {
     const chat = await chatOf(ALICE);
     await indexOf(ALICE);
     for (let at = 0; at < 20; at += 1) {
@@ -174,7 +218,7 @@ describe("asking for a docmosis.load", () => {
     expect(await statusOf(chat, await loadJob(chat))).toBe("pending");
   });
 
-  it("should hold one pending load per conversation, joining the same pick and refusing another", async () => {
+  it("should join the same pick and refuse another when a load is already pending in the conversation", async () => {
     const chat = await chatOf(ALICE);
     const other: IndexEntry = ["Templates/Base/Defence.docx", "d".repeat(40), 900];
     await indexOf(ALICE, [[PATH, BLOB, TEMPLATE.byteLength], other]);
@@ -190,7 +234,7 @@ describe("asking for a docmosis.load", () => {
 });
 
 describe("publishing a pick", () => {
-  it("should record the version as the person's, with where it came from, and finish the job", async () => {
+  it("should record the version as the person's, with where it came from, and finish the job when the pick is published", async () => {
     const chat = await chatOf(ALICE);
     await indexOf(ALICE);
     const job = await loadJob(chat);
@@ -214,7 +258,7 @@ describe("publishing a pick", () => {
     expect(await jsonOf(read)).toMatchObject({ by: "user", source_path: PATH });
   });
 
-  it("should refuse a .docx that is not the picked blob and leave the job pending", async () => {
+  it("should refuse the .docx and leave the job pending when it is not the picked blob", async () => {
     const chat = await chatOf(ALICE);
     await indexOf(ALICE);
     const job = await loadJob(chat);
@@ -226,7 +270,7 @@ describe("publishing a pick", () => {
     expect(await statusOf(chat, job)).toBe("pending");
   });
 
-  it("should refuse a pick asked for in another conversation", async () => {
+  it("should refuse a pick when it was asked for in another conversation", async () => {
     const chat = await chatOf(ALICE);
     const assistant = (await prisma.assistantConversation.findUniqueOrThrow({ where: { id: chat.conversation }, select: { virtualAgentId: true } }))
       .virtualAgentId as string;
@@ -241,7 +285,57 @@ describe("publishing a pick", () => {
     expect(await statusOf(elsewhere, job)).toBe("pending");
   });
 
-  it("should refuse a pick whose job ran out of time", async () => {
+  it("should refuse a pick and leave the job pending when the conversation has left the job's assistant", async () => {
+    // Arrange
+    const chat = await chatOf(ALICE);
+    await indexOf(ALICE);
+    const job = await loadJob(chat);
+    await prisma.assistantConversation.update({ where: { id: chat.conversation }, data: { virtualAgentId: null } });
+
+    // Act
+    const response = await publish(chat, job);
+
+    // Assert
+    expect(response.status).toBe(400);
+    expect(await versionsOf(chat.conversation)).toEqual([]);
+    expect((await prisma.assistantPodJob.findUniqueOrThrow({ where: { id: job }, select: { status: true } })).status).toBe("pending");
+  });
+
+  it("should refuse a pick when the agent writing it is not one the job's assistant registered", async () => {
+    // Arrange
+    const chat = await chatOf(ALICE);
+    await indexOf(ALICE);
+    const job = await loadJob(chat);
+    const laptop = await prisma.agent.create({
+      data: { ownerOid: ALICE.oid, sessionId: "laptop-session", name: "laptop", assistantConversationId: chat.conversation },
+      select: { id: true }
+    });
+
+    // Act
+    const response = await publish(chat, job, TEMPLATE, { base_version: 0, base_revision: 0 }, laptop.id);
+
+    // Assert
+    expect(response.status).toBe(400);
+    expect(await versionsOf(chat.conversation)).toEqual([]);
+    expect(await statusOf(chat, job)).toBe("pending");
+  });
+
+  it("should refuse a pick when it is written with no agent named", async () => {
+    const chat = await chatOf(ALICE);
+    await indexOf(ALICE);
+    const job = await loadJob(chat);
+    await putDocmosisAsset(prisma, chat.conversation, sha256(TEMPLATE), TEMPLATE);
+
+    const thrown = await writeAgentDocmosis(prisma, {
+      conversationId: chat.conversation,
+      body: { name: "Claim form.docx", docx: docxRef(sha256(TEMPLATE)), schema: SCHEMA, data: {}, base_version: 0, base_revision: 0, pick: job }
+    }).catch((e: unknown) => e);
+
+    expect(thrown).toMatchObject({ status: 400 });
+    expect(await statusOf(chat, job)).toBe("pending");
+  });
+
+  it("should refuse a pick when its job ran out of time", async () => {
     const chat = await chatOf(ALICE);
     await indexOf(ALICE);
     const job = await loadJob(chat);
@@ -256,7 +350,7 @@ describe("publishing a pick", () => {
     expect(await versionsOf(chat.conversation)).toEqual([]);
   });
 
-  it("should refuse a pick that is not a job", async () => {
+  it("should refuse a pick when it names no job", async () => {
     const chat = await chatOf(ALICE);
 
     const response = await publish(chat, crypto.randomUUID());
@@ -297,7 +391,7 @@ describe("publishing a pick", () => {
     expect(await versionsOf(elsewhere.conversation)).toEqual([]);
   });
 
-  it("should refuse with 400 a pick whose job failed", async () => {
+  it("should refuse a pick with 400 when its job failed", async () => {
     const chat = await chatOf(ALICE);
     await indexOf(ALICE);
     const job = await loadJob(chat);
@@ -309,7 +403,7 @@ describe("publishing a pick", () => {
     expect(await versionsOf(chat.conversation)).toEqual([]);
   });
 
-  it("should roll back a stale base and leave the job pending for the pod to answer", async () => {
+  it("should roll back and leave the job pending for the pod to answer when the base is stale", async () => {
     const chat = await chatOf(ALICE);
     await indexOf(ALICE);
     const held = docx(3);

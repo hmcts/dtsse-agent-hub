@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  BlobTooLargeError,
   blob,
   commitCheck,
   errorFor,
@@ -249,6 +250,64 @@ describe("blob", () => {
     expect(Array.from(await blob(rest(fetch), "hmcts", "rdo-docmosis", sha(1)))).toEqual([0x50, 0x4b, 3, 4]);
     expect(calls[0]?.headers.accept).toBe("application/vnd.github.raw");
     expect((await failureOf(blob(rest(fetch), "hmcts", "rdo-docmosis", "nope"))).error).toBe("failed");
+  });
+
+  it("should join the chunks in order when the blob arrives in several", async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1, 2]));
+        controller.enqueue(new Uint8Array([3]));
+        controller.close();
+      }
+    });
+    const { fetch } = fakeFetch({ "/git/blobs/": () => new Response(body) });
+
+    expect(Array.from(await blob(rest(fetch), "hmcts", "rdo-docmosis", sha(1), 3))).toEqual([1, 2, 3]);
+  });
+
+  it("should answer no bytes when GitHub's answer has no body", async () => {
+    const { fetch } = fakeFetch({ "/git/blobs/": () => new Response(null) });
+
+    expect(await blob(rest(fetch), "hmcts", "rdo-docmosis", sha(1), 10)).toEqual(new Uint8Array(0));
+  });
+
+  it("should refuse without reading the body when its content-length is over the cap", async () => {
+    // Arrange
+    let pulled = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled += 1;
+        controller.enqueue(new Uint8Array(4));
+      }
+    });
+    const { fetch } = fakeFetch({ "/git/blobs/": () => new Response(body, { headers: { "content-length": "11" } }) });
+
+    // Act
+    const thrown = await blob(rest(fetch), "hmcts", "rdo-docmosis", sha(1), 10).catch((e: unknown) => e);
+
+    // Assert
+    expect(thrown).toBeInstanceOf(BlobTooLargeError);
+    expect((thrown as BlobTooLargeError).maxBytes).toBe(10);
+    expect(pulled).toBeLessThanOrEqual(1);
+  });
+
+  it("should stop reading once past the cap when the body has no content-length", async () => {
+    // Arrange: a body that never ends, so only stopping at the cap returns at all.
+    let pulled = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled += 1;
+        controller.enqueue(new Uint8Array(4));
+      }
+    });
+    const { fetch } = fakeFetch({ "/git/blobs/": () => new Response(body) });
+
+    // Act
+    const thrown = await blob(rest(fetch), "hmcts", "rdo-docmosis", sha(1), 10).catch((e: unknown) => e);
+
+    // Assert
+    expect(thrown).toBeInstanceOf(BlobTooLargeError);
+    expect(pulled).toBeLessThanOrEqual(4);
   });
 });
 

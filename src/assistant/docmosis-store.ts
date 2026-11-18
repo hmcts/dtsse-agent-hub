@@ -227,27 +227,31 @@ export const PICK_LOADED = "that template has already been loaded";
  * `409 {loaded}` with the version it wrote, so a pod that runs the job again after a restart finds its own earlier
  * write and ends there, rather than writing the template twice. Anything else is a 400.
  */
-async function pickRefused(tx: Database, conversation: Conversation, pick: string): Promise<HttpError> {
+async function pickRefused(tx: Database, conversation: Conversation, agent: WritingAgent, pick: string): Promise<HttpError> {
   const job = await tx.assistantPodJob.findUnique({
     where: { id: pick },
-    select: { kind: true, conversationId: true, ownerOid: true, status: true, result: true }
+    select: { kind: true, conversationId: true, ownerOid: true, virtualAgentId: true, status: true, result: true }
   });
   const loaded = job === null ? undefined : docmosisLoadResult.safeParse(job.result);
-  if (job !== null && job.kind === DOCMOSIS_LOAD_KIND && job.status === "done" && canRecordPickAsOwner(job, conversation) && loaded?.success) {
+  if (job !== null && job.kind === DOCMOSIS_LOAD_KIND && job.status === "done" && canRecordPickAsOwner(job, conversation, agent) && loaded?.success) {
     return new HttpError(409, PICK_LOADED, { loaded: loaded.data });
   }
   return new HttpError(400, "pick names no template pick waiting in this conversation");
 }
 
+/** The agent a write comes through, by the virtual agent whose session registered it, if any. */
+type WritingAgent = { virtualAgentId: string | null };
+
 /**
  * The `docmosis.load` job `pick` names, locked for the write's transaction, once it is pending and in its time, was
- * asked for in this conversation by its owner (`canRecordPickAsOwner`), and names a template. Refused otherwise
- * (`pickRefused`), so a write naming somebody else's pick, or one already used, writes nothing at all.
+ * asked for in this conversation by its owner, on the virtual agent the conversation and the writing agent are still
+ * on (`canRecordPickAsOwner`), and names a template. Refused otherwise (`pickRefused`), so a write naming somebody
+ * else's pick, or one already used, writes nothing at all.
  */
-async function bindPick(tx: Database, conversation: Conversation, pick: string, now: Date): Promise<BoundPick> {
+async function bindPick(tx: Database, conversation: Conversation, agent: WritingAgent, pick: string, now: Date): Promise<BoundPick> {
   const job = await lockPendingPodJob(tx, pick, DOCMOSIS_LOAD_KIND, now);
-  if (job === undefined || !canRecordPickAsOwner(job, conversation)) {
-    throw await pickRefused(tx, conversation, pick);
+  if (job === undefined || !canRecordPickAsOwner(job, conversation, agent)) {
+    throw await pickRefused(tx, conversation, agent, pick);
   }
   const args = docmosisLoadArgs.safeParse(job.args);
   if (!args.success) {
@@ -264,16 +268,18 @@ async function bindPick(tx: Database, conversation: Conversation, pick: string, 
  * With `pick`, the version is the person's own pick from their template library rather than the agent's: written
  * `by: user` as the conversation's owner, with where it came from, and the pick's job finished in the same
  * transaction, so the two commit together or not at all. The .docx must be the very blob the person picked, by its
- * git SHA-1. A stale base rolls the whole write back and leaves the job pending, for the pod to answer.
+ * git SHA-1, and `agent` the one writing: a pick without it is refused. A stale base rolls the whole write back and
+ * leaves the job pending, for the pod to answer.
  */
 export async function writeAgentDocmosis(
   prisma: PrismaClient,
-  { conversationId, body, now = new Date() }: { conversationId: string; body: DocmosisPut; now?: Date }
+  { conversationId, body, agent, now = new Date() }: { conversationId: string; body: DocmosisPut; agent?: WritingAgent; now?: Date }
 ): Promise<{ version: number; revision: number }> {
   return await prisma.$transaction(async (tx) => {
-    const conversation = await conversationOf(tx, conversationId);
     await lockConversation(tx, conversationId);
-    const pick = body.pick === undefined ? undefined : await bindPick(tx, conversation, body.pick, now);
+    const conversation = await conversationOf(tx, conversationId);
+    const writer = agent ?? { virtualAgentId: null };
+    const pick = body.pick === undefined ? undefined : await bindPick(tx, conversation, writer, body.pick, now);
     const by: DocmosisAuthor = pick === undefined ? "agent" : "user";
     const summary = pick === undefined ? (body.summary ?? null) : loadedSummary(pick.path);
     const sha = docxSha(body.docx) ?? "";
@@ -317,8 +323,8 @@ export async function writeAgentDocmosis(
     `;
     await prune(tx, conversationId, moved.version, now);
     const written = { version: moved.version, revision: 0 };
-    if (pick !== undefined) {
-      await finishPodJob(tx, pick.job, written, now);
+    if (pick !== undefined && !(await finishPodJob(tx, pick.job, written, now))) {
+      throw await pickRefused(tx, conversation, writer, pick.job.id);
     }
     await announce(tx, conversation);
     return written;
