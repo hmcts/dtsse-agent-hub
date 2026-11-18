@@ -9,6 +9,7 @@ import { createMockHub, type MockHubOptions } from "../__fixtures__/mock-hub.ts"
 import { ApiError, createApi } from "../api.ts";
 import { hubHome } from "../session.ts";
 import type { MemoryFs } from "./memory.ts";
+import { STOPPED } from "./pod-jobs.ts";
 import { type RunAssistantSupervisorOptions, runAssistantSupervisor } from "./run.ts";
 import { tmuxName } from "./tmux.ts";
 
@@ -39,6 +40,9 @@ async function mockHub(options: Omit<MockHubOptions, "launchTokens"> = {}): Prom
   return { hub, api: createApi({ baseUrl: url, launchToken: LAUNCH }) };
 }
 
+/** An agent-path call no stubbed supervisor test makes. */
+const unused = (name: string) => async (): Promise<never> => Promise.reject(new Error(`no ${name} here`));
+
 /** A hub that accepts every report and whose sessions stream ends as soon as it opens, unless told otherwise. */
 function stubApi(overrides: Partial<SupervisorApi> = {}): SupervisorApi {
   return {
@@ -53,6 +57,14 @@ function stubApi(overrides: Partial<SupervisorApi> = {}): SupervisorApi {
     deckBuildAsset: async () => new Uint8Array(),
     putDeckBuild: async () => null,
     putPodJob: async () => null,
+    getArtefact: unused("getArtefact"),
+    putArtefact: unused("putArtefact"),
+    getDocmosis: unused("getDocmosis"),
+    putDocmosis: unused("putDocmosis"),
+    putDocmosisAsset: unused("putDocmosisAsset"),
+    docmosisAsset: unused("docmosisAsset"),
+    putDocmosisPdf: unused("putDocmosisPdf"),
+    postQuestion: unused("postQuestion"),
     putMemory: async () => null,
     sessionsStream: async () => new Response("", { status: 200 }),
     ...overrides
@@ -288,6 +300,41 @@ describe("runAssistantSupervisor", () => {
       // Assert
       await waitUntil(() => hub.podJobAnswers.length === 1, "the pod job to be answered");
       expect(hub.podJobAnswers[0]).toEqual({ virtual_id: VID, job_id: jobId, body: { status: "done", result: { echoed: "hi" } } });
+    } finally {
+      await assistant.stop();
+      await hub.close();
+    }
+  });
+
+  it("should answer a pod job still running as failed before it stops", async () => {
+    // Arrange
+    const { hub, api } = await mockHub();
+    const jobId = "7d2a9e3c-1111-4222-8333-44445555aaaa";
+    let started = false;
+    const assistant = supervise({
+      api,
+      podJobs: [
+        {
+          kind: "test.slow",
+          budgetMs: 60_000,
+          run: (_args, { signal }) => {
+            started = true;
+            return new Promise((resolve) => signal.addEventListener("abort", () => resolve({ late: true })));
+          }
+        }
+      ]
+    });
+
+    try {
+      await waitUntil(() => hub.sessionStreams.has(VID), "the sessions stream to open");
+      hub.sendPodJob(VID, { job_id: jobId, kind: "test.slow", conversation_id: "0f8a6a1e-0000-4000-8000-0000000000c6", args: {} });
+      await waitUntil(() => started, "the pod job to start");
+
+      // Act
+      await assistant.stop();
+
+      // Assert
+      expect(hub.podJobAnswers).toEqual([{ virtual_id: VID, job_id: jobId, body: { status: "failed", error: "failed", detail: STOPPED } }]);
     } finally {
       await assistant.stop();
       await hub.close();

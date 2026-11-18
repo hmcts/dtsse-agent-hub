@@ -1,5 +1,5 @@
 import { canReadPodJob, canRequestPodJob } from "../access/rules.ts";
-import { HttpError, MAX_REQUEST_BYTES } from "../agent-api/http.ts";
+import { HttpError } from "../agent-api/http.ts";
 import { podReady } from "../agents/pod-ready.ts";
 import { isUuid } from "../agents/store.ts";
 import { notify } from "../realtime/notify.ts";
@@ -207,36 +207,47 @@ export async function pendingPodJobFrame(db: Database, virtualAgentId: string, j
   };
 }
 
-/**
- * The largest answer body the pod may send for this job, or `undefined` when there is no pending job of its to
- * answer, so the route reads nothing it would ignore anyway.
- */
-export async function podJobAnswerLimit(db: Database, virtualAgentId: string, jobId: string, now: Date = new Date()): Promise<number | undefined> {
-  const row = await pendingRow(db, virtualAgentId, jobId, now);
-  return row === undefined ? undefined : (POD_JOB_REGISTRY.get(row.kind)?.maxResultBytes ?? MAX_REQUEST_BYTES);
+/** A pending job of this virtual agent's that its pod may answer, read once for both the body's cap and the answer. */
+export interface AnswerablePodJob {
+  id: string;
+  conversationId: string;
+  ownerOid: string;
+  virtualAgentId: string;
+  definition: PodJobKind;
 }
 
 /**
- * The pod's answer, kept only for a pending job of this virtual agent's, so a late or repeated answer, or one for
- * another assistant's job, changes nothing. An answer the kind does not allow is a 400; keeping it tells the owner's
- * open tabs (`assistant_pod_job`).
+ * The job the pod is answering, or `undefined` when there is no pending job of its to answer, so the route reads
+ * nothing it would ignore anyway. A kind this hub no longer registers is left to time out: there is nothing to check
+ * its answer against.
  */
-export async function answerPodJob(prisma: PrismaClient, virtualAgentId: string, jobId: string, body: unknown, now: Date = new Date()): Promise<void> {
-  const row = await pendingRow(prisma, virtualAgentId, jobId, now);
-  // A kind this hub no longer registers is left to time out: there is nothing to check its answer against.
+export async function answerablePodJob(db: Database, virtualAgentId: string, jobId: string, now: Date = new Date()): Promise<AnswerablePodJob | undefined> {
+  const row = await pendingRow(db, virtualAgentId, jobId, now);
   const definition = row === undefined ? undefined : POD_JOB_REGISTRY.get(row.kind);
   if (row === undefined || definition === undefined) {
-    return;
+    return undefined;
   }
-  const answer = checkPodJobAnswer(definition, body);
+  return { id: row.id, conversationId: row.conversationId, ownerOid: row.ownerOid, virtualAgentId, definition };
+}
+
+/**
+ * The pod's answer to a job `answerablePodJob` found, kept only while it is still pending and inside its time, so a
+ * late or repeated answer changes nothing. An answer the kind does not allow is a 400; keeping it tells the owner's
+ * open tabs (`assistant_pod_job`).
+ */
+export async function answerPodJob(prisma: PrismaClient, job: AnswerablePodJob, body: unknown, now: Date = new Date()): Promise<void> {
+  const answer = checkPodJobAnswer(job.definition, body);
   const data =
     answer.status === "done"
       ? { status: "done", result: answer.result as object, finishedAt: now }
       : { status: "failed", error: answer.error, detail: answer.detail ?? null, finishedAt: now };
   await prisma.$transaction(async (tx) => {
-    const { count } = await tx.assistantPodJob.updateMany({ where: { id: row.id, virtualAgentId, status: "pending", expiresAt: { gt: now } }, data });
+    const { count } = await tx.assistantPodJob.updateMany({
+      where: { id: job.id, virtualAgentId: job.virtualAgentId, status: "pending", expiresAt: { gt: now } },
+      data
+    });
     if (count > 0) {
-      await notify(tx, { type: "assistant_pod_job", job_id: row.id, conversation_id: row.conversationId, owner_oid: row.ownerOid });
+      await notify(tx, { type: "assistant_pod_job", job_id: job.id, conversation_id: job.conversationId, owner_oid: job.ownerOid });
     }
   });
 }

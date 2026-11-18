@@ -5,11 +5,11 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { HttpError, MAX_REQUEST_BYTES } from "../../src/agent-api/http.ts";
 import {
+  answerablePodJob,
   answerPodJob,
   finishPodJob,
   lockPendingPodJob,
   pendingPodJobFrame,
-  podJobAnswerLimit,
   readPodJob,
   requestPodJob,
   sweepPodJobs
@@ -52,13 +52,21 @@ beforeEach(async () => {
   await resetDatabase();
 });
 
-const claiming = podFixture(["pod-job:test.echo", "pod-job:test.single"]);
+const BOTH_KINDS = ["pod-job:test.echo", "pod-job:test.single"];
+const withMainSession = podFixture([]);
 
-/** A running pod caught up with its generation, claiming both test kinds, and a conversation of its owner's on it. */
-async function chatOf(who: Person, features?: string[] | null): Promise<{ assistant: string; conversation: string }> {
-  const assistant = await claiming(who, features);
+/**
+ * A running pod caught up with its generation, its own status report claiming both test kinds (or `features`, `null`
+ * for no report yet), and a conversation of its owner's on it. The claim is the pod's own, as `claimedFeatures()`
+ * reports it, because no session's registration ever claims a pod job.
+ */
+async function chatOf(who: Person, features: string[] | null = BOTH_KINDS): Promise<{ assistant: string; conversation: string }> {
+  const assistant = await withMainSession(who);
   const row = await prisma.virtualAgent.findUniqueOrThrow({ where: { id: assistant }, select: { generation: true, agentId: true } });
-  await prisma.virtualAgent.update({ where: { id: assistant }, data: { observedGeneration: row.generation } });
+  await prisma.virtualAgent.update({
+    where: { id: assistant },
+    data: { observedGeneration: row.generation, ...(features === null ? {} : { clientFeatures: features }) }
+  });
   const conversation = await prisma.assistantConversation.create({ data: { ownerOid: who.oid, virtualAgentId: assistant }, select: { id: true } });
   return { assistant, conversation: conversation.id };
 }
@@ -94,6 +102,14 @@ async function heard(act: () => Promise<unknown>): Promise<NotifiedEvent[]> {
 
 const jobOf = (asked: unknown) => (asked as { job_id: string }).job_id;
 
+/** What the PUT route does: find the job its pod may answer, once, and keep the answer if there is one. */
+async function answer(virtualAgentId: string, jobId: string, body: unknown): Promise<void> {
+  const job = await answerablePodJob(prisma, virtualAgentId, jobId);
+  if (job !== undefined) {
+    await answerPodJob(prisma, job, body);
+  }
+}
+
 describe("pod jobs", () => {
   it("should record a job, frame it for its pod, keep its answer and give it back only to its owner", async () => {
     // Arrange
@@ -112,7 +128,7 @@ describe("pod jobs", () => {
     const jobId = jobOf(asked);
     const frame = await pendingPodJobFrame(prisma, assistant, jobId);
     const before = await readPodJob(prisma, ALICE.oid, conversation, jobId);
-    const answered = await heard(() => answerPodJob(prisma, assistant, jobId, { status: "done", result: { echoed: "hi" } }));
+    const answered = await heard(() => answer(assistant, jobId, { status: "done", result: { echoed: "hi" } }));
 
     // Assert
     expect(asked).toEqual({ status: "pending", job_id: jobId });
@@ -154,16 +170,16 @@ describe("pod jobs", () => {
     const jobId = jobOf(await requestPodJob(prisma, ALICE.oid, alice.conversation, { kind: "test.echo", args: { text: "hi" } }));
 
     // Act
-    await answerPodJob(prisma, bob.assistant, jobId, { status: "done", result: { echoed: "bob's" } });
+    await answer(bob.assistant, jobId, { status: "done", result: { echoed: "bob's" } });
     const framedForBob = await pendingPodJobFrame(prisma, bob.assistant, jobId);
-    const limitForBob = await podJobAnswerLimit(prisma, bob.assistant, jobId);
-    await answerPodJob(prisma, alice.assistant, jobId, { status: "failed", error: "signed_out", detail: "Sign in to GitHub first." });
-    await answerPodJob(prisma, alice.assistant, jobId, { status: "done", result: { echoed: "late" } });
-    await answerPodJob(prisma, alice.assistant, "not-a-job", { status: "done", result: { echoed: "x" } });
+    const forBob = await answerablePodJob(prisma, bob.assistant, jobId);
+    await answer(alice.assistant, jobId, { status: "failed", error: "signed_out", detail: "Sign in to GitHub first." });
+    await answer(alice.assistant, jobId, { status: "done", result: { echoed: "late" } });
+    await answer(alice.assistant, "not-a-job", { status: "done", result: { echoed: "x" } });
 
     // Assert
     expect(framedForBob).toBeUndefined();
-    expect(limitForBob).toBeUndefined();
+    expect(forBob).toBeUndefined();
     expect(await readPodJob(prisma, ALICE.oid, alice.conversation, jobId)).toEqual({
       job_id: jobId,
       kind: "test.echo",
@@ -173,19 +189,40 @@ describe("pod jobs", () => {
     });
   });
 
-  it("should refuse an answer the kind does not allow with 400 and keep the job pending", async () => {
+  it("should refuse an answer the kind does not allow, or text Postgres cannot store, with 400 and keep the job pending", async () => {
     // Arrange
     const { assistant, conversation } = await chatOf(ALICE);
     const jobId = jobOf(await requestPodJob(prisma, ALICE.oid, conversation, { kind: "test.echo", args: { text: "hi" } }));
 
     // Act
-    const badResult = await refusal(answerPodJob(prisma, assistant, jobId, { status: "done", result: { echoed: 1 } }));
-    const badError = await refusal(answerPodJob(prisma, assistant, jobId, { status: "failed", error: "not_found" }));
+    const badResult = await refusal(answer(assistant, jobId, { status: "done", result: { echoed: 1 } }));
+    const badCode = await refusal(answer(assistant, jobId, { status: "failed", error: "Not Found" }));
+    const nulResult = await refusal(answer(assistant, jobId, { status: "done", result: { echoed: "a\u0000b" } }));
+    const nulDetail = await refusal(answer(assistant, jobId, { status: "failed", error: "failed", detail: "a\u0000b" }));
+    const nulArgs = await refusal(requestPodJob(prisma, ALICE.oid, conversation, { kind: "test.echo", args: { text: "a\u0000b" } }));
 
     // Assert
-    expect(badResult.status).toBe(400);
-    expect(badError.status).toBe(400);
+    expect([badResult.status, badCode.status, nulResult.status, nulDetail.status, nulArgs.status]).toEqual([400, 400, 400, 400, 400]);
     expect((await readPodJob(prisma, ALICE.oid, conversation, jobId))?.status).toBe("pending");
+    expect(await prisma.assistantPodJob.count()).toBe(1);
+  });
+
+  it("should store failed with the pod's detail when it answers a code the kind does not list", async () => {
+    // Arrange
+    const { assistant, conversation } = await chatOf(ALICE);
+    const jobId = jobOf(await requestPodJob(prisma, ALICE.oid, conversation, { kind: "test.echo", args: { text: "hi" } }));
+
+    // Act
+    await answer(assistant, jobId, { status: "failed", error: "not_found", detail: "There is no such repository." });
+
+    // Assert
+    expect(await readPodJob(prisma, ALICE.oid, conversation, jobId)).toEqual({
+      job_id: jobId,
+      kind: "test.echo",
+      status: "failed",
+      error: "failed",
+      detail: "There is no such repository."
+    });
   });
 
   it("should refuse an unknown kind and bad args with 400 before anything is read", async () => {
@@ -199,6 +236,20 @@ describe("pod jobs", () => {
     // Assert
     expect(unknown.status).toBe(400);
     expect(badArgs.status).toBe(400);
+    expect(await prisma.assistantPodJob.count()).toBe(0);
+  });
+
+  it("should answer waking when the running pod has reported no claim of its own, whatever its main session claims", async () => {
+    // Arrange
+    const { assistant, conversation } = await chatOf(ALICE, null);
+    const row = await prisma.virtualAgent.findUniqueOrThrow({ where: { id: assistant }, select: { agentId: true } });
+    await prisma.agent.update({ where: { id: row.agentId! }, data: { clientFeatures: ["lookups", ...BOTH_KINDS] } });
+
+    // Act
+    const asked = await requestPodJob(prisma, ALICE.oid, conversation, { kind: "test.echo", args: { text: "hi" } });
+
+    // Assert
+    expect(asked).toEqual({ status: "waking" });
     expect(await prisma.assistantPodJob.count()).toBe(0);
   });
 
@@ -276,7 +327,7 @@ describe("pod jobs", () => {
     // Act
     const read = await readPodJob(prisma, ALICE.oid, conversation, stale);
     const frame = await pendingPodJobFrame(prisma, assistant, stale);
-    await answerPodJob(prisma, assistant, stale, { status: "done", result: { loaded: true } });
+    await answer(assistant, stale, { status: "done", result: { loaded: true } });
     const fresh = await requestPodJob(prisma, ALICE.oid, conversation, { kind: "test.single", args: { name: "claim" } });
 
     // Assert
@@ -318,8 +369,8 @@ describe("pod jobs", () => {
     const single = jobOf(await requestPodJob(prisma, ALICE.oid, conversation, { kind: "test.single", args: { name: "a" } }));
 
     // Act and Assert
-    expect(await podJobAnswerLimit(prisma, assistant, echo)).toBe(MAX_REQUEST_BYTES);
-    expect(await podJobAnswerLimit(prisma, assistant, single)).toBe(512 * 1024);
+    expect((await answerablePodJob(prisma, assistant, echo))?.definition.maxResultBytes).toBe(MAX_REQUEST_BYTES);
+    expect((await answerablePodJob(prisma, assistant, single))?.definition.maxResultBytes).toBe(512 * 1024);
   });
 
   it("should bind a feature's own write to a job and finish it in the same transaction", async () => {

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { HttpError, MAX_REQUEST_BYTES } from "../agent-api/http.ts";
 import type { PodJobFeature } from "../agents/client-features.ts";
+import { jsonbText } from "./deck.ts";
 
 /**
  * A job an Assistant panel asks the conversation's own pod to run, with its owner's own credentials (`gh`, `az`), which
@@ -121,6 +122,11 @@ export function podJobFeature(kind: string): PodJobFeature {
 
 const jsonBytes = (value: unknown): number => Buffer.byteLength(JSON.stringify(value) ?? "", "utf8");
 
+const UNSTORABLE = "has text the hub cannot store: a NUL character, or half of a surrogate pair";
+
+/** Whether Postgres can hold `value` in a jsonb or text column, which refuse a NUL and half of a surrogate pair. */
+const storable = (value: unknown): boolean => jsonbText(value) !== undefined;
+
 function issueMessage(prefix: string, error: z.ZodError): string {
   const issue = error.issues[0];
   const path = [prefix, ...(issue?.path ?? []).map(String)].join(".");
@@ -132,6 +138,9 @@ export function checkPodJobArgs(definition: PodJobKind, args: unknown): unknown 
   const parsed = definition.args.safeParse(args ?? {});
   if (!parsed.success) {
     throw new HttpError(400, issueMessage("args", parsed.error));
+  }
+  if (!storable(parsed.data)) {
+    throw new HttpError(400, `args: ${UNSTORABLE}`);
   }
   if (jsonBytes(parsed.data) > MAX_POD_JOB_ARGS_BYTES) {
     throw new HttpError(400, `args: at most ${MAX_POD_JOB_ARGS_BYTES} bytes`);
@@ -145,13 +154,17 @@ export const podJobAnswerBody = z.discriminatedUnion("status", [
   z.strictObject({
     status: z.literal("failed"),
     error: z.string().regex(POD_JOB_ERROR_RE),
-    detail: z.string().trim().min(1).max(MAX_POD_JOB_DETAIL).optional()
+    detail: z.string().trim().min(1).max(MAX_POD_JOB_DETAIL).refine(storable, { message: UNSTORABLE }).optional()
   })
 ]);
 
 export type PodJobAnswer = { status: "done"; result: unknown } | { status: "failed"; error: string; detail?: string };
 
-/** The answer as it is stored: a result the kind's schema parses, or one of the kind's errors. A 400 otherwise. */
+/**
+ * The answer as it is stored: a result the kind's schema parses, or an error. A code the kind does not list is stored
+ * as `failed` with its detail, so the job still ends for the person waiting and the panel only ever sees codes it
+ * branches on. A 400 for an answer of the wrong shape or a result the kind refuses.
+ */
 export function checkPodJobAnswer(definition: PodJobKind, body: unknown): PodJobAnswer {
   const shaped = podJobAnswerBody.safeParse(body);
   if (!shaped.success) {
@@ -159,10 +172,8 @@ export function checkPodJobAnswer(definition: PodJobKind, body: unknown): PodJob
   }
   const answer = shaped.data;
   if (answer.status === "failed") {
-    if (!GENERIC_POD_JOB_ERRORS.includes(answer.error) && !definition.errors.includes(answer.error)) {
-      throw new HttpError(400, `error: ${definition.kind} does not answer ${answer.error}`);
-    }
-    return answer.detail === undefined ? { status: "failed", error: answer.error } : { status: "failed", error: answer.error, detail: answer.detail };
+    const error = GENERIC_POD_JOB_ERRORS.includes(answer.error) || definition.errors.includes(answer.error) ? answer.error : "failed";
+    return answer.detail === undefined ? { status: "failed", error } : { status: "failed", error, detail: answer.detail };
   }
   return { status: "done", result: checkPodJobResult(definition, answer.result) };
 }
@@ -176,6 +187,9 @@ export function checkPodJobResult(definition: PodJobKind, result: unknown): unkn
   // Undefined and null cannot be told from "no result" in a nullable jsonb column, so a result is always a value.
   if (parsed.data === undefined || parsed.data === null) {
     throw new HttpError(400, "result: must be a value");
+  }
+  if (!storable(parsed.data)) {
+    throw new HttpError(400, `result: ${UNSTORABLE}`);
   }
   if (jsonBytes(parsed.data) > MAX_POD_JOB_RESULT_BYTES) {
     throw new HttpError(400, `result: at most ${MAX_POD_JOB_RESULT_BYTES} bytes`);

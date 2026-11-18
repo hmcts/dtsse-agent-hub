@@ -115,6 +115,23 @@ describe("waitForPodJob", () => {
     expect(calls).toHaveLength(3);
   });
 
+  it.each([500, 502, 503, 429])("should keep waiting through a %s and read the job on the next poll", async (status) => {
+    // Arrange
+    vi.useFakeTimers();
+    const { fetchImpl, calls } = fakeFetch(
+      () => reply(status, { error: "try later" }),
+      () => reply(200, DONE)
+    );
+
+    // Act
+    const waiting = waitForPodJob("c1", "j1", { fetchImpl });
+    await vi.advanceTimersByTimeAsync(2000);
+
+    // Assert
+    expect(await waiting).toEqual(DONE);
+    expect(calls).toHaveLength(2);
+  });
+
   it("should read once more when a frame arrives during a read, rather than lose it", async () => {
     // Arrange
     let release: (response: Response) => void = () => undefined;
@@ -141,10 +158,10 @@ describe("waitForPodJob", () => {
     expect(await waitForPodJob("c1", "j1", { fetchImpl })).toEqual({ job_id: "j1", status: "missing" });
   });
 
-  it("should reject with a refusal other than 404", async () => {
-    const { fetchImpl } = fakeFetch(() => reply(401, { error: "sign in first" }));
+  it.each([400, 401, 403])("should reject with a %s, which is a refusal", async (status) => {
+    const { fetchImpl } = fakeFetch(() => reply(status, { error: "sign in first" }));
 
-    await expect(waitForPodJob("c1", "j1", { fetchImpl })).rejects.toMatchObject({ status: 401, message: "sign in first" });
+    await expect(waitForPodJob("c1", "j1", { fetchImpl })).rejects.toMatchObject({ status, message: "sign in first" });
   });
 
   it("should reject with the signal's reason when the wait is aborted, and stop listening", async () => {

@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
   virtualAgentsEnabled: vi.fn(),
   requestPodJob: vi.fn(),
   readPodJob: vi.fn(),
-  podJobAnswerLimit: vi.fn(),
+  answerablePodJob: vi.fn(),
   answerPodJob: vi.fn()
 }));
 
@@ -17,7 +17,7 @@ vi.mock("@/store/prisma", () => ({ prisma: {} }));
 vi.mock("@/assistant/pod-job-store", () => ({
   requestPodJob: mocks.requestPodJob,
   readPodJob: mocks.readPodJob,
-  podJobAnswerLimit: mocks.podJobAnswerLimit,
+  answerablePodJob: mocks.answerablePodJob,
   answerPodJob: mocks.answerPodJob
 }));
 vi.mock("@/agent-api/route", () => ({
@@ -54,6 +54,15 @@ function put(body: BodyInit): Promise<Response> {
     params: Promise.resolve({ virtualAgentId: "va-1", jobId: JOB })
   });
 }
+
+/** The pending job the store finds, of a kind whose answers are capped at `maxResultBytes`. */
+const jobCapped = (maxResultBytes: unknown) => ({
+  id: JOB,
+  conversationId: CONVERSATION,
+  ownerOid: "owner",
+  virtualAgentId: "va-1",
+  definition: { kind: "test.echo", maxResultBytes }
+});
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -135,7 +144,7 @@ describe("GET /api/ui/assistant/pod-jobs/{conversation_id}/{job_id}", () => {
 
 describe("PUT /api/virtual/{id}/pod-jobs/{job_id}", () => {
   it("should ignore an answer to a job that is not pending without reading it", async () => {
-    mocks.podJobAnswerLimit.mockResolvedValue(undefined);
+    mocks.answerablePodJob.mockResolvedValue(undefined);
 
     const response = await put("not json");
 
@@ -144,26 +153,26 @@ describe("PUT /api/virtual/{id}/pod-jobs/{job_id}", () => {
   });
 
   it("should read an answer within the agent API's cap as JSON and hand it to the store", async () => {
-    mocks.podJobAnswerLimit.mockResolvedValue(MAX_REQUEST_BYTES);
+    mocks.answerablePodJob.mockResolvedValue(jobCapped(MAX_REQUEST_BYTES));
 
     const response = await put(JSON.stringify({ status: "done", result: { echoed: "hi" } }));
 
     expect(response.status).toBe(204);
-    expect(mocks.answerPodJob).toHaveBeenCalledWith({}, "va-1", JOB, { status: "done", result: { echoed: "hi" } });
+    expect(mocks.answerPodJob).toHaveBeenCalledWith({}, jobCapped(expect.any(Number)), { status: "done", result: { echoed: "hi" } });
   });
 
   it("should read a larger answer as bytes up to the kind's own cap", async () => {
-    mocks.podJobAnswerLimit.mockResolvedValue(MAX_REQUEST_BYTES * 2);
+    mocks.answerablePodJob.mockResolvedValue(jobCapped(MAX_REQUEST_BYTES * 2));
     const result = { echoed: "x".repeat(MAX_REQUEST_BYTES) };
 
     const response = await put(JSON.stringify({ status: "done", result }));
 
     expect(response.status).toBe(204);
-    expect(mocks.answerPodJob).toHaveBeenCalledWith({}, "va-1", JOB, { status: "done", result });
+    expect(mocks.answerPodJob).toHaveBeenCalledWith({}, jobCapped(expect.any(Number)), { status: "done", result });
   });
 
   it("should answer 413 for an answer over the kind's cap, and 400 for one that is not JSON", async () => {
-    mocks.podJobAnswerLimit.mockResolvedValue(MAX_REQUEST_BYTES * 2);
+    mocks.answerablePodJob.mockResolvedValue(jobCapped(MAX_REQUEST_BYTES * 2));
 
     const tooBig = await put("x".repeat(MAX_REQUEST_BYTES * 2 + 1));
     const notJson = await put("{");
@@ -175,7 +184,7 @@ describe("PUT /api/virtual/{id}/pod-jobs/{job_id}", () => {
   });
 
   it("should pass on any other fault reading a larger answer", async () => {
-    mocks.podJobAnswerLimit.mockResolvedValue(MAX_REQUEST_BYTES * 2);
+    mocks.answerablePodJob.mockResolvedValue(jobCapped(MAX_REQUEST_BYTES * 2));
     const broken = new ReadableStream({
       pull(controller) {
         controller.error(new Error("socket closed"));
@@ -192,8 +201,18 @@ describe("PUT /api/virtual/{id}/pod-jobs/{job_id}", () => {
     expect(response.status).toBe(500);
   });
 
+  it("should answer 413 when the answer is over a kind's cap that is under the agent API's", async () => {
+    mocks.answerablePodJob.mockResolvedValue(jobCapped(2048));
+
+    const tooBig = await put(JSON.stringify({ status: "done", result: { echoed: "x".repeat(2048) } }));
+
+    expect(tooBig.status).toBe(413);
+    expect((await tooBig.json()).error).toBe("the answer is larger than 2048 bytes");
+    expect(mocks.answerPodJob).not.toHaveBeenCalled();
+  });
+
   it("should answer the store's 400 for an answer the kind does not allow", async () => {
-    mocks.podJobAnswerLimit.mockResolvedValue(MAX_REQUEST_BYTES);
+    mocks.answerablePodJob.mockResolvedValue(jobCapped(MAX_REQUEST_BYTES));
     mocks.answerPodJob.mockRejectedValue(new HttpError(400, "result: bad"));
 
     expect((await put(JSON.stringify({ status: "done", result: 1 }))).status).toBe(400);

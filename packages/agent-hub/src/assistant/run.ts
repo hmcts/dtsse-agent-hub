@@ -14,7 +14,7 @@ import { createLookupRunner, type LookupDeps, type Run } from "./lookups.ts";
 import { type MemoryFs, reportMemory } from "./memory.ts";
 import { prepareEach } from "./plugin-deps.ts";
 import { POD_JOB_HANDLERS } from "./pod-job-handlers.ts";
-import { createPodJobRunner, type PodJobHandler } from "./pod-jobs.ts";
+import { createPodJobRunner, type PodJobHandler, type PodJobHandlerApi } from "./pod-jobs.ts";
 import { type AssistantSupervisor, type CreateAssistantSupervisorOptions, createAssistantSupervisor, idleMinutes } from "./supervisor.ts";
 import { createWelshRunner, WELSH_PLUGIN, type WelshDeps } from "./welsh.ts";
 
@@ -29,22 +29,23 @@ const STREAM_IDLE_MS = 45000;
 const RECONCILE_MS = 10 * 60 * 1000;
 
 export type RunAssistantSupervisorOptions = Omit<CreateAssistantSupervisorOptions, "api" | "id"> & {
-  api: Pick<
-    Api,
-    | "putSessions"
-    | "sessionsStream"
-    | "conversations"
-    | "putUploads"
-    | "putLookup"
-    | "putMemory"
-    | "putWelsh"
-    | "putWelshFile"
-    | "welshFile"
-    | "deckBuild"
-    | "deckBuildAsset"
-    | "putDeckBuild"
-    | "putPodJob"
-  >;
+  api: PodJobHandlerApi &
+    Pick<
+      Api,
+      | "putSessions"
+      | "sessionsStream"
+      | "conversations"
+      | "putUploads"
+      | "putLookup"
+      | "putMemory"
+      | "putWelsh"
+      | "putWelshFile"
+      | "welshFile"
+      | "deckBuild"
+      | "deckBuildAsset"
+      | "putDeckBuild"
+      | "putPodJob"
+    >;
   id: string;
   /** The filesystem the uploads report and the deletions use; a test passes its own. */
   uploadsFs?: DiskFs;
@@ -361,6 +362,9 @@ export async function runAssistantSupervisor({
   } finally {
     clearInterval(timer);
     clearInterval(reconciler);
+    // Before the signal handlers go, so a second SIGTERM during the wait does not kill the pod without its answers:
+    // somebody is waiting on a panel for each job, and a job left unanswered reads as pending until its timeout.
+    await podJobs.stop();
     process.off("SIGTERM", onSignal);
     process.off("SIGINT", onSignal);
   }

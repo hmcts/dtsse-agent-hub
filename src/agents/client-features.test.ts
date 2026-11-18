@@ -35,6 +35,14 @@ describe("normaliseClientFeatures", () => {
   });
 });
 
+describe("MAX_CLIENT_FEATURES", () => {
+  it("should be the cap the pod client keeps its claim within, so a pod's status report is never refused for it", async () => {
+    // Imported by URL so that the hub's typecheck does not take in the client's sources.
+    const client: { MAX_CLIENT_FEATURES: number } = await import(new URL("../../packages/agent-hub/src/wire.ts", import.meta.url).href);
+    expect(client.MAX_CLIENT_FEATURES).toBe(MAX_CLIENT_FEATURES);
+  });
+});
+
 describe("storedClientFeatures", () => {
   it("should give null when the column holds no array, which is a client that reported nothing", () => {
     expect(storedClientFeatures(null)).toBeNull();
@@ -115,6 +123,14 @@ describe("podGate", () => {
 
   it("should say unsupported when the main-session agent registered on a client that claims nothing", () => {
     expect(podGate({ status: "running", clientFeatures: null, agent: { clientFeatures: null } }, "welsh")).toBe("unsupported");
+  });
+
+  it("should say waking for a pod job when the running pod has made no claim of its own, whatever its main-session agent claimed", () => {
+    expect(podGate({ status: "running", clientFeatures: null, agent: { clientFeatures: ["lookups"] } }, "pod-job:docmosis.load")).toBe("waking");
+    expect(podGate({ status: "running", clientFeatures: null, agent: { clientFeatures: null } }, "pod-job:docmosis.load")).toBe("waking");
+    expect(podGate({ status: "running", clientFeatures: ["lookups"], agent: { clientFeatures: ["pod-job:docmosis.load"] } }, "pod-job:docmosis.load")).toBe(
+      "unsupported"
+    );
   });
 });
 

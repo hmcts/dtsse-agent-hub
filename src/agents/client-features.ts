@@ -42,6 +42,7 @@ export type ClientFeature =
  */
 export type PodJobFeature = `pod-job:${string}`;
 
+/** Mirrored as `MAX_CLIENT_FEATURES` in the client's `wire.ts`, whose tests keep its own claim within it. */
 export const MAX_CLIENT_FEATURES = 50;
 export const MAX_CLIENT_FEATURE_NAME = 50;
 // Dots for a pod job's claim, `pod-job:<kind>`, whose kind is dotted (`src/assistant/pod-jobs.ts`).
@@ -117,16 +118,22 @@ export function podLacks(pod: PodClaims & { status: string }, feature: ClientFea
   return claim !== null && !claim.includes(feature);
 }
 
+const isPodJobFeature = (feature: string): feature is PodJobFeature => feature.startsWith("pod-job:");
+
 /**
  * Whether a request needing `feature` may be sent to the pod now. `waking` for a pod that is not running, or is
  * running but has claimed nothing yet, which is a pod still booting; `unsupported` for one whose claim leaves the
  * feature out.
+ *
+ * A pod job's claim is read from the pod's own claim alone: a session's registration never claims one, so the
+ * main-session agent's claim would leave every kind out and call a current pod `unsupported` until its first status
+ * report lands.
  */
 export function podGate(pod: PodClaims & { status: string }, feature: ClientFeature | PodJobFeature): "waking" | "unsupported" | "ok" {
   if (pod.status !== "running") {
     return "waking";
   }
-  const claim = podClaim(pod);
+  const claim = isPodJobFeature(feature) ? storedClientFeatures(pod.clientFeatures) : podClaim(pod);
   if (claim === null) {
     return "waking";
   }

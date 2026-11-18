@@ -51,7 +51,10 @@ export async function requestPodJob(conversationId: string, kind: string, args: 
   return (await response.json()) as PodJobRequest;
 }
 
-/** One read of a job; `undefined` when it is still pending. */
+/** Statuses a read is tried again after: the hub or its proxy failing for now, or asking for a slower pace. */
+const transient = (status: number): boolean => status >= 500 || status === 429;
+
+/** One read of a job; `undefined` when it is still pending, or the read failed in a way the next poll may not. */
 async function readOnce(conversationId: string, jobId: string, fetchImpl: typeof fetch, signal: AbortSignal | undefined): Promise<PodJobOutcome | undefined> {
   const response = await fetchImpl(`${base(conversationId)}/${encodeURIComponent(jobId)}`, {
     cache: "no-store",
@@ -59,6 +62,9 @@ async function readOnce(conversationId: string, jobId: string, fetchImpl: typeof
   });
   if (response.status === 404) {
     return { job_id: jobId, status: "missing" };
+  }
+  if (transient(response.status)) {
+    return undefined;
   }
   if (!response.ok) {
     throw await refusal(response);
@@ -69,8 +75,8 @@ async function readOnce(conversationId: string, jobId: string, fetchImpl: typeof
 
 /**
  * Resolves once the job is no longer pending: read when its frame arrives on `events`, and every `pollMs` whether or
- * not one does. A network fault is tried again on the next poll; a refusal other than 404 rejects, as does `signal`
- * aborting, with its reason.
+ * not one does. A network fault, a 5xx and a 429 are tried again on the next poll; any other 4xx but 404 is a refusal
+ * and rejects as `PodJobRefused`, and `signal` aborting rejects with its reason.
  */
 export function waitForPodJob(
   conversationId: string,

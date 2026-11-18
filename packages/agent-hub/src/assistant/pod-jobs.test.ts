@@ -1,8 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 import { claimedFeatures, podJobFeatures } from "../features.ts";
-import type { PodJobAnswer } from "../wire.ts";
+import { MAX_CLIENT_FEATURES, type PodJobAnswer } from "../wire.ts";
 import { POD_JOB_HANDLERS } from "./pod-job-handlers.ts";
-import { createPodJobRunner, failureOf, NO_HANDLER, PodJobError, type PodJobHandler, parsePodJobFrame, REFUSED, TOO_SLOW } from "./pod-jobs.ts";
+import {
+  createPodJobRunner,
+  failureOf,
+  NO_HANDLER,
+  PodJobError,
+  type PodJobHandler,
+  type PodJobHandlerApi,
+  parsePodJobFrame,
+  REFUSED,
+  STOPPED,
+  TOO_SLOW
+} from "./pod-jobs.ts";
 
 const JOB = "7d2a9e3c-1111-4222-8333-444455556666";
 const CONVERSATION = "0f8a6a1e-0000-4000-8000-0000000000c2";
@@ -23,7 +34,10 @@ const echo: PodJobHandler = {
 };
 
 /** A runner on a hub that records every answer, refusing the first ones with `refusals`. */
-function runner(handlers: readonly PodJobHandler[], { refusals = [] as number[], clock }: { refusals?: number[]; clock?: () => number } = {}) {
+function runner(
+  handlers: readonly PodJobHandler[],
+  { refusals = [] as number[], clock, agentApi = {} }: { refusals?: number[]; clock?: () => number; agentApi?: Partial<PodJobHandlerApi> } = {}
+) {
   const answers: { jobId: string; answer: PodJobAnswer }[] = [];
   const said: string[] = [];
   const putPodJob = vi.fn(async (_id: string, jobId: string, answer: PodJobAnswer) => {
@@ -35,7 +49,7 @@ function runner(handlers: readonly PodJobHandler[], { refusals = [] as number[],
     return null;
   });
   const jobs = createPodJobRunner({
-    api: { putPodJob },
+    api: { ...(agentApi as PodJobHandlerApi), putPodJob },
     id: "va-1",
     env: {},
     handlers,
@@ -95,6 +109,11 @@ describe("podJobFeatures and claimedFeatures", () => {
     expect(() => podJobFeatures([{ kind: "Test" }])).toThrow(/not a kind/);
     expect(() => podJobFeatures([{ kind: `a${".b".repeat(20)}` }])).toThrow(/not a kind/);
     expect(() => podJobFeatures([{ kind: "test.echo" }, { kind: "test.echo" }])).toThrow(/twice/);
+  });
+
+  it("should claim no more features than the hub takes, so a status report is never refused for its claim", () => {
+    expect(claimedFeatures().length).toBeLessThanOrEqual(MAX_CLIENT_FEATURES);
+    expect(claimedFeatures([...POD_JOB_HANDLERS, echo]).length).toBeLessThanOrEqual(MAX_CLIENT_FEATURES);
   });
 
   it("should claim no kind this build has no handler for", () => {
@@ -200,7 +219,7 @@ describe("createPodJobRunner", () => {
         budgetMs: 20,
         run: (_args, context) => {
           signal = context.signal;
-          return new Promise(() => undefined);
+          return new Promise((resolve) => context.signal.addEventListener("abort", () => resolve({ late: true })));
         }
       }
     ]);
@@ -268,7 +287,151 @@ describe("createPodJobRunner", () => {
 
     // Assert
     expect(answers).toEqual([{ jobId: JOB, answer: { status: "failed", error: "failed", detail: REFUSED } }]);
-    expect(said.join("\n")).toContain("refused its result");
+    expect(said.join("\n")).toContain("refused its answer");
+  });
+
+  it("should answer plain failed once when the hub refuses a failed answer, so the person is not left waiting", async () => {
+    // Arrange
+    const { jobs, answers, putPodJob } = runner(
+      [
+        {
+          ...echo,
+          run: async () => {
+            throw new PodJobError("signed_out", "Sign in first.");
+          }
+        }
+      ],
+      { refusals: [400] }
+    );
+
+    // Act
+    jobs.podJob(frame());
+    await jobs.idle();
+
+    // Assert
+    expect(putPodJob).toHaveBeenCalledTimes(2);
+    expect(answers).toEqual([{ jobId: JOB, answer: { status: "failed", error: "failed", detail: REFUSED } }]);
+  });
+
+  it("should not answer again when the hub refuses the plain failed answer itself", async () => {
+    const { jobs, putPodJob } = runner([echo], { refusals: [400, 400] });
+
+    jobs.podJob(frame());
+    await jobs.idle();
+
+    expect(putPodJob).toHaveBeenCalledTimes(2);
+  });
+
+  it("should give a handler the supervisor's api and the frame's agent id, so it can write into its conversation", async () => {
+    // Arrange
+    const putArtefact = vi.fn(async () => ({ version: 2 }));
+    const writer: PodJobHandler = {
+      kind: "test.write",
+      budgetMs: 5000,
+      run: async (_args, { api, agentId }) => {
+        if (agentId === undefined) {
+          throw new PodJobError("no_session", "Open the chat first.");
+        }
+        return await api.putArtefact(agentId, { markdown: "# Loaded", base_version: 1 });
+      }
+    };
+    const { jobs, answers } = runner([writer], { agentApi: { putArtefact } });
+
+    // Act
+    jobs.podJob(frame({ kind: "test.write", agent_id: AGENT }));
+    jobs.podJob(frame({ kind: "test.write", job_id: "7d2a9e3c-1111-4222-8333-000000000009" }));
+    await jobs.idle();
+
+    // Assert
+    expect(putArtefact).toHaveBeenCalledTimes(1);
+    expect(putArtefact).toHaveBeenCalledWith(AGENT, { markdown: "# Loaded", base_version: 1 });
+    expect(answers.map(({ answer }) => answer)).toEqual([
+      { status: "done", result: { version: 2 } },
+      { status: "failed", error: "no_session", detail: "Open the chat first." }
+    ]);
+  });
+
+  it("should keep a kind's slot held while a handler past its budget is still running, though it answered timeout", async () => {
+    // Arrange
+    let finish: () => void = () => undefined;
+    let started = 0;
+    const stuck: PodJobHandler = {
+      kind: "test.stuck",
+      budgetMs: 20,
+      run: async () => {
+        started += 1;
+        if (started === 1) {
+          await new Promise<void>((resolve) => {
+            finish = resolve;
+          });
+        }
+        return { ok: true };
+      }
+    };
+    const { jobs, answers } = runner([{ ...stuck, budgetMs: 20 }]);
+    jobs.podJob(frame({ kind: "test.stuck", job_id: "7d2a9e3c-1111-4222-8333-000000000001" }));
+    await new Promise((resolve) => setTimeout(resolve, 40));
+
+    // Act
+    jobs.podJob(frame({ kind: "test.stuck", job_id: "7d2a9e3c-1111-4222-8333-000000000002" }));
+    await settle();
+    const startedWhileStuck = started;
+    const answeredWhileStuck = answers.map(({ answer }) => answer.status === "failed" && answer.error);
+    finish();
+    await jobs.idle();
+
+    // Assert
+    expect(answeredWhileStuck).toEqual(["timeout"]);
+    expect(startedWhileStuck).toBe(1);
+    expect(started).toBe(2);
+  });
+
+  it("should answer every running and waiting job as failed when it stops, and any job sent after", async () => {
+    // Arrange
+    const slow = gated("test.slow");
+    let aborted: AbortSignal | undefined;
+    const { jobs, answers } = runner([
+      {
+        ...slow.handler,
+        run: async (args, context) => {
+          aborted = context.signal;
+          return await slow.handler.run(args, context);
+        }
+      }
+    ]);
+    jobs.podJob(frame({ kind: "test.slow", job_id: "7d2a9e3c-1111-4222-8333-000000000001" }));
+    jobs.podJob(frame({ kind: "test.slow", job_id: "7d2a9e3c-1111-4222-8333-000000000002" }));
+    await settle();
+
+    // Act
+    await jobs.stop();
+    jobs.podJob(frame({ kind: "test.slow", job_id: "7d2a9e3c-1111-4222-8333-000000000003" }));
+    await settle();
+
+    // Assert
+    const stopped = { status: "failed", error: "failed", detail: STOPPED };
+    expect(answers.map(({ answer }) => answer)).toEqual([stopped, stopped, stopped]);
+    expect(aborted?.aborted).toBe(true);
+    slow.releases.shift()?.();
+    await jobs.idle();
+    expect(answers).toHaveLength(3);
+  });
+
+  it("should stop waiting for answers after its bound when the hub cannot be reached", async () => {
+    // Arrange
+    const slow = gated("test.slow");
+    const hung = vi.fn(() => new Promise<null>(() => undefined));
+    const jobs = createPodJobRunner({ api: { putPodJob: hung } as never, id: "va-1", env: {}, handlers: [slow.handler] });
+    jobs.podJob(frame({ kind: "test.slow" }));
+    await settle();
+
+    // Act
+    const before = Date.now();
+    await jobs.stop(30);
+
+    // Assert
+    expect(Date.now() - before).toBeLessThan(1000);
+    expect(hung).toHaveBeenCalledWith("va-1", JOB, { status: "failed", error: "failed", detail: STOPPED });
   });
 
   it("should retry an answer the hub could not take for now", async () => {

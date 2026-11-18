@@ -117,6 +117,16 @@ describe("checkPodJobArgs", () => {
     expect(refusal(() => checkPodJobArgs(kind(), { text: 3 })).message).toMatch(/^args\.text:/);
   });
 
+  it.each([
+    ["a NUL", "a\u0000b"],
+    ["half of a surrogate pair", "\udc00"]
+  ])("should refuse args when they hold %s, which Postgres cannot store", (_label, text) => {
+    const error = refusal(() => checkPodJobArgs(kind(), { text }));
+
+    expect(error.status).toBe(400);
+    expect(error.message).toBe("args: has text the hub cannot store: a NUL character, or half of a surrogate pair");
+  });
+
   it("should refuse args over the cap", () => {
     const big = kind({ args: z.strictObject({ text: z.string() }) });
 
@@ -155,8 +165,24 @@ describe("checkPodJobAnswer", () => {
     });
   });
 
-  it("should refuse an error the kind does not list", () => {
-    expect(refusal(() => checkPodJobAnswer(kind(), { status: "failed", error: "not_found" })).message).toMatch(/does not answer not_found/);
+  it("should store failed with the pod's detail when the code is one the kind does not list", () => {
+    expect(checkPodJobAnswer(kind(), { status: "failed", error: "not_found", detail: "No such repo." })).toEqual({
+      status: "failed",
+      error: "failed",
+      detail: "No such repo."
+    });
+    expect(checkPodJobAnswer(kind(), { status: "failed", error: "not_found" })).toEqual({ status: "failed", error: "failed" });
+  });
+
+  it.each([
+    ["a NUL", "a\u0000b"],
+    ["half of a surrogate pair", "a\ud800b"]
+  ])("should refuse a result or a detail when it holds %s, which Postgres cannot store", (_label, text) => {
+    expect(refusal(() => checkPodJobAnswer(kind(), { status: "done", result: { echoed: text } })).message).toMatch(/^result: has text the hub cannot store/);
+    expect(refusal(() => checkPodJobAnswer(kind({ result: z.unknown() }), { status: "done", result: { [text]: 1 } })).message).toMatch(/cannot store/);
+    expect(refusal(() => checkPodJobAnswer(kind(), { status: "failed", error: "failed", detail: text })).message).toMatch(
+      /^answer\.detail: has text the hub cannot store/
+    );
   });
 
   it.each([
