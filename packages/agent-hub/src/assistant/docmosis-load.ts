@@ -82,7 +82,7 @@ export function parseLoadArgs(value: unknown): DocmosisLoadArgs | null {
 
 /** Git's SHA-1 of a blob, `blob <length>\0` and then the bytes: how the library's index names each template. */
 export function gitBlobSha1(bytes: Uint8Array): string {
-  return createHash("sha1").update(`blob ${bytes.byteLength}\0`).update(bytes).digest("hex");
+  return createHash("sha1").update(`blob ${bytes.byteLength}\0`).update(bytes).digest("hex"); // NOSONAR: git's blob id is SHA-1; this checks a download against the listing, not authenticity
 }
 
 const basename = (path: string): string => path.slice(path.lastIndexOf("/") + 1);
