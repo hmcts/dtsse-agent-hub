@@ -1245,6 +1245,32 @@ describe("the assistant items migration's Docmosis templates", () => {
   });
 });
 
+describe("the conversation item columns migration", () => {
+  const MIGRATION = "20261213090000_drop_conversation_item_columns";
+  const { database: DROPPED, earlier } = migrationFixture("migrate_drop_item_columns", MIGRATION);
+
+  it("should drop the document, export, deck, Docmosis and Notify columns and keep the conversation and its items, when it is applied", async () => {
+    await migrate(earlier());
+    await query(DROPPED, `INSERT INTO "user" (oid, tid, name) VALUES ('dev-alice', 'dev', 'Alice')`);
+    await query(
+      DROPPED,
+      `INSERT INTO "assistant_conversation" (owner_oid, title, artefact_version, jira_status, jira_requested_at, deck_version)
+       VALUES ('dev-alice', 'written', 1, 'pending', now(), 1)`
+    );
+
+    expect((await migrate())[0]).toBe(MIGRATION);
+
+    expect(
+      await query(
+        DROPPED,
+        `SELECT column_name FROM information_schema.columns
+          WHERE table_name = 'assistant_conversation' AND column_name ~ '^(artefact|jira|github|confluence|deck|docmosis|notify)_'`
+      )
+    ).toEqual([]);
+    expect(await query(DROPPED, `SELECT title FROM "assistant_conversation"`)).toEqual([{ title: "written" }]);
+  });
+});
+
 describe("the scratch database sweep's pattern", () => {
   const pattern = new RegExp(SCRATCH_PATTERN);
 
