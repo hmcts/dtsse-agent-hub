@@ -1,3 +1,4 @@
+import { canPostVideo, conversationAccess } from "../access/rules.ts";
 import { storedClientFeatures } from "../agents/client-features.ts";
 import { repoFileBase } from "../agents/github.ts";
 import { type Skill, storedSkills } from "../agents/skills.ts";
@@ -43,6 +44,7 @@ import { productLabel } from "./products.ts";
 import { mergeMatches, SEARCH_LIMIT, searchTerms, snippetOf } from "./search.ts";
 import { type ConversationMatchRow, searchConversations } from "./search-store.ts";
 import { type MessageAttachment, unsentAttachments } from "./upload-store.ts";
+import { VIDEO_SELECT, type VideoSummary, videoSummary } from "./video-store.ts";
 
 /** The CFT Workspace as its pages show it. Only ever the viewer's own: nobody sees anyone else's assistant. */
 
@@ -403,6 +405,10 @@ export interface ConversationView {
   docmosis: DocmosisSummary | null;
   /** The latest version of the conversation's Notify template, without its text, which the panel reads; `null` while it has none. */
   notify: NotifySummary | null;
+  /** The conversation's journey video, without its captions, chapters and reports, which the panel reads; `null` while it has none. */
+  video: VideoSummary | null;
+  /** Whether the viewer may post the video to Jira: its owner, in a chat with a pod to run the post on (`canPostVideo`). */
+  canPostVideo: boolean;
   jira: JiraExportView;
   github: GithubExportView;
   confluence: ConfluenceExportView;
@@ -429,16 +435,17 @@ export async function conversationView(db: Database, conversation: ConversationR
   const forkDeckAndDocmosis = async () => {
     const row = await db.assistantConversation.findUnique({
       where: { id: conversation.id },
-      select: { ...FORKED_SELECT, ...DECK_SELECT, ...DOCMOSIS_SELECT, ...NOTIFY_SELECT }
+      select: { ...FORKED_SELECT, ...DECK_SELECT, ...DOCMOSIS_SELECT, ...NOTIFY_SELECT, ...VIDEO_SELECT }
     });
     return {
       fork: row,
       deck: row === null ? null : await deckSummary(db, conversation.id, row),
       docmosis: row === null ? null : docmosisSummary(row),
-      notify: row === null ? null : notifySummary(row)
+      notify: row === null ? null : notifySummary(row),
+      video: row === null ? null : videoSummary(row)
     };
   };
-  const [current, artefact, { fork, deck, docmosis, notify }, jira, github, confluence, page, questions] = await Promise.all([
+  const [current, artefact, { fork, deck, docmosis, notify, video }, jira, github, confluence, page, questions] = await Promise.all([
     db.agent.findUnique({ where: { id: agentId }, select: { status: true, skills: true, clientFeatures: true, repo: true, branch: true } }),
     readArtefact(db, conversation.id),
     forkDeckAndDocmosis(),
@@ -471,6 +478,8 @@ export async function conversationView(db: Database, conversation: ConversationR
     deck,
     docmosis,
     notify,
+    video,
+    canPostVideo: canPostVideo(conversationAccess(conversation.ownerOid, conversation, [])) && hasPod(conversation),
     jira,
     github,
     confluence,

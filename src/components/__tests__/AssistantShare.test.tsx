@@ -445,6 +445,7 @@ function view(overrides: Partial<SharedConversationView> = {}): SharedConversati
     deck: null,
     docmosis: null,
     notify: null,
+    video: null,
     access: "reader",
     forked: null,
     fork: null,

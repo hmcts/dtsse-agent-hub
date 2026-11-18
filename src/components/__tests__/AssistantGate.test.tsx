@@ -122,6 +122,8 @@ function conversation(local: boolean): ConversationView {
     deck: null,
     docmosis: null,
     notify: null,
+    video: null,
+    canPostVideo: false,
     jira: { status: "none" },
     github: { status: "none" },
     confluence: { status: "none" },

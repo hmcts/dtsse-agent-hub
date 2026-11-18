@@ -102,9 +102,9 @@ describe("podJobRegistry", () => {
   });
 
   it("should register the production kinds when the registry is built", () => {
-    expect(POD_JOB_KINDS.map((definition) => definition.kind)).toEqual(["docmosis.load", "notify.list", "notify.pull"]);
+    expect(POD_JOB_KINDS.map((definition) => definition.kind)).toEqual(["docmosis.load", "notify.list", "notify.pull", "jira.attach-video"]);
     expect(POD_JOB_REGISTRY.get("docmosis.load")).toBe(POD_JOB_KINDS[0]);
-    expect(POD_JOB_REGISTRY.size).toBe(3);
+    expect(POD_JOB_REGISTRY.size).toBe(4);
   });
 });
 

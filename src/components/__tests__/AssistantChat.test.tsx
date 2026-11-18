@@ -128,6 +128,8 @@ function conversation(overrides: Partial<ConversationView> = {}): ConversationVi
     deck: null,
     docmosis: null,
     notify: null,
+    video: null,
+    canPostVideo: false,
     jira: { status: "none" },
     github: { status: "none" },
     confluence: { status: "none" },
@@ -2294,6 +2296,21 @@ describe("ChatView slides", () => {
     });
     return screen.getAllByTestId("arrivals").map((region) => region.textContent ?? "");
   }
+
+  it("should list the video in the switcher and open it, but not offer it in the Create menu, when the chat holds one", () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("{}", { status: 404 }))
+    );
+    render(chat({ video: { name: "pcs-journey", version: 1, updatedAt: "2026-11-18T12:00:00.000Z" } }));
+
+    switchTo("Video");
+
+    expect(screen.getByRole("region", { name: "Journey video" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Items, Video open" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(screen.queryByRole("menuitem", { name: /Video/ })).toBeNull();
+  });
 
   it("should offer the slides only once there is a deck, and open them in place of the document", async () => {
     const { rerender } = render(chat({}));

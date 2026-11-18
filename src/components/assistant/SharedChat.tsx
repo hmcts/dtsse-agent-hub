@@ -7,6 +7,7 @@ import { ForkButton, type ForkChatAction } from "@/components/assistant/ForkButt
 import { ForkedThread } from "@/components/assistant/ForkedThread";
 import { SharedNotify } from "@/components/assistant/NotifyPanel";
 import { SharedItem } from "@/components/assistant/SharedItem";
+import { SharedVideo } from "@/components/assistant/VideoPanel";
 import { SHARED_CHATS } from "@/web/home";
 
 /**
@@ -67,6 +68,7 @@ export function SharedChat({ view, forkChat }: { view: SharedConversationView; f
           {view.deck === null ? null : <SharedDeck conversationId={view.id} deck={view.deck} />}
           {view.docmosis === null ? null : <SharedDocmosis conversationId={view.id} docmosis={view.docmosis} />}
           {view.notify === null ? null : <SharedNotify conversationId={view.id} notify={view.notify} />}
+          {view.video === null ? null : <SharedVideo conversationId={view.id} video={view.video} />}
           <p className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs text-asst-faint">
             <Link href={SHARED_CHATS} className="text-asst-accent underline hover:text-asst-accent-hover">
               {view.access === "owner" ? "See all your shared chats" : "See other chats shared with you"}

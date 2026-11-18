@@ -25,6 +25,7 @@ import { createMockHub, type MockHub } from "./__fixtures__/mock-hub.ts";
 import { captureStderr } from "./__fixtures__/pod-shims.ts";
 import { createApi } from "./api.ts";
 import { parseFlags, readStdinText, UsageError } from "./cli/command.ts";
+import { clip, coverageSummaryLine, formatStamp, parseChapters } from "./cli/video.ts";
 import { runCli, USAGE } from "./cli.ts";
 import type { Env } from "./env.ts";
 import { CLIENT_FEATURES } from "./features.ts";
@@ -1621,6 +1622,136 @@ describe("artefact, in an assistant conversation", () => {
     ]) {
       expect((await cli(args, { sid, input: "x" })).code, args.join(" ")).toBe(2);
     }
+  });
+
+  describe("video", () => {
+    const MP4 = Buffer.from("not really an mp4, but bytes");
+    const CHAPTERS = "00:00:00 Landlord signs in\n00:01:05 Enters the claim\n";
+    const COVERAGE = "# Journey: coverage\n\n2 of 3 stories and 7 ACs are shown. Each AC's time is when its caption first appears.\n";
+
+    // A recording's output directory, as scripts/journey-video/record writes it.
+    function recording(files: Record<string, string | Buffer> = {}): string {
+      const dir = fs.mkdtempSync(path.join(home.root, "recording-"));
+      const all: Record<string, string | Buffer> = {
+        "pcs-journey.mp4": MP4,
+        "pcs-journey.vtt": "WEBVTT\n\n00:00:00.000 --> 00:00:02.000\nHello\n",
+        "pcs-journey.chapters.txt": CHAPTERS,
+        "coverage.md": COVERAGE,
+        "content-mismatches.md": "# mismatches\n",
+        ...files
+      };
+      for (const [name, content] of Object.entries(all)) {
+        fs.writeFileSync(path.join(dir, name), content);
+      }
+      return dir;
+    }
+
+    it("should put the video to storage and make it the conversation's, when video put runs on a recording's directory", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      const dir = recording();
+
+      // Act
+      const r = await cli(["video", "put", dir, "--jira", "HDPI-1234"], { sid });
+
+      // Assert
+      expect(r.code, r.errors.join("\n")).toBe(0);
+      const ready = hub.videos.get(agentId)?.ready;
+      expect(ready?.body).toMatchObject({
+        name: "pcs-journey",
+        bytes: MP4.length,
+        chapters: [
+          { at: 0, title: "Landlord signs in" },
+          { at: 65, title: "Enters the claim" }
+        ],
+        coverage_summary: "2 of 3 stories and 7 ACs are shown. Each AC's time is when its caption first appears.",
+        jira_key: "HDPI-1234"
+      });
+      expect(hub.blobs.get(ready?.video_id ?? "")?.equals(MP4)).toBe(true);
+      expect(hub.blobPuts[hub.blobPuts.length - 1]?.headers["x-ms-blob-type"]).toBe("BlockBlob");
+      expect(r.lines.join("\n")).toMatch(/published "pcs-journey" \(2 chapters\).*post it to HDPI-1234/);
+    });
+
+    it("should publish without captions, chapters or reports, when only the .mp4 is in the directory", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      const dir = fs.mkdtempSync(path.join(home.root, "recording-"));
+      fs.writeFileSync(path.join(dir, "demo.mp4"), MP4);
+
+      // Act
+      const r = await cli(["video", "put", dir, "--name", "Demo"], { sid });
+
+      // Assert
+      expect(r.code, r.errors.join("\n")).toBe(0);
+      expect(hub.videos.get(agentId)?.ready?.body).toMatchObject({ name: "Demo", chapters: [], coverage: "", content_mismatches: "" });
+      expect(hub.videos.get(agentId)?.ready?.body.captions).toBeUndefined();
+    });
+
+    it("should refuse with exit 2 before asking the hub, when the arguments cannot make a video", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      const empty = fs.mkdtempSync(path.join(home.root, "recording-"));
+      const two = recording({ "other.mp4": MP4 });
+
+      // Act
+      const none = await cli(["video", "put"], { sid });
+      const noMp4 = await cli(["video", "put", empty], { sid });
+      const ambiguous = await cli(["video", "put", two], { sid });
+      const badKey = await cli(["video", "put", recording(), "--jira", "nope"], { sid });
+      const action = await cli(["video", "get"], { sid });
+
+      // Assert
+      expect([none.code, noMp4.code, ambiguous.code, badKey.code, action.code]).toEqual([2, 2, 2, 2, 2]);
+      expect(badKey.errors.join("\n")).toMatch(/issue key such as HDPI-1234/);
+      expect(hub.videos.get(agentId)).toBeUndefined();
+    });
+
+    it("should say the session is not a conversation and exit 1, when video put runs outside one", async () => {
+      // Arrange
+      const { sid } = await session({ conversation: false });
+
+      // Act
+      const r = await cli(["video", "put", recording()], { sid });
+
+      // Assert
+      expect(r.code).toBe(1);
+      expect(r.errors.join("\n")).toMatch(/not a CFT Workspace conversation/);
+    });
+
+    it("should read the chapter times and the coverage line when the files are read", () => {
+      expect(parseChapters("01:02:03 Late\n05:07 Short\nnot a chapter\n00:00:00 First")).toEqual([
+        { at: 0, title: "First" },
+        { at: 307, title: "Short" },
+        { at: 3723, title: "Late" }
+      ]);
+      expect(coverageSummaryLine(COVERAGE)).toMatch(/^2 of 3 stories and 7 ACs are shown\./);
+      expect(coverageSummaryLine("# nothing here")).toBeUndefined();
+    });
+
+    it("should refuse a chapter past 24 hours naming the file and line, when the chapters are read", () => {
+      expect(() => parseChapters("00:00:00 First\n25:00:00 Late", "demo.chapters.txt")).toThrow(/^demo\.chapters\.txt line 2: 25:00:00 is more than 24 hours/);
+      expect(parseChapters("24:00:00 Edge")).toEqual([{ at: 86400, title: "Edge" }]);
+    });
+
+    it("should cut text between code points, when a title or summary is over the limit", () => {
+      const emoji = "\u{1F600}";
+      expect(clip(`ab${emoji}`, 3)).toBe("ab");
+      expect(clip(`a${emoji}`, 3)).toBe(`a${emoji}`);
+      expect(parseChapters(`00:00:01 ${"x".repeat(199)}${emoji}`)[0]?.title).toBe("x".repeat(199));
+      expect(formatStamp(3723)).toBe("01:02:03");
+    });
+
+    it("should send the recording with its length, as it is read from disk, when video put runs", async () => {
+      // Arrange
+      const { sid } = await session();
+
+      // Act
+      const r = await cli(["video", "put", recording()], { sid });
+
+      // Assert
+      expect(r.code, r.errors.join("\n")).toBe(0);
+      expect(hub.blobPuts[hub.blobPuts.length - 1]?.headers["content-length"]).toBe(String(MP4.length));
+    });
   });
 
   describe("notify", () => {

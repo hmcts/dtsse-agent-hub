@@ -451,3 +451,36 @@ export type MicrosoftTokenResponse = { access_token: string; expires_at: string;
 export type LoginCodeResponse = { code: string };
 /** Whether the owner has asked for a sign-in of this kind; see `GET /api/virtual/{id}/login/{kind}`. */
 export type SignInRequestResponse = { requested: boolean };
+
+export type VideoChapter = { at: number; title: string };
+
+/** The body of `POST …/video`: what the panel shows beside the player. The MP4 itself goes to the URL the answer names. */
+export type VideoBeginBody = {
+  name: string;
+  bytes: number;
+  captions?: string;
+  chapters: VideoChapter[];
+  coverage: string;
+  coverage_summary?: string;
+  content_mismatches: string;
+  jira_key?: string;
+};
+
+export type VideoBegun = { video_id: string; upload_url: string; expires_in: number };
+
+/** The conversation's ready video as `GET …/video` answers it. */
+export type VideoResponse = {
+  video_id: string;
+  name: string;
+  bytes: number;
+  has_captions: boolean;
+  chapters: VideoChapter[];
+  coverage: string;
+  coverage_summary: string | null;
+  content_mismatches: string;
+  jira_key: string | null;
+  posted: { key: string; url: string; at: string } | null;
+  finished_at: string;
+  /** Where the MP4 can be downloaded from, for a limited time. */
+  download_url: string;
+};

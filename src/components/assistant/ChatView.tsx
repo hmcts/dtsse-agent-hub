@@ -42,6 +42,7 @@ import type { ExportToJiraAction, JiraAccess } from "@/components/assistant/Jira
 import { ARTEFACT_OVERLAY_MAX_WIDTH } from "@/components/assistant/layout";
 import { MessageAttachments } from "@/components/assistant/MessageAttachments";
 import { NotifyPanel } from "@/components/assistant/NotifyPanel";
+import { VideoPanel } from "@/components/assistant/VideoPanel";
 import { useStickToBottom } from "@/components/feed/useStickToBottom";
 import { AnnouncerRegion, useAnnouncer } from "@/components/live/Announcer";
 import { useHubEvent } from "@/components/live/HubStream";
@@ -368,7 +369,7 @@ export function ChatView({
    * The one panel beside the chat: the document, the deck or the Docmosis template, never two, since two panels beside a chat leave the chat
    * no room to read in. The header's switcher moves between them, so each is two presses from another.
    */
-  const [panel, setPanel] = useState<"document" | "deck" | "docmosis" | "notify" | null>(null);
+  const [panel, setPanel] = useState<"document" | "deck" | "docmosis" | "notify" | "video" | null>(null);
   // Read by a closed editor's late answer, which comes back through the props of the render that last showed it.
   const panelNow = useRef(panel);
   panelNow.current = panel;
@@ -384,6 +385,8 @@ export function ChatView({
   const notifyBusy = useRef(false);
   /** The assistant wrote a newer Notify version while another panel was busy, so it waits behind its row in the switcher instead. */
   const [notifyWaiting, setNotifyWaiting] = useState(false);
+  /** The assistant published a video while another panel was busy, so it waits in the switcher. */
+  const [videoWaiting, setVideoWaiting] = useState(false);
   /** The assistant wrote a newer deck while the document was busy, so the slides wait behind their row in the switcher instead. */
   const [slidesWaiting, setSlidesWaiting] = useState(false);
   /** The assistant wrote the document while the slides' editor was busy, so the document waits behind its row in the switcher. */
@@ -412,6 +415,8 @@ export function ChatView({
   const seenDocmosis = useRef(docmosis?.version ?? 0);
   const notify = view.notify;
   const seenNotify = useRef(notify?.version ?? 0);
+  const video = view.video;
+  const seenVideo = useRef(video?.version ?? 0);
   const narrow = useNarrow();
 
   useEffect(() => setStatus(view.agentStatus), [view.agentStatus]);
@@ -502,6 +507,25 @@ export function ChatView({
     }
     seenNotify.current = Math.max(seenNotify.current, notifyVersion);
   }, [notifyVersion, notifyBy, arrivals, panel]);
+  /** The same for the journey video, which the assistant publishes with `video put`. Only the person's own edits are ever busy, and the video has none. */
+  const videoVersion = video?.version ?? 0;
+  useEffect(() => {
+    if (videoVersion > seenVideo.current) {
+      if (
+        (panel === "document" && documentBusy.current) ||
+        (panel === "deck" && deckBusy.current) ||
+        (panel === "docmosis" && docmosisBusy.current) ||
+        (panel === "notify" && notifyBusy.current)
+      ) {
+        setVideoWaiting(true);
+        arrivals.announce("The assistant published a video. Open it from Items to see it.");
+      } else if (panel !== "video") {
+        setPanel("video");
+        arrivals.announce("The assistant published a video");
+      }
+    }
+    seenVideo.current = Math.max(seenVideo.current, videoVersion);
+  }, [videoVersion, arrivals, panel]);
   useEffect(() => {
     if (panel === "deck") {
       setSlidesWaiting(false);
@@ -511,6 +535,9 @@ export function ChatView({
     }
     if (panel === "docmosis") {
       setDocmosisWaiting(false);
+    }
+    if (panel === "video") {
+      setVideoWaiting(false);
     }
     if (panel === "notify") {
       setNotifyWaiting(false);
@@ -685,7 +712,8 @@ export function ChatView({
             failed: loadFailed && panel !== "docmosis"
           }
         ]),
-    ...(notify === null && panel !== "notify" ? [] : [{ key: "notify", label: "Notify template", open: () => setPanel("notify"), waiting: notifyWaiting }])
+    ...(notify === null && panel !== "notify" ? [] : [{ key: "notify", label: "Notify template", open: () => setPanel("notify"), waiting: notifyWaiting }]),
+    ...(video === null ? [] : [{ key: "video", label: "Video", open: () => setPanel("video"), waiting: videoWaiting }])
   ];
   const switcherPanel = panel === "deck" ? "slides" : panel;
   const artefact: ArtefactSnapshot = {
@@ -962,6 +990,16 @@ export function ChatView({
           canPick={pod}
           onClose={() => setPanel(null)}
           onBusy={markNotifyBusy}
+          narrow={narrow}
+          announce={arrivals.announce}
+        />
+      ) : null}
+      {panel === "video" && video !== null ? (
+        <VideoPanel
+          conversationId={view.id}
+          video={video}
+          canPost={view.canPostVideo}
+          onClose={() => setPanel(null)}
           narrow={narrow}
           announce={arrivals.announce}
         />

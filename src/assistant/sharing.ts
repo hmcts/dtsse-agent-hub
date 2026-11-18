@@ -12,6 +12,7 @@ import { hasPod } from "./pods.ts";
 import { productLabel } from "./products.ts";
 import type { SharedConversationRow } from "./shares.ts";
 import { type ThreadItem, threadItems } from "./thread.ts";
+import { VIDEO_SELECT, type VideoSummary, videoSummary } from "./video-store.ts";
 import { UNTITLED } from "./views.ts";
 
 /**
@@ -99,6 +100,8 @@ export interface SharedConversationView {
   docmosis: DocmosisSummary | null;
   /** The latest version of the conversation's Notify template, without its text, which the viewer reads; `null` when it has none. */
   notify: NotifySummary | null;
+  /** The conversation's journey video, without its reports, which the viewer reads; `null` when it has none. */
+  video: VideoSummary | null;
   /** `owner` when the owner is looking at their own share, which is how they see what a recipient sees. */
   access: ConversationAccess;
   /**
@@ -143,7 +146,8 @@ export async function sharedConversation(
       ...FORKED_SELECT,
       ...DECK_SELECT,
       ...DOCMOSIS_SELECT,
-      ...NOTIFY_SELECT
+      ...NOTIFY_SELECT,
+      ...VIDEO_SELECT
     }
   });
   if (row === null) {
@@ -173,6 +177,7 @@ export async function sharedConversation(
     deck,
     docmosis: docmosisSummary(row),
     notify: notifySummary(row),
+    video: videoSummary(row),
     access,
     fork
   };

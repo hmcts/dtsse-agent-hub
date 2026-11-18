@@ -72,6 +72,12 @@ async function startSweeping(): Promise<void> {
         startFeedbackSweep(prisma, blobs);
       }
     }
+    const { videoBlobs } = await import("./assistant/video-blob.ts");
+    const videos = videoBlobs();
+    if (videos !== undefined) {
+      const { startVideoSweep } = await import("./assistant/video-store.ts");
+      startVideoSweep(prisma, videos);
+    }
     if (virtualAgentsEnabled()) {
       const { startVirtualAgentSweep } = await import("./virtual-agents/sweep.ts");
       startVirtualAgentSweep(prisma);

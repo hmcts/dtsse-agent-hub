@@ -292,6 +292,20 @@ export function createMockHub({
     const latest = stored.versions[stored.versions.length - 1];
     return { ...rest, has_pdf: pdf !== null, ...(latest && latest.version !== v.version ? { current_version: latest.version } : {}) };
   };
+  // agent id → the conversation's journey video: uploads begun, and the one finished
+  type MockVideo = { open: Map<string, Body>; ready: { video_id: string; body: Body } | null; posted: { video_id: string; issue_key: string }[] };
+  const videos = new Map<string, MockVideo>();
+  const videoOf = (agentId: string): MockVideo => {
+    let found = videos.get(agentId);
+    if (!found) {
+      found = { open: new Map(), ready: null, posted: [] };
+      videos.set(agentId, found);
+    }
+    return found;
+  };
+  // What a SAS URL would hold: video id → the bytes put to `/blob/<id>`, and the headers of each put.
+  const blobs = new Map<string, Buffer>();
+  const blobPuts: { id: string; headers: IncomingMessage["headers"] }[] = [];
   // agent id → the conversation's Notify template, every version as `GET …/notify` answers it
   const notifyTemplates = new Map<string, Body[]>();
   const notifyOf = (agentId: string): Body[] => {
@@ -833,6 +847,24 @@ export function createMockHub({
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://mock");
+    const blob = /^\/blob\/([0-9a-f-]{36})$/.exec(url.pathname)?.[1];
+    if (blob !== undefined) {
+      if (req.method === "PUT") {
+        const chunks: Buffer[] = [];
+        for await (const chunk of req) {
+          chunks.push(Buffer.from(chunk));
+        }
+        blobs.set(blob, Buffer.concat(chunks));
+        blobPuts.push({ id: blob, headers: req.headers });
+        return send(res, 201);
+      }
+      const found = blobs.get(blob);
+      if (!found) {
+        return send(res, 404, { error: "no such blob" });
+      }
+      res.writeHead(200, { "Content-Type": "video/mp4", "Content-Length": found.length });
+      return res.end(found);
+    }
     const bearer = /^Bearer (.+)$/.exec(req.headers.authorization || "")?.[1];
     const launch = bearer ? launchTokens[bearer] : null;
     const dev = launch ? `${launch.owner.oid}|${launch.owner.name}|${launch.owner.email}` : req.headers["x-dev-user"];
@@ -1301,6 +1333,58 @@ export function createMockHub({
         return send(res, 204);
       }
     }
+    if (action === "video") {
+      if (!agent.conversation_id) {
+        return send(res, 404, { error: "not a conversation" });
+      }
+      const stored = videoOf(agent.id);
+      const origin = `http://${req.headers.host}`;
+      if (parts[4] === undefined && req.method === "POST") {
+        if (typeof body.name !== "string" || typeof body.bytes !== "number" || !Array.isArray(body.chapters)) {
+          return send(res, 400, { error: "bad video" });
+        }
+        const id = randomUUID();
+        stored.open.set(id, body);
+        return send(res, 200, { video_id: id, upload_url: `${origin}/blob/${id}`, expires_in: 3600 });
+      }
+      if (parts[4] === undefined && req.method === "GET") {
+        if (!stored.ready) {
+          return send(res, 404, { error: "the conversation has no journey video" });
+        }
+        const { video_id, body: ready } = stored.ready;
+        const { captions, ...rest } = ready;
+        return send(res, 200, {
+          ...rest,
+          video_id,
+          has_captions: captions !== undefined,
+          coverage_summary: ready.coverage_summary ?? null,
+          jira_key: ready.jira_key ?? null,
+          posted: null,
+          finished_at: "2026-11-18T12:00:00.000Z",
+          download_url: `${origin}/blob/${video_id}`
+        });
+      }
+      const id = parts[4] ?? "";
+      if (parts[5] === "complete" && req.method === "POST") {
+        const declared = stored.open.get(id);
+        if (!declared) {
+          return send(res, 404, { error: "that upload is not one of this conversation's" });
+        }
+        const put = blobs.get(id);
+        if (!put) {
+          return send(res, 409, { error: "the video has not been put to the upload URL yet" });
+        }
+        if (put.length !== declared.bytes) {
+          return send(res, 409, { error: `the video in storage is ${put.length} bytes and the upload declared ${declared.bytes}` });
+        }
+        stored.ready = { video_id: id, body: declared };
+        return send(res, 200, { video_id: id });
+      }
+      if (parts[5] === "posted" && req.method === "POST") {
+        stored.posted.push({ video_id: id, issue_key: String(body.issue_key) });
+        return send(res, 204);
+      }
+    }
     if (action === "notify" && parts[4] === undefined) {
       if (!agent.conversation_id) {
         return send(res, 404, { error: "not a conversation" });
@@ -1567,6 +1651,9 @@ export function createMockHub({
     decks,
     docmosisTemplates,
     notifyTemplates,
+    videos,
+    blobs,
+    blobPuts,
     jiraReports,
     githubReports,
     confluenceReports,
