@@ -1774,7 +1774,42 @@ describe("artefact, in an assistant conversation", () => {
       expect(r.text()).not.toMatch(/^\s*hearing/m);
     });
 
-    it("should refuse the put and send nothing, when the data holds secret-shaped text", async () => {
+    it("should print the name and summary without their control characters, when the hub stored them with some", async () => {
+      // Arrange: the hub refuses only a NUL and half of a surrogate pair, so it stores these as they are.
+      const { sid } = await session();
+      const dir = workDir();
+      const esc = String.fromCharCode(27);
+      const put = putArgs(dir, "--name", `Claim${esc}[2J form`, "--summary", `Added${String.fromCharCode(7)} the${esc}[31m date\u0085now`);
+      expect((await cli(put, { sid })).code).toBe(0);
+
+      // Act
+      const r = await cli(["docmosis", "get"], { sid });
+
+      // Assert
+      expect(r.code, r.errors.join("\n")).toBe(0);
+      expect(r.text()).toContain(`of the template "Claim[2J form" to`);
+      expect(r.lines).toContain("Summary: Added the[31m datenow");
+      expect(r.text()).not.toContain(esc);
+    });
+
+    it("should refuse --name and --summary with their own words and send nothing, when either holds a NUL", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      const dir = workDir();
+      const nul = String.fromCharCode(0);
+
+      // Act
+      const name = await cli(putArgs(dir, "--name", `Claim${nul}`), { sid });
+      const summary = await cli(putArgs(dir, "--summary", `Added${nul}`), { sid });
+
+      // Assert
+      expect(name.code).toBe(2);
+      expect(name.errors.join("\n")).toContain("--name must not contain a NUL character or half of a surrogate pair");
+      expect(summary.errors.join("\n")).toContain("--summary must not contain a NUL character or half of a surrogate pair");
+      expect(calls(agentId, "PUT", "")).toEqual([]);
+    });
+
+    it("should refuse the put as a usage error and send nothing, when the data holds secret-shaped text", async () => {
       // Arrange: built at runtime so no secret-shaped literal sits in the repo.
       const { sid, agentId } = await session();
       const dir = workDir();
@@ -1784,7 +1819,7 @@ describe("artefact, in an assistant conversation", () => {
       const r = await cli(putArgs(dir), { sid });
 
       // Assert
-      expect(r.code).toBe(1);
+      expect(r.code).toBe(2);
       expect(r.errors.join("\n")).toMatch(/refusing to send: the text contains a secret-shaped string \(pattern /);
       expect(calls(agentId, "PUT", "")).toEqual([]);
     });

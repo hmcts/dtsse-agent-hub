@@ -5,7 +5,16 @@ import { type Api, ApiError, createApi } from "../api.ts";
 import { CLIENT_FEATURES } from "../features.ts";
 import type { DocmosisSchema } from "../wire.ts";
 import { UsageError } from "./command.ts";
-import { checkDocx, checkJsonObject, checkName, checkSchemaObject, checkSummary, DocmosisConversationMissingError, publishDocmosis } from "./docmosis.ts";
+import {
+  checkDocx,
+  checkJsonObject,
+  checkName,
+  checkSchemaObject,
+  checkSummary,
+  DocmosisConversationMissingError,
+  jsonbText,
+  publishDocmosis
+} from "./docmosis.ts";
 
 const VID = "va-docmosis";
 const LAUNCH = `launch-${"e".repeat(16)}`;
@@ -15,6 +24,14 @@ const SCHEMA: DocmosisSchema = {
   warnings: []
 };
 const digest = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
+/** An object `levels` deep, itself the first, each level made by `wrap`. */
+const nested = (levels: number, wrap: (inner: unknown) => unknown = (inner) => ({ inner })): unknown => {
+  let value: unknown = {};
+  for (let level = 1; level < levels; level += 1) {
+    value = wrap(value);
+  }
+  return value;
+};
 
 describe("publishDocmosis", () => {
   let hub: MockHub;
@@ -153,6 +170,18 @@ describe("publishDocmosis", () => {
     expect(hub.calls.slice(before).filter((c) => c.path.startsWith(`/api/agent/${agentId}/docmosis`))).toEqual([]);
   });
 
+  it("should send the name and summary trimmed, when they have whitespace around them", async () => {
+    // Arrange
+    const agentId = await conversationAgent();
+
+    // Act
+    await publishDocmosis(api, agentId, { ...input, name: "  Claim form\n", summary: "\tFirst draft " });
+
+    // Assert
+    const put = hub.calls.find((c) => c.method === "PUT" && c.path === `/api/agent/${agentId}/docmosis`);
+    expect(put?.body).toMatchObject({ name: "Claim form", summary: "First draft" });
+  });
+
   it("should throw the hub's refusal, when it answers the publish with an error other than a conflict", async () => {
     // Arrange
     const agentId = await conversationAgent();
@@ -226,13 +255,13 @@ describe("checkJsonObject", () => {
     const check = () => checkJsonObject({ notes: [`token ${secret}`] }, "data", "the loader");
 
     // Assert
+    expect(check).toThrow(UsageError);
     expect(check).toThrow(/refusing to send: the text contains a secret-shaped string \(pattern /);
   });
 
   it.each([
     ["an undefined item", { items: [1, undefined] }, "undefined at $.items[1]"],
     ["a hole in an array", { items: Object.assign([1], { 2: 2 }) }, "undefined at $.items[1]"],
-    ["an undefined property", { name: undefined }, "undefined at $.name"],
     ["a function", { render: () => "x" }, "a function at $.render"],
     ["a symbol", { tag: Symbol("t") }, "a symbol at $.tag"],
     ["a bigint", { count: 10n }, "a bigint at $.count"],
@@ -246,6 +275,94 @@ describe("checkJsonObject", () => {
     // Assert
     expect(check).toThrow(UsageError);
     expect(check).toThrow(`data the loader holds ${found}, which JSON cannot carry`);
+  });
+
+  it("should return the value, when a property is undefined, which JSON leaves out", () => {
+    // Arrange
+    const value = { name: "Ada", nickname: undefined, nested: { gone: undefined } };
+
+    // Act
+    const checked = checkJsonObject(value, "data", "the loader");
+
+    // Assert
+    expect(checked).toBe(value);
+  });
+
+  it("should refuse it, when the value holds an unstorable key", () => {
+    // Act
+    const check = () => checkJsonObject({ [`bad${String.fromCharCode(0)}`]: 1 }, "data", "the loader");
+
+    // Assert
+    expect(check).toThrow("data the loader has text the hub cannot store: a NUL character, or half of a surrogate pair");
+  });
+
+  it("should return the value, when it nests 64 levels as the hub allows", () => {
+    // Act
+    const checked = checkJsonObject(nested(64), "data", "the loader");
+
+    // Assert
+    expect(checked).toEqual(nested(64));
+  });
+
+  it("should refuse it with a UsageError, when it nests more than 64 levels", () => {
+    // Act
+    const tooDeep = () => checkJsonObject(nested(65), "data", "the loader");
+    const deepArray = () => checkJsonObject({ list: nested(64, (inner) => [inner]) }, "data", "the loader");
+    const farTooDeep = () => checkJsonObject(nested(200_000), "data", "the loader");
+
+    // Assert
+    expect(tooDeep).toThrow(UsageError);
+    expect(tooDeep).toThrow("data the loader nests more than 64 levels");
+    expect(deepArray).toThrow("data the loader nests more than 64 levels");
+    expect(farTooDeep).toThrow(UsageError);
+  });
+
+  it("should refuse it, when an object already checked shallower is shared again deeper than 64 levels", () => {
+    // Arrange
+    const shared = nested(10);
+    let deep: unknown = shared;
+    for (let level = 0; level < 60; level += 1) {
+      deep = { inner: deep };
+    }
+    const value = { first: shared, second: deep };
+
+    // Act
+    const check = () => checkJsonObject(value, "data", "the loader");
+
+    // Assert
+    expect(check).toThrow("data the loader nests more than 64 levels");
+  });
+
+  it("should refuse it by its stored size without expanding it, when a subtree is shared many times over", () => {
+    // Arrange: 2^50 copies of the leaf once written out.
+    let value: Record<string, unknown> = { leaf: "x" };
+    for (let level = 0; level < 50; level += 1) {
+      value = { a: value, b: value };
+    }
+
+    // Act
+    const check = () => checkJsonObject(value, "data", "the loader");
+
+    // Assert
+    expect(check).toThrow("data the loader is larger than the hub takes, 120000 bytes as the hub stores it");
+  });
+
+  it("should take it at exactly the hub's size and refuse one byte more, when a shared object counts once for each place it appears", () => {
+    // Arrange: {"a": {"k": "…"}, "b": {"k": "…"}} is 32 bytes around its two texts.
+    const sized = (length: number) => {
+      const shared = { k: "y".repeat(length) };
+      return { a: shared, b: shared };
+    };
+    const atLimit = sized((120_000 - 32) / 2);
+
+    // Act
+    const fits = () => checkJsonObject(atLimit, "data", "the loader");
+    const over = () => checkJsonObject(sized((120_000 - 32) / 2 + 1), "data", "the loader");
+
+    // Assert
+    expect(jsonbText(atLimit)).toHaveLength(120_000);
+    expect(fits).not.toThrow();
+    expect(over).toThrow("data the loader is larger than the hub takes, 120000 bytes as the hub stores it");
   });
 
   it("should refuse it, when the value refers to itself", () => {
@@ -290,14 +407,43 @@ describe("checkName", () => {
     expect(name).toBe("n".repeat(200));
   });
 
-  it("should refuse it with the refusal given, when the name is blank or too long", () => {
+  it("should return it trimmed, when it is 200 characters once its whitespace is trimmed", () => {
     // Act
-    const blank = () => checkName("  ", "give one with --name");
+    const name = checkName(`  ${"n".repeat(200)}\n`);
+
+    // Assert
+    expect(name).toBe("n".repeat(200));
+  });
+
+  it("should refuse it, when the name is blank or too long", () => {
+    // Act
+    const blank = () => checkName("  ");
     const long = () => checkName("n".repeat(201));
 
     // Assert
-    expect(blank).toThrow("give one with --name");
+    expect(blank).toThrow("the template's name must be 1 to 200 characters");
     expect(long).toThrow(UsageError);
+  });
+
+  it.each([
+    ["a NUL character", `Claim${String.fromCharCode(0)}form`],
+    ["a lone high surrogate", "Claim \ud83d form"],
+    ["a lone low surrogate", "Claim \ude00 form"]
+  ])("should refuse it, when the name holds %s", (_, name) => {
+    // Act
+    const check = () => checkName(name);
+
+    // Assert
+    expect(check).toThrow(UsageError);
+    expect(check).toThrow("the template's name must not contain a NUL character or half of a surrogate pair");
+  });
+
+  it("should return it, when the name holds a whole surrogate pair", () => {
+    // Act
+    const name = checkName("Claim \ud83d\ude00");
+
+    // Assert
+    expect(name).toBe("Claim 😀");
   });
 });
 
@@ -310,14 +456,32 @@ describe("checkSummary", () => {
     expect(summary).toBe("Loaded claim-form");
   });
 
+  it("should return it trimmed and keep its line breaks, when it has whitespace around and within it", () => {
+    // Act
+    const summary = checkSummary(` Added the\nhearing date${" ".repeat(200)}`);
+
+    // Assert
+    expect(summary).toBe("Added the\nhearing date");
+  });
+
   it("should refuse it, when the summary is blank or too long", () => {
     // Act
     const blank = () => checkSummary("\n");
-    const long = () => checkSummary("s".repeat(201), "--summary is too long");
+    const long = () => checkSummary("s".repeat(201));
 
     // Assert
     expect(blank).toThrow("the summary must be 1 to 200 characters saying what changed");
-    expect(long).toThrow("--summary is too long");
+    expect(long).toThrow(UsageError);
+  });
+
+  it("should refuse it, when the summary holds a NUL character or a lone surrogate", () => {
+    // Act
+    const nul = () => checkSummary(`Added${String.fromCharCode(0)}`);
+    const surrogate = () => checkSummary("Added \udc00");
+
+    // Assert
+    expect(nul).toThrow("the summary must not contain a NUL character or half of a surrogate pair");
+    expect(surrogate).toThrow(UsageError);
   });
 });
 
