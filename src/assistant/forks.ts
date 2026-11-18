@@ -90,7 +90,7 @@ function documentsLine(documents: number): string {
     return "The conversation had no document when it was copied.";
   }
   if (documents === 1) {
-    return "The conversation's document was copied too: read it with the agent-hub CLI's `artefact get` before you change it.";
+    return "The conversation's document was copied too: find its id with the agent-hub CLI's `artefact list` and read it with `artefact get --id <id>` before you change it.";
   }
   return `Its ${documents} documents were copied too: list them with the agent-hub CLI's \`artefact list\` and read each with \`artefact get --id <id>\` before you change it.`;
 }

@@ -81,23 +81,28 @@ interface DocumentRef {
 }
 
 /**
- * The most recently asked of a tool's pending exports across the documents, which is the one the message being framed
- * asks for: each export is asked for in a message of its own, which carried it in that message's frame.
+ * The pending export of a tool that the message being framed asks for. Each export is asked for in a message of its own,
+ * sent right after the request is recorded, so it is the one requested nearest the message's creation: with exports
+ * for two documents queued, each message carries its own. Without a message (a wake), or for one sent after them
+ * all, that is the most recently requested.
  */
-function newestPending<D extends { id: string }, F>(
+function nearestPending<D extends { id: string }, F>(
   documents: readonly D[],
   pending: (document: D) => F | undefined,
-  requestedAt: (document: D) => Date | null
+  requestedAt: (document: D) => Date | null,
+  messageAt: Date | undefined
 ): (F & DocumentRef) | undefined {
-  let newest: { at: number; frame: F & DocumentRef } | undefined;
+  const target = messageAt?.getTime() ?? Number.POSITIVE_INFINITY;
+  let best: { distance: number; at: number; frame: F & DocumentRef } | undefined;
   for (const document of documents) {
     const frame = pending(document);
     const at = requestedAt(document)?.getTime() ?? 0;
-    if (frame !== undefined && (newest === undefined || at > newest.at)) {
-      newest = { at, frame: { ...frame, document_id: document.id } };
+    const distance = Math.abs(target - at);
+    if (frame !== undefined && (best === undefined || distance < best.distance || (distance === best.distance && at > best.at))) {
+      best = { distance, at, frame: { ...frame, document_id: document.id } };
     }
   }
-  return newest?.frame;
+  return best?.frame;
 }
 
 /**
@@ -134,23 +139,27 @@ export async function assistantFrame(db: Database, agentId: string, messageId?: 
   if (conversation === null || conversation === undefined) {
     return undefined;
   }
+  const messageAt = messageId === undefined ? undefined : (await db.message.findUnique({ where: { id: messageId }, select: { createdAt: true } }))?.createdAt;
   const rows = conversation.documents;
   const documents = rows.map(toDocument);
   const primary = primaryDocument(documents);
-  const jira = newestPending(
+  const jira = nearestPending(
     rows,
     (row) => pendingJiraExport(row),
-    (row) => row.jiraRequestedAt
+    (row) => row.jiraRequestedAt,
+    messageAt
   );
-  const github = newestPending(
+  const github = nearestPending(
     rows,
     (row) => pendingGithubExport(row),
-    (row) => row.githubRequestedAt
+    (row) => row.githubRequestedAt,
+    messageAt
   );
-  const confluence = newestPending(
+  const confluence = nearestPending(
     rows,
     (row) => pendingConfluenceExport(row),
-    (row) => row.confluenceRequestedAt
+    (row) => row.confluenceRequestedAt,
+    messageAt
   );
   const deckBy = deckAuthor(conversation);
   const [model, agentVersion, attachments] = await Promise.all([

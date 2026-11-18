@@ -115,8 +115,11 @@ describe("forkContextMarkdown", () => {
     expect(forkContextMarkdown(forked(), 0)).toContain("(2 files were attached to this message. They were not copied.)");
   });
 
-  it("should tell the session to read the document when the copy has one", () => {
-    expect(forkContextMarkdown(forked(), 1)).toContain("The conversation's document was copied too");
+  it("should tell the session to read the document by id when the copy has one", () => {
+    const markdown = forkContextMarkdown(forked(), 1);
+
+    expect(markdown).toContain("The conversation's document was copied too");
+    expect(markdown).toContain("artefact get --id <id>");
   });
 
   it("should tell the session to list the documents and read each by id when the copy has several", () => {

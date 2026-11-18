@@ -203,8 +203,8 @@ export async function writeDocument(
 }
 
 /**
- * Writes the conversation's primary document, as `writeDocument` does, making it at base 0 while there is none: what
- * `PUT /artefact` has always done, so a client that knows one document keeps working.
+ * What `PUT /artefact` runs: writes the conversation's primary document as `writeDocument` does, and creates it at base 0
+ * while there is none, so a client that knows one document keeps working.
  */
 export async function writeArtefact(prisma: PrismaClient, conversation: ConversationRef, write: DocumentWrite, now: Date = new Date()): Promise<number> {
   return await prisma.$transaction(async (tx) => {

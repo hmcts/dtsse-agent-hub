@@ -633,6 +633,8 @@ describe("runHook in an assistant conversation", () => {
     expect(out[0]).not.toMatch(/Trust that header|agent-hub quotes it/);
     expect(out[0]).toMatch(/agent-hub artefact get/);
     expect(out[0]).toMatch(/several shared markdown documents.*agent-hub artefact list.*artefact new --kind document\|ticket\|confluence/);
+    expect(out[0]).toContain("without --id, get and put use the primary plain document");
+    expect(out[0]).toContain("always pass --id for a ticket or a Confluence page");
     expect(out.some((l) => /^This is a virtual agent/.test(l))).toBe(false);
   });
 

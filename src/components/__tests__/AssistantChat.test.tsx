@@ -2554,6 +2554,28 @@ describe("ChatView slides", () => {
     expect(saveArtefact).toHaveBeenCalledTimes(1);
   });
 
+  it("should keep the other document open and mark the first one's row, when a closing save finds a newer version while the person is typing in the other", async () => {
+    const theirs = { title: "Story", markdown: "theirs", version: 2, updatedBy: "agent" as const };
+    let answer: (result: { ok: true; saved: false; current: typeof theirs }) => void = () => undefined;
+    const saveArtefact = vi.fn(() => new Promise<{ ok: true; saved: false; current: typeof theirs }>((resolve) => (answer = resolve)));
+    const plan = doc({ id: "0f8a6a1e-0000-4000-8000-00000000d0c2", title: "Plan", markdown: "p", version: 1 });
+    render(chat({ documents: [doc(WRITTEN), plan] }, actions({ saveArtefact })));
+    switchTo("Story");
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Document, in markdown" }), { target: { value: "x, edited" } });
+    switchTo("Plan");
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Document, in markdown" }), { target: { value: "p, edited" } });
+
+    await act(async () => {
+      answer({ ok: true, saved: false, current: theirs });
+    });
+
+    expect((screen.getByRole("textbox", { name: "Document, in markdown" }) as HTMLTextAreaElement).value).toBe("p, edited");
+    openSwitcher();
+    expect(screen.getByTestId(`document:${DOCUMENT_ID}-unsaved`)).toBeTruthy();
+  });
+
   it("should keep the slides' editor open, say the document changed and mark its row in the switcher, when the assistant writes the document mid-edit", async () => {
     vi.useFakeTimers();
     const saveDeck = vi.fn(() => new Promise<never>(() => undefined));

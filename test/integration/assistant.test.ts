@@ -1469,6 +1469,21 @@ describe("several documents", () => {
     expect(documents?.find((document) => document.id === plan)?.jira).toMatchObject({ status: "pending" });
   });
 
+  it("should frame each queued export request with its own document's export when two are asked for before the session wakes", async () => {
+    const { id, agentId } = await conversationOnPod();
+    const first = randomUUID();
+    const second = randomUUID();
+    await actions.saveArtefact({ conversationId: id, documentId: first, kind: "ticket", title: "First", markdown: "a", baseVersion: 0 });
+    await actions.saveArtefact({ conversationId: id, documentId: second, kind: "ticket", title: "Second", markdown: "b", baseVersion: 0 });
+    await actions.exportArtefactToJira({ conversationId: id, documentId: first, project: "VIBE" });
+    await actions.exportArtefactToJira({ conversationId: id, documentId: second, project: "VIBE" });
+
+    const asked = await prisma.message.findMany({ where: { targetAgentId: agentId, body: { startsWith: "Please export" } }, orderBy: { id: "asc" } });
+    const frames = await Promise.all(asked.map((message) => assistantFrame(prisma, agentId, message.id)));
+
+    expect(frames.map((frame) => frame?.jira_export?.document_id)).toEqual([first, second]);
+  });
+
   it("should refuse to send a ticket to Confluence, or a Confluence page to Jira, when the kind does not go there", async () => {
     const { id } = await conversationOnPod();
     const story = randomUUID();

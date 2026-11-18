@@ -387,6 +387,8 @@ export function ChatView({
   // Read by a closed editor's late answer, which comes back through the props of the render that last showed it.
   const panelNow = useRef(panel);
   panelNow.current = panel;
+  const openDocumentNow = useRef(openDocument);
+  openDocumentNow.current = openDocument;
   /** The document panel has edits not yet saved, or a conflict showing, which a panel opened in its place would cut short. */
   const documentBusy = useRef(false);
   /** The same for the slides' editor. */
@@ -601,8 +603,11 @@ export function ChatView({
   }
   /** The same for a document, which waits behind its row in the switcher while another panel is busy. */
   function reopenDocument(draft: DocumentDraft): void {
-    setUnsaved((before) => ({ draft, key: before.key + 1 }));
+    const otherDocumentBusy = panelNow.current === "document" && documentBusy.current && openDocumentNow.current?.id !== draft.id;
+    // The key remounts the open document, which would drop what the person is typing in it.
+    setUnsaved((before) => ({ draft, key: before.key + (otherDocumentBusy ? 0 : 1) }));
     if (
+      otherDocumentBusy ||
       (panelNow.current === "deck" && deckBusy.current) ||
       (panelNow.current === "docmosis" && docmosisBusy.current) ||
       (panelNow.current === "notify" && notifyBusy.current)

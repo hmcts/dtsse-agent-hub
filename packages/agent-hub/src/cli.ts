@@ -59,7 +59,7 @@ export const USAGE = `usage: ${CLI} <command> [args]
   artefact list [--json]      in a CFT Workspace conversation: list its shared markdown documents,
                               with each one's id, kind (document, ticket or confluence) and version
   artefact get [--id ID] [--json]
-                              print one document, or the first without --id
+                              print one document, or the primary plain document without --id
                               (--json: with its title, version and who last wrote it)
   artefact put [--id ID] [--title T] [--base N]
                               replace a document with markdown read from stdin; --base is the version
@@ -138,7 +138,7 @@ export const USAGE = `usage: ${CLI} <command> [args]
   confluence report <export-id> --page-id N [--title T] | --error E
                               report the Confluence page made for an export by hand, or why it could not be made
                               (each export reads --document, the document the export was asked for, or the
-                              first document without it)
+                              primary plain document without it)
   credentials get <kind>      print your stored credential and nothing else (exit ${EXIT_NO_CREDENTIAL} if there is
                               none); agent-hub returns only claude_md and git_identity to people, any kind to a pod
   credentials set <kind> [--from-gh]
