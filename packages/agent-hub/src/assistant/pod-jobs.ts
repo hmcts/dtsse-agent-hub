@@ -51,7 +51,16 @@ export class PodJobError extends Error {
  */
 export type PodJobHandlerApi = Pick<
   Api,
-  "getArtefact" | "putArtefact" | "getDocmosis" | "putDocmosis" | "putDocmosisAsset" | "docmosisAsset" | "putDocmosisPdf" | "postQuestion"
+  | "getArtefact"
+  | "putArtefact"
+  | "getDocmosis"
+  | "putDocmosis"
+  | "putDocmosisAsset"
+  | "docmosisAsset"
+  | "putDocmosisPdf"
+  | "getNotify"
+  | "putNotify"
+  | "postQuestion"
 >;
 
 export type PodJobContext = {

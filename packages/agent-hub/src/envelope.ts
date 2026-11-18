@@ -208,6 +208,10 @@ export type AssistantFrame = {
   docmosis_version?: number | null;
   docmosis_revision?: number | null;
   docmosis_updated_by?: string | null;
+  /** The conversation's GOV.UK Notify template: its latest version and revision, and who wrote it. Absent before there is one. */
+  notify_version?: number | null;
+  notify_revision?: number | null;
+  notify_updated_by?: string | null;
   jira_export?: JiraExportFrame | null;
   github_export?: GithubExportFrame | null;
   confluence_export?: ConfluenceExportFrame | null;
@@ -456,6 +460,11 @@ export function docmosisChangedLine(assistant: AssistantFrame): string {
   return `The user has changed the conversation's template data (version ${assistant.docmosis_version}). Read it with \`${CLI} docmosis get\` before changing the template.`;
 }
 
+/** The same for the Notify template: the person edited its draft or personalisation, or loaded another template, in the web UI. */
+export function notifyChangedLine(assistant: AssistantFrame): string {
+  return `The user has changed the conversation's Notify template (version ${assistant.notify_version}). Read it with \`${CLI} notify get\` before changing it.`;
+}
+
 /**
  * What the CFT Workspace knows about a conversation's message that the person did not type, after `ANSWER_HERE`: the
  * product area, a document or deck the person changed, the files attached and an export waiting on this session.
@@ -484,6 +493,9 @@ export function assistantContextLines(
     }
     if (assistant.docmosis_updated_by === "user" && (assistant.docmosis_version ?? 0) > 0) {
       lines.push(docmosisChangedLine(assistant));
+    }
+    if (assistant.notify_updated_by === "user" && (assistant.notify_version ?? 0) > 0) {
+      lines.push(notifyChangedLine(assistant));
     }
   }
   lines.push(...attachmentLines(attachments));

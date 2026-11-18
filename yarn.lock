@@ -1001,6 +1001,8 @@ __metadata:
 "@hmcts-cft/agent-hub@workspace:packages/agent-hub":
   version: 0.0.0-use.local
   resolution: "@hmcts-cft/agent-hub@workspace:packages/agent-hub"
+  dependencies:
+    "@hmcts-cft/docmosis-tools": "npm:0.1.4"
   bin:
     agent-hub: bin/agent-hub
     virtual-agent-boot: bin/virtual-agent-boot
@@ -1019,6 +1021,15 @@ __metadata:
     config: ^3.3.12 || ^4.0.0
     express: ^5.1.0
   checksum: 10c0/3ce8c8b245f547072882dc8344e677b29d101bc751288137b2ece907efd3d899577a1134814ac6f6815193e99543bc66dc307fd353e70ce0c29299e2861e58ec
+  languageName: node
+  linkType: hard
+
+"@hmcts-cft/docmosis-tools@npm:0.1.4":
+  version: 0.1.4
+  resolution: "@hmcts-cft/docmosis-tools@npm:0.1.4"
+  bin:
+    docmosis: bin/docmosis.mjs
+  checksum: 10c0/5d005f3da113907d2457482a897ec6800ecb65ee45b4696b52ac5c3c46ec766018430cc908c942db7cbad74fcac3463fdc05cc13db4421d67faca91e840be8b5
   languageName: node
   linkType: hard
 
@@ -4226,6 +4237,7 @@ __metadata:
     "@azure/storage-blob": "npm:12.34.0"
     "@biomejs/biome": "npm:2.6.6"
     "@hmcts-cft/cloud-native-platform": "npm:2.3.0"
+    "@hmcts-cft/docmosis-tools": "npm:0.1.4"
     "@playwright/test": "npm:1.64.1"
     "@prisma/adapter-pg": "npm:7.10.1"
     "@prisma/client": "npm:7.10.1"

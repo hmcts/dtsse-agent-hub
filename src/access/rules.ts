@@ -469,6 +469,24 @@ export function canChangeDocmosis(access: ConversationAccess): boolean {
 }
 
 /**
+ * Whether the viewer may read a conversation's GOV.UK Notify template in the browser — the draft, the personalisation,
+ * Notify's preview and the kept versions — given what `conversationAccess` answered for them: its owner, and anyone it
+ * is shared with or offered to, as for the Docmosis template. Read-only for all but the owner.
+ */
+export function canReadNotify(access: ConversationAccess): boolean {
+  return access === "owner" || access === "reader";
+}
+
+/**
+ * Whether the viewer may change a conversation's Notify template from the browser, which saves a version of it: its
+ * owner alone, since a reader would be writing to someone else's conversation. Loading a template from Notify is a pod
+ * job, which `canRequestPodJob` already keeps to the owner.
+ */
+export function canChangeNotify(access: ConversationAccess): boolean {
+  return access === "owner";
+}
+
+/**
  * Whether the viewer may have a conversation's pod run a pod job (see "Pod jobs" in docs/agent-api.md), given what
  * `conversationAccess` answered for them: its owner alone, for every kind. A job runs in the owner's pod with the
  * owner's own `gh` and `az` sign-ins, so a reader asking for one would be borrowing someone else's credentials.

@@ -36,6 +36,7 @@ import { bySidebarOrder, groupForSidebar, type SidebarGroup } from "./grouping.t
 import type { JiraExportView } from "./jira.ts";
 import { readJiraExport } from "./jira-store.ts";
 import { LOCAL_SESSION, type LocalSession } from "./local-session.ts";
+import { NOTIFY_SELECT, type NotifySummary, notifySummary } from "./notify-store.ts";
 import { chatCredentials, onboarded, type Readiness, readiness } from "./onboarding.ts";
 import { hasPod } from "./pods.ts";
 import { productLabel } from "./products.ts";
@@ -400,6 +401,8 @@ export interface ConversationView {
   deck: DeckSummary | null;
   /** The latest version of the conversation's Docmosis template, without its schema and data, which the panel reads; `null` while it has none. */
   docmosis: DocmosisSummary | null;
+  /** The latest version of the conversation's Notify template, without its text, which the panel reads; `null` while it has none. */
+  notify: NotifySummary | null;
   jira: JiraExportView;
   github: GithubExportView;
   confluence: ConfluenceExportView;
@@ -422,12 +425,20 @@ export async function conversationView(db: Database, conversation: ConversationR
   // The ref carries the agent's id and its owner and nothing else, because that is all either read asks of it: the
   // literals are not a claim about the agent that some rule elsewhere has to keep agreeing with.
   const agent = { id: agentId, ownerOid: conversation.ownerOid };
-  // The fork's, the deck's and the Docmosis template's columns are one read, and only the .pptx probe waits for it.
+  // The fork's, the deck's and the two templates' columns are one read, and only the .pptx probe waits for it.
   const forkDeckAndDocmosis = async () => {
-    const row = await db.assistantConversation.findUnique({ where: { id: conversation.id }, select: { ...FORKED_SELECT, ...DECK_SELECT, ...DOCMOSIS_SELECT } });
-    return { fork: row, deck: row === null ? null : await deckSummary(db, conversation.id, row), docmosis: row === null ? null : docmosisSummary(row) };
+    const row = await db.assistantConversation.findUnique({
+      where: { id: conversation.id },
+      select: { ...FORKED_SELECT, ...DECK_SELECT, ...DOCMOSIS_SELECT, ...NOTIFY_SELECT }
+    });
+    return {
+      fork: row,
+      deck: row === null ? null : await deckSummary(db, conversation.id, row),
+      docmosis: row === null ? null : docmosisSummary(row),
+      notify: row === null ? null : notifySummary(row)
+    };
   };
-  const [current, artefact, { fork, deck, docmosis }, jira, github, confluence, page, questions] = await Promise.all([
+  const [current, artefact, { fork, deck, docmosis, notify }, jira, github, confluence, page, questions] = await Promise.all([
     db.agent.findUnique({ where: { id: agentId }, select: { status: true, skills: true, clientFeatures: true, repo: true, branch: true } }),
     readArtefact(db, conversation.id),
     forkDeckAndDocmosis(),
@@ -459,6 +470,7 @@ export async function conversationView(db: Database, conversation: ConversationR
     artefact: { ...artefact, updatedAt: artefact.updatedAt?.toISOString() ?? null },
     deck,
     docmosis,
+    notify,
     jira,
     github,
     confluence,

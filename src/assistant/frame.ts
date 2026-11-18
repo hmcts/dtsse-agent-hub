@@ -6,6 +6,7 @@ import { DOCMOSIS_SELECT, docmosisAuthor } from "./docmosis-store.ts";
 import { GITHUB_SELECT, type GithubExportFrame, pendingGithubExport } from "./github.ts";
 import { JIRA_SELECT, type JiraExportFrame, pendingJiraExport } from "./jira.ts";
 import { readAssistantModel } from "./model-store.ts";
+import { NOTIFY_SELECT, notifyAuthor } from "./notify-store.ts";
 import { productLabel } from "./products.ts";
 import { type FrameAttachment, frameAttachments } from "./upload-store.ts";
 
@@ -40,6 +41,10 @@ export interface AssistantFrame {
   docmosis_version: number;
   docmosis_revision: number;
   docmosis_updated_by: "user" | "agent" | null;
+  /** The conversation's GOV.UK Notify template's latest version, 0 before there is one, its revision, and who wrote it. */
+  notify_version: number;
+  notify_revision: number;
+  notify_updated_by: "user" | "agent" | null;
   /** While an export to Jira is pending: what to create, which the session carries out with `twg`. */
   jira_export?: JiraExportFrame;
   /** While an export to GitHub is pending: the repository to create the issue in, which the session does with `gh`. */
@@ -81,6 +86,7 @@ export async function assistantFrame(db: Database, agentId: string, messageId?: 
           ...ARTEFACT_SELECT,
           ...DECK_SELECT,
           ...DOCMOSIS_SELECT,
+          ...NOTIFY_SELECT,
           ...JIRA_SELECT,
           ...GITHUB_SELECT,
           ...CONFLUENCE_SELECT
@@ -118,6 +124,9 @@ export async function assistantFrame(db: Database, agentId: string, messageId?: 
     docmosis_version: conversation.docmosisVersion,
     docmosis_revision: conversation.docmosisRevision,
     docmosis_updated_by: docmosisAuthor(conversation),
+    notify_version: conversation.notifyVersion,
+    notify_revision: conversation.notifyRevision,
+    notify_updated_by: notifyAuthor(conversation),
     ...(jira === undefined ? {} : { jira_export: jira }),
     ...(github === undefined ? {} : { github_export: github }),
     ...(confluence === undefined ? {} : { confluence_export: confluence }),

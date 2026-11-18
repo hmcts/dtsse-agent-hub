@@ -372,7 +372,10 @@ describe("parseAssistantFrame", () => {
       deck_agent_version: 0,
       docmosis_version: 2,
       docmosis_revision: 1,
-      docmosis_updated_by: "user"
+      docmosis_updated_by: "user",
+      notify_version: 3,
+      notify_revision: 2,
+      notify_updated_by: "agent"
     };
 
     // Act & Assert
@@ -391,6 +394,9 @@ describe("parseAssistantFrame", () => {
       docmosis_version: null,
       docmosis_revision: null,
       docmosis_updated_by: undefined,
+      notify_version: null,
+      notify_revision: null,
+      notify_updated_by: undefined,
       jira_export: null,
       github_export: null,
       confluence_export: null
@@ -421,6 +427,9 @@ describe("parseAssistantFrame", () => {
       docmosis_version: "2",
       docmosis_revision: "1",
       docmosis_updated_by: 7,
+      notify_version: "3",
+      notify_revision: "2",
+      notify_updated_by: 8,
       jira_export: "VIBE"
     });
 
@@ -439,6 +448,9 @@ describe("parseAssistantFrame", () => {
       docmosis_version: null,
       docmosis_revision: null,
       docmosis_updated_by: undefined,
+      notify_version: null,
+      notify_revision: null,
+      notify_updated_by: undefined,
       jira_export: null,
       github_export: null,
       confluence_export: null

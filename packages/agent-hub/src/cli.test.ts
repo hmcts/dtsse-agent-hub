@@ -19,7 +19,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { fakeSecrets, type TempClaudeHome, tempClaudeHome } from "./__fixtures__/claude-home.ts";
 import { createMockHub, type MockHub } from "./__fixtures__/mock-hub.ts";
 import { captureStderr } from "./__fixtures__/pod-shims.ts";
@@ -39,6 +39,43 @@ const BIN = path.join(PACKAGE_ROOT, "bin", "agent-hub");
 const CLI_SOURCE = fileURLToPath(new URL("./cli.ts", import.meta.url));
 const DEV_USER = "u-me|Me Tester|me@example.com";
 const BYPASS = "--dangerously-skip-permissions";
+
+// GOV.UK Notify and the person's `az`, as `agent-hub notify` reaches them through the package's Node half.
+const NOTIFY_SERVICE = "5c1f3d4a-0000-4000-8000-000000000001";
+const notifyFake = vi.hoisted(() => ({
+  templates: [] as Record<string, unknown>[],
+  readSecret: undefined as ((vault: string, secret: string) => Promise<string>) | undefined,
+  reads: [] as string[]
+}));
+vi.mock("@hmcts-cft/docmosis-tools/notify/node", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@hmcts-cft/docmosis-tools/notify/node")>();
+  const client = {
+    serviceId: "5c1f3d4a-0000-4000-8000-000000000001",
+    listTemplates: async () => notifyFake.templates,
+    getTemplate: async (id: string) => {
+      const found = notifyFake.templates.find((template) => template.id === id);
+      if (found === undefined) {
+        throw new real.NotifyApiError("GOV.UK Notify returned 404: NoResultFound: No result found", 404);
+      }
+      return found;
+    },
+    previewTemplate: async (id: string) => {
+      const found = notifyFake.templates.find((template) => template.id === id);
+      return { ...found, html: found?.type === "email" ? `<p>${String(found.body)}</p>` : null };
+    }
+  };
+  return {
+    ...real,
+    readSecret: async (vault: string, secret: string) => {
+      notifyFake.reads.push(`${vault}/${secret}`);
+      return await (notifyFake.readSecret ?? (async () => "key"))(vault, secret);
+    },
+    // biome-ignore lint/complexity/useArrowFunction: the CLI constructs it with `new`, which an arrow function cannot be
+    NotifyClient: vi.fn(function () {
+      return client;
+    })
+  };
+});
 
 type Captured = {
   /** One string, as the terminal would have shown it: every `print` with its newline. */
@@ -1584,6 +1621,268 @@ describe("artefact, in an assistant conversation", () => {
     ]) {
       expect((await cli(args, { sid, input: "x" })).code, args.join(" ")).toBe(2);
     }
+  });
+
+  describe("notify", () => {
+    const EMAIL = "ab1f3d4a-0000-4000-8000-000000000002";
+    const TEXT = "ab1f3d4a-0000-4000-8000-000000000003";
+    const templates = [
+      { id: TEXT, type: "sms", name: "Hearing reminder", version: 2, subject: null, body: "Your hearing is on ((date))" },
+      { id: EMAIL, type: "email", name: "Claim received", version: 4, subject: "Claim ((ref))", body: "Dear ((name))" }
+    ];
+    const conversationDir = () => path.join(home.root, ".agent-hub", "notify", `0f8a6a1e-0000-4000-8000-${String(nextSession).padStart(12, "0")}`);
+
+    beforeAll(() => {
+      notifyFake.templates = templates;
+    });
+
+    it("should list the products with Notify keys, when notify products runs", async () => {
+      // Arrange
+      const { sid } = await session();
+
+      // Act
+      const r = await cli(["notify", "products"], { sid });
+
+      // Assert
+      expect(r.code, r.errors.join("\n")).toBe(0);
+      expect(r.lines).toContain("pcs\tPCS");
+      expect(r.lines.some((line) => line.startsWith("aac\tManage Case Assignment (NoC) (NoC emails"))).toBe(true);
+    });
+
+    it("should read the product's key from its vault and list its templates, emails first, when notify list runs", async () => {
+      // Arrange
+      const { sid } = await session();
+      notifyFake.reads = [];
+
+      // Act
+      const r = await cli(["notify", "list", "--product", "pcs"], { sid });
+
+      // Assert
+      expect(r.code, r.errors.join("\n")).toBe(0);
+      expect(notifyFake.reads).toEqual(["pcs-aat/gov-notify-key"]);
+      expect(r.lines).toEqual([`email\t${EMAIL}\tv4\tClaim received`, `sms\t${TEXT}\tv2\tHearing reminder`]);
+    });
+
+    it("should print the Key Vault's own words and exit 1, when the person cannot read the product's key", async () => {
+      // Arrange
+      const { sid } = await session();
+      const { KeyVaultError } = await import("@hmcts-cft/docmosis-tools/notify/node");
+      notifyFake.readSecret = async () => {
+        throw new KeyVaultError("Forbidden: you have no read access to secrets in the Key Vault pcs-aat.");
+      };
+
+      // Act
+      const r = await cli(["notify", "list", "--product", "pcs"], { sid });
+      notifyFake.readSecret = undefined;
+
+      // Assert
+      expect(r.code).toBe(1);
+      expect(r.errors.join("\n")).toBe("agent-hub notify: Forbidden: you have no read access to secrets in the Key Vault pcs-aat.");
+    });
+
+    it("should say a product is unknown and exit 1, and refuse a list or pull it cannot make with exit 2", async () => {
+      // Arrange
+      const { sid } = await session();
+
+      // Act
+      const unknown = await cli(["notify", "list", "--product", "nope"], { sid });
+      const noProduct = await cli(["notify", "list"], { sid });
+      const badTemplate = await cli(["notify", "pull", "--product", "pcs", "--template", "x"], { sid });
+      const extra = await cli(["notify", "products", "more"], { sid });
+      const action = await cli(["notify", "send"], { sid });
+
+      // Assert
+      expect(unknown.code).toBe(1);
+      expect(unknown.errors.join("\n")).toMatch(/There is no product "nope" with a Notify key/);
+      expect([noProduct.code, badTemplate.code, extra.code, action.code]).toEqual([2, 2, 2, 2]);
+      expect(action.errors.join("\n")).toMatch(/notify takes products, list, pull, get or put/);
+    });
+
+    it("should load a template once, write its files, publish the edit on that base and refuse a stale one, when pull, get and put run", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+
+      // Act: load it, twice
+      const pulled = await cli(["notify", "pull", "--product", "pcs", "--template", EMAIL], { sid });
+      const again = await cli(["notify", "pull", "--product", "pcs", "--template", EMAIL], { sid });
+
+      // Assert
+      expect(pulled.code, pulled.errors.join("\n")).toBe(0);
+      expect(pulled.text()).toMatch(/loaded "Claim received" into the conversation as version 1/);
+      expect(again.text()).toMatch(/already the conversation's Notify template, as version 1; nothing was written/);
+      const stored = hub.notifyTemplates.get(agentId);
+      expect(stored).toHaveLength(1);
+      expect(stored?.[0]).toMatchObject({
+        template_id: EMAIL,
+        service_id: NOTIFY_SERVICE,
+        notify_version: 4,
+        notify_preview: "<p>Dear ((name))</p>",
+        data: {}
+      });
+
+      // Act: read it
+      const got = await cli(["notify", "get"], { sid });
+
+      // Assert
+      expect(got.code, got.errors.join("\n")).toBe(0);
+      expect(got.text()).toMatch(/wrote version 1 \(revision 0\) of the email template "Claim received"/);
+      expect(got.text()).toMatch(/Taken from version 4 of the template in Notify, unchanged; last written by this conversation/);
+      const dir = conversationDir();
+      expect(fs.readFileSync(path.join(dir, "subject.md"), "utf8")).toBe("Claim ((ref))");
+      expect(fs.readFileSync(path.join(dir, "body.md"), "utf8")).toBe("Dear ((name))");
+      expect(JSON.parse(fs.readFileSync(path.join(dir, "template.json"), "utf8"))).toMatchObject({ type: "email", template_id: EMAIL, version: 1 });
+      expect(fs.readFileSync(path.join(dir, "version"), "utf8")).toBe("1\n");
+
+      // Act: edit and publish it
+      fs.writeFileSync(path.join(dir, "body.md"), "Dear ((name)),\n\nWe have your claim.");
+      fs.writeFileSync(path.join(dir, "data.json"), JSON.stringify({ name: "Ada" }));
+      const put = await cli(["notify", "put", "--summary", "Say we have it"], { sid });
+
+      // Assert
+      expect(put.code, put.errors.join("\n")).toBe(0);
+      expect(put.text()).toMatch(/published the Notify template's draft as version 2/);
+      expect(hub.notifyTemplates.get(agentId)?.[1]).toMatchObject({
+        body: "Dear ((name)),\n\nWe have your claim.",
+        subject: "Claim ((ref))",
+        data: { name: "Ada" },
+        summary: "Say we have it",
+        template_id: EMAIL
+      });
+      const body = hub.calls.filter((c) => c.method === "PUT" && c.path === `/api/agent/${agentId}/notify`).at(-1)?.body;
+      expect(body).toMatchObject({ base_version: 1, base_revision: 0 });
+      expect(body).not.toHaveProperty("source");
+
+      // Act: the person edits it, then the session puts on the version it read
+      hub.writeNotifyAsUser(agentId, { body: "Theirs" });
+      const stale = await cli(["notify", "put"], { sid });
+
+      // Assert
+      expect(stale.code).toBe(1);
+      expect(stale.errors.join("\n")).toMatch(/has changed since version 2: it is now version 3, last written by the user\. Nothing was saved/);
+      expect(hub.notifyTemplates.get(agentId)).toHaveLength(3);
+    });
+
+    it("should say the user changed the version read, when the person amended it since get", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      await cli(["notify", "pull", "--product", "pcs", "--template", EMAIL], { sid });
+      hub.writeNotifyAsUser(agentId, { body: "Mine" });
+      await cli(["notify", "get"], { sid });
+      hub.writeNotifyAsUser(agentId, { body: "Mine again" }, { amend: true });
+
+      // Act
+      const r = await cli(["notify", "put"], { sid });
+
+      // Assert
+      expect(r.code).toBe(1);
+      expect(r.errors.join("\n")).toMatch(/the user has changed version 2 of the Notify template since you read it/);
+    });
+
+    it("should write no subject for a text message, and put none, when get and put run on one", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      await cli(["notify", "pull", "--product", "pcs", "--template", TEXT], { sid });
+
+      // Act
+      const got = await cli(["notify", "get"], { sid });
+      const put = await cli(["notify", "put"], { sid });
+
+      // Assert
+      expect(got.code, got.errors.join("\n")).toBe(0);
+      expect(fs.existsSync(path.join(conversationDir(), "subject.md"))).toBe(false);
+      expect(got.text()).toMatch(/Edit body\.md \(Notify's markdown/);
+      expect(put.code, put.errors.join("\n")).toBe(0);
+      expect(hub.notifyTemplates.get(agentId)?.[1]).toMatchObject({ subject: null, body: "Your hearing is on ((date))" });
+    });
+
+    it("should write an older version beside the working copy and leave the recorded base alone, when get asks for one", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      await cli(["notify", "pull", "--product", "pcs", "--template", EMAIL], { sid });
+      hub.writeNotifyAsUser(agentId, { body: "Mine" });
+      await cli(["notify", "get"], { sid });
+
+      // Act
+      const older = await cli(["notify", "get", "--version", "1"], { sid });
+      const gone = await cli(["notify", "get", "--version", "9"], { sid });
+      const bad = await cli(["notify", "get", "--version", "0"], { sid });
+
+      // Assert
+      expect(older.code, older.errors.join("\n")).toBe(0);
+      expect(older.text()).toMatch(/This is not the latest version, which is 2/);
+      expect(fs.readFileSync(path.join(conversationDir(), "v1", "body.md"), "utf8")).toBe("Dear ((name))");
+      expect(fs.readFileSync(path.join(conversationDir(), "version"), "utf8")).toBe("2\n");
+      expect(gone.code).toBe(1);
+      expect(gone.errors.join("\n")).toMatch(/does not keep version 9/);
+      expect(bad.code).toBe(2);
+    });
+
+    it("should say there is no Notify template yet and exit 1, and refuse a put before any get, when there is none", async () => {
+      // Arrange
+      const { sid } = await session();
+
+      // Act
+      const got = await cli(["notify", "get"], { sid });
+      const put = await cli(["notify", "put"], { sid });
+
+      // Assert
+      expect(got.code).toBe(1);
+      expect(got.errors.join("\n")).toMatch(/no Notify template yet.*notify pull/);
+      expect(put.code).toBe(2);
+      expect(put.errors.join("\n")).toMatch(/nothing to put: run agent-hub notify get first/);
+    });
+
+    it("should refuse files the hub would not take, with exit 2, and a secret-shaped draft, when put runs", async () => {
+      // Arrange
+      const { sid } = await session();
+      await cli(["notify", "pull", "--product", "pcs", "--template", EMAIL], { sid });
+      await cli(["notify", "get"], { sid });
+      const dir = conversationDir();
+
+      // Act
+      fs.writeFileSync(path.join(dir, "data.json"), "[1]");
+      const list = await cli(["notify", "put"], { sid });
+      fs.writeFileSync(path.join(dir, "data.json"), "{");
+      const invalid = await cli(["notify", "put"], { sid });
+      fs.writeFileSync(path.join(dir, "data.json"), "{}");
+      fs.writeFileSync(path.join(dir, "subject.md"), "x".repeat(1001));
+      const long = await cli(["notify", "put"], { sid });
+      fs.writeFileSync(path.join(dir, "subject.md"), `a${String.fromCharCode(0)}b`);
+      const nul = await cli(["notify", "put"], { sid });
+      fs.writeFileSync(path.join(dir, "subject.md"), "Claim");
+      const summary = await cli(["notify", "put", "--summary", " "], { sid });
+      fs.writeFileSync(path.join(dir, "body.md"), `token ghp_${"a".repeat(36)}`);
+      const secret = await cli(["notify", "put"], { sid });
+      fs.rmSync(path.join(dir, "body.md"));
+      const missing = await cli(["notify", "put"], { sid });
+      fs.writeFileSync(path.join(dir, "template.json"), "{}");
+      const untyped = await cli(["notify", "put"], { sid });
+      fs.rmSync(path.join(dir, "template.json"));
+      const noTemplate = await cli(["notify", "put"], { sid });
+
+      // Assert
+      expect([list.code, invalid.code, long.code, nul.code, summary.code, missing.code, untyped.code, noTemplate.code]).toEqual([2, 2, 2, 2, 2, 2, 2, 2]);
+      expect(list.errors.join("\n")).toMatch(/must hold the personalisation as one object/);
+      expect(long.errors.join("\n")).toMatch(/longer than the hub takes, 1000 characters/);
+      expect(nul.errors.join("\n")).toMatch(/cannot store/);
+      expect(secret.code).toBe(1);
+      expect(secret.errors.join("\n")).toMatch(/refusing to send/);
+      expect(untyped.errors.join("\n")).toMatch(/does not say what type of template it is/);
+    });
+
+    it("should say the session is not a conversation, when it is not one", async () => {
+      // Arrange
+      const { sid } = await session({ conversation: false });
+
+      // Act
+      const pulled = await cli(["notify", "pull", "--product", "pcs", "--template", EMAIL], { sid });
+      const got = await cli(["notify", "get"], { sid });
+
+      // Assert
+      expect(pulled.code).not.toBe(0);
+      expect(got.code).toBe(1);
+      expect(got.errors.join("\n")).toMatch(/not a CFT Workspace conversation/);
+    });
   });
 
   describe("docmosis", () => {

@@ -94,9 +94,9 @@ describe("podJobRegistry", () => {
     expect(() => podJobRegistry([kind(), kind()])).toThrow(/registered twice/);
   });
 
-  it("should register no production kinds yet", () => {
-    expect(POD_JOB_KINDS).toEqual([]);
-    expect(POD_JOB_REGISTRY.size).toBe(0);
+  it("should register the Notify panel's kinds", () => {
+    expect(POD_JOB_KINDS.map((each) => each.kind)).toEqual(["notify.list", "notify.pull"]);
+    expect(POD_JOB_REGISTRY.size).toBe(2);
   });
 });
 

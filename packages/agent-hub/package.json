@@ -31,6 +31,9 @@
     },
     "./package.json": "./package.json"
   },
+  "devDependencies": {
+    "@hmcts-cft/docmosis-tools": "0.1.4"
+  },
   "scripts": {
     "build": "yarn run -T tsc -p tsconfig.json",
     "clean": "rm -rf dist coverage",

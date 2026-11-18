@@ -22,7 +22,8 @@ function stub(
     docmosisVersion: 0,
     docmosisRevision: 0,
     docmosisUpdatedBy: null
-  }
+  },
+  notify: { notifyVersion: number; notifyRevision: number; notifyUpdatedBy: string | null } = { notifyVersion: 0, notifyRevision: 0, notifyUpdatedBy: null }
 ) {
   const versionQueries: unknown[] = [];
   const nulls = Object.fromEntries(
@@ -37,6 +38,7 @@ function stub(
     artefactVersion: 0,
     deckRevision: deck.deckVersion,
     ...docmosis,
+    ...notify,
     ...deck
   };
   const db = {
@@ -99,5 +101,19 @@ describe("assistantFrame's docmosis fields", () => {
     const { db } = stub({ deckVersion: 0, deckUpdatedBy: null }, null, { docmosisVersion: 1, docmosisRevision: 0, docmosisUpdatedBy: "other" });
 
     expect((await assistantFrame(db, "va-1"))?.docmosis_updated_by).toBeNull();
+  });
+});
+
+describe("assistantFrame's notify fields", () => {
+  it("should carry the Notify template's version, revision and author", async () => {
+    const { db } = stub({ deckVersion: 0, deckUpdatedBy: null }, null, undefined, { notifyVersion: 5, notifyRevision: 1, notifyUpdatedBy: "user" });
+
+    expect(await assistantFrame(db, "va-1")).toMatchObject({ notify_version: 5, notify_revision: 1, notify_updated_by: "user" });
+  });
+
+  it("should say 0, 0 and no author before there is a Notify template", async () => {
+    const { db } = stub({ deckVersion: 0, deckUpdatedBy: null });
+
+    expect(await assistantFrame(db, "va-1")).toMatchObject({ notify_version: 0, notify_revision: 0, notify_updated_by: null });
   });
 });

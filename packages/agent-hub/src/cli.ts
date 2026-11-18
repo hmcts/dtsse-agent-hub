@@ -15,6 +15,7 @@ import { deck } from "./cli/deck.ts";
 import { reply, send } from "./cli/directs.ts";
 import { docmosis } from "./cli/docmosis.ts";
 import { m365 } from "./cli/m365.ts";
+import { notify } from "./cli/notify.ts";
 import { disable, enable, setup, status, transcript } from "./cli/session.ts";
 import { autoEnable, bridge, hook, stopWorker } from "./cli/workers.ts";
 import type { Env } from "./env.ts";
@@ -91,6 +92,19 @@ export const USAGE = `usage: ${CLI} <command> [args]
                               ~/.agent-hub/docmosis/<conversation>/ (template.docx, schema.json,
                               data.json, and the version and revision it read); the person may have
                               changed the data; --version writes an older kept version instead
+  notify products             list the products whose GOV.UK Notify templates can be read
+  notify list --product P     list product P's Notify templates, reading its Notify key from its AAT
+                              Key Vault with your own az login; the key stays on this machine
+  notify pull --product P --template ID
+                              in a CFT Workspace conversation: load template ID from Notify, with
+                              Notify's own preview of it, as the conversation's Notify template's next
+                              version; nothing in Notify is changed
+  notify get [--version N]    write the Notify template to ~/.agent-hub/notify/<conversation>/
+                              (subject.md, body.md, data.json, template.json, and the version and
+                              revision it read); the person may have edited it; --version writes an
+                              older kept version into v<N>/ instead
+  notify put [--summary S]    publish the edited subject.md, body.md and data.json as the next version,
+                              refused if a newer version was written since notify get
   jira export <export-id> --project P --type T [--labels a,b]
                               in a CFT Workspace conversation: create the Jira ticket for an export the
                               user asked for with twg, signing in first if it is not, and report it; run
@@ -150,6 +164,7 @@ export const COMMANDS: Record<string, Command> = {
   artefact,
   deck,
   docmosis,
+  notify,
   jira,
   github,
   confluence,
