@@ -79,6 +79,7 @@ export default defineConfig({
         "src/assistant/deck-edit-store.ts",
         "src/assistant/docmosis-store.ts",
         "src/assistant/pod-job-store.ts",
+        "src/assistant/docmosis-library-store.ts",
         "src/assistant/assistant-store.ts",
         "src/assistant/conversation-store.ts",
         "src/assistant/first-content.ts",

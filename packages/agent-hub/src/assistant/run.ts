@@ -10,6 +10,8 @@ import { run } from "../virtual/process.ts";
 import { deleteUploads, readDeleteUploads, reconcileUploads } from "./attachments.ts";
 import { createDeckBuildRunner } from "./deck-build.ts";
 import { type DiskFs, reportUploads } from "./disk.ts";
+import { createDocmosisIndexRunner } from "./docmosis-library.ts";
+import type { FetchLike } from "./github-rest.ts";
 import { createLookupRunner, type LookupDeps, type Run } from "./lookups.ts";
 import { type MemoryFs, reportMemory } from "./memory.ts";
 import { prepareEach } from "./plugin-deps.ts";
@@ -45,6 +47,7 @@ export type RunAssistantSupervisorOptions = Omit<CreateAssistantSupervisorOption
       | "deckBuildAsset"
       | "putDeckBuild"
       | "putPodJob"
+      | "putDocmosisIndex"
     >;
   id: string;
   /** The filesystem the uploads report and the deletions use; a test passes its own. */
@@ -62,6 +65,8 @@ export type RunAssistantSupervisorOptions = Omit<CreateAssistantSupervisorOption
   welsh?: { run?: Run; workspace?: string; install?: (name: string, workspace: string) => string };
   /** The pod-job kinds this supervisor runs; a test passes its own. `POD_JOB_HANDLERS` otherwise. */
   podJobs?: readonly PodJobHandler[];
+  /** How template library checks reach GitHub; a test passes its own rather than the network. */
+  githubFetch?: FetchLike;
   /** Stops the supervisor, as SIGTERM and SIGINT do; a test owns neither signal. */
   signal?: AbortSignal;
   tickMs?: number;
@@ -88,6 +93,7 @@ export async function runAssistantSupervisor({
   podJobs: podJobHandlers = POD_JOB_HANDLERS,
   cgroupRoot,
   memoryFs,
+  githubFetch,
   ...options
 }: RunAssistantSupervisorOptions): Promise<void> {
   const workspace = welshDeps.workspace ?? env.VIRTUAL_AGENT_WORKSPACE ?? "/workspace/cft-workspace";
@@ -95,13 +101,15 @@ export async function runAssistantSupervisor({
   const install = welshDeps.install ?? installBundled;
   const pluginDirs = () => installLoaded(env, workspace, say, install);
   const supervisor: AssistantSupervisor = createAssistantSupervisor({ api, id, env, say, pluginDirs, ...options });
+  const processRun: Run = (cmd, args, opts) => run(cmd, args, { env: opts.env as NodeJS.ProcessEnv, timeoutMs: opts.timeoutMs });
+  const lookupRun = lookupDeps.run ?? processRun;
   // Lookups run beside the supervisor rather than on its chain: see `createLookupRunner`.
   const lookups = createLookupRunner({
     api,
     id,
     env,
     say,
-    run: lookupDeps.run ?? ((cmd, args, opts) => run(cmd, args, { env: opts.env as NodeJS.ProcessEnv, timeoutMs: opts.timeoutMs })),
+    run: lookupRun,
     login: lookupDeps.login ?? (async () => (await atlassianLogin({ env })) !== "not-signed-in"),
     ...(lookupDeps.env === undefined ? {} : { env: lookupDeps.env })
   });
@@ -112,7 +120,7 @@ export async function runAssistantSupervisor({
     id,
     env,
     say,
-    run: welshDeps.run ?? ((cmd, args, opts) => run(cmd, args, { env: opts.env as NodeJS.ProcessEnv, timeoutMs: opts.timeoutMs })),
+    run: welshDeps.run ?? processRun,
     workspace,
     install
   };
@@ -130,6 +138,15 @@ export async function runAssistantSupervisor({
   const deckBuilds = createDeckBuildRunner({ ...welshOptions, api, ready: installs.get(SLIDES_PLUGIN) });
   // Pod jobs run beside the supervisor too, each kind in its own slots: see `createPodJobRunner`.
   const podJobs = createPodJobRunner({ api, id, env, say, handlers: podJobHandlers });
+  // Template library checks run beside the supervisor too, one at a time: a tree walk is a few seconds of GitHub calls.
+  const docmosisIndex = createDocmosisIndexRunner({
+    api,
+    id,
+    env,
+    say,
+    run: lookupRun,
+    ...(githubFetch === undefined ? {} : { fetch: githubFetch })
+  });
   const uploads = {
     api,
     id,
@@ -240,6 +257,13 @@ export async function runAssistantSupervisor({
             podJobs.podJob(JSON.parse(event.data));
           } catch {
             say("unparseable pod_job event");
+          }
+        } else if (event.event === "docmosis_index") {
+          // Not through `handle`: a tree walk can take seconds, and the wakes behind it must not wait.
+          try {
+            docmosisIndex.docmosisIndex(JSON.parse(event.data));
+          } catch {
+            say("unparseable docmosis_index event");
           }
         } else if (event.event === "delete_uploads") {
           handle(removeUploads, event);

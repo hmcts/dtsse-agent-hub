@@ -20,6 +20,7 @@ import { MAX_POD_JOB_KIND, POD_JOB_KIND_RE } from "./wire.ts";
 export type ClientFeature =
   | "attachments"
   | "deck-build"
+  | "docmosis-library"
   | "files"
   | "github-lookups"
   | "lookups"
@@ -75,6 +76,11 @@ export type ClientFeature =
  * one version of a conversation's deck with the slides plugin's `scripts/slides build` and uploading the .pptx. The hub
  * gates on it, answering `unsupported` to a pod that did not claim it, which the slides panel words as needing an update.
  *
+ * `docmosis-library` is claimed because the assistant supervisor answers the sessions stream's `docmosis_index`
+ * frame, reading the template library's index from GitHub's REST API with the owner's own `gh` token and answering
+ * it as tuples (`assistant/docmosis-library.ts`). The hub gates on it, answering the library's status with
+ * `unsupported` for a pod that did not claim it, which the template library words as needing an update.
+ *
  * `memory-anon` is claimed because the assistant supervisor reads its own container's memory cgroup and reports it,
  * including `anon_bytes` from `memory.stat`, which the hub's memory route requires and computes its low-memory
  * warning from. This is the name the current hub gates the Assistant section's size on, so that it can tell a pod that cannot
@@ -105,6 +111,7 @@ export type ClientFeature =
 export const CLIENT_FEATURES: readonly ClientFeature[] = [
   "attachments",
   "deck-build",
+  "docmosis-library",
   "files",
   "github-lookups",
   "lookups",

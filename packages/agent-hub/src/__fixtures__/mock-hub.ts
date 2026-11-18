@@ -309,6 +309,8 @@ export function createMockHub({
   // Every answer a supervisor gave to a pod job; `podJobRefusals` makes the next answers fail with these statuses.
   const podJobAnswers: { virtual_id: string; job_id: string; body: Record<string, unknown> }[] = [];
   const podJobRefusals: number[] = [];
+  // Every answer a supervisor gave to a check of its owner's template library, in the order they came.
+  const docmosisIndexAnswers: { virtual_id: string; request_id: string; body: Record<string, unknown> }[] = [];
   // upload id → the parts the pod may still fetch, and whether it has reported having the whole file
   const attachments = new Map<string, { parts: Uint8Array[]; fetched: boolean }>();
   // virtual agent id → { owner, status: [], credentials: Map, prompts: [], codes: Map, completes: [], ports: [], wakes: [], sessionReports: [] }
@@ -623,6 +625,20 @@ export function createMockHub({
         return send(res, 400, { error: "bad pod job answer" });
       }
       podJobAnswers.push({ virtual_id: id, job_id: kind, body });
+      return send(res, 204);
+    }
+    if (req.method === "PUT" && area === "docmosis-library" && kind && !sub) {
+      // The hub's three shapes, checked as far as a client test needs: the entries as tuples, a known reason.
+      const tuples =
+        Array.isArray(body.entries) && body.entries.length <= 10000 && body.entries.every((entry: unknown) => Array.isArray(entry) && entry.length === 3);
+      const answered =
+        (typeof body.commit === "string" && /^[0-9a-f]{40}$/.test(body.commit) && tuples) ||
+        body.unchanged === true ||
+        ["signed_out", "sso", "not_found", "rate_limited", "failed"].includes(body.error);
+      if (!answered) {
+        return send(res, 400, { error: "bad docmosis index answer" });
+      }
+      docmosisIndexAnswers.push({ virtual_id: id, request_id: kind, body });
       return send(res, 204);
     }
     if (area === "deck-builds" && kind) {
@@ -1501,6 +1517,7 @@ export function createMockHub({
     deckBuildAnswers,
     podJobAnswers,
     podJobRefusals,
+    docmosisIndexAnswers,
     attachments,
     sessionStreams,
     // A wake for one of a virtual agent's conversations: kept, and sent on every sessions stream, until a session
@@ -1538,6 +1555,10 @@ export function createMockHub({
       sessionStreams
         .get(virtualId)
         ?.write(`event: deck_build\ndata: ${JSON.stringify({ job_id: jobId, conversation_id: build.conversation_id, version: build.version })}\n\n`);
+    },
+    // A check of the owner's template library. Sent once and never replayed, as the hub does.
+    sendDocmosisIndex(virtualId: string, data: Record<string, unknown>) {
+      sessionStreams.get(virtualId)?.write(`event: docmosis_index\ndata: ${JSON.stringify(data)}\n\n`);
     },
     sendClose(virtualId: string, data: { conversation_id: string }) {
       const v = virtuals.get(virtualId) as VirtualRecord;

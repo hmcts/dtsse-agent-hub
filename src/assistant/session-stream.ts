@@ -1,6 +1,7 @@
 import type { EventHub } from "../realtime/hub.ts";
 import { type OnOpen, sseEvent } from "../realtime/sse.ts";
 import type { DeckBuildFrame } from "./deck-build-store.ts";
+import type { DocmosisIndexFrame } from "./docmosis-library-store.ts";
 import type { LookupFrame } from "./lookup-store.ts";
 import type { PodJobFrame } from "./pod-job-store.ts";
 import type { Wake } from "./session-store.ts";
@@ -28,6 +29,8 @@ export interface SessionStreamSources {
    * stream for a test about something else need not name it; the sessions route always does.
    */
   podJob?: (jobId: string) => Promise<PodJobFrame | undefined>;
+  /** The template library check to send the pod, `undefined` once it is answered, lost or not this assistant's owner's. */
+  docmosisIndex: (requestId: string) => Promise<DocmosisIndexFrame | undefined>;
 }
 
 export function wakeFrame(wake: Wake): string {
@@ -58,6 +61,10 @@ export function podJobFrame(job: PodJobFrame): string {
   return sseEvent({ event: "pod_job", data: JSON.stringify(job) });
 }
 
+export function docmosisIndexFrame(check: DocmosisIndexFrame): string {
+  return sseEvent({ event: "docmosis_index", data: JSON.stringify(check) });
+}
+
 export function deleteUploadsFrame(deletion: UploadDeletion): string {
   return sseEvent({ event: "delete_uploads", data: JSON.stringify(deletion) });
 }
@@ -82,7 +89,8 @@ export function deleteUploadsFrame(deletion: UploadDeletion): string {
  * rather than ending the stream. A Welsh job is sent the same way: once, as it is started, and never replayed — a job
  * lost to a reconnect times out, and the person starts it again, which is safer than running a pull request twice. A
  * deck build is too: a build lost to a reconnect times out, and the person asks again. So is a pod job, for the same
- * reason.
+ * reason. So is a check of the template library: one lost to a reconnect counts as lost after two minutes, and the
+ * next opening of the library asks again.
  *
  * An interrupt is the exception to all of that: it is neither replayed on connect nor resent on a `resync`, because
  * it names no state to reach but a turn to end, and the turn a missed one would have ended is over by the time
@@ -180,6 +188,15 @@ export function sessionStream(virtualAgentId: string, sources: SessionStreamSour
           (job) => {
             if (open && job !== undefined) {
               send(podJobFrame(job));
+            }
+          },
+          () => undefined
+        );
+      } else if (event.type === "assistant_docmosis_index" && event.virtual_agent_id === virtualAgentId) {
+        sources.docmosisIndex(event.request_id).then(
+          (check) => {
+            if (open && check !== undefined) {
+              send(docmosisIndexFrame(check));
             }
           },
           () => undefined

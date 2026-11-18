@@ -1,6 +1,7 @@
 import { HttpError, noContent, parse, readJson } from "@/agent-api/http";
 import { virtualRoute } from "@/agent-api/route";
 import { pendingDeckBuild } from "@/assistant/deck-build-store";
+import { pendingIndexFrame } from "@/assistant/docmosis-library-store";
 import { pendingLookup } from "@/assistant/lookup-store";
 import { pendingPodJobFrame } from "@/assistant/pod-job-store";
 import { sessionsReportBody } from "@/assistant/schemas";
@@ -17,7 +18,7 @@ import { prisma } from "@/store/prisma";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** The virtual agent's conversation wakes and closes, and its owner's lookups, Welsh jobs, deck builds and pod jobs, counted against its owner's agent streams. */
+/** The virtual agent's conversation wakes and closes, and its owner's lookups, Welsh jobs, deck builds, pod jobs and template library checks, counted against its owner's agent streams. */
 export const GET = virtualRoute<{ virtualAgentId: string }>(async ({ virtualAgent, request }) => {
   const { hub, listener } = realtime();
   const release = streamLimits().agent.take(virtualAgent.ownerOid);
@@ -37,7 +38,8 @@ export const GET = virtualRoute<{ virtualAgentId: string }>(async ({ virtualAgen
       lookup: (lookupId) => pendingLookup(prisma, virtualAgent.id, lookupId),
       welsh: (jobId) => pendingWelsh(prisma, virtualAgent.id, jobId),
       deckBuild: (jobId) => pendingDeckBuild(prisma, virtualAgent.id, jobId),
-      podJob: (jobId) => pendingPodJobFrame(prisma, virtualAgent.id, jobId)
+      podJob: (jobId) => pendingPodJobFrame(prisma, virtualAgent.id, jobId),
+      docmosisIndex: (requestId) => pendingIndexFrame(prisma, virtualAgent.id, requestId)
     })
   });
   return new Response(body, { headers: SSE_HEADERS });

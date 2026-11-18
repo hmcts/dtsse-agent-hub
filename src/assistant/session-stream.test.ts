@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createEventHub, type EventHub } from "../realtime/hub.ts";
 import type { DeckBuildFrame } from "./deck-build-store.ts";
+import type { DocmosisIndexFrame } from "./docmosis-library-store.ts";
 import type { LookupFrame } from "./lookup-store.ts";
 import type { PodJobFrame } from "./pod-job-store.ts";
 import type { Wake } from "./session-store.ts";
@@ -8,6 +9,7 @@ import {
   closeFrame,
   deckBuildFrame,
   deleteUploadsFrame,
+  docmosisIndexFrame,
   interruptFrame,
   lookupFrame,
   podJobFrame,
@@ -62,6 +64,7 @@ function sources(hub: EventHub, overrides: Partial<SessionStreamSources> = {}): 
     lookup: noLookup,
     welsh: noWelsh,
     deckBuild: noBuild,
+    docmosisIndex: async () => undefined,
     ...overrides
   };
 }
@@ -591,6 +594,77 @@ describe("sessionStream pod jobs", () => {
     without.publish(asked("p1"));
     await settle();
     failing.publish(stopped("c1"));
+
+    // Assert
+    expect(frames).toEqual([interruptFrame("c1")]);
+  });
+});
+
+describe("sessionStream template library checks", () => {
+  const CHECK: DocmosisIndexFrame = {
+    request_id: "r1",
+    owner: "hmcts",
+    repo: "rdo-docmosis",
+    ref: "HEAD",
+    path: "Templates",
+    commit: "a".repeat(40),
+    etag: '"abc"'
+  };
+
+  function asked(requestId: string, virtualAgent = ASSISTANT) {
+    return { type: "assistant_docmosis_index" as const, request_id: requestId, virtual_agent_id: virtualAgent, owner_oid: "o" };
+  }
+
+  function open(docmosisIndex: (id: string) => Promise<DocmosisIndexFrame | undefined>, frames: string[], hub = createEventHub()) {
+    sessionStream(ASSISTANT, sources(hub, { docmosisIndex }))((frame) => frames.push(frame), noFail);
+    return hub;
+  }
+
+  it("should send the pod a check as soon as its owner opens the library", async () => {
+    // Arrange
+    const frames: string[] = [];
+    const hub = open(async (id) => (id === "r1" ? CHECK : undefined), frames);
+    await settle();
+
+    // Act
+    hub.publish(asked("r1"));
+    await settle();
+
+    // Assert
+    expect(frames).toEqual([docmosisIndexFrame(CHECK)]);
+    expect(docmosisIndexFrame(CHECK)).toBe(`event: docmosis_index\ndata: ${JSON.stringify(CHECK)}\n\n`);
+  });
+
+  it("should send nothing for another assistant's check, one no longer waited for, or on a resync", async () => {
+    // Arrange
+    const frames: string[] = [];
+    const read = vi.fn(async () => undefined);
+    const hub = open(read, frames);
+    await settle();
+
+    // Act
+    hub.publish(asked("r1", "va-other"));
+    hub.publish(asked("r2"));
+    hub.publish({ type: "resync" });
+    await settle();
+
+    // Assert
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(frames.filter((frame) => frame.startsWith("event: docmosis_index"))).toEqual([]);
+  });
+
+  it("should keep the stream open when reading a check fails", async () => {
+    // Arrange
+    const frames: string[] = [];
+    const hub = open(async () => {
+      throw new Error("no database");
+    }, frames);
+    await settle();
+
+    // Act
+    hub.publish(asked("r1"));
+    await settle();
+    hub.publish(stopped("c1"));
 
     // Assert
     expect(frames).toEqual([interruptFrame("c1")]);
