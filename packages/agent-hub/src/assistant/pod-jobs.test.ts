@@ -3,8 +3,10 @@ import { claimedFeatures, podJobFeatures } from "../features.ts";
 import { MAX_CLIENT_FEATURES, type PodJobAnswer } from "../wire.ts";
 import { POD_JOB_HANDLERS } from "./pod-job-handlers.ts";
 import {
+  BUSY,
   createPodJobRunner,
   failureOf,
+  MAX_WAITING,
   NO_HANDLER,
   PodJobError,
   type PodJobHandler,
@@ -140,6 +142,14 @@ describe("failureOf", () => {
     const answer = failureOf(new Error("x".repeat(400)));
 
     expect(answer.status === "failed" && answer.detail?.length).toBe(300);
+  });
+
+  it("should cut words between code points when the cut falls inside a surrogate pair", () => {
+    const answer = failureOf(new Error(`${"x".repeat(298)}${"😀".repeat(5)}`));
+    const detail = answer.status === "failed" ? (answer.detail ?? "") : "";
+
+    expect(detail).toBe(`${"x".repeat(298)}…`);
+    expect(detail.isWellFormed()).toBe(true);
   });
 });
 
@@ -450,12 +460,113 @@ describe("createPodJobRunner", () => {
 
     // Act
     jobs.podJob(frame());
-    jobs.podJob(frame({ kind: "test.unclaimed" }));
+    jobs.podJob(frame({ kind: "test.unclaimed", job_id: "7d2a9e3c-1111-4222-8333-000000000002" }));
     await jobs.idle();
 
     // Assert
     expect(answers).toEqual([]);
     expect(said.filter((line) => line.includes("could not answer it"))).toHaveLength(2);
+  });
+
+  it("should answer timeout, and never start it, when a job's budget runs out while it waits behind a handler that never settles", async () => {
+    // Arrange
+    let started = 0;
+    const stuck: PodJobHandler = {
+      kind: "test.stuck",
+      budgetMs: 30,
+      run: () => {
+        started += 1;
+        return new Promise(() => undefined);
+      }
+    };
+    const { jobs, answers } = runner([stuck]);
+
+    // Act
+    jobs.podJob(frame({ kind: "test.stuck", job_id: "7d2a9e3c-1111-4222-8333-000000000001" }));
+    jobs.podJob(frame({ kind: "test.stuck", job_id: "7d2a9e3c-1111-4222-8333-000000000002" }));
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    // Assert
+    expect(started).toBe(1);
+    expect(answers.map(({ jobId, answer }) => [jobId.slice(-1), answer])).toEqual([
+      ["1", { status: "failed", error: "timeout", detail: TOO_SLOW }],
+      ["2", { status: "failed", error: "timeout", detail: TOO_SLOW }]
+    ]);
+  });
+
+  it("should answer failed as busy when more jobs of a kind are waiting than it queues", async () => {
+    // Arrange
+    const slow = gated("test.slow");
+    const { jobs, answers } = runner([slow.handler]);
+    const id = (n: number) => `7d2a9e3c-1111-4222-8333-${String(n).padStart(12, "0")}`;
+
+    // Act
+    for (let n = 0; n <= MAX_WAITING + 1; n += 1) {
+      jobs.podJob(frame({ kind: "test.slow", job_id: id(n) }));
+    }
+    await settle();
+
+    // Assert
+    expect(answers).toEqual([{ jobId: id(MAX_WAITING + 1), answer: { status: "failed", error: "failed", detail: BUSY } }]);
+    await jobs.stop();
+  });
+
+  it("should clear every budget timer when it stops, so nothing keeps the process alive", async () => {
+    // Arrange
+    vi.useFakeTimers();
+    try {
+      const slow = gated("test.slow");
+      const { jobs } = runner([{ ...slow.handler, budgetMs: 60_000 }]);
+      jobs.podJob(frame({ kind: "test.slow", job_id: "7d2a9e3c-1111-4222-8333-000000000001" }));
+      jobs.podJob(frame({ kind: "test.slow", job_id: "7d2a9e3c-1111-4222-8333-000000000002" }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(vi.getTimerCount()).toBe(2);
+
+      // Act
+      await jobs.stop();
+
+      // Assert
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("should run a job once when the hub sends it again while it runs or after it was answered", async () => {
+    // Arrange
+    const slow = gated("test.slow", 2);
+    const { jobs, answers } = runner([slow.handler]);
+    jobs.podJob(frame({ kind: "test.slow" }));
+    await settle();
+
+    // Act
+    jobs.podJob(frame({ kind: "test.slow" }));
+    await settle();
+    slow.releases.shift()?.();
+    await jobs.idle();
+    jobs.podJob(frame({ kind: "test.slow" }));
+    await settle();
+
+    // Assert
+    expect(slow.most()).toBe(1);
+    expect(slow.releases).toEqual([]);
+    expect(answers).toEqual([{ jobId: JOB, answer: { status: "done", result: { ok: true } } }]);
+  });
+
+  it("should run a job again when the hub sends it again after its answer could not be sent", async () => {
+    // Arrange
+    const run = vi.fn(echo.run);
+    const { jobs, answers } = runner([{ ...echo, run }], { refusals: [404] });
+    jobs.podJob(frame());
+    await jobs.idle();
+
+    // Act
+    jobs.podJob(frame());
+    await jobs.idle();
+
+    // Assert
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(answers).toEqual([{ jobId: JOB, answer: { status: "done", result: { echoed: "hi" } } }]);
   });
 
   it("should ignore a frame that is not a job", async () => {

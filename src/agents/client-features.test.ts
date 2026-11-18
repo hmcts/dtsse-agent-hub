@@ -4,6 +4,7 @@ import {
   MAX_CLIENT_FEATURE_NAME,
   MAX_CLIENT_FEATURES,
   normaliseClientFeatures,
+  POD_CLAIM_GRACE_MS,
   podGate,
   podLacks,
   podSupports,
@@ -131,6 +132,29 @@ describe("podGate", () => {
     expect(podGate({ status: "running", clientFeatures: ["lookups"], agent: { clientFeatures: ["pod-job:docmosis.load"] } }, "pod-job:docmosis.load")).toBe(
       "unsupported"
     );
+  });
+});
+
+describe("podGate on a pod job's claim over time", () => {
+  const NOW = new Date("2026-11-18T12:00:00Z");
+  const since = (ms: number) => new Date(NOW.getTime() - ms);
+
+  it("should say waking when the pod started running within the grace and has made no claim of its own yet", () => {
+    expect(
+      podGate({ status: "running", statusChangedAt: since(POD_CLAIM_GRACE_MS - 1), clientFeatures: null, agent: null }, "pod-job:docmosis.load", NOW)
+    ).toBe("waking");
+  });
+
+  it("should say unsupported when the pod has run past the grace with no claim of its own, whatever its main-session agent claimed", () => {
+    for (const agent of [null, { clientFeatures: null }, { clientFeatures: ["lookups"] }]) {
+      expect(podGate({ status: "running", statusChangedAt: since(POD_CLAIM_GRACE_MS), clientFeatures: null, agent }, "pod-job:docmosis.load", NOW)).toBe(
+        "unsupported"
+      );
+    }
+  });
+
+  it("should leave a feature other than a pod job's waking past the grace when nothing at all is claimed", () => {
+    expect(podGate({ status: "running", statusChangedAt: since(POD_CLAIM_GRACE_MS * 10), clientFeatures: null, agent: null }, "lookups", NOW)).toBe("waking");
   });
 });
 

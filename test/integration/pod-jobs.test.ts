@@ -10,6 +10,7 @@ import {
   finishPodJob,
   lockPendingPodJob,
   pendingPodJobFrame,
+  pendingPodJobFrames,
   readPodJob,
   requestPodJob,
   sweepPodJobs
@@ -189,6 +190,53 @@ describe("pod jobs", () => {
     });
   });
 
+  it("should ignore an answer when the conversation moved off the pod's virtual agent after the job was found", async () => {
+    // Arrange
+    const alice = await chatOf(ALICE);
+    const other = await chatOf(BOB);
+    const jobId = jobOf(await requestPodJob(prisma, ALICE.oid, alice.conversation, { kind: "test.echo", args: { text: "hi" } }));
+    const job = await answerablePodJob(prisma, alice.assistant, jobId);
+    await prisma.assistantConversation.update({ where: { id: alice.conversation }, data: { virtualAgentId: other.assistant } });
+
+    // Act
+    const answered = await heard(() => answerPodJob(prisma, job!, { status: "done", result: { echoed: "hi" } }));
+
+    // Assert
+    expect(answered).toEqual([]);
+    expect(await prisma.assistantPodJob.findUniqueOrThrow({ where: { id: jobId }, select: { status: true } })).toEqual({ status: "pending" });
+  });
+
+  it("should list a virtual agent's pending jobs oldest first for the stream to send again, when its pod connects", async () => {
+    // Arrange
+    const alice = await chatOf(ALICE);
+    const bob = await chatOf(BOB);
+    const first = jobOf(await requestPodJob(prisma, ALICE.oid, alice.conversation, { kind: "test.echo", args: { text: "a" } }));
+    const second = jobOf(await requestPodJob(prisma, ALICE.oid, alice.conversation, { kind: "test.single", args: { name: "b" } }));
+    const answered = jobOf(await requestPodJob(prisma, ALICE.oid, alice.conversation, { kind: "test.echo", args: { text: "c" } }));
+    const expired = await prisma.assistantPodJob.create({
+      data: {
+        conversationId: alice.conversation,
+        ownerOid: ALICE.oid,
+        virtualAgentId: alice.assistant,
+        kind: "test.echo",
+        args: { text: "d" },
+        createdAt: new Date(Date.now() - 120_000),
+        expiresAt: new Date(Date.now() - 60_000)
+      },
+      select: { id: true }
+    });
+    await requestPodJob(prisma, BOB.oid, bob.conversation, { kind: "test.echo", args: { text: "e" } });
+    await answer(alice.assistant, answered, { status: "done", result: { echoed: "c" } });
+
+    // Act
+    const frames = await pendingPodJobFrames(prisma, alice.assistant);
+
+    // Assert
+    expect(frames.map((frame) => frame.job_id)).toEqual([first, second]);
+    expect(frames[0]).toEqual({ job_id: first, kind: "test.echo", conversation_id: alice.conversation, args: { text: "a" } });
+    expect(frames.map((frame) => frame.job_id)).not.toContain(expired.id);
+  });
+
   it("should refuse an answer the kind does not allow, or text Postgres cannot store, with 400 and keep the job pending", async () => {
     // Arrange
     const { assistant, conversation } = await chatOf(ALICE);
@@ -250,6 +298,19 @@ describe("pod jobs", () => {
 
     // Assert
     expect(asked).toEqual({ status: "waking" });
+    expect(await prisma.assistantPodJob.count()).toBe(0);
+  });
+
+  it("should answer unsupported when the pod has been running past the grace with no claim of its own", async () => {
+    // Arrange
+    const { assistant, conversation } = await chatOf(ALICE, null);
+    await prisma.virtualAgent.update({ where: { id: assistant }, data: { statusChangedAt: new Date(Date.now() - 60_000) } });
+
+    // Act
+    const asked = await requestPodJob(prisma, ALICE.oid, conversation, { kind: "test.echo", args: { text: "hi" } });
+
+    // Assert
+    expect(asked).toEqual({ status: "unsupported" });
     expect(await prisma.assistantPodJob.count()).toBe(0);
   });
 

@@ -560,6 +560,34 @@ describe("sessionStream pod jobs", () => {
     expect(podJobFrame(JOB)).toBe(`event: pod_job\ndata: ${JSON.stringify(JOB)}\n\n`);
   });
 
+  it("should send every pending job on connect and on a resync, once per connection, when the pod was not listening as they were asked for", async () => {
+    // Arrange
+    const SECOND: PodJobFrame = { ...JOB, job_id: "p2" };
+    const pending = vi.fn(async () => [JOB, SECOND]);
+    const hub = createEventHub();
+    const first: string[] = [];
+    const second: string[] = [];
+    const connect = (frames: string[]) =>
+      sessionStream(ASSISTANT, sources(hub, { podJob: async (id) => (id === "p1" ? JOB : undefined), podJobs: pending }))(
+        (frame) => frames.push(frame),
+        noFail
+      );
+
+    // Act
+    connect(first);
+    await settle();
+    hub.publish(asked("p1"));
+    hub.publish({ type: "resync" });
+    await settle();
+    connect(second);
+    await settle();
+
+    // Assert
+    expect(first).toEqual([podJobFrame(JOB), podJobFrame(SECOND)]);
+    expect(second).toEqual([podJobFrame(JOB), podJobFrame(SECOND)]);
+    expect(pending).toHaveBeenCalledTimes(3);
+  });
+
   it("should send nothing for another assistant's job or one already answered", async () => {
     // Arrange
     const frames: string[] = [];

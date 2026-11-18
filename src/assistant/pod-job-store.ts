@@ -162,42 +162,46 @@ export interface PodJobFrame {
   args: unknown;
 }
 
-/** A job of this virtual agent's still waiting for its answer, in a conversation still on it; `undefined` otherwise. */
-async function pendingRow(db: Database, virtualAgentId: string, jobId: string, now: Date) {
+const PENDING_ROW = {
+  id: true,
+  kind: true,
+  conversationId: true,
+  ownerOid: true,
+  virtualAgentId: true,
+  args: true,
+  status: true,
+  expiresAt: true,
+  conversation: { select: { virtualAgentId: true, ownerOid: true, agentId: true } }
+} as const;
+
+type PendingRow = {
+  id: string;
+  kind: string;
+  conversationId: string;
+  ownerOid: string;
+  virtualAgentId: string;
+  args: unknown;
+  status: string;
+  expiresAt: Date;
+  conversation: { virtualAgentId: string | null; ownerOid: string; agentId: string | null };
+};
+
+/** Whether `row` is a job of this virtual agent's still waiting for its answer, in a conversation still on it. */
+const isPendingOn = (row: PendingRow, virtualAgentId: string, now: Date): boolean =>
+  row.virtualAgentId === virtualAgentId &&
+  row.conversation.virtualAgentId === virtualAgentId &&
+  row.conversation.ownerOid === row.ownerOid &&
+  podJobStatus(row, now) === "pending";
+
+async function pendingRow(db: Database, virtualAgentId: string, jobId: string, now: Date): Promise<PendingRow | undefined> {
   if (!isUuid(jobId)) {
     return undefined;
   }
-  const row = await db.assistantPodJob.findUnique({
-    where: { id: jobId },
-    select: {
-      id: true,
-      kind: true,
-      conversationId: true,
-      ownerOid: true,
-      virtualAgentId: true,
-      args: true,
-      status: true,
-      expiresAt: true,
-      conversation: { select: { virtualAgentId: true, ownerOid: true, agentId: true } }
-    }
-  });
-  if (
-    row === null ||
-    row.virtualAgentId !== virtualAgentId ||
-    row.conversation.virtualAgentId !== virtualAgentId ||
-    row.conversation.ownerOid !== row.ownerOid ||
-    podJobStatus(row, now) !== "pending"
-  ) {
-    return undefined;
-  }
-  return row;
+  const row = await db.assistantPodJob.findUnique({ where: { id: jobId }, select: PENDING_ROW });
+  return row !== null && isPendingOn(row, virtualAgentId, now) ? row : undefined;
 }
 
-export async function pendingPodJobFrame(db: Database, virtualAgentId: string, jobId: string, now: Date = new Date()): Promise<PodJobFrame | undefined> {
-  const row = await pendingRow(db, virtualAgentId, jobId, now);
-  if (row === undefined) {
-    return undefined;
-  }
+function frameOf(row: PendingRow): PodJobFrame {
   return {
     job_id: row.id,
     kind: row.kind,
@@ -205,6 +209,29 @@ export async function pendingPodJobFrame(db: Database, virtualAgentId: string, j
     ...(row.conversation.agentId === null ? {} : { agent_id: row.conversation.agentId }),
     args: row.args
   };
+}
+
+export async function pendingPodJobFrame(db: Database, virtualAgentId: string, jobId: string, now: Date = new Date()): Promise<PodJobFrame | undefined> {
+  const row = await pendingRow(db, virtualAgentId, jobId, now);
+  return row === undefined ? undefined : frameOf(row);
+}
+
+/** At most this many pending jobs are sent again on a stream's open; the rate limits keep the real number far under it. */
+const MAX_REPLAYED_POD_JOBS = 200;
+
+/**
+ * Every job of this virtual agent's still pending, oldest first, for the sessions stream to send again as it opens: a
+ * frame is sent once per stream, so a job recorded while no stream was open, or whose frame a reconnect lost, would
+ * otherwise wait out its timeout. The pod ignores a job it is already running or has answered.
+ */
+export async function pendingPodJobFrames(db: Database, virtualAgentId: string, now: Date = new Date()): Promise<PodJobFrame[]> {
+  const rows = await db.assistantPodJob.findMany({
+    where: { virtualAgentId, status: "pending", expiresAt: { gt: now }, conversation: { virtualAgentId } },
+    select: PENDING_ROW,
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    take: MAX_REPLAYED_POD_JOBS
+  });
+  return rows.filter((row) => isPendingOn(row, virtualAgentId, now)).map(frameOf);
 }
 
 /** A pending job of this virtual agent's that its pod may answer, read once for both the body's cap and the answer. */
@@ -231,8 +258,9 @@ export async function answerablePodJob(db: Database, virtualAgentId: string, job
 }
 
 /**
- * The pod's answer to a job `answerablePodJob` found, kept only while it is still pending and inside its time, so a
- * late or repeated answer changes nothing. An answer the kind does not allow is a 400; keeping it tells the owner's
+ * The pod's answer to a job `answerablePodJob` found, kept only while it is still pending, inside its time and in a
+ * conversation still on this virtual agent, each checked again in the update itself, so a late or repeated answer, or
+ * one racing the conversation's move to another assistant, changes nothing. An answer the kind does not allow is a 400; keeping it tells the owner's
  * open tabs (`assistant_pod_job`).
  */
 export async function answerPodJob(prisma: PrismaClient, job: AnswerablePodJob, body: unknown, now: Date = new Date()): Promise<void> {
@@ -243,7 +271,13 @@ export async function answerPodJob(prisma: PrismaClient, job: AnswerablePodJob, 
       : { status: "failed", error: answer.error, detail: answer.detail ?? null, finishedAt: now };
   await prisma.$transaction(async (tx) => {
     const { count } = await tx.assistantPodJob.updateMany({
-      where: { id: job.id, virtualAgentId: job.virtualAgentId, status: "pending", expiresAt: { gt: now } },
+      where: {
+        id: job.id,
+        virtualAgentId: job.virtualAgentId,
+        status: "pending",
+        expiresAt: { gt: now },
+        conversation: { virtualAgentId: job.virtualAgentId }
+      },
       data
     });
     if (count > 0) {

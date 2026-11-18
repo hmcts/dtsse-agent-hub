@@ -2,7 +2,7 @@ import { HttpError, noContent, parse, readJson } from "@/agent-api/http";
 import { virtualRoute } from "@/agent-api/route";
 import { pendingDeckBuild } from "@/assistant/deck-build-store";
 import { pendingLookup } from "@/assistant/lookup-store";
-import { pendingPodJobFrame } from "@/assistant/pod-job-store";
+import { pendingPodJobFrame, pendingPodJobFrames } from "@/assistant/pod-job-store";
 import { sessionsReportBody } from "@/assistant/schemas";
 import { pendingWake, pendingWakes, reportSessions } from "@/assistant/session-store";
 import { sessionStream } from "@/assistant/session-stream";
@@ -37,7 +37,8 @@ export const GET = virtualRoute<{ virtualAgentId: string }>(async ({ virtualAgen
       lookup: (lookupId) => pendingLookup(prisma, virtualAgent.id, lookupId),
       welsh: (jobId) => pendingWelsh(prisma, virtualAgent.id, jobId),
       deckBuild: (jobId) => pendingDeckBuild(prisma, virtualAgent.id, jobId),
-      podJob: (jobId) => pendingPodJobFrame(prisma, virtualAgent.id, jobId)
+      podJob: (jobId) => pendingPodJobFrame(prisma, virtualAgent.id, jobId),
+      podJobs: () => pendingPodJobFrames(prisma, virtualAgent.id)
     })
   });
   return new Response(body, { headers: SSE_HEADERS });

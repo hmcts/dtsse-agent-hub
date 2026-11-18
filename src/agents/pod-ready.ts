@@ -4,7 +4,7 @@ import { type ClientFeature, type PodClaims, type PodJobFeature, podGate } from 
 
 /** What `podReady` needs of a virtual agent: its lifecycle columns and the claims `podGate` reads. */
 export interface PodReadiness {
-  assistant: { id: string; desired: string; status: string; generation: number; observedGeneration: number };
+  assistant: { id: string; desired: string; status: string; statusChangedAt: Date; generation: number; observedGeneration: number };
   claims: PodClaims;
 }
 
@@ -24,7 +24,7 @@ export async function podReady(
     await setDesired(prisma, actorOid, assistant.id, "running", now);
     return "waking";
   }
-  const gate = podGate({ status: assistant.status, ...claims }, feature);
+  const gate = podGate({ status: assistant.status, statusChangedAt: assistant.statusChangedAt, ...claims }, feature, now);
   if (gate !== "ok") {
     return gate;
   }
