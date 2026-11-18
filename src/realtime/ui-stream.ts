@@ -36,6 +36,8 @@ import { type OnOpen, type Send, sseEvent } from "./sse.ts";
  *   read under its own rule.
  * - `assistant_conversation`: one of the viewer's own assistant conversations changed. Only the id is sent, and only
  *   to its owner; the page re-reads it.
+ * - `assistant_pod_job`: one of the viewer's own pod jobs finished. Only the ids are sent, and only to the person it
+ *   ran for; the panel waiting on it reads it back.
  * - `feedback`: something of a prototype feedback project changed, when the viewer is its owner or on its team. Only
  *   the ids are sent; the project's pages re-read it under their own rule. The review shell polls instead, since a
  *   reviewer is on no team. The team is read once per event per pod (`sharedFeedbackTeamLoader`), as a post is.
@@ -205,6 +207,13 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
     // An instruction to the pod; the slides panel reads its own build back.
     case "assistant_deck_build":
       return undefined;
+    // An instruction to the pod; its answer is the `assistant_pod_job` below.
+    case "assistant_pod_job_requested":
+      return undefined;
+    case "assistant_pod_job":
+      return isOwner(sources.viewerOid, { ownerOid: event.owner_oid })
+        ? sseEvent({ event: "assistant_pod_job", data: JSON.stringify({ job_id: event.job_id, conversation_id: event.conversation_id }) })
+        : undefined;
     // An instruction to the pod as well.
     case "assistant_docmosis_index":
       return undefined;

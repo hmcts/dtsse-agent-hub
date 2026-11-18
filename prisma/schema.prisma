@@ -616,6 +616,7 @@ model AssistantConversation {
   deckVersions AssistantDeckVersion[]
   deckAssets   AssistantDeckAsset[]
   deckBuilds   AssistantDeckBuild[]
+  podJobs      AssistantPodJob[]
   docmosisVersions AssistantDocmosisVersion[]
   docmosisAssets   AssistantDocmosisAsset[]
 
@@ -754,6 +755,33 @@ model AssistantDeckBuild {
   @@index([conversationId, version, createdAt(sort: Desc)], map: "assistant_deck_build_conversation_idx")
   @@index([createdAt], map: "assistant_deck_build_created_at_idx")
   @@map("assistant_deck_build")
+}
+
+/// A job a panel asked the conversation's pod to run with its owner's own credentials. `kind` is one registered in
+/// src/assistant/pod-job-kinds.ts, checked by shape in the migration. At most one pending per (conversation, kind) for
+/// an `exclusive` kind: a partial unique index in the migration, which this schema cannot express.
+model AssistantPodJob {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversationId String    @map("conversation_id") @db.Uuid
+  ownerOid       String    @map("owner_oid")
+  virtualAgentId String    @map("virtual_agent_id") @db.Uuid
+  kind           String
+  args           Json
+  exclusive      Boolean   @default(false)
+  /// pending, done, failed or timeout.
+  status         String    @default("pending")
+  result         Json?
+  error          String?
+  detail         String?
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  expiresAt      DateTime  @map("expires_at") @db.Timestamptz(6)
+  finishedAt     DateTime? @map("finished_at") @db.Timestamptz(6)
+
+  conversation AssistantConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([ownerOid, kind, createdAt], map: "assistant_pod_job_owner_kind_idx")
+  @@index([createdAt], map: "assistant_pod_job_created_at_idx")
+  @@map("assistant_pod_job")
 }
 
 /// A read-only share of one conversation with one named person. The list of rows is the whole of the access: a link

@@ -274,6 +274,22 @@ export type Deck = {
 /** A deck build as the supervisor reads it: the version to build, with its outline as `GET …/deck` returns one. */
 export type DeckBuild = { job_id: string; conversation_id: string; version: number; outline: DeckOutline };
 
+/** A pod-job kind's name, as the hub's `src/assistant/pod-jobs.ts` accepts it: dotted lowercase words, 40 at most. */
+export const POD_JOB_KIND_RE = /^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)*$/;
+export const MAX_POD_JOB_KIND = 40;
+
+/**
+ * The most client features the hub takes in one claim, as its `src/agents/client-features.ts` has it: a claim over it
+ * refuses the whole status report or registration with 400, so this build's claim must stay within it.
+ */
+export const MAX_CLIENT_FEATURES = 50;
+
+/** A pod job the sessions stream sent: one of the kinds in `src/assistant/pod-job-handlers.ts`. See "Pod jobs". */
+export type PodJobFrame = { job_id: string; kind: string; conversation_id: string; agent_id?: string; args: unknown };
+
+/** The supervisor's answer to a pod job: the handler's result, or an error code and words for the person. */
+export type PodJobAnswer = { status: "done"; result: unknown } | { status: "failed"; error: string; detail?: string };
+
 export type DeckImage = { asset?: string; path?: string; alt?: string; decorative?: boolean };
 export type DeckSlide = { id?: string; layout?: string; title?: string; image?: DeckImage; [field: string]: unknown };
 export type DeckOutline = { title?: string; slides?: DeckSlide[]; [field: string]: unknown };

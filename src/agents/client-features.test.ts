@@ -4,6 +4,7 @@ import {
   MAX_CLIENT_FEATURE_NAME,
   MAX_CLIENT_FEATURES,
   normaliseClientFeatures,
+  POD_CLAIM_GRACE_MS,
   podGate,
   podLacks,
   podSupports,
@@ -20,12 +21,26 @@ describe("normaliseClientFeatures", () => {
     expect(normaliseClientFeatures(["some-later-field"])).toEqual(["some-later-field"]);
   });
 
+  it("should keep a pod job's claim when its kind is dotted", () => {
+    expect(normaliseClientFeatures(["pod-job:docmosis.load", "lookups"])).toEqual(["lookups", "pod-job:docmosis.load"]);
+    expect(podGate({ status: "running", clientFeatures: ["pod-job:docmosis.load"] }, "pod-job:docmosis.load")).toBe("ok");
+    expect(podGate({ status: "running", clientFeatures: ["lookups"] }, "pod-job:docmosis.load")).toBe("unsupported");
+  });
+
   it("should drop an entry that is not a valid name rather than refuse the list, so one bad name costs only itself", () => {
     expect(normaliseClientFeatures(["Attachments", "-leading", "has space", "", 7, null, undefined, {}, ["attachments"], "attachments"])).toEqual([
       "attachments"
     ]);
     expect(normaliseClientFeatures(["a".repeat(MAX_CLIENT_FEATURE_NAME)])).toEqual(["a".repeat(MAX_CLIENT_FEATURE_NAME)]);
     expect(normaliseClientFeatures(["a".repeat(MAX_CLIENT_FEATURE_NAME + 1)])).toEqual([]);
+  });
+});
+
+describe("MAX_CLIENT_FEATURES", () => {
+  it("should be the cap the pod client keeps its claim within, so a pod's status report is never refused for it", async () => {
+    // Imported by URL so that the hub's typecheck does not take in the client's sources.
+    const client: { MAX_CLIENT_FEATURES: number } = await import(new URL("../../packages/agent-hub/src/wire.ts", import.meta.url).href);
+    expect(client.MAX_CLIENT_FEATURES).toBe(MAX_CLIENT_FEATURES);
   });
 });
 
@@ -109,6 +124,37 @@ describe("podGate", () => {
 
   it("should say unsupported when the main-session agent registered on a client that claims nothing", () => {
     expect(podGate({ status: "running", clientFeatures: null, agent: { clientFeatures: null } }, "welsh")).toBe("unsupported");
+  });
+
+  it("should say waking for a pod job when the running pod has made no claim of its own, whatever its main-session agent claimed", () => {
+    expect(podGate({ status: "running", clientFeatures: null, agent: { clientFeatures: ["lookups"] } }, "pod-job:docmosis.load")).toBe("waking");
+    expect(podGate({ status: "running", clientFeatures: null, agent: { clientFeatures: null } }, "pod-job:docmosis.load")).toBe("waking");
+    expect(podGate({ status: "running", clientFeatures: ["lookups"], agent: { clientFeatures: ["pod-job:docmosis.load"] } }, "pod-job:docmosis.load")).toBe(
+      "unsupported"
+    );
+  });
+});
+
+describe("podGate on a pod job's claim over time", () => {
+  const NOW = new Date("2026-11-18T12:00:00Z");
+  const since = (ms: number) => new Date(NOW.getTime() - ms);
+
+  it("should say waking when the pod started running within the grace and has made no claim of its own yet", () => {
+    expect(
+      podGate({ status: "running", statusChangedAt: since(POD_CLAIM_GRACE_MS - 1), clientFeatures: null, agent: null }, "pod-job:docmosis.load", NOW)
+    ).toBe("waking");
+  });
+
+  it("should say unsupported when the pod has run past the grace with no claim of its own, whatever its main-session agent claimed", () => {
+    for (const agent of [null, { clientFeatures: null }, { clientFeatures: ["lookups"] }]) {
+      expect(podGate({ status: "running", statusChangedAt: since(POD_CLAIM_GRACE_MS), clientFeatures: null, agent }, "pod-job:docmosis.load", NOW)).toBe(
+        "unsupported"
+      );
+    }
+  });
+
+  it("should leave a feature other than a pod job's waking past the grace when nothing at all is claimed", () => {
+    expect(podGate({ status: "running", statusChangedAt: since(POD_CLAIM_GRACE_MS * 10), clientFeatures: null, agent: null }, "lookups", NOW)).toBe("waking");
   });
 });
 

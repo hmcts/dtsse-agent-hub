@@ -99,6 +99,16 @@ export type HubEvent =
    */
   | { type: "assistant_deck_build"; job_id: string; virtual_agent_id: string; owner_oid: string }
   /**
+   * The owner asked for a pod job, so `virtual_agent_id`'s pod should run it. A job this misses, while the listener
+   * was down or before the pod's stream opened, is sent on the next `resync` or connect, which replay every pending one.
+   */
+  | { type: "assistant_pod_job_requested"; job_id: string; virtual_agent_id: string; owner_oid: string }
+  /**
+   * A pod job of `owner_oid`'s finished, so the panel waiting on it can read it back. Ids only: the result is read
+   * under `canReadPodJob`.
+   */
+  | { type: "assistant_pod_job"; job_id: string; conversation_id: string; owner_oid: string }
+  /**
    * The owner's template library needs checking, so `virtual_agent_id`'s pod should read its index from GitHub and
    * answer. Sent once, as `assistant_deck_build` is: a check lost while the listener was down counts as lost after two
    * minutes, and the next opening of the library asks again. Never sent to a browser.
@@ -219,6 +229,14 @@ export function decodeEvent(payload: string | undefined): NotifiedEvent | undefi
     case "assistant_welsh_answered":
       return isId(event.job_id) && isId(event.virtual_agent_id) && isId(event.owner_oid)
         ? { type: event.type, job_id: event.job_id, virtual_agent_id: event.virtual_agent_id, owner_oid: event.owner_oid }
+        : undefined;
+    case "assistant_pod_job_requested":
+      return isId(event.job_id) && isId(event.virtual_agent_id) && isId(event.owner_oid)
+        ? { type: event.type, job_id: event.job_id, virtual_agent_id: event.virtual_agent_id, owner_oid: event.owner_oid }
+        : undefined;
+    case "assistant_pod_job":
+      return isId(event.job_id) && isId(event.conversation_id) && isId(event.owner_oid)
+        ? { type: event.type, job_id: event.job_id, conversation_id: event.conversation_id, owner_oid: event.owner_oid }
         : undefined;
     case "assistant_docmosis_index":
       return isId(event.request_id) && isId(event.virtual_agent_id) && isId(event.owner_oid)

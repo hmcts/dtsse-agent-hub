@@ -2,7 +2,7 @@
 // path must not pay for loading a validation library.
 import { createTokenProvider, DEFAULT_SCOPE } from "./az-token.ts";
 import type { Env } from "./env.ts";
-import { CLIENT_FEATURES } from "./features.ts";
+import { claimedFeatures } from "./features.ts";
 import type { PortsReport } from "./ports.ts";
 import type { QuestionBody } from "./questions.ts";
 import { virtualAgent } from "./virtual-agent.ts";
@@ -41,6 +41,7 @@ import type {
   MessageResponse,
   MessagesResponse,
   MicrosoftTokenResponse,
+  PodJobAnswer,
   PostBody,
   RegisterBody,
   RegisterResponse,
@@ -231,6 +232,8 @@ export type Api = {
   deckBuildAsset: (virtualId: string, jobId: string, sha256: string) => Promise<Uint8Array>;
   /** The supervisor's answer to a deck build: the .pptx it built, at most 5 MiB, or why there is none. */
   putDeckBuild: (virtualId: string, jobId: string, answer: { pptx: Uint8Array } | { error: string }) => Promise<null>;
+  /** The supervisor's answer to one of its owner's pod jobs. */
+  putPodJob: (virtualId: string, jobId: string, answer: PodJobAnswer) => Promise<null>;
   /** One part of a file attached to a message in this agent's conversation. One part, never the whole file. */
   attachmentPart: (agentId: string, uploadId: string, index: number) => Promise<Uint8Array>;
   /** The whole file is on this pod's disk, which is what makes the hub delete its part rows. */
@@ -391,8 +394,7 @@ export function createApi({
     message: (messageId) => request<MessageResponse>("GET", `/api/agent/messages/${encodeURIComponent(messageId)}`),
     // Every report carries the claim, so the hub's copy is always the running build's; a hub that predates the field
     // ignores it.
-    virtualStatus: (id, phase, detail) =>
-      request<null>("POST", v(id, "status"), { phase, ...(detail ? { detail } : {}), client_features: [...CLIENT_FEATURES] }),
+    virtualStatus: (id, phase, detail) => request<null>("POST", v(id, "status"), { phase, ...(detail ? { detail } : {}), client_features: claimedFeatures() }),
     getCredential: async (id, kind) => (await nullOn404(request<CredentialResponse>("GET", v(id, `credentials/${k(kind)}`))))?.value ?? null,
     putCredential: (id, kind, value) => request<null>("PUT", v(id, `credentials/${k(kind)}`), { value }),
     putPorts: (id, body) => request<null>("PUT", v(id, "ports"), body),
@@ -451,6 +453,7 @@ export function createApi({
       "pptx" in answer
         ? putBytes<null>(v(virtualId, `deck-builds/${encodeURIComponent(jobId)}`), null, answer.pptx)
         : request<null>("PUT", v(virtualId, `deck-builds/${encodeURIComponent(jobId)}`), { error: answer.error }),
+    putPodJob: (virtualId, jobId, answer) => request<null>("PUT", v(virtualId, `pod-jobs/${encodeURIComponent(jobId)}`), answer),
     attachmentPart: (agentId, uploadId, index) => requestBytes(`${a(agentId)}/attachments/${encodeURIComponent(uploadId)}/parts/${index}`),
     attachmentFetched: (agentId, uploadId) => request<null>("POST", `${a(agentId)}/attachments/${encodeURIComponent(uploadId)}/fetched`),
     stream: (id, opts) => openStream(`${a(id)}/stream`, opts)

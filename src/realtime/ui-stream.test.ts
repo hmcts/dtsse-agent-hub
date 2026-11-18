@@ -358,6 +358,22 @@ describe("selectFrame", () => {
     ).toBeUndefined();
   });
 
+  it("should tell the owner which of their pod jobs finished, naming only the ids", async () => {
+    expect(await selectFrame({ type: "assistant_pod_job", job_id: "j-1", conversation_id: "c-1", owner_oid: VIEWER }, TOPICS, sources())).toBe(
+      `event: assistant_pod_job\ndata: ${JSON.stringify({ job_id: "j-1", conversation_id: "c-1" })}\n\n`
+    );
+  });
+
+  it("should send nothing about a pod job when it ran for someone else", async () => {
+    expect(await selectFrame({ type: "assistant_pod_job", job_id: "j-1", conversation_id: "c-1", owner_oid: OTHER }, TOPICS, sources())).toBeUndefined();
+  });
+
+  it("should send no browser the request for a pod job, which is the pod's", async () => {
+    expect(
+      await selectFrame({ type: "assistant_pod_job_requested", job_id: "j-1", virtual_agent_id: "va-1", owner_oid: VIEWER }, TOPICS, sources())
+    ).toBeUndefined();
+  });
+
   const FEEDBACK = { type: "feedback" as const, project_id: "p-1", link_id: "l-1" };
   const team = (ownerOid: string, memberOids: string[] = []) => ({
     ...sources(),

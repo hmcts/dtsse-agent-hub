@@ -43,6 +43,9 @@ export {
 } from "./lookups.ts";
 export type { MemoryFs, MemoryOptions, ReportMemoryOptions } from "./memory.ts";
 export { CGROUP_ROOT, measureMemory, reportMemory } from "./memory.ts";
+export { POD_JOB_HANDLERS } from "./pod-job-handlers.ts";
+export type { PodJobContext, PodJobDeps, PodJobHandler, PodJobRunner } from "./pod-jobs.ts";
+export { createPodJobRunner, failureOf, PodJobError, parsePodJobFrame } from "./pod-jobs.ts";
 export type { RunAssistantSupervisorOptions } from "./run.ts";
 export { runAssistantSupervisor } from "./run.ts";
 export type {

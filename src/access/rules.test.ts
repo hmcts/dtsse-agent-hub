@@ -22,8 +22,10 @@ import {
   canReadDeck,
   canReadDocmosis,
   canReadMessage,
+  canReadPodJob,
   canRecordFeedback,
   canRemoveUploadFromDisk,
+  canRequestPodJob,
   canSeeFeedbackRecording,
   canSessionUseAttachment,
   canShareConversationWith,
@@ -752,6 +754,32 @@ describe("the conversation share rules", () => {
 
     it.each(EVERYONE_ELSE)("should refuse %s a change to the template", (_label, viewerOid) => {
       expect(canChangeDocmosis(conversationAccess(viewerOid, CONVERSATION, SHARES))).toBe(false);
+    });
+  });
+
+  describe("canRequestPodJob", () => {
+    it("should let the owner have their pod run a job", () => {
+      expect(canRequestPodJob(conversationAccess(OWNER, CONVERSATION, SHARES))).toBe(true);
+    });
+
+    it("should refuse a share's recipient when the share lets them read the conversation", () => {
+      const access = conversationAccess(RECIPIENT, CONVERSATION, SHARES);
+      expect(access).toBe("reader");
+      expect(canRequestPodJob(access)).toBe(false);
+    });
+
+    it.each(EVERYONE_ELSE)("should refuse %s a job", (_label, viewerOid) => {
+      expect(canRequestPodJob(conversationAccess(viewerOid, CONVERSATION, SHARES))).toBe(false);
+    });
+  });
+
+  describe("canReadPodJob", () => {
+    it("should let the person the job ran for read it", () => {
+      expect(canReadPodJob(OWNER, { ownerOid: OWNER })).toBe(true);
+    });
+
+    it.each([["a share's recipient", RECIPIENT], ...EVERYONE_ELSE])("should refuse %s the job", (_label, viewerOid) => {
+      expect(canReadPodJob(viewerOid, { ownerOid: OWNER })).toBe(false);
     });
   });
 

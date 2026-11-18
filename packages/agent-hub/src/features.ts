@@ -1,3 +1,6 @@
+import { POD_JOB_HANDLERS } from "./assistant/pod-job-handlers.ts";
+import { MAX_POD_JOB_KIND, POD_JOB_KIND_RE } from "./wire.ts";
+
 /**
  * What this build of the client understands of the hub's optional wire fields, reported on every register, and on every
  * pod status report, so the hub can leave out a field this build would ignore. See the
@@ -125,4 +128,29 @@ export const CLIENT_FEATURES: readonly ClientFeature[] = [
 /** Whether `claim`, as untrusted as any stored or answered value, names exactly `names`, in any order. */
 export function sameFeatures(claim: unknown, names: readonly string[] = CLIENT_FEATURES): boolean {
   return Array.isArray(claim) && claim.length === names.length && names.every((name) => claim.includes(name));
+}
+
+/**
+ * The claim for each pod-job handler, `pod-job:<kind>`, sorted: one per kind this build can run and no other, so the
+ * hub never sends a kind with nothing here to answer it. Not part of `CLIENT_FEATURES`, which is a fixed list a test
+ * spells out; these follow `POD_JOB_HANDLERS` instead.
+ */
+export function podJobFeatures(handlers: readonly { kind: string }[]): string[] {
+  const kinds = new Set<string>();
+  for (const { kind } of handlers) {
+    if (kind.length > MAX_POD_JOB_KIND || !POD_JOB_KIND_RE.test(kind) || kinds.has(kind)) {
+      throw new Error(`pod job handler ${JSON.stringify(kind)} is not a kind the hub accepts, or is there twice`);
+    }
+    kinds.add(kind);
+  }
+  return [...kinds].map((kind) => `pod-job:${kind}`).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+}
+
+/**
+ * What a pod reports on `POST /api/virtual/{id}/status`: `CLIENT_FEATURES` and a claim for each pod-job handler. A
+ * session's registration claims `CLIENT_FEATURES` alone, since only the pod's supervisor runs pod jobs and the hub
+ * gates them on the pod's own claim.
+ */
+export function claimedFeatures(handlers: readonly { kind: string }[] = POD_JOB_HANDLERS): string[] {
+  return [...CLIENT_FEATURES, ...podJobFeatures(handlers)];
 }
