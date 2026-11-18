@@ -818,27 +818,37 @@ function Chat({ view: shown }: { view: ConversationView }) {
   return <ChatView jira={{ connected: false, login: null }} viewerOid={VIEWER} view={shown} templates={TEMPLATES} actions={actions()} />;
 }
 
+/** Chooses Docmosis template from the header's Create menu. */
+function createTemplate(): void {
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: /^Docmosis template/ }));
+}
+
 describe("ChatView template button", () => {
-  it("should offer Choose template on a pod chat with none, and open the library on it", async () => {
+  it("should open the library when the person creates a Docmosis template on a pod chat with none", async () => {
     serve();
     render(<Chat view={conversation()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Choose template" }));
+    createTemplate();
     await settle();
     expect(screen.getByRole("heading", { name: "Choose a template" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Choose template" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Items, Docmosis template open" })).toBeTruthy();
   });
 
-  it("should offer Open template on a chat with a template", () => {
+  it("should offer the template in the switcher, and Create should open it, when the chat has a template", () => {
     serve();
     render(<Chat view={conversation({ docmosis: SUMMARY })} />);
-    expect(screen.getByRole("button", { name: "Open template" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^Items/ }));
+    expect(screen.getByRole("menuitemradio", { name: "Docmosis template" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(screen.getByRole("menuitem", { name: "Docmosis template, already in this chat" })).toBeTruthy();
   });
 
-  it("should offer no template button on a local chat with none", () => {
+  it("should offer no Docmosis template when a local chat has none", () => {
     serve();
     render(<Chat view={conversation({ local: true })} />);
-    expect(screen.queryByRole("button", { name: "Choose template" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Open template" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Items/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(screen.queryByRole("menuitem", { name: /^Docmosis template/ })).toBeNull();
   });
 
   it("should not open the panel for a version the person loaded, and should for one the assistant wrote", async () => {
@@ -855,7 +865,7 @@ describe("ChatView template button", () => {
   it("should keep a load running when the panel is closed, and open on the loaded template when it lands", async () => {
     const server = serve();
     const { rerender } = render(<Chat view={conversation()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Choose template" }));
+    createTemplate();
     await settle();
     await pickClaimForm();
     fireEvent.click(screen.getByRole("button", { name: "Close template" }));
@@ -872,7 +882,7 @@ describe("ChatView template button", () => {
   it("should open on the conflict choice when a load the panel was closed on is refused for a newer version", async () => {
     const server = serve();
     render(<Chat view={conversation()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Choose template" }));
+    createTemplate();
     await settle();
     await pickClaimForm();
     fireEvent.click(screen.getByRole("button", { name: "Close template" }));

@@ -8,7 +8,7 @@ import { MAX_ASKED_BODY, MAX_SLIDE_REFERENCE } from "@/assistant/deck";
 import { STARTERS, TEMPLATES } from "@/assistant/starters";
 import { WARMING_QUIPS } from "@/assistant/thread";
 import type { ConversationView } from "@/assistant/views";
-import { type ChatActions, ChatView, QUIP_INTERVAL_MS } from "@/components/assistant/ChatView";
+import { type ChatActions, ChatView, CREATE_SLIDES, QUIP_INTERVAL_MS } from "@/components/assistant/ChatView";
 import { Composer } from "@/components/assistant/Composer";
 import { SAVE_AFTER_MS } from "@/components/assistant/DeckEditor";
 import { EmptyChat, type EmptyChatActions, NEW_CHAT_DRAFT } from "@/components/assistant/EmptyChat";
@@ -17,7 +17,7 @@ import type { ThreadMessage } from "@/messages/direct-thread";
 import { MAX_BODY } from "@/messages/limits";
 import type { QuestionView } from "@/questions/views";
 import type { ConversationPage, TranscriptEntryView } from "@/transcripts/conversation";
-import { ACTION_FAULT } from "@/web/action-fault";
+import { ACTION_FAULT, ACTION_UNREACHABLE } from "@/web/action-fault";
 
 const AGENT = "11111111-1111-1111-1111-111111111111";
 const CONVERSATION = "22222222-2222-2222-2222-222222222222";
@@ -161,6 +161,23 @@ function actions(overrides: Partial<ChatActions> = {}): ChatActions {
     exportToJira: ok(),
     ...overrides
   };
+}
+
+/** Opens the header's switcher, whose trigger is named for the open item. */
+function openSwitcher(): void {
+  fireEvent.click(screen.getByRole("button", { name: /^Items/ }));
+}
+
+/** Opens an item through the header's switcher, by its row's name. */
+function switchTo(name: string | RegExp): void {
+  openSwitcher();
+  fireEvent.click(screen.getByRole("menuitemradio", { name }));
+}
+
+/** Chooses one of the header's Create options, by its name. */
+function create(name: string | RegExp): void {
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
+  fireEvent.click(screen.getByRole("menuitem", { name }));
 }
 
 function emit(type: string, data: unknown): void {
@@ -931,7 +948,7 @@ describe("ChatView on a local chat", () => {
   it("should offer the document but neither export, which nothing behind this chat could carry out", () => {
     const written = laptop({ artefact: { title: "Notes", markdown: "# Notes", version: 1, updatedBy: "user", updatedAt: "2026-10-21T09:00:00.000Z" } });
     render(<ChatView jira={JIRA} viewerOid={VIEWER} view={written} templates={TEMPLATES} actions={actions({ exportToConfluence: ok() })} />);
-    fireEvent.click(screen.getByRole("button", { name: /Open document/ }));
+    switchTo("Document");
 
     expect(screen.getByRole("region", { name: "Document" })).toBeTruthy();
     expect(screen.getByRole("textbox", { name: "Document title" })).toBeTruthy();
@@ -1122,17 +1139,19 @@ describe("ChatView skills", () => {
 });
 
 describe("ChatView document", () => {
-  it("should open the document panel when the person chooses Add document", () => {
+  it("should open the document panel, and switch to it, when the person creates a document in a chat with no items", () => {
     render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions()} />);
 
     expect(screen.queryByRole("region", { name: "Document" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /Add document/ }));
+    expect(screen.queryByRole("button", { name: /^Items/ })).toBeNull();
+    create("Document");
 
     expect(screen.getByRole("region", { name: "Document" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /Add document/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "Items, Document open" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Close document" }));
     expect(screen.queryByRole("region", { name: "Document" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Items/ })).toBeNull();
   });
 
   // The other half of the local chat's "neither export": on a pod there is a session the frame reaches, so both are
@@ -1140,7 +1159,7 @@ describe("ChatView document", () => {
   it("should offer both exports on a chat that has a pod to carry them out", () => {
     const written = conversation({ artefact: { title: "Notes", markdown: "# Notes", version: 1, updatedBy: "user", updatedAt: "2026-10-21T09:00:00.000Z" } });
     render(<ChatView jira={JIRA} viewerOid={VIEWER} view={written} templates={TEMPLATES} actions={actions({ exportToConfluence: ok() })} />);
-    fireEvent.click(screen.getByRole("button", { name: /Open document/ }));
+    switchTo("Document");
 
     expect(screen.getByRole("group", { name: "Send this document to" })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Export to Jira backlog/ })).toBeTruthy();
@@ -1164,7 +1183,7 @@ describe("ChatView document", () => {
         defaults={{ ticketTool: "github", jira: null, github: "hmcts/cft-workspace", githubProject: null, confluence: null }}
       />
     );
-    fireEvent.click(screen.getByRole("button", { name: /Open document/ }));
+    switchTo("Document");
 
     expect(screen.getByText("In Jira")).toBeTruthy();
     expect(screen.getByRole("radio", { name: /Jira backlog/ })).toBeTruthy();
@@ -1184,7 +1203,7 @@ describe("ChatView document", () => {
         defaults={{ ticketTool: "github", jira: null, github: "hmcts/cft-workspace", githubProject: null, confluence: null }}
       />
     );
-    fireEvent.click(screen.getByRole("button", { name: /Open document/ }));
+    switchTo("Document");
 
     expect(screen.getByRole("radio", { name: /GitHub issue/ })).toBeTruthy();
     expect(screen.queryByRole("radio", { name: /Jira backlog/ })).toBeNull();
@@ -1204,7 +1223,10 @@ describe("ChatView document", () => {
       />
     );
 
-    expect(screen.getByRole("button", { name: /Open document/ })).toBeTruthy();
+    openSwitcher();
+    expect(screen.getByRole("menuitemradio", { name: "Document" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(screen.getByRole("menuitem", { name: "Document, already in this chat" })).toBeTruthy();
   });
 
   it("should open the panel when the assistant writes a newer version of the document", () => {
@@ -1237,6 +1259,89 @@ describe("ChatView document", () => {
     );
 
     expect(screen.queryByRole("region", { name: "Document" })).toBeNull();
+  });
+});
+
+describe("ChatView Create", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function offered(): string[] {
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    return screen.getAllByRole("menuitem").map((row) => row.getAttribute("aria-label") ?? "");
+  }
+
+  it("should offer every kind on a pod chat, in the order the header lists them", () => {
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions()} />);
+    expect(offered()).toEqual(["Document", "Slides", "Docmosis template", "Notify template"]);
+  });
+
+  it("should offer only a document when a local chat holds nothing else", () => {
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ local: true })} templates={TEMPLATES} actions={actions()} />);
+    expect(offered()).toEqual(["Document"]);
+  });
+
+  it("should offer the kinds a local chat's session already wrote, to open them", () => {
+    const view = conversation({
+      local: true,
+      deck: { title: "Plan", version: 1, revision: 1, updatedBy: "agent", pptx: false },
+      docmosis: { name: "Claim form.docx", version: 1, revision: 0, updatedBy: "agent", pdf: "pending" },
+      notify: { name: "Reminder", version: 1, revision: 0, updatedBy: "agent" }
+    });
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={view} templates={TEMPLATES} actions={actions()} />);
+    expect(offered()).toEqual(["Document", "Slides, already in this chat", "Docmosis template, already in this chat", "Notify template, already in this chat"]);
+  });
+
+  it("should ask the assistant for slides as the person's message when they create slides", async () => {
+    const chatActions = actions();
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={chatActions} />);
+
+    create("Slides");
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(chatActions.send).toHaveBeenCalledWith({ conversationId: CONVERSATION, body: CREATE_SLIDES, uploadIds: [] });
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("should show the refusal when the request for slides is refused", async () => {
+    const send = vi.fn(async () => ({ ok: false as const, error: "the assistant is not running" }));
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions({ send })} />);
+
+    create("Slides");
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(screen.getByRole("alert").textContent).toBe("the assistant is not running");
+  });
+
+  it("should say the request could not be sent when the request for slides never reaches the hub", async () => {
+    const send = vi.fn(async () => {
+      throw new Error("offline");
+    });
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions({ send })} />);
+
+    create("Slides");
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(screen.getByRole("alert").textContent).toBe(ACTION_UNREACHABLE);
+  });
+
+  it("should open the Notify panel and switch to it when the person creates a Notify template", () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => new Promise<never>(() => undefined))
+    );
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions()} />);
+
+    create("Notify template");
+
+    expect(screen.getByRole("button", { name: "Items, Notify template open" })).toBeTruthy();
   });
 });
 
@@ -2139,8 +2244,12 @@ describe("ChatView slides", () => {
     vi.unstubAllGlobals();
   });
 
-  async function openSlides(name = "Open slides"): Promise<void> {
-    fireEvent.click(screen.getByRole("button", { name }));
+  /** Opens the slides through the switcher, opening it first unless the test already has. */
+  async function openSlides(name = "Slides"): Promise<void> {
+    if (screen.queryByRole("menu", { name: "Items" }) === null) {
+      openSwitcher();
+    }
+    fireEvent.click(screen.getByRole("menuitemradio", { name }));
     await act(async () => {
       await Promise.resolve();
     });
@@ -2159,19 +2268,32 @@ describe("ChatView slides", () => {
 
   it("should offer the slides only once there is a deck, and open them in place of the document", async () => {
     const { rerender } = render(chat({}));
-    expect(screen.queryByRole("button", { name: "Open slides" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Items/ })).toBeNull();
 
     rerender(chat({ deck: DECK, artefact: WRITTEN }));
-    fireEvent.click(screen.getByRole("button", { name: "Open document" }));
+    switchTo("Document");
     expect(screen.getByRole("region", { name: "Document" })).toBeTruthy();
 
     await openSlides();
     expect(screen.getByRole("region", { name: "Slides" })).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Document" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Open slides" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Items, Slides open" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Close slides" }));
     expect(screen.queryByRole("region", { name: "Slides" })).toBeNull();
+  });
+
+  it("should open the slides rather than ask for more when the person creates slides in a chat that has a deck", async () => {
+    const chatActions = actions();
+    render(chat({ deck: DECK }, chatActions));
+
+    create("Slides, already in this chat");
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(screen.getByRole("region", { name: "Slides" })).toBeTruthy();
+    expect(chatActions.send).not.toHaveBeenCalled();
   });
 
   it("should open the slides and say so when the assistant writes a newer version, and not for the person's own", async () => {
@@ -2188,7 +2310,7 @@ describe("ChatView slides", () => {
   it("should open the slides in the document's place when the assistant writes a newer deck and the document has nothing unsaved", async () => {
     vi.useFakeTimers();
     const { rerender } = render(chat({ deck: DECK, artefact: WRITTEN }));
-    fireEvent.click(screen.getByRole("button", { name: "Open document" }));
+    switchTo("Document");
 
     rerender(chat({ deck: { ...DECK, version: 8, updatedBy: "agent" }, artefact: WRITTEN }));
     await announced();
@@ -2197,11 +2319,11 @@ describe("ChatView slides", () => {
     expect(screen.queryByRole("region", { name: "Document" })).toBeNull();
   });
 
-  it("should leave the document open, say the slides changed and mark their button, when the assistant writes a newer deck mid-edit", async () => {
+  it("should leave the document open, say the slides changed and mark their row in the switcher, when the assistant writes a newer deck mid-edit", async () => {
     vi.useFakeTimers();
     const chatActions = actions();
     const { rerender } = render(chat({ deck: DECK, artefact: WRITTEN }, chatActions));
-    fireEvent.click(screen.getByRole("button", { name: "Open document" }));
+    switchTo("Document");
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Document, in markdown" }), { target: { value: "x and more" } });
 
@@ -2210,21 +2332,24 @@ describe("ChatView slides", () => {
     expect(await announced()).toContain("The assistant updated the slides. Open slides to see them.");
     expect(screen.getByRole("region", { name: "Document" })).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Slides" })).toBeNull();
+    openSwitcher();
     expect(screen.getByTestId("slides-updated")).toBeTruthy();
 
-    // The pause saved the edit, so the document is no longer busy, but the update already waits behind its button.
+    // The pause saved the edit, so the document is no longer busy, but the update already waits behind its row in the switcher.
     expect(chatActions.saveArtefact).toHaveBeenCalledWith(expect.objectContaining({ markdown: "x and more" }));
-    await openSlides("Open slides, updated by the assistant");
+    await openSlides("Slides, updated by the assistant");
     expect(screen.getByRole("region", { name: "Slides" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Close slides" }));
-    expect(screen.getByRole("button", { name: "Open slides" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Items" })).toBeTruthy();
+    openSwitcher();
+    expect(screen.getByRole("menuitemradio", { name: "Slides" })).toBeTruthy();
     expect(screen.queryByTestId("slides-updated")).toBeNull();
   });
 
   it("should save the person's edit rather than drop it when they open the slides before the pause has saved it", async () => {
     const chatActions = actions();
     render(chat({ deck: DECK, artefact: WRITTEN }, chatActions));
-    fireEvent.click(screen.getByRole("button", { name: "Open document" }));
+    switchTo("Document");
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Document, in markdown" }), { target: { value: "x, edited" } });
 
@@ -2237,7 +2362,7 @@ describe("ChatView slides", () => {
   it("should open the document again with the edit, saying it could not save, when the save made as it closed fails", async () => {
     const saveArtefact = vi.fn(async () => ({ ok: false as const, error: "down" }));
     render(chat({ deck: DECK, artefact: WRITTEN }, actions({ saveArtefact })));
-    fireEvent.click(screen.getByRole("button", { name: "Open document" }));
+    switchTo("Document");
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Document, in markdown" }), { target: { value: "x, edited" } });
 
@@ -2259,7 +2384,7 @@ describe("ChatView slides", () => {
     const theirs = { title: "Story", markdown: "theirs", version: 2, updatedBy: "agent" as const };
     const saveArtefact = vi.fn(async () => ({ ok: true as const, saved: false as const, current: theirs }));
     render(chat({ deck: DECK, artefact: WRITTEN }, actions({ saveArtefact })));
-    fireEvent.click(screen.getByRole("button", { name: "Open document" }));
+    switchTo("Document");
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Document, in markdown" }), { target: { value: "x, edited" } });
 
@@ -2277,7 +2402,7 @@ describe("ChatView slides", () => {
     expect(saveArtefact).toHaveBeenCalledTimes(1);
   });
 
-  it("should keep the slides' editor open, say the document changed and mark its button, when the assistant writes the document mid-edit", async () => {
+  it("should keep the slides' editor open, say the document changed and mark its row in the switcher, when the assistant writes the document mid-edit", async () => {
     vi.useFakeTimers();
     const saveDeck = vi.fn(() => new Promise<never>(() => undefined));
     const chatActions = actions({ saveDeck });
@@ -2293,8 +2418,9 @@ describe("ChatView slides", () => {
     expect(await announced()).toContain("The assistant updated the document. Open document to see it.");
     expect(screen.getByRole("toolbar", { name: "Editing slides" })).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Document" })).toBeNull();
+    openSwitcher();
     expect(screen.getByTestId("document-updated")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Open document, updated by the assistant" }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Document, updated by the assistant" }));
     expect(screen.getByRole("region", { name: "Document" })).toBeTruthy();
     expect(screen.queryByTestId("document-updated")).toBeNull();
   });
@@ -2371,7 +2497,7 @@ describe("ChatView slides", () => {
     expect(saveDeck).toHaveBeenCalledTimes(3);
   });
 
-  it("should keep the document open, mark the slides' button and keep the edit for them, when the slides' closing save fails mid-edit of the document", async () => {
+  it("should keep the document open, mark the slides in the switcher and keep the edit for them, when the slides' closing save fails mid-edit of the document", async () => {
     vi.useFakeTimers();
     let answer: (result: { ok: false; error: string }) => void = () => undefined;
     const saveDeck = vi.fn(() => new Promise<{ ok: false; error: string }>((resolve) => (answer = resolve)));
@@ -2381,7 +2507,7 @@ describe("ChatView slides", () => {
     fireEvent.click(screen.getByRole("button", { name: "Edit slides" }));
     await announced();
     fireEvent.change(screen.getByRole("textbox", { name: "Deck title" }), { target: { value: "Mine" } });
-    fireEvent.click(screen.getByRole("button", { name: "Open document" }));
+    switchTo("Document");
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Document, in markdown" }), { target: { value: "x, edited" } });
 
@@ -2392,20 +2518,21 @@ describe("ChatView slides", () => {
     expect(await announced()).toContain("Your slides could not be saved. Open slides to see your changes.");
     expect(screen.getByRole("region", { name: "Document" })).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Slides" })).toBeNull();
+    openSwitcher();
     expect(screen.getByTestId("slides-unsaved")).toBeTruthy();
 
-    await openSlides("Open slides, with your unsaved changes");
+    await openSlides("Slides, with your unsaved changes");
     expect((screen.getByRole("textbox", { name: "Deck title" }) as HTMLInputElement).value).toBe("Mine");
     expect(screen.queryByTestId("slides-unsaved")).toBeNull();
   });
 
-  it("should keep the slides' editor open, mark the document's button and keep the edit for it, when the document's closing save fails mid-edit of the slides", async () => {
+  it("should keep the slides' editor open, mark the document in the switcher and keep the edit for it, when the document's closing save fails mid-edit of the slides", async () => {
     vi.useFakeTimers();
     let answer: (result: { ok: false; error: string }) => void = () => undefined;
     const saveArtefact = vi.fn(() => new Promise<{ ok: false; error: string }>((resolve) => (answer = resolve)));
     const saveDeck = vi.fn(() => new Promise<never>(() => undefined));
     render(chat({ deck: DECK, artefact: WRITTEN }, actions({ saveDeck, saveArtefact })));
-    fireEvent.click(screen.getByRole("button", { name: "Open document" }));
+    switchTo("Document");
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Document, in markdown" }), { target: { value: "x, edited" } });
     await openSlides();
@@ -2420,9 +2547,10 @@ describe("ChatView slides", () => {
     expect(await announced()).toContain("Your document could not be saved. Open document to see your changes.");
     expect(screen.getByRole("toolbar", { name: "Editing slides" })).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Document" })).toBeNull();
+    openSwitcher();
     expect(screen.getByTestId("document-unsaved")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Open document, with your unsaved changes" }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Document, with your unsaved changes" }));
     const reopened = screen.getByRole("region", { name: "Document" });
     expect((within(reopened).getByRole("textbox", { name: "Document, in markdown" }) as HTMLTextAreaElement).value).toBe("x, edited");
   });

@@ -29,6 +29,7 @@ import { Mark, SidebarToggle } from "@/components/assistant/AssistantShell";
 import { ChatMenu } from "@/components/assistant/ChatMenu";
 import { Composer } from "@/components/assistant/Composer";
 import type { ExportToConfluenceAction } from "@/components/assistant/ConfluenceExport";
+import { CreateMenu, type CreateOption } from "@/components/assistant/CreateMenu";
 import type { SaveDeckAction, UnsavedDeckDraft } from "@/components/assistant/DeckEditor";
 import type { RestoreDeckAction } from "@/components/assistant/DeckHistory";
 import { DeckPanel, type SlideAsk } from "@/components/assistant/DeckPanel";
@@ -36,6 +37,7 @@ import { DocmosisPanel, type LoadSettled, useTemplateLoad } from "@/components/a
 import { ticketsOffered } from "@/components/assistant/ExportFooter";
 import { ForkedThread } from "@/components/assistant/ForkedThread";
 import type { ExportToGithubAction } from "@/components/assistant/GithubExport";
+import { ItemSwitcher, type SwitcherItem } from "@/components/assistant/ItemSwitcher";
 import type { ExportToJiraAction, JiraAccess } from "@/components/assistant/JiraExport";
 import { ARTEFACT_OVERLAY_MAX_WIDTH } from "@/components/assistant/layout";
 import { MessageAttachments } from "@/components/assistant/MessageAttachments";
@@ -48,6 +50,7 @@ import type { ThreadMessage } from "@/messages/direct-thread";
 import { MAX_BODY } from "@/messages/limits";
 import type { AgentStatus } from "@/realtime/events";
 import type { ActionResult } from "@/web/action";
+import { ACTION_UNREACHABLE } from "@/web/action-fault";
 import { duration } from "@/web/format";
 import { RESTART_IN_SETTINGS } from "@/web/home";
 
@@ -127,6 +130,9 @@ function StopButton({ onStop }: { onStop: () => Promise<void> }) {
 function localOfflineNote(): string {
   return `This chat is a Claude Code session on your own computer, and it is not connected. Your message is kept and delivered when it reconnects, for up to ${duration(EXPIRE_AFTER_SECONDS)} offline.`;
 }
+
+/** What Create's Slides sends, as the person's own message. */
+export const CREATE_SLIDES = "Create slides for this conversation.";
 
 /** How long each warming quip stands before the next, which is a few seconds of a wait that is usually a few more. */
 export const QUIP_INTERVAL_MS = 3000;
@@ -360,7 +366,7 @@ export function ChatView({
   const [pendingProduct, setPendingProduct] = useState<string | null>(null);
   /**
    * The one panel beside the chat: the document, the deck or the Docmosis template, never two, since two panels beside a chat leave the chat
-   * no room to read in. Each has its own button in the header, so either is one press from the other.
+   * no room to read in. The header's switcher moves between them, so each is two presses from another.
    */
   const [panel, setPanel] = useState<"document" | "deck" | "docmosis" | "notify" | null>(null);
   // Read by a closed editor's late answer, which comes back through the props of the render that last showed it.
@@ -372,20 +378,20 @@ export function ChatView({
   const deckBusy = useRef(false);
   /** The same for the Docmosis form: edits typed and not yet rendered, or a newer version to settle. */
   const docmosisBusy = useRef(false);
-  /** The assistant wrote a newer Docmosis version while another panel was busy, so the template waits behind its button instead. */
+  /** The assistant wrote a newer Docmosis version while another panel was busy, so the template waits behind its row in the switcher instead. */
   const [docmosisWaiting, setDocmosisWaiting] = useState(false);
   /** The same for the Notify template: a draft not yet saved, or a newer version to settle. */
   const notifyBusy = useRef(false);
-  /** The assistant wrote a newer Notify version while another panel was busy, so it waits behind its button instead. */
+  /** The assistant wrote a newer Notify version while another panel was busy, so it waits behind its row in the switcher instead. */
   const [notifyWaiting, setNotifyWaiting] = useState(false);
-  /** The assistant wrote a newer deck while the document was busy, so the slides wait behind their button instead. */
+  /** The assistant wrote a newer deck while the document was busy, so the slides wait behind their row in the switcher instead. */
   const [slidesWaiting, setSlidesWaiting] = useState(false);
-  /** The assistant wrote the document while the slides' editor was busy, so the document waits behind its button. */
+  /** The assistant wrote the document while the slides' editor was busy, so the document waits behind its row in the switcher. */
   const [documentWaiting, setDocumentWaiting] = useState(false);
   /**
    * An edit the document was closed on whose save then failed or found a newer version: the document opens again with
    * it, keyed afresh so a panel the person opened meanwhile takes it in too, or, while the slides' editor is busy, it
-   * waits behind the document's button. The panel that takes it clears it, so it is handed to one panel only.
+   * waits behind the document's row in the switcher. The panel that takes it clears it, so it is handed to one panel only.
    */
   const [unsaved, setUnsaved] = useState<{ draft: UnsavedDraft | null; key: number }>({ draft: null, key: 0 });
   /** The same for an edit the slides' editor was closed on. */
@@ -421,7 +427,7 @@ export function ChatView({
   });
 
   // The assistant writing the document opens it, so the person sees what it was asked to draft, unless they are part-way
-  // through editing the slides, when it is announced and its button marked instead.
+  // through editing the slides, when it is announced and its row in the switcher marked instead.
   useEffect(() => {
     if (view.artefact.version > seenVersion.current && view.artefact.updatedBy === "agent") {
       if ((panel === "deck" && deckBusy.current) || (panel === "docmosis" && docmosisBusy.current) || (panel === "notify" && notifyBusy.current)) {
@@ -437,7 +443,7 @@ export function ChatView({
 
   /**
    * The same for the deck: a newer version from the assistant opens the slides in the document's place, unless the
-   * person is part-way through the document, when it is announced and its button marked instead. The slides' own
+   * person is part-way through the document, when it is announced and its row in the switcher marked instead. The slides' own
    * editor takes in a newer deck itself, or offers it against the person's edit.
    */
   const deckVersion = view.deck?.version ?? 0;
@@ -457,7 +463,7 @@ export function ChatView({
 
   /**
    * The same for the Docmosis template: a newer version from the assistant opens it in the other panel's place, unless
-   * the person is part-way through the document or the slides, when it is announced and its button marked instead. The
+   * the person is part-way through the document or the slides, when it is announced and its row in the switcher marked instead. The
    * panel itself takes in a newer version, or offers it against what the person has typed. The person's own versions,
    * a template they loaded from the library among them, never open it: they are already looking at it.
    */
@@ -507,7 +513,7 @@ export function ChatView({
   }, [panel]);
   /**
    * An edit the slides' editor could not save as it closed opens the slides again with it, unless the person is
-   * part-way through the document, which keeps the panel: the edit then waits behind the slides' button.
+   * part-way through the document, which keeps the panel: the edit then waits behind the slides' row in the switcher.
    */
   function reopenDeck(draft: UnsavedDeckDraft): void {
     setUnsavedDeck((before) => ({ draft, key: before.key + 1 }));
@@ -530,7 +536,7 @@ export function ChatView({
         : "The slides changed while you were editing them, so they are open again"
     );
   }
-  /** The same for the document, which waits behind its button while the slides' editor is busy. */
+  /** The same for the document, which waits behind its row in the switcher while the slides' editor is busy. */
   function reopenDocument(draft: UnsavedDraft): void {
     setUnsaved((before) => ({ draft, key: before.key + 1 }));
     if (
@@ -560,11 +566,44 @@ export function ChatView({
    * disagree about where the chat is.
    */
   const pod = !view.local;
+  const hasDocument = view.artefact.version > 0 || unsaved.draft !== null;
   /**
-   * A pod chat can always have a template: with none yet, the panel opens on the library to choose one from. A local
-   * chat has no pod to load one with, so it offers only a template its session wrote.
+   * What the switcher moves between: each item the conversation holds, and the panel that is open, which is one to
+   * return to even before its first save.
    */
-  const templateLabel = docmosis === null ? "Choose template" : "Open template";
+  const items: SwitcherItem[] = [
+    ...(hasDocument || panel === "document"
+      ? [{ key: "document", label: "Document", open: () => setPanel("document"), waiting: documentWaiting, unsaved: documentDraftWaiting }]
+      : []),
+    ...(view.deck === null ? [] : [{ key: "slides", label: "Slides", open: () => setPanel("deck"), waiting: slidesWaiting, unsaved: deckDraftWaiting }]),
+    ...(docmosis === null && panel !== "docmosis"
+      ? []
+      : [{ key: "docmosis", label: "Docmosis template", open: () => setPanel("docmosis"), waiting: docmosisWaiting }]),
+    ...(notify === null && panel !== "notify" ? [] : [{ key: "notify", label: "Notify template", open: () => setPanel("notify"), waiting: notifyWaiting }])
+  ];
+  const switcherPanel = panel === "deck" ? "slides" : panel;
+  /**
+   * What Create offers. A conversation holds one of each kind, so a kind it already holds is opened rather than made
+   * again. Slides, a Docmosis template and a Notify template are each made through the pod — the assistant drafts the
+   * slides, and the two templates are chosen from libraries the pod reads — so a local chat is offered only one its
+   * session already wrote. Every pod booted on the current hub has the slides tools (`podPlugins`), and the view does
+   * not carry the stored plugins an older client would need checking against, so a pod chat is always offered Slides.
+   */
+  const creatable: CreateOption[] = [
+    { key: "document", label: "Document", exists: hasDocument, choose: () => setPanel("document") },
+    ...(pod || view.deck !== null
+      ? [
+          {
+            key: "slides",
+            label: "Slides",
+            exists: view.deck !== null,
+            choose: view.deck === null ? () => void createSlides() : () => setPanel("deck")
+          }
+        ]
+      : []),
+    ...(pod || docmosis !== null ? [{ key: "docmosis", label: "Docmosis template", exists: docmosis !== null, choose: () => setPanel("docmosis") }] : []),
+    ...(pod || notify !== null ? [{ key: "notify", label: "Notify template", exists: notify !== null, choose: () => setPanel("notify") }] : [])
+  ];
   const tickets = ticketsOffered(defaults.ticketTool, view.jira, view.github);
   const thread = threadItems(live.items, view.productHistory, view.stopHistory, view.local);
   const doing: Progress = progress(live.items, thread, status, view.sessionState, view.local);
@@ -656,6 +695,19 @@ export function ChatView({
     return null;
   }
 
+  /** There is no blank deck to edit: slides are drafted by the assistant, so Create asks it to. */
+  async function createSlides(): Promise<void> {
+    let problem: string | null;
+    try {
+      problem = await send(CREATE_SLIDES, []);
+    } catch {
+      problem = ACTION_UNREACHABLE;
+    }
+    if (problem !== null) {
+      setError(problem);
+    }
+  }
+
   async function stop(): Promise<void> {
     const result = await actions.stop({ conversationId: view.id });
     setError(result.ok ? null : result.error);
@@ -712,84 +764,8 @@ export function ChatView({
             </select>
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-1.5">
-            {/* A chat with a pod can load a template from Notify before it has one; a chat without one can only show what it holds. */}
-            {(notify === null && !pod) || panel === "notify" ? null : (
-              <button
-                type="button"
-                onClick={() => setPanel("notify")}
-                aria-label={notifyWaiting ? "Open Notify template, updated by the assistant" : notify === null ? "Open Notify" : "Open Notify template"}
-                className={`flex h-[34px] items-center whitespace-nowrap rounded-[9px] border px-2.5 text-[13px] hover:border-asst-accent-line hover:bg-asst-field min-[480px]:gap-2 min-[480px]:pr-3 ${notifyWaiting ? "border-asst-accent bg-asst-field" : "border-asst-strong"}`}
-              >
-                <span aria-hidden="true" className="text-sm leading-none text-asst-accent">
-                  ✉
-                </span>
-                <span className="hidden min-[480px]:inline">Notify</span>
-                {notifyWaiting ? <span aria-hidden="true" data-testid="notify-updated" className="h-1.5 w-1.5 rounded-full bg-asst-accent" /> : null}
-              </button>
-            )}
-            {(!pod && docmosis === null) || panel === "docmosis" ? null : (
-              <button
-                type="button"
-                onClick={() => setPanel("docmosis")}
-                aria-label={docmosisWaiting ? "Open template, updated by the assistant" : templateLabel}
-                className={`flex h-[34px] items-center whitespace-nowrap rounded-[9px] border px-2.5 text-[13px] hover:border-asst-accent-line hover:bg-asst-field min-[480px]:gap-2 min-[480px]:pr-3 ${docmosisWaiting ? "border-asst-accent bg-asst-field" : "border-asst-strong"}`}
-              >
-                <span aria-hidden="true" className="text-sm leading-none text-asst-accent">
-                  ▤
-                </span>
-                <span className="hidden min-[480px]:inline">{templateLabel}</span>
-                {docmosisWaiting ? <span aria-hidden="true" data-testid="docmosis-updated" className="h-1.5 w-1.5 rounded-full bg-asst-accent" /> : null}
-              </button>
-            )}
-            {view.deck === null || panel === "deck" ? null : (
-              <button
-                type="button"
-                onClick={() => setPanel("deck")}
-                aria-label={
-                  deckDraftWaiting ? "Open slides, with your unsaved changes" : slidesWaiting ? "Open slides, updated by the assistant" : "Open slides"
-                }
-                className={`flex h-[34px] items-center whitespace-nowrap rounded-[9px] border px-2.5 text-[13px] hover:border-asst-accent-line hover:bg-asst-field min-[480px]:gap-2 min-[480px]:pr-3 ${slidesWaiting || deckDraftWaiting ? "border-asst-accent bg-asst-field" : "border-asst-strong"}`}
-              >
-                <span aria-hidden="true" className="text-sm leading-none text-asst-accent">
-                  ▭
-                </span>
-                <span className="hidden min-[480px]:inline">Open slides</span>
-                {/* Marked by a shape as well as the border's colour, so the change is not told by colour alone. */}
-                {deckDraftWaiting ? (
-                  <span aria-hidden="true" data-testid="slides-unsaved" className="h-1.5 w-1.5 rounded-full bg-asst-accent" />
-                ) : slidesWaiting ? (
-                  <span aria-hidden="true" data-testid="slides-updated" className="h-1.5 w-1.5 rounded-full bg-asst-accent" />
-                ) : null}
-              </button>
-            )}
-            {panel === "document" ? null : (
-              <button
-                type="button"
-                onClick={() => setPanel("document")}
-                // Named here as well, because below 480px the icon stands alone so that a 320px header still fits
-                // the title, the product chip and both buttons.
-                aria-label={
-                  documentDraftWaiting
-                    ? "Open document, with your unsaved changes"
-                    : documentWaiting
-                      ? "Open document, updated by the assistant"
-                      : view.artefact.version > 0
-                        ? "Open document"
-                        : "Add document"
-                }
-                className={`flex h-[34px] items-center whitespace-nowrap rounded-[9px] border px-2.5 text-[13px] hover:border-asst-accent-line hover:bg-asst-field min-[480px]:gap-2 min-[480px]:pr-3 ${documentWaiting || documentDraftWaiting ? "border-asst-accent bg-asst-field" : "border-asst-strong"}`}
-              >
-                <span aria-hidden="true" className="text-lg leading-none text-asst-accent">
-                  +
-                </span>
-                <span className="hidden min-[480px]:inline">{view.artefact.version > 0 ? "Open document" : "Add document"}</span>
-                {documentDraftWaiting ? (
-                  <span aria-hidden="true" data-testid="document-unsaved" className="h-1.5 w-1.5 rounded-full bg-asst-accent" />
-                ) : documentWaiting ? (
-                  <span aria-hidden="true" data-testid="document-updated" className="h-1.5 w-1.5 rounded-full bg-asst-accent" />
-                ) : null}
-              </button>
-            )}
+            <ItemSwitcher items={items} current={switcherPanel} />
+            <CreateMenu options={creatable} />
             <ChatMenu
               title={view.title}
               shareHref={`/assistant/${view.id}?share=1`}
