@@ -3,11 +3,11 @@ import { describe, expect, it, vi } from "vitest";
 import * as deckRoute from "../../src/app/api/agent/[agentId]/deck/route.ts";
 import * as claimRoute from "../../src/app/api/orchestrator/claim/route.ts";
 import * as observedRoute from "../../src/app/api/orchestrator/virtual-agents/[id]/observed/route.ts";
-import * as buildRoute from "../../src/app/api/ui/assistant/decks/[conversationId]/builds/[jobId]/route.ts";
-import * as deckUiRoute from "../../src/app/api/ui/assistant/decks/[conversationId]/route.ts";
-import * as pptxRoute from "../../src/app/api/ui/assistant/decks/[conversationId]/versions/[version]/pptx/route.ts";
-import * as versionRoute from "../../src/app/api/ui/assistant/decks/[conversationId]/versions/[version]/route.ts";
-import * as versionsRoute from "../../src/app/api/ui/assistant/decks/[conversationId]/versions/route.ts";
+import * as buildRoute from "../../src/app/api/ui/assistant/decks/[conversationId]/[itemId]/builds/[jobId]/route.ts";
+import * as deckUiRoute from "../../src/app/api/ui/assistant/decks/[conversationId]/[itemId]/route.ts";
+import * as pptxRoute from "../../src/app/api/ui/assistant/decks/[conversationId]/[itemId]/versions/[version]/pptx/route.ts";
+import * as versionRoute from "../../src/app/api/ui/assistant/decks/[conversationId]/[itemId]/versions/[version]/route.ts";
+import * as versionsRoute from "../../src/app/api/ui/assistant/decks/[conversationId]/[itemId]/versions/route.ts";
 import * as podAssetRoute from "../../src/app/api/virtual/[virtualAgentId]/deck-builds/[jobId]/assets/[sha256]/route.ts";
 import * as podBuildRoute from "../../src/app/api/virtual/[virtualAgentId]/deck-builds/[jobId]/route.ts";
 import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
@@ -26,7 +26,7 @@ import { deckSummary, deckView, putDeckPptx, readDeck, writeDeck } from "../../s
 import { assistantFrame } from "../../src/assistant/frame.ts";
 import { assistantSuite } from "./assistant-suite.ts";
 import { prisma } from "./database.ts";
-import { ALICE, BOB, CAROL, type Chat, chat, PPTX, png, store, viewerOf } from "./deck-chats.ts";
+import { ALICE, BOB, CAROL, type Chat, chat, PPTX, png, primaryDeck, store, viewerOf } from "./deck-chats.ts";
 import { jsonOf } from "./routes.ts";
 
 vi.mock("next/headers", async () => (await import("./web-session.ts")).nextHeadersMock());
@@ -62,7 +62,7 @@ async function deckOf(count: number): Promise<{ mine: Chat; sha: string }> {
   const mine = await chat();
   const sha = await store(mine, png(1));
   await writeDeck(prisma, mine.row, { outline: outline("v1", [sha]), baseVersion: 0, by: "agent", summary: "First draft" });
-  await putDeckPptx(prisma, mine.row, 1, PPTX);
+  await putDeckPptx(prisma, mine.row, await primaryDeck(mine), 1, PPTX);
   for (let version = 2; version <= count; version += 1) {
     await writeDeck(prisma, mine.row, { outline: outline(`v${version}`), baseVersion: version - 1, by: version % 2 === 0 ? "user" : "agent", summary: null });
   }
@@ -78,14 +78,26 @@ async function browser<P>(handler: BrowserHandler<P>, as: string, path: string, 
 }
 
 const base = (id: string) => `/api/ui/assistant/decks/${id}`;
-const versionsOf = (as: string, id: string) => browser(versionsRoute.GET, as, `${base(id)}/versions`, { conversationId: id });
-const versionOf = (as: string, id: string, version: string) =>
-  browser(versionRoute.GET, as, `${base(id)}/versions/${version}`, { conversationId: id, version });
-const download = (as: string, id: string, version: number) =>
-  browser(pptxRoute.GET, as, `${base(id)}/versions/${version}/pptx`, { conversationId: id, version: String(version) });
-const prepare = (as: string, id: string, version: number | string) =>
-  browser(pptxRoute.POST, as, `${base(id)}/versions/${version}/pptx`, { conversationId: id, version: String(version) }, "POST");
-const buildOf = (as: string, id: string, jobId: string) => browser(buildRoute.GET, as, `${base(id)}/builds/${jobId}`, { conversationId: id, jobId });
+const versionsOf = async (as: string, id: string) => {
+  const itemId = await primaryDeck({ id });
+  return await browser(versionsRoute.GET, as, `${base(id)}/${itemId}/versions`, { conversationId: id, itemId });
+};
+const versionOf = async (as: string, id: string, version: string) => {
+  const itemId = await primaryDeck({ id });
+  return await browser(versionRoute.GET, as, `${base(id)}/${itemId}/versions/${version}`, { conversationId: id, itemId, version });
+};
+const download = async (as: string, id: string, version: number) => {
+  const itemId = await primaryDeck({ id });
+  return await browser(pptxRoute.GET, as, `${base(id)}/${itemId}/versions/${version}/pptx`, { conversationId: id, itemId, version: String(version) });
+};
+const prepare = async (as: string, id: string, version: number | string) => {
+  const itemId = await primaryDeck({ id });
+  return await browser(pptxRoute.POST, as, `${base(id)}/${itemId}/versions/${version}/pptx`, { conversationId: id, itemId, version: String(version) }, "POST");
+};
+const buildOf = async (as: string, id: string, jobId: string) => {
+  const itemId = await primaryDeck({ id });
+  return await browser(buildRoute.GET, as, `${base(id)}/${itemId}/builds/${jobId}`, { conversationId: id, itemId, jobId });
+};
 
 type Handler<P> = (request: Request, context: { params: Promise<P> }) => Promise<Response>;
 
@@ -248,7 +260,7 @@ describe("restoring a deck version", () => {
 
     // Act
     actAs("alice");
-    const restored = await deckActions.restoreDeckVersion({ conversationId: mine.id, version: 1, baseVersion: 2 });
+    const restored = await deckActions.restoreDeckVersion({ conversationId: mine.id, itemId: await primaryDeck(mine), version: 1, baseVersion: 2 });
 
     // Assert
     expect(restored).toEqual({ ok: true, restored: true, version: 3 });
@@ -257,7 +269,7 @@ describe("restoring a deck version", () => {
     expect(deck.outline).toEqual((await readDeckVersionOutline(mine.id, 1))!);
     // The same outline, so the .pptx the hub held for it is the restored version's too.
     expect(deck.pptx).toBe(true);
-    const [latest] = await listDeckVersions(prisma, mine.id);
+    const [latest] = await listDeckVersions(prisma, await primaryDeck(mine));
     expect(latest).toMatchObject({ version: 3, by: "user", summary: "Restored version 1", pptx: true });
     expect(await assistantFrame(prisma, mine.agentId)).toMatchObject({ deck_version: 3, deck_updated_by: "user" });
   });
@@ -268,12 +280,12 @@ describe("restoring a deck version", () => {
 
     // Act
     actAs("alice");
-    const restored = await deckActions.restoreDeckVersion({ conversationId: mine.id, version: 1, baseVersion: 3 });
+    const restored = await deckActions.restoreDeckVersion({ conversationId: mine.id, itemId: await primaryDeck(mine), version: 1, baseVersion: 3 });
 
     // Assert
     expect(restored).toEqual({ ok: true, restored: true, version: 4 });
     const pptxOf = async (version: number) =>
-      (await prisma.assistantDeckVersion.findUniqueOrThrow({ where: { conversationId_version: { conversationId: mine.id, version } } })).pptx;
+      (await prisma.assistantDeckVersion.findUniqueOrThrow({ where: { itemId_version: { itemId: await primaryDeck(mine), version } } })).pptx;
     expect(Buffer.from((await pptxOf(4))!)).toEqual(PPTX);
     expect(await pptxOf(1)).toBeNull();
     expect((await readDeck(prisma, mine.id)).pptx).toBe(true);
@@ -284,27 +296,31 @@ describe("restoring a deck version", () => {
   it("should keep a .pptx built on request for the third-newest version when restoring it", async () => {
     // Arrange
     const { mine } = await deckOf(3);
-    await prisma.assistantDeckVersion.update({ where: { conversationId_version: { conversationId: mine.id, version: 1 } }, data: { pptx: null } });
-    await prisma.assistantDeckBuild.create({ data: { conversationId: mine.id, version: 1, status: "done", pptx: BUILT, finishedAt: new Date() } });
+    await prisma.assistantDeckVersion.update({ where: { itemId_version: { itemId: await primaryDeck(mine), version: 1 } }, data: { pptx: null } });
+    await prisma.assistantDeckBuild.create({
+      data: { conversationId: mine.id, itemId: await primaryDeck(mine), version: 1, status: "done", pptx: BUILT, finishedAt: new Date() }
+    });
 
     // Act
     actAs("alice");
-    const restored = await deckActions.restoreDeckVersion({ conversationId: mine.id, version: 1, baseVersion: 3 });
+    const restored = await deckActions.restoreDeckVersion({ conversationId: mine.id, itemId: await primaryDeck(mine), version: 1, baseVersion: 3 });
 
     // Assert
     expect(restored).toEqual({ ok: true, restored: true, version: 4 });
-    const kept = await prisma.assistantDeckVersion.findUniqueOrThrow({ where: { conversationId_version: { conversationId: mine.id, version: 4 } } });
+    const kept = await prisma.assistantDeckVersion.findUniqueOrThrow({ where: { itemId_version: { itemId: await primaryDeck(mine), version: 4 } } });
     expect(Buffer.from(kept.pptx!)).toEqual(BUILT);
   });
 
   it("should restore with no .pptx when the restored version has none kept or built", async () => {
     // Arrange
     const { mine } = await deckOf(3);
-    await prisma.assistantDeckBuild.create({ data: { conversationId: mine.id, version: 2, status: "failed", error: "nope", finishedAt: new Date() } });
+    await prisma.assistantDeckBuild.create({
+      data: { conversationId: mine.id, itemId: await primaryDeck(mine), version: 2, status: "failed", error: "nope", finishedAt: new Date() }
+    });
 
     // Act
     actAs("alice");
-    const restored = await deckActions.restoreDeckVersion({ conversationId: mine.id, version: 2, baseVersion: 3 });
+    const restored = await deckActions.restoreDeckVersion({ conversationId: mine.id, itemId: await primaryDeck(mine), version: 2, baseVersion: 3 });
 
     // Assert
     expect(restored).toEqual({ ok: true, restored: true, version: 4 });
@@ -317,7 +333,7 @@ describe("restoring a deck version", () => {
 
     // Act
     actAs("alice");
-    const stale = await deckActions.restoreDeckVersion({ conversationId: mine.id, version: 1, baseVersion: 2 });
+    const stale = await deckActions.restoreDeckVersion({ conversationId: mine.id, itemId: await primaryDeck(mine), version: 1, baseVersion: 2 });
 
     // Assert
     expect(stale).toEqual({ ok: true, restored: false, current: { version: 3, updatedBy: "agent" } });
@@ -333,16 +349,16 @@ describe("restoring a deck version", () => {
 
     // Act and assert
     actAs("bob");
-    expect(await deckActions.restoreDeckVersion({ conversationId: mine.id, version: 1, baseVersion: 2 })).toEqual(missing);
+    expect(await deckActions.restoreDeckVersion({ conversationId: mine.id, itemId: await primaryDeck(mine), version: 1, baseVersion: 2 })).toEqual(missing);
     actAs("carol");
-    expect(await deckActions.restoreDeckVersion({ conversationId: mine.id, version: 1, baseVersion: 2 })).toEqual(missing);
+    expect(await deckActions.restoreDeckVersion({ conversationId: mine.id, itemId: await primaryDeck(mine), version: 1, baseVersion: 2 })).toEqual(missing);
     actAs("alice");
-    expect(await deckActions.restoreDeckVersion({ conversationId: mine.id, version: 2, baseVersion: 2 })).toEqual({
+    expect(await deckActions.restoreDeckVersion({ conversationId: mine.id, itemId: await primaryDeck(mine), version: 2, baseVersion: 2 })).toEqual({
       ok: false,
       error: "that is already the latest version"
     });
-    expect(await deckActions.restoreDeckVersion({ conversationId: mine.id, version: 9, baseVersion: 2 })).toEqual(missing);
-    expect(await deckActions.restoreDeckVersion({ conversationId: mine.id, version: "1", baseVersion: 2 })).toEqual(missing);
+    expect(await deckActions.restoreDeckVersion({ conversationId: mine.id, itemId: await primaryDeck(mine), version: 9, baseVersion: 2 })).toEqual(missing);
+    expect(await deckActions.restoreDeckVersion({ conversationId: mine.id, itemId: await primaryDeck(mine), version: "1", baseVersion: 2 })).toEqual(missing);
     expect((await readDeck(prisma, mine.id)).version).toBe(2);
   });
 
@@ -353,7 +369,7 @@ describe("restoring a deck version", () => {
 
     // Act
     actAs("alice");
-    const refused = await deckActions.restoreDeckVersion({ conversationId: mine.id, version: 1, baseVersion: 2 });
+    const refused = await deckActions.restoreDeckVersion({ conversationId: mine.id, itemId: await primaryDeck(mine), version: 1, baseVersion: 2 });
 
     // Assert
     expect(refused).toEqual({ ok: false, error: "Version 1's pictures are no longer held, so it can't be restored." });
@@ -375,7 +391,7 @@ describe("restoring a deck version", () => {
     const upload = prisma.$transaction(
       async (tx) => {
         await tx.$queryRaw`SELECT 1 FROM assistant_conversation WHERE id = ${mine.id}::uuid FOR UPDATE`;
-        await tx.assistantDeckVersion.delete({ where: { conversationId_version: { conversationId: mine.id, version: 1 } } });
+        await tx.assistantDeckVersion.delete({ where: { itemId_version: { itemId: await primaryDeck(mine), version: 1 } } });
         await tx.assistantDeckAsset.delete({ where: { conversationId_sha256: { conversationId: mine.id, sha256: sha } } });
         dropped();
         await released;
@@ -385,7 +401,7 @@ describe("restoring a deck version", () => {
     await droppedYet;
 
     // Act
-    const restoring = restoreDeckVersion(prisma, mine.row, { version: 1, baseVersion: 2 });
+    const restoring = restoreDeckVersion(prisma, mine.row, { itemId: await primaryDeck(mine), version: 1, baseVersion: 2 });
     await vi.waitFor(
       async () => {
         const [waiting] = await prisma.$queryRaw<{ count: number }[]>`SELECT count(*)::int AS count FROM pg_locks WHERE NOT granted`;
@@ -404,11 +420,36 @@ describe("restoring a deck version", () => {
 });
 
 async function readDeckVersionOutline(conversationId: string, version: number) {
-  const row = await prisma.assistantDeckVersion.findUnique({ where: { conversationId_version: { conversationId, version } }, select: { outline: true } });
+  const itemId = await primaryDeck({ id: conversationId });
+  const row = await prisma.assistantDeckVersion.findUnique({ where: { itemId_version: { itemId, version } }, select: { outline: true } });
   return row?.outline;
 }
 
 describe("building an older version's .pptx", () => {
+  it("should build the same version number of two decks on their own, joining a second request only for the deck it names", async () => {
+    // Arrange
+    const mine = await chat();
+    await podFor(mine, ["deck-build", "slides-always-on", "items", "item-templates"]);
+    const first = await writeDeck(prisma, mine.row, { create: true, outline: outline("Ways of working"), baseVersion: 0, by: "agent", summary: null });
+    const second = await writeDeck(prisma, mine.row, { create: true, outline: outline("Ways of working"), baseVersion: 0, by: "agent", summary: null });
+
+    // Act
+    const one = await requestDeckBuild(prisma, ALICE.oid, mine.id, first.id, 1);
+    const two = await requestDeckBuild(prisma, ALICE.oid, mine.id, second.id, 1);
+    const again = await requestDeckBuild(prisma, ALICE.oid, mine.id, second.id, 1);
+    const stranger = await requestDeckBuild(prisma, ALICE.oid, mine.id, "00000000-0000-4000-8000-000000000000", 1).catch(
+      (error: { status: number }) => error.status
+    );
+
+    // Assert
+    expect(one).toMatchObject({ status: "pending" });
+    expect((two as { job_id: string }).job_id).not.toBe((one as { job_id: string }).job_id);
+    expect((again as { job_id: string }).job_id).toBe((two as { job_id: string }).job_id);
+    expect(stranger).toBe(404);
+    expect(await readDeckBuild(prisma, ALICE.oid, mine.id, first.id, (two as { job_id: string }).job_id)).toBeUndefined();
+    expect(await readDeckBuild(prisma, ALICE.oid, mine.id, second.id, (two as { job_id: string }).job_id)).toMatchObject({ status: "pending", version: 1 });
+  });
+
   it("should record a build, send it to the pod, join a second request to it, and download what the pod built", async () => {
     // Arrange
     const { mine, sha } = await deckOf(4);
@@ -451,11 +492,11 @@ describe("building an older version's .pptx", () => {
     const file = await download("alice", mine.id, 1);
     expect(file.status).toBe(200);
     expect(Buffer.from(await file.arrayBuffer())).toEqual(BUILT);
-    expect((await listDeckVersions(prisma, mine.id)).find((entry) => entry.version === 1)?.pptx).toBe(true);
+    expect((await listDeckVersions(prisma, await primaryDeck(mine))).find((entry) => entry.version === 1)?.pptx).toBe(true);
     expect(await jsonOf(await prepare("alice", mine.id, 1))).toEqual({ status: "ready" });
     // Built bytes stay with the build: the version itself still keeps none, as only the latest 3 do.
     expect(
-      (await prisma.assistantDeckVersion.findUniqueOrThrow({ where: { conversationId_version: { conversationId: mine.id, version: 1 } } })).pptx
+      (await prisma.assistantDeckVersion.findUniqueOrThrow({ where: { itemId_version: { itemId: await primaryDeck(mine), version: 1 } } })).pptx
     ).toBeNull();
   });
 
@@ -536,7 +577,7 @@ describe("building an older version's .pptx", () => {
 
     // Assert
     expect(await pendingDeckBuild(prisma, bobs.id, jobId)).toBeUndefined();
-    expect(await readDeckBuild(prisma, ALICE.oid, mine.id, jobId)).toMatchObject({ status: "pending" });
+    expect(await readDeckBuild(prisma, ALICE.oid, mine.id, await primaryDeck(mine), jobId)).toMatchObject({ status: "pending" });
   });
 
   it("should time a build out after 15 minutes, ignore the pod's late answer, and start a new one when asked again", async () => {
@@ -544,7 +585,7 @@ describe("building an older version's .pptx", () => {
     const { mine } = await deckOf(4);
     await podFor(mine);
     const then = new Date(Date.now() - DECK_BUILD_TIMEOUT_MS - 1000);
-    const asked = await requestDeckBuild(prisma, ALICE.oid, mine.id, 1, then);
+    const asked = await requestDeckBuild(prisma, ALICE.oid, mine.id, await primaryDeck(mine), 1, then);
     const jobId = (asked as { job_id: string }).job_id;
 
     // Act
@@ -567,13 +608,20 @@ describe("building an older version's .pptx", () => {
     const now = new Date();
     // Written as rows, since asking for a build writes down the conversation's timed-out ones itself.
     const old = await prisma.assistantDeckBuild.create({
-      data: { conversationId: mine.id, version: 1, status: "failed", error: "old", createdAt: new Date(now.getTime() - DECK_BUILD_KEEP_MS - 60_000) },
+      data: {
+        conversationId: mine.id,
+        itemId: await primaryDeck(mine),
+        version: 1,
+        status: "failed",
+        error: "old",
+        createdAt: new Date(now.getTime() - DECK_BUILD_KEEP_MS - 60_000)
+      },
       select: { id: true }
     });
-    const fresh = await requestDeckBuild(prisma, ALICE.oid, mine.id, 1, now);
+    const fresh = await requestDeckBuild(prisma, ALICE.oid, mine.id, await primaryDeck(mine), 1, now);
     await answerDeckBuild(prisma, mine.virtualAgentId, (fresh as { job_id: string }).job_id, { pptx: BUILT }, now);
     const stuck = await prisma.assistantDeckBuild.create({
-      data: { conversationId: mine.id, version: 2, createdAt: new Date(now.getTime() - DECK_BUILD_TIMEOUT_MS - 60_000) },
+      data: { conversationId: mine.id, itemId: await primaryDeck(mine), version: 2, createdAt: new Date(now.getTime() - DECK_BUILD_TIMEOUT_MS - 60_000) },
       select: { id: true }
     });
 
@@ -600,7 +648,7 @@ describe("building an older version's .pptx", () => {
     // Act
     for (let version = 1; version <= DECK_BUILDS_KEPT + 1; version += 1) {
       const at = new Date(start + version * 1000);
-      const asked = await requestDeckBuild(prisma, ALICE.oid, mine.id, version, at);
+      const asked = await requestDeckBuild(prisma, ALICE.oid, mine.id, await primaryDeck(mine), version, at);
       await answerDeckBuild(prisma, mine.virtualAgentId, (asked as { job_id: string }).job_id, { error: `no ${version}` }, at);
     }
 
@@ -616,24 +664,25 @@ describe("building an older version's .pptx", () => {
     actAs("alice");
     await shareActions.shareChat({ conversationId: mine.id, recipientOid: BOB.oid });
     const { job_id: jobId } = await jsonOf<{ job_id: string }>(await prepare("alice", mine.id, 4));
-    const before = await deckView(prisma, mine.id);
+    const before = await deckView(prisma, mine.id, await primaryDeck(mine));
 
     // Act
     await answerDeckBuild(prisma, mine.virtualAgentId, jobId, { pptx: BUILT });
 
     // Assert
     expect(before?.pptx).toBe(false);
-    const panel = (as: string) => browser(deckUiRoute.GET, as, base(mine.id), { conversationId: mine.id });
+    const itemId = await primaryDeck(mine);
+    const panel = (as: string) => browser(deckUiRoute.GET, as, `${base(mine.id)}/${itemId}`, { conversationId: mine.id, itemId });
     expect(await jsonOf(await panel("alice"))).toMatchObject({ version: 4, pptx: true });
     expect(await jsonOf(await panel("bob"))).toMatchObject({ version: 4, pptx: true });
     expect((await readDeck(prisma, mine.id)).pptx).toBe(true);
-    expect(await deckSummary(prisma, mine.id, { deckTitle: "v4", deckVersion: 4, deckRevision: 4, deckUpdatedBy: "user" })).toMatchObject({ pptx: true });
-    expect((await listDeckVersions(prisma, mine.id))[0]).toMatchObject({ version: 4, pptx: true });
+    expect(await deckSummary(prisma, { id: itemId, title: "v4", version: 4, revision: 4, updatedBy: "user" })).toMatchObject({ pptx: true });
+    expect((await listDeckVersions(prisma, await primaryDeck(mine)))[0]).toMatchObject({ version: 4, pptx: true });
     // A day on, the build is no longer held, by every one of them alike.
     const dayOn = new Date(Date.now() + DECK_BUILD_KEEP_MS + 60_000);
     expect((await readDeck(prisma, mine.id, dayOn)).pptx).toBe(false);
-    expect((await deckView(prisma, mine.id, dayOn))?.pptx).toBe(false);
-    expect((await listDeckVersions(prisma, mine.id, dayOn))[0]?.pptx).toBe(false);
+    expect((await deckView(prisma, mine.id, itemId, dayOn))?.pptx).toBe(false);
+    expect((await listDeckVersions(prisma, await primaryDeck(mine), dayOn))[0]?.pptx).toBe(false);
   });
 
   it("should give the pod a picture only while its build is pending, and only to the build's own assistant", async () => {

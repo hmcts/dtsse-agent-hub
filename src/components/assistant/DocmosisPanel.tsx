@@ -38,8 +38,8 @@ export const RENDER_AFTER_MS = 800;
 const BUSY_RETRY_SECONDS = 5;
 
 /** The latest version of the conversation's template, as the hub holds it now. */
-async function readDocmosisView(conversationId: string, signal?: AbortSignal): Promise<DocmosisView> {
-  const response = await fetch(docmosisUrl(conversationId), { cache: "no-store", ...(signal === undefined ? {} : { signal }) });
+async function readDocmosisView(conversationId: string, itemId: string, signal?: AbortSignal): Promise<DocmosisView> {
+  const response = await fetch(docmosisUrl(conversationId, itemId), { cache: "no-store", ...(signal === undefined ? {} : { signal }) });
   if (!response.ok) {
     throw new Error(`the template read answered ${response.status}`);
   }
@@ -51,7 +51,7 @@ async function readDocmosisView(conversationId: string, signal?: AbortSignal): P
  * `revision` or `pdf` has moved on, which is how a PDF put after the version the assistant wrote reaches the panel.
  */
 export function useDocmosisView(docmosis: DocmosisSummary, conversationId: string): { view: DocmosisView | null; failed: boolean; retry: () => void } {
-  const { version, revision, pdf } = docmosis;
+  const { id, version, revision, pdf } = docmosis;
   const [read, setRead] = useState<{ view: DocmosisView | null; failed: boolean }>({ view: null, failed: false });
   const [attempt, setAttempt] = useState(0);
   // biome-ignore lint/correctness/useExhaustiveDependencies: a newer version, revision or PDF, or another attempt, is what makes the template worth reading again
@@ -59,7 +59,7 @@ export function useDocmosisView(docmosis: DocmosisSummary, conversationId: strin
     const controller = new AbortController();
     void (async () => {
       try {
-        const view = await readDocmosisView(conversationId, controller.signal);
+        const view = await readDocmosisView(conversationId, id, controller.signal);
         setRead({ view, failed: false });
       } catch {
         if (!controller.signal.aborted) {
@@ -68,19 +68,19 @@ export function useDocmosisView(docmosis: DocmosisSummary, conversationId: strin
       }
     })();
     return () => controller.abort();
-  }, [conversationId, version, revision, pdf, attempt]);
+  }, [conversationId, id, version, revision, pdf, attempt]);
   return { view: read.view, failed: read.failed, retry: () => setAttempt((count) => count + 1) };
 }
 
 /** The kept versions, newest first, read whenever the latest moves on. */
-function useVersions(conversationId: string, version: number): DocmosisVersionEntry[] {
+function useVersions(conversationId: string, itemId: string, version: number): DocmosisVersionEntry[] {
   const [versions, setVersions] = useState<DocmosisVersionEntry[]>([]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: a newer version is what makes the list worth reading again
   useEffect(() => {
     const controller = new AbortController();
     void (async () => {
       try {
-        const response = await fetch(docmosisVersionsUrl(conversationId), { cache: "no-store", signal: controller.signal });
+        const response = await fetch(docmosisVersionsUrl(conversationId, itemId), { cache: "no-store", signal: controller.signal });
         if (response.ok) {
           const body = (await response.json()) as { versions: DocmosisVersionEntry[] };
           setVersions(body.versions);
@@ -90,12 +90,12 @@ function useVersions(conversationId: string, version: number): DocmosisVersionEn
       }
     })();
     return () => controller.abort();
-  }, [conversationId, version]);
+  }, [conversationId, itemId, version]);
   return versions;
 }
 
 /** The version a person is looking at when it is not the latest. */
-function useOlderVersion(conversationId: string, picked: number | null): { view: DocmosisView | null; failed: boolean } {
+function useOlderVersion(conversationId: string, itemId: string, picked: number | null): { view: DocmosisView | null; failed: boolean } {
   const [read, setRead] = useState<{ view: DocmosisView | null; failed: boolean; version: number | null }>({ view: null, failed: false, version: null });
   useEffect(() => {
     if (picked === null) {
@@ -104,7 +104,7 @@ function useOlderVersion(conversationId: string, picked: number | null): { view:
     const controller = new AbortController();
     void (async () => {
       try {
-        const response = await fetch(docmosisVersionUrl(conversationId, picked), { cache: "no-store", signal: controller.signal });
+        const response = await fetch(docmosisVersionUrl(conversationId, itemId, picked), { cache: "no-store", signal: controller.signal });
         if (!response.ok) {
           throw new Error(`the version read answered ${response.status}`);
         }
@@ -116,7 +116,7 @@ function useOlderVersion(conversationId: string, picked: number | null): { view:
       }
     })();
     return () => controller.abort();
-  }, [conversationId, picked]);
+  }, [conversationId, itemId, picked]);
   return picked !== null && read.version === picked ? { view: read.view, failed: read.failed } : { view: null, failed: false };
 }
 
@@ -126,7 +126,7 @@ type PdfSource = { version: number; revision: number } | null;
  * The PDF, fetched from the hub and drawn into canvases across the pane's width. The pages on screen stay until the
  * next PDF is drawn, so a re-render replaces them rather than flashing an empty pane.
  */
-function PdfPane({ conversationId, source, waiting }: { conversationId: string; source: PdfSource; waiting: string | null }) {
+function PdfPane({ conversationId, itemId, source, waiting }: { conversationId: string; itemId: string; source: PdfSource; waiting: string | null }) {
   const holder = useRef<HTMLDivElement>(null);
   const bytes = useRef<ArrayBuffer | null>(null);
   const drawing = useRef<AbortController | null>(null);
@@ -160,7 +160,7 @@ function PdfPane({ conversationId, source, waiting }: { conversationId: string; 
     setState("loading");
     void (async () => {
       try {
-        const response = await fetch(docmosisPdfUrl(conversationId, version), { cache: "no-store", signal: controller.signal });
+        const response = await fetch(docmosisPdfUrl(conversationId, itemId, version), { cache: "no-store", signal: controller.signal });
         if (!response.ok) {
           throw new Error(`the PDF read answered ${response.status}`);
         }
@@ -180,7 +180,7 @@ function PdfPane({ conversationId, source, waiting }: { conversationId: string; 
       }
     })();
     return () => controller.abort();
-  }, [conversationId, version, revision, attempt, paint]);
+  }, [conversationId, itemId, version, revision, attempt, paint]);
 
   useEffect(() => {
     const node = holder.current;
@@ -282,6 +282,7 @@ function DocmosisTemplate({
   announce,
   onBusy,
   onChange,
+  onRemove,
   embedded
 }: {
   conversationId: string;
@@ -293,12 +294,17 @@ function DocmosisTemplate({
   onBusy?: (busy: boolean) => void;
   /** Offers Change template, which swaps the form for the template library. */
   onChange?: () => void;
+  /** Removes the template, answering why it could not be; left out, the panel offers no Remove. */
+  onRemove?: () => Promise<string | null>;
   embedded: boolean;
 }) {
+  const itemId = docmosis.id;
   const latest = useDocmosisView(docmosis, conversationId);
-  const versions = useVersions(conversationId, docmosis.version);
+  const versions = useVersions(conversationId, itemId, docmosis.version);
   const [picked, setPicked] = useState<number | null>(null);
-  const older = useOlderVersion(conversationId, picked);
+  const older = useOlderVersion(conversationId, itemId, picked);
+  const [removing, setRemoving] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
 
   const [view, setView] = useState<DocmosisView | null>(null);
   const [data, setData] = useState<JsonObject>({});
@@ -416,7 +422,7 @@ function DocmosisTemplate({
     const sentEdits = edits.current;
     let response: Response | null = null;
     try {
-      response = await fetch(docmosisRenderUrl(conversationId), {
+      response = await fetch(docmosisRenderUrl(conversationId, itemId), {
         method: "POST",
         headers: { "content-type": "application/json" },
         cache: "no-store",
@@ -634,6 +640,18 @@ function DocmosisTemplate({
     onClose();
   }
 
+  async function remove(): Promise<void> {
+    if (onRemove === undefined) {
+      return;
+    }
+    stopTimer();
+    const problem = await onRemove().catch(() => "could not remove the template");
+    if (problem !== null && mounted.current) {
+      setRemoving(false);
+      setRemoveError(problem);
+    }
+  }
+
   function requestChange(): void {
     // The library takes the form's place, so what is typed and not yet rendered would be lost the same way.
     if (busy && !window.confirm("Your changes are still being saved. Change the template anyway and lose them?")) {
@@ -698,13 +716,26 @@ function DocmosisTemplate({
       embedded={embedded}
       onClose={requestClose}
       actions={
-        onChange === undefined || lookingBack ? null : (
-          <button type="button" onClick={requestChange} className={button}>
-            Change template
-          </button>
-        )
+        <>
+          {onChange === undefined || lookingBack ? null : (
+            <button type="button" onClick={requestChange} className={button}>
+              Change template
+            </button>
+          )}
+          {onRemove === undefined ? null : (
+            <button type="button" onClick={() => setRemoving(true)} className={button}>
+              Remove
+            </button>
+          )}
+        </>
       }
     >
+      {removing ? <ConfirmRemove onCancel={() => setRemoving(false)} onConfirm={() => void remove()} /> : null}
+      {removeError === null ? null : (
+        <p role="alert" className="border-b border-asst-field px-4 py-2 text-[13px] text-asst-error">
+          {removeError}
+        </p>
+      )}
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-asst-field px-4 py-2">
         <label htmlFor="template-version" className="sr-only">
           Version
@@ -730,7 +761,11 @@ function DocmosisTemplate({
           {status}
         </span>
         {pdfSource === null ? null : (
-          <a href={docmosisPdfUrl(conversationId, pdfSource.version)} download={`${name}-v${pdfSource.version}.pdf`} className={`${button} no-underline`}>
+          <a
+            href={docmosisPdfUrl(conversationId, itemId, pdfSource.version)}
+            download={`${name}-v${pdfSource.version}.pdf`}
+            className={`${button} no-underline`}
+          >
             <DownloadIcon />
             Download PDF
           </a>
@@ -823,7 +858,7 @@ function DocmosisTemplate({
                   )}
                 </div>
               )}
-              <PdfPane conversationId={conversationId} source={pdfSource} waiting={waiting} />
+              <PdfPane conversationId={conversationId} itemId={itemId} source={pdfSource} waiting={waiting} />
             </div>
           </div>
         </div>
@@ -919,19 +954,41 @@ function PanelShell({
   );
 }
 
+/** Asks before a template goes, which takes its versions with it. */
+function ConfirmRemove({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: () => void }) {
+  const cancel = useRef<HTMLButtonElement>(null);
+  useEffect(() => cancel.current?.focus(), []);
+  return (
+    <div
+      role="alertdialog"
+      aria-label="Remove this template?"
+      className="flex flex-wrap items-center gap-2 border-b border-asst-field bg-asst-raised px-4 py-2.5 text-[13px]"
+    >
+      <span className="min-w-0 flex-1">Remove this template from the chat? Its versions go with it.</span>
+      <button ref={cancel} type="button" onClick={onCancel} className="rounded-lg border border-asst-strong px-3 py-1 hover:bg-asst-active">
+        Cancel
+      </button>
+      <button type="button" onClick={onConfirm} className="rounded-lg bg-asst-accent px-3 py-1 font-semibold text-asst-ink hover:bg-asst-accent-hover">
+        Remove
+      </button>
+    </div>
+  );
+}
+
 type Load =
   | { phase: "idle" }
   | { phase: "loading" | "waking"; name: string }
   /** The load has written its version, and the page has yet to bring the summary that names it. */
-  | { phase: "arriving"; name: string; version: number; revision: number }
+  | { phase: "arriving"; name: string; item: string | undefined; version: number; revision: number }
   /** `view` is the assistant's version as read when the load was refused, or `null` when that read failed. */
-  | { phase: "conflict"; template: PreparedTemplate; owner: string; theirs: Base; view: DocmosisView | null }
+  | { phase: "conflict"; template: PreparedTemplate; owner: string; item: string | null; theirs: Base; view: DocmosisView | null }
   | { phase: "failed"; message: string };
 
 /** How long a written load waits for the page's summary before the panel reads the template itself. */
 export const ARRIVAL_TIMEOUT_MS = 10_000;
 
-const summaryOf = (view: DocmosisView): DocmosisSummary => ({
+const summaryOf = (id: string, view: DocmosisView): DocmosisSummary => ({
+  id,
   name: view.name,
   version: view.version,
   revision: view.revision,
@@ -939,9 +996,9 @@ const summaryOf = (view: DocmosisView): DocmosisSummary => ({
   pdf: view.has_pdf ? "ready" : view.render_error === null ? "pending" : "failed"
 });
 
-/** The later of the page's summary and one the panel read for itself; the page's on a tie. */
+/** The later of the page's summary and one the panel read for itself of the same template; the page's on a tie. */
 function newest(page: DocmosisSummary | null, read: DocmosisSummary | null): DocmosisSummary | null {
-  if (read === null) {
+  if (read === null || (page !== null && page.id !== read.id)) {
     return page;
   }
   return page === null || isNewer(read, page) ? read : page;
@@ -967,6 +1024,8 @@ export interface TemplateLoader {
 
 export type LoadSettled = "loaded" | "conflict" | "failed";
 
+/** What a load from the library is aimed at: `target`, one of the `templates` of the page, or, with `null`, a new template. */
+
 /**
  * A load from the template library and what the person decides about it. It lives with the chat rather than in the
  * panel, because the pod's job cannot be stopped: closing the panel leaves it running, and its outcome waits here for
@@ -974,15 +1033,19 @@ export type LoadSettled = "loaded" | "conflict" | "failed";
  */
 export function useTemplateLoad({
   conversationId,
-  docmosis,
+  templates,
+  target,
   announce,
   onSettled
 }: {
   conversationId: string;
-  docmosis: DocmosisSummary | null;
+  templates: readonly DocmosisSummary[];
+  target: string | null;
   announce: (text: string) => void;
-  onSettled?: (outcome: LoadSettled) => void;
+  /** Told how the load ended and, when it is known, which template it wrote. */
+  onSettled?: (outcome: LoadSettled, item?: string) => void;
 }): TemplateLoader {
+  const docmosis = templates.find((template) => template.id === target) ?? null;
   const [choosing, setChoosing] = useState(false);
   const [load, setLoad] = useState<Load>({ phase: "idle" });
   const [adopted, setAdopted] = useState<DocmosisSummary | null>(null);
@@ -998,26 +1061,27 @@ export function useTemplateLoad({
 
   useEffect(() => () => loading.current?.abort(), []);
 
-  function settle(next: Load, outcome: LoadSettled): void {
+  function settle(next: Load, outcome: LoadSettled, item?: string): void {
     setLoad(next);
-    settledNow.current?.(outcome);
+    settledNow.current?.(outcome, item);
   }
 
-  function landed(name: string): void {
+  function landed(name: string, item?: string): void {
     setChoosing(false);
-    settle({ phase: "idle" }, "loaded");
+    settle({ phase: "idle" }, "loaded", item);
     announceNow.current(`Loaded ${name}`);
   }
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: a load arriving or the summary moving on is what can end the wait
   useEffect(() => {
-    if (load.phase !== "arriving" || docmosis === null) {
+    if (load.phase !== "arriving") {
       return;
     }
-    if (docmosis.version > load.version || (docmosis.version === load.version && docmosis.revision >= load.revision)) {
-      landed(load.name);
+    const written = templates.find((template) => template.id === load.item);
+    if (written !== undefined && (written.version > load.version || (written.version === load.version && written.revision >= load.revision))) {
+      landed(load.name, written.id);
     }
-  }, [load, docmosis]);
+  }, [load, templates]);
 
   // The summary can be lost on its way to the tab, so a load that has written its version is read for itself in the end.
   const arriving = load.phase === "arriving" ? load : null;
@@ -1030,10 +1094,13 @@ export function useTemplateLoad({
     const timer = setTimeout(() => {
       void (async () => {
         try {
-          const view = await readDocmosisView(conversationId, controller.signal);
+          if (arriving.item === undefined) {
+            throw new Error("the load did not say which template it wrote");
+          }
+          const view = await readDocmosisView(conversationId, arriving.item, controller.signal);
           if (!controller.signal.aborted) {
-            setAdopted(summaryOf(view));
-            landed(arriving.name);
+            setAdopted(summaryOf(arriving.item, view));
+            landed(arriving.name, arriving.item);
           }
         } catch {
           if (!controller.signal.aborted) {
@@ -1048,7 +1115,7 @@ export function useTemplateLoad({
     };
   }, [arriving, conversationId]);
 
-  async function start(template: PreparedTemplate, owner: string, base: Base): Promise<void> {
+  async function start(template: PreparedTemplate, owner: string, item: string | null, base: Base): Promise<void> {
     loading.current?.abort();
     const controller = new AbortController();
     loading.current = controller;
@@ -1058,7 +1125,7 @@ export function useTemplateLoad({
     try {
       outcome = await loadTemplate(
         conversationId,
-        { path: template.path, blob_sha: template.blobSha, base_version: base.version, base_revision: base.revision },
+        { ...(item === null ? {} : { item }), path: template.path, blob_sha: template.blobSha, base_version: base.version, base_revision: base.revision },
         {
           signal: controller.signal,
           events: podJobs,
@@ -1076,19 +1143,19 @@ export function useTemplateLoad({
       return;
     }
     if (outcome.status === "done") {
-      setLoad({ phase: "arriving", name: template.name, version: outcome.version, revision: outcome.revision });
+      setLoad({ phase: "arriving", name: template.name, item: outcome.item, version: outcome.version, revision: outcome.revision });
       return;
     }
     if (outcome.status === "failed" && outcome.error === "conflict") {
       let view: DocmosisView | null = null;
       try {
-        view = await readDocmosisView(conversationId, controller.signal);
+        view = item === null ? null : await readDocmosisView(conversationId, item, controller.signal);
       } catch {
         // The summary's base is then the best there is; a load on it that is stale is refused as a conflict again.
       }
       if (!controller.signal.aborted) {
         const theirs = view === null ? baseOf(summaryNow.current) : { version: view.version, revision: view.revision };
-        settle({ phase: "conflict", template, owner, theirs, view }, "conflict");
+        settle({ phase: "conflict", template, owner, item, theirs, view }, "conflict");
         announceNow.current("The assistant changed the template while yours was loading");
       }
       return;
@@ -1115,20 +1182,20 @@ export function useTemplateLoad({
     },
     pick: (template, { owner }) => {
       if (!pending) {
-        void start(template, owner, baseOf(summaryNow.current));
+        void start(template, owner, target, baseOf(summaryNow.current));
       }
     },
     loadAnyway: () => {
       if (load.phase === "conflict") {
-        void start(load.template, load.owner, load.theirs);
+        void start(load.template, load.owner, load.item, load.theirs);
       }
     },
     keepTheirs: () => {
       if (load.phase !== "conflict") {
         return;
       }
-      if (load.view !== null) {
-        setAdopted(summaryOf(load.view));
+      if (load.view !== null && load.item !== null) {
+        setAdopted(summaryOf(load.item, load.view));
       }
       setLoad({ phase: "idle" });
       setChoosing(false);
@@ -1152,12 +1219,16 @@ export function DocmosisPanel({
   narrow,
   announce,
   onBusy,
+  onRemove,
   loader,
   embedded = false
 }: {
   conversationId: string;
+  /** The template to show; `null` is a new one, which the owner makes by picking from the library. */
   docmosis: DocmosisSummary | null;
   owner: boolean;
+  /** Removes the template, answering why it could not be; left out, the panel offers no Remove. */
+  onRemove?: () => Promise<string | null>;
   loader?: TemplateLoader;
   onClose: () => void;
   narrow: boolean;
@@ -1208,6 +1279,7 @@ export function DocmosisPanel({
       onBusy={onBusy}
       embedded={embedded}
       {...(chooser === null ? {} : { onChange: chooser.choose })}
+      {...(onRemove === undefined || !owner ? {} : { onRemove })}
     />
   );
 }

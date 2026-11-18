@@ -8,7 +8,8 @@ const { notifyList, notifyPull, POD_JOB_HANDLERS } = await import("./pod-job-han
 const { PodJobError } = await import("./pod-jobs.ts");
 
 const TEMPLATE = "ab1f3d4a-0000-4000-8000-000000000002";
-const api = { getNotify: vi.fn(), putNotify: vi.fn() } as never;
+const api = { listNotify: vi.fn(), getNotifyById: vi.fn(), putNotifyById: vi.fn(), createNotify: vi.fn() } as never;
+const ITEM = "0b1f3d4a-0000-4000-8000-0000000000c1";
 
 function context(agentId: string | undefined) {
   return { jobId: "job-1", conversationId: "conv-1", agentId, signal: new AbortController().signal, api, env: {} as Env, say: () => undefined };
@@ -32,12 +33,32 @@ describe("the Notify pod-job handlers", () => {
     expect(notify.listNotifyTemplates).toHaveBeenCalledWith("pcs");
   });
 
-  it("should load the template through the frame's agent as the person's, and answer the version alone", async () => {
-    notify.pullNotifyTemplate.mockResolvedValue({ version: 3, name: "Claim", written: true });
+  it("should load the template through the frame's agent as the person's, always into a new template, when no target is named, and answer the version and the template", async () => {
+    notify.pullNotifyTemplate.mockResolvedValue({ id: ITEM, version: 3, name: "Claim", written: true });
     const ctx = context("agent-1");
 
-    expect(await notifyPull.run({ product: "pcs", template_id: TEMPLATE }, ctx)).toEqual({ version: 3 });
-    expect(notify.pullNotifyTemplate).toHaveBeenCalledWith({ productId: "pcs", templateId: TEMPLATE, agentId: "agent-1", api, signal: ctx.signal, by: "user" });
+    expect(await notifyPull.run({ product: "pcs", template_id: TEMPLATE }, ctx)).toEqual({ version: 3, item_id: ITEM });
+    expect(notify.pullNotifyTemplate).toHaveBeenCalledWith({
+      productId: "pcs",
+      templateId: TEMPLATE,
+      agentId: "agent-1",
+      target: undefined,
+      api,
+      signal: ctx.signal,
+      by: "user",
+      create: true,
+      jobId: "job-1"
+    });
+  });
+
+  it("should load into the template the job names when it names one", async () => {
+    notify.pullNotifyTemplate.mockResolvedValue({ id: ITEM, version: 4, name: "Claim", written: true });
+    const ctx = context("agent-1");
+
+    await notifyPull.run({ product: "pcs", template_id: TEMPLATE, item_id: ITEM }, ctx);
+
+    expect(notify.pullNotifyTemplate).toHaveBeenCalledWith(expect.objectContaining({ target: ITEM, create: false }));
+    await expect(notifyPull.run({ product: "pcs", template_id: TEMPLATE, item_id: "nope" }, ctx)).rejects.toThrow("item_id");
   });
 
   it("should answer no_session when the frame carried no agent to write through", async () => {

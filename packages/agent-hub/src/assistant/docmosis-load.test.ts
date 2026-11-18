@@ -42,7 +42,12 @@ function docx(seed: number, length = 64): Uint8Array {
 
 const TEMPLATE = docx(1);
 const BLOB = gitBlobSha1(TEMPLATE);
-const ARGS = { ...LIBRARY, path: PATH, blob_sha: BLOB, base_version: 2, base_revision: 1 };
+const ITEM = "5b5b5b5b-5b5b-45b5-85b5-5b5b5b5b5b5b";
+const CREATED = "6c6c6c6c-6c6c-46c6-86c6-6c6c6c6c6c6c";
+/** A load into a template the conversation holds. */
+const ARGS = { ...LIBRARY, item: ITEM, path: PATH, blob_sha: BLOB, base_version: 2, base_revision: 1 };
+/** A load that makes a new template. */
+const NEW_ARGS = { ...LIBRARY, path: PATH, blob_sha: BLOB, base_version: 0, base_revision: 0 };
 
 const { sha1Hashes } = vi.hoisted(() => ({ sha1Hashes: { count: 0 } }));
 vi.mock("node:crypto", async (importOriginal) => {
@@ -96,24 +101,44 @@ function github(respond: () => Response = () => new Response(Buffer.from(TEMPLAT
 }
 
 /** The agent API, recording what was published; `conflict` makes the version write a 409. */
-function hub({ conflict = false, refuse, loaded }: { conflict?: boolean; refuse?: number; loaded?: { version: number; revision: number } } = {}) {
+function hub({
+  conflict = false,
+  refuse,
+  loaded
+}: {
+  conflict?: boolean;
+  refuse?: number;
+  loaded?: { item?: string; version: number; revision: number };
+} = {}) {
   const assets: { sha256: string; bytes: Uint8Array }[] = [];
   const puts: DocmosisBody[] = [];
+  const writtenTo: (string | undefined)[] = [];
+  const creates: DocmosisBody[] = [];
   const unused = async (): Promise<never> => Promise.reject(new Error("not here"));
   const api: PodJobHandlerApi = {
     getArtefact: unused,
     putArtefact: unused,
     getDocmosis: unused,
-    getNotify: unused,
-    putNotify: unused,
+    listNotify: unused,
+    getNotifyById: unused,
+    putNotifyById: unused,
+    createNotify: unused,
     getVideo: unused,
     videoPosted: unused,
     putDocmosisAsset: async (_agent, sha256, bytes) => {
       assets.push({ sha256, bytes });
       return { asset: `sha256:${sha256}` };
     },
-    putDocmosis: async (_agent, body) => {
+    createDocmosis: async (_agent, body) => {
+      creates.push(body);
+      if (loaded !== undefined) {
+        throw new ApiError(409, { error: "that template has already been loaded", loaded }, "POST", "/docmosis-templates");
+      }
+      return { id: CREATED, version: 1, revision: 0 };
+    },
+    putDocmosis: async (_agent, body, id) => {
       puts.push(body);
+      writtenTo.push(id);
       if (refuse !== undefined) {
         throw new ApiError(refuse, { error: `refused with ${TOKEN}` }, "PUT", "/docmosis");
       }
@@ -129,7 +154,7 @@ function hub({ conflict = false, refuse, loaded }: { conflict?: boolean; refuse?
     putDocmosisPdf: unused,
     postQuestion: unused
   };
-  return { api, assets, puts };
+  return { api, assets, puts, writtenTo, creates };
 }
 
 function context(api: PodJobHandlerApi, overrides: Partial<PodJobContext> = {}): PodJobContext {
@@ -171,7 +196,7 @@ describe("docmosisLoadHandler", () => {
     const result = await load({ run, fetch }, api);
 
     // Assert
-    expect(result).toEqual({ version: 3, revision: 0 });
+    expect(result).toEqual({ item: ITEM, version: 3, revision: 0 });
     expect(asked.map((call) => call.url)).toEqual([`https://api.github.com/repos/hmcts/rdo-docmosis/git/blobs/${BLOB}`]);
     expect(asked[0]?.headers.authorization).toBe(`Bearer ${TOKEN}`);
     expect(fs.readFileSync(cacheFile())).toEqual(Buffer.from(TEMPLATE));
@@ -328,12 +353,43 @@ describe("docmosisLoadHandler", () => {
   it("should answer with the version an earlier run wrote when the hub says the pick is already loaded", async () => {
     const { run } = runner();
     const { fetch } = github();
-    const { api, puts } = hub({ loaded: { version: 3, revision: 0 } });
+    const { api, puts } = hub({ loaded: { item: ITEM, version: 3, revision: 0 } });
 
     const result = await load({ run, fetch }, api);
 
-    expect(result).toEqual({ version: 3, revision: 0 });
+    expect(result).toEqual({ item: ITEM, version: 3, revision: 0 });
     expect(puts).toHaveLength(1);
+  });
+
+  it("should write the template the job names, and make no new one, when the args carry an item", async () => {
+    const { run } = runner();
+    const { fetch } = github();
+    const { api, writtenTo, creates } = hub();
+
+    await load({ run, fetch }, api);
+
+    expect(writtenTo).toEqual([ITEM]);
+    expect(creates).toEqual([]);
+  });
+
+  it("should make a new template and answer its id when the args carry no item", async () => {
+    const { run } = runner();
+    const { fetch } = github();
+    const { api, puts, creates } = hub();
+
+    const result = await load({ run, fetch }, api, NEW_ARGS);
+
+    expect(result).toEqual({ item: CREATED, version: 1, revision: 0 });
+    expect(puts).toEqual([]);
+    expect(creates).toEqual([expect.objectContaining({ base_version: 0, pick: JOB, summary: "Loaded Claim form.docx" })]);
+  });
+
+  it("should answer with the template an earlier run made when the hub says a new template's pick is already loaded", async () => {
+    const { run } = runner();
+    const { fetch } = github();
+    const { api } = hub({ loaded: { item: CREATED, version: 1, revision: 0 } });
+
+    expect(await load({ run, fetch }, api, NEW_ARGS)).toEqual({ item: CREATED, version: 1, revision: 0 });
   });
 
   it("should answer signed_out and ask GitHub nothing when the pod's gh has no token", async () => {
@@ -545,6 +601,10 @@ describe("parseLoadArgs", () => {
     expect(parseLoadArgs(ARGS)).toEqual(ARGS);
   });
 
+  it("should take a pick that names no item, which makes a new template", () => {
+    expect(parseLoadArgs(NEW_ARGS)).toEqual(NEW_ARGS);
+  });
+
   it.each([
     ["no object at all", "x"],
     ["an extra field", { ...ARGS, name: "x" }],
@@ -556,6 +616,7 @@ describe("parseLoadArgs", () => {
     ["a folder that climbs", { ...ARGS, folder: "Templates/..", path: "Templates/../x.docx" }],
     ["a folder that is not a string", { ...ARGS, folder: 1 }],
     ["a blob that is not a SHA-1", { ...ARGS, blob_sha: "x" }],
+    ["an item that is not an id", { ...ARGS, item: "nope" }],
     ["a base that is not a whole number", { ...ARGS, base_version: 1.5 }],
     ["a negative revision", { ...ARGS, base_revision: -1 }]
   ])("should refuse the arguments when they have %s", (_label, value) => {

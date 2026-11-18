@@ -23,6 +23,7 @@ export type ClientFeature =
   | "docmosis-library"
   | "files"
   | "github-lookups"
+  | "item-templates"
   | "items"
   | "lookups"
   | "memory-anon"
@@ -67,6 +68,11 @@ export type ClientFeature =
  * `artefact get|put|remove --id`, and an export's `document_id`, which its export commands read that document by. A
  * build without it reads only the primary document, so the hub refuses a second document, or a ticket or Confluence
  * page, and an export of anything but the primary, for a pod that did not claim it.
+ *
+ * `item-templates` is claimed because this build reads every one of a conversation's decks, Docmosis templates and Notify
+ * templates (the frame's `decks`, `docmosis_templates` and `notify_templates`, the CLI's `--id` and `new`) and takes
+ * `item` and `item_id` in the `docmosis.load` and `notify.pull` jobs. A build without it reads only the primary of each,
+ * so the hub refuses a second one, or a job aimed at another, for a pod that did not claim it.
  *
  * `welsh` is claimed because the assistant supervisor answers the sessions stream's `welsh` frame, running
  * the welsh plugin's `scripts/welsh` for the CFT Workspace's Welsh page. The hub gates on it, answering `unsupported`
@@ -120,6 +126,7 @@ export const CLIENT_FEATURES: readonly ClientFeature[] = [
   "docmosis-library",
   "files",
   "github-lookups",
+  "item-templates",
   "items",
   "lookups",
   "memory-anon",

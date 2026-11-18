@@ -318,20 +318,20 @@ async function askUserQuestion(sid: string, input: HookPayload, env: Env): Promi
 function slidesNote(env: Env): string {
   return bundledCopy(SLIDES_PLUGIN, env) === null
     ? ""
-    : ` It can also have one slide deck, which the slides plugin's deck skill reads with \`${CLI} deck get\` and publishes with \`${CLI} deck put\`.`;
+    : ` It can also have slide decks, which the slides plugin's deck skill lists with \`${CLI} deck list\`, reads with \`${CLI} deck get --id <id>\`, publishes with \`${CLI} deck put --id <id>\`, starts with \`${CLI} deck new\` and removes with \`${CLI} deck remove --id <id>\`; without --id, get and put use the primary deck, so use --id for any other.`;
 }
 
 /**
- * Pod conversations can have one Docmosis template, published with the cft-docmosis-template skill's tools; a person's
- * change to its data is read back with `docmosis get`.
+ * Pod conversations can have any number of Docmosis templates, published with the cft-docmosis-template skill's tools; a
+ * person's change to one's data is read back with `docmosis get`.
  */
-const DOCMOSIS_NOTE = ` A Docmosis template the person should see is published with \`docmosis schema\`, \`docmosis render-file\` and \`${CLI} docmosis put\` (or, for a PDF that did not reach the hub, \`${CLI} docmosis pdf\`); after a person has changed its data, run \`${CLI} docmosis get\` before changing the template.`;
+const DOCMOSIS_NOTE = ` Docmosis templates the person should see are published with \`docmosis schema\`, \`docmosis render-file\` and \`${CLI} docmosis put\` (or, for a PDF that did not reach the hub, \`${CLI} docmosis pdf\`), and a further one is started with \`${CLI} docmosis new\`; the conversation's own are listed with \`${CLI} docmosis list\`, read with \`${CLI} docmosis get --id <id>\`, put with \`${CLI} docmosis put --id <id>\` and removed with \`${CLI} docmosis remove --id <id>\`; without --id, get, put and pdf use the primary template, the oldest. After a person has changed a template's data, run \`${CLI} docmosis get\` (with its --id) before changing the template.`;
 
 /**
- * And one GOV.UK Notify template, which `notify pull` loads from Notify with the person's own Azure sign-in; a person's
- * edit of it is read back with `notify get`.
+ * And any number of GOV.UK Notify templates, which `notify pull` loads from Notify with the person's own Azure sign-in; a
+ * person's edit of one is read back with `notify get --id`.
  */
-const NOTIFY_NOTE = ` A GOV.UK Notify template is loaded with \`${CLI} notify products\`, \`${CLI} notify list --product <id>\` and \`${CLI} notify pull --product <id> --template <id>\`, read with \`${CLI} notify get\` and its edited draft published with \`${CLI} notify put\`; it is a draft for the person to copy into Notify, which nothing here changes.`;
+const NOTIFY_NOTE = ` GOV.UK Notify templates are loaded with \`${CLI} notify products\`, \`${CLI} notify list --product <id>\` and \`${CLI} notify pull --product <id> --template <id>\` (a new template of the conversation, or the next version of one with \`--id <id>\`); the conversation's own are listed with \`${CLI} notify list\`, read with \`${CLI} notify get --id <id>\`, their edited drafts published with \`${CLI} notify put --id <id>\` and removed with \`${CLI} notify remove --id <id>\`; without --id, get and put use the primary template, the oldest. A template is a draft for the person to copy into Notify, which nothing here changes.`;
 
 /** And a journey video, recorded with the `cft-journey-video` skill and published from its output directory. */
 const VIDEO_NOTE = ` A journey video recorded with the \`cft-journey-video\` skill is published with \`${CLI} video put <output dir>\`, adding \`--jira <KEY>\` when the user named the Jira issue it is for; the user watches it in the CFT Workspace and posts it to Jira themselves.`;

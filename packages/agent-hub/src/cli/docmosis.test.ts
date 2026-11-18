@@ -107,6 +107,7 @@ describe("publishDocmosis", () => {
     // Arrange
     const loadedAlready = {
       putDocmosisAsset: async () => ({ asset: `sha256:${digest(DOCX)}` }),
+      createDocmosis: async () => Promise.reject(new Error("not here")),
       putDocmosis: async () => Promise.reject(new ApiError(409, { error: "already loaded", loaded: { version: 4, revision: 0 } }, "PUT", "/docmosis"))
     };
 
@@ -209,6 +210,63 @@ describe("publishDocmosis", () => {
     // Assert
     await expect(result).rejects.toBeInstanceOf(ApiError);
     await expect(result).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("should make a further template and return its id, when create is given and the conversation already holds one", async () => {
+    // Arrange
+    const agentId = await conversationAgent();
+    await publishDocmosis(api, agentId, input);
+
+    // Act
+    const result = await publishDocmosis(api, agentId, { ...input, name: "Order", create: true });
+
+    // Assert
+    expect(result).toEqual({ written: { id: expect.stringMatching(/^[0-9a-f-]{36}$/), version: 1, revision: 0 } });
+    expect(hub.moreDocmosis.get(agentId)).toHaveLength(1);
+    expect(hub.docmosisTemplates.get(agentId)?.versions).toHaveLength(1);
+  });
+
+  it("should write the template the item names and leave the primary alone, when an item is given", async () => {
+    // Arrange
+    const agentId = await conversationAgent();
+    await publishDocmosis(api, agentId, input);
+    const created = await publishDocmosis(api, agentId, { ...input, name: "Order", create: true });
+    const id = "written" in created ? (created.written.id as string) : "";
+
+    // Act
+    const result = await publishDocmosis(api, agentId, { ...input, name: "Order", base: 1, item: id });
+
+    // Assert
+    expect(result).toEqual({ written: { version: 2, revision: 0 } });
+    expect(hub.docmosisTemplates.get(agentId)?.versions).toHaveLength(1);
+  });
+
+  it("should return a conflict for an item whose version moved on, and say the template is gone for one that is not held, when an item is given", async () => {
+    // Arrange
+    const agentId = await conversationAgent();
+    await publishDocmosis(api, agentId, input);
+    const created = await publishDocmosis(api, agentId, { ...input, name: "Order", create: true });
+    const id = "written" in created ? (created.written.id as string) : "";
+
+    // Act
+    const stale = await publishDocmosis(api, agentId, { ...input, base: 0, item: id });
+    const gone = publishDocmosis(api, agentId, { ...input, item: "00000000-0000-4000-8000-00000000dead" });
+
+    // Assert
+    expect("conflict" in stale).toBe(true);
+    await expect(gone).rejects.toThrow(/there is no template 00000000-0000-4000-8000-00000000dead/);
+  });
+
+  it("should throw the hub's refusal rather than report a conflict, when a new template is refused with a 409", async () => {
+    // Arrange
+    const agentId = await conversationAgent();
+    const refused = {
+      ...api,
+      createDocmosis: async () => Promise.reject(new ApiError(409, { error: "your assistant needs an update" }, "POST", "/docmosis-templates"))
+    };
+
+    // Act & Assert
+    await expect(publishDocmosis(refused, agentId, { ...input, create: true })).rejects.toBeInstanceOf(ApiError);
   });
 });
 

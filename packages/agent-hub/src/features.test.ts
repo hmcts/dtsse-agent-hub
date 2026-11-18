@@ -19,7 +19,7 @@ describe("CLIENT_FEATURES", () => {
   // an assertion below, which the per-name list cannot, and which is how this file came to claim a standard it did
   // not meet.
   it("should hold every feature this build claims, so a name dropped in a merge fails here", () => {
-    expect(CLIENT_FEATURES).toHaveLength(15);
+    expect(CLIENT_FEATURES).toHaveLength(16);
   });
 
   /**
@@ -53,6 +53,7 @@ describe("CLIENT_FEATURES", () => {
     "docmosis-library",
     "files",
     "github-lookups",
+    "item-templates",
     "items",
     "lookups",
     "memory-anon",

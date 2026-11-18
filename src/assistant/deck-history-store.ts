@@ -1,3 +1,4 @@
+import { HttpError } from "../agent-api/http.ts";
 import { clientPrisma } from "../store/client-namespace.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import type { ConversationRow } from "./conversation-row.ts";
@@ -35,7 +36,7 @@ export interface DeckVersionView extends DeckVersionOutline {
   sizes: Record<string, { width: number; height: number }>;
 }
 
-const byOf = (value: string): DeckAuthor => deckAuthor({ deckUpdatedBy: value }) ?? "agent";
+const byOf = (value: string): DeckAuthor => deckAuthor({ updatedBy: value }) ?? "agent";
 
 interface VersionRow {
   version: number;
@@ -51,12 +52,12 @@ interface VersionRow {
  * The deck's kept versions, newest first, or only `version` when it is a number, with its outline; the .pptx is tested
  * for, never read, and the list carries no outlines.
  */
-async function versionRows(db: Database, conversationId: string, version: number | null, now: Date): Promise<VersionRow[]> {
+async function versionRows(db: Database, itemId: string, version: number | null, now: Date): Promise<VersionRow[]> {
   const { sql } = clientPrisma();
   return await db.$queryRaw<VersionRow[]>`
     SELECT v.version, v.by, v.summary, v.created_at, COALESCE(v.updated_at, v.created_at) AS updated_at, ${pptxHeld(now)} AS pptx, ${version === null ? sql`NULL::jsonb` : sql`v.outline`} AS outline
       FROM assistant_deck_version v
-     WHERE v.conversation_id = ${conversationId}::uuid AND (${version}::int IS NULL OR v.version = ${version}::int)
+     WHERE v.item_id = ${itemId}::uuid AND (${version}::int IS NULL OR v.version = ${version}::int)
      ORDER BY v.version DESC
   `;
 }
@@ -70,30 +71,20 @@ const entryOf = (row: VersionRow): DeckVersionEntry => ({
   pptx: row.pptx
 });
 
-/** Every kept version of the deck, newest first; empty for a conversation with none. */
-export async function listDeckVersions(db: Database, conversationId: string, now: Date = new Date()): Promise<DeckVersionEntry[]> {
-  return (await versionRows(db, conversationId, null, now)).map(entryOf);
+/** Every kept version of the deck, newest first; empty for a deck the hub does not hold. */
+export async function listDeckVersions(db: Database, itemId: string, now: Date = new Date()): Promise<DeckVersionEntry[]> {
+  return (await versionRows(db, itemId, null, now)).map(entryOf);
 }
 
 /** One kept version as the history lists it, or `undefined` for one the deck does not keep. */
-export async function readDeckVersionEntry(
-  db: Database,
-  conversationId: string,
-  version: number,
-  now: Date = new Date()
-): Promise<DeckVersionEntry | undefined> {
-  const [row] = await versionRows(db, conversationId, version, now);
+export async function readDeckVersionEntry(db: Database, itemId: string, version: number, now: Date = new Date()): Promise<DeckVersionEntry | undefined> {
+  const [row] = await versionRows(db, itemId, version, now);
   return row === undefined ? undefined : entryOf(row);
 }
 
 /** One kept version with its outline, or `undefined` for one the deck does not keep. */
-export async function readDeckVersionOutline(
-  db: Database,
-  conversationId: string,
-  version: number,
-  now: Date = new Date()
-): Promise<DeckVersionOutline | undefined> {
-  const [row] = await versionRows(db, conversationId, version, now);
+export async function readDeckVersionOutline(db: Database, itemId: string, version: number, now: Date = new Date()): Promise<DeckVersionOutline | undefined> {
+  const [row] = await versionRows(db, itemId, version, now);
   if (row?.outline === null || row?.outline === undefined) {
     return undefined;
   }
@@ -101,8 +92,14 @@ export async function readDeckVersionOutline(
 }
 
 /** One kept version with the sizes of the pictures it names, or `undefined` for one the deck does not keep. */
-export async function readDeckVersion(db: Database, conversationId: string, version: number, now: Date = new Date()): Promise<DeckVersionView | undefined> {
-  const found = await readDeckVersionOutline(db, conversationId, version, now);
+export async function readDeckVersion(
+  db: Database,
+  conversationId: string,
+  itemId: string,
+  version: number,
+  now: Date = new Date()
+): Promise<DeckVersionView | undefined> {
+  const found = await readDeckVersionOutline(db, itemId, version, now);
   if (found === undefined) {
     return undefined;
   }
@@ -115,12 +112,12 @@ export async function readDeckVersion(db: Database, conversationId: string, vers
  */
 export async function readVersionPptx(
   db: Database,
-  conversationId: string,
+  itemId: string,
   version: number,
   now: Date = new Date()
 ): Promise<{ title: string; bytes: Uint8Array } | undefined> {
   const row = await db.assistantDeckVersion.findUnique({
-    where: { conversationId_version: { conversationId, version } },
+    where: { itemId_version: { itemId, version } },
     select: { pptx: true, outline: true }
   });
   const title = (row?.outline as unknown as DeckOutline | undefined)?.title;
@@ -128,7 +125,7 @@ export async function readVersionPptx(
     return { title, bytes: row.pptx };
   }
   const built = await db.assistantDeckBuild.findFirst({
-    where: { conversationId, version, status: "done", createdAt: { gte: heldBuildSince(now) } },
+    where: { itemId, version, status: "done", createdAt: { gte: heldBuildSince(now) } },
     orderBy: [{ createdAt: "desc" }, { id: "asc" }],
     select: { pptx: true }
   });
@@ -136,8 +133,8 @@ export async function readVersionPptx(
     return undefined;
   }
   // A version swept since its build was asked for still downloads under the deck's own title.
-  const deck = await db.assistantConversation.findUnique({ where: { id: conversationId }, select: { deckTitle: true } });
-  return { title: title ?? deck?.deckTitle ?? "slides", bytes: built.pptx };
+  const deck = await db.assistantDeck.findUnique({ where: { id: itemId }, select: { title: true } });
+  return { title: title ?? deck?.title ?? "slides", bytes: built.pptx };
 }
 
 export type RestoreResult =
@@ -161,7 +158,7 @@ export type RestoreResult =
 export async function restoreDeckVersion(
   prisma: PrismaClient,
   conversation: Pick<ConversationRow, "id" | "virtualAgentId" | "ownerOid">,
-  restore: { version: number; baseVersion: number },
+  restore: { itemId: string; version: number; baseVersion: number },
   now: Date = new Date()
 ): Promise<RestoreResult> {
   if (restore.version === restore.baseVersion) {
@@ -173,6 +170,7 @@ export async function restoreDeckVersion(
       prisma,
       conversation,
       {
+        itemId: restore.itemId,
         outline: { restore: restore.version },
         baseVersion: restore.baseVersion,
         by: "user",
@@ -184,7 +182,7 @@ export async function restoreDeckVersion(
     if (error instanceof DeckConflict) {
       return { restored: false, current: { version: error.current.version, updatedBy: error.current.updatedBy } };
     }
-    if (error instanceof DeckVersionGone) {
+    if (error instanceof DeckVersionGone || (error instanceof HttpError && error.status === 404)) {
       return { restored: false, missing: true };
     }
     if (error instanceof DeckAssetsMissing) {

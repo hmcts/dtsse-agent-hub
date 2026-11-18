@@ -21,7 +21,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { fakeSecrets, type TempClaudeHome, tempClaudeHome } from "./__fixtures__/claude-home.ts";
-import { createMockHub, type MockHub, PRIMARY_ARTEFACT_ID } from "./__fixtures__/mock-hub.ts";
+import { createMockHub, type MockHub, PRIMARY_ARTEFACT_ID, PRIMARY_DECK_ID, PRIMARY_DOCMOSIS_ID } from "./__fixtures__/mock-hub.ts";
 import { captureStderr } from "./__fixtures__/pod-shims.ts";
 import { createApi } from "./api.ts";
 import { parseFlags, readStdinText, UsageError } from "./cli/command.ts";
@@ -1874,13 +1874,12 @@ describe("artefact, in an assistant conversation", () => {
       expect(r.errors.join("\n")).toBe("agent-hub notify: Forbidden: you have no read access to secrets in the Key Vault pcs-aat.");
     });
 
-    it("should say a product is unknown and exit 1, and refuse a list or pull it cannot make with exit 2", async () => {
+    it("should say a product is unknown and exit 1, and refuse a pull or a command it cannot make with exit 2", async () => {
       // Arrange
       const { sid } = await session();
 
       // Act
       const unknown = await cli(["notify", "list", "--product", "nope"], { sid });
-      const noProduct = await cli(["notify", "list"], { sid });
       const badTemplate = await cli(["notify", "pull", "--product", "pcs", "--template", "x"], { sid });
       const extra = await cli(["notify", "products", "more"], { sid });
       const action = await cli(["notify", "send"], { sid });
@@ -1888,8 +1887,8 @@ describe("artefact, in an assistant conversation", () => {
       // Assert
       expect(unknown.code).toBe(1);
       expect(unknown.errors.join("\n")).toMatch(/There is no product "nope" with a Notify key/);
-      expect([noProduct.code, badTemplate.code, extra.code, action.code]).toEqual([2, 2, 2, 2]);
-      expect(action.errors.join("\n")).toMatch(/notify takes products, list, pull, get or put/);
+      expect([badTemplate.code, extra.code, action.code]).toEqual([2, 2, 2]);
+      expect(action.errors.join("\n")).toMatch(/notify takes products, list, pull, get, put or remove/);
     });
 
     it("should load a template once, write its files, publish the edit on that base and refuse a stale one, when pull, get and put run", async () => {
@@ -1903,7 +1902,7 @@ describe("artefact, in an assistant conversation", () => {
       // Assert
       expect(pulled.code, pulled.errors.join("\n")).toBe(0);
       expect(pulled.text()).toMatch(/loaded "Claim received" into the conversation as version 1/);
-      expect(again.text()).toMatch(/already the conversation's Notify template, as version 1; nothing was written/);
+      expect(again.text()).toMatch(/already a Notify template of the conversation \(.+\), as version 1; nothing was written/);
       const stored = hub.notifyTemplates.get(agentId);
       expect(stored).toHaveLength(1);
       expect(stored?.[0]).toMatchObject({
@@ -1954,6 +1953,72 @@ describe("artefact, in an assistant conversation", () => {
       expect(stale.code).toBe(1);
       expect(stale.errors.join("\n")).toMatch(/has changed since version 2: it is now version 3, last written by the user\. Nothing was saved/);
       expect(hub.notifyTemplates.get(agentId)).toHaveLength(3);
+    });
+
+    it("should list the conversation's own templates without --product, oldest first, and say when there are none", async () => {
+      // Arrange
+      const { sid } = await session();
+      const none = await cli(["notify", "list"], { sid });
+      await cli(["notify", "pull", "--product", "pcs", "--template", EMAIL], { sid });
+      await cli(["notify", "pull", "--product", "pcs", "--template", TEXT], { sid });
+
+      // Act
+      const listed = await cli(["notify", "list"], { sid });
+
+      // Assert
+      expect(none.text()).toMatch(/the conversation has no Notify template yet/);
+      const lines = listed.text().trim().split("\n");
+      expect(lines).toHaveLength(2);
+      expect(lines[0]).toMatch(/^[0-9a-f-]{36}\tv1\tassistant\tClaim received$/);
+      expect(lines[1]).toMatch(/\tHearing reminder$/);
+    });
+
+    it("should make a second template from a pull with no --id, and read, publish to and remove it by --id", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      await cli(["notify", "pull", "--product", "pcs", "--template", EMAIL], { sid });
+      const second = await cli(["notify", "pull", "--product", "pcs", "--template", TEXT], { sid });
+      const id = /\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b/.exec(second.text())?.[1] as string;
+      const dir = path.join(conversationDir(), id);
+
+      // Act
+      const got = await cli(["notify", "get", "--id", id], { sid });
+      fs.writeFileSync(path.join(dir, "body.md"), "Your hearing has moved");
+      const put = await cli(["notify", "put", "--id", id], { sid });
+      const missing = await cli(["notify", "get", "--id", "0b1f3d4a-0000-4000-8000-0000000000ff"], { sid });
+      const noId = await cli(["notify", "remove"], { sid });
+      const removed = await cli(["notify", "remove", "--id", id], { sid });
+      const afterwards = await cli(["notify", "list"], { sid });
+
+      // Assert
+      expect(second.code, second.errors.join("\n")).toBe(0);
+      expect(hub.notifyTemplates.get(agentId)).toHaveLength(1);
+      expect(got.code, got.errors.join("\n")).toBe(0);
+      expect(got.text()).toMatch(/Hearing reminder/);
+      expect(put.code, put.errors.join("\n")).toBe(0);
+      expect(put.text()).toMatch(/as version 2/);
+      expect(hub.calls.some((c) => c.method === "PUT" && c.path === `/api/agent/${agentId}/notify-templates/${id}`)).toBe(true);
+      expect(missing.code).toBe(1);
+      expect(noId.code).toBe(2);
+      expect(removed.code, removed.errors.join("\n")).toBe(0);
+      expect(fs.existsSync(dir)).toBe(false);
+      expect(afterwards.text().trim().split("\n")).toHaveLength(1);
+    });
+
+    it("should load into the template named by --id as its next version, when pull has one", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      await cli(["notify", "pull", "--product", "pcs", "--template", EMAIL], { sid });
+      const listed = await cli(["notify", "list"], { sid });
+      const id = listed.text().split("\t")[0] as string;
+
+      // Act
+      const replaced = await cli(["notify", "pull", "--product", "pcs", "--template", TEXT, "--id", id], { sid });
+
+      // Assert
+      expect(replaced.code, replaced.errors.join("\n")).toBe(0);
+      expect(replaced.text()).toMatch(/as version 2 of its Notify template/);
+      expect(hub.notifyTemplates.get(agentId)).toHaveLength(2);
     });
 
     it("should say the user changed the version read, when the person amended it since get", async () => {
@@ -2638,7 +2703,142 @@ describe("artefact, in an assistant conversation", () => {
 
       // Assert
       expect(r.code).toBe(2);
-      expect(r.errors.join("\n")).toMatch(/docmosis takes get, put or pdf/);
+      expect(r.errors.join("\n")).toMatch(/docmosis takes get, put, new, pdf, list or remove/);
+    });
+
+    const newArgs = (dir: string, ...more: string[]) => putArgs(dir, ...more).map((word) => (word === "put" ? "new" : word));
+    const itemDir = (id: string) => path.join(conversationDir(), id);
+
+    it("should list the templates oldest first with each one's id, and say so when there are none, when docmosis list runs", async () => {
+      // Arrange
+      const { sid } = await session();
+      const dir = workDir();
+      const none = await cli(["docmosis", "list"], { sid });
+      expect((await cli(putArgs(dir, "--name", "Claim"), { sid })).code).toBe(0);
+      expect((await cli(newArgs(dir, "--name", "Order"), { sid })).code).toBe(0);
+
+      // Act
+      const listed = await cli(["docmosis", "list"], { sid });
+      const json = await cli(["docmosis", "list", "--json"], { sid });
+
+      // Assert
+      expect(none.text()).toMatch(/the conversation has no templates yet/);
+      expect(listed.lines).toEqual([
+        expect.stringMatching(new RegExp(`^${PRIMARY_DOCMOSIS_ID}  version 1  Claim$`)),
+        expect.stringMatching(/^[0-9a-f-]{36} {2}version 1 {2}Order$/)
+      ]);
+      expect(JSON.parse(json.text())).toEqual([
+        expect.objectContaining({ id: PRIMARY_DOCMOSIS_ID, name: "Claim" }),
+        expect.objectContaining({ name: "Order" })
+      ]);
+    });
+
+    it("should publish a further template and print its id, keeping its working copy apart from the primary's, when docmosis new runs", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      const dir = workDir();
+      expect((await cli(putArgs(dir, "--name", "Claim"), { sid })).code).toBe(0);
+
+      // Act
+      const r = await cli(newArgs(dir, "--name", "Order", "--pdf", path.join(dir, "claim.pdf")), { sid });
+
+      // Assert
+      expect(r.code, r.errors.join("\n")).toBe(0);
+      const id = /created template ([0-9a-f-]{36}) at version 1/.exec(r.text())?.[1] as string;
+      expect(id).toBeTruthy();
+      expect(calls(agentId, "POST", "-templates")).toHaveLength(1);
+      expect(fs.readFileSync(path.join(itemDir(id), "version"), "utf8")).toBe("1\n");
+      expect(fs.readFileSync(path.join(conversationDir(), "version"), "utf8")).toBe("1\n");
+      expect(hub.moreDocmosis.get(agentId)?.[0]?.stored.versions[0]?.pdf).toEqual(PDF);
+    });
+
+    it("should refuse --base and --id with docmosis new, before sending", async () => {
+      const { sid, agentId } = await session();
+      const dir = workDir();
+
+      const base = await cli(newArgs(dir, "--base", "1"), { sid });
+      const id = await cli(newArgs(dir, "--id", PRIMARY_DOCMOSIS_ID), { sid });
+
+      expect([base.code, id.code]).toEqual([2, 2]);
+      expect(calls(agentId, "POST", "")).toHaveLength(0);
+    });
+
+    it("should read and put the template --id names, on its own recorded version, when the conversation holds two", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      const dir = workDir();
+      expect((await cli(putArgs(dir, "--name", "Claim"), { sid })).code).toBe(0);
+      const made = await cli(newArgs(dir, "--name", "Order"), { sid });
+      const id = /created template ([0-9a-f-]{36})/.exec(made.text())?.[1] as string;
+
+      // Act
+      const got = await cli(["docmosis", "get", "--id", id], { sid });
+      const put = await cli(putArgs(dir, "--id", id), { sid });
+
+      // Assert
+      expect(got.code, got.errors.join("\n")).toBe(0);
+      expect(fs.existsSync(path.join(itemDir(id), "template.docx"))).toBe(true);
+      expect(put.code, put.errors.join("\n")).toBe(0);
+      expect(put.text()).toMatch(new RegExp(`published template ${id} as version 2`));
+      expect(hub.docmosisTemplates.get(agentId)?.versions).toHaveLength(1);
+      expect(hub.moreDocmosis.get(agentId)?.[0]?.stored.versions).toHaveLength(2);
+    });
+
+    it("should send the PDF of the template --id names, when docmosis pdf has --id", async () => {
+      const { sid, agentId } = await session();
+      const dir = workDir();
+      expect((await cli(putArgs(dir), { sid })).code).toBe(0);
+      const made = await cli(newArgs(dir, "--name", "Order"), { sid });
+      const id = /created template ([0-9a-f-]{36})/.exec(made.text())?.[1] as string;
+
+      const r = await cli(["docmosis", "pdf", path.join(dir, "claim.pdf"), "--version", "1", "--id", id], { sid });
+
+      expect(r.code, r.errors.join("\n")).toBe(0);
+      expect(hub.moreDocmosis.get(agentId)?.[0]?.stored.versions[0]?.pdf).toEqual(PDF);
+      expect(hub.docmosisTemplates.get(agentId)?.versions[0]?.pdf).toBeNull();
+    });
+
+    it("should name the id in the command to run next, when a put with --id is refused for a newer version", async () => {
+      const { sid } = await session();
+      const dir = workDir();
+      expect((await cli(putArgs(dir), { sid })).code).toBe(0);
+      const made = await cli(newArgs(dir, "--name", "Order"), { sid });
+      const id = /created template ([0-9a-f-]{36})/.exec(made.text())?.[1] as string;
+
+      const stale = await cli(putArgs(dir, "--id", id, "--base", "5"), { sid });
+
+      expect(stale.code).toBe(1);
+      expect(stale.errors.join("\n")).toContain(`docmosis get --id ${id}`);
+    });
+
+    it("should remove the template --id names and its working copy, when docmosis remove runs", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      const dir = workDir();
+      expect((await cli(putArgs(dir), { sid })).code).toBe(0);
+      const made = await cli(newArgs(dir, "--name", "Order"), { sid });
+      const id = /created template ([0-9a-f-]{36})/.exec(made.text())?.[1] as string;
+      expect((await cli(["docmosis", "get", "--id", id], { sid })).code).toBe(0);
+
+      // Act
+      const r = await cli(["docmosis", "remove", "--id", id], { sid });
+      const again = await cli(["docmosis", "remove", "--id", id], { sid });
+
+      // Assert
+      expect(r.text()).toMatch(new RegExp(`removed the template ${id}`));
+      expect(hub.moreDocmosis.get(agentId)).toEqual([]);
+      expect(fs.existsSync(itemDir(id))).toBe(false);
+      expect(again.code).toBe(1);
+      expect(again.errors.join("\n")).toMatch(/there is no template/);
+    });
+
+    it("should refuse docmosis remove with no --id and an --id that is not an id, before sending", async () => {
+      const { sid } = await session();
+
+      const none = await cli(["docmosis", "remove"], { sid });
+      const bad = await cli(["docmosis", "get", "--id", "nope"], { sid });
+
+      expect([none.code, bad.code]).toEqual([2, 2]);
     });
   });
 
@@ -2781,6 +2981,20 @@ describe("artefact, in an assistant conversation", () => {
       expect(missing.errors.join("\n")).toMatch(/does not keep version 9/);
       expect(bad.code).not.toBe(0);
       expect(bad.errors.join("\n")).toMatch(/--version takes a version number from 1/);
+    });
+
+    it("should refuse the put, naming the id, and send nothing, when the outline is in another deck's directory and --id is not given", async () => {
+      const { sid, agentId } = await session();
+      const item = "0f8a6a1e-0000-4000-8000-00000000d0c9";
+      const dir = path.join(home.root, ".agent-hub", "decks", `0f8a6a1e-0000-4000-8000-${String(nextSession).padStart(12, "0")}`, item);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, "outline.json"), JSON.stringify({ title: "Other", slides: [] }));
+
+      const r = await cli(["deck", "put", path.join(dir, "outline.json")], { sid });
+
+      expect(r.code).toBe(2);
+      expect(r.errors.join("\n")).toContain(`put it with --id ${item}`);
+      expect(calls(agentId, "PUT", "")).toEqual([]);
     });
 
     it("should put against the version deck get read, and refuse the put, when someone writes a newer one in between", async () => {
@@ -3146,10 +3360,167 @@ describe("artefact, in an assistant conversation", () => {
         ["deck", "pptx", path.join(dir, "deck.pptx")],
         ["deck", "pptx", path.join(dir, "deck.pptx"), "--version", "0"],
         ["deck", "pptx", path.join(dir, "deck.pptx"), "--version", "1", "extra"],
-        ["deck", "pptx", path.join(dir, "pipeline.png"), "--version", "1"]
+        ["deck", "pptx", path.join(dir, "pipeline.png"), "--version", "1"],
+        ["deck", "get", "--id", "not-a-uuid"],
+        ["deck", "put", file, "--id", "not-a-uuid"],
+        ["deck", "new"],
+        ["deck", "new", file, "--base", "1"],
+        ["deck", "new", file, "--id", "0b1f3d4a-0000-4000-8000-0000000000d1"],
+        ["deck", "remove"],
+        ["deck", "remove", "--id", "not-a-uuid"],
+        ["deck", "list", "extra"],
+        ["deck", "pptx", path.join(dir, "deck.pptx"), "--version", "1", "--id", "nope"]
       ]) {
         expect((await cli(args, { sid })).code, args.join(" ")).toBe(2);
       }
+    });
+
+    describe("with several decks", () => {
+      const ID_RE = /deck ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}) at version 1/;
+
+      it("should make a deck of its own, beside the primary one, when deck new runs on a conversation that has one", async () => {
+        // Arrange
+        const { sid, agentId } = await session();
+        hub.writeDeckAsUser(agentId, outline({ asset: `sha256:${digest(PNG)}` }), { [digest(PNG)]: PNG });
+        const dir = workDir();
+
+        // Act
+        const made = await cli(["deck", "new", path.join(dir, "outline.json"), "--pptx", path.join(dir, "deck.pptx")], { sid });
+        const id = ID_RE.exec(made.text())?.[1] as string;
+        const listed = await cli(["deck", "list"], { sid });
+        const json = await cli(["deck", "list", "--json"], { sid });
+
+        // Assert
+        expect(made.code, made.errors.join("\n")).toBe(0);
+        expect(made.text()).toContain(`change it with agent-hub deck get --id ${id}`);
+        expect(calls(agentId, "POST", "s")).toHaveLength(1);
+        expect(hub.decks.get(agentId)?.version).toBe(1);
+        expect(hub.moreDecks.get(agentId)?.map((one) => one.id)).toEqual([id]);
+        expect(hub.moreDecks.get(agentId)?.[0]?.stored.pptx.get(1)).toEqual(PPTX);
+        expect(listed.text()).toMatch(new RegExp(`^${PRIMARY_DECK_ID}  version 1, last edited by the user  Ways of working$`, "m"));
+        expect(listed.text()).toContain(`${id}  version 1  Ways of working`);
+        expect(JSON.parse(json.lines[0] as string).map((one: { id: string }) => one.id)).toEqual([PRIMARY_DECK_ID, id]);
+      });
+
+      it("should read and write the deck --id names in a directory of its own, leaving the primary deck's alone", async () => {
+        // Arrange
+        const { sid, agentId } = await session();
+        hub.writeDeckAsUser(agentId, outline({ asset: `sha256:${digest(PNG)}` }), { [digest(PNG)]: PNG });
+        const dir = workDir();
+        const id = ID_RE.exec((await cli(["deck", "new", path.join(dir, "outline.json")], { sid })).text())?.[1] as string;
+        const base = path.join(home.root, ".agent-hub", "decks", `0f8a6a1e-0000-4000-8000-${String(nextSession).padStart(12, "0")}`);
+
+        // Act
+        const got = await cli(["deck", "get", "--id", id, "--json"], { sid });
+        const put = await cli(["deck", "put", path.join(base, id, "outline.json"), "--id", id], { sid });
+        const old = await cli(["deck", "get", "--id", id, "--version", "1"], { sid });
+
+        // Assert
+        expect(got.code, got.errors.join("\n")).toBe(0);
+        expect(JSON.parse(got.lines[0] as string)).toMatchObject({ id, version: 1 });
+        expect(fs.readFileSync(path.join(base, id, "version"), "utf8")).toBe("2\n");
+        expect(fs.existsSync(path.join(base, "version"))).toBe(false);
+        expect(put.code, put.errors.join("\n")).toBe(0);
+        expect(put.text()).toMatch(/published the slide deck as version 2/);
+        expect(hub.moreDecks.get(agentId)?.[0]?.stored.version).toBe(2);
+        expect(hub.decks.get(agentId)?.version).toBe(1);
+        expect(old.text()).toContain(`deck put ${path.join(base, id, "outline-v1.json")} --id ${id} --pptx <deck.pptx> --base 2`);
+      });
+
+      it("should name the deck in the conflict it prints and the commands it suggests, when a put with --id is refused", async () => {
+        // Arrange
+        const { sid, agentId } = await session();
+        hub.writeDeckAsUser(agentId, outline({ asset: `sha256:${digest(PNG)}` }), { [digest(PNG)]: PNG });
+        const dir = workDir();
+        const id = ID_RE.exec((await cli(["deck", "new", path.join(dir, "outline.json")], { sid })).text())?.[1] as string;
+
+        // Act
+        const r = await cli(["deck", "put", path.join(dir, "outline.json"), "--id", id, "--base", "5"], { sid });
+
+        // Assert
+        expect(r.code).toBe(1);
+        expect(r.errors.join("\n")).toMatch(/changed since version 5: it is now version 1/);
+        expect(r.errors.join("\n")).toContain(`Run agent-hub deck get --id ${id}, make your change`);
+      });
+
+      it("should send the .pptx to the deck --id names, when deck pptx runs", async () => {
+        // Arrange
+        const { sid, agentId } = await session();
+        hub.writeDeckAsUser(agentId, outline({ asset: `sha256:${digest(PNG)}` }), { [digest(PNG)]: PNG });
+        const dir = workDir();
+        const id = ID_RE.exec((await cli(["deck", "new", path.join(dir, "outline.json")], { sid })).text())?.[1] as string;
+
+        // Act
+        const r = await cli(["deck", "pptx", path.join(dir, "deck.pptx"), "--version", "1", "--id", id], { sid });
+
+        // Assert
+        expect(r.code, r.errors.join("\n")).toBe(0);
+        expect(hub.moreDecks.get(agentId)?.[0]?.stored.pptx.get(1)).toEqual(PPTX);
+        expect(hub.decks.get(agentId)?.pptx.has(1)).toBe(false);
+      });
+
+      it("should remove the deck --id names and say so, and say when there is no such deck", async () => {
+        // Arrange
+        const { sid, agentId } = await session();
+        hub.writeDeckAsUser(agentId, outline({ asset: `sha256:${digest(PNG)}` }), { [digest(PNG)]: PNG });
+        const dir = workDir();
+        const id = ID_RE.exec((await cli(["deck", "new", path.join(dir, "outline.json")], { sid })).text())?.[1] as string;
+
+        // Act
+        const removed = await cli(["deck", "remove", "--id", id], { sid });
+        const again = await cli(["deck", "remove", "--id", id], { sid });
+        const missing = await cli(["deck", "get", "--id", id], { sid });
+
+        // Assert
+        expect(removed.code, removed.errors.join("\n")).toBe(0);
+        expect(removed.text()).toContain(`removed the slide deck ${id}`);
+        expect(hub.moreDecks.get(agentId)).toEqual([]);
+        expect(again.code).toBe(1);
+        expect(again.errors.join("\n")).toContain(`there is no slide deck ${id} in this conversation; list them with agent-hub deck list`);
+        expect(missing.errors.join("\n")).toContain("there is no slide deck");
+      });
+
+      it("should make the primary deck, as deck put does, when deck new runs on a conversation with none", async () => {
+        // Arrange
+        const { sid, agentId } = await session();
+        const dir = workDir();
+
+        // Act
+        const r = await cli(["deck", "new", path.join(dir, "outline.json")], { sid });
+
+        // Assert
+        expect(r.code, r.errors.join("\n")).toBe(0);
+        expect(r.text()).toContain(`created slide deck ${PRIMARY_DECK_ID} at version 1`);
+        expect(hub.decks.get(agentId)?.version).toBe(1);
+      });
+
+      it("should say there are no decks yet, and print an empty list for --json", async () => {
+        // Arrange
+        const { sid } = await session();
+
+        // Act
+        const r = await cli(["deck", "list"], { sid });
+        const json = await cli(["deck", "list", "--json"], { sid });
+
+        // Assert
+        expect(r.text()).toContain("the conversation has no slide decks yet");
+        expect(json.lines).toEqual(["[]"]);
+      });
+
+      it("should say the session has no deck list, when it is not a conversation, and no deck can be made there", async () => {
+        // Arrange
+        const { sid } = await session({ conversation: false });
+
+        // Act
+        const listed = await cli(["deck", "list"], { sid });
+        const made = await cli(["deck", "new", path.join(workDir(), "outline.json")], { sid });
+
+        // Assert
+        expect(listed.code).toBe(1);
+        expect(listed.errors.join("\n")).toMatch(/holds one slide deck per conversation, or this session is not a CFT Workspace conversation/);
+        expect(made.code).toBe(1);
+        expect(made.errors.join("\n")).toMatch(/not a CFT Workspace conversation/);
+      });
     });
   });
 

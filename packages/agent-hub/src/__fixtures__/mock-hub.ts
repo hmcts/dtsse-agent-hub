@@ -55,6 +55,12 @@ export type StoredArtefact = Artefact & { id: string; kind: string };
 /** The id the mock answers for the primary document, which it keeps in `artefacts` as the hub's `/artefact` does. */
 export const PRIMARY_ARTEFACT_ID = "00000000-0000-4000-8000-0000000000a1";
 
+/** The id the mock answers for the primary Notify template, which it keeps in `notifyTemplates` as the hub's `/notify` does. */
+export const PRIMARY_NOTIFY_ID = "00000000-0000-4000-8000-0000000000b1";
+
+/** The id the mock answers for the primary Docmosis template, which it keeps in `docmosisTemplates` as the hub's `/docmosis` does. */
+export const PRIMARY_DOCMOSIS_ID = "00000000-0000-4000-8000-0000000000c1";
+
 export type StoredMessage = {
   id: number;
   created_at: string;
@@ -108,6 +114,9 @@ type Body = Record<string, any>;
  * one, and its pictures by digest. The hub's outline checks are not repeated here beyond what the client relies on:
  * a picture the outline names must be held, and every slide leaves with an id.
  */
+/** The id the mock answers for the primary deck, which it keeps in `decks` as the hub's `/deck` does. */
+export const PRIMARY_DECK_ID = "00000000-0000-4000-8000-0000000000d1";
+
 export type MockDeck = {
   version: number;
   revision: number;
@@ -275,7 +284,20 @@ export function createMockHub({
     }
     return found;
   };
-  const deckBody = (stored: MockDeck) => ({
+  // agent id → the decks beyond the primary, each with its own versions; the pictures stay the primary's, which the hub keeps per conversation
+  const moreDecks = new Map<string, { id: string; stored: MockDeck }[]>();
+  const newDeck = (): MockDeck => ({
+    version: 0,
+    revision: 0,
+    outline: null,
+    updated_by: null,
+    updated_at: null,
+    pptx: new Map(),
+    assets: new Map(),
+    history: new Map()
+  });
+  const deckBody = (stored: MockDeck, id?: string) => ({
+    ...(id === undefined || stored.version === 0 ? {} : { id }),
     title: stored.outline?.title ?? null,
     outline: stored.outline,
     version: stored.version,
@@ -294,6 +316,8 @@ export function createMockHub({
     }
     return found;
   };
+  // agent id → the templates beyond the primary, each with its own versions; the .docx files stay the primary's, which the hub keeps per conversation
+  const moreDocmosis = new Map<string, { id: string; stored: MockDocmosis }[]>();
   const docmosisBody = (stored: MockDocmosis, v: MockDocmosisVersion) => {
     const { pdf, ...rest } = v;
     const latest = stored.versions[stored.versions.length - 1];
@@ -323,6 +347,8 @@ export function createMockHub({
     }
     return found;
   };
+  // agent id → the Notify templates beyond the primary, which `/notify` does not reach, each with every version
+  const moreNotifyTemplates = new Map<string, { id: string; versions: Body[] }[]>();
   const notifyBody = (versions: Body[], v: Body) => {
     const latest = versions[versions.length - 1];
     return { ...v, ...(latest && latest.version !== v.version ? { current_version: latest.version } : {}) };
@@ -1307,16 +1333,67 @@ export function createMockHub({
         return send(res, 200, { version: found.version + 1 });
       }
     }
-    if (action === "deck") {
+    if (action === "deck" || action === "decks") {
       if (!agent.conversation_id) {
         return send(res, 404, { error: "not a conversation" });
       }
-      const stored = deckOf(agent.id);
-      const sub = parts[4];
-      if (sub === undefined && req.method === "GET") {
+      const primary = deckOf(agent.id);
+      const more = moreDecks.get(agent.id) ?? [];
+      // `/decks/{id}` has one more path part than `/deck`.
+      const offset = action === "deck" ? 0 : 1;
+      let stored = primary;
+      let deckId = PRIMARY_DECK_ID;
+      let method = req.method;
+      if (action === "decks") {
+        const asked = parts[4];
+        if (asked === undefined) {
+          if (req.method === "GET") {
+            const all = [{ id: PRIMARY_DECK_ID, stored: primary }, ...more].filter((one) => one.stored.version > 0);
+            return send(res, 200, {
+              decks: all.map(({ id, stored: one }) => ({
+                id,
+                title: one.outline?.title ?? "",
+                version: one.version,
+                revision: one.revision,
+                updated_by: one.updated_by,
+                pptx: one.pptx.has(one.version)
+              }))
+            });
+          }
+          if (req.method !== "POST") {
+            return send(res, 405, { error: "method not allowed" });
+          }
+          deckId = primary.version === 0 ? PRIMARY_DECK_ID : randomUUID();
+          stored = deckId === PRIMARY_DECK_ID ? primary : newDeck();
+          if (deckId !== PRIMARY_DECK_ID) {
+            moreDecks.set(agent.id, [...more, { id: deckId, stored }]);
+          }
+          method = "PUT";
+        } else {
+          const found = asked === PRIMARY_DECK_ID && primary.version > 0 ? { id: asked, stored: primary } : more.find((one) => one.id === asked);
+          if (found === undefined) {
+            return send(res, 404, { error: "the conversation has no such deck" });
+          }
+          stored = found.stored;
+          deckId = found.id;
+          if (req.method === "DELETE" && parts[5] === undefined) {
+            if (found.stored === primary) {
+              decks.delete(agent.id);
+            } else {
+              moreDecks.set(
+                agent.id,
+                more.filter((one) => one.id !== found.id)
+              );
+            }
+            return send(res, 204);
+          }
+        }
+      }
+      const sub = parts[4 + offset];
+      if (sub === undefined && method === "GET") {
         const asked = url.searchParams.get("version");
         if (asked === null) {
-          return send(res, 200, deckBody(stored));
+          return send(res, 200, deckBody(stored, deckId));
         }
         const kept = stored.history.get(Number(asked));
         if (!/^[1-9]\d*$/.test(asked)) {
@@ -1326,6 +1403,7 @@ export function createMockHub({
           return send(res, 404, { error: `the deck does not keep version ${asked}` });
         }
         return send(res, 200, {
+          id: deckId,
           title: kept.outline.title ?? null,
           outline: kept.outline,
           version: Number(asked),
@@ -1335,12 +1413,12 @@ export function createMockHub({
           latest_version: stored.version
         });
       }
-      if (sub === undefined && req.method === "PUT") {
+      if (sub === undefined && method === "PUT") {
         if (!Number.isInteger(body.base_version) || typeof body.outline !== "object" || !Array.isArray(body.outline?.slides)) {
           return send(res, 400, { error: "bad deck" });
         }
         if (body.base_version !== stored.version || (body.base_revision !== undefined && body.base_revision !== stored.revision)) {
-          return send(res, 409, { error: "the deck has changed since that version", current: deckBody(stored) });
+          return send(res, 409, { error: "the deck has changed since that version", current: deckBody(stored, deckId) });
         }
         const slides: Body[] = body.outline.slides;
         const missing = slides.flatMap((slide) => {
@@ -1349,7 +1427,7 @@ export function createMockHub({
           if (slide.image !== undefined && sha === undefined) {
             return [String(ref)];
           }
-          return sha !== undefined && !stored.assets.has(sha) ? [ref] : [];
+          return sha !== undefined && !primary.assets.has(sha) ? [ref] : [];
         });
         if (missing.length) {
           return send(res, 400, { error: "the outline names pictures the hub does not hold", missing });
@@ -1364,7 +1442,7 @@ export function createMockHub({
         stored.updated_by = "agent";
         stored.updated_at = new Date().toISOString();
         stored.history.set(stored.version, { outline, updated_by: "agent", updated_at: stored.updated_at });
-        return send(res, 200, { version: stored.version, revision: stored.revision, outline });
+        return send(res, req.method === "POST" ? 201 : 200, { id: deckId, version: stored.version, revision: stored.revision, outline });
       }
       if (sub === "assets") {
         const sha = parts[5] ?? "";
@@ -1392,12 +1470,12 @@ export function createMockHub({
           return send(res, held ? 200 : 201, { asset: `sha256:${sha}` });
         }
       }
-      if (sub === "versions" && parts[6] === "pptx" && req.method === "PUT") {
+      if (sub === "versions" && parts[6 + offset] === "pptx" && req.method === "PUT") {
         const refused = failures.pptx.shift();
         if (refused !== undefined) {
           return send(res, refused, { error: "the hub could not store the .pptx" });
         }
-        const version = Number(parts[5]);
+        const version = Number(parts[5 + offset]);
         if (octets?.subarray(0, 4).toString("hex") !== "504b0304") {
           return send(res, 400, { error: "that is not a .pptx" });
         }
@@ -1463,11 +1541,35 @@ export function createMockHub({
         return send(res, 204);
       }
     }
-    if (action === "notify" && parts[4] === undefined) {
+    if ((action === "notify" && parts[4] === undefined) || action === "notify-templates") {
       if (!agent.conversation_id) {
         return send(res, 404, { error: "not a conversation" });
       }
-      const versions = notifyOf(agent.id);
+      const primary = notifyOf(agent.id);
+      const more = moreNotifyTemplates.get(agent.id) ?? [];
+      const all = [...(primary.length > 0 ? [{ id: PRIMARY_NOTIFY_ID, versions: primary }] : []), ...more];
+      const id = action === "notify" ? PRIMARY_NOTIFY_ID : parts[4];
+      let target: { id: string; versions: Body[] } | undefined;
+      if (action === "notify-templates" && id === undefined) {
+        if (req.method === "GET") {
+          return send(res, 200, {
+            notify_templates: all.map(({ id: itemId, versions }) => {
+              const last = versions[versions.length - 1] as Body;
+              return { id: itemId, name: last.name, version: last.version, revision: last.revision, updated_by: last.by };
+            })
+          });
+        }
+        if (req.method !== "POST") {
+          return send(res, 405, { error: "method not allowed" });
+        }
+        target = { id: randomUUID(), versions: [] };
+      } else {
+        target = action === "notify" ? { id: PRIMARY_NOTIFY_ID, versions: primary } : all.find((item) => item.id === id);
+        if (!target) {
+          return send(res, 404, { error: "that Notify template no longer exists" });
+        }
+      }
+      const { versions } = target;
       const latest = versions[versions.length - 1];
       if (req.method === "GET") {
         const asked = url.searchParams.get("version");
@@ -1477,7 +1579,17 @@ export function createMockHub({
         const found = asked === null ? latest : versions.find((v) => v.version === Number(asked));
         return found ? send(res, 200, notifyBody(versions, found)) : send(res, 404, { error: `the template does not keep version ${asked}` });
       }
-      if (req.method === "PUT") {
+      if (req.method === "DELETE") {
+        moreNotifyTemplates.set(
+          agent.id,
+          more.filter((item) => item.id !== target.id)
+        );
+        if (target.id === PRIMARY_NOTIFY_ID) {
+          primary.length = 0;
+        }
+        return send(res, 204);
+      }
+      if (req.method === "PUT" || req.method === "POST") {
         const source = body.source ?? (latest ? { ...latest } : undefined);
         if (typeof body.body !== "string" || typeof body.data !== "object" || body.data === null || !Number.isInteger(body.base_version) || !source) {
           return send(res, 400, { error: "bad Notify template" });
@@ -1500,21 +1612,56 @@ export function createMockHub({
           subject: body.subject,
           body: body.body,
           data: body.data,
-          by: "agent",
+          by: body.by ?? "agent",
           summary: body.summary ?? null,
           updated_at: new Date().toISOString()
         };
         versions.push(next);
+        if (req.method === "POST") {
+          if (primary.length === 0 && all.length === 0) {
+            primary.push(next);
+            return send(res, 201, { id: PRIMARY_NOTIFY_ID, version: 1, revision: 0 });
+          }
+          moreNotifyTemplates.set(agent.id, [...more, target]);
+          return send(res, 201, { id: target.id, version: 1, revision: 0 });
+        }
         return send(res, 200, { version: next.version, revision: 0 });
       }
     }
-    if (action === "docmosis") {
+    if (action === "docmosis" || action === "docmosis-templates") {
       if (!agent.conversation_id) {
         return send(res, 404, { error: "not a conversation" });
       }
-      const stored = docmosisOf(agent.id);
+      const primary = docmosisOf(agent.id);
+      const more = moreDocmosis.get(agent.id) ?? [];
+      const all = [...(primary.versions.length > 0 ? [{ id: PRIMARY_DOCMOSIS_ID, stored: primary }] : []), ...more];
+      // `/docmosis/…` is the primary; `/docmosis-templates/{id}/…` names one; `/docmosis-templates` lists and creates.
+      const single = action === "docmosis";
+      const id = single ? PRIMARY_DOCMOSIS_ID : parts[4];
+      const sub = single ? parts[4] : parts[5];
+      const versionAt = single ? 5 : 6;
+      let target: { id: string; stored: MockDocmosis } | undefined;
+      if (!single && id === undefined) {
+        if (req.method === "GET") {
+          return send(res, 200, {
+            docmosis_templates: all.map(({ id: itemId, stored }) => {
+              const last = stored.versions[stored.versions.length - 1] as MockDocmosisVersion;
+              return { id: itemId, name: last.name, version: last.version, revision: last.revision, updated_by: last.by };
+            })
+          });
+        }
+        if (req.method !== "POST") {
+          return send(res, 405, { error: "method not allowed" });
+        }
+        target = { id: randomUUID(), stored: { versions: [], assets: primary.assets } };
+      } else {
+        target = single ? { id: PRIMARY_DOCMOSIS_ID, stored: primary } : all.find((item) => item.id === id);
+        if (!target) {
+          return send(res, 404, { error: "that template no longer exists" });
+        }
+      }
+      const stored = target.stored;
       const latest = stored.versions[stored.versions.length - 1];
-      const sub = parts[4];
       if (sub === undefined && req.method === "GET") {
         const asked = url.searchParams.get("version");
         if (!latest) {
@@ -1523,7 +1670,17 @@ export function createMockHub({
         const found = asked === null ? latest : stored.versions.find((v) => v.version === Number(asked));
         return found ? send(res, 200, docmosisBody(stored, found)) : send(res, 404, { error: `the template does not keep version ${asked}` });
       }
-      if (sub === undefined && req.method === "PUT") {
+      if (sub === undefined && req.method === "DELETE") {
+        moreDocmosis.set(
+          agent.id,
+          more.filter((item) => item.id !== target.id)
+        );
+        if (target.id === PRIMARY_DOCMOSIS_ID) {
+          primary.versions.length = 0;
+        }
+        return send(res, 204);
+      }
+      if (sub === undefined && (req.method === "PUT" || req.method === "POST")) {
         const docx = typeof body.docx === "string" ? DECK_ASSET_RE.exec(body.docx)?.[1] : undefined;
         if (
           typeof body.name !== "string" ||
@@ -1540,7 +1697,7 @@ export function createMockHub({
         if (body.base_version !== (latest?.version ?? 0) || (body.base_revision !== undefined && body.base_revision !== latest?.revision)) {
           return send(res, 409, { error: "the template has changed since that version", current: latest ? docmosisBody(stored, latest) : undefined });
         }
-        if (!stored.assets.has(docx)) {
+        if (!primary.assets.has(docx)) {
           return send(res, 400, { error: "the template's .docx is not held", missing_assets: [docx] });
         }
         const next: MockDocmosisVersion = {
@@ -1557,15 +1714,23 @@ export function createMockHub({
           render_error: null
         };
         stored.versions.push(next);
+        if (req.method === "POST") {
+          if (all.length === 0) {
+            primary.versions.push(...stored.versions);
+            return send(res, 201, { id: PRIMARY_DOCMOSIS_ID, version: 1, revision: 0 });
+          }
+          moreDocmosis.set(agent.id, [...more, target]);
+          return send(res, 201, { id: target.id, version: 1, revision: 0 });
+        }
         return send(res, 200, { version: next.version, revision: 0 });
       }
       if (sub === "assets") {
-        const sha = parts[5] ?? "";
+        const sha = parts[single ? 5 : 6] ?? "";
         if (!/^[0-9a-f]{64}$/.test(sha)) {
           return send(res, 400, { error: "not a sha256" });
         }
         if (req.method === "GET") {
-          const bytes = stored.assets.get(sha);
+          const bytes = primary.assets.get(sha);
           if (!bytes) {
             return send(res, 404, { error: "the template does not hold that .docx" });
           }
@@ -1580,11 +1745,11 @@ export function createMockHub({
           if (createHash("sha256").update(octets).digest("hex") !== sha) {
             return send(res, 400, { error: "the bytes' SHA-256 is not the one in the path" });
           }
-          stored.assets.set(sha, octets);
+          primary.assets.set(sha, octets);
           return send(res, 200, { asset: `sha256:${sha}` });
         }
       }
-      if (sub === "versions" && parts[6] === "pdf" && req.method === "PUT") {
+      if (sub === "versions" && parts[versionAt + 1] === "pdf" && req.method === "PUT") {
         const refused = failures.pdf.shift();
         if (refused !== undefined) {
           return send(res, refused, { error: "the hub could not store the PDF" });
@@ -1596,7 +1761,7 @@ export function createMockHub({
         if (asked === null || !/^\d+$/.test(asked)) {
           return send(res, 400, { error: "revision is required" });
         }
-        const found = stored.versions.find((v) => v.version === Number(parts[5]));
+        const found = stored.versions.find((v) => v.version === Number(parts[versionAt]));
         if (!found) {
           return send(res, 404, { error: "the template has no such version" });
         }
@@ -1728,8 +1893,11 @@ export function createMockHub({
     artefacts,
     moreArtefacts,
     decks,
+    moreDecks,
     docmosisTemplates,
+    moreDocmosis,
     notifyTemplates,
+    moreNotifyTemplates,
     videos,
     blobs,
     blobPuts,

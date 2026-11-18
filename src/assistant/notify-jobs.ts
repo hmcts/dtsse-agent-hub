@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { boundedArray } from "../agent-api/bounded-array.ts";
-import { MAX_NOTIFY_NAME, NOTIFY_TYPES, notifyId, notifyProduct } from "./notify.ts";
+import { OLDEST_FIRST, podLacksItems } from "./artefact-store.ts";
+import { ITEMS_CREATE_REFUSED_NOTIFY, MAX_NOTIFY_NAME, NOTIFY_TYPES, notifyId, notifyProduct } from "./notify.ts";
 import { definePodJobKind } from "./pod-jobs.ts";
 
 /**
@@ -58,10 +59,34 @@ export const NOTIFY_LIST = definePodJobKind({
   maxResultBytes: 1024 * 1024
 });
 
+/**
+ * `item_id` is the conversation's Notify template to load into as its next version; without it a new template is made.
+ * A pod that reads only the primary template (`items`) writes the primary whatever it is told, so a request that
+ * would make a second template, or load into one that is not the primary, is refused here, before the pod is asked.
+ */
 export const NOTIFY_PULL = definePodJobKind({
   kind: "notify.pull",
-  args: z.strictObject({ product: notifyProduct, template_id: notifyId }),
-  result: z.strictObject({ version: z.number().int().min(1) }),
+  args: z.strictObject({ product: notifyProduct, template_id: notifyId, item_id: z.uuid().optional() }),
+  precheck: async (db, { conversationId, args }) => {
+    const { item_id } = args as { item_id?: string };
+    const held = await db.assistantNotify.findMany({ where: { conversationId }, select: { id: true }, orderBy: [...OLDEST_FIRST] });
+    if (item_id !== undefined && !held.some((item) => item.id === item_id)) {
+      return { status: 404, error: "that Notify template is no longer in the chat" };
+    }
+    const target = item_id ?? "new";
+    if (held.length > 0 && held[0]?.id !== target) {
+      const conversation = await db.assistantConversation.findUnique({
+        where: { id: conversationId },
+        select: { id: true, virtualAgentId: true, ownerOid: true }
+      });
+      if (conversation !== null && (await podLacksItems(db, conversation, "item-templates"))) {
+        return { status: 409, error: ITEMS_CREATE_REFUSED_NOTIFY };
+      }
+    }
+    return undefined;
+  },
+  /** `item_id` is the template it went into, which a pod that makes a new one reports. */
+  result: z.strictObject({ version: z.number().int().min(1), item_id: z.uuid().optional() }),
   errors: NOTIFY_JOB_ERRORS,
   // The Key Vault read, two Notify calls and the agent-path write of the version.
   timeoutMs: 150_000,

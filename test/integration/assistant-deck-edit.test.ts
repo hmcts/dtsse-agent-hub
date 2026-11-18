@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import * as deckRoute from "../../src/app/api/agent/[agentId]/deck/route.ts";
 import * as claimRoute from "../../src/app/api/orchestrator/claim/route.ts";
 import * as observedRoute from "../../src/app/api/orchestrator/virtual-agents/[id]/observed/route.ts";
-import * as pptxRoute from "../../src/app/api/ui/assistant/decks/[conversationId]/versions/[version]/pptx/route.ts";
+import * as pptxRoute from "../../src/app/api/ui/assistant/decks/[conversationId]/[itemId]/versions/[version]/pptx/route.ts";
 import { assetRef, type DeckOutline, KEEP_VERSIONS } from "../../src/assistant/deck.ts";
 import { answerDeckBuild, readDeckBuild } from "../../src/assistant/deck-build-store.ts";
 import { AMEND_WINDOW_MS, AMENDED_BUILD_ERROR } from "../../src/assistant/deck-edit.ts";
@@ -13,7 +13,7 @@ import { putDeckPptx, readDeck, writeDeck } from "../../src/assistant/deck-store
 import { assistantFrame } from "../../src/assistant/frame.ts";
 import { assistantSuite } from "./assistant-suite.ts";
 import { prisma } from "./database.ts";
-import { ALICE, BOB, CAROL, type Chat, chat, PPTX, png, store } from "./deck-chats.ts";
+import { ALICE, BOB, CAROL, type Chat, chat, PPTX, png, primaryDeck, store } from "./deck-chats.ts";
 import { jsonOf } from "./routes.ts";
 
 vi.mock("next/headers", async () => (await import("./web-session.ts")).nextHeadersMock());
@@ -47,18 +47,24 @@ function outline(title: string, pictures: string[] = []): DeckOutline {
 async function agentDeck(pictures: string[] = []): Promise<Chat> {
   const mine = await chat();
   await writeDeck(prisma, mine.row, { outline: outline("Ways of working", pictures), baseVersion: 0, by: "agent", summary: "First draft" });
-  await putDeckPptx(prisma, mine.row, 1, PPTX);
+  await putDeckPptx(prisma, mine.row, await primaryDeck(mine), 1, PPTX);
   return mine;
 }
 
 async function save(of: Chat, next: DeckOutline, base: { version: number; revision: number }) {
   actAs("alice");
-  return await deckActions.saveDeck({ conversationId: of.id, outline: next, baseVersion: base.version, baseRevision: base.revision });
+  return await deckActions.saveDeck({
+    conversationId: of.id,
+    itemId: await primaryDeck(of),
+    outline: next,
+    baseVersion: base.version,
+    baseRevision: base.revision
+  });
 }
 
 async function versionRow(of: Chat, version: number) {
   return await prisma.assistantDeckVersion.findUniqueOrThrow({
-    where: { conversationId_version: { conversationId: of.id, version } },
+    where: { itemId_version: { itemId: await primaryDeck(of), version } },
     select: { by: true, summary: true, createdAt: true, updatedAt: true, editorOid: true, pptx: true, outline: true }
   });
 }
@@ -113,13 +119,14 @@ describe("saving the deck from the editor", () => {
     // Arrange
     const mine = await agentDeck();
     const start = new Date();
-    await saveDeckEdit(prisma, mine.row, { outline: outline("Mine"), baseVersion: 1, baseRevision: 1, editorOid: ALICE.oid }, start);
-    await putDeckPptx(prisma, mine.row, 2, PPTX);
+    await saveDeckEdit(prisma, mine.row, await primaryDeck(mine), { outline: outline("Mine"), baseVersion: 1, baseRevision: 1, editorOid: ALICE.oid }, start);
+    await putDeckPptx(prisma, mine.row, await primaryDeck(mine), 2, PPTX);
 
     // Act
     const again = await saveDeckEdit(
       prisma,
       mine.row,
+      await primaryDeck(mine),
       { outline: outline("Mine"), baseVersion: 2, baseRevision: 2, editorOid: ALICE.oid },
       new Date(start.getTime() + 1000)
     );
@@ -135,14 +142,18 @@ describe("saving the deck from the editor", () => {
     const mine = await agentDeck();
     const first = new Date();
     await save(mine, { ...outline("Ways of working"), subtitle: "One" }, { version: 1, revision: 1 });
-    const pending = await prisma.assistantDeckBuild.create({ data: { conversationId: mine.id, version: 2 }, select: { id: true } });
-    await putDeckPptx(prisma, mine.row, 2, PPTX);
+    const pending = await prisma.assistantDeckBuild.create({
+      data: { conversationId: mine.id, itemId: await primaryDeck(mine), version: 2 },
+      select: { id: true }
+    });
+    await putDeckPptx(prisma, mine.row, await primaryDeck(mine), 2, PPTX);
     const later = new Date(first.getTime() + 60_000);
 
     // Act
     const amended = await saveDeckEdit(
       prisma,
       mine.row,
+      await primaryDeck(mine),
       { outline: { ...outline("Ways of shipping"), subtitle: "Two" }, baseVersion: 2, baseRevision: 2, editorOid: ALICE.oid },
       later
     );
@@ -167,12 +178,18 @@ describe("saving the deck from the editor", () => {
     // Arrange
     const mine = await agentDeck();
     const first = new Date(Date.now() - 120_000);
-    await saveDeckEdit(prisma, mine.row, { outline: outline("Mine"), baseVersion: 1, baseRevision: 1, editorOid: ALICE.oid }, first);
+    await saveDeckEdit(prisma, mine.row, await primaryDeck(mine), { outline: outline("Mine"), baseVersion: 1, baseRevision: 1, editorOid: ALICE.oid }, first);
     const later = new Date(first.getTime() + 60_000);
-    await saveDeckEdit(prisma, mine.row, { outline: outline("Mine, amended"), baseVersion: 2, baseRevision: 2, editorOid: ALICE.oid }, later);
+    await saveDeckEdit(
+      prisma,
+      mine.row,
+      await primaryDeck(mine),
+      { outline: outline("Mine, amended"), baseVersion: 2, baseRevision: 2, editorOid: ALICE.oid },
+      later
+    );
 
     // Act
-    const listed = await listDeckVersions(prisma, mine.id);
+    const listed = await listDeckVersions(prisma, await primaryDeck(mine));
     const asked = await jsonOf<{ updated_at: string }>(await agent(deckRoute.GET, `/api/agent/${mine.agentId}/deck?version=2`, { agentId: mine.agentId }));
 
     // Assert
@@ -185,12 +202,13 @@ describe("saving the deck from the editor", () => {
     // Arrange
     const mine = await agentDeck();
     const start = new Date();
-    await saveDeckEdit(prisma, mine.row, { outline: outline("One"), baseVersion: 1, baseRevision: 1, editorOid: ALICE.oid }, start);
+    await saveDeckEdit(prisma, mine.row, await primaryDeck(mine), { outline: outline("One"), baseVersion: 1, baseRevision: 1, editorOid: ALICE.oid }, start);
 
     // Act
     const later = await saveDeckEdit(
       prisma,
       mine.row,
+      await primaryDeck(mine),
       { outline: outline("Two"), baseVersion: 2, baseRevision: 2, editorOid: ALICE.oid },
       new Date(start.getTime() + AMEND_WINDOW_MS)
     );
@@ -204,7 +222,10 @@ describe("saving the deck from the editor", () => {
     const mine = await agentDeck();
     await save(mine, outline("Edited"), { version: 1, revision: 1 });
     actAs("alice");
-    expect(await deckActions.restoreDeckVersion({ conversationId: mine.id, version: 1, baseVersion: 2 })).toMatchObject({ restored: true, version: 3 });
+    expect(await deckActions.restoreDeckVersion({ conversationId: mine.id, itemId: await primaryDeck(mine), version: 1, baseVersion: 2 })).toMatchObject({
+      restored: true,
+      version: 3
+    });
     expect(await readDeck(prisma, mine.id)).toMatchObject({ version: 3, revision: 3 });
     const restored = outline("Ways of working");
 
@@ -235,6 +256,58 @@ describe("saving the deck from the editor", () => {
     expect(await readDeck(prisma, mine.id)).toMatchObject({ version: 3, revision: 4, title: "The session's" });
   });
 
+  it("should save into the deck the person names, leaving the conversation's other decks as they were", async () => {
+    // Arrange
+    const mine = await agentDeck();
+    const other = await writeDeck(prisma, mine.row, { create: true, outline: outline("Other"), baseVersion: 0, by: "agent", summary: null });
+    actAs("alice");
+
+    // Act
+    const saved = await deckActions.saveDeck({ conversationId: mine.id, itemId: other.id, outline: outline("Other, edited"), baseVersion: 1, baseRevision: 1 });
+    const missing = await deckActions.saveDeck({
+      conversationId: mine.id,
+      itemId: "00000000-0000-4000-8000-000000000000",
+      outline: outline("Nowhere"),
+      baseVersion: 1,
+      baseRevision: 1
+    });
+
+    // Assert
+    expect(saved).toEqual({ ok: true, saved: true, version: 2, revision: 2, amended: false, unchanged: false });
+    expect(missing).toMatchObject({ ok: false });
+    expect(await readDeck(prisma, mine.id)).toMatchObject({ title: "Ways of working", version: 1, revision: 1, updatedBy: "agent" });
+    expect(await assistantFrame(prisma, mine.agentId)).toMatchObject({
+      decks: [
+        { title: "Ways of working", version: 1, updated_by: "agent" },
+        { id: other.id, title: "Other, edited", version: 2, updated_by: "user", agent_version: 1 }
+      ]
+    });
+  });
+
+  it("should restore a version of the deck the person names, and remove a deck only its owner may", async () => {
+    // Arrange
+    const mine = await agentDeck();
+    const other = await writeDeck(prisma, mine.row, { create: true, outline: outline("Other"), baseVersion: 0, by: "agent", summary: null });
+    await writeDeck(prisma, mine.row, { itemId: other.id, outline: outline("Other v2"), baseVersion: 1, by: "agent", summary: null });
+    actAs("alice");
+    await shareActions.shareChat({ conversationId: mine.id, recipientOid: BOB.oid });
+
+    // Act
+    const restored = await deckActions.restoreDeckVersion({ conversationId: mine.id, itemId: other.id, version: 1, baseVersion: 2 });
+    actAs("bob");
+    const refused = await deckActions.removeDeck({ conversationId: mine.id, itemId: other.id });
+    actAs("alice");
+    const removed = await deckActions.removeDeck({ conversationId: mine.id, itemId: other.id });
+    const again = await deckActions.removeDeck({ conversationId: mine.id, itemId: other.id });
+
+    // Assert
+    expect(restored).toMatchObject({ ok: true, restored: true, version: 3 });
+    expect(refused).toEqual({ ok: false, error: "those slides are not there" });
+    expect(removed).toEqual({ ok: true });
+    expect(again).toMatchObject({ ok: false });
+    expect(await prisma.assistantDeck.count({ where: { conversationId: mine.id } })).toBe(1);
+  });
+
   it("should save the person's edit on top of the newer version when they keep theirs", async () => {
     // Arrange
     const mine = await agentDeck();
@@ -256,7 +329,8 @@ describe("saving the deck from the editor", () => {
     actAs("alice");
     await shareActions.shareChat({ conversationId: mine.id, recipientOid: BOB.oid });
     const refused = { ok: false, error: "those slides are not there" };
-    const attempt = () => deckActions.saveDeck({ conversationId: mine.id, outline: outline("Theirs"), baseVersion: 1, baseRevision: 1 });
+    const itemId = await primaryDeck(mine);
+    const attempt = () => deckActions.saveDeck({ conversationId: mine.id, itemId, outline: outline("Theirs"), baseVersion: 1, baseRevision: 1 });
 
     // Act and assert
     actAs("bob");
@@ -264,7 +338,9 @@ describe("saving the deck from the editor", () => {
     actAs("carol");
     expect(await attempt()).toEqual(refused);
     actAs("alice");
-    expect(await deckActions.saveDeck({ conversationId: mine.id, outline: outline("Mine"), baseVersion: "1", baseRevision: 1 })).toEqual(refused);
+    expect(
+      await deckActions.saveDeck({ conversationId: mine.id, itemId: await primaryDeck(mine), outline: outline("Mine"), baseVersion: "1", baseRevision: 1 })
+    ).toEqual(refused);
     expect(await readDeck(prisma, mine.id)).toMatchObject({ version: 1, revision: 1, updatedBy: "agent" });
   });
 
@@ -291,11 +367,17 @@ describe("saving the deck from the editor", () => {
     const dropped = await store(mine, png(2));
     await writeDeck(prisma, mine.row, { outline: outline("Pictures", [kept]), baseVersion: 0, by: "agent", summary: null });
     const start = new Date();
-    await saveDeckEdit(prisma, mine.row, { outline: outline("Pictures", [kept, dropped]), baseVersion: 1, baseRevision: 1, editorOid: ALICE.oid }, start);
+    await saveDeckEdit(
+      prisma,
+      mine.row,
+      await primaryDeck(mine),
+      { outline: outline("Pictures", [kept, dropped]), baseVersion: 1, baseRevision: 1, editorOid: ALICE.oid },
+      start
+    );
 
     // The person's version is a minute old an hour on, so the amend is inside its window and past the picture's grace.
     await prisma.assistantDeckVersion.update({
-      where: { conversationId_version: { conversationId: mine.id, version: 2 } },
+      where: { itemId_version: { itemId: await primaryDeck(mine), version: 2 } },
       data: { createdAt: new Date(start.getTime() + 60 * 60_000) }
     });
 
@@ -303,6 +385,7 @@ describe("saving the deck from the editor", () => {
     const amended = await saveDeckEdit(
       prisma,
       mine.row,
+      await primaryDeck(mine),
       { outline: outline("Pictures, one", [kept]), baseVersion: 2, baseRevision: 2, editorOid: ALICE.oid },
       new Date(start.getTime() + 61 * 60_000)
     );
@@ -319,11 +402,12 @@ describe("the session after the person's edit", () => {
     // Arrange
     const mine = await agentDeck();
     const start = new Date();
-    await saveDeckEdit(prisma, mine.row, { outline: outline("Mine"), baseVersion: 1, baseRevision: 1, editorOid: ALICE.oid }, start);
+    await saveDeckEdit(prisma, mine.row, await primaryDeck(mine), { outline: outline("Mine"), baseVersion: 1, baseRevision: 1, editorOid: ALICE.oid }, start);
     const read = await jsonOf<{ version: number; revision: number }>(await agent(deckRoute.GET, `/api/agent/${mine.agentId}/deck`, { agentId: mine.agentId }));
     await saveDeckEdit(
       prisma,
       mine.row,
+      await primaryDeck(mine),
       { outline: outline("Mine, amended"), baseVersion: 2, baseRevision: 2, editorOid: ALICE.oid },
       new Date(start.getTime() + 1000)
     );
@@ -352,8 +436,14 @@ describe("the session after the person's edit", () => {
     // Arrange
     const mine = await agentDeck();
     const start = new Date();
-    await saveDeckEdit(prisma, mine.row, { outline: outline("Mine"), baseVersion: 1, baseRevision: 1, editorOid: ALICE.oid }, start);
-    await saveDeckEdit(prisma, mine.row, { outline: outline("Mine, amended"), baseVersion: 2, baseRevision: 2, editorOid: ALICE.oid }, start);
+    await saveDeckEdit(prisma, mine.row, await primaryDeck(mine), { outline: outline("Mine"), baseVersion: 1, baseRevision: 1, editorOid: ALICE.oid }, start);
+    await saveDeckEdit(
+      prisma,
+      mine.row,
+      await primaryDeck(mine),
+      { outline: outline("Mine, amended"), baseVersion: 2, baseRevision: 2, editorOid: ALICE.oid },
+      start
+    );
     actAs("alice");
     await forkActions.offerChatFork({ conversationId: mine.id, recipientOid: BOB.oid });
     actAs("bob");
@@ -361,7 +451,13 @@ describe("the session after the person's edit", () => {
 
     // Act
     const forked = await readDeck(prisma, copy);
-    const edited = await deckActions.saveDeck({ conversationId: copy, outline: outline("Bob's"), baseVersion: 1, baseRevision: 1 });
+    const edited = await deckActions.saveDeck({
+      conversationId: copy,
+      itemId: await primaryDeck({ id: copy }),
+      outline: outline("Bob's"),
+      baseVersion: 1,
+      baseRevision: 1
+    });
 
     // Assert
     expect(forked).toMatchObject({ version: 1, revision: 1, updatedBy: "user", title: "Mine, amended" });
@@ -398,18 +494,19 @@ describe("a version the person wrote", () => {
       data: { observedGeneration: row.generation, status: "running", clientFeatures: ["deck-build", "slides-always-on"] }
     });
     await save(mine, outline("Mine"), { version: 1, revision: 1 });
+    const itemId = await primaryDeck(mine);
     const prepare = () =>
       pptxRoute.POST(
-        new NextRequest(`http://localhost:3000/api/ui/assistant/decks/${mine.id}/versions/2/pptx`, {
+        new NextRequest(`http://localhost:3000/api/ui/assistant/decks/${mine.id}/${itemId}/versions/2/pptx`, {
           method: "POST",
           headers: { cookie: "ah_dev_persona=alice" }
         }),
-        { params: Promise.resolve({ conversationId: mine.id, version: "2" }) }
+        { params: Promise.resolve({ conversationId: mine.id, itemId, version: "2" }) }
       );
 
     const asked = await jsonOf<{ status: string; job_id: string }>(await prepare());
     const finished = await prisma.assistantDeckBuild.create({
-      data: { conversationId: mine.id, version: 2, status: "done", pptx: PPTX, finishedAt: new Date() },
+      data: { conversationId: mine.id, itemId: await primaryDeck(mine), version: 2, status: "done", pptx: PPTX, finishedAt: new Date() },
       select: { id: true }
     });
     const heldBefore = (await readDeck(prisma, mine.id)).pptx;
@@ -420,7 +517,7 @@ describe("a version the person wrote", () => {
 
     // Assert
     expect(asked.status).toBe("pending");
-    expect(await readDeckBuild(prisma, ALICE.oid, mine.id, asked.job_id)).toEqual({
+    expect(await readDeckBuild(prisma, ALICE.oid, mine.id, await primaryDeck(mine), asked.job_id)).toEqual({
       status: "failed",
       job_id: asked.job_id,
       version: 2,
@@ -429,9 +526,9 @@ describe("a version the person wrote", () => {
     expect(await prisma.assistantDeckBuild.findUnique({ where: { id: finished.id } })).toBeNull();
     expect(await prisma.assistantDeckBuild.findUniqueOrThrow({ where: { id: asked.job_id }, select: { pptx: true } })).toEqual({ pptx: null });
     expect(heldBefore).toBe(true);
-    expect((await listDeckVersions(prisma, mine.id))[0]).toMatchObject({ version: 2, by: "user", pptx: false });
+    expect((await listDeckVersions(prisma, await primaryDeck(mine)))[0]).toMatchObject({ version: 2, by: "user", pptx: false });
     expect((await readDeck(prisma, mine.id)).pptx).toBe(false);
-    expect(await readDeckVersionOutline(prisma, mine.id, 2)).toMatchObject({ version: 2, pptx: false });
+    expect(await readDeckVersionOutline(prisma, await primaryDeck(mine), 2)).toMatchObject({ version: 2, pptx: false });
   });
 });
 
@@ -443,13 +540,20 @@ describe("the retention with amends", () => {
       await writeDeck(prisma, mine.row, { outline: outline(`v${base + 1}`), baseVersion: base, by: "agent", summary: null });
     }
     const start = new Date();
-    await saveDeckEdit(prisma, mine.row, { outline: outline("Mine"), baseVersion: KEEP_VERSIONS, baseRevision: KEEP_VERSIONS, editorOid: ALICE.oid }, start);
+    await saveDeckEdit(
+      prisma,
+      mine.row,
+      await primaryDeck(mine),
+      { outline: outline("Mine"), baseVersion: KEEP_VERSIONS, baseRevision: KEEP_VERSIONS, editorOid: ALICE.oid },
+      start
+    );
 
     // Act
     for (let revision = KEEP_VERSIONS + 1; revision < KEEP_VERSIONS + 21; revision += 1) {
       const amended = await saveDeckEdit(
         prisma,
         mine.row,
+        await primaryDeck(mine),
         { outline: outline(`Mine ${revision}`), baseVersion: KEEP_VERSIONS + 1, baseRevision: revision, editorOid: ALICE.oid },
         new Date(start.getTime() + 1000)
       );
@@ -457,7 +561,7 @@ describe("the retention with amends", () => {
     }
 
     // Assert
-    const versions = await listDeckVersions(prisma, mine.id);
+    const versions = await listDeckVersions(prisma, await primaryDeck(mine));
     expect(versions).toHaveLength(KEEP_VERSIONS);
     expect(versions[0]).toMatchObject({ version: KEEP_VERSIONS + 1, by: "user" });
     expect(versions.at(-1)?.version).toBe(2);

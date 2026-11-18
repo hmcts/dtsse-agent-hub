@@ -4,11 +4,11 @@ import { conversationItems } from "../transcripts/conversation.ts";
 import { agentConversation } from "../transcripts/views.ts";
 import { listDocuments } from "./artefact-store.ts";
 import { storedHistory, storedStops } from "./conversation-row.ts";
-import { DECK_SELECT, type DeckSummary, deckSummary } from "./deck-store.ts";
-import { DOCMOSIS_SELECT, type DocmosisSummary, docmosisSummary } from "./docmosis-store.ts";
+import { type DeckSummary, listDeckSummaries } from "./deck-store.ts";
+import { type DocmosisSummary, listDocmosisSummaries } from "./docmosis-store.ts";
 import { UNTITLED_DOCUMENT } from "./documents.ts";
 import { FORKED_SELECT, type ForkedView, forkedView } from "./forks.ts";
-import { NOTIFY_SELECT, type NotifySummary, notifySummary } from "./notify-store.ts";
+import { listNotifySummaries, type NotifySummary } from "./notify-store.ts";
 import { hasPod } from "./pods.ts";
 import { productLabel } from "./products.ts";
 import type { SharedConversationRow } from "./shares.ts";
@@ -95,12 +95,12 @@ export interface SharedConversationView {
   earlierHidden: boolean;
   /** The conversation's documents that have been written, oldest first. Read-only here: there is no version to write against. */
   documents: { id: string; title: string; markdown: string }[];
-  /** The latest version of the conversation's slide deck, without its outline, which the viewer reads; `null` when it has none. Read-only here, as the document is. */
-  deck: DeckSummary | null;
-  /** The latest version of the conversation's Docmosis template, without its schema and data, which the viewer reads; `null` when it has none. */
-  docmosis: DocmosisSummary | null;
-  /** The latest version of the conversation's Notify template, without its text, which the viewer reads; `null` when it has none. */
-  notify: NotifySummary | null;
+  /** The latest version of each of the conversation's slide decks, without their outlines, which the viewer reads, oldest first. Read-only here, as the documents are. */
+  decks: DeckSummary[];
+  /** The latest version of each of the conversation's Docmosis templates, oldest first, without their schema and data, which the viewer reads. */
+  docmosisTemplates: DocmosisSummary[];
+  /** The latest version of each of the conversation's Notify templates, oldest first, without their text, which the viewer reads. */
+  notifyTemplates: NotifySummary[];
   /** The conversation's journey video, without its reports, which the viewer reads; `null` when it has none. */
   video: VideoSummary | null;
   /** `owner` when the owner is looking at their own share, which is how they see what a recipient sees. */
@@ -145,9 +145,6 @@ export async function sharedConversation(
       agentId: true,
       owner: { select: { name: true } },
       ...FORKED_SELECT,
-      ...DECK_SELECT,
-      ...DOCMOSIS_SELECT,
-      ...NOTIFY_SELECT,
       ...VIDEO_SELECT
     }
   });
@@ -155,11 +152,12 @@ export async function sharedConversation(
     return undefined;
   }
   const agentId = row.agentId;
-  const [page, documents, deck] = await Promise.all([
+  const [page, documents, decks] = await Promise.all([
     agentId === null ? undefined : agentConversation(db, conversation.ownerOid, { id: agentId, ownerOid: conversation.ownerOid }),
     listDocuments(db, conversation.id),
-    deckSummary(db, conversation.id, row)
+    listDeckSummaries(db, conversation.id)
   ]);
+  const notifyTemplates = await listNotifySummaries(db, conversation.id);
   const items = page === undefined ? [] : conversationItems(page.messages, page.entries);
   return {
     id: conversation.id,
@@ -177,9 +175,9 @@ export async function sharedConversation(
     documents: documents
       .filter((document) => document.version > 0)
       .map((document) => ({ id: document.id, title: document.title ?? UNTITLED_DOCUMENT, markdown: document.markdown })),
-    deck,
-    docmosis: docmosisSummary(row),
-    notify: notifySummary(row),
+    decks,
+    docmosisTemplates: await listDocmosisSummaries(db, conversation.id),
+    notifyTemplates,
     video: videoSummary(row),
     access,
     fork

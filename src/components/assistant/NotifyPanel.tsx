@@ -102,19 +102,20 @@ async function runPodJob<T>(
 
 /** The latest version, read when the panel opens, again whenever the page says the version or revision moved on, and on `refresh`. */
 function useNotifyView(notify: NotifySummary | null, conversationId: string): { view: NotifyView | null; failed: boolean; refresh: () => void } {
+  const itemId = notify?.id ?? null;
   const version = notify?.version ?? 0;
   const revision = notify?.revision ?? 0;
   const [read, setRead] = useState<{ view: NotifyView | null; failed: boolean }>({ view: null, failed: false });
   const [attempt, setAttempt] = useState(0);
   // biome-ignore lint/correctness/useExhaustiveDependencies: a newer version or revision, or another attempt, is what makes the template worth reading again
   useEffect(() => {
-    if (version === 0 && attempt === 0) {
+    if (itemId === null || (version === 0 && attempt === 0)) {
       return;
     }
     const controller = new AbortController();
     void (async () => {
       try {
-        const response = await fetch(notifyUrl(conversationId), { cache: "no-store", signal: controller.signal });
+        const response = await fetch(notifyUrl(conversationId, itemId), { cache: "no-store", signal: controller.signal });
         if (response.status === 404) {
           setRead({ view: null, failed: false });
           return;
@@ -130,20 +131,20 @@ function useNotifyView(notify: NotifySummary | null, conversationId: string): { 
       }
     })();
     return () => controller.abort();
-  }, [conversationId, version, revision, attempt]);
+  }, [conversationId, itemId, version, revision, attempt]);
   return { view: read.view, failed: read.failed, refresh: () => setAttempt((count) => count + 1) };
 }
 
-function useVersions(conversationId: string, version: number): NotifyVersionEntry[] {
+function useVersions(conversationId: string, itemId: string | null, version: number): NotifyVersionEntry[] {
   const [versions, setVersions] = useState<NotifyVersionEntry[]>([]);
   useEffect(() => {
-    if (version === 0) {
+    if (itemId === null || version === 0) {
       return;
     }
     const controller = new AbortController();
     void (async () => {
       try {
-        const response = await fetch(notifyVersionsUrl(conversationId), { cache: "no-store", signal: controller.signal });
+        const response = await fetch(notifyVersionsUrl(conversationId, itemId), { cache: "no-store", signal: controller.signal });
         if (response.ok) {
           setVersions(((await response.json()) as { versions: NotifyVersionEntry[] }).versions);
         }
@@ -152,20 +153,20 @@ function useVersions(conversationId: string, version: number): NotifyVersionEntr
       }
     })();
     return () => controller.abort();
-  }, [conversationId, version]);
+  }, [conversationId, itemId, version]);
   return versions;
 }
 
-function useOlderVersion(conversationId: string, picked: number | null): { view: NotifyView | null; failed: boolean } {
+function useOlderVersion(conversationId: string, itemId: string | null, picked: number | null): { view: NotifyView | null; failed: boolean } {
   const [read, setRead] = useState<{ view: NotifyView | null; failed: boolean; version: number | null }>({ view: null, failed: false, version: null });
   useEffect(() => {
-    if (picked === null) {
+    if (itemId === null || picked === null) {
       return;
     }
     const controller = new AbortController();
     void (async () => {
       try {
-        const response = await fetch(notifyVersionUrl(conversationId, picked), { cache: "no-store", signal: controller.signal });
+        const response = await fetch(notifyVersionUrl(conversationId, itemId, picked), { cache: "no-store", signal: controller.signal });
         if (!response.ok) {
           throw new Error(`the version read answered ${response.status}`);
         }
@@ -177,7 +178,7 @@ function useOlderVersion(conversationId: string, picked: number | null): { view:
       }
     })();
     return () => controller.abort();
-  }, [conversationId, picked]);
+  }, [conversationId, itemId, picked]);
   return picked !== null && read.version === picked ? { view: read.view, failed: read.failed } : { view: null, failed: false };
 }
 
@@ -193,6 +194,7 @@ type ListState =
  */
 function Picker({
   conversationId,
+  itemId,
   initialProduct,
   list,
   onList,
@@ -201,13 +203,15 @@ function Picker({
   announce
 }: {
   conversationId: string;
+  /** The template a load replaces, as its next version; `null` makes a new template. */
+  itemId: string | null;
   initialProduct: string;
   list: ListState;
   onList: (product: string) => void;
   /** Whether to go on, having set any unsaved draft aside; false when the person would rather keep it. */
   beforeOpen: () => boolean;
-  /** The version the load answered, or `null` when it failed. */
-  onLoaded: (version: number | null) => void;
+  /** The version the load answered and the template it went into, or `null` when it failed. */
+  onLoaded: (loaded: { version: number; itemId: string | null } | null) => void;
   announce: (text: string) => void;
 }) {
   const [product, setProduct] = useState(initialProduct);
@@ -231,11 +235,17 @@ function Picker({
     setPulling(true);
     setError(null);
     try {
-      const outcome = await runPodJob<{ version: number }>(conversationId, "notify.pull", { product, template_id: template }, events, own.signal);
+      const outcome = await runPodJob<{ version: number; item_id?: string }>(
+        conversationId,
+        "notify.pull",
+        { product, template_id: template, ...(itemId === null ? {} : { item_id: itemId }) },
+        events,
+        own.signal
+      );
       if (own.signal.aborted) {
         return;
       }
-      onLoaded(outcome.ok ? outcome.result.version : null);
+      onLoaded(outcome.ok ? { version: outcome.result.version, itemId: outcome.result.item_id ?? null } : null);
       if (outcome.ok) {
         announce("The Notify template is loaded");
       } else {
@@ -419,8 +429,29 @@ async function copy(text: string, announce: (text: string) => void, what: string
   }
 }
 
+/** Asks before a template goes: what was copied from it into Notify stays there. */
+function ConfirmRemove({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: () => void }) {
+  const cancel = useRef<HTMLButtonElement>(null);
+  useEffect(() => cancel.current?.focus(), []);
+  return (
+    <div
+      role="alertdialog"
+      aria-label="Remove this Notify template?"
+      className="flex flex-wrap items-center gap-2 border-b border-asst-field bg-asst-raised px-4 py-2.5 text-[13px]"
+    >
+      <span className="min-w-0 flex-1">Remove this Notify template from the chat? Nothing in Notify changes.</span>
+      <button ref={cancel} type="button" onClick={onCancel} className="rounded-lg border border-asst-strong px-3 py-1 hover:bg-asst-active">
+        Cancel
+      </button>
+      <button type="button" onClick={onConfirm} className="rounded-lg bg-asst-accent px-3 py-1 font-semibold text-asst-ink hover:bg-asst-accent-hover">
+        Remove
+      </button>
+    </div>
+  );
+}
+
 /**
- * The conversation's GOV.UK Notify template beside the chat, in the Docmosis panel's shell. The owner picks a product
+ * One of the conversation's GOV.UK Notify templates beside the chat, in the Docmosis panel's shell. The owner picks a product
  * and template, which their pod reads from Notify (`notify.list`, `notify.pull`), fills in the personalisation, and
  * edits the subject and body, each saved 800 ms after they stop typing, one save at a time. The preview is Notify's own
  * while the draft is Notify's text with nothing filled in, and an approximate local render otherwise. A reader sees the
@@ -435,9 +466,12 @@ export function NotifyPanel({
   narrow,
   announce,
   onBusy,
+  onRemove,
+  onCreated,
   embedded = false
 }: {
   conversationId: string;
+  /** The template the panel shows; `null` for a new one, whose picker makes it. */
   notify: NotifySummary | null;
   owner: boolean;
   /** Whether the owner may load templates from Notify, which is a pod job: not for a chat with no pod. */
@@ -446,12 +480,17 @@ export function NotifyPanel({
   narrow: boolean;
   announce: (text: string) => void;
   onBusy?: (busy: boolean) => void;
+  /** Removes the template, answering why it could not be; left out, the panel offers no Remove. */
+  onRemove?: () => Promise<string | null>;
+  /** A load made no template to replace, so it made a new one: its id. */
+  onCreated?: (itemId: string) => void;
   embedded?: boolean;
 }) {
+  const itemId = notify?.id ?? null;
   const latest = useNotifyView(notify, conversationId);
-  const versions = useVersions(conversationId, notify?.version ?? 0);
+  const versions = useVersions(conversationId, itemId, notify?.version ?? 0);
   const [picked, setPicked] = useState<number | null>(null);
-  const older = useOlderVersion(conversationId, picked);
+  const older = useOlderVersion(conversationId, itemId, picked);
   const events = useHubSubscribe("assistant_pod_job");
 
   const [view, setView] = useState<NotifyView | null>(null);
@@ -461,6 +500,10 @@ export function NotifyPanel({
   const [mode, setMode] = useState<"preview" | "edit">("preview");
   const [list, setList] = useState<ListState>({ state: "idle" });
   const [saved, setSaved] = useState(0);
+  const [removing, setRemoving] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
+  /** Set once the person has removed the template, so nothing typed is saved back into it. */
+  const removed = useRef(false);
 
   const draftNow = useRef(draft);
   const savedDraft = useRef<Draft>(draft);
@@ -538,7 +581,7 @@ export function NotifyPanel({
 
   async function send(): Promise<void> {
     const from = base.current;
-    if (from === null) {
+    if (from === null || itemId === null) {
       return;
     }
     inFlight.current = true;
@@ -547,7 +590,7 @@ export function NotifyPanel({
     const sent = draftNow.current;
     let response: Response | null = null;
     try {
-      response = await fetch(notifySaveUrl(conversationId), {
+      response = await fetch(notifySaveUrl(conversationId, itemId), {
         method: "POST",
         headers: { "content-type": "application/json" },
         cache: "no-store",
@@ -601,7 +644,7 @@ export function NotifyPanel({
 
   async function flush(): Promise<void> {
     timer.current = null;
-    if (!owner || base.current === null || conflictNow.current !== null) {
+    if (!owner || base.current === null || conflictNow.current !== null || removed.current) {
       return;
     }
     if (opening.current || !dirty()) {
@@ -650,12 +693,29 @@ export function NotifyPanel({
     return true;
   }
 
-  function onLoaded(version: number | null): void {
+  function onLoaded(loaded: { version: number; itemId: string | null } | null): void {
     // A failed load, or one that wrote nothing new, brings no version to take in.
-    if (version === null || (base.current !== null && version <= base.current.version)) {
+    if (loaded === null || (base.current !== null && loaded.version <= base.current.version)) {
       opening.current = false;
     }
+    if (loaded?.itemId != null && itemId === null) {
+      onCreated?.(loaded.itemId);
+    }
     latest.refresh();
+  }
+
+  async function remove(): Promise<void> {
+    if (onRemove === undefined) {
+      return;
+    }
+    removed.current = true;
+    stopTimer();
+    const problem = await onRemove().catch(() => "could not remove the Notify template");
+    if (problem !== null && mounted.current) {
+      removed.current = false;
+      setRemoving(false);
+      setRemoveError(problem);
+    }
   }
 
   async function listTemplates(product: string): Promise<void> {
@@ -769,6 +829,15 @@ export function NotifyPanel({
           Notify
         </span>
         <h2 className="min-w-0 flex-1 truncate text-[15px] font-medium text-asst-text">{name}</h2>
+        {onRemove === undefined || notify === null ? null : (
+          <button
+            type="button"
+            onClick={() => setRemoving(true)}
+            className="h-8 shrink-0 rounded-lg px-2 text-[13px] text-asst-muted hover:bg-asst-field hover:text-asst-text"
+          >
+            Remove
+          </button>
+        )}
         {embedded ? null : (
           <button
             type="button"
@@ -780,10 +849,17 @@ export function NotifyPanel({
           </button>
         )}
       </div>
+      {removing ? <ConfirmRemove onCancel={() => setRemoving(false)} onConfirm={() => void remove()} /> : null}
+      {removeError === null ? null : (
+        <p role="alert" className="border-b border-asst-field px-4 py-2 text-[13px] text-asst-error">
+          {removeError}
+        </p>
+      )}
       {owner && canPick ? (
         <Picker
           key={openProduct ?? ""}
           conversationId={conversationId}
+          itemId={itemId}
           initialProduct={openProduct ?? ""}
           list={list}
           onList={(product) => void listTemplates(product)}

@@ -7,6 +7,8 @@ import {
   exportArtefactToJira,
   pinConversation,
   removeArtefact,
+  removeDocmosisTemplate,
+  removeNotifyTemplate,
   renameConversation,
   saveArtefact,
   saveAssistantModel,
@@ -19,7 +21,7 @@ import {
 import { deleteAllAssistantFiles, deleteAssistantFile } from "@/app/_actions/assistant-files";
 import { readAssistantAgent, readGitIdentity, readSchedule, saveSchedule } from "@/app/_actions/assistant-settings";
 import { clearGitIdentity, removeCredential, resetClaudeMd, saveClaudeMd, saveCredential, saveGitIdentity } from "@/app/_actions/credentials";
-import { restoreDeckVersion, saveDeck } from "@/app/_actions/decks";
+import { removeDeck, restoreDeckVersion, saveDeck } from "@/app/_actions/decks";
 import { saveExportDefaults } from "@/app/_actions/export-defaults";
 import { archiveFeedbackProject, pinFeedbackProject } from "@/app/_actions/feedback";
 import { offerChatFork, withdrawChatFork } from "@/app/_actions/forks";
@@ -66,6 +68,9 @@ const ACTIONS: ChatActions = {
   remove: deleteConversation,
   answerQuestion: answerAgentQuestion,
   removeArtefact,
+  removeDeck,
+  removeDocmosisTemplate,
+  removeNotifyTemplate,
   saveArtefact,
   exportToJira: exportArtefactToJira,
   exportToGithub: exportArtefactToGithub,

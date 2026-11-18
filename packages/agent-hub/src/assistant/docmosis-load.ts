@@ -34,6 +34,8 @@ const MAX_NAME = 200;
 const MAX_DETAIL = 300;
 
 export type DocmosisLoadArgs = {
+  /** The template the load replaces; left out, it makes a new one. */
+  item?: string;
   owner: string;
   repo: string;
   folder: string;
@@ -43,7 +45,8 @@ export type DocmosisLoadArgs = {
   base_revision: number;
 };
 
-const ARG_KEYS: readonly string[] = ["owner", "repo", "folder", "path", "blob_sha", "base_version", "base_revision"];
+const ARG_KEYS: readonly string[] = ["item", "owner", "repo", "folder", "path", "blob_sha", "base_version", "base_revision"];
+const ITEM_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const isCount = (value: unknown): value is number => typeof value === "number" && Number.isInteger(value) && value >= 0;
 
@@ -63,6 +66,7 @@ export function parseLoadArgs(value: unknown): DocmosisLoadArgs | null {
     !isLibraryFolder(raw.folder) ||
     typeof raw.path !== "string" ||
     !isLibraryPath(raw.path, raw.folder) ||
+    (raw.item !== undefined && !(typeof raw.item === "string" && ITEM_RE.test(raw.item))) ||
     !isGitSha(raw.blob_sha) ||
     !isCount(raw.base_version) ||
     !isCount(raw.base_revision)
@@ -70,6 +74,7 @@ export function parseLoadArgs(value: unknown): DocmosisLoadArgs | null {
     return null;
   }
   return {
+    ...(raw.item === undefined ? {} : { item: raw.item as string }),
     owner: raw.owner,
     repo: raw.repo,
     folder: raw.folder,
@@ -240,7 +245,12 @@ function stopIfAborted(signal: AbortSignal): void {
   }
 }
 
-async function load(deps: DocmosisLoadDeps, raw: unknown, ctx: PodJobContext, held: { token: string | null }): Promise<{ version: number; revision: number }> {
+async function load(
+  deps: DocmosisLoadDeps,
+  raw: unknown,
+  ctx: PodJobContext,
+  held: { token: string | null }
+): Promise<{ item?: string; version: number; revision: number }> {
   const args = parseLoadArgs(raw);
   if (args === null) {
     throw new PodJobError("failed", "That is not a template from the library.");
@@ -260,14 +270,18 @@ async function load(deps: DocmosisLoadDeps, raw: unknown, ctx: PodJobContext, he
   const docx = await readTemplate(deps, fs, ctx, args, token, file);
   const schema = await readSchema(deps, ctx, file, name);
   // Checked again between the asset and the version, which is the write that records the pick and finishes the job.
-  const api: Pick<PodJobContext["api"], "putDocmosisAsset" | "putDocmosis"> = {
+  const api: Pick<PodJobContext["api"], "putDocmosisAsset" | "putDocmosis" | "createDocmosis"> = {
     putDocmosisAsset: (agentId, sha256, bytes) => {
       stopIfAborted(ctx.signal);
       return ctx.api.putDocmosisAsset(agentId, sha256, bytes);
     },
-    putDocmosis: (agentId, body) => {
+    putDocmosis: (agentId, body, id) => {
       stopIfAborted(ctx.signal);
-      return ctx.api.putDocmosis(agentId, body);
+      return ctx.api.putDocmosis(agentId, body, id);
+    },
+    createDocmosis: (agentId, body) => {
+      stopIfAborted(ctx.signal);
+      return ctx.api.createDocmosis(agentId, body);
     }
   };
   const published = await publishDocmosis(api, ctx.agentId, {
@@ -278,12 +292,14 @@ async function load(deps: DocmosisLoadDeps, raw: unknown, ctx: PodJobContext, he
     base: args.base_version,
     baseRevision: args.base_revision,
     summary: clip(`Loaded ${name}`, MAX_NAME),
-    pick: ctx.jobId
+    pick: ctx.jobId,
+    ...(args.item === undefined ? { create: true } : { item: args.item })
   });
   if ("conflict" in published) {
     throw new PodJobError("conflict", "The template in this chat changed while yours was loading.");
   }
-  return { version: published.written.version, revision: published.written.revision };
+  const item = published.written.id ?? published.written.item ?? args.item;
+  return { ...(item === undefined ? {} : { item }), version: published.written.version, revision: published.written.revision };
 }
 
 /**

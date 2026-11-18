@@ -69,9 +69,15 @@ export function SharedChat({ view, forkChat }: { view: SharedConversationView; f
               <AssistantMarkdown source={document.markdown} document />
             </section>
           ))}
-          {view.deck === null ? null : <SharedDeck conversationId={view.id} deck={view.deck} />}
-          {view.docmosis === null ? null : <SharedDocmosis conversationId={view.id} docmosis={view.docmosis} />}
-          {view.notify === null ? null : <SharedNotify conversationId={view.id} notify={view.notify} />}
+          {view.decks.map((deck) => (
+            <SharedDeck key={deck.id} conversationId={view.id} deck={deck} />
+          ))}
+          {view.docmosisTemplates.map((docmosis) => (
+            <SharedDocmosis key={docmosis.id} conversationId={view.id} docmosis={docmosis} />
+          ))}
+          {view.notifyTemplates.map((notify) => (
+            <SharedNotify key={notify.id} conversationId={view.id} notify={notify} />
+          ))}
           {view.video === null ? null : <SharedVideo conversationId={view.id} video={view.video} />}
           <p className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs text-asst-faint">
             <Link href={SHARED_CHATS} className="text-asst-accent underline hover:text-asst-accent-hover">

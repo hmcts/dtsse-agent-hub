@@ -27,15 +27,15 @@ import {
   sidebarConversations,
   unsentConversation
 } from "./conversation-store.ts";
-import { DECK_SELECT, type DeckSummary, deckSummary } from "./deck-store.ts";
-import { DOCMOSIS_SELECT, type DocmosisSummary, docmosisSummary } from "./docmosis-store.ts";
+import { type DeckSummary, listDeckSummaries } from "./deck-store.ts";
+import { type DocmosisSummary, listDocmosisSummaries } from "./docmosis-store.ts";
 import type { DocumentKind } from "./documents.ts";
 import { FORKED_SELECT, type ForkedView, forkedView } from "./forks.ts";
 import { GITHUB_SELECT, type GithubExportView, githubExportView } from "./github.ts";
 import { bySidebarOrder, groupForSidebar, type SidebarGroup } from "./grouping.ts";
 import { JIRA_SELECT, type JiraExportView, jiraExportView } from "./jira.ts";
 import { LOCAL_SESSION, type LocalSession } from "./local-session.ts";
-import { NOTIFY_SELECT, type NotifySummary, notifySummary } from "./notify-store.ts";
+import { listNotifySummaries, type NotifySummary } from "./notify-store.ts";
 import { chatCredentials, onboarded, type Readiness, readiness } from "./onboarding.ts";
 import { hasPod } from "./pods.ts";
 import { productLabel } from "./products.ts";
@@ -398,12 +398,12 @@ export interface ConversationView {
   sessionDetail: string | null;
   /** Every document, oldest first, each with its exports. */
   documents: DocumentView[];
-  /** The latest version of the conversation's slide deck, without its outline, which the panel reads; `null` while it has none. */
-  deck: DeckSummary | null;
-  /** The latest version of the conversation's Docmosis template, without its schema and data, which the panel reads; `null` while it has none. */
-  docmosis: DocmosisSummary | null;
-  /** The latest version of the conversation's Notify template, without its text, which the panel reads; `null` while it has none. */
-  notify: NotifySummary | null;
+  /** The latest version of each of the conversation's slide decks, oldest first, without their outlines, which the panel reads. */
+  decks: DeckSummary[];
+  /** The latest version of each of the conversation's Docmosis templates, oldest first, without their schema and data, which the panel reads. */
+  docmosisTemplates: DocmosisSummary[];
+  /** The latest version of each of the conversation's Notify templates, oldest first, without their text, which the panel reads. */
+  notifyTemplates: NotifySummary[];
   /** The conversation's journey video, without its captions, chapters and reports, which the panel reads; `null` while it has none. */
   video: VideoSummary | null;
   /** Whether the viewer may post the video to Jira: its owner, in a chat with a pod to run the post on (`canPostVideo`). */
@@ -462,17 +462,17 @@ export async function conversationView(db: Database, conversation: ConversationR
   const forkDeckAndDocmosis = async () => {
     const row = await db.assistantConversation.findUnique({
       where: { id: conversation.id },
-      select: { ...FORKED_SELECT, ...DECK_SELECT, ...DOCMOSIS_SELECT, ...NOTIFY_SELECT, ...VIDEO_SELECT }
+      select: { ...FORKED_SELECT, ...VIDEO_SELECT }
     });
     return {
       fork: row,
-      deck: row === null ? null : await deckSummary(db, conversation.id, row),
-      docmosis: row === null ? null : docmosisSummary(row),
-      notify: row === null ? null : notifySummary(row),
+      decks: await listDeckSummaries(db, conversation.id),
+      docmosisTemplates: await listDocmosisSummaries(db, conversation.id),
+      notifyTemplates: await listNotifySummaries(db, conversation.id),
       video: row === null ? null : videoSummary(row)
     };
   };
-  const [current, documents, { fork, deck, docmosis, notify, video }, page, questions] = await Promise.all([
+  const [current, documents, { fork, decks, docmosisTemplates, notifyTemplates, video }, page, questions] = await Promise.all([
     db.agent.findUnique({ where: { id: agentId }, select: { status: true, skills: true, clientFeatures: true, repo: true, branch: true } }),
     documentViews(db, conversation.id),
     forkDeckAndDocmosis(),
@@ -499,9 +499,9 @@ export async function conversationView(db: Database, conversation: ConversationR
     sessionState: conversation.sessionState,
     sessionDetail: conversation.sessionDetail,
     documents,
-    deck,
-    docmosis,
-    notify,
+    decks,
+    docmosisTemplates,
+    notifyTemplates,
     video,
     canPostVideo: canPostVideo(conversationAccess(conversation.ownerOid, conversation, [])) && hasPod(conversation),
     page,

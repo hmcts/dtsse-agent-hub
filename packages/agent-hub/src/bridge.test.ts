@@ -22,9 +22,12 @@ import {
   parseAssistantFrame,
   parseAssistantProduct,
   parseConfluenceExportFrame,
+  parseDecks,
   parseDirectEventMessage,
+  parseDocmosisTemplates,
   parseGithubExportFrame,
-  parseJiraExportFrame
+  parseJiraExportFrame,
+  parseNotifyTemplates
 } from "./frames.ts";
 import { nextBackoff, RAPID_CLOSE_MS, RAPID_CLOSES_BEFORE_BACKOFF, reconnectDelay } from "./reconnect.ts";
 import { ensureStateDir, readText, statePath, writeJson } from "./session.ts";
@@ -398,16 +401,25 @@ describe("parseAssistantFrame", () => {
       deck_updated_by: "user",
       deck_revision: 3,
       deck_agent_version: 0,
+      decks: null,
       docmosis_version: 2,
       docmosis_revision: 1,
       docmosis_updated_by: "user",
+      docmosis_templates: null,
       notify_version: 3,
       notify_revision: 2,
       notify_updated_by: "agent"
     };
 
     // Act & Assert
-    expect(parseAssistantFrame(sent)).toEqual({ ...sent, artefacts: null, jira_export: null, github_export: null, confluence_export: null });
+    expect(parseAssistantFrame(sent)).toEqual({
+      ...sent,
+      artefacts: null,
+      notify_templates: null,
+      jira_export: null,
+      github_export: null,
+      confluence_export: null
+    });
     expect(parseAssistantFrame({ conversation_id: "c1", product: null, product_label: null, artefact_version: 0, artefact_updated_by: null })).toEqual({
       conversation_id: "c1",
       product: null,
@@ -420,12 +432,15 @@ describe("parseAssistantFrame", () => {
       deck_updated_by: undefined,
       deck_revision: null,
       deck_agent_version: null,
+      decks: null,
       docmosis_version: null,
       docmosis_revision: null,
       docmosis_updated_by: undefined,
+      docmosis_templates: null,
       notify_version: null,
       notify_revision: null,
       notify_updated_by: undefined,
+      notify_templates: null,
       jira_export: null,
       github_export: null,
       confluence_export: null
@@ -475,16 +490,73 @@ describe("parseAssistantFrame", () => {
       deck_updated_by: undefined,
       deck_revision: null,
       deck_agent_version: null,
+      decks: null,
       docmosis_version: null,
       docmosis_revision: null,
       docmosis_updated_by: undefined,
+      docmosis_templates: null,
       notify_version: null,
       notify_revision: null,
       notify_updated_by: undefined,
+      notify_templates: null,
       jira_export: null,
       github_export: null,
       confluence_export: null
     });
+  });
+});
+
+describe("parseAssistantFrame's Docmosis templates", () => {
+  const ID = "0b1f3d4a-0000-4000-8000-0000000000e1";
+
+  it("should keep each template with its id, name, version, revision and author when the frame lists them", () => {
+    expect(parseDocmosisTemplates([{ id: ID, name: "Claim\n form", version: 2, revision: 1, updated_by: "user" }])).toEqual([
+      { id: ID, name: "Claim form", version: 2, revision: 1, updated_by: "user" }
+    ]);
+  });
+
+  it("should drop an entry whose id is not a uuid or whose version is not a number, and answer null for a frame that lists none", () => {
+    expect(parseDocmosisTemplates([{ id: "x; rm -rf", name: "a", version: 1 }, { id: ID, name: "b", version: "1" }, "no"])).toEqual([]);
+    expect(parseDocmosisTemplates(undefined)).toBeNull();
+  });
+
+  it("should default what a template leaves out", () => {
+    expect(parseDocmosisTemplates([{ id: ID, version: 1 }])).toEqual([{ id: ID, name: "", version: 1, revision: 0, updated_by: null }]);
+  });
+});
+
+describe("parseAssistantFrame's Notify templates", () => {
+  const ID = "0b1f3d4a-0000-4000-8000-0000000000c1";
+
+  it("should keep each template with its id, name, version, revision and author when the frame lists them", () => {
+    expect(parseNotifyTemplates([{ id: ID, name: "Claim\n received", version: 2, revision: 1, updated_by: "user" }])).toEqual([
+      { id: ID, name: "Claim received", version: 2, revision: 1, updated_by: "user" }
+    ]);
+  });
+
+  it("should drop an entry whose id is not a uuid or whose version is not a number, and answer null for a frame that lists none", () => {
+    expect(parseNotifyTemplates([{ id: "x; rm -rf", name: "a", version: 1 }, { id: ID, name: "b", version: "1" }, "no"])).toEqual([]);
+    expect(parseNotifyTemplates(undefined)).toBeNull();
+  });
+});
+
+describe("parseAssistantFrame's decks", () => {
+  const ID = "0b1f3d4a-0000-4000-8000-0000000000d1";
+
+  it("should keep each deck with its id, title, version, revision, author and agent version when the frame lists them", () => {
+    expect(parseDecks([{ id: ID, title: "Plan\n B", version: 2, revision: 3, updated_by: "user", agent_version: 1 }])).toEqual([
+      { id: ID, title: "Plan B", version: 2, revision: 3, updated_by: "user", agent_version: 1 }
+    ]);
+  });
+
+  it("should default what a deck leaves out and drop an entry whose id is not a uuid or whose version is not a number", () => {
+    expect(parseDecks([{ id: ID, version: 1 }, { id: "x; rm -rf", version: 1 }, { id: ID, version: "1" }, "no"])).toEqual([
+      { id: ID, title: "", version: 1, revision: 0, updated_by: null, agent_version: 0 }
+    ]);
+  });
+
+  it("should answer null for a frame that lists no decks, as a hub older than several decks sends", () => {
+    expect(parseDecks(undefined)).toBeNull();
   });
 });
 

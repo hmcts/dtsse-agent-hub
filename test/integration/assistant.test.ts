@@ -729,12 +729,15 @@ describe("conversations", () => {
       deck_updated_by: null,
       deck_revision: 0,
       deck_agent_version: 0,
+      decks: [],
       docmosis_version: 0,
       docmosis_revision: 0,
       docmosis_updated_by: null,
+      docmosis_templates: [],
       notify_version: 0,
       notify_revision: 0,
-      notify_updated_by: null
+      notify_updated_by: null,
+      notify_templates: []
     };
 
     // A wake is "this conversation needs a session", so there is no message whose files the field could name.
@@ -1428,7 +1431,7 @@ describe("several documents", () => {
       error: ITEMS_CREATE_REFUSED
     });
 
-    await prisma.virtualAgent.update({ where: { id: assistantId }, data: { clientFeatures: ["lookups", "github-lookups", "items"] } });
+    await prisma.virtualAgent.update({ where: { id: assistantId }, data: { clientFeatures: ["lookups", "github-lookups", "items", "item-templates"] } });
     expect((await api.create({ kind: "ticket", markdown: "As a clerk" })).status).toBe(201);
   });
 

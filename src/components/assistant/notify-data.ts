@@ -10,13 +10,14 @@ export type JsonObject = { [key: string]: unknown };
 
 /** What the page carries about the latest version: `src/assistant/notify-store.ts`'s `NotifySummary`. */
 export interface NotifySummary {
+  id: string;
   name: string;
   version: number;
   revision: number;
   updatedBy: "user" | "agent";
 }
 
-/** One version, as `GET /api/ui/assistant/notify/{id}` answers it. */
+/** One version, as `GET /api/ui/assistant/notify/{conversationId}/{itemId}` answers it. */
 export interface NotifyView {
   version: number;
   revision: number;
@@ -55,12 +56,12 @@ export interface ListedTemplate {
   version: number;
 }
 
-export function notifyUrl(conversationId: string): string {
-  return `/api/ui/assistant/notify/${encodeURIComponent(conversationId)}`;
+export function notifyUrl(conversationId: string, itemId: string): string {
+  return `/api/ui/assistant/notify/${encodeURIComponent(conversationId)}/${encodeURIComponent(itemId)}`;
 }
-export const notifySaveUrl = (conversationId: string): string => `${notifyUrl(conversationId)}/save`;
-export const notifyVersionsUrl = (conversationId: string): string => `${notifyUrl(conversationId)}/versions`;
-export const notifyVersionUrl = (conversationId: string, version: number): string => `${notifyUrl(conversationId)}/versions/${version}`;
+export const notifySaveUrl = (conversationId: string, itemId: string): string => `${notifyUrl(conversationId, itemId)}/save`;
+export const notifyVersionsUrl = (conversationId: string, itemId: string): string => `${notifyUrl(conversationId, itemId)}/versions`;
+export const notifyVersionUrl = (conversationId: string, itemId: string, version: number): string => `${notifyUrl(conversationId, itemId)}/versions/${version}`;
 
 export const TYPE_LABELS: Record<NotifyType, string> = { email: "Emails", sms: "Text messages", letter: "Letters" };
 export const TYPE_NAMES: Record<NotifyType, string> = { email: "Email", sms: "Text message", letter: "Letter" };

@@ -13,6 +13,7 @@ import {
 } from "../access/rules.ts";
 import type { Skill } from "../agents/skills.ts";
 import { isUuid } from "../agents/store.ts";
+import { UUID_RE } from "../assistant/artefact-store.ts";
 import { ensureAssistantWithClaims, findAssistant } from "../assistant/assistant-store.ts";
 import { offersBriefing } from "../assistant/briefing.ts";
 import { conversationAgent, findConversation } from "../assistant/conversation-store.ts";
@@ -475,12 +476,12 @@ async function deckReadable(viewer: Identity, id: string): Promise<boolean> {
   return allowed !== undefined && canReadDeck(allowed.access);
 }
 
-/** The latest version of a conversation's deck, outline and all, under the same rule as its pictures; `null` while it has none. */
-export async function readableDeck(viewer: Identity, id: string): Promise<DeckView | null | undefined> {
-  if (!(await deckReadable(viewer, id))) {
+/** The latest version of one of a conversation's decks, outline and all, under the same rule as its pictures; `null` while it has none. */
+export async function readableDeck(viewer: Identity, id: string, itemId: string): Promise<DeckView | null | undefined> {
+  if (!isUuid(itemId) || !(await deckReadable(viewer, id))) {
     return undefined;
   }
-  return await deckView(prisma, id);
+  return await deckView(prisma, id, itemId);
 }
 
 /** One picture of a conversation's deck, for anyone `canReadDeck` lets read it; `undefined` for everyone else. */
@@ -496,29 +497,34 @@ export async function deckAssetReadable(viewer: Identity, id: string, sha256: st
   return isSha256(sha256) && (await deckReadable(viewer, id)) && (await holdsDeckAsset(prisma, id, sha256));
 }
 
-/** One version's .pptx, kept with it or built on request, under the same rule as its pictures. */
-export async function deckPptx(viewer: Identity, id: string, version: number): Promise<{ title: string; bytes: Uint8Array } | undefined> {
-  if (!(await deckReadable(viewer, id))) {
-    return undefined;
-  }
-  return await readVersionPptx(prisma, id, version);
+/** Whether the deck is one of this conversation's, which a reader of the conversation may read. */
+async function deckOfConversation(viewer: Identity, id: string, itemId: string): Promise<boolean> {
+  return isUuid(itemId) && (await deckReadable(viewer, id)) && (await prisma.assistantDeck.count({ where: { id: itemId, conversationId: id } })) > 0;
 }
 
-/** Every kept version of a conversation's deck, newest first, under the same rule as its pictures; `undefined` for anyone else and for a chat with none. */
-export async function deckVersions(viewer: Identity, id: string): Promise<DeckVersionEntry[] | undefined> {
-  if (!(await deckReadable(viewer, id))) {
+/** One version's .pptx, kept with it or built on request, under the same rule as its pictures. */
+export async function deckPptx(viewer: Identity, id: string, itemId: string, version: number): Promise<{ title: string; bytes: Uint8Array } | undefined> {
+  if (!(await deckOfConversation(viewer, id, itemId))) {
     return undefined;
   }
-  const versions = await listDeckVersions(prisma, id);
+  return await readVersionPptx(prisma, itemId, version);
+}
+
+/** Every kept version of one of a conversation's decks, newest first, under the same rule as its pictures; `undefined` for anyone else and for a deck with none. */
+export async function deckVersions(viewer: Identity, id: string, itemId: string): Promise<DeckVersionEntry[] | undefined> {
+  if (!(await deckOfConversation(viewer, id, itemId))) {
+    return undefined;
+  }
+  const versions = await listDeckVersions(prisma, itemId);
   return versions.length === 0 ? undefined : versions;
 }
 
-/** One kept version of a conversation's deck, outline and all, under the same rule as its pictures. */
-export async function deckVersion(viewer: Identity, id: string, version: number): Promise<DeckVersionView | undefined> {
-  if (!(await deckReadable(viewer, id))) {
+/** One kept version of one of a conversation's decks, outline and all, under the same rule as its pictures. */
+export async function deckVersion(viewer: Identity, id: string, itemId: string, version: number): Promise<DeckVersionView | undefined> {
+  if (!(await deckOfConversation(viewer, id, itemId))) {
     return undefined;
   }
-  return await readDeckVersion(prisma, id, version);
+  return await readDeckVersion(prisma, id, itemId, version);
 }
 
 /** What the viewer may do with the conversation's Docmosis template: `owner` or `reader`, and `undefined` for everyone else. */
@@ -530,62 +536,71 @@ export async function docmosisAccess(viewer: Identity, id: string): Promise<Excl
   return allowed.access;
 }
 
-/** One kept version of a conversation's template, or its latest without `version`, for anyone `canReadDocmosis` lets read it; `undefined` for everyone else and when there is none. */
+/** One kept version of one of a conversation's templates, or its latest without `version`, for anyone `canReadDocmosis` lets read it; `undefined` for everyone else and when there is none. */
 export async function readableDocmosis(
   viewer: Identity,
   id: string,
+  item: string,
   version?: number
 ): Promise<NonNullable<Awaited<ReturnType<typeof docmosisView>>> | undefined> {
   if ((await docmosisAccess(viewer, id)) === undefined) {
     return undefined;
   }
-  return (await docmosisView(prisma, id, version)) ?? undefined;
+  return (await docmosisView(prisma, id, item, version)) ?? undefined;
 }
 
-/** Every kept version of a conversation's template, newest first, under the same rule; `undefined` for anyone else and for a chat with none. */
-export async function docmosisVersions(viewer: Identity, id: string): Promise<Awaited<ReturnType<typeof listDocmosisVersions>> | undefined> {
+/** Every kept version of one of a conversation's templates, newest first, under the same rule; `undefined` for anyone else and for a chat with none. */
+export async function docmosisVersions(viewer: Identity, id: string, item: string): Promise<Awaited<ReturnType<typeof listDocmosisVersions>> | undefined> {
   if ((await docmosisAccess(viewer, id)) === undefined) {
     return undefined;
   }
-  const versions = await listDocmosisVersions(prisma, id);
+  const versions = await listDocmosisVersions(prisma, id, item);
   return versions.length === 0 ? undefined : versions;
 }
 
 /** One version's rendered PDF with the template's name, under the same rule; `undefined` when there is none or the viewer may not read it. */
-export async function docmosisPdf(viewer: Identity, id: string, version: number): Promise<{ name: string; bytes: Uint8Array } | undefined> {
+export async function docmosisPdf(viewer: Identity, id: string, item: string, version: number): Promise<{ name: string; bytes: Uint8Array } | undefined> {
   if ((await docmosisAccess(viewer, id)) === undefined) {
     return undefined;
   }
+  if (!UUID_RE.test(item)) {
+    return undefined;
+  }
   const [row, bytes] = await Promise.all([
-    prisma.assistantDocmosisVersion.findUnique({ where: { conversationId_version: { conversationId: id, version } }, select: { name: true } }),
-    readDocmosisPdf(prisma, id, version)
+    prisma.assistantDocmosisVersion.findFirst({ where: { itemId: item, conversationId: id, version }, select: { name: true } }),
+    readDocmosisPdf(prisma, id, item, version)
   ]);
   return row === null || bytes === null ? undefined : { name: row.name, bytes };
 }
 
-/** What the viewer may do with the conversation's Notify template: `owner` or `reader`, and `undefined` for everyone else. */
-export async function notifyAccess(viewer: Identity, id: string): Promise<Exclude<ConversationAccess, "none"> | undefined> {
+/** What the viewer may do with one of the conversation's Notify templates: `owner` or `reader`, and `undefined` for everyone else and for an id that is not a template of the conversation. */
+export async function notifyAccess(viewer: Identity, id: string, itemId: string): Promise<Exclude<ConversationAccess, "none"> | undefined> {
   const allowed = await accessToConversation(prisma, viewer.oid, id);
   if (allowed === undefined || allowed.access === "none" || !canReadNotify(allowed.access)) {
     return undefined;
   }
-  return allowed.access;
+  return UUID_RE.test(itemId) && (await prisma.assistantNotify.count({ where: { id: itemId, conversationId: id } })) > 0 ? allowed.access : undefined;
 }
 
-/** One kept version of a conversation's Notify template, or its latest without `version`, for anyone `canReadNotify` lets read it; `undefined` for everyone else and when there is none. */
-export async function readableNotify(viewer: Identity, id: string, version?: number): Promise<NonNullable<Awaited<ReturnType<typeof notifyView>>> | undefined> {
-  if ((await notifyAccess(viewer, id)) === undefined) {
+/** One kept version of one of a conversation's Notify templates, or its latest without `version`, for anyone `canReadNotify` lets read it; `undefined` for everyone else and when there is none. */
+export async function readableNotify(
+  viewer: Identity,
+  id: string,
+  itemId: string,
+  version?: number
+): Promise<NonNullable<Awaited<ReturnType<typeof notifyView>>> | undefined> {
+  if ((await notifyAccess(viewer, id, itemId)) === undefined) {
     return undefined;
   }
-  return (await notifyView(prisma, id, version)) ?? undefined;
+  return (await notifyView(prisma, id, itemId, version)) ?? undefined;
 }
 
-/** Every kept version of a conversation's Notify template, newest first, under the same rule; `undefined` for anyone else and for a chat with none. */
-export async function notifyVersions(viewer: Identity, id: string): Promise<Awaited<ReturnType<typeof listNotifyVersions>> | undefined> {
-  if ((await notifyAccess(viewer, id)) === undefined) {
+/** Every kept version of one of a conversation's Notify templates, newest first, under the same rule; `undefined` for anyone else and for a template with none. */
+export async function notifyVersions(viewer: Identity, id: string, itemId: string): Promise<Awaited<ReturnType<typeof listNotifyVersions>> | undefined> {
+  if ((await notifyAccess(viewer, id, itemId)) === undefined) {
     return undefined;
   }
-  const versions = await listNotifyVersions(prisma, id);
+  const versions = await listNotifyVersions(prisma, itemId);
   return versions.length === 0 ? undefined : versions;
 }
 

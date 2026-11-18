@@ -85,33 +85,46 @@ export const USAGE = `usage: ${CLI} <command> [args]
   deck pptx <deck.pptx> --version N
                               send the .pptx built from version N alone, for a deck put that published
                               the outline but could not send its .pptx
-  docmosis put <template.docx> --schema <schema.json> --data <data.json> [--pdf file.pdf] [--name N] [--summary S] [--base N]
+  docmosis put <template.docx> --schema <schema.json> --data <data.json> [--pdf file.pdf] [--name N] [--summary S] [--base N] [--id ID]
                               in a CFT Workspace conversation: upload the Docmosis template, publish it
                               with its form schema (docmosis schema) and the data it was rendered with as
                               the template's next version, then the PDF rendered from it (docmosis
                               render-file); --name is the template's name (the file's name by default);
                               --base is the version it was changed from, and a newer one is refused.
-                              Omitted, it is the version docmosis get recorded, or the hub's current one
-  docmosis pdf <file.pdf> --version N
+                              Omitted, it is the version docmosis get recorded, or the hub's current one;
+                              --id is the template to write, and without it the primary, the oldest
+  docmosis new <template.docx> --schema <schema.json> --data <data.json> [--pdf file.pdf] [--name N] [--summary S]
+                              publish a further template, whatever the conversation holds, and print its id
+  docmosis pdf <file.pdf> --version N [--id ID]
                               send the PDF rendered from version N alone, for a docmosis put that
                               published the template but could not send its PDF
-  docmosis get [--version N]  write the template, its schema and the data to
+  docmosis get [--version N] [--id ID]
+                              write the template, its schema and the data to
                               ~/.agent-hub/docmosis/<conversation>/ (template.docx, schema.json,
                               data.json, and the version and revision it read); the person may have
-                              changed the data; --version writes an older kept version instead
+                              changed the data; --version writes an older kept version instead; --id
+                              reads another template, into a directory named by it inside that one
+  docmosis list [--json]      list the conversation's templates, with each one's id, version and name
+  docmosis remove --id ID     remove a template and its versions
   notify products             list the products whose GOV.UK Notify templates can be read
-  notify list --product P     list product P's Notify templates, reading its Notify key from its AAT
-                              Key Vault with your own az login; the key stays on this machine
-  notify pull --product P --template ID
+  notify list [--product P]   in a CFT Workspace conversation: list its Notify templates, with each one's id and
+                              version; with --product, list product P's templates in Notify instead,
+                              reading its Notify key from its AAT Key Vault with your own az login; the
+                              key stays on this machine
+  notify pull --product P --template ID [--id ID]
                               in a CFT Workspace conversation: load template ID from Notify, with
-                              Notify's own preview of it, as the conversation's Notify template's next
-                              version; nothing in Notify is changed
-  notify get [--version N]    write the Notify template to ~/.agent-hub/notify/<conversation>/
-                              (subject.md, body.md, data.json, template.json, and the version and
-                              revision it read); the person may have edited it; --version writes an
-                              older kept version into v<N>/ instead
-  notify put [--summary S]    publish the edited subject.md, body.md and data.json as the next version,
+                              Notify's own preview of it, as a new Notify template of the conversation,
+                              or, with --id, as the next version of that one; nothing in Notify is changed
+  notify get [--id ID] [--version N]
+                              write a Notify template to ~/.agent-hub/notify/<conversation>/ (or
+                              <conversation>/<id>/ with --id): subject.md, body.md, data.json, template.json,
+                              and the version and revision it read; the person may have edited it;
+                              --version writes an older kept version into v<N>/ instead; without --id,
+                              the primary template, the oldest
+  notify put [--id ID] [--summary S]
+                              publish the edited subject.md, body.md and data.json as the next version,
                               refused if a newer version was written since notify get
+  notify remove --id ID       remove a Notify template from the conversation
   video put <dir> [--jira KEY] [--name N]
                               in a CFT Workspace conversation: publish the journey video the
                               cft-journey-video skill recorded into <dir> (the .mp4, .vtt,

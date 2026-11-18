@@ -61,19 +61,34 @@ export const notifyList: PodJobHandler = {
   }
 };
 
-/** One template loaded into the conversation as its Notify template's next version, through the agent API, as the owner's. */
+/**
+ * One template loaded into the conversation, through the agent API, as the owner's: as the next version of the Notify
+ * template `item_id`, or, without it, as a new one.
+ */
 export const notifyPull: PodJobHandler = {
   kind: "notify.pull",
   budgetMs: 140_000,
-  run: async (args, { agentId, api, signal }) => {
+  run: async (args, { agentId, api, signal, jobId }) => {
     const product = stringArg(args, "product", SAFE_NAME_RE);
     const templateId = stringArg(args, "template_id", UUID_RE);
+    const target = (args as Record<string, unknown>).item_id === undefined ? undefined : stringArg(args, "item_id", UUID_RE);
     if (agentId === undefined) {
       throw new PodJobError("no_session", "This chat has no assistant session yet. Send it a message, then try again.");
     }
     const { pullNotifyTemplate } = await loadNotify();
-    const { version } = await pullNotifyTemplate({ productId: product, templateId, agentId, api, signal, by: "user" });
-    return { version };
+    // A job naming no item is the picker's new template, which is made even where another holds the Notify template.
+    const { id, version } = await pullNotifyTemplate({
+      productId: product,
+      templateId,
+      agentId,
+      target,
+      api,
+      signal,
+      by: "user",
+      create: target === undefined,
+      jobId
+    });
+    return { version, item_id: id };
   }
 };
 

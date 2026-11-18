@@ -33,6 +33,11 @@ export const MAX_IMAGE_SIDE = 65_535;
 export const KEEP_VERSIONS = 100;
 export const KEEP_PPTX = 3;
 /**
+ * Refused for a conversation whose pod runs a client older than `items`, which reads only the primary deck: a second
+ * deck would be one its session never sees.
+ */
+export const ITEMS_CREATE_REFUSED_DECK = "your assistant needs an update to hold more than one slide deck; it gets one the next time it restarts";
+/**
  * How long a picture nothing names yet survives a write's clean-up. A client uploads the pictures before the outline
  * that names them, so without this a write landing between the two would delete what the next one is about to name.
  */

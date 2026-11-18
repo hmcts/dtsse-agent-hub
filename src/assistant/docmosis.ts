@@ -19,6 +19,12 @@ export const MAX_SUMMARY = 200;
 /** How many versions are kept, and how many of the newest keep their PDF. */
 export const KEEP_VERSIONS = 50;
 export const KEEP_PDF = 10;
+
+/**
+ * Refused for a conversation whose pod runs a client older than `items`, which reads and writes only the primary
+ * template: a second one would be a template its session never sees, and a load for it would replace the primary.
+ */
+export const ITEMS_CREATE_REFUSED_DOCMOSIS = "your assistant needs an update to hold more than one Docmosis template; it gets one the next time it restarts";
 /** Object levels in a schema, the root being the first; an array's item is one more. */
 export const MAX_SCHEMA_DEPTH = 20;
 export const MAX_PROPERTIES = 500;

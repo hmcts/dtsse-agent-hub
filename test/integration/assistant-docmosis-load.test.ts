@@ -6,8 +6,10 @@ import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as docmosisRoute from "../../src/app/api/agent/[agentId]/docmosis/route.ts";
+import * as itemRoute from "../../src/app/api/agent/[agentId]/docmosis-templates/[itemId]/route.ts";
+import * as templatesRoute from "../../src/app/api/agent/[agentId]/docmosis-templates/route.ts";
 import * as podJobsRoute from "../../src/app/api/ui/assistant/pod-jobs/[conversationId]/route.ts";
-import { docxRef } from "../../src/assistant/docmosis.ts";
+import { docxRef, ITEMS_CREATE_REFUSED_DOCMOSIS } from "../../src/assistant/docmosis.ts";
 import { DOCMOSIS_LIBRARY_ID, type IndexEntry } from "../../src/assistant/docmosis-library.ts";
 import { STALE_PICK } from "../../src/assistant/docmosis-load.ts";
 import { PICK_LOADED, putDocmosisAsset, writeAgentDocmosis } from "../../src/assistant/docmosis-store.ts";
@@ -64,7 +66,10 @@ interface Chat {
 async function chatOf(who: Person, assistant?: string): Promise<Chat> {
   const virtualAgent = assistant ?? (await withMainSession(who));
   const row = await prisma.virtualAgent.findUniqueOrThrow({ where: { id: virtualAgent }, select: { generation: true } });
-  await prisma.virtualAgent.update({ where: { id: virtualAgent }, data: { observedGeneration: row.generation, clientFeatures: ["pod-job:docmosis.load"] } });
+  await prisma.virtualAgent.update({
+    where: { id: virtualAgent },
+    data: { observedGeneration: row.generation, clientFeatures: ["pod-job:docmosis.load", "items", "item-templates"] }
+  });
   const conversation = await prisma.assistantConversation.create({ data: { ownerOid: who.oid, virtualAgentId: virtualAgent }, select: { id: true } });
   const agent = await prisma.agent.create({
     data: {
@@ -106,23 +111,41 @@ async function loadJob(chat: Chat, overrides: Record<string, unknown> = {}): Pro
   return body.job_id;
 }
 
-/** What the pod's publish does: the .docx, then the version naming the pick, through `agent`, the chat's own by default. */
+/**
+ * What the pod's publish does: the .docx, then the version naming the pick, through `agent`, the chat's own by default.
+ * Without `to` it writes the primary template; `to: {item}` writes that one and `to: "new"` makes another.
+ */
 async function publish(
   chat: Chat,
   pick: string,
   bytes: Buffer = TEMPLATE,
   base = { base_version: 0, base_revision: 0 },
-  agent: string = chat.agent
+  agent: string = chat.agent,
+  to: { item: string } | "new" | undefined = undefined
 ): Promise<Response> {
   await putDocmosisAsset(prisma, chat.conversation, sha256(bytes), bytes);
-  return await call(docmosisRoute.PUT, {
-    as: ALICE,
-    path: `/api/agent/${agent}/docmosis`,
-    params: { agentId: agent },
-    method: "PUT",
-    body: { name: "Claim form.docx", docx: docxRef(sha256(bytes)), schema: SCHEMA, data: {}, ...base, summary: "Loaded Claim form.docx", pick }
-  });
+  const body = { name: "Claim form.docx", docx: docxRef(sha256(bytes)), schema: SCHEMA, data: {}, ...base, summary: "Loaded Claim form.docx", pick };
+  if (to === "new") {
+    return await call(templatesRoute.POST, { as: ALICE, path: `/api/agent/${agent}/docmosis-templates`, params: { agentId: agent }, method: "POST", body });
+  }
+  if (to !== undefined) {
+    return await call(itemRoute.PUT, {
+      as: ALICE,
+      path: `/api/agent/${agent}/docmosis-templates/${to.item}`,
+      params: { agentId: agent, itemId: to.item },
+      method: "PUT",
+      body
+    });
+  }
+  return await call(docmosisRoute.PUT, { as: ALICE, path: `/api/agent/${agent}/docmosis`, params: { agentId: agent }, method: "PUT", body });
 }
+
+const itemsOf = (conversation: string) =>
+  prisma.assistantDocmosis.findMany({
+    where: { conversationId: conversation },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    select: { id: true, version: true, updatedBy: true }
+  });
 
 const versionsOf = (conversation: string) =>
   prisma.assistantDocmosisVersion.findMany({
@@ -246,13 +269,13 @@ describe("publishing a pick", () => {
     expect(await versionsOf(chat.conversation)).toEqual([
       { version: 1, by: "user", editorOid: ALICE.oid, summary: "Loaded Claim form.docx", sourcePath: PATH, sourceBlobSha: BLOB }
     ]);
-    const conversation = await prisma.assistantConversation.findUniqueOrThrow({ where: { id: chat.conversation }, select: { docmosisUpdatedBy: true } });
-    expect(conversation.docmosisUpdatedBy).toBe("user");
+    const [item] = await itemsOf(chat.conversation);
+    expect(item?.updatedBy).toBe("user");
     expect(await readPodJob(prisma, ALICE.oid, chat.conversation, job)).toEqual({
       job_id: job,
       kind: "docmosis.load",
       status: "done",
-      result: { version: 1, revision: 0 }
+      result: { item: item?.id, version: 1, revision: 0 }
     });
     const read = await call(docmosisRoute.GET, { as: ALICE, path: `/api/agent/${chat.agent}/docmosis`, params: { agentId: chat.agent } });
     expect(await jsonOf(read)).toMatchObject({ by: "user", source_path: PATH });
@@ -371,7 +394,7 @@ describe("publishing a pick", () => {
     const response = await publish(chat, job, TEMPLATE, base);
 
     expect(response.status).toBe(409);
-    expect(await jsonOf(response)).toEqual({ error: PICK_LOADED, loaded: { version: 1, revision: 0 } });
+    expect(await jsonOf(response)).toEqual({ error: PICK_LOADED, loaded: { item: (await itemsOf(chat.conversation))[0]?.id, version: 1, revision: 0 } });
     expect((await versionsOf(chat.conversation)).length).toBe(1);
     expect(await statusOf(chat, job)).toBe("done");
   });
@@ -408,13 +431,13 @@ describe("publishing a pick", () => {
     await indexOf(ALICE);
     const held = docx(3);
     await putDocmosisAsset(prisma, chat.conversation, sha256(held), held);
-    await writeAgentDocmosis(prisma, {
+    const { id: item } = await writeAgentDocmosis(prisma, {
       conversationId: chat.conversation,
       body: { name: "Mine", docx: docxRef(sha256(held)), schema: SCHEMA, data: {}, base_version: 0 }
     });
-    const job = await loadJob(chat);
+    const job = await loadJob(chat, { item, base_version: 1 });
 
-    const response = await publish(chat, job);
+    const response = await publish(chat, job, TEMPLATE, { base_version: 0, base_revision: 0 }, chat.agent, { item });
 
     expect(response.status).toBe(409);
     expect(await versionsOf(chat.conversation)).toEqual([expect.objectContaining({ version: 1, by: "agent", sourcePath: null })]);
@@ -433,5 +456,145 @@ describe("publishing a pick", () => {
     expect(await versionsOf(chat.conversation)).toEqual([
       { version: 1, by: "agent", editorOid: null, summary: "Made it", sourcePath: null, sourceBlobSha: null }
     ]);
+  });
+});
+
+describe("a load's target template", () => {
+  async function chatWithTemplate(): Promise<{ chat: Chat; item: string }> {
+    const chat = await chatOf(ALICE);
+    await indexOf(ALICE);
+    const held = docx(3);
+    await putDocmosisAsset(prisma, chat.conversation, sha256(held), held);
+    const written = await writeAgentDocmosis(prisma, {
+      conversationId: chat.conversation,
+      body: { name: "Mine", docx: docxRef(sha256(held)), schema: SCHEMA, data: {}, base_version: 0 }
+    });
+    return { chat, item: written.id };
+  }
+
+  it("should write into the template the job names and finish the job with its id when the pick is published to it", async () => {
+    const { chat, item } = await chatWithTemplate();
+    const job = await loadJob(chat, { item, base_version: 1 });
+
+    const response = await publish(chat, job, TEMPLATE, { base_version: 1, base_revision: 0 }, chat.agent, { item });
+
+    expect(response.status).toBe(200);
+    expect(await jsonOf(response)).toEqual({ version: 2, revision: 0 });
+    expect(await itemsOf(chat.conversation)).toEqual([{ id: item, version: 2, updatedBy: "user" }]);
+    expect((await readPodJob(prisma, ALICE.oid, chat.conversation, job))?.result).toEqual({ item, version: 2, revision: 0 });
+  });
+
+  it("should refuse a pick published to another template than the job names, and to the primary when the job names an item", async () => {
+    const { chat, item } = await chatWithTemplate();
+    const held = docx(4);
+    await putDocmosisAsset(prisma, chat.conversation, sha256(held), held);
+    const second = await writeAgentDocmosis(prisma, {
+      conversationId: chat.conversation,
+      create: true,
+      body: { name: "Other", docx: docxRef(sha256(held)), schema: SCHEMA, data: {}, base_version: 0 }
+    });
+    const job = await loadJob(chat, { item: second.id, base_version: 1 });
+
+    const elsewhere = await publish(chat, job, TEMPLATE, { base_version: 1, base_revision: 0 }, chat.agent, { item });
+    const primary = await publish(chat, job, TEMPLATE, { base_version: 1, base_revision: 0 });
+
+    expect([elsewhere.status, primary.status]).toEqual([400, 400]);
+    expect(await statusOf(chat, job)).toBe("pending");
+  });
+
+  it("should make a new template, leave the others alone and finish the job with its id when the job names no item", async () => {
+    const { chat, item } = await chatWithTemplate();
+    const job = await loadJob(chat);
+
+    const response = await publish(chat, job, TEMPLATE, { base_version: 0, base_revision: 0 }, chat.agent, "new");
+
+    expect(response.status).toBe(201);
+    const made = await jsonOf<{ id: string; version: number }>(response);
+    expect(made).toMatchObject({ version: 1, revision: 0 });
+    expect((await itemsOf(chat.conversation)).map((row) => row.id)).toEqual([item, made.id]);
+    expect((await readPodJob(prisma, ALICE.oid, chat.conversation, job))?.result).toEqual({ item: made.id, version: 1, revision: 0 });
+  });
+
+  it("should refuse a new template's pick published to the primary, and leave the job pending, when the conversation already holds a template", async () => {
+    const { chat } = await chatWithTemplate();
+    const job = await loadJob(chat);
+
+    const response = await publish(chat, job, TEMPLATE, { base_version: 1, base_revision: 0 });
+
+    expect(response.status).toBe(400);
+    expect(await statusOf(chat, job)).toBe("pending");
+    expect(await itemsOf(chat.conversation)).toHaveLength(1);
+  });
+
+  it("should answer 409 with the template an earlier run made, and make no second, when a new template's pick is published again", async () => {
+    const { chat } = await chatWithTemplate();
+    const job = await loadJob(chat);
+    const first = await jsonOf<{ id: string }>(await publish(chat, job, TEMPLATE, { base_version: 0, base_revision: 0 }, chat.agent, "new"));
+
+    const again = await publish(chat, job, TEMPLATE, { base_version: 0, base_revision: 0 }, chat.agent, "new");
+
+    expect(again.status).toBe(409);
+    expect(await jsonOf(again)).toEqual({ error: PICK_LOADED, loaded: { item: first.id, version: 1, revision: 0 } });
+    expect(await itemsOf(chat.conversation)).toHaveLength(2);
+  });
+
+  it("should answer 409 with the template an earlier run wrote, and write no second version, when a targeted pick is published again", async () => {
+    const { chat, item } = await chatWithTemplate();
+    const job = await loadJob(chat, { item, base_version: 1 });
+    await publish(chat, job, TEMPLATE, { base_version: 1, base_revision: 0 }, chat.agent, { item });
+
+    const again = await publish(chat, job, TEMPLATE, { base_version: 1, base_revision: 0 }, chat.agent, { item });
+
+    expect(again.status).toBe(409);
+    expect(await jsonOf(again)).toEqual({ error: PICK_LOADED, loaded: { item, version: 2, revision: 0 } });
+    expect((await versionsOf(chat.conversation)).map((version) => version.version)).toEqual([1, 2]);
+  });
+
+  it("should refuse a load into a template the conversation does not hold with 404, starting no job", async () => {
+    const { chat } = await chatWithTemplate();
+
+    const response = await ask(chat.conversation, { kind: "docmosis.load", args: args({ item: crypto.randomUUID() }) });
+
+    expect(response.status).toBe(404);
+    expect(await prisma.assistantPodJob.count()).toBe(0);
+  });
+
+  it("should refuse a load that would make a second template with 409, starting no job, when the pod's client is older than items", async () => {
+    const { chat } = await chatWithTemplate();
+    const { virtualAgentId } = await prisma.assistantConversation.findUniqueOrThrow({ where: { id: chat.conversation }, select: { virtualAgentId: true } });
+    await prisma.virtualAgent.update({ where: { id: virtualAgentId as string }, data: { clientFeatures: ["pod-job:docmosis.load"] } });
+
+    const response = await ask(chat.conversation, { kind: "docmosis.load", args: args() });
+
+    expect(response.status).toBe(409);
+    expect(await jsonOf(response)).toEqual({ error: ITEMS_CREATE_REFUSED_DOCMOSIS });
+    expect(await prisma.assistantPodJob.count()).toBe(0);
+  });
+
+  it("should send a pod older than items the load of the primary without its item, which that pod would refuse as unknown", async () => {
+    const { chat, item } = await chatWithTemplate();
+    const { virtualAgentId } = await prisma.assistantConversation.findUniqueOrThrow({ where: { id: chat.conversation }, select: { virtualAgentId: true } });
+    await prisma.virtualAgent.update({ where: { id: virtualAgentId as string }, data: { clientFeatures: ["pod-job:docmosis.load"] } });
+
+    const job = await loadJob(chat, { item, base_version: 1 });
+
+    const row = await prisma.assistantPodJob.findUniqueOrThrow({ where: { id: job }, select: { args: true } });
+    expect(row.args).toEqual({ ...LIBRARY, ...args({ base_version: 1 }) });
+    const response = await publish(chat, job, TEMPLATE, { base_version: 1, base_revision: 0 });
+    expect(response.status).toBe(200);
+    expect(await itemsOf(chat.conversation)).toEqual([{ id: item, version: 2, updatedBy: "user" }]);
+  });
+
+  it("should let a pod older than items load the first template, which it writes as the primary", async () => {
+    const chat = await chatOf(ALICE);
+    await indexOf(ALICE);
+    const { virtualAgentId } = await prisma.assistantConversation.findUniqueOrThrow({ where: { id: chat.conversation }, select: { virtualAgentId: true } });
+    await prisma.virtualAgent.update({ where: { id: virtualAgentId as string }, data: { clientFeatures: ["pod-job:docmosis.load"] } });
+
+    const job = await loadJob(chat);
+    const response = await publish(chat, job);
+
+    expect(response.status).toBe(200);
+    expect(await itemsOf(chat.conversation)).toHaveLength(1);
   });
 });

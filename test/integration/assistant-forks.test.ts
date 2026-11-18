@@ -1,6 +1,9 @@
+import { createHash } from "node:crypto";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDocument, listDocuments, writeArtefact } from "../../src/assistant/artefact-store.ts";
 import { ensureAssistant, findAssistant } from "../../src/assistant/assistant-store.ts";
+import { docxRef } from "../../src/assistant/docmosis.ts";
+import { putDocmosisAsset, writeAgentDocmosis } from "../../src/assistant/docmosis-store.ts";
 import { forkRecipients } from "../../src/assistant/fork-store.ts";
 import { FORK_CONTEXT_FILE_NAME } from "../../src/assistant/forks.ts";
 import { frameAttachments } from "../../src/assistant/upload-store.ts";
@@ -172,6 +175,30 @@ describe("taking a copy", () => {
     const [attached] = await frameAttachments(prisma, BigInt((sent as { ok: true; message: { id: string } }).message.id));
     const upload = await prisma.assistantUpload.findUniqueOrThrow({ where: { id: attached!.upload_id }, include: { parts: true } });
     expect(Buffer.concat(upload.parts.map((part) => Buffer.from(part.data))).toString("utf8")).toContain("Its 2 documents were copied too");
+  });
+
+  it("should leave the copy with no Docmosis template, as it has always been, when the chat holds several", async () => {
+    actAs("alice");
+    const { id } = await chat();
+    const docx = Buffer.from([0x50, 0x4b, 0x03, 0x04, 1, 2, 3]);
+    const sha = createHash("sha256").update(docx).digest("hex");
+    await putDocmosisAsset(prisma, id, sha, docx);
+    const body = {
+      name: "Claim",
+      docx: docxRef(sha),
+      schema: { root: { kind: "object" as const, controls: [], notes: [], properties: {} }, warnings: [] },
+      data: {},
+      base_version: 0
+    };
+    await writeAgentDocmosis(prisma, { conversationId: id, body });
+    await writeAgentDocmosis(prisma, { conversationId: id, create: true, body: { ...body, name: "Order" } });
+    await forkActions.offerChatFork({ conversationId: id, recipientOid: BOB.oid });
+    actAs("bob");
+
+    const copyId = await take(id);
+
+    expect(await prisma.assistantDocmosis.count({ where: { conversationId: id } })).toBe(2);
+    expect(await prisma.assistantDocmosis.count({ where: { conversationId: copyId } })).toBe(0);
   });
 
   it("should make the recipient their own copy, with the words, the document and where it came from, when they take it", async () => {

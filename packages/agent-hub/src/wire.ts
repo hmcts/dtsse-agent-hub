@@ -276,6 +276,8 @@ export type ArtefactCreated = { id: string; version: number };
  * builds it; this client only moves it and rewrites its pictures.
  */
 export type Deck = {
+  /** Absent from a hub older than several decks, and from the answer for a conversation with none. */
+  id?: string;
   title: string | null;
   outline: DeckOutline | null;
   version: number;
@@ -319,7 +321,19 @@ export type DeckBody = {
   summary?: string;
 };
 
-export type DeckResponse = { version: number; revision?: number; outline: DeckOutline };
+export type DeckResponse = { id?: string; version: number; revision?: number; outline: DeckOutline };
+
+/** One entry of `GET …/decks`: a deck without its outline. */
+export type DeckSummary = {
+  id: string;
+  title: string;
+  version: number;
+  revision: number;
+  updated_by: "user" | "agent" | null;
+  pptx: boolean;
+};
+
+export type DeckList = { decks: DeckSummary[] };
 
 export type DeckAssetResponse = { asset: string };
 
@@ -333,6 +347,8 @@ export type DocmosisSchema = { root: Extract<DocmosisField, { kind: "object" }>;
 
 /** A conversation's Docmosis template at one version, as `GET …/docmosis` returns it. */
 export type DocmosisResponse = {
+  /** Present when the template was read by its id. */
+  id?: string;
   version: number;
   revision: number;
   name: string;
@@ -364,7 +380,16 @@ export type DocmosisBody = {
   pick?: string;
 };
 
-export type DocmosisWritten = { version: number; revision: number };
+/**
+ * What a write of a template answers: the version and revision written. A create adds the new template's `id`, and a
+ * `pick` an earlier run already loaded answers, in `loaded`, with the template it wrote as `item`.
+ */
+export type DocmosisWritten = { version: number; revision: number; id?: string; item?: string };
+
+/** One entry of `GET …/docmosis-templates`: a template without its schema and data. */
+export type DocmosisSummary = { id: string; name: string; version: number; revision: number; updated_by: "agent" | "user" };
+
+export type DocmosisList = { docmosis_templates: DocmosisSummary[] };
 
 export type DocmosisAssetResponse = { asset: string };
 
@@ -414,6 +439,13 @@ export type NotifyBody = {
 };
 
 export type NotifyWritten = { version: number; revision: number };
+
+/** One entry of `GET …/notify-templates`: a template without its text. */
+export type NotifySummary = { id: string; name: string; version: number; revision: number; updated_by: "agent" | "user" | null };
+
+export type NotifyList = { notify_templates: NotifySummary[] };
+
+export type NotifyCreated = NotifyWritten & { id: string };
 
 /** One conversation of a virtual agent, as `conversations` lists them for the uploads reconciliation. */
 export type ConversationSummary = { id: string };

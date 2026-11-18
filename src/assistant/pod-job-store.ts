@@ -53,7 +53,7 @@ export async function requestPodJob(
   now: Date = new Date()
 ): Promise<PodJobRequest> {
   const definition = kindOf(request.kind);
-  const args = checkPodJobArgs(definition, request.args);
+  const asked = checkPodJobArgs(definition, request.args);
   const allowed = await accessToConversation(prisma, viewerOid, conversationId);
   if (allowed === undefined) {
     throw new HttpError(404, "that chat is not there");
@@ -70,10 +70,11 @@ export async function requestPodJob(
   if (found === undefined || found.assistant.id !== conversation.virtualAgentId) {
     return { status: "assistant_gone" };
   }
-  const refused = await definition.precheck?.(prisma, { viewerOid, conversationId, args });
+  const refused = await definition.precheck?.(prisma, { viewerOid, conversationId, args: asked });
   if (refused !== undefined) {
     throw new HttpError(refused.status, refused.error);
   }
+  const args = (await definition.storedArgs?.(prisma, { viewerOid, conversationId, args: asked })) ?? asked;
   const ready = await podReady(prisma, viewerOid, found, podJobFeature(definition.kind), now);
   if (ready !== "ok") {
     return { status: ready };
