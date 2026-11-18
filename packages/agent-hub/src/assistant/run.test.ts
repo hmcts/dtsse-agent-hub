@@ -52,6 +52,7 @@ function stubApi(overrides: Partial<SupervisorApi> = {}): SupervisorApi {
     deckBuild: async () => Promise.reject(new Error("no builds here")),
     deckBuildAsset: async () => new Uint8Array(),
     putDeckBuild: async () => null,
+    putDocmosisIndex: async () => null,
     putMemory: async () => null,
     sessionsStream: async () => new Response("", { status: 200 }),
     ...overrides
@@ -190,6 +191,44 @@ describe("runAssistantSupervisor", () => {
       await waitUntil(() => hub.lookupAnswers.length === 1, "the lookup to be answered");
       expect(hub.lookupAnswers[0]).toEqual({ virtual_id: VID, lookup_id: lookupId, body: { results: [{ key: "VIBE", name: "Vibe-Coding Enablement" }] } });
       expect(twg[0]?.slice(0, 3)).toEqual(["jira", "space", "query"]);
+    } finally {
+      await assistant.stop();
+      await hub.close();
+    }
+  });
+
+  it("should answer a template library check on the sessions stream from GitHub with the owner's gh token", async () => {
+    // Arrange
+    fs.rmSync(path.join(hubHome(), "virtual"), { recursive: true, force: true });
+    const { hub, api } = await mockHub();
+    const requestId = "5b0e7c1a-1111-4222-8333-444455557777";
+    const commit = "c".repeat(40);
+    const asked: string[] = [];
+    const assistant = supervise({
+      api,
+      lookups: { run: async () => ({ code: 0, stdout: "gho_secret\n", stderr: "" }), login: async () => true },
+      githubFetch: async (url) => {
+        asked.push(url);
+        return url.includes("/commits/")
+          ? new Response(`${commit}\n`, { status: 200, headers: { etag: '"e1"' } })
+          : Response.json({ sha: commit, truncated: false, tree: [{ path: "Templates/a.docx", type: "blob", sha: "b".repeat(40), size: 5 }] });
+      }
+    });
+
+    try {
+      await waitUntil(() => hub.sessionStreams.has(VID), "the sessions stream to open");
+
+      // Act
+      hub.sendDocmosisIndex(VID, { request_id: requestId, owner: "hmcts", repo: "rdo-docmosis", ref: "HEAD", path: "Templates", commit: null, etag: null });
+
+      // Assert
+      await waitUntil(() => hub.docmosisIndexAnswers.length === 1, "the check to be answered");
+      expect(hub.docmosisIndexAnswers[0]).toEqual({
+        virtual_id: VID,
+        request_id: requestId,
+        body: { commit, etag: '"e1"', entries: [["Templates/a.docx", "b".repeat(40), 5]], dropped: 0 }
+      });
+      expect(asked).toHaveLength(2);
     } finally {
       await assistant.stop();
       await hub.close();

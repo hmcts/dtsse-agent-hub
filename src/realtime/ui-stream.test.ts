@@ -80,9 +80,20 @@ describe("selectFrame", () => {
     [{ type: "assistant_stop" as const, conversation_id: "c", virtual_agent_id: "va", owner_oid: "dev-alice" }],
     [{ type: "assistant_uploads" as const, virtual_agent_id: "va", owner_oid: "dev-alice" }],
     [{ type: "assistant_lookup" as const, lookup_id: "l", virtual_agent_id: "va", owner_oid: "dev-alice" }],
-    [{ type: "assistant_lookup_answered" as const, lookup_id: "l", virtual_agent_id: "va", owner_oid: "dev-alice" }]
+    [{ type: "assistant_lookup_answered" as const, lookup_id: "l", virtual_agent_id: "va", owner_oid: "dev-alice" }],
+    [{ type: "assistant_docmosis_index" as const, request_id: "r", virtual_agent_id: "va", owner_oid: "dev-alice" }]
   ])("should send no frame for %j when it is an instruction to the owner's pod", async (event) => {
     expect(await selectFrame(event, TOPICS, sources())).toBeUndefined();
+  });
+
+  it("should tell the owner's tab that their template library has a new answer", async () => {
+    expect(await selectFrame({ type: "assistant_docmosis_library", owner_oid: VIEWER }, TOPICS, sources())).toBe(
+      "event: assistant_docmosis_library\ndata: {}\n\n"
+    );
+  });
+
+  it("should tell nobody else of a template library's answer when it is another person's", async () => {
+    expect(await selectFrame({ type: "assistant_docmosis_library", owner_oid: "dev-bob" }, TOPICS, sources())).toBeUndefined();
   });
 
   it("should send a post on a watched topic when the page watches it", async () => {

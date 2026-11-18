@@ -29,6 +29,7 @@ import {
   canShareConversationWith,
   canSuggestPerson,
   canUseCredentialRoutes,
+  canUseDocmosisLibrary,
   canViewTranscript,
   canVirtualAgentStoreCredential,
   canWriteUpload,
@@ -344,6 +345,17 @@ describe("canManageVirtualAgent", () => {
 
   it.each(EVERYONE_ELSE)("should refuse %s when they would make the owner's virtual agent act as the owner", (_label, actorOid) => {
     expect(canManageVirtualAgent(actorOid, { ownerOid: OWNER })).toBe(false);
+  });
+});
+
+describe("canUseDocmosisLibrary", () => {
+  // The index lists what the owner's GitHub sign-in could see of a private repository.
+  it("should let the owner read and refresh their own template library index", () => {
+    expect(canUseDocmosisLibrary(OWNER, { ownerOid: OWNER })).toBe(true);
+  });
+
+  it.each(EVERYONE_ELSE)("should refuse %s the owner's template library index", (_label, actorOid) => {
+    expect(canUseDocmosisLibrary(actorOid, { ownerOid: OWNER })).toBe(false);
   });
 });
 

@@ -158,6 +158,7 @@ model User {
   assistantExportDefault AssistantExportDefault?
   assistantModelChoice   AssistantModelChoice?
   assistantSchedule      AssistantSchedule?
+  assistantDocmosisLibraries AssistantDocmosisLibrary[]
   conversationsSharedWithThem AssistantConversationShare[] @relation("shareRecipient")
   conversationsTheyShared     AssistantConversationShare[] @relation("shareOwner")
   conversationsForkedToThem   AssistantConversationFork[]  @relation("forkRecipient")
@@ -669,6 +670,41 @@ model AssistantDocmosisVersion {
 
   @@id([conversationId, version])
   @@map("assistant_docmosis_version")
+}
+
+/// A person's index of a Docmosis template library, read by their own pod, and the one check of it in flight.
+model AssistantDocmosisLibrary {
+  ownerOid           String    @map("owner_oid")
+  /// owner/repo@ref:path, DOCMOSIS_LIBRARY_ID in src/assistant/docmosis-library.ts.
+  libraryId          String    @map("library_id")
+  commitSha          String?   @map("commit_sha")
+  etag               String?
+  /// [[path, blob_sha, size], ...] in path order.
+  entries            Json      @default("[]")
+  entryCount         Int       @default(0) @map("entry_count")
+  checkedAt          DateTime? @map("checked_at") @db.Timestamptz(6)
+  /// The check last sent to the pod; only an answer naming it is kept.
+  refreshId          String?   @unique(map: "assistant_docmosis_library_refresh_id") @map("refresh_id") @db.Uuid
+  refreshRequestedAt DateTime? @map("refresh_requested_at") @db.Timestamptz(6)
+  /// The virtual agent the check in flight was sent to; only its answer is kept.
+  refreshAgentId     String?   @map("refresh_agent_id") @db.Uuid
+  /// When a forced check was last asked for, which spaces forced checks apart.
+  forcedAt           DateTime? @map("forced_at") @db.Timestamptz(6)
+  /// Templates the pod found and left out of the index.
+  dropped            Int       @default(0)
+  /// The owner's own part of the address the browser caches the entries under.
+  entriesKey         String    @default(dbgenerated("gen_random_uuid()")) @map("entries_key") @db.Uuid
+  /// signed_out, sso, not_found, rate_limited or failed: why the last check failed.
+  error              String?
+  detail             String?
+  ssoUrl             String?   @map("sso_url")
+  resetAt            DateTime? @map("reset_at") @db.Timestamptz(6)
+  updatedAt          DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  owner User @relation(fields: [ownerOid], references: [oid], onDelete: Cascade)
+
+  @@id([ownerOid, libraryId])
+  @@map("assistant_docmosis_library")
 }
 
 /// A .docx a Docmosis version names by its SHA-256.

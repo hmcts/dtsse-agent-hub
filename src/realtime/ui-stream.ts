@@ -205,6 +205,12 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
     // An instruction to the pod; the slides panel reads its own build back.
     case "assistant_deck_build":
       return undefined;
+    // An instruction to the pod as well.
+    case "assistant_docmosis_index":
+      return undefined;
+    // The owner's template library has a new answer; only their own tabs hear of it, and read the status again.
+    case "assistant_docmosis_library":
+      return isOwner(sources.viewerOid, { ownerOid: event.owner_oid }) ? sseEvent({ event: "assistant_docmosis_library", data: "{}" }) : undefined;
     case "feedback": {
       const team = await sources.feedbackTeam?.(event.project_id);
       if (team === undefined || feedbackProjectAccess(sources.viewerOid, team, team.memberOids) === "none") {

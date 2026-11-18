@@ -227,6 +227,15 @@ export type LookupAnswer =
   | { results: JiraProjectFound[] | ConfluencePageFound[] | GithubRepoFound[] | GithubProjectFound[] }
   | { error: "signed_out" | "failed" | "superseded"; detail?: string };
 
+/** One template in the library's index: its path, its blob's git SHA-1 and its size in bytes. */
+export type DocmosisIndexEntry = [path: string, blobSha: string, size: number];
+
+/** The answer to one check of the template library: a new index, the one the hub holds is current, or why neither. */
+export type DocmosisIndexAnswer =
+  | { commit: string; etag: string | null; entries: DocmosisIndexEntry[]; dropped?: number }
+  | { unchanged: true; etag?: string }
+  | { error: "signed_out" | "sso" | "not_found" | "rate_limited" | "failed"; detail?: string; sso_url?: string; reset_at?: string };
+
 /** A conversation's one markdown document, which the person and the session both edit. */
 export type Artefact = {
   title: string | null;
