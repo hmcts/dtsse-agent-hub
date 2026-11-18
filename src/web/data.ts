@@ -44,7 +44,7 @@ import type { SavedTemplate } from "../assistant/templates.ts";
 import { type UploadsOnDisk, uploadsOnDisk } from "../assistant/upload-disk.ts";
 import { VIDEO_READ_TTL_MS, videoPath } from "../assistant/video.ts";
 import { videoBlobs } from "../assistant/video-blob.ts";
-import { readyCaptions, readyVideo, type VideoView } from "../assistant/video-store.ts";
+import { readyCaptions, readyVideo, type VideoView, videoIntact } from "../assistant/video-store.ts";
 import {
   type AssistantSummary,
   assistantSummary,
@@ -608,7 +608,7 @@ export async function readableVideo(viewer: Identity, id: string): Promise<Reada
     return undefined;
   }
   const video = await readyVideo(prisma, id);
-  if (video === null) {
+  if (video === null || !(await videoIntact(prisma, blobs, id, video.video_id))) {
     return undefined;
   }
   return { ...video, play_url: await blobs.readUrl(videoPath(id, video.video_id), VIDEO_READ_TTL_MS), expires_in: VIDEO_READ_TTL_MS / 1000 };

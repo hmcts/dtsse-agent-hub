@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkVideoBegin, checkVideoPosted, formatStamp, MAX_CHAPTERS, MAX_VIDEO_BYTES, parseVideoPath, videoFileName, videoPath } from "./video.ts";
+import { checkVideoBegin, checkVideoPosted, formatStamp, MAX_CHAPTERS, MAX_VIDEO_BYTES, parseVideoPath, videoPath } from "./video.ts";
 
 const CONVERSATION = "0f8a6a1e-0000-4000-8000-000000000001";
 const VIDEO = "22222222-2222-4222-8222-222222222222";
@@ -22,7 +22,7 @@ function refusal(value: unknown): string {
 }
 
 describe("checkVideoBegin", () => {
-  it("should accept a recording's description with and without the optional parts", () => {
+  it("should accept a recording's description when its optional parts are given or left out", () => {
     expect(checkVideoBegin(begin()).ok).toBe(true);
     expect(checkVideoBegin(begin({ captions: "WEBVTT", coverage_summary: "1 of 1 stories and 2 ACs are shown.", jira_key: "HDPI-1234" })).ok).toBe(true);
   });
@@ -51,7 +51,7 @@ describe("checkVideoBegin", () => {
 });
 
 describe("checkVideoPosted", () => {
-  it("should take an issue key and nothing else", () => {
+  it("should accept an issue key when that is the only field", () => {
     expect(checkVideoPosted({ issue_key: "HDPI-1" })).toEqual({ ok: true, value: { issue_key: "HDPI-1" } });
     expect(checkVideoPosted({ issue_key: "x" }).ok).toBe(false);
     expect(checkVideoPosted({}).ok).toBe(false);
@@ -59,21 +59,16 @@ describe("checkVideoPosted", () => {
 });
 
 describe("video paths", () => {
-  it("should name a blob by its conversation and video, and read the names back", () => {
+  it("should read a blob's name back when it was made from a conversation and a video", () => {
     expect(videoPath(CONVERSATION, VIDEO)).toBe(`${CONVERSATION}/${VIDEO}.mp4`);
     expect(parseVideoPath(videoPath(CONVERSATION, VIDEO))).toEqual({ conversationId: CONVERSATION, videoId: VIDEO });
     expect(parseVideoPath("other/thing")).toBeUndefined();
     expect(parseVideoPath(`${CONVERSATION}/${VIDEO}.mov`)).toBeUndefined();
   });
-
-  it("should make a file name that is safe and ends .mp4", () => {
-    expect(videoFileName("PCS journey / v2.mp4")).toBe("PCS-journey-v2.mp4");
-    expect(videoFileName("///")).toBe("journey-video.mp4");
-  });
 });
 
 describe("formatStamp", () => {
-  it("should write seconds as hours, minutes and seconds", () => {
+  it("should write hours, minutes and seconds when a time is formatted", () => {
     expect(formatStamp(0)).toBe("00:00:00");
     expect(formatStamp(65)).toBe("00:01:05");
     expect(formatStamp(3723)).toBe("01:02:03");

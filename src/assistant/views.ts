@@ -1,3 +1,4 @@
+import { canPostVideo, conversationAccess } from "../access/rules.ts";
 import { storedClientFeatures } from "../agents/client-features.ts";
 import { repoFileBase } from "../agents/github.ts";
 import { type Skill, storedSkills } from "../agents/skills.ts";
@@ -406,6 +407,8 @@ export interface ConversationView {
   notify: NotifySummary | null;
   /** The conversation's journey video, without its captions, chapters and reports, which the panel reads; `null` while it has none. */
   video: VideoSummary | null;
+  /** Whether the viewer may post the video to Jira: its owner, in a chat with a pod to run the post on (`canPostVideo`). */
+  canPostVideo: boolean;
   jira: JiraExportView;
   github: GithubExportView;
   confluence: ConfluenceExportView;
@@ -476,6 +479,7 @@ export async function conversationView(db: Database, conversation: ConversationR
     docmosis,
     notify,
     video,
+    canPostVideo: canPostVideo(conversationAccess(conversation.ownerOid, conversation, [])) && hasPod(conversation),
     jira,
     github,
     confluence,

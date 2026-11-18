@@ -13,18 +13,40 @@ import { useHubSubscribe } from "@/components/live/HubStream";
 
 const button = "flex h-[30px] shrink-0 items-center gap-1.5 rounded-lg border border-asst-strong px-2.5 text-[13px] hover:bg-asst-field disabled:opacity-40";
 
-/** The video as the hub holds it, read when the panel opens and again whenever the page says it has moved on. */
-function useVideoDetail(conversationId: string, summary: VideoSummary): { detail: VideoDetail | null; failed: boolean; retry: () => void } {
+/** A play URL is replaced this long before it expires, so playback never reaches the end of one. */
+const RENEW_MARGIN_MS = 5 * 60_000;
+
+/**
+ * The video as the hub holds it, read when the panel opens and again whenever the page says it has moved on. Every read
+ * signs a new play URL, so a read of the same video keeps the URL the player already has while it has time left: a
+ * change of `src` would restart the player. `renew` reads again for a fresh one, which the hook also asks for itself
+ * before the current one expires.
+ */
+function useVideoDetail(conversationId: string, summary: VideoSummary): { detail: VideoDetail | null; failed: boolean; retry: () => void; renew: () => void } {
   const [read, setRead] = useState<{ detail: VideoDetail | null; failed: boolean }>({ detail: null, failed: false });
   const [attempt, setAttempt] = useState(0);
+  const signed = useRef<{ id: string; url: string; expiresIn: number; at: number } | null>(null);
+  const forced = useRef(false);
   const { version, updatedAt } = summary;
   // biome-ignore lint/correctness/useExhaustiveDependencies: a newer version, an update, or another attempt is what makes the video worth reading again
   useEffect(() => {
     const controller = new AbortController();
     void (async () => {
       try {
-        const detail = await readVideo(conversationId, { signal: controller.signal });
-        setRead({ detail: detail ?? null, failed: detail === undefined });
+        const fresh = await readVideo(conversationId, { signal: controller.signal });
+        if (fresh === undefined) {
+          setRead({ detail: null, failed: true });
+          return;
+        }
+        const held = signed.current;
+        const keep = !forced.current && held !== null && held.id === fresh.video_id && Date.now() < held.at + held.expiresIn * 1000 - RENEW_MARGIN_MS;
+        forced.current = false;
+        if (keep) {
+          setRead({ detail: { ...fresh, play_url: held.url, expires_in: held.expiresIn }, failed: false });
+        } else {
+          signed.current = { id: fresh.video_id, url: fresh.play_url, expiresIn: fresh.expires_in, at: Date.now() };
+          setRead({ detail: fresh, failed: false });
+        }
       } catch {
         if (!controller.signal.aborted) {
           setRead((previous) => ({ detail: previous.detail, failed: true }));
@@ -33,7 +55,20 @@ function useVideoDetail(conversationId: string, summary: VideoSummary): { detail
     })();
     return () => controller.abort();
   }, [conversationId, version, updatedAt, attempt]);
-  return { ...read, retry: () => setAttempt((count) => count + 1) };
+  const renew = useCallback(() => {
+    forced.current = true;
+    setAttempt((count) => count + 1);
+  }, []);
+  const playUrl = read.detail?.play_url;
+  const expiresIn = read.detail?.expires_in ?? 0;
+  useEffect(() => {
+    if (playUrl === undefined) {
+      return;
+    }
+    const timer = setTimeout(renew, Math.max(expiresIn * 1000 - RENEW_MARGIN_MS, 0));
+    return () => clearTimeout(timer);
+  }, [playUrl, expiresIn, renew]);
+  return { ...read, retry: () => setAttempt((count) => count + 1), renew };
 }
 
 function PanelShell({ narrow, embedded, children }: { narrow: boolean; embedded: boolean; children: ReactNode }) {
@@ -214,10 +249,36 @@ function Report({ title, summary, source }: { title: string; summary?: string | 
   );
 }
 
-function Player({ conversationId, detail }: { conversationId: string; detail: VideoDetail }) {
+function Player({ conversationId, detail, renew }: { conversationId: string; detail: VideoDetail; renew: () => void }) {
   const video = useRef<HTMLVideoElement>(null);
+  const loaded = useRef<{ id: string; url: string } | null>(null);
   const [now, setNow] = useState(0);
   const current = detail.chapters.reduce((found, chapter, index) => (chapter.at <= now ? index : found), -1);
+
+  // The source is set here and not as a prop, so a new URL for the same video carries on from where it was.
+  useEffect(() => {
+    const element = video.current;
+    const held = loaded.current;
+    if (element === null || (held !== null && held.url === detail.play_url)) {
+      return;
+    }
+    const resume = held !== null && held.id === detail.video_id ? { at: element.currentTime, playing: !element.paused } : null;
+    loaded.current = { id: detail.video_id, url: detail.play_url };
+    element.src = detail.play_url;
+    if (resume !== null) {
+      element.addEventListener(
+        "loadedmetadata",
+        () => {
+          element.currentTime = resume.at;
+          if (resume.playing) {
+            void element.play().catch(() => undefined);
+          }
+        },
+        { once: true }
+      );
+    }
+    element.load();
+  }, [detail.play_url, detail.video_id]);
 
   const seek = (at: number) => {
     const element = video.current;
@@ -235,10 +296,10 @@ function Player({ conversationId, detail }: { conversationId: string; detail: Vi
       <video
         ref={video}
         key={detail.video_id}
-        src={detail.play_url}
         controls
         preload="metadata"
         onTimeUpdate={(event) => setNow(event.currentTarget.currentTime)}
+        onError={renew}
         className="max-h-[60vh] w-full rounded-lg bg-black"
       >
         {detail.has_captions ? <track kind="captions" src={captionsUrl(conversationId, detail.video_id)} srcLang="en" label="English" default /> : null}
@@ -286,7 +347,7 @@ export function VideoPanel({
   /** Fills the box it is placed in instead of standing beside the chat at a width the person sets. */
   embedded?: boolean;
 }) {
-  const { detail, failed, retry } = useVideoDetail(conversationId, video);
+  const { detail, failed, retry, renew } = useVideoDetail(conversationId, video);
   return (
     <PanelShell narrow={narrow} embedded={embedded}>
       <Header title={video.name} embedded={embedded} onClose={onClose} />
@@ -306,11 +367,11 @@ export function VideoPanel({
       ) : (
         <>
           <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-3">
-            <Player conversationId={conversationId} detail={detail} />
+            <Player conversationId={conversationId} detail={detail} renew={renew} />
             <Report title="Coverage" summary={detail.coverage_summary} source={detail.coverage} />
             <Report title="Content mismatches" source={detail.content_mismatches} />
           </div>
-          {canPost ? <PostToJira conversationId={conversationId} detail={detail} announce={announce} /> : null}
+          {canPost ? <PostToJira key={detail.video_id} conversationId={conversationId} detail={detail} announce={announce} /> : null}
         </>
       )}
     </PanelShell>

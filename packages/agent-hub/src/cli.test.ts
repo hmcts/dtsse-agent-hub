@@ -25,7 +25,7 @@ import { createMockHub, type MockHub } from "./__fixtures__/mock-hub.ts";
 import { captureStderr } from "./__fixtures__/pod-shims.ts";
 import { createApi } from "./api.ts";
 import { parseFlags, readStdinText, UsageError } from "./cli/command.ts";
-import { coverageSummaryLine, parseChapters } from "./cli/video.ts";
+import { clip, coverageSummaryLine, formatStamp, parseChapters } from "./cli/video.ts";
 import { runCli, USAGE } from "./cli.ts";
 import type { Env } from "./env.ts";
 import { CLIENT_FEATURES } from "./features.ts";
@@ -1718,7 +1718,7 @@ describe("artefact, in an assistant conversation", () => {
       expect(r.errors.join("\n")).toMatch(/not a CFT Workspace conversation/);
     });
 
-    it("should read the chapter times and the coverage line, however the files are written", () => {
+    it("should read the chapter times and the coverage line when the files are read", () => {
       expect(parseChapters("01:02:03 Late\n05:07 Short\nnot a chapter\n00:00:00 First")).toEqual([
         { at: 0, title: "First" },
         { at: 307, title: "Short" },
@@ -1726,6 +1726,31 @@ describe("artefact, in an assistant conversation", () => {
       ]);
       expect(coverageSummaryLine(COVERAGE)).toMatch(/^2 of 3 stories and 7 ACs are shown\./);
       expect(coverageSummaryLine("# nothing here")).toBeUndefined();
+    });
+
+    it("should refuse a chapter past 24 hours naming the file and line, when the chapters are read", () => {
+      expect(() => parseChapters("00:00:00 First\n25:00:00 Late", "demo.chapters.txt")).toThrow(/^demo\.chapters\.txt line 2: 25:00:00 is more than 24 hours/);
+      expect(parseChapters("24:00:00 Edge")).toEqual([{ at: 86400, title: "Edge" }]);
+    });
+
+    it("should cut text between code points, when a title or summary is over the limit", () => {
+      const emoji = "\u{1F600}";
+      expect(clip(`ab${emoji}`, 3)).toBe("ab");
+      expect(clip(`a${emoji}`, 3)).toBe(`a${emoji}`);
+      expect(parseChapters(`00:00:01 ${"x".repeat(199)}${emoji}`)[0]?.title).toBe("x".repeat(199));
+      expect(formatStamp(3723)).toBe("01:02:03");
+    });
+
+    it("should send the recording with its length, as it is read from disk, when video put runs", async () => {
+      // Arrange
+      const { sid } = await session();
+
+      // Act
+      const r = await cli(["video", "put", recording()], { sid });
+
+      // Assert
+      expect(r.code, r.errors.join("\n")).toBe(0);
+      expect(hub.blobPuts[hub.blobPuts.length - 1]?.headers["content-length"]).toBe(String(MP4.length));
     });
   });
 

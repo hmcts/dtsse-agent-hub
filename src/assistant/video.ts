@@ -18,8 +18,11 @@ export const MAX_CHAPTER_TITLE = 200;
 export const MAX_VIDEO_REPORT = 40_000;
 export const MAX_COVERAGE_SUMMARY = 300;
 
-/** Long enough to put a 200 MiB recording over a slow connection. */
-export const VIDEO_UPLOAD_TTL_MS = 60 * 60_000;
+/**
+ * Long enough to put a 200 MiB recording over a slow connection. The URL can still write the blob after the upload is
+ * finished, until it expires, which is why the hub records the blob's ETag and serves the video only while it matches.
+ */
+export const VIDEO_UPLOAD_TTL_MS = 30 * 60_000;
 /** Long enough to watch a long recording through, and for a pod to download it to attach it. */
 export const VIDEO_READ_TTL_MS = 60 * 60_000;
 /** An upload that was never finished is deleted, row and blob, this long after it began. */
@@ -117,16 +120,6 @@ export function parseVideoPath(name: string): { conversationId: string; videoId:
   return match !== null && UUID_RE.test(match[1] as string) && UUID_RE.test(match[2] as string)
     ? { conversationId: (match[1] as string).toLowerCase(), videoId: (match[2] as string).toLowerCase() }
     : undefined;
-}
-
-/** A file name for the attached or downloaded recording: the name given, made safe, ending `.mp4`. */
-export function videoFileName(name: string): string {
-  const stem = name
-    .replace(/\.mp4$/i, "")
-    .replace(/[^A-Za-z0-9._-]+/g, "-")
-    .replace(/^[-.]+|[-.]+$/g, "")
-    .slice(0, 100);
-  return `${stem === "" ? "journey-video" : stem}.mp4`;
 }
 
 export function formatStamp(seconds: number): string {

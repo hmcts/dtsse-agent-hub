@@ -53,9 +53,10 @@ resource "azurerm_storage_container" "feedback" {
 }
 
 # A backstop for the hub's own sweep, which deletes by each project's retention (at most 365 days) and an archived
-# project a week after it is archived: anything the sweep missed is gone after 400 days. An account has one lifecycle
-# policy, and this rule has no prefix filter, so it is also the backstop for the journey videos' container, whose own
-# sweep deletes a conversation's videos with it, replaces a video with the next and deletes uploads never finished.
+# project a week after it is archived: anything the sweep missed is gone after 400 days. The rule is held to the feedback
+# container: the journey videos' container has no age backstop, since an age rule would delete a ready video whose row
+# is still there. Its own sweep (src/assistant/video-store.ts) deletes uploads never finished and every blob no row names,
+# which is all a backstop could safely delete.
 resource "azurerm_storage_management_policy" "feedback" {
   count = local.feedback_storage_enabled ? 1 : 0
 
@@ -66,7 +67,8 @@ resource "azurerm_storage_management_policy" "feedback" {
     enabled = true
 
     filters {
-      blob_types = ["blockBlob"]
+      blob_types   = ["blockBlob"]
+      prefix_match = ["${azurerm_storage_container.feedback[0].name}/"]
     }
 
     actions {

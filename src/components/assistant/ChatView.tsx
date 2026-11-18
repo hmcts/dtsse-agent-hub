@@ -1005,7 +1005,14 @@ export function ChatView({
         />
       ) : null}
       {panel === "video" && video !== null ? (
-        <VideoPanel conversationId={view.id} video={video} canPost={pod} onClose={() => setPanel(null)} narrow={narrow} announce={arrivals.announce} />
+        <VideoPanel
+          conversationId={view.id}
+          video={video}
+          canPost={view.canPostVideo}
+          onClose={() => setPanel(null)}
+          narrow={narrow}
+          announce={arrivals.announce}
+        />
       ) : null}
       {panel === "document" ? (
         <ArtefactPanel

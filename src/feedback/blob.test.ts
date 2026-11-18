@@ -226,6 +226,14 @@ describe("createFeedbackBlobs", () => {
     expect(await blobs.sizeOf("p/missing")).toBeUndefined();
   });
 
+  it("should answer a blob's size and ETag, when it is there", async () => {
+    const { container, typed } = fakeService({});
+    container.getBlockBlobClient = (() => ({ getProperties: async () => ({ contentLength: 7, etag: '"0x1"' }) })) as never;
+    const blobs = createFeedbackBlobs(IDENTITY, { service: typed, now: () => NOW });
+
+    expect(await blobs.statOf("p/a")).toEqual({ size: 7, etag: '"0x1"' });
+  });
+
   it("should throw when a blob's size cannot be read for a reason other than its absence", async () => {
     const { container, typed } = fakeService({});
     container.getBlockBlobClient = (() => ({

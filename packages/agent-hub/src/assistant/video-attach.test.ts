@@ -203,6 +203,18 @@ describe("video-attach", () => {
     expect([(a as PodJobError).code, (b as PodJobError).code]).toEqual(["download_failed", "download_failed"]);
   });
 
+  it("should not download the video, when twg is not signed in", async () => {
+    // Arrange
+    const { handler, context, login } = setup({ runs: { whoami: { code: 1, stdout: "", stderr: "" } }, fetchStatus: 403 });
+    login.mockResolvedValue("not-signed-in" as never);
+
+    // Act
+    const failure = await handler.run({ issue_key: "HDPI-1234", video_id: VIDEO }, context).catch((e: unknown) => e);
+
+    // Assert
+    expect((failure as PodJobError).code).toBe("not_signed_in");
+  });
+
   it("should fail no_session, when the frame carried no agent", async () => {
     // Arrange
     const { handler, context } = setup({ noAgent: true });
@@ -214,7 +226,7 @@ describe("video-attach", () => {
     expect((failure as PodJobError).code).toBe("no_session");
   });
 
-  it("should refuse arguments it cannot run, however they are wrong", () => {
+  it("should refuse arguments it cannot run when they are wrong", () => {
     expect(parseAttachArgs({ issue_key: "HDPI-1", video_id: VIDEO })).toEqual({ issueKey: "HDPI-1", videoId: VIDEO });
     for (const bad of [
       null,

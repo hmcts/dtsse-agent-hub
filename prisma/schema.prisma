@@ -740,6 +740,8 @@ model AssistantVideo {
   coverage          String
   coverageSummary   String?   @map("coverage_summary")
   contentMismatches String    @map("content_mismatches")
+  /// The blob's ETag when the upload was finished: a later write to the blob changes it, and the hub then serves nothing.
+  etag              String?
   /// The Jira issue the session suggested posting the video to.
   jiraKey           String?   @map("jira_key")
   /// The issue the video was last attached to, and when.

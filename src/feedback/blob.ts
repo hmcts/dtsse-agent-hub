@@ -32,6 +32,8 @@ export interface FeedbackBlobs {
   putBlob: (path: string, bytes: Uint8Array, contentType: string) => Promise<void>;
   /** The size in bytes of one blob, or `undefined` when it is not there. */
   sizeOf: (path: string) => Promise<number | undefined>;
+  /** The size and ETag of one blob, which changes whenever the blob is written again; `undefined` when it is not there. */
+  statOf: (path: string) => Promise<{ size: number; etag: string } | undefined>;
   /** The name of every blob under `prefix`; an empty prefix is the whole container. */
   listNames: (prefix: string) => Promise<string[]>;
   /** Deletes each blob that is there, and answers the paths that could not be deleted; one already gone is deleted. */
@@ -144,6 +146,19 @@ export function createFeedbackBlobs(settings: FeedbackBlobSettings, options: Fee
     return `${container.getBlockBlobClient(path).url}?${query.toString()}`;
   };
 
+  const statOf = async (path: string): Promise<{ size: number; etag: string } | undefined> => {
+    await ready();
+    try {
+      const properties = await container.getBlockBlobClient(path).getProperties();
+      return { size: properties.contentLength ?? 0, etag: properties.etag ?? "" };
+    } catch (error) {
+      if ((error as { statusCode?: number }).statusCode === 404) {
+        return undefined;
+      }
+      throw error;
+    }
+  };
+
   return {
     uploadUrl: (path, ttlMs = UPLOAD_TTL_MS) => sign(path, "cw", ttlMs),
     readUrl: (path, ttlMs = READ_TTL_MS) => sign(path, "r", ttlMs),
@@ -151,17 +166,8 @@ export function createFeedbackBlobs(settings: FeedbackBlobSettings, options: Fee
       await ready();
       await container.getBlockBlobClient(path).uploadData(bytes, { blobHTTPHeaders: { blobContentType: contentType } });
     },
-    sizeOf: async (path) => {
-      await ready();
-      try {
-        return (await container.getBlockBlobClient(path).getProperties()).contentLength;
-      } catch (error) {
-        if ((error as { statusCode?: number }).statusCode === 404) {
-          return undefined;
-        }
-        throw error;
-      }
-    },
+    statOf,
+    sizeOf: async (path) => (await statOf(path))?.size,
     listNames: async (prefix) => {
       await ready();
       const names: string[] = [];

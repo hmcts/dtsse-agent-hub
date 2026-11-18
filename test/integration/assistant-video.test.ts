@@ -6,7 +6,6 @@ import * as videoRoute from "../../src/app/api/agent/[agentId]/video/route.ts";
 import { shareConversation } from "../../src/assistant/shares.ts";
 import { sharedConversation } from "../../src/assistant/sharing.ts";
 import { videoPath } from "../../src/assistant/video.ts";
-import { videoBlobs } from "../../src/assistant/video-blob.ts";
 import { hasReadyVideo, MAX_OPEN_UPLOADS, sweepVideos } from "../../src/assistant/video-store.ts";
 import { conversationView } from "../../src/assistant/views.ts";
 import { readableCaptions, readableVideo, videoAccess } from "../../src/web/data.ts";
@@ -23,10 +22,57 @@ import { jsonOf } from "./routes.ts";
 vi.mock("next/headers", async () => (await import("./web-session.ts")).nextHeadersMock());
 vi.mock("next/cache", async () => (await import("./web-session.ts")).nextCacheMock());
 
+/**
+ * Blob Storage in memory, as the video routes, the page reads and the sweep see it through `videoBlobs()`: CI has no
+ * Azurite. A URL names its blob by path, and `put` is the pod's PUT to one.
+ */
+const storage = vi.hoisted(() => {
+  const blobs = new Map<string, { bytes: Buffer; etag: string }>();
+  let writes = 0;
+  const pathOf = (url: string) => decodeURIComponent(new URL(url).pathname.slice(1));
+  return {
+    blobs,
+    pathOf,
+    put(url: string, bytes: Buffer) {
+      writes += 1;
+      blobs.set(pathOf(url), { bytes, etag: `"etag-${writes}"` });
+    },
+    fake: {
+      uploadUrl: async (path: string) => `https://blobs.test/${path}?sp=cw`,
+      readUrl: async (path: string) => `https://blobs.test/${path}?sp=r`,
+      putBlob: async (path: string, bytes: Uint8Array, _contentType?: string) => {
+        writes += 1;
+        blobs.set(path, { bytes: Buffer.from(bytes), etag: `"etag-${writes}"` });
+      },
+      statOf: async (path: string) => {
+        const found = blobs.get(path);
+        return found === undefined ? undefined : { size: found.bytes.length, etag: found.etag };
+      },
+      sizeOf: async (path: string) => blobs.get(path)?.bytes.length,
+      listNames: async (prefix: string) => [...blobs.keys()].filter((name) => name.startsWith(prefix)),
+      deleteBlobs: async (paths: readonly string[]) => {
+        for (const path of paths) {
+          blobs.delete(path);
+        }
+        return [];
+      },
+      deletePrefix: async (prefix: string) => {
+        const names = [...blobs.keys()].filter((name) => name.startsWith(prefix));
+        for (const name of names) {
+          blobs.delete(name);
+        }
+        return names.length;
+      }
+    }
+  };
+});
+
+vi.mock("../../src/assistant/video-blob.ts", () => ({ videoBlobs: () => storage.fake }));
+
 assistantSuite([ALICE, BOB, CAROL]);
 
 beforeEach(() => {
-  vi.stubEnv("FEEDBACK_STORAGE_CONNECTION_STRING", "UseDevelopmentStorage=true");
+  storage.blobs.clear();
 });
 
 const MP4 = Buffer.from("pretend this is an mp4");
@@ -60,9 +106,9 @@ async function started(of: Chat, overrides: Record<string, unknown> = {}): Promi
   return (await jsonOf(response)) as { video_id: string; upload_url: string };
 }
 
+/** The pod's PUT to a write URL. */
 async function putBytes(url: string, bytes: Buffer): Promise<void> {
-  const response = await fetch(url, { method: "PUT", headers: { "x-ms-blob-type": "BlockBlob", "content-type": "video/mp4" }, body: new Uint8Array(bytes) });
-  expect(response.status).toBe(201);
+  storage.put(url, bytes);
 }
 
 const complete = (of: Chat, videoId: string) =>
@@ -76,7 +122,7 @@ async function published(of: Chat, overrides: Record<string, unknown> = {}, byte
 }
 
 describe("publishing a video", () => {
-  it("should make the upload the conversation's video once the blob is there at its size, and serve it", async () => {
+  it("should make the upload the conversation's video and serve it when the blob is there at its size", async () => {
     const mine = await chat();
 
     const { video_id, upload_url } = await started(mine);
@@ -104,7 +150,7 @@ describe("publishing a video", () => {
       jira_key: "HDPI-1234",
       posted: null
     });
-    expect(Buffer.from(await (await fetch(read!.play_url)).arrayBuffer()).equals(MP4)).toBe(true);
+    expect(storage.blobs.get(storage.pathOf(read!.play_url))?.bytes.equals(MP4)).toBe(true);
     expect(await readableCaptions(viewerOf(ALICE), mine.id)).toMatch(/^WEBVTT/);
 
     const row = await prisma.assistantConversation.findUniqueOrThrow({ where: { id: mine.id } });
@@ -113,7 +159,7 @@ describe("publishing a video", () => {
     expect(await hasReadyVideo(prisma, mine.id, video_id)).toBe(true);
   });
 
-  it("should give the session a download URL, and replace the video with the next one, deleting the old blob", async () => {
+  it("should replace the video and delete the old blob when the next one is published", async () => {
     const mine = await chat();
     const first = await published(mine);
     const second = await published(mine, { name: "second" }, Buffer.from("a second recording"));
@@ -121,14 +167,14 @@ describe("publishing a video", () => {
     const got = await videoRoute.GET(request("GET", mine, ""), { params: Promise.resolve({ agentId: mine.agentId }) });
     const body = (await jsonOf(got)) as { video_id: string; download_url: string };
     expect(body.video_id).toBe(second);
-    expect(await (await fetch(body.download_url)).text()).toBe("a second recording");
-    const blobs = videoBlobs()!;
+    expect(storage.blobs.get(storage.pathOf(body.download_url))?.bytes.toString()).toBe("a second recording");
+    const blobs = storage.fake;
     expect(await blobs.sizeOf(videoPath(mine.id, first))).toBeUndefined();
     expect(await prisma.assistantVideo.count({ where: { conversationId: mine.id } })).toBe(1);
     expect((await prisma.assistantConversation.findUniqueOrThrow({ where: { id: mine.id } })).videoVersion).toBe(2);
   });
 
-  it("should refuse a body the hub cannot store, and a conversation with too many open uploads", async () => {
+  it("should refuse a body the hub cannot store, and refuse an upload when the conversation has too many open", async () => {
     const mine = await chat();
 
     const bad = await videoRoute.POST(request("POST", mine, "", begin({ chapters: "none" })), { params: Promise.resolve({ agentId: mine.agentId }) });
@@ -140,6 +186,20 @@ describe("publishing a video", () => {
     expect(tooMany.status).toBe(429);
     const none = await videoRoute.GET(request("GET", await chat(), ""), { params: Promise.resolve({ agentId: (await chat()).agentId }) });
     expect(none.status).toBe(404);
+  });
+
+  it("should serve nothing, when the blob is written again with the upload URL after the upload finished", async () => {
+    const mine = await chat();
+    const { video_id, upload_url } = await started(mine);
+    await putBytes(upload_url, MP4);
+    expect((await complete(mine, video_id)).status).toBe(200);
+    expect(await readableVideo(viewerOf(ALICE), mine.id)).toMatchObject({ video_id });
+
+    await putBytes(upload_url, Buffer.from("something else entirely"));
+
+    expect(await readableVideo(viewerOf(ALICE), mine.id)).toBeUndefined();
+    const got = await videoRoute.GET(request("GET", mine, ""), { params: Promise.resolve({ agentId: mine.agentId }) });
+    expect(got.status).toBe(404);
   });
 
   it("should record where the video was posted, and show it on the conversation's page", async () => {
@@ -157,13 +217,14 @@ describe("publishing a video", () => {
     expect(stranger.status).toBe(404);
 
     const row = await prisma.assistantConversation.findUniqueOrThrow({ where: { id: mine.id } });
+    expect((await conversationView(prisma, row as never, mine.agentId)).canPostVideo).toBe(true);
     expect((await conversationView(prisma, row as never, mine.agentId)).video).toMatchObject({ name: "pcs-journey", version: 1 });
     expect((await sharedConversation(prisma, row as never, "reader"))?.video).toMatchObject({ name: "pcs-journey", version: 1 });
   });
 });
 
 describe("who may watch", () => {
-  it("should let a share's recipient watch and nobody else", async () => {
+  it("should let a share's recipient watch and nobody else when the video is shared", async () => {
     const mine = await chat();
     await published(mine);
     await shareConversation(prisma, ALICE.oid, mine.id, BOB.oid);
@@ -178,10 +239,10 @@ describe("who may watch", () => {
 });
 
 describe("deleting and sweeping", () => {
-  it("should delete a conversation's blobs with the conversation", async () => {
+  it("should delete a conversation's blobs when the conversation is deleted", async () => {
     const mine = await chat();
     const id = await published(mine);
-    const blobs = videoBlobs()!;
+    const blobs = storage.fake;
     expect(await blobs.sizeOf(videoPath(mine.id, id))).toBe(MP4.length);
 
     const { actAs } = await import("./web-session.ts");
@@ -193,7 +254,7 @@ describe("deleting and sweeping", () => {
     expect(await prisma.assistantVideo.count({ where: { videoId: id } })).toBe(0);
   });
 
-  it("should delete uploads never finished and blobs no row names, and keep what a row names", async () => {
+  it("should delete unfinished uploads and unnamed blobs and keep what a row names when the sweep runs", async () => {
     const mine = await chat();
     const kept = await published(mine);
     const stale = await started(mine);
@@ -201,7 +262,7 @@ describe("deleting and sweeping", () => {
     await prisma.assistantVideo.update({ where: { videoId: stale.video_id }, data: { createdAt: new Date(Date.now() - 3 * 60 * 60_000) } });
     const fresh = await started(mine);
     await putBytes(fresh.upload_url, MP4);
-    const blobs = videoBlobs()!;
+    const blobs = storage.fake;
     const orphan = videoPath(randomUUID(), randomUUID());
     await blobs.putBlob(orphan, MP4, "video/mp4");
     await blobs.putBlob("not-ours/thing.txt", MP4, "text/plain");
@@ -209,7 +270,7 @@ describe("deleting and sweeping", () => {
     const result = await sweepVideos(prisma, blobs);
 
     expect(result?.stale).toBe(1);
-    expect(result?.orphans).toBeGreaterThanOrEqual(2);
+    expect(result?.orphans).toBe(1);
     expect(await blobs.sizeOf(orphan)).toBeUndefined();
     expect(await blobs.sizeOf(videoPath(mine.id, stale.video_id))).toBeUndefined();
     expect(await blobs.sizeOf(videoPath(mine.id, kept))).toBe(MP4.length);

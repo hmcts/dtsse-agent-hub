@@ -27,14 +27,14 @@ export const POST = ownedAgentRoute<{ agentId: string; videoId: string }>(async 
   if (declared === undefined) {
     throw new HttpError(404, "that upload is not one of this conversation's");
   }
-  const size = await blobs.sizeOf(videoPath(conversation.id, videoId));
-  if (size === undefined) {
+  const stat = await blobs.statOf(videoPath(conversation.id, videoId));
+  if (stat === undefined) {
     throw new HttpError(409, "the video has not been put to the upload URL yet");
   }
-  if (size !== declared.bytes) {
-    throw new HttpError(409, `the video in storage is ${size} bytes and the upload declared ${declared.bytes}`);
+  if (stat.size !== declared.bytes) {
+    throw new HttpError(409, `the video in storage is ${stat.size} bytes and the upload declared ${declared.bytes}`);
   }
-  const { replaced } = await finishVideo(prisma, { conversationId: conversation.id, videoId });
+  const { replaced } = await finishVideo(prisma, { conversationId: conversation.id, videoId, etag: stat.etag });
   await deleteReplacedBlobs(blobs, conversation.id, replaced);
   return json({ video_id: videoId });
 });

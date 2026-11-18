@@ -60,6 +60,7 @@ const settle = () => act(async () => new Promise((resolve) => setTimeout(resolve
 beforeEach(() => {
   vi.stubGlobal("matchMedia", undefined);
   window.HTMLMediaElement.prototype.play = vi.fn(async () => undefined);
+  window.HTMLMediaElement.prototype.load = vi.fn();
 });
 
 afterEach(() => {
@@ -67,7 +68,97 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("the video panel's play URL", () => {
+  /** A video whose every read is signed anew, as the hub's is. */
+  function serveSigned(expiresIn = 3600) {
+    let signed = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        signed += 1;
+        return new Response(JSON.stringify(detail({ play_url: `https://blobs.example/v.mp4?sig=${signed}`, expires_in: expiresIn })));
+      })
+    );
+    return () => signed;
+  }
+
+  it("should keep the URL the player has, when the page moves on and the video is the same", async () => {
+    const signed = serveSigned();
+    const { container, rerender } = render(panel());
+    await settle();
+    const player = container.querySelector("video") as HTMLVideoElement;
+    expect(player.getAttribute("src")).toBe("https://blobs.example/v.mp4?sig=1");
+
+    rerender(panel({ video: { ...SUMMARY, updatedAt: "2026-11-18T13:00:00.000Z" } }));
+    await settle();
+
+    expect(signed()).toBe(2);
+    expect(container.querySelector("video")).toBe(player);
+    expect(player.getAttribute("src")).toBe("https://blobs.example/v.mp4?sig=1");
+    expect(window.HTMLMediaElement.prototype.load).toHaveBeenCalledTimes(1);
+  });
+
+  it("should take a new URL and carry on from where it was, when the player fails to play", async () => {
+    serveSigned();
+    const { container } = render(panel());
+    await settle();
+    const player = container.querySelector("video") as HTMLVideoElement;
+    player.currentTime = 42;
+    Object.defineProperty(player, "paused", { value: false, configurable: true });
+
+    fireEvent.error(player);
+    await settle();
+
+    expect(player.getAttribute("src")).toBe("https://blobs.example/v.mp4?sig=2");
+    player.currentTime = 0;
+    fireEvent.loadedMetadata(player);
+    expect(player.currentTime).toBe(42);
+    expect(window.HTMLMediaElement.prototype.play).toHaveBeenCalled();
+  });
+
+  it("should read a fresh URL before the one it has expires, when the panel stays open", async () => {
+    vi.useFakeTimers();
+    try {
+      const signed = serveSigned(3600);
+      const { container } = render(panel());
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(signed()).toBe(1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(56 * 60_000);
+      });
+
+      expect(signed()).toBe(2);
+      expect((container.querySelector("video") as HTMLVideoElement).getAttribute("src")).toBe("https://blobs.example/v.mp4?sig=2");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("the video panel", () => {
+  it("should forget the last post and the issue key, when the video is replaced", async () => {
+    serve({ jobs: [{ job_id: "job-1", kind: "k", status: "done", result: { issue_key: "HDPI-1234", url: "https://x/HDPI-1234", commented: true } }] });
+    const { rerender } = render(panel());
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Post to Jira" }));
+    await settle();
+    await settle();
+    expect(screen.getByRole("link", { name: "HDPI-1234" })).toBeTruthy();
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(detail({ video_id: "44444444-4444-4444-8444-444444444444", jira_key: "HDPI-9" }))))
+    );
+    rerender(panel({ video: { ...SUMMARY, version: 2 } }));
+    await settle();
+
+    expect(screen.queryByRole("link", { name: "HDPI-1234" })).toBeNull();
+    expect((screen.getByLabelText("Jira issue") as HTMLInputElement).value).toBe("HDPI-9");
+  });
+
   it("should play the video with its captions and list the chapters, when the video is read", async () => {
     serve();
     const { container } = render(panel());
@@ -171,7 +262,7 @@ describe("the video panel", () => {
     expect(screen.getByRole("alert").textContent).toBe("Jira could not find that issue, or your account cannot see it.");
   });
 
-  it("should not post while the key is not an issue key", async () => {
+  it("should not post when the key is not an issue key", async () => {
     const { posts } = serve({ video: detail({ jira_key: null }) });
     render(panel());
     await settle();
@@ -183,7 +274,7 @@ describe("the video panel", () => {
     expect(posts).toEqual([]);
   });
 
-  it("should show where the video was last attached", async () => {
+  it("should show where the video was last attached when it was posted before", async () => {
     serve({ video: detail({ posted: { key: "HDPI-5", url: "https://hmcts.atlassian.net/browse/HDPI-5", at: "2026-11-18T13:00:00.000Z" } }) });
     render(panel());
     await settle();

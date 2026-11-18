@@ -219,7 +219,7 @@ export type Api = {
   putNotify: (agentId: string, body: NotifyBody) => Promise<NotifyWritten>;
   /** The conversation's ready journey video, with a URL to download its MP4 from. */
   getVideo: (agentId: string) => Promise<VideoResponse>;
-  /** Records an upload and answers the write-only URL its MP4 is put to. */
+  /** Records an upload and answers the URL its MP4 is put to. */
   beginVideo: (agentId: string, body: VideoBeginBody) => Promise<VideoBegun>;
   /** Makes the upload the conversation's video, once its MP4 is at the URL; a `409` says it is not there or is the wrong size. */
   finishVideo: (agentId: string, videoId: string) => Promise<{ video_id: string }>;

@@ -9,7 +9,9 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { ApiError } from "../api.ts";
+import { formatStamp } from "../cli/video.ts";
 import type { Env } from "../env.ts";
+import { JIRA_BROWSE_URL, JIRA_KEY_RE } from "../jira-export.ts";
 import { withRetry } from "../retry.ts";
 import { hubHome, readJson, writeJson } from "../session.ts";
 import { twgFailureLine, twgSignInProblem } from "../twg-export.ts";
@@ -19,10 +21,7 @@ import type { VideoChapter } from "../wire.ts";
 import { type PodJobContext, PodJobError, type PodJobHandler } from "./pod-jobs.ts";
 import { VIDEO_ATTACH_BUDGET_MS, VIDEO_ATTACH_KIND } from "./video-attach-kind.ts";
 
-export const JIRA_KEY_RE = /^[A-Z][A-Z0-9_]{1,9}-\d{1,9}$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-/** twg signs in to the hmcts site, so every issue it reaches is here. */
-export const JIRA_BROWSE_URL = "https://hmcts.atlassian.net/browse/";
 const UPLOAD_TIMEOUT_MS = 6 * 60_000;
 const COMMENT_TIMEOUT_MS = 60_000;
 const MAX_LINE = 250;
@@ -55,16 +54,11 @@ export function parseAttachArgs(value: unknown): { issueKey: string; videoId: st
   return { issueKey: raw.issue_key, videoId: raw.video_id };
 }
 
-function stamp(seconds: number): string {
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `${pad(Math.floor(seconds / 3600))}:${pad(Math.floor((seconds % 3600) / 60))}:${pad(seconds % 60)}`;
-}
-
 /** The comment: the file's name, its chapters with their times, and the coverage summary line when there is one. */
 export function commentBody(fileName: string, chapters: readonly VideoChapter[], summary: string | null): string {
   const lines = [`Journey video attached: ${fileName}`];
   if (chapters.length > 0) {
-    lines.push("", "Chapters", ...chapters.map((chapter) => `- ${stamp(chapter.at)} ${chapter.title}`));
+    lines.push("", "Chapters", ...chapters.map((chapter) => `- ${formatStamp(chapter.at)} ${chapter.title}`));
   }
   if (summary !== null) {
     lines.push("", `Coverage: ${summary}`);
@@ -152,7 +146,6 @@ export function videoAttachHandler(deps: VideoAttachDeps): PodJobHandler {
       try {
         const fileName = attachFileName(video.name);
         const file = path.join(work, fileName);
-        await download(video.download_url, file, video.bytes, context.signal, deps.fetchImpl ?? fetch);
         const problem = await twgSignInProblem(
           {
             env: context.env,
@@ -165,6 +158,7 @@ export function videoAttachHandler(deps: VideoAttachDeps): PodJobHandler {
         if (problem !== null) {
           throw new PodJobError(/not installed/.test(problem) ? "twg_missing" : "not_signed_in", problem);
         }
+        await download(video.download_url, file, video.bytes, context.signal, deps.fetchImpl ?? fetch);
         const upload = await deps.run("twg", ["jira", "workitem", "attachment", "upload", `--issue-id=${issueKey}`, `--file=${file}`], {
           env: context.env,
           timeoutMs: UPLOAD_TIMEOUT_MS,

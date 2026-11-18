@@ -3,7 +3,7 @@ import { ownedAgentRoute } from "@/agent-api/route";
 import { requireConversationOfAgent } from "@/assistant/conversation-store";
 import { checkVideoBegin, VIDEO_READ_TTL_MS, VIDEO_UPLOAD_TTL_MS, videoPath } from "@/assistant/video";
 import { videoBlobs } from "@/assistant/video-blob";
-import { beginVideo, readyVideo } from "@/assistant/video-store";
+import { beginVideo, readyVideo, videoIntact } from "@/assistant/video-store";
 import { prisma } from "@/store/prisma";
 
 export const runtime = "nodejs";
@@ -25,11 +25,14 @@ export const GET = ownedAgentRoute<{ agentId: string }>(async ({ agent }) => {
   if (video === null) {
     throw new HttpError(404, "the conversation has no journey video");
   }
+  if (!(await videoIntact(prisma, blobs, conversation.id, video.video_id))) {
+    throw new HttpError(404, "the video in storage no longer matches what was published; publish it again");
+  }
   const downloadUrl = await blobs.readUrl(videoPath(conversation.id, video.video_id), VIDEO_READ_TTL_MS);
   return json({ ...video, download_url: downloadUrl });
 });
 
-/** Records an upload and answers the write-only URL for its MP4. The video is the conversation's once `…/complete` is called. */
+/** Records an upload and answers the URL its MP4 is put to. The video is the conversation's once `…/complete` is called. */
 export const POST = ownedAgentRoute<{ agentId: string }>(async ({ agent, request }) => {
   const body = await readJson(request);
   const blobs = requireBlobs();

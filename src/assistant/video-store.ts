@@ -158,7 +158,7 @@ export async function uploadOf(db: Database, conversationId: string, videoId: st
  */
 export async function finishVideo(
   prisma: PrismaClient,
-  { conversationId, videoId, now = new Date() }: { conversationId: string; videoId: string; now?: Date }
+  { conversationId, videoId, etag, now = new Date() }: { conversationId: string; videoId: string; etag: string; now?: Date }
 ): Promise<{ replaced: string[] }> {
   return await prisma.$transaction(async (tx) => {
     const conversation = await conversationOf(tx, conversationId);
@@ -172,7 +172,7 @@ export async function finishVideo(
     }
     const older = await tx.assistantVideo.findMany({ where: { conversationId, status: "ready" }, select: { videoId: true } });
     await tx.assistantVideo.deleteMany({ where: { conversationId, status: "ready" } });
-    await tx.assistantVideo.update({ where: { videoId }, data: { status: "ready", finishedAt: now } });
+    await tx.assistantVideo.update({ where: { videoId }, data: { status: "ready", finishedAt: now, etag } });
     await tx.$executeRaw`
       UPDATE assistant_conversation
          SET video_version = video_version + 1, video_name = ${row.name}, video_updated_at = ${now},
@@ -182,6 +182,19 @@ export async function finishVideo(
     await announce(tx, conversation);
     return { replaced: older.map((video) => video.videoId) };
   });
+}
+
+/**
+ * Whether the conversation's ready video is still the blob that was checked when its upload finished. The upload URL can
+ * write the blob until it expires, so a read URL is handed out only for a blob whose ETag and size are the recorded ones.
+ */
+export async function videoIntact(db: Database, blobs: VideoBlobs, conversationId: string, videoId: string): Promise<boolean> {
+  const row = await db.assistantVideo.findFirst({ where: { videoId, conversationId, status: "ready" }, select: { etag: true, bytes: true } });
+  if (row === null || row.etag === null) {
+    return false;
+  }
+  const stat = await blobs.statOf(videoPath(conversationId, videoId));
+  return stat !== undefined && stat.etag === row.etag && stat.size === Number(row.bytes);
 }
 
 /** Records that the conversation's ready video was attached to `issueKey`, for the panel to show. Announced. */
@@ -263,14 +276,20 @@ export async function sweepVideos(prisma: PrismaClient, blobs: VideoBlobs, now: 
       if (lock?.locked !== true) {
         return undefined;
       }
-      const stale = await prisma.assistantVideo.findMany({
-        where: { status: "uploading", createdAt: { lt: new Date(now.getTime() - STALE_UPLOAD_MS) } },
-        select: { videoId: true, conversationId: true },
-        take: NAME_BATCH
-      });
-      const failed = new Set(await blobs.deleteBlobs(stale.map((row) => videoPath(row.conversationId, row.videoId))));
-      const gone = stale.filter((row) => !failed.has(videoPath(row.conversationId, row.videoId))).map((row) => row.videoId);
-      await prisma.assistantVideo.deleteMany({ where: { videoId: { in: gone }, status: "uploading" } });
+      // The rows go first, in one statement that only takes `uploading` ones: a finish that wins the row makes it ready and
+      // this leaves it, and one that loses finds no row. Either way no ready row is left without its blob. A blob whose
+      // delete fails below has no row and is found by the unnamed-blob step.
+      const stale = await prisma.$queryRaw<{ video_id: string; conversation_id: string }[]>`
+        DELETE FROM assistant_video
+         WHERE video_id IN (
+                 SELECT video_id FROM assistant_video
+                  WHERE status = 'uploading' AND created_at < ${new Date(now.getTime() - STALE_UPLOAD_MS)}
+                  LIMIT ${NAME_BATCH}::int
+                  FOR UPDATE SKIP LOCKED)
+           AND status = 'uploading'
+        RETURNING video_id::text AS video_id, conversation_id::text AS conversation_id
+      `;
+      await blobs.deleteBlobs(stale.map((row) => videoPath(row.conversation_id, row.video_id)));
 
       const named = (await blobs.listNames("")).flatMap((name) => {
         const parsed = parseVideoPath(name);
@@ -290,7 +309,7 @@ export async function sweepVideos(prisma: PrismaClient, blobs: VideoBlobs, now: 
         const unnamed = chunk.filter((entry) => !held.has(`${entry.conversationId}/${entry.videoId}`)).map((entry) => entry.name);
         orphans += unnamed.length - (await blobs.deleteBlobs(unnamed)).length;
       }
-      return { stale: gone.length, orphans };
+      return { stale: stale.length, orphans };
     },
     { timeout: VIDEO_SWEEP_TIMEOUT_MS, maxWait: 10_000 }
   );

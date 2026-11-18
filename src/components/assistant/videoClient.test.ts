@@ -17,7 +17,7 @@ const REQUEST = { issueKey: "HDPI-1", videoId: "22222222-2222-4222-8222-22222222
 const noWait = async () => undefined;
 
 describe("readVideo", () => {
-  it("should answer the video, or undefined for a 404, and throw for any other refusal", async () => {
+  it("should answer undefined when the hub answers 404, and throw when it refuses otherwise", async () => {
     expect(await readVideo("c/1", { fetchImpl: fakeFetch(() => reply(200, { video_id: "v" })).fetchImpl })).toEqual({ video_id: "v" });
     const missing = fakeFetch(() => reply(404, { error: "none" }));
     expect(await readVideo("c/1", { fetchImpl: missing.fetchImpl })).toBeUndefined();
@@ -27,7 +27,7 @@ describe("readVideo", () => {
 });
 
 describe("postVideo", () => {
-  it("should ask for the job with the issue and video, and answer the issue once it is done", async () => {
+  it("should ask for the job with the issue and video, and answer the issue when it is done", async () => {
     const { fetchImpl, calls } = fakeFetch(
       () => reply(200, { status: "pending", job_id: "j1" }),
       () => reply(200, { job_id: "j1", kind: "jira.attach-video", status: "done", result: { issue_key: "HDPI-1", url: "https://x/HDPI-1", commented: true } })
@@ -41,7 +41,7 @@ describe("postVideo", () => {
     expect(onPending).toHaveBeenCalled();
   });
 
-  it("should ask again while the assistant is waking, then run", async () => {
+  it("should ask again when the assistant is waking, then run", async () => {
     const { fetchImpl } = fakeFetch(
       () => reply(200, { status: "waking" }),
       () => reply(200, { status: "pending", job_id: "j1" }),
@@ -58,16 +58,16 @@ describe("postVideo", () => {
   it.each([
     ["unsupported", { status: "unsupported" }],
     ["no_pod", { status: "no_pod" }]
-  ])("should answer %s as the hub does", async (status, body) => {
+  ])("should answer %s when the hub says so", async (status, body) => {
     expect(await postVideo("c1", REQUEST, { fetchImpl: fakeFetch(() => reply(200, body)).fetchImpl })).toEqual({ status });
   });
 
-  it("should answer a refusal with its status and words", async () => {
+  it("should answer a refusal with its status and words when the hub refuses the request", async () => {
     const outcome = await postVideo("c1", REQUEST, { fetchImpl: fakeFetch(() => reply(429, { error: "slow down" })).fetchImpl });
     expect(outcome).toEqual({ status: "refused", httpStatus: 429, error: "slow down" });
   });
 
-  it("should answer a failed job with its code and words, a timeout as a failure and a lost job as missing", async () => {
+  it("should answer a failed job with its code, a timeout as a failure and a lost job as missing when the job ends", async () => {
     const asked = () => reply(200, { status: "pending", job_id: "j1" });
     const failed = await postVideo("c1", REQUEST, {
       fetchImpl: fakeFetch(asked, () => reply(200, { job_id: "j1", kind: "k", status: "failed", error: "forbidden", detail: "no" })).fetchImpl
@@ -83,7 +83,7 @@ describe("postVideo", () => {
 describe("postFailureSentence", () => {
   const sentences = (outcomes: Exclude<PostOutcome, { status: "done" }>[]) => outcomes.map(postFailureSentence);
 
-  it("should word every way a post can end without the video attached", () => {
+  it("should word a sentence for every outcome when the video was not attached", () => {
     const words = sentences([
       { status: "waking" },
       { status: "unsupported" },
