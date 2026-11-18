@@ -817,7 +817,7 @@ model AssistantNotifyVersion {
   version        Int
   /// The person's amends of this version.
   revision       Int      @default(0)
-  /// An id from @hmcts-cft/docmosis-tools/notify/products.
+  /// An id from @hmcts-cft/notify-tools/products.
   product        String
   templateId     String   @map("template_id") @db.Uuid
   serviceId      String   @map("service_id") @db.Uuid

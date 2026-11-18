@@ -1,6 +1,6 @@
 // GitHub's REST API as the supervisor reads a template library with it: the commit a ref is at, revalidated by ETag
 // so an unchanged library costs nothing, the templates in a folder of that commit's tree, and a blob's bytes. Ported
-// from the HMCTS Template Preview extension's library client (dtsse-docmosis-tools `vscode/src/library/github.ts`),
+// from the HMCTS Template Preview extension's library client (dtsse-ide-tooling `extensions/template-preview/src/library/github.ts`),
 // as functions. The token is the owner's own `gh` sign-in, read for each call and only ever put in a header: it is
 // never logged, printed or written, and no error says it.
 import { GITHUB_OWNER_RE, GITHUB_REPO_RE } from "../github.ts";
