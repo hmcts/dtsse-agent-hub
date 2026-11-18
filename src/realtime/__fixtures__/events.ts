@@ -39,6 +39,8 @@ const NOTIFIED_EVENT_SAMPLES: { [T in NotifiedEvent["type"]]: readonly Extract<N
   assistant_welsh: [{ type: "assistant_welsh", job_id: "w-a", virtual_agent_id: "va-a", owner_oid: "oid-a" }],
   assistant_welsh_answered: [{ type: "assistant_welsh_answered", job_id: "w-a", virtual_agent_id: "va-a", owner_oid: "oid-a" }],
   assistant_deck_build: [{ type: "assistant_deck_build", job_id: "d-a", virtual_agent_id: "va-a", owner_oid: "oid-a" }],
+  assistant_docmosis_index: [{ type: "assistant_docmosis_index", request_id: "r-a", virtual_agent_id: "va-a", owner_oid: "oid-a" }],
+  assistant_docmosis_library: [{ type: "assistant_docmosis_library", owner_oid: "oid-a" }],
   feedback: [
     { type: "feedback", project_id: "fp-a", link_id: "fl-a" },
     // A change to the project itself rather than through one of its links.

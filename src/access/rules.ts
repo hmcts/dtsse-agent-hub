@@ -349,6 +349,15 @@ export function canManageVirtualAgent(actorOid: string, virtualAgent: { ownerOid
 }
 
 /**
+ * Whether `actorOid` may read a template library index, or answer a check of it: its owner alone, for the person
+ * opening it and for the pod answering, whose owner is the actor. The index is what the owner's own GitHub sign-in
+ * could see of a private repository, so a list of it is theirs as much as the repository access that made it.
+ */
+export function canUseDocmosisLibrary(actorOid: string, index: { ownerOid: string }): boolean {
+  return isOwner(actorOid, index);
+}
+
+/**
  * Only its owner opens a virtual agent's web servers through the viewer, as only they see its ports: a server there
  * runs as the owner, with their GitHub and Azure access, and may serve what it read with them.
  */
