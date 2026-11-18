@@ -167,6 +167,14 @@ describe("listNotifyTemplates", () => {
     expect(listed.templates[0]?.name).toBe("Untitled");
   });
 
+  it("should clip a long name without leaving half of a surrogate pair", async () => {
+    const { deps } = fakes({ templates: [template({ name: `${"x".repeat(498)}😀😀` })] });
+
+    const [listed] = (await listNotifyTemplates("pcs", deps)).templates;
+
+    expect(listed?.name).toBe(`${"x".repeat(498)}…`);
+  });
+
   it("should answer a Key Vault failure with its code", async () => {
     const { deps } = fakes({
       read: async () => {
@@ -235,6 +243,67 @@ describe("pullNotifyTemplate", () => {
     expect(body?.subject).toBeNull();
     expect(body?.source?.notify_subject).toBeNull();
     expect(body?.source?.notify_preview).toBe("Hi ((name))");
+  });
+
+  it("should record a load from the panel's picker as the person's", async () => {
+    const { deps } = fakes();
+    const api = hubApi(loaded({ by: "user" }), async () => ({ version: 3, revision: 0 }));
+
+    const again = await pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", api, deps, by: "user" });
+    const fresh = await pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", api: hubApi(), deps, by: "user" });
+
+    expect(again.written).toBe(false);
+    expect(fresh.written).toBe(true);
+  });
+
+  it("should send by: user only for a load from the panel's picker", async () => {
+    const { deps } = fakes();
+    const panel = hubApi();
+    const session = hubApi();
+
+    await pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", api: panel, deps, by: "user" });
+    await pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", api: session, deps });
+
+    expect(panel.putNotify.mock.calls[0]?.[1].by).toBe("user");
+    expect(session.putNotify.mock.calls[0]?.[1]).not.toHaveProperty("by");
+  });
+
+  it("should keep no preview when Notify cannot be reached for it", async () => {
+    const { deps } = fakes({ preview: new Error("Can't reach GOV.UK Notify: fetch failed") });
+    const api = hubApi();
+
+    await pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", api, deps });
+
+    expect(api.putNotify.mock.calls[0]?.[1].source?.notify_preview).toBeNull();
+  });
+
+  it("should write nothing once the job is aborted", async () => {
+    const { deps, client } = fakes();
+    const job = new AbortController();
+    client.previewTemplate.mockImplementation(async () => {
+      job.abort();
+      return { id: TEMPLATE_ID, type: "email", version: 4, body: "x", html: "<p>x</p>" } as never;
+    });
+    const api = hubApi();
+
+    await expect(pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", api, deps, signal: job.signal })).rejects.toThrow();
+    expect(api.putNotify).not.toHaveBeenCalled();
+  });
+
+  it("should stop every Notify call with the job's signal", async () => {
+    const job = new AbortController();
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit): Promise<Response> => Promise.reject(new TypeError("fetch failed")));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const real: NotifyDeps = { products: PRODUCTS, readKey: async () => KEY };
+
+      await expect(
+        pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", api: hubApi(), deps: real, signal: job.signal })
+      ).rejects.toMatchObject({ code: "notify_error" });
+      expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ signal: job.signal });
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("should give an email with no subject an empty one, and keep no preview Notify refused", async () => {
@@ -359,13 +428,15 @@ describe("pullNotifyTemplate", () => {
     const missing = fakes();
     missing.client.getTemplate.mockRejectedValue(new NotifyApiError("GOV.UK Notify returned 404: NoResultFound", 404));
     const aborted = fakes({ preview: new DOMException("aborted", "AbortError") });
+    const job = new AbortController();
+    job.abort();
 
     await expect(pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", api: hubApi(), deps: missing.deps })).rejects.toMatchObject({
       code: "not_found"
     });
-    await expect(pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", api: hubApi(), deps: aborted.deps })).rejects.toThrow(
-      "aborted"
-    );
+    await expect(
+      pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", api: hubApi(), deps: aborted.deps, signal: job.signal })
+    ).rejects.toThrow("aborted");
   });
 
   it("should answer a key that is not a Notify key with bad_key", async () => {

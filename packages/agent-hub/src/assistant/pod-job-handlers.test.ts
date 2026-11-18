@@ -32,12 +32,12 @@ describe("the Notify pod-job handlers", () => {
     expect(notify.listNotifyTemplates).toHaveBeenCalledWith("pcs");
   });
 
-  it("should load the template through the frame's agent and answer the version alone", async () => {
+  it("should load the template through the frame's agent as the person's, and answer the version alone", async () => {
     notify.pullNotifyTemplate.mockResolvedValue({ version: 3, name: "Claim", written: true });
     const ctx = context("agent-1");
 
     expect(await notifyPull.run({ product: "pcs", template_id: TEMPLATE }, ctx)).toEqual({ version: 3 });
-    expect(notify.pullNotifyTemplate).toHaveBeenCalledWith({ productId: "pcs", templateId: TEMPLATE, agentId: "agent-1", api, signal: ctx.signal });
+    expect(notify.pullNotifyTemplate).toHaveBeenCalledWith({ productId: "pcs", templateId: TEMPLATE, agentId: "agent-1", api, signal: ctx.signal, by: "user" });
   });
 
   it("should answer no_session when the frame carried no agent to write through", async () => {

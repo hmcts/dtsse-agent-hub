@@ -196,6 +196,7 @@ function Picker({
   initialProduct,
   list,
   onList,
+  beforeOpen,
   onLoaded,
   announce
 }: {
@@ -203,7 +204,10 @@ function Picker({
   initialProduct: string;
   list: ListState;
   onList: (product: string) => void;
-  onLoaded: () => void;
+  /** Whether to go on, having set any unsaved draft aside; false when the person would rather keep it. */
+  beforeOpen: () => boolean;
+  /** The version the load answered, or `null` when it failed. */
+  onLoaded: (version: number | null) => void;
   announce: (text: string) => void;
 }) {
   const [product, setProduct] = useState(initialProduct);
@@ -218,6 +222,9 @@ function Picker({
   const groups = groupTemplates(templates);
 
   async function open(): Promise<void> {
+    if (!beforeOpen()) {
+      return;
+    }
     controller.current?.abort();
     const own = new AbortController();
     controller.current = own;
@@ -228,9 +235,9 @@ function Picker({
       if (own.signal.aborted) {
         return;
       }
+      onLoaded(outcome.ok ? outcome.result.version : null);
       if (outcome.ok) {
         announce("The Notify template is loaded");
-        onLoaded();
       } else {
         setError(outcome.message);
         announce("The Notify template could not be loaded");
@@ -463,6 +470,8 @@ export function NotifyPanel({
   const inFlight = useRef(false);
   const queued = useRef(false);
   const mounted = useRef(true);
+  // From Open in the picker until the template it loads is taken in: nothing is saved, and what arrives is no conflict.
+  const opening = useRef(false);
   const listing = useRef<AbortController | null>(null);
   const listedFor = useRef<string | null>(null);
   const announceNow = useRef(announce);
@@ -486,6 +495,7 @@ export function NotifyPanel({
     draftNow.current = next;
     savedDraft.current = next;
     conflictNow.current = null;
+    opening.current = false;
     setView(arrived);
     setDraft(next);
     setConflict(null);
@@ -508,7 +518,7 @@ export function NotifyPanel({
     if (arrived.version < current.version || (arrived.version === current.version && arrived.revision <= current.revision)) {
       return;
     }
-    if (dirty() && !sameDraft(draftOf(arrived), draftNow.current)) {
+    if (dirty() && !opening.current && !sameDraft(draftOf(arrived), draftNow.current)) {
       conflictNow.current = arrived;
       stopTimer();
       setConflict(arrived);
@@ -594,7 +604,7 @@ export function NotifyPanel({
     if (!owner || base.current === null || conflictNow.current !== null) {
       return;
     }
-    if (!dirty()) {
+    if (opening.current || !dirty()) {
       setPhase("idle");
       return;
     }
@@ -624,6 +634,28 @@ export function NotifyPanel({
     setConflict(null);
     announceNow.current("Keeping your changes");
     void flush();
+  }
+
+  function beforeOpen(): boolean {
+    if ((dirty() || conflictNow.current !== null) && !window.confirm("Opening a template discards the changes you have not saved. Open it anyway?")) {
+      return false;
+    }
+    stopTimer();
+    draftNow.current = savedDraft.current;
+    setDraft(savedDraft.current);
+    conflictNow.current = null;
+    setConflict(null);
+    setPhase((before) => (before === "saving" ? before : "idle"));
+    opening.current = true;
+    return true;
+  }
+
+  function onLoaded(version: number | null): void {
+    // A failed load, or one that wrote nothing new, brings no version to take in.
+    if (version === null || (base.current !== null && version <= base.current.version)) {
+      opening.current = false;
+    }
+    latest.refresh();
   }
 
   async function listTemplates(product: string): Promise<void> {
@@ -755,7 +787,8 @@ export function NotifyPanel({
           initialProduct={openProduct ?? ""}
           list={list}
           onList={(product) => void listTemplates(product)}
-          onLoaded={latest.refresh}
+          beforeOpen={beforeOpen}
+          onLoaded={onLoaded}
           announce={announce}
         />
       ) : null}
@@ -776,7 +809,7 @@ export function NotifyPanel({
           >
             {(versions.length === 0 ? [{ version: shown.version, by: shown.by, summary: shown.summary }] : versions).map((entry) => (
               <option key={entry.version} value={entry.version}>
-                {`Version ${entry.version}, by ${entry.by === "agent" ? "assistant" : "you"}${entry.summary === null ? "" : `: ${entry.summary}`}`}
+                {`Version ${entry.version}, by ${entry.by === "agent" ? "assistant" : owner ? "you" : "the owner"}${entry.summary === null ? "" : `: ${entry.summary}`}`}
               </option>
             ))}
           </select>

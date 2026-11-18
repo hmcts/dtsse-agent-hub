@@ -142,6 +142,16 @@ describe("the notify store", () => {
     expect(await assistantFrame(prisma, mine.agentId)).toMatchObject({ notify_version: 2, notify_revision: 0, notify_updated_by: "agent" });
   });
 
+  it("should record a load from the panel's picker as the person's, with no editor, so their next save is a version of its own", async () => {
+    const mine = await chat();
+
+    await agentWrite(mine, { by: "user" });
+
+    expect(await notifyView(prisma, mine.id)).toMatchObject({ version: 1, by: "user" });
+    expect(await assistantFrame(prisma, mine.agentId)).toMatchObject({ notify_version: 1, notify_updated_by: "user" });
+    expect(await personSave(mine, { body: "Mine" }, { version: 1, revision: 0 })).toEqual({ version: 2, revision: 0, amended: false });
+  });
+
   it("should take a new source as the template replaced, and keep the old version's", async () => {
     const mine = await chat();
     await agentWrite(mine);

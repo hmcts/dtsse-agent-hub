@@ -388,6 +388,8 @@ export type NotifyBody = {
   summary?: string;
   /** Needed for the first version; left out, the version keeps the source of the one it is based on. */
   source?: NotifySource;
+  /** Sent only for the panel's picker, whose load the owner asked for. */
+  by?: "user";
 };
 
 export type NotifyWritten = { version: number; revision: number };

@@ -496,6 +496,44 @@ describe("NotifyPanel picker", () => {
     expect(podJobs.filter((job) => job.kind === "notify.pull")).toHaveLength(2);
   });
 
+  it("should set unsaved changes aside, once the person agrees, before opening another template, and take that one in", async () => {
+    const reminder = LISTED[0] as ListedTemplate;
+    const { podJobs, saves, state } = serve({
+      jobs: { "notify.list": { status: "done", result: { templates: LISTED, truncated: false } }, "notify.pull": { status: "done", result: { version: 3 } } }
+    });
+    await open();
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal("confirm", confirm);
+
+    fireEvent.change(screen.getByLabelText("name"), { target: { value: "Ada" } });
+    fireEvent.change(screen.getByLabelText("Template"), { target: { value: reminder.id } });
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    expect(confirm).toHaveBeenCalled();
+    expect(podJobs.filter((job) => job.kind === "notify.pull")).toHaveLength(0);
+
+    confirm.mockReturnValue(true);
+    state.latest = view({
+      version: 3,
+      by: "user",
+      template_id: reminder.id,
+      type: "sms",
+      name: reminder.name,
+      subject: null,
+      notify_subject: null,
+      body: "Hi ((name))",
+      notify_body: "Hi ((name))",
+      notify_preview: "Hi ((name))"
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    await wait(SAVE_AFTER_MS);
+
+    expect(podJobs.filter((job) => job.kind === "notify.pull")).toHaveLength(1);
+    expect(saves).toHaveLength(0);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("heading", { name: reminder.name })).toBeTruthy();
+    expect((screen.getByLabelText("name") as HTMLInputElement).value).toBe("");
+  });
+
   it("should say a product has no templates", async () => {
     serve({ latest: null, jobs: { "notify.list": { status: "done", result: { templates: [], truncated: false } } } });
     await open({ notify: null });
@@ -545,6 +583,13 @@ describe("NotifyPanel versions and readers", () => {
     expect(screen.queryByRole("tab", { name: "Edit" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Back to the latest" }));
     expect(screen.getByRole("tab", { name: "Edit" })).toBeTruthy();
+  });
+
+  it("should name the person's versions as the owner's to a reader", async () => {
+    serve({ versions: [{ version: 2, by: "user", name: "Claim received", notify_version: 4, summary: null, updated_at: "" }] });
+    await open({ owner: false });
+
+    expect(screen.getByRole("option", { name: "Version 2, by the owner" })).toBeTruthy();
   });
 
   it("should say when an older version could not be read", async () => {

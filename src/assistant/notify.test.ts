@@ -61,6 +61,12 @@ describe("checkNotifyPut", () => {
     });
   });
 
+  it("should take a load the person asked for from the panel's picker", () => {
+    const checked = checkNotifyPut(put({ by: "user" }));
+
+    expect(checked.ok && checked.value.by).toBe("user");
+  });
+
   it("should take an edit with no source on a version there is", () => {
     const checked = checkNotifyPut({ subject: null, body: "Hi", data: { name: "Ada" }, base_version: 3, base_revision: 1 });
 
@@ -80,7 +86,8 @@ describe("checkNotifyPut", () => {
     ["a preview over the cap", { source: source({ notify_preview: "é".repeat(MAX_NOTIFY_PREVIEW_BYTES / 2 + 1) }) }, /source\.notify_preview must be at most/],
     ["a field it does not know", { extra: 1 }, /Unrecognized key/],
     ["a blank summary", { summary: " " }, /^summary /],
-    ["a negative base", { base_version: -1 }, /^base_version /]
+    ["a negative base", { base_version: -1 }, /^base_version /],
+    ["an author other than the person", { by: "agent" }, /^by /]
   ])("should refuse %s, naming the field", (_label, change, message) => {
     expect(refusal(put(change))).toMatch(message);
   });

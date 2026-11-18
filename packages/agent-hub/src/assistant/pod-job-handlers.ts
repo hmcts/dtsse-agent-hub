@@ -34,7 +34,7 @@ export const notifyList: PodJobHandler = {
   }
 };
 
-/** One template loaded into the conversation as its Notify template's next version, through the agent API. */
+/** One template loaded into the conversation as its Notify template's next version, through the agent API, as the owner's. */
 export const notifyPull: PodJobHandler = {
   kind: "notify.pull",
   budgetMs: 140_000,
@@ -45,7 +45,7 @@ export const notifyPull: PodJobHandler = {
       throw new PodJobError("no_session", "This chat has no assistant session yet. Send it a message, then try again.");
     }
     const { pullNotifyTemplate } = await loadNotify();
-    const { version } = await pullNotifyTemplate({ productId: product, templateId, agentId, api, signal });
+    const { version } = await pullNotifyTemplate({ productId: product, templateId, agentId, api, signal, by: "user" });
     return { version };
   }
 };

@@ -242,9 +242,9 @@ async function insertVersion(
 }
 
 /**
- * Writes a new version by the session if `base_version` is still the template's version, and `base_revision`, when
- * given, its revision; otherwise `HttpError(409, {current})`. A put with no `source` keeps the latest version's, so
- * an edit of the draft names only what it changes. Announced.
+ * Writes a new version by the session, or by the person for a put with `by: "user"`, if `base_version` is still the
+ * template's version, and `base_revision`, when given, its revision; otherwise `HttpError(409, {current})`. A put
+ * with no `source` keeps the latest version's, so an edit of the draft names only what it changes. Announced.
  */
 export async function writeAgentNotify(
   prisma: PrismaClient,
@@ -269,14 +269,14 @@ export async function writeAgentNotify(
       subject: body.subject,
       body: body.body,
       data: JSON.stringify(body.data),
-      by: "agent",
+      by: body.by ?? "agent",
       editorOid: null,
       summary: body.summary ?? null,
       now
     });
     await tx.$executeRaw`
       UPDATE assistant_conversation
-         SET notify_version = ${version}::int, notify_revision = 0, notify_name = ${source.name}, notify_updated_by = 'agent',
+         SET notify_version = ${version}::int, notify_revision = 0, notify_name = ${source.name}, notify_updated_by = ${body.by ?? "agent"},
              notify_updated_at = ${now}, first_content_at = COALESCE(first_content_at, ${now}), updated_at = ${now}
        WHERE id = ${conversationId}::uuid
     `;

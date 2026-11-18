@@ -78,7 +78,8 @@ export const notifyPutBody = z.strictObject({
   base_version: z.number().int().nonnegative(),
   base_revision: z.number().int().nonnegative().optional(),
   summary: trimmed(MAX_NOTIFY_SUMMARY).optional(),
-  source: notifySource.optional()
+  source: notifySource.optional(),
+  by: z.literal("user").optional()
 });
 
 export interface NotifyPut {
@@ -89,6 +90,8 @@ export interface NotifyPut {
   base_revision?: number;
   summary?: string;
   source?: NotifySource;
+  /** A load the owner asked for from the panel's picker, which their pod writes through the agent path. */
+  by?: "user";
 }
 
 /** The body of the person's save, `POST /api/ui/assistant/notify/{id}/save`. */

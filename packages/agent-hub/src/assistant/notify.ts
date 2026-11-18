@@ -24,8 +24,10 @@ const utf8 = new TextEncoder();
 export type NotifyDeps = {
   products?: readonly Readonly<NotifyProduct>[];
   readKey?: (vault: string, secret: string) => Promise<string>;
-  client?: (apiKey: string) => Pick<NotifyClient, "serviceId" | "listTemplates" | "getTemplate" | "previewTemplate">;
+  client?: (apiKey: string, signal?: AbortSignal) => Pick<NotifyClient, "serviceId" | "listTemplates" | "getTemplate" | "previewTemplate">;
 };
+
+type Author = NotifyResponse["by"];
 
 export type ListedTemplate = { id: string; name: string; type: NotifyTemplateType; version: number };
 
@@ -92,11 +94,17 @@ async function explained<T>(work: () => Promise<T>): Promise<T> {
   }
 }
 
-/** A Notify client on the product's key, read with the person's own `az login`. */
-async function clientFor(product: Readonly<NotifyProduct>, deps: NotifyDeps): Promise<ReturnType<NonNullable<NotifyDeps["client"]>>> {
+const newClient = (apiKey: string, signal?: AbortSignal): NotifyClient =>
+  new NotifyClient(apiKey, signal === undefined ? undefined : { fetchImpl: (url, init) => fetch(url, { ...init, signal: init?.signal ?? signal }) });
+
+/**
+ * A Notify client on the product's key, read with the person's own `az login`, whose every call stops with `signal`.
+ * The Key Vault read takes no signal: the package gives `az` a timeout of its own.
+ */
+async function clientFor(product: Readonly<NotifyProduct>, deps: NotifyDeps, signal?: AbortSignal): Promise<ReturnType<NonNullable<NotifyDeps["client"]>>> {
   const read = deps.readKey ?? ((vault: string, secret: string) => readSecret(vault, secret));
   const key = await explained(() => read(product.vault, product.secret));
-  return await explained(async () => (deps.client ?? ((apiKey: string) => new NotifyClient(apiKey)))(key));
+  return await explained(async () => (deps.client ?? newClient)(key, signal));
 }
 
 /** The product's templates, emails first, then text messages, then letters, each by name; at most `MAX_LISTED`. */
@@ -112,7 +120,11 @@ export async function listNotifyTemplates(productId: string, deps: NotifyDeps = 
 
 function clip(text: string, max: number): string {
   const trimmed = text.trim() || "Untitled";
-  return trimmed.length <= max ? trimmed : `${Array.from(trimmed.slice(0, max - 1)).join("")}…`.slice(0, max);
+  if (trimmed.length <= max) {
+    return trimmed;
+  }
+  const cut = trimmed.slice(0, max - 1);
+  return `${/[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut}…`;
 }
 
 const bytes = (text: string): number => utf8.encode(text).byteLength;
@@ -139,25 +151,25 @@ function sourceOf(productId: string, template: NotifyTemplate, serviceId: string
   };
 }
 
-/** Notify's preview with no personalisation, or `null` when Notify would not give one, which the panel previews locally instead. */
+/** Notify's preview with no personalisation, or `null` when Notify would not give one or could not be reached, which the panel previews locally instead. */
 async function previewOf(client: Awaited<ReturnType<typeof clientFor>>, template: NotifyTemplate, signal?: AbortSignal): Promise<string | null> {
   const { personalisation } = apiPersonalisation(findPlaceholders(template.subject, template.body), {});
   try {
     const preview = await client.previewTemplate(template.id, personalisation, signal);
     return template.type === "email" ? (preview.html ?? null) : preview.body;
   } catch (e) {
-    if (e instanceof NotifyApiError) {
-      return null;
+    if (signal?.aborted) {
+      throw e;
     }
-    throw notifyFailure(e) ?? e;
+    return null;
   }
 }
 
 /** Whether `current` is this template at this Notify version, loaded and not changed since: loading it again would write a copy. */
-function alreadyLoaded(current: NotifyResponse | undefined, source: NotifySource): boolean {
+function alreadyLoaded(current: NotifyResponse | undefined, source: NotifySource, by: Author): boolean {
   return (
     current !== undefined &&
-    current.by === "agent" &&
+    current.by === by &&
     current.template_id === source.template_id &&
     current.notify_version === source.notify_version &&
     current.subject === source.notify_subject &&
@@ -178,14 +190,15 @@ async function currentOf(api: Pick<Api, "getNotify">, agentId: string): Promise<
 }
 
 /** The body of the put, with Notify's preview left out when the whole would pass the hub's request cap. */
-function putBody(source: NotifySource, base: number): NotifyBody {
+function putBody(source: NotifySource, base: number, by: Author): NotifyBody {
   const body: NotifyBody = {
     subject: source.notify_subject,
     body: source.notify_body,
     data: {},
     base_version: base,
     summary: `Loaded version ${source.notify_version} from Notify`,
-    source
+    source,
+    ...(by === "user" ? { by } : {})
   };
   if (bytes(JSON.stringify(body)) <= MAX_PUT_BYTES) {
     return body;
@@ -198,10 +211,11 @@ function putBody(source: NotifySource, base: number): NotifyBody {
 }
 
 /**
- * Loads one of the product's templates into the conversation as its Notify template's next version, by the session,
- * with no personalisation. Safe to run twice: a template already loaded at the same Notify version, and not changed
- * since, is answered as it is, so a pod that runs a job again after a crash writes no copy of it. A newer version
- * written while it loaded is `conflict`.
+ * Loads one of the product's templates into the conversation as its Notify template's next version, with no
+ * personalisation: by the session, or `by: "user"` for the panel's picker, so the session is told the person changed it.
+ * Safe to run twice: a template already loaded at the same Notify version, and not changed since, is answered as it
+ * is, so a pod that runs a job again after a crash writes no copy of it. A newer version written while it loaded is
+ * `conflict`.
  */
 export async function pullNotifyTemplate({
   productId,
@@ -209,7 +223,8 @@ export async function pullNotifyTemplate({
   agentId,
   api,
   deps = {},
-  signal
+  signal,
+  by = "agent"
 }: {
   productId: string;
   templateId: string;
@@ -217,27 +232,29 @@ export async function pullNotifyTemplate({
   api: Pick<Api, "getNotify" | "putNotify">;
   deps?: NotifyDeps;
   signal?: AbortSignal;
+  by?: Author;
 }): Promise<{ version: number; name: string; written: boolean }> {
   if (!UUID_RE.test(templateId)) {
     throw new PodJobError("not_found", `"${templateId}" is not a Notify template id, which is a UUID.`);
   }
   const product = productOf(productId, deps);
   const before = await currentOf(api, agentId);
-  const client = await clientFor(product, deps);
+  const client = await clientFor(product, deps, signal);
   const template = await explained(() => client.getTemplate(templateId));
   const source = sourceOf(product.id, template, client.serviceId, await previewOf(client, template, signal));
-  if (before !== undefined && alreadyLoaded(before, source)) {
+  if (before !== undefined && alreadyLoaded(before, source, by)) {
     return { version: before.version, name: source.name, written: false };
   }
+  signal?.throwIfAborted();
   try {
-    const written = await api.putNotify(agentId, putBody(source, before?.version ?? 0));
+    const written = await api.putNotify(agentId, putBody(source, before?.version ?? 0, by));
     return { version: written.version, name: source.name, written: true };
   } catch (e) {
     if (!(e instanceof ApiError && e.status === 409)) {
       throw e;
     }
     const current = e.body?.current as NotifyResponse | undefined;
-    if (current !== undefined && alreadyLoaded(current, source)) {
+    if (current !== undefined && alreadyLoaded(current, source, by)) {
       return { version: current.version, name: source.name, written: false };
     }
     throw new PodJobError("conflict", "The Notify template in this chat changed while it was loading. Try again.");
