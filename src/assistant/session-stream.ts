@@ -29,6 +29,8 @@ export interface SessionStreamSources {
    * stream for a test about something else need not name it; the sessions route always does.
    */
   podJob?: (jobId: string) => Promise<PodJobFrame | undefined>;
+  /** Every pod job still pending, oldest first; optional as `podJob` is. */
+  podJobs?: () => Promise<PodJobFrame[]>;
   /** The template library check to send the pod, `undefined` once it is answered, lost or not this assistant's owner's. */
   docmosisIndex: (requestId: string) => Promise<DocmosisIndexFrame | undefined>;
 }
@@ -70,8 +72,8 @@ export function deleteUploadsFrame(deletion: UploadDeletion): string {
 }
 
 /**
- * What `GET /api/virtual/{id}/sessions` sends an assistant's pod: every pending wake and every outstanding file
- * deletion on connect, then a wake as each conversation needs a session, an interrupt as the person stops an answer,
+ * What `GET /api/virtual/{id}/sessions` sends an assistant's pod: every pending wake, every outstanding file
+ * deletion and every pending pod job on connect, then a wake as each conversation needs a session, an interrupt as the person stops an answer,
  * a deletion as each is asked for, and a close as each conversation is deleted.
  *
  * Opened in the same order as the agent stream (subscribe, wait for `LISTEN`, then replay), so nothing committed
@@ -88,9 +90,13 @@ export function deleteUploadsFrame(deletion: UploadDeletion): string {
  * by the time another stream opens. A read that fails loses that one lookup, which the browser reports as a timeout,
  * rather than ending the stream. A Welsh job is sent the same way: once, as it is started, and never replayed — a job
  * lost to a reconnect times out, and the person starts it again, which is safer than running a pull request twice. A
- * deck build is too: a build lost to a reconnect times out, and the person asks again. So is a pod job, for the same
- * reason. So is a check of the template library: one lost to a reconnect counts as lost after two minutes, and the
- * next opening of the library asks again.
+ * deck build is too: a build lost to a reconnect times out, and the person asks again. So is a check of the template
+ * library: one lost to a reconnect counts as lost after two minutes, and the next opening of the library asks again.
+ *
+ * A pod job is sent as it is asked for, beside the queue, and replayed as a wake is: on connect and on a `resync`, at
+ * most once per connection for each job, and again on the next connection while it is pending. Somebody is waiting on
+ * a panel for it, and a job asked for before the pod's first stream opened has no other way to reach it. The pod runs
+ * each `job_id` once, ignoring one it is running or has answered, so the replay never runs a job twice.
  *
  * An interrupt is the exception to all of that: it is neither replayed on connect nor resent on a `resync`, because
  * it names no state to reach but a turn to end, and the turn a missed one would have ended is over by the time
@@ -107,6 +113,14 @@ export function sessionStream(virtualAgentId: string, sources: SessionStreamSour
       if (open && !sent.has(key)) {
         sent.add(key);
         send(wakeFrame(wake));
+      }
+    }
+
+    const sentJobs = new Set<string>();
+    function emitJob(job: PodJobFrame): void {
+      if (open && !sentJobs.has(job.job_id)) {
+        sentJobs.add(job.job_id);
+        send(podJobFrame(job));
       }
     }
 
@@ -136,6 +150,9 @@ export function sessionStream(virtualAgentId: string, sources: SessionStreamSour
         emit(wake);
       }
       await sendDeletions();
+      for (const job of (await sources.podJobs?.()) ?? []) {
+        emitJob(job);
+      }
     };
 
     const unsubscribe = sources.hub.subscribe((event) => {
@@ -186,8 +203,8 @@ export function sessionStream(virtualAgentId: string, sources: SessionStreamSour
       } else if (event.type === "assistant_pod_job_requested" && event.virtual_agent_id === virtualAgentId) {
         sources.podJob?.(event.job_id).then(
           (job) => {
-            if (open && job !== undefined) {
-              send(podJobFrame(job));
+            if (job !== undefined) {
+              emitJob(job);
             }
           },
           () => undefined

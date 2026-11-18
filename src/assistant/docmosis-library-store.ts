@@ -69,7 +69,7 @@ async function viewersAssistant(prisma: PrismaClient, viewerOid: string) {
 export async function readLibrary(prisma: PrismaClient, viewerOid: string, now: Date = new Date()): Promise<LibraryStatus> {
   const found = await viewersAssistant(prisma, viewerOid);
   const held = await prisma.assistantDocmosisLibrary.findUnique({ where: key(viewerOid), select: ROW_COLUMNS });
-  return libraryStatus(held, podState(found, "docmosis-library"), now);
+  return libraryStatus(held, podState(found, "docmosis-library", now), now);
 }
 
 /**

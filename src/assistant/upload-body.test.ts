@@ -67,6 +67,32 @@ describe("readBytes", () => {
     expect((refusal as HttpError).message).toBe("this part of the file is larger than 8 bytes");
   });
 
+  it("should hold about the body's own size rather than the limit when a small body is read under a large one", async () => {
+    // Arrange
+    const limit = 1024 * 1024;
+    const undeclared = streamed([filled(3, 5)]);
+    const declared = streamed([filled(3, 5)], { "content-length": "3" });
+
+    // Act
+    const [fromUndeclared, fromDeclared] = await Promise.all([readBytes(undeclared, limit), readBytes(declared, limit)]);
+
+    // Assert
+    expect([...fromUndeclared]).toEqual([5, 5, 5]);
+    expect(fromUndeclared.buffer.byteLength).toBeLessThan(limit / 4);
+    expect(fromDeclared.buffer.byteLength).toBe(3);
+  });
+
+  it("should read the whole body when it arrives in more chunks than its declared length allows for", async () => {
+    // Arrange
+    const request = streamed([filled(2, 1), filled(3, 2), filled(1, 3)], { "content-length": "2" });
+
+    // Act
+    const bytes = await readBytes(request, 8);
+
+    // Assert
+    expect([...bytes]).toEqual([1, 1, 2, 2, 2, 3]);
+  });
+
   it("should return nothing for a request with no body", async () => {
     // Arrange
     const request = new Request("http://localhost/x", { method: "PUT" });

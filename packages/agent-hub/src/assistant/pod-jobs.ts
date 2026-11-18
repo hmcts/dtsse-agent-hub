@@ -18,6 +18,12 @@ export const TOO_SLOW = "That took too long. Try again.";
 export const NO_HANDLER = "Your assistant cannot do that yet. Restart it to update it, then try again.";
 export const REFUSED = "The hub would not take your assistant's answer. Try again.";
 export const STOPPED = "Your assistant stopped before it finished. Try again.";
+export const BUSY = "Your assistant is busy with others of these. Wait for them to finish, then try again.";
+
+/** How many jobs of one kind may wait for a slot; the next is answered `failed` with `BUSY`. */
+export const MAX_WAITING = 10;
+/** How many job ids are remembered, so a frame the hub sends again is not run twice. */
+const REMEMBERED = 1000;
 
 /** How long the supervisor's shutdown waits for the hub to take the answers to the jobs it ends. */
 export const STOP_ANSWER_MS = 5000;
@@ -94,13 +100,24 @@ export function parsePodJobFrame(value: unknown): PodJobFrame | null {
   };
 }
 
-const clip = (text: string): string | undefined => {
+/** At most `MAX_DETAIL` UTF-16 units, the hub's measure, cut between code points: the hub refuses half a surrogate pair. */
+function clip(text: string): string | undefined {
   const trimmed = text.trim();
   if (trimmed === "") {
     return undefined;
   }
-  return trimmed.length > MAX_DETAIL ? `${trimmed.slice(0, MAX_DETAIL - 1)}…` : trimmed;
-};
+  if (trimmed.length <= MAX_DETAIL) {
+    return trimmed;
+  }
+  let kept = "";
+  for (const point of trimmed) {
+    if (kept.length + point.length > MAX_DETAIL - 1) {
+      break;
+    }
+    kept += point;
+  }
+  return `${kept}…`;
+}
 
 function failed(error: string, detail: string | undefined): PodJobAnswer {
   const words = detail === undefined ? undefined : clip(detail);
@@ -129,7 +146,10 @@ export type PodJobDeps = {
 };
 
 export type PodJobRunner = {
-  /** Takes a `pod_job` frame's data and runs it once a slot of its kind is free. */
+  /**
+   * Takes a `pod_job` frame's data and runs it once a slot of its kind is free. A `job_id` already running, waiting or
+   * answered is ignored: the hub sends every pending job again on each sessions stream it opens.
+   */
   podJob: (data: unknown) => void;
   /**
    * For the supervisor's shutdown: answers every job running or waiting as `failed` (`STOPPED`), aborts their
@@ -143,25 +163,35 @@ export type PodJobRunner = {
 
 const status = (e: unknown): unknown => (e as { status?: unknown } | null | undefined)?.status;
 
-/** A job from its frame's arrival to its answer: whichever of its handler, its budget and a stop ends it first. */
+/**
+ * A job from its frame's arrival to its answer: whichever of its handler, its budget and a stop ends it first. The
+ * budget runs from the arrival, whether or not the job has a slot yet, and its timer is cleared as the job ends.
+ */
 type Job = { over: boolean; end: (answer: PodJobAnswer) => void; ended: Promise<PodJobAnswer>; controller: AbortController };
 
-function startJob(): Job {
+function startJob(budgetMs: number): Job {
   let resolve: (answer: PodJobAnswer) => void = () => undefined;
   const ended = new Promise<PodJobAnswer>((r) => {
     resolve = r;
   });
+  const controller = new AbortController();
+  let budget: NodeJS.Timeout | undefined;
   const job: Job = {
     over: false,
     ended,
-    controller: new AbortController(),
+    controller,
     end: (answer) => {
       if (!job.over) {
         job.over = true;
+        clearTimeout(budget);
         resolve(answer);
       }
     }
   };
+  budget = setTimeout(() => {
+    job.end(failed("timeout", TOO_SLOW));
+    controller.abort();
+  }, budgetMs);
   return job;
 }
 
@@ -171,7 +201,8 @@ function startJob(): Job {
  *
  * A slot is held until its handler's promise settles, not until the job is answered: a handler past its budget is
  * answered `timeout` at once but may still be running, and the next job of its kind waits for it, so `concurrency`
- * is how many handlers of a kind are ever running at once.
+ * is how many handlers of a kind are ever running at once. A job waiting for a slot is on its budget all the same, so
+ * a handler that never settles costs the jobs behind it their budgets and nothing more, and at most `MAX_WAITING` wait.
  */
 export function createPodJobRunner(deps: PodJobDeps): PodJobRunner {
   const say = safeSay(deps.say);
@@ -181,6 +212,9 @@ export function createPodJobRunner(deps: PodJobDeps): PodJobRunner {
   const live = new Set<Job>();
   const answering = new Set<Promise<void>>();
   const handling = new Set<Promise<unknown>>();
+  // Running, waiting or answered, oldest first. One whose answer never reached the hub is forgotten, so that the hub's
+  // resend of the job, still pending to it, runs it again.
+  const seen = new Set<string>();
   let stopping = false;
 
   const track = <T>(set: Set<Promise<T>>, work: Promise<T>): void => {
@@ -188,13 +222,14 @@ export function createPodJobRunner(deps: PodJobDeps): PodJobRunner {
     set.add(tracked);
   };
 
-  async function answer(frame: PodJobFrame, body: PodJobAnswer): Promise<void> {
+  /** Whether the hub took an answer to the job, `body` or the plain one standing in for it. */
+  async function answer(frame: PodJobFrame, body: PodJobAnswer): Promise<boolean> {
     const put = (value: PodJobAnswer) =>
       withRetry(() => deps.api.putPodJob(deps.id, frame.job_id, value), { attempts: 3, ...(deps.retryWait ? { wait: deps.retryWait } : {}) });
     let fault: unknown;
     try {
       await put(body);
-      return;
+      return true;
     } catch (e) {
       fault = e;
     }
@@ -205,22 +240,27 @@ export function createPodJobRunner(deps: PodJobDeps): PodJobRunner {
       say(`pod job ${frame.job_id}: the hub refused its answer: ${reason(fault)}`);
       try {
         await put(failed("failed", REFUSED));
-        return;
+        return true;
       } catch (e) {
         fault = e;
       }
     }
     say(`pod job ${frame.job_id}: could not answer it: ${reason(fault)}`);
+    return false;
   }
 
-  /** A slot of `kind`, or `undefined` when `job` ended while it waited for one. */
-  function take(kind: string, limit: number, job: Job): Promise<(() => void) | undefined> {
+  function slotOf(kind: string): { running: number; waiting: (() => void)[] } {
     let slot = slots.get(kind);
     if (!slot) {
       slot = { running: 0, waiting: [] };
       slots.set(kind, slot);
     }
-    const held = slot;
+    return slot;
+  }
+
+  /** A slot of `kind`, or `undefined` when `job` ended while it waited for one. */
+  function take(kind: string, limit: number, job: Job): Promise<(() => void) | undefined> {
+    const held = slotOf(kind);
     const release = () => {
       const next = held.waiting.shift();
       if (next) {
@@ -246,17 +286,8 @@ export function createPodJobRunner(deps: PodJobDeps): PodJobRunner {
     });
   }
 
-  /** Starts the handler within what is left of its budget, holding `release`'s slot until the handler settles. */
-  function start(handler: PodJobHandler, frame: PodJobFrame, job: Job, budgetMs: number, release: () => void): void {
-    if (budgetMs <= 0) {
-      release();
-      job.end(failed("timeout", TOO_SLOW));
-      return;
-    }
-    const timer = setTimeout(() => {
-      job.end(failed("timeout", TOO_SLOW));
-      job.controller.abort();
-    }, budgetMs);
+  /** Starts the handler, holding `release`'s slot until the handler settles. */
+  function start(handler: PodJobHandler, frame: PodJobFrame, job: Job, release: () => void): void {
     const context: PodJobContext = {
       jobId: frame.job_id,
       conversationId: frame.conversation_id,
@@ -273,37 +304,58 @@ export function createPodJobRunner(deps: PodJobDeps): PodJobRunner {
         (e: unknown) => failureOf(e)
       )
       .then(job.end)
-      .finally(() => {
-        clearTimeout(timer);
-        release();
-      });
+      .finally(release);
     track(handling, ran);
   }
 
-  async function run(frame: PodJobFrame, arrived: number): Promise<void> {
+  /** The job's answer: `failed` before it starts, or whatever ends it once it has a slot or waits for one. */
+  async function outcome(frame: PodJobFrame, arrived: number): Promise<PodJobAnswer> {
     const handler = handlers.get(frame.kind);
     if (!handler) {
       // The hub sends only a kind this pod claimed, so this is a hub ahead of the build it thinks this is.
-      await answer(frame, failed("failed", NO_HANDLER));
-      return;
+      return failed("failed", NO_HANDLER);
     }
     if (stopping) {
-      await answer(frame, failed("failed", STOPPED));
-      return;
+      return failed("failed", STOPPED);
     }
-    const job = startJob();
+    const limit = Math.max(1, handler.concurrency ?? 1);
+    const slot = slotOf(frame.kind);
+    if (slot.running >= limit && slot.waiting.length >= MAX_WAITING) {
+      return failed("failed", BUSY);
+    }
+    const job = startJob(handler.budgetMs);
     live.add(job);
-    const release = await take(frame.kind, Math.max(1, handler.concurrency ?? 1), job);
+    const release = await take(frame.kind, limit, job);
     if (release !== undefined) {
+      // A timer can fire late on a busy event loop, and a test's clock is not the timers'; the clock is the budget.
+      if (clock() - arrived >= handler.budgetMs) {
+        job.end(failed("timeout", TOO_SLOW));
+      }
       if (job.over) {
         release();
       } else {
-        start(handler, frame, job, handler.budgetMs - (clock() - arrived), release);
+        start(handler, frame, job, release);
       }
     }
     const body = await job.ended;
     live.delete(job);
-    await answer(frame, body);
+    return body;
+  }
+
+  async function run(frame: PodJobFrame, arrived: number): Promise<void> {
+    if (!(await answer(frame, await outcome(frame, arrived)))) {
+      seen.delete(frame.job_id);
+    }
+  }
+
+  function remember(jobId: string): void {
+    seen.add(jobId);
+    if (seen.size > REMEMBERED) {
+      const [oldest] = seen;
+      if (oldest !== undefined) {
+        seen.delete(oldest);
+      }
+    }
   }
 
   return {
@@ -313,6 +365,10 @@ export function createPodJobRunner(deps: PodJobDeps): PodJobRunner {
         say(`ignoring a pod job that is not one: ${JSON.stringify(data)?.slice(0, 200)}`);
         return;
       }
+      if (seen.has(frame.job_id)) {
+        return;
+      }
+      remember(frame.job_id);
       track(
         answering,
         run(frame, clock()).catch((e: unknown) => say(`pod job ${frame.job_id} failed: ${reason(e)}`))

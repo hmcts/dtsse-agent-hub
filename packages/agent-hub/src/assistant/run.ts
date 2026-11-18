@@ -190,14 +190,24 @@ export async function runAssistantSupervisor({
   let stopping = false;
   let controller: AbortController | null = null;
   let wake: (() => void) | null = null;
+  // Started by the first signal rather than after the stream loop's chain drains: somebody is waiting on a panel for
+  // each job, and a wake still running on the chain must not hold their answers back.
+  let jobsStopped: Promise<void> | undefined;
+  const stopJobs = () => {
+    jobsStopped ??= podJobs.stop();
+    return jobsStopped;
+  };
   const onSignal = () => {
     stopping = true;
     stopped.abort();
     controller?.abort();
     wake?.();
+    void stopJobs();
   };
-  process.once("SIGTERM", onSignal);
-  process.once("SIGINT", onSignal);
+  // `on` rather than `once`, until the handlers go below: a second SIGTERM or SIGINT while the supervisor stops lands
+  // here again rather than on Node's default, which would kill the pod before its jobs are answered.
+  process.on("SIGTERM", onSignal);
+  process.on("SIGINT", onSignal);
   signal?.addEventListener("abort", onSignal, { once: true });
 
   async function consume(res: Response): Promise<{ reconnect: boolean }> {
@@ -387,8 +397,8 @@ export async function runAssistantSupervisor({
     clearInterval(timer);
     clearInterval(reconciler);
     // Before the signal handlers go, so a second SIGTERM during the wait does not kill the pod without its answers:
-    // somebody is waiting on a panel for each job, and a job left unanswered reads as pending until its timeout.
-    await podJobs.stop();
+    // a job left unanswered reads as pending until its timeout.
+    await stopJobs();
     process.off("SIGTERM", onSignal);
     process.off("SIGINT", onSignal);
   }

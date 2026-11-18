@@ -99,8 +99,8 @@ export type HubEvent =
    */
   | { type: "assistant_deck_build"; job_id: string; virtual_agent_id: string; owner_oid: string }
   /**
-   * The owner asked for a pod job, so `virtual_agent_id`'s pod should run it. Sent once, as `assistant_deck_build` is:
-   * a job lost while the listener was down times out, and the panel asks again.
+   * The owner asked for a pod job, so `virtual_agent_id`'s pod should run it. A job this misses, while the listener
+   * was down or before the pod's stream opened, is sent on the next `resync` or connect, which replay every pending one.
    */
   | { type: "assistant_pod_job_requested"; job_id: string; virtual_agent_id: string; owner_oid: string }
   /**

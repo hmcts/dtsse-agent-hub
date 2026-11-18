@@ -1544,7 +1544,7 @@ export function createMockHub({
     sendWelsh(virtualId: string, data: Record<string, unknown>) {
       sessionStreams.get(virtualId)?.write(`event: welsh\ndata: ${JSON.stringify(data)}\n\n`);
     },
-    // The owner asking for a pod job. Sent once and never replayed, as the hub does.
+    // One pod job frame, written as given: a test sends a frame again to stand in for the hub's replay on connect.
     sendPodJob(virtualId: string, data: Record<string, unknown>) {
       sessionStreams.get(virtualId)?.write(`event: pod_job\ndata: ${JSON.stringify(data)}\n\n`);
     },

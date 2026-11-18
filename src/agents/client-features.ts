@@ -122,21 +122,35 @@ export function podLacks(pod: PodClaims & { status: string }, feature: ClientFea
 const isPodJobFeature = (feature: string): feature is PodJobFeature => feature.startsWith("pod-job:");
 
 /**
+ * How long a running pod may go without a claim of its own before a pod job's gate reads it as a client that never
+ * makes one. The client that reports `running` claims in that same report, so this covers only the report landing a
+ * moment after the status, not a boot.
+ */
+export const POD_CLAIM_GRACE_MS = 30_000;
+
+/**
  * Whether a request needing `feature` may be sent to the pod now. `waking` for a pod that is not running, or is
  * running but has claimed nothing yet, which is a pod still booting; `unsupported` for one whose claim leaves the
  * feature out.
  *
  * A pod job's claim is read from the pod's own claim alone: a session's registration never claims one, so the
  * main-session agent's claim would leave every kind out and call a current pod `unsupported` until its first status
- * report lands.
+ * report lands. A pod running for `POD_CLAIM_GRACE_MS` since its status last changed (`statusChangedAt`) with no
+ * claim of its own is on a client that reports none, and never will until it restarts, so it is `unsupported` rather
+ * than `waking` for ever. With no `statusChangedAt` it stays `waking`.
  */
-export function podGate(pod: PodClaims & { status: string }, feature: ClientFeature | PodJobFeature): "waking" | "unsupported" | "ok" {
+export function podGate(
+  pod: PodClaims & { status: string; statusChangedAt?: Date },
+  feature: ClientFeature | PodJobFeature,
+  now: Date = new Date()
+): "waking" | "unsupported" | "ok" {
   if (pod.status !== "running") {
     return "waking";
   }
   const claim = isPodJobFeature(feature) ? storedClientFeatures(pod.clientFeatures) : podClaim(pod);
   if (claim === null) {
-    return "waking";
+    const settled = pod.statusChangedAt !== undefined && now.getTime() - pod.statusChangedAt.getTime() >= POD_CLAIM_GRACE_MS;
+    return isPodJobFeature(feature) && settled ? "unsupported" : "waking";
   }
   return claim.includes(feature) ? "ok" : "unsupported";
 }

@@ -896,6 +896,89 @@ describe("runAssistantSupervisor and the uploads on its volume", () => {
   });
 });
 
+describe("runAssistantSupervisor stopped on a signal", () => {
+  const CONVERSATION = "11111111-2222-3333-4444-555555555555";
+  const UPLOAD = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+  const JOB = "7d2a9e3c-1111-4222-8333-44445555bbbb";
+
+  const added = (before: readonly unknown[], signal: NodeJS.Signals) => process.rawListeners(signal).filter((listener) => !before.includes(listener));
+
+  it("should answer its pod jobs at once and keep its signal handlers until it has stopped, when a second signal arrives while the stream's work drains", async () => {
+    // Arrange: a deletion's report the hub never answers holds the stream's chain, and a pod job is running beside it.
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-hub-run-signal-"));
+    const file = path.join(root, CONVERSATION, `${UPLOAD}-letter.pdf`);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, Buffer.alloc(16));
+    const report = gate();
+    let reporting = false;
+    let started = false;
+    const answers: unknown[] = [];
+    const frames = [
+      `event: delete_uploads\ndata: ${JSON.stringify({ conversation_id: CONVERSATION, upload_ids: [UPLOAD] })}\n\n`,
+      `event: pod_job\ndata: ${JSON.stringify({ job_id: JOB, kind: "test.slow", conversation_id: CONVERSATION, args: {} })}\n\n`
+    ].join("");
+    const api = stubApi({
+      putUploads: async () => {
+        reporting = true;
+        await report.wait;
+        return null;
+      },
+      putPodJob: async (_id, _jobId, answer) => {
+        answers.push(answer);
+        return null;
+      },
+      sessionsStream: async (_id: string, opts: { signal?: AbortSignal } = {}): Promise<Response> => {
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(frames));
+            opts.signal?.addEventListener("abort", () => controller.error(new DOMException("aborted", "AbortError")), { once: true });
+          }
+        });
+        return new Response(body, { status: 200 });
+      }
+    });
+    const before = { term: process.rawListeners("SIGTERM"), int: process.rawListeners("SIGINT") };
+    const assistant = supervise({
+      api,
+      uploadsDir: root,
+      uploadsFs: { ...fs, statfsSync: () => ({ type: 0, bsize: 4096, frsize: 4096, blocks: 1024, bfree: 512, bavail: 512, files: 0, ffree: 0 }) } as never,
+      podJobs: [
+        {
+          kind: "test.slow",
+          budgetMs: 60_000,
+          run: (_args, { signal }) => {
+            started = true;
+            return new Promise((resolve) => signal.addEventListener("abort", () => resolve({ late: true })));
+          }
+        }
+      ]
+    });
+
+    try {
+      await waitUntil(() => reporting && started, "the deletion's report to hang and the pod job to start");
+      const [onTerm] = added(before.term, "SIGTERM");
+      expect(added(before.int, "SIGINT")).toHaveLength(1);
+
+      // Act
+      (onTerm as () => void)();
+      await waitUntil(() => answers.length === 1, "the pod job to be answered");
+      (onTerm as () => void)();
+
+      // Assert
+      expect(answers).toEqual([{ status: "failed", error: "failed", detail: STOPPED }]);
+      expect(added(before.term, "SIGTERM"), "still listening, so a second SIGTERM does not kill the pod").toEqual([onTerm]);
+      report.open();
+      await assistant.stop();
+      expect(added(before.term, "SIGTERM")).toEqual([]);
+      expect(added(before.int, "SIGINT")).toEqual([]);
+    } finally {
+      report.open();
+      await assistant.stop();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("runAssistantSupervisor and a file it cannot delete", () => {
   const CONVERSATION = "11111111-2222-3333-4444-555555555555";
   const UPLOAD = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";

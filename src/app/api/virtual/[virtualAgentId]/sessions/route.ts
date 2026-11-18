@@ -3,7 +3,7 @@ import { virtualRoute } from "@/agent-api/route";
 import { pendingDeckBuild } from "@/assistant/deck-build-store";
 import { pendingIndexFrame } from "@/assistant/docmosis-library-store";
 import { pendingLookup } from "@/assistant/lookup-store";
-import { pendingPodJobFrame } from "@/assistant/pod-job-store";
+import { pendingPodJobFrame, pendingPodJobFrames } from "@/assistant/pod-job-store";
 import { sessionsReportBody } from "@/assistant/schemas";
 import { pendingWake, pendingWakes, reportSessions } from "@/assistant/session-store";
 import { sessionStream } from "@/assistant/session-stream";
@@ -39,7 +39,8 @@ export const GET = virtualRoute<{ virtualAgentId: string }>(async ({ virtualAgen
       welsh: (jobId) => pendingWelsh(prisma, virtualAgent.id, jobId),
       deckBuild: (jobId) => pendingDeckBuild(prisma, virtualAgent.id, jobId),
       podJob: (jobId) => pendingPodJobFrame(prisma, virtualAgent.id, jobId),
-      docmosisIndex: (requestId) => pendingIndexFrame(prisma, virtualAgent, requestId)
+      docmosisIndex: (requestId) => pendingIndexFrame(prisma, virtualAgent, requestId),
+      podJobs: () => pendingPodJobFrames(prisma, virtualAgent.id)
     })
   });
   return new Response(body, { headers: SSE_HEADERS });
