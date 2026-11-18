@@ -760,7 +760,7 @@ export const listThings: PodJobHandler = {
 
 ## Docmosis template library
 
-Choosing a Docmosis template means finding one of the `.docx` files, some thousands of them, under `Templates/` in the private `hmcts/rdo-docmosis` repository. The hub holds no GitHub credential, so the person's own pod reads the repository with their own `gh` sign-in, as GitHub lookups do, and the hub keeps what it found: one index per person per library, which the browser downloads once and searches itself, so no keystroke goes to the pod. This section is the index; choosing a template from it and loading it into a conversation are not part of the contract yet.
+Choosing a Docmosis template means finding one of the `.docx` files, some thousands of them, under `Templates/` in the private `hmcts/rdo-docmosis` repository. The hub holds no GitHub credential, so the person's own pod reads the repository with their own `gh` sign-in, as GitHub lookups do, and the hub keeps what it found: one index per person per library, which the browser downloads once and searches itself, so no keystroke goes to the pod. This section covers the index and, under **Loading a template from the library** below, loading a template chosen from it into a conversation.
 
 There is one library, `hmcts/rdo-docmosis@HEAD:Templates` (`DOCMOSIS_LIBRARY`, `src/assistant/docmosis-library.ts`): owner `hmcts`, repository `rdo-docmosis`, ref `HEAD` (its default branch) and folder `Templates`. An entry's path is a **library path**: under `Templates/`, ending `.docx` in any case, with a file name that does not start `~$` (Word's lock files), no empty, `.` or `..` segment, no control character and no `\`, and at most 400 characters.
 
