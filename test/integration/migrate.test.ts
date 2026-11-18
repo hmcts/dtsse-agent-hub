@@ -162,6 +162,7 @@ describe("migrate", () => {
       "assistant_deck_build",
       "assistant_deck_version",
       "assistant_docmosis_asset",
+      "assistant_docmosis_library",
       "assistant_docmosis_version",
       "assistant_export_default",
       "assistant_lookup",

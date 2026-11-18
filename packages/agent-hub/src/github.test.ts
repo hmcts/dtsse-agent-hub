@@ -1,5 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { GITHUB_OWNER_RE, GITHUB_REPO_RE, ghSaid } from "./github.ts";
+import { GITHUB_OWNER_RE, GITHUB_REPO_RE, ghAuthToken, ghSaid } from "./github.ts";
+
+describe("ghAuthToken", () => {
+  const TOKEN = `${"gh"}o_abcdefghijklmnopqrstuvwxyz`;
+
+  it("should read the token from gh with the timeout given", async () => {
+    const asked: unknown[] = [];
+    const run = async (cmd: string, args: string[], opts: { env: object; timeoutMs: number }) => {
+      asked.push([cmd, ...args, opts.timeoutMs]);
+      return { code: 0, stdout: `${TOKEN}\n`, stderr: "" };
+    };
+
+    expect(await ghAuthToken(run, {}, 1234)).toBe(TOKEN);
+    expect(asked).toEqual([["gh", "auth", "token", "--hostname", "github.com", 1234]]);
+  });
+
+  it("should read none when gh fails, prints nothing or prints more than a token", async () => {
+    expect(await ghAuthToken(async () => ({ code: 1, stdout: TOKEN, stderr: "not logged in" }), {}, 1)).toBeNull();
+    expect(await ghAuthToken(async () => ({ code: 0, stdout: "\n", stderr: "" }), {}, 1)).toBeNull();
+    expect(await ghAuthToken(async () => ({ code: 0, stdout: "two words", stderr: "" }), {}, 1)).toBeNull();
+  });
+});
 
 describe("GITHUB_REPO_RE", () => {
   it.each(["hmcts/cft-workspace", "hmcts/.github", "hmcts/a.b_c-d", "x/.x", "a-b/.." + "x"])("should accept %s", (repo) => {

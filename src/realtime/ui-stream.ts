@@ -214,6 +214,12 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
       return isOwner(sources.viewerOid, { ownerOid: event.owner_oid })
         ? sseEvent({ event: "assistant_pod_job", data: JSON.stringify({ job_id: event.job_id, conversation_id: event.conversation_id }) })
         : undefined;
+    // An instruction to the pod as well.
+    case "assistant_docmosis_index":
+      return undefined;
+    // The owner's template library has a new answer; only their own tabs hear of it, and read the status again.
+    case "assistant_docmosis_library":
+      return isOwner(sources.viewerOid, { ownerOid: event.owner_oid }) ? sseEvent({ event: "assistant_docmosis_library", data: "{}" }) : undefined;
     case "feedback": {
       const team = await sources.feedbackTeam?.(event.project_id);
       if (team === undefined || feedbackProjectAccess(sources.viewerOid, team, team.memberOids) === "none") {

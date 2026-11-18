@@ -23,6 +23,7 @@ import { byCodePoint } from "../topics/slug.ts";
 export type ClientFeature =
   | "attachments"
   | "deck-build"
+  | "docmosis-library"
   | "files"
   | "github-lookups"
   | "lookups"
