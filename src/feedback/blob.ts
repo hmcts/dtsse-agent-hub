@@ -30,6 +30,10 @@ export interface FeedbackBlobs {
   readUrl: (path: string, ttlMs?: number) => Promise<string>;
   /** Writes one blob from the hub itself. */
   putBlob: (path: string, bytes: Uint8Array, contentType: string) => Promise<void>;
+  /** The size in bytes of one blob, or `undefined` when it is not there. */
+  sizeOf: (path: string) => Promise<number | undefined>;
+  /** The name of every blob under `prefix`; an empty prefix is the whole container. */
+  listNames: (prefix: string) => Promise<string[]>;
   /** Deletes each blob that is there, and answers the paths that could not be deleted; one already gone is deleted. */
   deleteBlobs: (paths: readonly string[]) => Promise<string[]>;
   /** Deletes every blob under `prefix` and answers how many there were, or throws when any could not be deleted. */
@@ -146,6 +150,25 @@ export function createFeedbackBlobs(settings: FeedbackBlobSettings, options: Fee
     putBlob: async (path, bytes, contentType) => {
       await ready();
       await container.getBlockBlobClient(path).uploadData(bytes, { blobHTTPHeaders: { blobContentType: contentType } });
+    },
+    sizeOf: async (path) => {
+      await ready();
+      try {
+        return (await container.getBlockBlobClient(path).getProperties()).contentLength;
+      } catch (error) {
+        if ((error as { statusCode?: number }).statusCode === 404) {
+          return undefined;
+        }
+        throw error;
+      }
+    },
+    listNames: async (prefix) => {
+      await ready();
+      const names: string[] = [];
+      for await (const blob of container.listBlobsFlat({ prefix })) {
+        names.push(blob.name);
+      }
+      return names;
     },
     deleteBlobs: async (paths) => {
       if (paths.length === 0) {

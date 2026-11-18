@@ -8,6 +8,7 @@ import {
   canReadDocmosis,
   canReadMessage,
   canReadNotify,
+  canReadVideo,
   isOwner
 } from "../access/rules.ts";
 import type { Skill } from "../agents/skills.ts";
@@ -41,6 +42,9 @@ import { type SharedConversationView, sharedConversation } from "../assistant/sh
 import { listTemplates } from "../assistant/template-store.ts";
 import type { SavedTemplate } from "../assistant/templates.ts";
 import { type UploadsOnDisk, uploadsOnDisk } from "../assistant/upload-disk.ts";
+import { VIDEO_READ_TTL_MS, videoPath } from "../assistant/video.ts";
+import { videoBlobs } from "../assistant/video-blob.ts";
+import { readyCaptions, readyVideo, type VideoView } from "../assistant/video-store.ts";
 import {
   type AssistantSummary,
   assistantSummary,
@@ -583,6 +587,39 @@ export async function notifyVersions(viewer: Identity, id: string): Promise<Awai
   }
   const versions = await listNotifyVersions(prisma, id);
   return versions.length === 0 ? undefined : versions;
+}
+
+/** A conversation's journey video for the panel, with the URL its MP4 plays from, which lasts `VIDEO_READ_TTL_MS`. */
+export type ReadableVideo = VideoView & { play_url: string; expires_in: number };
+
+/** What the viewer may do with the conversation's video: `owner` or `reader`, and `undefined` for everyone else. */
+export async function videoAccess(viewer: Identity, id: string): Promise<Exclude<ConversationAccess, "none"> | undefined> {
+  const allowed = await accessToConversation(prisma, viewer.oid, id);
+  if (allowed === undefined || allowed.access === "none" || !canReadVideo(allowed.access)) {
+    return undefined;
+  }
+  return allowed.access;
+}
+
+/** The conversation's video and a read URL for it, for anyone `canReadVideo` lets watch it; `undefined` for everyone else, when there is none and when the hub has no video storage. */
+export async function readableVideo(viewer: Identity, id: string): Promise<ReadableVideo | undefined> {
+  const blobs = videoBlobs();
+  if (blobs === undefined || (await videoAccess(viewer, id)) === undefined) {
+    return undefined;
+  }
+  const video = await readyVideo(prisma, id);
+  if (video === null) {
+    return undefined;
+  }
+  return { ...video, play_url: await blobs.readUrl(videoPath(id, video.video_id), VIDEO_READ_TTL_MS), expires_in: VIDEO_READ_TTL_MS / 1000 };
+}
+
+/** The video's WebVTT captions under the same rule; `undefined` when there are none. */
+export async function readableCaptions(viewer: Identity, id: string): Promise<string | undefined> {
+  if ((await videoAccess(viewer, id)) === undefined) {
+    return undefined;
+  }
+  return (await readyCaptions(prisma, id)) ?? undefined;
 }
 
 /** Who one of the viewer's own conversations is shared with, or `undefined` when it is not theirs to share. */

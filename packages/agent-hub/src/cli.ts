@@ -17,6 +17,7 @@ import { docmosis } from "./cli/docmosis.ts";
 import { m365 } from "./cli/m365.ts";
 import { notify } from "./cli/notify.ts";
 import { disable, enable, setup, status, transcript } from "./cli/session.ts";
+import { video } from "./cli/video.ts";
 import { autoEnable, bridge, hook, stopWorker } from "./cli/workers.ts";
 import type { Env } from "./env.ts";
 import { CLI } from "./envelope.ts";
@@ -105,6 +106,12 @@ export const USAGE = `usage: ${CLI} <command> [args]
                               older kept version into v<N>/ instead
   notify put [--summary S]    publish the edited subject.md, body.md and data.json as the next version,
                               refused if a newer version was written since notify get
+  video put <dir> [--jira KEY] [--name N]
+                              in a CFT Workspace conversation: publish the journey video the
+                              cft-journey-video skill recorded into <dir> (the .mp4, .vtt,
+                              .chapters.txt, coverage.md and content-mismatches.md) as the
+                              conversation's video; the MP4 goes straight to storage; --jira is the
+                              issue the user will most likely post it to
   jira export <export-id> --project P --type T [--labels a,b]
                               in a CFT Workspace conversation: create the Jira ticket for an export the
                               user asked for with twg, signing in first if it is not, and report it; run
@@ -165,6 +172,7 @@ export const COMMANDS: Record<string, Command> = {
   deck,
   docmosis,
   notify,
+  video,
   jira,
   github,
   confluence,

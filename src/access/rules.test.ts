@@ -20,11 +20,13 @@ import {
   canOwnerReadCredential,
   canPersonDirectAgent,
   canPodReadCredential,
+  canPostVideo,
   canReadDeck,
   canReadDocmosis,
   canReadMessage,
   canReadNotify,
   canReadPodJob,
+  canReadVideo,
   canRecordFeedback,
   canRecordPickAsOwner,
   canRemoveUploadFromDisk,
@@ -772,6 +774,37 @@ describe("the conversation share rules", () => {
 
     it("should refuse the Notify template when the access answered is none", () => {
       expect(canReadNotify("none")).toBe(false);
+    });
+  });
+
+  describe("canReadVideo", () => {
+    it("should let the owner and a share's recipient watch the video", () => {
+      expect(canReadVideo(conversationAccess(OWNER, CONVERSATION, SHARES))).toBe(true);
+      expect(canReadVideo(conversationAccess(RECIPIENT, CONVERSATION, SHARES))).toBe(true);
+    });
+
+    it.each(EVERYONE_ELSE)("should refuse %s the video", (_label, viewerOid) => {
+      expect(canReadVideo(conversationAccess(viewerOid, CONVERSATION, SHARES))).toBe(false);
+    });
+
+    it("should refuse the video when the access answered is none", () => {
+      expect(canReadVideo("none")).toBe(false);
+    });
+  });
+
+  describe("canPostVideo", () => {
+    it("should let the owner post the video", () => {
+      expect(canPostVideo(conversationAccess(OWNER, CONVERSATION, SHARES))).toBe(true);
+    });
+
+    it("should refuse a share's recipient when the share lets them watch the video", () => {
+      const access = conversationAccess(RECIPIENT, CONVERSATION, SHARES);
+      expect(canReadVideo(access)).toBe(true);
+      expect(canPostVideo(access)).toBe(false);
+    });
+
+    it.each(EVERYONE_ELSE)("should refuse %s posting the video", (_label, viewerOid) => {
+      expect(canPostVideo(conversationAccess(viewerOid, CONVERSATION, SHARES))).toBe(false);
     });
   });
 

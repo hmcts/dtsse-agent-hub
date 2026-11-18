@@ -40,6 +40,7 @@ import type { ExportToJiraAction, JiraAccess } from "@/components/assistant/Jira
 import { ARTEFACT_OVERLAY_MAX_WIDTH } from "@/components/assistant/layout";
 import { MessageAttachments } from "@/components/assistant/MessageAttachments";
 import { NotifyPanel } from "@/components/assistant/NotifyPanel";
+import { VideoPanel } from "@/components/assistant/VideoPanel";
 import { useStickToBottom } from "@/components/feed/useStickToBottom";
 import { AnnouncerRegion, useAnnouncer } from "@/components/live/Announcer";
 import { useHubEvent } from "@/components/live/HubStream";
@@ -362,7 +363,7 @@ export function ChatView({
    * The one panel beside the chat: the document, the deck or the Docmosis template, never two, since two panels beside a chat leave the chat
    * no room to read in. Each has its own button in the header, so either is one press from the other.
    */
-  const [panel, setPanel] = useState<"document" | "deck" | "docmosis" | "notify" | null>(null);
+  const [panel, setPanel] = useState<"document" | "deck" | "docmosis" | "notify" | "video" | null>(null);
   // Read by a closed editor's late answer, which comes back through the props of the render that last showed it.
   const panelNow = useRef(panel);
   panelNow.current = panel;
@@ -401,6 +402,8 @@ export function ChatView({
   const seenDocmosis = useRef(docmosis?.version ?? 0);
   const notify = view.notify;
   const seenNotify = useRef(notify?.version ?? 0);
+  const video = view.video;
+  const seenVideo = useRef(video?.version ?? 0);
   const narrow = useNarrow();
 
   useEffect(() => setStatus(view.agentStatus), [view.agentStatus]);
@@ -491,6 +494,24 @@ export function ChatView({
     }
     seenNotify.current = Math.max(seenNotify.current, notifyVersion);
   }, [notifyVersion, notifyBy, arrivals, panel]);
+  /** The same for the journey video, which the assistant publishes with `video put`. Only the person's own edits are ever busy, and the video has none. */
+  const videoVersion = video?.version ?? 0;
+  useEffect(() => {
+    if (videoVersion > seenVideo.current) {
+      if (
+        (panel === "document" && documentBusy.current) ||
+        (panel === "deck" && deckBusy.current) ||
+        (panel === "docmosis" && docmosisBusy.current) ||
+        (panel === "notify" && notifyBusy.current)
+      ) {
+        arrivals.announce("The assistant published a video. Open Video to watch it.");
+      } else if (panel !== "video") {
+        setPanel("video");
+        arrivals.announce("The assistant published a video");
+      }
+    }
+    seenVideo.current = Math.max(seenVideo.current, videoVersion);
+  }, [videoVersion, arrivals, panel]);
   useEffect(() => {
     if (panel === "deck") {
       setSlidesWaiting(false);
@@ -725,6 +746,19 @@ export function ChatView({
                 </span>
                 <span className="hidden min-[480px]:inline">Notify</span>
                 {notifyWaiting ? <span aria-hidden="true" data-testid="notify-updated" className="h-1.5 w-1.5 rounded-full bg-asst-accent" /> : null}
+              </button>
+            )}
+            {video === null || panel === "video" ? null : (
+              <button
+                type="button"
+                onClick={() => setPanel("video")}
+                aria-label="Open video"
+                className="flex h-[34px] items-center whitespace-nowrap rounded-[9px] border border-asst-strong px-2.5 text-[13px] hover:border-asst-accent-line hover:bg-asst-field min-[480px]:gap-2 min-[480px]:pr-3"
+              >
+                <span aria-hidden="true" className="text-sm leading-none text-asst-accent">
+                  ▶
+                </span>
+                <span className="hidden min-[480px]:inline">Video</span>
               </button>
             )}
             {(!pod && docmosis === null) || panel === "docmosis" ? null : (
@@ -969,6 +1003,9 @@ export function ChatView({
           narrow={narrow}
           announce={arrivals.announce}
         />
+      ) : null}
+      {panel === "video" && video !== null ? (
+        <VideoPanel conversationId={view.id} video={video} canPost={pod} onClose={() => setPanel(null)} narrow={narrow} announce={arrivals.announce} />
       ) : null}
       {panel === "document" ? (
         <ArtefactPanel

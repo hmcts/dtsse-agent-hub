@@ -487,6 +487,22 @@ export function canChangeNotify(access: ConversationAccess): boolean {
 }
 
 /**
+ * Whether the viewer may watch a conversation's journey video in the browser, with its captions, chapters and reports,
+ * given what `conversationAccess` answered for them: its owner, and anyone it is shared with or offered to.
+ */
+export function canReadVideo(access: ConversationAccess): boolean {
+  return access === "owner" || access === "reader";
+}
+
+/**
+ * Whether the viewer may post a conversation's video to Jira, which attaches it as the person: its owner alone. The
+ * post is a pod job, which `canRequestPodJob` keeps to the owner; this is what the panel offers the button on.
+ */
+export function canPostVideo(access: ConversationAccess): boolean {
+  return access === "owner";
+}
+
+/**
  * Whether the viewer may have a conversation's pod run a pod job (see "Pod jobs" in docs/agent-api.md), given what
  * `conversationAccess` answered for them: its owner alone, for every kind. A job runs in the owner's pod with the
  * owner's own `gh` and `az` sign-ins, so a reader asking for one would be borrowing someone else's credentials.

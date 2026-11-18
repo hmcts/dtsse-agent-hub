@@ -60,6 +60,8 @@ export type PodJobHandlerApi = Pick<
   | "putDocmosisPdf"
   | "getNotify"
   | "putNotify"
+  | "getVideo"
+  | "videoPosted"
   | "postQuestion"
 >;
 

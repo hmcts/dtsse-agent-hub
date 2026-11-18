@@ -55,6 +55,9 @@ import type {
   TranscriptBody,
   TranscriptResponse,
   UploadsReportBody,
+  VideoBeginBody,
+  VideoBegun,
+  VideoResponse,
   VirtualPhase,
   WelshAnswer
 } from "./wire.ts";
@@ -214,6 +217,14 @@ export type Api = {
   /** The latest version of the conversation's GOV.UK Notify template, or one kept version of it. */
   getNotify: (agentId: string, version?: number) => Promise<NotifyResponse>;
   putNotify: (agentId: string, body: NotifyBody) => Promise<NotifyWritten>;
+  /** The conversation's ready journey video, with a URL to download its MP4 from. */
+  getVideo: (agentId: string) => Promise<VideoResponse>;
+  /** Records an upload and answers the write-only URL its MP4 is put to. */
+  beginVideo: (agentId: string, body: VideoBeginBody) => Promise<VideoBegun>;
+  /** Makes the upload the conversation's video, once its MP4 is at the URL; a `409` says it is not there or is the wrong size. */
+  finishVideo: (agentId: string, videoId: string) => Promise<{ video_id: string }>;
+  /** Records that the video was attached to a Jira issue, for the panel to show. */
+  videoPosted: (agentId: string, videoId: string, issueKey: string) => Promise<null>;
   /**
    * A question this session's model asked with `AskUserQuestion`, for the person to answer in the web UI. Idempotent
    * on `tool_use_id`, so a retry after a lost response does not put the question on screen twice.
@@ -445,6 +456,10 @@ export function createApi({
       putBytes<null>(`${a(agentId)}/docmosis/versions/${version}/pdf${qs({ revision })}`, null, bytes, PART_TIMEOUT_MS, "application/pdf"),
     getNotify: (agentId, version) => request<NotifyResponse>("GET", `${a(agentId)}/notify${qs({ version })}`),
     putNotify: (agentId, body) => request<NotifyWritten>("PUT", `${a(agentId)}/notify`, body),
+    getVideo: (agentId) => request<VideoResponse>("GET", `${a(agentId)}/video`),
+    beginVideo: (agentId, body) => request<VideoBegun>("POST", `${a(agentId)}/video`, body),
+    finishVideo: (agentId, videoId) => request<{ video_id: string }>("POST", `${a(agentId)}/video/${encodeURIComponent(videoId)}/complete`, {}),
+    videoPosted: (agentId, videoId, issueKey) => request<null>("POST", `${a(agentId)}/video/${encodeURIComponent(videoId)}/posted`, { issue_key: issueKey }),
     postQuestion: (agentId, body, opts) => request<null>("POST", `${a(agentId)}/question`, body, opts),
     putJiraExport: (agentId, body) => request<null>("PUT", `${a(agentId)}/jira`, body),
     putGithubExport: (agentId, body) => request<null>("PUT", `${a(agentId)}/github`, body),

@@ -1,6 +1,7 @@
 import { DOCMOSIS_LOAD_KIND, LOAD_BUDGET_MS } from "./docmosis-load-kind.ts";
 import { loadNotify } from "./notify-tools.ts";
 import { PodJobError, type PodJobHandler } from "./pod-jobs.ts";
+import { VIDEO_ATTACH_BUDGET_MS, VIDEO_ATTACH_KIND } from "./video-attach-kind.ts";
 
 /**
  * `docmosis.load`, its module loaded only when a job of it arrives: it reaches the agent API's client, which imports
@@ -13,6 +14,24 @@ const docmosisLoad: PodJobHandler = {
     const [{ docmosisLoadHandler }, { run }] = await Promise.all([import("./docmosis-load.ts"), import("../virtual/process.ts")]);
     const handler = docmosisLoadHandler({
       run: (cmd, argv, opts) => run(cmd, argv, { env: opts.env as NodeJS.ProcessEnv, timeoutMs: opts.timeoutMs, signal: opts.signal })
+    });
+    return await handler.run(args, context);
+  }
+};
+
+/** `jira.attach-video`, its module loaded only when a job of it arrives, as `docmosis.load`'s is. */
+const videoAttach: PodJobHandler = {
+  kind: VIDEO_ATTACH_KIND,
+  budgetMs: VIDEO_ATTACH_BUDGET_MS,
+  run: async (args, context) => {
+    const [{ videoAttachHandler }, { run }, { atlassianLogin }] = await Promise.all([
+      import("./video-attach.ts"),
+      import("../virtual/process.ts"),
+      import("../virtual/atlassian.ts")
+    ]);
+    const handler = videoAttachHandler({
+      run: (cmd, argv, opts) => run(cmd, argv, { env: opts.env as NodeJS.ProcessEnv, timeoutMs: opts.timeoutMs, signal: opts.signal }),
+      login: ({ env }) => atlassianLogin({ env })
     });
     return await handler.run(args, context);
   }
@@ -66,4 +85,4 @@ export const notifyPull: PodJobHandler = {
  * Imported by `features.ts` and so by everything that reports a claim: a handler's module should import its heavy
  * dependencies inside `run`, not at the top.
  */
-export const POD_JOB_HANDLERS: readonly PodJobHandler[] = [docmosisLoad, notifyList, notifyPull];
+export const POD_JOB_HANDLERS: readonly PodJobHandler[] = [docmosisLoad, notifyList, notifyPull, videoAttach];
