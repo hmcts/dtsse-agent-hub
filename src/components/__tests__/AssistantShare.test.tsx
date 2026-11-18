@@ -233,6 +233,18 @@ describe("ShareDialog", () => {
     expect(screen.getByText("1 person matches. Only people who have used the hub can be named.")).toBeTruthy();
   });
 
+  it("should say it is searching as soon as the query changes, not what was found for the last one", async () => {
+    people([]);
+    render(dialog());
+    await type("zed");
+    expect(screen.getByText('No one called "zed" has used the hub yet.')).toBeTruthy();
+
+    fireEvent.change(box(), { target: { value: "zedd" } });
+
+    expect(screen.getByText("Searching…")).toBeTruthy();
+    expect(screen.queryByText(/No one called/)).toBeNull();
+  });
+
   it("should say nobody of that name has used the hub when the search finds no one", async () => {
     people([]);
     render(dialog());
@@ -404,6 +416,25 @@ describe("ShareDialog", () => {
     expect(screen.queryByText("Link copied")).toBeNull();
   });
 
+  it("should start the copied state again when the link is copied twice in a row", async () => {
+    vi.stubGlobal("navigator", { clipboard: { writeText: vi.fn(async () => undefined) } });
+    render(dialog());
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+      fireEvent.click(screen.getByRole("button", { name: "Copied" }));
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+
+    // 3s after the first copy, but only 1.5s after the second, so it still reads as copied.
+    expect(screen.getByRole("button", { name: "Copied" })).toBeTruthy();
+  });
+
   // Without a clipboard permission there is nothing to copy with, so the box is selected for the person to copy by
   // hand rather than the button doing nothing at all.
   it("should select the link instead when the clipboard refuses", async () => {
@@ -495,6 +526,61 @@ describe("removing someone", () => {
     expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
   });
 
+  it("should move focus to Undo when the Remove pressed has gone, and back to the name box once Undo is used", async () => {
+    render(dialog({ people: [person("bob", "Bob Tester")], unshare: ok([]), share: ok([person("bob", "Bob Tester")]) }));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    });
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Undo" }));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    });
+    expect(document.activeElement).toBe(box());
+  });
+
+  it("should keep Undo while it has focus after its time is up, and take it away once focus leaves", async () => {
+    render(dialog({ people: [person("bob", "Bob Tester")], unshare: ok([]) }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    });
+    const undo = screen.getByRole("button", { name: "Undo" });
+    expect(document.activeElement).toBe(undo);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5100);
+    });
+    expect(screen.getByRole("button", { name: "Undo" })).toBe(undo);
+
+    act(() => {
+      fireEvent.blur(undo);
+    });
+    expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
+  });
+
+  it("should make one change at a time, ignoring a pick from the list while a removal is saving", async () => {
+    people([{ oid: "carol", name: "Carol Tester", email: null }]);
+    let answer: (result: { ok: true; people: SharePerson[] }) => void = () => undefined;
+    const unshare = vi.fn(() => new Promise<{ ok: true; people: SharePerson[] }>((resolve) => (answer = resolve)));
+    const share = ok([person("carol", "Carol Tester")]);
+    render(dialog({ people: [person("bob", "Bob Tester")], unshare, share }));
+    await type("car");
+
+    act(() => {
+      fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    });
+    act(() => {
+      fireEvent.click(screen.getByRole("option", { name: /Carol Tester/ }));
+    });
+    await act(async () => {
+      answer({ ok: true, people: [] });
+    });
+
+    expect(share).not.toHaveBeenCalled();
+    expect(screen.getByText(/Bob Tester can no longer read this chat\./)).toBeTruthy();
+  });
+
   it("should take Undo away once its few seconds are up", async () => {
     render(dialog({ people: [person("bob", "Bob Tester")], unshare: ok([]) }));
 
@@ -502,6 +588,8 @@ describe("removing someone", () => {
       fireEvent.click(screen.getByRole("button", { name: "Remove" }));
     });
     expect(screen.getByRole("button", { name: "Undo" })).toBeTruthy();
+    // Focus elsewhere, as it is once the person has moved on: Undo stays only while it has focus.
+    box().focus();
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5100);
@@ -622,7 +710,7 @@ describe("SharedChat", () => {
   it("should say when the chat was shared with the reader", () => {
     render(<SharedChat view={view({ sharedAt: "2026-11-12T10:00:00.000Z" })} />);
 
-    expect(screen.getByText(/Shared on Thursday 12 November\./)).toBeTruthy();
+    expect(screen.getByText(/Shared on 12 November 2026\./)).toBeTruthy();
   });
 
   it("should say no date when there is none, as for the owner", () => {

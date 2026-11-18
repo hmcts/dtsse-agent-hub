@@ -5,6 +5,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 import SharedChatNotFound from "@/app/assistant/shared/[conversationId]/not-found";
 import { AssistantModal } from "@/components/assistant/AssistantModal";
+import { PasteHelp } from "@/components/assistant/PasteHelp";
 
 afterEach(cleanup);
 
@@ -74,5 +75,13 @@ describe("SharedChatNotFound", () => {
     expect(screen.getByRole("heading", { name: "This chat has not been shared with you" })).toBeTruthy();
     expect(screen.getByText(/ask them to add you/)).toBeTruthy();
     expect(screen.getByRole("link", { name: "See the chats that are shared with you" })).toBeTruthy();
+  });
+});
+
+describe("PasteHelp", () => {
+  it("should show nothing for a kind with no help", () => {
+    const { container } = render(<PasteHelp help={null} />);
+
+    expect(container.innerHTML).toBe("");
   });
 });

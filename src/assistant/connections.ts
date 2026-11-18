@@ -634,12 +634,16 @@ export function offeredConnections(
 }
 
 /**
- * What the getting-ready screen says beside its disabled Start button: the needed connections still missing, by name,
- * so the person knows what is between them and their chats rather than being told only that something is.
+ * What the getting-ready screen says beside its held-back Start button: the needed connections still missing, by
+ * name, so the person knows what is between them and their chats rather than being told only that something is.
+ *
+ * The button is held by the server's word that the person has not onboarded, and `stored` is the page's list of what
+ * is saved, which can arrive first. When that list already has everything, the gap is the hub catching up, so the line
+ * says so rather than asking for a connection the person has made.
  */
 export function stillNeededLine(needed: readonly CredentialKind[], stored: ReadonlySet<CredentialKind>): string {
   const names = needed.filter((kind) => !stored.has(kind)).map((kind) => CONNECTORS[kind]?.name ?? kind);
-  return names.length === 0 ? "Connect the accounts marked Required to start." : `Connect ${inWords(names)} to start.`;
+  return names.length === 0 ? "Checking your sign-ins. This takes a moment." : `Connect ${inWords(names)} to start.`;
 }
 
 /** "A", "A and B", "A, B and C". */

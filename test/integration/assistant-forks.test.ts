@@ -106,6 +106,32 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
+describe("when a shared chat was shared", () => {
+  it("should tell a reader the earlier of their share and their offer, and tell the owner nothing", async () => {
+    const { id } = await chat();
+    await shareActions.shareChat({ conversationId: id, recipientOid: BOB.oid });
+    await prisma.assistantConversationShare.updateMany({
+      where: { conversationId: id, recipientOid: BOB.oid },
+      data: { createdAt: new Date("2026-11-10T09:00:00Z") }
+    });
+    await forkActions.offerChatFork({ conversationId: id, recipientOid: BOB.oid });
+
+    expect((await sharedChat(viewerOf(BOB), id))?.sharedAt).toBe("2026-11-10T09:00:00.000Z");
+    expect((await sharedChat(viewerOf(ALICE), id))?.sharedAt).toBeNull();
+  });
+
+  it("should date an offer to fork when the reader was offered the chat and not shared it", async () => {
+    const { id } = await chat();
+    await forkActions.offerChatFork({ conversationId: id, recipientOid: BOB.oid });
+    await prisma.assistantConversationFork.updateMany({
+      where: { conversationId: id, recipientOid: BOB.oid },
+      data: { createdAt: new Date("2026-11-11T09:00:00Z") }
+    });
+
+    expect((await sharedChat(viewerOf(BOB), id))?.sharedAt).toBe("2026-11-11T09:00:00.000Z");
+  });
+});
+
 describe("offering a conversation to fork", () => {
   it("should list the person when the owner offers them the chat and take them off when the offer is withdrawn", async () => {
     const { id } = await chat();

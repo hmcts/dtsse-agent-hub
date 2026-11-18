@@ -1244,8 +1244,8 @@ describe("stillNeededLine", () => {
     expect(stillNeededLine(["github", "claude"], new Set<CredentialKind>(["github"]))).toBe("Connect Claude to start.");
   });
 
-  it("should point at the required rows when everything needed is stored but the screen still holds", () => {
-    expect(stillNeededLine(["github"], new Set<CredentialKind>(["github"]))).toBe("Connect the accounts marked Required to start.");
+  it("should say the hub is catching up, not ask again, when everything needed is stored but the screen still holds", () => {
+    expect(stillNeededLine(["github"], new Set<CredentialKind>(["github"]))).toBe("Checking your sign-ins. This takes a moment.");
   });
 
   it("should name a kind with no wording of its own by its kind", () => {

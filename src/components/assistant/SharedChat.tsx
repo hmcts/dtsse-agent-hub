@@ -8,7 +8,7 @@ import { ForkedThread } from "@/components/assistant/ForkedThread";
 import { SharedNotify } from "@/components/assistant/NotifyPanel";
 import { SharedItem } from "@/components/assistant/SharedItem";
 import { SharedVideo } from "@/components/assistant/VideoPanel";
-import { ukLongDate } from "@/web/format";
+import { ukDate } from "@/web/format";
 import { SHARED_CHATS } from "@/web/home";
 
 /**
@@ -43,7 +43,7 @@ export function SharedChat({ view, forkChat }: { view: SharedConversationView; f
         </span>
         <span className="text-pretty text-xs text-asst-faint sm:ml-auto max-sm:basis-full">
           {headline(view)}
-          {view.sharedAt === null ? null : <> Shared on {ukLongDate(new Date(view.sharedAt))}.</>}
+          {view.sharedAt === null ? null : <> Shared on {ukDate(new Date(view.sharedAt))}.</>}
         </span>
         {view.fork === null || forkChat === undefined ? null : <ForkButton conversationId={view.id} copyId={view.fork.copyId} forkChat={forkChat} />}
       </header>

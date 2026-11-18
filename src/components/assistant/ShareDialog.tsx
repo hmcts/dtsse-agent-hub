@@ -123,6 +123,13 @@ export function ShareEditor({
   const [removed, setRemoved] = useState<SharePerson | null>(null);
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const undoButton = useRef<HTMLButtonElement>(null);
+  // One change at a time. The box and the buttons are disabled while one is saving, but a suggestion can still be
+  // clicked, and two answers landing out of order would leave the list, and any Undo, describing the older change.
+  const saving = useRef(false);
+  // Set when Undo's time ran out while it had focus: it stays until focus leaves it, rather than vanishing under it.
+  const undoLapsed = useRef(false);
+  const refocusBox = useRef(false);
   const path = `/assistant/shared/${conversationId}`;
   // The whole address, once there is a browser to ask for the origin: the server has no origin to render, and a first
   // render that disagreed with the server's would be a hydration mismatch on the box's value.
@@ -161,6 +168,10 @@ export function ShareEditor({
 
   /** Whether the change was saved, for a caller that says something once it has been. */
   async function run(action: ShareAction, recipientOid: string): Promise<boolean> {
+    if (saving.current) {
+      return false;
+    }
+    saving.current = true;
     setPending(true);
     setError(null);
     forget();
@@ -178,6 +189,7 @@ export function ShareEditor({
     } catch {
       setError("That could not be saved. Check your connection and try again.");
     } finally {
+      saving.current = false;
       setPending(false);
     }
     return false;
@@ -189,6 +201,7 @@ export function ShareEditor({
       clearTimeout(undoTimer.current);
       undoTimer.current = null;
     }
+    undoLapsed.current = false;
     setRemoved(null);
   }
 
@@ -199,9 +212,37 @@ export function ShareEditor({
   async function remove(person: SharePerson): Promise<void> {
     if (await run(unshare, person.oid)) {
       setRemoved(person);
-      undoTimer.current = setTimeout(() => setRemoved(null), UNDO_FOR_MS);
+      undoTimer.current = setTimeout(() => {
+        undoTimer.current = null;
+        if (document.activeElement === undoButton.current) {
+          undoLapsed.current = true;
+        } else {
+          setRemoved(null);
+        }
+      }, UNDO_FOR_MS);
     }
   }
+
+  /** Shares with them again, and puts focus back in the name box, since the Undo it was on goes with the notice. */
+  async function undo(person: SharePerson): Promise<void> {
+    refocusBox.current = true;
+    await run(share, person.oid);
+  }
+
+  // Once the save is over, since the box is disabled while it runs and a disabled box cannot take focus.
+  useEffect(() => {
+    if (!pending && refocusBox.current) {
+      refocusBox.current = false;
+      document.getElementById(`${ids}-who`)?.focus();
+    }
+  }, [pending, ids]);
+
+  // The Remove pressed has gone with its row, so focus goes to the Undo that replaced it rather than to the body.
+  useEffect(() => {
+    if (removed !== null) {
+      undoButton.current?.focus();
+    }
+  }, [removed]);
 
   async function copy(): Promise<void> {
     if (copiedTimer.current !== null) {
@@ -309,19 +350,29 @@ export function ShareEditor({
         </p>
       </form>
 
-      {removed === null ? null : (
-        <p role="status" className="flex flex-wrap items-center gap-2 text-[13px] text-asst-body">
-          {removed.name} {mode === "fork" ? "can no longer fork this chat." : "can no longer read this chat."}
-          <button
-            type="button"
-            disabled={pending}
-            onClick={() => void run(share, removed.oid)}
-            className="rounded-md px-1.5 text-asst-accent underline hover:text-asst-accent-hover"
-          >
-            Undo
-          </button>
-        </p>
-      )}
+      {/* Mounted from the start and filled when someone is removed, so the removal is announced: a region inserted
+          with its words already in it often is not. */}
+      <div role="status" className={removed === null ? "sr-only" : "flex flex-wrap items-center gap-2 text-[13px] text-asst-body"}>
+        {removed === null ? null : (
+          <>
+            {removed.name} {mode === "fork" ? "can no longer fork this chat." : "can no longer read this chat."}
+            <button
+              ref={undoButton}
+              type="button"
+              disabled={pending}
+              onClick={() => void undo(removed)}
+              onBlur={() => {
+                if (undoLapsed.current) {
+                  forget();
+                }
+              }}
+              className="rounded-md px-1.5 text-asst-accent underline hover:text-asst-accent-hover"
+            >
+              Undo
+            </button>
+          </>
+        )}
+      </div>
 
       {people.length === 0 ? (
         <p className="text-[13px] text-asst-muted">{words.nobody}</p>

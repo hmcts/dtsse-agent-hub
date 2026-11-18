@@ -137,6 +137,10 @@ export function useSuggestions<T>({
     setQuery: (value: string) => {
       setDismissed(false);
       setQuery(value);
+      // Said with the keystroke, not a render later from the effect, so the line under the box never pairs the new
+      // query with what was found for the last one.
+      const asked = value.trim();
+      setStatus(asked === "" ? "idle" : asked.length < minQuery ? "short" : "searching");
     },
     shown,
     open,

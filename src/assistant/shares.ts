@@ -82,10 +82,11 @@ export async function accessToConversation(
  * say; `null` when it is neither, which is the owner.
  */
 export async function sharedWithSince(db: Database, conversationId: string, viewerOid: string): Promise<string | null> {
-  const where = { conversationId, recipientOid: viewerOid };
+  // By primary key: one person has at most one share and one offer of a conversation.
+  const where = { conversationId_recipientOid: { conversationId, recipientOid: viewerOid } };
   const [share, fork] = await Promise.all([
-    db.assistantConversationShare.findFirst({ where, select: { createdAt: true } }),
-    db.assistantConversationFork.findFirst({ where, select: { createdAt: true } })
+    db.assistantConversationShare.findUnique({ where, select: { createdAt: true } }),
+    db.assistantConversationFork.findUnique({ where, select: { createdAt: true } })
   ]);
   const times = [share?.createdAt, fork?.createdAt].filter((at): at is Date => at !== undefined).map((at) => at.getTime());
   return times.length === 0 ? null : new Date(Math.min(...times)).toISOString();

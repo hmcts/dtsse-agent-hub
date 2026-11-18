@@ -628,7 +628,7 @@ export function GettingReady({
   const rows = connectionRows({ assistant, statuses, unavailable }, now);
   const access = modelAccess(assistant.modelRoute, rows);
   const starting = !assistant.readiness.failed && assistant.status !== "running";
-  const stored = new Set(statuses.filter((status) => status.stored).map((status) => status.kind));
+  const stored = storedKinds(statuses);
   const neededId = useId();
   return (
     <ReadyShell

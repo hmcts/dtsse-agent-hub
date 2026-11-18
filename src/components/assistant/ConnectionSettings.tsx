@@ -4,7 +4,7 @@ import { useSearchParams } from "next/navigation";
 import { useId, useState } from "react";
 import { type ConnectionRow, connectionRows } from "@/assistant/connection-rows";
 import type { Connection, ConnectionState, MicrosoftConnection, ModelAccess } from "@/assistant/connections";
-import { awaitsGithub, CONNECTORS, checklistState, codeCollectable, GITHUB_FIRST, offersConnect } from "@/assistant/connections";
+import { awaitsGithub, checklistState, codeCollectable, connectorFor, GITHUB_FIRST, isConnection, offersConnect } from "@/assistant/connections";
 import type { SavedCredential } from "@/assistant/saved-credentials";
 import { ActionForm, type FormAction } from "@/components/ActionForm";
 import { PasteHelp } from "@/components/assistant/PasteHelp";
@@ -138,10 +138,23 @@ function ConnectQuestion({
   );
 }
 
-function Paste({ saved, save, onCancel, onSaved }: { saved: SavedCredential; save: FormAction; onCancel: () => void; onSaved: () => void }) {
+function Paste({
+  saved,
+  route,
+  save,
+  onCancel,
+  onSaved
+}: {
+  saved: SavedCredential;
+  route: ModelRoute;
+  save: FormAction;
+  onCancel: () => void;
+  onSaved: () => void;
+}) {
   const id = useId();
   const field = useFocusOnMount<HTMLInputElement>();
-  const help = CONNECTORS[saved.kind]?.help ?? null;
+  // Through `connectorFor`, as every surface reads a connection's words, so the help follows the route as the getting-ready screen's does.
+  const help = isConnection(saved.kind) ? connectorFor(saved.kind, route).help : null;
   return (
     <ActionForm action={save} label={`Save your ${saved.title}`} onSuccess={onSaved} className={BELOW} pendingText="Saving…">
       <input type="hidden" name="kind" value={saved.kind} />
@@ -237,6 +250,7 @@ function Row({
   login,
   now,
   held,
+  route,
   onSaid
 }: {
   row: ConnectionRow;
@@ -247,6 +261,8 @@ function Row({
   now: number;
   /** Whether Connect and Add wait for GitHub: `awaitsGithub`. Remove does not, since it only takes something away. */
   held: boolean;
+  /** How the person reaches Claude, which a connection's words follow. */
+  route: ModelRoute;
   onSaid: (said: string | null) => void;
 }) {
   const [doing, setDoing] = useState<Doing>(null);
@@ -327,7 +343,7 @@ function Row({
         />
       ) : null}
       {doing === "paste" && !live && tokens !== undefined && saved !== null ? (
-        <Paste saved={saved} save={tokens.save} onCancel={() => setDoing(null)} onSaved={finish(`Your ${saved.title} is saved`)} />
+        <Paste saved={saved} route={route} save={tokens.save} onCancel={() => setDoing(null)} onSaved={finish(`Your ${saved.title} is saved`)} />
       ) : null}
       {doing === "remove" && !live && tokens !== undefined && saved !== null ? (
         <Remove
@@ -425,6 +441,7 @@ export function Connections({ view }: { view: ConnectionsView }) {
               login={row.signIn === null ? undefined : view.logins.find((login) => login.kind === row.signIn?.kind)}
               now={view.now}
               held={awaitsGithub(row.key, view.list)}
+              route={view.route}
               onSaid={setSaid}
             />
           ))}
