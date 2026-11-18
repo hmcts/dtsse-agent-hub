@@ -5,7 +5,7 @@ import { type Api, ApiError, createApi } from "../api.ts";
 import { CLIENT_FEATURES } from "../features.ts";
 import type { DocmosisSchema } from "../wire.ts";
 import { UsageError } from "./command.ts";
-import { checkDocx, checkJsonObject, checkSchemaObject, publishDocmosis } from "./docmosis.ts";
+import { checkDocx, checkJsonObject, checkName, checkSchemaObject, checkSummary, DocmosisConversationMissingError, publishDocmosis } from "./docmosis.ts";
 
 const VID = "va-docmosis";
 const LAUNCH = `launch-${"e".repeat(16)}`;
@@ -93,7 +93,7 @@ describe("publishDocmosis", () => {
     const result = await publishDocmosis(api, agentId, { ...input, base: 1 });
 
     // Assert
-    expect(result).toMatchObject({ conflict: { version: 2, by: "user", data: { name: "Grace" } } });
+    expect(result).toMatchObject({ conflict: { current: { version: 2, by: "user", data: { name: "Grace" } } } });
     expect(hub.docmosisTemplates.get(agentId)?.versions).toHaveLength(2);
   });
 
@@ -108,10 +108,21 @@ describe("publishDocmosis", () => {
     const result = await publishDocmosis(api, agentId, { ...input, base: 2, baseRevision: 0 });
 
     // Assert
-    expect(result).toMatchObject({ conflict: { version: 2, revision: 1 } });
+    expect(result).toMatchObject({ conflict: { current: { version: 2, revision: 1 } } });
   });
 
-  it("should say the session is not a conversation, when the hub has no template for the agent", async () => {
+  it("should return a conflict with no current template, when the hub refuses the base without saying what it is now", async () => {
+    // Arrange
+    const agentId = await conversationAgent();
+
+    // Act
+    const result = await publishDocmosis(api, agentId, { ...input, base: 1 });
+
+    // Assert
+    expect(result).toEqual({ conflict: { current: null } });
+  });
+
+  it("should throw DocmosisConversationMissingError, when the hub has no conversation for the agent", async () => {
     // Arrange
     const agentId = await conversationAgent({ conversation: false });
 
@@ -119,7 +130,27 @@ describe("publishDocmosis", () => {
     const result = publishDocmosis(api, agentId, input);
 
     // Assert
-    await expect(result).rejects.toThrow(/not a CFT Workspace conversation/);
+    await expect(result).rejects.toBeInstanceOf(DocmosisConversationMissingError);
+    await expect(result).rejects.toThrow(`the hub has no CFT Workspace conversation for agent ${agentId}`);
+  });
+
+  it("should refuse the name or summary and send nothing, when either is outside the hub's limits", async () => {
+    // Arrange
+    const agentId = await conversationAgent();
+    const before = hub.calls.length;
+
+    // Act
+    const blankName = publishDocmosis(api, agentId, { ...input, name: " " });
+    const longName = publishDocmosis(api, agentId, { ...input, name: "n".repeat(201) });
+    const blankSummary = publishDocmosis(api, agentId, { ...input, summary: "" });
+    const longSummary = publishDocmosis(api, agentId, { ...input, summary: "s".repeat(201) });
+
+    // Assert
+    await expect(blankName).rejects.toThrow("the template's name must be 1 to 200 characters");
+    await expect(longName).rejects.toBeInstanceOf(UsageError);
+    await expect(blankSummary).rejects.toThrow("the summary must be 1 to 200 characters saying what changed");
+    await expect(longSummary).rejects.toBeInstanceOf(UsageError);
+    expect(hub.calls.slice(before).filter((c) => c.path.startsWith(`/api/agent/${agentId}/docmosis`))).toEqual([]);
   });
 
   it("should throw the hub's refusal, when it answers the publish with an error other than a conflict", async () => {
@@ -127,7 +158,7 @@ describe("publishDocmosis", () => {
     const agentId = await conversationAgent();
 
     // Act
-    const result = publishDocmosis(api, agentId, { ...input, name: "" });
+    const result = publishDocmosis(api, agentId, { ...input, schema: { ...SCHEMA, root: { ...SCHEMA.root, kind: "string" } } as unknown as DocmosisSchema });
 
     // Assert
     await expect(result).rejects.toBeInstanceOf(ApiError);
@@ -144,7 +175,7 @@ describe("checkSchemaObject", () => {
     expect(schema).toEqual(SCHEMA);
   });
 
-  it("should refuse a value that is not an object, naming its source", () => {
+  it("should refuse it, naming its source, when the value is not an object", () => {
     // Act
     const check = () => checkSchemaObject([SCHEMA], "schema.json");
 
@@ -153,7 +184,7 @@ describe("checkSchemaObject", () => {
     expect(check).toThrow("schema.json must hold the schema object");
   });
 
-  it("should refuse an object with no root of kind object", () => {
+  it("should refuse it, when the object has no root of kind object", () => {
     // Act
     const check = () => checkSchemaObject({ root: { kind: "string" }, warnings: [] }, "schema.json");
 
@@ -161,7 +192,7 @@ describe("checkSchemaObject", () => {
     expect(check).toThrow('schema.json is not a schema from docmosis schema: it has no root of kind "object"');
   });
 
-  it("should refuse a schema holding text a jsonb cannot store", () => {
+  it("should refuse it, when the schema holds text a jsonb cannot store", () => {
     // Act
     const check = () => checkSchemaObject({ ...SCHEMA, warnings: [`bad${String.fromCharCode(0)}`] }, "schema.json");
 
@@ -169,7 +200,7 @@ describe("checkSchemaObject", () => {
     expect(check).toThrow(/schema schema\.json has text the hub cannot store/);
   });
 
-  it("should refuse a schema larger than the hub stores, measured as Postgres prints it", () => {
+  it("should refuse it, when the schema is larger than the hub stores as Postgres prints it", () => {
     // Act
     const check = () => checkSchemaObject({ ...SCHEMA, warnings: ["x".repeat(120_000)] }, "schema.json");
 
@@ -186,6 +217,108 @@ describe("checkJsonObject", () => {
     // Assert
     expect(check).toThrow("data.json must hold the data object");
   });
+
+  it("should refuse it with the secret check's error, when the value holds secret-shaped text", () => {
+    // Arrange: built at runtime so no secret-shaped literal sits in the repo.
+    const secret = `${"gh"}p_${"Q".repeat(30)}`;
+
+    // Act
+    const check = () => checkJsonObject({ notes: [`token ${secret}`] }, "data", "the loader");
+
+    // Assert
+    expect(check).toThrow(/refusing to send: the text contains a secret-shaped string \(pattern /);
+  });
+
+  it.each([
+    ["an undefined item", { items: [1, undefined] }, "undefined at $.items[1]"],
+    ["a hole in an array", { items: Object.assign([1], { 2: 2 }) }, "undefined at $.items[1]"],
+    ["an undefined property", { name: undefined }, "undefined at $.name"],
+    ["a function", { render: () => "x" }, "a function at $.render"],
+    ["a symbol", { tag: Symbol("t") }, "a symbol at $.tag"],
+    ["a bigint", { count: 10n }, "a bigint at $.count"],
+    ["a non-finite number", { ratio: Number.NaN }, "NaN at $.ratio"],
+    ["a Date", { when: new Date(0) }, "a Date object at $.when"],
+    ["a Map", { lookup: new Map() }, "a Map object at $.lookup"]
+  ])("should refuse it, naming where, when the value holds %s", (_, value, found) => {
+    // Act
+    const check = () => checkJsonObject(value, "data", "the loader");
+
+    // Assert
+    expect(check).toThrow(UsageError);
+    expect(check).toThrow(`data the loader holds ${found}, which JSON cannot carry`);
+  });
+
+  it("should refuse it, when the value refers to itself", () => {
+    // Arrange
+    const value: Record<string, unknown> = { name: "Ada" };
+    value.self = { back: value };
+
+    // Act
+    const check = () => checkJsonObject(value, "data", "the loader");
+
+    // Assert
+    expect(check).toThrow("data the loader holds a reference to itself at $.self.back, which JSON cannot carry");
+  });
+
+  it("should quote the key, when it is not a plain identifier", () => {
+    // Act
+    const check = () => checkJsonObject({ "odd key": Number.POSITIVE_INFINITY }, "data", "the loader");
+
+    // Assert
+    expect(check).toThrow('data the loader holds Infinity at $["odd key"], which JSON cannot carry');
+  });
+
+  it("should return the value, when the same object appears twice without a cycle", () => {
+    // Arrange
+    const shared = { name: "Ada" };
+    const value = { first: shared, second: shared, nothing: null, list: [true, 1.5, "x"] };
+
+    // Act
+    const checked = checkJsonObject(value, "data", "the loader");
+
+    // Assert
+    expect(checked).toBe(value);
+  });
+});
+
+describe("checkName", () => {
+  it("should return the name, when it is 1 to 200 characters", () => {
+    // Act
+    const name = checkName("n".repeat(200));
+
+    // Assert
+    expect(name).toBe("n".repeat(200));
+  });
+
+  it("should refuse it with the refusal given, when the name is blank or too long", () => {
+    // Act
+    const blank = () => checkName("  ", "give one with --name");
+    const long = () => checkName("n".repeat(201));
+
+    // Assert
+    expect(blank).toThrow("give one with --name");
+    expect(long).toThrow(UsageError);
+  });
+});
+
+describe("checkSummary", () => {
+  it("should return the summary, when it is 1 to 200 characters", () => {
+    // Act
+    const summary = checkSummary("Loaded claim-form");
+
+    // Assert
+    expect(summary).toBe("Loaded claim-form");
+  });
+
+  it("should refuse it, when the summary is blank or too long", () => {
+    // Act
+    const blank = () => checkSummary("\n");
+    const long = () => checkSummary("s".repeat(201), "--summary is too long");
+
+    // Assert
+    expect(blank).toThrow("the summary must be 1 to 200 characters saying what changed");
+    expect(long).toThrow("--summary is too long");
+  });
 });
 
 describe("checkDocx", () => {
@@ -197,7 +330,7 @@ describe("checkDocx", () => {
     expect(bytes).toBe(DOCX);
   });
 
-  it("should refuse bytes that are not a zip, naming their source", () => {
+  it("should refuse them, naming their source, when the bytes are not a zip", () => {
     // Act
     const check = () => checkDocx(Buffer.from("%PDF-1.7"), "claim.docx");
 
@@ -206,7 +339,7 @@ describe("checkDocx", () => {
     expect(check).toThrow("claim.docx is not a .docx");
   });
 
-  it("should refuse a .docx larger than the hub takes", () => {
+  it("should refuse it, when the .docx is larger than the hub takes", () => {
     // Arrange
     const big = Buffer.alloc(5 * 1024 * 1024 + 1);
     DOCX.copy(big);
