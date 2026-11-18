@@ -23,6 +23,7 @@ export type ClientFeature =
   | "docmosis-library"
   | "files"
   | "github-lookups"
+  | "items"
   | "lookups"
   | "memory-anon"
   | "model-alias"
@@ -61,6 +62,11 @@ export type ClientFeature =
  * `github-lookups` is claimed because the assistant supervisor also answers a `lookup` frame of kind `github_repo`
  * or `github_project`, searching the owner's GitHub repositories or Projects with gh. A build that claims only
  * `lookups` would drop such a frame as one it does not know, so the hub gates the GitHub kinds on this name.
+ *
+ * `items` is claimed because this build reads every one of a conversation's documents: the frame's `artefacts`,
+ * `artefact get|put|remove --id`, and an export's `document_id`, which its export commands read that document by. A
+ * build without it reads only the primary document, so the hub refuses a second document, or a ticket or Confluence
+ * page, and an export of anything but the primary, for a pod that did not claim it.
  *
  * `welsh` is claimed because the assistant supervisor answers the sessions stream's `welsh` frame, running
  * the welsh plugin's `scripts/welsh` for the CFT Workspace's Welsh page. The hub gates on it, answering `unsupported`
@@ -114,6 +120,7 @@ export const CLIENT_FEATURES: readonly ClientFeature[] = [
   "docmosis-library",
   "files",
   "github-lookups",
+  "items",
   "lookups",
   "memory-anon",
   "model-alias",

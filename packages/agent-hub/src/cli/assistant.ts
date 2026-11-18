@@ -1,4 +1,4 @@
-// The commands a CFT Workspace conversation's session runs: its shared document, and the Jira, GitHub and
+// The commands a CFT Workspace conversation's session runs: its shared documents, and the Jira, GitHub and
 // Confluence exports the person asked for.
 import { ApiError } from "../api.ts";
 import { CONFLUENCE_EXPORT_ID_RE, CONFLUENCE_ID_RE, MAX_CONFLUENCE_ERROR, MAX_PAGE_TITLE, runConfluenceExport } from "../confluence-export.ts";
@@ -9,35 +9,59 @@ import { EXPORT_ID_RE, JIRA_BROWSE_URL, JIRA_KEY_RE, MAX_JIRA_ERROR, runJiraExpo
 import { requireSessionId } from "../session.ts";
 import { atlassianLogin, run } from "../virtual/index.ts";
 import { virtualAgent } from "../virtual-agent.ts";
-import type { Artefact, ArtefactBody, ConfluenceExportReport, GithubExportReport, JiraExportReport } from "../wire.ts";
+import type { Artefact, ArtefactBody, ArtefactCreateBody, ArtefactKind, ConfluenceExportReport, GithubExportReport, JiraExportReport } from "../wire.ts";
 import { type Cli, type Command, parseFlags, refuseSecrets, requireAgent, UsageError } from "./command.ts";
 
-type ArtefactAction = "get" | "put";
+type ArtefactAction = "get" | "put" | "list" | "new" | "remove";
+
+const ARTEFACT_ACTIONS: readonly ArtefactAction[] = ["get", "put", "list", "new", "remove"];
+const KINDS: readonly ArtefactKind[] = ["document", "ticket", "confluence"];
+const DOCUMENT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Which flags go with which action, so a stray one is refused rather than ignored. */
+const ARTEFACT_FLAGS: Record<ArtefactAction, readonly string[]> = {
+  get: ["id"],
+  put: ["id", "title", "base"],
+  list: [],
+  new: ["kind", "title"],
+  remove: ["id"]
+};
 
 /** The `artefact` arguments, refused before anything is asked of the hub. */
 function artefactArgs(argv: string[]): { action: ArtefactAction; json: boolean; flags: Record<string, string> } {
   const json = argv.includes("--json");
   const { flags, rest } = parseFlags(
     argv.filter((a) => a !== "--json"),
-    ["title", "base"]
+    ["title", "base", "id", "kind"]
   );
   const [action, ...extra] = rest;
-  if (action !== "get" && action !== "put") {
-    throw new UsageError("artefact takes get or put");
+  if (!ARTEFACT_ACTIONS.includes(action as ArtefactAction)) {
+    throw new UsageError("artefact takes get, put, list, new or remove");
   }
+  const chosen = action as ArtefactAction;
   if (extra.length) {
     throw new UsageError(`unexpected argument: ${extra[0]}`);
   }
-  if (action === "get" && (flags.title !== undefined || flags.base !== undefined)) {
-    throw new UsageError("--title and --base go with artefact put");
+  const stray = Object.keys(flags).find((name) => !ARTEFACT_FLAGS[chosen].includes(name));
+  if (stray !== undefined) {
+    throw new UsageError(`--${stray} does not go with artefact ${chosen}`);
   }
-  if (action === "put" && json) {
-    throw new UsageError("--json goes with artefact get");
+  if (json && chosen !== "get" && chosen !== "list") {
+    throw new UsageError("--json goes with artefact get or list");
   }
   if (flags.base !== undefined && !/^\d+$/.test(flags.base)) {
     throw new UsageError("--base must be a version number");
   }
-  return { action, json, flags };
+  if (flags.id !== undefined && !DOCUMENT_ID_RE.test(flags.id)) {
+    throw new UsageError("--id must be a document's id, as artefact list prints it");
+  }
+  if (chosen === "remove" && flags.id === undefined) {
+    throw new UsageError("artefact remove needs --id, the document to remove");
+  }
+  if (chosen === "new" && !KINDS.includes(flags.kind as ArtefactKind)) {
+    throw new UsageError("artefact new needs --kind document, ticket or confluence");
+  }
+  return { action: chosen, json, flags };
 }
 
 // Only a conversation's agent has a document, so a 404 here is the session, not a missing agent.
@@ -48,14 +72,30 @@ function notConversation(e: unknown): never {
   throw e;
 }
 
-async function getArtefact(cli: Cli, agentId: string, json: boolean): Promise<number> {
-  const doc = await cli.api().getArtefact(agentId).catch(notConversation);
+/** A 404 for one document: it is gone, or this hub is one that holds a single document and has no such route. */
+function noDocument(id: string): (e: unknown) => never {
+  return (e) => {
+    if (e instanceof ApiError && e.status === 404) {
+      throw new Error(`there is no document ${id} in this conversation; list them with ${CLI} artefact list`);
+    }
+    throw e;
+  };
+}
+
+/** The document a command names, by `--id`, or the conversation's first, which is all an older hub knows of. */
+function readOne(cli: Cli, agentId: string, id: string | undefined): Promise<Artefact> {
+  const api = cli.api();
+  return id === undefined ? api.getArtefact(agentId).catch(notConversation) : api.getArtefactById(agentId, id).catch(noDocument(id));
+}
+
+async function getArtefact(cli: Cli, agentId: string, json: boolean, id: string | undefined): Promise<number> {
+  const doc = await readOne(cli, agentId, id);
   if (json) {
     cli.print(JSON.stringify(doc));
     return 0;
   }
   if (!doc.markdown) {
-    cli.printError(`agent-hub: the conversation's document is empty (version ${doc.version})`);
+    cli.printError(`agent-hub: the document is empty (version ${doc.version})`);
     return 0;
   }
   cli.stdout.write(doc.markdown.endsWith("\n") ? doc.markdown : `${doc.markdown}\n`);
@@ -63,45 +103,105 @@ async function getArtefact(cli: Cli, agentId: string, json: boolean): Promise<nu
 }
 
 /** Says why a put was refused for a newer version, and how to put the change again on top of it. */
-function printConflict(cli: Cli, base: number, current: Artefact | undefined): void {
+function printConflict(cli: Cli, base: number, current: Artefact | undefined, id: string | undefined): void {
   let by = "";
   if (current?.updated_by) {
     by = `, last written by ${current.updated_by === "user" ? "the user" : "this conversation"}`;
   }
   const again = current?.version === undefined ? "" : ` with --base ${current.version}`;
+  const which = id === undefined ? "" : ` --id ${id}`;
   cli.printError(`agent-hub artefact: the document has changed since version ${base}: it is now version ${current?.version ?? "?"}${by}. Nothing was saved.`);
-  cli.printError(`Read it with ${CLI} artefact get, merge your change into it, and put it again${again}.`);
+  cli.printError(`Read it with ${CLI} artefact get${which}, merge your change into it, and put it again${again}.`);
+}
+
+function readMarkdown(cli: Cli, action: string, title: string | undefined): string {
+  const markdown = cli.readStdin();
+  if (!markdown.trim()) {
+    throw new UsageError(`artefact ${action} reads the markdown from stdin, and it was empty`);
+  }
+  refuseSecrets(`${title ?? ""}\n${markdown}`);
+  return markdown;
 }
 
 async function putArtefact(cli: Cli, agentId: string, flags: Record<string, string>): Promise<number> {
-  const markdown = cli.readStdin();
-  if (!markdown.trim()) {
-    throw new UsageError("artefact put reads the markdown from stdin, and it was empty");
-  }
-  refuseSecrets(`${flags.title ?? ""}\n${markdown}`);
+  const markdown = readMarkdown(cli, "put", flags.title);
   const api = cli.api();
-  const base = flags.base === undefined ? (await api.getArtefact(agentId).catch(notConversation)).version : Number(flags.base);
+  const id = flags.id;
+  const base = flags.base === undefined ? (await readOne(cli, agentId, id)).version : Number(flags.base);
   const body: ArtefactBody = { markdown, base_version: base };
   if (flags.title?.trim()) {
     body.title = flags.title.trim();
   }
   try {
-    const res = await api.putArtefact(agentId, body);
-    cli.print(`agent-hub: saved the conversation's document as version ${res.version}`);
+    const res = id === undefined ? await api.putArtefact(agentId, body) : await api.putArtefactById(agentId, id, body);
+    cli.print(`agent-hub: saved the ${id === undefined ? "conversation's document" : `document ${id}`} as version ${res.version}`);
   } catch (e) {
     if (!(e instanceof ApiError && e.status === 409)) {
-      return notConversation(e);
+      return id === undefined ? notConversation(e) : noDocument(id)(e);
     }
-    printConflict(cli, base, e.body?.current as Artefact | undefined);
+    printConflict(cli, base, e.body?.current as Artefact | undefined, id);
     return 1;
   }
   return 0;
 }
 
+/** A hub older than several documents has no list route: what it holds is the one `artefact get` reads. */
+function oneDocumentHub(e: unknown): never {
+  if (e instanceof ApiError && e.status === 404) {
+    throw new Error(`this hub holds one document per conversation, or this session is not a CFT Workspace conversation; read it with ${CLI} artefact get`);
+  }
+  throw e;
+}
+
+async function listArtefacts(cli: Cli, agentId: string, json: boolean): Promise<number> {
+  const { artefacts } = await cli.api().listArtefacts(agentId).catch(oneDocumentHub);
+  if (json) {
+    cli.print(JSON.stringify(artefacts));
+    return 0;
+  }
+  if (artefacts.length === 0) {
+    cli.print("agent-hub: the conversation has no documents yet");
+    return 0;
+  }
+  for (const doc of artefacts) {
+    const by = doc.updated_by === "user" ? ", last edited by the user" : "";
+    cli.print(`${doc.id}  ${doc.kind}  version ${doc.version}${by}  ${doc.title ?? "Untitled document"}`);
+  }
+  return 0;
+}
+
+async function newArtefact(cli: Cli, agentId: string, flags: Record<string, string>): Promise<number> {
+  const markdown = readMarkdown(cli, "new", flags.title);
+  const body: ArtefactCreateBody = { kind: flags.kind as ArtefactKind, markdown };
+  if (flags.title?.trim()) {
+    body.title = flags.title.trim();
+  }
+  const created = await cli.api().createArtefact(agentId, body).catch(oneDocumentHub);
+  cli.print(`agent-hub: created ${body.kind} ${created.id} at version ${created.version}; change it with ${CLI} artefact put --id ${created.id}`);
+  return 0;
+}
+
+async function removeArtefact(cli: Cli, agentId: string, id: string): Promise<number> {
+  await cli.api().deleteArtefact(agentId, id).catch(noDocument(id));
+  cli.print(`agent-hub: removed the document ${id}`);
+  return 0;
+}
+
 export const artefact: Command = async (cli, argv) => {
   const { action, json, flags } = artefactArgs(argv);
-  const agent = requireAgent(requireSessionId(cli.env));
-  return action === "get" ? getArtefact(cli, agent.agent_id, json) : putArtefact(cli, agent.agent_id, flags);
+  const agentId = requireAgent(requireSessionId(cli.env)).agent_id;
+  switch (action) {
+    case "get":
+      return getArtefact(cli, agentId, json, flags.id);
+    case "put":
+      return putArtefact(cli, agentId, flags);
+    case "list":
+      return listArtefacts(cli, agentId, json);
+    case "new":
+      return newArtefact(cli, agentId, flags);
+    case "remove":
+      return removeArtefact(cli, agentId, flags.id as string);
+  }
 };
 
 const PROJECT_RE = /^[A-Z][A-Z0-9_]{1,9}$/;
@@ -140,6 +240,9 @@ function exportCommand(kind: string, spec: ExportSpec): Command {
     }
     if (extra.length) {
       throw new UsageError(`unexpected argument: ${extra[0]}`);
+    }
+    if (flags.document !== undefined && !DOCUMENT_ID_RE.test(flags.document)) {
+      throw new UsageError("--document must be the document id the export was asked for");
     }
     const others = action === "report" ? spec.exportFlags : spec.reportFlags;
     const stray = others.find((name) => flags[name] !== undefined);
@@ -194,7 +297,7 @@ const jiraExport: ExportStep = async (cli, exportId, flags) => {
       login: virtualAgent(cli.env) ? () => atlassianLogin({ api, env: cli.env }) : null,
       print: cli.print
     },
-    { exportId, project, issueType, labels }
+    { exportId, project, issueType, labels, documentId: flags.document }
   ).catch(noExport("Jira"));
   if ("error" in outcome) {
     cli.print(`agent-hub: no ticket was created for export ${exportId}: ${outcome.error} The user has been shown this.`);
@@ -254,7 +357,7 @@ const confluenceExport: ExportStep = async (cli, exportId, flags) => {
       login: virtualAgent(cli.env) ? () => atlassianLogin({ api, env: cli.env }) : null,
       print: cli.print
     },
-    { exportId, spaceId, parentId }
+    { exportId, spaceId, parentId, documentId: flags.document }
   ).catch(noExport("Confluence"));
   if ("error" in outcome) {
     cli.print(`agent-hub: no page was created for export ${exportId}: ${outcome.error} The user has been shown this.`);
@@ -307,7 +410,7 @@ const githubExport: ExportStep = async (cli, exportId, flags) => {
   const agent = requireAgent(requireSessionId(cli.env));
   const outcome = await runGithubExport(
     { api: cli.api(), agentId: agent.agent_id, env: cli.env, run, print: cli.print },
-    { exportId, repo, project, labels }
+    { exportId, repo, project, labels, documentId: flags.document }
   ).catch(noExport("GitHub"));
   if ("error" in outcome) {
     cli.print(`agent-hub: no issue was created for export ${exportId}: ${outcome.error} The user has been shown this.`);
@@ -324,7 +427,7 @@ const githubExport: ExportStep = async (cli, exportId, flags) => {
 
 export const github = exportCommand("github", {
   exportIdRe: EXPORT_ID_RE,
-  exportFlags: ["repo", "project", "labels"],
+  exportFlags: ["repo", "project", "labels", "document"],
   reportFlags: ["number", "error"],
   export: githubExport,
   report: githubReport
@@ -332,7 +435,7 @@ export const github = exportCommand("github", {
 
 export const jira = exportCommand("jira", {
   exportIdRe: EXPORT_ID_RE,
-  exportFlags: ["project", "type", "labels"],
+  exportFlags: ["project", "type", "labels", "document"],
   reportFlags: ["key", "error"],
   export: jiraExport,
   report: jiraReport
@@ -340,7 +443,7 @@ export const jira = exportCommand("jira", {
 
 export const confluence = exportCommand("confluence", {
   exportIdRe: CONFLUENCE_EXPORT_ID_RE,
-  exportFlags: ["space-id", "parent-id"],
+  exportFlags: ["space-id", "parent-id", "document"],
   reportFlags: ["page-id", "title", "error"],
   export: confluenceExport,
   report: confluenceReport

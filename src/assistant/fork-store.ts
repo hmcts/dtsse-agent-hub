@@ -5,6 +5,7 @@ import type { Database, PrismaClient } from "../store/prisma.ts";
 import { conversationItems, mergeEntries, type TranscriptEntryView } from "../transcripts/conversation.ts";
 import { agentConversation } from "../transcripts/views.ts";
 import type { ModelRoute } from "../viewer/identity.ts";
+import { OLDEST_FIRST } from "./artefact-store.ts";
 import { ensureAssistant } from "./assistant-store.ts";
 import { announce, ConversationNotFound, storedHistory, storedStops } from "./conversation-row.ts";
 import { createConversationAgent } from "./conversation-store.ts";
@@ -179,9 +180,7 @@ export async function acceptFork(prisma: PrismaClient, viewer: { oid: string; mo
       productHistory: true,
       stopHistory: true,
       agentId: true,
-      artefactTitle: true,
-      artefactMarkdown: true,
-      artefactVersion: true,
+      documents: { where: { version: { gt: 0 } }, select: { kind: true, title: true, markdown: true }, orderBy: [...OLDEST_FIRST] },
       owner: { select: { name: true } },
       ...FORKED_SELECT
     }
@@ -209,21 +208,24 @@ export async function acceptFork(prisma: PrismaClient, viewer: { oid: string; mo
     if (raced !== undefined) {
       return raced;
     }
-    const document =
-      source.artefactVersion === 0
-        ? {}
-        : {
-            artefactTitle: source.artefactTitle,
-            artefactMarkdown: source.artefactMarkdown,
-            artefactVersion: 1,
-            // Said to be the person's, so the copy's session is told on its first message that there is a document
-            // and to read it before changing it: it has never seen this one.
-            artefactUpdatedBy: "user",
-            artefactUpdatedAt: now
-          };
     const created = await tx.assistantConversation.create({
-      data: { ownerOid: viewer.oid, virtualAgentId: assistant.id, product: source.product, title: source.title, lastActiveAt: now, ...document },
+      data: { ownerOid: viewer.oid, virtualAgentId: assistant.id, product: source.product, title: source.title, lastActiveAt: now },
       select: { id: true, ownerOid: true, virtualAgentId: true }
+    });
+    // Every written document, in order and without its exports, which were the source's: each as version 1, said to
+    // be the person's, so the copy's session is told on its first message that there is a document and to read it
+    // before changing it, since it has never seen this one. Created a millisecond apart so the oldest stays the primary.
+    await tx.assistantDocument.createMany({
+      data: source.documents.map((document, index) => ({
+        conversationId: created.id,
+        kind: document.kind,
+        title: document.title,
+        markdown: document.markdown,
+        version: 1,
+        updatedBy: "user",
+        updatedAt: now,
+        createdAt: new Date(now.getTime() + index)
+      }))
     });
     // In one statement, because the row's CHECK holds the fork's columns to all or none. Written raw for the reason
     // `stopAnswer` writes its history raw: Prisma's JSON input type takes no array of a named interface. The copied
@@ -277,13 +279,14 @@ export async function attachForkContext(db: Database, sent: { conversationId: st
       forked_at: Date;
       forked_thread: unknown;
       forked_earlier_hidden: boolean;
-      artefact_version: number;
+      documents: number;
     }[]
   >`
     UPDATE assistant_conversation
        SET fork_context_sent_at = now()
      WHERE id = ${sent.conversationId}::uuid AND owner_oid = ${sent.ownerOid} AND forked_at IS NOT NULL AND fork_context_sent_at IS NULL
-    RETURNING forked_from_owner_name, forked_from_title, forked_at, forked_thread, forked_earlier_hidden, artefact_version
+    RETURNING forked_from_owner_name, forked_from_title, forked_at, forked_thread, forked_earlier_hidden,
+              (SELECT count(*) FROM assistant_document d WHERE d.conversation_id = assistant_conversation.id AND d.version > 0)::int AS documents
   `;
   if (row === undefined) {
     return false;
@@ -298,7 +301,7 @@ export async function attachForkContext(db: Database, sent: { conversationId: st
   if (forked === null) {
     return false;
   }
-  const bytes = new TextEncoder().encode(forkContextMarkdown(forked, row.artefact_version > 0));
+  const bytes = new TextEncoder().encode(forkContextMarkdown(forked, row.documents));
   const upload = await db.assistantUpload.create({
     data: {
       conversationId: sent.conversationId,

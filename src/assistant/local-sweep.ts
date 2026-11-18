@@ -111,7 +111,7 @@ async function collectEmpty(tx: Database, retentionHours: number, batch: number)
       FROM assistant_conversation c
      WHERE c.virtual_agent_id IS NULL
        AND c.first_content_at IS NULL
-       AND c.artefact_version = 0
+       AND NOT EXISTS (SELECT 1 FROM assistant_document d WHERE d.conversation_id = c.id AND d.version > 0)
        AND c.created_at < now() - make_interval(hours => ${retentionHours}::int)
        AND NOT EXISTS (
              SELECT 1 FROM agent a

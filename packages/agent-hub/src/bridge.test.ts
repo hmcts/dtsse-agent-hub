@@ -271,6 +271,34 @@ describe("parseDirectEventMessage", () => {
   });
 });
 
+describe("an assistant frame's documents", () => {
+  const DOC = "0f8a6a1e-0000-4000-8000-00000000d0c1";
+
+  it("should keep each document and drop one whose id could not go into a command when the hub lists them", () => {
+    // Act
+    const frame = parseAssistantFrame({
+      conversation_id: "c1",
+      artefacts: [
+        { id: DOC, kind: "ticket", title: "Add\na hearing", version: 2, updated_by: "user" },
+        { id: "not-a-uuid; rm -rf /", kind: "document", title: "x", version: 1, updated_by: "agent" },
+        { id: DOC, kind: "deck", title: "x", version: 1, updated_by: "agent" }
+      ]
+    });
+
+    // Assert
+    expect(frame?.artefacts).toEqual([{ id: DOC, kind: "ticket", title: "Add a hearing", version: 2, updated_by: "user" }]);
+  });
+
+  it("should carry an export's document id only when it is a uuid", () => {
+    // Arrange
+    const pending = { export_id: "5b0e7c1a-1111-4222-8333-444455556666", project: "VIBE", issue_type: "Story", labels: [] };
+
+    // Act & Assert
+    expect(parseAssistantFrame({ jira_export: { ...pending, document_id: DOC } })?.jira_export).toEqual({ ...pending, document_id: DOC });
+    expect(parseAssistantFrame({ jira_export: { ...pending, document_id: "--repo evil" } })?.jira_export).toEqual(pending);
+  });
+});
+
 describe("parseJiraExportFrame", () => {
   const pending = { export_id: "5b0e7c1a-1111-4222-8333-444455556666", project: "VIBE", issue_type: "Story", labels: ["hmcts-assistant"] };
 
@@ -379,7 +407,7 @@ describe("parseAssistantFrame", () => {
     };
 
     // Act & Assert
-    expect(parseAssistantFrame(sent)).toEqual({ ...sent, jira_export: null, github_export: null, confluence_export: null });
+    expect(parseAssistantFrame(sent)).toEqual({ ...sent, artefacts: null, jira_export: null, github_export: null, confluence_export: null });
     expect(parseAssistantFrame({ conversation_id: "c1", product: null, product_label: null, artefact_version: 0, artefact_updated_by: null })).toEqual({
       conversation_id: "c1",
       product: null,
@@ -387,6 +415,7 @@ describe("parseAssistantFrame", () => {
       model: null,
       artefact_version: 0,
       artefact_updated_by: null,
+      artefacts: null,
       deck_version: null,
       deck_updated_by: undefined,
       deck_revision: null,
@@ -441,6 +470,7 @@ describe("parseAssistantFrame", () => {
       model: null,
       artefact_version: null,
       artefact_updated_by: undefined,
+      artefacts: null,
       deck_version: null,
       deck_updated_by: undefined,
       deck_revision: null,

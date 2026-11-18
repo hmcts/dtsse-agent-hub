@@ -167,6 +167,6 @@ export function pendingConfluenceExport(row: ConfluenceExportRow, now: Date = ne
 }
 
 /** The message the person is shown asking for the export, which is also what wakes the session. */
-export function confluenceExportRequest(parent: Pick<ConfluenceParent, "title" | "space_name">): string {
-  return `Please publish this document to Confluence, under "${parent.title}" in ${parent.space_name}.`;
+export function confluenceExportRequest(parent: Pick<ConfluenceParent, "title" | "space_name">, document = "this document"): string {
+  return `Please publish ${document} to Confluence, under "${parent.title}" in ${parent.space_name}.`;
 }

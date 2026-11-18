@@ -143,7 +143,7 @@ export async function unsentConversation(db: Database, ownerOid: string): Promis
     SELECT c.id::text AS id
       FROM assistant_conversation c
      WHERE c.owner_oid = ${ownerOid}
-       AND c.artefact_version = 0
+       AND NOT EXISTS (SELECT 1 FROM assistant_document d WHERE d.conversation_id = c.id AND d.version > 0)
        AND c.forked_at IS NULL
        AND EXISTS (
              SELECT 1 FROM assistant_upload u

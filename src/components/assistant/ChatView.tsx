@@ -7,6 +7,7 @@ import { clientSupports, sessionLacks } from "@/agents/client-features";
 import { EXPIRE_AFTER_SECONDS } from "@/agents/liveness";
 import type { ArtefactSnapshot } from "@/app/_actions/assistant";
 import { MAX_ASKED_BODY } from "@/assistant/deck";
+import { type DocumentKind, documentLabel } from "@/assistant/documents";
 import { type ExportDefaults, NO_DEFAULTS } from "@/assistant/export-defaults";
 import { PRODUCTS, productLabel, storedProduct } from "@/assistant/products";
 import type { Template } from "@/assistant/starters";
@@ -67,6 +68,8 @@ export interface ChatActions {
   /** The person's answer to a question the assistant asked with its own question tool. */
   answerQuestion: AnswerQuestionAction;
   saveArtefact: SaveArtefactAction;
+  /** Left out, the document panel offers no Remove. */
+  removeArtefact?: (input: { conversationId: unknown; documentId: unknown }) => Promise<ActionResult>;
   exportToJira: ExportToJiraAction;
   /** Left out, a person whose ticket tool is GitHub is offered no ticket export. */
   exportToGithub?: ExportToGithubAction;
@@ -131,6 +134,12 @@ function StopButton({ onStop }: { onStop: () => Promise<void> }) {
 function localOfflineNote(): string {
   return `This chat is a Claude Code session on your own computer, and it is not connected. Your message is kept and delivered when it reconnects, for up to ${duration(EXPIRE_AFTER_SECONDS)} offline.`;
 }
+
+/** An edit a closed document could not save, with the document it belongs to. */
+type DocumentDraft = UnsavedDraft & { id: string; kind: DocumentKind };
+
+/** The exports of a document not saved yet. */
+const NOT_EXPORTED = { status: "none" } as const;
 
 /** What Create's Slides sends, as the person's own message. */
 export const CREATE_SLIDES = "Create slides for this conversation.";
@@ -327,9 +336,9 @@ function useNarrow(): boolean {
 
 /**
  * One conversation: what the person and the assistant said, a line saying what the assistant is doing while it
- * works and how many subagents it is waiting on, and the composer; beside it, the conversation's document. The line
- * comes from the session's transcript and its own status, both already streamed here, so no page read follows a tool
- * call. Kept live by the conversation's agent's events;
+ * works and how many subagents it is waiting on, and the composer; beside it, one of the conversation's documents or
+ * other items. The line comes from the session's transcript and its own status, both already streamed here, so no page
+ * read follows a tool call. Kept live by the conversation's agent's events;
  * a change to the conversation itself (its product, title, document or session) re-renders the page, which hands
  * down the new `view`.
  */
@@ -370,9 +379,16 @@ export function ChatView({
    * no room to read in. The header's switcher moves between them, so each is two presses from another.
    */
   const [panel, setPanel] = useState<"document" | "deck" | "docmosis" | "notify" | "video" | null>(null);
+  /**
+   * Which document the document panel shows: one the conversation holds, or one Create opened and nobody has saved
+   * yet, whose id the browser makes so that its first save creates it under that id.
+   */
+  const [openDocument, setOpenDocument] = useState<{ id: string; kind: DocumentKind } | null>(null);
   // Read by a closed editor's late answer, which comes back through the props of the render that last showed it.
   const panelNow = useRef(panel);
   panelNow.current = panel;
+  const openDocumentNow = useRef(openDocument);
+  openDocumentNow.current = openDocument;
   /** The document panel has edits not yet saved, or a conflict showing, which a panel opened in its place would cut short. */
   const documentBusy = useRef(false);
   /** The same for the slides' editor. */
@@ -389,18 +405,19 @@ export function ChatView({
   const [videoWaiting, setVideoWaiting] = useState(false);
   /** The assistant wrote a newer deck while the document was busy, so the slides wait behind their row in the switcher instead. */
   const [slidesWaiting, setSlidesWaiting] = useState(false);
-  /** The assistant wrote the document while the slides' editor was busy, so the document waits behind its row in the switcher. */
-  const [documentWaiting, setDocumentWaiting] = useState(false);
+  /** The documents the assistant wrote while another panel was busy, which wait behind their rows in the switcher. */
+  const [documentsWaiting, setDocumentsWaiting] = useState<readonly string[]>([]);
   /**
    * An edit the document was closed on whose save then failed or found a newer version: the document opens again with
    * it, keyed afresh so a panel the person opened meanwhile takes it in too, or, while the slides' editor is busy, it
    * waits behind the document's row in the switcher. The panel that takes it clears it, so it is handed to one panel only.
    */
-  const [unsaved, setUnsaved] = useState<{ draft: UnsavedDraft | null; key: number }>({ draft: null, key: 0 });
+  const [unsaved, setUnsaved] = useState<{ draft: DocumentDraft | null; key: number }>({ draft: null, key: 0 });
   /** The same for an edit the slides' editor was closed on. */
   const [unsavedDeck, setUnsavedDeck] = useState<{ draft: UnsavedDeckDraft | null; key: number }>({ draft: null, key: 0 });
   const deckDraftWaiting = unsavedDeck.draft !== null && panel !== "deck";
-  const documentDraftWaiting = unsaved.draft !== null && panel !== "document";
+  const documentOpen = panel === "document" ? openDocument : null;
+  const documentDraftWaiting = unsaved.draft !== null && documentOpen?.id !== unsaved.draft.id;
   const [ask, setAsk] = useState<SlideAsk | null>(null);
   /**
    * Create has asked the assistant for slides, so it waits for the deck rather than asking again. The chat is keyed by
@@ -409,7 +426,7 @@ export function ChatView({
   const [slidesAsked, setSlidesAsked] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const warmed = useRef(false);
-  const seenVersion = useRef(view.artefact.version);
+  const seenVersions = useRef(new Map(view.documents.map((document) => [document.id, document.version])));
   const seenDeck = useRef(view.deck?.version ?? 0);
   const docmosis = view.docmosis;
   const seenDocmosis = useRef(docmosis?.version ?? 0);
@@ -418,6 +435,7 @@ export function ChatView({
   const video = view.video;
   const seenVideo = useRef(video?.version ?? 0);
   const narrow = useNarrow();
+  const ticketTool = defaults.ticketTool;
 
   useEffect(() => setStatus(view.agentStatus), [view.agentStatus]);
   useEffect(() => setClaim(view.clientFeatures), [view.clientFeatures]);
@@ -436,20 +454,35 @@ export function ChatView({
     }
   });
 
-  // The assistant writing the document opens it, so the person sees what it was asked to draft, unless they are part-way
-  // through editing the slides, when it is announced and its row in the switcher marked instead.
+  /**
+   * The assistant writing a document opens it, so the person sees what it was asked to draft, unless they are part-way
+   * through another panel or another document, when it is announced and its row in the switcher marked instead. Of
+   * several written at once, the newest is the one opened.
+   */
   useEffect(() => {
-    if (view.artefact.version > seenVersion.current && view.artefact.updatedBy === "agent") {
-      if ((panel === "deck" && deckBusy.current) || (panel === "docmosis" && docmosisBusy.current) || (panel === "notify" && notifyBusy.current)) {
-        setDocumentWaiting(true);
-        arrivals.announce("The assistant updated the document. Open it from Items to see it.");
-      } else {
-        setPanel("document");
-        arrivals.announce("The assistant updated the document");
-      }
+    const seen = seenVersions.current;
+    const arrived = view.documents.filter((document) => document.version > (seen.get(document.id) ?? 0) && document.updatedBy === "agent");
+    for (const document of view.documents) {
+      seen.set(document.id, Math.max(seen.get(document.id) ?? 0, document.version));
     }
-    seenVersion.current = Math.max(seenVersion.current, view.artefact.version);
-  }, [view.artefact.version, view.artefact.updatedBy, arrivals, panel]);
+    const newest = arrived.at(-1);
+    if (newest === undefined) {
+      return;
+    }
+    const busyElsewhere =
+      (panel === "deck" && deckBusy.current) ||
+      (panel === "docmosis" && docmosisBusy.current) ||
+      (panel === "notify" && notifyBusy.current) ||
+      (panel === "document" && documentBusy.current && openDocument?.id !== newest.id);
+    if (busyElsewhere) {
+      setDocumentsWaiting((before) => [...before, ...arrived.map((document) => document.id).filter((id) => !before.includes(id))]);
+      arrivals.announce(`The assistant updated "${documentLabel(newest.kind, newest.title, ticketTool)}". Open it from Items to see it.`);
+    } else {
+      setOpenDocument({ id: newest.id, kind: newest.kind });
+      setPanel("document");
+      arrivals.announce("The assistant updated the document");
+    }
+  }, [view.documents, arrivals, panel, openDocument, ticketTool]);
 
   /**
    * The same for the deck: a newer version from the assistant opens the slides in the document's place, unless the
@@ -530,8 +563,8 @@ export function ChatView({
     if (panel === "deck") {
       setSlidesWaiting(false);
     }
-    if (panel === "document") {
-      setDocumentWaiting(false);
+    if (documentOpen !== null) {
+      setDocumentsWaiting((before) => (before.includes(documentOpen.id) ? before.filter((id) => id !== documentOpen.id) : before));
     }
     if (panel === "docmosis") {
       setDocmosisWaiting(false);
@@ -542,7 +575,7 @@ export function ChatView({
     if (panel === "notify") {
       setNotifyWaiting(false);
     }
-  }, [panel]);
+  }, [panel, documentOpen]);
   /**
    * An edit the slides' editor could not save as it closed opens the slides again with it, unless the person is
    * part-way through the document, which keeps the panel: the edit then waits behind the slides' row in the switcher.
@@ -568,10 +601,13 @@ export function ChatView({
         : "The slides changed while you were editing them, so they are open again"
     );
   }
-  /** The same for the document, which waits behind its row in the switcher while the slides' editor is busy. */
-  function reopenDocument(draft: UnsavedDraft): void {
-    setUnsaved((before) => ({ draft, key: before.key + 1 }));
+  /** The same for a document, which waits behind its row in the switcher while another panel is busy. */
+  function reopenDocument(draft: DocumentDraft): void {
+    const otherDocumentBusy = panelNow.current === "document" && documentBusy.current && openDocumentNow.current?.id !== draft.id;
+    // The key remounts the open document, which would drop what the person is typing in it.
+    setUnsaved((before) => ({ draft, key: before.key + (otherDocumentBusy ? 0 : 1) }));
     if (
+      otherDocumentBusy ||
       (panelNow.current === "deck" && deckBusy.current) ||
       (panelNow.current === "docmosis" && docmosisBusy.current) ||
       (panelNow.current === "notify" && notifyBusy.current)
@@ -583,6 +619,7 @@ export function ChatView({
       );
       return;
     }
+    setOpenDocument({ id: draft.id, kind: draft.kind });
     setPanel("document");
     arrivals.announce(
       draft.conflict === null ? "Your document could not be saved, so it is open again" : "The document changed while you were editing it, so it is open again"
@@ -598,16 +635,29 @@ export function ChatView({
    * disagree about where the chat is.
    */
   const pod = !view.local;
-  const hasDocument = view.artefact.version > 0 || unsaved.draft !== null;
+  /** Opens a new document of `kind`, which its first save creates; the switcher lists the ones already made. */
+  function createDocument(kind: DocumentKind): void {
+    setOpenDocument({ id: crypto.randomUUID(), kind });
+    setPanel("document");
+  }
   /**
-   * What Create offers. A conversation holds one of each kind, so a kind it already holds is opened rather than made
-   * again. Slides, a Docmosis template and a Notify template are each made through the pod — the assistant drafts the
-   * slides, and the two templates are chosen from libraries the pod reads — so a local chat is offered only one its
-   * session already wrote. Every pod booted on the current hub has the slides tools (`podPlugins`), and the view does
-   * not carry the stored plugins an older client would need checking against, so a pod chat is always offered Slides.
+   * What Create offers. Any number of documents, of each of the three kinds: a ticket or a Confluence page is a document
+   * that goes to that one place, so it is offered only where there is a pod to export it, and the ones already made are
+   * reached through the switcher. A conversation holds one of each other kind, so a kind it already holds is opened
+   * rather than made again. Slides, a Docmosis template and a Notify template are each made through the pod — the
+   * assistant drafts the slides, and the two templates are chosen from libraries the pod reads — so a local chat is
+   * offered only one its session already wrote. Every pod booted on the current hub has the slides tools (`podPlugins`),
+   * and the view does not carry the stored plugins an older client would need checking against, so a pod chat is always
+   * offered Slides.
    */
   const creatable: CreateOption[] = [
-    { key: "document", label: "Document", exists: hasDocument, choose: () => setPanel("document") },
+    { key: "document", label: "Document", choose: () => createDocument("document") },
+    ...(pod
+      ? [
+          { key: "ticket", label: ticketTool === "github" ? "GitHub issue" : "Jira backlog", choose: () => createDocument("ticket") },
+          { key: "confluence", label: "Confluence page", choose: () => createDocument("confluence") }
+        ]
+      : []),
     ...(pod || view.deck !== null
       ? [
           {
@@ -621,7 +671,8 @@ export function ChatView({
     ...(pod || docmosis !== null ? [{ key: "docmosis", label: "Docmosis template", exists: docmosis !== null, choose: () => setPanel("docmosis") }] : []),
     ...(pod || notify !== null ? [{ key: "notify", label: "Notify template", exists: notify !== null, choose: () => setPanel("notify") }] : [])
   ];
-  const tickets = ticketsOffered(defaults.ticketTool, view.jira, view.github);
+  const shownDocument = documentOpen === null ? undefined : view.documents.find((document) => document.id === documentOpen.id);
+  const tickets = ticketsOffered(ticketTool, shownDocument?.jira ?? NOT_EXPORTED, shownDocument?.github ?? NOT_EXPORTED);
   const thread = threadItems(live.items, view.productHistory, view.stopHistory, view.local);
   const doing: Progress = progress(live.items, thread, status, view.sessionState, view.local);
   // Not part of `doing`: background work carries on after the session goes idle, so it has to show when nothing else does.
@@ -697,9 +748,16 @@ export function ChatView({
    * return to even before its first save.
    */
   const items: SwitcherItem[] = [
-    ...(hasDocument || panel === "document"
-      ? [{ key: "document", label: "Document", open: () => setPanel("document"), waiting: documentWaiting, unsaved: documentDraftWaiting }]
-      : []),
+    ...documentRows().map(({ id, kind, title }) => ({
+      key: `document:${id}`,
+      label: documentLabel(kind, title, ticketTool),
+      open: () => {
+        setOpenDocument({ id, kind });
+        setPanel("document");
+      },
+      waiting: documentsWaiting.includes(id),
+      unsaved: documentDraftWaiting && unsaved.draft?.id === id
+    })),
     ...(view.deck === null ? [] : [{ key: "slides", label: "Slides", open: () => setPanel("deck"), waiting: slidesWaiting, unsaved: deckDraftWaiting }]),
     ...(docmosis === null && panel !== "docmosis" && !templateLoad.pending && !loadFailed
       ? []
@@ -715,13 +773,40 @@ export function ChatView({
     ...(notify === null && panel !== "notify" ? [] : [{ key: "notify", label: "Notify template", open: () => setPanel("notify"), waiting: notifyWaiting }]),
     ...(video === null ? [] : [{ key: "video", label: "Video", open: () => setPanel("video"), waiting: videoWaiting }])
   ];
-  const switcherPanel = panel === "deck" ? "slides" : panel;
+  const switcherPanel = documentOpen !== null ? `document:${documentOpen.id}` : panel === "deck" ? "slides" : panel;
   const artefact: ArtefactSnapshot = {
-    title: view.artefact.title,
-    markdown: view.artefact.markdown,
-    version: view.artefact.version,
-    updatedBy: view.artefact.updatedBy
+    title: shownDocument?.title ?? null,
+    markdown: shownDocument?.markdown ?? "",
+    version: shownDocument?.version ?? 0,
+    updatedBy: shownDocument?.updatedBy ?? null
   };
+  /**
+   * The documents the switcher lists: every one the conversation holds, and one not saved yet that is open or has an
+   * edit waiting, which is one to return to even before its first save.
+   */
+  function documentRows(): { id: string; kind: DocumentKind; title: string | null }[] {
+    const rows: { id: string; kind: DocumentKind; title: string | null }[] = view.documents.map(({ id, kind, title }) => ({ id, kind, title }));
+    for (const fresh of [documentOpen, unsaved.draft]) {
+      if (fresh !== null && !rows.some((row) => row.id === fresh.id)) {
+        rows.push({ id: fresh.id, kind: fresh.kind, title: null });
+      }
+    }
+    return rows;
+  }
+
+  async function removeDocument(id: string): Promise<string | null> {
+    if (view.documents.some((document) => document.id === id) && actions.removeArtefact !== undefined) {
+      const result = await actions.removeArtefact({ conversationId: view.id, documentId: id });
+      if (!result.ok) {
+        return result.error;
+      }
+      router.refresh();
+    }
+    setUnsaved((before) => (before.draft?.id === id ? { draft: null, key: before.key } : before));
+    setPanel(null);
+    setOpenDocument(null);
+    return null;
+  }
 
   async function send(body: string, uploadIds: string[]): Promise<string | null> {
     // A slide the person asked about goes in front of their words, which is the whole of how the session is told. The
@@ -1004,13 +1089,16 @@ export function ChatView({
           announce={arrivals.announce}
         />
       ) : null}
-      {panel === "document" ? (
+      {documentOpen !== null ? (
         <ArtefactPanel
-          key={unsaved.key}
-          draft={unsaved.draft ?? undefined}
+          key={`${documentOpen.id}:${unsaved.key}`}
+          draft={unsaved.draft?.id === documentOpen.id ? unsaved.draft : undefined}
           onDraftTaken={() => setUnsaved((before) => ({ draft: null, key: before.key }))}
-          onUnsaved={reopenDocument}
+          onUnsaved={(draft) => reopenDocument({ ...draft, ...documentOpen })}
+          onRemove={actions.removeArtefact === undefined ? undefined : () => removeDocument(documentOpen.id)}
           conversationId={view.id}
+          documentId={documentOpen.id}
+          kind={documentOpen.kind}
           artefact={artefact}
           productLabel={view.productLabel}
           save={actions.saveArtefact}
@@ -1027,16 +1115,25 @@ export function ChatView({
            */
           // The person's ticket tool, a Jira backlog or a GitHub repository, and the other tool too when the document
           // already has a ticket there (`ticketsOffered`).
-          jira={pod && tickets.jira ? { exported: view.jira, access: jira, exportTo: actions.exportToJira, defaultProject: defaults.jira } : undefined}
+          jira={
+            pod && tickets.jira
+              ? { exported: shownDocument?.jira ?? NOT_EXPORTED, access: jira, exportTo: actions.exportToJira, defaultProject: defaults.jira }
+              : undefined
+          }
           github={
             pod && tickets.github && actions.exportToGithub !== undefined
-              ? { exported: view.github, exportTo: actions.exportToGithub, defaultRepo: defaults.github, defaultProject: defaults.githubProject }
+              ? {
+                  exported: shownDocument?.github ?? NOT_EXPORTED,
+                  exportTo: actions.exportToGithub,
+                  defaultRepo: defaults.github,
+                  defaultProject: defaults.githubProject
+                }
               : undefined
           }
           confluence={
             !pod || actions.exportToConfluence === undefined
               ? undefined
-              : { exported: view.confluence, access: jira, exportTo: actions.exportToConfluence, defaultPage: defaults.confluence }
+              : { exported: shownDocument?.confluence ?? NOT_EXPORTED, access: jira, exportTo: actions.exportToConfluence, defaultPage: defaults.confluence }
           }
           narrow={narrow}
         />

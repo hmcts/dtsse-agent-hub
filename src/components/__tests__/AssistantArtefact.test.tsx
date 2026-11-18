@@ -9,6 +9,7 @@ import { ArtefactPanel, format, type SaveArtefactAction, starterDocument, type U
 import type { ActionResult } from "@/web/action";
 
 const CONVERSATION = "22222222-2222-2222-2222-222222222222";
+const DOCUMENT = "33333333-3333-4333-8333-333333333333";
 
 /** jsdom lays nothing out, but the panel's bounds are worked out from the window's width. */
 function viewport(width: number): void {
@@ -34,7 +35,18 @@ function saving(...results: ActionResult<SaveArtefactResult>[]) {
 }
 
 function panel(artefact: ArtefactSnapshot, save: SaveArtefactAction = saving(), props: Partial<Parameters<typeof ArtefactPanel>[0]> = {}) {
-  return <ArtefactPanel conversationId={CONVERSATION} artefact={artefact} productLabel="CCD" save={save} onClose={() => undefined} narrow={false} {...props} />;
+  return (
+    <ArtefactPanel
+      conversationId={CONVERSATION}
+      documentId={DOCUMENT}
+      artefact={artefact}
+      productLabel="CCD"
+      save={save}
+      onClose={() => undefined}
+      narrow={false}
+      {...props}
+    />
+  );
 }
 
 function box(): HTMLTextAreaElement {
@@ -111,7 +123,14 @@ describe("ArtefactPanel saving", () => {
     await pause(1);
 
     expect(save).toHaveBeenCalledTimes(1);
-    expect(save).toHaveBeenCalledWith({ conversationId: CONVERSATION, title: "Story", markdown: "# Mine", baseVersion: 2 });
+    expect(save).toHaveBeenCalledWith({
+      conversationId: CONVERSATION,
+      documentId: DOCUMENT,
+      kind: "document",
+      title: "Story",
+      markdown: "# Mine",
+      baseVersion: 2
+    });
     expect(saveState()).toContain("Saved");
   });
 
@@ -142,7 +161,14 @@ describe("ArtefactPanel saving", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Document title" }), { target: { value: "Renamed" } });
     await pause();
 
-    expect(save).toHaveBeenCalledWith({ conversationId: CONVERSATION, title: "Renamed", markdown: "# Original", baseVersion: 2 });
+    expect(save).toHaveBeenCalledWith({
+      conversationId: CONVERSATION,
+      documentId: DOCUMENT,
+      kind: "document",
+      title: "Renamed",
+      markdown: "# Original",
+      baseVersion: 2
+    });
   });
 
   it("should say it could not save when the save is refused", async () => {
@@ -169,7 +195,14 @@ describe("ArtefactPanel closing", () => {
     await pause();
 
     expect(save).toHaveBeenCalledTimes(1);
-    expect(save).toHaveBeenCalledWith({ conversationId: CONVERSATION, title: "Story", markdown: "# Mine", baseVersion: 2 });
+    expect(save).toHaveBeenCalledWith({
+      conversationId: CONVERSATION,
+      documentId: DOCUMENT,
+      kind: "document",
+      title: "Story",
+      markdown: "# Mine",
+      baseVersion: 2
+    });
   });
 
   it("should save again as it closes when the last save failed", async () => {
@@ -381,7 +414,14 @@ describe("ArtefactPanel conflicts", () => {
       fireEvent.click(screen.getByRole("button", { name: "Keep mine" }));
     });
 
-    expect(save).toHaveBeenLastCalledWith({ conversationId: CONVERSATION, title: "Story", markdown: "# Mine", baseVersion: 3 });
+    expect(save).toHaveBeenLastCalledWith({
+      conversationId: CONVERSATION,
+      documentId: DOCUMENT,
+      kind: "document",
+      title: "Story",
+      markdown: "# Mine",
+      baseVersion: 3
+    });
     expect(box().value).toBe("# Mine");
     expect(screen.queryByRole("alert")).toBeNull();
     expect(saveState()).toContain("Saved");
@@ -915,5 +955,101 @@ describe("ArtefactPanel download", () => {
     expect(screen.queryByRole("heading", { level: 1, name: "Story" })).toBeNull();
     printIt();
     expect(window.print).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("ArtefactPanel kinds", () => {
+  const ACCESS = { connected: true, login: null };
+  const exports = {
+    jira: { exported: { status: "none" as const }, access: ACCESS, exportTo: vi.fn(async () => ({ ok: true as const })) },
+    confluence: { exported: { status: "none" as const }, access: ACCESS, exportTo: vi.fn(async () => ({ ok: true as const })) }
+  };
+
+  it("should offer both destinations with the Send to choice when the document is a plain one", () => {
+    render(panel(snapshot(), saving(), { ...exports, kind: "document" }));
+
+    expect(screen.getByRole("group", { name: "Send this document to" })).toBeTruthy();
+  });
+
+  it("should offer only the ticket export, with no Send to choice, when the document is a ticket", () => {
+    render(panel(snapshot(), saving(), { ...exports, kind: "ticket" }));
+
+    expect(screen.queryByRole("group", { name: "Send this document to" })).toBeNull();
+    expect(screen.getByRole("button", { name: /Export to Jira backlog/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Publish to Confluence/ })).toBeNull();
+  });
+
+  it("should offer only Confluence, with no Send to choice, when the document is a Confluence page", () => {
+    render(panel(snapshot(), saving(), { ...exports, kind: "confluence" }));
+
+    expect(screen.queryByRole("group", { name: "Send this document to" })).toBeNull();
+    expect(screen.getByRole("button", { name: /Publish to Confluence/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Export to Jira backlog/ })).toBeNull();
+  });
+
+  it("should start a ticket from a story outline when the ticket has not been written", () => {
+    render(panel(snapshot({ version: 0, markdown: "" }), saving(), { kind: "ticket" }));
+
+    expect(box().value).toBe(starterDocument("CCD", "ticket"));
+    expect(box().value).toContain("## Acceptance criteria");
+  });
+
+  it("should say why a save was refused when the hub gives a reason", async () => {
+    vi.useFakeTimers();
+    render(panel(snapshot(), saving({ ok: false, error: "your assistant needs an update to hold more than one document" })));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    edit("# Mine");
+    await pause();
+
+    expect(screen.getByText("Could not save: your assistant needs an update to hold more than one document")).toBeTruthy();
+  });
+});
+
+describe("ArtefactPanel remove", () => {
+  it("should offer no Remove when the page gives no way to remove", () => {
+    render(panel(snapshot()));
+
+    expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
+  });
+
+  it("should ask before removing, and remove nothing when the person cancels", () => {
+    const onRemove = vi.fn(async () => null);
+    render(panel(snapshot(), saving(), { onRemove }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(onRemove).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("should remove the document, saving nothing as it goes, when the person confirms", async () => {
+    vi.useFakeTimers();
+    const save = saving();
+    const onRemove = vi.fn(async () => null);
+    const { unmount } = render(panel(snapshot(), save, { onRemove }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    edit("# Unsaved");
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await act(async () => {
+      fireEvent.click(screen.getAllByRole("button", { name: "Remove" })[1] as HTMLElement);
+    });
+    unmount();
+    await pause();
+
+    expect(onRemove).toHaveBeenCalledTimes(1);
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it("should show why when the document could not be removed", async () => {
+    render(panel(snapshot(), saving(), { onRemove: async () => "that document no longer exists" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await act(async () => {
+      fireEvent.click(screen.getAllByRole("button", { name: "Remove" })[1] as HTMLElement);
+    });
+
+    expect(screen.getByRole("alert").textContent).toBe("that document no longer exists");
   });
 });

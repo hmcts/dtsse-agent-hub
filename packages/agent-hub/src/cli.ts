@@ -56,11 +56,17 @@ export const USAGE = `usage: ${CLI} <command> [args]
                               by a person or by one of your own agents; answer another
                               owner's post with post --reply-to <id> --tag
   agents                      list your own agents
-  artefact get [--json]       in a CFT Workspace conversation: print its shared markdown document
+  artefact list [--json]      in a CFT Workspace conversation: list its shared markdown documents,
+                              with each one's id, kind (document, ticket or confluence) and version
+  artefact get [--id ID] [--json]
+                              print one document, or the primary plain document without --id
                               (--json: with its title, version and who last wrote it)
-  artefact put [--title T] [--base N]
-                              replace the document with markdown read from stdin; --base is the version
+  artefact put [--id ID] [--title T] [--base N]
+                              replace a document with markdown read from stdin; --base is the version
                               it was edited from (read first when omitted), and a newer one is refused
+  artefact new --kind K [--title T]
+                              start a document of kind document, ticket or confluence from stdin
+  artefact remove --id ID     remove a document from the conversation
   deck get [--json] [--slide ID] [--version N] [--diff-from N]
                               in a CFT Workspace conversation: write its slide deck's outline to
                               ~/.agent-hub/decks/<conversation>/outline.json with its pictures beside it,
@@ -112,25 +118,27 @@ export const USAGE = `usage: ${CLI} <command> [args]
                               .chapters.txt, coverage.md and content-mismatches.md) as the
                               conversation's video; the MP4 goes straight to storage; --jira is the
                               issue the user will most likely post it to
-  jira export <export-id> --project P --type T [--labels a,b]
+  jira export <export-id> --project P --type T [--labels a,b] [--document ID]
                               in a CFT Workspace conversation: create the Jira ticket for an export the
                               user asked for with twg, signing in first if it is not, and report it; run
                               again for the same export, it reports the ticket already made
   jira report <export-id> --key K | --error E
                               report the Jira ticket made for an export by hand, or why it could not be made
-  github export <export-id> --repo owner/name [--project owner/number] [--labels a,b]
+  github export <export-id> --repo owner/name [--project owner/number] [--labels a,b] [--document ID]
                               in a CFT Workspace conversation: create the GitHub issue for an export the
                               user asked for with gh, label it, add it to the Project when one is given, and report
                               it; run again for the same export, it reports the issue already made
   github report <export-id> --number N | --error E
                               report the GitHub issue made for an export by hand, or why it could not be made
-  confluence export <export-id> --space-id S --parent-id P
+  confluence export <export-id> --space-id S --parent-id P [--document ID]
                               in a CFT Workspace conversation: publish the document as a new Confluence
                               page under page P for an export the user asked for, with twg, signing in first
                               if it is not, and report it; run again for the same export, it reports the page
                               already made
   confluence report <export-id> --page-id N [--title T] | --error E
                               report the Confluence page made for an export by hand, or why it could not be made
+                              (each export reads --document, the document the export was asked for, or the
+                              primary plain document without it)
   credentials get <kind>      print your stored credential and nothing else (exit ${EXIT_NO_CREDENTIAL} if there is
                               none); agent-hub returns only claude_md and git_identity to people, any kind to a pod
   credentials set <kind> [--from-gh]

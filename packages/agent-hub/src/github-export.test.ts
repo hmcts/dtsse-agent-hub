@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GITHUB_EXPORT_BASH_TIMEOUT_MS } from "./envelope.ts";
 import {
   type GithubExportDeps,
@@ -54,6 +54,15 @@ function fake({
   const deps: GithubExportDeps = {
     api: {
       getArtefact: async () => ({ ...doc, version: 3, updated_by: "agent", updated_at: null }),
+      getArtefactById: vi.fn(async (_agentId: string, id: string) => ({
+        id,
+        kind: "ticket" as const,
+        title: "Second document",
+        markdown: "# Second",
+        version: 2,
+        updated_by: "agent" as const,
+        updated_at: null
+      })),
       putGithubExport: async (_agentId, body) => {
         if (reportFailures-- > 0) {
           throw new Error("hub unreachable");
@@ -80,6 +89,18 @@ function fake({
 }
 
 describe("runGithubExport", () => {
+  it("should export the document the frame names when the export carries a document id", async () => {
+    // Arrange
+    const f = fake();
+
+    // Act
+    await runGithubExport(f.deps, { ...REQUEST, documentId: "0f8a6a1e-0000-4000-8000-00000000d0c2" });
+
+    // Assert
+    expect(f.deps.api.getArtefactById).toHaveBeenCalledWith(f.deps.agentId, "0f8a6a1e-0000-4000-8000-00000000d0c2");
+    expect(f.bodies).toEqual(["# Second"]);
+  });
+
   it("should create the issue with the title as an argument and the document as a file, and report its number", async () => {
     // Arrange
     const f = fake({ doc: { title: 'Fee "stories"; $(rm -rf ~)', markdown: "# Stories\n\n`whoami` and $HOME" } });

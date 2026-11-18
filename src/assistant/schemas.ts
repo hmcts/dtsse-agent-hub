@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { boundedArray } from "../agent-api/bounded-array.ts";
+import { DOCUMENT_KINDS } from "./documents.ts";
 import { MAX_DELETED_PER_FRAME, MAX_REPORTED_FILES } from "./upload-report.ts";
 
 /** Request bodies of the Assistant mode section of `docs/agent-api.md`, and the limits the web UI shares. */
@@ -16,6 +17,12 @@ export const artefactPutBody = z.object({
   title: artefactTitle.nullish(),
   markdown: z.string().max(MAX_ARTEFACT_MARKDOWN),
   base_version: z.number().int().nonnegative()
+});
+
+export const artefactCreateBody = z.object({
+  kind: z.enum(DOCUMENT_KINDS),
+  title: artefactTitle.nullish(),
+  markdown: z.string().max(MAX_ARTEFACT_MARKDOWN)
 });
 
 export const sessionsReportBody = z.object({

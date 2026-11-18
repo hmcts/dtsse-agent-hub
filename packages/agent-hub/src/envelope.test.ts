@@ -387,6 +387,53 @@ describe("assistantPrompt", () => {
     expect(assistantPrompt(personMessage, { ...pcs, artefact_version: 4, artefact_updated_by: "agent" }, null)).not.toMatch(/edited the conversation/);
   });
 
+  it("should name each document the user edited, by its id, and not the others, when the hub lists several", () => {
+    // Arrange
+    const story = "0f8a6a1e-0000-4000-8000-00000000d0c1";
+    const plan = "0f8a6a1e-0000-4000-8000-00000000d0c2";
+    const frame: AssistantFrame = {
+      ...pcs,
+      artefact_version: 2,
+      artefact_updated_by: "agent",
+      artefacts: [
+        { id: plan, kind: "document", title: "Plan", version: 2, updated_by: "agent" },
+        { id: story, kind: "ticket", title: "Add a hearing", version: 3, updated_by: "user" }
+      ]
+    };
+
+    // Act
+    const lines = context(assistantPrompt(personMessage, frame, samePcs));
+
+    // Assert
+    expect(lines).toContain(
+      `The user has edited the document "Add a hearing" (${story}, version 3) since; read it with \`agent-hub artefact get --id ${story}\` before changing it.`
+    );
+    expect(lines.join("\n")).not.toContain(plan);
+    expect(lines.join("\n")).not.toMatch(/edited the conversation's document/);
+  });
+
+  it("should export the document the frame names, by title and with --document, when the export carries its id", () => {
+    // Arrange
+    const exportId = "5b0e7c1a-1111-4222-8333-444455556666";
+    const story = "0f8a6a1e-0000-4000-8000-00000000d0c1";
+    const frame: AssistantFrame = {
+      ...pcs,
+      artefacts: [{ id: story, kind: "ticket", title: "Add a hearing", version: 1, updated_by: "agent" }],
+      jira_export: { export_id: exportId, document_id: story, project: "VIBE", issue_type: "Story", labels: [] },
+      github_export: { export_id: exportId, document_id: story, repo: "hmcts/cft-workspace" },
+      confluence_export: { export_id: exportId, document_id: story, space_id: "1", parent_id: "2" }
+    };
+
+    // Act
+    const text = assistantPrompt(personMessage, frame, null);
+
+    // Assert
+    expect(text).toContain('export the document "Add a hearing" to the VIBE backlog');
+    expect(text).toContain(`\`agent-hub jira export ${exportId} --project VIBE --type Story --document ${story}\``);
+    expect(text).toContain(`\`agent-hub github export ${exportId} --repo hmcts/cft-workspace --document ${story}\``);
+    expect(text).toContain(`\`agent-hub confluence export ${exportId} --space-id 1 --parent-id 2 --document ${story}\``);
+  });
+
   it("should tell the session to read the deck first when the user last changed it, as a fork's copy does", () => {
     // Act
     const text = assistantPrompt(personMessage, { ...pcs, deck_version: 1, deck_updated_by: "user", deck_revision: 1, deck_agent_version: 0 }, null);

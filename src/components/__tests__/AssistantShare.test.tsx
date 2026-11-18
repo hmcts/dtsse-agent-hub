@@ -441,7 +441,7 @@ function view(overrides: Partial<SharedConversationView> = {}): SharedConversati
       { type: "assistant", key: "t1", at: "2026-10-25T09:00:01.000Z", text: "The property, the date and the costs." }
     ],
     earlierHidden: false,
-    document: null,
+    documents: [],
     deck: null,
     docmosis: null,
     notify: null,
@@ -515,10 +515,20 @@ describe("SharedChat", () => {
     expect(screen.queryByText(/most recent part of the chat/)).toBeNull();
   });
 
-  it("should show the document under its own heading when the chat has one", () => {
-    render(<SharedChat view={view({ document: { title: "Draft order", markdown: "The property, the date and the costs." } })} />);
+  it("should show each document under its own heading when the chat has several", () => {
+    render(
+      <SharedChat
+        view={view({
+          documents: [
+            { id: "d1", title: "Draft order", markdown: "The property, the date and the costs." },
+            { id: "d2", title: "Hearing notes", markdown: "Listed for May." }
+          ]
+        })}
+      />
+    );
 
     expect(screen.getByRole("heading", { name: "Draft order" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Hearing notes" })).toBeTruthy();
   });
 
   it("should show no document section when the chat has none", () => {

@@ -1,8 +1,9 @@
 import type { Database } from "../store/prisma.ts";
-import { ARTEFACT_SELECT, toArtefact } from "./artefact-store.ts";
+import { DOCUMENT_SELECT, OLDEST_FIRST, toDocument } from "./artefact-store.ts";
 import { CONFLUENCE_SELECT, type ConfluenceExportFrame, pendingConfluenceExport } from "./confluence.ts";
 import { DECK_SELECT, deckAuthor, newestAgentVersion } from "./deck-store.ts";
 import { DOCMOSIS_SELECT, docmosisAuthor } from "./docmosis-store.ts";
+import { type DocumentKind, primaryDocument } from "./documents.ts";
 import { GITHUB_SELECT, type GithubExportFrame, pendingGithubExport } from "./github.ts";
 import { JIRA_SELECT, type JiraExportFrame, pendingJiraExport } from "./jira.ts";
 import { readAssistantModel } from "./model-store.ts";
@@ -16,7 +17,9 @@ import { type FrameAttachment, frameAttachments } from "./upload-store.ts";
  * No field is gated on a `client_features` claim (`src/agents/client-features.ts`): `attachments`, `jira_export`,
  * `github_export` and `confluence_export` go to every session. A client too old to read `attachments` drops that message's files
  * and nobody is told; one too old to read an export field is handed the request in words, and
- * the export fails on its 15-minute timeout.
+ * the export fails on its 15-minute timeout. One older than `items` ignores `artefacts` and an export's `document_id`
+ * and reads only the primary document, which is why the hub holds a conversation on such a pod to that one
+ * (`ITEMS_CREATE_REFUSED`, `ITEMS_EXPORT_REFUSED`).
  */
 export interface AssistantFrame {
   conversation_id: string;
@@ -28,8 +31,11 @@ export interface AssistantFrame {
    * the next message rather than from the next session.
    */
   model: string;
+  /** The primary document's version, 0 before there is one, and who wrote it: what a client older than `artefacts` reads. */
   artefact_version: number;
   artefact_updated_by: "user" | "agent" | null;
+  /** Every document, oldest first, without its markdown, which the session reads with `artefact get --id`. */
+  artefacts: FrameDocument[];
   /** The conversation's slide deck's latest version, 0 before there is one, and who wrote it. */
   deck_version: number;
   deck_updated_by: "user" | "agent" | null;
@@ -46,11 +52,11 @@ export interface AssistantFrame {
   notify_revision: number;
   notify_updated_by: "user" | "agent" | null;
   /** While an export to Jira is pending: what to create, which the session carries out with `twg`. */
-  jira_export?: JiraExportFrame;
+  jira_export?: JiraExportFrame & DocumentRef;
   /** While an export to GitHub is pending: the repository to create the issue in, which the session does with `gh`. */
-  github_export?: GithubExportFrame;
+  github_export?: GithubExportFrame & DocumentRef;
   /** While an export to Confluence is pending: where to create the page, which the session carries out with `twg`. */
-  confluence_export?: ConfluenceExportFrame;
+  confluence_export?: ConfluenceExportFrame & DocumentRef;
   /**
    * The files the person attached to this message, for the pod to fetch to its disk before it delivers the message.
    * Absent from a frame built without a message — a wake rather than a delivery — and an empty array for a message
@@ -59,6 +65,44 @@ export interface AssistantFrame {
    * about reaches the session as a file that could not be retrieved rather than as nothing.
    */
   attachments?: FrameAttachment[];
+}
+
+export interface FrameDocument {
+  id: string;
+  kind: DocumentKind;
+  title: string | null;
+  version: number;
+  updated_by: "user" | "agent" | null;
+}
+
+/** Which document an export is of, which the session's export command reads by id. */
+interface DocumentRef {
+  document_id: string;
+}
+
+/**
+ * The pending export of a tool that the message being framed asks for. Each export is asked for in a message of its own,
+ * sent right after the request is recorded, so it is the one requested nearest the message's creation: with exports
+ * for two documents queued, each message carries its own. Without a message (a wake), or for one sent after them
+ * all, that is the most recently requested.
+ */
+function nearestPending<D extends { id: string }, F>(
+  documents: readonly D[],
+  pending: (document: D) => F | undefined,
+  requestedAt: (document: D) => Date | null,
+  messageAt: Date | undefined
+): (F & DocumentRef) | undefined {
+  const target = messageAt?.getTime() ?? Number.POSITIVE_INFINITY;
+  let best: { distance: number; at: number; frame: F & DocumentRef } | undefined;
+  for (const document of documents) {
+    const frame = pending(document);
+    const at = requestedAt(document)?.getTime() ?? 0;
+    const distance = Math.abs(target - at);
+    if (frame !== undefined && (best === undefined || distance < best.distance || (distance === best.distance && at > best.at))) {
+      best = { distance, at, frame: { ...frame, document_id: document.id } };
+    }
+  }
+  return best?.frame;
 }
 
 /**
@@ -83,13 +127,10 @@ export async function assistantFrame(db: Database, agentId: string, messageId?: 
           id: true,
           ownerOid: true,
           product: true,
-          ...ARTEFACT_SELECT,
           ...DECK_SELECT,
           ...DOCMOSIS_SELECT,
           ...NOTIFY_SELECT,
-          ...JIRA_SELECT,
-          ...GITHUB_SELECT,
-          ...CONFLUENCE_SELECT
+          documents: { select: { ...DOCUMENT_SELECT, ...JIRA_SELECT, ...GITHUB_SELECT, ...CONFLUENCE_SELECT }, orderBy: [...OLDEST_FIRST] }
         }
       }
     }
@@ -98,10 +139,28 @@ export async function assistantFrame(db: Database, agentId: string, messageId?: 
   if (conversation === null || conversation === undefined) {
     return undefined;
   }
-  const artefact = toArtefact(conversation);
-  const jira = pendingJiraExport(conversation);
-  const github = pendingGithubExport(conversation);
-  const confluence = pendingConfluenceExport(conversation);
+  const messageAt = messageId === undefined ? undefined : (await db.message.findUnique({ where: { id: messageId }, select: { createdAt: true } }))?.createdAt;
+  const rows = conversation.documents;
+  const documents = rows.map(toDocument);
+  const primary = primaryDocument(documents);
+  const jira = nearestPending(
+    rows,
+    (row) => pendingJiraExport(row),
+    (row) => row.jiraRequestedAt,
+    messageAt
+  );
+  const github = nearestPending(
+    rows,
+    (row) => pendingGithubExport(row),
+    (row) => row.githubRequestedAt,
+    messageAt
+  );
+  const confluence = nearestPending(
+    rows,
+    (row) => pendingConfluenceExport(row),
+    (row) => row.confluenceRequestedAt,
+    messageAt
+  );
   const deckBy = deckAuthor(conversation);
   const [model, agentVersion, attachments] = await Promise.all([
     readAssistantModel(db, conversation.ownerOid),
@@ -115,8 +174,15 @@ export async function assistantFrame(db: Database, agentId: string, messageId?: 
     product: conversation.product,
     product_label: productLabel(conversation.product),
     model,
-    artefact_version: artefact.version,
-    artefact_updated_by: artefact.updatedBy,
+    artefact_version: primary?.version ?? 0,
+    artefact_updated_by: primary?.updatedBy ?? null,
+    artefacts: documents.map((document) => ({
+      id: document.id,
+      kind: document.kind,
+      title: document.title,
+      version: document.version,
+      updated_by: document.updatedBy
+    })),
     deck_version: conversation.deckVersion,
     deck_updated_by: deckBy,
     deck_revision: conversation.deckRevision,

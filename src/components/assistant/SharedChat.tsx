@@ -57,14 +57,18 @@ export function SharedChat({ view, forkChat }: { view: SharedConversationView; f
               ))}
             </ol>
           )}
-          {view.document === null ? null : (
-            <section aria-labelledby="shared-document" className="flex flex-col gap-3 rounded-2xl border border-asst-line p-5">
-              <h2 id="shared-document" className="text-[18px] font-semibold">
-                {view.document.title}
+          {view.documents.map((document) => (
+            <section
+              key={document.id}
+              aria-labelledby={`shared-document-${document.id}`}
+              className="flex flex-col gap-3 rounded-2xl border border-asst-line p-5"
+            >
+              <h2 id={`shared-document-${document.id}`} className="text-[18px] font-semibold">
+                {document.title}
               </h2>
-              <AssistantMarkdown source={view.document.markdown} document />
+              <AssistantMarkdown source={document.markdown} document />
             </section>
-          )}
+          ))}
           {view.deck === null ? null : <SharedDeck conversationId={view.id} deck={view.deck} />}
           {view.docmosis === null ? null : <SharedDocmosis conversationId={view.id} docmosis={view.docmosis} />}
           {view.notify === null ? null : <SharedNotify conversationId={view.id} notify={view.notify} />}

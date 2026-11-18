@@ -2,10 +2,11 @@ import type { ConversationAccess } from "../access/rules.ts";
 import type { Database } from "../store/prisma.ts";
 import { conversationItems } from "../transcripts/conversation.ts";
 import { agentConversation } from "../transcripts/views.ts";
-import { readArtefact } from "./artefact-store.ts";
+import { listDocuments } from "./artefact-store.ts";
 import { storedHistory, storedStops } from "./conversation-row.ts";
 import { DECK_SELECT, type DeckSummary, deckSummary } from "./deck-store.ts";
 import { DOCMOSIS_SELECT, type DocmosisSummary, docmosisSummary } from "./docmosis-store.ts";
+import { UNTITLED_DOCUMENT } from "./documents.ts";
 import { FORKED_SELECT, type ForkedView, forkedView } from "./forks.ts";
 import { NOTIFY_SELECT, type NotifySummary, notifySummary } from "./notify-store.ts";
 import { hasPod } from "./pods.ts";
@@ -19,7 +20,7 @@ import { UNTITLED } from "./views.ts";
  * A conversation as a read-only share of it shows it.
  *
  * What a share exposes is the words: what the person asked, what the assistant answered, where the subject changed,
- * and the conversation's document and slide deck. What it does not expose is the files — not their bytes, which no
+ * and the conversation's documents and slide deck. What it does not expose is the files — not their bytes, which no
  * route outside the conversation's own pod session can reach, and not their names or sizes either, because a person
  * chooses a file for the assistant to read rather than for a colleague to be shown a list of. A message that carried
  * files says so and says how many. A deck's pictures are not attachments: the session put them in the deck, and
@@ -92,8 +93,8 @@ export interface SharedConversationView {
    * take it for the whole of it.
    */
   earlierHidden: boolean;
-  /** The conversation's document, or `null` when it has none. Read-only here: there is no version to write against. */
-  document: { title: string; markdown: string } | null;
+  /** The conversation's documents that have been written, oldest first. Read-only here: there is no version to write against. */
+  documents: { id: string; title: string; markdown: string }[];
   /** The latest version of the conversation's slide deck, without its outline, which the viewer reads; `null` when it has none. Read-only here, as the document is. */
   deck: DeckSummary | null;
   /** The latest version of the conversation's Docmosis template, without its schema and data, which the viewer reads; `null` when it has none. */
@@ -154,9 +155,9 @@ export async function sharedConversation(
     return undefined;
   }
   const agentId = row.agentId;
-  const [page, artefact, deck] = await Promise.all([
+  const [page, documents, deck] = await Promise.all([
     agentId === null ? undefined : agentConversation(db, conversation.ownerOid, { id: agentId, ownerOid: conversation.ownerOid }),
-    readArtefact(db, conversation.id),
+    listDocuments(db, conversation.id),
     deckSummary(db, conversation.id, row)
   ]);
   const items = page === undefined ? [] : conversationItems(page.messages, page.entries);
@@ -173,7 +174,9 @@ export async function sharedConversation(
     // `olderBefore` is the entry the owner's own page would ask for the previous page before; here it only says that
     // there is one.
     earlierHidden: page?.olderBefore !== null && page?.olderBefore !== undefined,
-    document: artefact.version === 0 ? null : { title: artefact.title ?? "Untitled document", markdown: artefact.markdown },
+    documents: documents
+      .filter((document) => document.version > 0)
+      .map((document) => ({ id: document.id, title: document.title ?? UNTITLED_DOCUMENT, markdown: document.markdown })),
     deck,
     docmosis: docmosisSummary(row),
     notify: notifySummary(row),

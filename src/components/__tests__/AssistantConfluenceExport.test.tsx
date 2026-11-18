@@ -65,6 +65,7 @@ function panel({
 } = {}) {
   return (
     <ArtefactPanel
+      documentId="33333333-3333-4333-8333-333333333333"
       conversationId={CONVERSATION}
       artefact={snapshot()}
       productLabel="CCD"
@@ -115,6 +116,7 @@ describe("Confluence export in the document panel", () => {
 
     expect(exportTo).toHaveBeenCalledWith({
       conversationId: CONVERSATION,
+      documentId: "33333333-3333-4333-8333-333333333333",
       parent: {
         id: "286130747",
         title: "AI Resources",
@@ -142,6 +144,7 @@ describe("Confluence export in the document panel", () => {
     expect(lookUp).toHaveBeenCalledWith({ kind: "confluence_page", query: "design", space: "CCD", owner: null }, expect.any(AbortSignal));
     expect(exportTo).toHaveBeenCalledWith({
       conversationId: CONVERSATION,
+      documentId: "33333333-3333-4333-8333-333333333333",
       parent: { id: PAGE.id, title: PAGE.title, space_id: PAGE.space_id, space_key: "CCD", space_name: "Core Case Data" }
     });
     expect(screen.getByText("Creating page…")).toBeTruthy();

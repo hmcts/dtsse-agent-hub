@@ -133,7 +133,7 @@ async function dropAbandoned(tx: Database, retentionHours: number, batch: number
     SELECT c.id::text AS id, c.virtual_agent_id::text AS virtual_agent_id, c.owner_oid
       FROM assistant_conversation c
      WHERE c.virtual_agent_id IS NOT NULL
-       AND c.artefact_version = 0
+       AND NOT EXISTS (SELECT 1 FROM assistant_document d WHERE d.conversation_id = c.id AND d.version > 0)
        AND c.forked_at IS NULL
        AND c.created_at < now() - make_interval(hours => ${retentionHours}::int)
        AND NOT EXISTS (

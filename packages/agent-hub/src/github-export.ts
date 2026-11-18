@@ -33,6 +33,8 @@ export type GithubProject = { owner: string; number: number };
 
 export type GithubExportRequest = {
   exportId: string;
+  /** The document the export is of, from the frame; absent from a hub that holds one document, whose `/artefact` it is. */
+  documentId?: string;
   repo: string;
   project?: GithubProject | null;
   /** What to label the issue, as the Jira ticket is labelled. */
@@ -40,7 +42,7 @@ export type GithubExportRequest = {
 };
 
 export type GithubExportDeps = {
-  api: Pick<Api, "getArtefact" | "putGithubExport">;
+  api: Pick<Api, "getArtefact" | "getArtefactById" | "putGithubExport">;
   agentId: string;
   env: Env;
   run: (cmd: string, args: string[], opts: { env: Env; timeoutMs: number }) => Promise<RunResult>;
@@ -143,7 +145,10 @@ async function label(deps: GithubExportDeps, repo: string, number: number, label
 }
 
 async function create(deps: GithubExportDeps, dir: string, request: GithubExportRequest): Promise<GithubExportOutcome> {
-  const doc = await withRetry(() => deps.api.getArtefact(deps.agentId), { attempts: 3, wait: deps.retryWait });
+  const doc = await withRetry(
+    () => (request.documentId === undefined ? deps.api.getArtefact(deps.agentId) : deps.api.getArtefactById(deps.agentId, request.documentId)),
+    { attempts: 3, wait: deps.retryWait }
+  );
   if (!doc.markdown.trim()) {
     return { error: "The document is empty, so there was nothing to export." };
   }

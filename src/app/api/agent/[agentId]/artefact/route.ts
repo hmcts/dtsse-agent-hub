@@ -1,6 +1,6 @@
 import { HttpError, json, parse, readJson } from "@/agent-api/http";
 import { ownedAgentRoute } from "@/agent-api/route";
-import { type Artefact, ArtefactConflict, readArtefact, writeArtefact } from "@/assistant/artefact-store";
+import { ArtefactConflict, artefactJson, readArtefact, writeArtefact } from "@/assistant/artefact-store";
 import { requireConversationOfAgent } from "@/assistant/conversation-store";
 import { artefactPutBody } from "@/assistant/schemas";
 import { prisma } from "@/store/prisma";
@@ -8,19 +8,10 @@ import { prisma } from "@/store/prisma";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function artefactBody(artefact: Artefact) {
-  return {
-    title: artefact.title,
-    markdown: artefact.markdown,
-    version: artefact.version,
-    updated_by: artefact.updatedBy,
-    updated_at: artefact.updatedAt?.toISOString() ?? null
-  };
-}
-
+/** The conversation's primary document, which is all a client older than `/artefacts` knows of. */
 export const GET = ownedAgentRoute<{ agentId: string }>(async ({ agent }) => {
   const conversation = await requireConversationOfAgent(prisma, agent.id);
-  return json(artefactBody(await readArtefact(prisma, conversation.id)));
+  return json(artefactJson(await readArtefact(prisma, conversation.id)));
 });
 
 export const PUT = ownedAgentRoute<{ agentId: string }>(async ({ agent, request }) => {
@@ -36,7 +27,7 @@ export const PUT = ownedAgentRoute<{ agentId: string }>(async ({ agent, request 
     return json({ version });
   } catch (error) {
     if (error instanceof ArtefactConflict) {
-      throw new HttpError(409, error.message, { current: artefactBody(error.current) });
+      throw new HttpError(409, error.message, { current: artefactJson(error.current) });
     }
     throw error;
   }

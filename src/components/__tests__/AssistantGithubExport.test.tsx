@@ -67,6 +67,7 @@ function panel({
 } = {}) {
   return (
     <ArtefactPanel
+      documentId="33333333-3333-4333-8333-333333333333"
       conversationId={CONVERSATION}
       artefact={artefact}
       productLabel="CCD"
@@ -108,7 +109,12 @@ describe("the document's GitHub export", () => {
     // Assert
     expect(screen.getByText("hmcts/cft-workspace")).toBeTruthy();
     expect(screen.getByText("CFT roadmap")).toBeTruthy();
-    expect(exportTo).toHaveBeenCalledWith({ conversationId: CONVERSATION, repo: "hmcts/cft-workspace", project: ROADMAP });
+    expect(exportTo).toHaveBeenCalledWith({
+      conversationId: CONVERSATION,
+      documentId: "33333333-3333-4333-8333-333333333333",
+      repo: "hmcts/cft-workspace",
+      project: ROADMAP
+    });
     expect(screen.getByText("Creating issue…").getAttribute("role")).toBe("status");
   });
 
@@ -151,7 +157,12 @@ describe("the document's GitHub export", () => {
 
     // Assert
     expect(lookUp).toHaveBeenCalledWith({ kind: "github_repo", query: "ccd data", space: null, owner: null }, expect.any(AbortSignal));
-    expect(exportTo).toHaveBeenCalledWith({ conversationId: CONVERSATION, repo: "hmcts/ccd-data-store-api", project: null });
+    expect(exportTo).toHaveBeenCalledWith({
+      conversationId: CONVERSATION,
+      documentId: "33333333-3333-4333-8333-333333333333",
+      repo: "hmcts/ccd-data-store-api",
+      project: null
+    });
   });
 
   it("should offer a typed owner/name first, as it stands, even when the search does not find it", async () => {
@@ -169,7 +180,12 @@ describe("the document's GitHub export", () => {
     });
 
     // Assert
-    expect(exportTo).toHaveBeenCalledWith({ conversationId: CONVERSATION, repo: "someone/elsewhere", project: null });
+    expect(exportTo).toHaveBeenCalledWith({
+      conversationId: CONVERSATION,
+      documentId: "33333333-3333-4333-8333-333333333333",
+      repo: "someone/elsewhere",
+      project: null
+    });
   });
 
   it("should search the repository owner's Projects and put the issue on the one picked", async () => {
@@ -189,7 +205,12 @@ describe("the document's GitHub export", () => {
 
     // Assert
     expect(lookUp).toHaveBeenCalledWith({ kind: "github_project", query: "roadmap", space: null, owner: "hmcts" }, expect.any(AbortSignal));
-    expect(exportTo).toHaveBeenCalledWith({ conversationId: CONVERSATION, repo: "hmcts/cft-workspace", project: ROADMAP });
+    expect(exportTo).toHaveBeenCalledWith({
+      conversationId: CONVERSATION,
+      documentId: "33333333-3333-4333-8333-333333333333",
+      repo: "hmcts/cft-workspace",
+      project: ROADMAP
+    });
   });
 
   it("should take the Project off when the person picks a repository of another owner's", async () => {
@@ -208,7 +229,12 @@ describe("the document's GitHub export", () => {
 
     // Assert
     expect(screen.queryByText("CFT roadmap")).toBeNull();
-    expect(exportTo).toHaveBeenCalledWith({ conversationId: CONVERSATION, repo: "other/ccd-tool", project: null });
+    expect(exportTo).toHaveBeenCalledWith({
+      conversationId: CONVERSATION,
+      documentId: "33333333-3333-4333-8333-333333333333",
+      repo: "other/ccd-tool",
+      project: null
+    });
   });
 
   it("should add the issue to no Project when the person removes the default one", async () => {
@@ -220,7 +246,12 @@ describe("the document's GitHub export", () => {
       fireEvent.click(createButton());
     });
 
-    expect(exportTo).toHaveBeenCalledWith({ conversationId: CONVERSATION, repo: "hmcts/cft-workspace", project: null });
+    expect(exportTo).toHaveBeenCalledWith({
+      conversationId: CONVERSATION,
+      documentId: "33333333-3333-4333-8333-333333333333",
+      repo: "hmcts/cft-workspace",
+      project: null
+    });
   });
 
   it("should not export a document nobody has written when the panel shows the starter outline", () => {
@@ -281,7 +312,12 @@ describe("the document's GitHub export", () => {
     });
 
     // Assert
-    expect(exportTo).toHaveBeenCalledWith({ conversationId: CONVERSATION, repo: "hmcts/nope", project: null });
+    expect(exportTo).toHaveBeenCalledWith({
+      conversationId: CONVERSATION,
+      documentId: "33333333-3333-4333-8333-333333333333",
+      repo: "hmcts/nope",
+      project: null
+    });
   });
 
   it("should show the refusal and bring the button back when the action is refused", async () => {
@@ -337,6 +373,7 @@ describe("the footer with a ticket in each tool", () => {
   it("should offer both, ticked, beside Confluence", () => {
     render(
       <ExportFooter
+        documentId="33333333-3333-4333-8333-333333333333"
         conversationId={CONVERSATION}
         jira={{
           exported: { status: "done", project: "VIBE", key: "VIBE-1", url: "https://hmcts.atlassian.net/browse/VIBE-1" },

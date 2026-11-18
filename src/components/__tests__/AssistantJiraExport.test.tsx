@@ -46,6 +46,7 @@ function panel({
 } = {}) {
   return (
     <ArtefactPanel
+      documentId="33333333-3333-4333-8333-333333333333"
       conversationId={CONVERSATION}
       artefact={artefact}
       productLabel="CCD"
@@ -90,7 +91,7 @@ describe("Jira export in the document panel", () => {
       fireEvent.click(exportButton());
     });
 
-    expect(exportTo).toHaveBeenCalledWith({ conversationId: CONVERSATION, project: "VIBE" });
+    expect(exportTo).toHaveBeenCalledWith({ conversationId: CONVERSATION, documentId: "33333333-3333-4333-8333-333333333333", project: "VIBE" });
     expect(screen.getByText("Creating ticket…")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /export/i })).toBeNull();
   });
@@ -216,6 +217,7 @@ describe("Jira export in the document panel", () => {
   it("should leave the export out when the panel is given no Jira props", () => {
     render(
       <ArtefactPanel
+        documentId="33333333-3333-4333-8333-333333333333"
         conversationId={CONVERSATION}
         artefact={snapshot()}
         productLabel="CCD"
@@ -237,7 +239,7 @@ describe("Jira export in the document panel", () => {
       fireEvent.click(exportButton());
     });
 
-    expect(exportTo).toHaveBeenCalledWith({ conversationId: CONVERSATION, project: "CCD" });
+    expect(exportTo).toHaveBeenCalledWith({ conversationId: CONVERSATION, documentId: "33333333-3333-4333-8333-333333333333", project: "CCD" });
   });
 
   it("should put the backlog back as it was when the person cancels the project search", () => {
@@ -270,6 +272,6 @@ describe("Jira export in the document panel", () => {
     });
 
     expect(lookUp).toHaveBeenCalledWith({ kind: "jira_project", query: "possess", space: null, owner: null }, expect.any(AbortSignal));
-    expect(exportTo).toHaveBeenCalledWith({ conversationId: CONVERSATION, project: "PCS" });
+    expect(exportTo).toHaveBeenCalledWith({ conversationId: CONVERSATION, documentId: "33333333-3333-4333-8333-333333333333", project: "PCS" });
   });
 });
