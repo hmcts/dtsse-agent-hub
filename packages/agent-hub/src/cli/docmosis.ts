@@ -10,11 +10,11 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { ApiError } from "../api.ts";
+import { type Api, ApiError } from "../api.ts";
 import { CLI } from "../envelope.ts";
 import { type RetryOptions, withRetry } from "../retry.ts";
 import { requireSessionId } from "../session.ts";
-import type { DocmosisResponse, DocmosisSchema } from "../wire.ts";
+import type { DocmosisResponse, DocmosisSchema, DocmosisWritten } from "../wire.ts";
 import { type Cli, type Command, parseFlags, refuseSecrets, requireAgent, UsageError } from "./command.ts";
 
 /** The hub's limits, checked here so a file too big is refused before it is sent. */
@@ -75,8 +75,20 @@ function noAsset(e: unknown): never {
   throw e;
 }
 
+/** The hub has no CFT Workspace conversation for the agent, so no template to publish to. */
+export class DocmosisConversationMissingError extends Error {}
+
+function noConversation(agentId: string): (e: unknown) => never {
+  return (e) => {
+    if (e instanceof ApiError && e.status === 404) {
+      throw new DocmosisConversationMissingError(`the hub has no CFT Workspace conversation for agent ${agentId}`);
+    }
+    throw e;
+  };
+}
+
 function noDocmosis(e: unknown): never {
-  if (e instanceof ApiError && e.status === 404) {
+  if ((e instanceof ApiError && e.status === 404) || e instanceof DocmosisConversationMissingError) {
     throw new Error("this session is not a CFT Workspace conversation, so it has no template");
   }
   throw e;
@@ -126,15 +138,118 @@ function shellWord(value: string): string {
   return /^[A-Za-z0-9_/.,:=+@%-]+$/.test(value) ? value : `'${value.replace(/'/g, "'\\''")}'`;
 }
 
-function readFile(file: string, what: string, limit = MAX_FILE_BYTES): Uint8Array {
-  let bytes: Uint8Array;
+function checkSize(bytes: Uint8Array, what: string, source: string): Uint8Array {
+  if (bytes.byteLength > MAX_FILE_BYTES) {
+    throw new UsageError(`${what} ${source} is larger than the hub takes, ${MAX_FILE_BYTES} bytes`);
+  }
+  return bytes;
+}
+
+function readBytes(file: string, what: string): Uint8Array {
   try {
-    bytes = fs.readFileSync(file);
+    return fs.readFileSync(file);
   } catch (e) {
     throw new UsageError(`cannot read ${what} ${file}: ${(e as Error).message}`);
   }
-  if (bytes.byteLength > limit) {
-    throw new UsageError(`${what} ${file} is larger than the hub takes, ${limit} bytes`);
+}
+
+function readFile(file: string, what: string): Uint8Array {
+  return checkSize(readBytes(file, what), what, file);
+}
+
+/** Refuses, with a `UsageError` of `refusal`, a name the hub would not take for the template. */
+export function checkName(name: string, refusal = `the template's name must be 1 to ${MAX_NAME} characters`): string {
+  if (name.trim() === "" || name.length > MAX_NAME) {
+    throw new UsageError(refusal);
+  }
+  return name;
+}
+
+/** Refuses, with a `UsageError` of `refusal`, a summary the hub would not take for a version. */
+export function checkSummary(summary: string, refusal = `the summary must be 1 to ${MAX_SUMMARY} characters saying what changed`): string {
+  if (summary.trim() === "" || summary.length > MAX_SUMMARY) {
+    throw new UsageError(refusal);
+  }
+  return summary;
+}
+
+const JSON_KEY_RE = /^[A-Za-z_$][\w$]*$/;
+
+/** What in `value`, and where, JSON cannot carry as it is; `undefined` when all of it is JSON. */
+function nonJson(value: unknown, at: string, open: Set<object>): string | undefined {
+  if (value === null || typeof value === "string" || typeof value === "boolean") {
+    return undefined;
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? undefined : `${value} at ${at}`;
+  }
+  if (typeof value !== "object") {
+    return `${value === undefined ? "undefined" : `a ${typeof value}`} at ${at}`;
+  }
+  if (open.has(value)) {
+    return `a reference to itself at ${at}`;
+  }
+  const proto: unknown = Object.getPrototypeOf(value);
+  if (proto !== (Array.isArray(value) ? Array.prototype : Object.prototype) && proto !== null) {
+    return `a ${(proto as { constructor?: { name?: string } }).constructor?.name || "non-plain"} object at ${at}`;
+  }
+  open.add(value);
+  // Array.from turns a hole into undefined, which JSON would quietly write as null.
+  const items: [string, unknown][] = Array.isArray(value)
+    ? Array.from(value, (item, index): [string, unknown] => [`${at}[${index}]`, item])
+    : Object.entries(value).map(([key, item]): [string, unknown] => [JSON_KEY_RE.test(key) ? `${at}.${key}` : `${at}[${JSON.stringify(key)}]`, item]);
+  for (const [where, item] of items) {
+    const found = nonJson(item, where, open);
+    if (found !== undefined) {
+      return found;
+    }
+  }
+  open.delete(value);
+  return undefined;
+}
+
+/**
+ * Refuses, with a `UsageError` naming `source`, a value the hub would not store as the template's `what`: not an
+ * object, holding something JSON cannot carry, text a jsonb cannot hold, or larger than the hub's limit as Postgres
+ * prints it. Secret-shaped text is refused with `refuseSecrets`'s error.
+ */
+export function checkJsonObject(value: unknown, what: string, source: string): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new UsageError(`${source} must hold the ${what} object`);
+  }
+  const foreign = nonJson(value, "$", new Set());
+  if (foreign !== undefined) {
+    throw new UsageError(`${what} ${source} holds ${foreign}, which JSON cannot carry`);
+  }
+  // The hub measures the JSON as Postgres stores it, not the file's formatting.
+  const stored = jsonbText(value);
+  if (stored === undefined) {
+    throw new UsageError(`${what} ${source} has text the hub cannot store: a NUL character, or half of a surrogate pair`);
+  }
+  if (utf8.encode(stored).byteLength > MAX_JSON_BYTES) {
+    throw new UsageError(`${what} ${source} is larger than the hub takes, ${MAX_JSON_BYTES} bytes as the hub stores it`);
+  }
+  refuseSecrets(JSON.stringify(value));
+  return value as Record<string, unknown>;
+}
+
+function schemaRoot(schema: Record<string, unknown>, source: string): DocmosisSchema {
+  if ((schema.root as { kind?: unknown } | undefined)?.kind !== "object") {
+    throw new UsageError(`${source} is not a schema from docmosis schema: it has no root of kind "object"`);
+  }
+  return schema as unknown as DocmosisSchema;
+}
+
+/** `checkJsonObject` for the form schema, which must also be one `docmosis schema` wrote. */
+export function checkSchemaObject(value: unknown, source: string): DocmosisSchema {
+  return schemaRoot(checkJsonObject(value, "schema", source), source);
+}
+
+/** Refuses, with a `UsageError` naming `source`, bytes the hub would not take as the template's .docx. */
+export function checkDocx(bytes: Uint8Array, source: string): Uint8Array {
+  checkSize(bytes, "the template", source);
+  if (!(bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04)) {
+    throw new UsageError(`${source} is not a .docx`);
   }
   return bytes;
 }
@@ -147,27 +262,11 @@ function readJsonObject(file: string, what: string): Record<string, unknown> {
   } catch (e) {
     throw new UsageError(`${file} is not valid JSON: ${(e as Error).message}`);
   }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    throw new UsageError(`${file} must hold the ${what} object`);
-  }
-  // The hub measures the JSON as Postgres stores it, not the file's formatting.
-  const stored = jsonbText(parsed);
-  if (stored === undefined) {
-    throw new UsageError(`${what} ${file} has text the hub cannot store: a NUL character, or half of a surrogate pair`);
-  }
-  if (utf8.encode(stored).byteLength > MAX_JSON_BYTES) {
-    throw new UsageError(`${what} ${file} is larger than the hub takes, ${MAX_JSON_BYTES} bytes as the hub stores it`);
-  }
-  refuseSecrets(text);
-  return parsed as Record<string, unknown>;
+  return checkJsonObject(parsed, what, file);
 }
 
 function readSchema(file: string): DocmosisSchema {
-  const schema = readJsonObject(file, "schema");
-  if ((schema.root as { kind?: unknown } | undefined)?.kind !== "object") {
-    throw new UsageError(`${file} is not a schema from docmosis schema: it has no root of kind "object"`);
-  }
-  return schema as unknown as DocmosisSchema;
+  return schemaRoot(readJsonObject(file, "schema"), file);
 }
 
 function putArgs(argv: string[]): { file: string; flags: Record<string, string> } {
@@ -185,21 +284,17 @@ function putArgs(argv: string[]): { file: string; flags: Record<string, string> 
   if (flags.base !== undefined && !/^\d+$/.test(flags.base)) {
     throw new UsageError("--base must be a version number");
   }
-  if (flags.name !== undefined && (flags.name.trim() === "" || flags.name.length > MAX_NAME)) {
-    throw new UsageError(`--name is 1 to ${MAX_NAME} characters`);
+  if (flags.name !== undefined) {
+    checkName(flags.name, `--name is 1 to ${MAX_NAME} characters`);
   }
-  if (flags.summary !== undefined && (flags.summary.trim() === "" || flags.summary.length > MAX_SUMMARY)) {
-    throw new UsageError(`--summary is 1 to ${MAX_SUMMARY} characters saying what changed`);
+  if (flags.summary !== undefined) {
+    checkSummary(flags.summary, `--summary is 1 to ${MAX_SUMMARY} characters saying what changed`);
   }
   return { file, flags };
 }
 
 function readDocx(file: string): Uint8Array {
-  const docx = readFile(file, "the template");
-  if (!(docx[0] === 0x50 && docx[1] === 0x4b && docx[2] === 0x03 && docx[3] === 0x04)) {
-    throw new UsageError(`${file} is not a .docx`);
-  }
-  return docx;
+  return checkDocx(readBytes(file, "the template"), file);
 }
 
 function readPdf(file: string): Uint8Array {
@@ -214,7 +309,7 @@ function readPdf(file: string): Uint8Array {
  * Says why a put was refused: for a newer version or, when the revision was sent and the version still matches, for the
  * person's amend of the one read, and how to put the change again on top of it.
  */
-function printConflict(cli: Cli, base: number, current: DocmosisResponse | undefined, baseRevision: number | undefined): void {
+function printConflict(cli: Cli, base: number, current: DocmosisResponse | null, baseRevision: number | undefined): void {
   const by = current?.by ? `, last written by ${current.by === "user" ? "the user" : "this conversation"}` : "";
   if (baseRevision !== undefined && current?.version === base && current.revision !== baseRevision) {
     cli.printError(`agent-hub docmosis: the user has changed the data of version ${base} of the template since you read it. Nothing was saved.`);
@@ -222,6 +317,56 @@ function printConflict(cli: Cli, base: number, current: DocmosisResponse | undef
     cli.printError(`agent-hub docmosis: the template has changed since version ${base}: it is now version ${current?.version ?? "?"}${by}. Nothing was saved.`);
   }
   cli.printError(`Run ${CLI} docmosis get, merge your change into the data and template it writes, render it again, and put again.`);
+}
+
+export type DocmosisPublishInput = {
+  docx: Uint8Array;
+  schema: DocmosisSchema;
+  data: Record<string, unknown>;
+  name: string;
+  /** The version the change builds on: 0 for a conversation with no template yet. */
+  base: number;
+  /** The revision read with `base`, so the person's amend since is refused rather than overwritten. */
+  baseRevision?: number;
+  summary?: string;
+};
+
+/**
+ * `conflict` is given when the hub says the template has changed since `base`. Its `current` is the template as it is
+ * now, or `null` when the hub did not say.
+ */
+export type DocmosisPublishResult = { written: DocmosisWritten } | { conflict: { current: DocmosisResponse | null } };
+
+/**
+ * Uploads the .docx under the SHA-256 of its bytes, then publishes it as a new version on top of `base`. The name and
+ * summary are checked here, before anything is sent. The .docx, schema and data are not: `checkDocx`,
+ * `checkSchemaObject` and `checkJsonObject` apply the hub's limits first. Throws `DocmosisConversationMissingError`
+ * when the hub has no conversation for the agent.
+ */
+export async function publishDocmosis(api: Api, agentId: string, input: DocmosisPublishInput): Promise<DocmosisPublishResult> {
+  checkName(input.name);
+  if (input.summary !== undefined) {
+    checkSummary(input.summary);
+  }
+  const missing = noConversation(agentId);
+  const { asset } = await api.putDocmosisAsset(agentId, sha256(input.docx), input.docx).catch(missing);
+  try {
+    const written = await api.putDocmosis(agentId, {
+      name: input.name,
+      docx: asset,
+      schema: input.schema,
+      data: input.data,
+      base_version: input.base,
+      ...(input.baseRevision === undefined ? {} : { base_revision: input.baseRevision }),
+      ...(input.summary === undefined ? {} : { summary: input.summary })
+    });
+    return { written };
+  } catch (e) {
+    if (!(e instanceof ApiError && e.status === 409)) {
+      return missing(e);
+    }
+    return { conflict: { current: (e.body?.current as DocmosisResponse | undefined) ?? null } };
+  }
 }
 
 async function putDocmosis(cli: Cli, argv: string[]): Promise<number> {
@@ -258,33 +403,27 @@ async function putDocmosis(cli: Cli, argv: string[]): Promise<number> {
       () => undefined
     );
   }
-  const name = (known ?? path.basename(docxFile, path.extname(docxFile))).trim();
-  if (name === "" || name.length > MAX_NAME) {
-    throw new UsageError(`the template's name must be 1 to ${MAX_NAME} characters; give one with --name`);
-  }
+  const name = checkName(
+    (known ?? path.basename(docxFile, path.extname(docxFile))).trim(),
+    `the template's name must be 1 to ${MAX_NAME} characters; give one with --name`
+  );
   // Only the revision `get` read, and only with the version it read: one taken from the hub now would let the put
   // over an amend it never saw, and one sent with another version could never match.
   const baseRevision = recorded !== undefined && base === recorded ? recordedNumber(dir, REVISION_FILE) : undefined;
-  const digest = sha256(docx);
-  const { asset } = await api.putDocmosisAsset(agent.agent_id, digest, docx).catch(noDocmosis);
-  let written: { version: number; revision: number };
-  try {
-    written = await api.putDocmosis(agent.agent_id, {
-      name,
-      docx: asset,
-      schema,
-      data,
-      base_version: base,
-      ...(baseRevision === undefined ? {} : { base_revision: baseRevision }),
-      ...(flags.summary === undefined ? {} : { summary: flags.summary.trim() })
-    });
-  } catch (e) {
-    if (!(e instanceof ApiError && e.status === 409)) {
-      return noDocmosis(e);
-    }
-    printConflict(cli, base, e.body?.current as DocmosisResponse | undefined, baseRevision);
+  const published = await publishDocmosis(api, agent.agent_id, {
+    docx,
+    schema,
+    data,
+    name,
+    base,
+    baseRevision,
+    summary: flags.summary?.trim()
+  }).catch(noDocmosis);
+  if ("conflict" in published) {
+    printConflict(cli, base, published.conflict.current, baseRevision);
     return 1;
   }
+  const { written } = published;
   record(dir, written.version, written.revision, name);
   if (pdf !== undefined && pdfFile !== undefined) {
     try {
@@ -360,6 +499,9 @@ async function getDocmosis(cli: Cli, argv: string[]): Promise<number> {
   cli.print(`schema: ${files.schema}`);
   cli.print(`data: ${files.data}`);
   cli.print(`Last changed by ${who}; ${failure}; ${template.has_pdf ? "has a PDF" : "has no PDF"}.`);
+  if (template.summary) {
+    cli.print(`Summary: ${template.summary.replace(/\s+/g, " ").trim()}`);
+  }
   if (!isLatest) {
     cli.print(
       `This is not the latest version, which is ${template.current_version}, and the recorded base is unchanged. To bring it back, put it with ${CLI} docmosis put ${shellWord(files.docx)} --schema ${shellWord(files.schema)} --data ${shellWord(files.data)} --base ${template.current_version}`

@@ -1742,6 +1742,51 @@ describe("artefact, in an assistant conversation", () => {
       expect(fs.readFileSync(path.join(out, "revision"), "utf8")).toBe("0\n");
       expect(r.text()).toContain(path.join(out, "data.json"));
       expect(r.text()).toMatch(/Last changed by the user; render error: Bad field; has no PDF\./);
+      expect(r.text()).not.toMatch(/^Summary:/m);
+    });
+
+    it("should print the version's summary, when docmosis get reads a version that has one", async () => {
+      // Arrange
+      const { sid } = await session();
+      const dir = workDir();
+      expect((await cli(putArgs(dir, "--summary", "Added the hearing date"), { sid })).code).toBe(0);
+
+      // Act
+      const r = await cli(["docmosis", "get"], { sid });
+
+      // Assert
+      expect(r.code, r.errors.join("\n")).toBe(0);
+      expect(r.lines).toContain("Summary: Added the hearing date");
+    });
+
+    it("should print the summary on one line with its whitespace collapsed, when the summary spans several lines", async () => {
+      // Arrange
+      const { sid } = await session();
+      const dir = workDir();
+      expect((await cli(putArgs(dir, "--summary", "Added the\n  hearing\t\tdate\r\nand the judge"), { sid })).code).toBe(0);
+
+      // Act
+      const r = await cli(["docmosis", "get"], { sid });
+
+      // Assert
+      expect(r.code, r.errors.join("\n")).toBe(0);
+      expect(r.lines.filter((line) => line.startsWith("Summary:"))).toEqual(["Summary: Added the hearing date and the judge"]);
+      expect(r.text()).not.toMatch(/^\s*hearing/m);
+    });
+
+    it("should refuse the put and send nothing, when the data holds secret-shaped text", async () => {
+      // Arrange: built at runtime so no secret-shaped literal sits in the repo.
+      const { sid, agentId } = await session();
+      const dir = workDir();
+      fs.writeFileSync(path.join(dir, "data.json"), JSON.stringify({ name: `token ${"gh"}p_${"Q".repeat(30)}` }));
+
+      // Act
+      const r = await cli(putArgs(dir), { sid });
+
+      // Assert
+      expect(r.code).toBe(1);
+      expect(r.errors.join("\n")).toMatch(/refusing to send: the text contains a secret-shaped string \(pattern /);
+      expect(calls(agentId, "PUT", "")).toEqual([]);
     });
 
     it("should write an older version beside the working copy and leave the recorded version alone, when docmosis get has --version", async () => {
