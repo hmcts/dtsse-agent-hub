@@ -1431,7 +1431,7 @@ describe("several documents", () => {
       error: ITEMS_CREATE_REFUSED
     });
 
-    await prisma.virtualAgent.update({ where: { id: assistantId }, data: { clientFeatures: ["lookups", "github-lookups", "items"] } });
+    await prisma.virtualAgent.update({ where: { id: assistantId }, data: { clientFeatures: ["lookups", "github-lookups", "items", "item-templates"] } });
     expect((await api.create({ kind: "ticket", markdown: "As a clerk" })).status).toBe(201);
   });
 

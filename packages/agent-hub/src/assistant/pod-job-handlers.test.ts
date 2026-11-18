@@ -33,7 +33,7 @@ describe("the Notify pod-job handlers", () => {
     expect(notify.listNotifyTemplates).toHaveBeenCalledWith("pcs");
   });
 
-  it("should load the template through the frame's agent as the person's into a new template when no target is named, and answer the version and the template", async () => {
+  it("should load the template through the frame's agent as the person's, always into a new template, when no target is named, and answer the version and the template", async () => {
     notify.pullNotifyTemplate.mockResolvedValue({ id: ITEM, version: 3, name: "Claim", written: true });
     const ctx = context("agent-1");
 
@@ -45,7 +45,9 @@ describe("the Notify pod-job handlers", () => {
       target: undefined,
       api,
       signal: ctx.signal,
-      by: "user"
+      by: "user",
+      create: true,
+      jobId: "job-1"
     });
   });
 
@@ -55,7 +57,7 @@ describe("the Notify pod-job handlers", () => {
 
     await notifyPull.run({ product: "pcs", template_id: TEMPLATE, item_id: ITEM }, ctx);
 
-    expect(notify.pullNotifyTemplate).toHaveBeenCalledWith(expect.objectContaining({ target: ITEM }));
+    expect(notify.pullNotifyTemplate).toHaveBeenCalledWith(expect.objectContaining({ target: ITEM, create: false }));
     await expect(notifyPull.run({ product: "pcs", template_id: TEMPLATE, item_id: "nope" }, ctx)).rejects.toThrow("item_id");
   });
 

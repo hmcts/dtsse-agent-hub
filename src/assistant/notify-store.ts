@@ -269,7 +269,7 @@ export type NotifyTarget = { item: string } | "primary" | "new";
 
 /** A new template's row, at version 0 until the write that makes it has run in the same transaction. Refused for a second one on a pod that reads only the primary. */
 async function insertNotify(tx: Database, conversation: Conversation, now: Date): Promise<string> {
-  if ((await tx.assistantNotify.count({ where: { conversationId: conversation.id } })) > 0 && (await podLacksItems(tx, conversation))) {
+  if ((await tx.assistantNotify.count({ where: { conversationId: conversation.id } })) > 0 && (await podLacksItems(tx, conversation, "item-templates"))) {
     throw new HttpError(409, ITEMS_CREATE_REFUSED_NOTIFY);
   }
   const [row] = await tx.$queryRaw<{ id: string }[]>`

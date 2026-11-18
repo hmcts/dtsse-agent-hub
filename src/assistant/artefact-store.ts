@@ -88,8 +88,11 @@ async function touchConversation(tx: Database, conversationId: string, now: Date
   `;
 }
 
-/** Whether the conversation's pod is running a client that reads only the primary document. */
-export async function podLacksItems(tx: Database, conversation: ConversationRef): Promise<boolean> {
+/**
+ * Whether the conversation's pod is running a client that reads only the primary document (`items`), or, with
+ * `item-templates`, only the primary deck, Docmosis template and Notify template.
+ */
+export async function podLacksItems(tx: Database, conversation: ConversationRef, feature: "items" | "item-templates" = "items"): Promise<boolean> {
   if (!hasPod(conversation)) {
     return false;
   }
@@ -97,7 +100,7 @@ export async function podLacksItems(tx: Database, conversation: ConversationRef)
     where: { id: conversation.virtualAgentId },
     select: { status: true, clientFeatures: true, agent: { select: { clientFeatures: true } } }
   });
-  return pod !== null && podLacks(pod, "items");
+  return pod !== null && podLacks(pod, feature);
 }
 
 type DocumentWrite = { title: string | null; markdown: string; baseVersion: number; by: "user" | "agent" };

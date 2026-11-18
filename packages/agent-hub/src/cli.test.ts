@@ -2983,6 +2983,20 @@ describe("artefact, in an assistant conversation", () => {
       expect(bad.errors.join("\n")).toMatch(/--version takes a version number from 1/);
     });
 
+    it("should refuse the put, naming the id, and send nothing, when the outline is in another deck's directory and --id is not given", async () => {
+      const { sid, agentId } = await session();
+      const item = "0f8a6a1e-0000-4000-8000-00000000d0c9";
+      const dir = path.join(home.root, ".agent-hub", "decks", `0f8a6a1e-0000-4000-8000-${String(nextSession).padStart(12, "0")}`, item);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, "outline.json"), JSON.stringify({ title: "Other", slides: [] }));
+
+      const r = await cli(["deck", "put", path.join(dir, "outline.json")], { sid });
+
+      expect(r.code).toBe(2);
+      expect(r.errors.join("\n")).toContain(`put it with --id ${item}`);
+      expect(calls(agentId, "PUT", "")).toEqual([]);
+    });
+
     it("should put against the version deck get read, and refuse the put, when someone writes a newer one in between", async () => {
       // Arrange
       const { sid, agentId } = await session();

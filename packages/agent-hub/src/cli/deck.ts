@@ -18,7 +18,7 @@ import { CLI } from "../envelope.ts";
 import { type RetryOptions, withRetry } from "../retry.ts";
 import { requireSessionId } from "../session.ts";
 import type { Deck, DeckOutline, DeckResponse, DeckSlide } from "../wire.ts";
-import { type Cli, type Command, parseFlags, refuseSecrets, requireAgent, UsageError } from "./command.ts";
+import { type Cli, type Command, parseFlags, refuseNestedItemFile, refuseSecrets, requireAgent, UsageError } from "./command.ts";
 
 /** The hub's limits on one picture and one .pptx, checked here so a file too big is refused before it is sent. */
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
@@ -464,6 +464,9 @@ async function putDeck(cli: Cli, argv: string[], command: "put" | "new" = "put")
   const agent = requireAgent(requireSessionId(cli.env));
   const api = cli.api();
   const dir = deckDir(cli, agent.conversation_id ?? agent.agent_id, id);
+  if (!creating) {
+    refuseNestedItemFile(dir, outlineFile, id);
+  }
   const fromGet = !creating && isInside(dir, outlineFile);
   // An outline `get` wrote is a change to the version it read; any other is a new deck, put on whatever is there.
   const recorded = fromGet ? recordedVersion(dir) : undefined;

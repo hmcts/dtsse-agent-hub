@@ -75,6 +75,9 @@ export async function getDeck(agent: AgentRow, request: Request, item?: string):
 export async function putDeck(agent: AgentRow, request: Request, target: { item?: string; create?: boolean }): Promise<Response> {
   const body = parse(deckPutBody, await readJson(request));
   const conversation = await requireConversationOfAgent(prisma, agent.id);
+  if (target.create === true && body.base_version !== 0) {
+    throw new HttpError(400, "base_version must be 0 for a new deck");
+  }
   const checked = checkOutline(body.outline);
   if (!checked.ok) {
     throw new HttpError(400, checked.error);

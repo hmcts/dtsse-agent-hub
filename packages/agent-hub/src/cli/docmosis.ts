@@ -16,7 +16,7 @@ import { CLI } from "../envelope.ts";
 import { type RetryOptions, withRetry } from "../retry.ts";
 import { requireSessionId } from "../session.ts";
 import type { DocmosisResponse, DocmosisSchema, DocmosisWritten } from "../wire.ts";
-import { type Cli, type Command, parseFlags, refuseSecrets, requireAgent, UsageError } from "./command.ts";
+import { type Cli, type Command, parseFlags, refuseNestedItemFile, refuseSecrets, requireAgent, UsageError } from "./command.ts";
 
 /** The hub's limits, checked here so a file too big is refused before it is sent. */
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
@@ -508,6 +508,9 @@ async function putDocmosis(cli: Cli, argv: string[], create: boolean): Promise<n
   const agent = requireAgent(requireSessionId(cli.env));
   const api = cli.api();
   const dir = docmosisDir(cli, agent.conversation_id ?? agent.agent_id, id);
+  if (!create) {
+    refuseNestedItemFile(dir, docxFile, id);
+  }
   const recorded = create ? undefined : recordedNumber(dir, VERSION_FILE);
   let base: number;
   let hubName: string | undefined;

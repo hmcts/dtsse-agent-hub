@@ -79,7 +79,7 @@ export const NOTIFY_PULL = definePodJobKind({
         where: { id: conversationId },
         select: { id: true, virtualAgentId: true, ownerOid: true }
       });
-      if (conversation !== null && (await podLacksItems(db, conversation))) {
+      if (conversation !== null && (await podLacksItems(db, conversation, "item-templates"))) {
         return { status: 409, error: ITEMS_CREATE_REFUSED_NOTIFY };
       }
     }

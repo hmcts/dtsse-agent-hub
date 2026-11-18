@@ -106,7 +106,7 @@ async function targetRefusal(db: Database, conversationId: string, item: string 
     return undefined;
   }
   const conversation = await db.assistantConversation.findUnique({ where: { id: conversationId }, select: { id: true, virtualAgentId: true, ownerOid: true } });
-  return conversation !== null && (await podLacksItems(db, conversation)) ? { status: 409, error: ITEMS_CREATE_REFUSED_DOCMOSIS } : undefined;
+  return conversation !== null && (await podLacksItems(db, conversation, "item-templates")) ? { status: 409, error: ITEMS_CREATE_REFUSED_DOCMOSIS } : undefined;
 }
 
 /**
@@ -118,7 +118,7 @@ async function withoutPrimaryItem(db: Database, conversationId: string, args: Do
     return args;
   }
   const conversation = await db.assistantConversation.findUnique({ where: { id: conversationId }, select: { id: true, virtualAgentId: true, ownerOid: true } });
-  if (conversation === null || !(await podLacksItems(db, conversation))) {
+  if (conversation === null || !(await podLacksItems(db, conversation, "item-templates"))) {
     return args;
   }
   const { item: _item, ...rest } = args;

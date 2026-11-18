@@ -429,7 +429,7 @@ describe("building an older version's .pptx", () => {
   it("should build the same version number of two decks on their own, joining a second request only for the deck it names", async () => {
     // Arrange
     const mine = await chat();
-    await podFor(mine, ["deck-build", "slides-always-on", "items"]);
+    await podFor(mine, ["deck-build", "slides-always-on", "items", "item-templates"]);
     const first = await writeDeck(prisma, mine.row, { create: true, outline: outline("Ways of working"), baseVersion: 0, by: "agent", summary: null });
     const second = await writeDeck(prisma, mine.row, { create: true, outline: outline("Ways of working"), baseVersion: 0, by: "agent", summary: null });
 

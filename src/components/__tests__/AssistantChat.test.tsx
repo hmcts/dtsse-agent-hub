@@ -1448,6 +1448,24 @@ describe("ChatView Create", () => {
     expect(send).toHaveBeenCalledTimes(2);
   });
 
+  it("should offer slides again when the assistant's turn ends without a new deck after the person asked for slides", async () => {
+    const busy = conversation({ agentStatus: "busy", page: page({ messages: [message("1")] }) });
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={busy} templates={TEMPLATES} actions={actions()} />);
+
+    create("Slides");
+    await act(async () => {
+      await Promise.resolve();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(screen.getByRole("menuitem", { name: "Slides, being made" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    emit("agent_status", { agent_id: AGENT, status: "idle" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(screen.getByRole("menuitem", { name: "Slides" })).toBeTruthy();
+  });
+
   it("should say the request could not be sent when the request for slides never reaches the hub", async () => {
     const send = vi.fn(async () => {
       throw new Error("offline");
@@ -2700,6 +2718,24 @@ describe("ChatView slides", () => {
     openSwitcher();
     expect(screen.queryByTestId("docmosis:docmosis-1-updated")).toBeNull();
     expect(screen.queryByTestId("notify:notify-1-updated")).toBeNull();
+  });
+
+  it("should keep the open deck's editor, say another deck arrived and mark its row in the switcher, when the assistant writes a new deck mid-edit", async () => {
+    vi.useFakeTimers();
+    const OTHER_DECK = { ...DECK, id: "deck-2", title: "Release plan", version: 1, revision: 1 };
+    const chatActions = actions({ saveDeck: vi.fn(() => new Promise<never>(() => undefined)) });
+    const { rerender } = render(chat({ decks: [DECK] }, chatActions));
+    await openSlides();
+    fireEvent.click(screen.getByRole("button", { name: "Edit slides" }));
+    await announced();
+    fireEvent.change(screen.getByRole("textbox", { name: "Deck title" }), { target: { value: "Mine" } });
+
+    rerender(chat({ decks: [DECK, { ...OTHER_DECK, updatedBy: "agent" }] }, chatActions));
+
+    expect(await announced()).toContain("The assistant updated the slides. Open them from Items to see them.");
+    expect(screen.getByRole("toolbar", { name: "Editing slides" })).toBeTruthy();
+    openSwitcher();
+    expect(screen.getByTestId("deck:deck-2-updated")).toBeTruthy();
   });
 
   it("should keep the slides' editor open, say the document changed and mark its row in the switcher, when the assistant writes the document mid-edit", async () => {

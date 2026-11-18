@@ -17,7 +17,7 @@ const OTHER = "22222222-2222-4222-8222-222222222222";
  */
 function databaseAnswering(
   rows: unknown[],
-  { held = [], claims = ["items"] }: { held?: string[]; claims?: string[] } = {}
+  { held = [], claims = ["item-templates"] }: { held?: string[]; claims?: string[] } = {}
 ): { db: Database; asked: unknown[][] } {
   const asked: unknown[][] = [];
   const db = {
@@ -121,13 +121,13 @@ describe("the docmosis.load precheck", () => {
     });
   });
 
-  it("should pass a load that makes a second template when the pod's client claims items", async () => {
-    const { db } = databaseAnswering([{ owner_oid: "oid-a", size: 1200 }], { held: [PRIMARY], claims: ["items"] });
+  it("should pass a load that makes a second template when the pod's client claims item-templates", async () => {
+    const { db } = databaseAnswering([{ owner_oid: "oid-a", size: 1200 }], { held: [PRIMARY], claims: ["item-templates"] });
 
     expect(await DOCMOSIS_LOAD.precheck?.(db, { viewerOid: "oid-a", conversationId: "c", args: ARGS })).toBeUndefined();
   });
 
-  it("should refuse a load that makes a second template when the pod's client is older than items", async () => {
+  it("should refuse a load that makes a second template when the pod's client is older than item-templates", async () => {
     const { db } = databaseAnswering([{ owner_oid: "oid-a", size: 1200 }], { held: [PRIMARY], claims: [] });
 
     expect(await DOCMOSIS_LOAD.precheck?.(db, { viewerOid: "oid-a", conversationId: "c", args: ARGS })).toEqual({
@@ -136,27 +136,35 @@ describe("the docmosis.load precheck", () => {
     });
   });
 
-  it("should refuse a load into a template other than the primary when the pod's client is older than items", async () => {
+  it("should refuse a load that makes a second template and strip the primary's item when the pod claims items but not item-templates", async () => {
+    const { db } = databaseAnswering([{ owner_oid: "oid-a", size: 1200 }], { held: [PRIMARY], claims: ["items"] });
+    const named = { ...LIBRARY, ...ARGS, item: PRIMARY };
+
+    expect((await DOCMOSIS_LOAD.precheck?.(db, { viewerOid: "oid-a", conversationId: "c", args: ARGS }))?.status).toBe(409);
+    expect(await DOCMOSIS_LOAD.storedArgs?.(db, { viewerOid: "oid-a", conversationId: "c", args: named })).toEqual({ ...LIBRARY, ...ARGS });
+  });
+
+  it("should refuse a load into a template other than the primary when the pod's client is older than item-templates", async () => {
     const { db } = databaseAnswering([{ owner_oid: "oid-a", size: 1200 }], { held: [PRIMARY, OTHER], claims: [] });
 
     expect((await DOCMOSIS_LOAD.precheck?.(db, { viewerOid: "oid-a", conversationId: "c", args: { ...ARGS, item: OTHER } }))?.status).toBe(409);
   });
 
-  it("should pass a load into the primary when the pod's client is older than items", async () => {
+  it("should pass a load into the primary when the pod's client is older than item-templates", async () => {
     const { db } = databaseAnswering([{ owner_oid: "oid-a", size: 1200 }], { held: [PRIMARY, OTHER], claims: [] });
 
     expect(await DOCMOSIS_LOAD.precheck?.(db, { viewerOid: "oid-a", conversationId: "c", args: { ...ARGS, item: PRIMARY } })).toBeUndefined();
   });
 
-  it("should send the args without the primary's item to a pod older than items, which refuses an argument it does not know", async () => {
+  it("should send the args without the primary's item to a pod older than item-templates, which refuses an argument it does not know", async () => {
     const { db } = databaseAnswering([], { held: [PRIMARY], claims: [] });
     const args = { ...LIBRARY, ...ARGS, item: PRIMARY };
 
     expect(await DOCMOSIS_LOAD.storedArgs?.(db, { viewerOid: "oid-a", conversationId: "c", args })).toEqual({ ...LIBRARY, ...ARGS });
   });
 
-  it("should send the args as they are to a pod that claims items, and when they name no item", async () => {
-    const { db } = databaseAnswering([], { held: [PRIMARY], claims: ["items"] });
+  it("should send the args as they are to a pod that claims item-templates, and when they name no item", async () => {
+    const { db } = databaseAnswering([], { held: [PRIMARY], claims: ["item-templates"] });
     const named = { ...LIBRARY, ...ARGS, item: PRIMARY };
     const unnamed = { ...LIBRARY, ...ARGS };
 

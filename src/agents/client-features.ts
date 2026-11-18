@@ -26,6 +26,7 @@ export type ClientFeature =
   | "docmosis-library"
   | "files"
   | "github-lookups"
+  | "item-templates"
   | "items"
   | "lookups"
   | "memory-anon"

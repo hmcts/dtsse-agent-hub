@@ -44,6 +44,7 @@ function fakes({
 }
 
 const ITEM_ID = "0b1f3d4a-0000-4000-8000-0000000000c1";
+const JOB = "1c1c1c1c-0000-4000-8000-000000000001";
 
 /** A hub holding `current` as the conversation's one Notify template, or none. */
 function hubApi(
@@ -384,7 +385,38 @@ describe("pullNotifyTemplate", () => {
     expect(api.putNotifyById).not.toHaveBeenCalled();
   });
 
-  it("should check a load that makes a new template against the conversation's newest, and make it when that is another template", async () => {
+  it("should load into the template that already holds it, and make no second, when no target is named and Notify's version moved on", async () => {
+    const { deps } = fakes();
+    const api = hubApi(loaded({ notify_version: 3 }), async () => ({ version: 3, revision: 0 }));
+
+    const pulled = await pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", api, deps });
+
+    expect(pulled).toEqual({ id: ITEM_ID, version: 3, name: "Claim received", written: true });
+    expect(api.putNotifyById).toHaveBeenCalledWith("a1", ITEM_ID, expect.objectContaining({ base_version: 2 }));
+    expect(api.createNotify).not.toHaveBeenCalled();
+  });
+
+  it("should make a new template even though another holds it, when the load asks to create", async () => {
+    const { deps } = fakes();
+    const api = hubApi(loaded(), async () => ({ version: 1, revision: 0 }));
+
+    const pulled = await pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", api, deps, create: true, jobId: JOB });
+
+    expect(pulled.written).toBe(true);
+    expect(api.createNotify).toHaveBeenCalledWith("a1", expect.objectContaining({ base_version: 0, summary: "Loaded version 4 from Notify (job 1c1c1c1c)" }));
+  });
+
+  it("should answer the template an earlier run of the same job made, and make no second, when a load that creates runs again", async () => {
+    const { deps } = fakes();
+    const api = hubApi(loaded({ by: "user", summary: "Loaded version 4 from Notify (job 1c1c1c1c)" }));
+
+    const pulled = await pullNotifyTemplate({ productId: "pcs", templateId: TEMPLATE_ID, agentId: "a1", api, deps, create: true, jobId: JOB });
+
+    expect(pulled).toEqual({ id: ITEM_ID, version: 2, name: "Claim received", written: false });
+    expect(api.createNotify).not.toHaveBeenCalled();
+  });
+
+  it("should make a new template when no template of the conversation holds this one and no target is named", async () => {
     const { deps } = fakes();
     const api = hubApi(loaded({ template_id: "00000000-0000-4000-8000-000000000099" }), async () => ({ version: 1, revision: 0 }));
 

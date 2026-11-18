@@ -68,7 +68,7 @@ async function chatOf(who: Person, assistant?: string): Promise<Chat> {
   const row = await prisma.virtualAgent.findUniqueOrThrow({ where: { id: virtualAgent }, select: { generation: true } });
   await prisma.virtualAgent.update({
     where: { id: virtualAgent },
-    data: { observedGeneration: row.generation, clientFeatures: ["pod-job:docmosis.load", "items"] }
+    data: { observedGeneration: row.generation, clientFeatures: ["pod-job:docmosis.load", "items", "item-templates"] }
   });
   const conversation = await prisma.assistantConversation.create({ data: { ownerOid: who.oid, virtualAgentId: virtualAgent }, select: { id: true } });
   const agent = await prisma.agent.create({
@@ -431,13 +431,13 @@ describe("publishing a pick", () => {
     await indexOf(ALICE);
     const held = docx(3);
     await putDocmosisAsset(prisma, chat.conversation, sha256(held), held);
-    await writeAgentDocmosis(prisma, {
+    const { id: item } = await writeAgentDocmosis(prisma, {
       conversationId: chat.conversation,
       body: { name: "Mine", docx: docxRef(sha256(held)), schema: SCHEMA, data: {}, base_version: 0 }
     });
-    const job = await loadJob(chat);
+    const job = await loadJob(chat, { item, base_version: 1 });
 
-    const response = await publish(chat, job);
+    const response = await publish(chat, job, TEMPLATE, { base_version: 0, base_revision: 0 }, chat.agent, { item });
 
     expect(response.status).toBe(409);
     expect(await versionsOf(chat.conversation)).toEqual([expect.objectContaining({ version: 1, by: "agent", sourcePath: null })]);
@@ -513,6 +513,17 @@ describe("a load's target template", () => {
     expect(made).toMatchObject({ version: 1, revision: 0 });
     expect((await itemsOf(chat.conversation)).map((row) => row.id)).toEqual([item, made.id]);
     expect((await readPodJob(prisma, ALICE.oid, chat.conversation, job))?.result).toEqual({ item: made.id, version: 1, revision: 0 });
+  });
+
+  it("should refuse a new template's pick published to the primary, and leave the job pending, when the conversation already holds a template", async () => {
+    const { chat } = await chatWithTemplate();
+    const job = await loadJob(chat);
+
+    const response = await publish(chat, job, TEMPLATE, { base_version: 1, base_revision: 0 });
+
+    expect(response.status).toBe(400);
+    expect(await statusOf(chat, job)).toBe("pending");
+    expect(await itemsOf(chat.conversation)).toHaveLength(1);
   });
 
   it("should answer 409 with the template an earlier run made, and make no second, when a new template's pick is published again", async () => {

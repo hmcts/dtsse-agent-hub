@@ -252,7 +252,7 @@ async function targetDeck(tx: Database, conversation: Pick<ConversationRow, "id"
   if (primary !== undefined && write.create !== true) {
     return primary.id;
   }
-  if (primary !== undefined && (await podLacksItems(tx, conversation))) {
+  if (primary !== undefined && (await podLacksItems(tx, conversation, "item-templates"))) {
     throw new HttpError(409, ITEMS_CREATE_REFUSED_DECK);
   }
   const made = await tx.assistantDeck.create({ data: { conversationId: conversation.id }, select: { id: true } });

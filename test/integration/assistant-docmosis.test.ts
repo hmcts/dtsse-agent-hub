@@ -601,7 +601,7 @@ describe("a conversation's several Docmosis templates", () => {
       "POST",
       body(sha, { base_version: 4 })
     );
-    expect(stale.status).toBe(409);
+    expect(stale.status).toBe(400);
     expect(await itemsOf(mine)).toHaveLength(2);
   });
 
@@ -779,7 +779,7 @@ describe("the items gate for Docmosis templates", () => {
 
   it("should make a second template when the pod's client claims items, or has claimed nothing yet", async () => {
     const claiming = await chat();
-    await podClaiming(claiming, ["items"]);
+    await podClaiming(claiming, ["items", "item-templates"]);
     await agentWrite(claiming, 1);
     const booting = await chat();
     await agentWrite(booting, 1);

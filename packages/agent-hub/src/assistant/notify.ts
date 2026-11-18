@@ -178,23 +178,60 @@ function alreadyLoaded(current: NotifyResponse | undefined, source: NotifySource
   );
 }
 
-/**
- * The template a load is checked against: the one it targets, which has to be there, or, for a load that makes a new
- * one, the conversation's newest, which is where a repeat of the same load finds what the first one made.
- */
-async function currentOf(
-  api: Pick<Api, "listNotify" | "getNotifyById">,
-  agentId: string,
-  target: string | undefined
-): Promise<(NotifyResponse & { id: string }) | undefined> {
+/** The conversation's template `target`, which has to be there. */
+async function currentOf(api: Pick<Api, "getNotifyById">, agentId: string, target: string): Promise<NotifyResponse & { id: string }> {
   try {
-    const id = target ?? (await api.listNotify(agentId)).notify_templates.at(-1)?.id;
-    return id === undefined ? undefined : { ...(await api.getNotifyById(agentId, id)), id };
+    return { ...(await api.getNotifyById(agentId, target)), id: target };
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) {
-      if (target !== undefined) {
-        throw new PodJobError("conflict", "That Notify template is no longer in this chat.");
+      throw new PodJobError("conflict", "That Notify template is no longer in this chat.");
+    }
+    throw e;
+  }
+}
+
+/** The conversation's template that already holds this Notify template, if any. */
+async function holderOf(
+  api: Pick<Api, "listNotify" | "getNotifyById">,
+  agentId: string,
+  source: NotifySource
+): Promise<(NotifyResponse & { id: string }) | undefined> {
+  for (const item of (await api.listNotify(agentId)).notify_templates) {
+    try {
+      const held = await api.getNotifyById(agentId, item.id);
+      if (held.product === source.product && held.template_id === source.template_id) {
+        return { ...held, id: item.id };
       }
+    } catch (e) {
+      if (!(e instanceof ApiError && e.status === 404)) {
+        throw e;
+      }
+    }
+  }
+  return undefined;
+}
+
+/** What a version made by job `jobId` is summarised as, so a repeat of the job finds the template it made. */
+function summaryOf(source: NotifySource, jobId: string | undefined): string {
+  return `Loaded version ${source.notify_version} from Notify${jobId === undefined ? "" : ` (job ${jobId.slice(0, 8)})`}`;
+}
+
+/** The conversation's newest template if job `jobId` made it, which is where a repeat of that job finds it. */
+async function madeBy(
+  api: Pick<Api, "listNotify" | "getNotifyById">,
+  agentId: string,
+  source: NotifySource,
+  jobId: string | undefined
+): Promise<(NotifyResponse & { id: string }) | undefined> {
+  const id = jobId === undefined ? undefined : (await api.listNotify(agentId)).notify_templates.at(-1)?.id;
+  if (id === undefined) {
+    return undefined;
+  }
+  try {
+    const newest = { ...(await api.getNotifyById(agentId, id)), id };
+    return newest.summary === summaryOf(source, jobId) ? newest : undefined;
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) {
       return undefined;
     }
     throw e;
@@ -202,13 +239,13 @@ async function currentOf(
 }
 
 /** The body of the put, with Notify's preview left out when the whole would pass the hub's request cap. */
-function putBody(source: NotifySource, base: number, by: Author): NotifyBody {
+function putBody(source: NotifySource, base: number, by: Author, jobId?: string): NotifyBody {
   const body: NotifyBody = {
     subject: source.notify_subject,
     body: source.notify_body,
     data: {},
     base_version: base,
-    summary: `Loaded version ${source.notify_version} from Notify`,
+    summary: summaryOf(source, jobId),
     source,
     ...(by === "user" ? { by } : {})
   };
@@ -224,11 +261,12 @@ function putBody(source: NotifySource, base: number, by: Author): NotifyBody {
 
 /**
  * Loads one of the product's templates into the conversation with no personalisation: as the next version of the
- * conversation's template `target`, or, with no target, as a new template. By the session, or `by: "user"` for the
+ * conversation's template `target`; with none, of the template that already holds it, if any; otherwise, or with
+ * `create` (the panel's picker asking for a new one), as a new template. By the session, or `by: "user"` for the
  * panel's picker, so the session is told the person changed it. Safe to run twice: a template already loaded at the
- * same Notify version, and not changed since, in the target or, with none, in the conversation's newest, is answered as
- * it is, so a pod that runs a job again after a crash writes no copy of it. A newer version written while it loaded is
- * `conflict`.
+ * same Notify version, and not changed since, in the one it loads into is answered as it is, and a `create` run again
+ * with the same `jobId` finds the template it made, so a pod that runs a job again after a crash writes no copy of it.
+ * A newer version written while it loaded is `conflict`.
  */
 export async function pullNotifyTemplate({
   productId,
@@ -238,13 +276,18 @@ export async function pullNotifyTemplate({
   api,
   deps = {},
   signal,
-  by = "agent"
+  by = "agent",
+  create = false,
+  jobId
 }: {
   productId: string;
   templateId: string;
   agentId: string;
-  /** The conversation's template to load into; left out, a new one is made. */
+  /** The conversation's template to load into; left out, the one that holds the Notify template, or a new one. */
   target?: string;
+  /** Always make a new template, whatever holds this Notify template, unless `jobId` already made it. */
+  create?: boolean;
+  jobId?: string;
   api: Pick<Api, "listNotify" | "getNotifyById" | "putNotifyById" | "createNotify">;
   deps?: NotifyDeps;
   signal?: AbortSignal;
@@ -254,28 +297,32 @@ export async function pullNotifyTemplate({
     throw new PodJobError("not_found", `"${templateId}" is not a Notify template id, which is a UUID.`);
   }
   const product = productOf(productId, deps);
-  const before = await currentOf(api, agentId, target);
+  let before = target === undefined ? undefined : await currentOf(api, agentId, target);
   const client = await clientFor(product, deps, signal);
   const template = await explained(() => client.getTemplate(templateId));
   const source = sourceOf(product.id, template, client.serviceId, await previewOf(client, template, signal));
-  if (before !== undefined && alreadyLoaded(before, source, by)) {
+  if (target === undefined) {
+    before = create ? await madeBy(api, agentId, source, jobId) : await holderOf(api, agentId, source);
+  }
+  if (before !== undefined && (target === undefined && create ? true : alreadyLoaded(before, source, by))) {
     return { id: before.id, version: before.version, name: source.name, written: false };
   }
+  const into = target ?? before?.id;
   signal?.throwIfAborted();
   try {
-    if (target === undefined) {
-      const made = await api.createNotify(agentId, putBody(source, 0, by));
+    if (into === undefined) {
+      const made = await api.createNotify(agentId, putBody(source, 0, by, create ? jobId : undefined));
       return { id: made.id, version: made.version, name: source.name, written: true };
     }
-    const written = await api.putNotifyById(agentId, target, putBody(source, before?.version ?? 0, by));
-    return { id: target, version: written.version, name: source.name, written: true };
+    const written = await api.putNotifyById(agentId, into, putBody(source, before?.version ?? 0, by));
+    return { id: into, version: written.version, name: source.name, written: true };
   } catch (e) {
     if (!(e instanceof ApiError && e.status === 409)) {
       throw e;
     }
     const current = e.body?.current as NotifyResponse | undefined;
-    if (target !== undefined && current !== undefined && alreadyLoaded(current, source, by)) {
-      return { id: target, version: current.version, name: source.name, written: false };
+    if (into !== undefined && current !== undefined && alreadyLoaded(current, source, by)) {
+      return { id: into, version: current.version, name: source.name, written: false };
     }
     throw new PodJobError("conflict", "The Notify template in this chat changed while it was loading. Try again.");
   }

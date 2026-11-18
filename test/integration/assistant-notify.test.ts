@@ -498,7 +498,7 @@ describe("several Notify templates in one conversation", () => {
     expect(primaryWrite.status).toBe(200);
     expect(await prisma.assistantNotify.count({ where: { conversationId: mine.id } })).toBe(1);
 
-    await prisma.virtualAgent.update({ where: { id: mine.virtualAgentId }, data: { clientFeatures: ["lookups", "items"] } });
+    await prisma.virtualAgent.update({ where: { id: mine.virtualAgentId }, data: { clientFeatures: ["lookups", "items", "item-templates"] } });
 
     expect((await listCall("POST", mine, { ...put(), ...otherPut() })).status).toBe(201);
   });
@@ -526,7 +526,7 @@ describe("the notify.pull pod job's target", () => {
     expect(await precheck(mine, {})).toEqual({ status: 409, error: ITEMS_CREATE_REFUSED_NOTIFY });
     expect(await precheck(mine, { item_id: second })).toEqual({ status: 409, error: ITEMS_CREATE_REFUSED_NOTIFY });
 
-    await prisma.virtualAgent.update({ where: { id: mine.virtualAgentId }, data: { clientFeatures: ["lookups", "items"] } });
+    await prisma.virtualAgent.update({ where: { id: mine.virtualAgentId }, data: { clientFeatures: ["lookups", "items", "item-templates"] } });
 
     expect(await precheck(mine, {})).toBeUndefined();
     expect(await precheck(mine, { item_id: second })).toBeUndefined();

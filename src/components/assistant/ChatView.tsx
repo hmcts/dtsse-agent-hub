@@ -435,11 +435,13 @@ export function ChatView({
   const documentDraftWaiting = unsaved.draft !== null && documentOpen?.id !== unsaved.draft.id;
   const [ask, setAsk] = useState<SlideAsk | null>(null);
   /**
-   * How many decks the conversation held when Create asked the assistant for slides, so it waits for the new one
-   * rather than asking again. The chat is keyed by conversation, so another conversation starts clear.
+   * The decks and their versions when Create asked the assistant for slides, so it waits for the new one rather than
+   * asking again. A new deck or a new version of one ends the wait, and so does the assistant's turn ending without
+   * either. The chat is keyed by conversation, so another conversation starts clear.
    */
-  const [slidesAskedAt, setSlidesAskedAt] = useState<number | null>(null);
-  const slidesAsked = slidesAskedAt !== null && view.decks.length <= slidesAskedAt;
+  const [slidesAskedAt, setSlidesAskedAt] = useState<string | null>(null);
+  const decksSignature = view.decks.map((one) => `${one.id}:${one.version}`).join(",");
+  const slidesAsked = slidesAskedAt !== null && decksSignature === slidesAskedAt;
   const [error, setError] = useState<string | null>(null);
   const warmed = useRef(false);
   const seenVersions = useRef(new Map(view.documents.map((document) => [document.id, document.version])));
@@ -516,7 +518,12 @@ export function ChatView({
     if (newest === undefined) {
       return;
     }
-    if ((panel === "document" && documentBusy.current) || (panel === "docmosis" && docmosisBusy.current) || (panel === "notify" && notifyBusy.current)) {
+    if (
+      (panel === "document" && documentBusy.current) ||
+      (panel === "docmosis" && docmosisBusy.current) ||
+      (panel === "notify" && notifyBusy.current) ||
+      (panel === "deck" && deckBusy.current && openDeck !== newest.id)
+    ) {
       setDecksWaiting((before) => [...before, ...arrived.map((one) => one.id).filter((id) => !before.includes(id))]);
       arrivals.announce("The assistant updated the slides. Open them from Items to see them.");
     } else {
@@ -524,7 +531,7 @@ export function ChatView({
       setPanel("deck");
       arrivals.announce("The assistant updated the slides");
     }
-  }, [view.decks, arrivals, panel]);
+  }, [view.decks, arrivals, panel, openDeck]);
 
   /**
    * The same for a Docmosis template: a newer version from the assistant opens it in the other panel's place, unless
@@ -725,6 +732,14 @@ export function ChatView({
   const tickets = ticketsOffered(ticketTool, shownDocument?.jira ?? NOT_EXPORTED, shownDocument?.github ?? NOT_EXPORTED);
   const thread = threadItems(live.items, view.productHistory, view.stopHistory, view.local);
   const doing: Progress = progress(live.items, thread, status, view.sessionState, view.local);
+  /** A turn ending, working or waking back to idle, with no new slides ends the wait for the slides Create asked for. */
+  const turnActive = useRef(false);
+  useEffect(() => {
+    if (turnActive.current && doing.state === "idle") {
+      setSlidesAskedAt(null);
+    }
+    turnActive.current = doing.state !== "idle";
+  }, [doing.state]);
   // Not part of `doing`: background work carries on after the session goes idle, so it has to show when nothing else does.
   const background = useMemo(() => (status === "offline" ? 0 : backgroundHelpers(live.items)), [status, live.items]);
   /**
@@ -974,7 +989,7 @@ export function ChatView({
     if (slidesAsked) {
       return;
     }
-    setSlidesAskedAt(view.decks.length);
+    setSlidesAskedAt(decksSignature);
     let problem: string | null;
     try {
       problem = await send(CREATE_SLIDES, []);

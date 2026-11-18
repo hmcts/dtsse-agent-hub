@@ -259,7 +259,7 @@ async function touchConversation(tx: Database, conversationId: string, now: Date
  * `items`, which would read only the primary (`ITEMS_CREATE_REFUSED_DOCMOSIS`). The conversation's row is locked by the caller.
  */
 async function insertItem(tx: Database, conversation: Conversation): Promise<string> {
-  if ((await tx.assistantDocmosis.count({ where: { conversationId: conversation.id } })) > 0 && (await podLacksItems(tx, conversation))) {
+  if ((await tx.assistantDocmosis.count({ where: { conversationId: conversation.id } })) > 0 && (await podLacksItems(tx, conversation, "item-templates"))) {
     throw new HttpError(409, ITEMS_CREATE_REFUSED_DOCMOSIS);
   }
   const row = await tx.assistantDocmosis.create({ data: { conversationId: conversation.id }, select: { id: true } });
@@ -298,10 +298,18 @@ type WritingAgent = { virtualAgentId: string | null };
 /**
  * The `docmosis.load` job `pick` names, locked for the write's transaction, once it is pending and in its time, was
  * asked for in this conversation by its owner, on the virtual agent the conversation and the writing agent are still
- * on (`canRecordPickAsOwner`), names a template, and targets the template the write is to (`item`, none for a new one). Refused otherwise (`pickRefused`), so a write naming somebody
+ * on (`canRecordPickAsOwner`), names a template, and targets the template the write is to (`item`, none for a new one, which once the conversation holds one must be a `create`). Refused otherwise (`pickRefused`), so a write naming somebody
  * else's pick, or one already used, writes nothing at all.
  */
-async function bindPick(tx: Database, conversation: Conversation, agent: WritingAgent, pick: string, item: string | undefined, now: Date): Promise<BoundPick> {
+async function bindPick(
+  tx: Database,
+  conversation: Conversation,
+  agent: WritingAgent,
+  pick: string,
+  item: string | undefined,
+  create: boolean,
+  now: Date
+): Promise<BoundPick> {
   const job = await lockPendingPodJob(tx, pick, DOCMOSIS_LOAD_KIND, now);
   if (job === undefined || !canRecordPickAsOwner(job, conversation, agent)) {
     throw await pickRefused(tx, conversation, agent, pick);
@@ -312,6 +320,16 @@ async function bindPick(tx: Database, conversation: Conversation, agent: Writing
   }
   if (args.data.item !== item) {
     throw new HttpError(400, args.data.item === undefined ? "pick loads a new template, not into an existing one" : "pick loads into another template");
+  }
+  // A load naming no item is a new template once the conversation holds one, unless it went to a pod whose client
+  // takes no `item`, which writes the primary.
+  if (
+    item === undefined &&
+    !create &&
+    (await tx.assistantDocmosis.count({ where: { conversationId: conversation.id } })) > 0 &&
+    !(await podLacksItems(tx, conversation, "item-templates"))
+  ) {
+    throw new HttpError(400, "pick loads a new template, not into an existing one");
   }
   return { job, path: args.data.path, blobSha: args.data.blob_sha };
 }
@@ -343,7 +361,7 @@ export async function writeAgentDocmosis(
     await lockConversation(tx, conversationId);
     const conversation = await conversationOf(tx, conversationId);
     const writer = agent ?? { virtualAgentId: null };
-    const pick = body.pick === undefined ? undefined : await bindPick(tx, conversation, writer, body.pick, item, now);
+    const pick = body.pick === undefined ? undefined : await bindPick(tx, conversation, writer, body.pick, item, create, now);
     const by: DocmosisAuthor = pick === undefined ? "agent" : "user";
     const summary = pick === undefined ? (body.summary ?? null) : loadedSummary(pick.path);
     const sha = docxSha(body.docx) ?? "";

@@ -22,5 +22,8 @@ export const POST = ownedAgentRoute<{ agentId: string }>(async ({ agent, request
   if (!checked.ok) {
     throw new HttpError(400, checked.error);
   }
+  if (checked.value.base_version !== 0) {
+    throw new HttpError(400, "base_version must be 0 for a new template");
+  }
   return json(await writeAgentDocmosis(prisma, { conversationId: conversation.id, create: true, body: checked.value, agent }), 201);
 });

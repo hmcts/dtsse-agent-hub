@@ -104,21 +104,25 @@ describe("the notify.pull precheck", () => {
   });
 
   it("should refuse with 404 when the target template is not in the conversation", async () => {
-    expect(await precheck(database([ITEM], ["items"]), { ...PULL, item_id: OTHER })).toEqual({
+    expect(await precheck(database([ITEM], ["item-templates"]), { ...PULL, item_id: OTHER })).toEqual({
       status: 404,
       error: "that Notify template is no longer in the chat"
     });
   });
 
-  it("should pass a pull into the primary template when the pod's client is older than items", async () => {
+  it("should pass a pull into the primary template when the pod's client is older than item-templates", async () => {
     expect(await precheck(database([ITEM], []), { ...PULL, item_id: ITEM })).toBeUndefined();
   });
 
-  it("should refuse a pull that makes a second template when the pod's client is older than items", async () => {
+  it("should refuse a pull that makes a second template when the pod's client is older than item-templates", async () => {
     expect(await precheck(database([ITEM], []), PULL)).toEqual({ status: 409, error: ITEMS_CREATE_REFUSED_NOTIFY });
   });
 
-  it("should pass a pull that makes a second template when the pod's client claims items", async () => {
-    expect(await precheck(database([ITEM], ["items"]), PULL)).toBeUndefined();
+  it("should refuse a pull that makes a second template when the pod's client claims items but not item-templates", async () => {
+    expect(await precheck(database([ITEM], ["items"]), PULL)).toEqual({ status: 409, error: ITEMS_CREATE_REFUSED_NOTIFY });
+  });
+
+  it("should pass a pull that makes a second template when the pod's client claims item-templates", async () => {
+    expect(await precheck(database([ITEM], ["item-templates"]), PULL)).toBeUndefined();
   });
 });

@@ -646,6 +646,15 @@ describe("a conversation's several decks", () => {
     ]);
   });
 
+  it("should refuse a new deck with 400, and make none, when it names a base version above 0", async () => {
+    const mine = await chat();
+
+    const response = await create(mine, "First", 2);
+
+    expect(response.status).toBe(400);
+    expect(await list(mine)).toEqual([]);
+  });
+
   it("should list each deck oldest first with its id, title, version, revision and author, and answer an empty list for a chat with none", async () => {
     const mine = await chat();
     expect(await list(mine)).toEqual([]);
@@ -706,7 +715,7 @@ describe("a conversation's several decks", () => {
       outline: outline([], "First, again"),
       base_version: 1
     });
-    await claim(mine, ["lookups", "github-lookups", "items"]);
+    await claim(mine, ["lookups", "github-lookups", "items", "item-templates"]);
     const allowed = await create(mine, "Second");
 
     expect(first.status).toBe(201);

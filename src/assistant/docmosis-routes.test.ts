@@ -209,6 +209,13 @@ describe("GET and POST /api/agent/{id}/docmosis-templates", () => {
     expect(store.writeAgentDocmosis).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ conversationId: "conv-1", create: true }));
   });
 
+  it("should answer 400 when a new template names a base version above 0, and write nothing", async () => {
+    const response = await refusal(list.POST(request("POST", JSON.stringify(bodyOf({ base_version: 3 }))), params({ agentId: "a" })));
+
+    expect(response.status).toBe(400);
+    expect(store.writeAgentDocmosis).not.toHaveBeenCalled();
+  });
+
   it("should answer 400 when the body to create is refused, and write nothing", async () => {
     expect((await refusal(list.POST(request("POST", JSON.stringify(bodyOf({ docx: "nope" }))), params({ agentId: "a" })))).status).toBe(400);
     expect(store.writeAgentDocmosis).not.toHaveBeenCalled();

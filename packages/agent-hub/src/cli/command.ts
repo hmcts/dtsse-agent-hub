@@ -1,5 +1,6 @@
 // What every command is handed, and the argument checks the commands share.
 import fs from "node:fs";
+import path from "node:path";
 import { loadAgent, normaliseTopics, type StoredAgent } from "../agent.ts";
 import type { Api } from "../api.ts";
 import type { Env } from "../env.ts";
@@ -118,4 +119,20 @@ export function textArg(cli: Cli, rest: string[], what: string): string {
     throw new UsageError(`${what} is empty`);
   }
   return text;
+}
+
+const ITEM_ID_DIR = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * A put without `--id` is of the primary, whose working directory holds every other item's in a directory named by its
+ * id. A file from one of those would be put on the primary's recorded version, so it is refused, naming the id.
+ */
+export function refuseNestedItemFile(primaryDir: string, file: string, id: string | undefined): void {
+  if (id !== undefined) {
+    return;
+  }
+  const [first, ...below] = path.relative(primaryDir, file).split(path.sep);
+  if (below.length > 0 && first !== undefined && ITEM_ID_DIR.test(first)) {
+    throw new UsageError(`${file} is in the working directory of item ${first}, so put it with --id ${first}`);
+  }
 }
