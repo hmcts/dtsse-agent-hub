@@ -22,7 +22,7 @@ export const MAX_COVERAGE_SUMMARY = 300;
  * Long enough to put a 200 MiB recording over a slow connection. The URL can still write the blob after the upload is
  * finished, until it expires, which is why the hub records the blob's ETag and serves the video only while it matches.
  */
-export const VIDEO_UPLOAD_TTL_MS = 30 * 60_000;
+export const VIDEO_UPLOAD_TTL_MS = 60 * 60_000;
 /** Long enough to watch a long recording through, and for a pod to download it to attach it. */
 export const VIDEO_READ_TTL_MS = 60 * 60_000;
 /** An upload that was never finished is deleted, row and blob, this long after it began. */

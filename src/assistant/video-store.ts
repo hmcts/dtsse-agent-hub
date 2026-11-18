@@ -172,7 +172,13 @@ export async function finishVideo(
     }
     const older = await tx.assistantVideo.findMany({ where: { conversationId, status: "ready" }, select: { videoId: true } });
     await tx.assistantVideo.deleteMany({ where: { conversationId, status: "ready" } });
-    await tx.assistantVideo.update({ where: { videoId }, data: { status: "ready", finishedAt: now, etag } });
+    const { count } = await tx.assistantVideo.updateMany({
+      where: { videoId, conversationId, status: "uploading" },
+      data: { status: "ready", finishedAt: now, etag }
+    });
+    if (count === 0) {
+      throw new HttpError(404, "that upload is not one of this conversation's");
+    }
     await tx.$executeRaw`
       UPDATE assistant_conversation
          SET video_version = video_version + 1, video_name = ${row.name}, video_updated_at = ${now},

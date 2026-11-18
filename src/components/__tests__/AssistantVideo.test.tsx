@@ -116,6 +116,23 @@ describe("the video panel's play URL", () => {
     expect(window.HTMLMediaElement.prototype.play).toHaveBeenCalled();
   });
 
+  it("should renew once and then show the player failing, when the new URL errors too", async () => {
+    const signed = serveSigned();
+    const { container } = render(panel());
+    await settle();
+    const player = container.querySelector("video") as HTMLVideoElement;
+
+    fireEvent.error(player);
+    await settle();
+    fireEvent.error(player);
+    await settle();
+
+    expect(signed()).toBe(2);
+    expect(screen.getByRole("alert").textContent).toBe("The video could not be played.");
+    fireEvent.loadedData(player);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("should read a fresh URL before the one it has expires, when the panel stays open", async () => {
     vi.useFakeTimers();
     try {

@@ -252,6 +252,9 @@ function Report({ title, summary, source }: { title: string; summary?: string | 
 function Player({ conversationId, detail, renew }: { conversationId: string; detail: VideoDetail; renew: () => void }) {
   const video = useRef<HTMLVideoElement>(null);
   const loaded = useRef<{ id: string; url: string } | null>(null);
+  /** A failure is put down to an expired URL once; one that follows a fresh URL is the file's, and is left to the player. */
+  const renewed = useRef(false);
+  const [broken, setBroken] = useState(false);
   const [now, setNow] = useState(0);
   const current = detail.chapters.reduce((found, chapter, index) => (chapter.at <= now ? index : found), -1);
 
@@ -299,11 +302,27 @@ function Player({ conversationId, detail, renew }: { conversationId: string; det
         controls
         preload="metadata"
         onTimeUpdate={(event) => setNow(event.currentTarget.currentTime)}
-        onError={renew}
+        onLoadedData={() => {
+          renewed.current = false;
+          setBroken(false);
+        }}
+        onError={() => {
+          if (renewed.current) {
+            setBroken(true);
+          } else {
+            renewed.current = true;
+            renew();
+          }
+        }}
         className="max-h-[60vh] w-full rounded-lg bg-black"
       >
         {detail.has_captions ? <track kind="captions" src={captionsUrl(conversationId, detail.video_id)} srcLang="en" label="English" default /> : null}
       </video>
+      {broken ? (
+        <p role="alert" className="text-[13px] text-red-400">
+          The video could not be played.
+        </p>
+      ) : null}
       {detail.chapters.length === 0 ? null : (
         <nav aria-label="Chapters">
           <h3 className="mb-1 text-[12px] font-medium uppercase tracking-wider text-asst-muted">Chapters</h3>
