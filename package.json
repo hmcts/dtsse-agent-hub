@@ -45,7 +45,7 @@
     "@azure/keyvault-secrets": "4.12.0",
     "@azure/storage-blob": "12.34.0",
     "@hmcts-cft/cloud-native-platform": "2.3.0",
-    "@hmcts-cft/docmosis-tools": "0.1.4",
+    "@hmcts-cft/notify-tools": "0.1.0",
     "@prisma/adapter-pg": "7.10.1",
     "@prisma/client": "7.10.1",
     "@rrweb/record": "2.2.2",

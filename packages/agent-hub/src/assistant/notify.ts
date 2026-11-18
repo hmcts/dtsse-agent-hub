@@ -2,9 +2,9 @@
 // read from its AAT Key Vault here and used here, and never sent to the hub. `agent-hub notify list|pull` and the
 // Notify panel's `notify.list` and `notify.pull` pod jobs both run these. See "Notify templates" in dtsse-agent-hub's
 // docs/agent-api.md.
-import { apiPersonalisation, findPlaceholders, type NotifyTemplate } from "@hmcts-cft/docmosis-tools/notify";
-import { KeyVaultError, NotifyApiError, NotifyClient, readSecret } from "@hmcts-cft/docmosis-tools/notify/node";
-import { BUILT_IN_PRODUCTS, type NotifyProduct } from "@hmcts-cft/docmosis-tools/notify/products";
+import { apiPersonalisation, findPlaceholders, type NotifyTemplate } from "@hmcts-cft/notify-tools";
+import { KeyVaultError, NotifyApiError, NotifyClient, readSecret } from "@hmcts-cft/notify-tools/node";
+import { BUILT_IN_PRODUCTS, type NotifyProduct } from "@hmcts-cft/notify-tools/products";
 import type { Api } from "../api.ts";
 import { ApiError } from "../api.ts";
 import { CLI } from "../envelope.ts";

@@ -1,7 +1,7 @@
 "use client";
 
-import { dataKey, findPlaceholders, formValues, personalisationSchema, renderLocal, templateAdminUrl } from "@hmcts-cft/docmosis-tools/notify";
-import { BUILT_IN_PRODUCTS, mergeProducts } from "@hmcts-cft/docmosis-tools/notify/products";
+import { dataKey, findPlaceholders, formValues, personalisationSchema, renderLocal, templateAdminUrl } from "@hmcts-cft/notify-tools";
+import { BUILT_IN_PRODUCTS, mergeProducts } from "@hmcts-cft/notify-tools/products";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSidebarWidth } from "@/components/assistant/AssistantShell";
 import { DocmosisForm, type DocmosisFormHandlers } from "@/components/assistant/DocmosisForm";

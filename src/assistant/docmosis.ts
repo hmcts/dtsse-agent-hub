@@ -4,7 +4,7 @@ import { jsonbText } from "./deck.ts";
 
 /**
  * A conversation's Docmosis template as the hub keeps it: the .docx, the form schema `docmosis schema` extracted from
- * it (dtsse-docmosis-tools' `inferSchema`), the data the form holds and the PDF rendered from them. The .docx is named
+ * it (dtsse-ide-tooling's `inferSchema`), the data the form holds and the PDF rendered from them. The .docx is named
  * by the SHA-256 of bytes the hub holds, as a deck's pictures are. See "Docmosis templates" in docs/agent-api.md.
  */
 

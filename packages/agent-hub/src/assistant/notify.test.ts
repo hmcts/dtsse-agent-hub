@@ -1,5 +1,5 @@
-import type { NotifyTemplate } from "@hmcts-cft/docmosis-tools/notify";
-import { KeyVaultError, NotifyApiError } from "@hmcts-cft/docmosis-tools/notify/node";
+import type { NotifyTemplate } from "@hmcts-cft/notify-tools";
+import { KeyVaultError, NotifyApiError } from "@hmcts-cft/notify-tools/node";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api.ts";
 import type { NotifyBody, NotifyResponse } from "../wire.ts";

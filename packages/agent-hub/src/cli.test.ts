@@ -48,8 +48,8 @@ const notifyFake = vi.hoisted(() => ({
   readSecret: undefined as ((vault: string, secret: string) => Promise<string>) | undefined,
   reads: [] as string[]
 }));
-vi.mock("@hmcts-cft/docmosis-tools/notify/node", async (importOriginal) => {
-  const real = await importOriginal<typeof import("@hmcts-cft/docmosis-tools/notify/node")>();
+vi.mock("@hmcts-cft/notify-tools/node", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@hmcts-cft/notify-tools/node")>();
   const client = {
     serviceId: "5c1f3d4a-0000-4000-8000-000000000001",
     listTemplates: async () => notifyFake.templates,
@@ -1860,7 +1860,7 @@ describe("artefact, in an assistant conversation", () => {
     it("should print the Key Vault's own words and exit 1, when the person cannot read the product's key", async () => {
       // Arrange
       const { sid } = await session();
-      const { KeyVaultError } = await import("@hmcts-cft/docmosis-tools/notify/node");
+      const { KeyVaultError } = await import("@hmcts-cft/notify-tools/node");
       notifyFake.readSecret = async () => {
         throw new KeyVaultError("Forbidden: you have no read access to secrets in the Key Vault pcs-aat.");
       };
