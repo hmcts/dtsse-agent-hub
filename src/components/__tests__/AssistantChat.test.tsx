@@ -1272,7 +1272,7 @@ describe("ChatView Create", () => {
     return screen.getAllByRole("menuitem").map((row) => row.getAttribute("aria-label") ?? "");
   }
 
-  it("should offer every kind on a pod chat, in the order the header lists them", () => {
+  it("should offer every kind, in the order the header lists them, when the chat is on a pod", () => {
     render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions()} />);
     expect(offered()).toEqual(["Document", "Slides", "Docmosis template", "Notify template"]);
   });
@@ -1282,7 +1282,7 @@ describe("ChatView Create", () => {
     expect(offered()).toEqual(["Document"]);
   });
 
-  it("should offer the kinds a local chat's session already wrote, to open them", () => {
+  it("should offer to open the kinds a local chat's session already wrote when it holds them", () => {
     const view = conversation({
       local: true,
       deck: { title: "Plan", version: 1, revision: 1, updatedBy: "agent", pptx: false },
@@ -1316,6 +1316,35 @@ describe("ChatView Create", () => {
     });
 
     expect(screen.getByRole("alert").textContent).toBe("the assistant is not running");
+  });
+
+  it("should send the request for slides once, and show them as being made, when the person creates slides twice", async () => {
+    let answer: (result: Awaited<ReturnType<ChatActions["send"]>>) => void = () => undefined;
+    const send = vi.fn(() => new Promise<Awaited<ReturnType<ChatActions["send"]>>>((resolve) => (answer = resolve)));
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions({ send })} />);
+
+    create("Slides");
+    create("Slides, being made");
+    await act(async () => {
+      answer({ ok: true, message: message("99", { body: "sent" }) });
+      await Promise.resolve();
+    });
+    create("Slides, being made");
+
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("should send the request for slides again when the person creates slides after a refusal", async () => {
+    const send = vi.fn(async () => ({ ok: false as const, error: "the assistant is not running" }));
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions({ send })} />);
+
+    create("Slides");
+    await act(async () => {
+      await Promise.resolve();
+    });
+    create("Slides");
+
+    expect(send).toHaveBeenCalledTimes(2);
   });
 
   it("should say the request could not be sent when the request for slides never reaches the hub", async () => {
@@ -2329,7 +2358,7 @@ describe("ChatView slides", () => {
 
     rerender(chat({ deck: { ...DECK, version: 8, updatedBy: "agent" }, artefact: WRITTEN }, chatActions));
 
-    expect(await announced()).toContain("The assistant updated the slides. Open slides to see them.");
+    expect(await announced()).toContain("The assistant updated the slides. Open them from Items to see them.");
     expect(screen.getByRole("region", { name: "Document" })).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Slides" })).toBeNull();
     openSwitcher();
@@ -2415,7 +2444,7 @@ describe("ChatView slides", () => {
 
     rerender(chat({ deck: DECK, artefact: { ...WRITTEN, version: 2, updatedBy: "agent" } }, chatActions));
 
-    expect(await announced()).toContain("The assistant updated the document. Open document to see it.");
+    expect(await announced()).toContain("The assistant updated the document. Open it from Items to see it.");
     expect(screen.getByRole("toolbar", { name: "Editing slides" })).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Document" })).toBeNull();
     openSwitcher();
@@ -2515,7 +2544,7 @@ describe("ChatView slides", () => {
       answer({ ok: false, error: "down" });
     });
 
-    expect(await announced()).toContain("Your slides could not be saved. Open slides to see your changes.");
+    expect(await announced()).toContain("Your slides could not be saved. Open them from Items to see your changes.");
     expect(screen.getByRole("region", { name: "Document" })).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Slides" })).toBeNull();
     openSwitcher();
@@ -2544,7 +2573,7 @@ describe("ChatView slides", () => {
       answer({ ok: false, error: "down" });
     });
 
-    expect(await announced()).toContain("Your document could not be saved. Open document to see your changes.");
+    expect(await announced()).toContain("Your document could not be saved. Open it from Items to see your changes.");
     expect(screen.getByRole("toolbar", { name: "Editing slides" })).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Document" })).toBeNull();
     openSwitcher();

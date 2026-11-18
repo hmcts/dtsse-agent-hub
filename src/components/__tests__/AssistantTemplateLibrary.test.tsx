@@ -879,6 +879,27 @@ describe("ChatView template button", () => {
     expect(screen.getAllByTestId("arrivals").map((region) => region.textContent)).toContain("Loaded Claim form.docx");
   });
 
+  it("should keep the template in the switcher, marked once the load fails, when another panel opens on a chat with no template", async () => {
+    const server = serve();
+    render(<Chat view={conversation()} />);
+    createTemplate();
+    await settle();
+    await pickClaimForm();
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Document" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Items/ }));
+    expect(screen.getByRole("menuitemradio", { name: "Docmosis template" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^Items/ }));
+
+    finishJob(server, { job_id: JOB, kind: "docmosis.load", status: "failed", error: "not_docx" });
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Document" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Items/ }));
+    expect(screen.getByRole("menuitemradio", { name: "Docmosis template, which did not load" })).toBeTruthy();
+    expect(screen.getByTestId("docmosis-failed")).toBeTruthy();
+  });
+
   it("should open on the conflict choice when a load the panel was closed on is refused for a newer version", async () => {
     const server = serve();
     render(<Chat view={conversation()} />);

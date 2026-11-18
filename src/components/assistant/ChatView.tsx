@@ -399,6 +399,11 @@ export function ChatView({
   const deckDraftWaiting = unsavedDeck.draft !== null && panel !== "deck";
   const documentDraftWaiting = unsaved.draft !== null && panel !== "document";
   const [ask, setAsk] = useState<SlideAsk | null>(null);
+  /**
+   * Create has asked the assistant for slides, so it waits for the deck rather than asking again. The chat is keyed by
+   * conversation, so another conversation starts clear.
+   */
+  const [slidesAsked, setSlidesAsked] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const warmed = useRef(false);
   const seenVersion = useRef(view.artefact.version);
@@ -432,7 +437,7 @@ export function ChatView({
     if (view.artefact.version > seenVersion.current && view.artefact.updatedBy === "agent") {
       if ((panel === "deck" && deckBusy.current) || (panel === "docmosis" && docmosisBusy.current) || (panel === "notify" && notifyBusy.current)) {
         setDocumentWaiting(true);
-        arrivals.announce("The assistant updated the document. Open document to see it.");
+        arrivals.announce("The assistant updated the document. Open it from Items to see it.");
       } else {
         setPanel("document");
         arrivals.announce("The assistant updated the document");
@@ -452,7 +457,7 @@ export function ChatView({
     if (deckVersion > seenDeck.current && deckBy === "agent") {
       if ((panel === "document" && documentBusy.current) || (panel === "docmosis" && docmosisBusy.current) || (panel === "notify" && notifyBusy.current)) {
         setSlidesWaiting(true);
-        arrivals.announce("The assistant updated the slides. Open slides to see them.");
+        arrivals.announce("The assistant updated the slides. Open them from Items to see them.");
       } else {
         setPanel("deck");
         arrivals.announce("The assistant updated the slides");
@@ -473,7 +478,7 @@ export function ChatView({
     if (docmosisVersion > seenDocmosis.current && docmosisBy === "agent") {
       if ((panel === "document" && documentBusy.current) || (panel === "deck" && deckBusy.current) || (panel === "notify" && notifyBusy.current)) {
         setDocmosisWaiting(true);
-        arrivals.announce("The assistant updated the template. Open template to see it.");
+        arrivals.announce("The assistant updated the template. Open it from Items to see it.");
       } else {
         setPanel("docmosis");
         arrivals.announce("The assistant updated the template");
@@ -489,7 +494,7 @@ export function ChatView({
     if (notifyVersion > seenNotify.current && notifyBy === "agent") {
       if ((panel === "document" && documentBusy.current) || (panel === "deck" && deckBusy.current) || (panel === "docmosis" && docmosisBusy.current)) {
         setNotifyWaiting(true);
-        arrivals.announce("The assistant updated the Notify template. Open Notify to see it.");
+        arrivals.announce("The assistant updated the Notify template. Open it from Items to see it.");
       } else if (panel !== "notify") {
         setPanel("notify");
         arrivals.announce("The assistant updated the Notify template");
@@ -524,8 +529,8 @@ export function ChatView({
     ) {
       arrivals.announce(
         draft.conflict === null
-          ? "Your slides could not be saved. Open slides to see your changes."
-          : "The slides changed while you were editing them. Open slides to see your changes."
+          ? "Your slides could not be saved. Open them from Items to see your changes."
+          : "The slides changed while you were editing them. Open them from Items to see your changes."
       );
       return;
     }
@@ -546,8 +551,8 @@ export function ChatView({
     ) {
       arrivals.announce(
         draft.conflict === null
-          ? "Your document could not be saved. Open document to see your changes."
-          : "The document changed while you were editing it. Open document to see your changes."
+          ? "Your document could not be saved. Open it from Items to see your changes."
+          : "The document changed while you were editing it. Open it from Items to see your changes."
       );
       return;
     }
@@ -568,21 +573,6 @@ export function ChatView({
   const pod = !view.local;
   const hasDocument = view.artefact.version > 0 || unsaved.draft !== null;
   /**
-   * What the switcher moves between: each item the conversation holds, and the panel that is open, which is one to
-   * return to even before its first save.
-   */
-  const items: SwitcherItem[] = [
-    ...(hasDocument || panel === "document"
-      ? [{ key: "document", label: "Document", open: () => setPanel("document"), waiting: documentWaiting, unsaved: documentDraftWaiting }]
-      : []),
-    ...(view.deck === null ? [] : [{ key: "slides", label: "Slides", open: () => setPanel("deck"), waiting: slidesWaiting, unsaved: deckDraftWaiting }]),
-    ...(docmosis === null && panel !== "docmosis"
-      ? []
-      : [{ key: "docmosis", label: "Docmosis template", open: () => setPanel("docmosis"), waiting: docmosisWaiting }]),
-    ...(notify === null && panel !== "notify" ? [] : [{ key: "notify", label: "Notify template", open: () => setPanel("notify"), waiting: notifyWaiting }])
-  ];
-  const switcherPanel = panel === "deck" ? "slides" : panel;
-  /**
    * What Create offers. A conversation holds one of each kind, so a kind it already holds is opened rather than made
    * again. Slides, a Docmosis template and a Notify template are each made through the pod — the assistant drafts the
    * slides, and the two templates are chosen from libraries the pod reads — so a local chat is offered only one its
@@ -595,7 +585,7 @@ export function ChatView({
       ? [
           {
             key: "slides",
-            label: "Slides",
+            label: view.deck === null && slidesAsked ? "Slides, being made" : "Slides",
             exists: view.deck !== null,
             choose: view.deck === null ? () => void createSlides() : () => setPanel("deck")
           }
@@ -663,7 +653,7 @@ export function ChatView({
     }
     if ((panelNow.current === "document" && documentBusy.current) || (panelNow.current === "deck" && deckBusy.current)) {
       if (outcome === "failed") {
-        arrivals.announce("Your template did not load. Open the template to see why.");
+        arrivals.announce("Your template did not load. Open it from Items to see why.");
       }
       return;
     }
@@ -673,6 +663,31 @@ export function ChatView({
     }
   }
   const templateLoad = useTemplateLoad({ conversationId: view.id, docmosis, announce: arrivals.announce, onSettled: templateLoadSettled });
+  // A load's outcome waits in the Docmosis panel, so its row stays in the switcher until the person has seen it.
+  const loadFailed = templateLoad.load.phase === "failed";
+  /**
+   * What the switcher moves between: each item the conversation holds, and the panel that is open, which is one to
+   * return to even before its first save.
+   */
+  const items: SwitcherItem[] = [
+    ...(hasDocument || panel === "document"
+      ? [{ key: "document", label: "Document", open: () => setPanel("document"), waiting: documentWaiting, unsaved: documentDraftWaiting }]
+      : []),
+    ...(view.deck === null ? [] : [{ key: "slides", label: "Slides", open: () => setPanel("deck"), waiting: slidesWaiting, unsaved: deckDraftWaiting }]),
+    ...(docmosis === null && panel !== "docmosis" && !templateLoad.pending && !loadFailed
+      ? []
+      : [
+          {
+            key: "docmosis",
+            label: "Docmosis template",
+            open: () => setPanel("docmosis"),
+            waiting: docmosisWaiting,
+            failed: loadFailed && panel !== "docmosis"
+          }
+        ]),
+    ...(notify === null && panel !== "notify" ? [] : [{ key: "notify", label: "Notify template", open: () => setPanel("notify"), waiting: notifyWaiting }])
+  ];
+  const switcherPanel = panel === "deck" ? "slides" : panel;
   const artefact: ArtefactSnapshot = {
     title: view.artefact.title,
     markdown: view.artefact.markdown,
@@ -697,6 +712,10 @@ export function ChatView({
 
   /** There is no blank deck to edit: slides are drafted by the assistant, so Create asks it to. */
   async function createSlides(): Promise<void> {
+    if (slidesAsked) {
+      return;
+    }
+    setSlidesAsked(true);
     let problem: string | null;
     try {
       problem = await send(CREATE_SLIDES, []);
@@ -705,6 +724,7 @@ export function ChatView({
     }
     if (problem !== null) {
       setError(problem);
+      setSlidesAsked(false);
     }
   }
 

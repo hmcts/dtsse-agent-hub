@@ -16,7 +16,7 @@ function trigger(): HTMLElement {
 }
 
 describe("CreateMenu", () => {
-  it("should offer every option given, in order, as menu items", () => {
+  it("should offer every option given, in order, as menu items when opened", () => {
     render(<CreateMenu options={[option("document", "Document"), option("slides", "Slides"), option("notify", "Notify template")]} />);
     expect(trigger().getAttribute("aria-haspopup")).toBe("menu");
     expect(trigger().getAttribute("aria-expanded")).toBe("false");
@@ -44,7 +44,7 @@ describe("CreateMenu", () => {
     expect(document.activeElement).toBe(trigger());
   });
 
-  it("should move between the options with the arrow keys, and close on Escape with focus back on the trigger", () => {
+  it("should move between the options, and close with focus back on the trigger, when the arrow keys and Escape are pressed", () => {
     render(<CreateMenu options={[option("document", "Document"), option("slides", "Slides")]} />);
     fireEvent.keyDown(trigger(), { key: "ArrowDown" });
     const [document_, slides] = screen.getAllByRole("menuitem");

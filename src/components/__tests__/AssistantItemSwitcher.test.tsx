@@ -32,7 +32,7 @@ describe("ItemSwitcher", () => {
     expect(trigger().textContent).toContain("Slides");
   });
 
-  it("should list every item, check the open one, and open the one chosen, closing the menu", () => {
+  it("should list every item with the open one checked, and open the one chosen, when the menu is opened", () => {
     const slides = item("slides", "Slides");
     render(<ItemSwitcher items={[item("document", "Document"), slides]} current="document" />);
     expect(trigger().getAttribute("aria-haspopup")).toBe("menu");
@@ -67,13 +67,34 @@ describe("ItemSwitcher", () => {
     expect(screen.getByTestId("slides-updated")).toBeTruthy();
   });
 
+  it("should mark the row and name it as not loaded when a load into the item failed", () => {
+    render(<ItemSwitcher items={[item("docmosis", "Docmosis template", { failed: true })]} current={null} />);
+    expect(trigger().getAttribute("aria-label")).toBe("Items, with changes to see");
+
+    fireEvent.click(trigger());
+    expect(screen.getByRole("menuitemradio", { name: "Docmosis template, which did not load" })).toBeTruthy();
+    expect(screen.getByTestId("docmosis-failed")).toBeTruthy();
+  });
+
+  it("should come back closed when the list empties with the menu open and an item then returns", () => {
+    const items = [item("document", "Document")];
+    const { rerender } = render(<ItemSwitcher items={items} current={null} />);
+    fireEvent.click(trigger());
+    expect(screen.getByRole("menu", { name: "Items" })).toBeTruthy();
+
+    rerender(<ItemSwitcher items={[]} current={null} />);
+    rerender(<ItemSwitcher items={items} current={null} />);
+    expect(screen.queryByRole("menu", { name: "Items" })).toBeNull();
+    expect(trigger().getAttribute("aria-expanded")).toBe("false");
+  });
+
   it("should leave the trigger unmarked when nothing is waiting", () => {
     render(<ItemSwitcher items={[item("document", "Document")]} current={null} />);
     expect(trigger().getAttribute("aria-label")).toBe("Items");
     expect(trigger().className).toContain("border-asst-strong");
   });
 
-  it("should open on ArrowDown with the first row focused, move with the arrows, Home and End, and wrap", () => {
+  it("should focus the first row, and move and wrap with the arrows, Home and End, when opened with ArrowDown", () => {
     render(<ItemSwitcher items={[item("document", "Document"), item("slides", "Slides"), item("docmosis", "Docmosis template")]} current={null} />);
     fireEvent.keyDown(trigger(), { key: "ArrowDown" });
     const [first, second, third] = screen.getAllByRole("menuitemradio");
@@ -91,7 +112,7 @@ describe("ItemSwitcher", () => {
     expect(document.activeElement).toBe(first);
   });
 
-  it("should open on ArrowUp with the last row focused", () => {
+  it("should focus the last row when opened with ArrowUp", () => {
     render(<ItemSwitcher items={[item("document", "Document"), item("slides", "Slides")]} current={null} />);
     fireEvent.keyDown(trigger(), { key: "ArrowUp" });
     expect(document.activeElement).toBe(screen.getByRole("menuitemradio", { name: "Slides" }));

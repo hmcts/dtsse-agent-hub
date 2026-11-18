@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { useMenuButton } from "@/components/assistant/useMenuButton";
 
 /** One thing a conversation holds that opens in the panel beside it. */
@@ -11,12 +12,17 @@ export interface SwitcherItem {
   waiting?: boolean;
   /** An edit the person closed it on could not be saved, and waits to be opened again. */
   unsaved?: boolean;
+  /** A load into it failed while it was closed, and the reason waits in it. */
+  failed?: boolean;
 }
 
 /** What is said and marked for an item with something to see; unsaved changes first, as the person's own work. */
 function state(item: SwitcherItem): { suffix: string; testId: string } | null {
   if (item.unsaved === true) {
     return { suffix: "with your unsaved changes", testId: `${item.key}-unsaved` };
+  }
+  if (item.failed === true) {
+    return { suffix: "which did not load", testId: `${item.key}-failed` };
   }
   if (item.waiting === true) {
     return { suffix: "updated by the assistant", testId: `${item.key}-updated` };
@@ -38,12 +44,20 @@ function Dot({ testId }: { testId?: string }) {
  */
 export function ItemSwitcher({ items, current }: Readonly<{ items: readonly SwitcherItem[]; current: string | null }>) {
   const menu = useMenuButton();
-  if (items.length === 0) {
+  const empty = items.length === 0;
+  const { close } = menu;
+  // Unmounting the menu with the list would leave it open, to come back open with the next item.
+  useEffect(() => {
+    if (empty) {
+      close();
+    }
+  }, [empty, close]);
+  if (empty) {
     return null;
   }
-  const shown = items.find((item) => item.key === current)?.label ?? "Items";
+  const shown = items.find((item) => item.key === current);
   const attention = items.some((item) => state(item) !== null);
-  const name = shown === "Items" ? "Items" : `Items, ${shown} open`;
+  const name = shown === undefined ? "Items" : `Items, ${shown.label} open`;
   return (
     <div ref={menu.container} className="relative flex shrink-0">
       <button
@@ -59,7 +73,7 @@ export function ItemSwitcher({ items, current }: Readonly<{ items: readonly Swit
         <span aria-hidden="true" className="text-sm leading-none text-asst-accent">
           ▤
         </span>
-        <span className="hidden max-w-[10rem] truncate min-[480px]:inline">{shown}</span>
+        <span className="hidden max-w-[10rem] truncate min-[480px]:inline">{shown?.label ?? "Items"}</span>
         <span aria-hidden="true" className="hidden text-[7px] leading-none text-asst-accent min-[480px]:inline">
           ▼
         </span>
