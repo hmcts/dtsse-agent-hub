@@ -33,6 +33,7 @@ const hubHandlers = new Map<string, (data: unknown) => void>();
 vi.mock("@/components/live/HubStream", () => ({
   useHubEvent: (type: string, handler: (data: unknown) => void) => hubHandlers.set(type, handler),
   useEndSession: () => () => undefined,
+  useHubSubscribe: () => () => () => undefined,
   useWatch: () => undefined
 }));
 

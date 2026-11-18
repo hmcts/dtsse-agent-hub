@@ -14,7 +14,7 @@ const INDEX = prepare([
   entry("Templates/Top.docx", 7)
 ]);
 
-const paths = (found: { path: string }[]) => found.map((template) => template.path);
+const paths = (found: { results: { path: string }[] }) => found.results.map((template) => template.path);
 
 describe("prepare", () => {
   it("should split each entry into its name and the folder under the library's own", () => {
@@ -48,7 +48,7 @@ describe("searchTemplates", () => {
       "Templates/Base/Counterclaim.docx",
       "Templates/Base/Defence to claim.docx"
     ]);
-    expect(searchTemplates(INDEX, "claim nowhere")).toEqual([]);
+    expect(searchTemplates(INDEX, "claim nowhere")).toEqual({ results: [], total: 0 });
   });
 
   it("should ignore case and extra spaces", () => {
@@ -66,15 +66,35 @@ describe("searchTemplates", () => {
   });
 
   it("should list everything for an empty query, within the limit", () => {
-    expect(searchTemplates(INDEX, "")).toHaveLength(6);
+    expect(searchTemplates(INDEX, "").results).toHaveLength(6);
     expect(paths(searchTemplates(INDEX, "", { limit: 2 }))).toEqual(["Templates/Top.docx", "Templates/Claims/Order.docx"]);
-    expect(searchTemplates(INDEX, "", { limit: -1 })).toEqual([]);
+    expect(searchTemplates(INDEX, "", { limit: -1 })).toEqual({ results: [], total: 6 });
   });
 
-  it("should stop at 50 by default", () => {
+  it("should stop at 50 by default and count every match", () => {
     const many = prepare(Array.from({ length: 60 }, (_, i) => entry(`Templates/Base/form ${i}.docx`)));
 
-    expect(searchTemplates(many, "form")).toHaveLength(50);
+    const found = searchTemplates(many, "form");
+
+    expect(found.results).toHaveLength(50);
+    expect(found.total).toBe(60);
+  });
+
+  it("should return the same first page a full ranking gives when more templates match than the limit", () => {
+    const order = [7, 12, 2, 9, 0, 5, 11, 3, 8, 1, 10, 4, 6];
+    const many = prepare([
+      entry("Templates/Base/reform.docx"),
+      ...order.map((i) => entry(`Templates/${i % 2 === 0 ? "Base" : "Prod"}/form ${i}.docx`)),
+      entry("Templates/Base/the form.docx"),
+      entry("Templates/Form/Order.docx")
+    ]);
+    const everything = paths(searchTemplates(many, "form", { limit: 100 }));
+
+    const page = searchTemplates(many, "form", { limit: 5 });
+
+    expect(page.total).toBe(16);
+    expect(paths(page)).toEqual(everything.slice(0, 5));
+    expect(everything.slice(-3)).toEqual(["Templates/Base/the form.docx", "Templates/Base/reform.docx", "Templates/Form/Order.docx"]);
   });
 });
 
