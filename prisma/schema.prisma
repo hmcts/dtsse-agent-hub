@@ -525,80 +525,10 @@ model AssistantConversation {
   sessionState      String?   @map("session_state")
   sessionDetail     String?   @map("session_detail")
   lastActiveAt      DateTime  @default(now()) @map("last_active_at") @db.Timestamptz(6)
-  /// The artefact_*, jira_*, confluence_* and github_* columns are not read or written by the app: the document and its
-  /// exports are in assistant_document, and a later migration drops them.
-  artefactTitle     String?   @map("artefact_title") @ignore
-  artefactMarkdown  String    @default("") @map("artefact_markdown") @ignore
-  artefactVersion   Int       @default(0) @map("artefact_version") @ignore
-  /// user or agent.
-  artefactUpdatedBy String?   @map("artefact_updated_by") @ignore
-  artefactUpdatedAt DateTime? @map("artefact_updated_at") @db.Timestamptz(6) @ignore
-  /// The deck_*, docmosis_* and notify_* columns are not read or written by the app: the decks and templates are in
-  /// assistant_deck, assistant_docmosis and assistant_notify, and a later migration drops them.
-  deckVersion       Int       @default(0) @map("deck_version") @ignore
-  deckTitle         String?   @map("deck_title") @ignore
-  /// user or agent.
-  deckUpdatedBy     String?   @map("deck_updated_by") @ignore
-  deckUpdatedAt     DateTime? @map("deck_updated_at") @db.Timestamptz(6) @ignore
-  /// Moved on by every write of the outline, an amend of the latest version included. See "Revisions" in docs/agent-api.md.
-  deckRevision      Int       @default(0) @map("deck_revision") @ignore
-  /// The latest version of the conversation's Docmosis template, 0 before there is one. See src/assistant/docmosis-store.ts.
-  docmosisVersion   Int       @default(0) @map("docmosis_version") @ignore
-  /// The latest version's revision: the person's amends of its data.
-  docmosisRevision  Int       @default(0) @map("docmosis_revision") @ignore
-  docmosisName      String?   @map("docmosis_name") @ignore
-  /// user or agent.
-  docmosisUpdatedBy String?   @map("docmosis_updated_by") @ignore
-  docmosisUpdatedAt DateTime? @map("docmosis_updated_at") @db.Timestamptz(6) @ignore
-  /// Whether the latest version has a PDF (ready), a render_error (failed) or neither (pending); kept by every write so the page summary moves with it.
-  docmosisPdfState  String    @default("pending") @map("docmosis_pdf_state") @ignore
-  /// The latest version of the conversation's GOV.UK Notify template, 0 before there is one. See src/assistant/notify-store.ts.
-  notifyVersion     Int       @default(0) @map("notify_version") @ignore
-  /// The latest version's revision: the person's amends of it.
-  notifyRevision    Int       @default(0) @map("notify_revision") @ignore
-  notifyName        String?   @map("notify_name") @ignore
-  /// user or agent.
-  notifyUpdatedBy   String?   @map("notify_updated_by") @ignore
-  notifyUpdatedAt   DateTime? @map("notify_updated_at") @db.Timestamptz(6) @ignore
   /// How many journey videos the conversation has finished, 0 before there is one. The ready video is its latest.
   videoVersion      Int       @default(0) @map("video_version")
   videoName         String?   @map("video_name")
   videoUpdatedAt    DateTime? @map("video_updated_at") @db.Timestamptz(6)
-  jiraExportId      String?   @map("jira_export_id") @db.Uuid @ignore
-  jiraProject       String?   @map("jira_project") @ignore
-  /// pending, done or failed; null before the first export.
-  jiraStatus        String?   @map("jira_status") @ignore
-  jiraKey           String?   @map("jira_key") @ignore
-  jiraError         String?   @map("jira_error") @ignore
-  jiraRequestedAt   DateTime? @map("jira_requested_at") @db.Timestamptz(6) @ignore
-  jiraExportedAt    DateTime? @map("jira_exported_at") @db.Timestamptz(6) @ignore
-  confluenceExportId    String?   @map("confluence_export_id") @db.Uuid @ignore
-  confluenceSpaceId     String?   @map("confluence_space_id") @ignore
-  confluenceSpaceKey    String?   @map("confluence_space_key") @ignore
-  confluenceSpaceName   String?   @map("confluence_space_name") @ignore
-  confluenceParentId    String?   @map("confluence_parent_id") @ignore
-  confluenceParentTitle String?   @map("confluence_parent_title") @ignore
-  /// pending, done or failed; null before the first export.
-  confluenceStatus      String?   @map("confluence_status") @ignore
-  confluencePageId      String?   @map("confluence_page_id") @ignore
-  confluencePageTitle   String?   @map("confluence_page_title") @ignore
-  confluenceError       String?   @map("confluence_error") @ignore
-  confluenceRequestedAt DateTime? @map("confluence_requested_at") @db.Timestamptz(6) @ignore
-  confluenceExportedAt  DateTime? @map("confluence_exported_at") @db.Timestamptz(6) @ignore
-  githubExportId        String?   @map("github_export_id") @db.Uuid @ignore
-  /// owner/name of the repository the issue goes to.
-  githubRepo            String?   @map("github_repo") @ignore
-  /// pending, done or failed; null before the first export.
-  githubStatus          String?   @map("github_status") @ignore
-  githubNumber          Int?      @map("github_number") @ignore
-  githubError           String?   @map("github_error") @ignore
-  githubRequestedAt     DateTime? @map("github_requested_at") @db.Timestamptz(6) @ignore
-  /// The Project the issue is added to, when the person chose one: its owner, number and title together.
-  githubProjectOwner    String?   @map("github_project_owner") @ignore
-  githubProjectNumber   Int?      @map("github_project_number") @ignore
-  githubProjectTitle    String?   @map("github_project_title") @ignore
-  /// Why the issue, though made, could not be added to the Project.
-  githubProjectError    String?   @map("github_project_error") @ignore
   /// Where a copy was forked from; null once the source is deleted, and for a conversation that is not a copy.
   forkedFromId          String?   @map("forked_from_id") @db.Uuid
   forkedFromOwnerName   String?   @map("forked_from_owner_name")
