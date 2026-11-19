@@ -20,6 +20,8 @@ export interface Line {
   x1: number;
   /** Baseline. */
   y: number;
+  /** Height of the tallest text on the line. */
+  height: number;
   text: string;
 }
 
@@ -37,6 +39,7 @@ interface Item {
   x: number;
   y: number;
   width: number;
+  height: number;
   str: string;
 }
 
@@ -51,8 +54,9 @@ function rowsOf(items: Item[], page: number): Line[] {
       if (current && item.x - current.x1 <= COLUMN_GAP) {
         current.text += item.x - current.x1 > 1 ? ` ${item.str}` : item.str;
         current.x1 = Math.max(current.x1, item.x + item.width);
+        current.height = Math.max(current.height, item.height);
       } else {
-        current = { page, x0: item.x, x1: item.x + item.width, y: row[0]?.y ?? item.y, text: item.str };
+        current = { page, x0: item.x, x1: item.x + item.width, y: row[0]?.y ?? item.y, height: item.height, text: item.str };
         lines.push(current);
       }
     }
@@ -70,36 +74,41 @@ function rowsOf(items: Item[], page: number): Line[] {
 
 /** The form fields (text boxes, checkboxes, radio buttons) and the text layer of a PDF. Other field types are not read. */
 export async function extractPdf(path: string): Promise<PdfContent> {
-  const doc = await getDocument({ data: new Uint8Array(readFileSync(path)), verbosity: 0 }).promise;
-  const widgets: Widget[] = [];
-  const lines: Line[] = [];
-  for (let number = 1; number <= doc.numPages; number++) {
-    const page = await doc.getPage(number);
-    for (const a of await page.getAnnotations()) {
-      if (a.subtype !== "Widget" || a.pushButton) {
-        continue;
+  const task = getDocument({ data: new Uint8Array(readFileSync(path)), verbosity: 0 });
+  const doc = await task.promise;
+  try {
+    const widgets: Widget[] = [];
+    const lines: Line[] = [];
+    for (let number = 1; number <= doc.numPages; number++) {
+      const page = await doc.getPage(number);
+      for (const a of await page.getAnnotations()) {
+        if (a.subtype !== "Widget" || a.pushButton) {
+          continue;
+        }
+        const kind = a.fieldType === "Tx" ? "text" : a.fieldType === "Btn" ? (a.radioButton ? "radio" : "checkbox") : undefined;
+        if (!kind) {
+          continue;
+        }
+        const option = (a.radioButton ? a.buttonValue : a.exportValue) as string | undefined;
+        widgets.push({
+          page: number,
+          name: String(a.fieldName ?? ""),
+          kind,
+          rect: a.rect as [number, number, number, number],
+          ...(a.maxLen ? { maxLength: a.maxLen as number } : {}),
+          multiline: Boolean(a.multiLine),
+          ...(option ? { option } : {}),
+          ...(a.alternativeText ? { tooltip: String(a.alternativeText) } : {})
+        });
       }
-      const kind = a.fieldType === "Tx" ? "text" : a.fieldType === "Btn" ? (a.radioButton ? "radio" : "checkbox") : undefined;
-      if (!kind) {
-        continue;
-      }
-      const option = (a.radioButton ? a.buttonValue : a.exportValue) as string | undefined;
-      widgets.push({
-        page: number,
-        name: String(a.fieldName ?? ""),
-        kind,
-        rect: a.rect as [number, number, number, number],
-        ...(a.maxLen ? { maxLength: a.maxLen as number } : {}),
-        multiline: Boolean(a.multiLine),
-        ...(option ? { option } : {}),
-        ...(a.alternativeText ? { tooltip: String(a.alternativeText) } : {})
-      });
+      const content = await page.getTextContent();
+      const items = content.items.flatMap((i) =>
+        "str" in i && i.str.trim() !== "" ? [{ x: i.transform[4] as number, y: i.transform[5] as number, width: i.width, height: i.height, str: i.str }] : []
+      );
+      lines.push(...rowsOf(items, number));
     }
-    const content = await page.getTextContent();
-    const items = content.items.flatMap((i) =>
-      "str" in i && i.str.trim() !== "" ? [{ x: i.transform[4] as number, y: i.transform[5] as number, width: i.width, str: i.str }] : []
-    );
-    lines.push(...rowsOf(items, number));
+    return { pageCount: doc.numPages, widgets, lines };
+  } finally {
+    await task.destroy();
   }
-  return { pageCount: doc.numPages, widgets, lines };
 }

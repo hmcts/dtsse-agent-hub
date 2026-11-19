@@ -80,8 +80,37 @@ describe("draftFields", () => {
     expect(only?.field.label).toBe("Text9");
   });
 
-  it("should use section 1 when the form has no section headings", async () => {
-    const [only] = await draftOf({ texts: [{ text: "Surname", x: 57, y: 420 }], textBoxes: [{ name: "s", x: 57, y: 390 }] });
-    expect(only).toMatchObject({ sectionId: "1", sectionTitle: "" });
+  it("should put fields above the first heading in a section of their own", async () => {
+    const fields = await draftOf({
+      texts: [
+        { text: "Surname", x: 57, y: 720 },
+        { text: "Section 1 - About you", x: 28, y: 640 },
+        { text: "Town", x: 57, y: 610 }
+      ],
+      textBoxes: [
+        { name: "s", x: 57, y: 690 },
+        { name: "t", x: 57, y: 580 }
+      ]
+    });
+    expect(fields.map((d) => [d.sectionId, d.sectionTitle])).toEqual([
+      ["0", ""],
+      ["1", "Section 1 - About you"]
+    ]);
+  });
+
+  it("should give a box taller than the question text on the same row to that question", async () => {
+    const fields = await draftOf({
+      texts: [
+        { text: "2.1 Earlier question", x: 28, y: 740 },
+        { text: "3.1 Court", x: 28, y: 700 }
+      ],
+      textBoxes: [{ name: "court", x: 300, y: 695, width: 150 }]
+    });
+    expect(fields.map((d) => d.field.id)).toEqual(["3.1"]);
+  });
+
+  it("should label a checkbox with nothing near it by its field name", async () => {
+    const [only] = await draftOf({ checkboxes: [{ name: "agree", x: 57, y: 400 }] });
+    expect(only?.field.label).toBe("agree");
   });
 });

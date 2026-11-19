@@ -76,6 +76,9 @@ function save(path: string, content: string | Uint8Array): void {
 
 function loadBundle(path: string): Bundle {
   const raw: unknown = JSON.parse(readFileSync(path, "utf8"));
+  if (typeof raw === "object" && raw !== null && "needsReview" in raw) {
+    throw new Error(`${path} is a draft with no fields read from the PDF; fill it in (see its needsReview prompt) and remove needsReview first`);
+  }
   return bundleSchema.parse(raw);
 }
 
@@ -114,7 +117,7 @@ function houseKeys(opts: Map<string, string>): string[] | undefined {
   }
   const pattern = opts.get("pattern");
   if (pattern) {
-    return loadCodeKeys(pattern as Pattern, path).map((k) => k.key);
+    return loadCodeKeys(checkedPattern(pattern), path).map((k) => k.key);
   }
   return loadBundle(path).forms.flatMap((form) => specKeys(form).map((k) => k.key));
 }
@@ -122,9 +125,10 @@ function houseKeys(opts: Map<string, string>): string[] | undefined {
 async function runFromPdf(opts: Map<string, string>): Promise<void> {
   const out = need(opts, "out");
   const ccd = opts.get("ccd");
+  const keys = houseKeys(opts);
   const result = await fromPdf({
     pdf: need(opts, "pdf"),
-    ...(houseKeys(opts) ? { houseKeys: houseKeys(opts) } : {}),
+    ...(keys ? { houseKeys: keys } : {}),
     ...(ccd ? { ccdIds: loadCcdFields(ccd) } : {})
   });
   const { needsReview } = result;
@@ -168,11 +172,16 @@ async function runGenerate(opts: Map<string, string>): Promise<void> {
   }
 }
 
-async function runDrift(opts: Map<string, string>): Promise<void> {
-  const pattern = need(opts, "pattern") as Pattern;
-  if (!PATTERNS.includes(pattern)) {
+function checkedPattern(value: string): Pattern {
+  const pattern = PATTERNS.find((p) => p === value);
+  if (!pattern) {
     throw new Error(`--pattern must be one of ${PATTERNS.join(", ")}`);
   }
+  return pattern;
+}
+
+async function runDrift(opts: Map<string, string>): Promise<void> {
+  const pattern = checkedPattern(need(opts, "pattern"));
   let spec: FormSpec | undefined;
   let label: string;
   if (opts.has("spec")) {

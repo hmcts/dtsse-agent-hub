@@ -122,6 +122,30 @@ describe("cli from-pdf", () => {
     expect(readFileSync(join(dir, "flat.prompt.md"), "utf8")).toContain("Printed form");
   });
 
+  it("should refuse an unknown --pattern", async () => {
+    const result = run(
+      "from-pdf",
+      "--pdf",
+      await makePdf("form", SAMPLE_FORM),
+      "--house-style",
+      join(dir, "x"),
+      "--pattern",
+      "bogus",
+      "--out",
+      join(dir, "y.json")
+    );
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("--pattern must be one of");
+  });
+
+  it("should leave generate, codegen and drift to refuse a draft with no fields read", async () => {
+    const out = join(dir, "flat2.json");
+    run("from-pdf", "--pdf", await makePdf("flat", [{ texts: [{ text: "Printed", x: 40, y: 700 }] }]), "--out", out);
+    const result = run("codegen", "--spec", out, "--target", "fis", "--out", join(dir, "gen"));
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("needsReview");
+  });
+
   it("should refuse without --pdf", () => {
     const result = run("from-pdf", "--out", join(dir, "x.json"));
     expect(result.status).toBe(1);

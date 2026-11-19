@@ -44,7 +44,7 @@ const STOPWORDS = new Set([
   "tick"
 ]);
 
-/** Lower-case words of a label or camelCase key, in order; "applicant 1" is one word, and possessives and filler words are dropped. */
+/** Lower-case words of a label or camelCase key, in order, as written; "applicant 1" is one word, and possessives and filler words are dropped. */
 export function words(text: string): string[] {
   return text
     .replace(/\([^)]*\)/g, " ")
@@ -53,13 +53,12 @@ export function words(text: string): string[] {
     .replace(/applicant\s+(\d)/g, "applicant$1")
     .replace(/[’']s\b/g, "")
     .split(/[^a-z0-9]+/)
-    .filter((w) => w !== "" && !STOPWORDS.has(w))
-    .map((w) => ALIASES.get(w) ?? w);
+    .filter((w) => w !== "" && !STOPWORDS.has(w));
 }
 
-/** The words of a label or key with plurals folded, so that "names" and "name" match. */
+/** The words of a label or key with plurals folded and "no" read as "number", so that "names" and "name" match. */
 export function tokens(text: string): Set<string> {
-  return new Set(words(text).map((w) => (w.length > 3 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w)));
+  return new Set(words(text).map((w) => ALIASES.get(w) ?? (w.length > 3 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w)));
 }
 
 /** Dice coefficient of two word sets: 1 when they are the same, 0 when they share nothing. */

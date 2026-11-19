@@ -11,9 +11,14 @@ describe("tokens", () => {
     expect(tokens("Solicitor’s names (if known)")).toEqual(tokens("solicitor name"));
   });
 
+  it("should read no as number only when matching, not when spelling", () => {
+    expect(tokens("PhoneNo")).toEqual(tokens("phone number"));
+    expect(words("No")).toEqual(["no"]);
+  });
+
   it("should keep a word ending in ss as it is", () => {
     expect([...tokens("address")]).toEqual(["address"]);
-    expect(words("Phone no.")).toEqual(["phone", "number"]);
+    expect(words("Phone no.")).toEqual(["phone", "no"]);
   });
 });
 
