@@ -119,7 +119,7 @@ describe("taskRows cancellation and FEEL", () => {
   it("should include cancellation rows that apply to every category or may match one when the task makes categories structurally", () => {
     const rows = taskRows(cancel, "T1").find((f) => f.kind === "cancellation")?.rows;
     expect(rows?.map((r) => [r.index, r.mayApply])).toEqual([
-      [1, undefined],
+      [1, true],
       [3, undefined],
       [4, true],
       [5, true]
@@ -196,5 +196,39 @@ describe("taskRows values read from fields", () => {
     const found = taskRows(dynamic, "T1");
     expect(found.find((f) => f.kind === "initiation")?.rows.map((r) => [r.index, r.mayApply])).toEqual([[1, true]]);
     expect(found.find((f) => f.kind === "cancellation")?.rows.map((r) => [r.index, r.mayApply])).toEqual([[1, true]]);
+  });
+});
+
+describe("taskRows categories from rows that may apply", () => {
+  it("should mark a cancellation row as may apply when its category comes only from a row that may create the task", () => {
+    const maybe = SpecSchema.parse({
+      version: 1,
+      service: { slug: "demo" },
+      caseTypes: [{ id: "ct_a" }],
+      decisions: {
+        initiation: {
+          name: "I",
+          hitPolicy: "COLLECT",
+          inputs: [],
+          outputs: [{ name: "taskId" }, { name: "processCategories" }],
+          rows: [{ returns: { taskId: "T1", processCategories: "sure" } }, { returns: { taskId: { feel: "something" }, processCategories: "possible" } }]
+        },
+        cancellation: {
+          name: "C",
+          hitPolicy: "COLLECT",
+          inputs: [],
+          outputs: [{ name: "processCategories" }],
+          rows: [{ returns: { processCategories: "sure" } }, { returns: { processCategories: "possible" } }, { returns: { processCategories: "other" } }]
+        }
+      }
+    });
+    expect(
+      taskRows(maybe, "T1")
+        .find((f) => f.kind === "cancellation")
+        ?.rows.map((r) => [r.index, r.mayApply])
+    ).toEqual([
+      [1, undefined],
+      [2, true]
+    ]);
   });
 });

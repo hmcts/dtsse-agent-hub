@@ -20,23 +20,28 @@ export interface TaskRows {
 
 type Match = "yes" | "maybe" | "no";
 
-/** Whether a cancellation row's process categories include one the task is created with; an empty cell is every category. */
 /** Whether a structured value can give a result the spec does not spell out, such as a field read, in some branch. */
 const canBeRead = (value: Expr | undefined): boolean =>
   typeof value === "object" && value !== null && ("if" in value ? canBeRead(value.use) || canBeRead(value.otherwise) : true);
 
-const cancels = (value: Expr | undefined, categories: Set<string>): Match => {
+/** The process categories a task is created with: `sure` ones come from rows that name it, `possible` ones from rows that may. */
+interface Categories {
+  sure: Set<string>;
+  possible: Set<string>;
+}
+
+/** Whether a cancellation row's process categories include one the task is created with; an empty cell is every category. */
+const cancels = (value: Expr | undefined, categories: Categories): Match => {
   if (value === undefined) {
     return "yes";
   }
-  if (typeof value === "string") {
-    return listed(value).some((c) => categories.has(c)) ? "yes" : "no";
+  const listedValues = typeof value === "string" ? listed(value) : categoriesOf(value);
+  const structured = typeof value === "object" && value !== null;
+  if (!structured && listedValues.some((c) => categories.sure.has(c))) {
+    return "yes";
   }
-  return typeof value === "object" && value !== null && "feel" in value
-    ? "maybe"
-    : categoriesOf(value).some((c) => categories.has(c)) || canBeRead(value)
-      ? "maybe"
-      : "no";
+  const overlaps = listedValues.some((c) => categories.sure.has(c) || categories.possible.has(c));
+  return overlaps || (structured && ("feel" in value || canBeRead(value))) ? "maybe" : "no";
 };
 
 /** Every string in a structured expression, which is where a task id or process category would be written. */
@@ -87,12 +92,15 @@ const selects = (cell: Cell | undefined, taskId: string): Match => {
  */
 export function taskRows(spec: Spec, taskId: string): TaskRows[] {
   const found: TaskRows[] = [];
-  const categories = new Set<string>();
+  const categories: Categories = { sure: new Set(), possible: new Set() };
   const initiation = spec.decisions.initiation;
   for (const row of initiation?.rows ?? []) {
-    if (mentions(row.returns?.taskId, taskId) !== "no") {
-      for (const category of categoriesOf(row.returns?.processCategories)) {
-        categories.add(category);
+    const match = mentions(row.returns?.taskId, taskId);
+    if (match !== "no") {
+      const value = row.returns?.processCategories;
+      const into = match === "yes" && typeof value === "string" ? categories.sure : categories.possible;
+      for (const category of categoriesOf(value)) {
+        into.add(category);
       }
     }
   }

@@ -2,7 +2,7 @@ import { basename, dirname, join } from "node:path";
 import { type DmnDecision, type DmnDocument, type DmnInput, type DmnOutput, type DmnRule, type Inspection, readDmn } from "./dmn-model.ts";
 import { canonicalCell, canonicalExpr } from "./feel.ts";
 import { exists, isDirectory, listDir, readText } from "./file-io.ts";
-import { isWaTaskDmn } from "./file-names.ts";
+import { isWaTaskDmn, parseFileName } from "./file-names.ts";
 import { align, byCodePoint } from "./merge.ts";
 
 export interface DiffOptions {
@@ -108,7 +108,7 @@ function diffDecision(file: string, a: DmnDecision, b: DmnDecision, options: Dif
         }
       });
     }
-    if (!columnsEqual) {
+    if (!columnsEqual && (colA.length !== colB.length || outA.length !== outB.length)) {
       return;
     }
     const sigA = ta.rules.map(ruleSignature);
@@ -186,10 +186,10 @@ export function diffDocuments(file: string, a: DmnDocument, b: DmnDocument, opti
       out.push({ file, decision: decision.name, message: "decision only in first" });
       continue;
     }
-    if (decision.table && other.table && decision.id !== other.id) {
+    if (decision.table && other.table && decision.id !== other.id && parseFileName(`${decision.id}.dmn`)) {
       out.push({ file, decision: decision.name, message: `decision id differs: ${decision.id} vs ${other.id}` });
     }
-    const required = (d: DmnDecision, names: Map<string, string>) => d.requires.map((id) => names.get(id) ?? id).sort(byCodePoint);
+    const required = (d: DmnDecision, names: Map<string, string>) => [...new Set(d.requires.map((id) => names.get(id) ?? id))].sort(byCodePoint);
     if (JSON.stringify(required(decision, na)) !== JSON.stringify(required(other, nb))) {
       out.push({ file, decision: decision.name, message: `requires differ: ${required(decision, na).join(", ")} vs ${required(other, nb).join(", ")}` });
     }
@@ -205,13 +205,18 @@ export function diffDocuments(file: string, a: DmnDocument, b: DmnDocument, opti
 
 /** Constructs the model does not carry, which a diff of models cannot see: each one that occurs a different number of times on the two sides. */
 export function diffInspections(file: string, a: Inspection, b: Inspection): Difference[] {
-  return [...new Set([...a.unrepresentable.keys(), ...b.unrepresentable.keys()])]
-    .filter((construct) => (a.unrepresentable.get(construct) ?? 0) !== (b.unrepresentable.get(construct) ?? 0))
-    .sort(byCodePoint)
-    .map((construct) => ({
-      file,
-      message: `${construct} occurs ${a.unrepresentable.get(construct) ?? 0} times in first and ${b.unrepresentable.get(construct) ?? 0} in second`
-    }));
+  const valuesOf = (inspection: Inspection, construct: string) => [...(inspection.values.get(construct) ?? [])].sort(byCodePoint);
+  const out: Difference[] = [];
+  for (const construct of [...new Set([...a.unrepresentable.keys(), ...b.unrepresentable.keys()])].sort(byCodePoint)) {
+    const [first, second] = [valuesOf(a, construct), valuesOf(b, construct)];
+    if (first.length !== second.length) {
+      out.push({ file, message: `${construct} occurs ${first.length} times in first and ${second.length} in second` });
+    } else if (first.join("\n") !== second.join("\n")) {
+      const short = (values: string[]) => values.join(", ").slice(0, 120);
+      out.push({ file, message: `${construct} differs: ${short(first)} vs ${short(second)}` });
+    }
+  }
+  return out;
 }
 
 const dmnFiles = (dir: string): string[] => listDir(dir).filter(isWaTaskDmn).sort(byCodePoint);

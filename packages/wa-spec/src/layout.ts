@@ -39,6 +39,8 @@ type DecisionLayout = z.infer<typeof DecisionLayout>;
 
 const FileLayout = z.strictObject({
   id: Words,
+  /** The file's name, when it is not the one the generator would give it. */
+  fileName: z.string().optional(),
   /** The root element's namespace declarations in file order, each `<attribute> <uri>`. */
   namespaces: z.array(Words).optional(),
   exporter: z.string().optional(),
@@ -181,16 +183,22 @@ function parseItem(text: string): DmnDiagramItem | undefined {
 /**
  * Reads the layout out of a parsed DMN, for its main decision and the helpers the spec carries. `generated` is the document the generator makes for the same file from the spec without a
  * layout: rules are identified by what it renders, which is what `applyLayout` will match against, and any text it renders
- * differently is kept. `inputKeys` names the main decision's input columns.
+ * differently is kept. `inputKeysOf` names a decision's input columns.
  */
-export function layoutOf(doc: DmnDocument, main: DmnDecision, helpers: DmnDecision[], inputKeys: string[], generated: DmnDocument | undefined): FileLayout {
+export function layoutOf(
+  doc: DmnDocument,
+  main: DmnDecision,
+  helpers: DmnDecision[],
+  inputKeysOf: (decision: DmnDecision) => string[],
+  generated: DmnDocument | undefined
+): FileLayout {
   const kept = [main, ...helpers];
   const names = new Map(kept.map((d) => [d.id, d.name]));
   const decisions: Record<string, DecisionLayout> = {};
   for (const decision of kept) {
     const isMain = decision === main;
     const made = isMain ? generated?.decisions[0] : generated?.decisions.find((d, i) => i > 0 && d.name === decision.name);
-    decisions[isMain ? "table" : decision.name] = decisionLayout(decision, made, isMain, isMain ? inputKeys : [], names);
+    decisions[isMain ? "table" : decision.name] = decisionLayout(decision, made, isMain, inputKeysOf(decision), names);
   }
   return {
     id: doc.id,
@@ -241,7 +249,7 @@ function matchRules(rules: DmnRule[], lines: string[], hashOf: (rule: DmnRule) =
 const storedEntry = (entries: Array<string | undefined>, at: number, column = at): string => (column < 0 ? "" : (entries[at] ?? ""));
 
 /** Fills in the ids, widths and diagram a generated document lacks from what the file's layout stored. */
-export function applyLayout(doc: DmnDocument, layout: FileLayout | undefined, inputKeys: string[]): DmnDocument {
+export function applyLayout(doc: DmnDocument, layout: FileLayout | undefined, inputKeysByDecision: Record<string, string[]>): DmnDocument {
   if (!layout) {
     return doc;
   }
@@ -253,6 +261,7 @@ export function applyLayout(doc: DmnDocument, layout: FileLayout | undefined, in
       return decision;
     }
     const table = decision.table;
+    const inputKeys = inputKeysByDecision[keyOf(decision, index)] ?? [];
     const split = (text: string | undefined) => (text ?? "").split(" ").map(back);
     const storedInputs = (own.inputs ?? []).map(([key]) => key);
     const storedOutputs = (own.outputs ?? []).map(([name]) => name);

@@ -1,6 +1,6 @@
 import { type DmnDecision, type DmnDocument, type DmnInput, type DmnOutput, readDmn } from "./dmn-model.ts";
 import { isStructured, normaliseFeel, parseCell, parseExpr } from "./feel.ts";
-import { parseFileName } from "./file-names.ts";
+import { fileNameOf, parseFileName } from "./file-names.ts";
 import { generateDocument } from "./generator.ts";
 import { type FileLayout, type Layout, layoutKey, layoutOf } from "./layout.ts";
 import { byCodePoint, type Merged, majority, mergeSequences } from "./merge.ts";
@@ -164,27 +164,43 @@ function columnProperties<S extends object>(
   return { base, overrides };
 }
 
-function importTables(kind: Kind, tables: Table[], allCaseTypes: string[], report: ImportReport, rawIndex: Map<string, RawFeelUse>): Decision {
-  const caseTypes = tables.map((t) => t.caseType);
-  for (const table of tables) {
-    const names = (table.decision.table?.outputs ?? []).map((o) => o.name);
+/** One case type's decision table, from the file that holds it. */
+interface Part {
+  caseType: string;
+  decision: DmnDecision;
+}
+
+/**
+ * Merges the decision tables of one decision across case types: columns by key, rows shared where identical. `label` prefixes
+ * the raw-FEEL locations, so a helper's table is told from the main one.
+ */
+function mergeTable(
+  kind: Kind,
+  label: string,
+  parts: Part[],
+  report: ImportReport,
+  rawIndex: Map<string, RawFeelUse>
+): { inputs: InputColumn[]; outputs: OutputColumn[]; rows: Row[]; hitPolicy: ReturnType<typeof pick<string>>; aggregation: ReturnType<typeof pick<string>> } {
+  const caseTypes = parts.map((p) => p.caseType);
+  for (const part of parts) {
+    const names = (part.decision.table?.outputs ?? []).map((o) => o.name);
     const twice = names.find((name, i) => names.indexOf(name) !== i);
     if (twice !== undefined) {
-      throw new Error(`${kind}: duplicate output name ${twice} in the table of ${table.caseType}`);
+      throw new Error(`${kind}: duplicate output name ${twice} in the table of ${label || part.caseType}${label ? ` for ${part.caseType}` : ""}`);
     }
   }
-  const keysByCaseType = new Map(tables.map((t) => [t.caseType, inputKeys(t.decision)]));
-  const tableOf = new Map(tables.map((t) => [t.caseType, t]));
+  const keysByCaseType = new Map(parts.map((p) => [p.caseType, inputKeys(p.decision)]));
+  const partOf = new Map(parts.map((p) => [p.caseType, p]));
 
   // Columns: merged by key; each case type's own order is kept as a subsequence of the result.
   let inputOrder: Array<Merged<string>> = [];
   let outputOrder: Array<Merged<string>> = [];
-  for (const table of tables) {
-    inputOrder = mergeSequences(inputOrder, table.caseType, keysByCaseType.get(table.caseType) ?? [], (k) => k);
+  for (const part of parts) {
+    inputOrder = mergeSequences(inputOrder, part.caseType, keysByCaseType.get(part.caseType) ?? [], (k) => k);
     outputOrder = mergeSequences(
       outputOrder,
-      table.caseType,
-      (table.decision.table?.outputs ?? []).map((o) => o.name),
+      part.caseType,
+      (part.decision.table?.outputs ?? []).map((o) => o.name),
       (k) => k
     );
   }
@@ -202,13 +218,13 @@ function importTables(kind: Kind, tables: Table[], allCaseTypes: string[], repor
   const inputs: InputColumn[] = inputOrder.map(({ item: key, caseTypes: present }) => {
     const perType = present.map((caseType) => {
       const index = (keysByCaseType.get(caseType) ?? []).indexOf(key);
-      return { caseType, source: (tableOf.get(caseType) as Table).decision.table?.inputs[index] as NonNullable<DmnInput> };
+      return { caseType, source: (partOf.get(caseType) as Part).decision.table?.inputs[index] as NonNullable<DmnInput> };
     });
     const { base, overrides } = columnProperties(perType, INPUT_PROPERTIES);
     const expression = pick(
       perType.map(({ caseType, source }) => {
         const expr = parseExpr(source.expression);
-        addRaw(report, rawIndex, kind, `input ${key}`, expr, caseType);
+        addRaw(report, rawIndex, kind, `${label}input ${key}`, expr, caseType);
         return { caseType, value: expr === undefined ? "" : JSON.stringify(expr) };
       })
     );
@@ -227,7 +243,7 @@ function importTables(kind: Kind, tables: Table[], allCaseTypes: string[], repor
   const outputs: OutputColumn[] = outputOrder.map(({ item: name, caseTypes: present }) => {
     const perType = present.map((caseType) => ({
       caseType,
-      source: (tableOf.get(caseType) as Table).decision.table?.outputs.find((o) => o.name === name) as NonNullable<DmnOutput>
+      source: (partOf.get(caseType) as Part).decision.table?.outputs.find((o) => o.name === name) as NonNullable<DmnOutput>
     }));
     const { base, overrides } = columnProperties(perType, OUTPUT_PROPERTIES);
     return {
@@ -239,26 +255,26 @@ function importTables(kind: Kind, tables: Table[], allCaseTypes: string[], repor
   });
 
   // Rows: shared across case types when identical once empty entries are dropped.
-  const rowsOf = (table: Table): Row[] => {
-    const keys = keysByCaseType.get(table.caseType) ?? [];
-    const outputNames = (table.decision.table?.outputs ?? []).map((o) => o.name);
-    return (table.decision.table?.rules ?? []).map((rule) => {
+  const rowsOf = (part: Part): Row[] => {
+    const keys = keysByCaseType.get(part.caseType) ?? [];
+    const outputNames = (part.decision.table?.outputs ?? []).map((o) => o.name);
+    return (part.decision.table?.rules ?? []).map((rule) => {
       const when: Record<string, Cell> = {};
       rule.inputs.forEach((text, index) => {
         const language = rule.inputLanguages?.[index];
-        const cell = language && text.trim() !== "" ? { feel: text.trim(), language } : parseCell(text);
+        const cell = language ? { feel: text.trim(), language } : parseCell(text);
         if (cell !== undefined) {
           when[keys[index] as string] = cell;
-          addRaw(report, rawIndex, kind, `input ${keys[index]} entry`, cell, table.caseType);
+          addRaw(report, rawIndex, kind, `${label}input ${keys[index]} entry`, cell, part.caseType);
         }
       });
       const returns: Record<string, Expr> = {};
       rule.outputs.forEach((text, index) => {
         const language = rule.outputLanguages?.[index];
-        const expr = language && text.trim() !== "" ? { feel: text.trim(), language } : parseExpr(text);
+        const expr = language ? { feel: text.trim(), language } : parseExpr(text);
         if (expr !== undefined) {
           returns[outputNames[index] as string] = expr;
-          addRaw(report, rawIndex, kind, `output ${outputNames[index]}`, expr, table.caseType);
+          addRaw(report, rawIndex, kind, `${label}output ${outputNames[index]}`, expr, part.caseType);
         }
       });
       return {
@@ -271,8 +287,8 @@ function importTables(kind: Kind, tables: Table[], allCaseTypes: string[], repor
   const rowIdentity = (row: Row): string =>
     JSON.stringify(row, (_key, value) => (typeof value === "object" && value !== null && "feel" in value ? { feel: normaliseFeel(value.feel) } : value));
   let rowOrder: Array<Merged<Row>> = [];
-  for (const table of tables) {
-    rowOrder = mergeSequences(rowOrder, table.caseType, rowsOf(table), rowIdentity);
+  for (const part of parts) {
+    rowOrder = mergeSequences(rowOrder, part.caseType, rowsOf(part), rowIdentity);
   }
   const rows: Row[] = rowOrder.map(({ item, caseTypes: present }) => {
     const only = sameCaseTypes(present, caseTypes);
@@ -283,6 +299,25 @@ function importTables(kind: Kind, tables: Table[], allCaseTypes: string[], repor
       ...(item.returns ? { returns: item.returns } : {})
     };
   });
+
+  return {
+    inputs,
+    outputs,
+    rows,
+    hitPolicy: pick(parts.map((p) => ({ caseType: p.caseType, value: p.decision.table?.hitPolicy }))),
+    aggregation: pick(parts.map((p) => ({ caseType: p.caseType, value: p.decision.table?.aggregation })))
+  };
+}
+
+function importTables(kind: Kind, tables: Table[], allCaseTypes: string[], report: ImportReport, rawIndex: Map<string, RawFeelUse>): Decision {
+  const caseTypes = tables.map((t) => t.caseType);
+  const { inputs, outputs, rows, hitPolicy, aggregation } = mergeTable(
+    kind,
+    "",
+    tables.map((t) => ({ caseType: t.caseType, decision: t.decision })),
+    report,
+    rawIndex
+  );
 
   // Helper decisions and the dependencies between decisions.
   let helperOrder: Array<Merged<string>> = [];
@@ -312,15 +347,40 @@ function importTables(kind: Kind, tables: Table[], allCaseTypes: string[], repor
         value: helper.variable ? (helper.variable.name === name ? undefined : helper.variable.name) : (false as string | false | undefined)
       }))
     );
+    const tableCount = perType.filter(({ helper }) => helper.table).length;
+    if (tableCount > 0 && tableCount < perType.length) {
+      throw new Error(`${kind}: helper ${name} is a decision table in some case types and a literal expression in others`);
+    }
+    const merged =
+      tableCount > 0
+        ? mergeTable(
+            kind,
+            `helper ${name} `,
+            perType.map(({ caseType, helper }) => ({ caseType, decision: helper })),
+            report,
+            rawIndex
+          )
+        : undefined;
     const expression = pick(
       perType.map(({ caseType, helper }) => {
-        const expr = parseExpr(helper.literal?.text ?? "");
-        addRaw(report, rawIndex, kind, `helper ${name}`, expr, caseType);
+        const expr = merged ? undefined : parseExpr(helper.literal?.text ?? "");
+        if (!merged) {
+          addRaw(report, rawIndex, kind, `helper ${name}`, expr, caseType);
+        }
         return { caseType, value: JSON.stringify(expr === undefined ? { feel: "" } : expr) };
       })
     );
-    for (const [caseType, value] of Object.entries(expression.overrides)) {
-      setOverride(overrides, caseType, "expression", JSON.parse(value ?? '{"feel":""}'));
+    if (merged) {
+      for (const [caseType, value] of Object.entries(merged.hitPolicy.overrides)) {
+        setOverride(overrides, caseType, "hitPolicy", value);
+      }
+      for (const [caseType, value] of Object.entries(merged.aggregation.overrides)) {
+        setOverride(overrides, caseType, "aggregation", value ?? null);
+      }
+    } else {
+      for (const [caseType, value] of Object.entries(expression.overrides)) {
+        setOverride(overrides, caseType, "expression", JSON.parse(value ?? '{"feel":""}'));
+      }
     }
     for (const [caseType, value] of Object.entries(variable.overrides)) {
       setOverride(overrides, caseType, "variable", value ?? null);
@@ -329,7 +389,15 @@ function importTables(kind: Kind, tables: Table[], allCaseTypes: string[], repor
       name,
       ...(variable.base === undefined ? {} : { variable: variable.base }),
       ...base,
-      expression: JSON.parse(expression.base ?? '{"feel":""}'),
+      ...(merged
+        ? {
+            hitPolicy: merged.hitPolicy.base,
+            ...(merged.aggregation.base ? { aggregation: merged.aggregation.base } : {}),
+            inputs: merged.inputs,
+            outputs: merged.outputs,
+            rows: merged.rows
+          }
+        : { expression: JSON.parse(expression.base ?? '{"feel":""}') }),
       ...(sameCaseTypes(present, caseTypes) ? { only: present } : {}),
       ...(Object.keys(overrides).length > 0 ? { overrides } : {})
     } as Helper;
@@ -358,8 +426,6 @@ function importTables(kind: Kind, tables: Table[], allCaseTypes: string[], repor
   const dependencies = edges.map(({ dep, caseTypes: present }) => ({ ...dep, ...(sameCaseTypes(present, caseTypes) ? { only: present } : {}) }));
 
   const name = pick(tables.map((t) => ({ caseType: t.caseType, value: t.decision.name })));
-  const hitPolicy = pick(tables.map((t) => ({ caseType: t.caseType, value: t.decision.table?.hitPolicy })));
-  const aggregation = pick(tables.map((t) => ({ caseType: t.caseType, value: t.decision.table?.aggregation })));
   const ttl = pick(tables.map((t) => ({ caseType: t.caseType, value: t.decision.historyTimeToLive })));
   const overrides: Record<string, Record<string, string | null>> = {};
   for (const [field, picked] of [
@@ -369,22 +435,14 @@ function importTables(kind: Kind, tables: Table[], allCaseTypes: string[], repor
     ["historyTimeToLive", ttl]
   ] as const) {
     for (const [caseType, value] of Object.entries(picked.overrides)) {
-      if (value === undefined && (field === "name" || field === "hitPolicy")) {
-        throw new Error(`${kind}: ${field} is absent for ${caseType}`);
-      }
       setOverride(overrides, caseType, field, value ?? null);
     }
-  }
-  if (!HIT_POLICIES.includes(hitPolicy.base as (typeof HIT_POLICIES)[number])) {
-    throw new Error(`${kind}: unsupported hit policy ${hitPolicy.base}`);
   }
   return {
     ...(sameCaseTypes(caseTypes, allCaseTypes) ? { only: caseTypes } : {}),
     name: name.base as string,
     hitPolicy: hitPolicy.base as (typeof HIT_POLICIES)[number],
-    ...(aggregation.base && AGGREGATIONS.includes(aggregation.base as (typeof AGGREGATIONS)[number])
-      ? { aggregation: aggregation.base as (typeof AGGREGATIONS)[number] }
-      : {}),
+    ...(aggregation.base ? { aggregation: aggregation.base as (typeof AGGREGATIONS)[number] } : {}),
     ...(ttl.base === undefined ? {} : { historyTimeToLive: ttl.base }),
     ...(Object.keys(overrides).length > 0 ? { overrides } : {}),
     inputs,
@@ -409,7 +467,16 @@ export function importDmns(files: DmnFile[], options: ImportOptions = {}): { spe
   const caseTypeOrder: string[] = [];
   const unrepresentable = new Map<string, { count: number; files: string[] }>();
   const presentation = new Map<string, number>();
-  const parsed: Array<{ kind: Kind; caseType: string; document: DmnDocument; decision: DmnDecision; helpers: DmnDecision[] }> = [];
+  const parsed: Array<{ kind: Kind; caseType: string; document: DmnDocument; decision: DmnDecision; helpers: DmnDecision[]; fileName: string }> = [];
+  const skipped: string[] = [];
+  /** A file that is left out: noted, and, when it should have been a task DMN, flagged so the import does not pass. */
+  const skip = (file: string, reason: string, flagged = false, construct = reason) => {
+    report.notes.push(`${file}: ${reason}, skipped`);
+    skipped.push(`${file}: ${reason}`);
+    if (flagged) {
+      flag(construct, file);
+    }
+  };
   const flag = (construct: string, file: string, count = 1) => {
     const entry = unrepresentable.get(construct) ?? { count: 0, files: [] };
     entry.count += count;
@@ -418,12 +485,16 @@ export function importDmns(files: DmnFile[], options: ImportOptions = {}): { spe
   };
 
   for (const file of [...files].sort((a, b) => byCodePoint(a.name, b.name))) {
-    const match = parseFileName(file.name);
+    const byName = parseFileName(file.name);
+    if (!byName && !(file.name.startsWith("wa-task-") && file.name.endsWith(".dmn"))) {
+      skip(file.name, "not a wa-task-<kind>-<service>-<caseType>.dmn file");
+      continue;
+    }
+    const { document, inspection } = readDmn(file.xml);
+    const keyed = document.decisions.find((d) => parseFileName(`${d.id}.dmn`) !== undefined);
+    const match = keyed ? parseFileName(`${keyed.id}.dmn`) : byName;
     if (!match) {
-      report.notes.push(`${file.name}: not a wa-task-<kind>-<service>-<caseType>.dmn file, skipped`);
-      if (file.name.startsWith("wa-task-") && file.name.endsWith(".dmn")) {
-        flag("a task DMN of a kind the spec does not know", file.name);
-      }
+      skip(file.name, "a task DMN of a kind the spec does not know", true);
       continue;
     }
     const { kind, caseType } = match;
@@ -434,22 +505,27 @@ export function importDmns(files: DmnFile[], options: ImportOptions = {}): { spe
       continue;
     }
     parsedFiles.set(`${kind}/${caseType}`, file.name);
-    const { document, inspection } = readDmn(file.xml);
     const stem = file.name.replace(/\.dmn$/, "");
-    const named = document.decisions.find((d) => d.id === stem);
+    const named = keyed ?? document.decisions.find((d) => d.id === stem);
     const decision = named ?? document.decisions.find((d) => d.table);
     if (!decision?.table) {
-      report.notes.push(`${file.name}: no decision table found, skipped`);
-      flag("a task DMN with no decision table", file.name);
+      skip(file.name, "no decision table found", true, "a task DMN with no decision table");
       continue;
     }
     const unnamed = decision.table.outputs.findIndex((output) => output.name === "");
     if (unnamed >= 0) {
+      skipped.push(`${file.name}: an output column without a name`);
       flag(`an output column without a name (column ${unnamed + 1})`, file.name);
       continue;
     }
     if (!HIT_POLICIES.includes(decision.table.hitPolicy as (typeof HIT_POLICIES)[number])) {
+      skipped.push(`${file.name}: hit policy ${decision.table.hitPolicy}`);
       flag(`hit policy ${decision.table.hitPolicy}, which needs output values the spec cannot hold`, file.name);
+      continue;
+    }
+    if (decision.table.aggregation && !AGGREGATIONS.includes(decision.table.aggregation as (typeof AGGREGATIONS)[number])) {
+      skipped.push(`${file.name}: aggregation ${decision.table.aggregation}`);
+      flag(`aggregation ${decision.table.aggregation}, which the spec does not know`, file.name);
       continue;
     }
     slugs.set(match.service, [...(slugs.get(match.service) ?? []), file.name]);
@@ -465,8 +541,16 @@ export function importDmns(files: DmnFile[], options: ImportOptions = {}): { spe
     const helpers: DmnDecision[] = [];
     const helperNames = new Set<string>();
     for (const helper of document.decisions.filter((d) => d !== decision)) {
-      if (!helper.literal || helper.table) {
-        flag(`helper decision ${helper.name} is not a literal expression`, file.name);
+      if (Boolean(helper.literal) === Boolean(helper.table)) {
+        flag(`helper decision ${helper.name} is neither a literal expression nor a decision table`, file.name);
+        continue;
+      }
+      if (helper.table && !HIT_POLICIES.includes(helper.table.hitPolicy as (typeof HIT_POLICIES)[number])) {
+        flag(`hit policy ${helper.table.hitPolicy} of helper ${helper.name}, which needs output values the spec cannot hold`, file.name);
+        continue;
+      }
+      if (helper.table?.outputs.some((output) => output.name === "")) {
+        flag(`an output column without a name in helper ${helper.name}`, file.name);
         continue;
       }
       if (helper.name === "table") {
@@ -498,7 +582,7 @@ export function importDmns(files: DmnFile[], options: ImportOptions = {}): { spe
     for (const [construct, count] of inspection.presentation) {
       presentation.set(construct, (presentation.get(construct) ?? 0) + count);
     }
-    parsed.push({ kind, caseType, document, decision, helpers });
+    parsed.push({ kind, caseType, document, decision, helpers, fileName: file.name });
     byKind.set(kind, [...(byKind.get(kind) ?? []), { caseType, decision, helpers, document }]);
     report.files.push({
       name: file.name,
@@ -516,6 +600,9 @@ export function importDmns(files: DmnFile[], options: ImportOptions = {}): { spe
     );
   }
 
+  if (byKind.size === 0) {
+    throw new Error(`No task DMN could be imported${skipped.length > 0 ? `:\n${skipped.map((reason) => `  ${reason}`).join("\n")}` : ": none was given"}`);
+  }
   if (duplicates.length > 0) {
     throw new Error(duplicates.join("\n"));
   }
@@ -539,8 +626,9 @@ export function importDmns(files: DmnFile[], options: ImportOptions = {}): { spe
     decisions
   };
   const layouts: Record<string, FileLayout> = {};
-  for (const { kind, caseType, document, decision, helpers } of parsed) {
-    layouts[layoutKey(kind, caseType)] = layoutOf(document, decision, helpers, inputKeys(decision), generateDocument(spec, kind, caseType));
+  for (const { kind, caseType, document, decision, helpers, fileName } of parsed) {
+    const layout = layoutOf(document, decision, helpers, inputKeys, generateDocument(spec, kind, caseType));
+    layouts[layoutKey(kind, caseType)] = fileName === fileNameOf(spec.service.slug, kind, caseType) ? layout : { ...layout, fileName };
   }
   report.unrepresentable = [...unrepresentable].map(([construct, v]) => ({ construct, ...v }));
   report.presentation = [...presentation].map(([construct, count]) => ({ construct, count }));

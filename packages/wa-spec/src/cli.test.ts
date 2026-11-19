@@ -118,7 +118,7 @@ describe("cli errors", () => {
     const dir = mkdtempSync(join(tmpdir(), "wa-spec-"));
     const input = join(dir, "dmn");
     mkdirSync(input);
-    writeFileSync(join(input, "wa-task-completion-my svc-ct_c.dmn"), sampleDmn("ct_c"));
+    writeFileSync(join(input, "wa-task-completion-my svc-ct_c.dmn"), sampleDmn("ct_c").replaceAll("-demo-", "-my svc-"));
     const result = run("import", input, "-o", join(dir, "spec.yaml"));
     expect(result.status).toBe(2);
     expect(result.stderr).toContain("invalid spec");

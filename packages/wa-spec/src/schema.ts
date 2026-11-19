@@ -122,34 +122,49 @@ export const Row = z.strictObject({
 export type Row = z.infer<typeof Row>;
 
 /**
- * A named literal-expression decision a table reads, such as the latest referral's task title. It carries a variable named
- * like itself unless `variable` names another or is false for none.
+ * A named decision a table reads: a literal expression, such as the latest referral's task title, or a decision table of its
+ * own (`hitPolicy`, `inputs`, `outputs` and `rows`, as for a main decision, instead of `expression`). It carries a variable
+ * named like itself unless `variable` names another or is false for none.
  */
-export const Helper = z.strictObject({
-  name: z.string().min(1),
-  variable: z.union([z.string().min(1), z.literal(false)]).optional(),
-  typeRef: z.string().optional(),
-  language: z.string().optional(),
-  historyTimeToLive: z.string().optional(),
-  expression: Expr,
-  only: z.array(CaseTypeId).optional(),
-  overrides: z
-    .record(
-      CaseTypeId,
-      z.strictObject({
-        expression: Expr.optional(),
-        /** Absent inherits the helper's; `null` is a variable named like the helper. */
-        variable: z
-          .union([z.string().min(1), z.literal(false)])
-          .nullable()
-          .optional(),
-        typeRef: z.string().nullable().optional(),
-        language: z.string().nullable().optional(),
-        historyTimeToLive: z.string().nullable().optional()
-      })
-    )
-    .optional()
-});
+export const Helper = z
+  .strictObject({
+    name: z.string().min(1),
+    variable: z.union([z.string().min(1), z.literal(false)]).optional(),
+    typeRef: z.string().optional(),
+    language: z.string().optional(),
+    historyTimeToLive: z.string().optional(),
+    expression: Expr.optional(),
+    hitPolicy: z.enum(HIT_POLICIES).optional(),
+    aggregation: z.enum(AGGREGATIONS).optional(),
+    inputs: z.array(InputColumn).optional(),
+    outputs: z.array(OutputColumn).min(1).optional(),
+    rows: z.array(Row).optional(),
+    only: z.array(CaseTypeId).optional(),
+    overrides: z
+      .record(
+        CaseTypeId,
+        z.strictObject({
+          expression: Expr.optional(),
+          hitPolicy: z.enum(HIT_POLICIES).optional(),
+          aggregation: z.enum(AGGREGATIONS).nullable().optional(),
+          /** Absent inherits the helper's; `null` is a variable named like the helper. */
+          variable: z
+            .union([z.string().min(1), z.literal(false)])
+            .nullable()
+            .optional(),
+          typeRef: z.string().nullable().optional(),
+          language: z.string().nullable().optional(),
+          historyTimeToLive: z.string().nullable().optional()
+        })
+      )
+      .optional()
+  })
+  .refine((helper) => (helper.expression !== undefined) !== (helper.outputs !== undefined), {
+    message: "a helper is either an expression or a decision table with outputs"
+  })
+  .refine((helper) => helper.outputs === undefined || (helper.hitPolicy !== undefined && helper.rows !== undefined), {
+    message: "a helper decision table needs a hit policy and rows"
+  });
 export type Helper = z.infer<typeof Helper>;
 
 /** `decision` is "table" for the main decision table or a helper's name. */
@@ -238,17 +253,80 @@ export function validateSpec(spec: Spec): string[] {
     if (!decision) {
       continue;
     }
-    const inputKeys = new Map(decision.inputs.map((c) => [c.key, c]));
-    const outputNames = new Map(decision.outputs.map((c) => [c.name, c]));
-    if (inputKeys.size !== decision.inputs.length) {
-      problems.push(`${kind}: duplicate input key`);
-    }
-    if (outputNames.size !== decision.outputs.length) {
-      problems.push(`${kind}: duplicate output name`);
-    }
     known(`${kind}.overrides`, Object.keys(decision.overrides ?? {}));
     known(kind, decision.only);
     const own = decision.only ?? [...caseTypes];
+    /** Checks one decision table, the main one or a helper's, for the case types in `scope`. */
+    const checkTable = (
+      label: string,
+      table: Pick<Decision, "inputs" | "outputs" | "rows">,
+      scope: string[] | undefined,
+      hit: (id: string) => { hitPolicy: string; aggregation?: string | null }
+    ) => {
+      const types = scope ?? [...caseTypes];
+      const inputKeys = new Map(table.inputs.map((c) => [c.key, c]));
+      const outputNames = new Map(table.outputs.map((c) => [c.name, c]));
+      if (inputKeys.size !== table.inputs.length) {
+        problems.push(`${label}: duplicate input key`);
+      }
+      if (outputNames.size !== table.outputs.length) {
+        problems.push(`${label}: duplicate output name`);
+      }
+      const within = (where: string, only: string[] | undefined) => {
+        for (const id of only ?? []) {
+          if (scope && caseTypes.has(id) && !scope.includes(id)) {
+            problems.push(`${where}: ${id} is not a case type of ${label}`);
+          }
+        }
+      };
+      for (const id of types) {
+        const { hitPolicy, aggregation } = hit(id);
+        if (aggregation && hitPolicy !== "COLLECT") {
+          problems.push(`${label}: ${id} has aggregation ${aggregation} with hit policy ${hitPolicy}, and only COLLECT aggregates`);
+        }
+        if (!table.outputs.some((o) => o.only === undefined || o.only.includes(id))) {
+          problems.push(`${label}: ${id} has no outputs`);
+        }
+      }
+      for (const column of [...table.inputs, ...table.outputs]) {
+        known(`${label} column`, column.only);
+        within(`${label} column`, column.only);
+        known(`${label} column overrides`, Object.keys(column.overrides ?? {}));
+      }
+      table.rows.forEach((row, index) => {
+        const where = `${label} row ${index + 1}`;
+        known(where, row.only);
+        within(where, row.only);
+        for (const key of Object.keys(row.when ?? {})) {
+          const column = inputKeys.get(key);
+          if (!column) {
+            problems.push(`${where}: unknown input ${key}`);
+          } else {
+            for (const id of row.only ?? types) {
+              if (column.only && !column.only.includes(id)) {
+                problems.push(`${where}: input ${key} does not exist for ${id}`);
+              }
+            }
+          }
+        }
+        for (const name of Object.keys(row.returns ?? {})) {
+          const column = outputNames.get(name);
+          if (!column) {
+            problems.push(`${where}: unknown output ${name}`);
+          } else {
+            for (const id of row.only ?? types) {
+              if (column.only && !column.only.includes(id)) {
+                problems.push(`${where}: output ${name} does not exist for ${id}`);
+              }
+            }
+          }
+        }
+      });
+    };
+    checkTable(kind, decision, decision.only, (id) => ({
+      hitPolicy: decision.overrides?.[id]?.hitPolicy ?? decision.hitPolicy,
+      aggregation: decision.overrides?.[id]?.aggregation === undefined ? decision.aggregation : decision.overrides[id]?.aggregation
+    }));
     const within = (where: string, only: string[] | undefined) => {
       for (const id of only ?? []) {
         if (decision.only && caseTypes.has(id) && !decision.only.includes(id)) {
@@ -256,51 +334,6 @@ export function validateSpec(spec: Spec): string[] {
         }
       }
     };
-    for (const id of own) {
-      const override = decision.overrides?.[id];
-      const hitPolicy = override?.hitPolicy ?? decision.hitPolicy;
-      const aggregation = override?.aggregation === undefined ? decision.aggregation : override.aggregation;
-      if (aggregation && hitPolicy !== "COLLECT") {
-        problems.push(`${kind}: ${id} has aggregation ${aggregation} with hit policy ${hitPolicy}, and only COLLECT aggregates`);
-      }
-      if (!decision.outputs.some((o) => o.only === undefined || o.only.includes(id))) {
-        problems.push(`${kind}: ${id} has no outputs`);
-      }
-    }
-    for (const column of [...decision.inputs, ...decision.outputs]) {
-      known(`${kind} column`, column.only);
-      within(`${kind} column`, column.only);
-      known(`${kind} column overrides`, Object.keys(column.overrides ?? {}));
-    }
-    decision.rows.forEach((row, index) => {
-      const where = `${kind} row ${index + 1}`;
-      known(where, row.only);
-      within(where, row.only);
-      for (const key of Object.keys(row.when ?? {})) {
-        const column = inputKeys.get(key);
-        if (!column) {
-          problems.push(`${where}: unknown input ${key}`);
-        } else {
-          for (const id of row.only ?? own) {
-            if (column.only && !column.only.includes(id)) {
-              problems.push(`${where}: input ${key} does not exist for ${id}`);
-            }
-          }
-        }
-      }
-      for (const name of Object.keys(row.returns ?? {})) {
-        const column = outputNames.get(name);
-        if (!column) {
-          problems.push(`${where}: unknown output ${name}`);
-        } else {
-          for (const id of row.only ?? own) {
-            if (column.only && !column.only.includes(id)) {
-              problems.push(`${where}: output ${name} does not exist for ${id}`);
-            }
-          }
-        }
-      }
-    });
     const helperNames = new Set((decision.helpers ?? []).map((h) => h.name));
     const sharing = new Map<string, Array<string[] | undefined>>();
     for (const helper of decision.helpers ?? []) {
@@ -310,6 +343,17 @@ export function validateSpec(spec: Spec): string[] {
       known(`${kind} helper ${helper.name}`, helper.only);
       within(`${kind} helper ${helper.name}`, helper.only);
       known(`${kind} helper ${helper.name} overrides`, Object.keys(helper.overrides ?? {}));
+      if (helper.outputs) {
+        checkTable(
+          `${kind} helper ${helper.name}`,
+          { inputs: helper.inputs ?? [], outputs: helper.outputs, rows: helper.rows ?? [] },
+          helper.only ?? decision.only,
+          (id) => ({
+            hitPolicy: helper.overrides?.[id]?.hitPolicy ?? helper.hitPolicy ?? "",
+            aggregation: helper.overrides?.[id]?.aggregation === undefined ? helper.aggregation : helper.overrides[id]?.aggregation
+          })
+        );
+      }
       sharing.set(helper.name, [...(sharing.get(helper.name) ?? []), helper.only]);
     }
     for (const [name, onlys] of sharing) {
@@ -327,6 +371,9 @@ export function validateSpec(spec: Spec): string[] {
       if (!helperNames.has(dependency.requires)) {
         problems.push(`${kind}: dependency on unknown helper ${dependency.requires}`);
       }
+      if (dependency.decision === dependency.requires) {
+        problems.push(`${kind}: ${dependency.decision} requires itself`);
+      }
       const present = (name: string, id: string) => (decision.helpers ?? []).some((h) => h.name === name && (h.only === undefined || h.only.includes(id)));
       for (const id of dependency.only ?? own) {
         if (
@@ -338,6 +385,48 @@ export function validateSpec(spec: Spec): string[] {
         }
       }
     }
+    checkDependencyGraph(kind, decision, own, problems);
   }
   return problems;
+}
+
+/** Reports, for each case type, a dependency listed twice and a cycle among the helpers. */
+function checkDependencyGraph(kind: string, decision: Decision, own: string[], problems: string[]): void {
+  for (const id of own) {
+    const edges = (decision.dependencies ?? []).filter((d) => d.only === undefined || d.only.includes(id));
+    const seen = new Set<string>();
+    for (const { decision: from, requires } of edges) {
+      const key = `${from} -> ${requires}`;
+      if (seen.has(key)) {
+        problems.push(`${kind}: ${id} has the dependency ${key} more than once`);
+      }
+      seen.add(key);
+    }
+    const next = (from: string) => edges.filter((e) => e.decision === from).map((e) => e.requires);
+    const visiting = new Set<string>();
+    const done = new Set<string>();
+    const visit = (name: string): boolean => {
+      if (visiting.has(name)) {
+        return true;
+      }
+      if (done.has(name)) {
+        return false;
+      }
+      visiting.add(name);
+      const cyclic = next(name).some(visit);
+      visiting.delete(name);
+      done.add(name);
+      return cyclic;
+    };
+    if (visit("table")) {
+      problems.push(`${kind}: ${id} has a dependency cycle`);
+    } else {
+      for (const name of new Set(edges.map((e) => e.decision))) {
+        if (visit(name)) {
+          problems.push(`${kind}: ${id} has a dependency cycle`);
+          break;
+        }
+      }
+    }
+  }
 }

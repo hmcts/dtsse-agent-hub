@@ -724,3 +724,23 @@ tasks: [{id: T, title: {value: x, overrides: {ct_b: ${override}}}}]
     expect(shown.stdout).toContain("workType");
   });
 });
+
+describe("helper decision tables", () => {
+  it("should carry a helper that is a decision table through the tables residue when lifting and compiling", () => {
+    const spec = structuredClone(VARIANT_SPEC);
+    (spec.decisions.configuration as Record<string, unknown>).helpers = [
+      {
+        name: "LOOKUP",
+        hitPolicy: "FIRST",
+        inputs: [{ key: "x", typeRef: "string" }],
+        outputs: [{ name: "y", typeRef: "string" }],
+        rows: [{ when: { x: { in: ["a"] } }, returns: { y: "b" } }]
+      }
+    ];
+    const lifted = liftSpec(spec as never);
+    expect(lifted.report.differences).toEqual([]);
+    const helper = (lifted.model.tables?.configuration?.helpers ?? [])[0];
+    expect(helper).toMatchObject({ name: "LOOKUP", hitPolicy: "FIRST" });
+    expect(parseModel(stringifyModel(lifted.model)).tables?.configuration?.helpers?.[0]?.rows).toHaveLength(1);
+  });
+});
