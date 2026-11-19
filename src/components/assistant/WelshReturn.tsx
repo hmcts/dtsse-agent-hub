@@ -89,7 +89,11 @@ export function WelshReturn({ product, repos, client }: Readonly<{ product: stri
           choices={[]}
           start="Put them into the code"
           client={client}
-          before={repos.length > 1 ? <RepoSelect repos={repos} value={repo} onChange={setRepo} label="Repo to put them in" /> : null}
+          before={
+            repos.length > 1 ? (
+              <RepoSelect repos={repos} value={repo} onChange={setRepo} label="Which part of the service (code repository) to put them in" />
+            ) : null
+          }
         />
       ) : null}
     </>
@@ -231,8 +235,11 @@ function AddedSummary({ view, files }: Readonly<{ view: ImportView; files: Param
           "Nothing new for the catalogue, so no pull request was needed."
         )}
       </p>
-      {files.length > 0 ? <p className="text-xs text-asst-muted">Send the queries back to the Welsh unit:</p> : null}
-      <Downloads files={files} label="Queries for the Welsh Language Unit" />
+      <Downloads
+        files={files}
+        label="Queries for the Welsh Language Unit"
+        next="These are the rows the catalogue could not take as they were. Email the spreadsheet back to the Welsh Language Unit so they can answer them."
+      />
     </div>
   );
 }

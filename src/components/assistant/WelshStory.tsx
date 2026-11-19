@@ -351,7 +351,11 @@ function WriteStep({
                 : ". Every string has approved Welsh."}
             </span>
           </p>
-          <Downloads files={written.files} label="Spreadsheet for the Welsh Language Unit" />
+          <Downloads
+            files={written.files}
+            label="Spreadsheet for the Welsh Language Unit"
+            next="These are the strings with no approved Welsh yet. Email the spreadsheet to the Welsh Language Unit, then add what they send back with “The Welsh unit sent translations back”."
+          />
         </div>
       ) : null}
     </Step>

@@ -10,6 +10,7 @@ import { AssistantMarkdown, copyLabel } from "@/components/assistant/AssistantMa
 import { AssistantRefresh } from "@/components/assistant/AssistantRefresh";
 import { AssistantShell, SidebarToggle } from "@/components/assistant/AssistantShell";
 import { ProductSelect } from "@/components/assistant/ProductSelect";
+import { WorkflowsMenu } from "@/components/assistant/WorkflowsMenu";
 import type { ActionResult } from "@/web/action";
 
 const refresh = vi.fn();
@@ -237,7 +238,7 @@ describe("AssistantShell", () => {
     expect(screen.queryByRole("menu", { name: "Workflows" })).toBeNull();
   });
 
-  it("should offer the Welsh and Scheduled pages when the person's assistant has the Welsh plugin ticked", () => {
+  it("should offer the Welsh page, and not Scheduled while it is not built, when the person's assistant has the Welsh plugin ticked", () => {
     render(shell({ welsh: true }));
 
     fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
@@ -247,20 +248,25 @@ describe("AssistantShell", () => {
       within(menu)
         .getAllByRole("menuitem")
         .map((item) => item.getAttribute("href"))
-    ).toEqual(["/assistant/welsh", "/assistant/scheduled"]);
+    ).toEqual(["/assistant/welsh"]);
   });
 
-  it("should offer only the Scheduled page when the person's assistant does not have the Welsh plugin", () => {
+  it("should show no workflows plus at all when there is nothing behind it", () => {
     render(shell());
+
+    expect(screen.queryByRole("button", { name: "Workflows" })).toBeNull();
+  });
+
+  it("should offer the Scheduled page last once a page says it is built", () => {
+    render(<WorkflowsMenu welsh scheduled />);
 
     fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
 
-    const menu = screen.getByRole("menu", { name: "Workflows" });
     expect(
-      within(menu)
+      within(screen.getByRole("menu", { name: "Workflows" }))
         .getAllByRole("menuitem")
         .map((item) => item.getAttribute("href"))
-    ).toEqual(["/assistant/scheduled"]);
+    ).toEqual(["/assistant/welsh", "/assistant/scheduled"]);
   });
 
   it("should offer a new feedback project, and not the list of them, when feedback is on", () => {
@@ -271,12 +277,12 @@ describe("AssistantShell", () => {
       within(screen.getByRole("menu", { name: "Workflows" }))
         .getAllByRole("menuitem")
         .map((item) => item.getAttribute("href"));
-    expect(hrefs()).toEqual(["/assistant/welsh", "/assistant/feedback/new", "/assistant/scheduled"]);
+    expect(hrefs()).toEqual(["/assistant/welsh", "/assistant/feedback/new"]);
     expect(screen.getByRole("menuitem", { name: /New feedback project/ }).textContent).toContain("Share a prototype for comments and recorded feedback");
   });
 
   it("should offer nothing of feedback while it is off", () => {
-    render(shell());
+    render(shell({ welsh: true }));
 
     fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
 
@@ -284,7 +290,7 @@ describe("AssistantShell", () => {
   });
 
   it("should offer the morning briefing first when the page says it is offered", () => {
-    render(shell({ briefing: true, start: vi.fn() }));
+    render(shell({ briefing: true, start: vi.fn(), welsh: true }));
 
     fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
 
@@ -292,7 +298,7 @@ describe("AssistantShell", () => {
       within(screen.getByRole("menu", { name: "Workflows" }))
         .getAllByRole("menuitem")
         .map((item) => item.querySelector("span")?.textContent)
-    ).toEqual(["Morning briefing", "Scheduled"]);
+    ).toEqual(["Morning briefing", "Welsh translations"]);
   });
 
   it("should not offer the morning briefing when the page does not say it is offered", () => {
@@ -304,7 +310,7 @@ describe("AssistantShell", () => {
   });
 
   it("should not offer the morning briefing when the page gives no way to start a chat", () => {
-    render(shell({ briefing: true }));
+    render(shell({ briefing: true, welsh: true }));
 
     fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
 
@@ -442,7 +448,7 @@ describe("AssistantShell", () => {
     render(shell({ welsh: true }));
     fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
 
-    fireEvent.click(screen.getByRole("menuitem", { name: /Scheduled/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Welsh translations/ }));
 
     expect(screen.queryByRole("menu", { name: "Workflows" })).toBeNull();
   });

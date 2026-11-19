@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState } from "react";
-import type { WelshFileView, WelshResponse } from "@/assistant/welsh";
+import { createContext, useCallback, useContext, useEffect, useId, useRef, useState } from "react";
+import type { WelshFileView, WelshKind, WelshResponse, WelshTask } from "@/assistant/welsh";
 import { messageOf, safeLink } from "@/assistant/welsh-views";
 import { runWelshJob, type WelshClient, type WelshJobRequest, welshDownloadUrl } from "@/components/assistant/welshClient";
 
@@ -20,12 +20,23 @@ export interface JobState {
   phase: JobPhase;
   /** Set once the job is over. */
   response?: WelshResponse;
+  /** On a failed job, sends the same request again; `JobStatus` offers it as Try again. */
+  retry?: () => void;
+  /**
+   * Whether the failed job writes somewhere outside the page (a pull request, a Jira story, the catalogue), so one that
+   * timed out may still have done it, and sending it again could do it twice.
+   */
+  writes?: boolean;
 }
+
+/** The kinds that write somewhere outside the page: a pull request, a Jira story, or the service's catalogue. */
+const WRITING_KINDS: readonly WelshKind[] = ["apply", "story_write", "import", "keep_english"];
 
 /** One job at a time per section: starting another abandons the one before, whose answer then changes nothing. */
 export function useWelshJob(client: WelshClient) {
   const [state, setState] = useState<JobState>({ phase: "idle" });
   const current = useRef<AbortController | null>(null);
+  const runRef = useRef<(request: WelshJobRequest) => Promise<WelshResponse | undefined>>(async () => undefined);
 
   useEffect(() => () => current.current?.abort(), []);
 
@@ -46,11 +57,22 @@ export function useWelshJob(client: WelshClient) {
       if (controller.signal.aborted) {
         return undefined;
       }
-      setState({ phase: response.status === "done" ? "done" : "failed", response });
+      setState(
+        response.status === "done"
+          ? { phase: "done", response }
+          : {
+              phase: "failed",
+              response,
+              // Not for one that needs an update: the same request would be refused the same way until the pod restarts.
+              retry: response.status === "unsupported" ? undefined : () => void runRef.current(request),
+              writes: WRITING_KINDS.includes(request.kind)
+            }
+      );
       return response;
     },
     [client]
   );
+  runRef.current = run;
 
   const reset = useCallback(() => {
     current.current?.abort();
@@ -69,7 +91,7 @@ function problemText(response: WelshResponse | undefined): string {
     case "unsupported":
       return "Your assistant needs an update to do this. It gets one the next time it restarts.";
     case "timeout":
-      return "Your assistant did not answer in time. It may have restarted; try again.";
+      return "Your assistant did not answer in time. It may have restarted. Try again.";
     case "waking":
       return "Your assistant is still starting. Try again in a minute.";
     default:
@@ -85,33 +107,83 @@ const WAKING = "Your assistant is starting. This takes a minute or two, then thi
  */
 export function JobStatus({ state, working }: Readonly<{ state: JobState; working: string }>) {
   const progress: Record<JobPhase, string> = { idle: "", pending: working, waking: WAKING, done: "", failed: "" };
+  // A write that timed out may still land, so the person is asked to look before sending it again.
+  const unsure = state.writes === true && state.response?.status === "timeout";
   return (
     <>
       <output className="block text-[13px] text-asst-muted">{progress[state.phase]}</output>
       {state.phase === "failed" ? (
-        <p role="alert" className="text-[13px] text-asst-error">
-          {problemText(state.response)}
-        </p>
+        <div className="flex flex-col items-start gap-2">
+          <p role="alert" className="text-[13px] text-asst-error">
+            {unsure ? "Your assistant did not answer in time, but it may still have done this. Check before you try again." : problemText(state.response)}
+          </p>
+          {state.retry === undefined ? null : (
+            <button type="button" className={SECONDARY} onClick={state.retry}>
+              {unsure ? "Try again anyway" : "Try again"}
+            </button>
+          )}
+        </div>
       ) : null}
     </>
   );
 }
 
-/** The spreadsheets a job made, to download. */
-export function Downloads({ files, label }: Readonly<{ files: readonly WelshFileView[]; label: string }>) {
+/**
+ * The spreadsheets a job made, to download, each with what kind of file it is and how big, and `next`: what to do with
+ * them, since a spreadsheet on its own does not say who it is for.
+ */
+export function Downloads({ files, label, next }: Readonly<{ files: readonly WelshFileView[]; label: string; next?: string }>) {
   if (files.length === 0) {
     return null;
   }
   return (
-    <ul aria-label={label} className="flex flex-col gap-1">
-      {files.map((file) => (
-        <li key={file.file_id} className="text-[13px]">
-          <a href={welshDownloadUrl(file.file_id)} download={file.name} className={LINK}>
-            Download {file.name}
-          </a>
-        </li>
-      ))}
-    </ul>
+    <div className="flex flex-col gap-1">
+      <ul aria-label={label} className="flex flex-col gap-1">
+        {files.map((file) => (
+          <li key={file.file_id} className="text-[13px]">
+            <a href={welshDownloadUrl(file.file_id)} download={file.name} className={LINK}>
+              Download {file.name}
+            </a>
+            <span className="text-asst-muted"> ({fileFacts(file)})</span>
+          </li>
+        ))}
+      </ul>
+      {next === undefined ? null : <p className="text-pretty text-[13px] text-asst-body">{next}</p>}
+    </div>
+  );
+}
+
+/** "Excel spreadsheet, 24 KB": the kind of file from its name, and its size. */
+export function fileFacts(file: Pick<WelshFileView, "name" | "bytes">): string {
+  const kind = /\.xlsx$/i.test(file.name) ? "Excel spreadsheet" : /\.csv$/i.test(file.name) ? "CSV file" : "File";
+  return `${kind}, ${sizeLabel(file.bytes)}`;
+}
+
+function sizeLabel(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} bytes`;
+  }
+  const kb = bytes / 1024;
+  return kb < 1024 ? `${Math.max(1, Math.round(kb))} KB` : `${(kb / 1024).toFixed(1)} MB`;
+}
+
+/** How a task's last step moves the person on to the task that follows it, with the service they have chosen. */
+export const WelshTaskSwitch = createContext<(task: WelshTask) => void>(() => undefined);
+
+/**
+ * The task that usually comes next, at the end of one, so the person is not sent back to the list to find it. The
+ * service stays chosen: it is the same service's Welsh either way.
+ */
+export function NextTask({ task, title, why }: Readonly<{ task: WelshTask; title: string; why: string }>) {
+  const go = useContext(WelshTaskSwitch);
+  return (
+    <div className="flex flex-col gap-1 rounded-[10px] border border-asst-line px-4 py-3">
+      <p className="text-xs text-asst-muted">Next</p>
+      <button type="button" onClick={() => go(task)} className={`${LINK} self-start text-left text-sm font-semibold`}>
+        {title}
+      </button>
+      <p className="text-pretty text-[13px] text-asst-body">{why}</p>
+    </div>
   );
 }
 
@@ -180,11 +252,22 @@ export function WelshSourceNote() {
   );
 }
 
+/**
+ * How many steps the task has, so each can say "Step 2 of 5". `null` while that is not known yet: a check's later steps
+ * come and go with what it finds, so until it has run a step says only its own number.
+ */
+const StepsTotal = createContext<number | null>(null);
+
+/** Sets the total for the steps inside, for a task that learns it part-way, as the code check does. */
+export function StepsCount({ total, children }: Readonly<{ total: number | null; children: React.ReactNode }>) {
+  return <StepsTotal.Provider value={total}>{children}</StepsTotal.Provider>;
+}
+
 /** A numbered list of steps: what to do next is always the lowest step not yet done. */
-export function Steps({ children, label }: Readonly<{ children: React.ReactNode; label: string }>) {
+export function Steps({ children, label, total = null }: Readonly<{ children: React.ReactNode; label: string; total?: number | null }>) {
   return (
     <ol aria-label={label} className="flex flex-col">
-      {children}
+      <StepsTotal.Provider value={total}>{children}</StepsTotal.Provider>
     </ol>
   );
 }
@@ -206,6 +289,8 @@ export function Step({
   summary?: React.ReactNode;
   children?: React.ReactNode;
 }>) {
+  const total = useContext(StepsTotal);
+  const place = total === null ? `Step ${n}` : `Step ${n} of ${total}`;
   return (
     <li className="group relative flex gap-3 pb-6 last:pb-0">
       <span aria-hidden="true" className="absolute left-[13px] top-7 bottom-0 w-px bg-asst-line group-last:hidden" />
@@ -217,7 +302,11 @@ export function Step({
       </span>
       <div className="flex min-w-0 flex-1 flex-col gap-2 pt-0.5">
         <h3 className="text-sm font-semibold">
-          <span className="sr-only">{done ? `Step ${n}, done: ` : `Step ${n}: `}</span>
+          {/* Said and shown, so how far there is to go reads without counting the circles. */}
+          <span className="block text-xs font-normal text-asst-muted">
+            {place}
+            <span className="sr-only">{done ? ", done:" : ":"}</span>
+          </span>
           {title}
           {summary ? <span className="ml-2 font-normal text-asst-muted">{summary}</span> : null}
         </h3>
@@ -246,7 +335,7 @@ export function RepoSelect({
   repos,
   value,
   onChange,
-  label = "Repo"
+  label = "Which part of the service (code repository)"
 }: Readonly<{ repos: readonly string[]; value: string; onChange: (repo: string) => void; label?: string }>) {
   return (
     <Labelled label={label}>

@@ -12,12 +12,14 @@ import {
   isBusy,
   type JobState,
   JobStatus,
+  NextTask,
   OutLink,
   PRIMARY,
   plural,
   RepoSelect,
   repoName,
   Step,
+  StepsCount,
   ToolMessage,
   useWelshJob
 } from "@/components/assistant/WelshParts";
@@ -53,9 +55,9 @@ export function WelshScan({
 
   if (repos.length === 0) {
     return (
-      <Step n={2} title="Repo">
+      <Step n={2} title="Which part of the service">
         <p className="text-[13px] text-asst-warn">
-          <span>No repos are set up for this service yet. A developer adds them to </span>
+          <span>No code repositories are set up for this service yet. A developer adds them to </span>
           <span className="font-plex-mono">welsh/config.yaml</span>
           <span> in the service's own repo.</span>
         </p>
@@ -87,9 +89,12 @@ export function WelshScan({
   };
   const steps = numberSteps(view);
   const ready = view ? view.fromCatalogue + choices.length : 0;
+  // Known once the check has run: the steps after it are the ones it found something for, and the last puts the Welsh
+  // into the code only when there is some to put in.
+  const total = view === null ? null : ready > 0 ? steps.apply : steps.apply - 1;
 
   return (
-    <>
+    <StepsCount total={total}>
       <CheckStep
         repo={repo}
         repos={repos}
@@ -126,7 +131,7 @@ export function WelshScan({
           client={client}
         />
       ) : null}
-    </>
+    </StepsCount>
   );
 }
 
@@ -351,11 +356,16 @@ function SendStep({
       ) : null}
       {made ? (
         <>
-          <p className="text-[13px]">
-            {"Download this spreadsheet and send it to the Welsh Language Unit."}
-            {" When it comes back, choose “The Welsh unit sent translations back” on the first page."}
-          </p>
-          <Downloads files={made.files} label="Spreadsheet for the Welsh Language Unit" />
+          <Downloads
+            files={made.files}
+            label="Spreadsheet for the Welsh Language Unit"
+            next="Download this spreadsheet and email it to the Welsh Language Unit. They fill in the Welsh column and send it back."
+          />
+          <NextTask
+            task="return"
+            title="The Welsh unit sent translations back"
+            why="When their spreadsheet comes back, check it here and add it to the catalogue. The service stays chosen."
+          />
         </>
       ) : null}
       {keepable.length > 0 && !kept ? (

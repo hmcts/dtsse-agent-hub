@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { Product } from "@/assistant/products";
-import type { WelshTask } from "@/assistant/welsh";
+import { isWelshTask, type WelshTask } from "@/assistant/welsh";
 import { infoView, type WelshInfo } from "@/assistant/welsh-views";
-import { doneResult, FIELD, JobStatus, LINK, plural, Step, Steps, useWelshJob } from "@/components/assistant/WelshParts";
+import { doneResult, FIELD, JobStatus, LINK, plural, Step, Steps, useWelshJob, WelshTaskSwitch } from "@/components/assistant/WelshParts";
 import { WelshReturn } from "@/components/assistant/WelshReturn";
 import { WelshScan } from "@/components/assistant/WelshScan";
 import { WelshSearch } from "@/components/assistant/WelshSearch";
@@ -51,6 +51,31 @@ export function WelshPage({ products, initialProduct = null, initialTask = null,
   const info = useWelshJob(client);
   const { run } = info;
 
+  /**
+   * Opens a task, or the list for `null`, as a new entry in the browser's history with `?task=` in the address, so the
+   * Back button returns to where the person was rather than leaving the Welsh page, and the address can be shared.
+   */
+  const choose = useCallback((next: WelshTask | null) => {
+    setTask(next);
+    const address = new URL(window.location.href);
+    if (next === null) {
+      address.searchParams.delete("task");
+    } else {
+      address.searchParams.set("task", next);
+    }
+    window.history.pushState(null, "", address);
+  }, []);
+
+  // Back and Forward change the address without telling the page, so the task is read from it again when they do.
+  useEffect(() => {
+    const follow = () => {
+      const named = new URLSearchParams(window.location.search).get("task");
+      setTask(isWelshTask(named) ? named : null);
+    };
+    window.addEventListener("popstate", follow);
+    return () => window.removeEventListener("popstate", follow);
+  }, []);
+
   // The remembered service is read after the first render, since the server has no way to know it.
   useEffect(() => {
     if (initialProduct === null) {
@@ -91,7 +116,7 @@ export function WelshPage({ products, initialProduct = null, initialTask = null,
             <li key={t.id}>
               <button
                 type="button"
-                onClick={() => setTask(t.id)}
+                onClick={() => choose(t.id)}
                 className="flex h-full w-full flex-col gap-1 rounded-[10px] border border-asst-line px-4 py-3 text-left hover:border-asst-accent-line hover:bg-asst-hover"
               >
                 <span className="text-sm font-semibold">{t.title}</span>
@@ -110,7 +135,7 @@ export function WelshPage({ products, initialProduct = null, initialTask = null,
   return (
     <section aria-labelledby="welsh-task" className="flex flex-col gap-4">
       <div className="flex flex-col gap-1">
-        <button type="button" onClick={() => setTask(null)} className={`${LINK} self-start text-[13px]`}>
+        <button type="button" onClick={() => choose(null)} className={`${LINK} self-start text-[13px]`}>
           ← All tasks
         </button>
         <h2 id="welsh-task" className="text-[17px] font-semibold">
@@ -118,7 +143,7 @@ export function WelshPage({ products, initialProduct = null, initialTask = null,
         </h2>
         <p className="text-[13px] text-asst-muted">{chosen.description}</p>
       </div>
-      <Steps label={chosen.title}>
+      <Steps label={chosen.title} total={stepsIn(chosen.id, view)}>
         <Step n={1} title="Service" done={ready} summary={ready ? label : undefined}>
           {product === null || changing ? (
             <label className="flex flex-col gap-1 text-[13px]">
@@ -153,11 +178,30 @@ export function WelshPage({ products, initialProduct = null, initialTask = null,
         </Step>
         {ready && product ? (
           // Keyed by the service, so changing it starts the task afresh rather than showing another service's results.
-          <TaskSteps key={product} task={chosen.id} product={product} info={view} client={client} />
+          <WelshTaskSwitch.Provider value={choose}>
+            <TaskSteps key={product} task={chosen.id} product={product} info={view} client={client} />
+          </WelshTaskSwitch.Provider>
         ) : null}
       </Steps>
     </section>
   );
+}
+
+/**
+ * How many steps a task has, the service's included, or `null` while that is not known: putting the Welsh into the code
+ * is a step only for a service with repos, and the code check's later steps follow what it finds, so it says its own.
+ */
+export function stepsIn(task: WelshTask, info: WelshInfo | null): number | null {
+  switch (task) {
+    case "search":
+      return 2;
+    case "story":
+      return 5;
+    case "return":
+      return info === null ? null : info.repos.length > 0 ? 5 : 4;
+    case "scan":
+      return null;
+  }
 }
 
 function ServiceFacts({ info }: Readonly<{ info: WelshInfo }>) {

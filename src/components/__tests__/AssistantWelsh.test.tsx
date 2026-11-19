@@ -4,7 +4,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WelshKind, WelshResponse, WelshTask } from "@/assistant/welsh";
-import { PRODUCT_KEY, WelshPage } from "@/components/assistant/WelshPage";
+import { PRODUCT_KEY, stepsIn, WelshPage } from "@/components/assistant/WelshPage";
+import { fileFacts } from "@/components/assistant/WelshParts";
 import { SEARCH_AFTER_MS } from "@/components/assistant/WelshSearch";
 import type { WelshClient, WelshJobRequest } from "@/components/assistant/welshClient";
 
@@ -426,7 +427,7 @@ describe("WelshPage, the less common paths", () => {
     const { fake } = await open("scan", { ...ANSWERS, info: twoRepos });
 
     // Act
-    fireEvent.change(screen.getByLabelText("Repo"), { target: { value: "apps/cath/cath-frontend" } });
+    fireEvent.change(screen.getByLabelText("Which part of the service (code repository)"), { target: { value: "apps/cath/cath-frontend" } });
     fireEvent.click(screen.getByRole("button", { name: "Find missing Welsh" }));
     fireEvent.click(await screen.findByRole("radio", { name: "Ydw" }));
     fireEvent.click(screen.getByRole("radio", { name: "Send it to the Welsh unit" }));
@@ -442,7 +443,7 @@ describe("WelshPage, the less common paths", () => {
   it("should say when a service has no repos or no catalogue yet", async () => {
     await open("scan", { ...ANSWERS, info: done("info", { initialised: false, repos: [] }) });
     expect(screen.getByText(/This service is not set up for Welsh yet/)).toBeTruthy();
-    expect(screen.getByText(/No repos are set up for this service yet/)).toBeTruthy();
+    expect(screen.getByText(/No code repositories are set up for this service yet/)).toBeTruthy();
   });
 
   it("should put a return into the repo chosen after it is added, and start again with another spreadsheet", async () => {
@@ -450,10 +451,10 @@ describe("WelshPage, the less common paths", () => {
     const { fake } = await open("return", { ...ANSWERS, info: twoRepos });
     fireEvent.change(screen.getByLabelText(/The .xlsx the Welsh Language Unit sent back/), { target: { files: [new File(["PK"], "return.xlsx")] } });
     fireEvent.click(await screen.findByRole("button", { name: "Add to the catalogue" }));
-    await screen.findByLabelText("Repo to put them in");
+    await screen.findByLabelText("Which part of the service (code repository) to put them in");
 
     // Act
-    fireEvent.change(screen.getByLabelText("Repo to put them in"), { target: { value: "apps/cath/cath-frontend" } });
+    fireEvent.change(screen.getByLabelText("Which part of the service (code repository) to put them in"), { target: { value: "apps/cath/cath-frontend" } });
     fireEvent.click(screen.getByRole("button", { name: "Put them into the code" }));
     await screen.findByText(/50 Welsh values/);
     fireEvent.click(screen.getByRole("button", { name: "Use a different spreadsheet" }));
@@ -548,5 +549,125 @@ describe("WelshPage, the less common paths", () => {
     expect(await screen.findByText(/Your assistant is starting/)).toBeTruthy();
     await act(async () => release());
     expect(await screen.findByText(SET_UP)).toBeTruthy();
+  });
+});
+
+describe("WelshPage, getting through a task", () => {
+  it("should offer Try again when a step fails, and send the same request again when it is pressed", async () => {
+    const { fake } = client();
+    vi.mocked(fake.start)
+      .mockResolvedValueOnce({ status: "failed", detail: "That did not work." })
+      .mockResolvedValueOnce(ANSWERS.info as WelshResponse);
+    render(<WelshPage products={PRODUCTS} initialProduct="cath" initialTask="search" client={fake} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
+
+    expect(await screen.findByText(SET_UP)).toBeTruthy();
+    expect(kinds(fake).map((r) => r.kind)).toEqual(["info", "info"]);
+  });
+
+  it("should offer no Try again when the assistant needs an update, which another try would not change", async () => {
+    const { fake } = client({ ...ANSWERS, info: { status: "unsupported" } as WelshResponse });
+    render(<WelshPage products={PRODUCTS} initialProduct="cath" initialTask="search" client={fake} />);
+
+    expect(await screen.findByText(/needs an update to do this/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Try again/ })).toBeNull();
+  });
+
+  it("should ask the person to check before trying again when a write timed out, since it may still have been done", async () => {
+    const { requests } = await open("story", { ...ANSWERS, story_write: { status: "timeout" } as WelshResponse });
+    fireEvent.change(screen.getByLabelText("Jira story"), { target: { value: "dtsstci-1927" } });
+    fireEvent.click(screen.getByRole("button", { name: "Find its English" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Upload documents" }));
+    fireEvent.click(screen.getByRole("button", { name: "Build the Welsh table" }));
+    await screen.findByText("For the Welsh unit");
+    fireEvent.click(screen.getByRole("button", { name: "Add to the Jira story…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add it to the story" }));
+
+    expect(await screen.findByText("Your assistant did not answer in time, but it may still have done this. Check before you try again.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Try again anyway" }));
+
+    await waitFor(() => expect(requests.filter((r) => r.kind === "story_write")).toHaveLength(2));
+  });
+
+  it("should say how many steps a task has, and its own number only until the code check has said", async () => {
+    await open("story");
+    expect(screen.getByText("Step 1 of 5")).toBeTruthy();
+    expect(screen.getByText("Step 2 of 5")).toBeTruthy();
+
+    cleanup();
+    await open("scan");
+    expect(screen.getByText("Step 1")).toBeTruthy();
+    expect(screen.getByText("Step 2")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Find missing Welsh" }));
+    await screen.findByText("new, for the Welsh unit");
+    expect(screen.getByText("Step 2 of 5")).toBeTruthy();
+  });
+
+  it("should put the task in the address as it is chosen, and follow the browser's Back to the list", async () => {
+    window.history.replaceState(null, "", "/assistant/welsh?product=cath");
+    const { fake } = client();
+    render(<WelshPage products={PRODUCTS} initialProduct="cath" client={fake} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Look up a translation/ }));
+    expect(window.location.search).toBe("?product=cath&task=search");
+
+    act(() => {
+      window.history.replaceState(null, "", "/assistant/welsh?product=cath");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    expect(screen.getByText("What do you need to do?")).toBeTruthy();
+
+    act(() => {
+      window.history.replaceState(null, "", "/assistant/welsh?product=cath&task=story");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    expect(screen.getByRole("heading", { name: "Add Welsh to a Jira story" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "← All tasks" }));
+    expect(window.location.search).toBe("?product=cath");
+  });
+
+  it("should say what a spreadsheet is and what to do with it, then offer the task that comes next with the service kept", async () => {
+    await open("scan");
+    fireEvent.click(screen.getByRole("button", { name: "Find missing Welsh" }));
+    await screen.findByText("new, for the Welsh unit");
+    fireEvent.click(screen.getByRole("button", { name: "Make the spreadsheet of 181 strings" }));
+    await screen.findByRole("link", { name: `Download ${FILE.name}` });
+
+    expect(screen.getByText("(Excel spreadsheet, 100 bytes)")).toBeTruthy();
+    expect(screen.getByText(/email it to the Welsh Language Unit/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "The Welsh unit sent translations back" }));
+
+    expect(screen.getByRole("heading", { name: "The Welsh unit sent translations back" })).toBeTruthy();
+    expect(screen.getByText(SET_UP)).toBeTruthy();
+    expect(new URLSearchParams(window.location.search).get("task")).toBe("return");
+  });
+});
+
+describe("fileFacts", () => {
+  it("should name the kind of file and give its size in the unit that reads best", () => {
+    expect(fileFacts({ name: "a.xlsx", bytes: 2048 })).toBe("Excel spreadsheet, 2 KB");
+    expect(fileFacts({ name: "a.csv", bytes: 300 })).toBe("CSV file, 300 bytes");
+    expect(fileFacts({ name: "a.bin", bytes: 3 * 1024 * 1024 })).toBe("File, 3.0 MB");
+    expect(fileFacts({ name: "a.xlsx", bytes: 1100 })).toBe("Excel spreadsheet, 1 KB");
+  });
+});
+
+describe("stepsIn", () => {
+  it("should count a return's steps from whether the service has repos to put the Welsh in", () => {
+    const info = (repos: number) => ({
+      initialised: true,
+      approved: 1,
+      needsReview: 0,
+      repos: Array.from({ length: repos }, (_, i) => `r${i}`),
+      skipsStaffPages: false
+    });
+    expect(stepsIn("return", info(1) as never)).toBe(5);
+    expect(stepsIn("return", info(0) as never)).toBe(4);
+    expect(stepsIn("return", null)).toBeNull();
+    expect(stepsIn("search", null)).toBe(2);
+    expect(stepsIn("scan", null)).toBeNull();
   });
 });
