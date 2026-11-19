@@ -632,8 +632,8 @@ describe("WelshPage, getting through a task", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Find missing Welsh" }));
     await screen.findByText("new, for the Welsh unit");
-    // The service's step takes the total too, once the check has said it.
-    expect(screen.getByText("Step 1 of 5")).toBeTruthy();
+    // The service's step takes the total too, once the check has said it, which is a render after the check's own.
+    expect(await screen.findByText("Step 1 of 5")).toBeTruthy();
     expect(screen.getByText("Step 2 of 5")).toBeTruthy();
   });
 

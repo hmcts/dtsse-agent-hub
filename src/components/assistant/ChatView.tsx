@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { clientSupports, sessionLacks } from "@/agents/client-features";
 import { EXPIRE_AFTER_SECONDS } from "@/agents/liveness";
 import type { ArtefactSnapshot } from "@/app/_actions/assistant";
 import { MAX_ASKED_BODY } from "@/assistant/deck";
 import { type DocumentKind, documentLabel } from "@/assistant/documents";
 import { type ExportDefaults, NO_DEFAULTS } from "@/assistant/export-defaults";
+import { clockTime, dayLabel, dayNumber, sameDay } from "@/assistant/grouping";
 import { PRODUCTS, productLabel, storedProduct } from "@/assistant/products";
 import type { Template } from "@/assistant/starters";
 import {
@@ -30,6 +31,7 @@ import { Mark, SidebarToggle } from "@/components/assistant/AssistantShell";
 import { ChatMenu } from "@/components/assistant/ChatMenu";
 import { Composer } from "@/components/assistant/Composer";
 import type { ExportToConfluenceAction } from "@/components/assistant/ConfluenceExport";
+import { CopyButton } from "@/components/assistant/CopyButton";
 import { CreateMenu, type CreateOption } from "@/components/assistant/CreateMenu";
 import type { SaveDeckAction, UnsavedDeckDraft } from "@/components/assistant/DeckEditor";
 import type { RestoreDeckAction } from "@/components/assistant/DeckHistory";
@@ -209,7 +211,66 @@ function SessionNote({ notice }: { notice: SessionNotice | null }) {
   );
 }
 
-function Item({ item, answerQuestion, repoBase }: { item: ThreadItem; answerQuestion: AnswerQuestionAction; repoBase: string | null }) {
+/**
+ * What a message offers beyond its words: shown on hover and while focus is inside, so a long thread is not a column
+ * of buttons, and always on a screen with no hover to show it, where it would otherwise never appear.
+ */
+const ACTIONS_ROW =
+  "flex min-h-7 items-center gap-1 text-xs text-asst-faint [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-focus-within:opacity-100";
+
+/** A message's time, "14:02", as a `<time>` a screen reader can read the full instant of. */
+function Stamp({ at }: { at: string }) {
+  return (
+    <time dateTime={at} className="px-1 tabular-nums" suppressHydrationWarning>
+      {clockTime(new Date(at))}
+    </time>
+  );
+}
+
+/**
+ * A row that is one line until opened: a tool call's command or path, or a notice, can be long, and its start is what
+ * identifies it. Opening it shows the whole of it, to read or select, which a `title` tooltip never gave a keyboard
+ * or a touch screen.
+ */
+function Expandable({ text, className, lead }: { text: string; className: string; lead?: React.ReactNode }) {
+  return (
+    <li className={`min-w-0 text-xs ${className}`}>
+      <details className="group/row min-w-0">
+        <summary className="flex min-w-0 cursor-pointer list-none items-baseline gap-2 [&::-webkit-details-marker]:hidden">
+          {lead}
+          <span className="min-w-0 truncate group-open/row:hidden">{text}</span>
+          <span aria-hidden="true" className="shrink-0 text-asst-faint">
+            <span className="group-open/row:hidden">Show</span>
+            <span className="hidden group-open/row:inline">Hide</span>
+          </span>
+        </summary>
+        <p className="mt-1 whitespace-pre-wrap break-words rounded-lg bg-asst-field px-2.5 py-1.5 font-plex-mono text-xs text-asst-text">{text}</p>
+      </details>
+    </li>
+  );
+}
+
+function Item({
+  item,
+  answerQuestion,
+  repoBase,
+  onRetry,
+  onResend,
+  resent = false,
+  busy
+}: {
+  item: ThreadItem;
+  answerQuestion: AnswerQuestionAction;
+  repoBase: string | null;
+  /** On the latest answer only: asks again by sending the message it answered. */
+  onRetry?: () => void;
+  /** Sends an undelivered message's words again. */
+  onResend?: (item: { key: string; text: string }) => void;
+  /** This message's words were sent again, so it offers no second resend of them. */
+  resent?: boolean;
+  /** An answer is being written, so nothing here starts another. */
+  busy: boolean;
+}) {
   if (item.type === "question") {
     return (
       <li>
@@ -239,48 +300,107 @@ function Item({ item, answerQuestion, repoBase }: { item: ThreadItem; answerQues
   // nothing on its own, and the summary is left to truncate: it is a path or a command, and the start of one is the
   // part that identifies it.
   if (item.type === "tool") {
-    return (
-      <li className="flex min-w-0 items-baseline gap-2 text-xs text-asst-faint">
+    const lead = (
+      <>
         <span className="sr-only">Used</span>
         <span className="shrink-0 font-plex-mono text-asst-muted">{item.name}</span>
-        {item.summary === "" ? null : <span className="min-w-0 truncate">{item.summary}</span>}
         {item.failed ? <span className="shrink-0 text-asst-error">failed</span> : null}
-      </li>
+      </>
     );
+    if (item.summary === "") {
+      return <li className="flex min-w-0 items-baseline gap-2 text-xs text-asst-faint">{lead}</li>;
+    }
+    return <Expandable text={item.summary} className="text-asst-faint" lead={lead} />;
   }
   if (item.type === "notice") {
     return (
-      <li className={`flex min-w-0 items-baseline gap-2 text-xs ${item.failed ? "text-asst-error" : "text-asst-faint"}`}>
-        {item.failed ? <span className="shrink-0 font-medium">Failed:</span> : null}
-        <span title={item.text} className="min-w-0 truncate">
-          {item.text}
-        </span>
-      </li>
+      <Expandable
+        text={item.text}
+        className={item.failed ? "text-asst-error" : "text-asst-faint"}
+        lead={item.failed ? <span className="shrink-0 font-medium">Failed:</span> : undefined}
+      />
     );
   }
   if (item.type === "user") {
+    const undelivered = item.delivery === "expired";
     return (
-      <li className="flex flex-col items-end gap-1">
+      <li className="group flex flex-col items-end gap-1">
         <span className="sr-only">You said:</span>
         {item.text === "" ? null : (
           <div className="max-w-[82%] whitespace-pre-wrap break-words rounded-[18px_18px_4px_18px] bg-asst-bubble px-4 py-2.5">{item.text}</div>
         )}
         <MessageAttachments attachments={item.attachments} />
-        {item.delivery === "expired" ? <span className="text-xs text-asst-error">Not delivered. Send it again.</span> : null}
+        {undelivered ? (
+          <span className="flex items-center gap-2 text-xs text-asst-error">
+            Not delivered.
+            {/* Its words only: the files it carried were let go with it, so they would have to be attached again. */}
+            {resent ? (
+              " Sent again below."
+            ) : onResend === undefined || item.text === "" ? (
+              " Send it again."
+            ) : (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => onResend({ key: item.key, text: item.text })}
+                className="rounded-md px-1.5 py-0.5 text-asst-accent underline hover:text-asst-accent-hover disabled:opacity-50"
+              >
+                Send it again
+              </button>
+            )}
+          </span>
+        ) : null}
+        <div className={ACTIONS_ROW}>
+          <Stamp at={item.at} />
+        </div>
       </li>
     );
   }
   return (
-    <li className="flex items-start gap-3.5">
+    <li className="group flex items-start gap-3.5">
       <span className="mt-px">
         <Mark size="sm" />
       </span>
       <div className="min-w-0 flex-1 text-asst-body">
         <span className="sr-only">The assistant said:</span>
         <AssistantMarkdown source={item.text} repoBase={repoBase} />
+        <div className={`${ACTIONS_ROW} -ml-1.5 mt-1`}>
+          <CopyButton text={item.text} label="Copy answer" />
+          {onRetry === undefined ? null : (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={onRetry}
+              aria-label="Ask again"
+              title="Ask again"
+              className="flex h-7 items-center rounded-md px-1.5 text-asst-muted hover:bg-asst-field hover:text-asst-text disabled:opacity-40"
+            >
+              <span aria-hidden="true">↻</span>
+            </button>
+          )}
+          <Stamp at={item.at} />
+        </div>
       </div>
     </li>
   );
+}
+
+/** Where a day separator goes: before the first item of each day, once the thread is not all today's. */
+function daySeparators(thread: readonly ThreadItem[], now: Date): Map<string, string> {
+  const marks = new Map<string, string>();
+  // By the label, not the calendar: a browser clock a little behind can see a message from a moment ago as tomorrow's.
+  if (thread.every((item) => dayLabel(new Date(item.at), now) === "Today")) {
+    return marks;
+  }
+  let previous: Date | null = null;
+  for (const item of thread) {
+    const at = new Date(item.at);
+    if (previous === null || !sameDay(previous, at)) {
+      marks.set(item.key, dayLabel(at, now));
+    }
+    previous = at;
+  }
+  return marks;
 }
 
 function ConfirmProduct({ from, to, onCancel, onConfirm }: { from: string; to: string; onCancel: () => void; onConfirm: () => void }) {
@@ -731,7 +851,27 @@ export function ChatView({
   ];
   const shownDocument = documentOpen === null ? undefined : view.documents.find((document) => document.id === documentOpen.id);
   const tickets = ticketsOffered(ticketTool, shownDocument?.jira ?? NOT_EXPORTED, shownDocument?.github ?? NOT_EXPORTED);
-  const thread = threadItems(live.items, view.productHistory, view.stopHistory, view.local);
+  const thread = useMemo(
+    () => threadItems(live.items, view.productHistory, view.stopHistory, view.local),
+    [live.items, view.productHistory, view.stopHistory, view.local]
+  );
+  // Worked out again only as the thread or the day changes, not on every update an answer streams in.
+  const today = dayNumber(new Date());
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `today` is the day the labels are relative to, read through `new Date()`
+  const separators = useMemo(() => daySeparators(thread, new Date()), [thread, today]);
+  // Ask again is offered on the latest answer only, and sends the latest thing the person said: a session cannot
+  // take an answer back, so asking again is asking again, after it.
+  const resending = useRef(false);
+  const [resendingNow, setResendingNow] = useState(false);
+  // Undelivered messages already sent again, which offer no second resend of the same words.
+  const [resent, setResent] = useState<ReadonlySet<string>>(new Set());
+  // A message waiting for its answer makes the answer before it the wrong place to ask again from.
+  const answerAt = thread.findLastIndex((item) => item.type === "assistant");
+  const askedAt = thread.findLastIndex((item) => item.type === "user");
+  const asked = thread[askedAt];
+  const lastAnswer = answerAt > askedAt ? (thread[answerAt]?.key ?? null) : null;
+  // Not for a message that carried files: those were let go once fetched, so asking again would leave them out.
+  const lastAsked = asked?.type === "user" && asked.text !== "" && asked.attachments.length === 0 ? asked.text : null;
   const doing: Progress = progress(live.items, thread, status, view.sessionState, view.local);
   /** A turn ending, working or waking back to idle, with no new slides ends the wait for the slides Create asked for. */
   const turnActive = useRef(false);
@@ -985,6 +1125,37 @@ export function ChatView({
     return null;
   }
 
+  /** Sends words the person already sent, again: Ask again on an answer, and Send it again on one that was not delivered. */
+  /**
+   * The words exactly as they were sent, and nothing the box is holding for the next message: not a slide reference
+   * waiting there, which stays for the message it was chosen for. One at a time, so a double click sends them once.
+   */
+  async function again(text: string, resentKey?: string): Promise<void> {
+    if (resending.current) {
+      return;
+    }
+    resending.current = true;
+    setResendingNow(true);
+    try {
+      const result = await actions.send({ conversationId: view.id, body: text, uploadIds: [] });
+      if (result.ok) {
+        setError(null);
+        scroller.stickNow();
+        live.addMessage(result.message);
+        if (resentKey !== undefined) {
+          setResent((keys) => new Set(keys).add(resentKey));
+        }
+      } else {
+        setError(result.error);
+      }
+    } catch {
+      setError(ACTION_UNREACHABLE);
+    } finally {
+      resending.current = false;
+      setResendingNow(false);
+    }
+  }
+
   /** There is no blank deck to edit: slides are drafted by the assistant, so Create asks it to make a new one. */
   async function createSlides(): Promise<void> {
     if (slidesAsked) {
@@ -1002,6 +1173,34 @@ export function ChatView({
       setSlidesAskedAt(null);
     }
   }
+
+  // Escape stops the answer being written, as in other chat tools, but only when nothing else on the page has a use for
+  // it: a dialog, a menu or an open list answers Escape first, and the skill list marks it as used. `window` is the last
+  // stop, so all of those have had their turn.
+  const stopNow = useRef(() => {});
+  stopNow.current = () => void stop();
+  useEffect(() => {
+    if (!stoppable) {
+      return;
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.shiftKey || event.defaultPrevented) {
+        return;
+      }
+      if (document.querySelector('[aria-modal="true"], [role="menu"], [role="listbox"]:not([hidden])') !== null) {
+        return;
+      }
+      // The sidebar has its own Escapes — its search box, and the drawer on a narrow screen — which close something there.
+      const sidebar = document.querySelector('aside[aria-label="Conversations"]');
+      const target = event.target instanceof Node ? event.target : null;
+      if ((sidebar !== null && target !== null && sidebar.contains(target)) || document.querySelector('button[aria-label="Close sidebar"]') !== null) {
+        return;
+      }
+      stopNow.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [stoppable]);
 
   async function stop(): Promise<void> {
     const result = await actions.stop({ conversationId: view.id });
@@ -1109,7 +1308,24 @@ export function ChatView({
             )}
             <ol aria-label="Conversation" className="flex flex-col gap-[26px]">
               {thread.map((item) => (
-                <Item key={item.key} item={item} answerQuestion={actions.answerQuestion} repoBase={view.repoBase} />
+                <Fragment key={item.key}>
+                  {separators.has(item.key) ? (
+                    <li className="flex items-center gap-3 text-xs text-asst-faint">
+                      <span aria-hidden="true" className="h-px flex-1 bg-asst-line" />
+                      <span suppressHydrationWarning>{separators.get(item.key)}</span>
+                      <span aria-hidden="true" className="h-px flex-1 bg-asst-line" />
+                    </li>
+                  ) : null}
+                  <Item
+                    item={item}
+                    answerQuestion={actions.answerQuestion}
+                    repoBase={view.repoBase}
+                    busy={doing.state !== "idle" || resendingNow}
+                    onRetry={item.key === lastAnswer && lastAsked !== null ? () => void again(lastAsked) : undefined}
+                    onResend={({ key, text }) => void again(text, key)}
+                    resent={resent.has(item.key)}
+                  />
+                </Fragment>
               ))}
             </ol>
             {doing.state === "idle" ? null : (

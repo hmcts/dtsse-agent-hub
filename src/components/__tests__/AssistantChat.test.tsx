@@ -229,7 +229,10 @@ describe("ChatView thread", () => {
     const thread = screen.getByRole("list", { name: "Conversation" });
     expect(within(thread).getByText("How do I add an event?")).toBeTruthy();
     expect(within(thread).getByText("Add it to the definition.")).toBeTruthy();
-    expect(within(thread).getAllByRole("listitem")).toHaveLength(2);
+    // The two words, after the day they were said on: these were not said today.
+    const rows = within(thread).getAllByRole("listitem");
+    expect(rows).toHaveLength(3);
+    expect(rows[0]?.textContent).toBe("Wednesday 21 October");
     expect(screen.queryByText("the tool output")).toBeNull();
     expect(screen.queryByText("a system line")).toBeNull();
     expect(screen.queryByText(/secret\.ts/)).toBeNull();
@@ -260,7 +263,8 @@ describe("ChatView thread", () => {
       />
     );
 
-    expect(screen.getByText("Not delivered. Send it again.")).toBeTruthy();
+    expect(screen.getByText(/Not delivered\./)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Send it again" })).toBeTruthy();
   });
 
   const FORKED: ConversationView["forked"] = {
@@ -913,7 +917,8 @@ describe("ChatView on a local chat", () => {
 
     expect(screen.getByText("why did that delivery expire?")).toBeTruthy();
     expect(screen.getByText("Grep")).toBeTruthy();
-    expect(screen.getByText("expireDeliveries")).toBeTruthy();
+    // On its one line, and again in full once the row is opened.
+    expect(screen.getAllByText("expireDeliveries")).toHaveLength(2);
     // What came back is the session's working-out and stays out, as it does in a chat on a pod.
     expect(screen.queryByText("three matches in two files")).toBeNull();
   });
@@ -2957,5 +2962,305 @@ describe("ChatView slides", () => {
 
     expect(screen.queryByRole("region", { name: "Slides" })).toBeNull();
     expect(screen.getByRole("button", { name: "Stop asking about Slide 1: Ways of working" })).toBeTruthy();
+  });
+});
+
+describe("ChatView answer actions", () => {
+  const ANSWERED = page({
+    messages: [message("1", { body: "How do I add an event?" })],
+    entries: [entry("2", { content: { text: "Add it to the definition." } })]
+  });
+
+  it("should copy an answer's words when its Copy is pressed", async () => {
+    const writeText = vi.fn(async () => undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ page: ANSWERED })} templates={TEMPLATES} actions={actions()} />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Copy answer" }));
+    });
+
+    expect(writeText).toHaveBeenCalledWith("Add it to the definition.");
+    vi.unstubAllGlobals();
+  });
+
+  it("should ask again by sending the person's last message when Ask again is pressed on the latest answer", async () => {
+    const chatActions = actions();
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ page: ANSWERED })} templates={TEMPLATES} actions={chatActions} />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Ask again" }));
+    });
+
+    expect(chatActions.send).toHaveBeenCalledWith({ conversationId: CONVERSATION, body: "How do I add an event?", uploadIds: [] });
+  });
+
+  it("should offer Ask again on no answer when a newer message is still waiting for one", () => {
+    const waiting = page({
+      messages: [message("1", { body: "first" }), message("3", { body: "second", created_at: "2026-10-21T09:05:00.000Z" })],
+      entries: [entry("2", { content: { text: "An answer to the first." } })]
+    });
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ page: waiting })} templates={TEMPLATES} actions={actions()} />);
+
+    expect(screen.queryByRole("button", { name: "Ask again" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Copy answer" })).toBeTruthy();
+  });
+
+  it("should say why an Ask again failed when the message cannot be sent", async () => {
+    const chatActions = actions({ send: vi.fn(async () => ({ ok: false as const, error: "That chat has gone." })) });
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ page: ANSWERED })} templates={TEMPLATES} actions={chatActions} />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Ask again" }));
+    });
+
+    expect(screen.getByText("That chat has gone.")).toBeTruthy();
+  });
+
+  it("should say the connection failed when an Ask again cannot reach the server at all", async () => {
+    const chatActions = actions({
+      send: vi.fn(async () => {
+        throw new Error("offline");
+      })
+    });
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ page: ANSWERED })} templates={TEMPLATES} actions={chatActions} />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Ask again" }));
+    });
+
+    expect(screen.getByText(ACTION_UNREACHABLE)).toBeTruthy();
+  });
+
+  it("should send an undelivered message's words again when Send it again is pressed", async () => {
+    const chatActions = actions();
+    const lost = page({ messages: [message("1", { body: "Are you there?", delivery: "expired" })] });
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ page: lost })} templates={TEMPLATES} actions={chatActions} />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Send it again" }));
+    });
+
+    expect(chatActions.send).toHaveBeenCalledWith({ conversationId: CONVERSATION, body: "Are you there?", uploadIds: [] });
+  });
+
+  it("should give every message its time, in London, as a machine-readable time", () => {
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ page: ANSWERED })} templates={TEMPLATES} actions={actions()} />);
+
+    const times = [...document.querySelectorAll("time")].map((time) => [time.getAttribute("datetime"), time.textContent]);
+    expect(times).toEqual([
+      ["2026-10-21T09:00:00.000Z", "10:00"],
+      ["2026-10-21T09:01:00.000Z", "10:01"]
+    ]);
+  });
+
+  it("should put no day separator in a chat that is all today's", () => {
+    const now = new Date().toISOString();
+    const today = page({ messages: [message("1", { created_at: now })], entries: [entry("2", { occurred_at: now })] });
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ page: today })} templates={TEMPLATES} actions={actions()} />);
+
+    expect(within(screen.getByRole("list", { name: "Conversation" })).getAllByRole("listitem")).toHaveLength(2);
+  });
+
+  it("should mark where the day changes in a chat that runs over days", () => {
+    const yesterday = new Date(Date.now() - 24 * 60 * 60_000).toISOString();
+    const now = new Date().toISOString();
+    const spread = page({ messages: [message("1", { created_at: yesterday })], entries: [entry("2", { occurred_at: now })] });
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ page: spread })} templates={TEMPLATES} actions={actions()} />);
+
+    const rows = within(screen.getByRole("list", { name: "Conversation" }))
+      .getAllByRole("listitem")
+      .map((row) => row.textContent);
+    expect(rows[0]).toBe("Yesterday");
+    expect(rows).toContain("Today");
+  });
+});
+
+describe("ChatView sending words again", () => {
+  it("should send a message once when Send it again is pressed twice quickly, then offer it no more", async () => {
+    let finish: (value: { ok: true; message: ThreadMessage }) => void = () => undefined;
+    const chatActions = actions({ send: vi.fn(() => new Promise<{ ok: true; message: ThreadMessage }>((resolve) => (finish = resolve))) });
+    const lost = page({ messages: [message("1", { body: "Are you there?", delivery: "expired" })] });
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ page: lost })} templates={TEMPLATES} actions={chatActions} />);
+
+    const button = screen.getByRole("button", { name: "Send it again" });
+    act(() => {
+      fireEvent.click(button);
+      fireEvent.click(button);
+    });
+    await act(async () => {
+      finish({ ok: true, message: message("2", { body: "Are you there?" }) });
+    });
+
+    expect(chatActions.send).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "Send it again" })).toBeNull();
+    expect(screen.getByText(/Sent again below\./)).toBeTruthy();
+  });
+
+  it("should offer no Ask again when the message it would repeat carried files, which would be left out", () => {
+    const withFiles = page({
+      messages: [
+        message("1", { body: "Summarise this", attachments: [{ id: "u1", name: "a.pdf", media_type: "application/pdf", bytes: 3, available_until: null }] })
+      ],
+      entries: [entry("2", { content: { text: "A summary." } })]
+    });
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ page: withFiles })} templates={TEMPLATES} actions={actions()} />);
+
+    expect(screen.queryByRole("button", { name: "Ask again" })).toBeNull();
+  });
+});
+
+describe("ChatView Escape", () => {
+  function working(): ConversationView {
+    return conversation({ agentStatus: "busy", clientFeatures: ["stop"], page: page({ messages: [message("1")] }) });
+  }
+
+  it("should stop the answer being written when Escape is pressed and nothing else wants it", async () => {
+    const chatActions = actions();
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={working()} templates={TEMPLATES} actions={chatActions} />);
+
+    await act(async () => {
+      fireEvent.keyDown(document.body, { key: "Escape" });
+    });
+
+    expect(chatActions.stop).toHaveBeenCalledWith({ conversationId: CONVERSATION });
+  });
+
+  it("should leave the answer alone when Escape is closing a menu, when another part took it, or with Shift", async () => {
+    const chatActions = actions();
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={working()} templates={TEMPLATES} actions={chatActions} />);
+    const menu = document.createElement("div");
+    menu.setAttribute("role", "menu");
+    document.body.append(menu);
+
+    await act(async () => {
+      fireEvent.keyDown(document.body, { key: "Escape" });
+    });
+    menu.remove();
+    const taken = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    taken.preventDefault();
+    await act(async () => {
+      window.dispatchEvent(taken);
+      fireEvent.keyDown(document.body, { key: "Escape", shiftKey: true });
+      fireEvent.keyDown(document.body, { key: "Enter" });
+    });
+
+    expect(chatActions.stop).not.toHaveBeenCalled();
+  });
+
+  it("should leave the answer alone when Escape is closing something in the sidebar, or the drawer is open", async () => {
+    const chatActions = actions();
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={working()} templates={TEMPLATES} actions={chatActions} />);
+    const sidebar = document.createElement("aside");
+    sidebar.setAttribute("aria-label", "Conversations");
+    const search = document.createElement("input");
+    sidebar.append(search);
+    document.body.append(sidebar);
+
+    await act(async () => {
+      fireEvent.keyDown(search, { key: "Escape" });
+    });
+    const drawer = document.createElement("button");
+    drawer.setAttribute("aria-label", "Close sidebar");
+    document.body.append(drawer);
+    await act(async () => {
+      fireEvent.keyDown(document.body, { key: "Escape" });
+    });
+
+    expect(chatActions.stop).not.toHaveBeenCalled();
+    sidebar.remove();
+    drawer.remove();
+  });
+
+  it("should not listen for Escape when there is no answer to stop", async () => {
+    const chatActions = actions();
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={chatActions} />);
+
+    await act(async () => {
+      fireEvent.keyDown(document.body, { key: "Escape" });
+    });
+
+    expect(chatActions.stop).not.toHaveBeenCalled();
+  });
+});
+
+describe("ChatView on a local chat, its long rows", () => {
+  it("should show a notice on one line, and the whole of it once opened", () => {
+    const long = "a".repeat(150);
+    const notice = page({
+      entries: [entry("1", { role: "user", content: { text: `<command-name>/compact</command-name><command-args>${long}</command-args>` } })]
+    });
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ local: true, page: notice })} templates={TEMPLATES} actions={actions()} />);
+
+    const details = document.querySelector("details");
+    expect(details?.open).toBe(false);
+    fireEvent.click(within(details as HTMLElement).getByText("Show"));
+    expect(details?.querySelector("p")?.textContent).toContain(long);
+  });
+});
+
+describe("Composer sending", () => {
+  function composer(onSend: (text: string) => Promise<string | null> = vi.fn(async () => null), props: Partial<Parameters<typeof Composer>[0]> = {}) {
+    render(<Composer templates={TEMPLATES} viewerOid={VIEWER} draftId={CONVERSATION} onSend={onSend} {...props} />);
+    return screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
+  }
+
+  it("should say it is sending, and be busy, while the message goes", async () => {
+    let finish: (value: string | null) => void = () => undefined;
+    const box = composer(() => new Promise<string | null>((resolve) => (finish = resolve)));
+    fireEvent.change(box, { target: { value: "hello" } });
+
+    act(() => {
+      fireEvent.keyDown(box, { key: "Enter" });
+    });
+    const button = screen.getByRole("button", { name: "Sending" });
+    expect(button.getAttribute("aria-busy")).toBe("true");
+
+    await act(async () => {
+      finish(null);
+    });
+    expect(screen.getByRole("button", { name: "Send" })).toBeTruthy();
+  });
+
+  it("should send with Ctrl+Enter and keep Enter for a new line when the person chose that", async () => {
+    window.localStorage.setItem("asst-send-key", "mod-enter");
+    const onSend = vi.fn(async () => null);
+    const box = composer(onSend);
+    fireEvent.change(box, { target: { value: "hello" } });
+
+    await act(async () => {
+      fireEvent.keyDown(box, { key: "Enter" });
+    });
+    expect(onSend).not.toHaveBeenCalled();
+
+    await act(async () => {
+      fireEvent.keyDown(box, { key: "Enter", ctrlKey: true });
+    });
+    expect(onSend).toHaveBeenCalledWith("hello", []);
+    window.localStorage.removeItem("asst-send-key");
+  });
+
+  it("should say in the empty box what it can do here", () => {
+    composer(undefined, { conversationId: CONVERSATION });
+
+    expect(screen.getByRole("textbox", { name: "Message" }).getAttribute("placeholder")).toBe("Message CFT Workspace, or drop files here");
+  });
+});
+
+describe("EmptyChat templates", () => {
+  it("should offer the person's templates as chips that fill the box", () => {
+    render(
+      <EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={[{ name: "Bug report", text: "Bug: …" }]} skills={[]} actions={emptyActions(vi.fn())} />
+    );
+
+    fireEvent.click(within(screen.getByRole("list", { name: "Your templates" })).getByRole("button", { name: "Bug report" }));
+
+    expect(newChatBox().value).toBe("Bug: …");
+  });
+
+  it("should offer no template chips when the person has none", () => {
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={[]} skills={[]} actions={emptyActions(vi.fn())} />);
+
+    expect(screen.queryByRole("list", { name: "Your templates" })).toBeNull();
   });
 });

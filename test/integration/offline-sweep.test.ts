@@ -166,10 +166,12 @@ describe("startOfflineSweep", () => {
     await createDirect(prisma, { author: { oid: ALICE.oid, agentId: stale }, targetAgentId: gone, inReplyTo: null, body: "hello" });
     const transaction = vi.spyOn(prisma, "$transaction");
     const other = await connect();
+    // The lock is held before the sweep starts: started first, its opening tick can run before the lock is taken,
+    // and sweep and log what this expects to be held back.
+    await other.query("BEGIN");
+    await other.query("SELECT pg_advisory_xact_lock($1)", [0x61676e74_73776570n.toString()]);
     const sweeper = startOfflineSweep(prisma, 10);
     try {
-      await other.query("BEGIN");
-      await other.query("SELECT pg_advisory_xact_lock($1)", [0x61676e74_73776570n.toString()]);
       await until(() => transaction.mock.calls.length >= 2);
       expect(info).not.toHaveBeenCalled();
 

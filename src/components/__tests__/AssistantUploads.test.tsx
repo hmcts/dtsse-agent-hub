@@ -688,8 +688,9 @@ describe("ChatView attachments in the thread", () => {
       />
     );
 
-    const item = within(screen.getByRole("list", { name: "Conversation" })).getAllByRole("listitem")[0];
-    expect(item?.textContent).toBe("You said:📎letter.pdf10 bytes");
+    // After the day it was said on, and before its time: the chips and nothing else, so no empty bubble.
+    const item = within(screen.getByRole("list", { name: "Conversation" })).getAllByRole("listitem")[1];
+    expect(item?.textContent).toMatch(/^You said:📎letter\.pdf10 bytes\d\d:\d\d$/);
   });
 
   it("should show no attachment list when the message carried no files", () => {
