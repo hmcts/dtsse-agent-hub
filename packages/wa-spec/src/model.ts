@@ -9,6 +9,9 @@ import { CaseType, Cell, Expr, KINDS, Scalar, Service, Spec } from "./schema.ts"
 
 const CaseTypeId = z.string().min(1);
 
+/** The case types an entry is scoped to: at least one. */
+const OnlyList = z.array(CaseTypeId).min(1);
+
 /** An identifier that also appears in a row reference of the ordering file, so it has no whitespace or separators. */
 export const NAME_PATTERN = /^[A-Za-z0-9_.-]+$/;
 const Name = z.string().regex(NAME_PATTERN, "letters, digits, `_`, `.` and `-` only");
@@ -41,7 +44,7 @@ export function encodeCell(cell: Cell): FriendlyCell {
 /** A value for one case type or several: the value, with `only` to scope it and `overrides` to replace it for some case types. */
 export const ValEntry = z.strictObject({
   value: Expr,
-  only: z.array(CaseTypeId).optional(),
+  only: OnlyList.optional(),
   reconfigure: z.boolean().optional(),
   /** The description of the table row this entry heads. */
   note: z.string().optional(),
@@ -112,7 +115,7 @@ export const Trigger = z.strictObject({
   cancelCategory: Expr.optional(),
   /** The description of the table row this trigger heads. */
   note: z.string().optional(),
-  only: z.array(CaseTypeId).optional(),
+  only: OnlyList.optional(),
   overrides: z.record(CaseTypeId, z.strictObject({ event: FriendlyCell.optional(), postState: FriendlyCell.optional() }).nullable()).optional()
 });
 export type Trigger = z.infer<typeof Trigger>;
@@ -122,7 +125,7 @@ export const Completion = z.strictObject({
   mode: Expr.optional(),
   /** The description of the table row this completion heads. */
   note: z.string().optional(),
-  only: z.array(CaseTypeId).optional(),
+  only: OnlyList.optional(),
   overrides: z.record(CaseTypeId, z.strictObject({ event: FriendlyCell.optional(), mode: Expr.optional() }).nullable()).optional()
 });
 export type Completion = z.infer<typeof Completion>;
@@ -149,7 +152,7 @@ export const PermissionSpec = z.strictObject({
   remove: z.array(Name).optional(),
   override: z.record(Name, GrantPatch).optional(),
   add: z.record(Name, Grant).optional(),
-  only: z.array(CaseTypeId).optional()
+  only: OnlyList.optional()
 });
 export type PermissionSpec = z.infer<typeof PermissionSpec>;
 
@@ -159,7 +162,7 @@ export const Task = z.strictObject({
   name: Val.optional(),
   /** The name the task is created with, where it differs from `name`. A trigger without one uses `name`. */
   initialName: Expr.optional(),
-  only: z.array(CaseTypeId).optional(),
+  only: OnlyList.optional(),
   workType: Val.optional(),
   roleCategory: Val.optional(),
   permissions: z.union([Name, PermissionSpec, z.array(PermissionSpec).min(1)]).optional(),
@@ -189,7 +192,7 @@ export const DefaultAttribute = z.strictObject({
   value: Expr,
   reconfigure: z.boolean().optional(),
   note: z.string().optional(),
-  only: z.array(CaseTypeId).optional()
+  only: OnlyList.optional()
 });
 export type DefaultAttribute = z.infer<typeof DefaultAttribute>;
 
@@ -212,7 +215,7 @@ export const Cancellation = z.strictObject({
   /** The `cancelCategory` of each task it applies to; none when the action is not about particular tasks. */
   categories: z.array(Expr).min(1).optional(),
   note: z.string().optional(),
-  only: z.array(CaseTypeId).optional()
+  only: OnlyList.optional()
 });
 export type Cancellation = z.infer<typeof Cancellation>;
 
@@ -240,9 +243,10 @@ export type Model = z.infer<typeof Model>;
 /**
  * Where each table's row order and grouping comes from. A row is a space-separated list of references to the model's entries:
  * `<task>/<slot>` for a task's entry (a configuration attribute, a role, `create`, `complete`, `type`), `*`\/<name>` for a
- * default, `!/<id>` for a cancellation rule (its position when it has no `id`) and `~<n>` for the nth row of the model's
+ * default, `!/<id>` for a cancellation rule (`!/r<hash>` when it has no `id`) and `~<hash>` for a row of the model's
  * `tables` residue. A slot with several entries adds `#<hash>` of the entry's content and case types, and `.2`, `.3` for
- * identical ones. A reference whose entry has since changed stands for the one entry of that slot no reference names. A row
+ * identical ones. A reference whose entry has since changed stands for the closest entry of that slot (or residue row, or
+ * cancellation rule of that id) that no reference names, using the order file's `fingerprints`. A row
  * ends in `@<case types>` where it covers fewer case types than its entries. A row has the description of its first
  * entry's `note`; an object row states another (`null` for none).
  */
@@ -284,6 +288,8 @@ export function permissionSpecs(task: Task): PermissionSpec[] {
   }
   return typeof permissions === "string" ? [{ profile: permissions }] : [permissions].flat();
 }
+
+const RESERVED_WHEN = ["eventId", "eventID", "postEventState"];
 
 /** Checks the references the shape alone cannot: ids, roles, profiles and case types. */
 export function validateModel(model: Model): string[] {
@@ -343,6 +349,11 @@ export function validateModel(model: Model): string[] {
       }
     };
     for (const trigger of task.create ?? []) {
+      for (const key of Object.keys(trigger.when ?? {})) {
+        if (RESERVED_WHEN.includes(key)) {
+          problems.push(`${where} create: when names ${key}, which the trigger's event and postState set`);
+        }
+      }
       scoped(`${where} create`, trigger.only);
       overridden(`${where} create overrides`, Object.keys(trigger.overrides ?? {}), trigger.only);
     }
@@ -370,10 +381,14 @@ export function validateModel(model: Model): string[] {
       }
     }
     const specs = permissionSpecs(task);
-    const granted = specs.map((spec) => ({
-      cases: spec.only ?? own,
-      roles: new Set([...Object.keys(ownEntry(profiles, spec.profile) ?? {}).filter((r) => !spec.remove?.includes(r)), ...Object.keys(spec.add ?? {})])
-    }));
+    const granted = specs.map((spec) => {
+      const held = new Set(Object.keys(ownEntry(profiles, spec.profile) ?? {}));
+      return {
+        cases: spec.only ?? own,
+        held,
+        roles: new Set([...[...held].filter((r) => !spec.remove?.includes(r)), ...Object.keys(spec.add ?? {})])
+      };
+    });
     for (const [i, a] of granted.entries()) {
       for (const b of granted.slice(i + 1)) {
         for (const r of a.roles) {
@@ -384,12 +399,14 @@ export function validateModel(model: Model): string[] {
         }
       }
     }
-    for (const spec of specs) {
+    for (const [at, spec] of specs.entries()) {
       scoped(`${where} permissions`, spec.only);
-      const held = new Set(Object.keys(ownEntry(profiles, spec.profile) ?? {}));
+      const held = (granted[at] as { held: Set<string> }).held;
       for (const r of Object.keys(spec.override ?? {})) {
         if (spec.remove?.includes(r)) {
           problems.push(`${where}: overrides ${r}, which it also removes`);
+        } else if (!held.has(r)) {
+          problems.push(`${where}: overrides ${r}, which profile ${spec.profile ?? "(none)"} does not grant`);
         }
       }
       for (const r of Object.keys(spec.add ?? {})) {
@@ -403,11 +420,6 @@ export function validateModel(model: Model): string[] {
       for (const r of spec.remove ?? []) {
         if (!held.has(r)) {
           problems.push(`${where}: removes ${r}, which profile ${spec.profile ?? "(none)"} does not grant`);
-        }
-      }
-      for (const r of Object.keys(spec.override ?? {})) {
-        if (!held.has(r)) {
-          problems.push(`${where}: overrides ${r}, which profile ${spec.profile ?? "(none)"} does not grant`);
         }
       }
       for (const r of Object.keys(spec.add ?? {})) {
@@ -436,9 +448,36 @@ export function validateModel(model: Model): string[] {
       }
     }
   }
+  const seenDefaults = new Map<string, string[]>();
+  for (const [index, attribute] of (model.defaults?.configuration ?? []).entries()) {
+    const cases = attribute.only ?? [...caseTypes];
+    const before = seenDefaults.get(attribute.name) ?? [];
+    const both = cases.filter((c) => before.includes(c));
+    if (both.length > 0) {
+      problems.push(`defaults.configuration[${index}]: ${attribute.name} is defined twice for ${both.join(", ")}`);
+    }
+    seenDefaults.set(attribute.name, [...before, ...cases]);
+  }
+  const used = new Set<string>();
+  // Initiation rows kept in `tables` may create tasks of categories the model does not list.
+  let computed = (model.tables?.initiation?.rows.length ?? 0) > 0;
+  for (const task of model.tasks) {
+    for (const category of [task.cancelCategory, ...(task.create ?? []).map((t) => t.cancelCategory)]) {
+      if (typeof category === "string") {
+        used.add(category);
+      } else if (category !== undefined) {
+        computed = true;
+      }
+    }
+  }
   const ruleIds = new Set<string>();
   for (const [index, rule] of (model.cancellations ?? []).entries()) {
     known(`cancellations[${index}]`, rule.only);
+    for (const category of computed ? [] : (rule.categories ?? [])) {
+      if (typeof category === "string" && category !== "*" && !used.has(category)) {
+        problems.push(`cancellations[${index}]: category ${category} is not the cancelCategory of any task`);
+      }
+    }
     if (rule.id !== undefined) {
       if (ruleIds.has(rule.id)) {
         problems.push(`cancellations[${index}]: id ${rule.id} is used by another rule`);

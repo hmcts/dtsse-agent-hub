@@ -25,8 +25,11 @@ tasks:
     only: [ct_a, ct_b]
     workType: w1
     roleCategory: r1
+    cancelCategory: X
+    create: [{event: a}]
     attributes: {custom: [{value: 1, only: [ct_a]}, {value: 2, only: [ct_b]}]}
     complete: [{event: done}]
+  - {id: B, create: [{event: b}], cancelCategory: Y}
 cancellations:
   - {events: gone, action: Cancel, categories: [X, Y]}
   - {events: moved, action: Reconfigure}
@@ -65,7 +68,7 @@ describe("loading", () => {
 
   it("should compile without ordering when no ordering file is named and none sits beside the model", () => {
     writeFileSync(join(dir, "n.yaml"), BASE);
-    expect(loadSpecFile(join(dir, "n.yaml")).spec.decisions.initiation).toBeUndefined();
+    expect(loadSpecFile(join(dir, "n.yaml")).spec.decisions.initiation?.rows).toHaveLength(2);
   });
 
   it("should fail when an explicit layout file does not exist, for a model and for a spec", () => {
@@ -132,9 +135,12 @@ describe("ordering references", () => {
   });
 
   it("should keep the rows of repeated slots in place when an entry is inserted before them", () => {
-    const task = model.tasks[0] as Model["tasks"][number];
+    const task = model.tasks.find((t) => t.id === "A") as Model["tasks"][number];
     const entries = task.attributes?.custom as unknown[];
-    const edited = { ...model, tasks: [{ ...task, attributes: { custom: [{ value: 0, only: ["ct_b"] }, ...entries] } }] } as Model;
+    const edited = {
+      ...model,
+      tasks: model.tasks.map((t) => (t === task ? { ...task, attributes: { custom: [{ value: 0, only: ["ct_b"] }, ...entries] } } : t))
+    } as Model;
     const before = configRows(model, lifted.ordering)
       .filter((r) => r.returns?.name === "custom")
       .map((r) => r.returns?.value);
@@ -328,7 +334,7 @@ tasks: [{id: A, permissions: p}]
   });
 
   it("should lift event rows when the table spells its event column either way", () => {
-    const spec = compileModel(parseModel(BASE.replace("complete: [{event: done}]", "complete: [{event: done}]\n    create: [{event: made}]")));
+    const spec = compileModel(parseModel(BASE));
     const initiation = spec.decisions.initiation;
     const completion = spec.decisions.completion;
     if (!initiation || !completion) {
@@ -535,7 +541,7 @@ tasks:
     expect(lifted.report.differences).toEqual([]);
   });
 
-  it("should keep a row's description in the model, on the entry heading the row, and not in the ordering", () => {
+  it("should keep a row's description in the model, on the entry heading the row, when lifting, and not in the ordering", () => {
     const { model, ordering, report } = liftSpec(VARIANT_SPEC);
     expect(report.differences).toEqual([]);
     const z = model.tasks.find((t) => t.id === "Z") as Model["tasks"][number];
@@ -742,5 +748,73 @@ describe("helper decision tables", () => {
     const helper = (lifted.model.tables?.configuration?.helpers ?? [])[0];
     expect(helper).toMatchObject({ name: "LOOKUP", hitPolicy: "FIRST" });
     expect(parseModel(stringifyModel(lifted.model)).tables?.configuration?.helpers?.[0]?.rows).toHaveLength(1);
+  });
+});
+
+describe("round seven", () => {
+  const lifted = liftSpec(compileModel(parseModel(BASE)));
+  const model = parseModel(stringifyModel(lifted.model));
+
+  it("should append a new cancellation rule and not give it a deleted rule's place when a rule is deleted and another added", () => {
+    const kept = (model.cancellations ?? []).filter((r) => r.id !== "Cancel-gone");
+    const edited = { ...model, cancellations: [...kept, { id: "NewRule", events: "new", action: "Cancel", categories: ["X"] }] } as Model;
+    const rows = compileModel(edited, lifted.ordering).decisions.cancellation?.rows ?? [];
+    expect(rows.map((r) => JSON.stringify(r.when?.event))).toEqual(['{"in":["moved"]}', '{"in":["new"]}']);
+  });
+
+  it("should reject a when key that the trigger's event or postState sets when validating", () => {
+    const text = BASE.replace("create: [{event: a}]", "create: [{event: a, when: {postEventState: Open}}]");
+    expect(() => parseModel(text)).toThrow("create: when names postEventState");
+  });
+
+  it("should reject a cancellation category no task uses, except a wildcard or when a category is computed", () => {
+    expect(() => parseModel(BASE.replace("categories: [X, Y]", "categories: [X, Z]"))).toThrow("category Z is not the cancelCategory of any task");
+    expect(() => parseModel(BASE.replace("categories: [X, Y]", 'categories: [X, "*"]'))).not.toThrow();
+    expect(() =>
+      parseModel(BASE.replace("categories: [X, Y]", "categories: [X, Z]").replace("cancelCategory: Y", "cancelCategory: {feel: 'x'}"))
+    ).not.toThrow();
+  });
+
+  it("should reject an empty only list when parsing", () => {
+    expect(() => parseModel(BASE.replace("only: [ct_a, ct_b]", "only: []"))).toThrow();
+  });
+
+  it("should reject a default configuration defined twice for the same case types when validating", () => {
+    const defaults = (second: string) =>
+      BASE.replace("tasks:", `defaults:\n  configuration:\n    - {name: caseName, value: a}\n    - {name: caseName, value: b${second}}\ntasks:`);
+    expect(() => parseModel(defaults(""))).toThrow("caseName is defined twice for ct_a, ct_b, ct_c");
+    expect(() => parseModel(defaults(", only: [ct_a]"))).toThrow("defined twice for ct_a");
+  });
+
+  it("should name a profile neutrally when its roles' categories are not plain strings when lifting", () => {
+    const text = `
+kind: wa-model
+version: 1
+service: {slug: demo}
+caseTypes: [{id: ct_a}]
+roles: {a: {}}
+permissionProfiles: {p: {a: {perms: [Read], category: {feel: c}, autoAssign: true}}}
+tasks: [{id: A, permissions: p}, {id: B, permissions: p}]
+`;
+    const result = liftSpec(compileModel(parseModel(text)));
+    expect(Object.keys(result.model.permissionProfiles ?? {})).toEqual(["profile1"]);
+  });
+});
+
+describe("round seven residue categories", () => {
+  it("should not check cancellation categories against tasks when initiation rows stay in tables", () => {
+    const spec = compileModel(parseModel(BASE));
+    const initiation = spec.decisions.initiation;
+    if (!initiation) {
+      throw new Error("expected initiation");
+    }
+    initiation.rows.push({ when: { eventId: { in: ["x"] } }, returns: { taskId: "not a name", processCategories: "Z" } });
+    const cancellation = spec.decisions.cancellation?.rows[0];
+    if (cancellation?.returns) {
+      cancellation.returns.processCategories = "Z";
+    }
+    const lifted = liftSpec(spec);
+    expect(lifted.report.counts.initiation.residue).toBe(1);
+    expect(lifted.report.differences).toEqual([]);
   });
 });

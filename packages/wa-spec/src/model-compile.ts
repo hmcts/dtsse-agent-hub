@@ -457,6 +457,23 @@ function orderedRow(kind: Kind, decision: Decision, out: OutRow, all: string[], 
   };
 }
 
+/** Matches stale tokens to unnamed candidates, best score first (ties in token, then candidate, order); a score of 0 never matches. */
+function pairStale<T>(tokens: string[], candidates: T[], score: (token: string, candidate: T) => number): Map<string, T> {
+  const pairs = tokens
+    .flatMap((token) => candidates.map((candidate) => ({ token, candidate, score: score(token, candidate) })))
+    .filter((pair) => pair.score > 0)
+    .sort((x, y) => y.score - x.score);
+  const matched = new Map<string, T>();
+  const taken = new Set<T>();
+  for (const { token, candidate } of pairs) {
+    if (!matched.has(token) && !taken.has(candidate)) {
+      matched.set(token, candidate);
+      taken.add(candidate);
+    }
+  }
+  return matched;
+}
+
 /** The rows of one table: the ordering file's rows first, then whatever it does not mention, then unplaced residue rows. */
 function buildRows(
   kind: Kind,
@@ -482,19 +499,11 @@ function buildRows(
   const residueNamed = new Set([...named].filter((t) => t.startsWith("~")));
   const residueFor = new Map<string, number>(rowRefs.flatMap((ref, i) => (residueNamed.has(ref) ? [[ref, i]] : [])));
   const spareRows = rowRefs.flatMap((ref, i) => (residueNamed.has(ref) ? [] : [i]));
-  const takenRows = new Set<number>();
   const staleRows = [...residueNamed].filter((t) => !residueFor.has(t));
-  const rowPairs = staleRows
-    .flatMap((token) =>
-      spareRows.map((i) => ({ token, i, score: fingerprints?.[token] ? closeness(fingerprints[token] as string, rowFingerprint(residue[i] as Row, all)) : 1 }))
-    )
-    .filter((pair) => pair.score > 0)
-    .sort((x, y) => y.score - x.score);
-  for (const { token, i } of rowPairs) {
-    if (!residueFor.has(token) && !takenRows.has(i)) {
-      residueFor.set(token, i);
-      takenRows.add(i);
-    }
+  for (const [token, i] of pairStale(staleRows, spareRows, (token, i) =>
+    fingerprints?.[token] ? closeness(fingerprints[token] as string, rowFingerprint(residue[i] as Row, all)) : 1
+  )) {
+    residueFor.set(token, i);
   }
   // Without a fingerprint, only the case types of the rows naming the token say which atom it stood for.
   const rowCases = new Map<string, string[]>();
@@ -508,24 +517,25 @@ function buildRows(
       rowCases.set(token, [...(rowCases.get(token) ?? []), ...(only ?? [])]);
     }
   }
-  const pairs = stale
-    .flatMap((token) =>
-      spares
-        .filter((a) => bucketOf(a) === token.replace(/#.*$/, "") || (kind === "cancellation" && a.task === RULES))
-        .map((atom) => {
-          const fingerprint = fingerprints?.[token];
-          const wanted = rowCases.get(token);
-          const score = fingerprint ? closeness(fingerprint, atom.fingerprint) : !wanted || overlapping(wanted, atom.cases) ? 1 : 0;
-          return { token, atom, score };
-        })
-    )
-    .filter((pair) => pair.score > 0)
-    .sort((x, y) => y.score - x.score);
-  for (const { token, atom } of pairs) {
-    if (!mapped.has(token) && !taken.has(atom)) {
-      mapped.set(token, [atom]);
-      taken.add(atom);
+  const sameSlot = (token: string, a: Atom) => bucketOf(a) === token.replace(/#.*$/, "");
+  const eventOf = (fingerprint: string | undefined) => fingerprint?.split(";").find((field) => field.startsWith("w.event="));
+  // A cancellation rule with no id is named by a hash of itself, so an edited one is matched only to a rule it shares an event with.
+  const sameRule = (token: string, a: Atom) =>
+    kind === "cancellation" &&
+    /^!\/r[0-9a-f]{6}(#|$)/.test(token) &&
+    /^r[0-9a-f]{6}$/.test(a.slot) &&
+    eventOf(fingerprints?.[token]) !== undefined &&
+    eventOf(fingerprints?.[token]) === eventOf(a.fingerprint);
+  for (const [token, atom] of pairStale(stale, spares, (token, atom) => {
+    if (!sameSlot(token, atom) && !sameRule(token, atom)) {
+      return 0;
     }
+    const fingerprint = fingerprints?.[token];
+    const wanted = rowCases.get(token);
+    return fingerprint ? closeness(fingerprint, atom.fingerprint) : !wanted || overlapping(wanted, atom.cases) ? 1 : 0;
+  })) {
+    mapped.set(token, [atom]);
+    taken.add(atom);
   }
   const atomOf = (token: string, only: string[] | undefined): Atom | undefined => {
     const exact = byRef.get(token);
@@ -538,7 +548,7 @@ function buildRows(
     if (again) {
       return again;
     }
-    const spare = spares.find((a) => (bucketOf(a) === token.replace(/#.*$/, "") || (kind === "cancellation" && a.task === RULES)) && !taken.has(a) && fits(a));
+    const spare = spares.find((a) => sameSlot(token, a) && !taken.has(a) && fits(a));
     if (spare) {
       taken.add(spare);
       mapped.set(token, [...known, spare]);

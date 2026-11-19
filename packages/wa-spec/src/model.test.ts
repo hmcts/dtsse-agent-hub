@@ -39,6 +39,7 @@ tasks:
     reconfigure: [workType]
   - id: Review
     name: Review
+    cancelCategory: Review
     workType: routine_work
     permissions: adminWorker
     create:

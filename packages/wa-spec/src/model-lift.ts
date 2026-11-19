@@ -546,12 +546,13 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
     }
     const categories = used.set.roles
       .filter(([, g]) => g.autoAssign === true)
-      .map(([role, g]) => camel(String(g.category ?? roles[role]?.category ?? "")))
-      .filter((c) => c !== "");
-    const base = categories.length > 0 ? `${[...new Set(categories)].map((c, i) => (i === 0 ? c : capitalised(c))).join("And")}Worker` : "taskGrants";
-    let name = base;
+      .map(([role, g]) => g.category ?? roles[role]?.category)
+      .filter((c): c is string => typeof c === "string" && c !== "")
+      .map(camel);
+    const base = categories.length > 0 ? `${[...new Set(categories)].map((c, i) => (i === 0 ? c : capitalised(c))).join("And")}Worker` : undefined;
+    let name = base ?? `profile${Object.keys(profiles).length + 1}`;
     for (let n = 2; Object.hasOwn(profiles, name); n++) {
-      name = `${base}${n}`;
+      name = `${base ?? "profile"}${n}`;
     }
     profiles[name] = Object.fromEntries(used.set.roles);
     profileOf.set(key, name);
