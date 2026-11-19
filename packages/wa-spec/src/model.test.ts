@@ -40,7 +40,7 @@ describe("validateModel scopes", () => {
   });
 });
 
-describe("round two", () => {
+describe("reconfigure names and override case types", () => {
   const files = readdirSync(fileURLToPath(new URL("../test-fixtures/et", import.meta.url)))
     .filter((n) => n.startsWith("wa-task-") && n.endsWith(".dmn"))
     .map((name) => ({ name, xml: readFileSync(join(fileURLToPath(new URL("../test-fixtures/et", import.meta.url)), name), "utf8") }));
@@ -61,7 +61,7 @@ describe("round two", () => {
   });
 });
 
-describe("round three", () => {
+describe("duplicate attributes and permission grants", () => {
   it("should reject one attribute defined in two fields of a task for the same case types when validating", () => {
     const task = (attributes: string, extra = "") => BASE.replace("attributes: {custom:", `${extra}attributes: {${attributes}, custom:`);
     expect(() => parseModel(task("workType: w2"))).toThrow("workType is defined twice for ct_a, ct_b");
@@ -89,7 +89,7 @@ tasks:
   });
 });
 
-describe("round four", () => {
+describe("cancellation ids, removed roles and unused fields", () => {
   it("should reject a cancellation id used by two rules when validating", () => {
     expect(() => parseModel(TWO_RULES.replace("{events: a,", "{id: x, events: a,").replace("{events: b,", "{id: x, events: b,"))).toThrow(
       "id x is used by another rule"
@@ -121,7 +121,7 @@ tasks: [{id: A, permissions: ${spec}}]
   });
 });
 
-describe("round five", () => {
+describe("profile names and package exports", () => {
   it("should not take a name inherited from Object.prototype for a profile when validating", () => {
     const text = BASE.replace("workType: w1", "workType: w1\n    permissions: constructor");
     expect(() => parseModel(text)).toThrow("unknown permission profile constructor");
@@ -137,7 +137,7 @@ describe("round five", () => {
   });
 });
 
-describe("round seven", () => {
+describe("trigger keys, categories, only lists and duplicate defaults", () => {
   const lifted = liftSpec(compileModel(parseModel(BASE)));
   const _model = parseModel(stringifyModel(lifted.model));
 
@@ -166,7 +166,7 @@ describe("round seven", () => {
   });
 });
 
-describe("round eight", () => {
+describe("comma separated categories", () => {
   const fixtures = fileURLToPath(new URL("../test-fixtures/et", import.meta.url));
   const files = readdirSync(fixtures)
     .filter((n) => n.startsWith("wa-task-") && n.endsWith(".dmn"))

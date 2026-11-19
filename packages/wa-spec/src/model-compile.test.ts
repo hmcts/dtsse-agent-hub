@@ -61,7 +61,7 @@ describe("compileModel", () => {
   });
 });
 
-describe("liftSpec and compileModel on ET", () => {
+describe("editing a lifted ET model", () => {
   const lifted = et();
 
   it("should add the new task to the existing rows and append its trigger when a task is added", () => {
@@ -143,7 +143,7 @@ describe("liftSpec and compileModel on ET", () => {
   });
 });
 
-describe("liftSpec on a varied model", () => {
+describe("rows the ordering does not name", () => {
   const model = parseModel(VARIED);
   const spec = compileModel(model);
   const _lifted = liftSpec(spec);
@@ -222,7 +222,7 @@ describe("ordering references", () => {
   });
 });
 
-describe("round five", () => {
+describe("trigger names with no initial name", () => {
   it("should give a trigger the task type's name when it has no initial name, and keep an explicit null", () => {
     const model = parseModel(`
 kind: wa-model
@@ -239,7 +239,7 @@ tasks:
   });
 });
 
-describe("round six names and refs", () => {
+describe("trigger names per case type and null overrides", () => {
   const NAMED = (name: string, extra = "") => `
 kind: wa-model
 version: 1
@@ -293,7 +293,7 @@ tasks: [{id: T, title: {value: x, overrides: {ct_b: ${override}}}}]
   });
 });
 
-describe("round seven", () => {
+describe("deleting and adding cancellation rules", () => {
   const lifted = liftSpec(compileModel(parseModel(BASE)));
   const model = parseModel(stringifyModel(lifted.model));
 
@@ -305,7 +305,7 @@ describe("round seven", () => {
   });
 });
 
-describe("round eight", () => {
+describe("row descriptions when a task is deleted", () => {
   const fixtures = fileURLToPath(new URL("../test-fixtures/et", import.meta.url));
   const files = readdirSync(fixtures)
     .filter((n) => n.startsWith("wa-task-") && n.endsWith(".dmn"))

@@ -365,8 +365,10 @@ export function collectAtoms(model: Model): Atoms {
 
 /**
  * Gives every atom the reference the ordering file names it by. A slot with one atom is `<task>/<slot>`; a slot with
- * several (case type variants, a cancellation rule's categories) adds a hash of the atom's content and case types, so an
- * insertion beside an atom does not re-point the others. Identical atoms are told apart by a count.
+ * several (case type variants, a cancellation rule's categories) adds a hash of the atom's content and case types to each,
+ * and identical atoms are told apart by a count. The ref of a slot's entry therefore depends on whether the slot has one
+ * entry or several: adding a second entry to a slot, or removing all but one, changes the ref of the entry that was there,
+ * and that entry, no longer named by the ordering file, moves to the end like any new entry.
  */
 function withRefs(atoms: Atom[]): Atom[] {
   const sizes = new Map<string, number>();

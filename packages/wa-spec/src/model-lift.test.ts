@@ -140,7 +140,7 @@ describe("ordering references", () => {
   });
 });
 
-describe("round three", () => {
+describe("null categories and event column spellings", () => {
   it("should keep an explicit null category when the role has a category and when lifting it back", () => {
     const model = parseModel(`
 kind: wa-model
@@ -182,7 +182,7 @@ tasks: [{id: A, permissions: p}]
   });
 });
 
-describe("round four", () => {
+describe("null names and categories on triggers", () => {
   it("should keep an explicit null name and category on one trigger when the other triggers share a value", () => {
     const lifted = liftSpec(NULL_NAME_SPEC);
     expect(lifted.report.differences).toEqual([]);
@@ -191,7 +191,7 @@ describe("round four", () => {
   });
 });
 
-describe("round five", () => {
+describe("task names, initial names and row descriptions", () => {
   it("should leave initialName out when the task's creation name equals its name, and keep a different one", () => {
     const { model } = liftSpec(
       compileModel(
@@ -248,7 +248,7 @@ tasks:
   });
 });
 
-describe("round six", () => {
+describe("expression languages and allowed days", () => {
   it("should keep an expression language on a cell and on a value when lifting and compiling", () => {
     const spec = structuredClone(VARIANT_SPEC);
     spec.decisions.configuration.rows = [
@@ -308,7 +308,7 @@ describe("helper decision tables", () => {
   });
 });
 
-describe("round seven", () => {
+describe("profile names", () => {
   const lifted = liftSpec(compileModel(parseModel(BASE)));
   const _model = parseModel(stringifyModel(lifted.model));
 
@@ -327,7 +327,7 @@ tasks: [{id: A, permissions: p}, {id: B, permissions: p}]
   });
 });
 
-describe("round seven residue categories", () => {
+describe("cancellation categories when initiation rows stay in tables", () => {
   it("should not check cancellation categories against tasks when initiation rows stay in tables", () => {
     const spec = compileModel(parseModel(BASE));
     const initiation = spec.decisions.initiation;
@@ -345,7 +345,7 @@ describe("round seven residue categories", () => {
   });
 });
 
-describe("round eight", () => {
+describe("task attributes whose row has a shared description", () => {
   const fixtures = fileURLToPath(new URL("../test-fixtures/et", import.meta.url));
   const files = readdirSync(fixtures)
     .filter((n) => n.startsWith("wa-task-") && n.endsWith(".dmn"))
@@ -359,7 +359,7 @@ describe("round eight", () => {
   });
 });
 
-describe("round nine", () => {
+describe("stale cancellation categories and difference counts", () => {
   it("should keep a cancellation row in tables when no task is created with its category", () => {
     const spec = compileModel(parseModel(BASE));
     const row = spec.decisions.cancellation?.rows[0];

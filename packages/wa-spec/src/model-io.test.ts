@@ -69,7 +69,7 @@ describe("loading", () => {
   });
 });
 
-describe("round two", () => {
+describe("writing models and diffing without their layout", () => {
   const files = readdirSync(fileURLToPath(new URL("../test-fixtures/et", import.meta.url)))
     .filter((n) => n.startsWith("wa-task-") && n.endsWith(".dmn"))
     .map((name) => ({ name, xml: readFileSync(join(fileURLToPath(new URL("../test-fixtures/et", import.meta.url)), name), "utf8") }));
@@ -89,7 +89,7 @@ describe("round two", () => {
   });
 });
 
-describe("round three", () => {
+describe("the ordering file's path", () => {
   it("should name the ordering file beside a model by the one rule when building its path", () => {
     expect(orderPathBeside("out/model.yaml")).toBe("out/model.order.yaml");
     expect(orderPathBeside("out/model.yml")).toBe("out/model.order.yaml");
@@ -104,7 +104,7 @@ describe("readable errors", () => {
   });
 });
 
-describe("round eight", () => {
+describe("ordering file errors", () => {
   const fixtures = fileURLToPath(new URL("../test-fixtures/et", import.meta.url));
   const files = readdirSync(fixtures)
     .filter((n) => n.startsWith("wa-task-") && n.endsWith(".dmn"))

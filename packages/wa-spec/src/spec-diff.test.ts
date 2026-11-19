@@ -35,7 +35,7 @@ describe("compareSpecs", () => {
   });
 });
 
-describe("round four", () => {
+describe("ignoring rule order", () => {
   it("should compare rows as sets when the diff ignores rule order", () => {
     const a = compileModel(parseModel(BASE));
     const b = structuredClone(a);
@@ -45,7 +45,7 @@ describe("round four", () => {
   });
 });
 
-describe("round five", () => {
+describe("row order by hit policy", () => {
   it("should compare rows as sets only where the hit policy allows when diffing without a flag", () => {
     const a = compileModel(parseModel(BASE));
     const b = structuredClone(a);
@@ -62,7 +62,7 @@ describe("round five", () => {
   });
 });
 
-describe("round six names and refs", () => {
+describe("arrays of different length", () => {
   const _NAMED = (name: string, extra = "") => `
 kind: wa-model
 version: 1
