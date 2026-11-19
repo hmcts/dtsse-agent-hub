@@ -1,3 +1,6 @@
+import type ExcelJS from "exceljs";
+import { cellText } from "./cells.ts";
+
 /** Cell positions in the Exela Service Implementation Pack V3.2 workbook. */
 export const SIP = {
   formSheetPattern: /^Form \d+$/,
@@ -92,3 +95,8 @@ export const OVERVIEW_MERGES = [
   "A8:B23",
   ...Array.from({ length: 16 }, (_, i) => `D${i + 8}:G${i + 8}`)
 ];
+
+/** The template marks the rows that show how to fill the Page order sheet with "Example" in column A. */
+export function isPageOrderExample(sheet: ExcelJS.Worksheet, row: number): boolean {
+  return cellText(sheet.getCell(row, 1).value).trim().toLowerCase() === "example";
+}

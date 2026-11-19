@@ -3,7 +3,7 @@ import { cellText } from "./cells.ts";
 import { valueSetFor } from "./emits.ts";
 import type { Bundle, Field, FormSpec } from "./schema.ts";
 import { allFields } from "./schema.ts";
-import { FIELD_COLUMN, SIP } from "./sip-layout.ts";
+import { FIELD_COLUMN, isPageOrderExample, SIP } from "./sip-layout.ts";
 import { buildBlankTemplate } from "./sip-template.ts";
 
 export interface SipRow {
@@ -308,8 +308,7 @@ function fillPageOrder(workbook: ExcelJS.Workbook, forms: FormSpec[]): void {
   if (!sheet) {
     return;
   }
-  // The template's "Example" rows show how to fill the sheet in; they are not ours to overwrite.
-  const isExample = (r: number) => cellText(sheet.getCell(r, 1).value).trim().toLowerCase() === "example";
+  const isExample = (r: number) => isPageOrderExample(sheet, r);
   for (let r = SIP.pageOrder.firstRow; r <= Math.max(sheet.rowCount, SIP.pageOrder.firstRow); r++) {
     if (isExample(r)) {
       continue;

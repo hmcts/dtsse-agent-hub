@@ -1,13 +1,13 @@
 import { isDeepStrictEqual } from "node:util";
 import ExcelJS from "exceljs";
-import { cellText, readWorkbook, selectSheet } from "./cells.ts";
+import { readWorkbook, selectSheet } from "./cells.ts";
 import type { CellDiff, SheetDiff } from "./roundtrip.ts";
 import { diffSheets } from "./roundtrip.ts";
 import type { Bundle, TransformColumn } from "./schema.ts";
 import { TRANSFORM_COLUMNS } from "./schema.ts";
 import { generateSipWorkbook, sipRows } from "./sip-generate.ts";
 import { importSip } from "./sip-import.ts";
-import { SIP } from "./sip-layout.ts";
+import { isPageOrderExample, SIP } from "./sip-layout.ts";
 import { generateTransformWorkbook } from "./transform-generate.ts";
 import type { TransformImport } from "./transform-import.ts";
 import { importTransformSheet } from "./transform-import.ts";
@@ -65,7 +65,7 @@ function writtenRegion(sheetName: string, address: string, base: ExcelJS.Workshe
     );
   }
   if (sheetName === SIP.pageOrder.sheet) {
-    return row >= SIP.pageOrder.firstRow && cellText(base.getCell(row, 1).value).trim().toLowerCase() !== "example";
+    return row >= SIP.pageOrder.firstRow && !isPageOrderExample(base, row);
   }
   if (sheetName === SIP.rampUp.sheet) {
     return m[1] === "A" && row >= SIP.rampUp.firstFormRow && row < SIP.rampUp.firstFormRow + Math.max(SIP.rampUp.placeholders, forms);

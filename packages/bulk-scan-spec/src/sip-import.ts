@@ -2,7 +2,7 @@ import type ExcelJS from "exceljs";
 import { cellText } from "./cells.ts";
 import type { Bundle, Field, FormSpec } from "./schema.ts";
 import { bundleSchema, fieldSchema, formSpecSchema } from "./schema.ts";
-import { FIELD_COLUMN, SIP } from "./sip-layout.ts";
+import { FIELD_COLUMN, isPageOrderExample, SIP } from "./sip-layout.ts";
 
 const INPUT_TYPES: Record<string, Field["inputType"]> = {
   "text box": "text",
@@ -208,10 +208,9 @@ function readPageOrder(workbook: ExcelJS.Workbook): { page: number; keys: string
   }
   const pages = new Map<number, { key: string; order: number }[]>();
   for (let r = SIP.pageOrder.firstRow; r <= sheet.rowCount; r++) {
-    const marker = cellText(sheet.getCell(r, 1).value).trim().toLowerCase();
     const page = Number(/\d+/.exec(cellText(sheet.getCell(r, 2).value))?.[0]);
     const key = cellText(sheet.getCell(r, 3).value).trim();
-    if (marker === "example" || !page || !key) {
+    if (isPageOrderExample(sheet, r) || !page || !key) {
       continue;
     }
     const order = Number(cellText(sheet.getCell(r, 4).value)) || (pages.get(page)?.length ?? 0) + 1;

@@ -1,4 +1,4 @@
-import { emitsOf, valueSetFor } from "../emits.ts";
+import { valueSetFor } from "../emits.ts";
 import type { Field, FormSpec, Operand, Outcome, Rule, Scalar } from "../schema.ts";
 import { allFields, isNegation, isTickedTest } from "../schema.ts";
 
@@ -321,8 +321,6 @@ function literalSet(rule: Rule): RuleVerdict["set"] {
   }
   return Object.fromEntries(Object.entries(rule.set).map(([k, v]) => [k, v !== null && typeof v === "object" ? null : v]));
 }
-
-export { emitsOf };
 
 /** CCD fields a single OCR key feeds by plain copy: no condition, no free-text logic, and no other key feeding the same field. */
 export function keysByCcd(spec: FormSpec): Map<string, Set<string>> {

@@ -393,9 +393,11 @@ function parseBlock(block: Block, ctx: LogicContext): { rule: Rule; fragments: n
   }
 
   // Assignments may be followed by more conditions: "x = Yes AND key = a OR key = b".
-  const trailingConditions = /^((?:\w+\s*=\s*\w+[,\s]*)+?)\s+AND\s+(.+)$/i.exec(body);
-  if (trailingConditions?.[1] && trailingConditions[2] && parseAssignments(trailingConditions[1], ctx)) {
-    const extra = parseConditions(trailingConditions[2], ctx);
+  const and = /\s+AND\s+/i.exec(body);
+  const assigned = and ? body.slice(0, and.index) : "";
+  const conditions = and ? body.slice(and.index + and[0].length) : "";
+  if (assigned.includes("=") && conditions && parseAssignments(assigned, ctx)) {
+    const extra = parseConditions(conditions, ctx);
     if (typeof extra !== "string") {
       const before = rule.whenAny ?? (rule.when ? [rule.when] : [{}]);
       const crossed = before.flatMap((b) => extra.groups.map((g) => ({ ...b, ...g })));
@@ -406,7 +408,7 @@ function parseBlock(block: Block, ctx: LogicContext): { rule: Rule; fragments: n
       } else if (crossed[0]) {
         rule.when = crossed[0];
       }
-      body = [trailingConditions[1].trim(), extra.rest].filter(Boolean).join(", ");
+      body = [assigned.trim(), extra.rest].filter(Boolean).join(", ");
     }
   }
 

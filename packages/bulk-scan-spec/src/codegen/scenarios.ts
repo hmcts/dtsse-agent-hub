@@ -6,7 +6,6 @@ import {
   anchoredPattern,
   evaluateRules,
   exclusiveGroups,
-  FORMAT_REGEXES,
   formatPattern,
   groupAnswered,
   holds,
@@ -372,5 +371,3 @@ function uniqueNames(list: Scenario[]): Scenario[] {
     return name === s.name ? s : { ...s, name };
   });
 }
-
-export { FORMAT_REGEXES };

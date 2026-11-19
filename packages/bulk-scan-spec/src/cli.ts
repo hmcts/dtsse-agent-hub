@@ -237,4 +237,4 @@ async function main(argv: string[]): Promise<number> {
   }
 }
 
-process.exit(await main(process.argv.slice(2)));
+process.exitCode = await main(process.argv.slice(2));
