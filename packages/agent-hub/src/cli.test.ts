@@ -19,12 +19,13 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeSecrets, type TempClaudeHome, tempClaudeHome } from "./__fixtures__/claude-home.ts";
-import { createMockHub, type MockHub } from "./__fixtures__/mock-hub.ts";
+import { createMockHub, type MockHub, PRIMARY_ARTEFACT_ID, PRIMARY_DECK_ID, PRIMARY_DOCMOSIS_ID } from "./__fixtures__/mock-hub.ts";
 import { captureStderr } from "./__fixtures__/pod-shims.ts";
 import { createApi } from "./api.ts";
 import { parseFlags, readStdinText, UsageError } from "./cli/command.ts";
+import { clip, coverageSummaryLine, formatStamp, parseChapters } from "./cli/video.ts";
 import { runCli, USAGE } from "./cli.ts";
 import type { Env } from "./env.ts";
 import { describeAuthorShort } from "./envelope.ts";
@@ -40,6 +41,43 @@ const BIN = path.join(PACKAGE_ROOT, "bin", "agent-hub");
 const CLI_SOURCE = fileURLToPath(new URL("./cli.ts", import.meta.url));
 const DEV_USER = "u-me|Me Tester|me@example.com";
 const BYPASS = "--dangerously-skip-permissions";
+
+// GOV.UK Notify and the person's `az`, as `agent-hub notify` reaches them through the package's Node half.
+const NOTIFY_SERVICE = "5c1f3d4a-0000-4000-8000-000000000001";
+const notifyFake = vi.hoisted(() => ({
+  templates: [] as Record<string, unknown>[],
+  readSecret: undefined as ((vault: string, secret: string) => Promise<string>) | undefined,
+  reads: [] as string[]
+}));
+vi.mock("@hmcts-cft/notify-tools/node", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@hmcts-cft/notify-tools/node")>();
+  const client = {
+    serviceId: "5c1f3d4a-0000-4000-8000-000000000001",
+    listTemplates: async () => notifyFake.templates,
+    getTemplate: async (id: string) => {
+      const found = notifyFake.templates.find((template) => template.id === id);
+      if (found === undefined) {
+        throw new real.NotifyApiError("GOV.UK Notify returned 404: NoResultFound: No result found", 404);
+      }
+      return found;
+    },
+    previewTemplate: async (id: string) => {
+      const found = notifyFake.templates.find((template) => template.id === id);
+      return { ...found, html: found?.type === "email" ? `<p>${String(found.body)}</p>` : null };
+    }
+  };
+  return {
+    ...real,
+    readSecret: async (vault: string, secret: string) => {
+      notifyFake.reads.push(`${vault}/${secret}`);
+      return await (notifyFake.readSecret ?? (async () => "key"))(vault, secret);
+    },
+    // biome-ignore lint/complexity/useArrowFunction: the CLI constructs it with `new`, which an arrow function cannot be
+    NotifyClient: vi.fn(function () {
+      return client;
+    })
+  };
+});
 
 type Captured = {
   /** One string, as the terminal would have shown it: every `print` with its newline. */
@@ -1890,6 +1928,62 @@ describe("artefact, in an assistant conversation", () => {
     expect(r.errors.join("\n")).toMatch(/not a CFT Workspace conversation/);
   });
 
+  it("should list the documents, start one from stdin, and read, write and remove it by --id", async () => {
+    // Arrange
+    const { sid, agentId } = await session();
+    hub.editArtefactAsUser(agentId, "# Plan", "Plan");
+
+    // Act
+    const made = await cli(["artefact", "new", "--kind", "ticket", "--title", "Add a hearing"], { sid, input: "As a clerk" });
+    const id = hub.moreArtefacts.get(agentId)?.[0]?.id as string;
+    const listed = await cli(["artefact", "list"], { sid });
+    const got = await cli(["artefact", "get", "--id", id], { sid });
+    const put = await cli(["artefact", "put", "--id", id], { sid, input: "As a clerk, I want" });
+    const removed = await cli(["artefact", "remove", "--id", id], { sid });
+    const gone = await cli(["artefact", "get", "--id", id], { sid });
+
+    // Assert
+    expect(made.code, made.errors.join("\n")).toBe(0);
+    expect(made.text()).toMatch(new RegExp(`created ticket ${id} at version 1`));
+    expect(listed.lines).toEqual([`${PRIMARY_ARTEFACT_ID}  document  version 1, last edited by the user  Plan`, `${id}  ticket  version 1  Add a hearing`]);
+    expect(got.raw()).toBe("As a clerk\n");
+    expect(put.text()).toMatch(new RegExp(`saved the document ${id} as version 2`));
+    expect(hub.calls.find((c) => c.method === "PUT" && c.path === `/api/agent/${agentId}/artefacts/${id}`)?.body).toEqual({
+      markdown: "As a clerk, I want",
+      base_version: 1
+    });
+    expect(removed.code).toBe(0);
+    expect(gone.code).toBe(1);
+    expect(gone.errors.join("\n")).toMatch(/there is no document .* in this conversation; list them with/);
+    expect(hub.artefacts.get(agentId)?.markdown).toBe("# Plan");
+  });
+
+  it("should name the document and its id when a put by --id finds a newer version", async () => {
+    // Arrange
+    const { sid } = await session();
+    const created = await cli(["artefact", "new", "--kind", "document"], { sid, input: "one" });
+    const id = /created document (\S+)/.exec(created.text())?.[1] as string;
+
+    // Act
+    const r = await cli(["artefact", "put", "--id", id, "--base", "0"], { sid, input: "mine" });
+
+    // Assert
+    expect(r.code).toBe(1);
+    expect(r.errors.join("\n")).toMatch(new RegExp(`artefact get --id ${id}, merge your change into it, and put it again with --base 1`));
+  });
+
+  it("should say the hub holds one document when it has no list route", async () => {
+    // Arrange
+    const { sid } = await session({ conversation: false });
+
+    // Act
+    const r = await cli(["artefact", "list"], { sid });
+
+    // Assert
+    expect(r.code).toBe(1);
+    expect(r.errors.join("\n")).toMatch(/holds one document per conversation, or this session is not a CFT Workspace conversation/);
+  });
+
   it("should refuse the arguments the other action takes, and a --base that is not a version", async () => {
     // Arrange
     const { sid } = await session();
@@ -1902,10 +1996,474 @@ describe("artefact, in an assistant conversation", () => {
       ["artefact", "get", "--title", "T"],
       ["artefact", "get", "--base", "1"],
       ["artefact", "put", "--json"],
-      ["artefact", "put", "--base", "latest"]
+      ["artefact", "put", "--base", "latest"],
+      ["artefact", "put", "--id", "not-an-id"],
+      ["artefact", "list", "--id", "0f8a6a1e-0000-4000-8000-00000000d0c1"],
+      ["artefact", "new"],
+      ["artefact", "new", "--kind", "deck"],
+      ["artefact", "new", "--kind", "ticket", "--json"],
+      ["artefact", "remove"],
+      ["jira", "export", "5b0e7c1a-1111-4222-8333-444455556666", "--project", "VIBE", "--type", "Story", "--document", "x"]
     ]) {
       expect((await cli(args, { sid, input: "x" })).code, args.join(" ")).toBe(2);
     }
+  });
+
+  describe("video", () => {
+    const MP4 = Buffer.from("not really an mp4, but bytes");
+    const CHAPTERS = "00:00:00 Landlord signs in\n00:01:05 Enters the claim\n";
+    const COVERAGE = "# Journey: coverage\n\n2 of 3 stories and 7 ACs are shown. Each AC's time is when its caption first appears.\n";
+
+    // A recording's output directory, as scripts/journey-video/record writes it.
+    function recording(files: Record<string, string | Buffer> = {}): string {
+      const dir = fs.mkdtempSync(path.join(home.root, "recording-"));
+      const all: Record<string, string | Buffer> = {
+        "pcs-journey.mp4": MP4,
+        "pcs-journey.vtt": "WEBVTT\n\n00:00:00.000 --> 00:00:02.000\nHello\n",
+        "pcs-journey.chapters.txt": CHAPTERS,
+        "coverage.md": COVERAGE,
+        "content-mismatches.md": "# mismatches\n",
+        ...files
+      };
+      for (const [name, content] of Object.entries(all)) {
+        fs.writeFileSync(path.join(dir, name), content);
+      }
+      return dir;
+    }
+
+    it("should put the video to storage and make it the conversation's, when video put runs on a recording's directory", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      const dir = recording();
+
+      // Act
+      const r = await cli(["video", "put", dir, "--jira", "HDPI-1234"], { sid });
+
+      // Assert
+      expect(r.code, r.errors.join("\n")).toBe(0);
+      const ready = hub.videos.get(agentId)?.ready;
+      expect(ready?.body).toMatchObject({
+        name: "pcs-journey",
+        bytes: MP4.length,
+        chapters: [
+          { at: 0, title: "Landlord signs in" },
+          { at: 65, title: "Enters the claim" }
+        ],
+        coverage_summary: "2 of 3 stories and 7 ACs are shown. Each AC's time is when its caption first appears.",
+        jira_key: "HDPI-1234"
+      });
+      expect(hub.blobs.get(ready?.video_id ?? "")?.equals(MP4)).toBe(true);
+      expect(hub.blobPuts[hub.blobPuts.length - 1]?.headers["x-ms-blob-type"]).toBe("BlockBlob");
+      expect(r.lines.join("\n")).toMatch(/published "pcs-journey" \(2 chapters\).*post it to HDPI-1234/);
+    });
+
+    it("should publish without captions, chapters or reports, when only the .mp4 is in the directory", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      const dir = fs.mkdtempSync(path.join(home.root, "recording-"));
+      fs.writeFileSync(path.join(dir, "demo.mp4"), MP4);
+
+      // Act
+      const r = await cli(["video", "put", dir, "--name", "Demo"], { sid });
+
+      // Assert
+      expect(r.code, r.errors.join("\n")).toBe(0);
+      expect(hub.videos.get(agentId)?.ready?.body).toMatchObject({ name: "Demo", chapters: [], coverage: "", content_mismatches: "" });
+      expect(hub.videos.get(agentId)?.ready?.body.captions).toBeUndefined();
+    });
+
+    it("should refuse with exit 2 before asking the hub, when the arguments cannot make a video", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      const empty = fs.mkdtempSync(path.join(home.root, "recording-"));
+      const two = recording({ "other.mp4": MP4 });
+
+      // Act
+      const none = await cli(["video", "put"], { sid });
+      const noMp4 = await cli(["video", "put", empty], { sid });
+      const ambiguous = await cli(["video", "put", two], { sid });
+      const badKey = await cli(["video", "put", recording(), "--jira", "nope"], { sid });
+      const action = await cli(["video", "get"], { sid });
+
+      // Assert
+      expect([none.code, noMp4.code, ambiguous.code, badKey.code, action.code]).toEqual([2, 2, 2, 2, 2]);
+      expect(badKey.errors.join("\n")).toMatch(/issue key such as HDPI-1234/);
+      expect(hub.videos.get(agentId)).toBeUndefined();
+    });
+
+    it("should say the session is not a conversation and exit 1, when video put runs outside one", async () => {
+      // Arrange
+      const { sid } = await session({ conversation: false });
+
+      // Act
+      const r = await cli(["video", "put", recording()], { sid });
+
+      // Assert
+      expect(r.code).toBe(1);
+      expect(r.errors.join("\n")).toMatch(/not a CFT Workspace conversation/);
+    });
+
+    it("should read the chapter times and the coverage line when the files are read", () => {
+      expect(parseChapters("01:02:03 Late\n05:07 Short\nnot a chapter\n00:00:00 First")).toEqual([
+        { at: 0, title: "First" },
+        { at: 307, title: "Short" },
+        { at: 3723, title: "Late" }
+      ]);
+      expect(coverageSummaryLine(COVERAGE)).toMatch(/^2 of 3 stories and 7 ACs are shown\./);
+      expect(coverageSummaryLine("# nothing here")).toBeUndefined();
+    });
+
+    it("should refuse a chapter past 24 hours naming the file and line, when the chapters are read", () => {
+      expect(() => parseChapters("00:00:00 First\n25:00:00 Late", "demo.chapters.txt")).toThrow(/^demo\.chapters\.txt line 2: 25:00:00 is more than 24 hours/);
+      expect(parseChapters("24:00:00 Edge")).toEqual([{ at: 86400, title: "Edge" }]);
+    });
+
+    it("should cut text between code points, when a title or summary is over the limit", () => {
+      const emoji = "\u{1F600}";
+      expect(clip(`ab${emoji}`, 3)).toBe("ab");
+      expect(clip(`a${emoji}`, 3)).toBe(`a${emoji}`);
+      expect(parseChapters(`00:00:01 ${"x".repeat(199)}${emoji}`)[0]?.title).toBe("x".repeat(199));
+      expect(formatStamp(3723)).toBe("01:02:03");
+    });
+
+    it("should send the recording with its length, as it is read from disk, when video put runs", async () => {
+      // Arrange
+      const { sid } = await session();
+
+      // Act
+      const r = await cli(["video", "put", recording()], { sid });
+
+      // Assert
+      expect(r.code, r.errors.join("\n")).toBe(0);
+      expect(hub.blobPuts[hub.blobPuts.length - 1]?.headers["content-length"]).toBe(String(MP4.length));
+    });
+  });
+
+  describe("notify", () => {
+    const EMAIL = "ab1f3d4a-0000-4000-8000-000000000002";
+    const TEXT = "ab1f3d4a-0000-4000-8000-000000000003";
+    const templates = [
+      { id: TEXT, type: "sms", name: "Hearing reminder", version: 2, subject: null, body: "Your hearing is on ((date))" },
+      { id: EMAIL, type: "email", name: "Claim received", version: 4, subject: "Claim ((ref))", body: "Dear ((name))" }
+    ];
+    const conversationDir = () => path.join(home.root, ".agent-hub", "notify", `0f8a6a1e-0000-4000-8000-${String(nextSession).padStart(12, "0")}`);
+
+    beforeAll(() => {
+      notifyFake.templates = templates;
+    });
+
+    it("should list the products with Notify keys, when notify products runs", async () => {
+      // Arrange
+      const { sid } = await session();
+
+      // Act
+      const r = await cli(["notify", "products"], { sid });
+
+      // Assert
+      expect(r.code, r.errors.join("\n")).toBe(0);
+      expect(r.lines).toContain("pcs\tPCS");
+      expect(r.lines.some((line) => line.startsWith("aac\tManage Case Assignment (NoC) (NoC emails"))).toBe(true);
+    });
+
+    it("should read the product's key from its vault and list its templates, emails first, when notify list runs", async () => {
+      // Arrange
+      const { sid } = await session();
+      notifyFake.reads = [];
+
+      // Act
+      const r = await cli(["notify", "list", "--product", "pcs"], { sid });
+
+      // Assert
+      expect(r.code, r.errors.join("\n")).toBe(0);
+      expect(notifyFake.reads).toEqual(["pcs-aat/gov-notify-key"]);
+      expect(r.lines).toEqual([`email\t${EMAIL}\tv4\tClaim received`, `sms\t${TEXT}\tv2\tHearing reminder`]);
+    });
+
+    it("should print the Key Vault's own words and exit 1, when the person cannot read the product's key", async () => {
+      // Arrange
+      const { sid } = await session();
+      const { KeyVaultError } = await import("@hmcts-cft/notify-tools/node");
+      notifyFake.readSecret = async () => {
+        throw new KeyVaultError("Forbidden: you have no read access to secrets in the Key Vault pcs-aat.");
+      };
+
+      // Act
+      const r = await cli(["notify", "list", "--product", "pcs"], { sid });
+      notifyFake.readSecret = undefined;
+
+      // Assert
+      expect(r.code).toBe(1);
+      expect(r.errors.join("\n")).toBe("agent-hub notify: Forbidden: you have no read access to secrets in the Key Vault pcs-aat.");
+    });
+
+    it("should say a product is unknown and exit 1, and refuse a pull or a command it cannot make with exit 2", async () => {
+      // Arrange
+      const { sid } = await session();
+
+      // Act
+      const unknown = await cli(["notify", "list", "--product", "nope"], { sid });
+      const badTemplate = await cli(["notify", "pull", "--product", "pcs", "--template", "x"], { sid });
+      const extra = await cli(["notify", "products", "more"], { sid });
+      const action = await cli(["notify", "send"], { sid });
+
+      // Assert
+      expect(unknown.code).toBe(1);
+      expect(unknown.errors.join("\n")).toMatch(/There is no product "nope" with a Notify key/);
+      expect([badTemplate.code, extra.code, action.code]).toEqual([2, 2, 2]);
+      expect(action.errors.join("\n")).toMatch(/notify takes products, list, pull, get, put or remove/);
+    });
+
+    it("should load a template once, write its files, publish the edit on that base and refuse a stale one, when pull, get and put run", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+
+      // Act: load it, twice
+      const pulled = await cli(["notify", "pull", "--product", "pcs", "--template", EMAIL], { sid });
+      const again = await cli(["notify", "pull", "--product", "pcs", "--template", EMAIL], { sid });
+
+      // Assert
+      expect(pulled.code, pulled.errors.join("\n")).toBe(0);
+      expect(pulled.text()).toMatch(/loaded "Claim received" into the conversation as version 1/);
+      expect(again.text()).toMatch(/already a Notify template of the conversation \(.+\), as version 1; nothing was written/);
+      const stored = hub.notifyTemplates.get(agentId);
+      expect(stored).toHaveLength(1);
+      expect(stored?.[0]).toMatchObject({
+        template_id: EMAIL,
+        service_id: NOTIFY_SERVICE,
+        notify_version: 4,
+        notify_preview: "<p>Dear ((name))</p>",
+        data: {}
+      });
+
+      // Act: read it
+      const got = await cli(["notify", "get"], { sid });
+
+      // Assert
+      expect(got.code, got.errors.join("\n")).toBe(0);
+      expect(got.text()).toMatch(/wrote version 1 \(revision 0\) of the email template "Claim received"/);
+      expect(got.text()).toMatch(/Taken from version 4 of the template in Notify, unchanged; last written by this conversation/);
+      const dir = conversationDir();
+      expect(fs.readFileSync(path.join(dir, "subject.md"), "utf8")).toBe("Claim ((ref))");
+      expect(fs.readFileSync(path.join(dir, "body.md"), "utf8")).toBe("Dear ((name))");
+      expect(JSON.parse(fs.readFileSync(path.join(dir, "template.json"), "utf8"))).toMatchObject({ type: "email", template_id: EMAIL, version: 1 });
+      expect(fs.readFileSync(path.join(dir, "version"), "utf8")).toBe("1\n");
+
+      // Act: edit and publish it
+      fs.writeFileSync(path.join(dir, "body.md"), "Dear ((name)),\n\nWe have your claim.");
+      fs.writeFileSync(path.join(dir, "data.json"), JSON.stringify({ name: "Ada" }));
+      const put = await cli(["notify", "put", "--summary", "Say we have it"], { sid });
+
+      // Assert
+      expect(put.code, put.errors.join("\n")).toBe(0);
+      expect(put.text()).toMatch(/published the Notify template's draft as version 2/);
+      expect(hub.notifyTemplates.get(agentId)?.[1]).toMatchObject({
+        body: "Dear ((name)),\n\nWe have your claim.",
+        subject: "Claim ((ref))",
+        data: { name: "Ada" },
+        summary: "Say we have it",
+        template_id: EMAIL
+      });
+      const body = hub.calls.filter((c) => c.method === "PUT" && c.path === `/api/agent/${agentId}/notify`).at(-1)?.body;
+      expect(body).toMatchObject({ base_version: 1, base_revision: 0 });
+      expect(body).not.toHaveProperty("source");
+
+      // Act: the person edits it, then the session puts on the version it read
+      hub.writeNotifyAsUser(agentId, { body: "Theirs" });
+      const stale = await cli(["notify", "put"], { sid });
+
+      // Assert
+      expect(stale.code).toBe(1);
+      expect(stale.errors.join("\n")).toMatch(/has changed since version 2: it is now version 3, last written by the user\. Nothing was saved/);
+      expect(hub.notifyTemplates.get(agentId)).toHaveLength(3);
+    });
+
+    it("should list the conversation's own templates without --product, oldest first, and say when there are none", async () => {
+      // Arrange
+      const { sid } = await session();
+      const none = await cli(["notify", "list"], { sid });
+      await cli(["notify", "pull", "--product", "pcs", "--template", EMAIL], { sid });
+      await cli(["notify", "pull", "--product", "pcs", "--template", TEXT], { sid });
+
+      // Act
+      const listed = await cli(["notify", "list"], { sid });
+
+      // Assert
+      expect(none.text()).toMatch(/the conversation has no Notify template yet/);
+      const lines = listed.text().trim().split("\n");
+      expect(lines).toHaveLength(2);
+      expect(lines[0]).toMatch(/^[0-9a-f-]{36}\tv1\tassistant\tClaim received$/);
+      expect(lines[1]).toMatch(/\tHearing reminder$/);
+    });
+
+    it("should make a second template from a pull with no --id, and read, publish to and remove it by --id", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      await cli(["notify", "pull", "--product", "pcs", "--template", EMAIL], { sid });
+      const second = await cli(["notify", "pull", "--product", "pcs", "--template", TEXT], { sid });
+      const id = /\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b/.exec(second.text())?.[1] as string;
+      const dir = path.join(conversationDir(), id);
+
+      // Act
+      const got = await cli(["notify", "get", "--id", id], { sid });
+      fs.writeFileSync(path.join(dir, "body.md"), "Your hearing has moved");
+      const put = await cli(["notify", "put", "--id", id], { sid });
+      const missing = await cli(["notify", "get", "--id", "0b1f3d4a-0000-4000-8000-0000000000ff"], { sid });
+      const noId = await cli(["notify", "remove"], { sid });
+      const removed = await cli(["notify", "remove", "--id", id], { sid });
+      const afterwards = await cli(["notify", "list"], { sid });
+
+      // Assert
+      expect(second.code, second.errors.join("\n")).toBe(0);
+      expect(hub.notifyTemplates.get(agentId)).toHaveLength(1);
+      expect(got.code, got.errors.join("\n")).toBe(0);
+      expect(got.text()).toMatch(/Hearing reminder/);
+      expect(put.code, put.errors.join("\n")).toBe(0);
+      expect(put.text()).toMatch(/as version 2/);
+      expect(hub.calls.some((c) => c.method === "PUT" && c.path === `/api/agent/${agentId}/notify-templates/${id}`)).toBe(true);
+      expect(missing.code).toBe(1);
+      expect(noId.code).toBe(2);
+      expect(removed.code, removed.errors.join("\n")).toBe(0);
+      expect(fs.existsSync(dir)).toBe(false);
+      expect(afterwards.text().trim().split("\n")).toHaveLength(1);
+    });
+
+    it("should load into the template named by --id as its next version, when pull has one", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      await cli(["notify", "pull", "--product", "pcs", "--template", EMAIL], { sid });
+      const listed = await cli(["notify", "list"], { sid });
+      const id = listed.text().split("\t")[0] as string;
+
+      // Act
+      const replaced = await cli(["notify", "pull", "--product", "pcs", "--template", TEXT, "--id", id], { sid });
+
+      // Assert
+      expect(replaced.code, replaced.errors.join("\n")).toBe(0);
+      expect(replaced.text()).toMatch(/as version 2 of its Notify template/);
+      expect(hub.notifyTemplates.get(agentId)).toHaveLength(2);
+    });
+
+    it("should say the user changed the version read, when the person amended it since get", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      await cli(["notify", "pull", "--product", "pcs", "--template", EMAIL], { sid });
+      hub.writeNotifyAsUser(agentId, { body: "Mine" });
+      await cli(["notify", "get"], { sid });
+      hub.writeNotifyAsUser(agentId, { body: "Mine again" }, { amend: true });
+
+      // Act
+      const r = await cli(["notify", "put"], { sid });
+
+      // Assert
+      expect(r.code).toBe(1);
+      expect(r.errors.join("\n")).toMatch(/the user has changed version 2 of the Notify template since you read it/);
+    });
+
+    it("should write no subject for a text message, and put none, when get and put run on one", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      await cli(["notify", "pull", "--product", "pcs", "--template", TEXT], { sid });
+
+      // Act
+      const got = await cli(["notify", "get"], { sid });
+      const put = await cli(["notify", "put"], { sid });
+
+      // Assert
+      expect(got.code, got.errors.join("\n")).toBe(0);
+      expect(fs.existsSync(path.join(conversationDir(), "subject.md"))).toBe(false);
+      expect(got.text()).toMatch(/Edit body\.md \(Notify's markdown/);
+      expect(put.code, put.errors.join("\n")).toBe(0);
+      expect(hub.notifyTemplates.get(agentId)?.[1]).toMatchObject({ subject: null, body: "Your hearing is on ((date))" });
+    });
+
+    it("should write an older version beside the working copy and leave the recorded base alone, when get asks for one", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      await cli(["notify", "pull", "--product", "pcs", "--template", EMAIL], { sid });
+      hub.writeNotifyAsUser(agentId, { body: "Mine" });
+      await cli(["notify", "get"], { sid });
+
+      // Act
+      const older = await cli(["notify", "get", "--version", "1"], { sid });
+      const gone = await cli(["notify", "get", "--version", "9"], { sid });
+      const bad = await cli(["notify", "get", "--version", "0"], { sid });
+
+      // Assert
+      expect(older.code, older.errors.join("\n")).toBe(0);
+      expect(older.text()).toMatch(/This is not the latest version, which is 2/);
+      expect(fs.readFileSync(path.join(conversationDir(), "v1", "body.md"), "utf8")).toBe("Dear ((name))");
+      expect(fs.readFileSync(path.join(conversationDir(), "version"), "utf8")).toBe("2\n");
+      expect(gone.code).toBe(1);
+      expect(gone.errors.join("\n")).toMatch(/does not keep version 9/);
+      expect(bad.code).toBe(2);
+    });
+
+    it("should say there is no Notify template yet and exit 1, and refuse a put before any get, when there is none", async () => {
+      // Arrange
+      const { sid } = await session();
+
+      // Act
+      const got = await cli(["notify", "get"], { sid });
+      const put = await cli(["notify", "put"], { sid });
+
+      // Assert
+      expect(got.code).toBe(1);
+      expect(got.errors.join("\n")).toMatch(/no Notify template yet.*notify pull/);
+      expect(put.code).toBe(2);
+      expect(put.errors.join("\n")).toMatch(/nothing to put: run agent-hub notify get first/);
+    });
+
+    it("should refuse files the hub would not take, with exit 2, and a secret-shaped draft, when put runs", async () => {
+      // Arrange
+      const { sid } = await session();
+      await cli(["notify", "pull", "--product", "pcs", "--template", EMAIL], { sid });
+      await cli(["notify", "get"], { sid });
+      const dir = conversationDir();
+
+      // Act
+      fs.writeFileSync(path.join(dir, "data.json"), "[1]");
+      const list = await cli(["notify", "put"], { sid });
+      fs.writeFileSync(path.join(dir, "data.json"), "{");
+      const invalid = await cli(["notify", "put"], { sid });
+      fs.writeFileSync(path.join(dir, "data.json"), "{}");
+      fs.writeFileSync(path.join(dir, "subject.md"), "x".repeat(1001));
+      const long = await cli(["notify", "put"], { sid });
+      fs.writeFileSync(path.join(dir, "subject.md"), `a${String.fromCharCode(0)}b`);
+      const nul = await cli(["notify", "put"], { sid });
+      fs.writeFileSync(path.join(dir, "subject.md"), "Claim");
+      const summary = await cli(["notify", "put", "--summary", " "], { sid });
+      fs.writeFileSync(path.join(dir, "body.md"), `token ghp_${"a".repeat(36)}`);
+      const secret = await cli(["notify", "put"], { sid });
+      fs.rmSync(path.join(dir, "body.md"));
+      const missing = await cli(["notify", "put"], { sid });
+      fs.writeFileSync(path.join(dir, "template.json"), "{}");
+      const untyped = await cli(["notify", "put"], { sid });
+      fs.rmSync(path.join(dir, "template.json"));
+      const noTemplate = await cli(["notify", "put"], { sid });
+
+      // Assert
+      expect([list.code, invalid.code, long.code, nul.code, summary.code, missing.code, untyped.code, noTemplate.code]).toEqual([2, 2, 2, 2, 2, 2, 2, 2]);
+      expect(list.errors.join("\n")).toMatch(/must hold the personalisation as one object/);
+      expect(long.errors.join("\n")).toMatch(/longer than the hub takes, 1000 characters/);
+      expect(nul.errors.join("\n")).toMatch(/cannot store/);
+      expect(secret.code).toBe(1);
+      expect(secret.errors.join("\n")).toMatch(/refusing to send/);
+      expect(untyped.errors.join("\n")).toMatch(/does not say what type of template it is/);
+    });
+
+    it("should say the session is not a conversation, when it is not one", async () => {
+      // Arrange
+      const { sid } = await session({ conversation: false });
+
+      // Act
+      const pulled = await cli(["notify", "pull", "--product", "pcs", "--template", EMAIL], { sid });
+      const got = await cli(["notify", "get"], { sid });
+
+      // Assert
+      expect(pulled.code).not.toBe(0);
+      expect(got.code).toBe(1);
+      expect(got.errors.join("\n")).toMatch(/not a CFT Workspace conversation/);
+    });
   });
 
   describe("docmosis", () => {
@@ -2064,6 +2622,86 @@ describe("artefact, in an assistant conversation", () => {
       expect(fs.readFileSync(path.join(out, "revision"), "utf8")).toBe("0\n");
       expect(r.text()).toContain(path.join(out, "data.json"));
       expect(r.text()).toMatch(/Last changed by the user; render error: Bad field; has no PDF\./);
+      expect(r.text()).not.toMatch(/^Summary:/m);
+    });
+
+    it("should print the version's summary, when docmosis get reads a version that has one", async () => {
+      // Arrange
+      const { sid } = await session();
+      const dir = workDir();
+      expect((await cli(putArgs(dir, "--summary", "Added the hearing date"), { sid })).code).toBe(0);
+
+      // Act
+      const r = await cli(["docmosis", "get"], { sid });
+
+      // Assert
+      expect(r.code, r.errors.join("\n")).toBe(0);
+      expect(r.lines).toContain("Summary: Added the hearing date");
+    });
+
+    it("should print the summary on one line with its whitespace collapsed, when the summary spans several lines", async () => {
+      // Arrange
+      const { sid } = await session();
+      const dir = workDir();
+      expect((await cli(putArgs(dir, "--summary", "Added the\n  hearing\t\tdate\r\nand the judge"), { sid })).code).toBe(0);
+
+      // Act
+      const r = await cli(["docmosis", "get"], { sid });
+
+      // Assert
+      expect(r.code, r.errors.join("\n")).toBe(0);
+      expect(r.lines.filter((line) => line.startsWith("Summary:"))).toEqual(["Summary: Added the hearing date and the judge"]);
+      expect(r.text()).not.toMatch(/^\s*hearing/m);
+    });
+
+    it("should print the name and summary without their control characters, when the hub stored them with some", async () => {
+      // Arrange: the hub refuses only a NUL and half of a surrogate pair, so it stores these as they are.
+      const { sid } = await session();
+      const dir = workDir();
+      const esc = String.fromCharCode(27);
+      const put = putArgs(dir, "--name", `Claim${esc}[2J form`, "--summary", `Added${String.fromCharCode(7)} the${esc}[31m date\u0085now`);
+      expect((await cli(put, { sid })).code).toBe(0);
+
+      // Act
+      const r = await cli(["docmosis", "get"], { sid });
+
+      // Assert
+      expect(r.code, r.errors.join("\n")).toBe(0);
+      expect(r.text()).toContain(`of the template "Claim[2J form" to`);
+      expect(r.lines).toContain("Summary: Added the[31m datenow");
+      expect(r.text()).not.toContain(esc);
+    });
+
+    it("should refuse --name and --summary with their own words and send nothing, when either holds a NUL", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      const dir = workDir();
+      const nul = String.fromCharCode(0);
+
+      // Act
+      const name = await cli(putArgs(dir, "--name", `Claim${nul}`), { sid });
+      const summary = await cli(putArgs(dir, "--summary", `Added${nul}`), { sid });
+
+      // Assert
+      expect(name.code).toBe(2);
+      expect(name.errors.join("\n")).toContain("--name must not contain a NUL character or half of a surrogate pair");
+      expect(summary.errors.join("\n")).toContain("--summary must not contain a NUL character or half of a surrogate pair");
+      expect(calls(agentId, "PUT", "")).toEqual([]);
+    });
+
+    it("should refuse the put as a usage error and send nothing, when the data holds secret-shaped text", async () => {
+      // Arrange: built at runtime so no secret-shaped literal sits in the repo.
+      const { sid, agentId } = await session();
+      const dir = workDir();
+      fs.writeFileSync(path.join(dir, "data.json"), JSON.stringify({ name: `token ${"gh"}p_${"Q".repeat(30)}` }));
+
+      // Act
+      const r = await cli(putArgs(dir), { sid });
+
+      // Assert
+      expect(r.code).toBe(2);
+      expect(r.errors.join("\n")).toMatch(/refusing to send: the text contains a secret-shaped string \(pattern /);
+      expect(calls(agentId, "PUT", "")).toEqual([]);
     });
 
     it("should write an older version beside the working copy and leave the recorded version alone, when docmosis get has --version", async () => {
@@ -2387,7 +3025,142 @@ describe("artefact, in an assistant conversation", () => {
 
       // Assert
       expect(r.code).toBe(2);
-      expect(r.errors.join("\n")).toMatch(/docmosis takes get, put or pdf/);
+      expect(r.errors.join("\n")).toMatch(/docmosis takes get, put, new, pdf, list or remove/);
+    });
+
+    const newArgs = (dir: string, ...more: string[]) => putArgs(dir, ...more).map((word) => (word === "put" ? "new" : word));
+    const itemDir = (id: string) => path.join(conversationDir(), id);
+
+    it("should list the templates oldest first with each one's id, and say so when there are none, when docmosis list runs", async () => {
+      // Arrange
+      const { sid } = await session();
+      const dir = workDir();
+      const none = await cli(["docmosis", "list"], { sid });
+      expect((await cli(putArgs(dir, "--name", "Claim"), { sid })).code).toBe(0);
+      expect((await cli(newArgs(dir, "--name", "Order"), { sid })).code).toBe(0);
+
+      // Act
+      const listed = await cli(["docmosis", "list"], { sid });
+      const json = await cli(["docmosis", "list", "--json"], { sid });
+
+      // Assert
+      expect(none.text()).toMatch(/the conversation has no templates yet/);
+      expect(listed.lines).toEqual([
+        expect.stringMatching(new RegExp(`^${PRIMARY_DOCMOSIS_ID}  version 1  Claim$`)),
+        expect.stringMatching(/^[0-9a-f-]{36} {2}version 1 {2}Order$/)
+      ]);
+      expect(JSON.parse(json.text())).toEqual([
+        expect.objectContaining({ id: PRIMARY_DOCMOSIS_ID, name: "Claim" }),
+        expect.objectContaining({ name: "Order" })
+      ]);
+    });
+
+    it("should publish a further template and print its id, keeping its working copy apart from the primary's, when docmosis new runs", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      const dir = workDir();
+      expect((await cli(putArgs(dir, "--name", "Claim"), { sid })).code).toBe(0);
+
+      // Act
+      const r = await cli(newArgs(dir, "--name", "Order", "--pdf", path.join(dir, "claim.pdf")), { sid });
+
+      // Assert
+      expect(r.code, r.errors.join("\n")).toBe(0);
+      const id = /created template ([0-9a-f-]{36}) at version 1/.exec(r.text())?.[1] as string;
+      expect(id).toBeTruthy();
+      expect(calls(agentId, "POST", "-templates")).toHaveLength(1);
+      expect(fs.readFileSync(path.join(itemDir(id), "version"), "utf8")).toBe("1\n");
+      expect(fs.readFileSync(path.join(conversationDir(), "version"), "utf8")).toBe("1\n");
+      expect(hub.moreDocmosis.get(agentId)?.[0]?.stored.versions[0]?.pdf).toEqual(PDF);
+    });
+
+    it("should refuse --base and --id with docmosis new, before sending", async () => {
+      const { sid, agentId } = await session();
+      const dir = workDir();
+
+      const base = await cli(newArgs(dir, "--base", "1"), { sid });
+      const id = await cli(newArgs(dir, "--id", PRIMARY_DOCMOSIS_ID), { sid });
+
+      expect([base.code, id.code]).toEqual([2, 2]);
+      expect(calls(agentId, "POST", "")).toHaveLength(0);
+    });
+
+    it("should read and put the template --id names, on its own recorded version, when the conversation holds two", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      const dir = workDir();
+      expect((await cli(putArgs(dir, "--name", "Claim"), { sid })).code).toBe(0);
+      const made = await cli(newArgs(dir, "--name", "Order"), { sid });
+      const id = /created template ([0-9a-f-]{36})/.exec(made.text())?.[1] as string;
+
+      // Act
+      const got = await cli(["docmosis", "get", "--id", id], { sid });
+      const put = await cli(putArgs(dir, "--id", id), { sid });
+
+      // Assert
+      expect(got.code, got.errors.join("\n")).toBe(0);
+      expect(fs.existsSync(path.join(itemDir(id), "template.docx"))).toBe(true);
+      expect(put.code, put.errors.join("\n")).toBe(0);
+      expect(put.text()).toMatch(new RegExp(`published template ${id} as version 2`));
+      expect(hub.docmosisTemplates.get(agentId)?.versions).toHaveLength(1);
+      expect(hub.moreDocmosis.get(agentId)?.[0]?.stored.versions).toHaveLength(2);
+    });
+
+    it("should send the PDF of the template --id names, when docmosis pdf has --id", async () => {
+      const { sid, agentId } = await session();
+      const dir = workDir();
+      expect((await cli(putArgs(dir), { sid })).code).toBe(0);
+      const made = await cli(newArgs(dir, "--name", "Order"), { sid });
+      const id = /created template ([0-9a-f-]{36})/.exec(made.text())?.[1] as string;
+
+      const r = await cli(["docmosis", "pdf", path.join(dir, "claim.pdf"), "--version", "1", "--id", id], { sid });
+
+      expect(r.code, r.errors.join("\n")).toBe(0);
+      expect(hub.moreDocmosis.get(agentId)?.[0]?.stored.versions[0]?.pdf).toEqual(PDF);
+      expect(hub.docmosisTemplates.get(agentId)?.versions[0]?.pdf).toBeNull();
+    });
+
+    it("should name the id in the command to run next, when a put with --id is refused for a newer version", async () => {
+      const { sid } = await session();
+      const dir = workDir();
+      expect((await cli(putArgs(dir), { sid })).code).toBe(0);
+      const made = await cli(newArgs(dir, "--name", "Order"), { sid });
+      const id = /created template ([0-9a-f-]{36})/.exec(made.text())?.[1] as string;
+
+      const stale = await cli(putArgs(dir, "--id", id, "--base", "5"), { sid });
+
+      expect(stale.code).toBe(1);
+      expect(stale.errors.join("\n")).toContain(`docmosis get --id ${id}`);
+    });
+
+    it("should remove the template --id names and its working copy, when docmosis remove runs", async () => {
+      // Arrange
+      const { sid, agentId } = await session();
+      const dir = workDir();
+      expect((await cli(putArgs(dir), { sid })).code).toBe(0);
+      const made = await cli(newArgs(dir, "--name", "Order"), { sid });
+      const id = /created template ([0-9a-f-]{36})/.exec(made.text())?.[1] as string;
+      expect((await cli(["docmosis", "get", "--id", id], { sid })).code).toBe(0);
+
+      // Act
+      const r = await cli(["docmosis", "remove", "--id", id], { sid });
+      const again = await cli(["docmosis", "remove", "--id", id], { sid });
+
+      // Assert
+      expect(r.text()).toMatch(new RegExp(`removed the template ${id}`));
+      expect(hub.moreDocmosis.get(agentId)).toEqual([]);
+      expect(fs.existsSync(itemDir(id))).toBe(false);
+      expect(again.code).toBe(1);
+      expect(again.errors.join("\n")).toMatch(/there is no template/);
+    });
+
+    it("should refuse docmosis remove with no --id and an --id that is not an id, before sending", async () => {
+      const { sid } = await session();
+
+      const none = await cli(["docmosis", "remove"], { sid });
+      const bad = await cli(["docmosis", "get", "--id", "nope"], { sid });
+
+      expect([none.code, bad.code]).toEqual([2, 2]);
     });
   });
 
@@ -2530,6 +3303,20 @@ describe("artefact, in an assistant conversation", () => {
       expect(missing.errors.join("\n")).toMatch(/does not keep version 9/);
       expect(bad.code).not.toBe(0);
       expect(bad.errors.join("\n")).toMatch(/--version takes a version number from 1/);
+    });
+
+    it("should refuse the put, naming the id, and send nothing, when the outline is in another deck's directory and --id is not given", async () => {
+      const { sid, agentId } = await session();
+      const item = "0f8a6a1e-0000-4000-8000-00000000d0c9";
+      const dir = path.join(home.root, ".agent-hub", "decks", `0f8a6a1e-0000-4000-8000-${String(nextSession).padStart(12, "0")}`, item);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, "outline.json"), JSON.stringify({ title: "Other", slides: [] }));
+
+      const r = await cli(["deck", "put", path.join(dir, "outline.json")], { sid });
+
+      expect(r.code).toBe(2);
+      expect(r.errors.join("\n")).toContain(`put it with --id ${item}`);
+      expect(calls(agentId, "PUT", "")).toEqual([]);
     });
 
     it("should put against the version deck get read, and refuse the put, when someone writes a newer one in between", async () => {
@@ -2895,10 +3682,167 @@ describe("artefact, in an assistant conversation", () => {
         ["deck", "pptx", path.join(dir, "deck.pptx")],
         ["deck", "pptx", path.join(dir, "deck.pptx"), "--version", "0"],
         ["deck", "pptx", path.join(dir, "deck.pptx"), "--version", "1", "extra"],
-        ["deck", "pptx", path.join(dir, "pipeline.png"), "--version", "1"]
+        ["deck", "pptx", path.join(dir, "pipeline.png"), "--version", "1"],
+        ["deck", "get", "--id", "not-a-uuid"],
+        ["deck", "put", file, "--id", "not-a-uuid"],
+        ["deck", "new"],
+        ["deck", "new", file, "--base", "1"],
+        ["deck", "new", file, "--id", "0b1f3d4a-0000-4000-8000-0000000000d1"],
+        ["deck", "remove"],
+        ["deck", "remove", "--id", "not-a-uuid"],
+        ["deck", "list", "extra"],
+        ["deck", "pptx", path.join(dir, "deck.pptx"), "--version", "1", "--id", "nope"]
       ]) {
         expect((await cli(args, { sid })).code, args.join(" ")).toBe(2);
       }
+    });
+
+    describe("with several decks", () => {
+      const ID_RE = /deck ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}) at version 1/;
+
+      it("should make a deck of its own, beside the primary one, when deck new runs on a conversation that has one", async () => {
+        // Arrange
+        const { sid, agentId } = await session();
+        hub.writeDeckAsUser(agentId, outline({ asset: `sha256:${digest(PNG)}` }), { [digest(PNG)]: PNG });
+        const dir = workDir();
+
+        // Act
+        const made = await cli(["deck", "new", path.join(dir, "outline.json"), "--pptx", path.join(dir, "deck.pptx")], { sid });
+        const id = ID_RE.exec(made.text())?.[1] as string;
+        const listed = await cli(["deck", "list"], { sid });
+        const json = await cli(["deck", "list", "--json"], { sid });
+
+        // Assert
+        expect(made.code, made.errors.join("\n")).toBe(0);
+        expect(made.text()).toContain(`change it with agent-hub deck get --id ${id}`);
+        expect(calls(agentId, "POST", "s")).toHaveLength(1);
+        expect(hub.decks.get(agentId)?.version).toBe(1);
+        expect(hub.moreDecks.get(agentId)?.map((one) => one.id)).toEqual([id]);
+        expect(hub.moreDecks.get(agentId)?.[0]?.stored.pptx.get(1)).toEqual(PPTX);
+        expect(listed.text()).toMatch(new RegExp(`^${PRIMARY_DECK_ID}  version 1, last edited by the user  Ways of working$`, "m"));
+        expect(listed.text()).toContain(`${id}  version 1  Ways of working`);
+        expect(JSON.parse(json.lines[0] as string).map((one: { id: string }) => one.id)).toEqual([PRIMARY_DECK_ID, id]);
+      });
+
+      it("should read and write the deck --id names in a directory of its own, leaving the primary deck's alone", async () => {
+        // Arrange
+        const { sid, agentId } = await session();
+        hub.writeDeckAsUser(agentId, outline({ asset: `sha256:${digest(PNG)}` }), { [digest(PNG)]: PNG });
+        const dir = workDir();
+        const id = ID_RE.exec((await cli(["deck", "new", path.join(dir, "outline.json")], { sid })).text())?.[1] as string;
+        const base = path.join(home.root, ".agent-hub", "decks", `0f8a6a1e-0000-4000-8000-${String(nextSession).padStart(12, "0")}`);
+
+        // Act
+        const got = await cli(["deck", "get", "--id", id, "--json"], { sid });
+        const put = await cli(["deck", "put", path.join(base, id, "outline.json"), "--id", id], { sid });
+        const old = await cli(["deck", "get", "--id", id, "--version", "1"], { sid });
+
+        // Assert
+        expect(got.code, got.errors.join("\n")).toBe(0);
+        expect(JSON.parse(got.lines[0] as string)).toMatchObject({ id, version: 1 });
+        expect(fs.readFileSync(path.join(base, id, "version"), "utf8")).toBe("2\n");
+        expect(fs.existsSync(path.join(base, "version"))).toBe(false);
+        expect(put.code, put.errors.join("\n")).toBe(0);
+        expect(put.text()).toMatch(/published the slide deck as version 2/);
+        expect(hub.moreDecks.get(agentId)?.[0]?.stored.version).toBe(2);
+        expect(hub.decks.get(agentId)?.version).toBe(1);
+        expect(old.text()).toContain(`deck put ${path.join(base, id, "outline-v1.json")} --id ${id} --pptx <deck.pptx> --base 2`);
+      });
+
+      it("should name the deck in the conflict it prints and the commands it suggests, when a put with --id is refused", async () => {
+        // Arrange
+        const { sid, agentId } = await session();
+        hub.writeDeckAsUser(agentId, outline({ asset: `sha256:${digest(PNG)}` }), { [digest(PNG)]: PNG });
+        const dir = workDir();
+        const id = ID_RE.exec((await cli(["deck", "new", path.join(dir, "outline.json")], { sid })).text())?.[1] as string;
+
+        // Act
+        const r = await cli(["deck", "put", path.join(dir, "outline.json"), "--id", id, "--base", "5"], { sid });
+
+        // Assert
+        expect(r.code).toBe(1);
+        expect(r.errors.join("\n")).toMatch(/changed since version 5: it is now version 1/);
+        expect(r.errors.join("\n")).toContain(`Run agent-hub deck get --id ${id}, make your change`);
+      });
+
+      it("should send the .pptx to the deck --id names, when deck pptx runs", async () => {
+        // Arrange
+        const { sid, agentId } = await session();
+        hub.writeDeckAsUser(agentId, outline({ asset: `sha256:${digest(PNG)}` }), { [digest(PNG)]: PNG });
+        const dir = workDir();
+        const id = ID_RE.exec((await cli(["deck", "new", path.join(dir, "outline.json")], { sid })).text())?.[1] as string;
+
+        // Act
+        const r = await cli(["deck", "pptx", path.join(dir, "deck.pptx"), "--version", "1", "--id", id], { sid });
+
+        // Assert
+        expect(r.code, r.errors.join("\n")).toBe(0);
+        expect(hub.moreDecks.get(agentId)?.[0]?.stored.pptx.get(1)).toEqual(PPTX);
+        expect(hub.decks.get(agentId)?.pptx.has(1)).toBe(false);
+      });
+
+      it("should remove the deck --id names and say so, and say when there is no such deck", async () => {
+        // Arrange
+        const { sid, agentId } = await session();
+        hub.writeDeckAsUser(agentId, outline({ asset: `sha256:${digest(PNG)}` }), { [digest(PNG)]: PNG });
+        const dir = workDir();
+        const id = ID_RE.exec((await cli(["deck", "new", path.join(dir, "outline.json")], { sid })).text())?.[1] as string;
+
+        // Act
+        const removed = await cli(["deck", "remove", "--id", id], { sid });
+        const again = await cli(["deck", "remove", "--id", id], { sid });
+        const missing = await cli(["deck", "get", "--id", id], { sid });
+
+        // Assert
+        expect(removed.code, removed.errors.join("\n")).toBe(0);
+        expect(removed.text()).toContain(`removed the slide deck ${id}`);
+        expect(hub.moreDecks.get(agentId)).toEqual([]);
+        expect(again.code).toBe(1);
+        expect(again.errors.join("\n")).toContain(`there is no slide deck ${id} in this conversation; list them with agent-hub deck list`);
+        expect(missing.errors.join("\n")).toContain("there is no slide deck");
+      });
+
+      it("should make the primary deck, as deck put does, when deck new runs on a conversation with none", async () => {
+        // Arrange
+        const { sid, agentId } = await session();
+        const dir = workDir();
+
+        // Act
+        const r = await cli(["deck", "new", path.join(dir, "outline.json")], { sid });
+
+        // Assert
+        expect(r.code, r.errors.join("\n")).toBe(0);
+        expect(r.text()).toContain(`created slide deck ${PRIMARY_DECK_ID} at version 1`);
+        expect(hub.decks.get(agentId)?.version).toBe(1);
+      });
+
+      it("should say there are no decks yet, and print an empty list for --json", async () => {
+        // Arrange
+        const { sid } = await session();
+
+        // Act
+        const r = await cli(["deck", "list"], { sid });
+        const json = await cli(["deck", "list", "--json"], { sid });
+
+        // Assert
+        expect(r.text()).toContain("the conversation has no slide decks yet");
+        expect(json.lines).toEqual(["[]"]);
+      });
+
+      it("should say the session has no deck list, when it is not a conversation, and no deck can be made there", async () => {
+        // Arrange
+        const { sid } = await session({ conversation: false });
+
+        // Act
+        const listed = await cli(["deck", "list"], { sid });
+        const made = await cli(["deck", "new", path.join(workDir(), "outline.json")], { sid });
+
+        // Assert
+        expect(listed.code).toBe(1);
+        expect(listed.errors.join("\n")).toMatch(/holds one slide deck per conversation, or this session is not a CFT Workspace conversation/);
+        expect(made.code).toBe(1);
+        expect(made.errors.join("\n")).toMatch(/not a CFT Workspace conversation/);
+      });
     });
   });
 

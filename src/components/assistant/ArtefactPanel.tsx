@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ArtefactSnapshot, SaveArtefactResult } from "@/app/_actions/assistant";
+import { type DocumentKind, documentExports } from "@/assistant/documents";
 import { fileName } from "@/assistant/downloads";
 import { AssistantMarkdown } from "@/components/assistant/AssistantMarkdown";
 import { useSidebarWidth } from "@/components/assistant/AssistantShell";
@@ -18,6 +19,8 @@ import type { ActionResult } from "@/web/action";
 
 export type SaveArtefactAction = (input: {
   conversationId: unknown;
+  documentId: unknown;
+  kind?: unknown;
   title: unknown;
   markdown: unknown;
   baseVersion: unknown;
@@ -76,12 +79,14 @@ export function format(
   return { text: `${text.slice(0, lineStart)}${marked}${text.slice(end)}`, start: lineStart, end: lineStart + marked.length };
 }
 
+const SAVE_THREW = "could not save";
+
 /** A save that threw, as a server action does when the network drops, is a save that failed. */
 async function settled(saving: Promise<ActionResult<SaveArtefactResult>>): Promise<ActionResult<SaveArtefactResult>> {
   try {
     return await saving;
   } catch {
-    return { ok: false, error: "could not save" };
+    return { ok: false, error: SAVE_THREW };
   }
 }
 
@@ -194,18 +199,45 @@ function PrintSheet({ title, markdown }: { title: string; markdown: string }): R
   ) as React.ReactElement;
 }
 
-export function starterDocument(productLabel: string): string {
+export function starterDocument(productLabel: string, kind: DocumentKind = "document"): string {
+  if (kind === "ticket") {
+    return `# ${productLabel}: story\n\nAs a \nI want \nSo that \n\n## Acceptance criteria\n\n1. `;
+  }
   return `# ${productLabel}: draft\n\n## Problem\n\nDescribe the problem we're solving.\n\n## Users\n\n- \n\n## Goals\n\n1. `;
 }
 
+/** Asks before a document goes, and says that what it was exported as stays where it went. */
+function ConfirmRemove({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: () => void }) {
+  const cancel = useRef<HTMLButtonElement>(null);
+  useEffect(() => cancel.current?.focus(), []);
+  return (
+    <div
+      role="alertdialog"
+      aria-label="Remove this document?"
+      className="flex flex-wrap items-center gap-2 border-b border-asst-field bg-asst-raised px-4 py-2.5 text-[13px]"
+    >
+      <span className="min-w-0 flex-1">Remove this document from the chat? A ticket or page already made from it stays where it is.</span>
+      <button ref={cancel} type="button" onClick={onCancel} className="rounded-lg border border-asst-strong px-3 py-1 hover:bg-asst-active">
+        Cancel
+      </button>
+      <button type="button" onClick={onConfirm} className="rounded-lg bg-asst-accent px-3 py-1 font-semibold text-asst-ink hover:bg-asst-accent-hover">
+        Remove
+      </button>
+    </div>
+  );
+}
+
 /**
- * The conversation's one document, beside the chat. The person edits it as markdown or reads it rendered, and it
- * saves itself after each pause, and as the panel closes. The assistant can write it too: an update from it is taken
+ * One of the conversation's documents, beside the chat. Its kind decides where it can be sent: a plain document to
+ * the ticket tool and Confluence, a ticket to the ticket tool alone, a Confluence page to Confluence alone. The person
+ * edits it as markdown or reads it rendered, and it saves itself after each pause, and as the panel closes. The assistant can write it too: an update from it is taken
  * in at once unless the person has unsaved changes, when they choose between the assistant's version and their own.
  * A save that settles after the panel has gone, and does not land, comes back to the page through `onUnsaved`.
  */
 export function ArtefactPanel({
   conversationId,
+  documentId,
+  kind = "document",
   artefact,
   productLabel,
   save,
@@ -217,9 +249,13 @@ export function ArtefactPanel({
   onBusy,
   draft,
   onDraftTaken,
-  onUnsaved
+  onUnsaved,
+  onRemove
 }: {
   conversationId: string;
+  /** The document's id, made by the page for one it opened new, which the first save creates under it. */
+  documentId: string;
+  kind?: DocumentKind;
   artefact: ArtefactSnapshot;
   productLabel: string;
   save: SaveArtefactAction;
@@ -239,9 +275,15 @@ export function ArtefactPanel({
   onDraftTaken?: () => void;
   /** Told of an edit the panel was closed on whose save failed or found a newer version, once that save settles. */
   onUnsaved?: (draft: UnsavedDraft) => void;
+  /** Removes the document, answering why it could not be; left out, the panel offers no Remove. */
+  onRemove?: () => Promise<string | null>;
 }) {
+  const offers = documentExports(kind);
+  const ticketJira = offers.ticket ? jira : undefined;
+  const ticketGithub = offers.ticket ? github : undefined;
+  const page = offers.confluence ? confluence : undefined;
   const [title, setTitle] = useState(draft?.title ?? artefact.title ?? "Untitled document");
-  const [markdown, setMarkdown] = useState(draft?.markdown ?? (artefact.version === 0 ? starterDocument(productLabel) : artefact.markdown));
+  const [markdown, setMarkdown] = useState(draft?.markdown ?? (artefact.version === 0 ? starterDocument(productLabel, kind) : artefact.markdown));
   const [base, setBase] = useState(draft?.base ?? artefact.version);
   const [state, setState] = useState<SaveState>(
     draft === undefined ? (artefact.version === 0 ? "draft" : "saved") : draft.conflict === null ? "failed" : "unsaved"
@@ -250,6 +292,12 @@ export function ArtefactPanel({
   const [conflict, setConflict] = useState<ArtefactSnapshot | null>(draft?.conflict ?? null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [printing, setPrinting] = useState(false);
+  /** Why the last save was refused, when the hub said: a document the assistant cannot hold yet, say. */
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [removing, setRemoving] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
+  /** Set once the person has removed the document, so closing saves nothing back into it. */
+  const removed = useRef(false);
   const sidebarWidth = useSidebarWidth();
   const resize = useResizableWidth({
     storageKey: "hmcts-assistant-artefact-width",
@@ -271,10 +319,30 @@ export function ArtefactPanel({
    * A conflict is the person's to settle, so closing on one saves nothing over the newer version.
    */
   const unsaved = useRef<{ title: string; markdown: string; base: number } | null>(null);
+  /**
+   * The version the next save is made against: the latest this panel knows of, moved by a save's reply as it lands
+   * rather than a render later. A timer set while an earlier save was in flight reads it when it fires, not the
+   * version there was when the person typed — which would be their own last save, and answered as a conflict.
+   */
+  const latestBase = useRef(base);
+  latestBase.current = Math.max(latestBase.current, base);
+  /** What is on screen, for a save's reply to tell whether it saved that or something typed before more was. */
+  const onScreen = useRef({ title, markdown });
+  onScreen.current = { title, markdown };
+  /**
+   * The last save queued: in flight, or waiting behind one. Each new save is chained onto it, so however many pauses
+   * end while one is out they go one at a time, each against the version the one before it left.
+   */
+  const inFlight = useRef<Promise<void> | null>(null);
+  /** The text of the last save queued, which the newer-version check and the closing save read as this panel's own. */
+  const queuedText = useRef<{ title: string; markdown: string } | null>(null);
+  /** Read where a closure would see a stale one: a queued save checks it before going. */
+  const conflictNow = useRef(conflict);
+  conflictNow.current = conflict;
   unsaved.current = (state === "unsaved" || state === "failed") && conflict === null ? { title, markdown, base } : null;
   // Read by the closing save, which runs once, so a page that hands down new functions on each render cannot set it off.
-  const closing = useRef({ conversationId, save, onBusy, onUnsaved });
-  closing.current = { conversationId, save, onBusy, onUnsaved };
+  const closing = useRef({ conversationId, documentId, kind, save, onBusy, onUnsaved });
+  closing.current = { conversationId, documentId, kind, save, onBusy, onUnsaved };
   const mounted = useRef(true);
 
   useEffect(() => closing.current.onBusy?.(busy), [busy]);
@@ -316,9 +384,16 @@ export function ArtefactPanel({
     if (artefact.version <= base) {
       return;
     }
-    // The page re-rendering with this panel's own save, before the save's reply has moved `base`.
-    const same = artefact.markdown === markdown && (artefact.title ?? "Untitled document") === title;
-    if (dirty && !same) {
+    // The page re-rendering with this panel's own save, before the save's reply has moved `base`: what is on screen, or
+    // what it last sent while the person typed on. Its own save is adopted as the version, and the newer text kept.
+    const sameAs = (text: { title: string; markdown: string } | null) =>
+      text !== null && artefact.markdown === text.markdown && (artefact.title ?? "Untitled document") === text.title;
+    if (dirty && !sameAs({ title, markdown })) {
+      if (sameAs(queuedText.current)) {
+        latestBase.current = Math.max(latestBase.current, artefact.version);
+        setBase(artefact.version);
+        return;
+      }
       setConflict(artefact);
       return;
     }
@@ -330,7 +405,11 @@ export function ArtefactPanel({
 
   async function persist(next: { title: string; markdown: string; base: number }): Promise<void> {
     setState("saving");
-    const result = await settled(save({ conversationId, title: next.title, markdown: next.markdown, baseVersion: next.base }));
+    const result = await settled(save({ conversationId, documentId, kind, title: next.title, markdown: next.markdown, baseVersion: next.base }));
+    // Whether or not the panel is still open: a closing save queued behind this one goes against the version it made.
+    if (result.ok && result.saved) {
+      latestBase.current = Math.max(latestBase.current, result.version);
+    }
     // Closed while it was in flight: the page is the only one left to keep an edit that did not land.
     if (!mounted.current) {
       const lost = unsavedDraft(next, result);
@@ -340,17 +419,45 @@ export function ArtefactPanel({
       return;
     }
     if (!result.ok) {
+      setSaveError(result.error === SAVE_THREW ? null : result.error);
       setState("failed");
       return;
     }
+    setSaveError(null);
     if (result.saved) {
+      latestBase.current = Math.max(latestBase.current, result.version);
       setBase(result.version);
-      setState("saved");
+      // Saved, unless the person typed on while it was going: then the newer text is still to save, and its timer is set.
+      const still = onScreen.current.markdown === next.markdown && onScreen.current.title === next.title;
+      setState(still ? "saved" : "unsaved");
       setConflict(null);
     } else {
       setState("unsaved");
+      // Now, not a render later: a save queued behind this one checks it as soon as this answer lands.
+      conflictNow.current = result.current;
       setConflict(result.current);
     }
+  }
+
+  /**
+   * Saves once every save queued before it has answered, against the version they left. A save with none ahead of it
+   * goes at once. One behind a conflict is dropped: it would meet the same newer version, and the conflict is the
+   * person's to settle first.
+   */
+  function saveInTurn(nextTitle: string, nextMarkdown: string): Promise<void> {
+    const text = { title: nextTitle, markdown: nextMarkdown };
+    const go = () => (conflictNow.current === null ? persist({ ...text, base: latestBase.current }) : Promise.resolve());
+    const ahead = inFlight.current;
+    const run = ahead === null ? go() : ahead.then(go);
+    inFlight.current = run;
+    queuedText.current = text;
+    void run.then(() => {
+      if (inFlight.current === run) {
+        inFlight.current = null;
+        queuedText.current = null;
+      }
+    });
+    return run;
   }
 
   function edited(next: { title?: string; markdown?: string }): void {
@@ -363,7 +470,7 @@ export function ArtefactPanel({
       clearTimeout(timer.current);
     }
     if (conflict === null) {
-      timer.current = setTimeout(() => void persist({ title: nextTitle, markdown: nextMarkdown, base }), SAVE_AFTER_MS);
+      timer.current = setTimeout(() => void saveInTurn(nextTitle, nextMarkdown), SAVE_AFTER_MS);
     }
   }
 
@@ -378,10 +485,20 @@ export function ArtefactPanel({
       if (noticeTimer.current !== null) {
         clearTimeout(noticeTimer.current);
       }
-      const pending = unsaved.current;
-      const { conversationId: id, save: saveNow, onBusy: told } = closing.current;
+      const waiting = removed.current ? null : unsaved.current;
+      // A save already queued with this very text will save it, and say if it was lost; another would only race it.
+      const queued = queuedText.current;
+      const pending = waiting !== null && queued !== null && queued.markdown === waiting.markdown && queued.title === waiting.title ? null : waiting;
+      const { conversationId: id, documentId: doc, kind: made, save: saveNow, onBusy: told } = closing.current;
       if (pending !== null) {
-        void settled(saveNow({ conversationId: id, title: pending.title, markdown: pending.markdown, baseVersion: pending.base })).then((result) => {
+        // After any save still out, and against the version it leaves, rather than the one there was at the last render;
+        // at once when there is none, as the page may be going.
+        const send = () =>
+          settled(
+            saveNow({ conversationId: id, documentId: doc, kind: made, title: pending.title, markdown: pending.markdown, baseVersion: latestBase.current })
+          );
+        const ahead = inFlight.current;
+        void (ahead === null ? send() : ahead.then(send)).then((result) => {
           const lost = unsavedDraft(pending, result);
           if (lost !== null) {
             closing.current.onUnsaved?.(lost);
@@ -421,6 +538,22 @@ export function ArtefactPanel({
     setBase(current.version);
     setConflict(null);
     void persist({ title, markdown, base: current.version });
+  }
+
+  async function remove(): Promise<void> {
+    if (onRemove === undefined) {
+      return;
+    }
+    removed.current = true;
+    if (timer.current !== null) {
+      clearTimeout(timer.current);
+    }
+    const problem = await onRemove().catch(() => "could not remove the document");
+    if (problem !== null && mounted.current) {
+      removed.current = false;
+      setRemoving(false);
+      setRemoveError(problem);
+    }
   }
 
   function applyFormat(kind: "bold" | "italic" | "bullets" | "numbers"): void {
@@ -465,8 +598,17 @@ export function ArtefactPanel({
           className="min-w-0 flex-1 border-none bg-transparent py-1.5 text-[15px] font-medium text-asst-text outline-hidden"
         />
         <span role="status" className={`shrink-0 text-xs ${state === "failed" ? "text-asst-error" : state === "saved" ? "text-asst-ok" : "text-asst-faint"}`}>
-          {saveLabel}
+          {state === "failed" && saveError !== null ? `Could not save: ${saveError}` : saveLabel}
         </span>
+        {onRemove === undefined ? null : (
+          <button
+            type="button"
+            onClick={() => setRemoving(true)}
+            className="h-8 shrink-0 rounded-lg px-2 text-[13px] text-asst-muted hover:bg-asst-field hover:text-asst-text"
+          >
+            Remove
+          </button>
+        )}
         <button
           type="button"
           onClick={onClose}
@@ -536,6 +678,12 @@ export function ArtefactPanel({
           </span>
         </div>
       </div>
+      {removing ? <ConfirmRemove onCancel={() => setRemoving(false)} onConfirm={() => void remove()} /> : null}
+      {removeError === null ? null : (
+        <p role="alert" className="border-b border-asst-field px-4 py-2 text-[13px] text-asst-error">
+          {removeError}
+        </p>
+      )}
       {conflict === null ? null : (
         <div role="alert" className="flex flex-wrap items-center gap-2 border-b border-asst-field bg-asst-raised px-4 py-2.5 text-[13px]">
           <span className="min-w-0 flex-1">
@@ -554,9 +702,9 @@ export function ArtefactPanel({
           </button>
         </div>
       )}
-      {jira === undefined ? null : <JiraBanner exported={jira.exported} />}
-      {github === undefined ? null : <GithubBanner exported={github.exported} />}
-      {confluence === undefined ? null : <ConfluenceBanner exported={confluence.exported} />}
+      {ticketJira === undefined ? null : <JiraBanner exported={ticketJira.exported} />}
+      {ticketGithub === undefined ? null : <GithubBanner exported={ticketGithub.exported} />}
+      {page === undefined ? null : <ConfluenceBanner exported={page.exported} />}
       {mode === "edit" ? (
         // The textarea fills the scroller and scrolls itself, so the tab stop a keyboard user needs is the box.
         <div className="min-h-0 flex-1 overflow-y-auto">
@@ -577,12 +725,13 @@ export function ArtefactPanel({
           {markdown.trim() === "" ? <p className="text-asst-faint">This document is empty.</p> : <AssistantMarkdown source={markdown} document />}
         </ScrollPane>
       )}
-      {jira === undefined && github === undefined && confluence === undefined ? null : (
+      {ticketJira === undefined && ticketGithub === undefined && page === undefined ? null : (
         <ExportFooter
           conversationId={conversationId}
-          jira={jira}
-          github={github}
-          confluence={confluence}
+          documentId={documentId}
+          jira={ticketJira}
+          github={ticketGithub}
+          confluence={page}
           saved={state === "saved" && conflict === null}
           written={base > 0}
         />

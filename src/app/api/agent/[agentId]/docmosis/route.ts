@@ -1,35 +1,12 @@
-import { HttpError, json, readJson } from "@/agent-api/http";
+import { readJson } from "@/agent-api/http";
 import { ownedAgentRoute } from "@/agent-api/route";
-import { requireConversationOfAgent } from "@/assistant/conversation-store";
-import { versionParam } from "@/assistant/deck-build";
-import { checkDocmosisPut } from "@/assistant/docmosis";
-import { docmosisView, writeAgentDocmosis } from "@/assistant/docmosis-store";
-import { prisma } from "@/store/prisma";
+import { getTemplate, putTemplate } from "@/assistant/docmosis-agent";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** The latest version, or with `?version=N` one kept version, with the version the template is at now. */
-export const GET = ownedAgentRoute<{ agentId: string }>(async ({ agent, request }) => {
-  const conversation = await requireConversationOfAgent(prisma, agent.id);
-  const asked = new URL(request.url).searchParams.get("version");
-  const version = asked === null ? undefined : versionParam(asked);
-  if (asked !== null && version === undefined) {
-    throw new HttpError(400, "the version must be a whole number from 1");
-  }
-  const found = await docmosisView(prisma, conversation.id, version);
-  if (found === null) {
-    throw new HttpError(404, version === undefined ? "the conversation has no Docmosis template" : `the template does not keep version ${version}`);
-  }
-  return json(found);
-});
+/** The conversation's primary template, its oldest, which is all a client older than `/docmosis-templates` knows of. */
+export const GET = ownedAgentRoute<{ agentId: string }>(async ({ agent, request }) => await getTemplate(agent, request));
 
-export const PUT = ownedAgentRoute<{ agentId: string }>(async ({ agent, request }) => {
-  const body = await readJson(request);
-  const conversation = await requireConversationOfAgent(prisma, agent.id);
-  const checked = checkDocmosisPut(body);
-  if (!checked.ok) {
-    throw new HttpError(400, checked.error);
-  }
-  return json(await writeAgentDocmosis(prisma, { conversationId: conversation.id, body: checked.value }));
-});
+/** Writes the primary template, and makes it at base version 0 while there is none. */
+export const PUT = ownedAgentRoute<{ agentId: string }>(async ({ agent, request }) => await putTemplate(agent, await readJson(request)));

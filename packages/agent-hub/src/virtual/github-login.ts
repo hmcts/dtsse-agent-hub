@@ -2,6 +2,7 @@
 // and in gh.
 import { type Api, createApi } from "../api.ts";
 import type { Env } from "../env.ts";
+import { ghAuthToken } from "../github.ts";
 import { type RetryOptions, sleep, withRetry } from "../retry.ts";
 import { requireVirtualAgent } from "../virtual-agent.ts";
 import { DeviceLoginError, type LoginOptions } from "./device-relay.ts";
@@ -115,12 +116,13 @@ const storeAttempt = async (store: () => Promise<unknown>, options: RetryOptions
     (e: unknown) => (e instanceof Error ? e : new Error(`the store rejected with ${String(e)}`))
   );
 
+const GH_TOKEN_TIMEOUT_MS = 60_000;
+
 /**
  * The token gh holds, or `""` for none. Tolerates a `gh auth token` that fails, because having no sign-in yet is
  * one of the ways it does: only safe where no sign-in has been run, which is the reuse check below.
  */
-const storedGhToken = async (env: NodeJS.ProcessEnv): Promise<string> =>
-  (await run("gh", ["auth", "token", "--hostname", "github.com"], { env })).stdout.trim();
+const storedGhToken = async (env: NodeJS.ProcessEnv): Promise<string> => (await ghAuthToken(run, env, GH_TOKEN_TIMEOUT_MS)) ?? "";
 
 /**
  * What the agent's status says while a code is live. Its own length with nothing in it is what

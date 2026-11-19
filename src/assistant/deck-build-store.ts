@@ -14,7 +14,7 @@ import { type DeckAsset, lockConversation } from "./deck-store.ts";
 import { accessToConversation } from "./shares.ts";
 
 /**
- * A build of one deck version's .pptx, asked for by the conversation's owner and made by its pod: recorded here, sent
+ * A build of one version of one deck's .pptx, asked for by the conversation's owner and made by its pod: recorded here, sent
  * to the pod on its sessions stream, answered with the bytes or why there are none, and read back by the slides
  * panel. See "Deck builds" in docs/agent-api.md.
  *
@@ -45,6 +45,7 @@ export async function requestDeckBuild(
   prisma: PrismaClient,
   viewerOid: string,
   conversationId: string,
+  itemId: string,
   version: number,
   now: Date = new Date()
 ): Promise<DeckBuildRequest> {
@@ -55,7 +56,8 @@ export async function requestDeckBuild(
   if (!canChangeDeck(allowed.access)) {
     throw new HttpError(403, "only the person whose chat this is can prepare its slides");
   }
-  const kept = await readDeckVersionEntry(prisma, conversationId, version, now);
+  const kept =
+    (await prisma.assistantDeck.count({ where: { id: itemId, conversationId } })) === 0 ? undefined : await readDeckVersionEntry(prisma, itemId, version, now);
   if (kept === undefined) {
     throw new HttpError(404, "that version of the slides is not there");
   }
@@ -63,7 +65,7 @@ export async function requestDeckBuild(
     return { status: "ready" };
   }
   const running = await prisma.assistantDeckBuild.findFirst({
-    where: { conversationId, version, status: "pending", createdAt: { gte: pendingSince(now) } },
+    where: { itemId, version, status: "pending", createdAt: { gte: pendingSince(now) } },
     select: { id: true }
   });
   if (running !== null) {
@@ -91,11 +93,11 @@ export async function requestDeckBuild(
   const id = await prisma.$transaction(async (tx) => {
     await lockConversation(tx, conversationId);
     await expire(tx, conversationId, now);
-    const joined = await tx.assistantDeckBuild.findFirst({ where: { conversationId, version, status: "pending" }, select: { id: true } });
+    const joined = await tx.assistantDeckBuild.findFirst({ where: { itemId, version, status: "pending" }, select: { id: true } });
     if (joined !== null) {
       return joined.id;
     }
-    const row = await tx.assistantDeckBuild.create({ data: { conversationId, version, createdAt: now }, select: { id: true } });
+    const row = await tx.assistantDeckBuild.create({ data: { itemId, conversationId, version, createdAt: now }, select: { id: true } });
     await notify(tx, { type: "assistant_deck_build", job_id: row.id, virtual_agent_id: assistant.id, owner_oid: viewerOid });
     return row.id;
   });
@@ -107,10 +109,11 @@ export async function readDeckBuild(
   db: Database,
   viewerOid: string,
   conversationId: string,
+  itemId: string,
   jobId: string,
   now: Date = new Date()
 ): Promise<DeckBuildView | undefined> {
-  if (!isUuid(jobId) || !isUuid(conversationId)) {
+  if (!isUuid(jobId) || !isUuid(conversationId) || !isUuid(itemId)) {
     return undefined;
   }
   const allowed = await accessToConversation(db, viewerOid, conversationId);
@@ -119,9 +122,9 @@ export async function readDeckBuild(
   }
   const row = await db.assistantDeckBuild.findUnique({
     where: { id: jobId },
-    select: { id: true, conversationId: true, version: true, status: true, error: true, createdAt: true }
+    select: { id: true, conversationId: true, itemId: true, version: true, status: true, error: true, createdAt: true }
   });
-  if (row === null || row.conversationId !== conversationId || row.createdAt < heldBuildSince(now)) {
+  if (row === null || row.conversationId !== conversationId || row.itemId !== itemId || row.createdAt < heldBuildSince(now)) {
     return undefined;
   }
   const status = buildStatus(row, now);
@@ -142,7 +145,7 @@ async function pendingBuild(db: Database, virtualAgentId: string, jobId: string,
   }
   const row = await db.assistantDeckBuild.findUnique({
     where: { id: jobId },
-    select: { id: true, conversationId: true, version: true, status: true, createdAt: true, conversation: { select: { virtualAgentId: true } } }
+    select: { id: true, conversationId: true, itemId: true, version: true, status: true, createdAt: true, conversation: { select: { virtualAgentId: true } } }
   });
   if (row === null || row.conversation.virtualAgentId !== virtualAgentId || buildStatus(row, now) !== "pending") {
     return undefined;
@@ -167,7 +170,7 @@ export async function podDeckBuild(
     return undefined;
   }
   const version = await db.assistantDeckVersion.findUnique({
-    where: { conversationId_version: { conversationId: row.conversationId, version: row.version } },
+    where: { itemId_version: { itemId: row.itemId, version: row.version } },
     select: { outline: true }
   });
   return version === null
@@ -193,7 +196,7 @@ export async function podDeckBuildAsset(
     SELECT a.mime, a.bytes
       FROM assistant_deck_build b
       JOIN assistant_conversation c ON c.id = b.conversation_id
-      JOIN assistant_deck_version v ON v.conversation_id = b.conversation_id AND v.version = b.version
+      JOIN assistant_deck_version v ON v.item_id = b.item_id AND v.version = b.version
       JOIN assistant_deck_asset a ON a.conversation_id = b.conversation_id AND a.sha256 = ${sha256}
      WHERE b.id = ${jobId}::uuid AND c.virtual_agent_id = ${virtualAgentId}::uuid
        AND b.status = 'pending' AND b.created_at > ${pendingSince(now)}
@@ -206,7 +209,7 @@ export type DeckBuildAnswer = { pptx: Uint8Array } | { error: string };
 
 /**
  * The pod's answer, kept only for a build of one of its own conversations that is still pending, so a late or
- * repeated answer, or one for another assistant's build, changes nothing. Keeping it deletes the conversation's
+ * repeated answer, or one for another assistant's build, changes nothing. Keeping it deletes the deck's
  * finished builds beyond the newest `DECK_BUILDS_KEPT`.
  */
 export async function answerDeckBuild(
@@ -229,10 +232,10 @@ export async function answerDeckBuild(
     }
     await tx.$executeRaw`
       DELETE FROM assistant_deck_build
-       WHERE conversation_id = ${row.conversationId}::uuid AND status <> 'pending'
+       WHERE item_id = ${row.itemId}::uuid AND status <> 'pending'
          AND id NOT IN (
            SELECT id FROM assistant_deck_build
-            WHERE conversation_id = ${row.conversationId}::uuid AND status <> 'pending'
+            WHERE item_id = ${row.itemId}::uuid AND status <> 'pending'
             ORDER BY created_at DESC, id ASC
             LIMIT ${DECK_BUILDS_KEPT}::int
          )

@@ -6,6 +6,9 @@ import {
   exportArtefactToGithub,
   exportArtefactToJira,
   pinConversation,
+  removeArtefact,
+  removeDocmosisTemplate,
+  removeNotifyTemplate,
   renameConversation,
   saveArtefact,
   saveAssistantModel,
@@ -18,7 +21,7 @@ import {
 import { deleteAllAssistantFiles, deleteAssistantFile } from "@/app/_actions/assistant-files";
 import { readAssistantAgent, readGitIdentity, readSchedule, saveSchedule } from "@/app/_actions/assistant-settings";
 import { clearGitIdentity, removeCredential, resetClaudeMd, saveClaudeMd, saveCredential, saveGitIdentity } from "@/app/_actions/credentials";
-import { restoreDeckVersion, saveDeck } from "@/app/_actions/decks";
+import { removeDeck, restoreDeckVersion, saveDeck } from "@/app/_actions/decks";
 import { saveExportDefaults } from "@/app/_actions/export-defaults";
 import { archiveFeedbackProject, pinFeedbackProject } from "@/app/_actions/feedback";
 import { offerChatFork, withdrawChatFork } from "@/app/_actions/forks";
@@ -30,6 +33,7 @@ import { SHARING_SETTINGS } from "@/app/assistant/sharing";
 import { connectionsData } from "@/assistant/connections";
 import { savedCredentialsData } from "@/assistant/saved-credentials";
 import { assistantPluginsData } from "@/assistant/settings";
+import { SIDEBAR_COOKIE, sidebarCollapsedOf } from "@/assistant/sidebar";
 import { offeredTemplates } from "@/assistant/templates";
 import { THEME_COOKIE, themeOf } from "@/assistant/theme";
 import { WAITING_COOKIE } from "@/assistant/waiting";
@@ -63,6 +67,10 @@ const ACTIONS: ChatActions = {
   pin: pinConversation,
   remove: deleteConversation,
   answerQuestion: answerAgentQuestion,
+  removeArtefact,
+  removeDeck,
+  removeDocmosisTemplate,
+  removeNotifyTemplate,
   saveArtefact,
   exportToJira: exportArtefactToJira,
   exportToGithub: exportArtefactToGithub,
@@ -115,6 +123,7 @@ export default async function ConversationPage({
       groups={home.conversations}
       activeId={view.id}
       theme={theme}
+      collapsed={sidebarCollapsedOf(jar.get(SIDEBAR_COOKIE)?.value)}
       actions={{ ...ACTIONS, pinFeedback: pinFeedbackProject, archiveFeedback: archiveFeedbackProject }}
       connections={connectionsData(home.assistant, home.credentials)}
       viewerRoute={home.credentials.modelRoute}

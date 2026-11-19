@@ -4,7 +4,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { HubStreamProvider, useEndSession, useHubEvent, useWatch } from "@/components/live/HubStream";
+import { HubStreamProvider, useEndSession, useHubEvent, useHubSubscribe, useWatch } from "@/components/live/HubStream";
 import { SessionEndedBanner } from "@/components/live/SessionEnded";
 
 const refresh = vi.fn();
@@ -227,5 +227,48 @@ describe("HubStreamProvider", () => {
     render(<Status agentId="agent-1" initial="offline" />);
 
     expect(screen.getByText("offline")).toBeTruthy();
+  });
+});
+
+describe("useHubSubscribe", () => {
+  /** Hands the test the hook's subscribe, which a wait outside render would call. */
+  function Subscriber({ onReady }: { onReady: (subscribe: ReturnType<typeof useHubSubscribe>) => void }) {
+    onReady(useHubSubscribe("assistant_pod_job"));
+    return null;
+  }
+
+  it("should hand a listener every event of its type until it unsubscribes", () => {
+    // Arrange
+    let subscribe: ReturnType<typeof useHubSubscribe> = () => () => undefined;
+    render(
+      <HubStreamProvider>
+        <Subscriber onReady={(given) => (subscribe = given)} />
+      </HubStreamProvider>
+    );
+    const heard: unknown[] = [];
+    const unsubscribe = subscribe((data) => heard.push(data));
+
+    // Act
+    act(() => {
+      current().emit("assistant_pod_job", { job_id: "j1", conversation_id: "c1" });
+      current().emit("assistant_conversation", { conversation_id: "c1" });
+    });
+    unsubscribe();
+    act(() => current().emit("assistant_pod_job", { job_id: "j2", conversation_id: "c1" }));
+
+    // Assert
+    expect(heard).toEqual([{ job_id: "j1", conversation_id: "c1" }]);
+  });
+
+  it("should hear nothing outside a provider", () => {
+    // Arrange
+    let subscribe: ReturnType<typeof useHubSubscribe> = () => () => undefined;
+    render(<Subscriber onReady={(given) => (subscribe = given)} />);
+
+    // Act
+    const unsubscribe = subscribe(() => undefined);
+
+    // Assert
+    expect(unsubscribe()).toBeUndefined();
   });
 });

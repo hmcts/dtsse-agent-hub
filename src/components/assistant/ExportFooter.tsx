@@ -82,6 +82,7 @@ function Tick({ done }: { done: boolean }) {
  */
 export function ExportFooter({
   conversationId,
+  documentId,
   jira,
   github,
   confluence,
@@ -89,6 +90,7 @@ export function ExportFooter({
   written
 }: {
   conversationId: string;
+  documentId: string;
   jira?: JiraExportProps;
   /** For a person whose ticket tool is GitHub, or a document that already has an issue. */
   github?: GithubExportProps;
@@ -143,17 +145,17 @@ export function ExportFooter({
       <div className="grid min-w-0">
         {jira === undefined ? null : (
           <div className={STACKED} style={showing === "jira" ? undefined : HIDDEN} data-destination="jira">
-            <JiraFooter conversationId={conversationId} {...jira} saved={saved} written={written} />
+            <JiraFooter conversationId={conversationId} documentId={documentId} {...jira} saved={saved} written={written} />
           </div>
         )}
         {github === undefined ? null : (
           <div className={STACKED} style={showing === "github" ? undefined : HIDDEN} data-destination="github">
-            <GithubFooter conversationId={conversationId} {...github} saved={saved} written={written} />
+            <GithubFooter conversationId={conversationId} documentId={documentId} {...github} saved={saved} written={written} />
           </div>
         )}
         {confluence === undefined ? null : (
           <div className={STACKED} style={showing === "confluence" ? undefined : HIDDEN} data-destination="confluence">
-            <ConfluenceFooter conversationId={conversationId} {...confluence} saved={saved} written={written} />
+            <ConfluenceFooter conversationId={conversationId} documentId={documentId} {...confluence} saved={saved} written={written} />
           </div>
         )}
       </div>

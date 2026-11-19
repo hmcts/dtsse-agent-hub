@@ -1001,6 +1001,8 @@ __metadata:
 "@hmcts-cft/agent-hub@workspace:packages/agent-hub":
   version: 0.0.0-use.local
   resolution: "@hmcts-cft/agent-hub@workspace:packages/agent-hub"
+  dependencies:
+    "@hmcts-cft/notify-tools": "npm:0.1.0"
   bin:
     agent-hub: bin/agent-hub
     virtual-agent-boot: bin/virtual-agent-boot
@@ -1019,6 +1021,13 @@ __metadata:
     config: ^3.3.12 || ^4.0.0
     express: ^5.1.0
   checksum: 10c0/3ce8c8b245f547072882dc8344e677b29d101bc751288137b2ece907efd3d899577a1134814ac6f6815193e99543bc66dc307fd353e70ce0c29299e2861e58ec
+  languageName: node
+  linkType: hard
+
+"@hmcts-cft/notify-tools@npm:0.1.0":
+  version: 0.1.0
+  resolution: "@hmcts-cft/notify-tools@npm:0.1.0"
+  checksum: 10c0/59f502c59b153b922d70cb9d0790d0532d3997c38a99ea6c0e92261460d1170ee03e6607bd567cd0a3a5308a9e06a991c900281475ad936ae19820ade2202573
   languageName: node
   linkType: hard
 
@@ -4226,6 +4235,7 @@ __metadata:
     "@azure/storage-blob": "npm:12.34.0"
     "@biomejs/biome": "npm:2.6.6"
     "@hmcts-cft/cloud-native-platform": "npm:2.3.0"
+    "@hmcts-cft/notify-tools": "npm:0.1.0"
     "@playwright/test": "npm:1.64.1"
     "@prisma/adapter-pg": "npm:7.10.1"
     "@prisma/client": "npm:7.10.1"

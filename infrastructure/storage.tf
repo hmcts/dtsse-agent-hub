@@ -53,7 +53,10 @@ resource "azurerm_storage_container" "feedback" {
 }
 
 # A backstop for the hub's own sweep, which deletes by each project's retention (at most 365 days) and an archived
-# project a week after it is archived: anything the sweep missed is gone after 400 days.
+# project a week after it is archived: anything the sweep missed is gone after 400 days. The rule is held to the feedback
+# container: the journey videos' container has no age backstop, since an age rule would delete a ready video whose row
+# is still there. Its own sweep (src/assistant/video-store.ts) deletes uploads never finished and every blob no row names,
+# which is all a backstop could safely delete.
 resource "azurerm_storage_management_policy" "feedback" {
   count = local.feedback_storage_enabled ? 1 : 0
 
@@ -64,7 +67,8 @@ resource "azurerm_storage_management_policy" "feedback" {
     enabled = true
 
     filters {
-      blob_types = ["blockBlob"]
+      blob_types   = ["blockBlob"]
+      prefix_match = ["${azurerm_storage_container.feedback[0].name}/"]
     }
 
     actions {
@@ -90,6 +94,26 @@ resource "azurerm_role_assignment" "hub_feedback_delegator" {
 
   scope                = azurerm_storage_account.feedback[0].id
   role_definition_name = "Storage Blob Delegator"
+  principal_id         = azurerm_user_assigned_identity.hub[0].principal_id
+  principal_type       = "ServicePrincipal"
+}
+
+# The CFT Workspace's journey videos, in the same account and under the same rules: the pod puts each recording by a
+# write-only SAS the hub signs and the browser plays it by a read SAS, so the hub never streams one. A container of its
+# own keeps the role and any delete-everything away from prototype feedback's recordings.
+resource "azurerm_storage_container" "assistant_videos" {
+  count = local.feedback_storage_enabled ? 1 : 0
+
+  name                  = "assistant-videos"
+  storage_account_id    = azurerm_storage_account.feedback[0].id
+  container_access_type = "private"
+}
+
+resource "azurerm_role_assignment" "hub_assistant_video_blobs" {
+  count = local.feedback_storage_enabled ? 1 : 0
+
+  scope                = azurerm_storage_container.assistant_videos[0].id
+  role_definition_name = "Storage Blob Data Contributor"
   principal_id         = azurerm_user_assigned_identity.hub[0].principal_id
   principal_type       = "ServicePrincipal"
 }

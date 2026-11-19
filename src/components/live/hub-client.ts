@@ -20,6 +20,8 @@ import { sessionEnded } from "./session.ts";
  * `assistant_lookup` and its answer are as well: the request that asked for one waits on its own response. So are
  * `assistant_welsh` and its answer, which the Welsh page reads back itself.
  * `assistant_deck_build` is an instruction to the pod as well, and the slides panel reads its build back itself.
+ * `assistant_pod_job_requested` is one too; the answer to it is the `assistant_pod_job` frame. So is
+ * `assistant_docmosis_index`, whose answer is the `assistant_docmosis_library` frame.
  * `tagged_post` is not a frame because it says nothing a browser does not already get: it is how one agent's stream
  * picks a post of its own out, and the post arrives here as the `post` beside it, tags included.
  */
@@ -34,6 +36,8 @@ export type HubEventType = Exclude<
   | "assistant_welsh"
   | "assistant_welsh_answered"
   | "assistant_deck_build"
+  | "assistant_pod_job_requested"
+  | "assistant_docmosis_index"
 >;
 
 /**
@@ -50,6 +54,8 @@ export const HUB_EVENT_TYPES = [
   "transcript",
   "virtual_agent",
   "assistant_conversation",
+  "assistant_pod_job",
+  "assistant_docmosis_library",
   "feedback",
   "resync"
 ] as const satisfies readonly HubEventType[];

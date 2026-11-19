@@ -115,6 +115,26 @@ export function useHubEvent<T>(type: HubEventType, handler: (data: T) => void): 
   }, [context, type]);
 }
 
+/**
+ * A stable way to hear every event of `type` from code that is not a component's render, such as a wait that
+ * `podJobClient`'s `waitForPodJob` runs: the returned function subscribes a listener and answers its unsubscribe.
+ * Outside a provider it hears nothing, so a caller falls back on whatever else it does, such as polling.
+ */
+export function useHubSubscribe(type: HubEventType): (listener: (data: unknown) => void) => () => void {
+  const context = useContext(HubContext);
+  return useCallback(
+    (listener: (data: unknown) => void) =>
+      context === null
+        ? ignore
+        : context.subscribe((eventType, data) => {
+            if (eventType === type) {
+              listener(data);
+            }
+          }),
+    [context, type]
+  );
+}
+
 /** Whether the tab has found that the person has to sign in again. */
 export function useSessionEnded(): boolean {
   return useContext(HubContext)?.ended ?? false;

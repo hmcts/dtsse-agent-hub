@@ -1,3 +1,4 @@
+import { canPostVideo, conversationAccess } from "../access/rules.ts";
 import { storedClientFeatures } from "../agents/client-features.ts";
 import { repoFileBase } from "../agents/github.ts";
 import { type Skill, storedSkills } from "../agents/skills.ts";
@@ -15,9 +16,8 @@ import type { VirtualAgentDesired, VirtualAgentStatus } from "../virtual-agents/
 import { type LoginView, loginViews } from "../virtual-agents/logins.ts";
 import type { VirtualAgentRow } from "../virtual-agents/store.ts";
 import { neededCredentials, optionalCredentials } from "../virtual-agents/views.ts";
-import { type Artefact, readArtefact } from "./artefact-store.ts";
-import type { ConfluenceExportView } from "./confluence.ts";
-import { readConfluenceExport } from "./confluence-store.ts";
+import { type Artefact, DOCUMENT_SELECT, OLDEST_FIRST, toDocument } from "./artefact-store.ts";
+import { CONFLUENCE_SELECT, type ConfluenceExportView, confluenceExportView } from "./confluence.ts";
 import type { ConversationRow, ProductChange, SessionState, StopMark } from "./conversation-row.ts";
 import {
   type ConversationListRow,
@@ -27,21 +27,22 @@ import {
   sidebarConversations,
   unsentConversation
 } from "./conversation-store.ts";
-import { DECK_SELECT, type DeckSummary, deckSummary } from "./deck-store.ts";
-import { DOCMOSIS_SELECT, type DocmosisSummary, docmosisSummary } from "./docmosis-store.ts";
+import { type DeckSummary, listDeckSummaries } from "./deck-store.ts";
+import { type DocmosisSummary, listDocmosisSummaries } from "./docmosis-store.ts";
+import type { DocumentKind } from "./documents.ts";
 import { FORKED_SELECT, type ForkedView, forkedView } from "./forks.ts";
-import type { GithubExportView } from "./github.ts";
-import { readGithubExport } from "./github-store.ts";
+import { GITHUB_SELECT, type GithubExportView, githubExportView } from "./github.ts";
 import { bySidebarOrder, groupForSidebar, type SidebarGroup } from "./grouping.ts";
-import type { JiraExportView } from "./jira.ts";
-import { readJiraExport } from "./jira-store.ts";
+import { JIRA_SELECT, type JiraExportView, jiraExportView } from "./jira.ts";
 import { LOCAL_SESSION, type LocalSession } from "./local-session.ts";
+import { listNotifySummaries, type NotifySummary } from "./notify-store.ts";
 import { chatCredentials, onboarded, type Readiness, readiness } from "./onboarding.ts";
 import { hasPod } from "./pods.ts";
 import { productLabel } from "./products.ts";
 import { mergeMatches, SEARCH_LIMIT, searchTerms, snippetOf } from "./search.ts";
 import { type ConversationMatchRow, searchConversations } from "./search-store.ts";
 import { type MessageAttachment, unsentAttachments } from "./upload-store.ts";
+import { VIDEO_SELECT, type VideoSummary, videoSummary } from "./video-store.ts";
 
 /** The CFT Workspace as its pages show it. Only ever the viewer's own: nobody sees anyone else's assistant. */
 
@@ -395,14 +396,18 @@ export interface ConversationView {
   clientFeatures: string[] | null;
   sessionState: SessionState | null;
   sessionDetail: string | null;
-  artefact: { title: string | null; markdown: string; version: number; updatedBy: Artefact["updatedBy"]; updatedAt: string | null };
-  /** The latest version of the conversation's slide deck, without its outline, which the panel reads; `null` while it has none. */
-  deck: DeckSummary | null;
-  /** The latest version of the conversation's Docmosis template, without its schema and data, which the panel reads; `null` while it has none. */
-  docmosis: DocmosisSummary | null;
-  jira: JiraExportView;
-  github: GithubExportView;
-  confluence: ConfluenceExportView;
+  /** Every document, oldest first, each with its exports. */
+  documents: DocumentView[];
+  /** The latest version of each of the conversation's slide decks, oldest first, without their outlines, which the panel reads. */
+  decks: DeckSummary[];
+  /** The latest version of each of the conversation's Docmosis templates, oldest first, without their schema and data, which the panel reads. */
+  docmosisTemplates: DocmosisSummary[];
+  /** The latest version of each of the conversation's Notify templates, oldest first, without their text, which the panel reads. */
+  notifyTemplates: NotifySummary[];
+  /** The conversation's journey video, without its captions, chapters and reports, which the panel reads; `null` while it has none. */
+  video: VideoSummary | null;
+  /** Whether the viewer may post the video to Jira: its owner, in a chat with a pod to run the post on (`canPostVideo`). */
+  canPostVideo: boolean;
   page: ConversationPage;
   /** Where the chat was forked from and the words copied from it, shown above its own; `null` unless it is a copy. */
   forked: ForkedView | null;
@@ -414,6 +419,37 @@ export interface ConversationView {
   questions: QuestionView[];
 }
 
+export interface DocumentView {
+  id: string;
+  kind: DocumentKind;
+  title: string | null;
+  markdown: string;
+  version: number;
+  updatedBy: Artefact["updatedBy"];
+  updatedAt: string | null;
+  jira: JiraExportView;
+  github: GithubExportView;
+  confluence: ConfluenceExportView;
+}
+
+export async function documentViews(db: Database, conversationId: string, now: Date = new Date()): Promise<DocumentView[]> {
+  const rows = await db.assistantDocument.findMany({
+    where: { conversationId },
+    select: { ...DOCUMENT_SELECT, ...JIRA_SELECT, ...GITHUB_SELECT, ...CONFLUENCE_SELECT },
+    orderBy: [...OLDEST_FIRST]
+  });
+  return rows.map((row) => {
+    const document = toDocument(row);
+    return {
+      ...document,
+      updatedAt: document.updatedAt?.toISOString() ?? null,
+      jira: jiraExportView(row, now),
+      github: githubExportView(row, now),
+      confluence: confluenceExportView(row, now)
+    };
+  });
+}
+
 /** One of the viewer's conversations with its first page; `agentId` is the conversation's current agent. */
 export async function conversationView(db: Database, conversation: ConversationRow, agentId: string): Promise<ConversationView> {
   // Read as the owner, deliberately: this page is only ever reached through `findConversation`, which is scoped to
@@ -422,18 +458,24 @@ export async function conversationView(db: Database, conversation: ConversationR
   // The ref carries the agent's id and its owner and nothing else, because that is all either read asks of it: the
   // literals are not a claim about the agent that some rule elsewhere has to keep agreeing with.
   const agent = { id: agentId, ownerOid: conversation.ownerOid };
-  // The fork's, the deck's and the Docmosis template's columns are one read, and only the .pptx probe waits for it.
+  // The fork's, the deck's and the two templates' columns are one read, and only the .pptx probe waits for it.
   const forkDeckAndDocmosis = async () => {
-    const row = await db.assistantConversation.findUnique({ where: { id: conversation.id }, select: { ...FORKED_SELECT, ...DECK_SELECT, ...DOCMOSIS_SELECT } });
-    return { fork: row, deck: row === null ? null : await deckSummary(db, conversation.id, row), docmosis: row === null ? null : docmosisSummary(row) };
+    const row = await db.assistantConversation.findUnique({
+      where: { id: conversation.id },
+      select: { ...FORKED_SELECT, ...VIDEO_SELECT }
+    });
+    return {
+      fork: row,
+      decks: await listDeckSummaries(db, conversation.id),
+      docmosisTemplates: await listDocmosisSummaries(db, conversation.id),
+      notifyTemplates: await listNotifySummaries(db, conversation.id),
+      video: row === null ? null : videoSummary(row)
+    };
   };
-  const [current, artefact, { fork, deck, docmosis }, jira, github, confluence, page, questions] = await Promise.all([
+  const [current, documents, { fork, decks, docmosisTemplates, notifyTemplates, video }, page, questions] = await Promise.all([
     db.agent.findUnique({ where: { id: agentId }, select: { status: true, skills: true, clientFeatures: true, repo: true, branch: true } }),
-    readArtefact(db, conversation.id),
+    documentViews(db, conversation.id),
     forkDeckAndDocmosis(),
-    readJiraExport(db, conversation.id),
-    readGithubExport(db, conversation.id),
-    readConfluenceExport(db, conversation.id),
     agentConversation(db, conversation.ownerOid, agent),
     agentQuestions(db, conversation.ownerOid, agent)
   ]);
@@ -456,12 +498,12 @@ export async function conversationView(db: Database, conversation: ConversationR
     clientFeatures: storedClientFeatures(current?.clientFeatures),
     sessionState: conversation.sessionState,
     sessionDetail: conversation.sessionDetail,
-    artefact: { ...artefact, updatedAt: artefact.updatedAt?.toISOString() ?? null },
-    deck,
-    docmosis,
-    jira,
-    github,
-    confluence,
+    documents,
+    decks,
+    docmosisTemplates,
+    notifyTemplates,
+    video,
+    canPostVideo: canPostVideo(conversationAccess(conversation.ownerOid, conversation, [])) && hasPod(conversation),
     page,
     forked: fork === null ? null : forkedView(fork),
     questions

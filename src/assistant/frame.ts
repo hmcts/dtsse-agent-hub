@@ -1,11 +1,13 @@
 import type { Database } from "../store/prisma.ts";
-import { ARTEFACT_SELECT, toArtefact } from "./artefact-store.ts";
+import { DOCUMENT_SELECT, OLDEST_FIRST, toDocument } from "./artefact-store.ts";
 import { CONFLUENCE_SELECT, type ConfluenceExportFrame, pendingConfluenceExport } from "./confluence.ts";
 import { DECK_SELECT, deckAuthor, newestAgentVersion } from "./deck-store.ts";
-import { DOCMOSIS_SELECT, docmosisAuthor } from "./docmosis-store.ts";
+import { DOCMOSIS_SELECT, docmosisSummary } from "./docmosis-store.ts";
+import { type DocumentKind, primaryDocument } from "./documents.ts";
 import { GITHUB_SELECT, type GithubExportFrame, pendingGithubExport } from "./github.ts";
 import { JIRA_SELECT, type JiraExportFrame, pendingJiraExport } from "./jira.ts";
 import { readAssistantModel } from "./model-store.ts";
+import { NOTIFY_SELECT, notifySummary } from "./notify-store.ts";
 import { productLabel } from "./products.ts";
 import { type FrameAttachment, frameAttachments } from "./upload-store.ts";
 
@@ -15,7 +17,9 @@ import { type FrameAttachment, frameAttachments } from "./upload-store.ts";
  * No field is gated on a `client_features` claim (`src/agents/client-features.ts`): `attachments`, `jira_export`,
  * `github_export` and `confluence_export` go to every session. A client too old to read `attachments` drops that message's files
  * and nobody is told; one too old to read an export field is handed the request in words, and
- * the export fails on its 15-minute timeout.
+ * the export fails on its 15-minute timeout. One older than `items` ignores `artefacts` and an export's `document_id`
+ * and reads only the primary document, which is why the hub holds a conversation on such a pod to that one
+ * (`ITEMS_CREATE_REFUSED`, `ITEMS_EXPORT_REFUSED`).
  */
 export interface AssistantFrame {
   conversation_id: string;
@@ -27,25 +31,38 @@ export interface AssistantFrame {
    * the next message rather than from the next session.
    */
   model: string;
+  /** The primary document's version, 0 before there is one, and who wrote it: what a client older than `artefacts` reads. */
   artefact_version: number;
   artefact_updated_by: "user" | "agent" | null;
-  /** The conversation's slide deck's latest version, 0 before there is one, and who wrote it. */
+  /** Every document, oldest first, without its markdown, which the session reads with `artefact get --id`. */
+  artefacts: FrameDocument[];
+  /** The primary deck's latest version, 0 before there is one, and who wrote it: what a client older than `decks` reads. */
   deck_version: number;
   deck_updated_by: "user" | "agent" | null;
   /** Moved on by every write of the outline, so an amend of the person's latest version is seen though `deck_version` stays. */
   deck_revision: number;
   /** The newest kept version the session wrote itself, 0 when none is: what the prompt's context tells it to diff from. */
   deck_agent_version: number;
-  /** The conversation's Docmosis template's latest version, 0 before there is one, its revision, and who wrote it. */
+  /** Every deck, oldest first, without its outline, which the session reads with `deck get --id`. */
+  decks: FrameDeck[];
+  /** The primary Docmosis template's latest version, 0 before there is one, its revision, and who wrote it: what a client older than `docmosis_templates` reads. */
   docmosis_version: number;
   docmosis_revision: number;
   docmosis_updated_by: "user" | "agent" | null;
+  /** Every Docmosis template, oldest first, which the session reads with `docmosis get --id`. */
+  docmosis_templates: FrameDocmosis[];
+  /** The conversation's GOV.UK Notify template's latest version, 0 before there is one, its revision, and who wrote it. */
+  notify_version: number;
+  notify_revision: number;
+  notify_updated_by: "user" | "agent" | null;
+  /** Every Notify template, oldest first, without its text, which the session reads with `notify get --id`. */
+  notify_templates: { id: string; name: string; version: number; revision: number; updated_by: "user" | "agent" | null }[];
   /** While an export to Jira is pending: what to create, which the session carries out with `twg`. */
-  jira_export?: JiraExportFrame;
+  jira_export?: JiraExportFrame & DocumentRef;
   /** While an export to GitHub is pending: the repository to create the issue in, which the session does with `gh`. */
-  github_export?: GithubExportFrame;
+  github_export?: GithubExportFrame & DocumentRef;
   /** While an export to Confluence is pending: where to create the page, which the session carries out with `twg`. */
-  confluence_export?: ConfluenceExportFrame;
+  confluence_export?: ConfluenceExportFrame & DocumentRef;
   /**
    * The files the person attached to this message, for the pod to fetch to its disk before it delivers the message.
    * Absent from a frame built without a message — a wake rather than a delivery — and an empty array for a message
@@ -56,14 +73,70 @@ export interface AssistantFrame {
   attachments?: FrameAttachment[];
 }
 
+export interface FrameDeck {
+  id: string;
+  title: string;
+  version: number;
+  revision: number;
+  updated_by: "user" | "agent" | null;
+  /** The newest kept version of this deck the session wrote, 0 when none is: what the prompt's context tells it to diff from. */
+  agent_version: number;
+}
+
+export interface FrameDocmosis {
+  id: string;
+  name: string;
+  version: number;
+  revision: number;
+  updated_by: "user" | "agent";
+}
+
+export interface FrameDocument {
+  id: string;
+  kind: DocumentKind;
+  title: string | null;
+  version: number;
+  updated_by: "user" | "agent" | null;
+}
+
+/** Which document an export is of, which the session's export command reads by id. */
+interface DocumentRef {
+  document_id: string;
+}
+
+/**
+ * The pending export of a tool that the message being framed asks for. Each export is asked for in a message of its own,
+ * sent right after the request is recorded, so it is the one requested nearest the message's creation: with exports
+ * for two documents queued, each message carries its own. Without a message (a wake), or for one sent after them
+ * all, that is the most recently requested.
+ */
+function nearestPending<D extends { id: string }, F>(
+  documents: readonly D[],
+  pending: (document: D) => F | undefined,
+  requestedAt: (document: D) => Date | null,
+  messageAt: Date | undefined
+): (F & DocumentRef) | undefined {
+  const target = messageAt?.getTime() ?? Number.POSITIVE_INFINITY;
+  let best: { distance: number; at: number; frame: F & DocumentRef } | undefined;
+  for (const document of documents) {
+    const frame = pending(document);
+    const at = requestedAt(document)?.getTime() ?? 0;
+    const distance = Math.abs(target - at);
+    if (frame !== undefined && (best === undefined || distance < best.distance || (distance === best.distance && at > best.at))) {
+      best = { distance, at, frame: { ...frame, document_id: document.id } };
+    }
+  }
+  return best?.frame;
+}
+
 /**
  * The newest kept version the session wrote, read from the versions only when the person wrote the latest: when the
  * session did, it is the latest, and with no version or no author there is none. Every message is framed, so this
  * keeps the common case to no query.
  */
-function agentVersionOf(db: Database, conversationId: string, version: number, by: "user" | "agent" | null): Promise<number> | number {
+function agentVersionOf(db: Database, itemId: string, version: number, by: "user" | "agent" | null): Promise<number> | number {
   if (version > 0 && by === "user") {
-    return newestAgentVersion(db, conversationId);
+    return newestAgentVersion(db, itemId);
   }
   return version > 0 && by === "agent" ? version : 0;
 }
@@ -78,12 +151,10 @@ export async function assistantFrame(db: Database, agentId: string, messageId?: 
           id: true,
           ownerOid: true,
           product: true,
-          ...ARTEFACT_SELECT,
-          ...DECK_SELECT,
-          ...DOCMOSIS_SELECT,
-          ...JIRA_SELECT,
-          ...GITHUB_SELECT,
-          ...CONFLUENCE_SELECT
+          decks: { select: DECK_SELECT, where: { version: { gt: 0 } }, orderBy: [...OLDEST_FIRST] },
+          docmosisItems: { select: DOCMOSIS_SELECT, where: { version: { gt: 0 } }, orderBy: [...OLDEST_FIRST] },
+          notifyItems: { select: NOTIFY_SELECT, where: { version: { gt: 0 } }, orderBy: [...OLDEST_FIRST] },
+          documents: { select: { ...DOCUMENT_SELECT, ...JIRA_SELECT, ...GITHUB_SELECT, ...CONFLUENCE_SELECT }, orderBy: [...OLDEST_FIRST] }
         }
       }
     }
@@ -92,14 +163,33 @@ export async function assistantFrame(db: Database, agentId: string, messageId?: 
   if (conversation === null || conversation === undefined) {
     return undefined;
   }
-  const artefact = toArtefact(conversation);
-  const jira = pendingJiraExport(conversation);
-  const github = pendingGithubExport(conversation);
-  const confluence = pendingConfluenceExport(conversation);
-  const deckBy = deckAuthor(conversation);
-  const [model, agentVersion, attachments] = await Promise.all([
+  const messageAt = messageId === undefined ? undefined : (await db.message.findUnique({ where: { id: messageId }, select: { createdAt: true } }))?.createdAt;
+  const rows = conversation.documents;
+  const documents = rows.map(toDocument);
+  const primary = primaryDocument(documents);
+  const jira = nearestPending(
+    rows,
+    (row) => pendingJiraExport(row),
+    (row) => row.jiraRequestedAt,
+    messageAt
+  );
+  const github = nearestPending(
+    rows,
+    (row) => pendingGithubExport(row),
+    (row) => row.githubRequestedAt,
+    messageAt
+  );
+  const confluence = nearestPending(
+    rows,
+    (row) => pendingConfluenceExport(row),
+    (row) => row.confluenceRequestedAt,
+    messageAt
+  );
+  const notifyTemplates = conversation.notifyItems.flatMap((item) => notifySummary(item) ?? []);
+  const docmosisTemplates = conversation.docmosisItems.flatMap((item) => docmosisSummary(item) ?? []);
+  const [model, agentVersions, attachments] = await Promise.all([
     readAssistantModel(db, conversation.ownerOid),
-    agentVersionOf(db, conversation.id, conversation.deckVersion, deckBy),
+    Promise.all(conversation.decks.map((deck) => agentVersionOf(db, deck.id, deck.version, deckAuthor(deck)))),
     messageId === undefined ? undefined : frameAttachments(db, messageId)
   ]);
   return {
@@ -109,15 +199,47 @@ export async function assistantFrame(db: Database, agentId: string, messageId?: 
     product: conversation.product,
     product_label: productLabel(conversation.product),
     model,
-    artefact_version: artefact.version,
-    artefact_updated_by: artefact.updatedBy,
-    deck_version: conversation.deckVersion,
-    deck_updated_by: deckBy,
-    deck_revision: conversation.deckRevision,
-    deck_agent_version: agentVersion,
-    docmosis_version: conversation.docmosisVersion,
-    docmosis_revision: conversation.docmosisRevision,
-    docmosis_updated_by: docmosisAuthor(conversation),
+    artefact_version: primary?.version ?? 0,
+    artefact_updated_by: primary?.updatedBy ?? null,
+    artefacts: documents.map((document) => ({
+      id: document.id,
+      kind: document.kind,
+      title: document.title,
+      version: document.version,
+      updated_by: document.updatedBy
+    })),
+    deck_version: conversation.decks[0]?.version ?? 0,
+    deck_updated_by: conversation.decks[0] === undefined ? null : deckAuthor(conversation.decks[0]),
+    deck_revision: conversation.decks[0]?.revision ?? 0,
+    deck_agent_version: agentVersions[0] ?? 0,
+    decks: conversation.decks.map((deck, index) => ({
+      id: deck.id,
+      title: deck.title ?? "",
+      version: deck.version,
+      revision: deck.revision,
+      updated_by: deckAuthor(deck),
+      agent_version: agentVersions[index] ?? 0
+    })),
+    docmosis_version: docmosisTemplates[0]?.version ?? 0,
+    docmosis_revision: docmosisTemplates[0]?.revision ?? 0,
+    docmosis_updated_by: docmosisTemplates[0]?.updatedBy ?? null,
+    docmosis_templates: docmosisTemplates.map((template) => ({
+      id: template.id,
+      name: template.name,
+      version: template.version,
+      revision: template.revision,
+      updated_by: template.updatedBy
+    })),
+    notify_version: notifyTemplates[0]?.version ?? 0,
+    notify_revision: notifyTemplates[0]?.revision ?? 0,
+    notify_updated_by: notifyTemplates[0]?.updatedBy ?? null,
+    notify_templates: notifyTemplates.map((template) => ({
+      id: template.id,
+      name: template.name,
+      version: template.version,
+      revision: template.revision,
+      updated_by: template.updatedBy
+    })),
     ...(jira === undefined ? {} : { jira_export: jira }),
     ...(github === undefined ? {} : { github_export: github }),
     ...(confluence === undefined ? {} : { confluence_export: confluence }),

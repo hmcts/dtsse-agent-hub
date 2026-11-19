@@ -33,6 +33,8 @@ const CALENDAR_DAY = new Intl.DateTimeFormat("en-GB", { timeZone: ZONE, year: "n
 
 const LONG_DAY = new Intl.DateTimeFormat("en-GB", { timeZone: ZONE, weekday: "long", day: "numeric", month: "long" });
 
+const DAY_MONTH_YEAR = new Intl.DateTimeFormat("en-GB", { timeZone: ZONE, day: "numeric", month: "long", year: "numeric" });
+
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
@@ -64,6 +66,12 @@ export function ukIsoDate(date: Date | number): string {
 export function ukLongDate(date: Date | number): string {
   const part = partsOf(LONG_DAY, date);
   return `${part("weekday")} ${part("day")} ${part("month")}`;
+}
+
+/** The UK calendar day with its year, "12 November 2026", for a date that may be from any year. */
+export function ukDate(date: Date | number): string {
+  const part = partsOf(DAY_MONTH_YEAR, date);
+  return `${part("day")} ${part("month")} ${part("year")}`;
 }
 
 function ukYear(date: Date | number): string {

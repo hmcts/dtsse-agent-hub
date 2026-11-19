@@ -80,9 +80,20 @@ describe("selectFrame", () => {
     [{ type: "assistant_stop" as const, conversation_id: "c", virtual_agent_id: "va", owner_oid: "dev-alice" }],
     [{ type: "assistant_uploads" as const, virtual_agent_id: "va", owner_oid: "dev-alice" }],
     [{ type: "assistant_lookup" as const, lookup_id: "l", virtual_agent_id: "va", owner_oid: "dev-alice" }],
-    [{ type: "assistant_lookup_answered" as const, lookup_id: "l", virtual_agent_id: "va", owner_oid: "dev-alice" }]
+    [{ type: "assistant_lookup_answered" as const, lookup_id: "l", virtual_agent_id: "va", owner_oid: "dev-alice" }],
+    [{ type: "assistant_docmosis_index" as const, request_id: "r", virtual_agent_id: "va", owner_oid: "dev-alice" }]
   ])("should send no frame for %j when it is an instruction to the owner's pod", async (event) => {
     expect(await selectFrame(event, TOPICS, sources())).toBeUndefined();
+  });
+
+  it("should tell the owner's tab that their template library has a new answer", async () => {
+    expect(await selectFrame({ type: "assistant_docmosis_library", owner_oid: VIEWER }, TOPICS, sources())).toBe(
+      "event: assistant_docmosis_library\ndata: {}\n\n"
+    );
+  });
+
+  it("should tell nobody else of a template library's answer when it is another person's", async () => {
+    expect(await selectFrame({ type: "assistant_docmosis_library", owner_oid: "dev-bob" }, TOPICS, sources())).toBeUndefined();
   });
 
   it("should send a post on a watched topic when the page watches it", async () => {
@@ -344,6 +355,22 @@ describe("selectFrame", () => {
   it("should send nothing about an assistant conversation when it is someone else's", async () => {
     expect(
       await selectFrame({ type: "assistant_conversation", conversation_id: "c-1", virtual_agent_id: "va-1", owner_oid: OTHER }, TOPICS, sources())
+    ).toBeUndefined();
+  });
+
+  it("should tell the owner which of their pod jobs finished, naming only the ids", async () => {
+    expect(await selectFrame({ type: "assistant_pod_job", job_id: "j-1", conversation_id: "c-1", owner_oid: VIEWER }, TOPICS, sources())).toBe(
+      `event: assistant_pod_job\ndata: ${JSON.stringify({ job_id: "j-1", conversation_id: "c-1" })}\n\n`
+    );
+  });
+
+  it("should send nothing about a pod job when it ran for someone else", async () => {
+    expect(await selectFrame({ type: "assistant_pod_job", job_id: "j-1", conversation_id: "c-1", owner_oid: OTHER }, TOPICS, sources())).toBeUndefined();
+  });
+
+  it("should send no browser the request for a pod job, which is the pod's", async () => {
+    expect(
+      await selectFrame({ type: "assistant_pod_job_requested", job_id: "j-1", virtual_agent_id: "va-1", owner_oid: VIEWER }, TOPICS, sources())
     ).toBeUndefined();
   });
 

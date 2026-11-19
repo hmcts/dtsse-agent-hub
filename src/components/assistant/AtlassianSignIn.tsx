@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { CopyButton } from "@/components/assistant/CopyButton";
 import { LoginCountdown } from "@/components/assistant/LoginCountdown";
 import type { LoginView } from "@/virtual-agents/logins";
 
@@ -61,7 +62,7 @@ export function SignInPrompt({ login }: { login: LoginView }) {
       </a>{" "}
       and enter{" "}
       <code className="rounded-md border border-asst-strong bg-asst-field px-2 py-0.5 font-plex-mono tracking-widest text-asst-text">{login.userCode}</code>{" "}
-      <LoginCountdown expiresAt={login.expiresAt} />
+      <CopyButton text={login.userCode} label="Copy the Atlassian code" /> <LoginCountdown expiresAt={login.expiresAt} />
     </p>
   );
 }

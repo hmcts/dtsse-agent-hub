@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createMockHub, type MockHub } from "./__fixtures__/mock-hub.ts";
 import { type Api, ApiError, createApi, DEFAULT_URL, isMissingRoute, trimTrailingSlashes } from "./api.ts";
 import { createTokenProvider, DEFAULT_SCOPE, parseAzToken, type RunAz, requireAzureLogin } from "./az-token.ts";
-import { CLIENT_FEATURES } from "./features.ts";
+import { CLIENT_FEATURES, claimedFeatures } from "./features.ts";
 
 const VID = "0f8a6a1e-1234-4000-8000-00000000000a";
 const LAUNCH = `launch-${"q".repeat(16)}`;
@@ -786,7 +786,15 @@ describe("createApi credentials", () => {
     await pod.virtualStatus(VID, "running", "Claude is ready");
 
     // Assert
-    expect(hub.virtuals.get(VID)?.statusClaims.slice(-2)).toEqual([[...CLIENT_FEATURES], [...CLIENT_FEATURES]]);
+    expect(hub.virtuals.get(VID)?.statusClaims.slice(-2)).toEqual([claimedFeatures(), claimedFeatures()]);
+  });
+
+  it("should answer a pod job through the pod's pod-jobs route", async () => {
+    // Act
+    await pod.putPodJob(VID, "job-1", { status: "failed", error: "signed_out", detail: "Sign in first." });
+
+    // Assert
+    expect(hub.podJobAnswers.at(-1)).toEqual({ virtual_id: VID, job_id: "job-1", body: { status: "failed", error: "signed_out", detail: "Sign in first." } });
   });
 
   it("should report listening ports through the pod's ports route", async () => {

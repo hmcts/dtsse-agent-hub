@@ -1,6 +1,27 @@
 import { describe, expect, it } from "vitest";
-import { artefactPutBody, jiraExportReportBody, MAX_ARTEFACT_MARKDOWN, MAX_JIRA_ERROR, sessionsReportBody, uploadsReportBody } from "./schemas.ts";
+import {
+  artefactCreateBody,
+  artefactPutBody,
+  jiraExportReportBody,
+  MAX_ARTEFACT_MARKDOWN,
+  MAX_JIRA_ERROR,
+  sessionsReportBody,
+  uploadsReportBody
+} from "./schemas.ts";
 import { MAX_REPORTED_FILES } from "./upload-report.ts";
+
+describe("artefactCreateBody", () => {
+  it("should accept a kind and markdown when the title is left out", () => {
+    expect(artefactCreateBody.parse({ kind: "ticket", markdown: "As a clerk" })).toEqual({ kind: "ticket", markdown: "As a clerk" });
+  });
+
+  it.each([[{ kind: "deck", markdown: "" }], [{ markdown: "" }], [{ kind: "document", markdown: "x".repeat(MAX_ARTEFACT_MARKDOWN + 1) }]])(
+    "should refuse %j when its kind or markdown is not one the hub keeps",
+    (body) => {
+      expect(artefactCreateBody.safeParse(body).success).toBe(false);
+    }
+  );
+});
 
 describe("artefactPutBody", () => {
   it("should accept markdown and a base version when the title is left out", () => {

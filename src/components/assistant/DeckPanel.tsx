@@ -37,12 +37,11 @@ export function useDeckView(deck: DeckSummary, conversationId: string): { deck: 
     const controller = new AbortController();
     void (async () => {
       try {
-        const response = await fetch(deckUrl(conversationId), { cache: "no-store", signal: controller.signal });
+        const response = await fetch(deckUrl(conversationId, deck.id), { cache: "no-store", signal: controller.signal });
         if (!response.ok) {
           throw new Error(`the deck read answered ${response.status}`);
         }
-        const deck = (await response.json()) as DeckView;
-        setRead({ deck, failed: false });
+        setRead({ deck: (await response.json()) as DeckView, failed: false });
       } catch {
         if (!controller.signal.aborted) {
           setRead((before) => ({ deck: before.deck, failed: true }));
@@ -50,7 +49,7 @@ export function useDeckView(deck: DeckSummary, conversationId: string): { deck: 
       }
     })();
     return () => controller.abort();
-  }, [conversationId, version, revision, attempt]);
+  }, [conversationId, deck.id, version, revision, attempt]);
   // A .pptx arrives after its version's outline and changes nothing in it, so the page's word on it is taken as it is.
   // The same object comes back until the read or that word changes, so what is keyed on the deck does not run again.
   const shown = useMemo(
@@ -301,7 +300,7 @@ export function DeckViewer({
   const pptxControl =
     download ??
     (deck.pptx ? (
-      <a href={deckPptxUrl(conversationId, deck.version)} download className={`${button} no-underline`}>
+      <a href={deckPptxUrl(conversationId, deck.id, deck.version)} download className={`${button} no-underline`}>
         <DownloadIcon />
         Download .pptx
       </a>
@@ -452,8 +451,29 @@ export function DeckViewer({
   );
 }
 
+/** Asks before a deck goes: its versions go with it. */
+function ConfirmRemove({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: () => void }) {
+  const cancel = useRef<HTMLButtonElement>(null);
+  useEffect(() => cancel.current?.focus(), []);
+  return (
+    <div
+      role="alertdialog"
+      aria-label="Remove these slides?"
+      className="flex shrink-0 flex-wrap items-center gap-2 border-b border-asst-field bg-asst-raised px-4 py-2.5 text-[13px]"
+    >
+      <span className="min-w-0 flex-1">Remove these slides from the chat? Every version of them goes too.</span>
+      <button ref={cancel} type="button" onClick={onCancel} className="rounded-lg border border-asst-strong px-3 py-1 hover:bg-asst-active">
+        Cancel
+      </button>
+      <button type="button" onClick={onConfirm} className="rounded-lg bg-asst-accent px-3 py-1 font-semibold text-asst-ink hover:bg-asst-accent-hover">
+        Remove
+      </button>
+    </div>
+  );
+}
+
 /**
- * The conversation's deck beside the chat, in the document panel's shell: the same resizable width, close button and
+ * One of the conversation's decks beside the chat, in the document panel's shell: the same resizable width, close button and
  * header, so the two read as one kind of thing. The width is kept apart from the document's, since a deck is looked at
  * wider than a document is written. The page hands it the deck's version; the outline is read here (`useDeckView`).
  *
@@ -471,6 +491,7 @@ export function DeckPanel({
   onAsk,
   restore,
   save,
+  onRemove,
   onBusy,
   draft,
   onDraftTaken,
@@ -485,12 +506,16 @@ export function DeckPanel({
   restore?: RestoreDeckAction;
   /** Left out, the slides are not editable here. */
   save?: SaveDeckAction;
+  /** Removes the deck, answering why it could not be; left out, the panel offers no Remove. */
+  onRemove?: () => Promise<string | null>;
   onBusy?: (busy: boolean) => void;
   draft?: UnsavedDeckDraft;
   onDraftTaken?: () => void;
   onUnsaved?: (draft: UnsavedDeckDraft) => void;
 }) {
   const view = useDeckView(deck, conversationId);
+  const [removing, setRemoving] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
   const [editing, setEditing] = useState(draft !== undefined);
   // Held here as well as by the page, so no editor but the first is handed it, whoever renders the panel.
   const [handed, setHanded] = useState(draft);
@@ -504,6 +529,17 @@ export function DeckPanel({
     reserve: () => CHAT_MIN_WIDTH + sidebarWidth,
     edge: "right"
   });
+
+  async function remove(): Promise<void> {
+    if (onRemove === undefined) {
+      return;
+    }
+    const problem = await onRemove().catch(() => "could not remove the slides");
+    if (problem !== null) {
+      setRemoving(false);
+      setRemoveError(problem);
+    }
+  }
 
   return (
     <section
@@ -534,6 +570,15 @@ export function DeckPanel({
             Edit slides
           </button>
         ) : null}
+        {onRemove === undefined ? null : (
+          <button
+            type="button"
+            onClick={() => setRemoving(true)}
+            className="h-8 shrink-0 rounded-lg px-2 text-[13px] text-asst-muted hover:bg-asst-field hover:text-asst-text"
+          >
+            Remove
+          </button>
+        )}
         <button
           type="button"
           onClick={onClose}
@@ -543,6 +588,12 @@ export function DeckPanel({
           ×
         </button>
       </div>
+      {removeError === null ? null : (
+        <p role="alert" className="shrink-0 border-b border-asst-field px-4 py-2 text-[13px] text-asst-error">
+          Could not remove the slides: {removeError}
+        </p>
+      )}
+      {removing ? <ConfirmRemove onCancel={() => setRemoving(false)} onConfirm={() => void remove()} /> : null}
       <DeckBehind shown={view.deck} latest={deck.version} failed={view.failed} retry={view.retry} />
       {view.deck === null ? (
         <DeckLoading failed={view.failed} retry={view.retry} />
@@ -580,8 +631,8 @@ export function SharedDeck({ conversationId, deck }: { conversationId: string; d
   const view = useDeckView(deck, conversationId);
   const slides = useAnnouncer("slides");
   return (
-    <section aria-labelledby="shared-deck" className="flex h-[min(640px,80vh)] flex-col overflow-hidden rounded-2xl border border-asst-line">
-      <h2 id="shared-deck" className="shrink-0 border-b border-asst-field px-5 py-3 text-[18px] font-semibold">
+    <section aria-labelledby={`shared-deck-${deck.id}`} className="flex h-[min(640px,80vh)] flex-col overflow-hidden rounded-2xl border border-asst-line">
+      <h2 id={`shared-deck-${deck.id}`} className="shrink-0 border-b border-asst-field px-5 py-3 text-[18px] font-semibold">
         {view.deck?.title ?? deck.title}
       </h2>
       <DeckBehind shown={view.deck} latest={deck.version} failed={view.failed} retry={view.retry} />

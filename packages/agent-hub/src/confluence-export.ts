@@ -22,12 +22,14 @@ const CREATE_TIMEOUT_MS = 120000;
 
 export type ConfluenceExportRequest = {
   exportId: string;
+  /** The document the export is of, from the frame; absent from a hub that holds one document, whose `/artefact` it is. */
+  documentId?: string;
   spaceId: string;
   parentId: string;
 };
 
 export type ConfluenceExportDeps = {
-  api: Pick<Api, "getArtefact" | "putConfluenceExport">;
+  api: Pick<Api, "getArtefact" | "getArtefactById" | "putConfluenceExport">;
   agentId: string;
   env: Env;
   run: (cmd: string, args: string[], opts: { env: Env; timeoutMs: number }) => Promise<RunResult>;
@@ -120,7 +122,10 @@ export function confluenceFailure(result: RunResult): string {
 const TITLE_TAKEN_RE = /already exists|same title|title .*(?:taken|in use|exists)/i;
 
 async function create(deps: ConfluenceExportDeps, request: ConfluenceExportRequest, dir: string): Promise<ConfluenceExportOutcome> {
-  const doc = await withRetry(() => deps.api.getArtefact(deps.agentId), { attempts: 3 });
+  const doc = await withRetry(
+    () => (request.documentId === undefined ? deps.api.getArtefact(deps.agentId) : deps.api.getArtefactById(deps.agentId, request.documentId)),
+    { attempts: 3 }
+  );
   if (!doc.markdown.trim()) {
     return { error: "The document is empty, so there was nothing to publish." };
   }

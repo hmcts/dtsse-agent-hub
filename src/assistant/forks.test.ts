@@ -89,7 +89,7 @@ describe("forkedView", () => {
 
 describe("forkContextMarkdown", () => {
   it("should name whose chat it was and tell the session to continue from it when it is handed the copy", () => {
-    const markdown = forkContextMarkdown(forked(), false);
+    const markdown = forkContextMarkdown(forked(), 0);
 
     expect(markdown).toContain(`Alice Tester's CFT Workspace conversation "Possession orders"`);
     expect(markdown).toContain("continue from where they end");
@@ -98,7 +98,7 @@ describe("forkContextMarkdown", () => {
   });
 
   it("should give every turn in order with whose it was when the thread has several", () => {
-    const markdown = forkContextMarkdown(forked(), false);
+    const markdown = forkContextMarkdown(forked(), 0);
     const order = [
       "## Alice Tester asked\n\nWhat goes in a possession order?",
       "## The assistant answered\n\nThe property, the date and the costs.",
@@ -112,18 +112,29 @@ describe("forkContextMarkdown", () => {
   });
 
   it("should say files were not copied when a turn carried them", () => {
-    expect(forkContextMarkdown(forked(), false)).toContain("(2 files were attached to this message. They were not copied.)");
+    expect(forkContextMarkdown(forked(), 0)).toContain("(2 files were attached to this message. They were not copied.)");
   });
 
-  it("should tell the session to read the document when the copy has one", () => {
-    expect(forkContextMarkdown(forked(), true)).toContain("The conversation's document was copied too");
+  it("should tell the session to read the document by id when the copy has one", () => {
+    const markdown = forkContextMarkdown(forked(), 1);
+
+    expect(markdown).toContain("The conversation's document was copied too");
+    expect(markdown).toContain("artefact get --id <id>");
+  });
+
+  it("should tell the session to list the documents and read each by id when the copy has several", () => {
+    const markdown = forkContextMarkdown(forked(), 3);
+
+    expect(markdown).toContain("Its 3 documents were copied too");
+    expect(markdown).toContain("artefact list");
+    expect(markdown).toContain("artefact get --id <id>");
   });
 
   it("should say the copy begins part-way through when its start was too long to copy", () => {
-    expect(forkContextMarkdown(forked({ earlierHidden: true }), false)).toContain("begins part-way through");
+    expect(forkContextMarkdown(forked({ earlierHidden: true }), 0)).toContain("begins part-way through");
   });
 
   it("should say nothing had been said when the source thread was empty", () => {
-    expect(forkContextMarkdown(forked({ thread: [] }), false)).toContain("Nothing had been said in it yet.");
+    expect(forkContextMarkdown(forked({ thread: [] }), 0)).toContain("Nothing had been said in it yet.");
   });
 });

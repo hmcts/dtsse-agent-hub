@@ -4,14 +4,17 @@ import type { PrismaClient } from "../store/prisma.ts";
 const { setDesired } = vi.hoisted(() => ({ setDesired: vi.fn() }));
 vi.mock("../virtual-agents/store.ts", () => ({ setDesired }));
 
-const { podReady } = await import("./pod-ready.ts");
+const { podReady, podState } = await import("./pod-ready.ts");
 
 const prisma = {} as PrismaClient;
 const NOW = new Date("2026-11-04T09:00:00.000Z");
 
-function pod(overrides: Partial<{ desired: string; status: string; generation: number; observedGeneration: number }> = {}, features: unknown = ["welsh"]) {
+function pod(
+  overrides: Partial<{ desired: string; status: string; statusChangedAt: Date; generation: number; observedGeneration: number }> = {},
+  features: unknown = ["welsh"]
+) {
   return {
-    assistant: { id: "va-1", desired: "running", status: "running", generation: 2, observedGeneration: 2, ...overrides },
+    assistant: { id: "va-1", desired: "running", status: "running", statusChangedAt: NOW, generation: 2, observedGeneration: 2, ...overrides },
     claims: { clientFeatures: features }
   };
 }
@@ -37,7 +40,28 @@ describe("podReady", () => {
     expect(setDesired).not.toHaveBeenCalled();
   });
 
+  it("should answer unsupported for a pod job when the pod has run past the grace with no claim of its own", async () => {
+    const started = (ms: number) => ({ statusChangedAt: new Date(NOW.getTime() - ms) });
+
+    expect(await podReady(prisma, "oid", pod(started(5_000), null), "pod-job:test.echo", NOW)).toBe("waking");
+    expect(await podReady(prisma, "oid", pod(started(60_000), null), "pod-job:test.echo", NOW)).toBe("unsupported");
+  });
+
   it("should answer waking when a change is not yet applied, since the pod running is about to be replaced", async () => {
     expect(await podReady(prisma, "oid", pod({ generation: 3 }, ["deck-build"]), "deck-build", NOW)).toBe("waking");
+  });
+});
+
+describe("podState", () => {
+  it("should answer stopped for a stopped assistant and start nothing", () => {
+    expect(podState(pod({ desired: "stopped", status: "stopped" }), "welsh")).toBe("stopped");
+    expect(setDesired).not.toHaveBeenCalled();
+  });
+
+  it("should answer as podReady does for a pod that is not stopped", () => {
+    expect(podState(pod(), "welsh")).toBe("ok");
+    expect(podState(pod({ status: "provisioning" }), "welsh")).toBe("waking");
+    expect(podState(pod({}, ["lookups"]), "welsh")).toBe("unsupported");
+    expect(podState(pod({ generation: 3 }), "welsh")).toBe("waking");
   });
 });

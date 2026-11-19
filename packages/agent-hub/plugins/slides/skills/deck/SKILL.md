@@ -61,6 +61,15 @@ Also ask for any pictures they want used, as files. Don't start the outline unti
 5. Tell the person how many slides it has and any warnings left. In a conversation they already see it; elsewhere,
    say where the file is.
 
+## Several decks
+
+A conversation can hold any number of decks. `agent-hub deck list` prints each with its id, and `deck get`, `deck put` and
+`deck remove` take `--id <id>` to name one; without it they mean the primary deck, the oldest. When the person asks for
+another deck, or the conversation already has one that is not what they want changed, start a new one with
+`agent-hub deck new deck/outline.json --pptx deck/<name>.pptx` instead of `deck put`, which would write over the primary
+deck. It prints the new deck's id: pass it as `--id` to every later `deck get` and `deck put` for that deck. The message's
+context names the id of a deck the person has changed.
+
 ## Changing a deck that is already there
 
 In a CFT Workspace conversation, always start from the published deck rather than an outline you remember:

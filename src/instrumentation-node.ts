@@ -72,11 +72,19 @@ async function startSweeping(): Promise<void> {
         startFeedbackSweep(prisma, blobs);
       }
     }
+    const { videoBlobs } = await import("./assistant/video-blob.ts");
+    const videos = videoBlobs();
+    if (videos !== undefined) {
+      const { startVideoSweep } = await import("./assistant/video-store.ts");
+      startVideoSweep(prisma, videos);
+    }
     if (virtualAgentsEnabled()) {
       const { startVirtualAgentSweep } = await import("./virtual-agents/sweep.ts");
       startVirtualAgentSweep(prisma);
       const { startDeckBuildSweep } = await import("./assistant/deck-build-store.ts");
       startDeckBuildSweep(prisma);
+      const { startPodJobSweep } = await import("./assistant/pod-job-store.ts");
+      startPodJobSweep(prisma);
     }
   } catch (error) {
     console.warn(`could not start the sweeps: ${error instanceof Error ? error.message : String(error)}`);

@@ -207,6 +207,53 @@ describe("createFeedbackBlobs", () => {
     expect(container.listBlobsFlat).not.toHaveBeenCalled();
   });
 
+  it("should answer a blob's size, and nothing for a blob that is not there", async () => {
+    const { container, typed } = fakeService({});
+    const sizes: Record<string, number> = { "p/a": 42 };
+    container.getBlockBlobClient = (path: string) =>
+      ({
+        url: `${BASE}/${path}`,
+        getProperties: async () => {
+          if (sizes[path] === undefined) {
+            throw Object.assign(new Error("not found"), { statusCode: 404 });
+          }
+          return { contentLength: sizes[path] };
+        }
+      }) as never;
+    const blobs = createFeedbackBlobs(IDENTITY, { service: typed, now: () => NOW });
+
+    expect(await blobs.sizeOf("p/a")).toBe(42);
+    expect(await blobs.sizeOf("p/missing")).toBeUndefined();
+  });
+
+  it("should answer a blob's size and ETag, when it is there", async () => {
+    const { container, typed } = fakeService({});
+    container.getBlockBlobClient = (() => ({ getProperties: async () => ({ contentLength: 7, etag: '"0x1"' }) })) as never;
+    const blobs = createFeedbackBlobs(IDENTITY, { service: typed, now: () => NOW });
+
+    expect(await blobs.statOf("p/a")).toEqual({ size: 7, etag: '"0x1"' });
+  });
+
+  it("should throw when a blob's size cannot be read for a reason other than its absence", async () => {
+    const { container, typed } = fakeService({});
+    container.getBlockBlobClient = (() => ({
+      getProperties: async () => {
+        throw Object.assign(new Error("forbidden"), { statusCode: 403 });
+      }
+    })) as never;
+    const blobs = createFeedbackBlobs(IDENTITY, { service: typed, now: () => NOW });
+
+    await expect(blobs.sizeOf("p/a")).rejects.toThrow("forbidden");
+  });
+
+  it("should list every blob name under a prefix, or the whole container for none", async () => {
+    const { typed } = fakeService({}, ["a/1", "a/2", "b/1"]);
+    const blobs = createFeedbackBlobs(IDENTITY, { service: typed, now: () => NOW });
+
+    expect(await blobs.listNames("a/")).toEqual(["a/1", "a/2"]);
+    expect(await blobs.listNames("")).toEqual(["a/1", "a/2", "b/1"]);
+  });
+
   it("should build a real client from the settings when none is given", async () => {
     const blobs = createFeedbackBlobs(IDENTITY, { credential: { getToken: async () => null } });
 

@@ -58,9 +58,11 @@ export type ApiErrorBody = {
    * A `409` from `putArtefact`: the document as `getArtefact` returns it, to merge the refused change into; from
    * `putDeck`, the deck as `getDeck` returns it.
    */
-  current?: Artefact | Deck | DocmosisResponse;
+  current?: Artefact | Deck | DocmosisResponse | NotifyResponse;
   /** A `400` from `putDocmosis`: the .docx digests the hub does not hold. */
   missing_assets?: string[];
+  /** A `409` from `putDocmosis` with a `pick` already loaded: the version that load wrote. */
+  loaded?: DocmosisWritten;
   /** A `400` from `putDeck`: the pictures the outline names that the hub does not hold. */
   missing?: string[];
 };
@@ -227,7 +229,16 @@ export type LookupAnswer =
   | { results: JiraProjectFound[] | ConfluencePageFound[] | GithubRepoFound[] | GithubProjectFound[] }
   | { error: "signed_out" | "failed" | "superseded"; detail?: string };
 
-/** A conversation's one markdown document, which the person and the session both edit. */
+/** One template in the library's index: its path, its blob's git SHA-1 and its size in bytes. */
+export type DocmosisIndexEntry = [path: string, blobSha: string, size: number];
+
+/** The answer to one check of the template library: a new index, the one the hub holds is current, or why neither. */
+export type DocmosisIndexAnswer =
+  | { commit: string; etag: string | null; entries: DocmosisIndexEntry[]; dropped?: number }
+  | { unchanged: true; etag?: string }
+  | { error: "signed_out" | "sso" | "not_found" | "rate_limited" | "failed"; detail?: string; sso_url?: string; reset_at?: string };
+
+/** One of a conversation's markdown documents, which the person and the session both edit. */
 export type Artefact = {
   title: string | null;
   markdown: string;
@@ -244,12 +255,29 @@ export type ArtefactBody = {
 
 export type ArtefactResponse = { version: number };
 
+/** What a document is for: a plain document, a ticket for the person's ticket tool, or a Confluence page. */
+export type ArtefactKind = "document" | "ticket" | "confluence";
+
+/** One document, as `GET …/artefacts/{id}` returns it. */
+export type ArtefactById = Artefact & { id: string; kind: ArtefactKind };
+
+/** One entry of `GET …/artefacts`: a document without its markdown. */
+export type ArtefactSummary = Omit<ArtefactById, "markdown">;
+
+export type ArtefactList = { artefacts: ArtefactSummary[] };
+
+export type ArtefactCreateBody = { kind: ArtefactKind; title?: string; markdown: string };
+
+export type ArtefactCreated = { id: string; version: number };
+
 /**
  * A conversation's slide deck, as `GET …/deck` returns it: an outline in the slides plugin's shape whose pictures are
  * `{asset: "sha256:<hex>"}` rather than paths. Kept as `unknown` here, because the hub checks it and the plugin
  * builds it; this client only moves it and rewrites its pictures.
  */
 export type Deck = {
+  /** Absent from a hub older than several decks, and from the answer for a conversation with none. */
+  id?: string;
   title: string | null;
   outline: DeckOutline | null;
   version: number;
@@ -265,6 +293,22 @@ export type Deck = {
 /** A deck build as the supervisor reads it: the version to build, with its outline as `GET …/deck` returns one. */
 export type DeckBuild = { job_id: string; conversation_id: string; version: number; outline: DeckOutline };
 
+/** A pod-job kind's name, as the hub's `src/assistant/pod-jobs.ts` accepts it: dotted lowercase words, 40 at most. */
+export const POD_JOB_KIND_RE = /^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)*$/;
+export const MAX_POD_JOB_KIND = 40;
+
+/**
+ * The most client features the hub takes in one claim, as its `src/agents/client-features.ts` has it: a claim over it
+ * refuses the whole status report or registration with 400, so this build's claim must stay within it.
+ */
+export const MAX_CLIENT_FEATURES = 50;
+
+/** A pod job the sessions stream sent: one of the kinds in `src/assistant/pod-job-handlers.ts`. See "Pod jobs". */
+export type PodJobFrame = { job_id: string; kind: string; conversation_id: string; agent_id?: string; args: unknown };
+
+/** The supervisor's answer to a pod job: the handler's result, or an error code and words for the person. */
+export type PodJobAnswer = { status: "done"; result: unknown } | { status: "failed"; error: string; detail?: string };
+
 export type DeckImage = { asset?: string; path?: string; alt?: string; decorative?: boolean };
 export type DeckSlide = { id?: string; layout?: string; title?: string; image?: DeckImage; [field: string]: unknown };
 export type DeckOutline = { title?: string; slides?: DeckSlide[]; [field: string]: unknown };
@@ -277,7 +321,19 @@ export type DeckBody = {
   summary?: string;
 };
 
-export type DeckResponse = { version: number; revision?: number; outline: DeckOutline };
+export type DeckResponse = { id?: string; version: number; revision?: number; outline: DeckOutline };
+
+/** One entry of `GET …/decks`: a deck without its outline. */
+export type DeckSummary = {
+  id: string;
+  title: string;
+  version: number;
+  revision: number;
+  updated_by: "user" | "agent" | null;
+  pptx: boolean;
+};
+
+export type DeckList = { decks: DeckSummary[] };
 
 export type DeckAssetResponse = { asset: string };
 
@@ -291,6 +347,8 @@ export type DocmosisSchema = { root: Extract<DocmosisField, { kind: "object" }>;
 
 /** A conversation's Docmosis template at one version, as `GET …/docmosis` returns it. */
 export type DocmosisResponse = {
+  /** Present when the template was read by its id. */
+  id?: string;
   version: number;
   revision: number;
   name: string;
@@ -303,6 +361,8 @@ export type DocmosisResponse = {
   updated_at: string;
   has_pdf: boolean;
   render_error: { short: string; long: string } | null;
+  /** The library path a version loaded from the template library came from; null for every other version, absent from an older hub. */
+  source_path?: string | null;
   /** Only when a version other than the latest was asked for: the version the template is at now. */
   current_version?: number;
 };
@@ -316,11 +376,76 @@ export type DocmosisBody = {
   /** The revision read with the version, so a person's amend since is refused rather than overwritten. */
   base_revision?: number;
   summary?: string;
+  /** The `docmosis.load` pod job this write loads a template for; see "Docmosis template library" in docs/agent-api.md. */
+  pick?: string;
 };
 
-export type DocmosisWritten = { version: number; revision: number };
+/**
+ * What a write of a template answers: the version and revision written. A create adds the new template's `id`, and a
+ * `pick` an earlier run already loaded answers, in `loaded`, with the template it wrote as `item`.
+ */
+export type DocmosisWritten = { version: number; revision: number; id?: string; item?: string };
+
+/** One entry of `GET …/docmosis-templates`: a template without its schema and data. */
+export type DocmosisSummary = { id: string; name: string; version: number; revision: number; updated_by: "agent" | "user" };
+
+export type DocmosisList = { docmosis_templates: DocmosisSummary[] };
 
 export type DocmosisAssetResponse = { asset: string };
+
+export type NotifyTemplateType = "email" | "sms" | "letter";
+
+/** Where a Notify draft came from: the template as Notify held it when the pod read it. */
+export type NotifySource = {
+  product: string;
+  template_id: string;
+  service_id: string;
+  type: NotifyTemplateType;
+  name: string;
+  notify_version: number;
+  notify_subject: string | null;
+  notify_body: string;
+  /** Notify's own preview with no personalisation: HTML for an email, text otherwise; null when too big to keep. */
+  notify_preview: string | null;
+};
+
+/** A conversation's GOV.UK Notify template at one version, as `GET …/notify` returns it. */
+export type NotifyResponse = NotifySource & {
+  version: number;
+  revision: number;
+  /** The draft: null for a text message. */
+  subject: string | null;
+  body: string;
+  data: Record<string, unknown>;
+  by: "agent" | "user";
+  summary: string | null;
+  updated_at: string;
+  /** Only when a version other than the latest was asked for: the version the template is at now. */
+  current_version?: number;
+};
+
+export type NotifyBody = {
+  subject: string | null;
+  body: string;
+  data: Record<string, unknown>;
+  base_version: number;
+  /** The revision read with the version, so a person's amend since is refused rather than overwritten. */
+  base_revision?: number;
+  summary?: string;
+  /** Needed for the first version; left out, the version keeps the source of the one it is based on. */
+  source?: NotifySource;
+  /** Sent only for the panel's picker, whose load the owner asked for. */
+  by?: "user";
+};
+
+export type NotifyWritten = { version: number; revision: number };
+
+/** One entry of `GET …/notify-templates`: a template without its text. */
+export type NotifySummary = { id: string; name: string; version: number; revision: number; updated_by: "agent" | "user" | null };
+
+export type NotifyList = { notify_templates: NotifySummary[] };
+
+export type NotifyCreated = NotifyWritten & { id: string };
 
 /** One conversation of a virtual agent, as `conversations` lists them for the uploads reconciliation. */
 export type ConversationSummary = { id: string };
@@ -373,3 +498,36 @@ export type MicrosoftTokenResponse = { access_token: string; expires_at: string;
 export type LoginCodeResponse = { code: string };
 /** Whether the owner has asked for a sign-in of this kind; see `GET /api/virtual/{id}/login/{kind}`. */
 export type SignInRequestResponse = { requested: boolean };
+
+export type VideoChapter = { at: number; title: string };
+
+/** The body of `POST …/video`: what the panel shows beside the player. The MP4 itself goes to the URL the answer names. */
+export type VideoBeginBody = {
+  name: string;
+  bytes: number;
+  captions?: string;
+  chapters: VideoChapter[];
+  coverage: string;
+  coverage_summary?: string;
+  content_mismatches: string;
+  jira_key?: string;
+};
+
+export type VideoBegun = { video_id: string; upload_url: string; expires_in: number };
+
+/** The conversation's ready video as `GET …/video` answers it. */
+export type VideoResponse = {
+  video_id: string;
+  name: string;
+  bytes: number;
+  has_captions: boolean;
+  chapters: VideoChapter[];
+  coverage: string;
+  coverage_summary: string | null;
+  content_mismatches: string;
+  jira_key: string | null;
+  posted: { key: string; url: string; at: string } | null;
+  finished_at: string;
+  /** Where the MP4 can be downloaded from, for a limited time. */
+  download_url: string;
+};

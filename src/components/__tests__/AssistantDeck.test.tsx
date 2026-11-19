@@ -11,6 +11,7 @@ import { deckAssetUrl, deckPptxUrl, deckUrl } from "@/components/assistant/deck-
 import { nestRuns, SlideCanvas, slideTitle } from "@/components/assistant/SlideCanvas";
 
 const CONVERSATION = "22222222-2222-2222-2222-222222222222";
+const ITEM = "55555555-5555-5555-5555-555555555555";
 const SHA = "c".repeat(64);
 const DECORATIVE = "d".repeat(64);
 
@@ -51,6 +52,7 @@ function outline(overrides: Partial<DeckOutline> = {}): DeckOutline {
 
 function deck(overrides: Partial<DeckView> = {}): DeckView {
   return {
+    id: ITEM,
     title: "Ways of working",
     outline: outline(),
     version: 7,
@@ -64,7 +66,7 @@ function deck(overrides: Partial<DeckView> = {}): DeckView {
 
 /** What the page hands the panel: the deck's version and no outline. */
 function summary(overrides: Partial<DeckSummary> = {}): DeckSummary {
-  return { title: "Ways of working", version: 7, revision: 7, updatedBy: "agent", pptx: true, ...overrides };
+  return { id: ITEM, title: "Ways of working", version: 7, revision: 7, updatedBy: "agent", pptx: true, ...overrides };
 }
 
 /** The outline route, answering each read with the next of `answers` and the last one after that. */
@@ -269,7 +271,7 @@ describe("DeckViewer", () => {
 
   it("should link the latest version's .pptx when the hub holds it, and say it is not built when it does not", () => {
     viewer();
-    expect(screen.getByRole("link", { name: "Download .pptx" }).getAttribute("href")).toBe(deckPptxUrl(CONVERSATION, 7));
+    expect(screen.getByRole("link", { name: "Download .pptx" }).getAttribute("href")).toBe(deckPptxUrl(CONVERSATION, ITEM, 7));
     cleanup();
 
     viewer({ deck: deck({ pptx: false }) });
@@ -340,6 +342,93 @@ describe("DeckPanel", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it("should offer no Remove when the page gives no way to remove", async () => {
+    serving(deck());
+    render(<DeckPanel conversationId={CONVERSATION} deck={summary()} onClose={() => undefined} narrow={false} announce={() => undefined} />);
+    await settle();
+
+    expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
+  });
+
+  it("should ask before removing and remove nothing when the person cancels", async () => {
+    serving(deck());
+    const onRemove = vi.fn(async () => null);
+    render(
+      <DeckPanel conversationId={CONVERSATION} deck={summary()} onClose={() => undefined} narrow={false} announce={() => undefined} onRemove={onRemove} />
+    );
+    await settle();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    expect(screen.getByRole("alertdialog", { name: "Remove these slides?" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(onRemove).not.toHaveBeenCalled();
+  });
+
+  it("should remove the deck once the person confirms", async () => {
+    serving(deck());
+    const onRemove = vi.fn(async () => null);
+    render(
+      <DeckPanel conversationId={CONVERSATION} deck={summary()} onClose={() => undefined} narrow={false} announce={() => undefined} onRemove={onRemove} />
+    );
+    await settle();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await act(async () => {
+      fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Remove" }));
+    });
+
+    expect(onRemove).toHaveBeenCalledTimes(1);
+  });
+
+  it("should say why when the deck could not be removed", async () => {
+    serving(deck());
+    render(
+      <DeckPanel
+        conversationId={CONVERSATION}
+        deck={summary()}
+        onClose={() => undefined}
+        narrow={false}
+        announce={() => undefined}
+        onRemove={async () => "that deck no longer exists"}
+      />
+    );
+    await settle();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await act(async () => {
+      fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Remove" }));
+    });
+
+    expect(screen.getByRole("alert").textContent).toBe("Could not remove the slides: that deck no longer exists");
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("should say the removal failed when the action throws", async () => {
+    serving(deck());
+    render(
+      <DeckPanel
+        conversationId={CONVERSATION}
+        deck={summary()}
+        onClose={() => undefined}
+        narrow={false}
+        announce={() => undefined}
+        onRemove={async () => {
+          throw new Error("offline");
+        }}
+      />
+    );
+    await settle();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await act(async () => {
+      fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Remove" }));
+    });
+
+    expect(screen.getByRole("alert").textContent).toBe("Could not remove the slides: could not remove the slides");
+  });
+
   it("should cover the page with no resize handle when the screen is narrow", async () => {
     serving(deck());
     render(<DeckPanel conversationId={CONVERSATION} deck={summary()} onClose={() => undefined} narrow announce={() => undefined} />);
@@ -358,7 +447,7 @@ describe("DeckPanel", () => {
     await settle();
 
     expect(reads).toHaveBeenCalledTimes(1);
-    expect(reads.mock.calls[0]?.[0]).toBe(deckUrl(CONVERSATION));
+    expect(reads.mock.calls[0]?.[0]).toBe(deckUrl(CONVERSATION, ITEM));
     expect(reads.mock.calls[0]?.[1]).toMatchObject({ cache: "no-store" });
     expect(screen.getByRole("region", { name: "Slide 1 of 7: Ways of working" })).toBeTruthy();
 
@@ -427,7 +516,7 @@ describe("DeckPanel", () => {
     // The header, the version and the download are the version on screen's, not the page's.
     expect(screen.getByRole("heading", { level: 2, name: "Ways of working" })).toBeTruthy();
     expect(screen.getByText("Version 7")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Download .pptx" }).getAttribute("href")).toBe(deckPptxUrl(CONVERSATION, 7));
+    expect(screen.getByRole("link", { name: "Download .pptx" }).getAttribute("href")).toBe(deckPptxUrl(CONVERSATION, ITEM, 7));
 
     fireEvent.click(within(screen.getByRole("alert")).getByRole("button", { name: "Try again" }));
     await settle();
@@ -457,7 +546,7 @@ describe("SharedDeck", () => {
     vi.useFakeTimers();
     render(<SharedDeck conversationId={CONVERSATION} deck={summary()} />);
     await settle();
-    expect(reads.mock.calls[0]?.[0]).toBe(deckUrl(CONVERSATION));
+    expect(reads.mock.calls[0]?.[0]).toBe(deckUrl(CONVERSATION, ITEM));
 
     expect(screen.getByRole("heading", { level: 2, name: "Ways of working" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Ask about this slide" })).toBeNull();

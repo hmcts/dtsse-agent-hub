@@ -8,7 +8,7 @@ import type { JiraAccess } from "@/components/assistant/JiraExport";
 import type { LookUp } from "@/components/assistant/lookupClient";
 import type { ActionResult } from "@/web/action";
 
-export type ExportToGithubAction = (input: { conversationId: unknown; repo: unknown; project: unknown }) => Promise<ActionResult>;
+export type ExportToGithubAction = (input: { conversationId: unknown; documentId: unknown; repo: unknown; project: unknown }) => Promise<ActionResult>;
 
 export interface GithubExportProps {
   exported: GithubExportView;
@@ -117,6 +117,7 @@ function Picked({
  */
 export function GithubFooter({
   conversationId,
+  documentId,
   exported,
   exportTo,
   defaultRepo,
@@ -124,7 +125,7 @@ export function GithubFooter({
   lookUp,
   saved,
   written
-}: GithubExportProps & { conversationId: string; saved: boolean; written: boolean }) {
+}: GithubExportProps & { conversationId: string; documentId: string; saved: boolean; written: boolean }) {
   const [chosen, setChosen] = useState(() => starting(exported, defaultRepo, defaultProject));
   const [searching, setSearching] = useState<"repo" | "project" | null>(null);
   // The export as the page showed it when the person clicked: until the page shows it changed, the click is what is
@@ -132,12 +133,12 @@ export function GithubFooter({
   const shownExport = exported.status === "failed" ? `failed:${exported.error}` : exported.status;
   const [clickedAt, setClickedAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const hintId = `github-hint-${conversationId}`;
+  const hintId = `github-hint-${documentId}`;
 
   async function start(): Promise<void> {
     setClickedAt(shownExport);
     setError(null);
-    const result = await exportTo({ conversationId, repo: chosen.repo, project: chosen.project });
+    const result = await exportTo({ conversationId, documentId, repo: chosen.repo, project: chosen.project });
     if (!result.ok) {
       setClickedAt(null);
       setError(result.error);

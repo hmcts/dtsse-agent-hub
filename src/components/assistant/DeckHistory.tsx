@@ -23,20 +23,25 @@ import { RESTART_IN_SETTINGS } from "@/web/home";
  * look through every version and download what is already built, and nothing else; the routes refuse the rest anyway.
  */
 
-export function deckVersionsUrl(conversationId: string): string {
-  return `${deckUrl(conversationId)}/versions`;
+export function deckVersionsUrl(conversationId: string, itemId: string): string {
+  return `${deckUrl(conversationId, itemId)}/versions`;
 }
 
-export function deckVersionUrl(conversationId: string, version: number): string {
-  return `${deckUrl(conversationId)}/versions/${version}`;
+export function deckVersionUrl(conversationId: string, itemId: string, version: number): string {
+  return `${deckUrl(conversationId, itemId)}/versions/${version}`;
 }
 
-export function deckBuildUrl(conversationId: string, jobId: string): string {
-  return `${deckUrl(conversationId)}/builds/${encodeURIComponent(jobId)}`;
+export function deckBuildUrl(conversationId: string, itemId: string, jobId: string): string {
+  return `${deckUrl(conversationId, itemId)}/builds/${encodeURIComponent(jobId)}`;
 }
 
 /** The restore server action, handed down from the chat's page, which a shared page never has. */
-export type RestoreDeckAction = (input: { conversationId: unknown; version: unknown; baseVersion: unknown }) => Promise<ActionResult<RestoreDeckResult>>;
+export type RestoreDeckAction = (input: {
+  conversationId: unknown;
+  itemId: unknown;
+  version: unknown;
+  baseVersion: unknown;
+}) => Promise<ActionResult<RestoreDeckResult>>;
 
 const button = "flex h-[30px] shrink-0 items-center gap-1.5 rounded-lg border border-asst-strong px-2.5 text-[13px] hover:bg-asst-field disabled:opacity-40";
 
@@ -73,7 +78,7 @@ async function readJson<T>(url: string, signal?: AbortSignal): Promise<T> {
  * The kept versions, read when the list opens and again whenever the latest version or the revision moves on while it
  * is open: an amend keeps the version and changes its summary and .pptx.
  */
-function useVersions(conversationId: string, latest: number, revision: number, open: boolean) {
+function useVersions(conversationId: string, itemId: string, latest: number, revision: number, open: boolean) {
   const [state, setState] = useState<{ versions: DeckVersionEntry[] | null; failed: boolean }>({ versions: null, failed: false });
   const [attempt, setAttempt] = useState(0);
   // biome-ignore lint/correctness/useExhaustiveDependencies: a newer latest version or revision, or another attempt, is what makes the list worth reading again
@@ -82,7 +87,7 @@ function useVersions(conversationId: string, latest: number, revision: number, o
       return;
     }
     const controller = new AbortController();
-    readJson<DeckVersionEntry[]>(deckVersionsUrl(conversationId), controller.signal).then(
+    readJson<DeckVersionEntry[]>(deckVersionsUrl(conversationId, itemId), controller.signal).then(
       (versions) => setState({ versions, failed: false }),
       () => {
         if (!controller.signal.aborted) {
@@ -91,12 +96,12 @@ function useVersions(conversationId: string, latest: number, revision: number, o
       }
     );
     return () => controller.abort();
-  }, [conversationId, latest, revision, open, attempt]);
+  }, [conversationId, itemId, latest, revision, open, attempt]);
   return { ...state, retry: () => setAttempt((count) => count + 1) };
 }
 
 /** One older version, outline and all; `null` while it is read, and kept once read since a version never changes. */
-function useVersion(conversationId: string, version: number | null) {
+function useVersion(conversationId: string, itemId: string, version: number | null) {
   const [read, setRead] = useState<{ version: DeckVersionView | null; failed: boolean }>({ version: null, failed: false });
   useEffect(() => {
     if (version === null) {
@@ -105,7 +110,7 @@ function useVersion(conversationId: string, version: number | null) {
     }
     const controller = new AbortController();
     setRead({ version: null, failed: false });
-    readJson<DeckVersionView>(deckVersionUrl(conversationId, version), controller.signal).then(
+    readJson<DeckVersionView>(deckVersionUrl(conversationId, itemId, version), controller.signal).then(
       (found) => setRead({ version: found, failed: false }),
       () => {
         if (!controller.signal.aborted) {
@@ -114,13 +119,14 @@ function useVersion(conversationId: string, version: number | null) {
       }
     );
     return () => controller.abort();
-  }, [conversationId, version]);
+  }, [conversationId, itemId, version]);
   return read;
 }
 
 /** An older version in the shape the viewer draws. */
-function asView(version: DeckVersionView): DeckView {
+function asView(itemId: string, version: DeckVersionView): DeckView {
   return {
+    id: itemId,
     title: version.title,
     outline: version.outline,
     version: version.version,
@@ -174,6 +180,7 @@ const NOT_STARTED: Record<"waking" | "unsupported" | "restart_needed" | "assista
  */
 export function DeckDownload({
   conversationId,
+  itemId,
   version,
   pptx,
   canBuild,
@@ -183,6 +190,7 @@ export function DeckDownload({
   pollMs = BUILD_POLL_MS
 }: {
   conversationId: string;
+  itemId: string;
   version: number;
   pptx: boolean;
   canBuild: boolean;
@@ -198,7 +206,7 @@ export function DeckDownload({
   pollMs?: number;
 }) {
   const [building, setBuilding] = useState<Building>({ state: "idle" });
-  const href = deckPptxUrl(conversationId, version);
+  const href = deckPptxUrl(conversationId, itemId, version);
   const sessionBuildsUntil = latest && writtenAt !== null ? Date.parse(writtenAt) + LATEST_BUILD_GRACE_MS : 0;
   const [, rerender] = useState(0);
 
@@ -212,7 +220,7 @@ export function DeckDownload({
   }, [pptx, sessionBuildsUntil]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: another version starts again from what the hub holds of it
-  useEffect(() => setBuilding({ state: "idle" }), [conversationId, version]);
+  useEffect(() => setBuilding({ state: "idle" }), [conversationId, itemId, version]);
 
   const finished = useCallback(
     (answer: DeckBuildView) => {
@@ -258,7 +266,7 @@ export function DeckDownload({
         return;
       }
       try {
-        const answer = await readJson<DeckBuildView>(deckBuildUrl(conversationId, building.jobId), controller.signal);
+        const answer = await readJson<DeckBuildView>(deckBuildUrl(conversationId, itemId, building.jobId), controller.signal);
         if (controller.signal.aborted) {
           return;
         }
@@ -288,7 +296,7 @@ export function DeckDownload({
       controller.abort();
       clearTimeout(timer);
     };
-  }, [announce, building, conversationId, finished, pollMs, version]);
+  }, [announce, building, conversationId, finished, itemId, pollMs, version]);
 
   async function prepare(): Promise<void> {
     setBuilding({ state: "asking" });
@@ -641,9 +649,9 @@ export function DeckHistory({
   const [restoring, setRestoring] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
   const listId = useId();
-  const versions = useVersions(conversationId, latest.version, latest.revision ?? 0, open);
+  const versions = useVersions(conversationId, latest.id, latest.version, latest.revision ?? 0, open);
   const viewing = picked !== null && picked !== latest.version ? picked : null;
-  const older = useVersion(conversationId, viewing);
+  const older = useVersion(conversationId, latest.id, viewing);
 
   function pick(version: number): void {
     setComparing(false);
@@ -676,7 +684,7 @@ export function DeckHistory({
     setRestoring(true);
     setRefusal(null);
     try {
-      const result = await restoreAction({ conversationId, version, baseVersion: latest.version }).catch(() => undefined);
+      const result = await restoreAction({ conversationId, itemId: latest.id, version, baseVersion: latest.version }).catch(() => undefined);
       if (result === undefined) {
         setRefusal(`Couldn't restore version ${version}. Try again.`);
       } else if (!result.ok) {
@@ -710,7 +718,7 @@ export function DeckHistory({
     </button>
   );
 
-  const view = viewing === null ? latest : older.version === null ? null : asView(older.version);
+  const view = viewing === null ? latest : older.version === null ? null : asView(latest.id, older.version);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -780,6 +788,7 @@ export function DeckHistory({
           download={
             <DeckDownload
               conversationId={conversationId}
+              itemId={latest.id}
               version={view.version}
               pptx={view.pptx}
               canBuild={owner}

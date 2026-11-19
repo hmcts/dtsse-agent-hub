@@ -45,6 +45,8 @@ export type {
   CreateTmuxOptions,
   FetchAttachmentsOptions,
   LookupFrame,
+  PodJobContext,
+  PodJobHandler,
   ProgramCheck,
   ReadAttachments,
   ReconcileUploadsOptions,
@@ -67,6 +69,7 @@ export {
   conversationDir,
   createAssistantSupervisor,
   createLookupRunner,
+  createPodJobRunner,
   createTmux,
   createWelshRunner,
   DEFAULT_IDLE_MINUTES,
@@ -78,6 +81,8 @@ export {
   MAX_ATTACHMENTS,
   MAX_SESSIONS_LIMIT,
   maxSessions,
+  POD_JOB_HANDLERS,
+  PodJobError,
   PROMPT_FILE,
   parseAttachments,
   parseLookupFrame,
@@ -178,7 +183,7 @@ export {
   taggedPostEnvelope
 } from "./envelope.ts";
 export type { ClientFeature } from "./features.ts";
-export { CLIENT_FEATURES } from "./features.ts";
+export { CLIENT_FEATURES, claimedFeatures, podJobFeatures } from "./features.ts";
 export type { DirectEventAuthor, DirectEventMessage } from "./frames.ts";
 export {
   parseAssistantFrame,
@@ -478,7 +483,13 @@ export type {
   ApiErrorBody,
   Artefact,
   ArtefactBody,
+  ArtefactById,
+  ArtefactCreateBody,
+  ArtefactCreated,
+  ArtefactKind,
+  ArtefactList,
   ArtefactResponse,
+  ArtefactSummary,
   ConfluenceExportReport,
   ConfluencePageFound,
   CredentialKind,

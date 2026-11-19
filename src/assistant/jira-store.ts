@@ -1,5 +1,6 @@
 import { HttpError } from "../agent-api/http.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
+import { exportableDocument } from "./artefact-store.ts";
 import { announce, type ConversationRow } from "./conversation-row.ts";
 import { GITHUB_SELECT } from "./github.ts";
 import { isJiraProject, JIRA_EXPORT_TIMEOUT_MS, JIRA_SELECT, type JiraExportView, jiraExportView } from "./jira.ts";
@@ -7,18 +8,18 @@ import { hasPod } from "./pods.ts";
 import { MAX_JIRA_ERROR } from "./schemas.ts";
 
 /**
- * A conversation's Jira export as the hub keeps it: claimed when its owner asks, carried to the conversation's
+ * A document's Jira export as the hub keeps it: claimed when its owner asks, carried to the conversation's
  * session with each message while it is pending, and recorded when the session reports what came of it.
  */
 
-export async function readJiraExport(db: Database, conversationId: string, now: Date = new Date()): Promise<JiraExportView> {
-  const row = await db.assistantConversation.findUnique({ where: { id: conversationId }, select: JIRA_SELECT });
+export async function readJiraExport(db: Database, documentId: string, now: Date = new Date()): Promise<JiraExportView> {
+  const row = await db.assistantDocument.findUnique({ where: { id: documentId }, select: JIRA_SELECT });
   return row === null ? { status: "none" } : jiraExportView(row, now);
 }
 
 /**
- * Starts an export of the conversation's document to `project`'s backlog, for its session to carry out. Refused when
- * the conversation already has a ticket, or an export still pending, so a second click or tab cannot ask for a second
+ * Starts an export of one of the conversation's documents, as `exportableDocument` allows, to `project`'s backlog, for its session to carry out. Refused when
+ * the document already has a ticket, or an export still pending, so a second click or tab cannot ask for a second
  * issue: the check and the write are one statement. The caller then asks the session, which wakes it.
  *
  * Refused outright for a conversation with no pod, before anything is written, as `requestWake` refuses a wake. The
@@ -31,6 +32,7 @@ export async function readJiraExport(db: Database, conversationId: string, now: 
 export async function requestJiraExport(
   prisma: PrismaClient,
   conversation: Pick<ConversationRow, "id" | "virtualAgentId" | "ownerOid">,
+  document: unknown,
   project: unknown,
   now: Date = new Date()
 ): Promise<void> {
@@ -42,13 +44,14 @@ export async function requestJiraExport(
   }
   const staleBefore = new Date(now.getTime() - JIRA_EXPORT_TIMEOUT_MS);
   await prisma.$transaction(async (tx) => {
+    const documentId = await exportableDocument(tx, conversation, document, "ticket");
     const updated = await tx.$executeRaw`
-      UPDATE assistant_conversation
+      UPDATE assistant_document
          SET jira_export_id = gen_random_uuid(), jira_project = ${project}, jira_status = 'pending', jira_error = NULL,
-             jira_requested_at = ${now}, updated_at = ${now}
-       WHERE id = ${conversation.id}::uuid
+             jira_requested_at = ${now}
+       WHERE id = ${documentId}::uuid
          AND jira_key IS NULL
-         AND artefact_version > 0
+         AND version > 0
          AND (jira_status IS DISTINCT FROM 'pending' OR jira_requested_at < ${staleBefore})
          -- One ticket a document, whichever tool made it: a person who has since switched to Jira is not offered a
          -- second for a document already on GitHub, or on its way there.
@@ -56,20 +59,14 @@ export async function requestJiraExport(
          AND (github_status IS DISTINCT FROM 'pending' OR github_requested_at < ${staleBefore})
     `;
     if (updated === 0) {
-      const row = await tx.assistantConversation.findUnique({
-        where: { id: conversation.id },
-        select: { artefactVersion: true, ...JIRA_SELECT, ...GITHUB_SELECT }
-      });
-      if (row === null) {
-        throw new HttpError(404, "that conversation no longer exists");
-      }
+      const row = await tx.assistantDocument.findUniqueOrThrow({ where: { id: documentId }, select: { version: true, ...JIRA_SELECT, ...GITHUB_SELECT } });
       if (row.jiraKey !== null) {
         throw new HttpError(409, `this document is already in Jira as ${row.jiraKey}`);
       }
       if (row.githubNumber !== null) {
         throw new HttpError(409, `this document is already on GitHub as ${row.githubRepo}#${row.githubNumber}`);
       }
-      if (row.artefactVersion === 0) {
+      if (row.version === 0) {
         throw new HttpError(409, "write the document before exporting it");
       }
       throw new HttpError(409, "this document is already being exported");
@@ -81,22 +78,19 @@ export async function requestJiraExport(
 export type JiraExportResult = { export_id: string; key: string } | { export_id: string; error: string };
 
 /**
- * The session's result for an export. Kept only for the conversation's current export, and never over a key: a
+ * The session's result for an export, found by its id among the conversation's documents. Kept only for that document's current export, and never over a key: a
  * report for an export the person has since retried, or a second report, changes nothing.
  */
 export async function recordJiraExport(
   prisma: PrismaClient,
   conversation: Pick<ConversationRow, "id" | "virtualAgentId" | "ownerOid">,
-  result: JiraExportResult,
-  now: Date = new Date()
+  result: JiraExportResult
 ): Promise<void> {
-  const where = { id: conversation.id, jiraExportId: result.export_id, jiraKey: null };
+  const where = { conversationId: conversation.id, jiraExportId: result.export_id, jiraKey: null };
   const data =
-    "key" in result
-      ? { jiraStatus: "done", jiraKey: result.key, jiraError: null, updatedAt: now }
-      : { jiraStatus: "failed", jiraError: result.error.slice(0, MAX_JIRA_ERROR), updatedAt: now };
+    "key" in result ? { jiraStatus: "done", jiraKey: result.key, jiraError: null } : { jiraStatus: "failed", jiraError: result.error.slice(0, MAX_JIRA_ERROR) };
   await prisma.$transaction(async (tx) => {
-    const { count } = await tx.assistantConversation.updateMany({ where, data });
+    const { count } = await tx.assistantDocument.updateMany({ where, data });
     if (count > 0) {
       await announce(tx, conversation);
     }

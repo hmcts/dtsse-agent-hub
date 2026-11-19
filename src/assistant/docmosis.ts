@@ -4,7 +4,7 @@ import { jsonbText } from "./deck.ts";
 
 /**
  * A conversation's Docmosis template as the hub keeps it: the .docx, the form schema `docmosis schema` extracted from
- * it (dtsse-docmosis-tools' `inferSchema`), the data the form holds and the PDF rendered from them. The .docx is named
+ * it (dtsse-ide-tooling's `inferSchema`), the data the form holds and the PDF rendered from them. The .docx is named
  * by the SHA-256 of bytes the hub holds, as a deck's pictures are. See "Docmosis templates" in docs/agent-api.md.
  */
 
@@ -19,6 +19,12 @@ export const MAX_SUMMARY = 200;
 /** How many versions are kept, and how many of the newest keep their PDF. */
 export const KEEP_VERSIONS = 50;
 export const KEEP_PDF = 10;
+
+/**
+ * Refused for a conversation whose pod runs a client older than `items`, which reads and writes only the primary
+ * template: a second one would be a template its session never sees, and a load for it would replace the primary.
+ */
+export const ITEMS_CREATE_REFUSED_DOCMOSIS = "your assistant needs an update to hold more than one Docmosis template; it gets one the next time it restarts";
 /** Object levels in a schema, the root being the first; an array's item is one more. */
 export const MAX_SCHEMA_DEPTH = 20;
 export const MAX_PROPERTIES = 500;
@@ -132,7 +138,8 @@ export const docmosisPutBody = z.object({
   data: z.unknown(),
   base_version: z.number().int().nonnegative(),
   base_revision: z.number().int().nonnegative().optional(),
-  summary: storableText(MAX_SUMMARY).optional()
+  summary: storableText(MAX_SUMMARY).optional(),
+  pick: z.uuid({ message: "must be the id of the template library pick this write loads" }).optional()
 });
 
 export interface DocmosisPut {
@@ -143,6 +150,8 @@ export interface DocmosisPut {
   base_version: number;
   base_revision?: number;
   summary?: string;
+  /** The `docmosis.load` pod job this write loads a template for, which records it as the person's own pick. */
+  pick?: string;
 }
 
 export type Checked<T> = { ok: true; value: T } | { ok: false; error: string };

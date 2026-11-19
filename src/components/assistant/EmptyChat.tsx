@@ -117,14 +117,19 @@ export function EmptyChat({
       return opened.current;
     }
     opening.current ??= (async () => {
-      const result = await actions.open({ product });
-      if (!result.ok) {
-        // Cleared so the next attempt tries again rather than replaying this failure for the rest of the session.
+      try {
+        const result = await actions.open({ product });
+        if (!result.ok) {
+          throw new Error(result.error);
+        }
+        opened.current = result.id;
+        return result.id;
+      } catch (error) {
+        // Cleared however it failed — refused, or the call itself never came back — so the next attempt tries again
+        // rather than replaying this failure for the rest of the session.
         opening.current = null;
-        throw new Error(result.error);
+        throw error;
       }
-      opened.current = result.id;
-      return result.id;
     })();
     return await opening.current;
   }

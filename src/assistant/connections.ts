@@ -59,6 +59,11 @@ export interface Connector {
    * someone who has run that themselves can paste the token it printed instead.
    */
   relays: boolean;
+  /**
+   * Where the thing to paste comes from, in words for someone who has never made one, with a link to the page it is
+   * made on when there is one. `null` for a kind with nothing to paste.
+   */
+  help: { text: string; link: { href: string; label: string } | null } | null;
 }
 
 /**
@@ -70,11 +75,28 @@ export interface Connector {
  * missing entry here is a credential the hub can wait for and no surface can show.
  */
 export const CONNECTORS = {
-  github: { name: "GitHub", initial: "G", desc: "Read repositories and open pull requests", paste: null, relays: true },
-  azure: { name: "Azure", initial: "Az", desc: "Your HMCTS account, for pipelines and environments (optional)", paste: null, relays: true },
-  atlassian: { name: "Atlassian", initial: "A", desc: "Jira tickets and Confluence pages (optional)", paste: null, relays: true },
-  jenkins: { name: "Jenkins", initial: "J", desc: "Builds and pipelines on Jenkins (optional)", paste: "Jenkins API token", relays: false },
-  claude: { name: "Claude", initial: "C", desc: "Your Claude licence", paste: "Claude token", relays: true },
+  github: { name: "GitHub", initial: "G", desc: "Read repositories and open pull requests", paste: null, relays: true, help: null },
+  azure: { name: "Azure", initial: "Az", desc: "Your HMCTS account, for pipelines and environments (optional)", paste: null, relays: true, help: null },
+  atlassian: { name: "Atlassian", initial: "A", desc: "Jira tickets and Confluence pages (optional)", paste: null, relays: true, help: null },
+  jenkins: {
+    name: "Jenkins",
+    initial: "J",
+    desc: "Builds and pipelines on Jenkins (optional)",
+    paste: "Jenkins API token",
+    relays: false,
+    help: {
+      text: "Sign in to Jenkins, select your name at the top right, then Security, and add a new API token. Copy it straight away: Jenkins shows it only once.",
+      link: { href: "https://build.hmcts.net/", label: "Open Jenkins" }
+    }
+  },
+  claude: {
+    name: "Claude",
+    initial: "C",
+    desc: "Your Claude licence",
+    paste: "Claude token",
+    relays: true,
+    help: { text: "On a computer with Claude Code, run claude setup-token in a terminal, sign in, and paste the token it prints.", link: null }
+  },
   // Neither is a sign-in: both are kept beside them because they may hold private context, and there is nothing to
   // connect for either, so no surface offers a row for them.
   claude_md: null,
@@ -609,6 +631,19 @@ export function offeredConnections(
     }
   }
   return rows;
+}
+
+/**
+ * What the getting-ready screen says beside its held-back Start button: the needed connections still missing, by
+ * name, so the person knows what is between them and their chats rather than being told only that something is.
+ *
+ * The button is held by the server's word that the person has not onboarded, and `stored` is the page's list of what
+ * is saved, which can arrive first. When that list already has everything, the gap is the hub catching up, so the line
+ * says so rather than asking for a connection the person has made.
+ */
+export function stillNeededLine(needed: readonly CredentialKind[], stored: ReadonlySet<CredentialKind>): string {
+  const names = needed.filter((kind) => !stored.has(kind)).map((kind) => CONNECTORS[kind]?.name ?? kind);
+  return names.length === 0 ? "Checking your sign-ins. This takes a moment." : `Connect ${inWords(names)} to start.`;
 }
 
 /** "A", "A and B", "A, B and C". */

@@ -17,6 +17,7 @@ import {
   RepoSelect,
   Step,
   ToolMessage,
+  useStepsTotal,
   useWelshJob
 } from "@/components/assistant/WelshParts";
 import type { WelshClient } from "@/components/assistant/welshClient";
@@ -66,6 +67,10 @@ export function WelshReturn({ product, repos, client }: Readonly<{ product: stri
     }
   }
 
+  // Known once the spreadsheet is checked: with nothing usable it ends there, and putting the Welsh into the code is a
+  // step only for a service with repos.
+  useStepsTotal(view === null ? null : usableRows(view) === 0 ? 3 : repos.length > 0 ? 5 : 4);
+
   return (
     <>
       <UploadStep file={file} busy={busy} uploading={uploading} error={uploadError} input={input} onChoose={choose} onStartAgain={startAgain} />
@@ -89,7 +94,11 @@ export function WelshReturn({ product, repos, client }: Readonly<{ product: stri
           choices={[]}
           start="Put them into the code"
           client={client}
-          before={repos.length > 1 ? <RepoSelect repos={repos} value={repo} onChange={setRepo} label="Repo to put them in" /> : null}
+          before={
+            repos.length > 1 ? (
+              <RepoSelect repos={repos} value={repo} onChange={setRepo} label="Which part of the service (code repository) to put them in" />
+            ) : null
+          }
         />
       ) : null}
     </>
@@ -210,7 +219,7 @@ function AddStep({
           </p>
         </div>
       ) : null}
-      <JobStatus state={state} working="Adding it to the catalogue…" />
+      <JobStatus busy={busy} state={state} working="Adding it to the catalogue…" />
       {view ? <AddedSummary view={view} files={files} /> : null}
     </Step>
   );
@@ -231,8 +240,11 @@ function AddedSummary({ view, files }: Readonly<{ view: ImportView; files: Param
           "Nothing new for the catalogue, so no pull request was needed."
         )}
       </p>
-      {files.length > 0 ? <p className="text-xs text-asst-muted">Send the queries back to the Welsh unit:</p> : null}
-      <Downloads files={files} label="Queries for the Welsh Language Unit" />
+      <Downloads
+        files={files}
+        label="Queries for the Welsh Language Unit"
+        next="These are the rows the catalogue could not take as they were. Email the spreadsheet back to the Welsh Language Unit so they can answer them."
+      />
     </div>
   );
 }

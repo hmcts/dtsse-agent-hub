@@ -349,6 +349,15 @@ export function canManageVirtualAgent(actorOid: string, virtualAgent: { ownerOid
 }
 
 /**
+ * Whether `actorOid` may read a template library index, or answer a check of it: its owner alone, for the person
+ * opening it and for the pod answering, whose owner is the actor. The index is what the owner's own GitHub sign-in
+ * could see of a private repository, so a list of it is theirs as much as the repository access that made it.
+ */
+export function canUseDocmosisLibrary(actorOid: string, index: { ownerOid: string }): boolean {
+  return isOwner(actorOid, index);
+}
+
+/**
  * Only its owner opens a virtual agent's web servers through the viewer, as only they see its ports: a server there
  * runs as the owner, with their GitHub and Azure access, and may serve what it read with them.
  */
@@ -457,6 +466,78 @@ export function canReadDocmosis(access: ConversationAccess): boolean {
  */
 export function canChangeDocmosis(access: ConversationAccess): boolean {
   return access === "owner";
+}
+
+/**
+ * Whether the viewer may read a conversation's GOV.UK Notify template in the browser — the draft, the personalisation,
+ * Notify's preview and the kept versions — given what `conversationAccess` answered for them: its owner, and anyone it
+ * is shared with or offered to, as for the Docmosis template. Read-only for all but the owner.
+ */
+export function canReadNotify(access: ConversationAccess): boolean {
+  return access === "owner" || access === "reader";
+}
+
+/**
+ * Whether the viewer may change a conversation's Notify template from the browser, which saves a version of it: its
+ * owner alone, since a reader would be writing to someone else's conversation. Loading a template from Notify is a pod
+ * job, which `canRequestPodJob` already keeps to the owner.
+ */
+export function canChangeNotify(access: ConversationAccess): boolean {
+  return access === "owner";
+}
+
+/**
+ * Whether the viewer may watch a conversation's journey video in the browser, with its captions, chapters and reports,
+ * given what `conversationAccess` answered for them: its owner, and anyone it is shared with or offered to.
+ */
+export function canReadVideo(access: ConversationAccess): boolean {
+  return access === "owner" || access === "reader";
+}
+
+/**
+ * Whether the viewer may post a conversation's video to Jira, which attaches it as the person: its owner alone. The
+ * post is a pod job, which `canRequestPodJob` keeps to the owner; this is what the panel offers the button on.
+ */
+export function canPostVideo(access: ConversationAccess): boolean {
+  return access === "owner";
+}
+
+/**
+ * Whether the viewer may have a conversation's pod run a pod job (see "Pod jobs" in docs/agent-api.md), given what
+ * `conversationAccess` answered for them: its owner alone, for every kind. A job runs in the owner's pod with the
+ * owner's own `gh` and `az` sign-ins, so a reader asking for one would be borrowing someone else's credentials.
+ */
+export function canRequestPodJob(access: ConversationAccess): boolean {
+  return access === "owner";
+}
+
+/**
+ * Whether the viewer may read a pod job back: the person it was run for, whose credentials made the result. Read from
+ * the job's own `owner_oid` rather than the conversation's shares, so sharing a chat never shares what a job found.
+ */
+export function canReadPodJob(viewerOid: string, job: { ownerOid: string }): boolean {
+  return isOwner(viewerOid, job);
+}
+
+/**
+ * Whether a session's write of a Docmosis template may be recorded as the person's own pick from their template
+ * library: the job it names was asked for in this conversation, by the person who owns it, the conversation is still
+ * on the virtual agent the job was sent to, and the agent writing is one that virtual agent's sessions registered. The
+ * job's id reaches only the owner's browser and their pod, never a session, so a session cannot claim a pick it was
+ * not handed; this is what stops a job of one chat crediting a write to another, or to somebody else's, and a job
+ * sent to an assistant since replaced being finished through another.
+ */
+export function canRecordPickAsOwner(
+  job: { conversationId: string; ownerOid: string; virtualAgentId: string },
+  conversation: { id: string; ownerOid: string; virtualAgentId: string | null },
+  agent: { virtualAgentId: string | null }
+): boolean {
+  return (
+    job.conversationId === conversation.id &&
+    isOwner(job.ownerOid, conversation) &&
+    conversation.virtualAgentId === job.virtualAgentId &&
+    agent.virtualAgentId === job.virtualAgentId
+  );
 }
 
 /**

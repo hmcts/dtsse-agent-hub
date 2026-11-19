@@ -6,7 +6,10 @@ const store = vi.hoisted(() => ({
   writeAgentDocmosis: vi.fn(),
   putDocmosisAsset: vi.fn(),
   readDocmosisDocx: vi.fn(),
-  putDocmosisPdf: vi.fn()
+  putDocmosisPdf: vi.fn(),
+  listDocmosisSummaries: vi.fn(),
+  docmosisSummaryJson: vi.fn((summary: unknown) => summary),
+  removeDocmosisTemplate: vi.fn()
 }));
 
 vi.mock("@/store/prisma", () => ({ prisma: {} }));
@@ -20,6 +23,11 @@ vi.mock("@/assistant/docmosis-store", () => store);
 const assets = await import("../app/api/agent/[agentId]/docmosis/assets/[sha256]/route.ts");
 const root = await import("../app/api/agent/[agentId]/docmosis/route.ts");
 const pdf = await import("../app/api/agent/[agentId]/docmosis/versions/[version]/pdf/route.ts");
+const list = await import("../app/api/agent/[agentId]/docmosis-templates/route.ts");
+const one = await import("../app/api/agent/[agentId]/docmosis-templates/[itemId]/route.ts");
+const onePdf = await import("../app/api/agent/[agentId]/docmosis-templates/[itemId]/versions/[version]/pdf/route.ts");
+
+const ITEM = "0f0f0f0f-0f0f-4f0f-8f0f-0f0f0f0f0f0f";
 
 const params = <P>(value: P) => ({ params: Promise.resolve(value) });
 const hex = async (bytes: Uint8Array) => Buffer.from(await crypto.subtle.digest("SHA-256", bytes.slice())).toString("hex");
@@ -48,7 +56,10 @@ async function refusal(call: Promise<unknown>): Promise<HttpError> {
   return error as HttpError;
 }
 
-beforeEach(() => vi.resetAllMocks());
+beforeEach(() => {
+  vi.resetAllMocks();
+  store.docmosisSummaryJson.mockImplementation((summary: unknown) => summary);
+});
 
 describe("PUT /api/agent/{id}/docmosis/assets/{sha256}", () => {
   it("should store a .docx under its digest and answer the reference", async () => {
@@ -88,15 +99,16 @@ describe("PUT /api/agent/{id}/docmosis/assets/{sha256}", () => {
 });
 
 describe("PUT /api/agent/{id}/docmosis", () => {
-  it("should write the version and answer it", async () => {
-    store.writeAgentDocmosis.mockResolvedValue({ version: 1, revision: 0 });
+  it("should write the version through the agent asked for and answer it when the body is valid", async () => {
+    store.writeAgentDocmosis.mockResolvedValue({ id: ITEM, version: 1, revision: 0 });
 
     const response = await root.PUT(request("PUT", JSON.stringify(bodyOf({ summary: "First" }))), params({ agentId: "a" }));
 
     expect(await response.json()).toEqual({ version: 1, revision: 0 });
     expect(store.writeAgentDocmosis).toHaveBeenCalledWith(expect.anything(), {
       conversationId: "conv-1",
-      body: expect.objectContaining({ name: "Claim", summary: "First" })
+      body: expect.objectContaining({ name: "Claim", summary: "First" }),
+      agent: expect.objectContaining({ id: "agent-1" })
     });
   });
 
@@ -124,7 +136,10 @@ describe("GET /api/agent/{id}/docmosis", () => {
 
     expect(await latest.json()).toEqual({ version: 2 });
     expect(await asked.json()).toEqual({ version: 2 });
-    expect(store.docmosisView.mock.calls.map((call) => call[2])).toEqual([undefined, 1]);
+    expect(store.docmosisView.mock.calls.map((call) => [call[2], call[3]])).toEqual([
+      [undefined, undefined],
+      [undefined, 1]
+    ]);
   });
 
   it("should answer 400 for a version that is not a whole number and 404 for none held", async () => {
@@ -144,7 +159,7 @@ describe("PUT /api/agent/{id}/docmosis/versions/{version}/pdf", () => {
     const response = await pdf.PUT(pdfRequest(PDF.slice()), params({ agentId: "a", version: "3" }));
 
     expect(response.status).toBe(204);
-    expect(store.putDocmosisPdf).toHaveBeenCalledWith(expect.anything(), "conv-1", 3, 2, expect.any(Uint8Array));
+    expect(store.putDocmosisPdf).toHaveBeenCalledWith(expect.anything(), "conv-1", undefined, 3, 2, expect.any(Uint8Array));
   });
 
   it("should refuse a version that is not a number, bytes that are not a PDF, and one over 5 MiB", async () => {
@@ -172,5 +187,79 @@ describe("PUT /api/agent/{id}/docmosis/versions/{version}/pdf", () => {
   it.each(["", "?revision=", "?revision=-1", "?revision=x", "?revision=1.5"])("should answer 400 when the revision is %j", async (query) => {
     expect((await refusal(pdf.PUT(pdfRequest(PDF.slice(), query), params({ agentId: "a", version: "3" })))).status).toBe(400);
     expect(store.putDocmosisPdf).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET and POST /api/agent/{id}/docmosis-templates", () => {
+  it("should list every template", async () => {
+    store.listDocmosisSummaries.mockResolvedValue([{ id: ITEM, name: "Claim", version: 2 }]);
+
+    const response = await list.GET(new Request("http://localhost/x"), params({ agentId: "a" }));
+
+    expect(await response.json()).toEqual({ docmosis_templates: [{ id: ITEM, name: "Claim", version: 2 }] });
+  });
+
+  it("should make a new template whatever the conversation holds and answer 201 with its id", async () => {
+    store.writeAgentDocmosis.mockResolvedValue({ id: ITEM, version: 1, revision: 0 });
+
+    const response = await list.POST(request("POST", JSON.stringify(bodyOf())), params({ agentId: "a" }));
+
+    expect(response.status).toBe(201);
+    expect(await response.json()).toEqual({ id: ITEM, version: 1, revision: 0 });
+    expect(store.writeAgentDocmosis).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ conversationId: "conv-1", create: true }));
+  });
+
+  it("should answer 400 when a new template names a base version above 0, and write nothing", async () => {
+    const response = await refusal(list.POST(request("POST", JSON.stringify(bodyOf({ base_version: 3 }))), params({ agentId: "a" })));
+
+    expect(response.status).toBe(400);
+    expect(store.writeAgentDocmosis).not.toHaveBeenCalled();
+  });
+
+  it("should answer 400 when the body to create is refused, and write nothing", async () => {
+    expect((await refusal(list.POST(request("POST", JSON.stringify(bodyOf({ docx: "nope" }))), params({ agentId: "a" })))).status).toBe(400);
+    expect(store.writeAgentDocmosis).not.toHaveBeenCalled();
+  });
+});
+
+describe("/api/agent/{id}/docmosis-templates/{itemId}", () => {
+  it("should read the template it names, with its id", async () => {
+    store.docmosisView.mockResolvedValue({ version: 2 });
+
+    const response = await one.GET(new Request("http://localhost/x?version=1"), params({ agentId: "a", itemId: ITEM }));
+
+    expect(await response.json()).toEqual({ id: ITEM, version: 2 });
+    expect(store.docmosisView).toHaveBeenCalledWith(expect.anything(), "conv-1", ITEM, 1);
+  });
+
+  it("should answer 404 for an id that is not a uuid and for a template the conversation does not hold", async () => {
+    expect((await refusal(one.GET(new Request("http://localhost/x"), params({ agentId: "a", itemId: "nope" })))).status).toBe(404);
+    store.docmosisView.mockResolvedValue(null);
+    expect((await refusal(one.GET(new Request("http://localhost/x"), params({ agentId: "a", itemId: ITEM })))).status).toBe(404);
+  });
+
+  it("should write the template it names", async () => {
+    store.writeAgentDocmosis.mockResolvedValue({ id: ITEM, version: 3, revision: 0 });
+
+    const response = await one.PUT(request("PUT", JSON.stringify(bodyOf({ base_version: 2 }))), params({ agentId: "a", itemId: ITEM }));
+
+    expect(await response.json()).toEqual({ version: 3, revision: 0 });
+    expect(store.writeAgentDocmosis).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ conversationId: "conv-1", item: ITEM }));
+  });
+
+  it("should remove the template it names and answer 204", async () => {
+    const response = await one.DELETE(request("DELETE"), params({ agentId: "a", itemId: ITEM }));
+
+    expect(response.status).toBe(204);
+    expect(store.removeDocmosisTemplate).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ id: "conv-1" }), ITEM);
+  });
+
+  it("should store the PDF of one of its versions", async () => {
+    store.putDocmosisPdf.mockResolvedValue("stored");
+
+    const response = await onePdf.PUT(pdfRequest(PDF.slice()), params({ agentId: "a", itemId: ITEM, version: "3" }));
+
+    expect(response.status).toBe(204);
+    expect(store.putDocmosisPdf).toHaveBeenCalledWith(expect.anything(), "conv-1", ITEM, 3, 2, expect.any(Uint8Array));
   });
 });

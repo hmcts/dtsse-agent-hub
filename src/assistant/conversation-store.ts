@@ -9,6 +9,8 @@ import { detachLocalSessions, markChatRemoved } from "./local-chat-store.ts";
 import { hasPod } from "./pods.ts";
 import { DEFAULT_PRODUCT, isProduct } from "./products.ts";
 import { messageTitle, TITLE_MAX, type TitleSource } from "./titles.ts";
+import { videoBlobs } from "./video-blob.ts";
+import { deleteVideoBlobs } from "./video-store.ts";
 
 /**
  * The CFT Workspace's conversations: reading, listing, creating, renaming, pinning and removing them.
@@ -141,7 +143,7 @@ export async function unsentConversation(db: Database, ownerOid: string): Promis
     SELECT c.id::text AS id
       FROM assistant_conversation c
      WHERE c.owner_oid = ${ownerOid}
-       AND c.artefact_version = 0
+       AND NOT EXISTS (SELECT 1 FROM assistant_document d WHERE d.conversation_id = c.id AND d.version > 0)
        AND c.forked_at IS NULL
        AND EXISTS (
              SELECT 1 FROM assistant_upload u
@@ -343,6 +345,7 @@ export async function deleteConversation(prisma: PrismaClient, ownerOid: string,
   if (!isUuid(id)) {
     throw new ConversationNotFound();
   }
+  let hadVideo = false;
   await prisma.$transaction(async (tx) => {
     const sessions = await tx.$queryRaw<{ id: string }[]>`
       SELECT id::text AS id FROM agent WHERE assistant_conversation_id = ${id}::uuid AND owner_oid = ${ownerOid} AND virtual_agent_id IS NULL
@@ -369,9 +372,13 @@ export async function deleteConversation(prisma: PrismaClient, ownerOid: string,
     } else {
       await detachLocalSessions(tx, id, { removedByPerson: true });
     }
+    hadVideo = (await tx.assistantVideo.count({ where: { conversationId: id } })) > 0;
     await tx.assistantConversation.delete({ where: { id } });
     await announce(tx, conversation);
   });
+  if (hadVideo) {
+    await deleteVideoBlobs(videoBlobs(), id);
+  }
 }
 
 /** The conversation an agent is a session of, for the agent API's artefact routes. */

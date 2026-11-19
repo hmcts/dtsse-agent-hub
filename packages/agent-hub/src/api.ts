@@ -2,7 +2,7 @@
 // path must not pay for loading a validation library.
 import { createTokenProvider, DEFAULT_SCOPE } from "./az-token.ts";
 import type { Env } from "./env.ts";
-import { CLIENT_FEATURES } from "./features.ts";
+import { claimedFeatures } from "./features.ts";
 import type { PortsReport } from "./ports.ts";
 import type { QuestionBody } from "./questions.ts";
 import { virtualAgent } from "./virtual-agent.ts";
@@ -11,6 +11,10 @@ import type {
   ApiErrorBody,
   Artefact,
   ArtefactBody,
+  ArtefactById,
+  ArtefactCreateBody,
+  ArtefactCreated,
+  ArtefactList,
   ArtefactResponse,
   ConfluenceExportReport,
   ConversationsResponse,
@@ -20,10 +24,13 @@ import type {
   DeckAssetResponse,
   DeckBody,
   DeckBuild,
+  DeckList,
   DeckResponse,
   DirectBody,
   DocmosisAssetResponse,
   DocmosisBody,
+  DocmosisIndexAnswer,
+  DocmosisList,
   DocmosisResponse,
   DocmosisWritten,
   FeedResponse,
@@ -40,6 +47,12 @@ import type {
   MessageResponse,
   MessagesResponse,
   MicrosoftTokenResponse,
+  NotifyBody,
+  NotifyCreated,
+  NotifyList,
+  NotifyResponse,
+  NotifyWritten,
+  PodJobAnswer,
   PostBody,
   RegisterBody,
   RegisterResponse,
@@ -50,6 +63,9 @@ import type {
   TranscriptBody,
   TranscriptResponse,
   UploadsReportBody,
+  VideoBeginBody,
+  VideoBegun,
+  VideoResponse,
   VirtualPhase,
   WelshAnswer
 } from "./wire.ts";
@@ -187,17 +203,41 @@ export type Api = {
   putMemory: (virtualId: string, body: MemoryReportBody) => Promise<null>;
   getArtefact: (agentId: string) => Promise<Artefact>;
   putArtefact: (agentId: string, body: ArtefactBody) => Promise<ArtefactResponse>;
-  /** The latest version of the deck, or one kept version of it, which then says the version the deck is at now. */
-  getDeck: (agentId: string, version?: number) => Promise<Deck>;
-  putDeck: (agentId: string, body: DeckBody) => Promise<DeckResponse>;
+  /** Every document of the conversation, oldest first, without their markdown. A hub older than several documents answers 404. */
+  listArtefacts: (agentId: string) => Promise<ArtefactList>;
+  getArtefactById: (agentId: string, id: string) => Promise<ArtefactById>;
+  putArtefactById: (agentId: string, id: string, body: ArtefactBody) => Promise<ArtefactResponse>;
+  createArtefact: (agentId: string, body: ArtefactCreateBody) => Promise<ArtefactCreated>;
+  deleteArtefact: (agentId: string, id: string) => Promise<null>;
+  /**
+   * The latest version of a deck, or one kept version of it, which then says the version the deck is at now. Without an
+   * `id`, the conversation's primary deck, which is the one a hub older than several decks holds.
+   */
+  getDeck: (agentId: string, version?: number, id?: string) => Promise<Deck>;
+  /** Writes the deck `id` names, or the primary without one, which a write at base 0 makes while there is none. */
+  putDeck: (agentId: string, body: DeckBody, id?: string) => Promise<DeckResponse>;
+  /** Every deck of the conversation, oldest first, without its outline. A hub older than several decks answers 404. */
+  listDecks: (agentId: string) => Promise<DeckList>;
+  /** A new deck at version 1, whatever the conversation already holds. The body's `base_version` is 0. */
+  createDeck: (agentId: string, body: DeckBody) => Promise<DeckResponse>;
+  deleteDeck: (agentId: string, id: string) => Promise<null>;
   /** One picture for the deck, under the SHA-256 of its bytes. At most 5 MiB. */
   putDeckAsset: (agentId: string, sha256: string, bytes: Uint8Array) => Promise<DeckAssetResponse>;
   deckAsset: (agentId: string, sha256: string) => Promise<Uint8Array>;
   /** The .pptx built from one version of the deck. At most 5 MiB. */
-  putDeckPptx: (agentId: string, version: number, bytes: Uint8Array) => Promise<null>;
-  /** The latest version of the conversation's Docmosis template, or one kept version of it. */
-  getDocmosis: (agentId: string, version?: number) => Promise<DocmosisResponse>;
-  putDocmosis: (agentId: string, body: DocmosisBody) => Promise<DocmosisWritten>;
+  putDeckPptx: (agentId: string, version: number, bytes: Uint8Array, id?: string) => Promise<null>;
+  /**
+   * The latest version of a Docmosis template, or one kept version of it. Without an `id`, the conversation's primary
+   * template, which is the one a hub older than several templates holds.
+   */
+  getDocmosis: (agentId: string, version?: number, id?: string) => Promise<DocmosisResponse>;
+  /** Writes the template `id` names, or the primary without one, which a write at base 0 makes while there is none. */
+  putDocmosis: (agentId: string, body: DocmosisBody, id?: string) => Promise<DocmosisWritten>;
+  /** Every Docmosis template of the conversation, oldest first, without its schema and data. A hub older than several templates answers 404. */
+  listDocmosis: (agentId: string) => Promise<DocmosisList>;
+  /** A new template at version 1, whatever the conversation already holds. The body's `base_version` is 0. */
+  createDocmosis: (agentId: string, body: DocmosisBody) => Promise<DocmosisWritten>;
+  deleteDocmosis: (agentId: string, id: string) => Promise<null>;
   /** The .docx a template version names, under the SHA-256 of its bytes. At most 5 MiB. */
   putDocmosisAsset: (agentId: string, sha256: string, bytes: Uint8Array) => Promise<DocmosisAssetResponse>;
   docmosisAsset: (agentId: string, sha256: string) => Promise<Uint8Array>;
@@ -205,7 +245,25 @@ export type Api = {
    * The PDF rendered from one version of the template, at the revision it was rendered from. At most 5 MiB. A `409`
    * means the version's revision has moved since.
    */
-  putDocmosisPdf: (agentId: string, version: number, revision: number, bytes: Uint8Array) => Promise<null>;
+  putDocmosisPdf: (agentId: string, version: number, revision: number, bytes: Uint8Array, id?: string) => Promise<null>;
+  /** The latest version of the conversation's GOV.UK Notify template, or one kept version of it. */
+  getNotify: (agentId: string, version?: number) => Promise<NotifyResponse>;
+  putNotify: (agentId: string, body: NotifyBody) => Promise<NotifyWritten>;
+  /** Every Notify template of the conversation, oldest first, without their text. A hub older than several templates answers 404. */
+  listNotify: (agentId: string) => Promise<NotifyList>;
+  getNotifyById: (agentId: string, id: string, version?: number) => Promise<NotifyResponse>;
+  putNotifyById: (agentId: string, id: string, body: NotifyBody) => Promise<NotifyWritten>;
+  /** Makes a template, from a body at `base_version` 0. */
+  createNotify: (agentId: string, body: NotifyBody) => Promise<NotifyCreated>;
+  deleteNotify: (agentId: string, id: string) => Promise<null>;
+  /** The conversation's ready journey video, with a URL to download its MP4 from. */
+  getVideo: (agentId: string) => Promise<VideoResponse>;
+  /** Records an upload and answers the URL its MP4 is put to. */
+  beginVideo: (agentId: string, body: VideoBeginBody) => Promise<VideoBegun>;
+  /** Makes the upload the conversation's video, once its MP4 is at the URL; a `409` says it is not there or is the wrong size. */
+  finishVideo: (agentId: string, videoId: string) => Promise<{ video_id: string }>;
+  /** Records that the video was attached to a Jira issue, for the panel to show. */
+  videoPosted: (agentId: string, videoId: string, issueKey: string) => Promise<null>;
   /**
    * A question this session's model asked with `AskUserQuestion`, for the person to answer in the web UI. Idempotent
    * on `tool_use_id`, so a retry after a lost response does not put the question on screen twice.
@@ -222,12 +280,16 @@ export type Api = {
   putWelshFile: (virtualId: string, jobId: string, name: string, bytes: Uint8Array) => Promise<{ file_id: string }>;
   /** A spreadsheet the owner uploaded for a Welsh job to read. At most 5 MiB, so read whole. */
   welshFile: (virtualId: string, fileId: string) => Promise<Uint8Array>;
+  /** The supervisor's answer to one check of its owner's template library. At most 1 MiB. */
+  putDocmosisIndex: (virtualId: string, requestId: string, body: DocmosisIndexAnswer, options?: RequestOptions) => Promise<null>;
   /** The version one of its owner's pending deck builds is of, outline and all. */
   deckBuild: (virtualId: string, jobId: string) => Promise<DeckBuild>;
   /** One picture a pending deck build's outline names. At most 5 MiB, so read whole. */
   deckBuildAsset: (virtualId: string, jobId: string, sha256: string) => Promise<Uint8Array>;
   /** The supervisor's answer to a deck build: the .pptx it built, at most 5 MiB, or why there is none. */
   putDeckBuild: (virtualId: string, jobId: string, answer: { pptx: Uint8Array } | { error: string }) => Promise<null>;
+  /** The supervisor's answer to one of its owner's pod jobs. */
+  putPodJob: (virtualId: string, jobId: string, answer: PodJobAnswer) => Promise<null>;
   /** One part of a file attached to a message in this agent's conversation. One part, never the whole file. */
   attachmentPart: (agentId: string, uploadId: string, index: number) => Promise<Uint8Array>;
   /** The whole file is on this pod's disk, which is what makes the hub delete its part rows. */
@@ -288,6 +350,9 @@ export function createApi({
   }
 
   const a = (agentId: string) => `/api/agent/${encodeURIComponent(agentId)}`;
+  // The primary deck, or the one `id` names.
+  const deckPath = (id?: string) => (id === undefined ? "deck" : `decks/${encodeURIComponent(id)}`);
+  const docmosisPath = (id?: string) => (id === undefined ? "docmosis" : `docmosis-templates/${encodeURIComponent(id)}`);
   const v = (virtualId: string, rest: string) => `/api/virtual/${encodeURIComponent(virtualId)}/${rest}`;
   const k = (kind: CredentialKind) => encodeURIComponent(kind);
   const nullOn404 = <T>(promise: Promise<T>): Promise<T | null> =>
@@ -388,8 +453,7 @@ export function createApi({
     message: (messageId) => request<MessageResponse>("GET", `/api/agent/messages/${encodeURIComponent(messageId)}`),
     // Every report carries the claim, so the hub's copy is always the running build's; a hub that predates the field
     // ignores it.
-    virtualStatus: (id, phase, detail) =>
-      request<null>("POST", v(id, "status"), { phase, ...(detail ? { detail } : {}), client_features: [...CLIENT_FEATURES] }),
+    virtualStatus: (id, phase, detail) => request<null>("POST", v(id, "status"), { phase, ...(detail ? { detail } : {}), client_features: claimedFeatures() }),
     getCredential: async (id, kind) => (await nullOn404(request<CredentialResponse>("GET", v(id, `credentials/${k(kind)}`))))?.value ?? null,
     putCredential: (id, kind, value) => request<null>("PUT", v(id, `credentials/${k(kind)}`), { value }),
     putPorts: (id, body) => request<null>("PUT", v(id, "ports"), body),
@@ -421,17 +485,39 @@ export function createApi({
     putMemory: (virtualId, body) => request<null>("PUT", v(virtualId, "memory"), body),
     getArtefact: (agentId) => request<Artefact>("GET", `${a(agentId)}/artefact`),
     putArtefact: (agentId, body) => request<ArtefactResponse>("PUT", `${a(agentId)}/artefact`, body),
-    getDeck: (agentId, version) => request<Deck>("GET", `${a(agentId)}/deck${qs({ version })}`),
-    putDeck: (agentId, body) => request<DeckResponse>("PUT", `${a(agentId)}/deck`, body),
+    listArtefacts: (agentId) => request<ArtefactList>("GET", `${a(agentId)}/artefacts`),
+    getArtefactById: (agentId, id) => request<ArtefactById>("GET", `${a(agentId)}/artefacts/${encodeURIComponent(id)}`),
+    putArtefactById: (agentId, id, body) => request<ArtefactResponse>("PUT", `${a(agentId)}/artefacts/${encodeURIComponent(id)}`, body),
+    createArtefact: (agentId, body) => request<ArtefactCreated>("POST", `${a(agentId)}/artefacts`, body),
+    deleteArtefact: (agentId, id) => request<null>("DELETE", `${a(agentId)}/artefacts/${encodeURIComponent(id)}`),
+    getDeck: (agentId, version, id) => request<Deck>("GET", `${a(agentId)}/${deckPath(id)}${qs({ version })}`),
+    putDeck: (agentId, body, id) => request<DeckResponse>("PUT", `${a(agentId)}/${deckPath(id)}`, body),
+    listDecks: (agentId) => request<DeckList>("GET", `${a(agentId)}/decks`),
+    createDeck: (agentId, body) => request<DeckResponse>("POST", `${a(agentId)}/decks`, body),
+    deleteDeck: (agentId, id) => request<null>("DELETE", `${a(agentId)}/decks/${encodeURIComponent(id)}`),
     putDeckAsset: (agentId, sha256, bytes) => putBytes<DeckAssetResponse>(`${a(agentId)}/deck/assets/${encodeURIComponent(sha256)}`, null, bytes),
     deckAsset: (agentId, sha256) => requestBytes(`${a(agentId)}/deck/assets/${encodeURIComponent(sha256)}`),
-    putDeckPptx: (agentId, version, bytes) => putBytes<null>(`${a(agentId)}/deck/versions/${version}/pptx`, null, bytes),
-    getDocmosis: (agentId, version) => request<DocmosisResponse>("GET", `${a(agentId)}/docmosis${qs({ version })}`),
-    putDocmosis: (agentId, body) => request<DocmosisWritten>("PUT", `${a(agentId)}/docmosis`, body),
+    putDeckPptx: (agentId, version, bytes, id) => putBytes<null>(`${a(agentId)}/${deckPath(id)}/versions/${version}/pptx`, null, bytes),
+    getDocmosis: (agentId, version, id) => request<DocmosisResponse>("GET", `${a(agentId)}/${docmosisPath(id)}${qs({ version })}`),
+    putDocmosis: (agentId, body, id) => request<DocmosisWritten>("PUT", `${a(agentId)}/${docmosisPath(id)}`, body),
+    listDocmosis: (agentId) => request<DocmosisList>("GET", `${a(agentId)}/docmosis-templates`),
+    createDocmosis: (agentId, body) => request<DocmosisWritten>("POST", `${a(agentId)}/docmosis-templates`, body),
+    deleteDocmosis: (agentId, id) => request<null>("DELETE", `${a(agentId)}/docmosis-templates/${encodeURIComponent(id)}`),
     putDocmosisAsset: (agentId, sha256, bytes) => putBytes<DocmosisAssetResponse>(`${a(agentId)}/docmosis/assets/${encodeURIComponent(sha256)}`, null, bytes),
     docmosisAsset: (agentId, sha256) => requestBytes(`${a(agentId)}/docmosis/assets/${encodeURIComponent(sha256)}`),
-    putDocmosisPdf: (agentId, version, revision, bytes) =>
-      putBytes<null>(`${a(agentId)}/docmosis/versions/${version}/pdf${qs({ revision })}`, null, bytes, PART_TIMEOUT_MS, "application/pdf"),
+    putDocmosisPdf: (agentId, version, revision, bytes, id) =>
+      putBytes<null>(`${a(agentId)}/${docmosisPath(id)}/versions/${version}/pdf${qs({ revision })}`, null, bytes, PART_TIMEOUT_MS, "application/pdf"),
+    getNotify: (agentId, version) => request<NotifyResponse>("GET", `${a(agentId)}/notify${qs({ version })}`),
+    putNotify: (agentId, body) => request<NotifyWritten>("PUT", `${a(agentId)}/notify`, body),
+    listNotify: (agentId) => request<NotifyList>("GET", `${a(agentId)}/notify-templates`),
+    getNotifyById: (agentId, id, version) => request<NotifyResponse>("GET", `${a(agentId)}/notify-templates/${encodeURIComponent(id)}${qs({ version })}`),
+    putNotifyById: (agentId, id, body) => request<NotifyWritten>("PUT", `${a(agentId)}/notify-templates/${encodeURIComponent(id)}`, body),
+    createNotify: (agentId, body) => request<NotifyCreated>("POST", `${a(agentId)}/notify-templates`, body),
+    deleteNotify: (agentId, id) => request<null>("DELETE", `${a(agentId)}/notify-templates/${encodeURIComponent(id)}`),
+    getVideo: (agentId) => request<VideoResponse>("GET", `${a(agentId)}/video`),
+    beginVideo: (agentId, body) => request<VideoBegun>("POST", `${a(agentId)}/video`, body),
+    finishVideo: (agentId, videoId) => request<{ video_id: string }>("POST", `${a(agentId)}/video/${encodeURIComponent(videoId)}/complete`, {}),
+    videoPosted: (agentId, videoId, issueKey) => request<null>("POST", `${a(agentId)}/video/${encodeURIComponent(videoId)}/posted`, { issue_key: issueKey }),
     postQuestion: (agentId, body, opts) => request<null>("POST", `${a(agentId)}/question`, body, opts),
     putJiraExport: (agentId, body) => request<null>("PUT", `${a(agentId)}/jira`, body),
     putGithubExport: (agentId, body) => request<null>("PUT", `${a(agentId)}/github`, body),
@@ -440,12 +526,15 @@ export function createApi({
     putWelsh: (virtualId, jobId, body) => request<null>("PUT", v(virtualId, `welsh/${encodeURIComponent(jobId)}`), body),
     putWelshFile: (virtualId, jobId, name, bytes) => putBytes<{ file_id: string }>(v(virtualId, `welsh/${encodeURIComponent(jobId)}/files`), name, bytes),
     welshFile: (virtualId, fileId) => requestBytes(v(virtualId, `welsh/files/${encodeURIComponent(fileId)}`)),
+    putDocmosisIndex: (virtualId, requestId, body, options) =>
+      request<null>("PUT", v(virtualId, `docmosis-library/${encodeURIComponent(requestId)}`), body, options),
     deckBuild: (virtualId, jobId) => request<DeckBuild>("GET", v(virtualId, `deck-builds/${encodeURIComponent(jobId)}`)),
     deckBuildAsset: (virtualId, jobId, sha256) => requestBytes(v(virtualId, `deck-builds/${encodeURIComponent(jobId)}/assets/${encodeURIComponent(sha256)}`)),
     putDeckBuild: (virtualId, jobId, answer) =>
       "pptx" in answer
         ? putBytes<null>(v(virtualId, `deck-builds/${encodeURIComponent(jobId)}`), null, answer.pptx)
         : request<null>("PUT", v(virtualId, `deck-builds/${encodeURIComponent(jobId)}`), { error: answer.error }),
+    putPodJob: (virtualId, jobId, answer) => request<null>("PUT", v(virtualId, `pod-jobs/${encodeURIComponent(jobId)}`), answer),
     attachmentPart: (agentId, uploadId, index) => requestBytes(`${a(agentId)}/attachments/${encodeURIComponent(uploadId)}/parts/${index}`),
     attachmentFetched: (agentId, uploadId) => request<null>("POST", `${a(agentId)}/attachments/${encodeURIComponent(uploadId)}/fetched`),
     stream: (id, opts) => openStream(`${a(id)}/stream`, opts)

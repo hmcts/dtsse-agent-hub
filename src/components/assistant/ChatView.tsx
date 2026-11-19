@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { clientSupports, sessionLacks } from "@/agents/client-features";
 import { EXPIRE_AFTER_SECONDS } from "@/agents/liveness";
 import type { ArtefactSnapshot } from "@/app/_actions/assistant";
 import { MAX_ASKED_BODY } from "@/assistant/deck";
+import { type DocumentKind, documentLabel } from "@/assistant/documents";
 import { type ExportDefaults, NO_DEFAULTS } from "@/assistant/export-defaults";
+import { clockTime, dayLabel, dayNumber, sameDay } from "@/assistant/grouping";
 import { PRODUCTS, productLabel, storedProduct } from "@/assistant/products";
 import type { Template } from "@/assistant/starters";
 import {
@@ -25,27 +27,36 @@ import type { ConversationView } from "@/assistant/views";
 import { useLiveConversation } from "@/components/agents/useLiveConversation";
 import { ArtefactPanel, type SaveArtefactAction, type UnsavedDraft } from "@/components/assistant/ArtefactPanel";
 import { AssistantMarkdown } from "@/components/assistant/AssistantMarkdown";
+import { AssistantModal } from "@/components/assistant/AssistantModal";
 import { Mark, SidebarToggle } from "@/components/assistant/AssistantShell";
 import { ChatMenu } from "@/components/assistant/ChatMenu";
 import { Composer } from "@/components/assistant/Composer";
 import type { ExportToConfluenceAction } from "@/components/assistant/ConfluenceExport";
+import { CopyButton } from "@/components/assistant/CopyButton";
+import { CreateMenu, type CreateOption } from "@/components/assistant/CreateMenu";
 import type { SaveDeckAction, UnsavedDeckDraft } from "@/components/assistant/DeckEditor";
 import type { RestoreDeckAction } from "@/components/assistant/DeckHistory";
 import { DeckPanel, type SlideAsk } from "@/components/assistant/DeckPanel";
-import { DocmosisPanel } from "@/components/assistant/DocmosisPanel";
+import { DocmosisPanel, type LoadSettled, useTemplateLoad } from "@/components/assistant/DocmosisPanel";
 import { ticketsOffered } from "@/components/assistant/ExportFooter";
 import { ForkedThread } from "@/components/assistant/ForkedThread";
 import type { ExportToGithubAction } from "@/components/assistant/GithubExport";
+import { ItemButtons } from "@/components/assistant/ItemButtons";
+import type { SwitcherItem } from "@/components/assistant/ItemSwitcher";
 import type { ExportToJiraAction, JiraAccess } from "@/components/assistant/JiraExport";
 import { ARTEFACT_OVERLAY_MAX_WIDTH } from "@/components/assistant/layout";
 import { MessageAttachments } from "@/components/assistant/MessageAttachments";
+import { NotifyPanel } from "@/components/assistant/NotifyPanel";
+import { VideoPanel } from "@/components/assistant/VideoPanel";
 import { useStickToBottom } from "@/components/feed/useStickToBottom";
 import { AnnouncerRegion, useAnnouncer } from "@/components/live/Announcer";
 import { useHubEvent } from "@/components/live/HubStream";
 import { type AnswerQuestionAction, QuestionCard } from "@/components/questions/QuestionCard";
 import type { ThreadMessage } from "@/messages/direct-thread";
+import { MAX_BODY } from "@/messages/limits";
 import type { AgentStatus } from "@/realtime/events";
 import type { ActionResult } from "@/web/action";
+import { actionThrew } from "@/web/action-fault";
 import { duration } from "@/web/format";
 import { RESTART_IN_SETTINGS } from "@/web/home";
 
@@ -61,10 +72,18 @@ export interface ChatActions {
   /** The person's answer to a question the assistant asked with its own question tool. */
   answerQuestion: AnswerQuestionAction;
   saveArtefact: SaveArtefactAction;
+  /** Left out, the document panel offers no Remove. */
+  removeArtefact?: (input: { conversationId: unknown; documentId: unknown }) => Promise<ActionResult>;
   exportToJira: ExportToJiraAction;
   /** Left out, a person whose ticket tool is GitHub is offered no ticket export. */
   exportToGithub?: ExportToGithubAction;
   exportToConfluence?: ExportToConfluenceAction;
+  /** Left out, the slides panel offers no Remove. */
+  removeDeck?: (input: { conversationId: unknown; itemId: unknown }) => Promise<ActionResult>;
+  /** Left out, the Docmosis panel offers no Remove. */
+  removeDocmosisTemplate?: (input: { conversationId: unknown; itemId: unknown }) => Promise<ActionResult>;
+  /** Left out, the Notify panel offers no Remove. */
+  removeNotifyTemplate?: (input: { conversationId: unknown; itemId: unknown }) => Promise<ActionResult>;
   /** Left out, the slides panel offers no restore of an older version. */
   restoreDeck?: RestoreDeckAction;
   /** Left out, the slides panel offers no editing. */
@@ -126,6 +145,15 @@ function localOfflineNote(): string {
   return `This chat is a Claude Code session on your own computer, and it is not connected. Your message is kept and delivered when it reconnects, for up to ${duration(EXPIRE_AFTER_SECONDS)} offline.`;
 }
 
+/** An edit a closed document could not save, with the document it belongs to. */
+type DocumentDraft = UnsavedDraft & { id: string; kind: DocumentKind };
+
+/** The exports of a document not saved yet. */
+const NOT_EXPORTED = { status: "none" } as const;
+
+/** What Create's Slides sends, as the person's own message. */
+export const CREATE_SLIDES = "Create a new slide deck for this conversation.";
+
 /** How long each warming quip stands before the next, which is a few seconds of a wait that is usually a few more. */
 export const QUIP_INTERVAL_MS = 3000;
 
@@ -184,7 +212,66 @@ function SessionNote({ notice }: { notice: SessionNotice | null }) {
   );
 }
 
-function Item({ item, answerQuestion, repoBase }: { item: ThreadItem; answerQuestion: AnswerQuestionAction; repoBase: string | null }) {
+/**
+ * What a message offers beyond its words: shown on hover and while focus is inside, so a long thread is not a column
+ * of buttons, and always on a screen with no hover to show it, where it would otherwise never appear.
+ */
+const ACTIONS_ROW =
+  "flex min-h-7 items-center gap-1 text-xs text-asst-faint [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-focus-within:opacity-100";
+
+/** A message's time, "14:02", as a `<time>` a screen reader can read the full instant of. */
+function Stamp({ at }: { at: string }) {
+  return (
+    <time dateTime={at} className="px-1 tabular-nums" suppressHydrationWarning>
+      {clockTime(new Date(at))}
+    </time>
+  );
+}
+
+/**
+ * A row that is one line until opened: a tool call's command or path, or a notice, can be long, and its start is what
+ * identifies it. Opening it shows the whole of it, to read or select, which a `title` tooltip never gave a keyboard
+ * or a touch screen.
+ */
+function Expandable({ text, className, lead }: { text: string; className: string; lead?: React.ReactNode }) {
+  return (
+    <li className={`min-w-0 text-xs ${className}`}>
+      <details className="group/row min-w-0">
+        <summary className="flex min-w-0 cursor-pointer list-none items-baseline gap-2 [&::-webkit-details-marker]:hidden">
+          {lead}
+          <span className="min-w-0 truncate group-open/row:hidden">{text}</span>
+          <span aria-hidden="true" className="shrink-0 text-asst-faint">
+            <span className="group-open/row:hidden">Show</span>
+            <span className="hidden group-open/row:inline">Hide</span>
+          </span>
+        </summary>
+        <p className="mt-1 whitespace-pre-wrap break-words rounded-lg bg-asst-field px-2.5 py-1.5 font-plex-mono text-xs text-asst-text">{text}</p>
+      </details>
+    </li>
+  );
+}
+
+function Item({
+  item,
+  answerQuestion,
+  repoBase,
+  onRetry,
+  onResend,
+  resent = false,
+  busy
+}: {
+  item: ThreadItem;
+  answerQuestion: AnswerQuestionAction;
+  repoBase: string | null;
+  /** On the latest answer only: asks again by sending the message it answered. */
+  onRetry?: () => void;
+  /** Sends an undelivered message's words again. */
+  onResend?: (item: { key: string; text: string }) => void;
+  /** This message's words were sent again, so it offers no second resend of them. */
+  resent?: boolean;
+  /** An answer is being written, so nothing here starts another. */
+  busy: boolean;
+}) {
   if (item.type === "question") {
     return (
       <li>
@@ -214,93 +301,143 @@ function Item({ item, answerQuestion, repoBase }: { item: ThreadItem; answerQues
   // nothing on its own, and the summary is left to truncate: it is a path or a command, and the start of one is the
   // part that identifies it.
   if (item.type === "tool") {
-    return (
-      <li className="flex min-w-0 items-baseline gap-2 text-xs text-asst-faint">
+    const lead = (
+      <>
         <span className="sr-only">Used</span>
         <span className="shrink-0 font-plex-mono text-asst-muted">{item.name}</span>
-        {item.summary === "" ? null : <span className="min-w-0 truncate">{item.summary}</span>}
         {item.failed ? <span className="shrink-0 text-asst-error">failed</span> : null}
-      </li>
+      </>
     );
+    if (item.summary === "") {
+      return <li className="flex min-w-0 items-baseline gap-2 text-xs text-asst-faint">{lead}</li>;
+    }
+    return <Expandable text={item.summary} className="text-asst-faint" lead={lead} />;
   }
   if (item.type === "notice") {
     return (
-      <li className={`flex min-w-0 items-baseline gap-2 text-xs ${item.failed ? "text-asst-error" : "text-asst-faint"}`}>
-        {item.failed ? <span className="shrink-0 font-medium">Failed:</span> : null}
-        <span title={item.text} className="min-w-0 truncate">
-          {item.text}
-        </span>
-      </li>
+      <Expandable
+        text={item.text}
+        className={item.failed ? "text-asst-error" : "text-asst-faint"}
+        lead={item.failed ? <span className="shrink-0 font-medium">Failed:</span> : undefined}
+      />
     );
   }
   if (item.type === "user") {
+    const undelivered = item.delivery === "expired";
     return (
-      <li className="flex flex-col items-end gap-1">
+      <li className="group flex flex-col items-end gap-1">
         <span className="sr-only">You said:</span>
         {item.text === "" ? null : (
           <div className="max-w-[82%] whitespace-pre-wrap break-words rounded-[18px_18px_4px_18px] bg-asst-bubble px-4 py-2.5">{item.text}</div>
         )}
         <MessageAttachments attachments={item.attachments} />
-        {item.delivery === "expired" ? <span className="text-xs text-asst-error">Not delivered. Send it again.</span> : null}
+        {undelivered ? (
+          <span className="flex items-center gap-2 text-xs text-asst-error">
+            Not delivered.
+            {/* Its words only: the files it carried were let go with it, so they would have to be attached again. */}
+            {resent ? (
+              " Sent again below."
+            ) : onResend === undefined || item.text === "" ? (
+              " Send it again."
+            ) : (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => onResend({ key: item.key, text: item.text })}
+                className="rounded-md px-1.5 py-0.5 text-asst-accent underline hover:text-asst-accent-hover disabled:opacity-50"
+              >
+                Send it again
+              </button>
+            )}
+          </span>
+        ) : null}
+        <div className={ACTIONS_ROW}>
+          <Stamp at={item.at} />
+        </div>
       </li>
     );
   }
   return (
-    <li className="flex items-start gap-3.5">
+    <li className="group flex items-start gap-3.5">
       <span className="mt-px">
         <Mark size="sm" />
       </span>
       <div className="min-w-0 flex-1 text-asst-body">
         <span className="sr-only">The assistant said:</span>
         <AssistantMarkdown source={item.text} repoBase={repoBase} />
+        <div className={`${ACTIONS_ROW} -ml-1.5 mt-1`}>
+          <CopyButton text={item.text} label="Copy answer" />
+          {onRetry === undefined ? null : (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={onRetry}
+              aria-label="Ask again"
+              title="Ask again"
+              className="flex h-7 items-center rounded-md px-1.5 text-asst-muted hover:bg-asst-field hover:text-asst-text disabled:opacity-40"
+            >
+              <span aria-hidden="true">↻</span>
+            </button>
+          )}
+          <Stamp at={item.at} />
+        </div>
       </div>
     </li>
   );
 }
 
+/** Where a day separator goes: before the first item of each day, once the thread is not all today's. */
+function daySeparators(thread: readonly ThreadItem[], now: Date): Map<string, string> {
+  const marks = new Map<string, string>();
+  // By the label, not the calendar: a browser clock a little behind can see a message from a moment ago as tomorrow's.
+  if (thread.every((item) => dayLabel(new Date(item.at), now) === "Today")) {
+    return marks;
+  }
+  let previous: Date | null = null;
+  for (const item of thread) {
+    const at = new Date(item.at);
+    if (previous === null || !sameDay(previous, at)) {
+      marks.set(item.key, dayLabel(at, now));
+    }
+    previous = at;
+  }
+  return marks;
+}
+
+/**
+ * Asked before a chat's product changes. The Assistant's dialog frame keeps focus inside it and gives it back to the
+ * product chip as it closes; Change product is focused as it opens, since it is the dialog's one decision. A click
+ * on the page behind does nothing: it is a question, and a stray click is no answer to it.
+ */
 function ConfirmProduct({ from, to, onCancel, onConfirm }: { from: string; to: string; onCancel: () => void; onConfirm: () => void }) {
   const confirm = useRef<HTMLButtonElement>(null);
-  // The dialog's one decision, focused as it opens.
-  useEffect(() => confirm.current?.focus(), []);
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        onCancel();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onCancel]);
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-5">
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="product-change-title"
-        className="flex w-full max-w-[420px] flex-col gap-3.5 rounded-2xl border border-asst-line bg-asst-hover p-[22px] shadow-2xl"
-      >
-        <h2 id="product-change-title" className="text-lg font-semibold">
-          Change product?
-        </h2>
-        <p className="text-pretty text-asst-body">
-          You're switching from <strong className="font-semibold text-asst-text">{productLabel(from)}</strong> to{" "}
-          <strong className="font-semibold text-asst-text">{productLabel(to)}</strong>. From now on, answers will use that product's context.
-        </p>
-        <div className="mt-1.5 flex justify-end gap-2.5">
-          <button type="button" onClick={onCancel} className="rounded-[10px] border border-asst-strong px-4 py-2.5 text-sm hover:bg-asst-active">
-            Cancel
-          </button>
-          <button
-            ref={confirm}
-            type="button"
-            onClick={onConfirm}
-            className="rounded-[10px] bg-asst-accent px-4 py-2.5 text-sm font-semibold text-asst-ink hover:bg-asst-accent-hover"
-          >
-            Change product
-          </button>
-        </div>
+    <AssistantModal
+      title="Change product?"
+      onClose={onCancel}
+      initialFocus={confirm}
+      closeLabel="Keep the product"
+      className="max-w-[420px]"
+      closeOnBackdrop={false}
+    >
+      <p className="text-pretty text-asst-body">
+        You're switching from <strong className="font-semibold text-asst-text">{productLabel(from)}</strong> to{" "}
+        <strong className="font-semibold text-asst-text">{productLabel(to)}</strong>. From now on, answers will use that product's context.
+      </p>
+      <div className="mt-1.5 flex justify-end gap-2.5">
+        <button type="button" onClick={onCancel} className="rounded-[10px] border border-asst-strong px-4 py-2.5 text-sm hover:bg-asst-active">
+          Cancel
+        </button>
+        <button
+          ref={confirm}
+          type="button"
+          onClick={onConfirm}
+          className="rounded-[10px] bg-asst-accent px-4 py-2.5 text-sm font-semibold text-asst-ink hover:bg-asst-accent-hover"
+        >
+          Change product
+        </button>
       </div>
-    </div>
+    </AssistantModal>
   );
 }
 
@@ -318,9 +455,9 @@ function useNarrow(): boolean {
 
 /**
  * One conversation: what the person and the assistant said, a line saying what the assistant is doing while it
- * works and how many subagents it is waiting on, and the composer; beside it, the conversation's document. The line
- * comes from the session's transcript and its own status, both already streamed here, so no page read follows a tool
- * call. Kept live by the conversation's agent's events;
+ * works and how many subagents it is waiting on, and the composer; beside it, one of the conversation's documents or
+ * other items. The line comes from the session's transcript and its own status, both already streamed here, so no page
+ * read follows a tool call. Kept live by the conversation's agent's events;
  * a change to the conversation itself (its product, title, document or session) re-renders the page, which hands
  * down the new `view`.
  */
@@ -357,43 +494,80 @@ export function ChatView({
   const [claim, setClaim] = useState<string[] | null>(view.clientFeatures);
   const [pendingProduct, setPendingProduct] = useState<string | null>(null);
   /**
-   * The one panel beside the chat: the document, the deck or the Docmosis template, never two, since two panels beside a chat leave the chat
-   * no room to read in. Each has its own button in the header, so either is one press from the other.
+   * The one panel beside the chat: a document, a deck or a template, never two, since two panels beside a chat leave the chat
+   * no room to read in. The header's switcher moves between them, so each is two presses from another.
    */
-  const [panel, setPanel] = useState<"document" | "deck" | "docmosis" | null>(null);
+  const [panel, setPanel] = useState<"document" | "deck" | "docmosis" | "notify" | "video" | null>(null);
+  /**
+   * Which document the document panel shows: one the conversation holds, or one Create opened and nobody has saved
+   * yet, whose id the browser makes so that its first save creates it under that id.
+   */
+  const [openDocument, setOpenDocument] = useState<{ id: string; kind: DocumentKind } | null>(null);
+  /** Which deck the slides panel shows. */
+  const [openDeck, setOpenDeck] = useState<string | null>(null);
+  /** Which Docmosis template the panel shows; `null` is a new one, which the panel's picker makes. */
+  const [openDocmosis, setOpenDocmosis] = useState<string | null>(null);
+  /** The same for the Notify panel. */
+  const [openNotify, setOpenNotify] = useState<string | null>(null);
   // Read by a closed editor's late answer, which comes back through the props of the render that last showed it.
   const panelNow = useRef(panel);
   panelNow.current = panel;
+  const openDocmosisNow = useRef(openDocmosis);
+  openDocmosisNow.current = openDocmosis;
+  const openDocumentNow = useRef(openDocument);
+  openDocumentNow.current = openDocument;
   /** The document panel has edits not yet saved, or a conflict showing, which a panel opened in its place would cut short. */
   const documentBusy = useRef(false);
   /** The same for the slides' editor. */
   const deckBusy = useRef(false);
   /** The same for the Docmosis form: edits typed and not yet rendered, or a newer version to settle. */
   const docmosisBusy = useRef(false);
-  /** The assistant wrote a newer Docmosis version while another panel was busy, so the template waits behind its button instead. */
-  const [docmosisWaiting, setDocmosisWaiting] = useState(false);
-  /** The assistant wrote a newer deck while the document was busy, so the slides wait behind their button instead. */
-  const [slidesWaiting, setSlidesWaiting] = useState(false);
-  /** The assistant wrote the document while the slides' editor was busy, so the document waits behind its button. */
-  const [documentWaiting, setDocumentWaiting] = useState(false);
+  /** The Docmosis templates the assistant wrote while another panel was busy, which wait behind their rows in the switcher. */
+  const [docmosisWaiting, setDocmosisWaiting] = useState<readonly string[]>([]);
+  /** The same for the Notify template: a draft not yet saved, or a newer version to settle. */
+  const notifyBusy = useRef(false);
+  /** The Notify templates the assistant wrote while another panel was busy, which wait behind their rows in the switcher. */
+  const [notifyWaiting, setNotifyWaiting] = useState<readonly string[]>([]);
+  /** The assistant published a video while another panel was busy, so it waits in the switcher. */
+  const [videoWaiting, setVideoWaiting] = useState(false);
+  /** The decks the assistant wrote while another panel was busy, which wait behind their rows in the switcher. */
+  const [decksWaiting, setDecksWaiting] = useState<readonly string[]>([]);
+  /** The documents the assistant wrote while another panel was busy, which wait behind their rows in the switcher. */
+  const [documentsWaiting, setDocumentsWaiting] = useState<readonly string[]>([]);
   /**
    * An edit the document was closed on whose save then failed or found a newer version: the document opens again with
    * it, keyed afresh so a panel the person opened meanwhile takes it in too, or, while the slides' editor is busy, it
-   * waits behind the document's button. The panel that takes it clears it, so it is handed to one panel only.
+   * waits behind the document's row in the switcher. The panel that takes it clears it, so it is handed to one panel only.
    */
-  const [unsaved, setUnsaved] = useState<{ draft: UnsavedDraft | null; key: number }>({ draft: null, key: 0 });
-  /** The same for an edit the slides' editor was closed on. */
-  const [unsavedDeck, setUnsavedDeck] = useState<{ draft: UnsavedDeckDraft | null; key: number }>({ draft: null, key: 0 });
-  const deckDraftWaiting = unsavedDeck.draft !== null && panel !== "deck";
-  const documentDraftWaiting = unsaved.draft !== null && panel !== "document";
+  const [unsaved, setUnsaved] = useState<{ draft: DocumentDraft | null; key: number }>({ draft: null, key: 0 });
+  /** The same for an edit the slides' editor was closed on, with the deck it was of. */
+  const [unsavedDeck, setUnsavedDeck] = useState<{ draft: UnsavedDeckDraft | null; deckId: string | null; key: number }>({ draft: null, deckId: null, key: 0 });
+  const deckOpen = panel === "deck" ? openDeck : null;
+  const decksDraftWaiting = (id: string): boolean => unsavedDeck.draft !== null && unsavedDeck.deckId === id && deckOpen !== id;
+  const documentOpen = panel === "document" ? openDocument : null;
+  const documentDraftWaiting = unsaved.draft !== null && documentOpen?.id !== unsaved.draft.id;
   const [ask, setAsk] = useState<SlideAsk | null>(null);
+  /**
+   * The decks and their versions when Create asked the assistant for slides, so it waits for the new one rather than
+   * asking again. A new deck or a new version of one ends the wait, and so does the assistant's turn ending without
+   * either. The chat is keyed by conversation, so another conversation starts clear.
+   */
+  const [slidesAskedAt, setSlidesAskedAt] = useState<string | null>(null);
+  const decksSignature = view.decks.map((one) => `${one.id}:${one.version}`).join(",");
+  const slidesAsked = slidesAskedAt !== null && decksSignature === slidesAskedAt;
   const [error, setError] = useState<string | null>(null);
   const warmed = useRef(false);
-  const seenVersion = useRef(view.artefact.version);
-  const seenDeck = useRef(view.deck?.version ?? 0);
-  const docmosis = view.docmosis;
-  const seenDocmosis = useRef(docmosis?.version ?? 0);
+  const seenVersions = useRef(new Map(view.documents.map((document) => [document.id, document.version])));
+  const seenDecks = useRef(new Map(view.decks.map((deck) => [deck.id, deck.version])));
+  const seenDocmosis = useRef(new Map(view.docmosisTemplates.map((template) => [template.id, template.version])));
+  const seenNotify = useRef(new Map(view.notifyTemplates.map((template) => [template.id, template.version])));
+  const deck = view.decks.find((one) => one.id === openDeck);
+  const docmosis = view.docmosisTemplates.find((one) => one.id === openDocmosis) ?? null;
+  const notify = view.notifyTemplates.find((one) => one.id === openNotify) ?? null;
+  const video = view.video;
+  const seenVideo = useRef(video?.version ?? 0);
   const narrow = useNarrow();
+  const ticketTool = defaults.ticketTool;
 
   useEffect(() => setStatus(view.agentStatus), [view.agentStatus]);
   useEffect(() => setClaim(view.clientFeatures), [view.clientFeatures]);
@@ -412,85 +586,177 @@ export function ChatView({
     }
   });
 
-  // The assistant writing the document opens it, so the person sees what it was asked to draft, unless they are part-way
-  // through editing the slides, when it is announced and its button marked instead.
+  /**
+   * The assistant writing a document opens it, so the person sees what it was asked to draft, unless they are part-way
+   * through another panel or another document, when it is announced and its row in the switcher marked instead. Of
+   * several written at once, the newest is the one opened.
+   */
   useEffect(() => {
-    if (view.artefact.version > seenVersion.current && view.artefact.updatedBy === "agent") {
-      if ((panel === "deck" && deckBusy.current) || (panel === "docmosis" && docmosisBusy.current)) {
-        setDocumentWaiting(true);
-        arrivals.announce("The assistant updated the document. Open document to see it.");
-      } else {
-        setPanel("document");
-        arrivals.announce("The assistant updated the document");
-      }
+    const seen = seenVersions.current;
+    const arrived = view.documents.filter((document) => document.version > (seen.get(document.id) ?? 0) && document.updatedBy === "agent");
+    for (const document of view.documents) {
+      seen.set(document.id, Math.max(seen.get(document.id) ?? 0, document.version));
     }
-    seenVersion.current = Math.max(seenVersion.current, view.artefact.version);
-  }, [view.artefact.version, view.artefact.updatedBy, arrivals, panel]);
+    const newest = arrived.at(-1);
+    if (newest === undefined) {
+      return;
+    }
+    const busyElsewhere =
+      (panel === "deck" && deckBusy.current) ||
+      (panel === "docmosis" && docmosisBusy.current) ||
+      (panel === "notify" && notifyBusy.current) ||
+      (panel === "document" && documentBusy.current && openDocument?.id !== newest.id);
+    if (busyElsewhere) {
+      setDocumentsWaiting((before) => [...before, ...arrived.map((document) => document.id).filter((id) => !before.includes(id))]);
+      arrivals.announce(`The assistant updated "${documentLabel(newest.kind, newest.title, ticketTool)}". Open it from the header to see it.`);
+    } else {
+      setOpenDocument({ id: newest.id, kind: newest.kind });
+      setPanel("document");
+      arrivals.announce("The assistant updated the document");
+    }
+  }, [view.documents, arrivals, panel, openDocument, ticketTool]);
 
   /**
-   * The same for the deck: a newer version from the assistant opens the slides in the document's place, unless the
-   * person is part-way through the document, when it is announced and its button marked instead. The slides' own
-   * editor takes in a newer deck itself, or offers it against the person's edit.
+   * The same for a deck: a newer version from the assistant opens the slides in the other panel's place, unless the
+   * person is part-way through another panel or another deck, when it is announced and its row in the switcher marked
+   * instead. The slides' own editor takes in a newer version of its deck itself, or offers it against the person's edit.
    */
-  const deckVersion = view.deck?.version ?? 0;
-  const deckBy = view.deck?.updatedBy ?? null;
   useEffect(() => {
-    if (deckVersion > seenDeck.current && deckBy === "agent") {
-      if ((panel === "document" && documentBusy.current) || (panel === "docmosis" && docmosisBusy.current)) {
-        setSlidesWaiting(true);
-        arrivals.announce("The assistant updated the slides. Open slides to see them.");
-      } else {
-        setPanel("deck");
-        arrivals.announce("The assistant updated the slides");
-      }
+    const seen = seenDecks.current;
+    const arrived = view.decks.filter((one) => one.version > (seen.get(one.id) ?? 0) && one.updatedBy === "agent");
+    for (const one of view.decks) {
+      seen.set(one.id, Math.max(seen.get(one.id) ?? 0, one.version));
     }
-    seenDeck.current = Math.max(seenDeck.current, deckVersion);
-  }, [deckVersion, deckBy, arrivals, panel]);
+    const newest = arrived.at(-1);
+    if (newest === undefined) {
+      return;
+    }
+    if (
+      (panel === "document" && documentBusy.current) ||
+      (panel === "docmosis" && docmosisBusy.current) ||
+      (panel === "notify" && notifyBusy.current) ||
+      (panel === "deck" && deckBusy.current && openDeck !== newest.id)
+    ) {
+      setDecksWaiting((before) => [...before, ...arrived.map((one) => one.id).filter((id) => !before.includes(id))]);
+      arrivals.announce("The assistant updated the slides. Open them from the header to see them.");
+    } else {
+      setOpenDeck(newest.id);
+      setPanel("deck");
+      arrivals.announce("The assistant updated the slides");
+    }
+  }, [view.decks, arrivals, panel, openDeck]);
 
   /**
-   * The same for the Docmosis template: a newer version from the assistant opens it in the other panel's place, unless
-   * the person is part-way through the document or the slides, when it is announced and its button marked instead. The
-   * panel itself takes in a newer version, or offers it against what the person has typed.
+   * The same for a Docmosis template: a newer version from the assistant opens it in the other panel's place, unless
+   * the person is part-way through another panel, when it is announced and its row in the switcher marked instead. The
+   * panel itself takes in a newer version, or offers it against what the person has typed. The person's own versions,
+   * a template they loaded from the library among them, never open it: they are already looking at it.
    */
-  const docmosisVersion = docmosis?.version ?? 0;
-  const docmosisBy = docmosis?.updatedBy ?? null;
   useEffect(() => {
-    if (docmosisVersion > seenDocmosis.current && docmosisBy === "agent") {
-      if ((panel === "document" && documentBusy.current) || (panel === "deck" && deckBusy.current)) {
-        setDocmosisWaiting(true);
-        arrivals.announce("The assistant updated the template. Open template to see it.");
-      } else {
-        setPanel("docmosis");
-        arrivals.announce("The assistant updated the template");
+    const seen = seenDocmosis.current;
+    const arrived = view.docmosisTemplates.filter((one) => one.version > (seen.get(one.id) ?? 0) && one.updatedBy === "agent");
+    for (const one of view.docmosisTemplates) {
+      seen.set(one.id, Math.max(seen.get(one.id) ?? 0, one.version));
+    }
+    const newest = arrived.at(-1);
+    if (newest === undefined) {
+      return;
+    }
+    if (
+      (panel === "document" && documentBusy.current) ||
+      (panel === "deck" && deckBusy.current) ||
+      (panel === "notify" && notifyBusy.current) ||
+      (panel === "docmosis" && docmosisBusy.current && openDocmosis !== newest.id)
+    ) {
+      setDocmosisWaiting((before) => [...before, ...arrived.map((one) => one.id).filter((id) => !before.includes(id))]);
+      arrivals.announce("The assistant updated the template. Open it from the header to see it.");
+    } else {
+      setOpenDocmosis(newest.id);
+      setPanel("docmosis");
+      arrivals.announce("The assistant updated the template");
+    }
+  }, [view.docmosisTemplates, arrivals, panel, openDocmosis]);
+
+  /** The same for a Notify template, which the assistant loads with `notify pull` or changes with `notify put`. */
+  useEffect(() => {
+    const seen = seenNotify.current;
+    const arrived = view.notifyTemplates.filter((one) => one.version > (seen.get(one.id) ?? 0) && one.updatedBy === "agent");
+    for (const one of view.notifyTemplates) {
+      seen.set(one.id, Math.max(seen.get(one.id) ?? 0, one.version));
+    }
+    const newest = arrived.at(-1);
+    if (newest === undefined) {
+      return;
+    }
+    if (
+      (panel === "document" && documentBusy.current) ||
+      (panel === "deck" && deckBusy.current) ||
+      (panel === "docmosis" && docmosisBusy.current) ||
+      (panel === "notify" && notifyBusy.current && openNotify !== newest.id)
+    ) {
+      setNotifyWaiting((before) => [...before, ...arrived.map((one) => one.id).filter((id) => !before.includes(id))]);
+      arrivals.announce("The assistant updated the Notify template. Open it from the header to see it.");
+    } else if (panel !== "notify" || openNotify !== newest.id) {
+      setOpenNotify(newest.id);
+      setPanel("notify");
+      arrivals.announce("The assistant updated the Notify template");
+    }
+  }, [view.notifyTemplates, arrivals, panel, openNotify]);
+  /** The same for the journey video, which the assistant publishes with `video put`. Only the person's own edits are ever busy, and the video has none. */
+  const videoVersion = video?.version ?? 0;
+  useEffect(() => {
+    if (videoVersion > seenVideo.current) {
+      if (
+        (panel === "document" && documentBusy.current) ||
+        (panel === "deck" && deckBusy.current) ||
+        (panel === "docmosis" && docmosisBusy.current) ||
+        (panel === "notify" && notifyBusy.current)
+      ) {
+        setVideoWaiting(true);
+        arrivals.announce("The assistant published a video. Open it from the header to see it.");
+      } else if (panel !== "video") {
+        setPanel("video");
+        arrivals.announce("The assistant published a video");
       }
     }
-    seenDocmosis.current = Math.max(seenDocmosis.current, docmosisVersion);
-  }, [docmosisVersion, docmosisBy, arrivals, panel]);
+    seenVideo.current = Math.max(seenVideo.current, videoVersion);
+  }, [videoVersion, arrivals, panel]);
   useEffect(() => {
-    if (panel === "deck") {
-      setSlidesWaiting(false);
+    if (documentOpen !== null) {
+      setDocumentsWaiting((before) => (before.includes(documentOpen.id) ? before.filter((id) => id !== documentOpen.id) : before));
     }
-    if (panel === "document") {
-      setDocumentWaiting(false);
+    if (deckOpen !== null) {
+      setDecksWaiting((before) => (before.includes(deckOpen) ? before.filter((id) => id !== deckOpen) : before));
     }
-    if (panel === "docmosis") {
-      setDocmosisWaiting(false);
+    if (panel === "docmosis" && openDocmosis !== null) {
+      setDocmosisWaiting((before) => (before.includes(openDocmosis) ? before.filter((id) => id !== openDocmosis) : before));
     }
-  }, [panel]);
+    if (panel === "video") {
+      setVideoWaiting(false);
+    }
+    if (panel === "notify" && openNotify !== null) {
+      setNotifyWaiting((before) => (before.includes(openNotify) ? before.filter((id) => id !== openNotify) : before));
+    }
+  }, [panel, documentOpen, deckOpen, openDocmosis, openNotify]);
   /**
    * An edit the slides' editor could not save as it closed opens the slides again with it, unless the person is
-   * part-way through the document, which keeps the panel: the edit then waits behind the slides' button.
+   * part-way through the document, which keeps the panel: the edit then waits behind the slides' row in the switcher.
    */
-  function reopenDeck(draft: UnsavedDeckDraft): void {
-    setUnsavedDeck((before) => ({ draft, key: before.key + 1 }));
-    if ((panelNow.current === "document" && documentBusy.current) || (panelNow.current === "docmosis" && docmosisBusy.current)) {
+  function reopenDeck(draft: UnsavedDeckDraft, deckId: string): void {
+    setUnsavedDeck((before) => ({ draft, deckId, key: before.key + 1 }));
+    if (
+      (panelNow.current === "document" && documentBusy.current) ||
+      (panelNow.current === "docmosis" && docmosisBusy.current) ||
+      (panelNow.current === "notify" && notifyBusy.current)
+    ) {
       arrivals.announce(
         draft.conflict === null
-          ? "Your slides could not be saved. Open slides to see your changes."
-          : "The slides changed while you were editing them. Open slides to see your changes."
+          ? "Your slides could not be saved. Open them from the header to see your changes."
+          : "The slides changed while you were editing them. Open them from the header to see your changes."
       );
       return;
     }
+    setOpenDeck(deckId);
     setPanel("deck");
     arrivals.announce(
       draft.conflict === null
@@ -498,17 +764,25 @@ export function ChatView({
         : "The slides changed while you were editing them, so they are open again"
     );
   }
-  /** The same for the document, which waits behind its button while the slides' editor is busy. */
-  function reopenDocument(draft: UnsavedDraft): void {
-    setUnsaved((before) => ({ draft, key: before.key + 1 }));
-    if ((panelNow.current === "deck" && deckBusy.current) || (panelNow.current === "docmosis" && docmosisBusy.current)) {
+  /** The same for a document, which waits behind its row in the switcher while another panel is busy. */
+  function reopenDocument(draft: DocumentDraft): void {
+    const otherDocumentBusy = panelNow.current === "document" && documentBusy.current && openDocumentNow.current?.id !== draft.id;
+    // The key remounts the open document, which would drop what the person is typing in it.
+    setUnsaved((before) => ({ draft, key: before.key + (otherDocumentBusy ? 0 : 1) }));
+    if (
+      otherDocumentBusy ||
+      (panelNow.current === "deck" && deckBusy.current) ||
+      (panelNow.current === "docmosis" && docmosisBusy.current) ||
+      (panelNow.current === "notify" && notifyBusy.current)
+    ) {
       arrivals.announce(
         draft.conflict === null
-          ? "Your document could not be saved. Open document to see your changes."
-          : "The document changed while you were editing it. Open document to see your changes."
+          ? "Your document could not be saved. Open it from the header to see your changes."
+          : "The document changed while you were editing it. Open it from the header to see your changes."
       );
       return;
     }
+    setOpenDocument({ id: draft.id, kind: draft.kind });
     setPanel("document");
     arrivals.announce(
       draft.conflict === null ? "Your document could not be saved, so it is open again" : "The document changed while you were editing it, so it is open again"
@@ -524,9 +798,81 @@ export function ChatView({
    * disagree about where the chat is.
    */
   const pod = !view.local;
-  const tickets = ticketsOffered(defaults.ticketTool, view.jira, view.github);
-  const thread = threadItems(live.items, view.productHistory, view.stopHistory, view.local);
+  /** Opens a new document of `kind`, which its first save creates; the switcher lists the ones already made. */
+  function createDocument(kind: DocumentKind): void {
+    setOpenDocument({ id: crypto.randomUUID(), kind });
+    setPanel("document");
+  }
+  /**
+   * What Create offers: a new item, of any kind, as many times as the person likes; the ones already made are reached
+   * through the switcher. A ticket or a Confluence page is a document that goes to that one place, so it is offered only
+   * where there is a pod to export it. Slides, a Docmosis template and a Notify template are each made through the pod —
+   * the assistant drafts the slides, and the two templates are chosen from libraries the pod reads — so a local chat is
+   * offered none of them. Every pod booted on the current hub has the slides tools (`podPlugins`), and the view does
+   * not carry the stored plugins an older client would need checking against, so a pod chat is always offered Slides.
+   */
+  const creatable: CreateOption[] = [
+    { key: "document", label: "Document", choose: () => createDocument("document") },
+    ...(pod
+      ? [
+          { key: "ticket", label: ticketTool === "github" ? "GitHub issue" : "Jira", choose: () => createDocument("ticket") },
+          { key: "confluence", label: "Confluence page", choose: () => createDocument("confluence") }
+        ]
+      : []),
+    ...(pod
+      ? [
+          { key: "slides", label: slidesAsked ? "Slides, being made" : "Slides", choose: () => void createSlides() },
+          {
+            key: "docmosis",
+            label: "Docmosis template",
+            choose: () => {
+              setOpenDocmosis(null);
+              setPanel("docmosis");
+            }
+          },
+          {
+            key: "notify",
+            label: "Notify template",
+            choose: () => {
+              setOpenNotify(null);
+              setPanel("notify");
+            }
+          }
+        ]
+      : [])
+  ];
+  const shownDocument = documentOpen === null ? undefined : view.documents.find((document) => document.id === documentOpen.id);
+  const tickets = ticketsOffered(ticketTool, shownDocument?.jira ?? NOT_EXPORTED, shownDocument?.github ?? NOT_EXPORTED);
+  const thread = useMemo(
+    () => threadItems(live.items, view.productHistory, view.stopHistory, view.local),
+    [live.items, view.productHistory, view.stopHistory, view.local]
+  );
+  // Worked out again only as the thread or the day changes, not on every update an answer streams in.
+  const today = dayNumber(new Date());
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `today` is the day the labels are relative to, read through `new Date()`
+  const separators = useMemo(() => daySeparators(thread, new Date()), [thread, today]);
+  // Ask again is offered on the latest answer only, and sends the latest thing the person said: a session cannot
+  // take an answer back, so asking again is asking again, after it.
+  const resending = useRef(false);
+  const [resendingNow, setResendingNow] = useState(false);
+  // Undelivered messages already sent again, which offer no second resend of the same words.
+  const [resent, setResent] = useState<ReadonlySet<string>>(new Set());
+  // A message waiting for its answer makes the answer before it the wrong place to ask again from.
+  const answerAt = thread.findLastIndex((item) => item.type === "assistant");
+  const askedAt = thread.findLastIndex((item) => item.type === "user");
+  const asked = thread[askedAt];
+  const lastAnswer = answerAt > askedAt ? (thread[answerAt]?.key ?? null) : null;
+  // Not for a message that carried files: those were let go once fetched, so asking again would leave them out.
+  const lastAsked = asked?.type === "user" && asked.text !== "" && asked.attachments.length === 0 ? asked.text : null;
   const doing: Progress = progress(live.items, thread, status, view.sessionState, view.local);
+  /** A turn ending, working or waking back to idle, with no new slides ends the wait for the slides Create asked for. */
+  const turnActive = useRef(false);
+  useEffect(() => {
+    if (turnActive.current && doing.state === "idle") {
+      setSlidesAskedAt(null);
+    }
+    turnActive.current = doing.state !== "idle";
+  }, [doing.state]);
   // Not part of `doing`: background work carries on after the session goes idle, so it has to show when nothing else does.
   const background = useMemo(() => (status === "offline" ? 0 : backgroundHelpers(live.items)), [status, live.items]);
   /**
@@ -569,28 +915,284 @@ export function ChatView({
   function markDocmosisBusy(busy: boolean): void {
     docmosisBusy.current = busy;
   }
+  function markNotifyBusy(busy: boolean): void {
+    notifyBusy.current = busy;
+  }
+
+  /**
+   * A load from the template library ended while the panel was closed: the panel opens on its outcome, unless the
+   * person is part-way through the document or the slides, when the outcome waits for them to open it.
+   */
+  function templateLoadSettled(outcome: LoadSettled, item?: string): void {
+    if (item !== undefined && outcome === "loaded" && (panelNow.current === "docmosis" || openDocmosisNow.current === null)) {
+      setOpenDocmosis(item);
+    }
+    if (panelNow.current === "docmosis") {
+      return;
+    }
+    if ((panelNow.current === "document" && documentBusy.current) || (panelNow.current === "deck" && deckBusy.current)) {
+      if (outcome === "failed") {
+        arrivals.announce("Your template did not load. Open it from the header to see why.");
+      }
+      return;
+    }
+    setPanel("docmosis");
+    if (outcome === "failed") {
+      arrivals.announce("Your template did not load");
+    }
+  }
+  const templateLoad = useTemplateLoad({
+    conversationId: view.id,
+    templates: view.docmosisTemplates,
+    target: openDocmosis,
+    announce: arrivals.announce,
+    onSettled: templateLoadSettled
+  });
+  // A load's outcome waits in the Docmosis panel, so its row stays in the switcher until the person has seen it.
+  const loadFailed = templateLoad.load.phase === "failed";
+  /**
+   * What the switcher moves between: each item the conversation holds, and the panel that is open, which is one to
+   * return to even before its first save.
+   */
+  const items: SwitcherItem[] = [
+    ...documentRows().map(({ id, kind, title }) => ({
+      key: `document:${id}`,
+      label: documentLabel(kind, title, ticketTool),
+      open: () => {
+        setOpenDocument({ id, kind });
+        setPanel("document");
+      },
+      waiting: documentsWaiting.includes(id),
+      unsaved: documentDraftWaiting && unsaved.draft?.id === id
+    })),
+    ...view.decks.map((one) => ({
+      key: `deck:${one.id}`,
+      label: one.title,
+      open: () => {
+        setOpenDeck(one.id);
+        setPanel("deck");
+      },
+      waiting: decksWaiting.includes(one.id),
+      unsaved: decksDraftWaiting(one.id)
+    })),
+    ...view.docmosisTemplates.map((one) => ({
+      key: `docmosis:${one.id}`,
+      label: one.name,
+      open: () => {
+        setOpenDocmosis(one.id);
+        setPanel("docmosis");
+      },
+      waiting: docmosisWaiting.includes(one.id)
+    })),
+    ...(openDocmosis === null && (panel === "docmosis" || templateLoad.pending || loadFailed)
+      ? [
+          {
+            key: "docmosis:new",
+            label: "New Docmosis template",
+            open: () => {
+              setOpenDocmosis(null);
+              setPanel("docmosis");
+            },
+            failed: loadFailed && panel !== "docmosis"
+          }
+        ]
+      : []),
+    ...view.notifyTemplates.map((one) => ({
+      key: `notify:${one.id}`,
+      label: one.name,
+      open: () => {
+        setOpenNotify(one.id);
+        setPanel("notify");
+      },
+      waiting: notifyWaiting.includes(one.id)
+    })),
+    ...(openNotify === null && panel === "notify"
+      ? [
+          {
+            key: "notify:new",
+            label: "New Notify template",
+            open: () => {
+              setOpenNotify(null);
+              setPanel("notify");
+            }
+          }
+        ]
+      : []),
+    ...(video === null ? [] : [{ key: "video", label: "Video", open: () => setPanel("video"), waiting: videoWaiting }])
+  ];
+  const switcherPanel =
+    documentOpen !== null
+      ? `document:${documentOpen.id}`
+      : panel === "deck"
+        ? `deck:${openDeck}`
+        : panel === "docmosis" || panel === "notify"
+          ? `${panel}:${(panel === "docmosis" ? openDocmosis : openNotify) ?? "new"}`
+          : panel;
   const artefact: ArtefactSnapshot = {
-    title: view.artefact.title,
-    markdown: view.artefact.markdown,
-    version: view.artefact.version,
-    updatedBy: view.artefact.updatedBy
+    title: shownDocument?.title ?? null,
+    markdown: shownDocument?.markdown ?? "",
+    version: shownDocument?.version ?? 0,
+    updatedBy: shownDocument?.updatedBy ?? null
   };
+  /**
+   * The documents the switcher lists: every one the conversation holds, and one not saved yet that is open or has an
+   * edit waiting, which is one to return to even before its first save.
+   */
+  function documentRows(): { id: string; kind: DocumentKind; title: string | null }[] {
+    const rows: { id: string; kind: DocumentKind; title: string | null }[] = view.documents.map(({ id, kind, title }) => ({ id, kind, title }));
+    for (const fresh of [documentOpen, unsaved.draft]) {
+      if (fresh !== null && !rows.some((row) => row.id === fresh.id)) {
+        rows.push({ id: fresh.id, kind: fresh.kind, title: null });
+      }
+    }
+    return rows;
+  }
+
+  async function removeDocument(id: string): Promise<string | null> {
+    if (view.documents.some((document) => document.id === id) && actions.removeArtefact !== undefined) {
+      const result = await actions.removeArtefact({ conversationId: view.id, documentId: id });
+      if (!result.ok) {
+        return result.error;
+      }
+      router.refresh();
+    }
+    setUnsaved((before) => (before.draft?.id === id ? { draft: null, key: before.key } : before));
+    setPanel(null);
+    setOpenDocument(null);
+    return null;
+  }
+
+  async function removeDeck(id: string): Promise<string | null> {
+    if (actions.removeDeck !== undefined) {
+      const result = await actions.removeDeck({ conversationId: view.id, itemId: id });
+      if (!result.ok) {
+        return result.error;
+      }
+      router.refresh();
+    }
+    setUnsavedDeck((before) => (before.deckId === id ? { draft: null, deckId: null, key: before.key } : before));
+    setPanel(null);
+    setOpenDeck(null);
+    return null;
+  }
+
+  async function removeDocmosisTemplate(id: string): Promise<string | null> {
+    if (actions.removeDocmosisTemplate !== undefined) {
+      const result = await actions.removeDocmosisTemplate({ conversationId: view.id, itemId: id });
+      if (!result.ok) {
+        return result.error;
+      }
+      router.refresh();
+    }
+    setPanel(null);
+    setOpenDocmosis(null);
+    return null;
+  }
+
+  async function removeNotifyTemplate(id: string): Promise<string | null> {
+    if (actions.removeNotifyTemplate !== undefined) {
+      const result = await actions.removeNotifyTemplate({ conversationId: view.id, itemId: id });
+      if (!result.ok) {
+        return result.error;
+      }
+      router.refresh();
+    }
+    setPanel(null);
+    setOpenNotify(null);
+    return null;
+  }
 
   async function send(body: string, uploadIds: string[]): Promise<string | null> {
-    // A slide the person asked about goes in front of their words, which is the whole of how the session is told. Its
-    // room is kept whatever its length, so the limit the person is told is the same for every slide.
-    if (ask !== null && body.length > MAX_ASKED_BODY) {
-      return `a message about a slide is at most ${MAX_ASKED_BODY} characters`;
-    }
+    // A slide the person asked about goes in front of their words, which is the whole of how the session is told. The
+    // box holds their words to the room the slide leaves (`limit` below), so the two together never pass `MAX_BODY`.
     const asked = ask === null ? body : `${ask.reference}\n${body}`;
     const result = await actions.send({ conversationId: view.id, body: asked, uploadIds });
     if (!result.ok) {
       return result.error;
     }
     setAsk(null);
+    // Someone who scrolled up to re-read and then sent wants to see their message and the reply coming, not stay put.
+    scroller.stickNow();
     live.addMessage(result.message);
     return null;
   }
+
+  /** Sends words the person already sent, again: Ask again on an answer, and Send it again on one that was not delivered. */
+  /**
+   * The words exactly as they were sent, and nothing the box is holding for the next message: not a slide reference
+   * waiting there, which stays for the message it was chosen for. One at a time, so a double click sends them once.
+   */
+  async function again(text: string, resentKey?: string): Promise<void> {
+    if (resending.current) {
+      return;
+    }
+    resending.current = true;
+    setResendingNow(true);
+    try {
+      const result = await actions.send({ conversationId: view.id, body: text, uploadIds: [] });
+      if (result.ok) {
+        setError(null);
+        scroller.stickNow();
+        live.addMessage(result.message);
+        if (resentKey !== undefined) {
+          setResent((keys) => new Set(keys).add(resentKey));
+        }
+      } else {
+        setError(result.error);
+      }
+    } catch (error) {
+      setError(actionThrew(error));
+    } finally {
+      resending.current = false;
+      setResendingNow(false);
+    }
+  }
+
+  /** There is no blank deck to edit: slides are drafted by the assistant, so Create asks it to make a new one. */
+  async function createSlides(): Promise<void> {
+    if (slidesAsked) {
+      return;
+    }
+    setSlidesAskedAt(decksSignature);
+    let problem: string | null;
+    try {
+      problem = await send(CREATE_SLIDES, []);
+    } catch (error) {
+      problem = actionThrew(error);
+    }
+    if (problem !== null) {
+      setError(problem);
+      setSlidesAskedAt(null);
+    }
+  }
+
+  // Escape stops the answer being written, as in other chat tools, but only when nothing else on the page has a use for
+  // it: a dialog, a menu or an open list answers Escape first, and the skill list marks it as used. `window` is the last
+  // stop, so all of those have had their turn.
+  const stopNow = useRef(() => {});
+  stopNow.current = () => void stop();
+  useEffect(() => {
+    if (!stoppable) {
+      return;
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.shiftKey || event.defaultPrevented) {
+        return;
+      }
+      if (document.querySelector('[aria-modal="true"], [role="menu"], [role="listbox"]:not([hidden])') !== null) {
+        return;
+      }
+      // The sidebar has its own Escapes — its search box, and the drawer on a narrow screen — which close something there.
+      const sidebar = document.querySelector('aside[aria-label="Conversations"]');
+      const target = event.target instanceof Node ? event.target : null;
+      if ((sidebar !== null && target !== null && sidebar.contains(target)) || document.querySelector('button[aria-label="Close sidebar"]') !== null) {
+        return;
+      }
+      stopNow.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [stoppable]);
 
   async function stop(): Promise<void> {
     const result = await actions.stop({ conversationId: view.id });
@@ -617,7 +1219,7 @@ export function ChatView({
         <header className="flex h-14 shrink-0 items-center gap-3 border-b border-asst-field px-4">
           <SidebarToggle />
           {/* Gives way long before the product chip beside it, keeping 4rem so the start of the name always shows. */}
-          <h1 className="min-w-[4rem] shrink-[999] truncate text-[15px] font-medium">{view.title}</h1>
+          <h1 className="min-w-[4rem] shrink-[999] min-[480px]:min-w-[10rem] truncate text-[15px] font-medium">{view.title}</h1>
           <label className="sr-only" htmlFor="chat-product">
             Product
           </label>
@@ -627,7 +1229,7 @@ export function ChatView({
             to 40 characters, and how a select renders a value too long for it is the engine's business rather than
             `text-overflow`'s. The chip never goes below 4rem, so it stays readable and operable in a 320px header.
           */}
-          <div className="relative flex min-w-[4rem] max-w-[9.5rem] shrink items-center gap-1.5 rounded-md border border-asst-accent-line px-2 py-1 font-plex-mono text-[11px] uppercase leading-none tracking-wider text-asst-accent-soft focus-within:border-asst-accent">
+          <div className="relative flex min-w-[4rem] max-w-[9.5rem] shrink items-center min-[480px]:shrink-0 gap-1.5 rounded-md border border-asst-accent-line px-2 py-1 font-plex-mono text-[11px] uppercase leading-none tracking-wider text-asst-accent-soft focus-within:border-asst-accent">
             <span aria-hidden="true" className="min-w-0 truncate">
               {productLabel(product)}
             </span>
@@ -647,70 +1249,9 @@ export function ChatView({
               ))}
             </select>
           </div>
-          <div className="ml-auto flex shrink-0 items-center gap-1.5">
-            {docmosis === null || panel === "docmosis" ? null : (
-              <button
-                type="button"
-                onClick={() => setPanel("docmosis")}
-                aria-label={docmosisWaiting ? "Open template, updated by the assistant" : "Open template"}
-                className={`flex h-[34px] items-center whitespace-nowrap rounded-[9px] border px-2.5 text-[13px] hover:border-asst-accent-line hover:bg-asst-field min-[480px]:gap-2 min-[480px]:pr-3 ${docmosisWaiting ? "border-asst-accent bg-asst-field" : "border-asst-strong"}`}
-              >
-                <span aria-hidden="true" className="text-sm leading-none text-asst-accent">
-                  ▤
-                </span>
-                <span className="hidden min-[480px]:inline">Open template</span>
-                {docmosisWaiting ? <span aria-hidden="true" data-testid="docmosis-updated" className="h-1.5 w-1.5 rounded-full bg-asst-accent" /> : null}
-              </button>
-            )}
-            {view.deck === null || panel === "deck" ? null : (
-              <button
-                type="button"
-                onClick={() => setPanel("deck")}
-                aria-label={
-                  deckDraftWaiting ? "Open slides, with your unsaved changes" : slidesWaiting ? "Open slides, updated by the assistant" : "Open slides"
-                }
-                className={`flex h-[34px] items-center whitespace-nowrap rounded-[9px] border px-2.5 text-[13px] hover:border-asst-accent-line hover:bg-asst-field min-[480px]:gap-2 min-[480px]:pr-3 ${slidesWaiting || deckDraftWaiting ? "border-asst-accent bg-asst-field" : "border-asst-strong"}`}
-              >
-                <span aria-hidden="true" className="text-sm leading-none text-asst-accent">
-                  ▭
-                </span>
-                <span className="hidden min-[480px]:inline">Open slides</span>
-                {/* Marked by a shape as well as the border's colour, so the change is not told by colour alone. */}
-                {deckDraftWaiting ? (
-                  <span aria-hidden="true" data-testid="slides-unsaved" className="h-1.5 w-1.5 rounded-full bg-asst-accent" />
-                ) : slidesWaiting ? (
-                  <span aria-hidden="true" data-testid="slides-updated" className="h-1.5 w-1.5 rounded-full bg-asst-accent" />
-                ) : null}
-              </button>
-            )}
-            {panel === "document" ? null : (
-              <button
-                type="button"
-                onClick={() => setPanel("document")}
-                // Named here as well, because below 480px the icon stands alone so that a 320px header still fits
-                // the title, the product chip and both buttons.
-                aria-label={
-                  documentDraftWaiting
-                    ? "Open document, with your unsaved changes"
-                    : documentWaiting
-                      ? "Open document, updated by the assistant"
-                      : view.artefact.version > 0
-                        ? "Open document"
-                        : "Add document"
-                }
-                className={`flex h-[34px] items-center whitespace-nowrap rounded-[9px] border px-2.5 text-[13px] hover:border-asst-accent-line hover:bg-asst-field min-[480px]:gap-2 min-[480px]:pr-3 ${documentWaiting || documentDraftWaiting ? "border-asst-accent bg-asst-field" : "border-asst-strong"}`}
-              >
-                <span aria-hidden="true" className="text-lg leading-none text-asst-accent">
-                  +
-                </span>
-                <span className="hidden min-[480px]:inline">{view.artefact.version > 0 ? "Open document" : "Add document"}</span>
-                {documentDraftWaiting ? (
-                  <span aria-hidden="true" data-testid="document-unsaved" className="h-1.5 w-1.5 rounded-full bg-asst-accent" />
-                ) : documentWaiting ? (
-                  <span aria-hidden="true" data-testid="document-updated" className="h-1.5 w-1.5 rounded-full bg-asst-accent" />
-                ) : null}
-              </button>
-            )}
+          <ItemButtons items={items} current={switcherPanel} />
+          <div className="flex shrink-0 items-center gap-1.5">
+            <CreateMenu options={creatable} />
             <ChatMenu
               title={view.title}
               shareHref={`/assistant/${view.id}?share=1`}
@@ -759,7 +1300,24 @@ export function ChatView({
             )}
             <ol aria-label="Conversation" className="flex flex-col gap-[26px]">
               {thread.map((item) => (
-                <Item key={item.key} item={item} answerQuestion={actions.answerQuestion} repoBase={view.repoBase} />
+                <Fragment key={item.key}>
+                  {separators.has(item.key) ? (
+                    <li className="flex items-center gap-3 text-xs text-asst-faint">
+                      <span aria-hidden="true" className="h-px flex-1 bg-asst-line" />
+                      <span suppressHydrationWarning>{separators.get(item.key)}</span>
+                      <span aria-hidden="true" className="h-px flex-1 bg-asst-line" />
+                    </li>
+                  ) : null}
+                  <Item
+                    item={item}
+                    answerQuestion={actions.answerQuestion}
+                    repoBase={view.repoBase}
+                    busy={doing.state !== "idle" || resendingNow}
+                    onRetry={item.key === lastAnswer && lastAsked !== null ? () => void again(lastAsked) : undefined}
+                    onResend={({ key, text }) => void again(text, key)}
+                    resent={resent.has(item.key)}
+                  />
+                </Fragment>
               ))}
             </ol>
             {doing.state === "idle" ? null : (
@@ -832,6 +1390,7 @@ export function ChatView({
               attach={pod}
               skills={view.skills}
               reference={ask === null ? undefined : { label: ask.label, onRemove: () => setAsk(null) }}
+              limit={ask === null ? MAX_BODY : MAX_ASKED_BODY}
               dropZone={scroller.ref}
               onFocus={() => {
                 if (pod && !warmed.current && status === "offline") {
@@ -843,16 +1402,17 @@ export function ChatView({
           </div>
         </div>
       </div>
-      {panel === "deck" && view.deck !== null ? (
+      {panel === "deck" && deck !== undefined ? (
         <DeckPanel
-          key={unsavedDeck.key}
-          draft={unsavedDeck.draft ?? undefined}
-          onDraftTaken={() => setUnsavedDeck((before) => ({ draft: null, key: before.key }))}
-          onUnsaved={reopenDeck}
+          key={`${deck.id}:${unsavedDeck.key}`}
+          draft={unsavedDeck.deckId === deck.id ? (unsavedDeck.draft ?? undefined) : undefined}
+          onDraftTaken={() => setUnsavedDeck((before) => ({ draft: null, deckId: null, key: before.key }))}
+          onUnsaved={(draft) => reopenDeck(draft, deck.id)}
+          onRemove={actions.removeDeck === undefined ? undefined : () => removeDeck(deck.id)}
           save={actions.saveDeck}
           onBusy={markDeckBusy}
           conversationId={view.id}
-          deck={view.deck}
+          deck={deck}
           onClose={() => setPanel(null)}
           narrow={narrow}
           announce={arrivals.announce}
@@ -866,24 +1426,55 @@ export function ChatView({
           }}
         />
       ) : null}
-      {panel === "docmosis" && docmosis !== null ? (
+      {panel === "docmosis" ? (
         <DocmosisPanel
+          key={openDocmosis ?? "new"}
           conversationId={view.id}
           docmosis={docmosis}
+          onRemove={docmosis === null || actions.removeDocmosisTemplate === undefined ? undefined : () => removeDocmosisTemplate(docmosis.id)}
           owner
+          loader={pod ? templateLoad : undefined}
           onClose={() => setPanel(null)}
           onBusy={markDocmosisBusy}
           narrow={narrow}
           announce={arrivals.announce}
         />
       ) : null}
-      {panel === "document" ? (
-        <ArtefactPanel
-          key={unsaved.key}
-          draft={unsaved.draft ?? undefined}
-          onDraftTaken={() => setUnsaved((before) => ({ draft: null, key: before.key }))}
-          onUnsaved={reopenDocument}
+      {panel === "notify" ? (
+        <NotifyPanel
+          key={openNotify ?? "new"}
+          onCreated={(id) => setOpenNotify(id)}
           conversationId={view.id}
+          notify={notify}
+          onRemove={notify === null || actions.removeNotifyTemplate === undefined ? undefined : () => removeNotifyTemplate(notify.id)}
+          owner
+          canPick={pod}
+          onClose={() => setPanel(null)}
+          onBusy={markNotifyBusy}
+          narrow={narrow}
+          announce={arrivals.announce}
+        />
+      ) : null}
+      {panel === "video" && video !== null ? (
+        <VideoPanel
+          conversationId={view.id}
+          video={video}
+          canPost={view.canPostVideo}
+          onClose={() => setPanel(null)}
+          narrow={narrow}
+          announce={arrivals.announce}
+        />
+      ) : null}
+      {documentOpen !== null ? (
+        <ArtefactPanel
+          key={`${documentOpen.id}:${unsaved.key}`}
+          draft={unsaved.draft?.id === documentOpen.id ? unsaved.draft : undefined}
+          onDraftTaken={() => setUnsaved((before) => ({ draft: null, key: before.key }))}
+          onUnsaved={(draft) => reopenDocument({ ...draft, ...documentOpen })}
+          onRemove={actions.removeArtefact === undefined ? undefined : () => removeDocument(documentOpen.id)}
+          conversationId={view.id}
+          documentId={documentOpen.id}
+          kind={documentOpen.kind}
           artefact={artefact}
           productLabel={view.productLabel}
           save={actions.saveArtefact}
@@ -898,18 +1489,27 @@ export function ChatView({
            * The panel keeps copy, download and print, which are the ways a document leaves a local chat.
            * `requestJiraExport` and `requestConfluenceExport` refuse it as well, so this is the convenience half.
            */
-          // The person's ticket tool, a Jira backlog or a GitHub repository, and the other tool too when the document
+          // The person's ticket tool, Jira or a GitHub repository, and the other tool too when the document
           // already has a ticket there (`ticketsOffered`).
-          jira={pod && tickets.jira ? { exported: view.jira, access: jira, exportTo: actions.exportToJira, defaultProject: defaults.jira } : undefined}
+          jira={
+            pod && tickets.jira
+              ? { exported: shownDocument?.jira ?? NOT_EXPORTED, access: jira, exportTo: actions.exportToJira, defaultProject: defaults.jira }
+              : undefined
+          }
           github={
             pod && tickets.github && actions.exportToGithub !== undefined
-              ? { exported: view.github, exportTo: actions.exportToGithub, defaultRepo: defaults.github, defaultProject: defaults.githubProject }
+              ? {
+                  exported: shownDocument?.github ?? NOT_EXPORTED,
+                  exportTo: actions.exportToGithub,
+                  defaultRepo: defaults.github,
+                  defaultProject: defaults.githubProject
+                }
               : undefined
           }
           confluence={
             !pod || actions.exportToConfluence === undefined
               ? undefined
-              : { exported: view.confluence, access: jira, exportTo: actions.exportToConfluence, defaultPage: defaults.confluence }
+              : { exported: shownDocument?.confluence ?? NOT_EXPORTED, access: jira, exportTo: actions.exportToConfluence, defaultPage: defaults.confluence }
           }
           narrow={narrow}
         />

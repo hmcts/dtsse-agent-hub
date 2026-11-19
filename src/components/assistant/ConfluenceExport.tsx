@@ -9,7 +9,7 @@ import type { JiraAccess } from "@/components/assistant/JiraExport";
 import type { LookUp } from "@/components/assistant/lookupClient";
 import type { ActionResult } from "@/web/action";
 
-export type ExportToConfluenceAction = (input: { conversationId: unknown; parent: unknown }) => Promise<ActionResult>;
+export type ExportToConfluenceAction = (input: { conversationId: unknown; documentId: unknown; parent: unknown }) => Promise<ActionResult>;
 
 export interface ConfluenceExportProps {
   exported: ConfluenceExportView;
@@ -135,6 +135,7 @@ function blockedBy(written: boolean, saved: boolean, parent: Chosen | null): str
  */
 export function ConfluenceFooter({
   conversationId,
+  documentId,
   exported,
   exportTo,
   defaultPage,
@@ -142,7 +143,7 @@ export function ConfluenceFooter({
   access,
   saved,
   written
-}: ConfluenceExportProps & { conversationId: string; saved: boolean; written: boolean }) {
+}: ConfluenceExportProps & { conversationId: string; documentId: string; saved: boolean; written: boolean }) {
   const [parent, setParent] = useState<Chosen | null>(defaultPage ?? DEFAULT_CONFLUENCE_PARENT);
   const shownExport = exported.status === "failed" ? `failed:${exported.error}` : exported.status;
   const [clickedAt, setClickedAt] = useState<string | null>(null);
@@ -159,7 +160,7 @@ export function ConfluenceFooter({
     setClickedMs(Date.now());
     setError(null);
     const { ancestors: _, ...chosen } = parent;
-    const result = await exportTo({ conversationId, parent: chosen });
+    const result = await exportTo({ conversationId, documentId, parent: chosen });
     if (!result.ok) {
       setClickedAt(null);
       setError(result.error);
@@ -177,7 +178,7 @@ export function ConfluenceFooter({
   const shown = error ?? failure;
   const idle = !pending && done === null;
   const hint = idle ? (blocked ?? (access.connected ? null : "You'll be asked to sign in to Atlassian, so the page is created as you.")) : null;
-  const hintId = `confluence-hint-${conversationId}`;
+  const hintId = `confluence-hint-${documentId}`;
 
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2.5">

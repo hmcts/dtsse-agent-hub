@@ -27,13 +27,15 @@ const CREATE_TIMEOUT_MS = 120000;
 
 export type JiraExportRequest = {
   exportId: string;
+  /** The document the export is of, from the frame; absent from a hub that holds one document, whose `/artefact` it is. */
+  documentId?: string;
   project: string;
   issueType: string;
   labels: string[];
 };
 
 export type JiraExportDeps = {
-  api: Pick<Api, "getArtefact" | "putJiraExport">;
+  api: Pick<Api, "getArtefact" | "getArtefactById" | "putJiraExport">;
   agentId: string;
   env: Env;
   run: (cmd: string, args: string[], opts: { env: Env; timeoutMs: number }) => Promise<RunResult>;
@@ -113,7 +115,10 @@ export function twgFailure(result: RunResult): string {
 
 async function create(deps: JiraExportDeps, request: JiraExportRequest): Promise<JiraExportOutcome> {
   // The document first: it is one quick request, and an empty one should not ask anybody to sign in.
-  const doc = await withRetry(() => deps.api.getArtefact(deps.agentId), { attempts: 3, wait: deps.retryWait });
+  const doc = await withRetry(
+    () => (request.documentId === undefined ? deps.api.getArtefact(deps.agentId) : deps.api.getArtefactById(deps.agentId, request.documentId)),
+    { attempts: 3, wait: deps.retryWait }
+  );
   if (!doc.markdown.trim()) {
     return { error: "The document is empty, so there was nothing to export." };
   }

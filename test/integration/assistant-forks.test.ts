@@ -1,6 +1,9 @@
+import { createHash } from "node:crypto";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { writeArtefact } from "../../src/assistant/artefact-store.ts";
+import { createDocument, listDocuments, writeArtefact } from "../../src/assistant/artefact-store.ts";
 import { ensureAssistant, findAssistant } from "../../src/assistant/assistant-store.ts";
+import { docxRef } from "../../src/assistant/docmosis.ts";
+import { putDocmosisAsset, writeAgentDocmosis } from "../../src/assistant/docmosis-store.ts";
 import { forkRecipients } from "../../src/assistant/fork-store.ts";
 import { FORK_CONTEXT_FILE_NAME } from "../../src/assistant/forks.ts";
 import { frameAttachments } from "../../src/assistant/upload-store.ts";
@@ -75,10 +78,11 @@ async function take(id: string): Promise<string> {
 }
 
 async function original(id: string) {
-  return await prisma.assistantConversation.findUniqueOrThrow({
+  const row = await prisma.assistantConversation.findUniqueOrThrow({
     where: { id },
-    select: { ownerOid: true, title: true, artefactVersion: true, artefactMarkdown: true, lastActiveAt: true, agentId: true }
+    select: { ownerOid: true, title: true, lastActiveAt: true, agentId: true }
   });
+  return { ...row, documents: await listDocuments(prisma, id) };
 }
 
 beforeAll(async () => {
@@ -100,6 +104,32 @@ afterEach(() => {
 afterAll(async () => {
   await realtime().listener.stop();
   await prisma.$disconnect();
+});
+
+describe("when a shared chat was shared", () => {
+  it("should tell a reader the earlier of their share and their offer, and tell the owner nothing", async () => {
+    const { id } = await chat();
+    await shareActions.shareChat({ conversationId: id, recipientOid: BOB.oid });
+    await prisma.assistantConversationShare.updateMany({
+      where: { conversationId: id, recipientOid: BOB.oid },
+      data: { createdAt: new Date("2026-11-10T09:00:00Z") }
+    });
+    await forkActions.offerChatFork({ conversationId: id, recipientOid: BOB.oid });
+
+    expect((await sharedChat(viewerOf(BOB), id))?.sharedAt).toBe("2026-11-10T09:00:00.000Z");
+    expect((await sharedChat(viewerOf(ALICE), id))?.sharedAt).toBeNull();
+  });
+
+  it("should date an offer to fork when the reader was offered the chat and not shared it", async () => {
+    const { id } = await chat();
+    await forkActions.offerChatFork({ conversationId: id, recipientOid: BOB.oid });
+    await prisma.assistantConversationFork.updateMany({
+      where: { conversationId: id, recipientOid: BOB.oid },
+      data: { createdAt: new Date("2026-11-11T09:00:00Z") }
+    });
+
+    expect((await sharedChat(viewerOf(BOB), id))?.sharedAt).toBe("2026-11-11T09:00:00.000Z");
+  });
 });
 
 describe("offering a conversation to fork", () => {
@@ -151,6 +181,52 @@ describe("offering a conversation to fork", () => {
 });
 
 describe("taking a copy", () => {
+  it("should copy every document, in order and without its exports, and tell the copy's session there are several, when the chat holds more than one", async () => {
+    actAs("alice");
+    const { id } = await chat();
+    const conversation = await prisma.assistantConversation.findUniqueOrThrow({ where: { id }, select: { id: true, virtualAgentId: true, ownerOid: true } });
+    const ticket = await createDocument(prisma, conversation, { kind: "ticket", title: "Add a hearing", markdown: "As a clerk", by: "agent" });
+    await prisma.assistantDocument.update({ where: { id: ticket.id }, data: { jiraStatus: "done", jiraKey: "VIBE-9", jiraProject: "VIBE" } });
+    await forkActions.offerChatFork({ conversationId: id, recipientOid: BOB.oid });
+    actAs("bob");
+
+    const copyId = await take(id);
+
+    const copied = await prisma.assistantDocument.findMany({ where: { conversationId: copyId }, orderBy: { createdAt: "asc" } });
+    expect(copied.map(({ kind, title, version, updatedBy, jiraKey }) => ({ kind, title, version, updatedBy, jiraKey }))).toEqual([
+      { kind: "document", title: "Draft order", version: 1, updatedBy: "user", jiraKey: null },
+      { kind: "ticket", title: "Add a hearing", version: 1, updatedBy: "user", jiraKey: null }
+    ]);
+    const sent = await assistantActions.sendAssistantMessage({ conversationId: copyId, body: "Carry on" });
+    const [attached] = await frameAttachments(prisma, BigInt((sent as { ok: true; message: { id: string } }).message.id));
+    const upload = await prisma.assistantUpload.findUniqueOrThrow({ where: { id: attached!.upload_id }, include: { parts: true } });
+    expect(Buffer.concat(upload.parts.map((part) => Buffer.from(part.data))).toString("utf8")).toContain("Its 2 documents were copied too");
+  });
+
+  it("should leave the copy with no Docmosis template, as it has always been, when the chat holds several", async () => {
+    actAs("alice");
+    const { id } = await chat();
+    const docx = Buffer.from([0x50, 0x4b, 0x03, 0x04, 1, 2, 3]);
+    const sha = createHash("sha256").update(docx).digest("hex");
+    await putDocmosisAsset(prisma, id, sha, docx);
+    const body = {
+      name: "Claim",
+      docx: docxRef(sha),
+      schema: { root: { kind: "object" as const, controls: [], notes: [], properties: {} }, warnings: [] },
+      data: {},
+      base_version: 0
+    };
+    await writeAgentDocmosis(prisma, { conversationId: id, body });
+    await writeAgentDocmosis(prisma, { conversationId: id, create: true, body: { ...body, name: "Order" } });
+    await forkActions.offerChatFork({ conversationId: id, recipientOid: BOB.oid });
+    actAs("bob");
+
+    const copyId = await take(id);
+
+    expect(await prisma.assistantDocmosis.count({ where: { conversationId: id } })).toBe(2);
+    expect(await prisma.assistantDocmosis.count({ where: { conversationId: copyId } })).toBe(0);
+  });
+
   it("should make the recipient their own copy, with the words, the document and where it came from, when they take it", async () => {
     const { id } = await offered();
 
@@ -163,9 +239,11 @@ describe("taking a copy", () => {
     expect(copy.agentId).not.toBeNull();
     expect(copy.forkedFromId).toBe(id);
     expect(copy.forkedFromOwnerName).toBe(ALICE.name);
-    expect(copy.artefactMarkdown).toContain("Draft order");
-    expect(copy.artefactVersion).toBe(1);
-    expect(copy.artefactUpdatedBy).toBe("user");
+    const [document, ...others] = await listDocuments(prisma, copyId);
+    expect(others).toEqual([]);
+    expect(document?.markdown).toContain("Draft order");
+    expect(document?.version).toBe(1);
+    expect(document?.updatedBy).toBe("user");
 
     const view = await assistantConversation(viewerOf(BOB), copyId);
     expect(view?.forked?.fromOwnerName).toBe(ALICE.name);
@@ -311,8 +389,9 @@ describe("the copy's context for its session", () => {
     // Old enough for the sweep's window, with no document, as a copy of a chat without one would be.
     await prisma.assistantConversation.update({
       where: { id: copyId },
-      data: { createdAt: new Date(Date.now() - 48 * 3_600_000), artefactVersion: 0, artefactMarkdown: "" }
+      data: { createdAt: new Date(Date.now() - 48 * 3_600_000) }
     });
+    await prisma.assistantDocument.deleteMany({ where: { conversationId: copyId } });
 
     await sweepUploads(prisma, { retentionHours: 1 });
 

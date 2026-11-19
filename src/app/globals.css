@@ -53,6 +53,12 @@
   .status-pulse {
     animation: none;
   }
+
+  /* The thinking dots rest as three steady dots: the words beside them already say the assistant is working. */
+  .animate-asst-dot {
+    animation: none;
+    opacity: 0.6;
+  }
 }
 
 @keyframes status-pulse {

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { ActionForm, type FormAction } from "@/components/ActionForm";
+import { CopyButton } from "@/components/assistant/CopyButton";
 import { LoginCountdown } from "@/components/assistant/LoginCountdown";
 import type { LoginView } from "@/virtual-agents/logins";
 
@@ -51,11 +52,13 @@ export function SignIn({
           </a>{" "}
           and enter this code <LoginCountdown expiresAt={login.expiresAt} />:
         </p>
-        <p>
+        {/* A Copy button beside it, since the code goes into a page in another tab, and retyping it is where it goes wrong. */}
+        <p className="flex items-center gap-2">
           <span className="sr-only">{name} code: </span>
           <code className="inline-block rounded-lg border border-asst-strong bg-asst-field px-3 py-1 font-plex-mono text-lg tracking-widest text-asst-text">
             {login.userCode}
           </code>
+          {login.userCode === null ? null : <CopyButton text={login.userCode} label={`Copy the ${name} code`} />}
         </p>
         <p className="text-xs text-asst-faint">Sign in as yourself.</p>
         {/* hmcts enforces SAML single sign-on, and a token is authorised for it only if the person has an SSO session

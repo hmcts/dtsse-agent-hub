@@ -49,6 +49,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh, push }), usePat
 vi.mock("@/components/live/HubStream", () => ({
   useHubEvent: () => undefined,
   useEndSession: () => () => undefined,
+  useHubSubscribe: () => () => () => undefined,
   useWatch: () => undefined
 }));
 
@@ -567,12 +568,12 @@ function conversation(overrides: Partial<ConversationView> = {}): ConversationVi
     clientFeatures: null,
     sessionState: null,
     sessionDetail: null,
-    artefact: { title: null, markdown: "", version: 0, updatedBy: null, updatedAt: null },
-    deck: null,
-    docmosis: null,
-    jira: { status: "none" },
-    github: { status: "none" },
-    confluence: { status: "none" },
+    documents: [],
+    decks: [],
+    docmosisTemplates: [],
+    notifyTemplates: [],
+    video: null,
+    canPostVideo: false,
     page: page(),
     forked: null,
     questions: [],
@@ -687,8 +688,9 @@ describe("ChatView attachments in the thread", () => {
       />
     );
 
-    const item = within(screen.getByRole("list", { name: "Conversation" })).getAllByRole("listitem")[0];
-    expect(item?.textContent).toBe("You said:📎letter.pdf10 bytes");
+    // After the day it was said on, and before its time: the chips and nothing else, so no empty bubble.
+    const item = within(screen.getByRole("list", { name: "Conversation" })).getAllByRole("listitem")[1];
+    expect(item?.textContent).toMatch(/^You said:📎letter\.pdf10 bytes\d\d:\d\d$/);
   });
 
   it("should show no attachment list when the message carried no files", () => {

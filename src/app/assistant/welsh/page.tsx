@@ -3,6 +3,7 @@ import { isWelshTask, WELSH_PRODUCTS } from "@/assistant/welsh";
 import { WelshPage } from "@/components/assistant/WelshPage";
 import { requireViewer } from "@/viewer/current";
 import { assistantHasWelsh } from "@/web/data";
+import { assistantSettingsPath } from "@/web/home";
 
 export const dynamic = "force-dynamic";
 
@@ -46,9 +47,16 @@ function TurnOn() {
         Turn on Welsh translations first
       </h2>
       <p className="text-pretty text-[13px] text-asst-body">
-        Your assistant does this work with the Welsh translations tool, which is not turned on for it yet. Go back to CFT Workspace, open Settings at the bottom
-        of the sidebar, and tick Welsh translations under Plugins. Your assistant restarts to load it, and keeps your chats.
+        Your assistant does this work with the Welsh translations tool, which is not turned on for it yet. Tick Welsh translations in the Plugins settings. Your
+        assistant restarts to load it, and keeps your chats.
       </p>
+      {/* Straight to the section, rather than directions to it: the settings open on Plugins over CFT Workspace. */}
+      <Link
+        href={assistantSettingsPath("plugins")}
+        className="self-start rounded-[10px] bg-asst-accent px-3.5 py-2 text-[13px] font-semibold text-asst-ink hover:bg-asst-accent-hover"
+      >
+        Open the Plugins settings
+      </Link>
     </section>
   );
 }

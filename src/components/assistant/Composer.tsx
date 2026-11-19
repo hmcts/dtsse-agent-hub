@@ -4,10 +4,19 @@ import { type Ref, type RefObject, useEffect, useId, useImperativeHandle, useLay
 import type { Skill } from "@/agents/skills";
 import { type Filled, fillWith, type Template } from "@/assistant/starters";
 import type { MessageAttachment } from "@/assistant/upload-store";
+import { sendsMessage, useSendKey } from "@/components/assistant/shortcuts";
 import { admitFiles, discardUpload, fileSizeLabel, pastedName, UploadAborted, uploadFile } from "@/components/assistant/uploadClient";
 import { AnnouncerRegion, useAnnouncer } from "@/components/live/Announcer";
 import { type SkillMenuTheme, useSkillMenu } from "@/components/SkillMenu";
 import { useDraft } from "@/components/useDraft";
+import { MAX_BODY } from "@/messages/limits";
+import { actionThrew } from "@/web/action-fault";
+
+/**
+ * The share of the limit at which the box starts counting characters: soon enough to cut a long paste before
+ * pressing Send, late enough that an ordinary message never shows a number.
+ */
+const COUNT_FROM = 0.8;
 
 /** Above this the box scrolls rather than grows. Eight lines, which is a quarter of a phone's screen. */
 const MAX_HEIGHT = 200;
@@ -83,6 +92,20 @@ export interface ComposerFiller {
 }
 
 /**
+ * What the empty box says: what it can do beyond words, but only what it can do here, so a "/" list is mentioned only
+ * where there are skills, and dropping a file only where one can be attached.
+ */
+export function composerPlaceholder(skills: boolean, files: boolean): string {
+  if (skills && files) {
+    return "Message CFT Workspace. Type / for skills, or drop files here";
+  }
+  if (skills) {
+    return "Message CFT Workspace. Type / for skills";
+  }
+  return files ? "Message CFT Workspace, or drop files here" : "Message CFT Workspace";
+}
+
+/**
  * The message box: Enter sends and Shift+Enter starts a new line, as in any chat. The + menu attaches files or fills
  * the box from a saved template for the person to complete. Files can also be pasted into the box or dropped on it,
  * or on `dropZone` — the message pane — so the target is large. `onFocus` lets the page warm a session up before they
@@ -121,7 +144,8 @@ export function Composer({
   skills = [],
   dropZone,
   filler,
-  reference
+  reference,
+  limit = MAX_BODY
 }: {
   templates: readonly Template[];
   /** Resolves to an error to show, or `null` once sent, which clears the box and its attachments. */
@@ -149,8 +173,11 @@ export function Composer({
    * The page puts the words in front of the message as it sends it; the box holds only what the person types.
    */
   reference?: { label: string; onRemove: () => void };
+  /** The most characters the message may have: the counter shows from `COUNT_FROM` of it, and past it Send is off. */
+  limit?: number;
 }) {
   const { body: text, setBody: setText, discard } = useDraft({ kind: "assistant-draft", viewerOid, draftId });
+  const [sendKey] = useSendKey();
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [menu, setMenu] = useState<"closed" | "open" | "templates">("closed");
@@ -167,6 +194,7 @@ export function Composer({
   const picker = useRef<HTMLInputElement>(null);
   const menuId = useId();
   const errorId = useId();
+  const countId = useId();
   const files = useAnnouncer("files");
   const skillMenu = useSkillMenu({ skills, body: text, setBody: setText, field: box, theme: SKILL_MENU });
 
@@ -402,12 +430,20 @@ export function Composer({
   const uploading = attachments.some((file) => file.state.stage === "uploading");
   const unattached = attachments.some((file) => file.state.stage === "failed");
   const empty = text.trim() === "" && attachments.length === 0;
+  const counted = text.length >= limit * COUNT_FROM;
+  const tooLong = text.length > limit;
   const blocked = uploading
     ? "Wait for your files to finish uploading, then send."
     : unattached
       ? "One of your files could not be attached. Try again, or remove it."
-      : null;
+      : tooLong
+        ? attachable
+          ? "Your message is too long. Shorten it, or attach the text as a file."
+          : "Your message is too long. Shorten it, then send."
+        : null;
   const notice = error ?? blocked;
+  const placeholder = composerPlaceholder(skills.length > 0, attachable);
+  const describedBy = [notice === null ? null : errorId, counted ? countId : null].filter((id) => id !== null).join(" ");
 
   async function send(): Promise<void> {
     if (empty || sending || disabled || blocked !== null) {
@@ -416,7 +452,14 @@ export function Composer({
     setSending(true);
     setError(null);
     const uploadIds = held.current.flatMap((file) => (file.uploadId === null ? [] : [file.uploadId]));
-    const failure = await onSend(text, uploadIds);
+    // A call that throws never reached the hub or never came back: said like a refusal, and the box given back, rather
+    // than left disabled for good with nothing on screen.
+    let failure: string | null;
+    try {
+      failure = await onSend(text, uploadIds);
+    } catch (error) {
+      failure = actionThrew(error);
+    }
     setSending(false);
     if (failure === null) {
       // Forgets the draft of the message that was sent, which empties the box; anything typed while the send was in
@@ -646,27 +689,44 @@ export function Composer({
               if (skillMenu.onKeyDown(event)) {
                 return;
               }
-              if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+              if (sendsMessage({ ...event, isComposing: event.nativeEvent.isComposing }, sendKey)) {
                 event.preventDefault();
                 void send();
               }
             }}
-            placeholder="Message CFT Workspace"
+            placeholder={placeholder}
             aria-label="Message"
-            aria-describedby={notice === null ? undefined : errorId}
+            aria-describedby={describedBy === "" ? undefined : describedBy}
             className="max-h-[200px] min-w-0 flex-1 resize-none border-none bg-transparent py-1.5 text-[15px] leading-normal text-asst-text outline-hidden placeholder:text-asst-faint"
           />
           <button
             type="button"
             onClick={() => void send()}
-            aria-label="Send"
+            aria-label={sending ? "Sending" : "Send"}
+            aria-busy={sending}
             disabled={empty || sending || disabled || blocked !== null}
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-asst-accent text-lg font-semibold text-asst-ink disabled:opacity-40"
           >
-            ↑
+            {/* Dots rather than the arrow while it goes, so a slow send does not read as a press that did nothing. */}
+            {sending ? (
+              <span aria-hidden="true" className="flex gap-0.5">
+                {[0, 1, 2].map((dot) => (
+                  <span key={dot} className="h-1 w-1 animate-asst-dot rounded-full bg-asst-ink" style={{ animationDelay: `${dot * 0.15}s` }} />
+                ))}
+              </span>
+            ) : (
+              "↑"
+            )}
           </button>
         </div>
       </div>
+      {/* Not live: read with the box it describes, since a region announcing every keystroke would drown the typing.
+          Going over the limit is announced once, by the alert below. */}
+      {counted ? (
+        <p id={countId} className={`text-right text-xs tabular-nums ${tooLong ? "text-asst-error" : "text-asst-muted"}`}>
+          {text.length.toLocaleString("en-GB")} / {limit.toLocaleString("en-GB")} characters
+        </p>
+      ) : null}
       {notice === null ? null : (
         <p id={errorId} role="alert" className="text-center text-[13px] text-asst-error">
           {notice}

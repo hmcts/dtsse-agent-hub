@@ -1,3 +1,6 @@
+import { POD_JOB_HANDLERS } from "./assistant/pod-job-handlers.ts";
+import { MAX_POD_JOB_KIND, POD_JOB_KIND_RE } from "./wire.ts";
+
 /**
  * What this build of the client understands of the hub's optional wire fields, reported on every register, and on every
  * pod status report, so the hub can leave out a field this build would ignore. See the
@@ -17,8 +20,11 @@
 export type ClientFeature =
   | "attachments"
   | "deck-build"
+  | "docmosis-library"
   | "files"
   | "github-lookups"
+  | "item-templates"
+  | "items"
   | "lookups"
   | "memory-anon"
   | "model-alias"
@@ -58,6 +64,16 @@ export type ClientFeature =
  * or `github_project`, searching the owner's GitHub repositories or Projects with gh. A build that claims only
  * `lookups` would drop such a frame as one it does not know, so the hub gates the GitHub kinds on this name.
  *
+ * `items` is claimed because this build reads every one of a conversation's documents: the frame's `artefacts`,
+ * `artefact get|put|remove --id`, and an export's `document_id`, which its export commands read that document by. A
+ * build without it reads only the primary document, so the hub refuses a second document, or a ticket or Confluence
+ * page, and an export of anything but the primary, for a pod that did not claim it.
+ *
+ * `item-templates` is claimed because this build reads every one of a conversation's decks, Docmosis templates and Notify
+ * templates (the frame's `decks`, `docmosis_templates` and `notify_templates`, the CLI's `--id` and `new`) and takes
+ * `item` and `item_id` in the `docmosis.load` and `notify.pull` jobs. A build without it reads only the primary of each,
+ * so the hub refuses a second one, or a job aimed at another, for a pod that did not claim it.
+ *
  * `welsh` is claimed because the assistant supervisor answers the sessions stream's `welsh` frame, running
  * the welsh plugin's `scripts/welsh` for the CFT Workspace's Welsh page. The hub gates on it, answering `unsupported`
  * to a pod that did not claim it.
@@ -71,6 +87,11 @@ export type ClientFeature =
  * `deck-build` is claimed because the assistant supervisor answers the sessions stream's `deck_build` frame, building
  * one version of a conversation's deck with the slides plugin's `scripts/slides build` and uploading the .pptx. The hub
  * gates on it, answering `unsupported` to a pod that did not claim it, which the slides panel words as needing an update.
+ *
+ * `docmosis-library` is claimed because the assistant supervisor answers the sessions stream's `docmosis_index`
+ * frame, reading the template library's index from GitHub's REST API with the owner's own `gh` token and answering
+ * it as tuples (`assistant/docmosis-library.ts`). The hub gates on it, answering the library's status with
+ * `unsupported` for a pod that did not claim it, which the template library words as needing an update.
  *
  * `memory-anon` is claimed because the assistant supervisor reads its own container's memory cgroup and reports it,
  * including `anon_bytes` from `memory.stat`, which the hub's memory route requires and computes its low-memory
@@ -102,8 +123,11 @@ export type ClientFeature =
 export const CLIENT_FEATURES: readonly ClientFeature[] = [
   "attachments",
   "deck-build",
+  "docmosis-library",
   "files",
   "github-lookups",
+  "item-templates",
+  "items",
   "lookups",
   "memory-anon",
   "model-alias",
@@ -118,4 +142,29 @@ export const CLIENT_FEATURES: readonly ClientFeature[] = [
 /** Whether `claim`, as untrusted as any stored or answered value, names exactly `names`, in any order. */
 export function sameFeatures(claim: unknown, names: readonly string[] = CLIENT_FEATURES): boolean {
   return Array.isArray(claim) && claim.length === names.length && names.every((name) => claim.includes(name));
+}
+
+/**
+ * The claim for each pod-job handler, `pod-job:<kind>`, sorted: one per kind this build can run and no other, so the
+ * hub never sends a kind with nothing here to answer it. Not part of `CLIENT_FEATURES`, which is a fixed list a test
+ * spells out; these follow `POD_JOB_HANDLERS` instead.
+ */
+export function podJobFeatures(handlers: readonly { kind: string }[]): string[] {
+  const kinds = new Set<string>();
+  for (const { kind } of handlers) {
+    if (kind.length > MAX_POD_JOB_KIND || !POD_JOB_KIND_RE.test(kind) || kinds.has(kind)) {
+      throw new Error(`pod job handler ${JSON.stringify(kind)} is not a kind the hub accepts, or is there twice`);
+    }
+    kinds.add(kind);
+  }
+  return [...kinds].map((kind) => `pod-job:${kind}`).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+}
+
+/**
+ * What a pod reports on `POST /api/virtual/{id}/status`: `CLIENT_FEATURES` and a claim for each pod-job handler. A
+ * session's registration claims `CLIENT_FEATURES` alone, since only the pod's supervisor runs pod jobs and the hub
+ * gates them on the pod's own claim.
+ */
+export function claimedFeatures(handlers: readonly { kind: string }[] = POD_JOB_HANDLERS): string[] {
+  return [...CLIENT_FEATURES, ...podJobFeatures(handlers)];
 }

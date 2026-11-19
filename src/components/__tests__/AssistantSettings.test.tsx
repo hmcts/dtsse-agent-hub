@@ -859,7 +859,12 @@ describe("connecting Azure from the Assistant's settings", () => {
   it("should offer no connect while a code the person asked for is waiting for them", () => {
     open({ connections: data(["github", "claude"], [login("azure", "pending")]), connect: connectWith() }, "Connections");
 
-    expect(within(azureRow()).queryByRole("button")).toBeNull();
+    // Only the code's own Copy button: nothing that would start another sign-in.
+    expect(
+      within(azureRow())
+        .getAllByRole("button")
+        .map((button) => button.getAttribute("aria-label"))
+    ).toEqual(["Copy the Azure code"]);
   });
 
   it("should offer a connect for nothing but GitHub, Azure and Microsoft 365 when GitHub is connected", () => {

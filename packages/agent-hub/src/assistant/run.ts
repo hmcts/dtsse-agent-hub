@@ -10,9 +10,13 @@ import { run } from "../virtual/process.ts";
 import { deleteUploads, readDeleteUploads, reconcileUploads } from "./attachments.ts";
 import { createDeckBuildRunner } from "./deck-build.ts";
 import { type DiskFs, reportUploads } from "./disk.ts";
+import { createDocmosisIndexRunner } from "./docmosis-library.ts";
+import type { FetchLike } from "./github-rest.ts";
 import { createLookupRunner, type LookupDeps, type Run } from "./lookups.ts";
 import { type MemoryFs, reportMemory } from "./memory.ts";
 import { prepareEach } from "./plugin-deps.ts";
+import { POD_JOB_HANDLERS } from "./pod-job-handlers.ts";
+import { createPodJobRunner, type PodJobHandler, type PodJobHandlerApi } from "./pod-jobs.ts";
 import { type AssistantSupervisor, type CreateAssistantSupervisorOptions, createAssistantSupervisor, idleMinutes } from "./supervisor.ts";
 import { createWelshRunner, WELSH_PLUGIN, type WelshDeps } from "./welsh.ts";
 
@@ -27,21 +31,24 @@ const STREAM_IDLE_MS = 45000;
 const RECONCILE_MS = 10 * 60 * 1000;
 
 export type RunAssistantSupervisorOptions = Omit<CreateAssistantSupervisorOptions, "api" | "id"> & {
-  api: Pick<
-    Api,
-    | "putSessions"
-    | "sessionsStream"
-    | "conversations"
-    | "putUploads"
-    | "putLookup"
-    | "putMemory"
-    | "putWelsh"
-    | "putWelshFile"
-    | "welshFile"
-    | "deckBuild"
-    | "deckBuildAsset"
-    | "putDeckBuild"
-  >;
+  api: PodJobHandlerApi &
+    Pick<
+      Api,
+      | "putSessions"
+      | "sessionsStream"
+      | "conversations"
+      | "putUploads"
+      | "putLookup"
+      | "putMemory"
+      | "putWelsh"
+      | "putWelshFile"
+      | "welshFile"
+      | "deckBuild"
+      | "deckBuildAsset"
+      | "putDeckBuild"
+      | "putPodJob"
+      | "putDocmosisIndex"
+    >;
   id: string;
   /** The filesystem the uploads report and the deletions use; a test passes its own. */
   uploadsFs?: DiskFs;
@@ -56,6 +63,10 @@ export type RunAssistantSupervisorOptions = Omit<CreateAssistantSupervisorOption
    * plugin is made. A test passes its own.
    */
   welsh?: { run?: Run; workspace?: string; install?: (name: string, workspace: string) => string };
+  /** The pod-job kinds this supervisor runs; a test passes its own. `POD_JOB_HANDLERS` otherwise. */
+  podJobs?: readonly PodJobHandler[];
+  /** How template library checks reach GitHub; a test passes its own rather than the network. */
+  githubFetch?: FetchLike;
   /** Stops the supervisor, as SIGTERM and SIGINT do; a test owns neither signal. */
   signal?: AbortSignal;
   tickMs?: number;
@@ -79,8 +90,10 @@ export async function runAssistantSupervisor({
   uploadsFs,
   lookups: lookupDeps = {},
   welsh: welshDeps = {},
+  podJobs: podJobHandlers = POD_JOB_HANDLERS,
   cgroupRoot,
   memoryFs,
+  githubFetch,
   ...options
 }: RunAssistantSupervisorOptions): Promise<void> {
   const workspace = welshDeps.workspace ?? env.VIRTUAL_AGENT_WORKSPACE ?? "/workspace/cft-workspace";
@@ -88,13 +101,15 @@ export async function runAssistantSupervisor({
   const install = welshDeps.install ?? installBundled;
   const pluginDirs = () => installLoaded(env, workspace, say, install);
   const supervisor: AssistantSupervisor = createAssistantSupervisor({ api, id, env, say, pluginDirs, ...options });
+  const processRun: Run = (cmd, args, opts) => run(cmd, args, { env: opts.env as NodeJS.ProcessEnv, timeoutMs: opts.timeoutMs });
+  const lookupRun = lookupDeps.run ?? processRun;
   // Lookups run beside the supervisor rather than on its chain: see `createLookupRunner`.
   const lookups = createLookupRunner({
     api,
     id,
     env,
     say,
-    run: lookupDeps.run ?? ((cmd, args, opts) => run(cmd, args, { env: opts.env as NodeJS.ProcessEnv, timeoutMs: opts.timeoutMs })),
+    run: lookupRun,
     login: lookupDeps.login ?? (async () => (await atlassianLogin({ env })) !== "not-signed-in"),
     ...(lookupDeps.env === undefined ? {} : { env: lookupDeps.env })
   });
@@ -105,7 +120,7 @@ export async function runAssistantSupervisor({
     id,
     env,
     say,
-    run: welshDeps.run ?? ((cmd, args, opts) => run(cmd, args, { env: opts.env as NodeJS.ProcessEnv, timeoutMs: opts.timeoutMs })),
+    run: welshDeps.run ?? processRun,
     workspace,
     install
   };
@@ -121,6 +136,17 @@ export async function runAssistantSupervisor({
   // Deck builds run beside the supervisor as well, on the same runner and workspace as the Welsh jobs: a build is a
   // minute of Node that no wake should wait behind.
   const deckBuilds = createDeckBuildRunner({ ...welshOptions, api, ready: installs.get(SLIDES_PLUGIN) });
+  // Pod jobs run beside the supervisor too, each kind in its own slots: see `createPodJobRunner`.
+  const podJobs = createPodJobRunner({ api, id, env, say, handlers: podJobHandlers });
+  // Template library checks run beside the supervisor too, one at a time: a tree walk is a few seconds of GitHub calls.
+  const docmosisIndex = createDocmosisIndexRunner({
+    api,
+    id,
+    env,
+    say,
+    run: lookupRun,
+    ...(githubFetch === undefined ? {} : { fetch: githubFetch })
+  });
   const uploads = {
     api,
     id,
@@ -164,14 +190,24 @@ export async function runAssistantSupervisor({
   let stopping = false;
   let controller: AbortController | null = null;
   let wake: (() => void) | null = null;
+  // Started by the first signal rather than after the stream loop's chain drains: somebody is waiting on a panel for
+  // each job, and a wake still running on the chain must not hold their answers back.
+  let jobsStopped: Promise<void> | undefined;
+  const stopJobs = () => {
+    jobsStopped ??= podJobs.stop();
+    return jobsStopped;
+  };
   const onSignal = () => {
     stopping = true;
     stopped.abort();
     controller?.abort();
     wake?.();
+    void stopJobs();
   };
-  process.once("SIGTERM", onSignal);
-  process.once("SIGINT", onSignal);
+  // `on` rather than `once`, until the handlers go below: a second SIGTERM or SIGINT while the supervisor stops lands
+  // here again rather than on Node's default, which would kill the pod before its jobs are answered.
+  process.on("SIGTERM", onSignal);
+  process.on("SIGINT", onSignal);
   signal?.addEventListener("abort", onSignal, { once: true });
 
   async function consume(res: Response): Promise<{ reconnect: boolean }> {
@@ -224,6 +260,20 @@ export async function runAssistantSupervisor({
             deckBuilds.deckBuild(JSON.parse(event.data));
           } catch {
             say("unparseable deck_build event");
+          }
+        } else if (event.event === "pod_job") {
+          // Not through `handle`: somebody is waiting on a panel for this, and it may take a while.
+          try {
+            podJobs.podJob(JSON.parse(event.data));
+          } catch {
+            say("unparseable pod_job event");
+          }
+        } else if (event.event === "docmosis_index") {
+          // Not through `handle`: a tree walk can take seconds, and the wakes behind it must not wait.
+          try {
+            docmosisIndex.docmosisIndex(JSON.parse(event.data));
+          } catch {
+            say("unparseable docmosis_index event");
           }
         } else if (event.event === "delete_uploads") {
           handle(removeUploads, event);
@@ -346,6 +396,9 @@ export async function runAssistantSupervisor({
   } finally {
     clearInterval(timer);
     clearInterval(reconciler);
+    // Before the signal handlers go, so a second SIGTERM during the wait does not kill the pod without its answers:
+    // a job left unanswered reads as pending until its timeout.
+    await stopJobs();
     process.off("SIGTERM", onSignal);
     process.off("SIGINT", onSignal);
   }

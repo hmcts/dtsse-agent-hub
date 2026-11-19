@@ -1,3 +1,4 @@
+import { markConversationAgentsOffline } from "../agents/offline.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database } from "../store/prisma.ts";
 
@@ -23,6 +24,9 @@ export async function announce(db: Database, virtualAgentId: string, ownerOid: s
  * An agent not yet stopped becomes `stopping` and loses its `status_detail`, which described the pod being stopped;
  * one already `stopped` keeps its status, its detail and when its status last changed. The pod's client-features
  * claim goes either way, since the next boot may run another client.
+ *
+ * The assistant's conversations lose their session state and have their current agents marked offline: no session
+ * outlives the pod, and a `live` left behind would keep a message from asking for the wake that starts one.
  */
 export async function stopVirtualAgents(db: Database, ids: readonly string[], reason: StopReason, now: Date): Promise<{ id: string; ownerOid: string }[]> {
   if (ids.length === 0) {
@@ -40,6 +44,15 @@ export async function stopVirtualAgents(db: Database, ids: readonly string[], re
      WHERE id = ANY(${[...ids]}::uuid[]) AND desired = 'running'
     RETURNING id::text AS id, owner_oid
   `;
+  const conversations = await db.$queryRaw<{ id: string }[]>`
+    UPDATE assistant_conversation SET session_state = NULL, session_detail = NULL
+     WHERE virtual_agent_id = ANY(${stopped.map((row) => row.id)}::uuid[])
+    RETURNING id::text AS id
+  `;
+  await markConversationAgentsOffline(
+    db,
+    conversations.map((row) => row.id)
+  );
   for (const row of stopped) {
     await announce(db, row.id, row.owner_oid);
   }

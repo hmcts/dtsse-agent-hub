@@ -223,8 +223,11 @@ export type AssistantFrame = {
   product_label?: string | null;
   /** The hub's id for the model the person wants this message answered by; null from a hub older than the choice. */
   model?: string | null;
+  /** The primary document's version and who last wrote it, which a hub sends beside `artefacts` for older clients. */
   artefact_version?: number | null;
   artefact_updated_by?: string | null;
+  /** Every document, oldest first; null from a hub older than several documents. */
+  artefacts?: FrameArtefact[] | null;
   /** The conversation's slide deck: its latest version, 0 before there is one, and who wrote it. */
   deck_version?: number | null;
   deck_updated_by?: string | null;
@@ -232,10 +235,20 @@ export type AssistantFrame = {
   deck_revision?: number | null;
   /** The newest kept version this session wrote, 0 when none is; null from a hub older than either. */
   deck_agent_version?: number | null;
+  /** Every deck, oldest first; null from a hub older than several decks. */
+  decks?: FrameDeck[] | null;
   /** The conversation's Docmosis template: its latest version and revision, and who wrote it. Absent before there is one. */
   docmosis_version?: number | null;
   docmosis_revision?: number | null;
   docmosis_updated_by?: string | null;
+  /** Every Docmosis template, oldest first; null from a hub older than several templates. */
+  docmosis_templates?: FrameDocmosisTemplate[] | null;
+  /** The conversation's GOV.UK Notify template: its latest version and revision, and who wrote it. Absent before there is one. */
+  notify_version?: number | null;
+  notify_revision?: number | null;
+  notify_updated_by?: string | null;
+  /** Every Notify template, oldest first; null from a hub older than several templates. */
+  notify_templates?: FrameNotifyTemplate[] | null;
   jira_export?: JiraExportFrame | null;
   github_export?: GithubExportFrame | null;
   confluence_export?: ConfluenceExportFrame | null;
@@ -243,13 +256,84 @@ export type AssistantFrame = {
   attachments?: unknown;
 };
 
-/** An export of the conversation's document to Jira the person has asked for and nobody has reported yet. */
+/** One of the conversation's Docmosis templates, as the frame lists them, without its schema and data. */
+export type FrameDocmosisTemplate = {
+  id: string;
+  name: string;
+  version: number;
+  revision: number;
+  updated_by: string | null;
+};
+
+/** One of the conversation's Notify templates, as the frame lists them, without its text. */
+export type FrameNotifyTemplate = {
+  id: string;
+  name: string;
+  version: number;
+  revision: number;
+  updated_by: string | null;
+};
+
+/** One of the conversation's slide decks, as the frame lists them, without its outline. */
+export type FrameDeck = {
+  id: string;
+  title: string;
+  version: number;
+  revision: number;
+  updated_by: string | null;
+  /** The newest kept version of this deck the session wrote, 0 when none is. */
+  agent_version: number;
+};
+
+/** One of the conversation's documents, as the frame lists them, without its markdown. */
+export type FrameArtefact = {
+  id: string;
+  kind: "document" | "ticket" | "confluence";
+  title: string | null;
+  version: number;
+  updated_by: string | null;
+};
+
+/** An export of one of the conversation's documents to Jira the person has asked for and nobody has reported yet. */
 export type JiraExportFrame = {
   export_id: string;
+  /** Which document; absent from a hub that holds one, whose `artefact get` it is. */
+  document_id?: string;
   project: string;
   issue_type: string;
   labels: string[];
 };
+
+/** The flag that has an export command read the export's own document rather than the conversation's first. */
+function documentFlag(frame: { document_id?: string }): string {
+  return frame.document_id === undefined ? "" : ` --document ${frame.document_id}`;
+}
+
+/** How the export lines name the document: by its title when the frame lists it, else as the conversation's one. */
+function exportedName(frame: { document_id?: string }, artefacts: FrameArtefact[] | null): string {
+  const title = artefacts?.find((artefact) => artefact.id === frame.document_id)?.title;
+  return title ? `the document "${title}"` : "the conversation's document";
+}
+
+/**
+ * What the session is told of the documents the person has edited since: one line for each, by its id, or, from a
+ * hub that lists none, the one line about the conversation's only document.
+ */
+export function documentChangedLines(assistant: AssistantFrame): string[] {
+  if (!assistant.artefacts) {
+    return assistant.artefact_updated_by === "user"
+      ? [
+          `The user has edited the conversation's document (version ${assistant.artefact_version}) since; read it with \`${CLI} artefact get\` before changing it.`
+        ]
+      : [];
+  }
+  return assistant.artefacts
+    .filter((artefact) => artefact.updated_by === "user" && artefact.version > 0)
+    .map(
+      (artefact) =>
+        `The user has edited the document "${artefact.title ?? "Untitled document"}" (${artefact.id}, version ${artefact.version}) since; read it with \`${CLI} artefact get --id ${artefact.id}\` before changing it.`
+    );
+}
 
 /**
  * How long the session is told to let `jira export` run. The command has to report the export's outcome inside this,
@@ -273,11 +357,11 @@ export const JIRA_EXPORT_BASH_TIMEOUT_MS = 600000;
  * These are the last lines of the context before the skill line, which stays nearest the words it is about. They go
  * after the attachment lines, which are facts that stand on their own wherever they sit.
  */
-export function jiraExportLines(jira: JiraExportFrame): string[] {
+export function jiraExportLines(jira: JiraExportFrame, artefacts: FrameArtefact[] | null = null): string[] {
   const labels = jira.labels.length ? ` --labels ${jira.labels.join(",")}` : "";
   return [
-    `The user has asked you to export the conversation's document to the ${jira.project} backlog in Jira (export ${jira.export_id}).`,
-    `Run exactly this one command, with a Bash timeout of ${JIRA_EXPORT_BASH_TIMEOUT_MS} ms because it waits for the user if they have to sign in to Atlassian: \`${CLI} jira export ${jira.export_id} --project ${jira.project} --type ${jira.issue_type}${labels}\``,
+    `The user has asked you to export ${exportedName(jira, artefacts)} to the ${jira.project} backlog in Jira (export ${jira.export_id}).`,
+    `Run exactly this one command, with a Bash timeout of ${JIRA_EXPORT_BASH_TIMEOUT_MS} ms because it waits for the user if they have to sign in to Atlassian: \`${CLI} jira export ${jira.export_id} --project ${jira.project} --type ${jira.issue_type}${labels}${documentFlag(jira)}\``,
     "It does every step itself: it checks twg is signed in as the user, reads the document, creates the ticket and reports it to the CFT Workspace chat app. Run again for the same export, it reports the ticket it already made rather than making another.",
     "Do not read the document, check twg, or look at the ticket yourself, before or after; do not run any other command for this.",
     "Then tell the user in one short sentence which ticket it became, or why it could not be made, in the words the command printed."
@@ -287,6 +371,7 @@ export function jiraExportLines(jira: JiraExportFrame): string[] {
 /** An export of the conversation's document to a GitHub issue the person has asked for and nobody has reported yet. */
 export type GithubExportFrame = {
   export_id: string;
+  document_id?: string;
   repo: string;
   /** The Project to add the issue to once it exists, when the person chose one. */
   project?: { owner: string; number: number } | null;
@@ -308,13 +393,13 @@ export const GITHUB_EXPORT_BASH_TIMEOUT_MS = 600000;
  * with the person's own gh sign-in and reports it, for the reasons `jira export` is one. Placed as the Jira lines
  * are, before the skill line.
  */
-export function githubExportLines(github: GithubExportFrame): string[] {
+export function githubExportLines(github: GithubExportFrame, artefacts: FrameArtefact[] | null = null): string[] {
   const project = github.project ? ` --project ${github.project.owner}/${github.project.number}` : "";
   const labels = github.labels?.length ? ` --labels ${github.labels.join(",")}` : "";
   const board = github.project ? `, on Project ${github.project.number} of ${github.project.owner}` : "";
   return [
-    `The user has asked you to create a GitHub issue for the conversation's document in ${github.repo}${board} (export ${github.export_id}).`,
-    `Run exactly this one command, with a Bash timeout of ${GITHUB_EXPORT_BASH_TIMEOUT_MS} ms: \`${CLI} github export ${github.export_id} --repo ${github.repo}${project}${labels}\``,
+    `The user has asked you to create a GitHub issue for ${exportedName(github, artefacts)} in ${github.repo}${board} (export ${github.export_id}).`,
+    `Run exactly this one command, with a Bash timeout of ${GITHUB_EXPORT_BASH_TIMEOUT_MS} ms: \`${CLI} github export ${github.export_id} --repo ${github.repo}${project}${labels}${documentFlag(github)}\``,
     "It does every step itself: it reads the document, creates the issue with gh as the user and reports it to the CFT Workspace chat app. Run again for the same export, it reports the issue it already made rather than making another.",
     "Do not read the document, check gh, or look at the issue yourself, before or after; do not run any other command for this.",
     "Then tell the user in one short sentence which issue it became, or why it could not be made, in the words the command printed."
@@ -324,6 +409,7 @@ export function githubExportLines(github: GithubExportFrame): string[] {
 /** A publish of the conversation's document to Confluence the person has asked for and nobody has reported yet. */
 export type ConfluenceExportFrame = {
   export_id: string;
+  document_id?: string;
   space_id: string;
   parent_id: string;
 };
@@ -339,10 +425,10 @@ export type ConfluenceExportFrame = {
  * the same `jiraExportSignInBudget` to fit inside it. Placed as the Jira lines are, before the skill line, for the
  * reason given there.
  */
-export function confluenceExportLines(confluence: ConfluenceExportFrame): string[] {
+export function confluenceExportLines(confluence: ConfluenceExportFrame, artefacts: FrameArtefact[] | null = null): string[] {
   return [
-    `The user has asked you to publish the conversation's document to Confluence as a new page (export ${confluence.export_id}).`,
-    `Run exactly this one command, with a Bash timeout of ${JIRA_EXPORT_BASH_TIMEOUT_MS} ms because it waits for the user if they have to sign in to Atlassian: \`${CLI} confluence export ${confluence.export_id} --space-id ${confluence.space_id} --parent-id ${confluence.parent_id}\``,
+    `The user has asked you to publish ${exportedName(confluence, artefacts)} to Confluence as a new page (export ${confluence.export_id}).`,
+    `Run exactly this one command, with a Bash timeout of ${JIRA_EXPORT_BASH_TIMEOUT_MS} ms because it waits for the user if they have to sign in to Atlassian: \`${CLI} confluence export ${confluence.export_id} --space-id ${confluence.space_id} --parent-id ${confluence.parent_id}${documentFlag(confluence)}\``,
     "It does every step itself: it checks twg is signed in as the user, reads the document, creates the page and reports it to the CFT Workspace chat app. Run again for the same export, it reports the page it already made rather than making another.",
     "Do not read the document, check twg, or look at the page yourself, before or after; do not run any other command for this.",
     "Then tell the user in one short sentence which page it became, or why it could not be made, in the words the command printed."
@@ -430,6 +516,25 @@ export function deckChangedLine(assistant: AssistantFrame): string {
   return `The conversation's slide deck (version ${assistant.deck_version}${revision}) was last changed by the user, not by you; read it with \`${CLI} deck get\` before changing it, and build on their version.`;
 }
 
+/**
+ * What the session is told of the decks the person has changed: one line for each, by its id, or, from a hub that lists
+ * none, the one line about the conversation's only deck.
+ */
+export function deckChangedLines(assistant: AssistantFrame): string[] {
+  if (!assistant.decks) {
+    return assistant.deck_updated_by === "user" && (assistant.deck_version ?? 0) > 0 ? [deckChangedLine(assistant)] : [];
+  }
+  return assistant.decks
+    .filter((deck) => deck.updated_by === "user" && deck.version > 0)
+    .map((deck) => {
+      const name = `"${deck.title}" (${deck.id}, version ${deck.version}, revision ${deck.revision})`;
+      if (deck.agent_version > 0) {
+        return `The user has changed the slide deck ${name} since you last wrote it. Before changing anything, run \`${CLI} deck get --id ${deck.id} --diff-from ${deck.agent_version}\`, which writes their latest version for you to work on and prints what they changed since your version ${deck.agent_version}; then build on their version, keeping their changes.`;
+      }
+      return `The slide deck ${name} was last changed by the user, not by you; read it with \`${CLI} deck get --id ${deck.id}\` before changing it, and build on their version.`;
+    });
+}
+
 /** The tag of the block of context a conversation's prompt carries ahead of the person's words. */
 export const CONTEXT_TAG = "cft-workspace-context";
 
@@ -485,6 +590,43 @@ export function docmosisChangedLine(assistant: AssistantFrame): string {
 }
 
 /**
+ * The same for the Docmosis templates: one line for each the person changed, by its id, or, from a hub that lists none,
+ * the one line about the conversation's only template.
+ */
+export function docmosisChangedLines(assistant: AssistantFrame): string[] {
+  if (!assistant.docmosis_templates) {
+    return assistant.docmosis_updated_by === "user" && (assistant.docmosis_version ?? 0) > 0 ? [docmosisChangedLine(assistant)] : [];
+  }
+  return assistant.docmosis_templates
+    .filter((template) => template.updated_by === "user" && template.version > 0)
+    .map(
+      (template) =>
+        `The user has changed the data of the Docmosis template "${template.name}" (${template.id}, version ${template.version}). Read it with \`${CLI} docmosis get --id ${template.id}\` before changing the template.`
+    );
+}
+
+/**
+ * The same for the Notify templates: the person edited a draft or its personalisation, or loaded another template, in
+ * the web UI. One line for each, by its id, or, from a hub that lists none, the one line about the conversation's only
+ * template.
+ */
+export function notifyChangedLines(assistant: AssistantFrame): string[] {
+  if (!assistant.notify_templates) {
+    return assistant.notify_updated_by === "user" && (assistant.notify_version ?? 0) > 0
+      ? [
+          `The user has changed the conversation's Notify template (version ${assistant.notify_version}). Read it with \`${CLI} notify get\` before changing it.`
+        ]
+      : [];
+  }
+  return assistant.notify_templates
+    .filter((template) => template.updated_by === "user" && template.version > 0)
+    .map(
+      (template) =>
+        `The user has changed the Notify template "${template.name}" (${template.id}, version ${template.version}). Read it with \`${CLI} notify get --id ${template.id}\` before changing it.`
+    );
+}
+
+/**
  * What the CFT Workspace knows about a conversation's message that the person did not type, after `ANSWER_HERE`: the
  * product area, a document or deck the person changed, the files attached and an export waiting on this session.
  * `assistant` is null for a frame the client could not read, which leaves `ANSWER_HERE` and the skill line.
@@ -502,27 +644,20 @@ export function assistantContextLines(
   const lines: string[] = [ANSWER_HERE];
   if (assistant !== null) {
     lines.push(...productLines(assistant, previousProduct));
-    if (assistant.artefact_updated_by === "user") {
-      lines.push(
-        `The user has edited the conversation's document (version ${assistant.artefact_version}) since; read it with \`${CLI} artefact get\` before changing it.`
-      );
-    }
-    if (assistant.deck_updated_by === "user" && (assistant.deck_version ?? 0) > 0) {
-      lines.push(deckChangedLine(assistant));
-    }
-    if (assistant.docmosis_updated_by === "user" && (assistant.docmosis_version ?? 0) > 0) {
-      lines.push(docmosisChangedLine(assistant));
-    }
+    lines.push(...documentChangedLines(assistant));
+    lines.push(...deckChangedLines(assistant));
+    lines.push(...docmosisChangedLines(assistant));
+    lines.push(...notifyChangedLines(assistant));
   }
   lines.push(...attachmentLines(attachments));
   if (assistant?.jira_export) {
-    lines.push(...jiraExportLines(assistant.jira_export));
+    lines.push(...jiraExportLines(assistant.jira_export, assistant.artefacts ?? null));
   }
   if (assistant?.github_export) {
-    lines.push(...githubExportLines(assistant.github_export));
+    lines.push(...githubExportLines(assistant.github_export, assistant.artefacts ?? null));
   }
   if (assistant?.confluence_export) {
-    lines.push(...confluenceExportLines(assistant.confluence_export));
+    lines.push(...confluenceExportLines(assistant.confluence_export, assistant.artefacts ?? null));
   }
   lines.push(...skillLine(message.body, skills, promptSkillLine));
   return lines;

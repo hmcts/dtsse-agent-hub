@@ -12,6 +12,7 @@ import { SHARING_SETTINGS } from "@/app/assistant/sharing";
 import { connectionsData } from "@/assistant/connections";
 import { savedCredentialsData } from "@/assistant/saved-credentials";
 import { assistantPluginsData } from "@/assistant/settings";
+import { SIDEBAR_COOKIE, sidebarCollapsedOf } from "@/assistant/sidebar";
 import { THEME_COOKIE, themeOf } from "@/assistant/theme";
 import { AssistantShell, type ConversationActions } from "@/components/assistant/AssistantShell";
 import { feedbackEnabled } from "@/feedback/settings";
@@ -66,6 +67,7 @@ export async function FeedbackFrame({
       groups={home.conversations}
       activeId={projectId}
       theme={theme}
+      collapsed={sidebarCollapsedOf(jar.get(SIDEBAR_COOKIE)?.value)}
       actions={ROW_ACTIONS}
       connections={connectionsData(home.assistant, home.credentials)}
       viewerRoute={home.credentials.modelRoute}

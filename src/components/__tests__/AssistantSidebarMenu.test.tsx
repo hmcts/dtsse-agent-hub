@@ -351,7 +351,7 @@ describe("AssistantShell conversation menu", () => {
     });
 
     expect((screen.getByRole("textbox", { name: "Chat name" }) as HTMLInputElement).value).toBe("Half typed");
-    expect(screen.getByRole("alert").textContent).toBe("the new name could not be sent; check your connection and try again");
+    expect(screen.getByRole("alert").textContent).toBe("The new name could not be sent. Check your connection and try again.");
   });
 
   it("should keep the confirmation and say so when a delete cannot be sent at all", async () => {
@@ -360,7 +360,7 @@ describe("AssistantShell conversation menu", () => {
     await deleteFrom("Story draft");
 
     expect(screen.getByText(CONFIRMATION)).toBeTruthy();
-    expect(screen.getByRole("alert").textContent).toBe("the delete could not be sent; check your connection and try again");
+    expect(screen.getByRole("alert").textContent).toBe("The delete could not be sent. Check your connection and try again.");
     expect(push).not.toHaveBeenCalled();
   });
 

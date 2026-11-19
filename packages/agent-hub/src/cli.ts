@@ -15,7 +15,9 @@ import { deck } from "./cli/deck.ts";
 import { reply, send } from "./cli/directs.ts";
 import { docmosis } from "./cli/docmosis.ts";
 import { m365 } from "./cli/m365.ts";
+import { notify } from "./cli/notify.ts";
 import { disable, enable, setup, status, transcript } from "./cli/session.ts";
+import { video } from "./cli/video.ts";
 import { autoEnable, bridge, hook, stopWorker } from "./cli/workers.ts";
 import type { Env } from "./env.ts";
 import { CLI } from "./envelope.ts";
@@ -59,11 +61,17 @@ export const USAGE = `usage: ${CLI} <command> [args]
                               or an id prefix of 8+ characters, or a person's name or email.
                               Anyone else is the author: nothing is sent and it exits 2
   agents                      list your own agents
-  artefact get [--json]       in a CFT Workspace conversation: print its shared markdown document
+  artefact list [--json]      in a CFT Workspace conversation: list its shared markdown documents,
+                              with each one's id, kind (document, ticket or confluence) and version
+  artefact get [--id ID] [--json]
+                              print one document, or the primary plain document without --id
                               (--json: with its title, version and who last wrote it)
-  artefact put [--title T] [--base N]
-                              replace the document with markdown read from stdin; --base is the version
+  artefact put [--id ID] [--title T] [--base N]
+                              replace a document with markdown read from stdin; --base is the version
                               it was edited from (read first when omitted), and a newer one is refused
+  artefact new --kind K [--title T]
+                              start a document of kind document, ticket or confluence from stdin
+  artefact remove --id ID     remove a document from the conversation
   deck get [--json] [--slide ID] [--version N] [--diff-from N]
                               in a CFT Workspace conversation: write its slide deck's outline to
                               ~/.agent-hub/decks/<conversation>/outline.json with its pictures beside it,
@@ -82,39 +90,73 @@ export const USAGE = `usage: ${CLI} <command> [args]
   deck pptx <deck.pptx> --version N
                               send the .pptx built from version N alone, for a deck put that published
                               the outline but could not send its .pptx
-  docmosis put <template.docx> --schema <schema.json> --data <data.json> [--pdf file.pdf] [--name N] [--summary S] [--base N]
+  docmosis put <template.docx> --schema <schema.json> --data <data.json> [--pdf file.pdf] [--name N] [--summary S] [--base N] [--id ID]
                               in a CFT Workspace conversation: upload the Docmosis template, publish it
                               with its form schema (docmosis schema) and the data it was rendered with as
                               the template's next version, then the PDF rendered from it (docmosis
                               render-file); --name is the template's name (the file's name by default);
                               --base is the version it was changed from, and a newer one is refused.
-                              Omitted, it is the version docmosis get recorded, or the hub's current one
-  docmosis pdf <file.pdf> --version N
+                              Omitted, it is the version docmosis get recorded, or the hub's current one;
+                              --id is the template to write, and without it the primary, the oldest
+  docmosis new <template.docx> --schema <schema.json> --data <data.json> [--pdf file.pdf] [--name N] [--summary S]
+                              publish a further template, whatever the conversation holds, and print its id
+  docmosis pdf <file.pdf> --version N [--id ID]
                               send the PDF rendered from version N alone, for a docmosis put that
                               published the template but could not send its PDF
-  docmosis get [--version N]  write the template, its schema and the data to
+  docmosis get [--version N] [--id ID]
+                              write the template, its schema and the data to
                               ~/.agent-hub/docmosis/<conversation>/ (template.docx, schema.json,
                               data.json, and the version and revision it read); the person may have
-                              changed the data; --version writes an older kept version instead
-  jira export <export-id> --project P --type T [--labels a,b]
+                              changed the data; --version writes an older kept version instead; --id
+                              reads another template, into a directory named by it inside that one
+  docmosis list [--json]      list the conversation's templates, with each one's id, version and name
+  docmosis remove --id ID     remove a template and its versions
+  notify products             list the products whose GOV.UK Notify templates can be read
+  notify list [--product P]   in a CFT Workspace conversation: list its Notify templates, with each one's id and
+                              version; with --product, list product P's templates in Notify instead,
+                              reading its Notify key from its AAT Key Vault with your own az login; the
+                              key stays on this machine
+  notify pull --product P --template ID [--id ID]
+                              in a CFT Workspace conversation: load template ID from Notify, with
+                              Notify's own preview of it, as a new Notify template of the conversation,
+                              or, with --id, as the next version of that one; nothing in Notify is changed
+  notify get [--id ID] [--version N]
+                              write a Notify template to ~/.agent-hub/notify/<conversation>/ (or
+                              <conversation>/<id>/ with --id): subject.md, body.md, data.json, template.json,
+                              and the version and revision it read; the person may have edited it;
+                              --version writes an older kept version into v<N>/ instead; without --id,
+                              the primary template, the oldest
+  notify put [--id ID] [--summary S]
+                              publish the edited subject.md, body.md and data.json as the next version,
+                              refused if a newer version was written since notify get
+  notify remove --id ID       remove a Notify template from the conversation
+  video put <dir> [--jira KEY] [--name N]
+                              in a CFT Workspace conversation: publish the journey video the
+                              cft-journey-video skill recorded into <dir> (the .mp4, .vtt,
+                              .chapters.txt, coverage.md and content-mismatches.md) as the
+                              conversation's video; the MP4 goes straight to storage; --jira is the
+                              issue the user will most likely post it to
+  jira export <export-id> --project P --type T [--labels a,b] [--document ID]
                               in a CFT Workspace conversation: create the Jira ticket for an export the
                               user asked for with twg, signing in first if it is not, and report it; run
                               again for the same export, it reports the ticket already made
   jira report <export-id> --key K | --error E
                               report the Jira ticket made for an export by hand, or why it could not be made
-  github export <export-id> --repo owner/name [--project owner/number] [--labels a,b]
+  github export <export-id> --repo owner/name [--project owner/number] [--labels a,b] [--document ID]
                               in a CFT Workspace conversation: create the GitHub issue for an export the
                               user asked for with gh, label it, add it to the Project when one is given, and report
                               it; run again for the same export, it reports the issue already made
   github report <export-id> --number N | --error E
                               report the GitHub issue made for an export by hand, or why it could not be made
-  confluence export <export-id> --space-id S --parent-id P
+  confluence export <export-id> --space-id S --parent-id P [--document ID]
                               in a CFT Workspace conversation: publish the document as a new Confluence
                               page under page P for an export the user asked for, with twg, signing in first
                               if it is not, and report it; run again for the same export, it reports the page
                               already made
   confluence report <export-id> --page-id N [--title T] | --error E
                               report the Confluence page made for an export by hand, or why it could not be made
+                              (each export reads --document, the document the export was asked for, or the
+                              primary plain document without it)
   credentials get <kind>      print your stored credential and nothing else (exit ${EXIT_NO_CREDENTIAL} if there is
                               none); agent-hub returns only claude_md and git_identity to people, any kind to a pod
   credentials set <kind> [--from-gh]
@@ -155,6 +197,8 @@ export const COMMANDS: Record<string, Command> = {
   artefact,
   deck,
   docmosis,
+  notify,
+  video,
   jira,
   github,
   confluence,

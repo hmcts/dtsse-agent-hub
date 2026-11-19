@@ -1,14 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
 import { createEventHub, type EventHub } from "../realtime/hub.ts";
 import type { DeckBuildFrame } from "./deck-build-store.ts";
+import type { DocmosisIndexFrame } from "./docmosis-library-store.ts";
 import type { LookupFrame } from "./lookup-store.ts";
+import type { PodJobFrame } from "./pod-job-store.ts";
 import type { Wake } from "./session-store.ts";
 import {
   closeFrame,
   deckBuildFrame,
   deleteUploadsFrame,
+  docmosisIndexFrame,
   interruptFrame,
   lookupFrame,
+  podJobFrame,
   type SessionStreamSources,
   sessionStream,
   wakeFrame,
@@ -60,6 +64,7 @@ function sources(hub: EventHub, overrides: Partial<SessionStreamSources> = {}): 
     lookup: noLookup,
     welsh: noWelsh,
     deckBuild: noBuild,
+    docmosisIndex: async () => undefined,
     ...overrides
   };
 }
@@ -521,6 +526,171 @@ describe("sessionStream deck builds", () => {
 
     // Act
     hub.publish(asked("d1"));
+    await settle();
+    hub.publish(stopped("c1"));
+
+    // Assert
+    expect(frames).toEqual([interruptFrame("c1")]);
+  });
+});
+
+describe("sessionStream pod jobs", () => {
+  const JOB: PodJobFrame = { job_id: "p1", kind: "test.echo", conversation_id: "c1", agent_id: "a1", args: { text: "hi" } };
+
+  function asked(jobId: string, virtualAgent = ASSISTANT) {
+    return { type: "assistant_pod_job_requested" as const, job_id: jobId, virtual_agent_id: virtualAgent, owner_oid: "o" };
+  }
+
+  function open(podJob: SessionStreamSources["podJob"], frames: string[], hub = createEventHub()) {
+    sessionStream(ASSISTANT, sources(hub, podJob === undefined ? {} : { podJob }))((frame) => frames.push(frame), noFail);
+    return hub;
+  }
+
+  it("should send the pod a job once, as soon as its owner asks for it", async () => {
+    // Arrange
+    const frames: string[] = [];
+    const hub = open(async (id) => (id === "p1" ? JOB : undefined), frames);
+    await settle();
+
+    // Act
+    hub.publish(asked("p1"));
+    await settle();
+    hub.publish({ type: "resync" });
+    await settle();
+
+    // Assert
+    expect(frames).toEqual([podJobFrame(JOB)]);
+    expect(podJobFrame(JOB)).toBe(`event: pod_job\ndata: ${JSON.stringify(JOB)}\n\n`);
+  });
+
+  it("should send every pending job on connect and on a resync, once per connection, when the pod was not listening as they were asked for", async () => {
+    // Arrange
+    const SECOND: PodJobFrame = { ...JOB, job_id: "p2" };
+    const pending = vi.fn(async () => [JOB, SECOND]);
+    const hub = createEventHub();
+    const first: string[] = [];
+    const second: string[] = [];
+    const connect = (frames: string[]) =>
+      sessionStream(ASSISTANT, sources(hub, { podJob: async (id) => (id === "p1" ? JOB : undefined), podJobs: pending }))(
+        (frame) => frames.push(frame),
+        noFail
+      );
+
+    // Act
+    connect(first);
+    await settle();
+    hub.publish(asked("p1"));
+    hub.publish({ type: "resync" });
+    await settle();
+    connect(second);
+    await settle();
+
+    // Assert
+    expect(first).toEqual([podJobFrame(JOB), podJobFrame(SECOND)]);
+    expect(second).toEqual([podJobFrame(JOB), podJobFrame(SECOND)]);
+    expect(pending).toHaveBeenCalledTimes(3);
+  });
+
+  it("should send nothing for another assistant's job or one already answered", async () => {
+    // Arrange
+    const frames: string[] = [];
+    const read = vi.fn(async () => undefined);
+    const hub = open(read, frames);
+    await settle();
+
+    // Act
+    hub.publish(asked("p1", "va-other"));
+    hub.publish(asked("p2"));
+    await settle();
+
+    // Assert
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(frames.filter((frame) => frame.startsWith("event: pod_job"))).toEqual([]);
+  });
+
+  it("should keep the stream open when reading a job fails, or when it has nowhere to read jobs from", async () => {
+    // Arrange
+    const frames: string[] = [];
+    const failing = open(async () => {
+      throw new Error("no database");
+    }, frames);
+    const without = open(undefined, frames);
+    await settle();
+
+    // Act
+    failing.publish(asked("p1"));
+    without.publish(asked("p1"));
+    await settle();
+    failing.publish(stopped("c1"));
+
+    // Assert
+    expect(frames).toEqual([interruptFrame("c1")]);
+  });
+});
+
+describe("sessionStream template library checks", () => {
+  const CHECK: DocmosisIndexFrame = {
+    request_id: "r1",
+    owner: "hmcts",
+    repo: "rdo-docmosis",
+    ref: "HEAD",
+    path: "Templates",
+    commit: "a".repeat(40),
+    etag: '"abc"'
+  };
+
+  function asked(requestId: string, virtualAgent = ASSISTANT) {
+    return { type: "assistant_docmosis_index" as const, request_id: requestId, virtual_agent_id: virtualAgent, owner_oid: "o" };
+  }
+
+  function open(docmosisIndex: (id: string) => Promise<DocmosisIndexFrame | undefined>, frames: string[], hub = createEventHub()) {
+    sessionStream(ASSISTANT, sources(hub, { docmosisIndex }))((frame) => frames.push(frame), noFail);
+    return hub;
+  }
+
+  it("should send the pod a check as soon as its owner opens the library", async () => {
+    // Arrange
+    const frames: string[] = [];
+    const hub = open(async (id) => (id === "r1" ? CHECK : undefined), frames);
+    await settle();
+
+    // Act
+    hub.publish(asked("r1"));
+    await settle();
+
+    // Assert
+    expect(frames).toEqual([docmosisIndexFrame(CHECK)]);
+    expect(docmosisIndexFrame(CHECK)).toBe(`event: docmosis_index\ndata: ${JSON.stringify(CHECK)}\n\n`);
+  });
+
+  it("should send nothing for another assistant's check, one no longer waited for, or on a resync", async () => {
+    // Arrange
+    const frames: string[] = [];
+    const read = vi.fn(async () => undefined);
+    const hub = open(read, frames);
+    await settle();
+
+    // Act
+    hub.publish(asked("r1", "va-other"));
+    hub.publish(asked("r2"));
+    hub.publish({ type: "resync" });
+    await settle();
+
+    // Assert
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(frames.filter((frame) => frame.startsWith("event: docmosis_index"))).toEqual([]);
+  });
+
+  it("should keep the stream open when reading a check fails", async () => {
+    // Arrange
+    const frames: string[] = [];
+    const hub = open(async () => {
+      throw new Error("no database");
+    }, frames);
+    await settle();
+
+    // Act
+    hub.publish(asked("r1"));
     await settle();
     hub.publish(stopped("c1"));
 

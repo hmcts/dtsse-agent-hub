@@ -59,3 +59,9 @@ export async function store(of: Chat, bytes: Buffer): Promise<string> {
   await putDeckAsset(prisma, of.id, sha, bytes, imageInfo(bytes)!);
   return sha;
 }
+
+/** The id of the chat's primary deck, its oldest; an id nothing holds while it has none. */
+export async function primaryDeck(of: { id: string }): Promise<string> {
+  const row = await prisma.assistantDeck.findFirst({ where: { conversationId: of.id }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: { id: true } });
+  return row?.id ?? "00000000-0000-4000-8000-000000000000";
+}

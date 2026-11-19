@@ -26,6 +26,7 @@ export function ActionForm<T extends object & { confirmation?: string }>({
   onSuccess,
   onRefused,
   navigate,
+  pendingText,
   children
 }: {
   action: (form: FormData) => Promise<ActionResult<T>>;
@@ -41,6 +42,8 @@ export function ActionForm<T extends object & { confirmation?: string }>({
    */
   onRefused?: () => void;
   navigate?: (result: T) => string;
+  /** Said while a post is in flight, such as "Saving…", for a form whose wait is long enough to look like nothing happened. */
+  pendingText?: string;
   children: React.ReactNode | ((state: { pending: boolean }) => React.ReactNode);
 }) {
   const router = useRouter();
@@ -74,23 +77,45 @@ export function ActionForm<T extends object & { confirmation?: string }>({
         setSignedOut(true);
         endSession();
       } else {
-        setMessage({ ok: false, text: "that could not be done; try again" });
+        setMessage({ ok: false, text: "That could not be done. Try again." });
       }
     } finally {
       setPending(false);
     }
   }
 
+  const waits = pendingText !== undefined && !signedOut;
+  const said = pending ? (pendingText ?? "") : message?.ok ? message.text : "";
   // A submit React does not intercept (before hydration, or when the page's script failed to load) is a native one,
   // and a native GET would put every field, a pasted credential included, in the URL.
   return (
-    <form method="post" onSubmit={submit} aria-label={label} aria-busy={pending} className={className}>
+    <form
+      method="post"
+      onSubmit={submit}
+      // A confirmation is about what was sent; once the person changes a field it describes a form that is no longer
+      // there. A refusal stays until the next post, since it says what to fix.
+      onInput={() => {
+        if (message?.ok === true) {
+          setMessage(null);
+        }
+      }}
+      aria-label={label}
+      aria-busy={pending}
+      className={className}
+    >
       {typeof children === "function" ? children({ pending }) : children}
+      {/* A form that says what it is doing keeps one status mounted and changes its words, from the wait to the
+          confirmation: a live region inserted with its text already in it is often not read at all. */}
+      {waits ? (
+        <p role="status" className={said === "" ? "sr-only" : `text-xs ${pending ? "text-asst-muted" : "text-asst-ok"}`}>
+          {said}
+        </p>
+      ) : null}
       {signedOut ? (
         <p role="status" className="text-xs text-asst-error">
           <SessionEndedMessage />
         </p>
-      ) : message ? (
+      ) : message && !(waits && message.ok) ? (
         <p role={message.ok ? "status" : "alert"} className={`text-xs ${message.ok ? "text-asst-ok" : "text-asst-error"}`}>
           {message.text}
         </p>

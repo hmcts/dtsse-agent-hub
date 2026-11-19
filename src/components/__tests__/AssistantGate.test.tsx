@@ -24,6 +24,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: 
 vi.mock("@/components/live/HubStream", () => ({
   useHubEvent: () => undefined,
   useEndSession: () => () => undefined,
+  useHubSubscribe: () => () => () => undefined,
   useWatch: () => undefined
 }));
 
@@ -117,12 +118,12 @@ function conversation(local: boolean): ConversationView {
     clientFeatures: null,
     sessionState: null,
     sessionDetail: null,
-    artefact: { title: null, markdown: "", version: 0, updatedBy: null, updatedAt: null },
-    deck: null,
-    docmosis: null,
-    jira: { status: "none" },
-    github: { status: "none" },
-    confluence: { status: "none" },
+    documents: [],
+    decks: [],
+    docmosisTemplates: [],
+    notifyTemplates: [],
+    video: null,
+    canPostVideo: false,
     page: { messages: [], entries: [], olderBefore: null, lastId: null, more: false },
     forked: null,
     questions: []

@@ -9,7 +9,7 @@ import type { LookUp } from "@/components/assistant/lookupClient";
 import type { LoginView } from "@/virtual-agents/logins";
 import type { ActionResult } from "@/web/action";
 
-export type ExportToJiraAction = (input: { conversationId: unknown; project: unknown }) => Promise<ActionResult>;
+export type ExportToJiraAction = (input: { conversationId: unknown; documentId: unknown; project: unknown }) => Promise<ActionResult>;
 
 /** Whether the person's assistant can reach Jira as them, and the Atlassian sign-in it is waiting on, if any. */
 export interface JiraAccess {
@@ -190,6 +190,7 @@ function JiraAction({
  */
 export function JiraFooter({
   conversationId,
+  documentId,
   exported,
   access,
   exportTo,
@@ -197,7 +198,7 @@ export function JiraFooter({
   lookUp,
   saved,
   written
-}: JiraExportProps & { conversationId: string; saved: boolean; written: boolean }) {
+}: JiraExportProps & { conversationId: string; documentId: string; saved: boolean; written: boolean }) {
   const [chosen, setChosen] = useState(() => startingProject(exported, defaultProject));
   const project = chosen.key;
   // The export as the page showed it when the person clicked: until the page shows it changed, the click is what
@@ -212,7 +213,7 @@ export function JiraFooter({
     setClickedAt(shownExport);
     setClickedMs(Date.now());
     setError(null);
-    const result = await exportTo({ conversationId, project });
+    const result = await exportTo({ conversationId, documentId, project });
     if (!result.ok) {
       setClickedAt(null);
       setError(result.error);
@@ -241,7 +242,7 @@ export function JiraFooter({
   const failure = exported.status === "failed" && !pending ? exported.error : null;
   const shown = error ?? failure;
   const hint = footerHint(!pending && exported.status !== "done", blocked, access.connected);
-  const hintId = `jira-hint-${conversationId}`;
+  const hintId = `jira-hint-${documentId}`;
 
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2.5">

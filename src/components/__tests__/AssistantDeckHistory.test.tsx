@@ -21,6 +21,7 @@ import { SharedDeck } from "@/components/assistant/DeckPanel";
 import { deckPptxUrl } from "@/components/assistant/deck-addresses";
 
 const CONVERSATION = "22222222-2222-2222-2222-222222222222";
+const ITEM = "55555555-5555-5555-5555-555555555555";
 const SHA = "c".repeat(64);
 const JOB = "33333333-3333-4333-8333-333333333333";
 
@@ -60,6 +61,7 @@ const OLD_OUTLINE: DeckOutline = {
 
 function latest(overrides: Partial<DeckView> = {}): DeckView {
   return {
+    id: ITEM,
     title: "Ways of working",
     outline: LATEST_OUTLINE,
     version: 7,
@@ -119,7 +121,7 @@ async function openHistory(): Promise<void> {
 describe("DeckHistory's list", () => {
   it("should open the list of versions as buttons, newest first, with the one on screen current", async () => {
     // Arrange
-    const reads = serving({ [`GET ${deckVersionsUrl(CONVERSATION)}`]: { body: VERSIONS } });
+    const reads = serving({ [`GET ${deckVersionsUrl(CONVERSATION, ITEM)}`]: { body: VERSIONS } });
     const announce = history();
     const toggle = screen.getByRole("button", { name: "History" });
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
@@ -140,12 +142,12 @@ describe("DeckHistory's list", () => {
     expect(items[0]?.getAttribute("aria-current")).toBe("true");
     expect(items[1]?.getAttribute("aria-current")).toBeNull();
     expect(announce).toHaveBeenCalledWith("Version history opened");
-    expect(reads).toHaveBeenCalledWith(deckVersionsUrl(CONVERSATION), expect.objectContaining({ cache: "no-store" }));
+    expect(reads).toHaveBeenCalledWith(deckVersionsUrl(CONVERSATION, ITEM), expect.objectContaining({ cache: "no-store" }));
   });
 
   it("should say who wrote a version as the chat's owner to someone it is shared with", async () => {
     // Arrange
-    serving({ [`GET ${deckVersionsUrl(CONVERSATION)}`]: { body: VERSIONS } });
+    serving({ [`GET ${deckVersionsUrl(CONVERSATION, ITEM)}`]: { body: VERSIONS } });
     history({ owner: false });
 
     // Act
@@ -158,7 +160,7 @@ describe("DeckHistory's list", () => {
   it("should say it could not load the history, and read it again when asked", async () => {
     // Arrange
     let calls = 0;
-    serving({ [`GET ${deckVersionsUrl(CONVERSATION)}`]: () => (calls++ === 0 ? { status: 500, body: {} } : { body: VERSIONS }) });
+    serving({ [`GET ${deckVersionsUrl(CONVERSATION, ITEM)}`]: () => (calls++ === 0 ? { status: 500, body: {} } : { body: VERSIONS }) });
     history();
 
     // Act
@@ -175,7 +177,7 @@ describe("DeckHistory's list", () => {
     // Arrange
     const amended: DeckVersionEntry[] = [{ ...VERSIONS[0]!, by: "user", summary: "Reordered slides", pptx: false }, ...VERSIONS.slice(1)];
     let calls = 0;
-    const reads = serving({ [`GET ${deckVersionsUrl(CONVERSATION)}`]: () => ({ body: calls++ === 0 ? VERSIONS : amended }) });
+    const reads = serving({ [`GET ${deckVersionsUrl(CONVERSATION, ITEM)}`]: () => ({ body: calls++ === 0 ? VERSIONS : amended }) });
     const { rerender } = render(<DeckHistory conversationId={CONVERSATION} latest={latest({ revision: 3 })} announce={vi.fn()} owner />);
     await openHistory();
     expect(screen.getAllByRole("button", { name: /^Version 7/ })[0]?.textContent).toContain("Added the pipeline");
@@ -191,7 +193,7 @@ describe("DeckHistory's list", () => {
 
   it("should close the list again, and say so", async () => {
     // Arrange
-    serving({ [`GET ${deckVersionsUrl(CONVERSATION)}`]: { body: VERSIONS } });
+    serving({ [`GET ${deckVersionsUrl(CONVERSATION, ITEM)}`]: { body: VERSIONS } });
     const announce = history();
     await openHistory();
 
@@ -207,8 +209,8 @@ describe("DeckHistory's list", () => {
 describe("DeckHistory's older version", () => {
   function routes(extra: Record<string, Answer> = {}) {
     return serving({
-      [`GET ${deckVersionsUrl(CONVERSATION)}`]: { body: VERSIONS },
-      [`GET ${deckVersionUrl(CONVERSATION, 5)}`]: { body: old() },
+      [`GET ${deckVersionsUrl(CONVERSATION, ITEM)}`]: { body: VERSIONS },
+      [`GET ${deckVersionUrl(CONVERSATION, ITEM, 5)}`]: { body: old() },
       ...extra
     });
   }
@@ -260,7 +262,7 @@ describe("DeckHistory's older version", () => {
 
   it("should say it could not load a version, with a way back to the latest", async () => {
     // Arrange
-    routes({ [`GET ${deckVersionUrl(CONVERSATION, 5)}`]: { status: 404, body: {} } });
+    routes({ [`GET ${deckVersionUrl(CONVERSATION, ITEM, 5)}`]: { status: 404, body: {} } });
     history();
     await openHistory();
 
@@ -322,7 +324,7 @@ describe("DeckHistory's older version", () => {
 
   it("should say the title slide changed when the outline's own title did", async () => {
     // Arrange
-    routes({ [`GET ${deckVersionUrl(CONVERSATION, 5)}`]: { body: old(5, { outline: { ...LATEST_OUTLINE, title: "Ways of shipping" } }) } });
+    routes({ [`GET ${deckVersionUrl(CONVERSATION, ITEM, 5)}`]: { body: old(5, { outline: { ...LATEST_OUTLINE, title: "Ways of shipping" } }) } });
     history();
     await openHistory();
     fireEvent.click(screen.getByRole("button", { name: /^Version 5/ }));
@@ -351,7 +353,7 @@ describe("DeckHistory's older version", () => {
     });
 
     // Assert
-    expect(restore).toHaveBeenCalledWith({ conversationId: CONVERSATION, version: 5, baseVersion: 7 });
+    expect(restore).toHaveBeenCalledWith({ conversationId: CONVERSATION, itemId: ITEM, version: 5, baseVersion: 7 });
     expect(announce).toHaveBeenLastCalledWith("Restored version 5 as version 8");
     expect(screen.queryByText(/Viewing version/)).toBeNull();
   });
@@ -435,11 +437,11 @@ describe("DeckHistory's older version", () => {
   it("should offer a shared page's reader the history read-only", async () => {
     // Arrange
     serving({
-      [`GET /api/ui/assistant/decks/${CONVERSATION}`]: { body: latest() },
-      [`GET ${deckVersionsUrl(CONVERSATION)}`]: { body: VERSIONS },
-      [`GET ${deckVersionUrl(CONVERSATION, 5)}`]: { body: old() }
+      [`GET /api/ui/assistant/decks/${CONVERSATION}/${ITEM}`]: { body: latest() },
+      [`GET ${deckVersionsUrl(CONVERSATION, ITEM)}`]: { body: VERSIONS },
+      [`GET ${deckVersionUrl(CONVERSATION, ITEM, 5)}`]: { body: old() }
     });
-    render(<SharedDeck conversationId={CONVERSATION} deck={{ title: "Ways of working", version: 7, revision: 7, updatedBy: "agent", pptx: true }} />);
+    render(<SharedDeck conversationId={CONVERSATION} deck={{ id: ITEM, title: "Ways of working", version: 7, revision: 7, updatedBy: "agent", pptx: true }} />);
     await settle();
 
     // Act
@@ -466,8 +468,8 @@ describe("DeckHistory with a layout the viewer no longer has", () => {
   it("should say which layout an older version uses that the viewer cannot draw, and show its slides as text", async () => {
     // Arrange
     serving({
-      [`GET ${deckVersionsUrl(CONVERSATION)}`]: { body: VERSIONS },
-      [`GET ${deckVersionUrl(CONVERSATION, 5)}`]: { body: old(5, { outline: STALE_OUTLINE }) }
+      [`GET ${deckVersionsUrl(CONVERSATION, ITEM)}`]: { body: VERSIONS },
+      [`GET ${deckVersionUrl(CONVERSATION, ITEM, 5)}`]: { body: old(5, { outline: STALE_OUTLINE }) }
     });
     history();
     await openHistory();
@@ -488,8 +490,8 @@ describe("DeckHistory with a layout the viewer no longer has", () => {
   it("should compare such a version in words, without drawing its slides", async () => {
     // Arrange
     serving({
-      [`GET ${deckVersionsUrl(CONVERSATION)}`]: { body: VERSIONS },
-      [`GET ${deckVersionUrl(CONVERSATION, 5)}`]: { body: old(5, { outline: STALE_OUTLINE }) }
+      [`GET ${deckVersionsUrl(CONVERSATION, ITEM)}`]: { body: VERSIONS },
+      [`GET ${deckVersionUrl(CONVERSATION, ITEM, 5)}`]: { body: old(5, { outline: STALE_OUTLINE }) }
     });
     history();
     await openHistory();
@@ -519,16 +521,18 @@ describe("DeckHistory with a layout the viewer no longer has", () => {
 describe("DeckDownload", () => {
   function shown(props: Partial<Parameters<typeof DeckDownload>[0]> = {}) {
     const announce = vi.fn();
-    render(<DeckDownload conversationId={CONVERSATION} version={5} pptx={false} canBuild latest={false} announce={announce} pollMs={50} {...props} />);
+    render(
+      <DeckDownload conversationId={CONVERSATION} itemId={ITEM} version={5} pptx={false} canBuild latest={false} announce={announce} pollMs={50} {...props} />
+    );
     return announce;
   }
 
-  const POST = `POST ${deckPptxUrl(CONVERSATION, 5)}`;
-  const POLL = `GET ${deckBuildUrl(CONVERSATION, JOB)}`;
+  const POST = `POST ${deckPptxUrl(CONVERSATION, ITEM, 5)}`;
+  const POLL = `GET ${deckBuildUrl(CONVERSATION, ITEM, JOB)}`;
 
   it("should link to the .pptx the hub holds", () => {
     shown({ pptx: true });
-    expect(screen.getByRole("link", { name: "Download .pptx" }).getAttribute("href")).toBe(deckPptxUrl(CONVERSATION, 5));
+    expect(screen.getByRole("link", { name: "Download .pptx" }).getAttribute("href")).toBe(deckPptxUrl(CONVERSATION, ITEM, 5));
   });
 
   it("should say Not built yet for the latest, and Not available for an older one, to someone who cannot build", () => {
@@ -556,7 +560,7 @@ describe("DeckDownload", () => {
     expect(announce).toHaveBeenCalledWith("Preparing version 5");
     await vi.waitFor(() => expect(screen.getByRole("link", { name: "Download .pptx" })).toBeTruthy(), { timeout: 2000 });
     expect(polls).toBe(2);
-    expect(clicked).toEqual([deckPptxUrl(CONVERSATION, 5)]);
+    expect(clicked).toEqual([deckPptxUrl(CONVERSATION, ITEM, 5)]);
     expect(announce).toHaveBeenLastCalledWith("Version 5 is ready to download");
   });
 
@@ -570,7 +574,7 @@ describe("DeckDownload", () => {
     await settle();
 
     // Assert
-    expect(clicked).toEqual([deckPptxUrl(CONVERSATION, 5)]);
+    expect(clicked).toEqual([deckPptxUrl(CONVERSATION, ITEM, 5)]);
     expect(screen.getByRole("link", { name: "Download .pptx" })).toBeTruthy();
   });
 
@@ -675,10 +679,12 @@ describe("DeckDownload", () => {
       vi.useFakeTimers();
       const reads = serving({ [POST]: { body: { status: "pending", job_id: JOB } }, [POLL]: poll });
       const announce = vi.fn();
-      const view = render(<DeckDownload conversationId={CONVERSATION} version={5} pptx={false} canBuild latest={false} announce={announce} pollMs={2000} />);
+      const view = render(
+        <DeckDownload conversationId={CONVERSATION} itemId={ITEM} version={5} pptx={false} canBuild latest={false} announce={announce} pollMs={2000} />
+      );
       fireEvent.click(screen.getByRole("button", { name: "Prepare .pptx" }));
       await settle();
-      const polls = () => reads.mock.calls.filter(([url]) => url === deckBuildUrl(CONVERSATION, JOB)).length;
+      const polls = () => reads.mock.calls.filter(([url]) => url === deckBuildUrl(CONVERSATION, ITEM, JOB)).length;
       return { announce, polls, view };
     }
 
@@ -705,7 +711,9 @@ describe("DeckDownload", () => {
         })
       );
       const announce = vi.fn();
-      const view = render(<DeckDownload conversationId={CONVERSATION} version={5} pptx={false} canBuild latest={false} announce={announce} pollMs={2000} />);
+      const view = render(
+        <DeckDownload conversationId={CONVERSATION} itemId={ITEM} version={5} pptx={false} canBuild latest={false} announce={announce} pollMs={2000} />
+      );
       fireEvent.click(screen.getByRole("button", { name: "Prepare .pptx" }));
       await settle();
       return { announce, signals, view };
@@ -725,7 +733,7 @@ describe("DeckDownload", () => {
       // Assert
       expect(waiting).toBe(1);
       expect(signals).toHaveLength(1);
-      expect(clicked).toEqual([deckPptxUrl(CONVERSATION, 5)]);
+      expect(clicked).toEqual([deckPptxUrl(CONVERSATION, ITEM, 5)]);
       expect(announce.mock.calls.filter(([text]) => text === "Version 5 is ready to download")).toHaveLength(1);
       expect(screen.getByRole("link", { name: "Download .pptx" })).toBeTruthy();
     });

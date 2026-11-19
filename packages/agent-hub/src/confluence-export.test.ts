@@ -40,6 +40,15 @@ function deps(create: RunResult[] = [CREATED], overrides: Partial<ConfluenceExpo
   const d: ConfluenceExportDeps = {
     api: {
       getArtefact: async () => DOC,
+      getArtefactById: vi.fn(async (_agentId: string, id: string) => ({
+        id,
+        kind: "ticket" as const,
+        title: "Second document",
+        markdown: "# Second",
+        version: 2,
+        updated_by: "agent" as const,
+        updated_at: null
+      })),
       putConfluenceExport: async (_agent, body) => {
         reports.push(body);
         return null;
@@ -93,6 +102,18 @@ describe("parseCreatedPageId and confluenceFailure", () => {
 });
 
 describe("runConfluenceExport", () => {
+  it("should publish the document the frame names when the export carries a document id", async () => {
+    // Arrange
+    const { d, run } = deps();
+
+    // Act
+    const outcome = await runConfluenceExport(d, { ...REQUEST, documentId: "0f8a6a1e-0000-4000-8000-00000000d0c2" });
+
+    // Assert
+    expect(outcome).toMatchObject({ title: "Second document" });
+    expect(run.mock.calls.find(([, a]) => a[0] === "confluence")?.[1]).toEqual(expect.arrayContaining(["--title=Second document"]));
+  });
+
   it("should create the page under the parent with the body in a file, report it, and remove the file", async () => {
     // Arrange
     const { d, run, reports, bodies } = deps();
@@ -177,7 +198,13 @@ describe("runConfluenceExport", () => {
 
   it("should refuse to publish an empty document without asking anybody to sign in", async () => {
     // Arrange
-    const { d, run } = deps([], { api: { getArtefact: async () => ({ ...DOC, markdown: "  " }), putConfluenceExport: async () => null } });
+    const { d, run } = deps([], {
+      api: {
+        getArtefact: async () => ({ ...DOC, markdown: "  " }),
+        getArtefactById: async () => ({ ...DOC, id: "x", kind: "document" }),
+        putConfluenceExport: async () => null
+      }
+    });
 
     // Act & Assert
     expect(await runConfluenceExport(d, REQUEST)).toEqual({ error: "The document is empty, so there was nothing to publish." });

@@ -10,6 +10,7 @@ import {
   canChangeDeck,
   canChangeDocmosis,
   canChangeFeedbackProject,
+  canChangeNotify,
   canConnectMicrosoft,
   canForkConversation,
   canLaunchTokenActForAgent,
@@ -19,16 +20,23 @@ import {
   canOwnerReadCredential,
   canPersonDirectAgent,
   canPodReadCredential,
+  canPostVideo,
   canReadDeck,
   canReadDocmosis,
   canReadMessage,
+  canReadNotify,
+  canReadPodJob,
+  canReadVideo,
   canRecordFeedback,
+  canRecordPickAsOwner,
   canRemoveUploadFromDisk,
+  canRequestPodJob,
   canSeeFeedbackRecording,
   canSessionUseAttachment,
   canShareConversationWith,
   canSuggestPerson,
   canUseCredentialRoutes,
+  canUseDocmosisLibrary,
   canViewTranscript,
   canVirtualAgentStoreCredential,
   canWriteUpload,
@@ -344,6 +352,17 @@ describe("canManageVirtualAgent", () => {
 
   it.each(EVERYONE_ELSE)("should refuse %s when they would make the owner's virtual agent act as the owner", (_label, actorOid) => {
     expect(canManageVirtualAgent(actorOid, { ownerOid: OWNER })).toBe(false);
+  });
+});
+
+describe("canUseDocmosisLibrary", () => {
+  // The index lists what the owner's GitHub sign-in could see of a private repository.
+  it("should let the owner read and refresh their own template library index", () => {
+    expect(canUseDocmosisLibrary(OWNER, { ownerOid: OWNER })).toBe(true);
+  });
+
+  it.each(EVERYONE_ELSE)("should refuse %s the owner's template library index", (_label, actorOid) => {
+    expect(canUseDocmosisLibrary(actorOid, { ownerOid: OWNER })).toBe(false);
   });
 });
 
@@ -740,6 +759,126 @@ describe("the conversation share rules", () => {
 
     it.each(EVERYONE_ELSE)("should refuse %s a change to the template", (_label, viewerOid) => {
       expect(canChangeDocmosis(conversationAccess(viewerOid, CONVERSATION, SHARES))).toBe(false);
+    });
+  });
+
+  describe("canReadNotify", () => {
+    it("should let the owner and a share's recipient read the Notify template", () => {
+      expect(canReadNotify(conversationAccess(OWNER, CONVERSATION, SHARES))).toBe(true);
+      expect(canReadNotify(conversationAccess(RECIPIENT, CONVERSATION, SHARES))).toBe(true);
+    });
+
+    it.each(EVERYONE_ELSE)("should refuse %s the Notify template", (_label, viewerOid) => {
+      expect(canReadNotify(conversationAccess(viewerOid, CONVERSATION, SHARES))).toBe(false);
+    });
+
+    it("should refuse the Notify template when the access answered is none", () => {
+      expect(canReadNotify("none")).toBe(false);
+    });
+  });
+
+  describe("canReadVideo", () => {
+    it("should let the owner and a share's recipient watch the video", () => {
+      expect(canReadVideo(conversationAccess(OWNER, CONVERSATION, SHARES))).toBe(true);
+      expect(canReadVideo(conversationAccess(RECIPIENT, CONVERSATION, SHARES))).toBe(true);
+    });
+
+    it.each(EVERYONE_ELSE)("should refuse %s the video", (_label, viewerOid) => {
+      expect(canReadVideo(conversationAccess(viewerOid, CONVERSATION, SHARES))).toBe(false);
+    });
+
+    it("should refuse the video when the access answered is none", () => {
+      expect(canReadVideo("none")).toBe(false);
+    });
+  });
+
+  describe("canPostVideo", () => {
+    it("should let the owner post the video", () => {
+      expect(canPostVideo(conversationAccess(OWNER, CONVERSATION, SHARES))).toBe(true);
+    });
+
+    it("should refuse a share's recipient when the share lets them watch the video", () => {
+      const access = conversationAccess(RECIPIENT, CONVERSATION, SHARES);
+      expect(canReadVideo(access)).toBe(true);
+      expect(canPostVideo(access)).toBe(false);
+    });
+
+    it.each(EVERYONE_ELSE)("should refuse %s posting the video", (_label, viewerOid) => {
+      expect(canPostVideo(conversationAccess(viewerOid, CONVERSATION, SHARES))).toBe(false);
+    });
+  });
+
+  describe("canChangeNotify", () => {
+    it("should let the owner change the Notify template", () => {
+      expect(canChangeNotify(conversationAccess(OWNER, CONVERSATION, SHARES))).toBe(true);
+    });
+
+    it("should refuse a share's recipient when the share lets them read the Notify template", () => {
+      const access = conversationAccess(RECIPIENT, CONVERSATION, SHARES);
+      expect(canReadNotify(access)).toBe(true);
+      expect(canChangeNotify(access)).toBe(false);
+    });
+
+    it.each(EVERYONE_ELSE)("should refuse %s a change to the Notify template", (_label, viewerOid) => {
+      expect(canChangeNotify(conversationAccess(viewerOid, CONVERSATION, SHARES))).toBe(false);
+    });
+  });
+
+  describe("canRequestPodJob", () => {
+    it("should let the owner have their pod run a job", () => {
+      expect(canRequestPodJob(conversationAccess(OWNER, CONVERSATION, SHARES))).toBe(true);
+    });
+
+    it("should refuse a share's recipient when the share lets them read the conversation", () => {
+      const access = conversationAccess(RECIPIENT, CONVERSATION, SHARES);
+      expect(access).toBe("reader");
+      expect(canRequestPodJob(access)).toBe(false);
+    });
+
+    it.each(EVERYONE_ELSE)("should refuse %s a job", (_label, viewerOid) => {
+      expect(canRequestPodJob(conversationAccess(viewerOid, CONVERSATION, SHARES))).toBe(false);
+    });
+  });
+
+  describe("canRecordPickAsOwner", () => {
+    const CHAT = { id: "conversation-a", ownerOid: OWNER, virtualAgentId: "assistant-a" };
+    const JOB = { conversationId: "conversation-a", ownerOid: OWNER, virtualAgentId: "assistant-a" };
+    const SESSION = { virtualAgentId: "assistant-a" };
+
+    it("should record a write as the owner's pick when the job was asked for in this conversation by its owner", () => {
+      expect(canRecordPickAsOwner(JOB, CHAT, SESSION)).toBe(true);
+    });
+
+    it("should refuse when the job was asked for in another conversation", () => {
+      expect(canRecordPickAsOwner({ ...JOB, conversationId: "conversation-b" }, CHAT, SESSION)).toBe(false);
+    });
+
+    it.each(EVERYONE_ELSE)("should refuse when the job is %s's and the conversation is the owner's", (_label, ownerOid) => {
+      expect(canRecordPickAsOwner({ ...JOB, ownerOid }, CHAT, SESSION)).toBe(false);
+    });
+
+    it.each([
+      ["another assistant", "assistant-b"],
+      ["no assistant", null]
+    ])("should refuse when the conversation has moved to %s since the job was sent", (_label, virtualAgentId) => {
+      expect(canRecordPickAsOwner(JOB, { ...CHAT, virtualAgentId }, SESSION)).toBe(false);
+    });
+
+    it.each([
+      ["another assistant's session", "assistant-b"],
+      ["an agent no assistant registered", null]
+    ])("should refuse when the writing agent is %s", (_label, virtualAgentId) => {
+      expect(canRecordPickAsOwner(JOB, CHAT, { virtualAgentId })).toBe(false);
+    });
+  });
+
+  describe("canReadPodJob", () => {
+    it("should let the person the job ran for read it", () => {
+      expect(canReadPodJob(OWNER, { ownerOid: OWNER })).toBe(true);
+    });
+
+    it.each([["a share's recipient", RECIPIENT], ...EVERYONE_ELSE])("should refuse %s the job", (_label, viewerOid) => {
+      expect(canReadPodJob(viewerOid, { ownerOid: OWNER })).toBe(false);
     });
   });
 

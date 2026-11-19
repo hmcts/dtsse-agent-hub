@@ -17,6 +17,13 @@ import { useEffect, useState } from "react";
 
 const DEBOUNCE_MS = 200;
 
+/**
+ * Where the search for the current query stands, so a surface can say why its list is empty: too short to ask,
+ * asked and waiting, answered (the list, or nobody), or not answered at all. An empty box that says nothing reads as
+ * a box that is broken.
+ */
+export type SuggestionStatus = "idle" | "short" | "searching" | "answered" | "failed";
+
 export interface Suggestions<T> {
   query: string;
   setQuery: (value: string) => void;
@@ -29,6 +36,9 @@ export interface Suggestions<T> {
   choose: (item: T) => void;
   /** Forgets the query and its matches, for once a choice has been taken. */
   clear: () => void;
+  status: SuggestionStatus;
+  /** Whether the route found anyone at all, before `exclude`: an empty `shown` can mean nobody, or nobody new. */
+  found: boolean;
 }
 
 export function useSuggestions<T>({
@@ -51,22 +61,37 @@ export function useSuggestions<T>({
   const [matches, setMatches] = useState<T[]>([]);
   const [active, setActive] = useState(0);
   const [dismissed, setDismissed] = useState(false);
+  const [status, setStatus] = useState<SuggestionStatus>("idle");
 
   useEffect(() => {
     const asked = query.trim();
     if (asked.length < minQuery) {
       setMatches([]);
+      setStatus(asked === "" ? "idle" : "short");
       return;
     }
+    setStatus("searching");
     const controller = new AbortController();
     const timer = setTimeout(() => {
       fetch(`${path}?q=${encodeURIComponent(asked)}`, { signal: controller.signal })
-        .then((response) => (response.ok ? response.json() : {}))
-        .then((body: Record<string, T[] | undefined>) => {
+        .then(async (response) => {
+          if (!response.ok) {
+            throw new Error(`suggestions answered ${response.status}`);
+          }
+          return (await response.json()) as Record<string, T[] | undefined>;
+        })
+        .then((body) => {
           setMatches(body[field] ?? []);
           setActive(0);
+          setStatus("answered");
         })
-        .catch(() => undefined);
+        .catch(() => {
+          // A request a keystroke replaced is not a failure: the next one is already on its way.
+          if (!controller.signal.aborted) {
+            setMatches([]);
+            setStatus("failed");
+          }
+        });
     }, DEBOUNCE_MS);
     return () => {
       clearTimeout(timer);
@@ -112,6 +137,10 @@ export function useSuggestions<T>({
     setQuery: (value: string) => {
       setDismissed(false);
       setQuery(value);
+      // Said with the keystroke, not a render later from the effect, so the line under the box never pairs the new
+      // query with what was found for the last one.
+      const asked = value.trim();
+      setStatus(asked === "" ? "idle" : asked.length < minQuery ? "short" : "searching");
     },
     shown,
     open,
@@ -121,6 +150,8 @@ export function useSuggestions<T>({
     clear: () => {
       setQuery("");
       setMatches([]);
-    }
+    },
+    status,
+    found: matches.length > 0
   };
 }

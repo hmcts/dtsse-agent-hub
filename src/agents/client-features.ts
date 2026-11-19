@@ -23,8 +23,11 @@ import { byCodePoint } from "../topics/slug.ts";
 export type ClientFeature =
   | "attachments"
   | "deck-build"
+  | "docmosis-library"
   | "files"
   | "github-lookups"
+  | "item-templates"
+  | "items"
   | "lookups"
   | "memory-anon"
   | "model-alias"
@@ -35,9 +38,18 @@ export type ClientFeature =
   | "welsh"
   | "welsh-review";
 
+/**
+ * A pod job's claim, `pod-job:<kind>`: one per kind the pod has a handler for, so a kind needs no name added to the
+ * union above. The kinds are the hub's own registry (`src/assistant/pod-job-kinds.ts`), which is what keeps a gate on
+ * one from naming something neither side defines. See "Pod jobs" in `docs/agent-api.md`.
+ */
+export type PodJobFeature = `pod-job:${string}`;
+
+/** Mirrored as `MAX_CLIENT_FEATURES` in the client's `wire.ts`, whose tests keep its own claim within it. */
 export const MAX_CLIENT_FEATURES = 50;
 export const MAX_CLIENT_FEATURE_NAME = 50;
-const CLIENT_FEATURE_NAME = /^[a-z0-9][a-z0-9:_-]*$/;
+// Dots for a pod job's claim, `pod-job:<kind>`, whose kind is dotted (`src/assistant/pod-jobs.ts`).
+const CLIENT_FEATURE_NAME = /^[a-z0-9][a-z0-9:._-]*$/;
 
 /**
  * Sorted and de-duplicated, with anything that is not a valid name dropped.
@@ -109,18 +121,38 @@ export function podLacks(pod: PodClaims & { status: string }, feature: ClientFea
   return claim !== null && !claim.includes(feature);
 }
 
+const isPodJobFeature = (feature: string): feature is PodJobFeature => feature.startsWith("pod-job:");
+
+/**
+ * How long a running pod may go without a claim of its own before a pod job's gate reads it as a client that never
+ * makes one. The client that reports `running` claims in that same report, so this covers only the report landing a
+ * moment after the status, not a boot.
+ */
+export const POD_CLAIM_GRACE_MS = 30_000;
+
 /**
  * Whether a request needing `feature` may be sent to the pod now. `waking` for a pod that is not running, or is
  * running but has claimed nothing yet, which is a pod still booting; `unsupported` for one whose claim leaves the
  * feature out.
+ *
+ * A pod job's claim is read from the pod's own claim alone: a session's registration never claims one, so the
+ * main-session agent's claim would leave every kind out and call a current pod `unsupported` until its first status
+ * report lands. A pod running for `POD_CLAIM_GRACE_MS` since its status last changed (`statusChangedAt`) with no
+ * claim of its own is on a client that reports none, and never will until it restarts, so it is `unsupported` rather
+ * than `waking` for ever. With no `statusChangedAt` it stays `waking`.
  */
-export function podGate(pod: PodClaims & { status: string }, feature: ClientFeature): "waking" | "unsupported" | "ok" {
+export function podGate(
+  pod: PodClaims & { status: string; statusChangedAt?: Date },
+  feature: ClientFeature | PodJobFeature,
+  now: Date = new Date()
+): "waking" | "unsupported" | "ok" {
   if (pod.status !== "running") {
     return "waking";
   }
-  const claim = podClaim(pod);
+  const claim = isPodJobFeature(feature) ? storedClientFeatures(pod.clientFeatures) : podClaim(pod);
   if (claim === null) {
-    return "waking";
+    const settled = pod.statusChangedAt !== undefined && now.getTime() - pod.statusChangedAt.getTime() >= POD_CLAIM_GRACE_MS;
+    return isPodJobFeature(feature) && settled ? "unsupported" : "waking";
   }
   return claim.includes(feature) ? "ok" : "unsupported";
 }
