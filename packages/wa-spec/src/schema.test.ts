@@ -143,3 +143,25 @@ describe("validateSpec helpers and dependencies", () => {
     expect(validateSpec(Spec.parse(spec({ caseTypes: [{ id: "a b" }] })))[0]).toContain("case type a b");
   });
 });
+
+describe("validateSpec dependencies on helpers that a case type lacks", () => {
+  const build = (helpers: unknown[], dependencies: unknown[]) => Spec.parse(spec({ decisions: { completion: { ...decision, helpers, dependencies } } }));
+
+  it("should name the case type that lacks the helper when a dependency applies to more case types than the helper", () => {
+    expect(validateSpec(build([{ name: "H", expression: 1, only: ["ct_a"] }], [{ decision: "table", requires: "H" }]))).toEqual([
+      "completion: table requires helper H, which ct_b does not have"
+    ]);
+  });
+
+  it("should accept the dependency when it is limited to the case types that have the helper", () => {
+    expect(validateSpec(build([{ name: "H", expression: 1, only: ["ct_a"] }], [{ decision: "table", requires: "H", only: ["ct_a"] }]))).toEqual([]);
+  });
+
+  it("should not report a helper-to-helper dependency when the requiring helper is absent for that case type", () => {
+    const helpers = [
+      { name: "A", expression: 1, only: ["ct_a"] },
+      { name: "B", expression: 1, only: ["ct_a"] }
+    ];
+    expect(validateSpec(build(helpers, [{ decision: "A", requires: "B" }]))).toEqual([]);
+  });
+});

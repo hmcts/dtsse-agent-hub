@@ -47,7 +47,7 @@ function lex(text: string): Token[] {
       const literal = /^\d+(\.\d+)?/.exec(text.slice(i))?.[0] ?? "";
       push(String(Number(literal)) === literal ? "num" : "raw", literal, literal);
     } else if (/[A-Za-z_]/.test(c)) {
-      const word = /^[A-Za-z_][A-Za-z0-9_]*/.exec(text.slice(i))?.[0] ?? "";
+      const word = /^[A-Za-z_]\w*/.exec(text.slice(i))?.[0] ?? "";
       push(KEYWORDS.has(word) ? "kw" : "id", word, word);
     } else {
       const op = OPERATORS.find((o) => text.startsWith(o, i));
@@ -322,7 +322,7 @@ function renderCond(cond: Cond, inAll = false): string {
     return inAll ? `(${text})` : text;
   }
   if ("truthy" in cond) {
-    return renderExpr(cond.truthy);
+    return renderOperand(cond.truthy);
   }
   if ("left" in cond) {
     return `${renderOperand(cond.left)} ${OP_TEXT[cond.op]} ${renderOperand(cond.right)}`;

@@ -143,3 +143,51 @@ describe("ncName", () => {
     expect(ncName(text)).toBe(expected);
   });
 });
+
+describe("entities and namespaces", () => {
+  it("should decode character references in attributes and text when a Modeler-style file has them", () => {
+    const xml = sampleDmn("ct_a")
+      .replace('label="Event ID"', 'label="a &#34;b&#34; &amp;#34;"')
+      .replace("<rule ", "<rule ")
+      .replace(/(<rule[^>]*>)/, "$1<description>line&#10;two</description>");
+    const doc = parseDmn(xml);
+    expect(doc.decisions[0]?.table?.inputs[0]?.label).toBe('a "b" &#34;');
+    expect(doc.decisions[0]?.table?.rules[0]?.description).toBe("line\ntwo");
+    const again = parseDmn(writeDmn(doc));
+    expect(again.decisions[0]?.table?.inputs[0]?.label).toBe('a "b" &#34;');
+    expect(again.decisions[0]?.table?.rules[0]?.description).toBe("line\ntwo");
+    expect(writeDmn(doc)).not.toContain("&amp;#34;&amp;");
+  });
+
+  it("should write a line break in an attribute as a character reference when the label has one", () => {
+    const doc = parseDmn(sampleDmn("ct_a"));
+    const input = doc.decisions[0]?.table?.inputs[0];
+    if (input) {
+      input.label = "two\nlines";
+    }
+    const xml = writeDmn(doc);
+    expect(xml).toContain('label="two&#10;lines"');
+    expect(parseDmn(xml).decisions[0]?.table?.inputs[0]?.label).toBe("two\nlines");
+  });
+
+  it("should declare every prefix the output uses when the stored declarations lack some", () => {
+    const doc = parseDmn(sampleDmn("ct_a"));
+    doc.namespaces = [["xmlns", "https://www.omg.org/spec/DMN/20191111/MODEL/"]];
+    const root = /<definitions[^>]*>/.exec(writeDmn(doc))?.[0] ?? "";
+    for (const prefix of ["camunda", "dmndi", "dc", "di"]) {
+      expect(root).toContain(`xmlns:${prefix}=`);
+    }
+    expect(root).not.toContain("xmlns:biodi");
+  });
+
+  it("should keep the stored declarations first and in order when it adds the missing ones", () => {
+    const doc = parseDmn(sampleDmn("ct_a"));
+    doc.namespaces = [
+      ["xmlns:dc", "http://www.omg.org/spec/DMN/20180521/DC/"],
+      ["xmlns", "https://www.omg.org/spec/DMN/20191111/MODEL/"]
+    ];
+    const root = /<definitions[^>]*>/.exec(writeDmn(doc))?.[0] ?? "";
+    expect(root.indexOf("xmlns:dc=")).toBeLessThan(root.indexOf('xmlns="'));
+    expect(root.indexOf('xmlns="')).toBeLessThan(root.indexOf("xmlns:camunda="));
+  });
+});

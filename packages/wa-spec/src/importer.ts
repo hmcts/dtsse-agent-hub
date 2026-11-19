@@ -73,12 +73,19 @@ function camel(text: string): string {
 
 /** A column's key: its variable, else its label in camel case, else `input`; a repeated key gets a number. */
 function inputKeys(decision: DmnDecision): string[] {
-  const seen = new Map<string, number>();
-  return (decision.table?.inputs ?? []).map((input) => {
-    const stem = input.inputVariable || (input.label ? camel(input.label) : "") || "input";
-    const count = (seen.get(stem) ?? 0) + 1;
-    seen.set(stem, count);
-    return count === 1 ? stem : `${stem}${count}`;
+  const stems = (decision.table?.inputs ?? []).map((input) => input.inputVariable || (input.label ? camel(input.label) : "") || "input");
+  const keys = stems.map((stem, i) => (stems.indexOf(stem) === i ? stem : undefined));
+  const taken = new Set(keys.filter((key): key is string => key !== undefined));
+  return keys.map((key, i) => {
+    if (key !== undefined) {
+      return key;
+    }
+    let n = 2;
+    while (taken.has(`${stems[i]}${n}`)) {
+      n++;
+    }
+    taken.add(`${stems[i]}${n}`);
+    return `${stems[i]}${n}`;
   });
 }
 
@@ -290,7 +297,7 @@ function importTables(kind: Kind, tables: Table[], report: ImportReport): Decisi
       perType.map(({ caseType, helper }) => {
         const expr = parseExpr(helper.literal?.text ?? "");
         addRaw(report, kind, `helper ${name}`, expr, caseType);
-        return { caseType, value: JSON.stringify(expr ?? { feel: "" }) };
+        return { caseType, value: JSON.stringify(expr === undefined ? { feel: "" } : expr) };
       })
     );
     const overrides: Record<string, Record<string, unknown>> = {};
@@ -491,8 +498,14 @@ export function importDmns(files: DmnFile[], options: ImportOptions = {}): { spe
 /** Renders the coverage report as Markdown. */
 export function renderReport(report: ImportReport): string {
   const lines: string[] = ["# Import coverage", ""];
-  lines.push(`${report.files.length} DMN files read.`, "");
-  lines.push("## Entries by kind", "", "| Kind | Entries | Structured | Raw FEEL |", "| --- | ---: | ---: | ---: |");
+  lines.push(
+    `${report.files.length} DMN files read.`,
+    "",
+    "## Entries by kind",
+    "",
+    "| Kind | Entries | Structured | Raw FEEL |",
+    "| --- | ---: | ---: | ---: |"
+  );
   for (const [kind, stats] of Object.entries(report.entries)) {
     lines.push(`| ${kind} | ${stats.total} | ${stats.structured} | ${stats.rawFeel} |`);
   }

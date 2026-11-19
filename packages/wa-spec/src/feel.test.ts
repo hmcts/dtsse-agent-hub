@@ -188,3 +188,42 @@ describe("canonical forms", () => {
     expect(normaliseFeel('  x   +  "a  b" ')).toBe('x + "a  b"');
   });
 });
+
+describe("renderExpr precedence", () => {
+  it("should parenthesise an or that is the operand of a truthy test when it sits inside an and", () => {
+    const expr = {
+      if: {
+        all: [
+          {
+            truthy: {
+              any: [
+                { field: "a", op: "eq" as const, value: 1 },
+                { field: "b", op: "eq" as const, value: 2 }
+              ]
+            }
+          },
+          { field: "c", op: "eq" as const, value: 3 }
+        ]
+      },
+      use: 1,
+      otherwise: 2
+    };
+    const text = renderExpr(expr);
+    expect(text).toBe("if ((a = 1 or b = 2) and c = 3) then 1 else 2");
+    expect(parseExpr(text)).toEqual({
+      if: {
+        all: [
+          {
+            any: [
+              { field: "a", op: "eq", value: 1 },
+              { field: "b", op: "eq", value: 2 }
+            ]
+          },
+          { field: "c", op: "eq", value: 3 }
+        ]
+      },
+      use: 1,
+      otherwise: 2
+    });
+  });
+});

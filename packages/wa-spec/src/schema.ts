@@ -280,6 +280,16 @@ export function validateSpec(spec: Spec): string[] {
       if (!helperNames.has(dependency.requires)) {
         problems.push(`${kind}: dependency on unknown helper ${dependency.requires}`);
       }
+      const present = (name: string, id: string) => (decision.helpers ?? []).some((h) => h.name === name && (h.only === undefined || h.only.includes(id)));
+      for (const id of dependency.only ?? [...caseTypes]) {
+        if (
+          helperNames.has(dependency.requires) &&
+          (dependency.decision === "table" || present(dependency.decision, id)) &&
+          !present(dependency.requires, id)
+        ) {
+          problems.push(`${kind}: ${dependency.decision} requires helper ${dependency.requires}, which ${id} does not have`);
+        }
+      }
     }
   }
   return problems;

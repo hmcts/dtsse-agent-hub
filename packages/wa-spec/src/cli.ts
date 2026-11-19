@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { diffPaths, renderDifferences } from "./diff.ts";
+import { exists, isDirectory, listDir, readText, writeText } from "./file-io.ts";
 import { generateAll } from "./generator.ts";
 import { importDmns, renderReport } from "./importer.ts";
 import { layoutPathFor, parseLayout, parseSpec, stringifyLayout, stringifySpec } from "./spec-io.ts";
@@ -41,21 +41,19 @@ function main(argv: string[]): number {
     if (!dir || !values.output) {
       fail(USAGE);
     }
-    const files = readdirSync(dir)
+    const files = listDir(dir)
       .filter((name) => name.startsWith("wa-task-") && name.endsWith(".dmn"))
-      .map((name) => ({ name, xml: readFileSync(join(dir, name), "utf8") }));
+      .map((name) => ({ name, xml: readText(join(dir, name)) }));
     const { spec, layout, report } = importDmns(files, {
       jurisdiction: values.jurisdiction,
       serviceCode: values["service-code"],
       displayName: values["display-name"]
     });
-    mkdirSync(dirname(values.output), { recursive: true });
-    writeFileSync(values.output, stringifySpec(spec));
-    writeFileSync(layoutPathFor(values.output), stringifyLayout(layout));
+    writeText(values.output, stringifySpec(spec));
+    writeText(layoutPathFor(values.output), stringifyLayout(layout));
     const markdown = renderReport(report);
     if (values.report) {
-      mkdirSync(dirname(values.report), { recursive: true });
-      writeFileSync(values.report, markdown);
+      writeText(values.report, markdown);
     }
     const rawFeel = Object.values(report.entries).reduce((n, e) => n + e.rawFeel, 0);
     process.stdout.write(`imported ${report.files.length} files; ${rawFeel} raw FEEL entries; ${report.unrepresentable.length} unrepresentable constructs\n`);
@@ -66,11 +64,10 @@ function main(argv: string[]): number {
     if (!specPath || !values.output) {
       fail(USAGE);
     }
-    mkdirSync(values.output, { recursive: true });
     const layoutPath = layoutPathFor(specPath);
-    const files = generateAll(parseSpec(readFileSync(specPath, "utf8")), existsSync(layoutPath) ? parseLayout(readFileSync(layoutPath, "utf8")) : undefined);
+    const files = generateAll(parseSpec(readText(specPath)), exists(layoutPath) ? parseLayout(readText(layoutPath)) : undefined);
     for (const file of files) {
-      writeFileSync(join(values.output, file.fileName), file.xml);
+      writeText(join(values.output, file.fileName), file.xml);
     }
     process.stdout.write(`generated ${files.length} files in ${values.output}\n`);
     return 0;
@@ -80,7 +77,7 @@ function main(argv: string[]): number {
     if (!a || !b) {
       fail(USAGE);
     }
-    const isDir = (path: string) => statSync(path).isDirectory();
+    const isDir = isDirectory;
     const side = (path: string, counterpart: string) => {
       if (!isDir(path)) {
         return { dir: dirname(path), file: basename(path) };
@@ -91,7 +88,7 @@ function main(argv: string[]): number {
       [a, b],
       [b, a]
     ] as const) {
-      if (!isDir(file) && isDir(other) && !existsSync(join(other, basename(file)))) {
+      if (!isDir(file) && isDir(other) && !exists(join(other, basename(file)))) {
         fail(`${other} has no file named ${basename(file)} to compare ${file} with`);
       }
     }
@@ -108,7 +105,7 @@ function main(argv: string[]): number {
     if (!specPath || !taskId) {
       fail(USAGE);
     }
-    process.stdout.write(`${renderTaskRows(taskRows(parseSpec(readFileSync(specPath, "utf8")), taskId))}\n`);
+    process.stdout.write(`${renderTaskRows(taskRows(parseSpec(readText(specPath)), taskId))}\n`);
     return 0;
   }
   process.stdout.write(USAGE);

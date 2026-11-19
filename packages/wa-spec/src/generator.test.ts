@@ -125,3 +125,46 @@ describe("generateAll", () => {
     expect(parseDmn(regenerated[1]?.xml ?? "").decisions[0]?.table?.rules).toEqual(parseDmn(sampleDmn("ct_b", { extraRule: true })).decisions[0]?.table?.rules);
   });
 });
+
+describe("generator edge cases", () => {
+  const make = (extra: Record<string, unknown>): Spec =>
+    SpecSchema.parse({
+      version: 1,
+      service: { slug: "demo" },
+      caseTypes: [{ id: "ct_a" }, { id: "ct_b" }],
+      decisions: {
+        completion: {
+          name: "D",
+          hitPolicy: "COLLECT",
+          inputs: [{ key: "k", expression: { field: "base" }, overrides: { ct_b: { expression: null } } }],
+          outputs: [{ name: "o" }],
+          rows: [],
+          ...extra
+        }
+      }
+    });
+
+  it("should write the null literal when an input override is null and not fall back to the base expression", () => {
+    const s = make({});
+    expect(generateDocument(s, "completion", "ct_a")?.decisions[0]?.table?.inputs[0]?.expression).toBe("base");
+    expect(generateDocument(s, "completion", "ct_b")?.decisions[0]?.table?.inputs[0]?.expression).toBe("null");
+  });
+
+  it("should write a helper's null literal when its override is null", () => {
+    const s = make({ helpers: [{ name: "H", expression: 1, overrides: { ct_b: { expression: null } } }] });
+    expect(generateDocument(s, "completion", "ct_b")?.decisions[1]?.literal?.text).toBe("null");
+  });
+
+  it("should give helpers distinct ids when their names differ only in characters an id cannot hold", () => {
+    const s = make({
+      helpers: [
+        { name: "a b", expression: 1 },
+        { name: "a_b", expression: 2 }
+      ]
+    });
+    const ids = generateDocument(s, "completion", "ct_a")?.decisions.map((d) => d.id);
+    expect(new Set(ids).size).toBe(3);
+    expect(ids?.[1]).toBe("Decision_a_b");
+    expect(ids?.[2]).toBe("Decision_a_b_1");
+  });
+});

@@ -117,3 +117,23 @@ describe("importDmns constructs the generator would change", () => {
     expect(parseDmn(out[1]?.xml as string).decisions[1]?.variable).toBeUndefined();
   });
 });
+
+describe("importDmns keys and null literals", () => {
+  it("should keep a helper whose expression is the null literal as null when it is imported", () => {
+    const xml = sampleDmn("ct_a").replace(/(<literalExpression[^>]*>\s*<text>)[^<]*/, "$1null");
+    const { spec } = importDmns([{ name: "wa-task-completion-demo-ct_a.dmn", xml }]);
+    expect(spec.decisions.completion?.helpers?.[0]?.expression).toBeNull();
+  });
+
+  it("should give repeated input keys numbers no other key in the table has when a numbered key already exists", () => {
+    const doc = parseDmn(sampleDmn("ct_a"));
+    const table = doc.decisions[0]?.table;
+    if (!table) {
+      throw new Error("no table");
+    }
+    table.inputs = ["Event Id", "Event Id", "Event Id 2"].map((label) => ({ label, expression: "" }));
+    table.rules = [];
+    const { spec } = importDmns([{ name: "wa-task-completion-demo-ct_a.dmn", xml: writeDmn(doc) }]);
+    expect(spec.decisions.completion?.inputs.map((c) => c.key)).toEqual(["eventId", "eventId3", "eventId2"]);
+  });
+});

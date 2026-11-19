@@ -13,25 +13,32 @@ const TASK_COLUMN: Record<Kind, { side: "when" | "returns"; name: string }> = {
 
 export interface TaskRows {
   kind: Kind;
-  rows: Array<{ index: number; row: Row }>;
+  /** `mayApply` marks a row whose task cell is FEEL, which may or may not match the task. */
+  rows: Array<{ index: number; row: Row; mayApply?: true }>;
 }
 
-const mentions = (value: Cell | Expr | undefined, taskId: string): boolean => {
-  if (value === undefined) {
-    return false;
-  }
+/** Whether an output value names the task. */
+const mentions = (value: Expr | undefined, taskId: string): boolean => {
   if (typeof value === "string") {
     return value === taskId;
   }
-  if (typeof value === "object" && value !== null) {
-    if ("in" in value) {
-      return value.in.includes(taskId);
-    }
-    if ("feel" in value) {
-      return value.feel.includes(`"${taskId}"`);
-    }
+  return typeof value === "object" && value !== null && "feel" in value && value.feel.includes(`"${taskId}"`);
+};
+
+type Match = "yes" | "maybe" | "no";
+
+/** Whether an input cell selects the task: an empty cell selects every task, and a FEEL or comparison cell cannot be decided here. */
+const selects = (cell: Cell | undefined, taskId: string): Match => {
+  if (cell === undefined) {
+    return "yes";
   }
-  return false;
+  if ("in" in cell) {
+    return cell.in.includes(taskId) ? "yes" : "no";
+  }
+  if ("notIn" in cell) {
+    return cell.notIn.includes(taskId) ? "no" : "yes";
+  }
+  return "maybe";
 };
 
 /**
@@ -51,12 +58,14 @@ export function taskRows(spec: Spec, taskId: string): TaskRows[] {
     const where = TASK_COLUMN[kind];
     const rows = decision.rows
       .map((row, index) => ({ row, index: index + 1 }))
-      .filter(({ row }) => {
-        const value = where.side === "when" ? row.when?.[where.name] : row.returns?.[where.name];
-        if (kind === "cancellation") {
-          return typeof value === "string" && categories.has(value);
+      .flatMap(({ row, index }) => {
+        if (where.side === "when") {
+          const match = selects(row.when?.[where.name], taskId);
+          return match === "no" ? [] : [{ index, row, ...(match === "maybe" ? { mayApply: true as const } : {}) }];
         }
-        return mentions(value, taskId);
+        const value = row.returns?.[where.name];
+        const hit = kind === "cancellation" ? typeof value === "string" && categories.has(value) : mentions(value, taskId);
+        return hit ? [{ index, row }] : [];
       });
     if (rows.length > 0) {
       found.push({ kind, rows });
@@ -66,5 +75,9 @@ export function taskRows(spec: Spec, taskId: string): TaskRows[] {
 }
 
 export function renderTaskRows(found: TaskRows[]): string {
-  return toYaml(Object.fromEntries(found.map(({ kind, rows }) => [kind, rows.map(({ index, row }) => ({ row: index, ...row }))])));
+  return toYaml(
+    Object.fromEntries(
+      found.map(({ kind, rows }) => [kind, rows.map(({ index, row, mayApply }) => ({ row: index, ...(mayApply ? { mayApply } : {}), ...row }))])
+    )
+  );
 }

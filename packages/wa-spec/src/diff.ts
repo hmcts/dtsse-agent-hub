@@ -1,7 +1,7 @@
-import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type DmnDecision, type DmnDocument, type DmnRule, parseDmn } from "./dmn-model.ts";
 import { canonicalCell, canonicalExpr } from "./feel.ts";
+import { listDir, readText } from "./file-io.ts";
 import { align } from "./merge.ts";
 
 export interface DiffOptions {
@@ -187,7 +187,7 @@ export function diffDocuments(file: string, a: DmnDocument, b: DmnDocument, opti
 }
 
 const dmnFiles = (dir: string): string[] =>
-  readdirSync(dir)
+  listDir(dir)
     .filter((f) => f.endsWith(".dmn"))
     .sort((x, y) => (x < y ? -1 : x > y ? 1 : 0));
 
@@ -212,14 +212,7 @@ export function diffPaths(a: { dir: string; file?: string }, b: { dir: string; f
     }
   }
   for (const [nameA, nameB] of names) {
-    out.push(
-      ...diffDocuments(
-        nameA as string,
-        parseDmn(readFileSync(join(a.dir, nameA as string), "utf8")),
-        parseDmn(readFileSync(join(b.dir, nameB as string), "utf8")),
-        options
-      )
-    );
+    out.push(...diffDocuments(nameA as string, parseDmn(readText(join(a.dir, nameA as string))), parseDmn(readText(join(b.dir, nameB as string))), options));
   }
   return out;
 }

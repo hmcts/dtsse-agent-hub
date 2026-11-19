@@ -11,6 +11,8 @@ import { taskRows } from "./task-view.ts";
 
 const resources = fileURLToPath(new URL("../test-fixtures/et", import.meta.url));
 
+const byCodePoint = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
 describe("ET round trip", () => {
   const files = readdirSync(resources)
     .filter((name) => name.startsWith("wa-task-") && name.endsWith(".dmn"))
@@ -20,7 +22,7 @@ describe("ET round trip", () => {
   it("should import all 24 DMNs into one spec of four case types when the files are ET's", () => {
     expect(files).toHaveLength(24);
     expect(spec.caseTypes.map((c) => c.id)).toEqual(["et_englandwales", "et_englandwales_multiple", "et_scotland", "et_scotland_multiple"]);
-    expect(Object.keys(spec.decisions).sort()).toEqual(["cancellation", "completion", "configuration", "initiation", "permissions", "task-types"]);
+    expect(Object.keys(spec.decisions).sort(byCodePoint)).toEqual(["cancellation", "completion", "configuration", "initiation", "permissions", "task-types"]);
     expect(report.unrepresentable).toEqual([]);
   });
 
@@ -32,7 +34,7 @@ describe("ET round trip", () => {
 
   it("should regenerate DMNs with no semantic difference from the originals when generated from the spec", () => {
     const regenerated = generateAll(parseSpec(stringifySpec(spec)), parseLayout(stringifyLayout(layout)));
-    expect(regenerated.map((f) => f.fileName).sort()).toEqual(files.map((f) => f.name).sort());
+    expect(regenerated.map((f) => f.fileName).sort(byCodePoint)).toEqual(files.map((f) => f.name).sort(byCodePoint));
     const differences = regenerated.flatMap((generated) => {
       const original = files.find((f) => f.name === generated.fileName);
       return diffDocuments(generated.fileName, parseDmn(original?.xml ?? ""), parseDmn(generated.xml));
