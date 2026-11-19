@@ -47,6 +47,11 @@ beforeEach(() => {
     writable: true,
     value: () => ({ matches: false, addEventListener: () => undefined, removeEventListener: () => undefined })
   });
+  // jsdom does no layout, so the header's item row is given room for every item.
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    const width = this.getAttribute("role") === "group" ? 1000 : 10;
+    return { width, height: 0, top: 0, left: 0, right: width, bottom: 0, x: 0, y: 0, toJSON: () => ({}) };
+  });
   Object.defineProperty(globalThis, "ResizeObserver", {
     configurable: true,
     writable: true,
@@ -183,15 +188,9 @@ function actions(overrides: Partial<ChatActions> = {}): ChatActions {
   };
 }
 
-/** Opens the header's switcher, whose trigger is named for the open item. */
-function openSwitcher(): void {
-  fireEvent.click(screen.getByRole("button", { name: /^Items/ }));
-}
-
-/** Opens an item through the header's switcher, by its row's name. */
+/** Opens an item from the header, by its button's name. */
 function switchTo(name: string | RegExp): void {
-  openSwitcher();
-  fireEvent.click(screen.getByRole("menuitemradio", { name }));
+  fireEvent.click(screen.getByRole("button", { name }));
 }
 
 /** Chooses one of the header's Create options, by its name. */
@@ -1163,15 +1162,15 @@ describe("ChatView document", () => {
     render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions()} />);
 
     expect(screen.queryByRole("region", { name: "Document" })).toBeNull();
-    expect(screen.queryByRole("button", { name: /^Items/ })).toBeNull();
+    expect(within(screen.getByRole("group", { name: "Items" })).queryAllByRole("button")).toEqual([]);
     create("Document");
 
     expect(screen.getByRole("region", { name: "Document" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Items, Untitled document open" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Untitled document" }).getAttribute("aria-current")).toBe("true");
 
     fireEvent.click(screen.getByRole("button", { name: "Close document" }));
     expect(screen.queryByRole("region", { name: "Document" })).toBeNull();
-    expect(screen.queryByRole("button", { name: /^Items/ })).toBeNull();
+    expect(within(screen.getByRole("group", { name: "Items" })).queryAllByRole("button")).toEqual([]);
   });
 
   // The other half of the local chat's "neither export": on a pod there is a session the frame reaches, so both are
@@ -1245,11 +1244,14 @@ describe("ChatView document", () => {
     });
     render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={view} templates={TEMPLATES} actions={actions()} />);
 
-    openSwitcher();
-    expect(screen.getAllByRole("menuitemradio").map((row) => row.textContent)).toEqual(["Story", "Jira: Add a hearing", "Confluence: Design notes"]);
-    fireEvent.click(screen.getByRole("menuitemradio", { name: "Jira: Add a hearing" }));
+    expect(
+      within(screen.getByRole("group", { name: "Items" }))
+        .getAllByRole("button")
+        .map((row) => row.textContent)
+    ).toEqual(["Story", "Jira: Add a hearing", "Confluence: Design notes"]);
+    fireEvent.click(screen.getByRole("button", { name: "Jira: Add a hearing" }));
     expect((screen.getByRole("textbox", { name: "Document title" }) as HTMLInputElement).value).toBe("Add a hearing");
-    expect(screen.getByRole("button", { name: "Items, Jira: Add a hearing open" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Jira: Add a hearing" }).getAttribute("aria-current")).toBe("true");
   });
 
   it("should name tickets as GitHub issues when the person's ticket tool is GitHub", () => {
@@ -1265,11 +1267,10 @@ describe("ChatView document", () => {
       />
     );
 
-    openSwitcher();
-    expect(screen.getByRole("menuitemradio", { name: "GitHub: Add a hearing" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "GitHub: Add a hearing" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
     expect(screen.getByRole("menuitem", { name: "GitHub issue" })).toBeTruthy();
-    expect(screen.queryByRole("menuitem", { name: "Jira backlog" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Jira" })).toBeNull();
   });
 
   it("should open a new document beside the existing one, and save it under its own id, when the person creates another", () => {
@@ -1277,7 +1278,7 @@ describe("ChatView document", () => {
     const chatActions = actions();
     render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ documents: [doc()] })} templates={TEMPLATES} actions={chatActions} />);
 
-    create("Jira backlog");
+    create("Jira");
     fireEvent.change(screen.getByRole("textbox", { name: "Document, in markdown" }), { target: { value: "As a clerk" } });
     act(() => {
       vi.advanceTimersByTime(1000);
@@ -1287,8 +1288,11 @@ describe("ChatView document", () => {
     const [saved] = vi.mocked(chatActions.saveArtefact).mock.calls[0] as unknown as [{ documentId: string; kind: string; baseVersion: number }];
     expect(saved).toMatchObject({ kind: "ticket", baseVersion: 0, markdown: "As a clerk" });
     expect(saved.documentId).not.toBe(DOCUMENT_ID);
-    openSwitcher();
-    expect(screen.getAllByRole("menuitemradio").map((row) => row.textContent)).toEqual(["Notes", "Jira: Untitled document"]);
+    expect(
+      within(screen.getByRole("group", { name: "Items" }))
+        .getAllByRole("button")
+        .map((row) => row.textContent)
+    ).toEqual(["Notes", "Jira: Untitled document"]);
   });
 
   it("should offer only the Jira export, with no Send to choice, for a Jira backlog document", () => {
@@ -1375,7 +1379,7 @@ describe("ChatView Create", () => {
 
   it("should offer every kind, in the order the header lists them, when the chat is on a pod", () => {
     render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions()} />);
-    expect(offered()).toEqual(["Document", "Jira backlog", "Confluence page", "Slides", "Docmosis template", "Notify template"]);
+    expect(offered()).toEqual(["Document", "Jira", "Confluence page", "Slides", "Docmosis template", "Notify template"]);
   });
 
   it("should offer only a document when a local chat holds nothing else", () => {
@@ -1489,7 +1493,7 @@ describe("ChatView Create", () => {
 
     create("Notify template");
 
-    expect(screen.getByRole("button", { name: "Items, New Notify template open" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "New Notify template" }).getAttribute("aria-current")).toBe("true");
   });
 
   it("should list every deck, Docmosis template and Notify template in the switcher by its name when the conversation holds several", () => {
@@ -1509,9 +1513,9 @@ describe("ChatView Create", () => {
     });
     render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={view} templates={TEMPLATES} actions={actions()} />);
 
-    openSwitcher();
-
-    const names = screen.getAllByRole("menuitemradio").map((row) => row.textContent);
+    const names = within(screen.getByRole("group", { name: "Items" }))
+      .getAllByRole("button")
+      .map((row) => row.textContent);
     expect(names).toEqual(["Plan", "Review", "Claim form.docx", "Order.docx", "Reminder", "Receipt"]);
   });
 
@@ -1522,7 +1526,7 @@ describe("ChatView Create", () => {
     });
     render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={view} templates={TEMPLATES} actions={actions()} />);
 
-    expect(offered()).toEqual(["Document", "Jira backlog", "Confluence page", "Slides", "Docmosis template", "Notify template"]);
+    expect(offered()).toEqual(["Document", "Jira", "Confluence page", "Slides", "Docmosis template", "Notify template"]);
   });
 
   it("should remove the open deck by its id when the person confirms Remove", async () => {
@@ -1579,7 +1583,7 @@ describe("ChatView Create", () => {
     create("Notify template");
     switchTo("New Notify template");
 
-    expect(screen.getByRole("button", { name: "Items, New Notify template open" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "New Notify template" }).getAttribute("aria-current")).toBe("true");
   });
 });
 
@@ -2482,12 +2486,9 @@ describe("ChatView slides", () => {
     vi.unstubAllGlobals();
   });
 
-  /** Opens the slides through the switcher, opening it first unless the test already has. */
+  /** Opens the slides from the header, by their button. */
   async function openSlides(name = "Ways of working"): Promise<void> {
-    if (screen.queryByRole("menu", { name: "Items" }) === null) {
-      openSwitcher();
-    }
-    fireEvent.click(screen.getByRole("menuitemradio", { name }));
+    fireEvent.click(screen.getByRole("button", { name }));
     await act(async () => {
       await Promise.resolve();
     });
@@ -2514,14 +2515,14 @@ describe("ChatView slides", () => {
     switchTo("Video");
 
     expect(screen.getByRole("region", { name: "Journey video" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Items, Video open" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Video" }).getAttribute("aria-current")).toBe("true");
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
     expect(screen.queryByRole("menuitem", { name: /Video/ })).toBeNull();
   });
 
   it("should offer the slides only once there is a deck, and open them in place of the document", async () => {
     const { rerender } = render(chat({}));
-    expect(screen.queryByRole("button", { name: /^Items/ })).toBeNull();
+    expect(within(screen.getByRole("group", { name: "Items" })).queryAllByRole("button")).toEqual([]);
 
     rerender(chat({ decks: [DECK], documents: [doc(WRITTEN)] }));
     switchTo("Story");
@@ -2530,7 +2531,7 @@ describe("ChatView slides", () => {
     await openSlides();
     expect(screen.getByRole("region", { name: "Slides" })).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Document" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Items, Ways of working open" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Ways of working" }).getAttribute("aria-current")).toBe("true");
 
     fireEvent.click(screen.getByRole("button", { name: "Close slides" }));
     expect(screen.queryByRole("region", { name: "Slides" })).toBeNull();
@@ -2581,10 +2582,9 @@ describe("ChatView slides", () => {
 
     rerender(chat({ decks: [{ ...DECK, version: 8, updatedBy: "agent" }], documents: [doc(WRITTEN)] }, chatActions));
 
-    expect(await announced()).toContain("The assistant updated the slides. Open them from Items to see them.");
+    expect(await announced()).toContain("The assistant updated the slides. Open them from the header to see them.");
     expect(screen.getByRole("region", { name: "Document" })).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Slides" })).toBeNull();
-    openSwitcher();
     expect(screen.getByTestId("deck:deck-1-updated")).toBeTruthy();
 
     // The pause saved the edit, so the document is no longer busy, but the update already waits behind its row in the switcher.
@@ -2592,9 +2592,7 @@ describe("ChatView slides", () => {
     await openSlides("Ways of working, updated by the assistant");
     expect(screen.getByRole("region", { name: "Slides" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Close slides" }));
-    expect(screen.getByRole("button", { name: "Items" })).toBeTruthy();
-    openSwitcher();
-    expect(screen.getByRole("menuitemradio", { name: "Ways of working" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Ways of working" })).toBeTruthy();
     expect(screen.queryByTestId("deck:deck-1-updated")).toBeNull();
   });
 
@@ -2679,7 +2677,6 @@ describe("ChatView slides", () => {
     });
 
     expect((screen.getByRole("textbox", { name: "Document, in markdown" }) as HTMLTextAreaElement).value).toBe("p, edited");
-    openSwitcher();
     expect(screen.getByTestId(`document:${DOCUMENT_ID}-unsaved`)).toBeTruthy();
   });
 
@@ -2709,13 +2706,11 @@ describe("ChatView slides", () => {
     );
 
     expect(screen.getByRole("region", { name: "Document" })).toBeTruthy();
-    openSwitcher();
     expect(screen.getByTestId("docmosis:docmosis-1-updated")).toBeTruthy();
     expect(screen.getByTestId("notify:notify-1-updated")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("menuitemradio", { name: "Order.docx, updated by the assistant" }));
+    fireEvent.click(screen.getByRole("button", { name: "Order.docx, updated by the assistant" }));
     switchTo("Receipt, updated by the assistant");
-    openSwitcher();
     expect(screen.queryByTestId("docmosis:docmosis-1-updated")).toBeNull();
     expect(screen.queryByTestId("notify:notify-1-updated")).toBeNull();
   });
@@ -2732,9 +2727,8 @@ describe("ChatView slides", () => {
 
     rerender(chat({ decks: [DECK, { ...OTHER_DECK, updatedBy: "agent" }] }, chatActions));
 
-    expect(await announced()).toContain("The assistant updated the slides. Open them from Items to see them.");
+    expect(await announced()).toContain("The assistant updated the slides. Open them from the header to see them.");
     expect(screen.getByRole("toolbar", { name: "Editing slides" })).toBeTruthy();
-    openSwitcher();
     expect(screen.getByTestId("deck:deck-2-updated")).toBeTruthy();
   });
 
@@ -2751,12 +2745,11 @@ describe("ChatView slides", () => {
 
     rerender(chat({ decks: [DECK], documents: [doc({ ...WRITTEN, version: 2, updatedBy: "agent" })] }, chatActions));
 
-    expect(await announced()).toContain('The assistant updated "Story". Open it from Items to see it.');
+    expect(await announced()).toContain('The assistant updated "Story". Open it from the header to see it.');
     expect(screen.getByRole("toolbar", { name: "Editing slides" })).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Document" })).toBeNull();
-    openSwitcher();
     expect(screen.getByTestId(`document:${DOCUMENT_ID}-updated`)).toBeTruthy();
-    fireEvent.click(screen.getByRole("menuitemradio", { name: "Story, updated by the assistant" }));
+    fireEvent.click(screen.getByRole("button", { name: "Story, updated by the assistant" }));
     expect(screen.getByRole("region", { name: "Document" })).toBeTruthy();
     expect(screen.queryByTestId(`document:${DOCUMENT_ID}-updated`)).toBeNull();
   });
@@ -2851,10 +2844,9 @@ describe("ChatView slides", () => {
       answer({ ok: false, error: "down" });
     });
 
-    expect(await announced()).toContain("Your slides could not be saved. Open them from Items to see your changes.");
+    expect(await announced()).toContain("Your slides could not be saved. Open them from the header to see your changes.");
     expect(screen.getByRole("region", { name: "Document" })).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Slides" })).toBeNull();
-    openSwitcher();
     expect(screen.getByTestId("deck:deck-1-unsaved")).toBeTruthy();
 
     await openSlides("Ways of working, with your unsaved changes");
@@ -2880,13 +2872,12 @@ describe("ChatView slides", () => {
       answer({ ok: false, error: "down" });
     });
 
-    expect(await announced()).toContain("Your document could not be saved. Open it from Items to see your changes.");
+    expect(await announced()).toContain("Your document could not be saved. Open it from the header to see your changes.");
     expect(screen.getByRole("toolbar", { name: "Editing slides" })).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Document" })).toBeNull();
-    openSwitcher();
     expect(screen.getByTestId(`document:${DOCUMENT_ID}-unsaved`)).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("menuitemradio", { name: "Story, with your unsaved changes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Story, with your unsaved changes" }));
     const reopened = screen.getByRole("region", { name: "Document" });
     expect((within(reopened).getByRole("textbox", { name: "Document, in markdown" }) as HTMLTextAreaElement).value).toBe("x, edited");
   });
