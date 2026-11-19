@@ -224,7 +224,9 @@ async function summarise(ctx: PassContext, { agent, cursors, cursorsFile, slice,
       }
       if (notify && d.offerNotify) {
         const note = attributeNote(notify, messages, await ownAgentIdsFor(api, notify, messages));
-        if (findSecret(note) !== null) {
+        if (!note.trim()) {
+          log(sid, "stop-worker: notification held nothing but an authors line of its own; dropped");
+        } else if (findSecret(note) !== null) {
           log(sid, "stop-worker: secret-shaped string in notification; dropped");
         } else {
           // Held for the user's next prompt: delivering it now would start a turn of its own.

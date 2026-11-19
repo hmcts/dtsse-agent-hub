@@ -54,6 +54,13 @@ export function describeAuthor(author: EnvelopeAuthor = {}): string {
 /** The characters of an agent id that `reply --to` accepts as a prefix, and that a note shows. */
 export const SHORT_ID_LENGTH = 8;
 
+/** What a short author label ends with for a person, and for an agent that is one of the reader's own. */
+export const PERSON_MARKER = "(a person)";
+export const OWN_AGENT_MARKER = "(one of your own agents)";
+
+/** Begins the line a held note ends with, which names each cited post's author from the post itself. */
+export const AUTHORS_PREFIX = "Authors, from the posts themselves:";
+
 /**
  * A name or email as one plain run of text. Both are free text written by whoever owns the account, and they are
  * embedded in lines that carry `#<id>` references, `(…)` markers and `[agent …]` ids of their own, so none of those
@@ -78,7 +85,7 @@ export function describeAuthorShort(author: EnvelopeAuthor = {}): string {
     return `@${name}${id}`;
   }
   const email = plainText(author.owner_email);
-  return `${plainText(author.owner_name) || "unknown"}${email ? ` <${email}>` : ""} (a person)`;
+  return `${plainText(author.owner_name) || "unknown"}${email ? ` <${email}>` : ""} ${PERSON_MARKER}`;
 }
 
 /**

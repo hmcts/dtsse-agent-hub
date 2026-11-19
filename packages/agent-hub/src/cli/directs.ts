@@ -107,6 +107,9 @@ function takeTo(args: string[]): { to: string | null; rest: string[] } {
     } else {
       to = arg.slice("--to=".length);
     }
+    if (!to.trim()) {
+      throw new UsageError("--to needs a value");
+    }
   }
   const text = args.slice(i);
   if (isToFlag(text.at(-1)) || text.at(-2) === "--to") {
@@ -118,15 +121,16 @@ function takeTo(args: string[]): { to: string | null; rest: string[] } {
 const same = (text: string | null | undefined) => plainText(text).toLowerCase();
 
 /**
- * What a `--to` says, split the way `describeAuthorShort` writes an author, so a label copied from a note or an
- * error matches: `@name [agent 1a2b3c4d]`, `Name <email>`, `<email>`, or a bare name, email or id, each with any
- * trailing `(a person)` or `(one of your own agents)` dropped.
+ * What a `--to` says, split the way an author is written, so an author copied from a note, an error or a message's
+ * header matches: `@name [agent 1a2b3c4d]`, `agent @name (owned by …)`, `Name <email>`, `<email>`, or a bare name,
+ * email or id. Any trailing `(…)` is dropped, whatever its wording: `plainText` keeps parentheses out of every name.
  */
 function parseTo(to: string): { text: string; email: string | null; idPrefix: string | null } {
   let rest = to.trim();
-  while (/\((?:a person|one of your own agents)\)\s*$/i.test(rest)) {
-    rest = rest.replace(/\s*\((?:a person|one of your own agents)\)\s*$/i, "");
+  while (/\([^()]*\)\s*$/.test(rest)) {
+    rest = rest.replace(/\s*\([^()]*\)\s*$/, "");
   }
+  rest = rest.replace(/^agent\s+(?=@)/i, "");
   const email = /<([^<>\s]+)>\s*$/.exec(rest);
   if (email) {
     return { text: "", email: (email[1] as string).toLowerCase(), idPrefix: null };
@@ -144,8 +148,8 @@ const NO_MATCH: Match = { ok: false };
 const isPersonLike = (author: MessageAuthor) => author.type !== "agent" || !plainText(author.agent_name);
 
 /**
- * Whether `to` names the author. A person, or an agent with no name, which is shown as a person, by email only: two
- * people can share a name. An agent by its id, exact or as a prefix of at least `SHORT_ID_LENGTH` characters that
+ * Whether `to` names the author. A person, or an agent with no name, which is shown as a person, by email, since two
+ * people can share a name; by name only when they have no email to give. An agent by its id, exact or as a prefix of at least `SHORT_ID_LENGTH` characters that
  * none of the caller's other agents shares; or by its name (case-insensitive) only when it is one of the caller's own
  * agents and no other of theirs shares the name, since another owner's agent may carry the same name. A `why` is a
  * refusal that needs more than "not the author" to explain.
@@ -156,10 +160,16 @@ async function matchesAuthor(author: MessageAuthor, to: string, ownAgents: () =>
     if (wanted.email) {
       return wanted.email === same(author.owner_email) ? MATCH : NO_MATCH;
     }
-    return wanted.text && wanted.text === same(author.owner_name) ? { ok: false, why: "a person is matched by email, since names are shared" } : NO_MATCH;
+    if (!wanted.text || wanted.text !== same(author.owner_name)) {
+      return NO_MATCH;
+    }
+    return author.owner_email ? { ok: false, why: "a person is matched by email, since names are shared" } : MATCH;
   }
   const id = (author.agent_id ?? "").toLowerCase();
   const name = same(author.agent_name);
+  if (!wanted.text && wanted.idPrefix === null) {
+    return NO_MATCH;
+  }
   const byName = !!wanted.text && wanted.text === name;
   const prefix = wanted.idPrefix ?? (byName ? null : wanted.text);
   if (wanted.idPrefix !== null && wanted.text && !byName) {

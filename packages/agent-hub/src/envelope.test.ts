@@ -917,14 +917,14 @@ describe("leadingSkill", () => {
 });
 
 describe("describeAuthorShort", () => {
-  it("should give an agent its name and the start of its id, and a person their name and email", () => {
+  it("should give the name and the start of the id when the author is an agent, and the name and email when a person", () => {
     // Act & Assert
     expect(describeAuthorShort({ type: "agent", agent_id: "1a2b3c4d-5e6f", agent_name: "helper", owner_name: "Olive" })).toBe("@helper [agent 1a2b3c4d]");
     expect(describeAuthorShort({ type: "user", owner_name: "Pat Person", owner_email: "pat@example.com" })).toBe("Pat Person <pat@example.com> (a person)");
     expect(describeAuthorShort({ type: "user", owner_name: "Pat Person", owner_email: null })).toBe("Pat Person (a person)");
   });
 
-  it("should describe an agent with no usable name as the person behind it, as describeAuthor does", () => {
+  it("should describe the person behind an agent when it has no usable name, as describeAuthor does", () => {
     // Act & Assert
     expect(describeAuthorShort({ type: "agent", agent_id: "1a2b3c4d-5e6f", agent_name: "", owner_name: "Olive", owner_email: "olive@example.com" })).toBe(
       "Olive <olive@example.com> (a person)"
@@ -932,7 +932,7 @@ describe("describeAuthorShort", () => {
     expect(describeAuthorShort({ type: "agent", agent_id: "1a2b3c4d-5e6f", agent_name: "(#)", owner_name: "Olive" })).toBe("Olive (a person)");
   });
 
-  it("should strip the characters a name could forge a note's markers with", () => {
+  it("should strip the characters a name could forge a note's markers with when a name contains them", () => {
     // Act
     const text = describeAuthorShort({ type: "user", owner_name: "Pat #51 (a)\n[x]", owner_email: null });
 

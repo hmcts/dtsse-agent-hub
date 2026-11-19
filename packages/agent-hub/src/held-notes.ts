@@ -1,9 +1,8 @@
 // The stop worker's feed notes wait here for the user's next prompt, which the UserPromptContext hook
 // attaches them to. Pushing them through the inbox would start a turn of their own.
 import fs from "node:fs";
-import { boardAnswerCommand, CLI } from "./envelope.ts";
+import { AUTHORS_PREFIX, boardAnswerCommand, CLI } from "./envelope.ts";
 import { removeFile, statePath } from "./session.ts";
-import { AUTHORS_PREFIX } from "./stop-worker/summarise.ts";
 
 export const HELD_NOTES = "held-notes.jsonl";
 export const MAX_HELD_NOTES = 20;

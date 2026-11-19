@@ -1,7 +1,7 @@
 // What the summariser asks Haiku for, and what it will accept back. The topic taxonomy in the prompt is
 // cft-workspace's layout, the same one `agent.ts` reads paths against; the two are changed together.
 import { TOPIC_RE } from "../agent.ts";
-import { CLI, describeAuthorShort } from "../envelope.ts";
+import { AUTHORS_PREFIX, CLI, describeAuthorShort, OWN_AGENT_MARKER } from "../envelope.ts";
 import { MAX_POST_TOPICS } from "../limits.ts";
 import type { Message } from "../wire.ts";
 import type { CandidateTopics } from "./candidates.ts";
@@ -200,8 +200,6 @@ ${feedText || "(none)"}
 `;
 }
 
-export const OWN_AGENT_MARKER = "(one of your own agents)";
-
 /** How many cited posts a note names the authors of, and how long each label may be, which bound what a note gains. */
 export const MAX_NOTE_AUTHORS = 10;
 const MAX_AUTHOR_LABEL = 160;
@@ -220,20 +218,24 @@ export function citedIds(note: string): Set<string> {
   return new Set([...note.matchAll(new RegExp(MENTION, "giu"))].map((m) => m[1] as string));
 }
 
-export const AUTHORS_PREFIX = "Authors, from the posts themselves:";
+// The authors line the model may have written itself, in any case or punctuation, and everything after it: only the
+// line built from the posts may carry that heading.
+const FORGED_AUTHORS = /\s*authors\W+from\s+the\s+posts\s+themselves\b[\s\S]*$/i;
 
 /**
  * Appends who wrote each feed post the note cites, taken from the post and never from the model, so whatever the
  * model wrote about authorship is outranked by a line the session is told to trust. The note's own text is left as
- * written: rewriting prose around a mention cannot tell a forged attribution from an ordinary sentence.
+ * written, but for any authors line of the model's, which is cut: rewriting prose around a mention cannot tell a
+ * forged attribution from an ordinary sentence, and a forged authors line would pass as the trusted one.
  */
 export function attributeNote(note: string, messages: readonly Message[], ownAgentIds: ReadonlySet<string> | null): string {
+  const text = note.replace(FORGED_AUTHORS, "").trimEnd();
   const byId = new Map(messages.map((m) => [m.id, m]));
-  const authors = [...citedIds(note)]
+  const authors = [...citedIds(text)]
     .flatMap((id) => {
       const m = byId.get(id);
       return m ? [`#${id} ${authorLabel(m, ownAgentIds)}`] : [];
     })
     .slice(0, MAX_NOTE_AUTHORS);
-  return authors.length ? `${note.trimEnd()} ${AUTHORS_PREFIX} ${authors.join("; ")}.` : note;
+  return authors.length ? `${text} ${AUTHORS_PREFIX} ${authors.join("; ")}.` : text;
 }

@@ -28,7 +28,7 @@ import { parseFlags, readStdinText, UsageError } from "./cli/command.ts";
 import { clip, coverageSummaryLine, formatStamp, parseChapters } from "./cli/video.ts";
 import { runCli, USAGE } from "./cli.ts";
 import type { Env } from "./env.ts";
-import { describeAuthorShort } from "./envelope.ts";
+import { describeAuthor, describeAuthorShort } from "./envelope.ts";
 import { CLIENT_FEATURES } from "./features.ts";
 import { denyOutput, UNDELIVERED_REASON } from "./questions.ts";
 import { VIRTUAL_USAGE } from "./virtual/index.ts";
@@ -892,7 +892,7 @@ describe("the commands, in process against the mock hub", () => {
       expect(sends()).toHaveLength(0);
     });
 
-    it("should match an agent with no name by its owner's email, as its envelope shows it as a person", async () => {
+    it("should match an agent by its owner's email when it has no name, as its envelope shows it as a person", async () => {
       // Arrange
       const post = ownPost("to-be-nameless");
       Object.assign(hub.agents.get(post.author.agent_id as string) as object, { name: null });
@@ -906,7 +906,62 @@ describe("the commands, in process against the mock hub", () => {
       expect(sends()).toHaveLength(1);
     });
 
-    it("should send text that mentions --to anywhere but at its end", async () => {
+    it.each([
+      ["a person who wrote from the web UI", () => hub.addPost({ topics: ["zz-reply"], title: "t", bodyText: "x", user: me })],
+      ["one of the caller's own agents", () => ownPost("header-copy")]
+    ])("should send when --to is the author exactly as a message header names %s", async (_label, make) => {
+      // Arrange
+      const post = make();
+
+      // Act
+      const r = await cli(["reply", post.id, "--to", describeAuthor(post.author), "hi"]);
+
+      // Assert
+      expect(r.code).toBe(0);
+      expect(sends()).toHaveLength(1);
+    });
+
+    it("should send when --to is the name, or the note's label, of a person with no email", async () => {
+      // Arrange
+      const post = hub.addPost({ topics: ["zz-reply"], title: "t", bodyText: "x", user: { oid: "u-no-email", name: "No Email", email: null } });
+
+      // Act
+      const byName = await cli(["reply", post.id, "--to", "no EMAIL", "hi"]);
+      const byLabel = await cli(["reply", post.id, "--to", describeAuthorShort(post.author), "hi"]);
+
+      // Assert
+      expect(describeAuthorShort(post.author)).toBe("No Email (a person)");
+      expect([byName.code, byLabel.code]).toEqual([0, 0]);
+      expect(sends()).toHaveLength(2);
+    });
+
+    it("should name the actual author when --to is a person's label and the author is an agent", async () => {
+      // Arrange
+      const post = ownPost("not-a-person");
+
+      // Act
+      const r = await cli(["reply", post.id, "--to", "Me Tester <me@example.com>", "hi"]);
+
+      // Assert
+      expect(r.code).toBe(2);
+      expect(r.errors.join("\n")).toMatch(/was written by @not-a-person \[agent [0-9a-f]{8}\], not "Me Tester <me@example.com>"; nothing was sent/);
+      expect(sends()).toHaveLength(0);
+    });
+
+    it.each([["--to="], ["--to=  "]])("should refuse with exit 2 and send nothing when --to is given as %j with no value", async (flag) => {
+      // Arrange
+      const post = ownPost("empty-to");
+
+      // Act
+      const r = await cli(["reply", post.id, flag, "hi"]);
+
+      // Assert
+      expect(r.code).toBe(2);
+      expect(r.errors.join("\n")).toMatch(/--to needs a value/);
+      expect(sends()).toHaveLength(0);
+    });
+
+    it("should send the text as written when it mentions --to anywhere but at its end", async () => {
       // Arrange
       const post = ownPost("to-in-text");
 
@@ -930,7 +985,7 @@ describe("the commands, in process against the mock hub", () => {
       expect(sends()).toHaveLength(1);
     });
 
-    it("should accept --to before the id and before - for stdin, and refuse it after the message with exit 2", async () => {
+    it("should accept --to when it comes before the id or before - for stdin, and refuse it with exit 2 when it ends the message", async () => {
       // Arrange
       const post = ownPost("place-to");
 
@@ -1041,7 +1096,7 @@ describe("the commands, in process against the mock hub", () => {
       expect(sends()).toHaveLength(1);
     });
 
-    it("should refuse an agent's id given to a person's post, and a --to with no value", async () => {
+    it("should refuse when --to gives an agent's id for a person's post, or has no value", async () => {
       // Arrange
       const post = hub.addPost({ topics: ["zz-reply"], title: "t", bodyText: "x", user: me });
 

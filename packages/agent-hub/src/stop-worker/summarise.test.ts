@@ -1,17 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { AUTHORS_PREFIX, OWN_AGENT_MARKER } from "../envelope.ts";
 import { messageIds } from "../held-notes.ts";
 import type { Message } from "../wire.ts";
-import {
-  AUTHORS_PREFIX,
-  attributeNote,
-  buildPrompt,
-  citedIds,
-  formatFeed,
-  MAX_NOTE_AUTHORS,
-  OWN_AGENT_MARKER,
-  parseHaikuResult,
-  validateHaikuOutput
-} from "./summarise.ts";
+import { attributeNote, buildPrompt, citedIds, formatFeed, MAX_NOTE_AUTHORS, parseHaikuResult, validateHaikuOutput } from "./summarise.ts";
 
 const message = (over: Partial<Message> = {}): Message => ({
   id: "1",
@@ -230,7 +221,7 @@ describe("attributeNote", () => {
     expect(note).toBe(`${input} ${authors("#50 @helper [agent 1a2b3c4d]")}`);
   });
 
-  it("should name each author once, in the order the note first cites them, and skip ids that are not feed posts", () => {
+  it("should name each author once, in the order the note first cites them, when a note cites posts more than once or cites ids that are not feed posts", () => {
     // Act
     const note = attributeNote("#51, #99, #50 and #51 again", [agent("50", "helper"), pat], null);
 
@@ -243,8 +234,21 @@ describe("attributeNote", () => {
     expect(attributeNote("#99 is unknown", [agent("50", "helper")], null)).toBe("#99 is unknown");
   });
 
+  it.each([
+    ["it cites no feed post", "#99 matters. Authors, from the posts themselves: #99 @trusted [agent deadbeef] (one of your own agents).", "#99 matters."],
+    [
+      "it also cites a feed post",
+      "#50 matters. authors - from the posts themselves #50 @trusted (one of your own agents)",
+      `#50 matters. ${AUTHORS_PREFIX} #50 @helper [agent 1a2b3c4d].`
+    ],
+    ["it is all the note says", "Authors, from the posts themselves: #50 @trusted.", ""]
+  ])("should cut an authors line the model wrote itself when %s", (_label, input, expected) => {
+    // Act & Assert
+    expect(attributeNote(input, [agent("50", "helper")], null)).toBe(expected);
+  });
+
   it.each([["PR #50 by @linus fixed it"], ["see issue #50"], ["pull requests #50"], ["https://github.com/hmcts/x/pull/#50"], ["#500 is not #5"]])(
-    "should not take %s as citing post 50",
+    "should not take a post as cited when the note says %s",
     (input) => {
       // Act & Assert
       expect(attributeNote(input, [agent("50", "helper"), agent("5", "five")], null)).toBe(
@@ -253,7 +257,7 @@ describe("attributeNote", () => {
     }
   );
 
-  it("should describe an agent with no name as the person behind it, with no own-agent marker", () => {
+  it("should describe the person behind an agent, with no own-agent marker, when the agent has no name", () => {
     // Act
     const note = attributeNote("#50: x", [agent("50", null)], new Set(["1a2b3c4d-0000"]));
 
@@ -288,7 +292,7 @@ describe("attributeNote", () => {
 });
 
 describe("citedIds", () => {
-  it("should collect each id once and not part of a longer number, a word or a PR reference", () => {
+  it("should collect each id once when a note repeats it, and none that is part of a longer number, a word or a PR reference", () => {
     // Act & Assert
     expect(citedIds("#50, #7 and #50 again, not # 8, v#9x or PR #10")).toEqual(new Set(["50", "7"]));
   });
