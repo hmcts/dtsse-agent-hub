@@ -24,7 +24,7 @@ import {
   signInPrompt,
   stillNeededLine
 } from "@/assistant/connections";
-import { type ConnectionsAsk, chatGate, connectionsAsk } from "@/assistant/onboarding";
+import { type ConnectionsAsk, chatGate, connectionsAsk, stoppedLine } from "@/assistant/onboarding";
 import type { Theme } from "@/assistant/theme";
 import type { AssistantSummary } from "@/assistant/views";
 import { waitingCookie } from "@/assistant/waiting";
@@ -49,6 +49,8 @@ import type { CredentialKind } from "@/credentials/names";
 import type { CredentialStatus } from "@/credentials/store";
 import type { VirtualAgentStatus } from "@/virtual-agents/lifecycle";
 import type { LoginView } from "@/virtual-agents/logins";
+import type { ActionResult } from "@/web/action";
+import { ACTION_UNREACHABLE } from "@/web/action-fault";
 
 const INPUT =
   "min-w-0 flex-1 rounded-lg border border-asst-strong bg-asst-field px-2.5 py-1.5 font-plex-mono text-sm text-asst-text outline-hidden focus:border-asst-accent-line";
@@ -748,7 +750,13 @@ function ConnectionsBanner({ prompt, onShow, onHide }: { prompt: ConnectionsProm
  * made and the pod is asking for none, so they are not listed. The button leaves: an assistant that could not start
  * stays failed until a new pod starts reporting, so without one the screen would shut the person out of the hub.
  */
-export function WarmingUp({ assistant, unavailable, theme = "system", onDismiss }: ScreenProps & { onDismiss: () => void }) {
+export function WarmingUp({
+  assistant,
+  unavailable,
+  theme = "system",
+  onDismiss,
+  start
+}: ScreenProps & { onDismiss: () => void; start?: StartAssistantAction }) {
   const { failed } = assistant.readiness;
   const { message, slow } = useWarmupMessage(warmupPhase(assistant.status), !failed, Date.parse(assistant.statusChangedAt));
   return (
@@ -768,12 +776,82 @@ export function WarmingUp({ assistant, unavailable, theme = "system", onDismiss 
           )}
         </div>
       )}
-      <div className="flex justify-end">
-        <button type="button" onClick={onDismiss} className={failed ? FOOTER_PRIMARY : FOOTER_QUIET}>
+      <div className="flex flex-wrap items-center justify-end gap-3">
+        <button type="button" onClick={onDismiss} className={failed && start === undefined ? FOOTER_PRIMARY : FOOTER_QUIET}>
           {failed ? "Carry on without it" : "Carry on while it starts"}
         </button>
+        {/* A failure stays one until someone tries again, and before this the only way to was in Settings. */}
+        {failed && start !== undefined ? <StartButton start={start} label="Try again" className={FOOTER_PRIMARY} /> : null}
       </div>
     </ReadyShell>
+  );
+}
+
+/** `startAssistant`: starts a stopped assistant, or tries a failed one again. */
+export type StartAssistantAction = () => Promise<ActionResult>;
+
+/**
+ * Starts the assistant, saying so while it goes and why if it could not. The page follows the assistant's own events
+ * from there, so nothing here waits for it to come up.
+ */
+function StartButton({ start, label, className }: { start: StartAssistantAction; label: string; className: string }) {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const press = async () => {
+    setPending(true);
+    setError(null);
+    try {
+      const result = await start();
+      if (!result.ok) {
+        setError(result.error);
+      }
+    } catch {
+      setError(ACTION_UNREACHABLE);
+    } finally {
+      setPending(false);
+    }
+  };
+  return (
+    <>
+      <button type="button" disabled={pending} onClick={() => void press()} className={className}>
+        {pending ? "Starting…" : label}
+      </button>
+      {error === null ? null : (
+        <span role="alert" className="text-[13px] text-asst-error">
+          {error}
+        </span>
+      )}
+    </>
+  );
+}
+
+/**
+ * An assistant that is stopped, or that could not start, as a notice where the waiting one goes: why, and the one
+ * thing to do about it. A stopped one starts again on its own when the person sends, which it says, so the button is
+ * there for someone who wants it warm before they type.
+ */
+function PodNotice({ assistant, start, onHide }: { assistant: AssistantSummary; start: StartAssistantAction; onHide: () => void }) {
+  const failed = assistant.readiness.failed;
+  const said = failed ? "Your assistant could not start." : `${stoppedLine(assistant.stopReason)} It starts again when you send a message.`;
+  return (
+    <div className="fixed left-1/2 top-[68px] z-40 flex max-w-[calc(100%-2rem)] -translate-x-1/2 flex-wrap items-center gap-3 rounded-[20px] border border-asst-line bg-asst-raised py-2 pl-4 pr-2.5 font-plex text-asst-text shadow-lg">
+      <p role="status" className="min-w-0 text-pretty text-[13px] text-asst-body">
+        {said}
+      </p>
+      <StartButton
+        start={start}
+        label={failed ? "Try again" : "Start now"}
+        className="shrink-0 rounded-full px-2.5 py-1 text-[13px] font-medium text-asst-accent-soft hover:bg-asst-active disabled:opacity-60"
+      />
+      <button
+        type="button"
+        onClick={onHide}
+        aria-label="Hide this notice"
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-asst-muted hover:bg-asst-active hover:text-asst-text"
+      >
+        <span aria-hidden="true">✕</span>
+      </button>
+    </div>
   );
 }
 
@@ -891,8 +969,9 @@ function storedKinds(statuses: CredentialStatus[]): Set<CredentialKind> {
 export function OnboardingGate({
   dismissed = false,
   local = false,
+  start,
   ...props
-}: Omit<Parameters<typeof GettingReady>[0], "onDone" | "returning"> & { dismissed?: boolean; local?: boolean }) {
+}: Omit<Parameters<typeof GettingReady>[0], "onDone" | "returning"> & { dismissed?: boolean; local?: boolean; start?: StartAssistantAction }) {
   const { assistant } = props;
   const visit = useVisit();
   // One clock for the banner and for the screen it opens, started from the page's own and handed down rather than
@@ -902,7 +981,10 @@ export function OnboardingGate({
   const now = useSignInClock(props.now);
   const ask = connectionsAsk(assistant.onboarded, props.unavailable);
   const [needed] = useState(ask === "connect");
-  const [waiting] = useState(ask === "done" && assistant.status !== "running");
+  // A wait is for an assistant on its way up. A stopped one is not on its way anywhere until the person asks, so it
+  // gets a notice saying so rather than a screen watching a start that is not happening.
+  const [waiting] = useState(ask === "done" && assistant.status !== "running" && assistant.desired === "running");
+  const [podNoticeHidden, setPodNoticeHidden] = useState(false);
   const [done, setDone] = useState(false);
   const [asking, setAsking] = useState(false);
   // Without GitHub and Claude there is no chat to be had, so this one is a gate rather than a banner: no cookie, no
@@ -980,7 +1062,7 @@ export function OnboardingGate({
       return waitingForPerson(assistant.status) ? (
         <GettingReady {...props} now={now} returning onDone={dismiss} />
       ) : (
-        <WarmingUp assistant={assistant} unavailable={props.unavailable} theme={props.theme} onDismiss={dismiss} />
+        <WarmingUp assistant={assistant} unavailable={props.unavailable} theme={props.theme} onDismiss={dismiss} start={start} />
       );
     }
     if (signIn) {
@@ -997,6 +1079,12 @@ export function OnboardingGate({
     // assistant is holding a code for them, and it clears itself the moment they have used it.
     if (relayed !== null) {
       return <ConnectionsBanner prompt={relayed} onShow={() => setAsking(true)} />;
+    }
+    // Stopped, or failed after the screen for the wait has gone: said wherever the person is, whenever it is so, since
+    // nothing else tells them why their message would sit waiting. Hidden for the page if they choose.
+    const parked = assistant.desired === "stopped" || assistant.readiness.failed;
+    if (parked && ask === "done" && !local && start !== undefined && !podNoticeHidden) {
+      return <PodNotice assistant={assistant} start={start} onHide={() => setPodNoticeHidden(true)} />;
     }
     // Only for a wait this visit began on: someone who arrives to an assistant already up is not shown the end of a
     // wait they never saw, however recently they sent one away.

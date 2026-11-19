@@ -1,5 +1,5 @@
 import { saveCredential } from "@/app/_actions/credentials";
-import { pasteLoginCode, reconnectSignIn } from "@/app/_actions/virtual-agents";
+import { pasteLoginCode, reconnectSignIn, startAssistant } from "@/app/_actions/virtual-agents";
 import type { Theme } from "@/assistant/theme";
 import { waitingDismissed } from "@/assistant/waiting";
 import { OnboardingGate } from "@/components/assistant/GettingReady";
@@ -51,6 +51,7 @@ export function AssistantGate({
         dismissed={waitingDismissed(waiting, assistant.id, assistant.startedAt)}
         local={local}
         theme={theme}
+        start={startAssistant}
       />
     </>
   );

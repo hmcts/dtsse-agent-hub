@@ -150,6 +150,7 @@ function conversation(overrides: Partial<ConversationView> = {}): ConversationVi
     clientFeatures: null,
     sessionState: null,
     sessionDetail: null,
+    podFailed: false,
     documents: [],
     decks: [],
     docmosisTemplates: [],
@@ -3262,5 +3263,78 @@ describe("EmptyChat templates", () => {
     render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={[]} skills={[]} actions={emptyActions(vi.fn())} />);
 
     expect(screen.queryByRole("list", { name: "Your templates" })).toBeNull();
+  });
+});
+
+describe("ChatView on a pod that could not start", () => {
+  const WAITING = page({ messages: [message("1", { body: "are you there" })] });
+
+  it("should say the message has not been read yet and offer Try again, in place of the waking dots", async () => {
+    const startAssistant = vi.fn(async () => ({ ok: true as const }));
+    render(
+      <ChatView
+        jira={NO_JIRA}
+        viewerOid={VIEWER}
+        view={conversation({ agentStatus: "offline", podFailed: true, page: WAITING })}
+        templates={TEMPLATES}
+        actions={actions({ startAssistant })}
+      />
+    );
+
+    expect(screen.getByText("Your assistant could not start, so your message has not been read yet.")).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    });
+    expect(startAssistant).toHaveBeenCalledTimes(1);
+  });
+
+  it("should say why Try again did not work, refused or unreachable", async () => {
+    const view = conversation({ agentStatus: "offline", podFailed: true, page: WAITING });
+    const { unmount } = render(
+      <ChatView
+        jira={NO_JIRA}
+        viewerOid={VIEWER}
+        view={view}
+        templates={TEMPLATES}
+        actions={actions({ startAssistant: vi.fn(async () => ({ ok: false as const, error: "Not now." })) })}
+      />
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    });
+    expect(screen.getByRole("alert").textContent).toBe("Not now.");
+    unmount();
+
+    render(
+      <ChatView
+        jira={NO_JIRA}
+        viewerOid={VIEWER}
+        view={view}
+        templates={TEMPLATES}
+        actions={actions({
+          startAssistant: vi.fn(async () => {
+            throw new Error("offline");
+          })
+        })}
+      />
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    });
+    expect(screen.getByRole("alert").textContent).toBe(ACTION_UNREACHABLE);
+  });
+
+  it("should offer no Try again where the page gives no way to start it", () => {
+    render(
+      <ChatView
+        jira={NO_JIRA}
+        viewerOid={VIEWER}
+        view={conversation({ agentStatus: "offline", podFailed: true, page: WAITING })}
+        templates={TEMPLATES}
+        actions={actions()}
+      />
+    );
+
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
   });
 });

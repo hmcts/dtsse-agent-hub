@@ -10,6 +10,13 @@ import type { StopReason } from "./stop.ts";
 /** A pod that has said nothing for this long since it was scheduled is not going to. */
 export const PROVISIONING_TIMEOUT_MS = 15 * 60_000;
 
+/**
+ * An assistant asked for that no orchestrator has picked up in this long is not going to be: the orchestrator is down,
+ * or held off by another cluster's lease. A claim takes seconds, so this is generous; it is the same as the
+ * provisioning deadline, so neither half of a start can wait longer than the other.
+ */
+export const REQUESTED_TIMEOUT_MS = 15 * 60_000;
+
 /** An orchestrator that has not reported on a claim for this long has died, so another may take it. */
 export const CLAIM_TIMEOUT_MS = 2 * 60_000;
 
@@ -172,8 +179,9 @@ export type InactivityRule = (typeof INACTIVITY_RULES)[number];
  * Telling them apart from the restart of a pod whose owner has just fixed what was wrong needs a count of restarts,
  * which the orchestrator does not report.
  *
- * The rest have no deadline: `requested` and `stopped` hold no pod of this generation to reclaim, `provisioning`
- * answers to `PROVISIONING_TIMEOUT_MS` instead, and `stopping` is already on its way down.
+ * The rest have no deadline here: `requested` and `stopped` hold no pod of this generation to reclaim, `provisioning`
+ * and `requested` answer to `PROVISIONING_TIMEOUT_MS` and `REQUESTED_TIMEOUT_MS` instead, and `stopping` is
+ * already on its way down.
  */
 export function inactivityRule(status: string): InactivityRule | undefined {
   if (awaitsOwner(status)) {

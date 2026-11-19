@@ -1,6 +1,7 @@
 import type { CredentialKind } from "../credentials/names.ts";
 import type { ModelRoute } from "../viewer/identity.ts";
-import type { VirtualAgentStatus } from "../virtual-agents/lifecycle.ts";
+import type { VirtualAgentDesired, VirtualAgentStatus } from "../virtual-agents/lifecycle.ts";
+import type { StopReason } from "../virtual-agents/stop.ts";
 
 /**
  * How far the person's assistant has got, as the getting-ready screen shows it: a bar, a line of plain words, and
@@ -24,13 +25,23 @@ const STEPS: Readonly<Record<VirtualAgentStatus, { percent: number; step: string
   awaiting_login: { percent: 55, step: "Waiting for you to connect your accounts…" },
   cloning: { percent: 80, step: "Preparing your workspace…" },
   running: { percent: 100, step: "Your assistant is ready" },
+  // Asked to run again and not yet picked up: on its way back. One the person has not asked for is `PARKED`'s.
   stopping: { percent: 5, step: "Starting your assistant again…" },
   stopped: { percent: 5, step: "Starting your assistant again…" },
   failed: { percent: 0, step: "Your assistant could not start" }
 };
 
-export function readiness(status: VirtualAgentStatus): Readiness {
-  const step = STEPS[status];
+/**
+ * A stopped assistant nobody has asked for again: stopped means stopped, and nothing starts it until the person sends,
+ * focuses the box or presses Start, so it is not said to be starting.
+ */
+const PARKED: Readonly<Partial<Record<VirtualAgentStatus, { percent: number; step: string }>>> = {
+  stopping: { percent: 5, step: "Your assistant is stopping" },
+  stopped: { percent: 5, step: "Your assistant is stopped" }
+};
+
+export function readiness(status: VirtualAgentStatus, desired: VirtualAgentDesired = "running"): Readiness {
+  const step = (desired === "stopped" ? PARKED[status] : undefined) ?? STEPS[status];
   return { ...step, ready: status === "running", failed: status === "failed" };
 }
 
@@ -99,4 +110,25 @@ export function connectionsAsk(onboarded: boolean, unavailable: string | null): 
     return "unknown";
   }
   return onboarded ? "done" : "connect";
+}
+
+/**
+ * Why the person's assistant is stopped, in their words, for the notice that offers to start it. `null` when the hub
+ * did not record why, which is said plainly rather than guessed at.
+ */
+export function stoppedLine(reason: StopReason | null): string {
+  switch (reason) {
+    case "evening":
+      return "Your assistant stopped for the evening.";
+    case "idle":
+      return "Your assistant stopped after a while with nothing to do.";
+    case "user":
+      return "You stopped your assistant.";
+    case "awaiting_owner":
+      return "Your assistant stopped while it was waiting for you to sign in.";
+    case "failed":
+      return "Your assistant stopped after it could not start.";
+    default:
+      return "Your assistant is stopped.";
+  }
 }

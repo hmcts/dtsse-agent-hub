@@ -28,6 +28,26 @@ export async function announce(db: Database, virtualAgentId: string, ownerOid: s
  * The assistant's conversations lose their session state and have their current agents marked offline: no session
  * outlives the pod, and a `live` left behind would keep a message from asking for the wake that starts one.
  */
+/**
+ * What a stopped pod leaves on its conversations: the sessions it said they had, and wakes asked of it, none of which
+ * the pod is there to answer any more. Left, a chat on a stopped pod says it is waiting for a free assistant, and a
+ * focus of its box finds a wake already asked for and starts nothing. Their agents are marked offline with them.
+ */
+export async function forgetSessions(db: Database, virtualAgentIds: readonly string[]): Promise<void> {
+  if (virtualAgentIds.length === 0) {
+    return;
+  }
+  const conversations = await db.$queryRaw<{ id: string }[]>`
+    UPDATE assistant_conversation SET session_state = NULL, session_detail = NULL, wake_requested_at = NULL
+     WHERE virtual_agent_id = ANY(${[...virtualAgentIds]}::uuid[])
+    RETURNING id::text AS id
+  `;
+  await markConversationAgentsOffline(
+    db,
+    conversations.map((row) => row.id)
+  );
+}
+
 export async function stopVirtualAgents(db: Database, ids: readonly string[], reason: StopReason, now: Date): Promise<{ id: string; ownerOid: string }[]> {
   if (ids.length === 0) {
     return [];
@@ -44,14 +64,9 @@ export async function stopVirtualAgents(db: Database, ids: readonly string[], re
      WHERE id = ANY(${[...ids]}::uuid[]) AND desired = 'running'
     RETURNING id::text AS id, owner_oid
   `;
-  const conversations = await db.$queryRaw<{ id: string }[]>`
-    UPDATE assistant_conversation SET session_state = NULL, session_detail = NULL
-     WHERE virtual_agent_id = ANY(${stopped.map((row) => row.id)}::uuid[])
-    RETURNING id::text AS id
-  `;
-  await markConversationAgentsOffline(
+  await forgetSessions(
     db,
-    conversations.map((row) => row.id)
+    stopped.map((row) => row.id)
   );
   for (const row of stopped) {
     await announce(db, row.id, row.owner_oid);
