@@ -1,0 +1,61 @@
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+import { sampleDmn } from "./__fixtures__/dmn.ts";
+
+const cli = fileURLToPath(new URL("./cli.ts", import.meta.url));
+const run = (...args: string[]) =>
+  spawnSync(process.execPath, ["--import", "tsx", cli, ...args], { encoding: "utf8", cwd: fileURLToPath(new URL("..", import.meta.url)) });
+
+function workspace() {
+  const dir = mkdtempSync(join(tmpdir(), "wa-spec-"));
+  const input = join(dir, "dmn");
+  mkdirSync(input);
+  writeFileSync(join(input, "wa-task-completion-demo-ct_a.dmn"), sampleDmn("ct_a"));
+  writeFileSync(join(input, "wa-task-completion-demo-ct_b.dmn"), sampleDmn("ct_b", { extraRule: true }));
+  return { dir, input };
+}
+
+describe("cli", () => {
+  it("should import, generate and find no difference when the DMNs round-trip", () => {
+    const { dir, input } = workspace();
+    const imported = run("import", input, "-o", join(dir, "spec.yaml"), "--report", join(dir, "report.md"), "--jurisdiction", "DEMO");
+    expect(imported.status).toBe(0);
+    expect(readFileSync(join(dir, "spec.yaml"), "utf8")).toContain("jurisdiction: DEMO");
+    expect(readFileSync(join(dir, "report.md"), "utf8")).toContain("# Import coverage");
+    expect(run("generate", join(dir, "spec.yaml"), "-o", join(dir, "out")).status).toBe(0);
+    const diff = run("diff", input, join(dir, "out"));
+    expect(diff.status).toBe(0);
+    expect(diff.stdout).toContain("no differences");
+  });
+
+  it("should exit 1 and list the difference when a generated file is changed", () => {
+    const { dir, input } = workspace();
+    run("import", input, "-o", join(dir, "spec.yaml"));
+    run("generate", join(dir, "spec.yaml"), "-o", join(dir, "out"));
+    const changed = join(dir, "out", "wa-task-completion-demo-ct_a.dmn");
+    writeFileSync(changed, readFileSync(changed, "utf8").replace('"Auto"', '"Manual"'));
+    const diff = run("diff", join(input, "wa-task-completion-demo-ct_a.dmn"), changed);
+    expect(diff.status).toBe(1);
+    expect(diff.stdout).toContain("only in second");
+  });
+
+  it("should show the rows for a task when asked", () => {
+    const { dir, input } = workspace();
+    run("import", input, "-o", join(dir, "spec.yaml"));
+    const shown = run("show", join(dir, "spec.yaml"), "Review");
+    expect(shown.status).toBe(0);
+    expect(shown.stdout).toContain("completion");
+  });
+
+  it("should print usage and exit 2 when the command is unknown or arguments are missing", () => {
+    expect(run("bogus").status).toBe(2);
+    const missing = run("generate");
+    expect(missing.status).toBe(2);
+    expect(missing.stderr).toContain("wa-spec generate");
+    expect(execFileSync(process.execPath, ["--import", "tsx", cli, "help"], { encoding: "utf8" })).toContain("wa-spec import");
+  });
+});

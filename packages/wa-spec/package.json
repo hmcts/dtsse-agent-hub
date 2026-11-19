@@ -1,0 +1,27 @@
+{
+  "name": "@hmcts-cft/wa-spec",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The Work Allocation configuration spec: one versioned description of a service's tasks, from which the Camunda task-configuration DMNs are generated, and the importer and diff that prove it against a real service.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "bin": "bin/wa-spec",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "fast-xml-parser": "5.12.0",
+    "yaml": "2.9.1",
+    "zod": "4.6.7"
+  },
+  "scripts": {
+    "typecheck": "yarn run -T tsc -p tsconfig.json",
+    "test": "yarn run -T vitest run",
+    "test:watch": "yarn run -T vitest watch",
+    "test:coverage": "yarn run -T vitest run --coverage"
+  }
+}
