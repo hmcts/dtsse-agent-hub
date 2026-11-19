@@ -15,6 +15,11 @@ export type StartChatAction = (input: { product: unknown; body: unknown; title?:
 type Workflow = { href: string; label: string; hint: string };
 
 const WELSH: Workflow = { href: "/assistant/welsh", label: "Welsh translations", hint: "Search, scan, send and apply a service's Welsh" };
+const WA_BUILDER: Workflow = {
+  href: "/assistant/wa-builder",
+  label: "Work Allocation builder",
+  hint: "Read how a service's Work Allocation tasks are configured"
+};
 const NEW_FEEDBACK: Workflow = { href: "/assistant/feedback/new", label: "New feedback project", hint: "Share a prototype for comments and recorded feedback" };
 
 /**
@@ -44,7 +49,7 @@ export function WorkflowsMenu({
   // Which start the menu is waiting on. Closing it moves this on, so a start that answers after the person dismissed
   // the menu neither shows an error in a menu they closed nor takes them to a chat they have moved away from.
   const attempt = useRef(0);
-  const workflows = [...(welsh ? [WELSH] : []), ...(feedback ? [NEW_FEEDBACK] : [])];
+  const workflows = [...(welsh ? [WELSH] : []), WA_BUILDER, ...(feedback ? [NEW_FEEDBACK] : [])];
 
   const close = useCallback(() => {
     if (ref.current?.contains(document.activeElement)) {

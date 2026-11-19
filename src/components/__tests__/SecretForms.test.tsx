@@ -150,8 +150,8 @@ describe("a form carrying a credential", () => {
   });
 });
 
-/** The topic searches, whose one field is the search itself and belongs in a shareable URL. */
-const GET_FORMS = new Set(["src/app/hub/topics/page.tsx", "src/components/Sidebar.tsx"]);
+/** The topic searches and the task board's filter, whose fields are a query that belongs in a shareable URL. */
+const GET_FORMS = new Set(["src/app/hub/topics/page.tsx", "src/components/Sidebar.tsx", "src/components/assistant/WaBuilderTaskBoard.tsx"]);
 
 function sources(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
