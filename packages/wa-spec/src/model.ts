@@ -290,7 +290,7 @@ export function permissionSpecs(task: Task): PermissionSpec[] {
 }
 
 /** A category value may list several, comma separated, as the WA task templates do. */
-const categoryParts = (category: string): string[] =>
+export const categoryParts = (category: string): string[] =>
   category
     .split(",")
     .map((part) => part.trim())

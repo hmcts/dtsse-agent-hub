@@ -24,7 +24,7 @@ rows:
     - ExpiredBfAction/create
     - ET3Processing/create#6d9158
     - CompleteInitialConsideration/create#6e2918
-    - ET3Processing/create#92bd0e
+    - ET3Processing/create#6d3fde
     - ReviewRule21Referral/create
     - CompleteInitialConsideration/create#1eb718
     - SendEt3Notification/create
@@ -346,7 +346,7 @@ fingerprints:
     IssueJudgment/create#a68e8d: et_englandwales,et_scotland;w.eventId=8559;w.isJudgmentOrOrder=55c5;r.taskId=268a;r.name=7e75;r.processCategories=dcb2
     ET3Processing/create#6d9158: et_englandwales,et_scotland;w.eventId=c8bd;w.postEventState=8cdc;r.taskId=9ec2;r.name=c07a;r.processCategories=4f40
     CompleteInitialConsideration/create#6e2918: et_englandwales,et_scotland;w.eventId=0783;w.isECCReplyReceived=55c5;r.taskId=fe96;r.name=88d1;r.processCategories=4f40
-    ET3Processing/create#92bd0e: et_englandwales,et_scotland;w.eventId=0783;w.et3FormReceived=55c5;r.taskId=9ec2;r.name=c07a;r.processCategories=4f40
+    ET3Processing/create#6d3fde: et_englandwales,et_scotland;w.eventId=0783;w.eT3FormReceived=55c5;r.taskId=9ec2;r.name=c07a;r.processCategories=4f40
     CompleteInitialConsideration/create#1eb718: et_englandwales,et_scotland;w.eventId=53f5;w.postEventState=8cdc;w.isThereAnEt3Response=55c5;w.isECC=fbf6;r.taskId=fe96;r.name=88d1;r.processCategories=4f40
     IssueInitialConsiderationDirections/create#abda8c: et_englandwales,et_scotland;w.eventId=49bf;w.postEventState=8cdc;r.taskId=26a8;r.name=f0d6;r.processCategories=dcb2
     IssueInitialConsiderationDirections/create#ea4f64: et_englandwales,et_scotland;w.eventId=e04c;w.postEventState=8cdc;r.taskId=26a8;r.name=f0d6;r.processCategories=dcb2
@@ -415,5 +415,16 @@ fingerprints:
     "!/Cancel-disposeCase#41dfda": et_englandwales,et_scotland;w.event=bb74;r.action=ef13;r.processCategories=7194
     "!/Cancel-disposeCase#21b443": et_englandwales,et_scotland;w.event=bb74;r.action=ef13;r.processCategories=434c
     "!/Cancel-disposeCase#ac3722": et_englandwales,et_scotland;w.event=bb74;r.action=ef13;r.processCategories=21bc
+    "!/Cancel-disposeCase-2": et_englandwales,et_scotland;w.event=632d;r.action=ef13;r.processCategories=6364
+    "!/Reconfigure-addAmendHearing": et_englandwales,et_scotland;w.event=6daa;r.action=88a7
+    "!/Reconfigure-addAmendJurisdiction": et_englandwales,et_scotland;w.event=8a1c;r.action=88a7
+    "!/Reconfigure-caseTransferDifferentCountry": et_englandwales,et_scotland;w.event=97e5;r.action=88a7
+    "!/Reconfigure-caseTransferSameCountry": et_englandwales;w.event=4ce6;r.action=88a7
+    "!/Reconfigure-amendCaseDetails": et_scotland;w.event=39be;r.action=88a7
+    "!/Reconfigure-RECONFIGURE_WA_TASKS": et_englandwales,et_scotland;w.event=6ed1;r.action=88a7
+    "!/Reconfigure-assignCase": et_englandwales,et_scotland;w.event=c44c;r.action=88a7
+    "!/Cancel-closeAdminReviewSupportTask": et_englandwales,et_scotland;w.event=ebc9;r.action=ef13;r.processCategories=c9e9
+    "!/Cancel-closeLOReviewSupportTask": et_englandwales,et_scotland;w.event=7bc1;r.action=ef13;r.processCategories=e835
+    "!/Cancel-closeJudgeReviewSupportTask": et_englandwales,et_scotland;w.event=a170;r.action=ef13;r.processCategories=cc3a
     "!/Cancel-close#15ef53": et_englandwales_multiple,et_scotland_multiple;w.event=09fe;r.action=ef13;r.processCategories=d1c5
     "!/Cancel-close#7fbe94": et_englandwales_multiple,et_scotland_multiple;w.event=09fe;r.action=ef13;r.processCategories=4f40

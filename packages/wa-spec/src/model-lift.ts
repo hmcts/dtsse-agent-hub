@@ -2,6 +2,7 @@ import { byCodePoint, majority } from "./merge.ts";
 import {
   ADDITIONAL_PREFIX,
   type Cancellation,
+  categoryParts,
   DUE_ATTRIBUTES,
   encodeCell,
   type Grant,
@@ -34,7 +35,7 @@ import {
   withCanonicalEvent
 } from "./model-compile.ts";
 import { type Cell, type Decision, type Expr, KINDS, type Kind, type Row, type Spec } from "./schema.ts";
-import { diffSpecs } from "./spec-diff.ts";
+import { compareSpecs } from "./spec-diff.ts";
 
 export interface KindCount {
   rows: number;
@@ -53,6 +54,8 @@ export interface LiftReport {
   defaultRows: number;
   /** Differences between the spec and what the lifted model compiles back to; empty when the lift is lossless. */
   differences: string[];
+  /** How many differences there are in all; `differences` holds the first few. */
+  totalDifferences: number;
 }
 
 export interface LiftResult {
@@ -412,6 +415,30 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
 
   // A trigger with no name would take the task type's name when compiled, so such rows stay as rows.
   const typed = new Set(classified["task-types"].flatMap((e) => (typeof e.result === "string" ? [] : e.result.items.map((i) => i.task))));
+  // A cancellation rule for a category no task creates (its tasks were deleted) would fail the model's own check, so its row stays a row.
+  const created = new Set<string>();
+  let computedCategory = false;
+  for (const entry of classified.initiation) {
+    for (const item of typeof entry.result === "string" ? [] : entry.result.items) {
+      const category = item.content.returns.processCategories;
+      if (typeof category === "string") {
+        for (const part of categoryParts(category)) {
+          created.add(part);
+        }
+      } else if (category !== undefined) {
+        computedCategory = true;
+      }
+    }
+  }
+  const staleCategory = (result: Classified): string | undefined => {
+    const category = result.items[0]?.content.returns.processCategories;
+    const unknown =
+      !computedCategory &&
+      classified.initiation.every((e) => typeof e.result !== "string") &&
+      typeof category === "string" &&
+      categoryParts(category).find((part) => part !== "*" && !created.has(part));
+    return unknown ? `no task is created with the category ${unknown}` : undefined;
+  };
   for (const kind of KINDS) {
     for (const entry of classified[kind]) {
       const result = entry.result;
@@ -420,7 +447,8 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
         kind === "initiation" && typeof result !== "string" && result.items.some((i) => !("name" in i.content.returns) && typed.has(i.task))
           ? "it creates a task with no name, but the task type has one"
           : undefined;
-      const failure = typeof result === "string" ? result : kind === "permissions" ? (permissionsStay ?? twice) : unnamed;
+      const failure =
+        typeof result === "string" ? result : kind === "permissions" ? (permissionsStay ?? twice) : kind === "cancellation" ? staleCategory(result) : unnamed;
       if (typeof result === "string" || failure !== undefined) {
         residue[kind].push(entry.row);
         entry.residueIndex = residue[kind].length;
@@ -872,7 +900,7 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
         used.set(atom, [...(used.get(atom) ?? []), ...item.cases]);
         tokens.push(atom.ref);
         matched.push(atom);
-        if (atom.ref.includes("#")) {
+        if (atom.ref.includes("#") || kind === "cancellation") {
           remember(kind, atom.ref, atom.fingerprint);
         }
         differs ||= !sameSet(atom.cases, result.cases);
@@ -891,11 +919,11 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
   const counts = Object.fromEntries(
     KINDS.map((kind) => [kind, { rows: classified[kind].length, lifted: classified[kind].length - residue[kind].length, residue: residue[kind].length }])
   ) as Record<Kind, KindCount>;
-  let differences: string[];
+  let found = { differences: [] as string[], total: 0 };
   try {
-    differences = unmatched ? [unmatched] : diffSpecs(spec, compileModel(model, ordering, atoms));
+    found = unmatched ? { differences: [unmatched], total: 1 } : compareSpecs(spec, compileModel(model, ordering, atoms), { strict: true });
   } catch (error) {
-    differences = [(error as Error).message];
+    found = { differences: [(error as Error).message], total: 1 };
   }
   return {
     model,
@@ -907,7 +935,8 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
       profiles: Object.keys(profiles).length,
       roles: Object.keys(roles).length,
       defaultRows: (defaults.configuration?.length ?? 0) + Object.keys(defaults.permissions ?? {}).length,
-      differences
+      differences: found.differences,
+      totalDifferences: found.total
     }
   };
 }

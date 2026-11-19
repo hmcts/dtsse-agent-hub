@@ -116,7 +116,7 @@ function main(argv: string[]): number {
     const residue = Object.values(report.counts).reduce((n, c) => n + c.residue, 0);
     const rows = Object.values(report.counts).reduce((n, c) => n + c.rows, 0);
     process.stdout.write(
-      `lifted ${rows - residue} of ${rows} rows into ${report.tasks} tasks and ${report.profiles} profiles; ${residue} rows stay in tables; ${report.differences.length === 0 ? "compiles back equal" : `${report.differences.length} differences on compiling back`}\n`
+      `lifted ${rows - residue} of ${rows} rows into ${report.tasks} tasks and ${report.profiles} profiles; ${residue} rows stay in tables; ${report.differences.length === 0 ? "compiles back equal" : `${report.totalDifferences} differences on compiling back`}\n`
     );
     return report.differences.length === 0 ? 0 : 1;
   }

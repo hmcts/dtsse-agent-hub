@@ -868,3 +868,46 @@ describe("round eight", () => {
     expect(() => loadSpecFile(join(dir, "n.yaml"))).toThrow(/bad\.order\.yaml is not valid/);
   });
 });
+
+describe("round nine", () => {
+  it("should keep a cancellation row in tables when no task is created with its category", () => {
+    const spec = compileModel(parseModel(BASE));
+    const row = spec.decisions.cancellation?.rows[0];
+    if (row?.returns) {
+      row.returns.processCategories = "Deleted";
+    }
+    const lifted = liftSpec(spec);
+    expect(lifted.report.differences).toEqual([]);
+    expect(lifted.report.residue).toContainEqual({ kind: "cancellation", row: 1, reason: "no task is created with the category Deleted" });
+    expect(lifted.model.tables?.cancellation?.rows).toHaveLength(1);
+    expect(() => parseModel(stringifyModel(lifted.model))).not.toThrow();
+  });
+
+  it("should keep a renamed cancellation rule's rows in place when its id is changed", () => {
+    const spec = compileModel(
+      parseModel(`
+kind: wa-model
+version: 1
+service: {slug: demo}
+caseTypes: [{id: ct_a}]
+tasks: []
+cancellations:
+  - {events: a, action: Cancel}
+  - {events: b, action: Warn}
+`)
+    );
+    const lifted = liftSpec(spec);
+    const model = parseModel(stringifyModel(lifted.model));
+    const rename = (index: number, change: object) =>
+      ({ ...model, cancellations: (model.cancellations ?? []).map((r, i) => (i === index ? { ...r, ...change } : r)) }) as Model;
+    const actions = (m: Model) => (compileModel(m, lifted.ordering).decisions.cancellation?.rows ?? []).map((r) => r.returns?.action);
+    expect(actions(rename(0, { id: "renamed" }))).toEqual(["Cancel", "Warn"]);
+    expect(actions(rename(0, { id: undefined }))).toEqual(["Cancel", "Warn"]);
+    expect(actions(rename(0, { id: undefined, action: "Reconfigure" }))).toEqual(["Reconfigure", "Warn"]);
+  });
+
+  it("should count every difference when lift reports more than the shown limit", () => {
+    const lifted = liftSpec(compileModel(parseModel(BASE)));
+    expect(lifted.report.totalDifferences).toBe(0);
+  });
+});
