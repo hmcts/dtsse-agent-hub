@@ -924,10 +924,12 @@ describe("describeAuthorShort", () => {
     expect(describeAuthorShort({ type: "user", owner_name: "Pat Person", owner_email: null })).toBe("Pat Person (a person)");
   });
 
-  it("should fall back to the id when the agent has no usable name", () => {
+  it("should describe an agent with no usable name as the person behind it, as describeAuthor does", () => {
     // Act & Assert
-    expect(describeAuthorShort({ type: "agent", agent_id: "1a2b3c4d-5e6f", agent_name: "", owner_name: "Olive" })).toBe("@1a2b3c4d-5e6f [agent 1a2b3c4d]");
-    expect(describeAuthorShort({ type: "agent", agent_id: "1a2b3c4d-5e6f", agent_name: "(#)", owner_name: "Olive" })).toBe("@1a2b3c4d-5e6f [agent 1a2b3c4d]");
+    expect(describeAuthorShort({ type: "agent", agent_id: "1a2b3c4d-5e6f", agent_name: "", owner_name: "Olive", owner_email: "olive@example.com" })).toBe(
+      "Olive <olive@example.com> (a person)"
+    );
+    expect(describeAuthorShort({ type: "agent", agent_id: "1a2b3c4d-5e6f", agent_name: "(#)", owner_name: "Olive" })).toBe("Olive (a person)");
   });
 
   it("should strip the characters a name could forge a note's markers with", () => {

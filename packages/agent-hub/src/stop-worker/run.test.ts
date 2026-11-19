@@ -264,7 +264,11 @@ describe("runStopWorker", () => {
     // Assert
     expect(callsOf(api, "post")[0]?.[1]).toEqual({ topics: ["pcs-api"], title: "Renamed cases table", body: "V030 renames cases to claim." });
     expect(heldNotes()).toEqual([
-      { at: new Date(100 * MIN).toISOString(), text: "#50 from @bob [agent agent-9] touches the same table.", message_ids: ["50"] }
+      {
+        at: new Date(100 * MIN).toISOString(),
+        text: "#50 touches the same table. Authors, from the posts themselves: #50 @bob [agent agent-9].",
+        message_ids: ["50"]
+      }
     ]);
     expect(logText()).toMatch(/stop-worker: held note for next prompt/);
     expect(prompts[0]).toMatch(/Renamed cases to claim/);
@@ -293,7 +297,7 @@ describe("runStopWorker", () => {
 
     // Assert
     expect(heldNotes()[0]?.text).toBe(
-      "#50 from @bob [agent agent-9] (one of your own agents): bears on this. #51 from Pat Person <pat@example.com> (a person): asks about it. #99 is unknown."
+      "#50 from @someone-else: bears on this. #51: asks about it. #99 is unknown. Authors, from the posts themselves: #50 @bob [agent agent-9] (one of your own agents); #51 Pat Person <pat@example.com> (a person)."
     );
   });
 
@@ -314,7 +318,7 @@ describe("runStopWorker", () => {
 
     // Assert
     expect(callsOf(api, "agents")).toEqual([]);
-    expect(heldNotes()[0]?.text).toBe("#51 from Pat Person (a person): asks about it.");
+    expect(heldNotes()[0]?.text).toBe("#51: asks about it. Authors, from the posts themselves: #51 Pat Person (a person).");
   });
 
   it("should name the author without saying whose it is when the hub cannot list the session's agents", async () => {
@@ -335,7 +339,7 @@ describe("runStopWorker", () => {
     });
 
     // Assert
-    expect(heldNotes()[0]?.text).toBe("#50 from @bob [agent agent-9]: same table.");
+    expect(heldNotes()[0]?.text).toBe("#50: same table. Authors, from the posts themselves: #50 @bob [agent agent-9].");
   });
 
   it("should not hold another note or publish when a pass falls inside the rate-limit window", async () => {
@@ -433,6 +437,24 @@ describe("runStopWorker", () => {
     expect(heldNotes()).toEqual([]);
   });
 
+  it("should drop a note when the author label it gains is secret-shaped", async () => {
+    // Arrange
+    const leaky = message({ id: "52", author: { type: "user", agent_id: null, agent_name: null, owner_name: fakeSecrets.jwt, owner_email: null } });
+    const api = fakeApi([leaky]);
+
+    // Act
+    await runStopWorker({
+      sid: SID,
+      transcriptPath: transcript,
+      api,
+      haiku: haikuReturning({ publish: null, notify: "#52: asks about it." }),
+      now: () => 100 * MIN,
+      config: cfg
+    });
+
+    // Assert
+    expect(heldNotes()).toEqual([]);
+  });
   it("should advance on invalid Haiku output but advance nothing when the call itself fails", async () => {
     // Arrange
     const api = fakeApi([feedItem]);

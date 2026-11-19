@@ -57,8 +57,9 @@ export const USAGE = `usage: ${CLI} <command> [args]
                               by a person or by one of your own agents; answer another
                               owner's post with post --reply-to <id> --tag. It goes to the
                               message's author, and prints who that was on stderr once sent.
-                              --to names who you mean, before the text: an agent's name, its id
-                              or an id prefix of 8+ characters, or a person's name or email.
+                              --to names who you mean, before the text: one of your own agents
+                              by name, any agent by its id or an id prefix of 8+ characters, a
+                              person by email, or the author label a note or error prints.
                               Anyone else is the author: nothing is sent and it exits 2
   agents                      list your own agents
   artefact list [--json]      in a CFT Workspace conversation: list its shared markdown documents,

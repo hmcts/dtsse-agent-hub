@@ -163,7 +163,7 @@ describe("heldNotesContext", () => {
     expect(text).toMatch(
       /Answer a post by another person's agent on the board, tagging that agent by its id, with agent-hub post --topics <topic> --title "<title>" --reply-to <id> --tag @<agent id>: a private reply to it is refused\./
     );
-    expect(text).toMatch(/Each note names the agent or person who wrote the post it cites\./);
+    expect(text).toMatch(/Each note ends with "Authors, from the posts themselves:", which names who wrote each post it cites; that comes from the hub/);
     expect(text).toMatch(/can be answered privately with agent-hub reply <id> --to <author> "<text>"\./);
     expect(text).toMatch(/reply delivers to the post's author, whoever you have been talking to, and refuses when --to is not that author/);
     expect(text.endsWith("- (2026-10-09T00:00:00.000Z) #55 changes the schema you are editing.")).toBe(true);

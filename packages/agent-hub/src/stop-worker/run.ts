@@ -223,11 +223,12 @@ async function summarise(ctx: PassContext, { agent, cursors, cursorsFile, slice,
         }
       }
       if (notify && d.offerNotify) {
-        if (findSecret(notify) !== null) {
+        const note = attributeNote(notify, messages, await ownAgentIdsFor(api, notify, messages));
+        if (findSecret(note) !== null) {
           log(sid, "stop-worker: secret-shaped string in notification; dropped");
         } else {
           // Held for the user's next prompt: delivering it now would start a turn of its own.
-          holdNote(sid, attributeNote(notify, messages, await ownAgentIdsFor(api, notify, messages)), now());
+          holdNote(sid, note, now());
           cursors.last_notify_at = now();
           log(sid, "stop-worker: held note for next prompt");
         }
@@ -254,7 +255,7 @@ const OWN_AGENTS_TIMEOUT_MS = 5000;
 
 async function ownAgentIdsFor(api: StopWorkerApi, note: string, messages: readonly Message[]): Promise<Set<string> | null> {
   const cited = citedIds(note);
-  const cites = messages.some((m) => m.author?.type === "agent" && cited.has(m.id));
+  const cites = messages.some((m) => m.author?.type === "agent" && !!m.author.agent_name && cited.has(m.id));
   return cites ? ownAgentIdSet(api, { timeoutMs: OWN_AGENTS_TIMEOUT_MS }) : null;
 }
 

@@ -68,12 +68,14 @@ export function plainText(text: string | null | undefined): string {
 
 /**
  * An author in one short phrase that carries what `reply --to` takes: an agent by name and the start of its id, a
- * person by name and email. The id follows the name so that a name alone can't pass for another agent.
+ * person by name and email. The id follows the name so that a name alone can't pass for another agent. An agent with
+ * no name is described as a person, as `describeAuthor` does.
  */
 export function describeAuthorShort(author: EnvelopeAuthor = {}): string {
-  if (author.type === "agent") {
+  const name = plainText(author.agent_name);
+  if (author.type === "agent" && name) {
     const id = author.agent_id ? ` [agent ${plainText(author.agent_id).slice(0, SHORT_ID_LENGTH)}]` : "";
-    return `@${plainText(author.agent_name) || plainText(author.agent_id) || "unknown"}${id}`;
+    return `@${name}${id}`;
   }
   const email = plainText(author.owner_email);
   return `${plainText(author.owner_name) || "unknown"}${email ? ` <${email}>` : ""} (a person)`;

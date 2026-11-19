@@ -76,18 +76,14 @@ function replyOnBoard(cli: Cli, id: string, original: Message | null, error: Api
   return 1;
 }
 
-/** The shortest agent id prefix `reply --to` accepts: anything shorter could name several agents. */
-export const MIN_ID_PREFIX = SHORT_ID_LENGTH;
-
-const MISPLACED_TO = "put --to before the message, and quote the message text if it contains --to";
+const MISPLACED_TO = "put --to before the message, and quote the message text if it ends with --to";
 
 const isToFlag = (arg: string | undefined) => arg === "--to" || !!arg?.startsWith("--to=");
 
 /**
  * The `--to` and its value, wherever they come before the message text, and what is left. The text starts at the
- * argument after the id, so a `--to` after it is an error rather than words of the message that were never meant
- * as an option: it would otherwise send without the check the caller asked for. Other option-like words in the text
- * are left alone.
+ * argument after the id. A `--to` that ends the text is refused rather than sent as words, since it reads as the
+ * check the caller asked for and sending would skip it; a `--to` anywhere else in the text is a word like any other.
  */
 function takeTo(args: string[]): { to: string | null; rest: string[] } {
   let to: string | null = null;
@@ -113,64 +109,90 @@ function takeTo(args: string[]): { to: string | null; rest: string[] } {
     }
   }
   const text = args.slice(i);
-  if (text.some(isToFlag)) {
+  if (isToFlag(text.at(-1)) || text.at(-2) === "--to") {
     throw new UsageError(MISPLACED_TO);
   }
   return { to, rest: [...rest, ...text] };
 }
 
-// Names and emails as a copied note label shows them, which plainText has already cleaned, so a label always matches.
 const same = (text: string | null | undefined) => plainText(text).toLowerCase();
+
+/**
+ * What a `--to` says, split the way `describeAuthorShort` writes an author, so a label copied from a note or an
+ * error matches: `@name [agent 1a2b3c4d]`, `Name <email>`, `<email>`, or a bare name, email or id, each with any
+ * trailing `(a person)` or `(one of your own agents)` dropped.
+ */
+function parseTo(to: string): { text: string; email: string | null; idPrefix: string | null } {
+  let rest = to.trim();
+  while (/\((?:a person|one of your own agents)\)\s*$/i.test(rest)) {
+    rest = rest.replace(/\s*\((?:a person|one of your own agents)\)\s*$/i, "");
+  }
+  const email = /<([^<>\s]+)>\s*$/.exec(rest);
+  if (email) {
+    return { text: "", email: (email[1] as string).toLowerCase(), idPrefix: null };
+  }
+  const tag = /\s*\[agent ([^\]\s]+)\]\s*$/i.exec(rest);
+  const idPrefix = tag ? (tag[1] as string).toLowerCase() : null;
+  const text = same((tag ? rest.slice(0, tag.index) : rest).replace(/^@/, ""));
+  return { text, email: text.includes("@") ? text : null, idPrefix };
+}
 
 type Match = { ok: true } | { ok: false; why?: string };
 const MATCH: Match = { ok: true };
 const NO_MATCH: Match = { ok: false };
 
+const isPersonLike = (author: MessageAuthor) => author.type !== "agent" || !plainText(author.agent_name);
+
 /**
- * Whether `to` names the author, after one leading `@` is dropped: an agent by its name (case-insensitive), unless
- * several of the caller's agents share it, or by its id, exact or as a prefix of at least `MIN_ID_PREFIX`
- * characters that none of the caller's other agents shares; a person by name or email. A `why` is a refusal that
- * needs more than "not the author" to explain.
+ * Whether `to` names the author. A person, or an agent with no name, which is shown as a person, by email only: two
+ * people can share a name. An agent by its id, exact or as a prefix of at least `SHORT_ID_LENGTH` characters that
+ * none of the caller's other agents shares; or by its name (case-insensitive) only when it is one of the caller's own
+ * agents and no other of theirs shares the name, since another owner's agent may carry the same name. A `why` is a
+ * refusal that needs more than "not the author" to explain.
  */
 async function matchesAuthor(author: MessageAuthor, to: string, ownAgents: () => Promise<AgentSummary[]>): Promise<Match> {
-  const wanted = same(to.trim().replace(/^@/, ""));
-  if (!wanted) {
-    return NO_MATCH;
-  }
-  if (author.type !== "agent") {
-    return wanted === same(author.owner_email) || wanted === same(author.owner_name) ? MATCH : NO_MATCH;
+  const wanted = parseTo(to);
+  if (isPersonLike(author)) {
+    if (wanted.email) {
+      return wanted.email === same(author.owner_email) ? MATCH : NO_MATCH;
+    }
+    return wanted.text && wanted.text === same(author.owner_name) ? { ok: false, why: "a person is matched by email, since names are shared" } : NO_MATCH;
   }
   const id = (author.agent_id ?? "").toLowerCase();
-  if (same(author.agent_name) === wanted) {
-    let agents: AgentSummary[];
-    try {
-      agents = await ownAgents();
-    } catch {
-      return { ok: false, why: "could not check that the name is unambiguous; give the agent id" };
-    }
-    const sameName = agents.filter((a) => same(a.name) === wanted);
-    const ambiguous = sameName.length > 1 && sameName.some((a) => a.id.toLowerCase() === id);
-    return ambiguous
-      ? { ok: false, why: `more than one of your agents is called "${to.trim()}"; give the agent id or an ${MIN_ID_PREFIX}-character prefix of it` }
-      : MATCH;
-  }
-  if (!id.startsWith(wanted)) {
+  const name = same(author.agent_name);
+  const byName = !!wanted.text && wanted.text === name;
+  const prefix = wanted.idPrefix ?? (byName ? null : wanted.text);
+  if (wanted.idPrefix !== null && wanted.text && !byName) {
     return NO_MATCH;
   }
-  if (wanted === id) {
+  if (prefix !== null && !id.startsWith(prefix)) {
+    return NO_MATCH;
+  }
+  if (prefix === null && !byName) {
+    return NO_MATCH;
+  }
+  if (prefix === id) {
     return MATCH;
   }
-  if (wanted.length < MIN_ID_PREFIX) {
-    return { ok: false, why: `an agent id prefix needs at least ${MIN_ID_PREFIX} characters` };
+  if (prefix !== null && prefix.length < SHORT_ID_LENGTH) {
+    return { ok: false, why: `an agent id prefix needs at least ${SHORT_ID_LENGTH} characters` };
   }
   let agents: AgentSummary[];
   try {
     agents = await ownAgents();
   } catch {
-    return { ok: false, why: "could not check that the id prefix is unambiguous; give the whole id" };
+    return { ok: false, why: "could not check your agents to confirm it; give the whole agent id" };
   }
-  const shared = agents.filter((other) => other.id.toLowerCase() !== id && other.id.toLowerCase().startsWith(wanted));
-  return shared.length ? { ok: false, why: `"${to.trim()}" is also a prefix of another of your agents' ids` } : MATCH;
+  if (prefix !== null) {
+    const shared = agents.some((other) => other.id.toLowerCase() !== id && other.id.toLowerCase().startsWith(prefix));
+    return shared ? { ok: false, why: `"${prefix}" is also a prefix of another of your agents' ids` } : MATCH;
+  }
+  if (!agents.some((a) => a.id.toLowerCase() === id)) {
+    return { ok: false, why: "it is not one of your own agents, and another owner's agent can share a name; give its agent id" };
+  }
+  return agents.filter((a) => same(a.name) === name).length > 1
+    ? { ok: false, why: `more than one of your agents is called "${to.trim()}"; give the agent id or an ${SHORT_ID_LENGTH}-character prefix of it` }
+    : MATCH;
 }
 
 export const reply: Command = async (cli, args) => {

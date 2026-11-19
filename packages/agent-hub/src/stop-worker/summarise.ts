@@ -182,7 +182,7 @@ PUBLISH ${offerPublish ? "is allowed this time" : 'is NOT allowed this time: set
 
 NOTIFY ${offerNotify ? "is allowed this time" : 'is NOT allowed this time: set "notify" to null'}.
 - Set "notify" only when a feed item below bears directly on what this session is working on now. Otherwise null.
-- Cite each message as "#<id>: <one or two sentences on why it matters>", and tell the session it can run "${CLI} read <id>" for the full message. Do not name the author: the client adds it after the id.
+- Cite each message as "#<id>: <one or two sentences on why it matters>", and tell the session it can run "${CLI} read <id>" for the full message. Do not name the author: the client appends each cited post's author.
 
 Subscribed topics: ${listed(subscriptions)}
 Most active topics: ${listed(activeTopics)}
@@ -202,39 +202,38 @@ ${feedText || "(none)"}
 
 export const OWN_AGENT_MARKER = "(one of your own agents)";
 
+/** How many cited posts a note names the authors of, and how long each label may be, which bound what a note gains. */
+export const MAX_NOTE_AUTHORS = 10;
+const MAX_AUTHOR_LABEL = 160;
+
 function authorLabel(m: Message, ownAgentIds: ReadonlySet<string> | null): string {
-  const own = m.author?.type === "agent" && m.author.agent_id && ownAgentIds?.has(m.author.agent_id) ? ` ${OWN_AGENT_MARKER}` : "";
-  return `from ${describeAuthorShort(m.author)}${own}`;
+  const own = m.author?.type === "agent" && m.author.agent_name && m.author.agent_id && ownAgentIds?.has(m.author.agent_id) ? ` ${OWN_AGENT_MARKER}` : "";
+  const label = `${describeAuthorShort(m.author)}${own}`;
+  return label.length > MAX_AUTHOR_LABEL ? `${label.slice(0, MAX_AUTHOR_LABEL - 1)}…` : label;
 }
 
-const OWN_OR_PERSON_MARKER = "\\((?:one of your own agents|a person)\\)";
-const NAME = "\\p{L}[\\p{L}\\p{M}'.\\-]*(?:\\s+\\p{L}[\\p{L}\\p{M}'.\\-]*)*?";
-const AGENT_TAG = "\\[agent [^\\]\\n]*\\]";
-// What an attribution can look like: an @name (dots included), an [agent …] tag, a name with an email, or a name that
-// a marker follows. Anything else after "from" or "by" is ordinary prose and stays.
-const ATTRIBUTED = `(?:@[\\w-]+(?:\\.[\\w-]+)*|${AGENT_TAG}|${NAME}\\s*<[^<>\\s]+>|${NAME}(?=\\s*${OWN_OR_PERSON_MARKER}))(?:\\s*${AGENT_TAG})?(?:\\s*${OWN_OR_PERSON_MARKER})*`;
-const MODEL_ATTRIBUTION = `(?:\\s*${OWN_OR_PERSON_MARKER})*(?:\\s+(?:from|by)\\s+${ATTRIBUTED})?`;
-const MENTION = "#(\\d+)(?!\\d)";
+// A #<id> that is a GitHub or Jira reference ("PR #260", "issue #12", ".../pull/#5") is not a hub post.
+const MENTION = "(?<![\\w/&])(?<!\\b(?:PRs?|pull requests?|issues?|tickets?)\\s*)#(\\d+)(?!\\d)";
 
-/** The ids a note cites as #<id>, which is what `attributeNote` labels. */
+/** The hub post ids a note cites as #<id>, in the order they are first cited. */
 export function citedIds(note: string): Set<string> {
-  return new Set([...note.matchAll(new RegExp(MENTION, "g"))].map((m) => m[1] as string));
+  return new Set([...note.matchAll(new RegExp(MENTION, "giu"))].map((m) => m[1] as string));
 }
+
+export const AUTHORS_PREFIX = "Authors, from the posts themselves:";
 
 /**
- * Replaces whatever the model wrote after each `#<id>` with nothing, then names the author after the first mention of
- * each feed post. The author comes from the post and not from the model, so a note can never pass one agent's post
- * off as another's, and a mention of any other id carries no attribution at all.
+ * Appends who wrote each feed post the note cites, taken from the post and never from the model, so whatever the
+ * model wrote about authorship is outranked by a line the session is told to trust. The note's own text is left as
+ * written: rewriting prose around a mention cannot tell a forged attribution from an ordinary sentence.
  */
 export function attributeNote(note: string, messages: readonly Message[], ownAgentIds: ReadonlySet<string> | null): string {
   const byId = new Map(messages.map((m) => [m.id, m]));
-  const labelled = new Set<string>();
-  return note.replace(new RegExp(`${MENTION}${MODEL_ATTRIBUTION}`, "giu"), (_all, id: string) => {
-    const m = byId.get(id);
-    if (!m || labelled.has(id)) {
-      return `#${id}`;
-    }
-    labelled.add(id);
-    return `#${id} ${authorLabel(m, ownAgentIds)}`;
-  });
+  const authors = [...citedIds(note)]
+    .flatMap((id) => {
+      const m = byId.get(id);
+      return m ? [`#${id} ${authorLabel(m, ownAgentIds)}`] : [];
+    })
+    .slice(0, MAX_NOTE_AUTHORS);
+  return authors.length ? `${note.trimEnd()} ${AUTHORS_PREFIX} ${authors.join("; ")}.` : note;
 }

@@ -791,7 +791,7 @@ describe("the commands, in process against the mock hub", () => {
 
       // Assert
       expect(code).toBe(2);
-      expect(out.errors.join("\n")).toMatch(/give the whole id/);
+      expect(out.errors.join("\n")).toMatch(/give the whole agent id/);
       expect(sends()).toHaveLength(0);
     });
 
@@ -828,7 +828,7 @@ describe("the commands, in process against the mock hub", () => {
       expect(sends()).toHaveLength(1);
     });
 
-    it("should send when --to is the name of the person who wrote the post, in any case, and print no email in what it was given", async () => {
+    it("should refuse with exit 2 and send nothing when --to is only the name of the person who wrote the post", async () => {
       // Arrange
       const post = hub.addPost({ topics: ["zz-reply"], title: "t", bodyText: "x", user: me });
 
@@ -836,8 +836,86 @@ describe("the commands, in process against the mock hub", () => {
       const r = await cli(["reply", post.id, "--to", "  me TESTER ", "hi"]);
 
       // Assert
+      expect(r.code).toBe(2);
+      expect(r.errors.join("\n")).toMatch(/a person is matched by email, since names are shared; nothing was sent/);
+      expect(sends()).toHaveLength(0);
+    });
+
+    it.each([
+      ["an agent", () => ownPost("copied-label"), new Set<string>()],
+      ["one of your own agents, with the marker", () => ownPost("copied-own"), new Set(["own"])],
+      ["a person", () => hub.addPost({ topics: ["zz-reply"], title: "t", bodyText: "x", user: me }), new Set<string>()]
+    ])("should send when --to is the label a note gives for %s", async (_label, make, mark) => {
+      // Arrange
+      const post = make();
+      const label = `${describeAuthorShort(post.author)}${mark.size ? " (one of your own agents)" : ""}`;
+
+      // Act
+      const r = await cli(["reply", post.id, "--to", label, "hi"]);
+      const emailOnly = post.author.type === "agent" ? null : await cli(["reply", post.id, "--to", "<me@example.com>", "hi"]);
+
+      // Assert
+      expect(r.code).toBe(0);
+      expect(emailOnly?.code ?? 0).toBe(0);
+      expect(sends()).toHaveLength(emailOnly ? 2 : 1);
+    });
+
+    it("should refuse with exit 2 when a copied agent label has the right name but another agent's id", async () => {
+      // Arrange
+      const post = ownPost("label-wrong-id");
+
+      // Act
+      const r = await cli(["reply", post.id, "--to", "@label-wrong-id [agent ffffffff]", "hi"]);
+
+      // Assert
+      expect(r.code).toBe(2);
+      expect(sends()).toHaveLength(0);
+    });
+
+    it("should refuse with exit 2 and send nothing when --to is only a name and the author is another owner's agent of that name", async () => {
+      // Arrange
+      hub.agents.set("mine-same-name", { id: "mine-same-name", owner_oid: me.oid, name: "shared-name", status: "idle" });
+      const theirs = hub.addPost({
+        topics: ["zz-reply"],
+        title: "t",
+        bodyText: "x",
+        fromAgent: "shared-name",
+        user: { oid: "u-other", name: "Other", email: "other@example.com" }
+      });
+
+      // Act
+      const r = await cli(["reply", theirs.id, "--to", "shared-name", "hi"]);
+
+      // Assert
+      expect(r.code).toBe(2);
+      expect(r.errors.join("\n")).toMatch(/not one of your own agents, and another owner's agent can share a name; give its agent id/);
+      expect(sends()).toHaveLength(0);
+    });
+
+    it("should match an agent with no name by its owner's email, as its envelope shows it as a person", async () => {
+      // Arrange
+      const post = ownPost("to-be-nameless");
+      Object.assign(hub.agents.get(post.author.agent_id as string) as object, { name: null });
+      Object.assign(post.author, { agent_name: null });
+
+      // Act
+      const r = await cli(["reply", post.id, "--to", "me@example.com", "hi"]);
+
+      // Assert
       expect(r.code).toBe(0);
       expect(sends()).toHaveLength(1);
+    });
+
+    it("should send text that mentions --to anywhere but at its end", async () => {
+      // Arrange
+      const post = ownPost("to-in-text");
+
+      // Act
+      const r = await cli(["reply", post.id, "use", "the", "--to", "flag", "next", "time"]);
+
+      // Assert
+      expect(r.code).toBe(0);
+      expect(sends().map((c) => c.body.body)).toEqual(["use the --to flag next time"]);
     });
 
     it("should send when --to is @ and the whole agent id", async () => {
@@ -867,7 +945,7 @@ describe("the commands, in process against the mock hub", () => {
       expect(sends().map((c) => c.body.body)).toEqual(["from stdin"]);
       for (const r of [after, afterDash, equalsAfter]) {
         expect(r.code).toBe(2);
-        expect(r.errors.join("\n")).toMatch(/put --to before the message, and quote the message text/);
+        expect(r.errors.join("\n")).toMatch(/put --to before the message, and quote the message text if it ends with --to/);
       }
     });
 
@@ -901,7 +979,7 @@ describe("the commands, in process against the mock hub", () => {
 
       // Assert
       expect(code).toBe(2);
-      expect(out.errors.join("\n")).toMatch(/give the agent id/);
+      expect(out.errors.join("\n")).toMatch(/give the whole agent id/);
       expect(sends()).toHaveLength(0);
     });
 
@@ -4596,7 +4674,9 @@ process.stdout.write(JSON.stringify({ type: 'result', is_error: false, result: J
     expect(ctx.status).toBe(0);
     const out = JSON.parse(ctx.stdout);
     expect(out.hookSpecificOutput.hookEventName).toBe("UserPromptSubmit");
-    expect(out.hookSpecificOutput.additionalContext).toMatch(new RegExp(`#${feed.id} from @carol-pcs \\[agent [0-9a-f]{8}\\] is about the same table`));
+    expect(out.hookSpecificOutput.additionalContext).toMatch(
+      new RegExp(`#${feed.id} is about the same table.* Authors, from the posts themselves: #${feed.id} @carol-pcs \\[agent [0-9a-f]{8}\\]\\.`)
+    );
     expect(fs.existsSync(stateFile("held-notes.jsonl"))).toBe(false);
 
     expect(hub.calls.filter((c) => c.path === "/api/agent/register").length).toBe(registers + 1);
