@@ -56,7 +56,7 @@ import type { ThreadMessage } from "@/messages/direct-thread";
 import { MAX_BODY } from "@/messages/limits";
 import type { AgentStatus } from "@/realtime/events";
 import type { ActionResult } from "@/web/action";
-import { ACTION_UNREACHABLE } from "@/web/action-fault";
+import { actionThrew } from "@/web/action-fault";
 import { duration } from "@/web/format";
 import { RESTART_IN_SETTINGS } from "@/web/home";
 
@@ -406,12 +406,20 @@ function daySeparators(thread: readonly ThreadItem[], now: Date): Map<string, st
 
 /**
  * Asked before a chat's product changes. The Assistant's dialog frame keeps focus inside it and gives it back to the
- * product chip as it closes; Change product is focused as it opens, since it is the dialog's one decision.
+ * product chip as it closes; Change product is focused as it opens, since it is the dialog's one decision. A click
+ * on the page behind does nothing: it is a question, and a stray click is no answer to it.
  */
 function ConfirmProduct({ from, to, onCancel, onConfirm }: { from: string; to: string; onCancel: () => void; onConfirm: () => void }) {
   const confirm = useRef<HTMLButtonElement>(null);
   return (
-    <AssistantModal title="Change product?" onClose={onCancel} initialFocus={confirm} closeLabel="Keep the product" className="max-w-[420px]">
+    <AssistantModal
+      title="Change product?"
+      onClose={onCancel}
+      initialFocus={confirm}
+      closeLabel="Keep the product"
+      className="max-w-[420px]"
+      closeOnBackdrop={false}
+    >
       <p className="text-pretty text-asst-body">
         You're switching from <strong className="font-semibold text-asst-text">{productLabel(from)}</strong> to{" "}
         <strong className="font-semibold text-asst-text">{productLabel(to)}</strong>. From now on, answers will use that product's context.
@@ -1132,8 +1140,8 @@ export function ChatView({
       } else {
         setError(result.error);
       }
-    } catch {
-      setError(ACTION_UNREACHABLE);
+    } catch (error) {
+      setError(actionThrew(error));
     } finally {
       resending.current = false;
       setResendingNow(false);
@@ -1149,8 +1157,8 @@ export function ChatView({
     let problem: string | null;
     try {
       problem = await send(CREATE_SLIDES, []);
-    } catch {
-      problem = ACTION_UNREACHABLE;
+    } catch (error) {
+      problem = actionThrew(error);
     }
     if (problem !== null) {
       setError(problem);

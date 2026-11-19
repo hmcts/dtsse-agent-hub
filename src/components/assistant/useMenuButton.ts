@@ -8,6 +8,37 @@ import { useDismiss } from "@/components/assistant/useDismiss";
  * press or on an arrow key and focus moves into it, the arrows, Home and End move between its items, Tab leaves it
  * closed, and Escape or a click outside dismisses it as `useDismiss` does every other menu here.
  */
+/**
+ * Which item a menu's key moves focus to: up and down wrap at either end, Home and End go to them, and anything else
+ * is not the menu's. `at` is the focused item's place, or -1 for none, when either arrow starts from its own end.
+ */
+export function menuKeyTarget(key: string, at: number, count: number): number | null {
+  if (count === 0) {
+    return null;
+  }
+  switch (key) {
+    case "ArrowDown":
+      return (at + 1) % count;
+    case "ArrowUp":
+      return at <= 0 ? count - 1 : at - 1;
+    case "Home":
+      return 0;
+    case "End":
+      return count - 1;
+    default:
+      return null;
+  }
+}
+
+/** Moves focus among a menu's items for a key it answers, which it then takes. */
+export function moveFocusInMenu(event: { key: string; preventDefault: () => void }, items: readonly HTMLElement[]): void {
+  const next = menuKeyTarget(event.key, items.indexOf(document.activeElement as HTMLElement), items.length);
+  if (next !== null) {
+    event.preventDefault();
+    items[next]?.focus();
+  }
+}
+
 export function useMenuButton() {
   const [open, setOpen] = useState(false);
   const container = useRef<HTMLDivElement>(null);
@@ -51,22 +82,7 @@ export function useMenuButton() {
       setOpen(false);
       return;
     }
-    const all = items();
-    const at = all.indexOf(document.activeElement as HTMLElement);
-    const next =
-      event.key === "ArrowDown"
-        ? (at + 1) % all.length
-        : event.key === "ArrowUp"
-          ? (at - 1 + all.length) % all.length
-          : event.key === "Home"
-            ? 0
-            : event.key === "End"
-              ? all.length - 1
-              : null;
-    if (next !== null) {
-      event.preventDefault();
-      all[next]?.focus();
-    }
+    moveFocusInMenu(event, items());
   }
 
   return {

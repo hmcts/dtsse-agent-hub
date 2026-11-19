@@ -16,6 +16,11 @@ export const ACTION_STALE_PAGE = "CFT Workspace has been updated since this page
  * anything else is the connection.
  */
 export function actionThrew(error: unknown): string {
+  return isStalePage(error) ? ACTION_STALE_PAGE : ACTION_UNREACHABLE;
+}
+
+/** Whether a thrown action is the page being from before a deploy, for a caller with its own words for the rest. */
+export function isStalePage(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return /Failed to find Server Action|older or newer deployment/i.test(message) ? ACTION_STALE_PAGE : ACTION_UNREACHABLE;
+  return /Failed to find Server Action|older or newer deployment/i.test(message);
 }

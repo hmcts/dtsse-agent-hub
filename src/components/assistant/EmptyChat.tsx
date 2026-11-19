@@ -199,25 +199,6 @@ export function EmptyChat({
               </li>
             ))}
           </ul>
-          {/* The person's own templates, one click away where a new chat starts, rather than two menus deep in the box. */}
-          {templates.length === 0 ? null : (
-            <div className="flex w-full max-w-[640px] flex-col gap-1.5">
-              <h3 className="text-xs font-medium text-asst-faint">Your templates</h3>
-              <ul aria-label="Your templates" className="flex flex-wrap gap-1.5">
-                {templates.map((template) => (
-                  <li key={template.name}>
-                    <button
-                      type="button"
-                      onClick={() => starter(template.text)}
-                      className="rounded-full border border-asst-line bg-asst-raised px-3 py-1 text-[13px] hover:border-asst-accent-line hover:bg-asst-hover"
-                    >
-                      {template.name}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
           <ProductSelect value={product} onChange={(next) => void changeProduct(next)} />
           {error === null ? null : (
             <p role="alert" className="text-[13px] text-asst-error">

@@ -1088,7 +1088,9 @@ describe("ArtefactPanel typing while a save is in flight", () => {
   it("should say the newer text is not saved yet when the earlier save's answer arrives before it goes", async () => {
     vi.useFakeTimers();
     let answerFirst: (result: ActionResult<SaveArtefactResult>) => void = () => undefined;
-    const save = vi.fn<SaveArtefactAction>().mockImplementationOnce(() => new Promise((resolve) => (answerFirst = resolve)));
+    const save = vi
+      .fn<SaveArtefactAction>(async () => ({ ok: true, saved: true, version: 99 }))
+      .mockImplementationOnce(() => new Promise((resolve) => (answerFirst = resolve)));
     render(panel(snapshot(), save));
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
 
@@ -1100,5 +1102,111 @@ describe("ArtefactPanel typing while a save is in flight", () => {
     });
 
     expect(saveState()).not.toContain("Saved");
+  });
+});
+
+describe("ArtefactPanel saves queued behind one in flight", () => {
+  it("should send each queued save in turn, each against the version the one before it made", async () => {
+    vi.useFakeTimers();
+    let answerFirst: (result: ActionResult<SaveArtefactResult>) => void = () => undefined;
+    const save = vi
+      .fn<SaveArtefactAction>()
+      .mockImplementationOnce(() => new Promise((resolve) => (answerFirst = resolve)))
+      .mockResolvedValueOnce({ ok: true, saved: true, version: 4 })
+      .mockResolvedValueOnce({ ok: true, saved: true, version: 5 });
+    render(panel(snapshot(), save));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+    edit("a");
+    await pause(1000);
+    edit("ab");
+    await pause(1000);
+    edit("abc");
+    await pause(1000);
+    expect(save).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      answerFirst({ ok: true, saved: true, version: 3 });
+    });
+    await pause(0);
+
+    expect(save.mock.calls.map(([input]) => [input.markdown, input.baseVersion])).toEqual([
+      ["a", 2],
+      ["ab", 3],
+      ["abc", 4]
+    ]);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("should drop a queued save once the one ahead of it met a newer version", async () => {
+    vi.useFakeTimers();
+    let answerFirst: (result: ActionResult<SaveArtefactResult>) => void = () => undefined;
+    const save = vi
+      .fn<SaveArtefactAction>(async () => ({ ok: true, saved: true, version: 99 }))
+      .mockImplementationOnce(() => new Promise((resolve) => (answerFirst = resolve)));
+    render(panel(snapshot(), save));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    edit("a");
+    await pause(1000);
+    edit("ab");
+    await pause(1000);
+
+    await act(async () => {
+      answerFirst({ ok: true, saved: false, current: snapshot({ markdown: "# Theirs", version: 9, updatedBy: "agent" }) });
+    });
+    await pause(0);
+
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("alert")).toBeTruthy();
+  });
+
+  it("should take its own save coming back on the page as the new version, not as a conflict, while the person types on", async () => {
+    vi.useFakeTimers();
+    const save = vi.fn<SaveArtefactAction>(async () => ({ ok: true, saved: true, version: 99 })).mockImplementationOnce(() => new Promise(() => undefined));
+    const view = render(panel(snapshot(), save));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    edit("mine");
+    await pause(1000);
+    edit("mine and more");
+
+    view.rerender(panel(snapshot({ markdown: "mine", version: 3 }), save));
+
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(box().value).toBe("mine and more");
+  });
+
+  it("should leave the closing save to a queued save already carrying the same text", async () => {
+    vi.useFakeTimers();
+    const save = vi.fn<SaveArtefactAction>(async () => ({ ok: true, saved: true, version: 99 })).mockImplementationOnce(() => new Promise(() => undefined));
+    const view = render(panel(snapshot(), save));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    edit("mine");
+    await pause(1000);
+
+    view.unmount();
+
+    expect(save).toHaveBeenCalledTimes(1);
+  });
+
+  it("should send the closing save after the one still out, against the version it made", async () => {
+    vi.useFakeTimers();
+    let answerFirst: (result: ActionResult<SaveArtefactResult>) => void = () => undefined;
+    const save = vi
+      .fn<SaveArtefactAction>()
+      .mockImplementationOnce(() => new Promise((resolve) => (answerFirst = resolve)))
+      .mockResolvedValueOnce({ ok: true, saved: true, version: 4 });
+    const view = render(panel(snapshot(), save));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    edit("mine");
+    await pause(1000);
+    edit("mine and more");
+
+    view.unmount();
+    expect(save).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      answerFirst({ ok: true, saved: true, version: 3 });
+    });
+
+    expect(save).toHaveBeenLastCalledWith(expect.objectContaining({ markdown: "mine and more", baseVersion: 3 }));
   });
 });

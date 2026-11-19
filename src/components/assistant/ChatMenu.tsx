@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useDismiss } from "@/components/assistant/useDismiss";
+import { moveFocusInMenu } from "@/components/assistant/useMenuButton";
+import { ACTION_STALE_PAGE, isStalePage } from "@/web/action-fault";
 
 const TRIGGER = "flex h-[34px] w-[34px] items-center justify-center rounded-[9px] text-lg text-asst-muted hover:bg-asst-field hover:text-asst-text";
 
@@ -119,9 +121,8 @@ export function ChatMenu({
   // Read as well as shown: two presses before the next render both see `running` false.
   const busy = useRef(false);
 
-  // Back to the trigger, unless a click outside closed it: that click is putting focus where the person wants it.
-  const close = useCallback((how: "keyboard" | "pointer" = "keyboard") => {
-    if (how === "keyboard" && ref.current?.contains(document.activeElement)) {
+  const close = useCallback(() => {
+    if (ref.current?.contains(document.activeElement)) {
       trigger.current?.focus();
     }
     setOpen("closed");
@@ -140,16 +141,9 @@ export function ChatMenu({
     }
   }, [open]);
 
-  /** Up and down move through the menu's items, wrapping at either end, as a menu's keys do. */
+  /** The menu's keys, as every menu in the Assistant answers them. */
   function moveInMenu(event: React.KeyboardEvent<HTMLDivElement>): void {
-    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") {
-      return;
-    }
-    event.preventDefault();
-    const items = [...(menu.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
-    const at = items.indexOf(document.activeElement as HTMLElement);
-    const next = event.key === "ArrowDown" ? (at + 1) % items.length : (at - 1 + items.length) % items.length;
-    items[next]?.focus();
+    moveFocusInMenu(event, [...(menu.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])]);
   }
 
   useDismiss(open !== "closed", ref, close);
@@ -185,8 +179,8 @@ export function ChatMenu({
     setRunning(true);
     try {
       await work();
-    } catch {
-      setProblem(UNREACHABLE(what));
+    } catch (error) {
+      setProblem(isStalePage(error) ? ACTION_STALE_PAGE : UNREACHABLE(what));
       return;
     } finally {
       busy.current = false;

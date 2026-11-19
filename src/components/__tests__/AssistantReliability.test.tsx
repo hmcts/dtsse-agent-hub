@@ -7,6 +7,7 @@ import { TEMPLATES } from "@/assistant/starters";
 import { ChatMenu } from "@/components/assistant/ChatMenu";
 import { Composer } from "@/components/assistant/Composer";
 import { EmptyChat, type EmptyChatActions } from "@/components/assistant/EmptyChat";
+import { menuKeyTarget, useMenuButton } from "@/components/assistant/useMenuButton";
 import { useResizableWidth } from "@/components/assistant/useResizableWidth";
 import { ACTION_STALE_PAGE, ACTION_UNREACHABLE, actionThrew } from "@/web/action-fault";
 
@@ -222,5 +223,94 @@ describe("ChatMenu from the keyboard", () => {
     });
 
     expect(onDelete).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("menuKeyTarget", () => {
+  it("should wrap at either end, start an arrow from its own end with nothing focused, and answer Home and End", () => {
+    expect(menuKeyTarget("ArrowDown", 2, 3)).toBe(0);
+    expect(menuKeyTarget("ArrowUp", 0, 3)).toBe(2);
+    expect(menuKeyTarget("ArrowUp", -1, 3)).toBe(2);
+    expect(menuKeyTarget("ArrowDown", -1, 3)).toBe(0);
+    expect(menuKeyTarget("Home", 2, 3)).toBe(0);
+    expect(menuKeyTarget("End", 0, 3)).toBe(2);
+    expect(menuKeyTarget("Enter", 0, 3)).toBeNull();
+    expect(menuKeyTarget("ArrowDown", -1, 0)).toBeNull();
+  });
+});
+
+describe("useDismiss from a click outside", () => {
+  function Menu() {
+    const menu = useMenuButton();
+    return (
+      <div>
+        <div ref={menu.container}>
+          <button ref={menu.trigger} type="button" onClick={menu.toggle}>
+            Open
+          </button>
+          {menu.open ? (
+            <div ref={menu.menu} role="menu" onKeyDown={menu.onMenuKeyDown}>
+              <button type="button" role="menuitem">
+                One
+              </button>
+            </div>
+          ) : null}
+        </div>
+        <input aria-label="Elsewhere" />
+      </div>
+    );
+  }
+
+  it("should leave focus off the trigger in every menu, so the click can put it where it landed", () => {
+    render(<Menu />);
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "One" }));
+
+    fireEvent.mouseDown(screen.getByRole("textbox", { name: "Elsewhere" }));
+
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(document.activeElement).not.toBe(screen.getByRole("button", { name: "Open" }));
+  });
+});
+
+describe("ChatMenu after a deploy", () => {
+  it("should ask for a reload, not the connection, when the page names an action the hub no longer has", async () => {
+    render(
+      <ChatMenu
+        title="Event help"
+        shareHref="/s"
+        forkHref="/f"
+        pinned={false}
+        onPin={vi.fn(async () => {
+          throw new Error('Failed to find Server Action "abc"');
+        })}
+        onRename={vi.fn(async () => undefined)}
+        onDelete={vi.fn(async () => undefined)}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Chat options" }));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+    });
+
+    expect(screen.getByRole("alert").textContent).toBe(ACTION_STALE_PAGE);
+  });
+});
+
+describe("useResizableWidth ending a drag", () => {
+  it("should remember the width a cancelled drag left, and end a first drag when a second begins", () => {
+    render(<Panel />);
+    const separator = screen.getByRole("separator");
+
+    fireEvent.pointerDown(separator);
+    fireEvent(window, new MouseEvent("pointermove", { clientX: 420 }));
+    fireEvent(window, new Event("pointercancel"));
+    expect(window.localStorage.getItem("test-width")).toBe("420");
+
+    const removed = vi.spyOn(window, "removeEventListener");
+    fireEvent.pointerDown(separator);
+    fireEvent.pointerDown(separator);
+    expect(removed.mock.calls.filter(([type]) => type === "pointermove")).toHaveLength(1);
   });
 });

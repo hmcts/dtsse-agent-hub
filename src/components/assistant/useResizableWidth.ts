@@ -120,6 +120,8 @@ export function useResizableWidth({
 
   function startResize(event: React.PointerEvent<HTMLElement>): void {
     event.preventDefault();
+    // One drag at a time: a second finger on the handle ends the first, rather than leaving its listeners running.
+    endDrag.current?.();
     let moved = false;
     const move = (pointer: PointerEvent) => {
       moved = true;
@@ -127,14 +129,15 @@ export function useResizableWidth({
     };
     const stop = () => {
       window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      window.removeEventListener("pointercancel", stop);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
       endDrag.current = null;
     };
-    const up = () => {
+    // Remembered however the drag ends, lifted or cancelled: a cancelled one has already moved the panel, and the width
+    // on screen and the one stored must not disagree on the next visit. A press that never moved is not a resize, and
+    // leaves the remembered width — or a person who has never dragged on whatever the default becomes — as it is.
+    const finish = () => {
       stop();
-      // A press that never moved is not a resize: it must leave the remembered width as it is, and leave a person
-      // who has never dragged the handle on whatever the default becomes.
       if (moved) {
         setChosen((current) => {
           remember(current);
@@ -143,10 +146,10 @@ export function useResizableWidth({
       }
     };
     window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
+    window.addEventListener("pointerup", finish);
     // A touch the browser takes back for a scroll or a gesture never sends `pointerup`; without this the panel would
     // go on following a finger that has gone.
-    window.addEventListener("pointercancel", stop);
+    window.addEventListener("pointercancel", finish);
     endDrag.current = stop;
   }
 

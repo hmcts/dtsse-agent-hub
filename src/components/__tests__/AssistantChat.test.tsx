@@ -3265,19 +3265,14 @@ describe("Composer sending", () => {
 });
 
 describe("EmptyChat templates", () => {
-  it("should offer the person's templates as chips that fill the box", () => {
+  // Templates are in the box's + menu only: the new-chat screen offers the starter cards and nothing else.
+  it("should offer the person's templates only from the box's menu, not on the new-chat screen", () => {
     render(
       <EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={[{ name: "Bug report", text: "Bug: …" }]} skills={[]} actions={emptyActions(vi.fn())} />
     );
 
-    fireEvent.click(within(screen.getByRole("list", { name: "Your templates" })).getByRole("button", { name: "Bug report" }));
-
-    expect(newChatBox().value).toBe("Bug: …");
-  });
-
-  it("should offer no template chips when the person has none", () => {
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={[]} skills={[]} actions={emptyActions(vi.fn())} />);
-
     expect(screen.queryByRole("list", { name: "Your templates" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /template/ }));
+    expect(screen.getByRole("menuitem", { name: /Templates/ })).toBeTruthy();
   });
 });
