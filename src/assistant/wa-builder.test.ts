@@ -52,8 +52,9 @@ describe("waDocuments", () => {
 });
 
 describe("WA_SERVICE_PATTERN", () => {
-  it("should accept a hyphenated slug and refuse a leading hyphen", () => {
+  it("should accept hyphens and underscores and refuse a leading hyphen", () => {
     expect(WA_SERVICE_PATTERN.test("family-private-law")).toBe(true);
+    expect(WA_SERVICE_PATTERN.test("possession_service")).toBe(true);
     expect(WA_SERVICE_PATTERN.test("-x")).toBe(false);
   });
 });
