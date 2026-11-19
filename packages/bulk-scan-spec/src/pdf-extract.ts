@@ -69,8 +69,8 @@ function rowsOf(items: Item[], page: number): Line[] {
 }
 
 /** The form fields (text boxes, checkboxes, radio buttons) and the text layer of a PDF. Other field types are not read. */
-export async function extractPdf(path: string): Promise<PdfContent> {
-  const doc = await getDocument({ data: new Uint8Array(readFileSync(path)), verbosity: 0 }).promise;
+export async function extractPdf(source: string | Uint8Array): Promise<PdfContent> {
+  const doc = await getDocument({ data: typeof source === "string" ? new Uint8Array(readFileSync(source)) : new Uint8Array(source), verbosity: 0 }).promise;
   const widgets: Widget[] = [];
   const lines: Line[] = [];
   for (let number = 1; number <= doc.numPages; number++) {

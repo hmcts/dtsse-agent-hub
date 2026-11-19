@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "description": "One reviewed field spec per Bulk Scan form, with importers and generators for the Exela SIP and the HMCTS transformation sheet, and a drift checker against service OCR code.",
   "license": "MIT",
   "engines": {

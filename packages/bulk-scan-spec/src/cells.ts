@@ -47,6 +47,12 @@ export async function readWorkbook(path: string): Promise<ExcelJS.Workbook> {
   return workbook;
 }
 
+export async function readWorkbookBytes(bytes: Uint8Array): Promise<ExcelJS.Workbook> {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(Buffer.from(bytes) as unknown as ArrayBuffer);
+  return workbook;
+}
+
 export function rowTexts(sheet: ExcelJS.Worksheet, row: number, columns: number): string[] {
   const out: string[] = [];
   for (let c = 1; c <= columns; c++) {

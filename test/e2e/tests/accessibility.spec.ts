@@ -161,6 +161,17 @@ test.describe("accessibility @nightly", () => {
     await expectNoViolations(page);
   });
 
+  test("should raise no WCAG A or AA violations on the Assistant's Bulk Scan forms page @nightly @a11y", async ({ page, request }) => {
+    await connectForChat(request, PERSONA);
+    const response = await page.goto("/assistant/bulk-scan");
+    test.skip(response?.status() === 404, "the Assistant is off on this deployment");
+    expect(response?.status()).toBe(200);
+
+    await expect(page.getByRole("heading", { name: "Bulk Scan forms" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Start a form" })).toBeVisible();
+    await expectNoViolations(page);
+  });
+
   test("should raise no WCAG A or AA violations on the Assistant's Scheduled page @nightly @a11y", async ({ page, request }) => {
     await connectForChat(request, PERSONA);
     const response = await page.goto("/assistant/scheduled");

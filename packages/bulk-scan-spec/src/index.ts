@@ -1,10 +1,18 @@
+export * from "./cells.ts";
 export * from "./code-keys.ts";
+export * from "./codegen/case-data.ts";
+export * from "./codegen/index.ts";
+export type { Data } from "./codegen/model.ts";
+export { modelByKey } from "./codegen/model.ts";
+export * from "./codegen/scenarios.ts";
 export * from "./drift.ts";
+export { valueSets } from "./emits.ts";
 export * from "./from-pdf.ts";
 export * from "./logic.ts";
 export * from "./schema.ts";
 export * from "./sip-generate.ts";
 export * from "./sip-import.ts";
+export { SIP } from "./sip-layout.ts";
 export * from "./sip-template.ts";
 export * from "./transform-generate.ts";
 export * from "./transform-import.ts";

@@ -8,7 +8,10 @@ import type { Bundle, Field, Section } from "./schema.ts";
 import { bundleSchema } from "./schema.ts";
 
 export interface FromPdfInput {
+  /** The PDF's path, which also names the form. */
   pdf: string;
+  /** The PDF's content when it is not on disk; `pdf` then only names the form. */
+  bytes?: Uint8Array;
   /** Keys the service already uses, to reuse and imitate. */
   houseKeys?: string[];
   /** CCD case field ids of the service's definition. */
@@ -52,7 +55,7 @@ ${pageText(content)}
 
 /** Reads a PDF and drafts its field spec, proposing keys, groups and CCD ids and flagging each as a guess. */
 export async function fromPdf(input: FromPdfInput): Promise<FromPdfResult> {
-  const content = await extractPdf(input.pdf);
+  const content = await extractPdf(input.bytes ?? input.pdf);
   const form = { name: basename(input.pdf, extname(input.pdf)), formType: "" };
   if (content.widgets.length === 0) {
     const reason = "the PDF has no AcroForm fields";

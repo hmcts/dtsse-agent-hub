@@ -14,8 +14,7 @@ USER hmcts
 COPY --chown=hmcts:hmcts package.json yarn.lock .yarnrc.yml ./
 COPY --chown=hmcts:hmcts .yarn ./.yarn
 # Yarn builds the project graph from the lockfile and needs every workspace manifest present, so the published
-# client's and the bulk scan spec package's package.json come in even though the server consumes neither: manifest only,
-# never their src/, bin/ or dist/.
+# client's package.json comes in even though the server does not consume it: manifest only, never its src/, bin/ or dist/.
 COPY --chown=hmcts:hmcts packages/agent-hub/package.json ./packages/agent-hub/
 COPY --chown=hmcts:hmcts packages/bulk-scan-spec/package.json ./packages/bulk-scan-spec/
 
@@ -27,6 +26,9 @@ WORKDIR /app
 
 COPY --chown=hmcts:hmcts tsconfig.json tsconfig.cli.json next.config.mjs biome.json prisma.config.ts postcss.config.mjs ./
 COPY --chown=hmcts:hmcts src ./src
+# The Bulk Scan page imports the spec package's source, which `next build` compiles into the server bundle: the runtime
+# stage needs only its dependencies, which the standalone output carries.
+COPY --chown=hmcts:hmcts packages/bulk-scan-spec/src ./packages/bulk-scan-spec/src
 COPY --chown=hmcts:hmcts public ./public
 COPY --chown=hmcts:hmcts prisma ./prisma
 

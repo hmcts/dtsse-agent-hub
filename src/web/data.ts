@@ -59,6 +59,8 @@ import {
   unsentChat
 } from "../assistant/views.ts";
 import { hasWelshPlugin } from "../assistant/welsh.ts";
+import { type BulkScanEditorView, bulkScanEditorView } from "../bulk-scan/editor-view.ts";
+import { listSpecs, readSpec, type SpecSummary } from "../bulk-scan/spec-store.ts";
 import { findChannel, listChannels } from "../channels/store.ts";
 import { credentialBackend } from "../credentials/backend.ts";
 import { DEFAULT_CLAUDE_MD } from "../credentials/claude-md.ts";
@@ -679,4 +681,15 @@ export async function sharedChats(viewer: Identity): Promise<SharedChats> {
     conversationsForkableBy(prisma, viewer.oid)
   ]);
   return { given, received, offered, forkable };
+}
+
+/** The viewer's own Bulk Scan form specs, newest first. */
+export async function bulkScanSpecs(viewer: Identity): Promise<SpecSummary[]> {
+  return await listSpecs(prisma, { actorOid: viewer.oid, ownerOid: viewer.oid });
+}
+
+/** One of the viewer's specs at a version, or its latest, with everything the editor draws from it; `undefined` when it is not theirs. */
+export async function bulkScanEditor(viewer: Identity, id: string, version?: number): Promise<BulkScanEditorView | undefined> {
+  const record = await readSpec(prisma, { actorOid: viewer.oid, ownerOid: viewer.oid }, id, version);
+  return record ? bulkScanEditorView(record) : undefined;
 }

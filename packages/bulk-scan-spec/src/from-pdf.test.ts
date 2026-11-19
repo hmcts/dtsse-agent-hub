@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { makePdf, SAMPLE_FORM } from "./__fixtures__/make-pdf.ts";
 import { fromPdf } from "./from-pdf.ts";
@@ -63,5 +64,14 @@ describe("fromPdf on a flat form", () => {
     expect(result.needsReview?.reason).toBe("the PDF has no AcroForm fields");
     expect(result.needsReview?.promptText).toContain("Section 1 - Your details");
     expect(result.needsReview?.promptText).toContain("(no text layer: read the page image)");
+  });
+});
+
+describe("fromPdf on bytes", () => {
+  it("should draft the same spec from the PDF's bytes as from its path", async () => {
+    const path = await makePdf("sample", SAMPLE_FORM);
+    const fromPath = await fromPdf({ pdf: path, houseKeys: HOUSE });
+    const fromBytes = await fromPdf({ pdf: path, bytes: new Uint8Array(readFileSync(path)), houseKeys: HOUSE });
+    expect(fromBytes.bundle).toEqual(fromPath.bundle);
   });
 });

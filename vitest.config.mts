@@ -91,6 +91,8 @@ export default defineConfig({
         "src/assistant/search-store.ts",
         "src/assistant/session-store.ts",
         "src/assistant/template-store.ts",
+        "src/bulk-scan/spec-store.ts",
+        "src/bulk-scan/load.ts",
         "src/assistant/upload-store.ts",
         "src/assistant/upload-sweep.ts",
         "src/assistant/views.ts",
