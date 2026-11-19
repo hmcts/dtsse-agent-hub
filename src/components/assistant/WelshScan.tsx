@@ -12,6 +12,7 @@ import {
   isBusy,
   type JobState,
   JobStatus,
+  NextTask,
   OutLink,
   PRIMARY,
   plural,
@@ -19,6 +20,7 @@ import {
   repoName,
   Step,
   ToolMessage,
+  useStepsTotal,
   useWelshJob
 } from "@/components/assistant/WelshParts";
 import type { WelshClient } from "@/components/assistant/welshClient";
@@ -50,12 +52,17 @@ export function WelshScan({
   const done = doneResult(scan.state);
   const view = done ? scanView(done.result) : null;
   const choices = Object.entries(picked).map(([ref, row_id]) => ({ ref, row_id }));
+  const steps = numberSteps(view);
+  const ready = view ? view.fromCatalogue + choices.length : 0;
+  // Known once the check has run: the steps after it are the ones it found something for, and the last puts the Welsh
+  // into the code only when there is some to put in. A service with no repos stops at its second step.
+  useStepsTotal(repos.length === 0 ? 2 : view === null ? null : ready > 0 ? steps.apply : steps.apply - 1);
 
   if (repos.length === 0) {
     return (
-      <Step n={2} title="Repo">
+      <Step n={2} title="Which part of the service">
         <p className="text-[13px] text-asst-warn">
-          <span>No repos are set up for this service yet. A developer adds them to </span>
+          <span>No code repositories are set up for this service yet. A developer adds them to </span>
           <span className="font-plex-mono">welsh/config.yaml</span>
           <span> in the service's own repo.</span>
         </p>
@@ -85,9 +92,6 @@ export function WelshScan({
     fresh();
     scan.reset();
   };
-  const steps = numberSteps(view);
-  const ready = view ? view.fromCatalogue + choices.length : 0;
-
   return (
     <>
       <CheckStep
@@ -171,7 +175,7 @@ function CheckStep({
           {view ? "Check again" : "Find missing Welsh"}
         </button>
       </div>
-      <JobStatus state={state} working="Looking through the code. This can take a few minutes…" />
+      <JobStatus busy={busy} state={state} working="Looking through the code. This can take a few minutes…" />
       {view ? <Found view={view} result={result} skipsStaffPages={skipsStaffPages} /> : null}
     </Step>
   );
@@ -340,7 +344,7 @@ function SendStep({
           </button>
         </div>
       )}
-      <JobStatus state={request} working="Making the spreadsheet…" />
+      <JobStatus busy={busy} state={request} working="Making the spreadsheet…" />
       {olderPod ? (
         <>
           <p className="text-[13px]">
@@ -351,11 +355,19 @@ function SendStep({
       ) : null}
       {made ? (
         <>
-          <p className="text-[13px]">
-            {"Download this spreadsheet and send it to the Welsh Language Unit."}
-            {" When it comes back, choose “The Welsh unit sent translations back” on the first page."}
-          </p>
-          <Downloads files={made.files} label="Spreadsheet for the Welsh Language Unit" />
+          <Downloads
+            files={made.files}
+            label="Spreadsheet for the Welsh Language Unit"
+            next="Download this spreadsheet and email it to the Welsh Language Unit. They fill in the Welsh column and send it back."
+          />
+          {/* Only once nothing here is still running: moving on closes this task, and a job closed mid-way is lost. */}
+          {busy ? null : (
+            <NextTask
+              task="return"
+              title="The Welsh unit sent translations back"
+              why="When their spreadsheet comes back, check it here and add it to the catalogue. The service stays chosen."
+            />
+          )}
         </>
       ) : null}
       {keepable.length > 0 && !kept ? (
@@ -376,7 +388,7 @@ function SendStep({
           onConfirm={() => onKeep(keepable)}
         />
       ) : null}
-      <JobStatus state={keep} working="Opening the pull request…" />
+      <JobStatus busy={busy} state={keep} working="Opening the pull request…" />
       {kept ? <KeptLink pr={keepView(kept.result).pr} /> : null}
     </Step>
   );

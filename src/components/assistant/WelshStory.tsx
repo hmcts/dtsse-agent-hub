@@ -127,7 +127,7 @@ function StoryStep({
           Find its English
         </button>
       </form>
-      <JobStatus state={state} working="Reading the story…" />
+      <JobStatus busy={busy} state={state} working="Reading the story…" />
       {candidates ? (
         <p className="text-[13px]">
           <OutLink url={candidates.url}>{storyKey}</OutLink>
@@ -218,7 +218,7 @@ function TableStep({
   const unchosen = table?.rows.some((r) => r.state === "ambiguous") ?? false;
   return (
     <Step n={4} title="Check the Welsh table" done={table?.verified === true && !unchosen}>
-      <JobStatus state={state} working="Looking the English up in the catalogue…" />
+      <JobStatus busy={busy} state={state} working="Looking the English up in the catalogue…" />
       {table ? (
         <>
           <WelshTable storyKey={storyKey} rows={table.rows} picked={picked} onPick={onPick} />
@@ -339,7 +339,7 @@ function WriteStep({
           onConfirm={onWrite}
         />
       )}
-      <JobStatus state={state} working="Updating the story…" />
+      <JobStatus busy={busy} state={state} working="Updating the story…" />
       {written ? (
         <div className="flex flex-col gap-1 text-[13px]">
           <p>
@@ -351,7 +351,11 @@ function WriteStep({
                 : ". Every string has approved Welsh."}
             </span>
           </p>
-          <Downloads files={written.files} label="Spreadsheet for the Welsh Language Unit" />
+          <Downloads
+            files={written.files}
+            label="Spreadsheet for the Welsh Language Unit"
+            next="These are the strings with no approved Welsh yet. Email the spreadsheet to the Welsh Language Unit, then add what they send back with “The Welsh unit sent translations back”."
+          />
         </div>
       ) : null}
     </Step>

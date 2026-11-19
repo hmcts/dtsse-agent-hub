@@ -55,7 +55,7 @@ export function WelshApply({ n, product, repo, fileId, choices, start, before, c
           <p className="mt-1 text-xs text-asst-muted">You see exactly what would change first. Nothing changes until you say so.</p>
         </div>
       ) : null}
-      <JobStatus state={preview.state} working="Working out the changes. On a large repo this takes a few minutes…" />
+      <JobStatus busy={busy} state={preview.state} working="Working out the changes. On a large repo this takes a few minutes…" />
       {shown ? <Preview shown={shown} result={previewed?.result ?? {}} /> : null}
       {shown && shown.applied > 0 && !pr ? (
         <Confirm
@@ -72,7 +72,7 @@ export function WelshApply({ n, product, repo, fileId, choices, start, before, c
           onConfirm={() => void create.run({ kind: "apply", product, args })}
         />
       ) : null}
-      <JobStatus state={create.state} working="Opening the pull request…" />
+      <JobStatus busy={busy} state={create.state} working="Opening the pull request…" />
       {pr ? <Opened pr={pr} /> : null}
     </Step>
   );
