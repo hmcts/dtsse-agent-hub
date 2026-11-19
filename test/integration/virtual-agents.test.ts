@@ -294,7 +294,22 @@ describe("starting the person's assistant from the page", () => {
 
     await prisma.virtualAgent.update({ where: { id }, data: { status: "failed" } });
     expect(await actions.startAssistant()).toEqual({ ok: true });
-    expect((await row(id)).status).toBe("provisioning");
+    expect((await row(id)).status).toBe("requested");
+  });
+
+  it("should try a chat's own pod again from the chat, and say so when the chat has gone", async () => {
+    actAs("alice");
+    await started(ALICE, "assistant");
+    const { id: second } = await started(ALICE, "second");
+    await prisma.virtualAgent.update({ where: { id: second }, data: { status: "failed" } });
+    const conversation = await prisma.assistantConversation.create({ data: { ownerOid: ALICE.oid, virtualAgentId: second }, select: { id: true } });
+
+    expect(await actions.startAssistant({ conversationId: conversation.id })).toEqual({ ok: true });
+    expect((await row(second)).status).toBe("requested");
+    expect(await actions.startAssistant({ conversationId: "00000000-0000-4000-8000-000000000000" })).toEqual({
+      ok: false,
+      error: "That chat no longer exists."
+    });
   });
 });
 

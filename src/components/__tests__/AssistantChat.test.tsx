@@ -3285,7 +3285,8 @@ describe("ChatView on a pod that could not start", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     });
-    expect(startAssistant).toHaveBeenCalledTimes(1);
+    // This chat's own pod, which is not always the person's first virtual agent.
+    expect(startAssistant).toHaveBeenCalledWith({ conversationId: CONVERSATION });
   });
 
   it("should say why Try again did not work, refused or unreachable", async () => {

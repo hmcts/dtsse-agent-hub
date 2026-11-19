@@ -1,7 +1,8 @@
 import type { PodClaims } from "../agents/client-features.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import type { ModelRoute } from "../viewer/identity.ts";
-import { createVirtualAgent, findVirtualAgent, restartVirtualAgent, setDesired, type VirtualAgentRow } from "../virtual-agents/store.ts";
+import { retryVirtualAgent } from "../virtual-agents/start.ts";
+import { createVirtualAgent, findVirtualAgent, setDesired, type VirtualAgentRow } from "../virtual-agents/store.ts";
 
 const ASSISTANT_NAME = "assistant";
 
@@ -60,10 +61,9 @@ export async function ensureAssistantWithClaims(
   const existing = await findAssistantWithClaims(prisma, owner.oid);
   if (existing !== undefined) {
     const { assistant, claims } = existing;
-    // As it is: a page being read is not the person asking for their assistant. A stopped one stays stopped until they
-    // send, focus the message box or press Start, each of which goes through `wakeAssistant`. Starting it here meant
-    // an open tab answered every stop the sweep made with a restart, and a pod torn down and built again every idle
-    // period through the night.
+    // As it is: a page being read is not the person asking for their assistant, and an open tab is read again on
+    // every change to it, the sweep's stops included. A stopped one stays stopped until they send, focus the message
+    // box or press Start, each of which goes through `wakeAssistant`.
     return { assistant, claims };
   }
   try {
@@ -95,8 +95,7 @@ export async function wakeAssistant(
     await setDesired(prisma, ownerOid, assistant.id, "running", now);
     return "started";
   }
-  if (assistant.desired === "running" && assistant.status === "failed") {
-    await restartVirtualAgent(prisma, ownerOid, assistant.id, "starting again after it could not start", now);
+  if (assistant.desired === "running" && assistant.status === "failed" && (await retryVirtualAgent(prisma, ownerOid, assistant.id, now))) {
     return "restarted";
   }
   return "already";

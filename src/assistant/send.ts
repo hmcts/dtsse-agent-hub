@@ -4,7 +4,7 @@ import type { NewDirect } from "../messages/store.ts";
 import type { PrismaClient } from "../store/prisma.ts";
 import type { ConversationRow } from "./conversation-row.ts";
 import { conversationAgent, touchConversation } from "./conversation-store.ts";
-import { requestWake } from "./session-store.ts";
+import { requestWake, wakeConversationPod } from "./session-store.ts";
 import { needsWake } from "./wake.ts";
 
 /**
@@ -36,8 +36,14 @@ export async function sendToConversation(
   const sent = await directAsPerson(prisma, senderOid, agentId, message.body, message.alongside);
   await touchConversation(prisma, conversation, message.title);
   const agent = await prisma.agent.findUnique({ where: { id: agentId }, select: { status: true } });
-  if (conversation.wakeRequestedAt === null && needsWake(agent?.status, conversation.sessionState)) {
-    await requestWake(prisma, conversation);
+  if (needsWake(agent?.status, conversation.sessionState)) {
+    // One wake at a time is asked of the session, but the pod is brought back however many have been: a message to a
+    // stopped or failed pod with a wake already pending would otherwise wait on a pod nothing starts.
+    if (conversation.wakeRequestedAt === null) {
+      await requestWake(prisma, conversation);
+    } else {
+      await wakeConversationPod(prisma, conversation);
+    }
   }
   const loaded = await loadThreadMessage(prisma, BigInt(sent.id));
   return loaded?.message ?? { ...sent, delivery: "queued" };

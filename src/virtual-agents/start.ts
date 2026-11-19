@@ -72,3 +72,28 @@ export async function autoStartAssistants(db: Database, time: string, day: strin
     now
   );
 }
+
+/**
+ * Tries again an agent of `ownerOid`'s that is meant to be running and failed: back to `requested` with a fresh
+ * generation, so an orchestrator claims and applies it as it would a start, and with none of the failed pod's token,
+ * ports, memory report or client claim. `requested` rather than `provisioning`, because nothing is scheduled until an
+ * orchestrator takes it — a failure that was nobody picking it up would otherwise read as a pod on its way. Whether it
+ * was retried.
+ */
+export async function retryVirtualAgent(db: Database, ownerOid: string, id: string, now: Date): Promise<boolean> {
+  const retried = await db.$queryRaw<{ id: string; owner_oid: string }[]>`
+    UPDATE virtual_agent
+       SET started_at = ${now}, stop_reason = NULL,
+           memory_limit_bytes = NULL, memory_current_bytes = NULL, memory_peak_bytes = NULL, memory_anon_bytes = NULL, memory_reported_at = NULL,
+           client_features = NULL, apply_failures = 0, exposed_ports = '{}', local_only_ports = '{}',
+           launch_token_hash = NULL, launch_token_issued_at = NULL,
+           status = 'requested', status_detail = NULL, status_changed_at = ${now},
+           generation = generation + 1, pod_generation = pod_generation + 1, updated_at = ${now}
+     WHERE id = ${id}::uuid AND owner_oid = ${ownerOid} AND desired = 'running' AND status = 'failed'
+    RETURNING id::text AS id, owner_oid
+  `;
+  for (const row of retried) {
+    await announce(db, row.id, row.owner_oid);
+  }
+  return retried.length > 0;
+}

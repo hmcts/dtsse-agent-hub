@@ -196,7 +196,7 @@ export async function acceptFork(prisma: PrismaClient, viewer: { oid: string; mo
   const earlierHidden = cut || own.earlierHidden || (earlier?.earlierHidden ?? false);
   const assistant = await ensureAssistant(prisma, viewer);
   // Taking a copy is the person asking to carry on with it, so their assistant is started for it, warming while the
-  // copy opens, as it was before a page being read stopped starting it.
+  // copy opens.
   await wakeAssistant(prisma, viewer.oid, assistant);
   return await prisma.$transaction(async (tx) => {
     // The offer's row is what two tabs taking the copy at once queue on, so one makes it and the other finds it. A

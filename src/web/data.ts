@@ -331,8 +331,8 @@ function pluginSettings(assistant: { plugins: string[] }): AssistantHome["plugin
 }
 
 /**
- * Opening the Assistant: the viewer's assistant, created on their first visit and started if it has stopped, so it is
- * warming up while they sign in or type; what it still needs from them; and their conversations.
+ * Opening the Assistant: the viewer's assistant, created on their first visit and otherwise as it is, stopped or not,
+ * since reading a page starts nothing; what it still needs from them; and their conversations.
  */
 export async function openAssistant(viewer: Viewer): Promise<AssistantHome> {
   const { assistant, claims } = await ensureAssistantWithClaims(prisma, viewer);

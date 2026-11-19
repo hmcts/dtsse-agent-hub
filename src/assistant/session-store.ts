@@ -34,10 +34,24 @@ export async function requestWake(prisma: PrismaClient, conversation: Conversati
     `;
     await announce(tx, conversation);
   });
+  await wakeConversationPod(prisma, conversation, now);
+}
+
+/**
+ * Brings back the pod a conversation runs on, stopped or failed, for something the person did in it: a message, a
+ * focus of its box, or Try again. A failed pod is otherwise never tried again, since it is still meant to be running.
+ * Whether a wake is already pending makes no difference: one asked for before a stop or a failure has nothing to wake.
+ */
+export async function wakeConversationPod(
+  prisma: PrismaClient,
+  conversation: Pick<ConversationRow, "virtualAgentId" | "ownerOid">,
+  now: Date = new Date()
+): Promise<void> {
+  if (conversation.virtualAgentId === null) {
+    return;
+  }
   const assistant = await findVirtualAgent(prisma, conversation.virtualAgentId);
   if (assistant !== undefined) {
-    // Stopped, or failed: a message is the person asking for it, and a failed pod is otherwise never tried again, which
-    // left a message to one waiting on "waking" for good.
     await wakeAssistant(prisma, conversation.ownerOid, assistant, now);
   }
 }

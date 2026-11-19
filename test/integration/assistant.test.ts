@@ -1137,7 +1137,18 @@ describe("the chat gate", () => {
 
       expect(await actions.sendAssistantMessage({ conversationId: id, body: "are you there" })).toMatchObject({ ok: true });
 
-      expect(await prisma.virtualAgent.findUniqueOrThrow({ where: { id: assistant } })).toMatchObject({ desired: "running", status: "provisioning" });
+      // Back in the queue for an orchestrator to claim, rather than said to be scheduled when nothing yet is.
+      expect(await prisma.virtualAgent.findUniqueOrThrow({ where: { id: assistant } })).toMatchObject({ desired: "running", status: "requested" });
+    });
+
+    it("should restart a pod that could not start when the person sends to it with a wake already pending", async () => {
+      const { id, assistant } = await offlineChat();
+      await prisma.assistantConversation.update({ where: { id }, data: { wakeRequestedAt: new Date(Date.now() - 60_000) } });
+      await prisma.virtualAgent.update({ where: { id: assistant }, data: { status: "failed" } });
+
+      await actions.sendAssistantMessage({ conversationId: id, body: "still there?" });
+
+      expect((await prisma.virtualAgent.findUniqueOrThrow({ where: { id: assistant } })).status).toBe("requested");
     });
 
     it("should say a chat's pod could not start only while it is meant to be running", async () => {
@@ -1159,16 +1170,17 @@ describe("the chat gate", () => {
       expect((await prisma.virtualAgent.findUniqueOrThrow({ where: { id: assistant } })).desired).toBe("running");
     });
 
-    it("should forget the sessions and wakes of a chat when its assistant is stopped", async () => {
+    it("should forget a chat's sessions when its assistant is stopped, and keep its wake for the message waiting on it", async () => {
       const { id, assistant } = await offlineChat();
-      await prisma.assistantConversation.update({ where: { id }, data: { wakeRequestedAt: new Date(), sessionState: "queued", sessionDetail: "two ahead" } });
+      const asked = new Date(Date.now() - 60_000);
+      await prisma.assistantConversation.update({ where: { id }, data: { wakeRequestedAt: asked, sessionState: "queued", sessionDetail: "two ahead" } });
 
       await setDesired(prisma, ALICE.oid, assistant, "stopped");
 
       expect(
         await prisma.assistantConversation.findUniqueOrThrow({ where: { id }, select: { wakeRequestedAt: true, sessionState: true, sessionDetail: true } })
       ).toEqual({
-        wakeRequestedAt: null,
+        wakeRequestedAt: asked,
         sessionState: null,
         sessionDetail: null
       });
