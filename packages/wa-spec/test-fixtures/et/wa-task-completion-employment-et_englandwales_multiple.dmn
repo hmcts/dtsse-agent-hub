@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="https://www.omg.org/spec/DMN/20191111/MODEL/" xmlns:dmndi="https://www.omg.org/spec/DMN/20191111/DMNDI/" xmlns:dc="http://www.omg.org/spec/DMN/20180521/DC/" xmlns:biodi="http://bpmn.io/schema/dmn/biodi/2.0" xmlns:camunda="http://camunda.org/schema/1.0/dmn" id="wa-completion-definition-et_englandwales_multiple" name="DRD" namespace="http://camunda.org/schema/1.0/dmn" exporter="Camunda Modeler" exporterVersion="5.24.0">
+  <decision id="wa-task-completion-employment-et_englandwales_multiple" name="ET Multiple Task completion DMN" camunda:historyTimeToLive="P30D">
+    <decisionTable id="DecisionTable_01re27m" hitPolicy="COLLECT">
+      <input id="eventId" label="Event ID" biodi:width="392">
+        <inputExpression id="LiteralExpression_1ngg489" typeRef="string">
+          <text>eventId</text>
+        </inputExpression>
+      </input>
+      <output id="Output_1" label="Task Type" name="taskType" typeRef="string" biodi:width="341" />
+      <output id="OutputClause_1mldd9e" label="Completion Mode" name="completionMode" typeRef="string" />
+      <rule id="DecisionRule_1jameda">
+        <inputEntry id="UnaryTests_0q8217i">
+          <text>"replyToReferral",
+"closeReferral"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_1ku023r">
+          <text>"ReviewReferralAdminMultiple"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_15g3yjk">
+          <text>"Auto"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_00owiss">
+        <inputEntry id="UnaryTests_0l84new">
+          <text>"replyToReferral",
+"closeReferral"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_0tdmwpw">
+          <text>"ReviewReferralJudiciaryMultiple"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_0mv4xsp">
+          <text>"Auto"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_0bbou0i">
+        <inputEntry id="UnaryTests_0g58wwl">
+          <text>"replyToReferral",
+"closeReferral"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_1nz644f">
+          <text>"ReviewReferralLegalOpsMultiple"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1pzhzlu">
+          <text>"Auto"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_1dp6qo6">
+        <inputEntry id="UnaryTests_0d9mz14">
+          <text>"replyToReferral",
+"closeReferral"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_0eboqai">
+          <text>"MultiplesReviewReferralResponseLegalOps"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_0f8zgv5">
+          <text>"Auto"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_1dvznvs">
+        <inputEntry id="UnaryTests_1h097zq">
+          <text>"replyToReferral",
+"closeReferral"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_0roa7pi">
+          <text>"ReviewReferralResponseJudiciaryMultiple"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_15aochv">
+          <text>"Auto"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_0nad6ek">
+        <inputEntry id="UnaryTests_14zi0bn">
+          <text>"replyToReferral",
+"closeReferral"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_1axmkid">
+          <text>"ReviewReferralResponseAdminMultiple"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_0dq4o4q">
+          <text>"Auto"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_0itovx4">
+        <description>Left empty so event can be triggered without a task</description>
+        <inputEntry id="UnaryTests_12maaf5">
+          <text>"replyToReferral",
+"closeReferral"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_1h91hdk">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_0lujj8y">
+          <text></text>
+        </outputEntry>
+      </rule>
+    </decisionTable>
+  </decision>
+  <dmndi:DMNDI>
+    <dmndi:DMNDiagram>
+      <dmndi:DMNShape dmnElementRef="wa-task-completion-employment-et_englandwales_multiple">
+        <dc:Bounds height="80" width="180" x="160" y="80" />
+      </dmndi:DMNShape>
+    </dmndi:DMNDiagram>
+  </dmndi:DMNDI>
+</definitions>

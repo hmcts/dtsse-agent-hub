@@ -1,36 +1,21 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { dirname, join, parse } from "node:path";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { diffDocuments } from "./diff.ts";
 import { parseDmn } from "./dmn-model.ts";
 import { generateAll } from "./generator.ts";
 import { importDmns } from "./importer.ts";
-import { parseSpec, stringifySpec } from "./spec-io.ts";
+import { parseLayout, parseSpec, stringifyLayout, stringifySpec } from "./spec-io.ts";
 import { taskRows } from "./task-view.ts";
 
-const RESOURCES = "apps/et/et-wa-task-configuration/src/main/resources";
+const resources = fileURLToPath(new URL("../test-fixtures/et", import.meta.url));
 
-function findEtResources(): string | undefined {
-  if (process.env.ET_WA_TASK_CONFIGURATION_RESOURCES) {
-    return process.env.ET_WA_TASK_CONFIGURATION_RESOURCES;
-  }
-  let dir = process.cwd();
-  while (dir !== parse(dir).root) {
-    if (existsSync(join(dir, RESOURCES))) {
-      return join(dir, RESOURCES);
-    }
-    dir = dirname(dir);
-  }
-  return undefined;
-}
-
-const resources = findEtResources();
-
-describe.skipIf(resources === undefined)("ET round trip", () => {
-  const files = readdirSync(resources as string)
+describe("ET round trip", () => {
+  const files = readdirSync(resources)
     .filter((name) => name.startsWith("wa-task-") && name.endsWith(".dmn"))
-    .map((name) => ({ name, xml: readFileSync(join(resources as string, name), "utf8") }));
-  const { spec, report } = importDmns(files, { jurisdiction: "EMPLOYMENT" });
+    .map((name) => ({ name, xml: readFileSync(join(resources, name), "utf8") }));
+  const { spec, layout, report } = importDmns(files, { jurisdiction: "EMPLOYMENT" });
 
   it("should import all 24 DMNs into one spec of four case types when the files are ET's", () => {
     expect(files).toHaveLength(24);
@@ -46,13 +31,21 @@ describe.skipIf(resources === undefined)("ET round trip", () => {
   });
 
   it("should regenerate DMNs with no semantic difference from the originals when generated from the spec", () => {
-    const regenerated = generateAll(parseSpec(stringifySpec(spec)));
+    const regenerated = generateAll(parseSpec(stringifySpec(spec)), parseLayout(stringifyLayout(layout)));
     expect(regenerated.map((f) => f.fileName).sort()).toEqual(files.map((f) => f.name).sort());
     const differences = regenerated.flatMap((generated) => {
       const original = files.find((f) => f.name === generated.fileName);
       return diffDocuments(generated.fileName, parseDmn(original?.xml ?? ""), parseDmn(generated.xml));
     });
     expect(differences).toEqual([]);
+  });
+
+  it("should regenerate every original file with its ids, widths and diagram when the layout is applied", () => {
+    const regenerated = generateAll(parseSpec(stringifySpec(spec)), parseLayout(stringifyLayout(layout)));
+    for (const generated of regenerated) {
+      const original = files.find((f) => f.name === generated.fileName);
+      expect(parseDmn(generated.xml), generated.fileName).toEqual(parseDmn(original?.xml ?? ""));
+    }
   });
 
   it("should keep every column the tests read by variable and name in order when regenerating", () => {

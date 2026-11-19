@@ -1,5 +1,6 @@
-import { type DmnDecision, type DmnDocument, type DmnInput, type DmnOutput, type DmnRule, writeDmn } from "./dmn-model.ts";
+import { type DmnDecision, type DmnDocument, type DmnInput, type DmnOutput, type DmnRule, ncName, writeDmn } from "./dmn-model.ts";
 import { renderCell, renderExpr } from "./feel.ts";
+import { applyLayout, type Layout, layoutKey } from "./layout.ts";
 import { type Decision, type Expr, KINDS, type Kind, type Spec } from "./schema.ts";
 
 export interface GeneratedFile {
@@ -27,12 +28,11 @@ export function decisionKey(spec: Spec, kind: Kind, caseType: string): string {
   return `wa-task-${KIND_SLUG[kind]}-${spec.service.slug}-${caseType}`;
 }
 
-function helperId(name: string): string {
-  return `Decision_${name}`;
-}
-
-/** The DMN document one kind of decision takes for one case type. */
-export function generateDocument(spec: Spec, kind: Kind, caseType: string): DmnDocument | undefined {
+/**
+ * The DMN document one kind of decision takes for one case type. `layout` supplies the ids, widths and diagram a spec
+ * imported from DMNs came with; whatever it lacks is generated.
+ */
+export function generateDocument(spec: Spec, kind: Kind, caseType: string, layout?: Layout): DmnDocument | undefined {
   const decision: Decision | undefined = spec.decisions[kind];
   if (!decision || !spec.caseTypes.some((c) => c.id === caseType)) {
     return undefined;
@@ -69,7 +69,9 @@ export function generateDocument(spec: Spec, kind: Kind, caseType: string): DmnD
       outputs: outputs.map((column) => renderExpr(row.returns?.[column.name]))
     }));
 
+  const fileLayout = layout?.files[layoutKey(kind, caseType)];
   const helpers = (decision.helpers ?? []).filter((h) => applies(h.only, caseType));
+  const helperId = (name: string): string => fileLayout?.decisions[name]?.id ?? ncName(`Decision_${name}`);
   const requiresOf = (from: string): string[] =>
     (decision.dependencies ?? []).filter((d) => d.decision === from && applies(d.only, caseType)).map((d) => helperId(d.requires));
   const mainId = decisionKey(spec, kind, caseType);
@@ -88,25 +90,31 @@ export function generateDocument(spec: Spec, kind: Kind, caseType: string): DmnD
     const helperTtl = overridden(override?.historyTimeToLive, helper.historyTimeToLive);
     const typeRef = overridden(override?.typeRef, helper.typeRef);
     const language = overridden(override?.language, helper.language);
+    const hasVariable = (override?.variable ?? helper.variable) !== false;
     return {
       id: helperId(helper.name),
       name: helper.name,
       ...(helperTtl === undefined ? {} : { historyTimeToLive: helperTtl }),
-      variable: { name: helper.name, ...(typeRef === undefined ? {} : { typeRef }) },
+      ...(hasVariable ? { variable: { name: helper.name, ...(typeRef === undefined ? {} : { typeRef }) } } : {}),
       requires: requiresOf(helper.name),
       literal: { text: renderExpr(override?.expression ?? helper.expression), ...(language === undefined ? {} : { expressionLanguage: language }) }
     };
   });
-  const definitionId = kind === "task-types" ? `wa-task-types-definition-${caseType}` : `wa-${kind}-definition-${caseType}`;
-  return { id: definitionId, name: "DRD", decisions: [main, ...helperDecisions] };
+  const definitionId = ncName(kind === "task-types" ? `wa-task-types-definition-${caseType}` : `wa-${kind}-definition-${caseType}`);
+  const document: DmnDocument = { id: fileLayout?.id ?? definitionId, name: "DRD", decisions: [main, ...helperDecisions] };
+  return applyLayout(
+    document,
+    fileLayout,
+    inputs.map((column) => column.key)
+  );
 }
 
 /** Every DMN the spec describes: each kind it defines, for each case type. */
-export function generateAll(spec: Spec): GeneratedFile[] {
+export function generateAll(spec: Spec, layout?: Layout): GeneratedFile[] {
   const files: GeneratedFile[] = [];
   for (const kind of KINDS) {
     for (const { id: caseType } of spec.caseTypes) {
-      const document = generateDocument(spec, kind, caseType);
+      const document = generateDocument(spec, kind, caseType, layout);
       if (document) {
         files.push({ fileName: `${decisionKey(spec, kind, caseType)}.dmn`, kind, caseType, xml: writeDmn(document) });
       }

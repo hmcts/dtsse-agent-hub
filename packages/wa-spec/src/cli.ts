@@ -1,17 +1,19 @@
-import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { diffPaths, renderDifferences } from "./diff.ts";
 import { generateAll } from "./generator.ts";
 import { importDmns, renderReport } from "./importer.ts";
-import { parseSpec, stringifySpec } from "./spec-io.ts";
+import { layoutPathFor, parseLayout, parseSpec, stringifyLayout, stringifySpec } from "./spec-io.ts";
 import { renderTaskRows, taskRows } from "./task-view.ts";
 
 const USAGE = `wa-spec: Work Allocation configuration spec
 
   wa-spec import <dmn-dir> -o <spec.yaml> [--report <report.md>] [--jurisdiction J] [--service-code C] [--display-name N]
-  wa-spec generate <spec.yaml> -o <dir>
-  wa-spec diff <a> <b> [--ignore-rule-order]     two DMN files or two directories; exits 1 when they differ
+                                                 also writes the ids and layout to <spec>.layout.yaml
+  wa-spec generate <spec.yaml> -o <dir>          uses <spec>.layout.yaml when it exists
+  wa-spec diff <a> <b> [--ignore-rule-order]     two DMN files or two directories, or a file and a directory holding
+                                                 a file of the same name; exits 1 when they differ
   wa-spec show <spec.yaml> <taskId>              the rows of every kind that concern one task
 `;
 
@@ -42,13 +44,14 @@ function main(argv: string[]): number {
     const files = readdirSync(dir)
       .filter((name) => name.startsWith("wa-task-") && name.endsWith(".dmn"))
       .map((name) => ({ name, xml: readFileSync(join(dir, name), "utf8") }));
-    const { spec, report } = importDmns(files, {
+    const { spec, layout, report } = importDmns(files, {
       jurisdiction: values.jurisdiction,
       serviceCode: values["service-code"],
       displayName: values["display-name"]
     });
     mkdirSync(dirname(values.output), { recursive: true });
     writeFileSync(values.output, stringifySpec(spec));
+    writeFileSync(layoutPathFor(values.output), stringifyLayout(layout));
     const markdown = renderReport(report);
     if (values.report) {
       mkdirSync(dirname(values.report), { recursive: true });
@@ -64,7 +67,8 @@ function main(argv: string[]): number {
       fail(USAGE);
     }
     mkdirSync(values.output, { recursive: true });
-    const files = generateAll(parseSpec(readFileSync(specPath, "utf8")));
+    const layoutPath = layoutPathFor(specPath);
+    const files = generateAll(parseSpec(readFileSync(specPath, "utf8")), existsSync(layoutPath) ? parseLayout(readFileSync(layoutPath, "utf8")) : undefined);
     for (const file of files) {
       writeFileSync(join(values.output, file.fileName), file.xml);
     }
@@ -76,8 +80,22 @@ function main(argv: string[]): number {
     if (!a || !b) {
       fail(USAGE);
     }
-    const side = (path: string) => (statSync(path).isDirectory() ? { dir: path } : { dir: dirname(path), file: basename(path) });
-    const differences = diffPaths(side(a), side(b), { ignoreRuleOrder: values["ignore-rule-order"] });
+    const isDir = (path: string) => statSync(path).isDirectory();
+    const side = (path: string, counterpart: string) => {
+      if (!isDir(path)) {
+        return { dir: dirname(path), file: basename(path) };
+      }
+      return isDir(counterpart) ? { dir: path } : { dir: path, file: basename(counterpart) };
+    };
+    for (const [file, other] of [
+      [a, b],
+      [b, a]
+    ] as const) {
+      if (!isDir(file) && isDir(other) && !existsSync(join(other, basename(file)))) {
+        fail(`${other} has no file named ${basename(file)} to compare ${file} with`);
+      }
+    }
+    const differences = diffPaths(side(a, b), side(b, a), { ignoreRuleOrder: values["ignore-rule-order"] });
     if (differences.length === 0) {
       process.stdout.write("no differences\n");
       return 0;

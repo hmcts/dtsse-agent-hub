@@ -1,0 +1,391 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="https://www.omg.org/spec/DMN/20191111/MODEL/" xmlns:dmndi="https://www.omg.org/spec/DMN/20191111/DMNDI/" xmlns:dc="http://www.omg.org/spec/DMN/20180521/DC/" xmlns:biodi="http://bpmn.io/schema/dmn/biodi/2.0" xmlns:camunda="http://camunda.org/schema/1.0/dmn" id="wa-cancellation-definition-et_englandwales" name="DRD" namespace="http://camunda.org/schema/1.0/dmn" exporter="Camunda Modeler" exporterVersion="5.50.1">
+  <decision id="wa-task-cancellation-employment-et_englandwales" name="ET Task cancellation DMN" camunda:historyTimeToLive="P30D">
+    <decisionTable id="DecisionTable_0z3jx1g" hitPolicy="COLLECT">
+      <input id="Input_1" label="From State">
+        <inputExpression id="InputExpression_1" typeRef="string">
+          <text>fromState</text>
+        </inputExpression>
+      </input>
+      <input id="InputClause_0ain215" label="Event" biodi:width="265">
+        <inputExpression id="LiteralExpression_0h2l2zj" typeRef="string">
+          <text>event</text>
+        </inputExpression>
+      </input>
+      <input id="InputClause_0bomy63" label="State">
+        <inputExpression id="LiteralExpression_1g5glfi" typeRef="string">
+          <text>state</text>
+        </inputExpression>
+      </input>
+      <output id="OutputClause_18zgoaj" label="Action" name="action" typeRef="string" />
+      <output id="OutputClause_0tu8bqp" label="Warning Code" name="warningCode" typeRef="string" />
+      <output id="OutputClause_1kfc3jv" label="Warning Text" name="warningText" typeRef="string" />
+      <output id="OutputClause_0dqzted" label="Process Categories Identifiers" name="processCategories" typeRef="string" biodi:width="277" />
+      <rule id="DecisionRule_0623eaq">
+        <inputEntry id="UnaryTests_0pawl5b">
+          <text></text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_0puirp2">
+          <text>"disposeCase", "rollbackMigrateCase","caseTransferECM"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_1nrvqbg">
+          <text></text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_1ucqosp">
+          <text>"Cancel"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1uyvgku">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1965v3p">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1lsdk2d">
+          <text>"Vetting"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_1pgnaox">
+        <inputEntry id="UnaryTests_02udgat">
+          <text></text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_1woxl8e">
+          <text>"disposeCase", "rollbackMigrateCase","caseTransferECM"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_1lt298h">
+          <text></text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_15v2291">
+          <text>"Cancel"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1acxajd">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_0788pov">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1p7t7rc">
+          <text>"Processing"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_0w0vpl4">
+        <inputEntry id="UnaryTests_11rsnao">
+          <text></text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_179f1yj">
+          <text>"disposeCase", "rollbackMigrateCase","caseTransferECM"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_0qf1qt9">
+          <text></text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_1r5jmrq">
+          <text>"Cancel"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_187kmua">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_06sb6pg">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1ac49sn">
+          <text>"Hearing"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_1j0ikqt">
+        <inputEntry id="UnaryTests_019v0hk">
+          <text></text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_0neewht">
+          <text>"disposeCase", "rollbackMigrateCase","caseTransferECM"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_0rsetu2">
+          <text></text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_0m544nk">
+          <text>"Cancel"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1d3nugq">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_0m7wsvq">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1m0xz5y">
+          <text>"Judgment"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_1dtax7b">
+        <inputEntry id="UnaryTests_0ta9m1v">
+          <text></text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_1343btr">
+          <text>"disposeCase", "rollbackMigrateCase","caseTransferECM"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_1rfdad7">
+          <text></text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_044nj4n">
+          <text>"Cancel"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_0bptiw2">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_03p0j5j">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1j5pbe7">
+          <text>"Application"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_16ex8sw">
+        <inputEntry id="UnaryTests_059p3eg">
+          <text></text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_0wy94bd">
+          <text>"disposeCase", "rollbackMigrateCase","caseTransferECM"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_19r12pr">
+          <text></text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_0koep8p">
+          <text>"Cancel"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_0dvavxe">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_03wwqfd">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1mr0kny">
+          <text>"Amendments"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_1sa870z">
+        <inputEntry id="UnaryTests_0t9q8uc">
+          <text></text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_0ijwxx5">
+          <text>"disposeCase",
+"rollbackMigrateCase",
+"caseTransferECM"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_167sxis">
+          <text></text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_1wgvlaa">
+          <text>"Cancel"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1dxpk3a">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_04ku4p6">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1pgvlta">
+          <text>"ArrangeSupport"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_17m74mk">
+        <inputEntry id="UnaryTests_0zvcuaj">
+          <text></text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_0m2nxdv">
+          <text>"disposeCase",
+"et3Response", "rollbackMigrateCase","caseTransferECM"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_1wa7mlt">
+          <text></text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_12o84z1">
+          <text>"Cancel"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_0qmhszw">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_18lh030">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_03ysq5s">
+          <text>"Rule21"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_15ptch9">
+        <inputEntry id="UnaryTests_0o3w5oy">
+          <text></text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_021m3kj">
+          <text>"addAmendHearing"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_01nw966">
+          <text></text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_09g170p">
+          <text>"Reconfigure"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1f0kbvz">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_0u0739h">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_00d8rfc">
+          <text></text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_0r1v2pd">
+        <inputEntry id="UnaryTests_0vx9yge">
+          <text></text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_1omgmrt">
+          <text>"addAmendJurisdiction"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_0a2hf54">
+          <text></text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_1ersk6s">
+          <text>"Reconfigure"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_0sf0qjz">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_0f0zsep">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_07gjwl0">
+          <text></text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_1w12dsa">
+        <inputEntry id="UnaryTests_02s0k8s">
+          <text></text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_02di4az">
+          <text>"caseTransferDifferentCountry"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_1k4mtov">
+          <text></text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_12g8lgi">
+          <text>"Reconfigure"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1v708d0">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_00hbhep">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1ewt01p">
+          <text></text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_0dsvv1v">
+        <inputEntry id="UnaryTests_09i0i9x">
+          <text></text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_0mwa3dz">
+          <text>"caseTransferSameCountry"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_0kj697g">
+          <text></text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_05mqj6p">
+          <text>"Reconfigure"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_0tixiay">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_0jabmnu">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1eema7l">
+          <text></text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_15nau58">
+        <inputEntry id="UnaryTests_0eheicw">
+          <text></text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_123pfqc">
+          <text>"RECONFIGURE_WA_TASKS"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_092zwko">
+          <text></text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_044svlb">
+          <text>"Reconfigure"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1uhfrr9">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_0md4g5z">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_15sf64y">
+          <text></text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_16wfljn">
+        <inputEntry id="UnaryTests_0sfqlq1">
+          <text></text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_1vcdznk">
+          <text>"assignCase"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_00d1inp">
+          <text></text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_0wlte2j">
+          <text>"Reconfigure"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_0v2ko1v">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_190q2l8">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_0uzyeez">
+          <text></text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_close_admin_support_ew">
+        <inputEntry id="UnaryTests_close_admin_from_state_ew"><text></text></inputEntry>
+        <inputEntry id="UnaryTests_close_admin_event_ew">
+          <text>"closeAdminReviewSupportTask", "disposeCase", "rollbackMigrateCase", "caseTransferECM"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_close_admin_state_ew"><text></text></inputEntry>
+        <outputEntry id="LiteralExpression_close_admin_action_ew"><text>"Cancel"</text></outputEntry>
+        <outputEntry id="LiteralExpression_close_admin_warning_code_ew"><text></text></outputEntry>
+        <outputEntry id="LiteralExpression_close_admin_warning_text_ew"><text></text></outputEntry>
+        <outputEntry id="LiteralExpression_close_admin_category_ew"><text>"ReviewSupportAdmin"</text></outputEntry>
+      </rule>
+      <rule id="DecisionRule_close_lo_support_ew">
+        <inputEntry id="UnaryTests_close_lo_from_state_ew"><text></text></inputEntry>
+        <inputEntry id="UnaryTests_close_lo_event_ew">
+          <text>"closeLOReviewSupportTask", "disposeCase", "rollbackMigrateCase", "caseTransferECM"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_close_lo_state_ew"><text></text></inputEntry>
+        <outputEntry id="LiteralExpression_close_lo_action_ew"><text>"Cancel"</text></outputEntry>
+        <outputEntry id="LiteralExpression_close_lo_warning_code_ew"><text></text></outputEntry>
+        <outputEntry id="LiteralExpression_close_lo_warning_text_ew"><text></text></outputEntry>
+        <outputEntry id="LiteralExpression_close_lo_category_ew"><text>"ReviewSupportLegalOfficer"</text></outputEntry>
+      </rule>
+      <rule id="DecisionRule_close_judge_support_ew">
+        <inputEntry id="UnaryTests_close_judge_from_state_ew"><text></text></inputEntry>
+        <inputEntry id="UnaryTests_close_judge_event_ew">
+          <text>"closeJudgeReviewSupportTask", "disposeCase", "rollbackMigrateCase", "caseTransferECM"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_close_judge_state_ew"><text></text></inputEntry>
+        <outputEntry id="LiteralExpression_close_judge_action_ew"><text>"Cancel"</text></outputEntry>
+        <outputEntry id="LiteralExpression_close_judge_warning_code_ew"><text></text></outputEntry>
+        <outputEntry id="LiteralExpression_close_judge_warning_text_ew"><text></text></outputEntry>
+        <outputEntry id="LiteralExpression_close_judge_category_ew"><text>"ReviewSupportJudge"</text></outputEntry>
+      </rule>
+    </decisionTable>
+  </decision>
+  <dmndi:DMNDI>
+    <dmndi:DMNDiagram>
+      <dmndi:DMNShape dmnElementRef="wa-task-cancellation-employment-et_englandwales">
+        <dc:Bounds height="80" width="180" x="160" y="100" />
+      </dmndi:DMNShape>
+    </dmndi:DMNDiagram>
+  </dmndi:DMNDI>
+</definitions>

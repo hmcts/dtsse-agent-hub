@@ -3,6 +3,7 @@ export * from "./dmn-model.ts";
 export * from "./feel.ts";
 export * from "./generator.ts";
 export * from "./importer.ts";
+export * from "./layout.ts";
 export * from "./schema.ts";
 export * from "./spec-io.ts";
 export * from "./task-view.ts";

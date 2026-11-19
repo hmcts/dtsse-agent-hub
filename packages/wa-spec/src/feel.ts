@@ -1,48 +1,57 @@
-import type { Cell, Comparison, Cond, Expr, Scalar } from "./schema.ts";
+import type { Cell, CompareOp, Comparison, Cond, Expr, Scalar } from "./schema.ts";
 
-type Token = { t: "str" | "num" | "id" | "kw" | "op"; v: string };
+/** `raw` is anything outside the structured forms: an escaped string, a number written another way, or a character the grammar lacks. */
+type Token = { t: "str" | "num" | "id" | "kw" | "op" | "raw"; v: string; text: string; space: boolean };
 
 const KEYWORDS = new Set(["if", "then", "else", "and", "or", "null", "true", "false"]);
-const OPERATORS = ["!=", "<=", ">=", "=", "<", ">", "(", ")", ".", "+", ","];
+const OPERATORS = ["!=", "<=", ">=", "=", "<", ">", "(", ")", ".", "+", "-", ","];
 
-/** Lexes the FEEL subset the structured forms cover; anything outside it (escapes, calls, lists, `-`) fails. */
-function lex(text: string): Token[] | undefined {
+/** FEEL's built-in functions whose names are several words; the lexer sees each word apart. */
+const MULTI_WORD_FUNCTIONS = [
+  "date and time",
+  "list contains",
+  "get entries",
+  "starts with",
+  "ends with",
+  "string length",
+  "substring before",
+  "substring after",
+  "upper case",
+  "lower case"
+];
+
+/** Splits FEEL into tokens, keeping each token's source text and whether whitespace came before it. Every input lexes. */
+function lex(text: string): Token[] {
   const tokens: Token[] = [];
   let i = 0;
+  let space = false;
+  const push = (t: Token["t"], v: string, source: string) => {
+    tokens.push({ t, v, text: source, space: space && tokens.length > 0 });
+    space = false;
+    i += source.length;
+  };
   while (i < text.length) {
     const c = text.charAt(i);
     if (/\s/.test(c)) {
+      space = true;
       i++;
     } else if (c === '"') {
-      const end = text.indexOf('"', i + 1);
-      if (end < 0) {
-        return undefined;
+      let end = i + 1;
+      while (end < text.length && text.charAt(end) !== '"') {
+        end += text.charAt(end) === "\\" ? 2 : 1;
       }
-      const value = text.slice(i + 1, end);
-      if (value.includes("\\")) {
-        return undefined;
-      }
-      tokens.push({ t: "str", v: value });
-      i = end + 1;
+      const source = text.slice(i, end + 1);
+      const value = source.slice(1, -1);
+      push(end >= text.length || value.includes("\\") ? "raw" : "str", value, source);
     } else if (/\d/.test(c)) {
-      const match = /^\d+(\.\d+)?/.exec(text.slice(i));
-      const literal = match?.[0] ?? "";
-      if (String(Number(literal)) !== literal) {
-        return undefined;
-      }
-      tokens.push({ t: "num", v: literal });
-      i += literal.length;
+      const literal = /^\d+(\.\d+)?/.exec(text.slice(i))?.[0] ?? "";
+      push(String(Number(literal)) === literal ? "num" : "raw", literal, literal);
     } else if (/[A-Za-z_]/.test(c)) {
       const word = /^[A-Za-z_][A-Za-z0-9_]*/.exec(text.slice(i))?.[0] ?? "";
-      tokens.push({ t: KEYWORDS.has(word) ? "kw" : "id", v: word });
-      i += word.length;
+      push(KEYWORDS.has(word) ? "kw" : "id", word, word);
     } else {
       const op = OPERATORS.find((o) => text.startsWith(o, i));
-      if (!op) {
-        return undefined;
-      }
-      tokens.push({ t: "op", v: op });
-      i += op.length;
+      push(op ? "op" : "raw", op ?? c, op ?? c);
     }
   }
   return tokens;
@@ -72,6 +81,9 @@ type Node =
   | { n: "path"; path: string }
   | { n: "if"; c: Node; a: Node; b: Node }
   | { n: "plus"; items: Node[] }
+  | { n: "minus"; l: Node; r: Node }
+  | { n: "call"; name: string; args: Node[] }
+  | { n: "quantifier"; quantifier: "some" | "every"; variable: string; over: Node; satisfies: Node }
   | { n: "cmp"; op: string; l: Node; r: Node }
   | { n: "and" | "or"; items: Node[] };
 
@@ -89,6 +101,17 @@ function parseNode(tokens: Token[]): Node {
     pos++;
   };
 
+  /** The name of the function a call at `pos` names, when the words there are followed by `(`. */
+  const functionName = (): string | undefined => {
+    const first = peek();
+    if (first?.t !== "id") {
+      return undefined;
+    }
+    const known = MULTI_WORD_FUNCTIONS.find(
+      (name) => name.split(" ").every((word, i) => tokens[pos + i]?.v === word) && tokens[pos + name.split(" ").length]?.v === "("
+    );
+    return known ?? (tokens[pos + 1]?.t === "op" && tokens[pos + 1]?.v === "(" ? first.v : undefined);
+  };
   const primary = (): Node => {
     const token = peek();
     if (!token) {
@@ -108,28 +131,50 @@ function parseNode(tokens: Token[]): Node {
       pos++;
       return { n: "lit", value: literal.value };
     }
+    const name = functionName();
+    if (name) {
+      pos += name.split(" ").length + 1;
+      const args: Node[] = [];
+      while (!isOp(")")) {
+        if (args.length > 0) {
+          if (!isOp(",")) {
+            throw new Fail();
+          }
+          pos++;
+        }
+        args.push(expr());
+      }
+      pos++;
+      return { n: "call", name, args };
+    }
     if (token.t === "id") {
       let path = token.v;
       pos++;
-      while (isOp(".")) {
-        const next = tokens[pos + 1];
-        if (next?.t !== "id") {
+      for (;;) {
+        if (isOp(".") && tokens[pos + 1]?.t === "id") {
+          path += `.${tokens[pos + 1]?.v}`;
+          pos += 2;
+        } else if (peek()?.text === "[" && tokens[pos + 1]?.t === "num" && tokens[pos + 2]?.text === "]") {
+          path += `[${tokens[pos + 1]?.v}]`;
+          pos += 3;
+        } else if (isOp(".")) {
           throw new Fail();
+        } else {
+          return { n: "path", path };
         }
-        path += `.${next.v}`;
-        pos += 2;
       }
-      return { n: "path", path };
     }
     throw new Fail();
   };
   const sum = (): Node => {
-    const items = [primary()];
-    while (isOp("+")) {
+    let left = primary();
+    while (isOp("+") || isOp("-")) {
+      const plus = isOp("+");
       pos++;
-      items.push(primary());
+      const right = primary();
+      left = !plus ? { n: "minus", l: left, r: right } : left.n === "plus" ? { n: "plus", items: [...left.items, right] } : { n: "plus", items: [left, right] };
     }
-    return items.length === 1 ? (items[0] as Node) : { n: "plus", items };
+    return left;
   };
   const comparison = (): Node => {
     const left = sum();
@@ -149,6 +194,16 @@ function parseNode(tokens: Token[]): Node {
     return items.length === 1 ? (items[0] as Node) : { n: word, items };
   };
   const expr = (): Node => {
+    const [quantifier, variable, within] = [peek(), tokens[pos + 1], tokens[pos + 2]];
+    if ((quantifier?.v === "some" || quantifier?.v === "every") && quantifier.t === "id" && variable?.t === "id" && within?.v === "in") {
+      pos += 3;
+      const over = sum();
+      if (peek()?.v !== "satisfies") {
+        throw new Fail();
+      }
+      pos++;
+      return { n: "quantifier", quantifier: quantifier.v, variable: variable.v, over, satisfies: expr() };
+    }
     if (isKw("if")) {
       pos++;
       const c = chain("or", () => chain("and", comparison));
@@ -174,10 +229,13 @@ function toCond(node: Node): Cond {
     const items = node.items.map(toCond);
     return node.n === "and" ? { all: items } : { any: items };
   }
-  if (node.n === "cmp" && node.l.n === "path" && node.r.n === "lit") {
+  if (node.n === "cmp") {
     const op = OPS[node.op];
     if (!op) {
       throw new Fail();
+    }
+    if (node.l.n !== "path" || node.r.n !== "lit") {
+      return { left: toExpr(node.l), op: op as CompareOp, right: toExpr(node.r) };
     }
     if (node.r.value === null) {
       if (op === "eq") {
@@ -189,6 +247,9 @@ function toCond(node: Node): Cond {
       throw new Fail();
     }
     return { field: node.l.path, op, value: node.r.value };
+  }
+  if (node.n === "path" || node.n === "call" || node.n === "lit" || node.n === "quantifier") {
+    return { truthy: toExpr(node) };
   }
   throw new Fail();
 }
@@ -203,6 +264,12 @@ function toExpr(node: Node): Expr {
       return { if: toCond(node.c), use: toExpr(node.a), otherwise: toExpr(node.b) };
     case "plus":
       return { plus: node.items.map(toExpr) };
+    case "minus":
+      return { minus: [toExpr(node.l), toExpr(node.r)] };
+    case "call":
+      return { call: node.name, args: node.args.map(toExpr) };
+    case "quantifier":
+      return { quantifier: node.quantifier, variable: node.variable, over: toExpr(node.over), satisfies: toExpr(node.satisfies) };
     default:
       return toCond(node);
   }
@@ -210,24 +277,9 @@ function toExpr(node: Node): Expr {
 
 /** Collapses whitespace outside string literals, so equal FEEL written with different layout compares equal. */
 export function normaliseFeel(text: string): string {
-  let out = "";
-  let inString = false;
-  let pendingSpace = false;
-  for (const c of text.trim()) {
-    if (c === '"') {
-      inString = !inString;
-    }
-    if (!inString && /\s/.test(c)) {
-      pendingSpace = true;
-      continue;
-    }
-    if (pendingSpace) {
-      out += " ";
-      pendingSpace = false;
-    }
-    out += c;
-  }
-  return out;
+  return lex(text)
+    .map((token) => (token.space ? ` ${token.text}` : token.text))
+    .join("");
 }
 
 export function isStructured(expr: Expr): boolean {
@@ -240,14 +292,11 @@ export function parseExpr(text: string): Expr | undefined {
   if (trimmed === "") {
     return undefined;
   }
-  const tokens = lex(trimmed);
-  if (tokens) {
-    try {
-      return toExpr(parseNode(tokens));
-    } catch (error) {
-      if (!(error instanceof Fail)) {
-        throw error;
-      }
+  try {
+    return toExpr(parseNode(lex(trimmed)));
+  } catch (error) {
+    if (!(error instanceof Fail)) {
+      throw error;
     }
   }
   return { feel: trimmed };
@@ -272,6 +321,12 @@ function renderCond(cond: Cond, inAll = false): string {
     const text = cond.any.map((c) => renderCond(c)).join(" or ");
     return inAll ? `(${text})` : text;
   }
+  if ("truthy" in cond) {
+    return renderExpr(cond.truthy);
+  }
+  if ("left" in cond) {
+    return `${renderOperand(cond.left)} ${OP_TEXT[cond.op]} ${renderOperand(cond.right)}`;
+  }
   if (cond.op === "exists" || cond.op === "notExists") {
     return `${cond.field} ${OP_TEXT[cond.op]}`;
   }
@@ -294,6 +349,15 @@ export function renderExpr(expr: Expr | undefined): string {
   if ("plus" in expr) {
     return expr.plus.map((item) => renderOperand(item)).join(" + ");
   }
+  if ("minus" in expr) {
+    return expr.minus.map((item) => renderOperand(item)).join(" - ");
+  }
+  if ("quantifier" in expr) {
+    return `(${expr.quantifier} ${expr.variable} in ${renderOperand(expr.over)} satisfies ${renderExpr(expr.satisfies)})`;
+  }
+  if ("call" in expr) {
+    return `${expr.call}(${expr.args.map((arg) => renderExpr(arg)).join(", ")})`;
+  }
   if ("field" in expr && !("op" in expr)) {
     return expr.field;
   }
@@ -302,7 +366,7 @@ export function renderExpr(expr: Expr | undefined): string {
 
 function renderOperand(expr: Expr): string {
   const text = renderExpr(expr);
-  const bare = typeof expr !== "object" || expr === null || ("field" in expr && !("op" in expr));
+  const bare = typeof expr !== "object" || expr === null || ("field" in expr && !("op" in expr)) || "call" in expr || "truthy" in expr || "quantifier" in expr;
   return bare ? text : `(${text})`;
 }
 
@@ -312,14 +376,7 @@ export function parseCell(text: string): Cell | undefined {
   if (trimmed === "") {
     return undefined;
   }
-  const tokens = lex(trimmed);
-  if (tokens) {
-    const parsed = structuredCell(tokens);
-    if (parsed) {
-      return parsed;
-    }
-  }
-  return { feel: trimmed };
+  return structuredCell(lex(trimmed)) ?? { feel: trimmed };
 }
 
 function literalList(tokens: Token[]): Scalar[] | undefined {

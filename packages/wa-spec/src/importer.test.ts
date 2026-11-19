@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { sampleDmn } from "./__fixtures__/dmn.ts";
 import { parseDmn, writeDmn } from "./dmn-model.ts";
+import { generateAll } from "./generator.ts";
 import { importDmns, renderReport } from "./importer.ts";
 import { validateSpec } from "./schema.ts";
 
@@ -38,7 +39,7 @@ describe("importDmns", () => {
     expect(completion?.rows[1]?.when?.closed).toEqual({ in: [true] });
     expect(completion?.helpers?.[0]?.name).toBe("LATEST");
     expect(completion?.dependencies).toEqual([{ decision: "table", requires: "LATEST" }]);
-    expect(completion?.inputs[1]?.expression).toEqual({ feel: "count(caseData.items) > 0" });
+    expect(completion?.inputs[1]?.expression).toEqual({ feel: "sort(caseData.items, function(x, y) x > y)" });
   });
 
   it("should record a differing hit policy as an override when case types disagree", () => {
@@ -52,7 +53,7 @@ describe("importDmns", () => {
     expect(report.unrepresentable).toEqual([]);
     expect(report.entries.completion).toEqual({ total: 18, structured: 16, rawFeel: 2 });
     expect(report.rawFeel.find((r) => r.where === "input closed")?.caseTypes).toEqual(["ct_a", "ct_b"]);
-    expect(report.presentation.map((p) => p.construct)).toContain("decision requirements diagram layout (regenerated)");
+    expect(report.presentation.map((p) => p.construct)).toEqual(["attribute namespace"]);
     expect(renderReport(report)).toContain("# Import coverage");
   });
 
@@ -75,5 +76,44 @@ describe("importDmns", () => {
       rule.inputs.reverse();
     }
     expect(() => importDmns([file("ct_a"), { name: "wa-task-completion-demo-ct_b.dmn", xml: writeDmn(reversed) }])).toThrow(/different order/);
+  });
+});
+
+describe("importDmns constructs the generator would change", () => {
+  const a = (xml: string) => [{ name: "wa-task-completion-demo-ct_a.dmn", xml }];
+  const constructs = (xml: string) => importDmns(a(xml)).report.unrepresentable.map((u) => u.construct);
+
+  it("should report the table's id when no decision has the file's key as its id", () => {
+    const xml = sampleDmn("ct_a").replaceAll('"wa-task-completion-demo-ct_a"', '"my_table"');
+    expect(constructs(xml)).toEqual(["no decision has the file's key wa-task-completion-demo-ct_a as its id; the table my_table would be renamed to it"]);
+  });
+
+  it("should report a variable on the main decision when the file has one", () => {
+    const xml = sampleDmn("ct_a").replace("<decisionTable", '<variable id="V" name="v" /><decisionTable');
+    expect(constructs(xml)).toEqual(["the main decision Demo completion has a <variable>"]);
+  });
+
+  it("should report two helper decisions of one name when a file has them", () => {
+    const original = sampleDmn("ct_a");
+    const helper = /<decision id="Decision_LATEST"[\s\S]*?<\/decision>/.exec(original)?.[0] as string;
+    const xml = original.replace(helper, `${helper}${helper.replace('id="Decision_LATEST"', 'id="Decision_TWO"')}`);
+    expect(constructs(xml)).toEqual(["more than one helper decision is named LATEST"]);
+  });
+
+  it("should regenerate a helper without a variable as one without a variable when the file has none", () => {
+    const xml = sampleDmn("ct_a").replace(/<variable id="InformationItem[^>]*\/>\n/, "");
+    const { spec, layout } = importDmns(a(xml));
+    expect(spec.decisions.completion?.helpers?.[0]?.variable).toBe(false);
+    expect(parseDmn(generateAll(spec, layout)[0]?.xml as string).decisions[1]?.variable).toBeUndefined();
+  });
+
+  it("should give the variable back to a case type that has one when another case type lacks it", () => {
+    const bare = sampleDmn("ct_b").replace(/<variable id="InformationItem[^>]*\/>\n/, "");
+    const { spec, layout } = importDmns([...a(sampleDmn("ct_a")), { name: "wa-task-completion-demo-ct_b.dmn", xml: bare }]);
+    const helper = spec.decisions.completion?.helpers?.[0];
+    expect(helper?.variable ?? helper?.overrides?.ct_b?.variable ?? helper?.overrides?.ct_a?.variable).toBeDefined();
+    const out = generateAll(spec, layout);
+    expect(parseDmn(out[0]?.xml as string).decisions[1]?.variable).toBeDefined();
+    expect(parseDmn(out[1]?.xml as string).decisions[1]?.variable).toBeUndefined();
   });
 });

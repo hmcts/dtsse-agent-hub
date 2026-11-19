@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { majority, mergeSequences } from "./merge.ts";
+import { align, majority, mergeSequences } from "./merge.ts";
 
 const ids = (m: Array<{ item: string; caseTypes: string[] }>) => m.map((x) => `${x.item}:${x.caseTypes.join("+")}`);
 
@@ -26,5 +26,20 @@ describe("majority", () => {
     ]);
     expect(result.base).toBe("q");
     expect(result.differing).toEqual([{ caseType: "a", value: "p" }]);
+  });
+});
+
+describe("align", () => {
+  it("should pair what both sequences share and list the rest in order when they differ", () => {
+    expect(align(["a", "b", "c"], ["a", "x", "c"])).toEqual([
+      { op: "keep", a: 0, b: 0 },
+      { op: "del", a: 1 },
+      { op: "add", b: 1 },
+      { op: "keep", a: 2, b: 2 }
+    ]);
+  });
+
+  it("should list only additions when the first sequence is empty", () => {
+    expect(align([], ["a"])).toEqual([{ op: "add", b: 0 }]);
   });
 });

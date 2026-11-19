@@ -20,7 +20,7 @@ export function sampleDmn(caseType: string, options: { extraRule?: boolean; hitP
           hitPolicy: options.hitPolicy ?? "COLLECT",
           inputs: [
             { label: "Event ID", inputVariable: "eventId", typeRef: "string", expression: "" },
-            { label: "Closed", typeRef: "boolean", expressionLanguage: "feel", expression: "count(caseData.items) > 0" }
+            { label: "Closed", typeRef: "boolean", expressionLanguage: "feel", expression: "sort(caseData.items, function(x, y) x > y)" }
           ],
           outputs: [
             { label: "Task Type", name: "taskType", typeRef: "string" },

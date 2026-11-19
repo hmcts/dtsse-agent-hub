@@ -110,3 +110,36 @@ describe("validateSpec", () => {
     expect(problems).toContain("completion: dependency from unknown decision Ghost");
   });
 });
+
+describe("validateSpec helpers and dependencies", () => {
+  const withHelpers = (helpers: unknown[], dependencies: unknown[] = []) =>
+    Spec.parse(spec({ decisions: { completion: { ...decision, helpers, dependencies } } }));
+  const helper = (extra: Record<string, unknown> = {}) => ({ name: "H", expression: 1, ...extra });
+
+  it("should name an unknown case type when a helper's only or overrides refers to one", () => {
+    expect(validateSpec(withHelpers([helper({ only: ["ct_z"] })]))).toEqual(["completion helper H: unknown case type ct_z"]);
+    expect(validateSpec(withHelpers([helper({ overrides: { ct_y: { expression: 2 } } })]))).toEqual(["completion helper H overrides: unknown case type ct_y"]);
+  });
+
+  it("should name an unknown case type when a dependency's only refers to one", () => {
+    expect(validateSpec(withHelpers([helper()], [{ decision: "table", requires: "H", only: ["ct_q"] }]))).toEqual([
+      "completion dependency table -> H: unknown case type ct_q"
+    ]);
+  });
+
+  it("should accept two helpers of one name when their only lists do not overlap", () => {
+    expect(validateSpec(withHelpers([helper({ only: ["ct_a"] }), helper({ only: ["ct_b"], expression: 2 })]))).toEqual([]);
+  });
+
+  it("should reject two helpers of one name when their only lists overlap or one has none", () => {
+    expect(validateSpec(withHelpers([helper({ only: ["ct_a"] }), helper({ only: ["ct_a", "ct_b"] })]))).toEqual([
+      "completion: helper H is defined more than once for the same case type"
+    ]);
+    expect(validateSpec(withHelpers([helper(), helper({ only: ["ct_b"] })]))).toHaveLength(1);
+  });
+
+  it("should reject a service slug or case type that cannot be part of a decision id when it holds a space", () => {
+    expect(validateSpec(Spec.parse(spec({ service: { slug: "my service" } })))).toHaveLength(1);
+    expect(validateSpec(Spec.parse(spec({ caseTypes: [{ id: "a b" }] })))[0]).toContain("case type a b");
+  });
+});

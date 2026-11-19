@@ -81,86 +81,179 @@ decisions:
         label: ET3 form received
         typeRef: boolean
         expression:
-          feel: |-
-            if(additionalData!=null
-            and additionalData.Data!=null
-            and additionalData.Data.respondentCollection!=null
-            and count(additionalData.Data.respondentCollection)>0)
-            then
-              if(additionalData.Data.respondentCollection[1].value.responseReceived)
-              then
-                if(additionalData.Data.respondentCollection[1].value.responseReceivedCount="1")
-                then true
-                else false
-              else false
-            else false
+          if:
+            all:
+              - field: additionalData
+                op: exists
+              - field: additionalData.Data
+                op: exists
+              - field: additionalData.Data.respondentCollection
+                op: exists
+              - left:
+                  call: count
+                  args:
+                    - field: additionalData.Data.respondentCollection
+                op: gt
+                right: 0
+          use:
+            if:
+              truthy:
+                field: additionalData.Data.respondentCollection[1].value.responseReceived
+            use:
+              if:
+                field: additionalData.Data.respondentCollection[1].value.responseReceivedCount
+                op: eq
+                value: "1"
+              use: true
+              otherwise: false
+            otherwise: false
+          otherwise: false
         only: [ et_englandwales, et_scotland ]
       - key: isThereAnEt3Response
         label: Is There An Et3 Response
         typeRef: boolean
         expression:
-          feel: |-
-            if(additionalData!=null
-            and additionalData.Data!=null
-            and additionalData.Data.respondentCollection!=null
-            and count(additionalData.Data.respondentCollection) > 0)
-            then some item in additionalData.Data.respondentCollection satisfies (item.value.et3Vetting != null and item.value.et3Vetting.et3IsThereAnEt3Response = true)
-            else false
+          if:
+            all:
+              - field: additionalData
+                op: exists
+              - field: additionalData.Data
+                op: exists
+              - field: additionalData.Data.respondentCollection
+                op: exists
+              - left:
+                  call: count
+                  args:
+                    - field: additionalData.Data.respondentCollection
+                op: gt
+                right: 0
+          use:
+            quantifier: some
+            variable: item
+            over:
+              field: additionalData.Data.respondentCollection
+            satisfies:
+              all:
+                - field: item.value.et3Vetting
+                  op: exists
+                - field: item.value.et3Vetting.et3IsThereAnEt3Response
+                  op: eq
+                  value: true
+          otherwise: false
         only: [ et_englandwales, et_scotland ]
       - key: isECC
         label: Is ECC
         typeRef: boolean
         expression:
-          feel: |-
-            if(additionalData!=null
-            and additionalData.Data!=null
-            and additionalData.Data.respondentCollection!=null
-            and count(additionalData.Data.respondentCollection) > 0)
-            then some item in additionalData.Data.respondentCollection satisfies (item.value.et3Vetting != null and item.value.et3Vetting.et3ContractClaimSection7 = true)
-            else false
+          if:
+            all:
+              - field: additionalData
+                op: exists
+              - field: additionalData.Data
+                op: exists
+              - field: additionalData.Data.respondentCollection
+                op: exists
+              - left:
+                  call: count
+                  args:
+                    - field: additionalData.Data.respondentCollection
+                op: gt
+                right: 0
+          use:
+            quantifier: some
+            variable: item
+            over:
+              field: additionalData.Data.respondentCollection
+            satisfies:
+              all:
+                - field: item.value.et3Vetting
+                  op: exists
+                - field: item.value.et3Vetting.et3ContractClaimSection7
+                  op: eq
+                  value: true
+          otherwise: false
         only: [ et_englandwales, et_scotland ]
       - key: isECCReplyReceived
         label: Is ECC Reply Received
         typeRef: boolean
         expression:
-          feel: |-
-            if (
-              additionalData != null
-              and additionalData.Data != null
-              and additionalData.Data.respondentCollection != null
-              and count(additionalData.Data.respondentCollection) > 0
-            )
-            then
-              some item in additionalData.Data.respondentCollection satisfies (
-                item.value.respondentEccReplyCount = "1"
-              )
-            else false
+          if:
+            all:
+              - field: additionalData
+                op: exists
+              - field: additionalData.Data
+                op: exists
+              - field: additionalData.Data.respondentCollection
+                op: exists
+              - left:
+                  call: count
+                  args:
+                    - field: additionalData.Data.respondentCollection
+                op: gt
+                right: 0
+          use:
+            quantifier: some
+            variable: item
+            over:
+              field: additionalData.Data.respondentCollection
+            satisfies:
+              field: item.value.respondentEccReplyCount
+              op: eq
+              value: "1"
+          otherwise: false
         only: [ et_englandwales, et_scotland ]
       - key: respondentECCReply
         label: Respondent ECC Reply
         typeRef: boolean
         expression:
-          feel: |-
-            if(additionalData!=null
-            and additionalData.Data!=null
-            and additionalData.Data.respondentCollection!=null
-            and count(additionalData.Data.respondentCollection) > 0
-            and additionalData.Data.respondentCollection[1].value.et3Vetting!=null)
-            then additionalData.Data.respondentCollection[1].value.et3Vetting.et3ResponseEccYes
-            else null
+          if:
+            all:
+              - field: additionalData
+                op: exists
+              - field: additionalData.Data
+                op: exists
+              - field: additionalData.Data.respondentCollection
+                op: exists
+              - left:
+                  call: count
+                  args:
+                    - field: additionalData.Data.respondentCollection
+                op: gt
+                right: 0
+              - field: additionalData.Data.respondentCollection[1].value.et3Vetting
+                op: exists
+          use:
+            field: additionalData.Data.respondentCollection[1].value.et3Vetting.et3ResponseEccYes
+          otherwise: null
         only: [ et_englandwales, et_scotland ]
       - key: listAHearing
         label: List A Hearing
         typeRef: boolean
         language: feel
         expression:
-          feel: |-
-            if(additionalData.Data.etICHearingNotListedListUpdated!=null
-            and count(additionalData.Data.etICHearingNotListedListUpdated) > 0
-            and (list contains(additionalData.Data.etICHearingNotListedListUpdated, "List for preliminary hearing")
-            or list contains(additionalData.Data.etICHearingNotListedListUpdated, "List for final hearing")))
-            then true
-            else false
+          if:
+            all:
+              - field: additionalData.Data.etICHearingNotListedListUpdated
+                op: exists
+              - left:
+                  call: count
+                  args:
+                    - field: additionalData.Data.etICHearingNotListedListUpdated
+                op: gt
+                right: 0
+              - any:
+                  - truthy:
+                      call: list contains
+                      args:
+                        - field: additionalData.Data.etICHearingNotListedListUpdated
+                        - List for preliminary hearing
+                  - truthy:
+                      call: list contains
+                      args:
+                        - field: additionalData.Data.etICHearingNotListedListUpdated
+                        - List for final hearing
+          use: true
+          otherwise: false
         only: [ et_englandwales, et_scotland ]
         overrides:
           et_scotland:
@@ -200,13 +293,44 @@ decisions:
         label: Hearings Heard
         typeRef: boolean
         expression:
-          feel: |-
-            additionalData!=null
-            and additionalData.Data!=null
-            and additionalData.Data.hearingDetailsCollection!=null
-            and count(additionalData.Data.hearingDetailsCollection)>0
-            and (some x in additionalData.Data.hearingDetailsCollection satisfies x.value.hearingDetailsStatus="Heard")
-            and (every x in additionalData.Data.hearingDetailsCollection satisfies (x.value.hearingDetailsStatus="Heard" or x.value.hearingDetailsStatus="Vacated" or x.value.hearingDetailsStatus="Postponed"))
+          all:
+            - field: additionalData
+              op: exists
+            - field: additionalData.Data
+              op: exists
+            - field: additionalData.Data.hearingDetailsCollection
+              op: exists
+            - left:
+                call: count
+                args:
+                  - field: additionalData.Data.hearingDetailsCollection
+              op: gt
+              right: 0
+            - truthy:
+                quantifier: some
+                variable: x
+                over:
+                  field: additionalData.Data.hearingDetailsCollection
+                satisfies:
+                  field: x.value.hearingDetailsStatus
+                  op: eq
+                  value: Heard
+            - truthy:
+                quantifier: every
+                variable: x
+                over:
+                  field: additionalData.Data.hearingDetailsCollection
+                satisfies:
+                  any:
+                    - field: x.value.hearingDetailsStatus
+                      op: eq
+                      value: Heard
+                    - field: x.value.hearingDetailsStatus
+                      op: eq
+                      value: Vacated
+                    - field: x.value.hearingDetailsStatus
+                      op: eq
+                      value: Postponed
         only: [ et_englandwales, et_scotland ]
       - key: submissionReasonApplication
         label: Submission Reason (Application)
@@ -1426,7 +1550,11 @@ decisions:
       - name: LATEST_NOTIFICATION_RESPONSE_IS_ECC_FROM_CLAIMANT
         typeRef: boolean
         expression:
-          feel: (LATEST_NOTIFICATION_RESPONSE_IS_ECC and LATEST_NOTIFICATION_RESPONSE_IS_FROM_CLAIMANT)
+          all:
+            - truthy:
+                field: LATEST_NOTIFICATION_RESPONSE_IS_ECC
+            - truthy:
+                field: LATEST_NOTIFICATION_RESPONSE_IS_FROM_CLAIMANT
         only: [ et_englandwales, et_scotland ]
       - name: LATEST_NOTIFICATION_RESPONSE_IS_ECC
         typeRef: boolean
@@ -1631,13 +1759,27 @@ decisions:
         overrides:
           et_scotland_multiple:
             expression:
-              feel: |-
-                if(additionalData!=null
-                and additionalData.Data!=null
-                and additionalData.Data.referralCollection!=null
-                and count(additionalData.Data.referralCollection) > 0)
-                then "Review Multiples Referral #" + LATEST_REFERRAL_NUMBER + " - " + LATEST_REFERRAL_SUBJECT
-                else null
+              if:
+                all:
+                  - field: additionalData
+                    op: exists
+                  - field: additionalData.Data
+                    op: exists
+                  - field: additionalData.Data.referralCollection
+                    op: exists
+                  - left:
+                      call: count
+                      args:
+                        - field: additionalData.Data.referralCollection
+                    op: gt
+                    right: 0
+              use:
+                plus:
+                  - "Review Multiples Referral #"
+                  - field: LATEST_REFERRAL_NUMBER
+                  - " - "
+                  - field: LATEST_REFERRAL_SUBJECT
+              otherwise: null
       - name: LATEST_REFERRAL_REPLY_NUMBER
         typeRef: string
         expression:
@@ -2308,16 +2450,34 @@ decisions:
         returns:
           name: title
           value:
-            feel: |-
-              if (LATEST_REVIEW_REFERRAL_TASK_TITLE != null) then
-               "EJ - " + LATEST_REVIEW_REFERRAL_TASK_TITLE
-              else if (taskAttributes != null and taskAttributes.title != null) then
-                if (starts with(taskAttributes.title, "EJ - ")) then
-                  taskAttributes.title
-                else
-                  "EJ - " + taskAttributes.title
-              else
-                "EJ - Review Referral"
+            if:
+              field: LATEST_REVIEW_REFERRAL_TASK_TITLE
+              op: exists
+            use:
+              plus:
+                - "EJ - "
+                - field: LATEST_REVIEW_REFERRAL_TASK_TITLE
+            otherwise:
+              if:
+                all:
+                  - field: taskAttributes
+                    op: exists
+                  - field: taskAttributes.title
+                    op: exists
+              use:
+                if:
+                  truthy:
+                    call: starts with
+                    args:
+                      - field: taskAttributes.title
+                      - "EJ - "
+                use:
+                  field: taskAttributes.title
+                otherwise:
+                  plus:
+                    - "EJ - "
+                    - field: taskAttributes.title
+              otherwise: EJ - Review Referral
           canReconfigure: true
       - only: [ et_englandwales, et_scotland ]
         when:
@@ -2326,16 +2486,34 @@ decisions:
         returns:
           name: title
           value:
-            feel: |-
-              if (LATEST_REVIEW_REFERRAL_TASK_TITLE != null) then
-               "LO - " + LATEST_REVIEW_REFERRAL_TASK_TITLE
-              else if (taskAttributes != null and taskAttributes.title != null) then
-                if (starts with(taskAttributes.title, "LO - ")) then
-                  taskAttributes.title
-                else
-                  "LO - " + taskAttributes.title
-              else
-                "LO - Review Referral"
+            if:
+              field: LATEST_REVIEW_REFERRAL_TASK_TITLE
+              op: exists
+            use:
+              plus:
+                - "LO - "
+                - field: LATEST_REVIEW_REFERRAL_TASK_TITLE
+            otherwise:
+              if:
+                all:
+                  - field: taskAttributes
+                    op: exists
+                  - field: taskAttributes.title
+                    op: exists
+              use:
+                if:
+                  truthy:
+                    call: starts with
+                    args:
+                      - field: taskAttributes.title
+                      - "LO - "
+                use:
+                  field: taskAttributes.title
+                otherwise:
+                  plus:
+                    - "LO - "
+                    - field: taskAttributes.title
+              otherwise: LO - Review Referral
           canReconfigure: true
       - only: [ et_englandwales, et_scotland ]
         when:
@@ -2378,16 +2556,34 @@ decisions:
         returns:
           name: title
           value:
-            feel: |-
-              if (LATEST_REVIEW_REFERRAL_RESPONSE_TASK_TITLE != null) then
-               "EJ - " + LATEST_REVIEW_REFERRAL_RESPONSE_TASK_TITLE
-              else if (taskAttributes != null and taskAttributes.title != null) then
-                if (starts with(taskAttributes.title, "EJ - ")) then
-                  taskAttributes.title
-                else
-                  "EJ - " + taskAttributes.title
-              else
-                "EJ - Review Referral Response"
+            if:
+              field: LATEST_REVIEW_REFERRAL_RESPONSE_TASK_TITLE
+              op: exists
+            use:
+              plus:
+                - "EJ - "
+                - field: LATEST_REVIEW_REFERRAL_RESPONSE_TASK_TITLE
+            otherwise:
+              if:
+                all:
+                  - field: taskAttributes
+                    op: exists
+                  - field: taskAttributes.title
+                    op: exists
+              use:
+                if:
+                  truthy:
+                    call: starts with
+                    args:
+                      - field: taskAttributes.title
+                      - "EJ - "
+                use:
+                  field: taskAttributes.title
+                otherwise:
+                  plus:
+                    - "EJ - "
+                    - field: taskAttributes.title
+              otherwise: EJ - Review Referral Response
           canReconfigure: true
       - only: [ et_englandwales, et_scotland ]
         when:
@@ -2396,16 +2592,34 @@ decisions:
         returns:
           name: title
           value:
-            feel: |-
-              if (LATEST_REVIEW_REFERRAL_RESPONSE_TASK_TITLE != null) then
-               "LO - " + LATEST_REVIEW_REFERRAL_RESPONSE_TASK_TITLE
-              else if (taskAttributes != null and taskAttributes.title != null) then
-                if (starts with(taskAttributes.title, "LO - ")) then
-                  taskAttributes.title
-                else
-                  "LO - " + taskAttributes.title
-              else
-                "LO - Review Referral Response"
+            if:
+              field: LATEST_REVIEW_REFERRAL_RESPONSE_TASK_TITLE
+              op: exists
+            use:
+              plus:
+                - "LO - "
+                - field: LATEST_REVIEW_REFERRAL_RESPONSE_TASK_TITLE
+            otherwise:
+              if:
+                all:
+                  - field: taskAttributes
+                    op: exists
+                  - field: taskAttributes.title
+                    op: exists
+              use:
+                if:
+                  truthy:
+                    call: starts with
+                    args:
+                      - field: taskAttributes.title
+                      - "LO - "
+                use:
+                  field: taskAttributes.title
+                otherwise:
+                  plus:
+                    - "LO - "
+                    - field: taskAttributes.title
+              otherwise: LO - Review Referral Response
           canReconfigure: true
       - only: [ et_englandwales, et_scotland ]
         when:
@@ -2762,19 +2976,22 @@ decisions:
         returns:
           name: dueDateTime
           value:
-            feel: time("16:00")
+            call: time
+            args: [ 16:00 ]
           canReconfigure: false
       - only: [ et_englandwales, et_scotland ]
         returns:
           name: dueDateOrigin
           value:
-            feel: now()
+            call: now
+            args: []
           canReconfigure: false
       - only: [ et_scotland ]
         returns:
           name: dueDateTime
           value:
-            feel: time("16:00")
+            call: time
+            args: [ 16:00 ]
           canReconfigure: false
       - only: [ et_englandwales, et_scotland ]
         when:
@@ -2804,10 +3021,43 @@ decisions:
         returns:
           name: dueDateIntervalDays
           value:
-            feel: |-
-              if month(dueDateOrigin) = 2 then 18
-              else if month(dueDateOrigin) = 4 or month(dueDateOrigin) = 6 or month(dueDateOrigin) = 9 or month(dueDateOrigin) = 11 then 19
-              else 20
+            if:
+              left:
+                call: month
+                args:
+                  - field: dueDateOrigin
+              op: eq
+              right: 2
+            use: 18
+            otherwise:
+              if:
+                any:
+                  - left:
+                      call: month
+                      args:
+                        - field: dueDateOrigin
+                    op: eq
+                    right: 4
+                  - left:
+                      call: month
+                      args:
+                        - field: dueDateOrigin
+                    op: eq
+                    right: 6
+                  - left:
+                      call: month
+                      args:
+                        - field: dueDateOrigin
+                    op: eq
+                    right: 9
+                  - left:
+                      call: month
+                      args:
+                        - field: dueDateOrigin
+                    op: eq
+                    right: 11
+              use: 19
+              otherwise: 20
           canReconfigure: false
       - only: [ et_englandwales, et_scotland ]
         when:
@@ -2954,13 +3204,15 @@ decisions:
         returns:
           name: dueDateOrigin
           value:
-            feel: now()
+            call: now
+            args: []
           canReconfigure: true
       - only: [ et_englandwales_multiple, et_scotland_multiple ]
         returns:
           name: dueDateTime
           value:
-            feel: time("16:00")
+            call: time
+            args: [ 16:00 ]
           canReconfigure: true
       - only: [ et_englandwales, et_englandwales_multiple ]
         returns:
@@ -3138,12 +3390,39 @@ decisions:
         returns:
           name: majorPriority
           value:
-            feel: |-
-              if caseData.nextListedDate != null then
-              if (date(caseData.nextListedDate) - today()) <= duration("P10D") then 2001
-              else if (date(caseData.nextListedDate) - today()) <= duration("P30D") then 5000
-              else 5001
-              else 5001
+            if:
+              field: caseData.nextListedDate
+              op: exists
+            use:
+              if:
+                left:
+                  minus:
+                    - call: date
+                      args:
+                        - field: caseData.nextListedDate
+                    - call: today
+                      args: []
+                op: le
+                right:
+                  call: duration
+                  args: [ P10D ]
+              use: 2001
+              otherwise:
+                if:
+                  left:
+                    minus:
+                      - call: date
+                        args:
+                          - field: caseData.nextListedDate
+                      - call: today
+                        args: []
+                  op: le
+                  right:
+                    call: duration
+                    args: [ P30D ]
+                use: 5000
+                otherwise: 5001
+            otherwise: 5001
           canReconfigure: false
       - only: [ et_englandwales, et_scotland ]
         when:
@@ -3233,12 +3512,25 @@ decisions:
         returns:
           name: dueDateIntervalDays
           value:
-            feel: |-
-              if caseData.nextListedDate != null then
-              if (date(caseData.nextListedDate) - today()) <= duration("P30D")
-              then 1
-              else 10
-              else 10
+            if:
+              field: caseData.nextListedDate
+              op: exists
+            use:
+              if:
+                left:
+                  minus:
+                    - call: date
+                      args:
+                        - field: caseData.nextListedDate
+                    - call: today
+                      args: []
+                op: le
+                right:
+                  call: duration
+                  args: [ P30D ]
+              use: 1
+              otherwise: 10
+            otherwise: 10
           canReconfigure: true
       - only: [ et_englandwales, et_scotland ]
         when:
@@ -3247,12 +3539,25 @@ decisions:
         returns:
           name: minorPriority
           value:
-            feel: |-
-              if caseData.nextListedDate != null then
-              if (date(caseData.nextListedDate) - today()) <= duration("P3D")
-              then 100
-              else 500
-              else 500
+            if:
+              field: caseData.nextListedDate
+              op: exists
+            use:
+              if:
+                left:
+                  minus:
+                    - call: date
+                      args:
+                        - field: caseData.nextListedDate
+                    - call: today
+                      args: []
+                op: le
+                right:
+                  call: duration
+                  args: [ P3D ]
+              use: 100
+              otherwise: 500
+            otherwise: 500
           canReconfigure: true
       - only: [ et_englandwales, et_scotland ]
         when:
@@ -3261,12 +3566,25 @@ decisions:
         returns:
           name: majorPriority
           value:
-            feel: |-
-              if caseData.nextListedDate != null then
-              if (date(caseData.nextListedDate) - today()) <= duration("P3D")
-              then 1000
-              else 5001
-              else 5001
+            if:
+              field: caseData.nextListedDate
+              op: exists
+            use:
+              if:
+                left:
+                  minus:
+                    - call: date
+                      args:
+                        - field: caseData.nextListedDate
+                    - call: today
+                      args: []
+                op: le
+                right:
+                  call: duration
+                  args: [ P3D ]
+              use: 1000
+              otherwise: 5001
+            otherwise: 5001
           canReconfigure: true
       - only: [ et_englandwales_multiple, et_scotland_multiple ]
         when:

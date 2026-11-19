@@ -1,6 +1,9 @@
 import { XMLParser } from "fast-xml-parser";
 
 export interface DmnInput {
+  id?: string;
+  expressionId?: string;
+  width?: string;
   label?: string;
   inputVariable?: string;
   typeRef?: string;
@@ -9,18 +12,26 @@ export interface DmnInput {
 }
 
 export interface DmnOutput {
+  id?: string;
+  width?: string;
   label?: string;
   name: string;
   typeRef?: string;
 }
 
 export interface DmnRule {
+  id?: string;
+  /** Ids of the entries, parallel to `inputs` and `outputs`. */
+  inputIds?: string[];
+  outputIds?: string[];
   description?: string;
   inputs: string[];
   outputs: string[];
 }
 
 export interface DmnTable {
+  id?: string;
+  annotationsWidth?: string;
   hitPolicy: string;
   aggregation?: string;
   inputs: DmnInput[];
@@ -32,17 +43,34 @@ export interface DmnDecision {
   id: string;
   name: string;
   historyTimeToLive?: string;
-  variable?: { name: string; typeRef?: string };
+  variable?: { id?: string; name: string; typeRef?: string };
   /** Ids of the decisions it requires, in document order. */
   requires: string[];
+  /** Ids of the information requirements, parallel to `requires`. */
+  requirementIds?: string[];
   table?: DmnTable;
-  literal?: { text: string; expressionLanguage?: string };
+  literal?: { id?: string; text: string; expressionLanguage?: string };
+}
+
+/** A shape or edge of the decision requirements diagram. An empty `id` means the element has no id attribute. */
+export type DmnDiagramItem =
+  | { type: "shape"; id: string; ref: string; bounds: { x: string; y: string; width: string; height: string } }
+  | { type: "edge"; id: string; ref: string; waypoints: Array<{ x: string; y: string }> };
+
+export interface DmnDiagram {
+  id: string;
+  items: DmnDiagramItem[];
 }
 
 export interface DmnDocument {
   id: string;
   name: string;
+  /** The namespace declarations of the root element, as `[attribute, uri]`, in file order. */
+  namespaces?: Array<[string, string]>;
+  exporter?: string;
+  exporterVersion?: string;
   decisions: DmnDecision[];
+  diagram?: DmnDiagram;
 }
 
 type Node = Record<string, unknown>;
@@ -57,6 +85,61 @@ const parser = new XMLParser({
   trimValues: false,
   isArray: (name) => LIST_TAGS.has(name)
 });
+
+const orderedParser = new XMLParser({
+  ignoreAttributes: false,
+  attributeNamePrefix: "@_",
+  parseAttributeValue: false,
+  parseTagValue: false,
+  preserveOrder: true
+});
+
+type Ordered = Array<Record<string, unknown>>;
+
+const childrenOf = (nodes: Ordered, name: string): Ordered => nodes.filter((n) => name in n);
+
+const orderedAttrs = (node: Record<string, unknown>): Node => (node[":@"] ?? {}) as Node;
+
+function parseDiagram(xml: string): DmnDiagram | undefined {
+  const root = parseOrdered(xml);
+  const diagram = childrenOf(
+    childrenOf(root, "definitions").flatMap((d) => (d.definitions as Ordered) ?? []),
+    "dmndi:DMNDI"
+  )
+    .flatMap((d) => (d["dmndi:DMNDI"] as Ordered) ?? [])
+    .find((n) => "dmndi:DMNDiagram" in n);
+  if (!diagram) {
+    return undefined;
+  }
+  const items: DmnDiagramItem[] = [];
+  for (const node of (diagram["dmndi:DMNDiagram"] as Ordered) ?? []) {
+    const nodeAttrs = orderedAttrs(node);
+    if ("dmndi:DMNShape" in node) {
+      const bounds = orderedAttrs(childrenOf((node["dmndi:DMNShape"] as Ordered) ?? [], "dc:Bounds")[0] ?? {});
+      items.push({
+        type: "shape",
+        id: attr(nodeAttrs, "id") ?? "",
+        ref: attr(nodeAttrs, "dmnElementRef") ?? "",
+        bounds: { x: attr(bounds, "x") ?? "0", y: attr(bounds, "y") ?? "0", width: attr(bounds, "width") ?? "0", height: attr(bounds, "height") ?? "0" }
+      });
+    } else if ("dmndi:DMNEdge" in node) {
+      items.push({
+        type: "edge",
+        id: attr(nodeAttrs, "id") ?? "",
+        ref: attr(nodeAttrs, "dmnElementRef") ?? "",
+        waypoints: childrenOf((node["dmndi:DMNEdge"] as Ordered) ?? [], "di:waypoint").map((w) => ({
+          x: attr(orderedAttrs(w), "x") ?? "0",
+          y: attr(orderedAttrs(w), "y") ?? "0"
+        }))
+      });
+    }
+  }
+  return { id: attr(orderedAttrs(diagram), "id") ?? "", items };
+}
+
+function parseOrdered(xml: string): Ordered {
+  return orderedParser.parse(xml) as Ordered;
+}
 
 function asList(value: unknown): Node[] {
   return Array.isArray(value) ? (value as Node[]) : value === undefined ? [] : [value as Node];
@@ -93,6 +176,9 @@ function parseTable(table: Node): DmnTable {
     const expression = (input.inputExpression ?? {}) as Node;
     return {
       ...optional<Omit<DmnInput, "expression">>({
+        id: attr(input, "id"),
+        expressionId: attr(expression, "id"),
+        width: attr(input, "biodi:width"),
         label: attr(input, "label"),
         inputVariable: attr(input, "camunda:inputVariable"),
         typeRef: attr(expression, "typeRef"),
@@ -102,21 +188,35 @@ function parseTable(table: Node): DmnTable {
     };
   });
   const outputs = asList(table.output).map((output) => ({
-    ...optional<Omit<DmnOutput, "name">>({ label: attr(output, "label"), typeRef: attr(output, "typeRef") }),
+    ...optional<Omit<DmnOutput, "name">>({
+      id: attr(output, "id"),
+      width: attr(output, "biodi:width"),
+      label: attr(output, "label"),
+      typeRef: attr(output, "typeRef")
+    }),
     name: attr(output, "name") ?? ""
   }));
   const rules = asList(table.rule).map((rule) => {
-    const description = asList(rule.description)
-      .map((d) => (typeof d === "string" ? d : ""))
-      .join("");
+    const descriptions = asList(rule.description);
+    const description = descriptions.map((d) => (typeof d === "string" ? d : "")).join("");
+    const inputEntries = asList(rule.inputEntry);
+    const outputEntries = asList(rule.outputEntry);
     return {
-      ...(description === "" ? {} : { description }),
-      inputs: asList(rule.inputEntry).map((entry) => textOf(entry)),
-      outputs: asList(rule.outputEntry).map((entry) => textOf(entry))
+      ...optional<{ id?: string }>({ id: attr(rule, "id") }),
+      ...(descriptions.length === 0 ? {} : { description }),
+      inputIds: inputEntries.map((entry) => attr(entry, "id") ?? ""),
+      outputIds: outputEntries.map((entry) => attr(entry, "id") ?? ""),
+      inputs: inputEntries.map((entry) => textOf(entry)),
+      outputs: outputEntries.map((entry) => textOf(entry))
     };
   });
   return {
-    ...optional<{ hitPolicy: string; aggregation?: string }>({ hitPolicy: attr(table, "hitPolicy") ?? "UNIQUE", aggregation: attr(table, "aggregation") }),
+    ...optional<{ id?: string; annotationsWidth?: string; hitPolicy: string; aggregation?: string }>({
+      id: attr(table, "id"),
+      annotationsWidth: attr(table, "biodi:annotationsWidth"),
+      hitPolicy: attr(table, "hitPolicy") ?? "UNIQUE",
+      aggregation: attr(table, "aggregation")
+    }),
     inputs,
     outputs,
     rules
@@ -126,30 +226,51 @@ function parseTable(table: Node): DmnTable {
 export function parseDmn(xml: string): DmnDocument {
   const root = (parser.parse(xml) as Node).definitions as Node;
   const decisionNodes = asList(root.decision);
-  const idToDecision = new Map<string, string>();
-  for (const node of decisionNodes) {
-    idToDecision.set(attr(node, "id") ?? "", attr(node, "name") ?? "");
-  }
   const decisions = decisionNodes.map((node): DmnDecision => {
     const variable = node.variable as Node | undefined;
     const literal = node.literalExpression as Node | undefined;
     const table = node.decisionTable as Node | undefined;
-    const requires = asList(node.informationRequirement).flatMap((requirement) =>
+    const requirements = asList(node.informationRequirement);
+    const requires = requirements.flatMap((requirement) =>
       asList(requirement.requiredDecision).map((required) => (attr(required, "href") ?? "").replace(/^#/, ""))
     );
     return {
       id: attr(node, "id") ?? "",
       name: attr(node, "name") ?? "",
       ...optional<{ historyTimeToLive?: string }>({ historyTimeToLive: attr(node, "camunda:historyTimeToLive") }),
-      ...(variable ? { variable: { name: attr(variable, "name") ?? "", ...optional<{ typeRef?: string }>({ typeRef: attr(variable, "typeRef") }) } } : {}),
+      ...(variable
+        ? {
+            variable: {
+              ...optional<{ id?: string; typeRef?: string }>({ id: attr(variable, "id"), typeRef: attr(variable, "typeRef") }),
+              name: attr(variable, "name") ?? ""
+            }
+          }
+        : {}),
       requires,
+      requirementIds: requirements.map((requirement) => attr(requirement, "id") ?? ""),
       ...(table ? { table: parseTable(table) } : {}),
       ...(literal
-        ? { literal: { text: textOf(literal), ...optional<{ expressionLanguage?: string }>({ expressionLanguage: attr(literal, "expressionLanguage") }) } }
+        ? {
+            literal: {
+              ...optional<{ id?: string; expressionLanguage?: string }>({ id: attr(literal, "id"), expressionLanguage: attr(literal, "expressionLanguage") }),
+              text: textOf(literal)
+            }
+          }
         : {})
     };
   });
-  return { id: attr(root, "id") ?? "", name: attr(root, "name") ?? "", decisions };
+  const diagram = parseDiagram(xml);
+  const namespaces = Object.entries(root)
+    .filter(([key, value]) => key.startsWith("@_xmlns") && typeof value === "string")
+    .map(([key, value]): [string, string] => [key.slice(2), value as string]);
+  return {
+    id: attr(root, "id") ?? "",
+    name: attr(root, "name") ?? "",
+    ...(namespaces.length > 0 ? { namespaces } : {}),
+    ...optional<{ exporter?: string; exporterVersion?: string }>({ exporter: attr(root, "exporter"), exporterVersion: attr(root, "exporterVersion") }),
+    decisions,
+    ...(diagram ? { diagram } : {})
+  };
 }
 
 function escapeText(text: string): string {
@@ -167,33 +288,76 @@ function attrs(pairs: Array<[string, string | undefined]>): string {
     .join("");
 }
 
-/** Stable ids derived from a seed, so regenerating a file never churns ids. */
-function idFactory(prefix: string): (kind: string, ...parts: Array<string | number>) => string {
-  return (kind, ...parts) => `${kind}_${[prefix, ...parts].join("_")}`;
+/** An XML NCName from arbitrary text, for ids the writer has to invent: anything outside the name characters becomes `_`. */
+export function ncName(text: string): string {
+  const cleaned = text.replaceAll(/[^A-Za-z0-9_.-]/g, "_");
+  return /^[A-Za-z_]/.test(cleaned) ? cleaned : `_${cleaned}`;
 }
 
-const NAMESPACES =
-  'xmlns="https://www.omg.org/spec/DMN/20191111/MODEL/" xmlns:dmndi="https://www.omg.org/spec/DMN/20191111/DMNDI/" xmlns:dc="http://www.omg.org/spec/DMN/20180521/DC/" xmlns:biodi="http://bpmn.io/schema/dmn/biodi/2.0" xmlns:camunda="http://camunda.org/schema/1.0/dmn" xmlns:di="http://www.omg.org/spec/DMN/20180521/DI/"';
+/** Every id the document already carries. */
+function storedIds(doc: DmnDocument): Set<string> {
+  const ids = [doc.diagram?.id, ...(doc.diagram?.items.map((item) => item.id) ?? [])];
+  for (const decision of doc.decisions) {
+    ids.push(decision.id, decision.variable?.id, decision.literal?.id, decision.table?.id, ...(decision.requirementIds ?? []));
+    for (const input of decision.table?.inputs ?? []) {
+      ids.push(input.id, input.expressionId);
+    }
+    for (const output of decision.table?.outputs ?? []) {
+      ids.push(output.id);
+    }
+    for (const rule of decision.table?.rules ?? []) {
+      ids.push(rule.id, ...(rule.inputIds ?? []), ...(rule.outputIds ?? []));
+    }
+  }
+  return new Set(ids.filter((id): id is string => Boolean(id)));
+}
+
+/**
+ * Ids derived from the document's id and the element's position, so regenerating a file never churns them. One that would
+ * repeat an id the document already has, stored or generated, gets a number added.
+ */
+function idFactory(prefix: string, taken: Set<string>): (kind: string, ...parts: Array<string | number>) => string {
+  return (kind, ...parts) => {
+    const base = ncName(`${kind}_${[prefix, ...parts].join("_")}`);
+    let candidate = base;
+    for (let n = 1; taken.has(candidate); n++) {
+      candidate = `${base}_${n}`;
+    }
+    taken.add(candidate);
+    return candidate;
+  };
+}
+
+const NAMESPACES: Array<[string, string]> = [
+  ["xmlns", "https://www.omg.org/spec/DMN/20191111/MODEL/"],
+  ["xmlns:camunda", "http://camunda.org/schema/1.0/dmn"], // NOSONAR: XML namespace identifiers, never fetched
+  ["xmlns:biodi", "http://bpmn.io/schema/dmn/biodi/2.0"], // NOSONAR: XML namespace identifiers, never fetched
+  ["xmlns:dmndi", "https://www.omg.org/spec/DMN/20191111/DMNDI/"],
+  ["xmlns:dc", "http://www.omg.org/spec/DMN/20180521/DC/"], // NOSONAR: XML namespace identifiers, never fetched
+  ["xmlns:di", "http://www.omg.org/spec/DMN/20180521/DI/"] // NOSONAR: XML namespace identifiers, never fetched
+];
 
 function text(indent: string, value: string): string {
   return `${indent}<text>${escapeText(value)}</text>\n`;
 }
 
-function writeTable(table: DmnTable, tableId: string, id: ReturnType<typeof idFactory>, base: string): string {
+function writeTable(table: DmnTable, id: ReturnType<typeof idFactory>, base: string): string {
   const pad = "      ";
   let out = `    <decisionTable${attrs([
-    ["id", tableId],
+    ["id", table.id ?? id("DecisionTable", base)],
     ["hitPolicy", table.hitPolicy === "UNIQUE" ? undefined : table.hitPolicy],
-    ["aggregation", table.aggregation]
+    ["aggregation", table.aggregation],
+    ["biodi:annotationsWidth", table.annotationsWidth]
   ])}>\n`;
   table.inputs.forEach((input, index) => {
     out += `${pad}<input${attrs([
-      ["id", id("Input", base, index)],
+      ["id", input.id ?? id("Input", base, index)],
       ["label", input.label],
+      ["biodi:width", input.width],
       ["camunda:inputVariable", input.inputVariable]
     ])}>\n`;
     out += `${pad}  <inputExpression${attrs([
-      ["id", id("InputExpression", base, index)],
+      ["id", input.expressionId ?? id("InputExpression", base, index)],
       ["typeRef", input.typeRef],
       ["expressionLanguage", input.expressionLanguage]
     ])}>\n`;
@@ -202,40 +366,40 @@ function writeTable(table: DmnTable, tableId: string, id: ReturnType<typeof idFa
   });
   table.outputs.forEach((output, index) => {
     out += `${pad}<output${attrs([
-      ["id", id("Output", base, index)],
+      ["id", output.id ?? id("Output", base, index)],
       ["label", output.label],
       ["name", output.name],
-      ["typeRef", output.typeRef]
+      ["typeRef", output.typeRef],
+      ["biodi:width", output.width]
     ])} />\n`;
   });
   table.rules.forEach((rule, ruleIndex) => {
-    out += `${pad}<rule id="${id("Rule", base, ruleIndex)}">\n`;
+    out += `${pad}<rule${attrs([["id", rule.id ?? id("Rule", base, ruleIndex)]])}>\n`;
     if (rule.description !== undefined) {
       out += `${pad}  <description>${escapeText(rule.description)}</description>\n`;
     }
     rule.inputs.forEach((entry, index) => {
-      out += `${pad}  <inputEntry id="${id("InputEntry", base, ruleIndex, index)}">\n${text(`${pad}    `, entry)}${pad}  </inputEntry>\n`;
+      out += `${pad}  <inputEntry${attrs([["id", rule.inputIds?.[index] || id("InputEntry", base, ruleIndex, index)]])}>\n${text(`${pad}    `, entry)}${pad}  </inputEntry>\n`;
     });
     rule.outputs.forEach((entry, index) => {
-      out += `${pad}  <outputEntry id="${id("OutputEntry", base, ruleIndex, index)}">\n${text(`${pad}    `, entry)}${pad}  </outputEntry>\n`;
+      out += `${pad}  <outputEntry${attrs([["id", rule.outputIds?.[index] || id("OutputEntry", base, ruleIndex, index)]])}>\n${text(`${pad}    `, entry)}${pad}  </outputEntry>\n`;
     });
     out += `${pad}</rule>\n`;
   });
   return `${out}    </decisionTable>\n`;
 }
 
-/** Serialises the model as a DMN 1.3 file in Camunda Modeler's layout, with a generated, left-to-right DRD. */
+/** Serialises the model as a DMN 1.3 file in Camunda Modeler's layout. Ids and diagram items the model lacks are generated. */
 export function writeDmn(doc: DmnDocument): string {
-  const id = idFactory(doc.id);
-  const decisionIds = new Map(doc.decisions.map((d) => [d.name, d.id]));
-  let out = `<?xml version="1.0" encoding="UTF-8"?>\n<definitions ${NAMESPACES}${attrs([
+  const id = idFactory(doc.id, storedIds(doc));
+  let out = `<?xml version="1.0" encoding="UTF-8"?>\n<definitions${attrs(doc.namespaces ?? NAMESPACES)}${attrs([
     ["id", doc.id],
     ["name", doc.name],
-    ["namespace", "http://camunda.org/schema/1.0/dmn"],
-    ["exporter", "Camunda Modeler"],
-    ["exporterVersion", "5.50.1"]
+    ["namespace", "http://camunda.org/schema/1.0/dmn"], // NOSONAR: the DMN namespace the Camunda engine expects
+    ["exporter", doc.exporter ?? "Camunda Modeler"],
+    ["exporterVersion", doc.exporterVersion ?? "5.50.1"]
   ])}>\n`;
-  const requirementIds: Array<{ from: string; to: string; id: string }> = [];
+  const requirements: Array<{ from: string; to: string; id: string }> = [];
   for (const decision of doc.decisions) {
     out += `  <decision${attrs([
       ["id", decision.id],
@@ -244,94 +408,140 @@ export function writeDmn(doc: DmnDocument): string {
     ])}>\n`;
     if (decision.variable) {
       out += `    <variable${attrs([
-        ["id", id("InformationItem", decision.id)],
+        ["id", decision.variable.id ?? id("InformationItem", decision.id)],
         ["name", decision.variable.name],
         ["typeRef", decision.variable.typeRef]
       ])} />\n`;
     }
     decision.requires.forEach((required, index) => {
-      const requirementId = id("InformationRequirement", decision.id, index);
-      requirementIds.push({ from: decision.id, to: required, id: requirementId });
-      out += `    <informationRequirement id="${requirementId}">\n      <requiredDecision href="#${required}" />\n    </informationRequirement>\n`;
+      const requirementId = decision.requirementIds?.[index] || id("InformationRequirement", decision.id, index);
+      requirements.push({ from: decision.id, to: required, id: requirementId });
+      out += `    <informationRequirement${attrs([["id", requirementId]])}>\n      <requiredDecision${attrs([["href", `#${required}`]])} />\n    </informationRequirement>\n`;
     });
     if (decision.table) {
-      out += writeTable(decision.table, id("DecisionTable", decision.id), id, decision.id);
+      out += writeTable(decision.table, id, decision.id);
     }
     if (decision.literal) {
       out += `    <literalExpression${attrs([
-        ["id", id("LiteralExpression", decision.id)],
+        ["id", decision.literal.id ?? id("LiteralExpression", decision.id)],
         ["expressionLanguage", decision.literal.expressionLanguage]
       ])}>\n${text("      ", decision.literal.text)}    </literalExpression>\n`;
     }
     out += "  </decision>\n";
   }
-  out += writeDiagram(doc, requirementIds, id, decisionIds);
+  out += writeDiagram(doc, requirements, id);
   return `${out}</definitions>\n`;
 }
 
-function writeDiagram(
-  doc: DmnDocument,
-  requirements: Array<{ from: string; to: string; id: string }>,
-  id: ReturnType<typeof idFactory>,
-  _decisionIds: Map<string, string>
-): string {
-  const width = 180;
-  const height = 80;
-  const position = new Map<string, { x: number; y: number }>();
-  const dependents = doc.decisions.filter((d) => d.requires.length === 0 || d.table);
-  const main = dependents.find((d) => d.table) ?? doc.decisions[0];
+const SHAPE_WIDTH = 180;
+const SHAPE_HEIGHT = 80;
+
+/**
+ * The model's diagram where it has one, kept to the decisions and requirements that still exist; a decision or
+ * requirement without a shape or edge gets one in a left-to-right grid, the first decision at the top left.
+ */
+function writeDiagram(doc: DmnDocument, requirements: Array<{ from: string; to: string; id: string }>, id: ReturnType<typeof idFactory>): string {
+  const decisionIds = new Set(doc.decisions.map((d) => d.id));
+  const requirementIds = new Set(requirements.map((r) => r.id));
+  const items = (doc.diagram?.items ?? []).filter((item) => (item.type === "shape" ? decisionIds.has(item.ref) : requirementIds.has(item.ref)));
+  const shaped = new Set(items.filter((item) => item.type === "shape").map((item) => item.ref));
+  const edged = new Set(items.filter((item) => item.type === "edge").map((item) => item.ref));
+  const main = doc.decisions.find((d) => d.table) ?? doc.decisions[0];
   doc.decisions.forEach((decision, index) => {
-    if (decision === main) {
-      position.set(decision.id, { x: 160, y: 80 });
-    } else {
-      position.set(decision.id, { x: 160 + ((index - 1) % 4) * 220, y: 250 + Math.floor((index - 1) / 4) * 170 });
+    if (!shaped.has(decision.id)) {
+      const at = decision === main ? { x: 160, y: 80 } : { x: 160 + ((index - 1) % 4) * 220, y: 250 + Math.floor((index - 1) / 4) * 170 };
+      items.push({
+        type: "shape",
+        id: id("DMNShape", decision.id),
+        ref: decision.id,
+        bounds: { x: String(at.x), y: String(at.y), width: String(SHAPE_WIDTH), height: String(SHAPE_HEIGHT) }
+      });
     }
   });
-  let out = `  <dmndi:DMNDI>\n    <dmndi:DMNDiagram id="${id("DMNDiagram", "drd")}">\n`;
-  for (const decision of doc.decisions) {
-    const at = position.get(decision.id) ?? { x: 0, y: 0 };
-    out += `      <dmndi:DMNShape id="${id("DMNShape", decision.id)}" dmnElementRef="${decision.id}">\n        <dc:Bounds height="${height}" width="${width}" x="${at.x}" y="${at.y}" />\n      </dmndi:DMNShape>\n`;
-  }
+  const boundsOf = new Map(items.flatMap((item) => (item.type === "shape" ? [[item.ref, item.bounds] as const] : [])));
   for (const requirement of requirements) {
-    const from = position.get(requirement.from) ?? { x: 0, y: 0 };
-    const to = position.get(requirement.to) ?? { x: 0, y: 0 };
-    out += `      <dmndi:DMNEdge id="${id("DMNEdge", requirement.id)}" dmnElementRef="${requirement.id}">\n`;
-    out += `        <di:waypoint x="${to.x + width / 2}" y="${to.y}" />\n        <di:waypoint x="${from.x + width / 2}" y="${from.y + height}" />\n      </dmndi:DMNEdge>\n`;
+    if (!edged.has(requirement.id)) {
+      const from = boundsOf.get(requirement.from);
+      const to = boundsOf.get(requirement.to);
+      const at = (bounds: typeof from, dx: number, dy: number) => ({
+        x: String(Number(bounds?.x ?? 0) + dx),
+        y: String(Number(bounds?.y ?? 0) + dy)
+      });
+      items.push({
+        type: "edge",
+        id: id("DMNEdge", requirement.id),
+        ref: requirement.id,
+        waypoints: [at(to, SHAPE_WIDTH / 2, 0), at(from, SHAPE_WIDTH / 2, SHAPE_HEIGHT)]
+      });
+    }
+  }
+  let out = `  <dmndi:DMNDI>\n    <dmndi:DMNDiagram${attrs([["id", (doc.diagram ? doc.diagram.id : id("DMNDiagram", "drd")) || undefined]])}>\n`;
+  for (const item of items) {
+    if (item.type === "shape") {
+      out += `      <dmndi:DMNShape${attrs([
+        ["id", item.id || undefined],
+        ["dmnElementRef", item.ref]
+      ])}>\n        <dc:Bounds${attrs([
+        ["height", item.bounds.height],
+        ["width", item.bounds.width],
+        ["x", item.bounds.x],
+        ["y", item.bounds.y]
+      ])} />\n      </dmndi:DMNShape>\n`;
+    } else {
+      out += `      <dmndi:DMNEdge${attrs([
+        ["id", item.id || undefined],
+        ["dmnElementRef", item.ref]
+      ])}>\n`;
+      for (const point of item.waypoints) {
+        out += `        <di:waypoint${attrs([
+          ["x", point.x],
+          ["y", point.y]
+        ])} />\n`;
+      }
+      out += "      </dmndi:DMNEdge>\n";
+    }
   }
   return `${out}    </dmndi:DMNDiagram>\n  </dmndi:DMNDI>\n`;
 }
 
+/** The attributes of each element the model carries. */
 const USED_ATTRIBUTES: Record<string, string[]> = {
-  definitions: ["id", "name"],
+  definitions: ["id", "name", "exporter", "exporterVersion"],
   decision: ["id", "name", "camunda:historyTimeToLive"],
-  variable: ["name", "typeRef"],
+  variable: ["id", "name", "typeRef"],
+  informationRequirement: ["id"],
   requiredDecision: ["href"],
-  decisionTable: ["hitPolicy", "aggregation"],
-  input: ["label", "camunda:inputVariable"],
-  inputExpression: ["typeRef", "expressionLanguage"],
-  output: ["label", "name", "typeRef"],
-  literalExpression: ["expressionLanguage"]
+  decisionTable: ["id", "hitPolicy", "aggregation", "biodi:annotationsWidth"],
+  input: ["id", "label", "biodi:width", "camunda:inputVariable"],
+  inputExpression: ["id", "typeRef", "expressionLanguage"],
+  output: ["id", "label", "name", "typeRef", "biodi:width"],
+  rule: ["id"],
+  inputEntry: ["id"],
+  outputEntry: ["id"],
+  literalExpression: ["id", "expressionLanguage"]
 };
 
-/** Attributes and elements that carry no behaviour: ids, the modeler's own metadata, column widths and the diagram. */
-const PRESENTATION_ATTRIBUTES = new Set(["id", "exporter", "exporterVersion", "namespace", "biodi:width", "biodi:annotationsWidth"]);
-const KNOWN_ELEMENTS = new Set([
-  "definitions",
-  "decision",
-  "variable",
-  "informationRequirement",
-  "requiredDecision",
-  "decisionTable",
-  "input",
-  "inputExpression",
-  "output",
-  "rule",
-  "description",
-  "inputEntry",
-  "outputEntry",
-  "literalExpression",
-  "text"
-]);
+/** Attributes that carry no behaviour and that the writer states afresh. */
+const PRESENTATION_ATTRIBUTES = new Set(["namespace"]);
+
+/** Where the model has a place for each element: its parents. A known element under any other parent is dropped by a round trip. */
+const KNOWN_ELEMENTS: Record<string, string[]> = {
+  definitions: [""],
+  decision: ["definitions"],
+  variable: ["decision"],
+  informationRequirement: ["decision"],
+  requiredDecision: ["informationRequirement"],
+  decisionTable: ["decision"],
+  input: ["decisionTable"],
+  inputExpression: ["input"],
+  output: ["decisionTable"],
+  rule: ["decisionTable"],
+  description: ["rule"],
+  inputEntry: ["rule"],
+  outputEntry: ["rule"],
+  literalExpression: ["decision"],
+  text: ["inputExpression", "inputEntry", "outputEntry", "literalExpression"]
+};
 
 export interface Inspection {
   /** Things the model does not carry and the generator recreates or discards, with how many times each occurred. */
@@ -345,13 +555,16 @@ export function inspectDmn(xml: string): Inspection {
   const presentation = new Map<string, number>();
   const unrepresentable = new Map<string, number>();
   const bump = (map: Map<string, number>, key: string) => map.set(key, (map.get(key) ?? 0) + 1);
-  const walk = (name: string, value: unknown) => {
+  const walk = (name: string, parent: string, value: unknown) => {
     if (name === "dmndi:DMNDI") {
-      bump(presentation, "decision requirements diagram layout (regenerated)");
       return;
     }
-    if (!KNOWN_ELEMENTS.has(name)) {
+    if (!KNOWN_ELEMENTS[name]) {
       bump(unrepresentable, `element <${name}>`);
+      return;
+    }
+    if (!KNOWN_ELEMENTS[name]?.includes(parent)) {
+      bump(unrepresentable, `element <${name}> in <${parent}>`);
       return;
     }
     for (const node of Array.isArray(value) ? value : [value]) {
@@ -361,19 +574,16 @@ export function inspectDmn(xml: string): Inspection {
       for (const [key, child] of Object.entries(node as Node)) {
         if (key.startsWith("@_")) {
           const attribute = key.slice(2);
-          if (attribute.startsWith("xmlns")) {
-            continue;
-          }
-          if (USED_ATTRIBUTES[name]?.includes(attribute)) {
+          if (attribute.startsWith("xmlns") || USED_ATTRIBUTES[name]?.includes(attribute)) {
             continue;
           }
           if (PRESENTATION_ATTRIBUTES.has(attribute)) {
-            bump(presentation, attribute === "id" ? "element ids (regenerated)" : `attribute ${attribute}`);
+            bump(presentation, `attribute ${attribute}`);
           } else {
             bump(unrepresentable, `attribute ${attribute} on <${name}>`);
           }
         } else if (key !== "#text") {
-          walk(key, child);
+          walk(key, name, child);
         }
       }
     }
@@ -381,7 +591,7 @@ export function inspectDmn(xml: string): Inspection {
   const root = parser.parse(xml) as Node;
   for (const [key, value] of Object.entries(root)) {
     if (key !== "?xml") {
-      walk(key, value);
+      walk(key, "", value);
     }
   }
   return { presentation, unrepresentable };

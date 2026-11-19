@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type DmnDecision, type DmnDocument, type DmnRule, parseDmn } from "./dmn-model.ts";
 import { canonicalCell, canonicalExpr } from "./feel.ts";
+import { align } from "./merge.ts";
 
 export interface DiffOptions {
   /** Compare rules as a set even where the hit policy makes their order matter. */
@@ -30,7 +31,7 @@ export function ruleOrderMatters(hitPolicy: string, aggregation: string | undefi
 }
 
 function ruleSignature(rule: DmnRule): string {
-  return JSON.stringify([rule.description ?? null, rule.inputs.map(canonicalCell), rule.outputs.map(canonicalExpr)]);
+  return JSON.stringify([rule.description || null, rule.inputs.map(canonicalCell), rule.outputs.map(canonicalExpr)]);
 }
 
 function describeRule(rule: DmnRule, index: number): string {
@@ -41,41 +42,8 @@ function describeRule(rule: DmnRule, index: number): string {
   return `rule ${index + 1} (${text.length > 110 ? `${text.slice(0, 110)}...` : text})`;
 }
 
-/** Edit script between two signature lists, by longest common subsequence. */
-function editScript(a: string[], b: string[]): Array<{ op: "keep" | "del" | "add"; index: number }> {
-  const lcs: number[][] = Array.from({ length: a.length + 1 }, () => new Array<number>(b.length + 1).fill(0));
-  for (let i = a.length - 1; i >= 0; i--) {
-    for (let j = b.length - 1; j >= 0; j--) {
-      (lcs[i] as number[])[j] =
-        a[i] === b[j]
-          ? ((lcs[i + 1] as number[])[j + 1] as number) + 1
-          : Math.max((lcs[i + 1] as number[])[j] as number, (lcs[i] as number[])[j + 1] as number);
-    }
-  }
-  const out: Array<{ op: "keep" | "del" | "add"; index: number }> = [];
-  let i = 0;
-  let j = 0;
-  while (i < a.length || j < b.length) {
-    if (i < a.length && j < b.length && a[i] === b[j]) {
-      out.push({ op: "keep", index: i });
-      i++;
-      j++;
-    } else if (j >= b.length || (i < a.length && ((lcs[i + 1] as number[])[j] as number) >= ((lcs[i] as number[])[j + 1] as number))) {
-      out.push({ op: "del", index: i });
-      i++;
-    } else {
-      out.push({ op: "add", index: j });
-      j++;
-    }
-  }
-  return out;
-}
-
 function diffDecision(file: string, a: DmnDecision, b: DmnDecision, options: DiffOptions, out: Difference[]): void {
   const at = (message: string) => out.push({ file, decision: a.name, message });
-  if (a.name !== b.name) {
-    at(`name differs: ${JSON.stringify(a.name)} vs ${JSON.stringify(b.name)}`);
-  }
   if ((a.historyTimeToLive ?? "") !== (b.historyTimeToLive ?? "")) {
     at(`historyTimeToLive differs: ${a.historyTimeToLive} vs ${b.historyTimeToLive}`);
   }
@@ -134,11 +102,11 @@ function diffDecision(file: string, a: DmnDecision, b: DmnDecision, options: Dif
     }
     const ordered = ruleOrderMatters(ta.hitPolicy, ta.aggregation) && !options.ignoreRuleOrder;
     if (ordered) {
-      for (const step of editScript(sigA, sigB)) {
+      for (const step of align(sigA, sigB)) {
         if (step.op === "del") {
-          at(`only in first: ${describeRule(ta.rules[step.index] as DmnRule, step.index)}`);
+          at(`only in first: ${describeRule(ta.rules[step.a] as DmnRule, step.a)}`);
         } else if (step.op === "add") {
-          at(`only in second: ${describeRule(tb.rules[step.index] as DmnRule, step.index)}`);
+          at(`only in second: ${describeRule(tb.rules[step.b] as DmnRule, step.b)}`);
         }
       }
     } else {
@@ -165,34 +133,54 @@ function diffDecision(file: string, a: DmnDecision, b: DmnDecision, options: Dif
   }
 }
 
+/** Decisions keyed by name and, for a name used more than once, by order of occurrence. */
+function keyedDecisions(doc: DmnDocument): { byKey: Map<string, DmnDecision>; counts: Map<string, number> } {
+  const counts = new Map<string, number>();
+  const byKey = new Map<string, DmnDecision>();
+  for (const decision of doc.decisions) {
+    const seen = counts.get(decision.name) ?? 0;
+    counts.set(decision.name, seen + 1);
+    byKey.set(`${decision.name}#${seen}`, decision);
+  }
+  return { byKey, counts };
+}
+
 /**
  * Compares two DMNs as data: decisions by name, then hit policy, columns and rules. Ids, whitespace and layout are
- * ignored, and so is rule order wherever `ruleOrderMatters` says it cannot change a result. Decision order is
- * ignored; required decisions are compared by name.
+ * ignored, except the id of a decision table, which is the key Camunda evaluates it by. Rule order is ignored wherever
+ * `ruleOrderMatters` says it cannot change a result, and so is decision order; required decisions are compared by name.
+ * Decisions that share a name are matched by order of occurrence and reported, as a name should identify one decision.
  */
 export function diffDocuments(file: string, a: DmnDocument, b: DmnDocument, options: DiffOptions = {}): Difference[] {
   const out: Difference[] = [];
   const nameById = (doc: DmnDocument) => new Map(doc.decisions.map((d) => [d.id, d.name]));
   const na = nameById(a);
   const nb = nameById(b);
-  const byName = (doc: DmnDocument) => new Map(doc.decisions.map((d) => [d.name, d]));
-  const da = byName(a);
-  const db = byName(b);
-  for (const [name, decision] of da) {
-    const other = db.get(name);
+  const da = keyedDecisions(a);
+  const db = keyedDecisions(b);
+  for (const [name, count] of da.counts) {
+    if (count > 1 || (db.counts.get(name) ?? 0) > 1) {
+      out.push({ file, decision: name, message: `decision name used ${count} times in first and ${db.counts.get(name) ?? 0} in second` });
+    }
+  }
+  for (const [key, decision] of da.byKey) {
+    const other = db.byKey.get(key);
     if (!other) {
-      out.push({ file, decision: name, message: "decision only in first" });
+      out.push({ file, decision: decision.name, message: "decision only in first" });
       continue;
+    }
+    if (decision.table && other.table && decision.id !== other.id) {
+      out.push({ file, decision: decision.name, message: `decision id differs: ${decision.id} vs ${other.id}` });
     }
     const required = (d: DmnDecision, names: Map<string, string>) => d.requires.map((id) => names.get(id) ?? id).sort((x, y) => (x < y ? -1 : x > y ? 1 : 0));
     if (JSON.stringify(required(decision, na)) !== JSON.stringify(required(other, nb))) {
-      out.push({ file, decision: name, message: `requires differ: ${required(decision, na).join(", ")} vs ${required(other, nb).join(", ")}` });
+      out.push({ file, decision: decision.name, message: `requires differ: ${required(decision, na).join(", ")} vs ${required(other, nb).join(", ")}` });
     }
     diffDecision(file, decision, other, options, out);
   }
-  for (const name of db.keys()) {
-    if (!da.has(name)) {
-      out.push({ file, decision: name, message: "decision only in second" });
+  for (const [key, decision] of db.byKey) {
+    if (!da.byKey.has(key)) {
+      out.push({ file, decision: decision.name, message: "decision only in second" });
     }
   }
   return out;

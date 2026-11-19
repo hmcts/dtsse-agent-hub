@@ -19,6 +19,8 @@ function workspace() {
   return { dir, input };
 }
 
+const bin = fileURLToPath(new URL("../bin/wa-spec", import.meta.url));
+
 describe("cli", () => {
   it("should import, generate and find no difference when the DMNs round-trip", () => {
     const { dir, input } = workspace();
@@ -41,6 +43,49 @@ describe("cli", () => {
     const diff = run("diff", join(input, "wa-task-completion-demo-ct_a.dmn"), changed);
     expect(diff.status).toBe(1);
     expect(diff.stdout).toContain("only in second");
+  });
+
+  it("should resolve relative paths against the caller's directory when run through the bin script", () => {
+    const { dir } = workspace();
+    const here = (...args: string[]) => spawnSync(bin, args, { encoding: "utf8", cwd: dir });
+    expect(here("import", "dmn", "-o", "out/spec.yaml").status).toBe(0);
+    expect(here("generate", "out/spec.yaml", "-o", "gen").status).toBe(0);
+    const diff = here("diff", "dmn", "gen");
+    expect(diff.stdout).toContain("no differences");
+    expect(diff.status).toBe(0);
+  });
+
+  it("should write the layout beside the spec and generate the original ids from it when the spec was imported", () => {
+    const { dir, input } = workspace();
+    run("import", input, "-o", join(dir, "spec.yaml"));
+    expect(readFileSync(join(dir, "spec.layout.yaml"), "utf8")).toContain("version: 1");
+    run("generate", join(dir, "spec.yaml"), "-o", join(dir, "out"));
+    expect(readFileSync(join(dir, "out", "wa-task-completion-demo-ct_a.dmn"), "utf8")).toBe(
+      readFileSync(join(input, "wa-task-completion-demo-ct_a.dmn"), "utf8")
+    );
+  });
+
+  it("should compare a file with the file of the same name in a directory when one side is a directory", () => {
+    const { dir, input } = workspace();
+    run("import", input, "-o", join(dir, "spec.yaml"));
+    run("generate", join(dir, "spec.yaml"), "-o", join(dir, "out"));
+    const file = join(input, "wa-task-completion-demo-ct_b.dmn");
+    const same = run("diff", file, join(dir, "out"));
+    expect(same.stdout).toContain("no differences");
+    expect(run("diff", join(dir, "out"), file).status).toBe(0);
+    const changed = join(dir, "out", "wa-task-completion-demo-ct_b.dmn");
+    writeFileSync(changed, readFileSync(changed, "utf8").replace('"Auto"', '"Manual"'));
+    const different = run("diff", file, join(dir, "out"));
+    expect(different.status).toBe(1);
+    expect(different.stdout).not.toContain("ct_a");
+  });
+
+  it("should exit 2 and say what is missing when the directory has no file of the file's name", () => {
+    const { dir, input } = workspace();
+    mkdirSync(join(dir, "empty"));
+    const result = run("diff", join(input, "wa-task-completion-demo-ct_a.dmn"), join(dir, "empty"));
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("has no file named wa-task-completion-demo-ct_a.dmn");
   });
 
   it("should show the rows for a task when asked", () => {

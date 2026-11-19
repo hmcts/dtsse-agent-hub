@@ -78,6 +78,35 @@ describe("generateDocument", () => {
   });
 });
 
+describe("generated ids", () => {
+  it("should give a helper a valid id, and requirements that refer to it, when its name holds spaces and quotes", () => {
+    const odd: Spec = SpecSchema.parse({
+      ...spec,
+      decisions: {
+        completion: {
+          ...spec.decisions.completion,
+          helpers: [{ name: 'My "odd" helper', expression: 1 }],
+          dependencies: [{ decision: "table", requires: 'My "odd" helper' }]
+        }
+      }
+    });
+    const doc = generateDocument(odd, "completion", "ct_a");
+    expect(doc?.decisions[1]?.id).toBe("Decision_My__odd__helper");
+    expect(doc?.decisions[0]?.requires).toEqual(["Decision_My__odd__helper"]);
+    const xml = generateAll(odd)[0]?.xml ?? "";
+    expect(xml).toContain('name="My &quot;odd&quot; helper"');
+    expect(parseDmn(xml).decisions[0]?.requires).toEqual(["Decision_My__odd__helper"]);
+  });
+
+  it("should keep a helper's id from the layout when the layout has one", () => {
+    const layout = { version: 1 as const, files: { "completion/ct_a": { id: "def", decisions: { H: { id: "Decision_abc" } } } } };
+    const doc = generateDocument(spec, "completion", "ct_a", layout);
+    expect(doc?.id).toBe("def");
+    expect(doc?.decisions[1]?.id).toBe("Decision_abc");
+    expect(doc?.decisions[0]?.requires).toEqual(["Decision_abc"]);
+  });
+});
+
 describe("generateAll", () => {
   it("should produce one parseable DMN per kind and case type when the spec defines a kind", () => {
     const files = generateAll(spec);

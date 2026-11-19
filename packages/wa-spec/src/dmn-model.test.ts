@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { sampleDmn } from "./__fixtures__/dmn.ts";
-import { inspectDmn, parseDmn, writeDmn } from "./dmn-model.ts";
+import { inspectDmn, ncName, parseDmn, writeDmn } from "./dmn-model.ts";
 
 describe("parseDmn and writeDmn", () => {
   it("should read back what was written when the document is written and parsed again", () => {
@@ -30,7 +30,7 @@ describe("parseDmn and writeDmn", () => {
       ]
     });
     expect(xml).toContain("&lt; 3");
-    expect(parseDmn(xml).decisions[0]?.table?.rules[0]).toEqual({ inputs: ["< 3"], outputs: ['if a < b & c > d then "q"\nelse "r"'] });
+    expect(parseDmn(xml).decisions[0]?.table?.rules[0]).toMatchObject({ inputs: ["< 3"], outputs: ['if a < b & c > d then "q"\nelse "r"'] });
   });
 
   it("should omit the hit policy attribute when it is the default UNIQUE", () => {
@@ -45,11 +45,28 @@ describe("parseDmn and writeDmn", () => {
 });
 
 describe("inspectDmn", () => {
-  it("should report ids and the diagram as presentation when the file is ordinary", () => {
+  it("should find nothing unrepresentable and only the namespace as presentation when the file is ordinary", () => {
     const { presentation, unrepresentable } = inspectDmn(sampleDmn("ct_a"));
     expect(unrepresentable.size).toBe(0);
-    expect(presentation.get("element ids (regenerated)")).toBeGreaterThan(0);
-    expect(presentation.get("decision requirements diagram layout (regenerated)")).toBe(1);
+    expect([...presentation.keys()]).toEqual(["attribute namespace"]);
+  });
+
+  it("should report a description on a decision, input or output when the file has one", () => {
+    const xml = sampleDmn("ct_a")
+      .replace("<variable", "<description>about</description><variable")
+      .replace('<inputExpression id="InputExpression', '<description>in</description><inputExpression id="InputExpression')
+      .replace("<rule ", "<description>x</description><rule ");
+    const { unrepresentable } = inspectDmn(xml);
+    expect([...unrepresentable.keys()]).toEqual(
+      expect.arrayContaining(["element <description> in <decision>", "element <description> in <input>", "element <description> in <decisionTable>"])
+    );
+  });
+
+  it("should report a known element under a parent that has no place for it when the file nests it oddly", () => {
+    const xml = sampleDmn("ct_a").replace("<rule ", '<input id="stray"><inputExpression><text/></inputExpression></input><rule ');
+    expect([...inspectDmn(xml).unrepresentable.keys()]).not.toContain("element <input> in <rule>");
+    const odd = sampleDmn("ct_a").replace("<inputEntry ", '<variable name="v" /><inputEntry ');
+    expect(inspectDmn(odd).unrepresentable.get("element <variable> in <rule>")).toBe(1);
   });
 
   it("should report an element or attribute the model has no place for when the file has one", () => {
@@ -62,5 +79,67 @@ describe("inspectDmn", () => {
     const { unrepresentable } = inspectDmn(xml);
     expect(unrepresentable.get("element <outputValues>")).toBe(1);
     expect([...unrepresentable.keys()]).toContain("attribute extra on <rule>");
+  });
+});
+
+describe("ids and diagram", () => {
+  it("should keep every id, width and diagram item in order when a file is parsed and written again", () => {
+    const xml = sampleDmn("ct_a")
+      .replace(
+        '<input id="Input_wa-completion-definition-ct_a_wa-task-completion-demo-ct_a_0"',
+        '<input biodi:width="321" id="Input_wa-completion-definition-ct_a_wa-task-completion-demo-ct_a_0"'
+      )
+      .replace(/<dmndi:DMNShape id="[^"]*"/, '<dmndi:DMNShape id="Shape_mine"');
+    const doc = parseDmn(xml);
+    expect(doc.decisions[0]?.table?.inputs[0]?.width).toBe("321");
+    expect(doc.diagram?.items[0]).toMatchObject({ type: "shape", id: "Shape_mine" });
+    expect(parseDmn(writeDmn(doc))).toEqual(doc);
+  });
+
+  it("should keep an edge before the shape that follows it when the diagram interleaves them", () => {
+    const xml = writeDmn({
+      id: "d",
+      name: "DRD",
+      decisions: [
+        { id: "m", name: "m", requires: ["h"], table: { hitPolicy: "UNIQUE", inputs: [], outputs: [{ name: "o" }], rules: [] } },
+        { id: "h", name: "h", requires: [], literal: { text: "1" } }
+      ],
+      diagram: {
+        id: "",
+        items: [
+          { type: "edge", id: "", ref: "InformationRequirement_d_m_0", waypoints: [{ x: "1", y: "2" }] },
+          { type: "shape", id: "", ref: "m", bounds: { x: "5", y: "6", width: "7", height: "8" } },
+          { type: "shape", id: "S", ref: "h", bounds: { x: "9", y: "9", width: "7", height: "8" } }
+        ]
+      }
+    });
+    const items = parseDmn(xml).diagram?.items ?? [];
+    expect(items.map((i) => i.type)).toEqual(["edge", "shape", "shape"]);
+    expect(xml).toContain("<dmndi:DMNDiagram>");
+    expect(xml).toContain('<dmndi:DMNShape dmnElementRef="m">');
+  });
+
+  it("should invent valid, escaped ids when names hold spaces, quotes and markup", () => {
+    const xml = writeDmn({
+      id: "d x",
+      name: "DRD",
+      decisions: [{ id: 'a"b', name: "n", requires: [], literal: { text: "1" } }]
+    });
+    const ids = [...xml.matchAll(/ id="([^"]*)"/g)].map((m) => m[1] as string);
+    expect(ids).toContain("a&quot;b");
+    for (const id of ids.filter((i) => i !== "a&quot;b" && i !== "d x")) {
+      expect(id).toMatch(/^[A-Za-z_][A-Za-z0-9_.-]*$/);
+    }
+  });
+});
+
+describe("ncName", () => {
+  it.each([
+    ["Decision_ok-1.2", "Decision_ok-1.2"],
+    ["a b/c", "a_b_c"],
+    ["1abc", "_1abc"],
+    ["", "_"]
+  ])("should turn %j into %j when making an id", (text, expected) => {
+    expect(ncName(text)).toBe(expected);
   });
 });

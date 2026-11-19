@@ -41,15 +41,67 @@ describe("parseExpr", () => {
     expect(parseExpr('"Arrange Support - " + NAME')).toEqual({ plus: ["Arrange Support - ", { field: "NAME" }] });
   });
 
-  it("should keep the text as raw FEEL when it uses a function call or any other unsupported construct", () => {
-    expect(parseExpr("now()")).toEqual({ feel: "now()" });
-    expect(parseExpr("if x != null then count(y) else 0")).toEqual({ feel: "if x != null then count(y) else 0" });
-    expect(parseExpr('"a\\"b"')).toEqual({ feel: '"a\\"b"' });
-    expect(parseExpr("1.50")).toEqual({ feel: "1.50" });
+  it("should keep the text as raw FEEL when it uses a lambda, a filter or any other unsupported construct", () => {
+    for (const text of [
+      "sort(a, function(x, y) x > y)",
+      "a[x > 1]",
+      "if x != null then count(y) else",
+      '"a\\"b"',
+      "1.50",
+      "-1",
+      "a.b.",
+      "some x in a",
+      "f(a b)"
+    ]) {
+      expect(parseExpr(text)).toEqual({ feel: text });
+    }
   });
 
-  it("should keep the text as raw FEEL when an if condition is not a comparison", () => {
-    expect(parseExpr("if flag then 1 else 2")).toEqual({ feel: "if flag then 1 else 2" });
+  it("should read function calls, including multi-word names, as a call over its arguments when the FEEL calls a built-in", () => {
+    expect(parseExpr("now()")).toEqual({ call: "now", args: [] });
+    expect(parseExpr('time("16:00")')).toEqual({ call: "time", args: ["16:00"] });
+    expect(parseExpr('starts with(a.title, "EJ - ")')).toEqual({ call: "starts with", args: [{ field: "a.title" }, "EJ - "] });
+    expect(parseExpr('date and time(x, "y")')).toEqual({ call: "date and time", args: [{ field: "x" }, "y"] });
+  });
+
+  it("should read subtraction and any comparison between expressions when the operands are not a field and a literal", () => {
+    expect(parseExpr('if (date(d) - today()) <= duration("P3D") then 1 else 2')).toEqual({
+      if: {
+        left: {
+          minus: [
+            { call: "date", args: [{ field: "d" }] },
+            { call: "today", args: [] }
+          ]
+        },
+        op: "le",
+        right: { call: "duration", args: ["P3D"] }
+      },
+      use: 1,
+      otherwise: 2
+    });
+    expect(parseExpr("a - b + c")).toEqual({ plus: [{ minus: [{ field: "a" }, { field: "b" }] }, { field: "c" }] });
+    expect(parseExpr("if month(d) = 2 then 18 else 20")).toMatchObject({ if: { left: { call: "month" }, op: "eq", right: 2 } });
+  });
+
+  it("should read a bare boolean as a truthy condition when an if or and tests a name or call", () => {
+    expect(parseExpr("if flag then 1 else 2")).toEqual({ if: { truthy: { field: "flag" } }, use: 1, otherwise: 2 });
+    expect(parseExpr("(A and B)")).toEqual({ all: [{ truthy: { field: "A" } }, { truthy: { field: "B" } }] });
+  });
+
+  it("should read an index in a path and a quantifier over a list when the FEEL uses them", () => {
+    expect(parseExpr("a.list[1].value.x")).toEqual({ field: "a.list[1].value.x" });
+    expect(parseExpr("some item in a.list satisfies (item.v != null and item.w = true)")).toEqual({
+      quantifier: "some",
+      variable: "item",
+      over: { field: "a.list" },
+      satisfies: {
+        all: [
+          { field: "item.v", op: "exists" },
+          { field: "item.w", op: "eq", value: true }
+        ]
+      }
+    });
+    expect(parseExpr("every x in l satisfies x.a = 1")).toMatchObject({ quantifier: "every" });
   });
 });
 
@@ -62,7 +114,16 @@ describe("renderExpr", () => {
     'if (a != null) then a else "x"',
     'if (a = "Y" and (b = 1 or c = 2)) then 1 else 2',
     '"EJ - " + (if (t != null) then t else "x")',
-    "caseData.nextListedDate"
+    "caseData.nextListedDate",
+    "now()",
+    'starts with(t, "EJ - ")',
+    "if (month(d) = 2 or month(d) = 4) then 18 else 20",
+    'if ((date(d) - today()) <= duration("P3D")) then 1 else 2',
+    "(A and B)",
+    "a.list[1].value.x",
+    "if (a != null and some i in a.list satisfies (i.v = 1 and i.w != null)) then true else false",
+    "a - b + c",
+    "if (flag) then f(a, b) else null"
   ])("should reproduce %s when it is parsed and rendered again", (text) => {
     const first = parseExpr(text);
     expect(parseExpr(renderExpr(first))).toEqual(first);
@@ -74,6 +135,20 @@ describe("renderExpr", () => {
 
   it("should render an empty entry when the value is absent", () => {
     expect(renderExpr(undefined)).toBe("");
+  });
+});
+
+describe("normaliseFeel", () => {
+  it("should collapse whitespace outside strings and keep it inside when the text has both", () => {
+    expect(normaliseFeel('  if   a  =  "x   y"\n then 1  ')).toBe('if a = "x   y" then 1');
+  });
+
+  it("should keep an escaped quote inside the string when normalising", () => {
+    expect(normaliseFeel('a  =  "say \\"  hi  \\"" and   b')).toBe('a = "say \\"  hi  \\"" and b');
+  });
+
+  it("should leave unlexable characters in place when the text has any", () => {
+    expect(normaliseFeel("a[ 1 ]   ??")).toBe("a[ 1 ] ??");
   });
 });
 

@@ -1,4 +1,5 @@
 import { Document, isScalar, parse, visit } from "yaml";
+import { Layout } from "./layout.ts";
 import { Spec, validateSpec } from "./schema.ts";
 
 /** Parses and checks a spec: the shape first, then the references between its parts. */
@@ -30,4 +31,17 @@ export function toYaml(value: unknown): string {
 
 export function stringifySpec(spec: Spec): string {
   return toYaml(spec);
+}
+
+export function parseLayout(yamlText: string): Layout {
+  return Layout.parse(parse(yamlText));
+}
+
+export function stringifyLayout(layout: Layout): string {
+  return toYaml(layout);
+}
+
+/** Where a spec's layout lives: beside it, as `<name>.layout.yaml`. */
+export function layoutPathFor(specPath: string): string {
+  return `${specPath.replace(/\.ya?ml$/, "")}.layout.yaml`;
 }

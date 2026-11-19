@@ -12,18 +12,41 @@ export type Scalar = z.infer<typeof Scalar>;
 export const COMPARISONS = ["eq", "ne", "gt", "ge", "lt", "le", "exists", "notExists"] as const;
 export type Comparison = (typeof COMPARISONS)[number];
 
-/** A boolean condition: a field compared with a value, or and/or combinations of those. */
-export type Cond = { field: string; op: Comparison; value?: Scalar } | { all: Cond[] } | { any: Cond[] };
+export const COMPARE_OPS = ["eq", "ne", "gt", "ge", "lt", "le"] as const;
+export type CompareOp = (typeof COMPARE_OPS)[number];
+
+/**
+ * A boolean condition: a field compared with a value, any two expressions compared, a boolean expression that is simply
+ * true, or and/or combinations of those.
+ */
+export type Cond =
+  | { field: string; op: Comparison; value?: Scalar }
+  | { left: Expr; op: CompareOp; right: Expr }
+  | { truthy: Expr }
+  | { all: Cond[] }
+  | { any: Cond[] };
 
 /**
  * A value expression. A scalar is itself, `field` reads a variable or a dotted path, `if` chooses `use` or `otherwise`, `plus` adds or
- * concatenates, a condition is a boolean, and `feel` is the raw FEEL escape hatch for anything else.
+ * concatenates, `minus` subtracts, `call` calls a FEEL built-in function, `quantifier` tests some or every item of a list, a condition is a boolean, and `feel` is the raw FEEL escape
+ * hatch for anything else.
  */
-export type Expr = Scalar | { feel: string } | { field: string } | { if: Cond; use: Expr; otherwise: Expr } | { plus: Expr[] } | Cond;
+export type Expr =
+  | Scalar
+  | { feel: string }
+  | { field: string }
+  | { if: Cond; use: Expr; otherwise: Expr }
+  | { plus: Expr[] }
+  | { minus: [Expr, Expr] }
+  | { call: string; args: Expr[] }
+  | { quantifier: "some" | "every"; variable: string; over: Expr; satisfies: Expr }
+  | Cond;
 
 export const Cond: z.ZodType<Cond> = z.lazy(() =>
   z.union([
     z.strictObject({ field: z.string().min(1), op: z.enum(COMPARISONS), value: Scalar.optional() }),
+    z.strictObject({ left: Expr, op: z.enum(COMPARE_OPS), right: Expr }),
+    z.strictObject({ truthy: Expr }),
     z.strictObject({ all: z.array(Cond).min(1) }),
     z.strictObject({ any: z.array(Cond).min(1) })
   ])
@@ -36,6 +59,9 @@ export const Expr: z.ZodType<Expr> = z.lazy(() =>
     z.strictObject({ field: z.string().min(1) }),
     z.strictObject({ if: Cond, use: Expr, otherwise: Expr }),
     z.strictObject({ plus: z.array(Expr).min(2) }),
+    z.strictObject({ minus: z.tuple([Expr, Expr]) }),
+    z.strictObject({ call: z.string().min(1), args: z.array(Expr) }),
+    z.strictObject({ quantifier: z.enum(["some", "every"]), variable: z.string().min(1), over: Expr, satisfies: Expr }),
     Cond
   ])
 );
@@ -91,9 +117,13 @@ export const Row = z.strictObject({
 });
 export type Row = z.infer<typeof Row>;
 
-/** A named literal-expression decision a table reads, such as the latest referral's task title. */
+/**
+ * A named literal-expression decision a table reads, such as the latest referral's task title. It carries a variable named
+ * like itself unless `variable` is false.
+ */
 export const Helper = z.strictObject({
   name: z.string().min(1),
+  variable: z.literal(false).optional(),
   typeRef: z.string().optional(),
   language: z.string().optional(),
   historyTimeToLive: z.string().optional(),
@@ -104,6 +134,7 @@ export const Helper = z.strictObject({
       CaseTypeId,
       z.strictObject({
         expression: Expr.optional(),
+        variable: z.boolean().optional(),
         typeRef: z.string().nullable().optional(),
         language: z.string().nullable().optional(),
         historyTimeToLive: z.string().nullable().optional()
@@ -171,6 +202,11 @@ export type Spec = z.infer<typeof Spec>;
 export function validateSpec(spec: Spec): string[] {
   const problems: string[] = [];
   const caseTypes = new Set(spec.caseTypes.map((c) => c.id));
+  for (const [what, value] of [["service slug", spec.service.slug], ...spec.caseTypes.map((c) => ["case type", c.id] as const)]) {
+    if (!/^[A-Za-z0-9_.-]+$/.test(value)) {
+      problems.push(`${what} ${value}: only letters, digits, "_", "." and "-" are allowed, as it becomes part of a decision id and file name`);
+    }
+  }
   const known = (where: string, ids: string[] | undefined) => {
     for (const id of ids ?? []) {
       if (!caseTypes.has(id)) {
@@ -224,7 +260,20 @@ export function validateSpec(spec: Spec): string[] {
       }
     });
     const helperNames = new Set((decision.helpers ?? []).map((h) => h.name));
+    const sharing = new Map<string, Array<string[] | undefined>>();
+    for (const helper of decision.helpers ?? []) {
+      known(`${kind} helper ${helper.name}`, helper.only);
+      known(`${kind} helper ${helper.name} overrides`, Object.keys(helper.overrides ?? {}));
+      sharing.set(helper.name, [...(sharing.get(helper.name) ?? []), helper.only]);
+    }
+    for (const [name, onlys] of sharing) {
+      const claimed = onlys.flatMap((only) => only ?? [...caseTypes]);
+      if (onlys.length > 1 && new Set(claimed).size !== claimed.length) {
+        problems.push(`${kind}: helper ${name} is defined more than once for the same case type`);
+      }
+    }
     for (const dependency of decision.dependencies ?? []) {
+      known(`${kind} dependency ${dependency.decision} -> ${dependency.requires}`, dependency.only);
       if (dependency.decision !== "table" && !helperNames.has(dependency.decision)) {
         problems.push(`${kind}: dependency from unknown decision ${dependency.decision}`);
       }

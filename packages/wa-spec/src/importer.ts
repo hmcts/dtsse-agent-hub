@@ -1,5 +1,7 @@
 import { type DmnDecision, type DmnDocument, inspectDmn, parseDmn } from "./dmn-model.ts";
 import { isStructured, normaliseFeel, parseCell, parseExpr } from "./feel.ts";
+import { generateDocument } from "./generator.ts";
+import { type FileLayout, type Layout, layoutKey, layoutOf } from "./layout.ts";
 import { type Merged, majority, mergeSequences } from "./merge.ts";
 import {
   AGGREGATIONS,
@@ -69,20 +71,15 @@ function camel(text: string): string {
   return words.map((w, i) => (i === 0 ? w.toLowerCase() : w.charAt(0).toUpperCase() + w.slice(1))).join("");
 }
 
-interface TableColumns {
-  inputKeys: string[];
-}
-
-function inputKeys(decision: DmnDecision): TableColumns {
+/** A column's key: its variable, else its label in camel case, else `input`; a repeated key gets a number. */
+function inputKeys(decision: DmnDecision): string[] {
   const seen = new Map<string, number>();
-  const keys = (decision.table?.inputs ?? []).map((input) => {
-    const base = input.inputVariable ?? (input.label ? camel(input.label) : "") ?? "";
-    const stem = base === "" ? "input" : base;
+  return (decision.table?.inputs ?? []).map((input) => {
+    const stem = input.inputVariable || (input.label ? camel(input.label) : "") || "input";
     const count = (seen.get(stem) ?? 0) + 1;
     seen.set(stem, count);
     return count === 1 ? stem : `${stem}${count}`;
   });
-  return { inputKeys: keys };
 }
 
 /** Counts one parsed entry, and records it when it fell back to raw FEEL. */
@@ -127,9 +124,9 @@ function pick<T>(values: Array<{ caseType: string; value: T | undefined }>): { b
   return { base, overrides };
 }
 
-function importTables(kind: Kind, tables: Table[], allCaseTypes: string[], report: ImportReport): Decision {
+function importTables(kind: Kind, tables: Table[], report: ImportReport): Decision {
   const caseTypes = tables.map((t) => t.caseType);
-  const keysByCaseType = new Map(tables.map((t) => [t.caseType, inputKeys(t.decision).inputKeys]));
+  const keysByCaseType = new Map(tables.map((t) => [t.caseType, inputKeys(t.decision)]));
 
   // Columns: merged by key; each case type's own order is kept as a subsequence of the result.
   let inputOrder: Array<Merged<string>> = [];
@@ -248,7 +245,7 @@ function importTables(kind: Kind, tables: Table[], allCaseTypes: string[], repor
         }
       });
       return {
-        ...(rule.description === undefined ? {} : { description: rule.description }),
+        ...(rule.description ? { description: rule.description } : {}),
         ...(Object.keys(when).length > 0 ? { when } : {}),
         ...(Object.keys(returns).length > 0 ? { returns } : {})
       };
@@ -288,6 +285,7 @@ function importTables(kind: Kind, tables: Table[], allCaseTypes: string[], repor
     const typeRef = pick(perType.map(({ caseType, helper }) => ({ caseType, value: helper.variable?.typeRef })));
     const language = pick(perType.map(({ caseType, helper }) => ({ caseType, value: helper.literal?.expressionLanguage })));
     const ttl = pick(perType.map(({ caseType, helper }) => ({ caseType, value: helper.historyTimeToLive })));
+    const variable = pick(perType.map(({ caseType, helper }) => ({ caseType, value: helper.variable ? undefined : (false as boolean | undefined) })));
     const expression = pick(
       perType.map(({ caseType, helper }) => {
         const expr = parseExpr(helper.literal?.text ?? "");
@@ -308,8 +306,12 @@ function importTables(kind: Kind, tables: Table[], allCaseTypes: string[], repor
         setOverride(overrides, caseType, field, value ?? null);
       }
     }
+    for (const [caseType, value] of Object.entries(variable.overrides)) {
+      setOverride(overrides, caseType, "variable", value !== false);
+    }
     return {
       name,
+      ...(variable.base === false ? { variable: false } : {}),
       ...(typeRef.base === undefined ? {} : { typeRef: typeRef.base }),
       ...(language.base === undefined ? {} : { language: language.base }),
       ...(ttl.base === undefined ? {} : { historyTimeToLive: ttl.base }),
@@ -358,7 +360,6 @@ function importTables(kind: Kind, tables: Table[], allCaseTypes: string[], repor
   if (!HIT_POLICIES.includes(hitPolicy.base as (typeof HIT_POLICIES)[number])) {
     throw new Error(`${kind}: unsupported hit policy ${hitPolicy.base}`);
   }
-  void allCaseTypes;
   return {
     name: name.base as string,
     hitPolicy: hitPolicy.base as (typeof HIT_POLICIES)[number],
@@ -375,14 +376,24 @@ function importTables(kind: Kind, tables: Table[], allCaseTypes: string[], repor
   } as Decision;
 }
 
-/** Builds one spec from every case type's DMNs of a service, and reports what could not be represented structurally. */
-export function importDmns(files: DmnFile[], options: ImportOptions = {}): { spec: Spec; report: ImportReport } {
+/**
+ * Builds one spec from every case type's DMNs of a service, and reports what could not be represented structurally.
+ * The layout holds the ids, widths and diagram the spec leaves out; generating from both reproduces them.
+ */
+export function importDmns(files: DmnFile[], options: ImportOptions = {}): { spec: Spec; layout: Layout; report: ImportReport } {
   const report: ImportReport = { files: [], entries: {}, rawFeel: [], unrepresentable: [], presentation: [], notes: [] };
   const byKind = new Map<Kind, Table[]>();
   const slugs = new Set<string>();
   const caseTypeOrder: string[] = [];
   const unrepresentable = new Map<string, { count: number; files: string[] }>();
   const presentation = new Map<string, number>();
+  const parsed: Array<{ kind: Kind; caseType: string; document: DmnDocument; decision: DmnDecision }> = [];
+  const flag = (construct: string, file: string, count = 1) => {
+    const entry = unrepresentable.get(construct) ?? { count: 0, files: [] };
+    entry.count += count;
+    entry.files.push(file);
+    unrepresentable.set(construct, entry);
+  };
 
   for (const file of [...files].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
     const match = FILE_PATTERN.exec(file.name);
@@ -398,33 +409,43 @@ export function importDmns(files: DmnFile[], options: ImportOptions = {}): { spe
     }
     const document = parseDmn(file.xml);
     const stem = file.name.replace(/\.dmn$/, "");
-    const decision = document.decisions.find((d) => d.id === stem) ?? document.decisions.find((d) => d.table);
+    const named = document.decisions.find((d) => d.id === stem);
+    const decision = named ?? document.decisions.find((d) => d.table);
     if (!decision?.table) {
       report.notes.push(`${file.name}: no decision table found, skipped`);
       continue;
     }
+    if (!named) {
+      flag(`no decision has the file's key ${stem} as its id; the table ${decision.id} would be renamed to it`, file.name);
+    }
+    if (decision.variable) {
+      flag(`the main decision ${decision.name} has a <variable>`, file.name);
+    }
     const helpers = document.decisions.filter((d) => d !== decision);
+    const helperNames = new Set<string>();
     for (const helper of helpers) {
       if (!helper.literal || helper.table) {
-        unrepresentable.set(`helper decision ${helper.name} is not a literal expression`, { count: 1, files: [file.name] });
+        flag(`helper decision ${helper.name} is not a literal expression`, file.name);
       }
       if (helper.variable && helper.variable.name !== helper.name) {
-        unrepresentable.set(`helper ${helper.name} has a variable named ${helper.variable.name}`, { count: 1, files: [file.name] });
+        flag(`helper ${helper.name} has a variable named ${helper.variable.name}`, file.name);
       }
+      if (helperNames.has(helper.name)) {
+        flag(`more than one helper decision is named ${helper.name}`, file.name);
+      }
+      helperNames.add(helper.name);
     }
     if (document.name !== "DRD") {
       report.notes.push(`${file.name}: definitions name ${document.name} is replaced with DRD`);
     }
     const inspection = inspectDmn(file.xml);
     for (const [construct, count] of inspection.unrepresentable) {
-      const entry = unrepresentable.get(construct) ?? { count: 0, files: [] };
-      entry.count += count;
-      entry.files.push(file.name);
-      unrepresentable.set(construct, entry);
+      flag(construct, file.name, count);
     }
     for (const [construct, count] of inspection.presentation) {
       presentation.set(construct, (presentation.get(construct) ?? 0) + count);
     }
+    parsed.push({ kind, caseType, document, decision });
     byKind.set(kind, [...(byKind.get(kind) ?? []), { caseType, decision, helpers, document }]);
     report.files.push({
       name: file.name,
@@ -444,26 +465,27 @@ export function importDmns(files: DmnFile[], options: ImportOptions = {}): { spe
   for (const kind of KINDS) {
     const tables = byKind.get(kind);
     if (tables) {
-      decisions[kind] = importTables(kind, tables, caseTypeOrder, report);
+      decisions[kind] = importTables(kind, tables, report);
     }
+  }
+  const spec: Spec = {
+    version: 1,
+    service: {
+      slug: [...slugs][0] ?? "service",
+      ...(options.jurisdiction ? { jurisdiction: options.jurisdiction } : {}),
+      ...(options.serviceCode ? { serviceCode: options.serviceCode } : {}),
+      ...(options.displayName ? { displayName: options.displayName } : {})
+    },
+    caseTypes: caseTypeOrder.map((id) => ({ id })),
+    decisions
+  };
+  const layouts: Record<string, FileLayout> = {};
+  for (const { kind, caseType, document, decision } of parsed) {
+    layouts[layoutKey(kind, caseType)] = layoutOf(document, decision, inputKeys(decision), generateDocument(spec, kind, caseType));
   }
   report.unrepresentable = [...unrepresentable].map(([construct, v]) => ({ construct, ...v }));
   report.presentation = [...presentation].map(([construct, count]) => ({ construct, count }));
-  const slug = [...slugs][0] ?? "service";
-  return {
-    spec: {
-      version: 1,
-      service: {
-        slug,
-        ...(options.jurisdiction ? { jurisdiction: options.jurisdiction } : {}),
-        ...(options.serviceCode ? { serviceCode: options.serviceCode } : {}),
-        ...(options.displayName ? { displayName: options.displayName } : {})
-      },
-      caseTypes: caseTypeOrder.map((id) => ({ id })),
-      decisions
-    },
-    report
-  };
+  return { spec, layout: { version: 1, files: layouts }, report };
 }
 
 /** Renders the coverage report as Markdown. */
@@ -481,7 +503,7 @@ export function renderReport(report: ImportReport): string {
   for (const item of report.unrepresentable) {
     lines.push(`- ${item.construct} (${item.count}, in ${item.files.join(", ")})`);
   }
-  lines.push("", "## Presentation not carried", "");
+  lines.push("", "## Presentation regenerated", "");
   for (const item of report.presentation) {
     lines.push(`- ${item.construct}: ${item.count}`);
   }
