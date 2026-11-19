@@ -1,5 +1,6 @@
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { lifecycleReport } from "./ccd/lifecycle-command.ts";
 import { diffPaths, renderDifferences } from "./diff.ts";
 import { exists, listDir, readText, writeText } from "./file-io.ts";
 import { decisionKeyOf, parseFileName } from "./file-names.ts";
@@ -29,6 +30,9 @@ const USAGE = `wa-spec: Work Allocation configuration spec
                                                  a file of the same name; exits 1 when they differ. Two YAML files
                                                  (specs or models) are compared as specs
   wa-spec show <spec.yaml|model.yaml> <taskId>   the rows of every kind that concern one task
+  wa-spec lifecycle <definition-dir> --spec <spec.yaml|model.yaml> [--case-type X] [--env prod|nonprod] [--format yaml|json]
+                                                 the spec's tasks laid over the case lifecycle of a CCD definition (JSON sheets), with
+                                                 warnings for what the definition cannot back
 `;
 
 function fail(message: string): never {
@@ -48,7 +52,11 @@ function main(argv: string[]): number {
       "service-code": { type: "string" },
       "display-name": { type: "string" },
       layout: { type: "string" },
-      "ignore-rule-order": { type: "boolean" }
+      "ignore-rule-order": { type: "boolean" },
+      spec: { type: "string" },
+      "case-type": { type: "string" },
+      env: { type: "string" },
+      format: { type: "string" }
     }
   });
   if (command === "import") {
@@ -164,6 +172,22 @@ function main(argv: string[]): number {
       fail(USAGE);
     }
     process.stdout.write(`${renderTaskRows(taskRows(loadSpecOnly(specPath), taskId))}\n`);
+    return 0;
+  }
+  if (command === "lifecycle") {
+    const [definitionDir] = positionals;
+    if (!definitionDir || !values.spec) {
+      fail(USAGE);
+    }
+    process.stdout.write(
+      lifecycleReport({
+        definitionDir,
+        specPath: values.spec,
+        caseType: values["case-type"],
+        environment: values.env === "prod" ? "prod" : "nonprod",
+        format: values.format === "json" ? "json" : "yaml"
+      })
+    );
     return 0;
   }
   process.stdout.write(USAGE);
