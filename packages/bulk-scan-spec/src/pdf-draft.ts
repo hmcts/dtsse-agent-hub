@@ -10,9 +10,9 @@ export interface DraftField {
   question: string;
   field: Field;
   slotLabels: string[];
-  /** Why the field was grouped or typed as it was; empty when the PDF states it outright. */
   /** The number of boxes in an XoR group, which a Yes/No pair keeps although it has one key. */
   groupSize?: number;
+  /** Why the field was grouped or typed as it was; empty when the PDF states it outright. */
   reasons: { about: "group" | "type"; reason: string; confidence: "low" | "medium" | "high" }[];
 }
 
@@ -102,15 +102,24 @@ function subtitleOf(heading: Line, lines: Line[]): string {
   return lines.find((l) => l.page === heading.page && l.y < heading.y && heading.y - l.y <= 25 && l.text.startsWith("("))?.text ?? "";
 }
 
+/** The top of a question line, raised to the top of any box on the same row so that the question comes before it. */
+function rowTop(line: Line, widgets: Widget[]): number {
+  const row = widgets.filter((w) => w.page === line.page && w.rect[1] <= line.y && line.y <= w.rect[3]).map(top);
+  return Math.max(line.y + line.height, ...row);
+}
+
 /** Walks the page text and fields in reading order, giving each field the section and question it sits under. */
 function place(content: PdfContent): Place[] {
   type Event = { page: number; y: number; order: number; line?: Line; widget?: Widget };
   const events: Event[] = [
-    ...content.lines.filter((l) => SECTION.test(l.text) || ANCHOR.test(l.text)).map((line) => ({ page: line.page, y: line.y + 10, order: 0, line })),
+    ...content.lines
+      .filter((l) => SECTION.test(l.text) || ANCHOR.test(l.text))
+      .map((line) => ({ page: line.page, y: rowTop(line, content.widgets), order: 0, line })),
     ...content.widgets.map((widget) => ({ page: widget.page, y: top(widget), order: 1, widget }))
   ];
   events.sort((a, b) => a.page - b.page || b.y - a.y || a.order - b.order || (a.widget?.rect[0] ?? 0) - (b.widget?.rect[0] ?? 0));
-  let section = { id: "1", title: "" };
+  // Fields above the first heading are a section of their own, so they do not take the title of section 1.
+  let section = { id: "0", title: "" };
   let anchor: { id: string; text: string } | undefined;
   const placed: Place[] = [];
   for (const e of events) {
@@ -246,7 +255,7 @@ export function draftFields(content: PdfContent): DraftField[] {
     for (const p of members) {
       consumed.add(p);
     }
-    const question = stripAnchor(labelAbove(first.widget, content.lines) ?? first.anchorText ?? first.label);
+    const question = stripAnchor(labelAbove(first.widget, content.lines) ?? "") || first.anchorText || first.label || first.widget.tooltip || first.widget.name;
     const yesNo = members.length === 2 && /^yes\b/i.test(members[0]?.label ?? "") && /^no\b/i.test(members[1]?.label ?? "");
     drafts.push({
       ...base,

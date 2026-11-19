@@ -18,10 +18,12 @@ const MIN_REUSE = 0.55;
 const MIN_PREFIX_USES = 3;
 const MAX_WORDS = 5;
 
-/** Plain camelCase of a label, from its first few meaningful words. */
-export function camelCase(label: string): string {
-  return words(label)
-    .slice(0, MAX_WORDS)
+/** Plain camelCase of a label, from its first few meaningful words, leaving out leading words in `skip`. */
+export function camelCase(label: string, skip: Set<string> = new Set()): string {
+  const all = words(label);
+  const lead = all.findIndex((w) => !skip.has(w));
+  return all
+    .slice(lead < 0 ? all.length : lead, (lead < 0 ? all.length : lead) + MAX_WORDS)
     .map((w, i) => (i === 0 ? w : w.charAt(0).toUpperCase() + w.slice(1)))
     .join("");
 }
@@ -74,11 +76,11 @@ export function proposeKeys(slots: KeySlot[], houseKeys: string[], tags: string[
         confidence: confidenceOf(match.score)
       };
     }
-    const base = camelCase(slot.label) || "field";
     const party = prefixes
       .map((p) => ({ ...p, shared: [...p.words].filter((w) => contexts[i]?.has(w)).length }))
       .filter((p) => p.shared > 0)
       .sort((a, b) => b.shared - a.shared || b.words.size - a.words.size)[0];
+    const base = camelCase(slot.label, party ? new Set(words(party.prefix)) : undefined) || "field";
     const key = party ? `${party.prefix}${base.charAt(0).toUpperCase()}${base.slice(1)}` : base;
     return {
       key: uniqueKey(key, used, tags[i] ?? ""),

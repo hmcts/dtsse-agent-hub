@@ -18,6 +18,17 @@ describe("camelCase", () => {
   });
 });
 
+describe("camelCase of options", () => {
+  it("should spell a No option as no, not number", () => {
+    expect(["Yes", "No", "Not sure"].map((l) => camelCase(l))).toEqual(["yes", "no", "notSure"]);
+  });
+
+  it("should leave out leading words the prefix already says", () => {
+    expect(camelCase("Applicant is habitually resident", new Set(["sole", "applicant", "applicant1"]))).toBe("habituallyResident");
+    expect(camelCase("Applicant", new Set(["applicant"]))).toBe("");
+  });
+});
+
 describe("proposeKeys without house style", () => {
   it("should use the label in camelCase and mark it low confidence", () => {
     const [key] = proposeKeys([{ label: "Court name", context: "Section 2" }], [], ["Q2_2"]);
@@ -68,6 +79,11 @@ describe("proposeKeys with house style", () => {
     const [key] = proposeKeys([{ label: "Postcode", context: "Section 3 - About the respondent or applicant 2" }], HOUSE, [""]);
     expect(key).toMatchObject({ key: "respondentOrApplicant2Postcode", confidence: "low" });
     expect(key?.reason).toContain("house prefix respondentOrApplicant2");
+  });
+
+  it("should not repeat the party when the label starts with it", () => {
+    const [key] = proposeKeys([{ label: "Respondent is habitually resident", context: "Section 3 - About the respondent or applicant 2" }], HOUSE, [""]);
+    expect(key?.key).toBe("respondentOrApplicant2HabituallyResident");
   });
 
   it("should leave a new key unprefixed when no house prefix is named in its context", () => {
