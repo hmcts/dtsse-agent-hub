@@ -15,7 +15,6 @@ export type StartChatAction = (input: { product: unknown; body: unknown; title?:
 type Workflow = { href: string; label: string; hint: string };
 
 const WELSH: Workflow = { href: "/assistant/welsh", label: "Welsh translations", hint: "Search, scan, send and apply a service's Welsh" };
-const SCHEDULED: Workflow = { href: "/assistant/scheduled", label: "Scheduled", hint: "Prompts your assistant runs on a schedule" };
 const NEW_FEEDBACK: Workflow = { href: "/assistant/feedback/new", label: "New feedback project", hint: "Share a prototype for comments and recorded feedback" };
 
 /**
@@ -23,9 +22,8 @@ const NEW_FEEDBACK: Workflow = { href: "/assistant/feedback/new", label: "New fe
  * who has connected Microsoft 365, which most of it reads, and whose pod's client claims `morning-briefing`
  * (`offersBriefing`). It is not a page: it starts a chat whose first message runs the briefing, the same way the
  * new-chat screen starts one, and opens it.
- * Welsh translations is offered only to someone whose assistant has the plugin that runs it. Scheduled is offered only
- * once a page passes `scheduled`, which none does while scheduled prompts are not built: a menu item that opens a page
- * saying "not available yet" is a dead end. A new feedback project is offered wherever prototype feedback is on; the projects themselves are in the
+ * Welsh translations is offered only to someone whose assistant has the plugin that runs it. Scheduled prompts are not
+ * offered at all until they are built: a menu item opening a page that says "not available yet" is a dead end. A new feedback project is offered wherever prototype feedback is on; the projects themselves are in the
  * sidebar's list.
  *
  * Dismissed by Escape or a click outside, in the same shape as the chat menu: closing from the keyboard puts focus
@@ -35,9 +33,8 @@ export function WorkflowsMenu({
   welsh = false,
   briefing = false,
   feedback = false,
-  scheduled = false,
   start
-}: Readonly<{ welsh?: boolean; briefing?: boolean; feedback?: boolean; scheduled?: boolean; start?: StartChatAction }>) {
+}: Readonly<{ welsh?: boolean; briefing?: boolean; feedback?: boolean; start?: StartChatAction }>) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -47,7 +44,7 @@ export function WorkflowsMenu({
   // Which start the menu is waiting on. Closing it moves this on, so a start that answers after the person dismissed
   // the menu neither shows an error in a menu they closed nor takes them to a chat they have moved away from.
   const attempt = useRef(0);
-  const workflows = [...(welsh ? [WELSH] : []), ...(feedback ? [NEW_FEEDBACK] : []), ...(scheduled ? [SCHEDULED] : [])];
+  const workflows = [...(welsh ? [WELSH] : []), ...(feedback ? [NEW_FEEDBACK] : [])];
 
   const close = useCallback(() => {
     if (ref.current?.contains(document.activeElement)) {

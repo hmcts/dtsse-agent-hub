@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WelshKind, WelshResponse, WelshTask } from "@/assistant/welsh";
 import { PRODUCT_KEY, stepsIn, WelshPage } from "@/components/assistant/WelshPage";
-import { fileFacts } from "@/components/assistant/WelshParts";
+import { fileFacts, JobStatus } from "@/components/assistant/WelshParts";
 import { SEARCH_AFTER_MS } from "@/components/assistant/WelshSearch";
 import type { WelshClient, WelshJobRequest } from "@/components/assistant/welshClient";
 
@@ -585,15 +585,45 @@ describe("WelshPage, getting through a task", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add it to the story" }));
 
     expect(await screen.findByText("Your assistant did not answer in time, but it may still have done this. Check before you try again.")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Try again anyway" }));
+    // No Try again for a write: the step's own button is the way, and it sends what the page says now.
+    expect(screen.queryByRole("button", { name: /Try again/ })).toBeNull();
+    expect(requests.filter((r) => r.kind === "story_write")).toHaveLength(1);
+  });
 
-    await waitFor(() => expect(requests.filter((r) => r.kind === "story_write")).toHaveLength(2));
+  it("should ask the person to check first when the connection dropped while a write was waiting", async () => {
+    const { fake } = await open("story");
+    vi.mocked(fake.start).mockImplementation(async (request) => {
+      if (request.kind === "story_write") {
+        throw new Error("offline");
+      }
+      return ANSWERS[request.kind] as WelshResponse;
+    });
+    fireEvent.change(screen.getByLabelText("Jira story"), { target: { value: "dtsstci-1927" } });
+    fireEvent.click(screen.getByRole("button", { name: "Find its English" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Upload documents" }));
+    fireEvent.click(screen.getByRole("button", { name: "Build the Welsh table" }));
+    await screen.findByText("For the Welsh unit");
+    fireEvent.click(screen.getByRole("button", { name: "Add to the Jira story…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add it to the story" }));
+
+    expect(await screen.findByText(/it may still have done this\. Check before you try again\./)).toBeTruthy();
+  });
+
+  it("should say a read failed in its own words, and offer Try again, when the connection dropped while it waited", async () => {
+    const { fake } = client();
+    vi.mocked(fake.start).mockRejectedValueOnce(new Error("offline"));
+    render(<WelshPage products={PRODUCTS} initialProduct="cath" initialTask="search" client={fake} />);
+
+    expect(await screen.findByText("That did not work. Check your connection and try again.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
   });
 
   it("should say how many steps a task has, and its own number only until the code check has said", async () => {
     await open("story");
     expect(screen.getByText("Step 1 of 5")).toBeTruthy();
     expect(screen.getByText("Step 2 of 5")).toBeTruthy();
+
+    expect(screen.getByRole("heading", { name: "Step 2 of 5: The story" })).toBeTruthy();
 
     cleanup();
     await open("scan");
@@ -602,7 +632,28 @@ describe("WelshPage, getting through a task", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Find missing Welsh" }));
     await screen.findByText("new, for the Welsh unit");
+    // The service's step takes the total too, once the check has said it.
+    expect(screen.getByText("Step 1 of 5")).toBeTruthy();
     expect(screen.getByText("Step 2 of 5")).toBeTruthy();
+  });
+
+  it("should count a return's steps only as far as they will go when nothing in the spreadsheet can be used", async () => {
+    await open("return", {
+      ...ANSWERS,
+      import_check: done("import_check", { added: 0, superseded: 0, unchanged: 0, conflicting: 0, blank: 2, problems: [] })
+    });
+    fireEvent.change(screen.getByLabelText(/The .xlsx the Welsh Language Unit sent back/), { target: { files: [new File(["PK"], "return.xlsx")] } });
+
+    expect(await screen.findByText("Step 3 of 3")).toBeTruthy();
+  });
+
+  it("should say a service with no repos has two steps to its code check", async () => {
+    await open("scan", {
+      ...ANSWERS,
+      info: done("info", { initialised: true, repos: [], catalogue: { approved: 1, needsReview: 0 }, shared: { approved: 0 } })
+    });
+
+    expect(await screen.findByText("Step 2 of 2")).toBeTruthy();
   });
 
   it("should put the task in the address as it is chosen, and follow the browser's Back to the list", async () => {
@@ -652,22 +703,30 @@ describe("fileFacts", () => {
     expect(fileFacts({ name: "a.csv", bytes: 300 })).toBe("CSV file, 300 bytes");
     expect(fileFacts({ name: "a.bin", bytes: 3 * 1024 * 1024 })).toBe("File, 3.0 MB");
     expect(fileFacts({ name: "a.xlsx", bytes: 1100 })).toBe("Excel spreadsheet, 1 KB");
+    expect(fileFacts({ name: "a.xlsx", bytes: 1 })).toBe("Excel spreadsheet, 1 byte");
   });
 });
 
 describe("stepsIn", () => {
-  it("should count a return's steps from whether the service has repos to put the Welsh in", () => {
-    const info = (repos: number) => ({
-      initialised: true,
-      approved: 1,
-      needsReview: 0,
-      repos: Array.from({ length: repos }, (_, i) => `r${i}`),
-      skipsStaffPages: false
-    });
-    expect(stepsIn("return", info(1) as never)).toBe(5);
-    expect(stepsIn("return", info(0) as never)).toBe(4);
-    expect(stepsIn("return", null)).toBeNull();
-    expect(stepsIn("search", null)).toBe(2);
-    expect(stepsIn("scan", null)).toBeNull();
+  it("should give a fixed total only for the tasks whose steps do not follow what they find", () => {
+    expect(stepsIn("search")).toBe(2);
+    expect(stepsIn("story")).toBe(5);
+    expect(stepsIn("return")).toBeNull();
+    expect(stepsIn("scan")).toBeNull();
+  });
+});
+
+describe("JobStatus", () => {
+  it("should hold Try again back while another job in the section is running, and send it once nothing is", () => {
+    const retry = vi.fn();
+    const failed = { phase: "failed" as const, response: { status: "failed", detail: "That did not work." } as WelshResponse, retry };
+    const { rerender } = render(<JobStatus state={failed} working="Working…" busy />);
+
+    const button = screen.getByRole("button", { name: "Try again" }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+
+    rerender(<JobStatus state={failed} working="Working…" />);
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(retry).toHaveBeenCalledTimes(1);
   });
 });

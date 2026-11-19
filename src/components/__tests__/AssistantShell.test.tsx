@@ -10,7 +10,6 @@ import { AssistantMarkdown, copyLabel } from "@/components/assistant/AssistantMa
 import { AssistantRefresh } from "@/components/assistant/AssistantRefresh";
 import { AssistantShell, SidebarToggle } from "@/components/assistant/AssistantShell";
 import { ProductSelect } from "@/components/assistant/ProductSelect";
-import { WorkflowsMenu } from "@/components/assistant/WorkflowsMenu";
 import type { ActionResult } from "@/web/action";
 
 const refresh = vi.fn();
@@ -255,18 +254,6 @@ describe("AssistantShell", () => {
     render(shell());
 
     expect(screen.queryByRole("button", { name: "Workflows" })).toBeNull();
-  });
-
-  it("should offer the Scheduled page last once a page says it is built", () => {
-    render(<WorkflowsMenu welsh scheduled />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
-
-    expect(
-      within(screen.getByRole("menu", { name: "Workflows" }))
-        .getAllByRole("menuitem")
-        .map((item) => item.getAttribute("href"))
-    ).toEqual(["/assistant/welsh", "/assistant/scheduled"]);
   });
 
   it("should offer a new feedback project, and not the list of them, when feedback is on", () => {

@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useId, useRef, useState } from "react";
 import type { WelshFileView, WelshKind, WelshResponse, WelshTask } from "@/assistant/welsh";
 import { messageOf, safeLink } from "@/assistant/welsh-views";
+import { fileSizeLabel } from "@/components/assistant/uploadClient";
 import { runWelshJob, type WelshClient, type WelshJobRequest, welshDownloadUrl } from "@/components/assistant/welshClient";
 
 /** The pieces every section of the Welsh page shares: a job's state, what it says about it, and its downloads. */
@@ -20,13 +21,16 @@ export interface JobState {
   phase: JobPhase;
   /** Set once the job is over. */
   response?: WelshResponse;
-  /** On a failed job, sends the same request again; `JobStatus` offers it as Try again. */
+  /**
+   * On a failed job that only reads, sends the same request again; `JobStatus` offers it as Try again. Never set for a
+   * write: its step keeps its own button, which sends what the page says now rather than what was sent before.
+   */
   retry?: () => void;
   /**
-   * Whether the failed job writes somewhere outside the page (a pull request, a Jira story, the catalogue), so one that
-   * timed out may still have done it, and sending it again could do it twice.
+   * A write whose answer was lost — it timed out, or the connection dropped while the page waited — so it may still have
+   * been done, and doing it again could open a second pull request or write a story twice.
    */
-  writes?: boolean;
+  unsure?: boolean;
 }
 
 /** The kinds that write somewhere outside the page: a pull request, a Jira story, or the service's catalogue. */
@@ -37,6 +41,7 @@ export function useWelshJob(client: WelshClient) {
   const [state, setState] = useState<JobState>({ phase: "idle" });
   const current = useRef<AbortController | null>(null);
   const runRef = useRef<(request: WelshJobRequest) => Promise<WelshResponse | undefined>>(async () => undefined);
+  const lost = useRef(false);
 
   useEffect(() => () => current.current?.abort(), []);
 
@@ -53,7 +58,13 @@ export function useWelshJob(client: WelshClient) {
             setState({ phase });
           }
         }
-      }).catch((): WelshResponse => ({ status: "failed", detail: "That did not work. Check your connection and try again." }));
+      }).catch((): WelshResponse => {
+        lost.current = true;
+        return { status: "failed", detail: "That did not work. Check your connection and try again." };
+      });
+      const unanswered = lost.current || response.status === "timeout";
+      lost.current = false;
+      const writes = WRITING_KINDS.includes(request.kind);
       if (controller.signal.aborted) {
         return undefined;
       }
@@ -64,8 +75,8 @@ export function useWelshJob(client: WelshClient) {
               phase: "failed",
               response,
               // Not for one that needs an update: the same request would be refused the same way until the pod restarts.
-              retry: response.status === "unsupported" ? undefined : () => void runRef.current(request),
-              writes: WRITING_KINDS.includes(request.kind)
+              retry: writes || response.status === "unsupported" ? undefined : () => void runRef.current(request),
+              unsure: writes && unanswered
             }
       );
       return response;
@@ -105,10 +116,10 @@ const WAKING = "Your assistant is starting. This takes a minute or two, then thi
  * Where a job has got to: an always-mounted `<output>` live region for progress, so a screen reader hears each change,
  * and an alert when it failed.
  */
-export function JobStatus({ state, working }: Readonly<{ state: JobState; working: string }>) {
+export function JobStatus({ state, working, busy = false }: Readonly<{ state: JobState; working: string; busy?: boolean }>) {
   const progress: Record<JobPhase, string> = { idle: "", pending: working, waking: WAKING, done: "", failed: "" };
-  // A write that timed out may still land, so the person is asked to look before sending it again.
-  const unsure = state.writes === true && state.response?.status === "timeout";
+  // A write whose answer was lost may still land, so the person is asked to look before sending it again.
+  const unsure = state.unsure === true;
   return (
     <>
       <output className="block text-[13px] text-asst-muted">{progress[state.phase]}</output>
@@ -117,9 +128,10 @@ export function JobStatus({ state, working }: Readonly<{ state: JobState; workin
           <p role="alert" className="text-[13px] text-asst-error">
             {unsure ? "Your assistant did not answer in time, but it may still have done this. Check before you try again." : problemText(state.response)}
           </p>
+          {/* Off while another job in the section runs, which is the one-job-at-a-time rule every other button keeps. */}
           {state.retry === undefined ? null : (
-            <button type="button" className={SECONDARY} onClick={state.retry}>
-              {unsure ? "Try again anyway" : "Try again"}
+            <button type="button" className={SECONDARY} disabled={busy} onClick={state.retry}>
+              Try again
             </button>
           )}
         </div>
@@ -156,15 +168,7 @@ export function Downloads({ files, label, next }: Readonly<{ files: readonly Wel
 /** "Excel spreadsheet, 24 KB": the kind of file from its name, and its size. */
 export function fileFacts(file: Pick<WelshFileView, "name" | "bytes">): string {
   const kind = /\.xlsx$/i.test(file.name) ? "Excel spreadsheet" : /\.csv$/i.test(file.name) ? "CSV file" : "File";
-  return `${kind}, ${sizeLabel(file.bytes)}`;
-}
-
-function sizeLabel(bytes: number): string {
-  if (bytes < 1024) {
-    return `${bytes} bytes`;
-  }
-  const kb = bytes / 1024;
-  return kb < 1024 ? `${Math.max(1, Math.round(kb))} KB` : `${(kb / 1024).toFixed(1)} MB`;
+  return `${kind}, ${fileSizeLabel(file.bytes)}`;
 }
 
 /** How a task's last step moves the person on to the task that follows it, with the service they have chosen. */
@@ -258,9 +262,19 @@ export function WelshSourceNote() {
  */
 const StepsTotal = createContext<number | null>(null);
 
-/** Sets the total for the steps inside, for a task that learns it part-way, as the code check does. */
-export function StepsCount({ total, children }: Readonly<{ total: number | null; children: React.ReactNode }>) {
-  return <StepsTotal.Provider value={total}>{children}</StepsTotal.Provider>;
+/** How a task tells the page its total once it knows it, so every step, the service's included, says the same total. */
+export const ReportStepsTotal = createContext<(total: number | null) => void>(() => undefined);
+
+/**
+ * For a task whose steps follow what it finds: reports its total to the page as it changes, and takes it back as the
+ * task closes, so the next task does not inherit it.
+ */
+export function useStepsTotal(total: number | null): void {
+  const report = useContext(ReportStepsTotal);
+  useEffect(() => {
+    report(total);
+  }, [report, total]);
+  useEffect(() => () => report(null), [report]);
 }
 
 /** A numbered list of steps: what to do next is always the lowest step not yet done. */
@@ -307,7 +321,7 @@ export function Step({
             {place}
             <span className="sr-only">{done ? ", done:" : ":"}</span>
           </span>
-          {title}
+          {/* Its own node, so the space survives: one at the end of the hidden words is dropped from the heading's name. */} {title}
           {summary ? <span className="ml-2 font-normal text-asst-muted">{summary}</span> : null}
         </h3>
         {children}

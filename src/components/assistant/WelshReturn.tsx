@@ -17,6 +17,7 @@ import {
   RepoSelect,
   Step,
   ToolMessage,
+  useStepsTotal,
   useWelshJob
 } from "@/components/assistant/WelshParts";
 import type { WelshClient } from "@/components/assistant/welshClient";
@@ -65,6 +66,10 @@ export function WelshReturn({ product, repos, client }: Readonly<{ product: stri
       input.current.value = "";
     }
   }
+
+  // Known once the spreadsheet is checked: with nothing usable it ends there, and putting the Welsh into the code is a
+  // step only for a service with repos.
+  useStepsTotal(view === null ? null : usableRows(view) === 0 ? 3 : repos.length > 0 ? 5 : 4);
 
   return (
     <>
@@ -214,7 +219,7 @@ function AddStep({
           </p>
         </div>
       ) : null}
-      <JobStatus state={state} working="Adding it to the catalogue…" />
+      <JobStatus busy={busy} state={state} working="Adding it to the catalogue…" />
       {view ? <AddedSummary view={view} files={files} /> : null}
     </Step>
   );
