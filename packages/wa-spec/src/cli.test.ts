@@ -189,3 +189,26 @@ describe("cli errors name the file", () => {
     expect(result.stderr).toContain("does not exist");
   });
 });
+
+describe("cli generate stale files found by key", () => {
+  it("should list a stale file named unlike a task key when its decision holds the key of a case type the spec lacks", () => {
+    const { dir, input } = workspace();
+    run("import", input, "-o", join(dir, "spec.yaml"));
+    mkdirSync(join(dir, "out"));
+    writeFileSync(join(dir, "out", "legacy-name.dmn"), sampleDmn("ct_old"));
+    const result = run("generate", join(dir, "spec.yaml"), "-o", join(dir, "out"));
+    expect(result.stderr).toContain("legacy-name.dmn");
+    expect(readdirSync(join(dir, "out"))).toContain("legacy-name.dmn");
+  });
+
+  it("should not list a generated file whose layout names it differently when the spec still generates it", () => {
+    const { dir } = workspace();
+    const input = join(dir, "misnamed");
+    mkdirSync(input);
+    writeFileSync(join(input, "wa-task-completion-misnamed.dmn"), sampleDmn("ct_a"));
+    run("import", input, "-o", join(dir, "spec.yaml"));
+    const result = run("generate", join(dir, "spec.yaml"), "-o", input);
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+  });
+});

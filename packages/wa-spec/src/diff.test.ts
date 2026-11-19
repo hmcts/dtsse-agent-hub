@@ -130,10 +130,11 @@ describe("diffPaths", () => {
 
   it("should list files present on one side only and compare the rest when two directories are given", () => {
     const { a, b } = dirs();
-    write(a, "wa-task-completion-demo-one.dmn", base());
-    write(a, "wa-task-completion-demo-gone.dmn", base());
-    write(b, "wa-task-completion-demo-one.dmn", base());
-    write(b, "wa-task-completion-demo-new.dmn", base());
+    const keyed = (caseType: string) => parseDmn(sampleDmn(caseType));
+    write(a, "wa-task-completion-demo-one.dmn", keyed("one"));
+    write(a, "wa-task-completion-demo-gone.dmn", keyed("gone"));
+    write(b, "wa-task-completion-demo-one.dmn", keyed("one"));
+    write(b, "wa-task-completion-demo-new.dmn", keyed("new"));
     expect(diffPaths(a, b).map((d) => `${d.file}: ${d.message}`)).toEqual([
       "wa-task-completion-demo-gone.dmn: file only in first",
       "wa-task-completion-demo-new.dmn: file only in second"
@@ -266,5 +267,53 @@ describe("diffInspections values", () => {
     const element = (text: string) => sampleDmn("ct_a").replace("<variable", `<extensionElements><x:y xmlns:x="u">${text}</x:y></extensionElements><variable`);
     const messages = diffInspections("f", readDmn(element("a")).inspection, readDmn(element("b")).inspection).map((d) => d.message);
     expect(messages).toEqual([expect.stringContaining("element <extensionElements> differs")]);
+  });
+});
+
+describe("diffPaths pairs files by task key", () => {
+  const keyedXml = (key: string, change?: (xml: string) => string) => {
+    const xml = sampleDmn("ct_a").replaceAll("wa-task-completion-demo-ct_a", key);
+    return change ? change(xml) : xml;
+  };
+  const dirs = () => {
+    const root = mkdtempSync(join(tmpdir(), "wa-spec-diff-"));
+    const [a, b] = [join(root, "a"), join(root, "b")];
+    mkdirSync(a);
+    mkdirSync(b);
+    return { a, b };
+  };
+
+  it("should compare a file named unlike a task key with the generated file that holds the same key when the directories are compared", () => {
+    const { a, b } = dirs();
+    const key = "wa-task-completion-svc-x";
+    writeFileSync(join(a, "wa-task-completion-possession.dmn"), keyedXml(key));
+    writeFileSync(join(b, `${key}.dmn`), keyedXml(key));
+    expect(diffPaths(a, b)).toEqual([]);
+    writeFileSync(
+      join(b, `${key}.dmn`),
+      keyedXml(key, (xml) => xml.replace('"Auto"', '"Manual"'))
+    );
+    expect(diffPaths(a, b).map((d) => d.message)).toEqual([
+      expect.stringContaining("only in first: rule 1"),
+      expect.stringContaining("only in second: rule 1")
+    ]);
+  });
+
+  it("should report a task-looking file whose decisions hold no task key and files that share one", () => {
+    const { a, b } = dirs();
+    writeFileSync(join(a, "wa-task-mystery-thing.dmn"), '<definitions><decision id="x" name="x"/></definitions>');
+    writeFileSync(join(a, "other.dmn"), keyedXml("not-a-key"));
+    writeFileSync(join(b, "wa-task-completion-one.dmn"), keyedXml("wa-task-completion-svc-x"));
+    writeFileSync(join(b, "wa-task-completion-two.dmn"), keyedXml("wa-task-completion-svc-x"));
+    const messages = diffPaths(a, b).map((d) => `${d.file}: ${d.message}`);
+    expect(messages).toContain("wa-task-mystery-thing.dmn: not a task DMN of a known kind, so not compared (first)");
+    expect(messages.join()).toContain("both hold wa-task-completion-svc-x (second)");
+    expect(messages.join()).not.toContain("other.dmn");
+  });
+
+  it("should name the file when a DMN in a directory cannot be read", () => {
+    const { a, b } = dirs();
+    writeFileSync(join(a, "broken.dmn"), "<html/>");
+    expect(() => diffPaths(a, b)).toThrow(/^broken\.dmn: not a DMN file/);
   });
 });

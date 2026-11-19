@@ -274,14 +274,14 @@ function toExpr(node: Node): Expr {
   }
 }
 
-/** Drops whitespace outside string literals, keeping one space only between two words, so FEEL written with different layout compares equal. */
+/** Drops whitespace outside string literals, keeping one space only where the two tokens would lex differently if joined, so FEEL written with different layout compares equal. */
 export function normaliseFeel(text: string): string {
-  const word = /^[\p{L}\p{N}_]$/u;
+  const apart = (before: string, after: string): boolean => {
+    const joined = lex(before + after);
+    return joined.length !== 2 || joined[0]?.text !== before || joined[1]?.text !== after;
+  };
   return lex(text)
-    .map((token, i, tokens) => {
-      const before = tokens[i - 1]?.text.at(-1) ?? "";
-      return word.test(before) && word.test(token.text.charAt(0)) ? ` ${token.text}` : token.text;
-    })
+    .map((token, i, tokens) => (i > 0 && apart((tokens[i - 1] as Token).text, token.text) ? ` ${token.text}` : token.text))
     .join("");
 }
 

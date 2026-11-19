@@ -2,6 +2,8 @@
 export interface Merged<T> {
   item: T;
   caseTypes: string[];
+  /** The item's identity, once computed. */
+  key?: string;
 }
 
 export type AlignStep = { op: "keep"; a: number; b: number } | { op: "del"; a: number } | { op: "add"; b: number };
@@ -35,15 +37,16 @@ export function align(a: string[], b: string[]): AlignStep[] {
  * order stays a subsequence of the result. Items with the same identity are shared; the rest are kept apart.
  */
 export function mergeSequences<T>(merged: Array<Merged<T>>, caseType: string, items: T[], identity: (item: T) => string): Array<Merged<T>> {
-  return align(
-    merged.map((m) => identity(m.item)),
-    items.map(identity)
-  ).map((step) => {
+  const mergedKeys = merged.map((m) => m.key ?? identity(m.item));
+  const itemKeys = items.map(identity);
+  return align(mergedKeys, itemKeys).map((step) => {
     if (step.op === "keep") {
       const shared = merged[step.a] as Merged<T>;
-      return { item: shared.item, caseTypes: [...shared.caseTypes, caseType] };
+      return { item: shared.item, caseTypes: [...shared.caseTypes, caseType], key: mergedKeys[step.a] };
     }
-    return step.op === "del" ? (merged[step.a] as Merged<T>) : { item: items[step.b] as T, caseTypes: [caseType] };
+    return step.op === "del"
+      ? { ...(merged[step.a] as Merged<T>), key: mergedKeys[step.a] }
+      : { item: items[step.b] as T, caseTypes: [caseType], key: itemKeys[step.b] };
   });
 }
 

@@ -232,3 +232,20 @@ describe("taskRows categories from rows that may apply", () => {
     ]);
   });
 });
+
+describe("taskRows raw FEEL task cells", () => {
+  const feelSpec = (feel: string) =>
+    SpecSchema.parse({
+      version: 1,
+      service: { slug: "demo" },
+      caseTypes: [{ id: "ct_a" }],
+      decisions: {
+        initiation: { name: "I", hitPolicy: "COLLECT", inputs: [], outputs: [{ name: "taskId" }], rows: [{ returns: { taskId: { feel } } }] }
+      }
+    });
+
+  it("should call raw FEEL definite only when the whole expression is the task id and otherwise may apply", () => {
+    expect(taskRows(feelSpec('"T1"'), "T1")[0]?.rows[0]?.mayApply).toBeUndefined();
+    expect(taskRows(feelSpec('if x then "T1" else "T2"'), "T1")[0]?.rows[0]?.mayApply).toBe(true);
+  });
+});

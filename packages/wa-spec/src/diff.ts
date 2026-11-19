@@ -1,9 +1,10 @@
 import { basename, dirname, join } from "node:path";
-import { type DmnDecision, type DmnDocument, type DmnInput, type DmnOutput, type DmnRule, type Inspection, readDmn } from "./dmn-model.ts";
+import type { DmnDecision, DmnDocument, DmnInput, DmnOutput, DmnRule, Inspection } from "./dmn-model.ts";
 import { canonicalCell, canonicalExpr } from "./feel.ts";
-import { exists, isDirectory, listDir, readText } from "./file-io.ts";
-import { isWaTaskDmn, parseFileName } from "./file-names.ts";
+import { exists, isDirectory, readText } from "./file-io.ts";
+import { parseFileName } from "./file-names.ts";
 import { align, byCodePoint } from "./merge.ts";
+import { listTaskFiles, readDmnFile, type TaskFile } from "./task-files.ts";
 
 export interface DiffOptions {
   /** Compare rules as a set even where the hit policy makes their order matter. */
@@ -219,8 +220,6 @@ export function diffInspections(file: string, a: Inspection, b: Inspection): Dif
   return out;
 }
 
-const dmnFiles = (dir: string): string[] => listDir(dir).filter(isWaTaskDmn).sort(byCodePoint);
-
 /**
  * Compares two files, two directories file by file by name, or a file with the file of the same name in a directory. A path that
  * is missing, or a directory without that file, is an error.
@@ -250,30 +249,47 @@ export function diffPaths(pathA: string, pathB: string, options: DiffOptions = {
 
 function diffSides(a: { dir: string; file?: string }, b: { dir: string; file?: string }, options: DiffOptions): Difference[] {
   const out: Difference[] = [];
-  const names = a.file && b.file ? [[a.file, b.file]] : [];
-  if (!a.file || !b.file) {
-    const fa = dmnFiles(a.dir);
-    const fb = dmnFiles(b.dir);
-    for (const name of fa) {
-      if (!fb.includes(name)) {
-        out.push({ file: name, message: "file only in first" });
+  const pairs: Array<[TaskFile, TaskFile]> = [];
+  if (a.file && b.file) {
+    pairs.push([
+      { name: a.file, xml: readText(join(a.dir, a.file)) },
+      { name: b.file, xml: readText(join(b.dir, b.file)) }
+    ]);
+  } else {
+    const [fa, fb] = [listTaskFiles(a.dir), listTaskFiles(b.dir)];
+    const byKey = (files: TaskFile[], side: string) => {
+      const map = new Map<string, TaskFile>();
+      for (const file of files) {
+        if (file.key === undefined) {
+          if (file.name.startsWith("wa-task-")) {
+            out.push({ file: file.name, message: `not a task DMN of a known kind, so not compared (${side})` });
+          }
+        } else if (map.has(file.key)) {
+          out.push({ file: file.name, message: `${map.get(file.key)?.name} and ${file.name} both hold ${file.key} (${side})` });
+        } else {
+          map.set(file.key, file);
+        }
+      }
+      return map;
+    };
+    const [ka, kb] = [byKey(fa, "first"), byKey(fb, "second")];
+    for (const [key, file] of ka) {
+      const other = kb.get(key);
+      if (other) {
+        pairs.push([file, other]);
       } else {
-        names.push([name, name]);
+        out.push({ file: file.name, message: "file only in first" });
       }
     }
-    for (const name of fb) {
-      if (!fa.includes(name)) {
-        out.push({ file: name, message: "file only in second" });
+    for (const [key, file] of kb) {
+      if (!ka.has(key)) {
+        out.push({ file: file.name, message: "file only in second" });
       }
     }
   }
-  for (const [nameA, nameB] of names) {
-    const first = readDmn(readText(join(a.dir, nameA as string)));
-    const second = readDmn(readText(join(b.dir, nameB as string)));
-    out.push(
-      ...diffInspections(nameA as string, first.inspection, second.inspection),
-      ...diffDocuments(nameA as string, first.document, second.document, options)
-    );
+  for (const [first, second] of pairs) {
+    const [x, y] = [readDmnFile(first.name, first.xml), readDmnFile(second.name, second.xml)];
+    out.push(...diffInspections(first.name, x.inspection, y.inspection), ...diffDocuments(first.name, x.document, y.document, options));
   }
   return out;
 }

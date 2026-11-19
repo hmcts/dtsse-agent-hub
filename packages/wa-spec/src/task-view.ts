@@ -67,7 +67,7 @@ const mentions = (value: Expr | undefined, taskId: string): Match => {
     return value === taskId ? "yes" : "no";
   }
   if (typeof value === "object" && value !== null && "feel" in value) {
-    return value.feel.includes(`"${taskId}"`) ? "yes" : "maybe";
+    return value.feel.trim() === `"${taskId}"` ? "yes" : "maybe";
   }
   return literalsOf(value).includes(taskId) || canBeRead(value) ? "maybe" : "no";
 };
