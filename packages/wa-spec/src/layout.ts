@@ -67,9 +67,21 @@ const out = (value: string | undefined): string => (value === undefined || value
 const back = (value: string | undefined): string | undefined => (value === undefined || value === ABSENT ? undefined : value);
 
 /** Identifies a rule by what it says, so a stored id follows the rule when the spec's rows are reordered or edited around it. */
-export function ruleHash(rule: Pick<DmnRule, "description" | "inputs" | "outputs">): string {
+export function ruleHash(
+  rule: Pick<DmnRule, "description" | "inputs" | "outputs">,
+  inputKeys: string[],
+  outputNames: string[],
+  covered?: { inputs: Set<string>; outputs: Set<string> }
+): string {
+  const kept = (entries: string[], names: string[], known?: Set<string>) => entries.filter((_, i) => known === undefined || known.has(names[i] as string));
   return createHash("sha1")
-    .update(JSON.stringify([rule.description || null, rule.inputs.map(normaliseFeel), rule.outputs.map(normaliseFeel)]))
+    .update(
+      JSON.stringify([
+        rule.description || null,
+        kept(rule.inputs, inputKeys, covered?.inputs).map(normaliseFeel),
+        kept(rule.outputs, outputNames, covered?.outputs).map(normaliseFeel)
+      ])
+    )
     .digest("hex")
     .slice(0, 12);
 }
@@ -111,6 +123,7 @@ function decisionLayout(
   const table = decision.table;
   const texts = textOverrides(decision, generated);
   const rules = generated?.table?.rules ?? [];
+  const outputNames = (table?.outputs ?? []).map((o) => o.name);
   const requirements = Object.fromEntries(
     decision.requires.flatMap((required, index) => {
       const id = decision.requirementIds?.[index];
@@ -133,7 +146,7 @@ function decisionLayout(
           ]),
           outputs: table.outputs.map((output): [string, string] => [output.name, [out(output.id), out(output.width)].join(" ")]),
           rules: table.rules.map((rule, i) =>
-            [ruleHash(rules[i] ?? rule), out(rule.id), ...(rule.inputIds ?? []).map(out), ...(rule.outputIds ?? []).map(out)].join(" ")
+            [ruleHash(rules[i] ?? rule, inputKeys, outputNames), out(rule.id), ...(rule.inputIds ?? []).map(out), ...(rule.outputIds ?? []).map(out)].join(" ")
           )
         }
       : {})
@@ -166,14 +179,15 @@ function parseItem(text: string): DmnDiagramItem | undefined {
 }
 
 /**
- * Reads the layout out of a parsed DMN. `generated` is the document the generator makes for the same file from the spec without a
+ * Reads the layout out of a parsed DMN, for its main decision and the helpers the spec carries. `generated` is the document the generator makes for the same file from the spec without a
  * layout: rules are identified by what it renders, which is what `applyLayout` will match against, and any text it renders
  * differently is kept. `inputKeys` names the main decision's input columns.
  */
-export function layoutOf(doc: DmnDocument, main: DmnDecision, inputKeys: string[], generated: DmnDocument | undefined): FileLayout {
-  const names = new Map(doc.decisions.map((d) => [d.id, d.name]));
+export function layoutOf(doc: DmnDocument, main: DmnDecision, helpers: DmnDecision[], inputKeys: string[], generated: DmnDocument | undefined): FileLayout {
+  const kept = [main, ...helpers];
+  const names = new Map(kept.map((d) => [d.id, d.name]));
   const decisions: Record<string, DecisionLayout> = {};
-  for (const decision of doc.decisions) {
+  for (const decision of kept) {
     const isMain = decision === main;
     const made = isMain ? generated?.decisions[0] : generated?.decisions.find((d, i) => i > 0 && d.name === decision.name);
     decisions[isMain ? "table" : decision.name] = decisionLayout(decision, made, isMain, isMain ? inputKeys : [], names);
@@ -199,10 +213,10 @@ function original(texts: Record<string, string> | undefined, id: string | undefi
 }
 
 /**
- * The stored line for each generated rule. A rule keeps the line with the same content hash; when the spec has as many rules as
+ * The stored line for each generated rule. A rule keeps the line with the same content hash, taken over the columns the layout knew; when the spec has as many rules as
  * were stored, the rules whose hash found nothing, such as every rule after a column was added, take the unused lines in order.
  */
-function matchRules(rules: DmnRule[], lines: string[]): Array<string[] | undefined> {
+function matchRules(rules: DmnRule[], lines: string[], hashOf: (rule: DmnRule) => string): Array<string[] | undefined> {
   const byHash = new Map<string, number[]>();
   for (const [i, line] of lines.entries()) {
     const hash = line.split(" ")[0] ?? "";
@@ -210,7 +224,7 @@ function matchRules(rules: DmnRule[], lines: string[]): Array<string[] | undefin
   }
   const taken = new Set<number>();
   const found = rules.map((rule) => {
-    const at = byHash.get(ruleHash(rule))?.shift();
+    const at = byHash.get(hashOf(rule))?.shift();
     if (at !== undefined) {
       taken.add(at);
     }
@@ -240,9 +254,17 @@ export function applyLayout(doc: DmnDocument, layout: FileLayout | undefined, in
     }
     const table = decision.table;
     const split = (text: string | undefined) => (text ?? "").split(" ").map(back);
-    const stored = matchRules(table?.rules ?? [], own.rules ?? []);
     const storedInputs = (own.inputs ?? []).map(([key]) => key);
     const storedOutputs = (own.outputs ?? []).map(([name]) => name);
+    const covered = { inputs: new Set(storedInputs), outputs: new Set(storedOutputs) };
+    const stored = matchRules(table?.rules ?? [], own.rules ?? [], (rule) =>
+      ruleHash(
+        rule,
+        inputKeys,
+        (table?.outputs ?? []).map((o) => o.name),
+        covered
+      )
+    );
     const columnOf = (columns: Array<[string, string]> | undefined, key: string) => columns?.find(([name]) => name === key)?.[1];
     const order = Object.keys(own.requirements ?? {});
     const rank = (required: string): number => {

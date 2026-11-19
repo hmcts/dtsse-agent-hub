@@ -12,6 +12,7 @@
 | completion | 37 | 35 | 2 |
 | cancellation | 20 | 20 | 0 |
 | task-types | 44 | 44 | 0 |
+| allowed-days | 0 | 0 | 0 |
 | total | 322 | 320 | 2 |
 
 ## Not lifted

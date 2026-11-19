@@ -4,6 +4,7 @@ import { writeDmn } from "./dmn-model.ts";
 import { generateAll } from "./generator.ts";
 import { importDmns, renderReport } from "./importer.ts";
 import { validateSpec } from "./schema.ts";
+import { parseLayout, parseSpec, stringifyLayout, stringifySpec } from "./spec-io.ts";
 
 const file = (caseType: string, options?: Parameters<typeof sampleDmn>[1]) => ({
   name: `wa-task-completion-demo-${caseType}.dmn`,
@@ -301,5 +302,58 @@ describe("importDmns requirements to missing decisions and error order", () => {
   it("should name the services before the duplicate files when both problems are present", () => {
     const names = ["wa-task-completion-one-ct_a.dmn", "wa-task-completion-two-ct_a.dmn"].map((name) => ({ name, xml: sampleDmn("ct_a") }));
     expect(() => importDmns([...names, { name: "wa-task-completion-one-ct_a.dmn", xml: sampleDmn("ct_a") }])).toThrow(/more than one service/);
+  });
+});
+
+describe("importDmns files it cannot place", () => {
+  const named = (name: string, xml: string) => ({ name, xml });
+
+  it("should report a task DMN of an unknown kind as unrepresentable when the directory has one", () => {
+    const { report } = importDmns([file("ct_a"), named("wa-task-mystery-demo-ct_a.dmn", sampleDmn("ct_a"))]);
+    expect(report.unrepresentable).toEqual([{ construct: "a task DMN of a kind the spec does not know", count: 1, files: ["wa-task-mystery-demo-ct_a.dmn"] }]);
+  });
+
+  it("should report a task DMN with no decision table as unrepresentable when a file has none", () => {
+    const { report } = importDmns([file("ct_a"), named("wa-task-completion-demo-ct_z.dmn", "<definitions/>")]);
+    expect(report.unrepresentable.map((u) => u.construct)).toEqual(["a task DMN with no decision table"]);
+  });
+
+  it("should import the allowed-days kind like any other when a service has it", () => {
+    const xml = sampleDmn("ct_a")
+      .replaceAll("wa-completion-definition", "wa-allowed-days-definition")
+      .replaceAll("wa-task-completion-demo", "wa-task-allowed-days-demo");
+    const { spec, layout, report } = importDmns([named("wa-task-allowed-days-demo-ct_a.dmn", xml)]);
+    expect(report.unrepresentable).toEqual([]);
+    expect(generateAll(spec, layout).map((f) => f.fileName)).toEqual(["wa-task-allowed-days-demo-ct_a.dmn"]);
+  });
+
+  it("should flag an output column without a name and skip the file when a table has one", () => {
+    const { report } = importDmns([file("ct_a"), named("wa-task-completion-demo-ct_b.dmn", sampleDmn("ct_b").replace('name="taskType"', ""))]);
+    expect(report.unrepresentable.map((u) => u.construct)).toEqual(["an output column without a name (column 1)"]);
+  });
+
+  it("should skip a helper that is a decision table without leaving a layout entry or an empty literal when the file has one", () => {
+    const original = sampleDmn("ct_a");
+    const helper = /<decision id="Decision_LATEST"[\s\S]*?<\/decision>/.exec(original)?.[0] as string;
+    const asTable = helper.replace(
+      /<literalExpression[\s\S]*?<\/literalExpression>/,
+      '<decisionTable id="DT"><input id="I"><inputExpression id="IE"><text></text></inputExpression></input><output id="O" name="o" /></decisionTable>'
+    );
+    const { spec, layout, report } = importDmns([{ name: "wa-task-completion-demo-ct_a.dmn", xml: original.replace(helper, asTable) }]);
+    expect(report.unrepresentable.map((u) => u.construct)).toEqual(["helper decision LATEST is not a literal expression"]);
+    expect(spec.decisions.completion?.helpers).toBeUndefined();
+    expect(spec.decisions.completion?.dependencies).toBeUndefined();
+    expect(Object.keys(layout.files["completion/ct_a"]?.decisions ?? {})).toEqual(["table"]);
+    expect(() => parseLayout(stringifyLayout(layout))).not.toThrow();
+    expect(generateAll(parseSpec(stringifySpec(spec)), parseLayout(stringifyLayout(layout)))).toHaveLength(1);
+  });
+
+  it("should carry the expression language of an entry when a file sets one", () => {
+    const xml = sampleDmn("ct_a").replace("<outputEntry ", '<outputEntry expressionLanguage="feel" ');
+    const { spec, layout, report } = importDmns([{ name: "wa-task-completion-demo-ct_a.dmn", xml }]);
+    expect(report.unrepresentable).toEqual([]);
+    expect(spec.decisions.completion?.rows[0]?.returns?.taskType).toEqual({ feel: '"Review"', language: "feel" });
+    expect(generateAll(spec, layout)[0]?.xml).toContain('expressionLanguage="feel"');
+    expect(generateAll(spec)[0]?.xml).toContain('expressionLanguage="feel"');
   });
 });

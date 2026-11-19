@@ -131,3 +131,19 @@ describe("layout column ids", () => {
     expect(rule?.rules[0]?.inputIds).toEqual(["E_foo", "E_two"]);
   });
 });
+
+describe("layout when a column and a row are added together", () => {
+  it("should keep every original rule id when an input column and a row are added to a spec", () => {
+    const { spec, layout } = importDmns([fileA]);
+    const completion = spec.decisions.completion;
+    if (!completion) {
+      throw new Error("no completion decision");
+    }
+    completion.inputs.splice(1, 0, { key: "added", expression: { field: "x" } });
+    completion.rows.splice(1, 0, { when: { eventId: { in: ["brand-new"] } }, returns: { taskType: "N" } });
+    const original = parseDmn(fileA.xml).decisions[0]?.table?.rules.map((r) => r.id) ?? [];
+    const rules = parseDmn(generateAll(spec, layout)[0]?.xml as string).decisions[0]?.table?.rules.map((r) => r.id) ?? [];
+    expect(rules).toHaveLength(original.length + 1);
+    expect(rules.filter((id) => original.includes(id as string))).toEqual(original);
+  });
+});

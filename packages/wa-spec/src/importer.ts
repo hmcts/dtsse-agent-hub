@@ -245,7 +245,8 @@ function importTables(kind: Kind, tables: Table[], allCaseTypes: string[], repor
     return (table.decision.table?.rules ?? []).map((rule) => {
       const when: Record<string, Cell> = {};
       rule.inputs.forEach((text, index) => {
-        const cell = parseCell(text);
+        const language = rule.inputLanguages?.[index];
+        const cell = language && text.trim() !== "" ? { feel: text.trim(), language } : parseCell(text);
         if (cell !== undefined) {
           when[keys[index] as string] = cell;
           addRaw(report, rawIndex, kind, `input ${keys[index]} entry`, cell, table.caseType);
@@ -253,7 +254,8 @@ function importTables(kind: Kind, tables: Table[], allCaseTypes: string[], repor
       });
       const returns: Record<string, Expr> = {};
       rule.outputs.forEach((text, index) => {
-        const expr = parseExpr(text);
+        const language = rule.outputLanguages?.[index];
+        const expr = language && text.trim() !== "" ? { feel: text.trim(), language } : parseExpr(text);
         if (expr !== undefined) {
           returns[outputNames[index] as string] = expr;
           addRaw(report, rawIndex, kind, `output ${outputNames[index]}`, expr, table.caseType);
@@ -335,18 +337,11 @@ function importTables(kind: Kind, tables: Table[], allCaseTypes: string[], repor
 
   const edges: Array<{ dep: Dependency; caseTypes: string[] }> = [];
   for (const table of tables) {
-    const nameOf = new Map(table.document.decisions.map((d) => [d.id, d.name]));
-    for (const decision of table.document.decisions) {
+    for (const decision of [table.decision, ...table.helpers]) {
       const from = decision === table.decision ? "table" : decision.name;
-      if (decision !== table.decision && decision.name === "table") {
-        continue;
-      }
       for (const required of decision.requires) {
-        if (required === table.decision.id || !nameOf.has(required)) {
-          continue;
-        }
-        const to = nameOf.get(required) ?? required;
-        if (to === "table") {
+        const to = table.helpers.find((h) => h.id === required)?.name;
+        if (to === undefined) {
           continue;
         }
         const edge = edges.find((e) => e.dep.decision === from && e.dep.requires === to);
@@ -414,7 +409,7 @@ export function importDmns(files: DmnFile[], options: ImportOptions = {}): { spe
   const caseTypeOrder: string[] = [];
   const unrepresentable = new Map<string, { count: number; files: string[] }>();
   const presentation = new Map<string, number>();
-  const parsed: Array<{ kind: Kind; caseType: string; document: DmnDocument; decision: DmnDecision }> = [];
+  const parsed: Array<{ kind: Kind; caseType: string; document: DmnDocument; decision: DmnDecision; helpers: DmnDecision[] }> = [];
   const flag = (construct: string, file: string, count = 1) => {
     const entry = unrepresentable.get(construct) ?? { count: 0, files: [] };
     entry.count += count;
@@ -426,6 +421,9 @@ export function importDmns(files: DmnFile[], options: ImportOptions = {}): { spe
     const match = parseFileName(file.name);
     if (!match) {
       report.notes.push(`${file.name}: not a wa-task-<kind>-<service>-<caseType>.dmn file, skipped`);
+      if (file.name.startsWith("wa-task-") && file.name.endsWith(".dmn")) {
+        flag("a task DMN of a kind the spec does not know", file.name);
+      }
       continue;
     }
     const { kind, caseType } = match;
@@ -442,6 +440,12 @@ export function importDmns(files: DmnFile[], options: ImportOptions = {}): { spe
     const decision = named ?? document.decisions.find((d) => d.table);
     if (!decision?.table) {
       report.notes.push(`${file.name}: no decision table found, skipped`);
+      flag("a task DMN with no decision table", file.name);
+      continue;
+    }
+    const unnamed = decision.table.outputs.findIndex((output) => output.name === "");
+    if (unnamed >= 0) {
+      flag(`an output column without a name (column ${unnamed + 1})`, file.name);
       continue;
     }
     if (!HIT_POLICIES.includes(decision.table.hitPolicy as (typeof HIT_POLICIES)[number])) {
@@ -463,6 +467,7 @@ export function importDmns(files: DmnFile[], options: ImportOptions = {}): { spe
     for (const helper of document.decisions.filter((d) => d !== decision)) {
       if (!helper.literal || helper.table) {
         flag(`helper decision ${helper.name} is not a literal expression`, file.name);
+        continue;
       }
       if (helper.name === "table") {
         flag("a helper decision named table, which the spec reserves for the main decision", file.name);
@@ -493,7 +498,7 @@ export function importDmns(files: DmnFile[], options: ImportOptions = {}): { spe
     for (const [construct, count] of inspection.presentation) {
       presentation.set(construct, (presentation.get(construct) ?? 0) + count);
     }
-    parsed.push({ kind, caseType, document, decision });
+    parsed.push({ kind, caseType, document, decision, helpers });
     byKind.set(kind, [...(byKind.get(kind) ?? []), { caseType, decision, helpers, document }]);
     report.files.push({
       name: file.name,
@@ -534,8 +539,8 @@ export function importDmns(files: DmnFile[], options: ImportOptions = {}): { spe
     decisions
   };
   const layouts: Record<string, FileLayout> = {};
-  for (const { kind, caseType, document, decision } of parsed) {
-    layouts[layoutKey(kind, caseType)] = layoutOf(document, decision, inputKeys(decision), generateDocument(spec, kind, caseType));
+  for (const { kind, caseType, document, decision, helpers } of parsed) {
+    layouts[layoutKey(kind, caseType)] = layoutOf(document, decision, helpers, inputKeys(decision), generateDocument(spec, kind, caseType));
   }
   report.unrepresentable = [...unrepresentable].map(([construct, v]) => ({ construct, ...v }));
   report.presentation = [...presentation].map(([construct, count]) => ({ construct, count }));

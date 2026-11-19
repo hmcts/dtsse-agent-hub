@@ -238,6 +238,8 @@ function classify(kind: Kind, row: Row, index: number, caseIds: string[]): Class
       }
       return { cases, items: [make(returns.taskType, "complete", { when: { eventID: event }, returns: { ...returns } })] };
     }
+    case "allowed-days":
+      return "the model has no place for allowed days";
     case "task-types": {
       if (Object.keys(when).length > 0 || !isName(returns.taskTypeId) || !("taskTypeName" in returns) || !onlyKeys(returns, ["taskTypeId", "taskTypeName"])) {
         return "it is not a task type and its name";
@@ -368,7 +370,7 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
   const defaultGrants = new Map<string, Array<Ent<Grant>>>();
   const cancellationRows: Array<{ row: number; classified: Classified; src: Row }> = [];
 
-  const residue: Record<Kind, Row[]> = { initiation: [], configuration: [], permissions: [], completion: [], cancellation: [], "task-types": [] };
+  const residue = Object.fromEntries(KINDS.map((kind) => [kind, [] as Row[]])) as Record<Kind, Row[]>;
   const reasons: LiftReport["residue"] = [];
   const classified = {} as Record<Kind, Array<{ row: Row; index: number; result: Classified | string; residueIndex?: number }>>;
 

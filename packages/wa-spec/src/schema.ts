@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const KINDS = ["initiation", "configuration", "permissions", "completion", "cancellation", "task-types"] as const;
+export const KINDS = ["initiation", "configuration", "permissions", "completion", "cancellation", "task-types", "allowed-days"] as const;
 export type Kind = (typeof KINDS)[number];
 
 /** PRIORITY and OUTPUT ORDER rank outputs by an `<outputValues>` list, which the spec has no place for. */
@@ -34,7 +34,7 @@ export type Cond =
  */
 export type Expr =
   | Scalar
-  | { feel: string }
+  | { feel: string; language?: string }
   | { field: string }
   | { if: Cond; use: Expr; otherwise: Expr }
   | { plus: Expr[] }
@@ -56,7 +56,7 @@ export const Cond: z.ZodType<Cond> = z.lazy(() =>
 export const Expr: z.ZodType<Expr> = z.lazy(() =>
   z.union([
     Scalar,
-    z.strictObject({ feel: z.string() }),
+    z.strictObject({ feel: z.string(), language: z.string().optional() }),
     z.strictObject({ field: z.string().min(1) }),
     z.strictObject({ if: Cond, use: Expr, otherwise: Expr }),
     z.strictObject({ plus: z.array(Expr).min(2) }),
@@ -72,7 +72,7 @@ export const Cell = z.union([
   z.strictObject({ in: z.array(Scalar).min(1) }),
   z.strictObject({ notIn: z.array(Scalar).min(1) }),
   z.strictObject({ cmp: z.enum(["<", "<=", ">", ">="]), value: z.union([z.number(), z.string()]) }),
-  z.strictObject({ feel: z.string() })
+  z.strictObject({ feel: z.string(), language: z.string().optional() })
 ]);
 export type Cell = z.infer<typeof Cell>;
 
@@ -203,7 +203,8 @@ export const Spec = z.strictObject({
     permissions: Decision.optional(),
     completion: Decision.optional(),
     cancellation: Decision.optional(),
-    "task-types": Decision.optional()
+    "task-types": Decision.optional(),
+    "allowed-days": Decision.optional()
   })
 });
 export type Spec = z.infer<typeof Spec>;

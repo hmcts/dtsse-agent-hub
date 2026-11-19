@@ -27,6 +27,9 @@ export interface DmnRule {
   /** Ids of the entries, parallel to `inputs` and `outputs`. */
   inputIds?: string[];
   outputIds?: string[];
+  /** The `expressionLanguage` of each entry, parallel to `inputs` and `outputs`, empty for none. Present only when some entry has one. */
+  inputLanguages?: string[];
+  outputLanguages?: string[];
   description?: string;
   inputs: string[];
   outputs: string[];
@@ -82,22 +85,14 @@ type Node = Record<string, unknown>;
 
 const LIST_TAGS = new Set(["decision", "input", "output", "rule", "inputEntry", "outputEntry", "informationRequirement", "requiredDecision", "description"]);
 
-const parser = new XMLParser({
-  ignoreAttributes: false,
-  attributeNamePrefix: "@_",
-  parseAttributeValue: false,
-  parseTagValue: false,
-  htmlEntities: true,
-  trimValues: false,
-  isArray: (name) => LIST_TAGS.has(name)
-});
-
+/** One order-preserving read serves the model, the inspection and the diagram, whose shapes and edges interleave. */
 const orderedParser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: "@_",
   parseAttributeValue: false,
   parseTagValue: false,
   htmlEntities: true,
+  trimValues: false,
   preserveOrder: true
 });
 
@@ -107,8 +102,7 @@ const childrenOf = (nodes: Ordered, name: string): Ordered => nodes.filter((n) =
 
 const orderedAttrs = (node: Record<string, unknown>): Node => (node[":@"] ?? {}) as Node;
 
-function parseDiagram(xml: string): DmnDiagram | undefined {
-  const root = parseOrdered(xml);
+function parseDiagram(root: Ordered): DmnDiagram | undefined {
   const diagram = childrenOf(
     childrenOf(root, "definitions").flatMap((d) => (d.definitions as Ordered) ?? []),
     "dmndi:DMNDI"
@@ -144,8 +138,41 @@ function parseDiagram(xml: string): DmnDiagram | undefined {
   return { id: attr(orderedAttrs(diagram), "id") ?? "", items };
 }
 
-function parseOrdered(xml: string): Ordered {
-  return orderedParser.parse(xml) as Ordered;
+/**
+ * The ordered tree as an object per element: attributes as `@_name`, children by tag name (a list where a tag repeats or is in
+ * `LIST_TAGS`), and an element with text and nothing else as that text.
+ */
+function groupTree(nodes: Ordered, attrs?: Node): Node | string {
+  const out: Node = { ...attrs };
+  let text = "";
+  let hasChildren = false;
+  for (const node of nodes) {
+    const tag = Object.keys(node).find((key) => key !== ":@");
+    if (tag === undefined || tag.startsWith("?")) {
+      continue;
+    }
+    if (tag === "#text") {
+      text += String(node[tag]);
+      continue;
+    }
+    hasChildren = true;
+    const value = groupTree(node[tag] as Ordered, node[":@"] as Node | undefined);
+    const existing = out[tag];
+    if (existing === undefined) {
+      out[tag] = LIST_TAGS.has(tag) ? [value] : value;
+    } else {
+      out[tag] = Array.isArray(existing) ? [...existing, value] : [existing, value];
+    }
+  }
+  return !hasChildren && attrs === undefined ? text : out;
+}
+
+/**
+ * XML turns a tab or line break written in an attribute value into a space before anything reads it, but a character reference
+ * for one survives; the parser decodes both alike, so the literal ones are replaced first.
+ */
+function normaliseAttributes(xml: string): string {
+  return xml.replace(/<[^<>]*>/g, (tag) => tag.replace(/="[^"]*"|='[^']*'/g, (value) => value.replace(/\r\n|[\t\r\n]/g, " ")));
 }
 
 function asList(value: unknown): Node[] {
@@ -176,6 +203,15 @@ function optional<T extends object>(fields: Record<string, string | undefined>):
     }
   }
   return out as T;
+}
+
+function entryLanguages(inputs: Node[], outputs: Node[]): { inputLanguages?: string[]; outputLanguages?: string[] } {
+  const inputLanguages = inputs.map((entry) => attr(entry, "expressionLanguage") ?? "");
+  const outputLanguages = outputs.map((entry) => attr(entry, "expressionLanguage") ?? "");
+  return {
+    ...(inputLanguages.some(Boolean) ? { inputLanguages } : {}),
+    ...(outputLanguages.some(Boolean) ? { outputLanguages } : {})
+  };
 }
 
 function parseTable(table: Node): DmnTable {
@@ -212,6 +248,7 @@ function parseTable(table: Node): DmnTable {
     return {
       ...optional<{ id?: string }>({ id: attr(rule, "id") }),
       ...(descriptions.length === 0 ? {} : { description }),
+      ...entryLanguages(inputEntries, outputEntries),
       inputIds: inputEntries.map((entry) => attr(entry, "id") ?? ""),
       outputIds: outputEntries.map((entry) => attr(entry, "id") ?? ""),
       inputs: inputEntries.map((entry) => textOf(entry)),
@@ -231,16 +268,14 @@ function parseTable(table: Node): DmnTable {
   } as DmnTable;
 }
 
-/**
- * A DMN file's document, and what the model leaves out of it. The tree is read once for both; the diagram needs a second,
- * order-preserving read, because the first read groups shapes and edges apart.
- */
+/** A DMN file's document, and what the model leaves out of it, from one read of the XML. */
 export function readDmn(xml: string): { document: DmnDocument; inspection: Inspection } {
-  const tree = parser.parse(xml) as Node;
-  return { document: documentOf(tree, xml), inspection: inspectTree(tree) };
+  const ordered = orderedParser.parse(normaliseAttributes(xml)) as Ordered;
+  const tree = groupTree(ordered) as Node;
+  return { document: documentOf(tree, parseDiagram(ordered)), inspection: inspectTree(tree) };
 }
 
-function documentOf(tree: Node, xml: string): DmnDocument {
+function documentOf(tree: Node, diagram: DmnDiagram | undefined): DmnDocument {
   const root = tree.definitions as Node;
   const decisionNodes = asList(root.decision);
   const decisions = decisionNodes.map((node): DmnDecision => {
@@ -276,7 +311,6 @@ function documentOf(tree: Node, xml: string): DmnDocument {
         : {})
     };
   });
-  const diagram = parseDiagram(xml);
   const namespaces = Object.entries(root)
     .filter(([key, value]) => key.startsWith("@_xmlns") && typeof value === "string")
     .map(([key, value]): [string, string] => [key.slice(2), value as string]);
@@ -409,10 +443,16 @@ function writeTable(table: DmnTable, id: ReturnType<typeof idFactory>, base: str
       out += `${pad}  <description>${escapeText(rule.description)}</description>\n`;
     }
     rule.inputs.forEach((entry, index) => {
-      out += `${pad}  <inputEntry${attrs([["id", rule.inputIds?.[index] || id("InputEntry", base, ruleIndex, index)]])}>\n${text(`${pad}    `, entry)}${pad}  </inputEntry>\n`;
+      out += `${pad}  <inputEntry${attrs([
+        ["id", rule.inputIds?.[index] || id("InputEntry", base, ruleIndex, index)],
+        ["expressionLanguage", rule.inputLanguages?.[index] || undefined]
+      ])}>\n${text(`${pad}    `, entry)}${pad}  </inputEntry>\n`;
     });
     rule.outputs.forEach((entry, index) => {
-      out += `${pad}  <outputEntry${attrs([["id", rule.outputIds?.[index] || id("OutputEntry", base, ruleIndex, index)]])}>\n${text(`${pad}    `, entry)}${pad}  </outputEntry>\n`;
+      out += `${pad}  <outputEntry${attrs([
+        ["id", rule.outputIds?.[index] || id("OutputEntry", base, ruleIndex, index)],
+        ["expressionLanguage", rule.outputLanguages?.[index] || undefined]
+      ])}>\n${text(`${pad}    `, entry)}${pad}  </outputEntry>\n`;
     });
     out += `${pad}</rule>\n`;
   });
@@ -557,8 +597,8 @@ const USED_ATTRIBUTES: Record<string, string[]> = {
   inputValues: ["id"],
   output: ["id", "label", "name", "typeRef", "biodi:width"],
   rule: ["id"],
-  inputEntry: ["id"],
-  outputEntry: ["id"],
+  inputEntry: ["id", "expressionLanguage"],
+  outputEntry: ["id", "expressionLanguage"],
   literalExpression: ["id", "expressionLanguage"]
 };
 

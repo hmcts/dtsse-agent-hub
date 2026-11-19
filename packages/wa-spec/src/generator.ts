@@ -20,6 +20,9 @@ export function decisionKey(spec: Spec, kind: Kind, caseType: string): string {
   return decisionKeyOf(spec.service.slug, kind, caseType);
 }
 
+/** The expression language an entry names, or none. */
+const languageOf = (entry: unknown): string => (typeof entry === "object" && entry !== null && "language" in entry ? String(entry.language) : "");
+
 /**
  * The DMN document one kind of decision takes for one case type. `layout` supplies the ids, widths and diagram a spec
  * imported from DMNs came with; whatever it lacks is generated.
@@ -57,11 +60,17 @@ export function generateDocument(spec: Spec, kind: Kind, caseType: string, layou
   });
   const rules: DmnRule[] = decision.rows
     .filter((row) => applies(row.only, caseType))
-    .map((row) => ({
-      ...(row.description === undefined ? {} : { description: row.description }),
-      inputs: inputs.map((column) => renderCell(row.when?.[column.key])),
-      outputs: outputs.map((column) => renderExpr(row.returns?.[column.name]))
-    }));
+    .map((row) => {
+      const inputLanguages = inputs.map((column) => languageOf(row.when?.[column.key]));
+      const outputLanguages = outputs.map((column) => languageOf(row.returns?.[column.name]));
+      return {
+        ...(row.description === undefined ? {} : { description: row.description }),
+        ...(inputLanguages.some(Boolean) ? { inputLanguages } : {}),
+        ...(outputLanguages.some(Boolean) ? { outputLanguages } : {}),
+        inputs: inputs.map((column) => renderCell(row.when?.[column.key])),
+        outputs: outputs.map((column) => renderExpr(row.returns?.[column.name]))
+      };
+    });
 
   const fileLayout = layout?.files[layoutKey(kind, caseType)];
   const helpers = (decision.helpers ?? []).filter((h) => applies(h.only, caseType));

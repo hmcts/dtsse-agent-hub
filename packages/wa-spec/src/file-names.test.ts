@@ -19,8 +19,10 @@ describe("file names", () => {
   });
 
   it("should recognise a task DMN by its prefix and extension when filtering a directory", () => {
-    expect(isWaTaskDmn("wa-task-x.dmn")).toBe(true);
-    expect(isWaTaskDmn("wa-task-x.xml")).toBe(false);
+    expect(isWaTaskDmn("wa-task-completion-demo-ct.dmn")).toBe(true);
+    expect(isWaTaskDmn("wa-task-allowed-days-demo-ct.dmn")).toBe(true);
+    expect(isWaTaskDmn("wa-task-x.dmn")).toBe(false);
+    expect(isWaTaskDmn("wa-task-completion-demo-ct.xml")).toBe(false);
     expect(isWaTaskDmn("other.dmn")).toBe(false);
   });
 });

@@ -211,3 +211,19 @@ describe("fallback diagram", () => {
     expect(at(helper.id)).toMatchObject({ x: "160", y: "250" });
   });
 });
+
+describe("attribute value normalisation", () => {
+  it("should read a tab or line break written in an attribute as a space and keep one written as a character reference when a file has both", () => {
+    const xml = sampleDmn("ct_a")
+      .replace('label="Event ID"', 'label="a\t\tb\nc&#10;d"')
+      .replace('camunda:inputVariable="eventId"', 'camunda:inputVariable="eventId\t\t"');
+    const input = readDmn(xml).document.decisions[0]?.table?.inputs[0];
+    expect(input?.label).toBe("a  b c\nd");
+    expect(input?.inputVariable).toBe("eventId  ");
+  });
+
+  it("should leave tabs and line breaks in element text alone when the file has them", () => {
+    const xml = sampleDmn("ct_a").replace('"submit", "update"', '"submit",\n\t"update"');
+    expect(readDmn(xml).document.decisions[0]?.table?.rules[0]?.inputs[0]).toBe('"submit",\n\t"update"');
+  });
+});

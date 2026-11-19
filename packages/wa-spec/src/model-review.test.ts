@@ -583,3 +583,51 @@ tasks:
     expect("attributesOf" in api).toBe(false);
   });
 });
+
+describe("round six", () => {
+  it("should keep an expression language on a cell and on a value when lifting and compiling", () => {
+    const spec = structuredClone(VARIANT_SPEC);
+    spec.decisions.configuration.rows = [
+      cfgRow({ taskType: { in: ["A"] } }, { name: "title", value: { feel: "caseData.a", language: "juel" }, canReconfigure: false }, undefined)
+    ] as never;
+    const initiation = {
+      name: "i",
+      hitPolicy: "COLLECT" as const,
+      inputs: [
+        { key: "eventId", typeRef: "string" },
+        { key: "flag", typeRef: "string" }
+      ],
+      outputs: [{ name: "taskId", typeRef: "string" }],
+      rows: [cfgRow({ eventId: { in: ["e"] }, flag: { feel: "x > 1", language: "juel" } }, { taskId: "A" })]
+    };
+    (spec.decisions as Record<string, unknown>).initiation = initiation;
+    const lifted = liftSpec(spec as never);
+    expect(lifted.report.differences).toEqual([]);
+    expect(lifted.report.counts.initiation.residue).toBe(0);
+    expect(lifted.model.tasks[0]?.create?.[0]?.when).toEqual({ flag: { feel: "x > 1", language: "juel" } });
+    expect(lifted.model.tasks[0]?.title).toEqual({ feel: "caseData.a", language: "juel" });
+  });
+
+  it("should keep the allowed-days rows in tables when lifting a spec that has that kind", () => {
+    const spec = structuredClone(VARIANT_SPEC);
+    (spec.decisions as Record<string, unknown>)["allowed-days"] = {
+      name: "d",
+      hitPolicy: "COLLECT",
+      inputs: [{ key: "taskId", typeRef: "string" }],
+      outputs: [{ name: "workingDaysAllowed", typeRef: "integer" }],
+      rows: [{ when: { taskId: { in: ["A"] } }, returns: { workingDaysAllowed: 3 } }]
+    };
+    const lifted = liftSpec(spec as never);
+    expect(lifted.report.counts["allowed-days"]).toEqual({ rows: 1, lifted: 0, residue: 1 });
+    expect(lifted.model.tables?.["allowed-days"]?.rows).toHaveLength(1);
+    expect(lifted.report.differences).toEqual([]);
+  });
+});
+
+describe("readable errors", () => {
+  it("should name the file and the field when a model fails its schema when loading", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wa-spec-err-"));
+    writeFileSync(join(dir, "bad.yaml"), "kind: wa-model\nversion: 1\nservice: {}\ncaseTypes: []\ntasks: []\n");
+    expect(() => loadSpecFile(join(dir, "bad.yaml"))).toThrow(/bad\.yaml is not valid:[\s\S]*service\.slug/);
+  });
+});

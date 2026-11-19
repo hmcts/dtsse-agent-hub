@@ -616,6 +616,15 @@ export function standardDecision(kind: Kind, model: Model): Decision {
         ],
         rows: []
       };
+    case "allowed-days":
+      return {
+        name: `${label} Task allowed days DMN`,
+        hitPolicy: "COLLECT",
+        historyTimeToLive: "P30D",
+        inputs: [{ key: "taskId", label: "Task Id", variable: "taskId", typeRef: "string" }],
+        outputs: [out("taskId", "Task Id"), out("name", "Name"), out("workingDaysAllowed", "Working Days Allowed", "integer")],
+        rows: []
+      };
     case "task-types":
       return {
         name: `${label} Task Types DMN`,

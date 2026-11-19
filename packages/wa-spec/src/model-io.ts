@@ -1,5 +1,6 @@
 import { dirname, resolve } from "node:path";
 import { parse } from "yaml";
+import { ZodError } from "zod";
 import { exists, readText } from "./file-io.ts";
 import type { Layout } from "./layout.ts";
 import { Model, Ordering, validateModel } from "./model.ts";
@@ -76,6 +77,24 @@ export interface LoadedSpec {
 
 /** Reads a spec file, or a model file compiled with its ordering, without its layout, which only DMN generation needs. */
 function readSpecFile(path: string): { spec: Spec; model: Model | undefined } {
+  return explained(path, () => readSpecText(path));
+}
+
+/** Runs a read that parses a file, naming the file in whatever goes wrong and, for a schema failure, each field at fault. */
+function explained<T>(path: string, read: () => T): T {
+  try {
+    return read();
+  } catch (error) {
+    if (error instanceof ZodError) {
+      throw new Error(`${path} is not valid:\n${error.issues.map((issue) => `  ${issue.path.join(".")}: ${issue.message}`).join("\n")}`);
+    }
+    throw new Error(`${path}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+const readLayout = (path: string): Layout => explained(path, () => parseLayout(readText(path)));
+
+function readSpecText(path: string): { spec: Spec; model: Model | undefined } {
   const text = readText(path);
   const document: unknown = parse(text);
   if (isModelDocument(document)) {
@@ -94,8 +113,8 @@ export function loadSpecFile(path: string, layoutOverride?: string): LoadedSpec 
   const { spec, model } = readSpecFile(path);
   if (model) {
     const layoutPath = layoutOverride ? layoutPathOf(path, layoutOverride, process.cwd()) : modelLayoutPath(path, model);
-    return { spec, layout: layoutPath ? parseLayout(readText(layoutPath)) : undefined, layoutPath, isModel: true };
+    return { spec, layout: layoutPath ? readLayout(layoutPath) : undefined, layoutPath, isModel: true };
   }
   const layoutPath = layoutPathOf(path, layoutOverride, process.cwd());
-  return { spec, layout: layoutPath ? parseLayout(readText(layoutPath)) : undefined, layoutPath, isModel: false };
+  return { spec, layout: layoutPath ? readLayout(layoutPath) : undefined, layoutPath, isModel: false };
 }
