@@ -36,7 +36,7 @@ export async function sendToConversation(
   const sent = await directAsPerson(prisma, senderOid, agentId, message.body, message.alongside);
   await touchConversation(prisma, conversation, message.title);
   const agent = await prisma.agent.findUnique({ where: { id: agentId }, select: { status: true } });
-  if (needsWake(agent?.status, conversation.sessionState)) {
+  if (conversation.wakeRequestedAt === null && needsWake(agent?.status, conversation.sessionState)) {
     await requestWake(prisma, conversation);
   }
   const loaded = await loadThreadMessage(prisma, BigInt(sent.id));

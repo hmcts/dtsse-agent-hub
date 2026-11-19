@@ -1,4 +1,5 @@
 import { clientSupports } from "../agents/client-features.ts";
+import { markConversationAgentsOffline } from "../agents/offline.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { findVirtualAgent, setDesired } from "../virtual-agents/store.ts";
@@ -110,7 +111,9 @@ export async function linkSession(
 
 /**
  * What the pod's supervisor runs, replacing its last report: every conversation of the assistant it leaves out has
- * no session. Only conversations whose state changed are announced. Not activity for the idle stop, which a pod
+ * no session. A conversation that stops being `live` has its current agent marked offline in the same transaction,
+ * since the agent's `idle` or `busy` is then left over from a session that is gone. Only conversations whose state
+ * changed are announced. Not activity for the idle stop, which a pod
  * reporting every minute would otherwise never reach.
  *
  * A session reported `live` answers the conversation's wake, as a registration does. A registration cannot be
@@ -119,7 +122,7 @@ export async function linkSession(
  * is replayed on every sessions stream the pod opens, and `fill()` takes the oldest wake first — so a handful of
  * resumed conversations take each other's slots in turn for ever and no one of them keeps a session long enough to
  * answer. Nothing is stranded by clearing it: a pod that loses its sessions leaves their agents silent, and the
- * offline sweep is what the person's next message and the warm on opening a conversation ask for a wake on.
+ * agent going offline is what the person's next message and the warm on opening a conversation ask for a wake on.
  *
  * The report's `max` is kept as well, because it is the only account of what the pod in front of the person actually
  * enforces: the cap is in the pod template, so raising the constant reaches a running pod when it next rolls and the
@@ -136,6 +139,7 @@ export async function reportSessions(prisma: PrismaClient, virtualAgentId: strin
       where: { virtualAgentId },
       select: { id: true, ownerOid: true, virtualAgentId: true, sessionState: true, sessionDetail: true, wakeRequestedAt: true }
     });
+    const gone: string[] = [];
     for (const row of rows) {
       const session = reported.get(row.id);
       const state = session?.state ?? null;
@@ -149,7 +153,11 @@ export async function reportSessions(prisma: PrismaClient, virtualAgentId: strin
         });
         await announce(tx, row);
       }
+      if (row.sessionState === "live" && state !== "live") {
+        gone.push(row.id);
+      }
     }
+    await markConversationAgentsOffline(tx, gone);
   });
 }
 

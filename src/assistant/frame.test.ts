@@ -315,13 +315,18 @@ describe("assistantFrame as the published client reads it", () => {
   });
 
   it("should be treated as a conversation with its templates listed to the session", async () => {
-    const { parseAssistantFrame } = await client();
+    const { parseAssistantFrame, routeDelivery, chooseEnvelope } = await client();
     const parsed = parseAssistantFrame(await onTheWire([], [docmosisItem(DOCMOSIS, { updatedBy: "user" })], [notifyItem(NOTIFY, { updatedBy: "user" })]));
-    const { routeDelivery, chooseEnvelope } = await client();
     const delivery = routeDelivery({ fromOwner: true, session: "conversation", frame: parsed, transcriptUploaded: true });
     const prompt = chooseEnvelope({ id: "1", body: "Create a new slide deck for this conversation." } as never, delivery);
 
-    expect(delivery).toEqual({ kind: "conversation", frame: parsed });
+    expect(parsed).not.toBeNull();
+    expect(parsed).toMatchObject({
+      artefacts: [],
+      docmosis_templates: [{ id: DOCMOSIS, name: "Claim form", updated_by: "user" }],
+      notify_templates: [{ id: NOTIFY, updated_by: "user" }]
+    });
+    expect(delivery.kind).toBe("conversation");
     expect(prompt).toContain("Create a new slide deck for this conversation.");
     expect(prompt).toContain("Claim form");
   });
