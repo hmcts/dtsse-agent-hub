@@ -4,6 +4,7 @@ import { type Ref, type RefObject, useEffect, useId, useImperativeHandle, useLay
 import type { Skill } from "@/agents/skills";
 import { type Filled, fillWith, type Template } from "@/assistant/starters";
 import type { MessageAttachment } from "@/assistant/upload-store";
+import { sendsMessage, useSendKey } from "@/components/assistant/shortcuts";
 import { admitFiles, discardUpload, fileSizeLabel, pastedName, UploadAborted, uploadFile } from "@/components/assistant/uploadClient";
 import { AnnouncerRegion, useAnnouncer } from "@/components/live/Announcer";
 import { type SkillMenuTheme, useSkillMenu } from "@/components/SkillMenu";
@@ -114,6 +115,20 @@ export interface ComposerFiller {
  * Typing "/" offers `skills` through `SkillMenu` — the conversation's session's, or on the new-chat screen the pod's —
  * and nothing at all when there are none.
  */
+/**
+ * What the empty box says: what it can do beyond words, but only what it can do here, so a "/" list is mentioned only
+ * where there are skills, and dropping a file only where one can be attached.
+ */
+export function composerPlaceholder(skills: boolean, files: boolean): string {
+  if (skills && files) {
+    return "Message CFT Workspace. Type / for skills, or drop files here";
+  }
+  if (skills) {
+    return "Message CFT Workspace. Type / for skills";
+  }
+  return files ? "Message CFT Workspace, or drop files here" : "Message CFT Workspace";
+}
+
 export function Composer({
   templates,
   onSend,
@@ -161,6 +176,7 @@ export function Composer({
   limit?: number;
 }) {
   const { body: text, setBody: setText, discard } = useDraft({ kind: "assistant-draft", viewerOid, draftId });
+  const [sendKey] = useSendKey();
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [menu, setMenu] = useState<"closed" | "open" | "templates">("closed");
@@ -425,6 +441,7 @@ export function Composer({
           : "Your message is too long. Shorten it, then send."
         : null;
   const notice = error ?? blocked;
+  const placeholder = composerPlaceholder(skills.length > 0, attachable);
   const describedBy = [notice === null ? null : errorId, counted ? countId : null].filter((id) => id !== null).join(" ");
 
   async function send(): Promise<void> {
@@ -664,12 +681,12 @@ export function Composer({
               if (skillMenu.onKeyDown(event)) {
                 return;
               }
-              if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+              if (sendsMessage({ ...event, isComposing: event.nativeEvent.isComposing }, sendKey)) {
                 event.preventDefault();
                 void send();
               }
             }}
-            placeholder="Message CFT Workspace"
+            placeholder={placeholder}
             aria-label="Message"
             aria-describedby={describedBy === "" ? undefined : describedBy}
             className="max-h-[200px] min-w-0 flex-1 resize-none border-none bg-transparent py-1.5 text-[15px] leading-normal text-asst-text outline-hidden placeholder:text-asst-faint"
@@ -677,11 +694,21 @@ export function Composer({
           <button
             type="button"
             onClick={() => void send()}
-            aria-label="Send"
+            aria-label={sending ? "Sending" : "Send"}
+            aria-busy={sending}
             disabled={empty || sending || disabled || blocked !== null}
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-asst-accent text-lg font-semibold text-asst-ink disabled:opacity-40"
           >
-            ↑
+            {/* Dots rather than the arrow while it goes, so a slow send does not read as a press that did nothing. */}
+            {sending ? (
+              <span aria-hidden="true" className="flex gap-0.5">
+                {[0, 1, 2].map((dot) => (
+                  <span key={dot} className="h-1 w-1 animate-asst-dot rounded-full bg-asst-ink" style={{ animationDelay: `${dot * 0.15}s` }} />
+                ))}
+              </span>
+            ) : (
+              "↑"
+            )}
           </button>
         </div>
       </div>

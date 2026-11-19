@@ -27,6 +27,7 @@ import type { AssistantScheduleSetting } from "@/components/assistant/ScheduleSe
 import { type AssistantConnect, type AssistantPlugins, AssistantSettings } from "@/components/assistant/SettingsDialog";
 import type { AssistantSharing } from "@/components/assistant/SharingSettings";
 import type { AssistantSize } from "@/components/assistant/SizeSettings";
+import { ShortcutsDialog, useShellShortcuts } from "@/components/assistant/shortcuts";
 import type { AssistantTemplates } from "@/components/assistant/TemplateSettings";
 import { useResizableWidth } from "@/components/assistant/useResizableWidth";
 import { type StartChatAction, WorkflowsMenu } from "@/components/assistant/WorkflowsMenu";
@@ -263,16 +264,39 @@ export function AssistantShell({
   // biome-ignore lint/correctness/useExhaustiveDependencies: dropping it on navigation is the point, so the effect keys on the active id it does not read
   useEffect(() => setFailed(null), [activeId]);
 
+  const [showingShortcuts, setShowingShortcuts] = useState(false);
+  // A search that opened the sidebar waits for it to come out of `inert`, which an inert box cannot take focus inside.
+  const [searchAsked, setSearchAsked] = useState(0);
+  useEffect(() => {
+    if (searchAsked > 0) {
+      sidebar.current?.querySelector<HTMLInputElement>('input[aria-label="Search"]')?.focus();
+    }
+  }, [searchAsked]);
+
+  function setSidebar(next: boolean): void {
+    setOpen(next);
+    if (!narrow) {
+      rememberCollapsed(!next);
+    }
+  }
+
+  useShellShortcuts({
+    newChat: () => router.push("/assistant"),
+    search: () => {
+      if (!open) {
+        setSidebar(true);
+      }
+      setSearchAsked((count) => count + 1);
+    },
+    toggleSidebar: () => setSidebar(!open),
+    showShortcuts: () => setShowingShortcuts(true)
+  });
+
   return (
     <ShellContext.Provider
       value={{
         sidebarOpen: open,
-        openSidebar: () => {
-          setOpen(true);
-          if (!narrow) {
-            rememberCollapsed(false);
-          }
-        },
+        openSidebar: () => setSidebar(true),
         sidebarWidth: narrow || !open ? 0 : width
       }}
     >
@@ -293,12 +317,7 @@ export function AssistantShell({
             <span className="text-sm font-semibold">CFT Workspace</span>
             <button
               type="button"
-              onClick={() => {
-                setOpen(false);
-                if (!narrow) {
-                  rememberCollapsed(true);
-                }
-              }}
+              onClick={() => setSidebar(false)}
               aria-label="Collapse sidebar"
               title="Collapse sidebar"
               className="ml-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-asst-muted hover:bg-asst-hover hover:text-asst-text"
@@ -431,6 +450,15 @@ export function AssistantShell({
             {/* The name takes whatever room is left between the two, so the cog sits at the end of the row rather
                 than against a short name. */}
             <span className="min-w-0 flex-1 truncate text-sm font-medium">{viewerName}</span>
+            <button
+              type="button"
+              onClick={() => setShowingShortcuts(true)}
+              aria-label="Keyboard shortcuts"
+              title="Keyboard shortcuts"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-sm text-asst-muted hover:bg-asst-hover hover:text-asst-text"
+            >
+              <span aria-hidden="true">?</span>
+            </button>
             <AssistantSettings
               theme={theme}
               connections={connections}
@@ -462,6 +490,7 @@ export function AssistantShell({
         </aside>
         <main className="flex h-full min-w-0 flex-1 flex-col">{children}</main>
       </div>
+      {showingShortcuts ? <ShortcutsDialog onClose={() => setShowingShortcuts(false)} /> : null}
     </ShellContext.Provider>
   );
 }

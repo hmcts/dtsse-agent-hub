@@ -29,6 +29,38 @@ export function dateGroup(at: Date, now: Date): DateGroup {
   return days <= 30 ? "Previous 30 days" : "Older";
 }
 
+const WEEKDAY_DATE = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", weekday: "long", day: "numeric", month: "long" });
+const WEEKDAY_DATE_YEAR = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", weekday: "long", day: "numeric", month: "long", year: "numeric" });
+const CLOCK = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+
+/** Whether two instants fall on the same day in London. */
+export function sameDay(a: Date, b: Date): boolean {
+  return londonDay(a) === londonDay(b);
+}
+
+/**
+ * A chat's day separator: "Today", "Yesterday", or the day itself, "Tuesday 12 November", with its year once it is
+ * not this year's. Joined from its parts, so no locale's comma.
+ */
+export function dayLabel(at: Date, now: Date): string {
+  const days = londonDay(now) - londonDay(at);
+  if (days === 0) {
+    return "Today";
+  }
+  if (days === 1) {
+    return "Yesterday";
+  }
+  const thisYear =
+    LONDON.formatToParts(at).find((part) => part.type === "year")?.value === LONDON.formatToParts(now).find((part) => part.type === "year")?.value;
+  const parts = Object.fromEntries((thisYear ? WEEKDAY_DATE : WEEKDAY_DATE_YEAR).formatToParts(at).map((part) => [part.type, part.value]));
+  return [parts.weekday, parts.day, parts.month, thisYear ? undefined : parts.year].filter((part) => part !== undefined).join(" ");
+}
+
+/** The time of day in London, "14:02", for a message's timestamp. */
+export function clockTime(at: Date): string {
+  return CLOCK.format(at);
+}
+
 /** The items under each non-empty group, in group order, keeping the items' own order within a group. */
 export function groupByDate<T>(items: readonly T[], at: (item: T) => Date, now: Date): { label: DateGroup; items: T[] }[] {
   const groups = new Map<DateGroup, T[]>();
