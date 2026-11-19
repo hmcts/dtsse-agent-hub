@@ -319,6 +319,26 @@ export function ArtefactPanel({
    * A conflict is the person's to settle, so closing on one saves nothing over the newer version.
    */
   const unsaved = useRef<{ title: string; markdown: string; base: number } | null>(null);
+  /**
+   * The version the next save is made against: the latest this panel knows of, moved by a save's reply as it lands
+   * rather than a render later. A timer set while an earlier save was in flight reads it when it fires, not the
+   * version there was when the person typed — which would be their own last save, and answered as a conflict.
+   */
+  const latestBase = useRef(base);
+  latestBase.current = Math.max(latestBase.current, base);
+  /** What is on screen, for a save's reply to tell whether it saved that or something typed before more was. */
+  const onScreen = useRef({ title, markdown });
+  onScreen.current = { title, markdown };
+  /**
+   * The last save queued: in flight, or waiting behind one. Each new save is chained onto it, so however many pauses
+   * end while one is out they go one at a time, each against the version the one before it left.
+   */
+  const inFlight = useRef<Promise<void> | null>(null);
+  /** The text of the last save queued, which the newer-version check and the closing save read as this panel's own. */
+  const queuedText = useRef<{ title: string; markdown: string } | null>(null);
+  /** Read where a closure would see a stale one: a queued save checks it before going. */
+  const conflictNow = useRef(conflict);
+  conflictNow.current = conflict;
   unsaved.current = (state === "unsaved" || state === "failed") && conflict === null ? { title, markdown, base } : null;
   // Read by the closing save, which runs once, so a page that hands down new functions on each render cannot set it off.
   const closing = useRef({ conversationId, documentId, kind, save, onBusy, onUnsaved });
@@ -364,9 +384,16 @@ export function ArtefactPanel({
     if (artefact.version <= base) {
       return;
     }
-    // The page re-rendering with this panel's own save, before the save's reply has moved `base`.
-    const same = artefact.markdown === markdown && (artefact.title ?? "Untitled document") === title;
-    if (dirty && !same) {
+    // The page re-rendering with this panel's own save, before the save's reply has moved `base`: what is on screen, or
+    // what it last sent while the person typed on. Its own save is adopted as the version, and the newer text kept.
+    const sameAs = (text: { title: string; markdown: string } | null) =>
+      text !== null && artefact.markdown === text.markdown && (artefact.title ?? "Untitled document") === text.title;
+    if (dirty && !sameAs({ title, markdown })) {
+      if (sameAs(queuedText.current)) {
+        latestBase.current = Math.max(latestBase.current, artefact.version);
+        setBase(artefact.version);
+        return;
+      }
       setConflict(artefact);
       return;
     }
@@ -379,6 +406,10 @@ export function ArtefactPanel({
   async function persist(next: { title: string; markdown: string; base: number }): Promise<void> {
     setState("saving");
     const result = await settled(save({ conversationId, documentId, kind, title: next.title, markdown: next.markdown, baseVersion: next.base }));
+    // Whether or not the panel is still open: a closing save queued behind this one goes against the version it made.
+    if (result.ok && result.saved) {
+      latestBase.current = Math.max(latestBase.current, result.version);
+    }
     // Closed while it was in flight: the page is the only one left to keep an edit that did not land.
     if (!mounted.current) {
       const lost = unsavedDraft(next, result);
@@ -394,13 +425,39 @@ export function ArtefactPanel({
     }
     setSaveError(null);
     if (result.saved) {
+      latestBase.current = Math.max(latestBase.current, result.version);
       setBase(result.version);
-      setState("saved");
+      // Saved, unless the person typed on while it was going: then the newer text is still to save, and its timer is set.
+      const still = onScreen.current.markdown === next.markdown && onScreen.current.title === next.title;
+      setState(still ? "saved" : "unsaved");
       setConflict(null);
     } else {
       setState("unsaved");
+      // Now, not a render later: a save queued behind this one checks it as soon as this answer lands.
+      conflictNow.current = result.current;
       setConflict(result.current);
     }
+  }
+
+  /**
+   * Saves once every save queued before it has answered, against the version they left. A save with none ahead of it
+   * goes at once. One behind a conflict is dropped: it would meet the same newer version, and the conflict is the
+   * person's to settle first.
+   */
+  function saveInTurn(nextTitle: string, nextMarkdown: string): Promise<void> {
+    const text = { title: nextTitle, markdown: nextMarkdown };
+    const go = () => (conflictNow.current === null ? persist({ ...text, base: latestBase.current }) : Promise.resolve());
+    const ahead = inFlight.current;
+    const run = ahead === null ? go() : ahead.then(go);
+    inFlight.current = run;
+    queuedText.current = text;
+    void run.then(() => {
+      if (inFlight.current === run) {
+        inFlight.current = null;
+        queuedText.current = null;
+      }
+    });
+    return run;
   }
 
   function edited(next: { title?: string; markdown?: string }): void {
@@ -413,7 +470,7 @@ export function ArtefactPanel({
       clearTimeout(timer.current);
     }
     if (conflict === null) {
-      timer.current = setTimeout(() => void persist({ title: nextTitle, markdown: nextMarkdown, base }), SAVE_AFTER_MS);
+      timer.current = setTimeout(() => void saveInTurn(nextTitle, nextMarkdown), SAVE_AFTER_MS);
     }
   }
 
@@ -428,12 +485,20 @@ export function ArtefactPanel({
       if (noticeTimer.current !== null) {
         clearTimeout(noticeTimer.current);
       }
-      const pending = removed.current ? null : unsaved.current;
+      const waiting = removed.current ? null : unsaved.current;
+      // A save already queued with this very text will save it, and say if it was lost; another would only race it.
+      const queued = queuedText.current;
+      const pending = waiting !== null && queued !== null && queued.markdown === waiting.markdown && queued.title === waiting.title ? null : waiting;
       const { conversationId: id, documentId: doc, kind: made, save: saveNow, onBusy: told } = closing.current;
       if (pending !== null) {
-        void settled(
-          saveNow({ conversationId: id, documentId: doc, kind: made, title: pending.title, markdown: pending.markdown, baseVersion: pending.base })
-        ).then((result) => {
+        // After any save still out, and against the version it leaves, rather than the one there was at the last render;
+        // at once when there is none, as the page may be going.
+        const send = () =>
+          settled(
+            saveNow({ conversationId: id, documentId: doc, kind: made, title: pending.title, markdown: pending.markdown, baseVersion: latestBase.current })
+          );
+        const ahead = inFlight.current;
+        void (ahead === null ? send() : ahead.then(send)).then((result) => {
           const lost = unsavedDraft(pending, result);
           if (lost !== null) {
             closing.current.onUnsaved?.(lost);

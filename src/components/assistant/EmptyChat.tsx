@@ -117,14 +117,19 @@ export function EmptyChat({
       return opened.current;
     }
     opening.current ??= (async () => {
-      const result = await actions.open({ product });
-      if (!result.ok) {
-        // Cleared so the next attempt tries again rather than replaying this failure for the rest of the session.
+      try {
+        const result = await actions.open({ product });
+        if (!result.ok) {
+          throw new Error(result.error);
+        }
+        opened.current = result.id;
+        return result.id;
+      } catch (error) {
+        // Cleared however it failed — refused, or the call itself never came back — so the next attempt tries again
+        // rather than replaying this failure for the rest of the session.
         opening.current = null;
-        throw new Error(result.error);
+        throw error;
       }
-      opened.current = result.id;
-      return result.id;
     })();
     return await opening.current;
   }
@@ -194,25 +199,6 @@ export function EmptyChat({
               </li>
             ))}
           </ul>
-          {/* The person's own templates, one click away where a new chat starts, rather than two menus deep in the box. */}
-          {templates.length === 0 ? null : (
-            <div className="flex w-full max-w-[640px] flex-col gap-1.5">
-              <h3 className="text-xs font-medium text-asst-faint">Your templates</h3>
-              <ul aria-label="Your templates" className="flex flex-wrap gap-1.5">
-                {templates.map((template) => (
-                  <li key={template.name}>
-                    <button
-                      type="button"
-                      onClick={() => starter(template.text)}
-                      className="rounded-full border border-asst-line bg-asst-raised px-3 py-1 text-[13px] hover:border-asst-accent-line hover:bg-asst-hover"
-                    >
-                      {template.name}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
           <ProductSelect value={product} onChange={(next) => void changeProduct(next)} />
           {error === null ? null : (
             <p role="alert" className="text-[13px] text-asst-error">

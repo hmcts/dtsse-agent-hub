@@ -23,6 +23,18 @@ export interface ResizableWidth {
 }
 
 /**
+ * The width the person last dragged to, or `null`. Storage throws in Safari private browsing and when the quota is
+ * full, and a remembered width is never worth breaking the page over.
+ */
+function readStored(key: string): string | null {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * A panel the person drags wider or narrower by its inner edge, at a width their browser remembers.
  *
  * `edge` is the side of the viewport the panel is pinned to; it decides both the pointer arithmetic and which arrow
@@ -83,11 +95,15 @@ export function useResizableWidth({
   }, []);
 
   useEffect(() => {
-    const stored = Number(window.localStorage.getItem(storageKey));
+    const stored = Number(readStored(storageKey));
     if (Number.isFinite(stored) && stored > 0) {
       setChosen(stored);
     }
   }, [storageKey]);
+
+  // A drag still going when the panel goes — the page left mid-drag — is ended with it, so nothing is left listening.
+  const endDrag = useRef<(() => void) | null>(null);
+  useEffect(() => () => endDrag.current?.(), []);
 
   function fitted(next: number): number {
     const now = bounds.current;
@@ -95,21 +111,33 @@ export function useResizableWidth({
   }
 
   function remember(next: number): void {
-    window.localStorage.setItem(storageKey, String(next));
+    try {
+      window.localStorage.setItem(storageKey, String(next));
+    } catch {
+      // Not remembered: the width still applies until the page is left, as it would with no storage at all.
+    }
   }
 
   function startResize(event: React.PointerEvent<HTMLElement>): void {
     event.preventDefault();
+    // One drag at a time: a second finger on the handle ends the first, rather than leaving its listeners running.
+    endDrag.current?.();
     let moved = false;
     const move = (pointer: PointerEvent) => {
       moved = true;
       setChosen(fitted(edge === "left" ? pointer.clientX : window.innerWidth - pointer.clientX));
     };
-    const up = () => {
+    const stop = () => {
       window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      // A press that never moved is not a resize: it must leave the remembered width as it is, and leave a person
-      // who has never dragged the handle on whatever the default becomes.
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+      endDrag.current = null;
+    };
+    // Remembered however the drag ends, lifted or cancelled: a cancelled one has already moved the panel, and the width
+    // on screen and the one stored must not disagree on the next visit. A press that never moved is not a resize, and
+    // leaves the remembered width — or a person who has never dragged on whatever the default becomes — as it is.
+    const finish = () => {
+      stop();
       if (moved) {
         setChosen((current) => {
           remember(current);
@@ -118,7 +146,11 @@ export function useResizableWidth({
       }
     };
     window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
+    window.addEventListener("pointerup", finish);
+    // A touch the browser takes back for a scroll or a gesture never sends `pointerup`; without this the panel would
+    // go on following a finger that has gone.
+    window.addEventListener("pointercancel", finish);
+    endDrag.current = stop;
   }
 
   function resizeByKey(event: React.KeyboardEvent<HTMLElement>): void {

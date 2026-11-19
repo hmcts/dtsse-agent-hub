@@ -4,7 +4,8 @@ import { type RefObject, useEffect } from "react";
 
 /**
  * Closes an open menu on Escape or on a mouse press outside `container`, the way every menu in the sidebar is
- * dismissed. `close` decides where focus goes: back to the trigger from the keyboard, left where a click put it.
+ * dismissed. `close` puts focus back on the trigger when focus is in the menu; a click outside is left to put it where
+ * the person clicked.
  */
 export function useDismiss(open: boolean, container: RefObject<HTMLElement | null>, close: () => void): void {
   useEffect(() => {
@@ -22,6 +23,12 @@ export function useDismiss(open: boolean, container: RefObject<HTMLElement | nul
         return;
       }
       if (!container.current?.contains(event.target as Node)) {
+        // A press lands while focus is still in the menu, before the browser moves it to where the press was, so
+        // every closer would read it as the keyboard and pull focus back to its trigger. Letting go of it first leaves
+        // the press to place it.
+        if (document.activeElement instanceof HTMLElement && container.current?.contains(document.activeElement)) {
+          document.activeElement.blur();
+        }
         close();
       }
     };

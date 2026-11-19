@@ -64,6 +64,7 @@ export function AssistantModal({
   initialFocus,
   closeLabel = "Close",
   className = "",
+  closeOnBackdrop = true,
   children
 }: {
   title: ReactNode;
@@ -73,6 +74,11 @@ export function AssistantModal({
   closeLabel?: string;
   /** Sizes the panel; the frame sets only what every dialog shares. */
   className?: string;
+  /**
+   * Whether a click on the dimmed page closes it. Off for a dialog asking a question, where a stray click outside
+   * should not answer it.
+   */
+  closeOnBackdrop?: boolean;
   children: ReactNode;
 }) {
   const titleId = useId();
@@ -95,7 +101,11 @@ export function AssistantModal({
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center p-5">
       {/* Out of the tab order: the × is the keyboard's way out, and a second close button would be a stop for nothing. */}
-      <button type="button" tabIndex={-1} aria-label={closeLabel} onClick={onClose} className="absolute inset-0 cursor-default bg-black/60" />
+      {closeOnBackdrop ? (
+        <button type="button" tabIndex={-1} aria-label={closeLabel} onClick={onClose} className="absolute inset-0 cursor-default bg-black/60" />
+      ) : (
+        <div aria-hidden="true" className="absolute inset-0 bg-black/60" />
+      )}
       <div
         ref={panel}
         role="dialog"

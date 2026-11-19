@@ -6,7 +6,7 @@ import { useCallback, useRef, useState } from "react";
 import { briefingRequest } from "@/assistant/briefing";
 import { useDismiss } from "@/components/assistant/useDismiss";
 import type { ActionResult } from "@/web/action";
-import { ACTION_UNREACHABLE } from "@/web/action-fault";
+import { actionThrew } from "@/web/action-fault";
 
 /** `startConversation`: a new chat and its first message, which is how the morning briefing is run. */
 export type StartChatAction = (input: { product: unknown; body: unknown; title?: unknown }) => Promise<ActionResult<{ id: string }>>;
@@ -63,9 +63,9 @@ export function WorkflowsMenu({
     let result: ActionResult<{ id: string }>;
     try {
       result = await begin(briefingRequest(new Date()));
-    } catch {
+    } catch (error) {
       if (attempt.current === mine) {
-        setError(ACTION_UNREACHABLE);
+        setError(actionThrew(error));
       }
       return;
     } finally {

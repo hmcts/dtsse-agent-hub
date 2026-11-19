@@ -1053,3 +1053,131 @@ describe("ArtefactPanel remove", () => {
     expect(screen.getByRole("alert").textContent).toBe("that document no longer exists");
   });
 });
+
+/**
+ * A save whose first answer is held until the test gives it, then `then` in order, then saved as version 99: for the
+ * saves made while one is still out.
+ */
+function heldSave(...then: ActionResult<SaveArtefactResult>[]) {
+  let answer: (result: ActionResult<SaveArtefactResult>) => void = () => undefined;
+  const queue = [...then];
+  const save = vi
+    .fn<SaveArtefactAction>(async () => queue.shift() ?? { ok: true, saved: true, version: 99 })
+    .mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+  return { save, answerFirst: (result: ActionResult<SaveArtefactResult>) => act(async () => answer(result)) };
+}
+
+/** The panel open on the editor, with fake timers to step through each save's pause. */
+function editing(save: SaveArtefactAction) {
+  vi.useFakeTimers();
+  const view = render(panel(snapshot(), save));
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  return view;
+}
+
+/** Types `text` and waits out the pause, so its save is made, or queued behind the one still out. */
+async function typeAndPause(text: string): Promise<void> {
+  edit(text);
+  await pause(1000);
+}
+
+const SAVED = (version: number): ActionResult<SaveArtefactResult> => ({ ok: true, saved: true, version });
+
+describe("ArtefactPanel typing while a save is in flight", () => {
+  it("should save the newer text against the version the first save made, with no conflict over the person's own edit", async () => {
+    const { save, answerFirst } = heldSave(SAVED(4));
+    editing(save);
+
+    await typeAndPause("first");
+    // The second pause ends while the first save is still out, so its save waits for that one's answer.
+    await typeAndPause("first and more");
+    expect(save).toHaveBeenCalledTimes(1);
+    await answerFirst(SAVED(3));
+    await pause(0);
+
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(save).toHaveBeenLastCalledWith(expect.objectContaining({ markdown: "first and more", baseVersion: 3 }));
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(saveState()).toContain("Saved");
+  });
+
+  it("should say the newer text is not saved yet when the earlier save's answer arrives before it goes", async () => {
+    const { save, answerFirst } = heldSave();
+    editing(save);
+
+    await typeAndPause("first");
+    edit("first and more");
+    await answerFirst(SAVED(3));
+
+    expect(saveState()).not.toContain("Saved");
+  });
+});
+
+describe("ArtefactPanel saves queued behind one in flight", () => {
+  it("should send each queued save in turn, each against the version the one before it made", async () => {
+    const { save, answerFirst } = heldSave(SAVED(4), SAVED(5));
+    editing(save);
+
+    for (const text of ["a", "ab", "abc"]) {
+      await typeAndPause(text);
+    }
+    expect(save).toHaveBeenCalledTimes(1);
+    await answerFirst(SAVED(3));
+    await pause(0);
+
+    expect(save.mock.calls.map(([input]) => [input.markdown, input.baseVersion])).toEqual([
+      ["a", 2],
+      ["ab", 3],
+      ["abc", 4]
+    ]);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("should drop a queued save once the one ahead of it met a newer version", async () => {
+    const { save, answerFirst } = heldSave();
+    editing(save);
+    await typeAndPause("a");
+    await typeAndPause("ab");
+
+    await answerFirst({ ok: true, saved: false, current: snapshot({ markdown: "# Theirs", version: 9, updatedBy: "agent" }) });
+    await pause(0);
+
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("alert")).toBeTruthy();
+  });
+
+  it("should take its own save coming back on the page as the new version, not as a conflict, while the person types on", async () => {
+    const { save } = heldSave();
+    const view = editing(save);
+    await typeAndPause("mine");
+    edit("mine and more");
+
+    view.rerender(panel(snapshot({ markdown: "mine", version: 3 }), save));
+
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(box().value).toBe("mine and more");
+  });
+
+  it("should leave the closing save to a queued save already carrying the same text", async () => {
+    const { save } = heldSave();
+    const view = editing(save);
+    await typeAndPause("mine");
+
+    view.unmount();
+
+    expect(save).toHaveBeenCalledTimes(1);
+  });
+
+  it("should send the closing save after the one still out, against the version it made", async () => {
+    const { save, answerFirst } = heldSave(SAVED(4));
+    const view = editing(save);
+    await typeAndPause("mine");
+    edit("mine and more");
+
+    view.unmount();
+    expect(save).toHaveBeenCalledTimes(1);
+    await answerFirst(SAVED(3));
+
+    expect(save).toHaveBeenLastCalledWith(expect.objectContaining({ markdown: "mine and more", baseVersion: 3 }));
+  });
+});

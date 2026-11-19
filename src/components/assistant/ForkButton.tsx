@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { ActionResult } from "@/web/action";
-import { ACTION_UNREACHABLE } from "@/web/action-fault";
+import { actionThrew } from "@/web/action-fault";
 
 export type ForkChatAction = (input: { conversationId: unknown }) => Promise<ActionResult<{ id: string }>>;
 
@@ -36,8 +36,8 @@ export function ForkButton({ conversationId, copyId, forkChat }: { conversationI
         return;
       }
       setError(result.error);
-    } catch {
-      setError(ACTION_UNREACHABLE);
+    } catch (error) {
+      setError(actionThrew(error));
     }
     setPending(false);
   }

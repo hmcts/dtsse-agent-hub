@@ -1039,11 +1039,28 @@ describe("ChatView product", () => {
     expect(setProduct).not.toHaveBeenCalled();
   });
 
+  it("should keep focus in the confirmation, and close it from its ×, keeping the product", () => {
+    const chatActions = actions();
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={chatActions} />);
+    fireEvent.change(screen.getByRole("combobox", { name: "Product" }), { target: { value: "pcs" } });
+    const dialog = screen.getByRole("dialog", { name: "Change product?" });
+    const change = within(dialog).getByRole("button", { name: "Change product" });
+    expect(document.activeElement).toBe(change);
+
+    fireEvent.keyDown(change, { key: "Tab" });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Keep the product" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(chatActions.setProduct).not.toHaveBeenCalled();
+  });
+
   it("should close the confirmation when the person presses Escape", () => {
     render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions()} />);
 
     fireEvent.change(screen.getByRole("combobox", { name: "Product" }), { target: { value: "pcs" } });
-    fireEvent.keyDown(window, { key: "Escape" });
+    // From where focus is, as a key press is: it reaches `document`, where the dialog listens, on its way up.
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
 
     expect(screen.queryByRole("dialog")).toBeNull();
   });
@@ -3248,19 +3265,14 @@ describe("Composer sending", () => {
 });
 
 describe("EmptyChat templates", () => {
-  it("should offer the person's templates as chips that fill the box", () => {
+  // Templates are in the box's + menu only: the new-chat screen offers the starter cards and nothing else.
+  it("should offer the person's templates only from the box's menu, not on the new-chat screen", () => {
     render(
       <EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={[{ name: "Bug report", text: "Bug: …" }]} skills={[]} actions={emptyActions(vi.fn())} />
     );
 
-    fireEvent.click(within(screen.getByRole("list", { name: "Your templates" })).getByRole("button", { name: "Bug report" }));
-
-    expect(newChatBox().value).toBe("Bug: …");
-  });
-
-  it("should offer no template chips when the person has none", () => {
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={[]} skills={[]} actions={emptyActions(vi.fn())} />);
-
     expect(screen.queryByRole("list", { name: "Your templates" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /template/ }));
+    expect(screen.getByRole("menuitem", { name: /Templates/ })).toBeTruthy();
   });
 });
