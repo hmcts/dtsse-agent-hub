@@ -10,7 +10,8 @@ import {
   inactivityRule,
   isIdle,
   lastActivity,
-  PROVISIONING_TIMEOUT_MS
+  PROVISIONING_TIMEOUT_MS,
+  REQUESTED_TIMEOUT_MS
 } from "./cleanup.ts";
 import { idleMinutesFor } from "./schedule.ts";
 import { awaitingOwnerMinutes, eveningStop, idleMinutes, type WallClock } from "./settings.ts";
@@ -64,7 +65,8 @@ interface Candidate {
  * one pod sweeps per tick; `undefined` means another pod held the lock. Every time is the sweep's `now`, not the
  * database's, so a test can move the clock.
  *
- * - a pod still `provisioning` with nothing from it for `PROVISIONING_TIMEOUT_MS` is failed;
+ * - a pod still `provisioning` with nothing from it for `PROVISIONING_TIMEOUT_MS` is failed, and so is an agent still
+ *   `requested` for `REQUESTED_TIMEOUT_MS` with no orchestrator having picked it up, so neither waits for ever;
  * - logins past their expiry are expired, and pasted codes past theirs are removed;
  * - claims older than `CLAIM_TIMEOUT_MS` are released, so another orchestrator may take them;
  * - an Assistant stopped at the time its owner chose for an auto start is started, once a UK day and only on a weekday,
@@ -99,6 +101,14 @@ export async function sweepVirtualAgents(prisma: PrismaClient, options: VirtualA
          AND GREATEST(status_changed_at, COALESCE(last_active_at, status_changed_at)) <= ${silentSince}
       RETURNING id::text AS id, owner_oid
     `;
+    const unclaimedSince = new Date(now.getTime() - REQUESTED_TIMEOUT_MS);
+    const unclaimed = await tx.$queryRaw<{ id: string; owner_oid: string }[]>`
+      UPDATE virtual_agent
+         SET status = 'failed', status_detail = 'no assistant could be started for 15 minutes', status_changed_at = ${now}, updated_at = ${now}
+       WHERE desired = 'running' AND status = 'requested' AND claimed_by IS NULL AND status_changed_at <= ${unclaimedSince}
+      RETURNING id::text AS id, owner_oid
+    `;
+    failed.push(...unclaimed);
 
     const expired = await tx.$queryRaw<{ id: string; owner_oid: string }[]>`
       WITH expired AS (

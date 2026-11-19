@@ -6,7 +6,7 @@ import { useLayoutEffect } from "react";
 import { hydrateRoot } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { readiness } from "@/assistant/onboarding";
+import { readiness, stoppedLine } from "@/assistant/onboarding";
 import type { AssistantSummary } from "@/assistant/views";
 import { WAITING_COOKIE, waitingCookie, waitingDismissed } from "@/assistant/waiting";
 import {
@@ -25,6 +25,7 @@ import type { CredentialKind } from "@/credentials/names";
 import type { CredentialStatus } from "@/credentials/store";
 import type { VirtualAgentStatus } from "@/virtual-agents/lifecycle";
 import type { LoginView } from "@/virtual-agents/logins";
+import { ACTION_UNREACHABLE } from "@/web/action-fault";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }), usePathname: () => "/assistant" }));
 
@@ -61,6 +62,7 @@ function assistant(status: VirtualAgentStatus = "stopped", overrides: Partial<As
     statusDetail: null,
     statusChangedAt: new Date().toISOString(),
     startedAt: new Date().toISOString(),
+    stopReason: null,
     readiness: readiness(status),
     modelRoute: "own-licence",
     needed: ["github", "azure", "claude"],
@@ -562,5 +564,102 @@ describe("OnboardingGate while the assistant starts", () => {
     rerender(view("running"));
 
     expect(painted).toEqual(["Your assistant is getting ready", null]);
+  });
+});
+
+describe("OnboardingGate for an assistant that is stopped or could not start", () => {
+  function gate(summary: AssistantSummary, start: () => Promise<{ ok: true } | { ok: false; error: string }> = vi.fn(async () => ({ ok: true as const }))) {
+    const noop = vi.fn(async () => ({ ok: true as const }));
+    return <OnboardingGate assistant={summary} statuses={[]} unavailable={null} paste={noop} save={noop} reconnect={noop} now={Date.now()} start={start} />;
+  }
+
+  function stopped(reason: AssistantSummary["stopReason"]): AssistantSummary {
+    return assistant("stopped", { desired: "stopped", stopReason: reason, readiness: readiness("stopped", "stopped") });
+  }
+
+  it("should say why a stopped assistant stopped and that a message starts it, with no waiting screen over the page", () => {
+    render(gate(stopped("evening")));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe("Your assistant stopped for the evening. It starts again when you send a message.");
+    expect(screen.getByRole("button", { name: "Start now" })).toBeTruthy();
+  });
+
+  it("should start it when Start now is pressed, saying so while it goes", async () => {
+    let finish: (value: { ok: true }) => void = () => undefined;
+    const start = vi.fn(() => new Promise<{ ok: true }>((resolve) => (finish = resolve)));
+    render(gate(stopped("idle"), start));
+
+    act(() => {
+      fireEvent.click(screen.getByRole("button", { name: "Start now" }));
+    });
+    expect(screen.getByRole("button", { name: "Starting…" })).toBeTruthy();
+    await act(async () => {
+      finish({ ok: true });
+    });
+
+    expect(start).toHaveBeenCalledTimes(1);
+  });
+
+  it("should say why a start was refused, and that the connection failed when it threw", async () => {
+    const refused = vi.fn(async () => ({ ok: false as const, error: "Not now." }));
+    const { unmount } = render(gate(stopped("user"), refused));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Start now" }));
+    });
+    expect(screen.getByRole("alert").textContent).toBe("Not now.");
+    unmount();
+
+    render(
+      gate(
+        stopped("user"),
+        vi.fn(async () => {
+          throw new Error("offline");
+        })
+      )
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Start now" }));
+    });
+    expect(screen.getByRole("alert").textContent).toBe(ACTION_UNREACHABLE);
+  });
+
+  it("should offer Try again for an assistant that could not start, and let the notice be hidden", () => {
+    const start = vi.fn(async () => ({ ok: true as const }));
+    render(gate(assistant("failed", { readiness: readiness("failed") }), start));
+    // The failed screen opens first, as it always has, and is sent away to leave the notice.
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Carry on without it" }));
+
+    expect(screen.getByText("Your assistant could not start.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Hide this notice" }));
+    expect(screen.queryByText("Your assistant could not start.")).toBeNull();
+  });
+
+  it("should offer Try again on the screen that says the assistant could not start", async () => {
+    const start = vi.fn(async () => ({ ok: true as const }));
+    render(<WarmingUp assistant={assistant("failed", { readiness: readiness("failed") })} unavailable={null} onDismiss={() => undefined} start={start} />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    });
+
+    expect(start).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("stoppedLine and readiness for a stopped assistant", () => {
+  it("should say why it stopped in the person's words, and plainly when it was not said", () => {
+    expect(stoppedLine("evening")).toBe("Your assistant stopped for the evening.");
+    expect(stoppedLine("idle")).toBe("Your assistant stopped after a while with nothing to do.");
+    expect(stoppedLine("user")).toBe("You stopped your assistant.");
+    expect(stoppedLine("awaiting_owner")).toBe("Your assistant stopped while it was waiting for you to sign in.");
+    expect(stoppedLine("failed")).toBe("Your assistant stopped after it could not start.");
+    expect(stoppedLine(null)).toBe("Your assistant is stopped.");
+  });
+
+  it("should call a stopped assistant stopped, and one asked to run again starting", () => {
+    expect(readiness("stopped", "stopped").step).toBe("Your assistant is stopped");
+    expect(readiness("stopping", "stopped").step).toBe("Your assistant is stopping");
+    expect(readiness("stopped", "running").step).toBe("Starting your assistant again…");
   });
 });

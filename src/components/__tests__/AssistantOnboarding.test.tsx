@@ -40,6 +40,7 @@ function assistant(status: VirtualAgentStatus = "provisioning", overrides: Parti
     statusDetail: null,
     statusChangedAt: new Date().toISOString(),
     startedAt: new Date().toISOString(),
+    stopReason: null,
     readiness: readiness(status),
     modelRoute: "own-licence",
     needed: neededCredentials("own-licence"),

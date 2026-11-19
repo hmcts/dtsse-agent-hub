@@ -568,6 +568,7 @@ function conversation(overrides: Partial<ConversationView> = {}): ConversationVi
     clientFeatures: null,
     sessionState: null,
     sessionDetail: null,
+    podFailed: false,
     documents: [],
     decks: [],
     docmosisTemplates: [],

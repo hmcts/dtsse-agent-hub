@@ -53,6 +53,23 @@ describe("sweepVirtualAgents", () => {
     expect((await row(fresh.id)).status).toBe("provisioning");
   });
 
+  it("should fail an agent no orchestrator has picked up for fifteen minutes, and leave a claimed or recent one", async () => {
+    const stuck = await create(ALICE, "stuck");
+    const recent = await create(ALICE, "recent");
+    const claimed = await create(ALICE, "claimed");
+    await prisma.virtualAgent.update({ where: { id: stuck.id }, data: { statusChangedAt: ago(16), startedAt: ago(16) } });
+    await prisma.virtualAgent.update({ where: { id: recent.id }, data: { statusChangedAt: ago(5), startedAt: ago(5) } });
+    await prisma.virtualAgent.update({
+      where: { id: claimed.id },
+      data: { statusChangedAt: ago(16), startedAt: ago(16), claimedBy: "orch", claimedAt: ago(1) }
+    });
+
+    expect(await sweepVirtualAgents(prisma, OPTIONS)).toMatchObject({ failed: [stuck.id] });
+    expect(await row(stuck.id)).toMatchObject({ status: "failed", statusDetail: "no assistant could be started for 15 minutes" });
+    expect((await row(recent.id)).status).toBe("requested");
+    expect((await row(claimed.id)).status).toBe("requested");
+  });
+
   it("should expire pending logins past their expiry and drop pasted codes past theirs", async () => {
     const agent = await create(ALICE, "pcs-api");
     await prisma.virtualAgentLogin.create({

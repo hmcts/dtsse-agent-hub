@@ -21,7 +21,7 @@ import * as lookupAnswerRoute from "../../src/app/api/virtual/[virtualAgentId]/l
 import * as sessionsRoute from "../../src/app/api/virtual/[virtualAgentId]/sessions/route.ts";
 import * as statusRoute from "../../src/app/api/virtual/[virtualAgentId]/status/route.ts";
 import { writeArtefact } from "../../src/assistant/artefact-store.ts";
-import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
+import { ensureAssistant, wakeAssistant } from "../../src/assistant/assistant-store.ts";
 import { CONFLUENCE_EXPORT_TIMEOUT_MS } from "../../src/assistant/confluence.ts";
 import {
   createConversation,
@@ -291,11 +291,17 @@ describe("the person's assistant", () => {
     expect(await prisma.virtualAgent.count({ where: { ownerOid: ALICE.oid } })).toBe(1);
   });
 
-  it("should start a stopped assistant when the person comes back", async () => {
+  // A page being read is not the person asking for their assistant: an open tab that restarted it on every refresh
+  // answered each of the sweep's stops with a new pod. Something they do starts it, through `wakeAssistant`.
+  it("should leave a stopped assistant stopped when the person comes back, and start it when they ask", async () => {
     await insertUser(ALICE);
     const assistant = await ensureAssistant(prisma, VIEWER);
     await setDesired(prisma, ALICE.oid, assistant.id, "stopped");
 
+    const back = await ensureAssistant(prisma, VIEWER);
+    expect(back.desired).toBe("stopped");
+
+    expect(await wakeAssistant(prisma, ALICE.oid, back)).toBe("started");
     expect((await ensureAssistant(prisma, VIEWER)).desired).toBe("running");
   });
 
@@ -1113,6 +1119,66 @@ describe("the chat gate", () => {
     expect(conversation.wakeRequestedAt).toBeNull();
     // The chat still moves up the sidebar when something is sent to it: `touchConversation` does that, not the wake.
     expect(conversation.lastActiveAt.getTime()).toBeGreaterThan(yesterday.getTime());
+  });
+
+  describe("bringing back a stopped or failed assistant", () => {
+    /** Alice's assistant up, with a chat on it whose session has gone offline. */
+    async function offlineChat(): Promise<{ id: string; assistant: string }> {
+      const { id: assistant } = await startedAssistant();
+      const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+      await prisma.agent.updateMany({ where: { id: (await sessionOf(id)).agentId }, data: { status: "offline" } });
+      await prisma.assistantConversation.update({ where: { id }, data: { wakeRequestedAt: null, sessionState: null } });
+      return { id, assistant };
+    }
+
+    it("should restart a pod that could not start when the person sends to it, rather than leave the message waking", async () => {
+      const { id, assistant } = await offlineChat();
+      await prisma.virtualAgent.update({ where: { id: assistant }, data: { status: "failed", statusDetail: "it fell over" } });
+
+      expect(await actions.sendAssistantMessage({ conversationId: id, body: "are you there" })).toMatchObject({ ok: true });
+
+      expect(await prisma.virtualAgent.findUniqueOrThrow({ where: { id: assistant } })).toMatchObject({ desired: "running", status: "provisioning" });
+    });
+
+    it("should say a chat's pod could not start only while it is meant to be running", async () => {
+      const { id, assistant } = await offlineChat();
+      await prisma.virtualAgent.update({ where: { id: assistant }, data: { status: "failed" } });
+
+      expect((await assistantConversation(VIEWER, id))?.podFailed).toBe(true);
+      await setDesired(prisma, ALICE.oid, assistant, "stopped");
+      expect((await assistantConversation(VIEWER, id))?.podFailed).toBe(false);
+    });
+
+    it("should start a stopped assistant when its box is focused, even with a wake still pending from before the stop", async () => {
+      const { id, assistant } = await offlineChat();
+      await setDesired(prisma, ALICE.oid, assistant, "stopped");
+      await prisma.assistantConversation.update({ where: { id }, data: { wakeRequestedAt: new Date(Date.now() - 60_000) } });
+
+      expect(await actions.warmConversation({ conversationId: id })).toEqual({ ok: true });
+
+      expect((await prisma.virtualAgent.findUniqueOrThrow({ where: { id: assistant } })).desired).toBe("running");
+    });
+
+    it("should forget the sessions and wakes of a chat when its assistant is stopped", async () => {
+      const { id, assistant } = await offlineChat();
+      await prisma.assistantConversation.update({ where: { id }, data: { wakeRequestedAt: new Date(), sessionState: "queued", sessionDetail: "two ahead" } });
+
+      await setDesired(prisma, ALICE.oid, assistant, "stopped");
+
+      expect(
+        await prisma.assistantConversation.findUniqueOrThrow({ where: { id }, select: { wakeRequestedAt: true, sessionState: true, sessionDetail: true } })
+      ).toEqual({
+        wakeRequestedAt: null,
+        sessionState: null,
+        sessionDetail: null
+      });
+    });
+
+    it("should leave an assistant already on its way alone when asked to wake it", async () => {
+      const { assistant } = await offlineChat();
+
+      expect(await wakeAssistant(prisma, ALICE.oid, await prisma.virtualAgent.findUniqueOrThrow({ where: { id: assistant } }))).toBe("already");
+    });
   });
 
   describe("a message to a pod conversation whose agent reads idle", () => {

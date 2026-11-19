@@ -2,7 +2,8 @@ import { clientSupports } from "../agents/client-features.ts";
 import { markConversationAgentsOffline } from "../agents/offline.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
-import { findVirtualAgent, setDesired } from "../virtual-agents/store.ts";
+import { findVirtualAgent } from "../virtual-agents/store.ts";
+import { wakeAssistant } from "./assistant-store.ts";
 import { announce, type ConversationRow } from "./conversation-row.ts";
 import { readAssistantModel } from "./model-store.ts";
 import { hasPod } from "./pods.ts";
@@ -34,8 +35,10 @@ export async function requestWake(prisma: PrismaClient, conversation: Conversati
     await announce(tx, conversation);
   });
   const assistant = await findVirtualAgent(prisma, conversation.virtualAgentId);
-  if (assistant?.desired === "stopped") {
-    await setDesired(prisma, conversation.ownerOid, assistant.id, "running", now);
+  if (assistant !== undefined) {
+    // Stopped, or failed: a message is the person asking for it, and a failed pod is otherwise never tried again, which
+    // left a message to one waiting on "waking" for good.
+    await wakeAssistant(prisma, conversation.ownerOid, assistant, now);
   }
 }
 

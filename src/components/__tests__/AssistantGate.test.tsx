@@ -31,7 +31,7 @@ vi.mock("@/components/live/HubStream", () => ({
 // `AssistantGate` is a server component and reaches its actions by importing them, so the three server-action modules
 // are stood in for: without this the `server-only` they pull in refuses to load under a client module graph.
 vi.mock("@/app/_actions/credentials", () => ({ saveCredential: vi.fn() }));
-vi.mock("@/app/_actions/virtual-agents", () => ({ pasteLoginCode: vi.fn(), reconnectSignIn: vi.fn() }));
+vi.mock("@/app/_actions/virtual-agents", () => ({ pasteLoginCode: vi.fn(), reconnectSignIn: vi.fn(), startAssistant: vi.fn() }));
 
 beforeEach(() => {
   Object.defineProperty(window, "matchMedia", {
@@ -69,6 +69,7 @@ function assistant(overrides: Partial<AssistantSummary> = {}): AssistantSummary 
     statusDetail: null,
     statusChangedAt: new Date().toISOString(),
     startedAt: new Date().toISOString(),
+    stopReason: null,
     readiness: readiness("awaiting_credentials"),
     needed: neededCredentials("own-licence"),
     optional: OPTIONAL_CREDENTIALS,
@@ -118,6 +119,7 @@ function conversation(local: boolean): ConversationView {
     clientFeatures: null,
     sessionState: null,
     sessionDetail: null,
+    podFailed: false,
     documents: [],
     decks: [],
     docmosisTemplates: [],

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { HttpError } from "@/agent-api/http";
 import { type Artefact, ArtefactConflict, removeDocument, UUID_RE, writeDocument } from "@/assistant/artefact-store";
+import { wakeAssistant } from "@/assistant/assistant-store";
 import { confluenceExportRequest } from "@/assistant/confluence";
 import { requestConfluenceExport } from "@/assistant/confluence-store";
 import type { ConversationRow } from "@/assistant/conversation-row";
@@ -38,6 +39,7 @@ import { prisma } from "@/store/prisma";
 import { requireViewer } from "@/viewer/current";
 import type { Viewer } from "@/viewer/identity";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
+import { findVirtualAgent } from "@/virtual-agents/store";
 import { type ActionResult, runAction, text } from "@/web/action";
 import { assistantChatGate } from "@/web/data";
 
@@ -227,8 +229,17 @@ export async function warmConversation(input: { conversationId: unknown }): Prom
     }
     const agentId = await conversationAgent(prisma, conversation);
     const agent = await prisma.agent.findUnique({ where: { id: agentId }, select: { status: true } });
-    if (needsWake(agent?.status, conversation.sessionState) && conversation.wakeRequestedAt === null) {
-      await requestWake(prisma, conversation);
+    if (needsWake(agent?.status, conversation.sessionState)) {
+      if (conversation.wakeRequestedAt === null) {
+        await requestWake(prisma, conversation);
+      } else if (conversation.virtualAgentId !== null) {
+        // A wake still pending from before a stop has nothing to wake: the pod went with the stop. The assistant
+        // itself is brought back for the person in the box, rather than waiting on a request that will not be met.
+        const assistant = await findVirtualAgent(prisma, conversation.virtualAgentId);
+        if (assistant !== undefined) {
+          await wakeAssistant(prisma, viewer.oid, assistant);
+        }
+      }
     }
     return { ok: true };
   });
