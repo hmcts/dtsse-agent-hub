@@ -1347,3 +1347,19 @@ model FeedbackRecordingSegment {
   @@unique([recordingId, kind, seq])
   @@map("feedback_recording_segment")
 }
+
+/// One saved version of a Work Allocation service's spec, append-only. The three documents are the YAML text
+/// `@hmcts-cft/wa-spec` writes. See src/assistant/wa-builder-store.ts.
+model WaSpecVersion {
+  service     String
+  version     Int
+  displayName String   @map("display_name")
+  model       String
+  ordering    String?
+  layout      String?
+  savedBy     String   @map("saved_by")
+  savedAt     DateTime @default(now()) @map("saved_at") @db.Timestamptz(6)
+
+  @@id([service, version])
+  @@map("wa_spec_version")
+}

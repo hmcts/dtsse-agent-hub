@@ -7,6 +7,7 @@
 !.yarn/
 !packages/agent-hub/package.json
 !packages/wa-spec/package.json
+!packages/wa-spec/src/
 !tsconfig.json
 !tsconfig.cli.json
 !next.config.mjs
@@ -26,6 +27,7 @@ src/store/generated/
 public/feedback/widget.js
 **/*.test.ts
 **/*.test.tsx
+packages/wa-spec/src/__fixtures__/
 
 **/.env*
 **/*.pem
