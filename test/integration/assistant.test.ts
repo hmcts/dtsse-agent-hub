@@ -1114,6 +1114,34 @@ describe("the chat gate", () => {
     expect(conversation.lastActiveAt.getTime()).toBeGreaterThan(yesterday.getTime());
   });
 
+  describe("a message to a pod conversation whose agent reads idle", () => {
+    async function idleConversation(sessionState: string | null): Promise<string> {
+      const { token } = await startedAssistant();
+      const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+      const { agentId, sessionId } = await sessionOf(id);
+      await register(token, sessionId, id);
+      await pod(heartbeatRoute.POST, token, `/api/agent/${agentId}/heartbeat`, { agentId }, "POST", { status: "idle" });
+      await prisma.assistantConversation.update({ where: { id }, data: { wakeRequestedAt: null, sessionState } });
+      return id;
+    }
+
+    it.each([null, "starting", "queued"])("should ask for a wake when the supervisor's report leaves the session %s", async (state) => {
+      const id = await idleConversation(state);
+
+      expect(await actions.sendAssistantMessage({ conversationId: id, body: "are you there" })).toMatchObject({ ok: true });
+
+      expect((await findConversation(prisma, ALICE.oid, id))!.wakeRequestedAt).not.toBeNull();
+    });
+
+    it("should not ask for a wake when the session is live", async () => {
+      const id = await idleConversation("live");
+
+      expect(await actions.sendAssistantMessage({ conversationId: id, body: "are you there" })).toMatchObject({ ok: true });
+
+      expect((await findConversation(prisma, ALICE.oid, id))!.wakeRequestedAt).toBeNull();
+    });
+  });
+
   it("should not hold the person when the hub cannot read the credentials", async () => {
     await startedAssistant();
     await storedOnly();
