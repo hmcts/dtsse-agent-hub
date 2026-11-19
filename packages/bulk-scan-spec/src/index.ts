@@ -1,5 +1,6 @@
 export * from "./code-keys.ts";
 export * from "./drift.ts";
+export * from "./from-pdf.ts";
 export * from "./logic.ts";
 export * from "./schema.ts";
 export * from "./sip-generate.ts";

@@ -1,8 +1,9 @@
 import { spawnSync } from "node:child_process";
-import { existsSync as existsX, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync as existsX, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { makePdf, SAMPLE_FORM } from "./__fixtures__/make-pdf.ts";
 import { formSpecSchema } from "./schema.ts";
 
 const CLI = join(import.meta.dirname, "cli.ts");
@@ -82,5 +83,48 @@ describe("cli option parsing", () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("--transfrom");
     expect(result.stderr).toContain("usage");
+  });
+});
+
+describe("cli from-pdf", () => {
+  const dir = mkdtempSync(join(tmpdir(), "cli-pdf-"));
+
+  it("should write a draft that reuses keys from a house-style spec and print the review checklist", async () => {
+    const pdf = await makePdf("form", SAMPLE_FORM);
+    const house = join(dir, "house.json");
+    writeFileSync(
+      house,
+      JSON.stringify({ forms: [formSpecSchema.parse({ form: {}, sections: [{ id: "1", title: "", fields: [{ keys: ["soleOrApplicant1FirstName"] }] }] })] })
+    );
+    const ccd = join(dir, "CaseField.json");
+    writeFileSync(ccd, JSON.stringify([{ ID: "applicant1FirstName", FieldType: "Text" }]));
+    const out = join(dir, "draft.json");
+    const result = run("from-pdf", "--pdf", pdf, "--house-style", house, "--ccd", ccd, "--out", out);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("review checklist");
+    expect(result.stdout).toContain("soleOrApplicant1FirstName");
+    expect(JSON.parse(readFileSync(out, "utf8")).forms[0].sections[1].fields[0].ccd).toEqual(["applicant1FirstName"]);
+  });
+
+  it("should take house keys from service code when --pattern names it", async () => {
+    const java = join(dir, "OcrDataFields.java");
+    writeFileSync(java, "class OcrDataFields { private String soleOrApplicant1FirstName; }");
+    const result = run("from-pdf", "--pdf", await makePdf("form", SAMPLE_FORM), "--house-style", java, "--pattern", "nfdiv", "--out", join(dir, "code.json"));
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("matches existing key soleOrApplicant1FirstName");
+  });
+
+  it("should write the draft and a prompt file when the PDF has no form fields", async () => {
+    const out = join(dir, "flat.json");
+    const result = run("from-pdf", "--pdf", await makePdf("flat", [{ texts: [{ text: "Printed form", x: 40, y: 700 }] }]), "--out", out);
+    expect(result.status).toBe(0);
+    expect(JSON.parse(readFileSync(out, "utf8")).needsReview.prompt).toBe(join(dir, "flat.prompt.md"));
+    expect(readFileSync(join(dir, "flat.prompt.md"), "utf8")).toContain("Printed form");
+  });
+
+  it("should refuse without --pdf", () => {
+    const result = run("from-pdf", "--out", join(dir, "x.json"));
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("--pdf");
   });
 });

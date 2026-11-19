@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
+import { loadCcdFields } from "./ccd-propose.ts";
 import { readWorkbook, selectSheet } from "./cells.ts";
 import type { Pattern } from "./code-keys.ts";
 import { loadCodeKeys, PATTERNS } from "./code-keys.ts";
@@ -9,6 +10,7 @@ import { generateTarget, TARGETS } from "./codegen/index.ts";
 import { unsatisfiedRules, unsatisfiedSamples } from "./codegen/scenarios.ts";
 import { classifyDrift, formatDrift, sheetInternalKeys, specKeys } from "./drift.ts";
 import { requireOneForm, selectForms } from "./form-select.ts";
+import { fromPdf } from "./from-pdf.ts";
 import { roundTrip } from "./round-trip-run.ts";
 import type { Bundle, FormSpec } from "./schema.ts";
 import { bundleSchema, TRANSFORM_COLUMNS } from "./schema.ts";
@@ -20,12 +22,30 @@ import { importTransformSheet } from "./transform-import.ts";
 const USAGE = `usage:
   import   --transform <xlsx> [--sheet <name>] --out <spec.json>
   import   --sip <xlsx> --out <spec.json>
+  from-pdf --pdf <form.pdf> [--house-style <spec.json> | --house-style <code file or dir> --pattern <p>] [--ccd <definition dir or CaseField.json>] --out <draft.json>
   generate --spec <spec.json> [--sip <out.xlsx> [--template <sip.xlsx>]] [--transform <out.xlsx>] [--form <n>]
   drift    (--spec <spec.json> | --transform <xlsx> [--sheet <name>]) --pattern ${PATTERNS.join("|")} --code <file|dir> [--form <n>]
   codegen  --spec <spec.json> --target ${TARGETS.join("|")}|all --out <dir> [--package <java base package>] [--prefix <class prefix>] [--jurisdiction <J>] [--form <n>]
   roundtrip --transform <xlsx> [--sheet <name>] [--template <sip.xlsx>] [--out <dir>]`;
 
-const OPTION_NAMES = ["code", "form", "jurisdiction", "out", "package", "pattern", "prefix", "sheet", "sip", "spec", "target", "template", "transform"];
+const OPTION_NAMES = [
+  "ccd",
+  "code",
+  "form",
+  "house-style",
+  "jurisdiction",
+  "out",
+  "package",
+  "pattern",
+  "pdf",
+  "prefix",
+  "sheet",
+  "sip",
+  "spec",
+  "target",
+  "template",
+  "transform"
+];
 
 function options(argv: string[]): Map<string, string> {
   try {
@@ -85,6 +105,43 @@ async function runImport(opts: Map<string, string>): Promise<void> {
   const bundle = importSip(workbook);
   save(out, `${JSON.stringify(bundle, null, 2)}\n`);
   console.log(`${bundle.forms.length} form tabs -> ${out}`);
+}
+
+function houseKeys(opts: Map<string, string>): string[] | undefined {
+  const path = opts.get("house-style");
+  if (!path) {
+    return undefined;
+  }
+  const pattern = opts.get("pattern");
+  if (pattern) {
+    return loadCodeKeys(pattern as Pattern, path).map((k) => k.key);
+  }
+  return loadBundle(path).forms.flatMap((form) => specKeys(form).map((k) => k.key));
+}
+
+async function runFromPdf(opts: Map<string, string>): Promise<void> {
+  const out = need(opts, "out");
+  const ccd = opts.get("ccd");
+  const result = await fromPdf({
+    pdf: need(opts, "pdf"),
+    ...(houseKeys(opts) ? { houseKeys: houseKeys(opts) } : {}),
+    ...(ccd ? { ccdIds: loadCcdFields(ccd) } : {})
+  });
+  const { needsReview } = result;
+  if (needsReview) {
+    const prompt = `${out.replace(/\.json$/, "")}.prompt.md`;
+    save(prompt, needsReview.promptText);
+    save(out, `${JSON.stringify({ ...result.bundle, needsReview: { reason: needsReview.reason, prompt } }, null, 2)}\n`);
+    console.log(`${needsReview.reason}: nothing could be read from it. Fill in ${out} from the page images and text in ${prompt}.`);
+    return;
+  }
+  save(out, `${JSON.stringify(result.bundle, null, 2)}\n`);
+  const fields = result.bundle.forms.flatMap((f) => f.sections.flatMap((s) => s.fields));
+  console.log(`${fields.length} fields, ${fields.filter((f) => f.group).length} XoR groups -> ${out}`);
+  console.log(`review checklist (${result.checklist.length} guesses, lowest confidence first); the mandatory column, validation and rules are not proposed:`);
+  for (const line of result.checklist) {
+    console.log(`  ${line}`);
+  }
 }
 
 async function runGenerate(opts: Map<string, string>): Promise<void> {
@@ -215,6 +272,7 @@ async function runRoundTrip(opts: Map<string, string>): Promise<void> {
 
 const commands = new Map<string, (opts: Map<string, string>) => Promise<void>>([
   ["import", runImport],
+  ["from-pdf", runFromPdf],
   ["generate", runGenerate],
   ["drift", runDrift],
   ["codegen", runCodegen],
