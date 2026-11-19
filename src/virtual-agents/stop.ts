@@ -28,26 +28,6 @@ export async function announce(db: Database, virtualAgentId: string, ownerOid: s
  * The assistant's conversations lose their session state and have their current agents marked offline: no session
  * outlives the pod, and a `live` left behind would keep a message from asking for the wake that starts one.
  */
-/**
- * What a stopped pod leaves on its conversations: the sessions it said they had, and wakes asked of it, none of which
- * the pod is there to answer any more. Left, a chat on a stopped pod says it is waiting for a free assistant, and a
- * focus of its box finds a wake already asked for and starts nothing. Their agents are marked offline with them.
- */
-export async function forgetSessions(db: Database, virtualAgentIds: readonly string[]): Promise<void> {
-  if (virtualAgentIds.length === 0) {
-    return;
-  }
-  const conversations = await db.$queryRaw<{ id: string }[]>`
-    UPDATE assistant_conversation SET session_state = NULL, session_detail = NULL, wake_requested_at = NULL
-     WHERE virtual_agent_id = ANY(${[...virtualAgentIds]}::uuid[])
-    RETURNING id::text AS id
-  `;
-  await markConversationAgentsOffline(
-    db,
-    conversations.map((row) => row.id)
-  );
-}
-
 export async function stopVirtualAgents(db: Database, ids: readonly string[], reason: StopReason, now: Date): Promise<{ id: string; ownerOid: string }[]> {
   if (ids.length === 0) {
     return [];
@@ -72,4 +52,28 @@ export async function stopVirtualAgents(db: Database, ids: readonly string[], re
     await announce(db, row.id, row.owner_oid);
   }
   return stopped.map((row) => ({ id: row.id, ownerOid: row.owner_oid }));
+}
+
+/**
+ * What a stopped pod leaves on its conversations: the sessions it said they had, which it is not there to answer any
+ * more. Left, a chat on a stopped pod says it is waiting for a free assistant. A wake asked for stays: it is a message
+ * the person sent, answered once the assistant is started again. Their agents are marked offline with them, and each
+ * conversation is announced, so a chat open on one shows it as it now is.
+ */
+export async function forgetSessions(db: Database, virtualAgentIds: readonly string[]): Promise<void> {
+  if (virtualAgentIds.length === 0) {
+    return;
+  }
+  const conversations = await db.$queryRaw<{ id: string; virtual_agent_id: string; owner_oid: string }[]>`
+    UPDATE assistant_conversation SET session_state = NULL, session_detail = NULL
+     WHERE virtual_agent_id = ANY(${[...virtualAgentIds]}::uuid[])
+    RETURNING id::text AS id, virtual_agent_id::text AS virtual_agent_id, owner_oid
+  `;
+  await markConversationAgentsOffline(
+    db,
+    conversations.map((row) => row.id)
+  );
+  for (const row of conversations) {
+    await notify(db, { type: "assistant_conversation", conversation_id: row.id, virtual_agent_id: row.virtual_agent_id, owner_oid: row.owner_oid });
+  }
 }

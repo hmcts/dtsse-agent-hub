@@ -66,7 +66,9 @@ interface Candidate {
  * database's, so a test can move the clock.
  *
  * - a pod still `provisioning` with nothing from it for `PROVISIONING_TIMEOUT_MS` is failed, and so is an agent still
- *   `requested` for `REQUESTED_TIMEOUT_MS` with no orchestrator having picked it up, so neither waits for ever;
+ *   `requested` for `REQUESTED_TIMEOUT_MS` with no orchestrator having picked it up, so neither waits for ever. One an
+ *   orchestrator is retrying after apply errors has its claim lapse between tries, and is left to the apply-failure
+ *   rule, which fails it after `APPLY_FAILURES_BEFORE_FAILED`;
  * - logins past their expiry are expired, and pasted codes past theirs are removed;
  * - claims older than `CLAIM_TIMEOUT_MS` are released, so another orchestrator may take them;
  * - an Assistant stopped at the time its owner chose for an auto start is started, once a UK day and only on a weekday,
@@ -105,7 +107,7 @@ export async function sweepVirtualAgents(prisma: PrismaClient, options: VirtualA
     const unclaimed = await tx.$queryRaw<{ id: string; owner_oid: string }[]>`
       UPDATE virtual_agent
          SET status = 'failed', status_detail = 'no assistant could be started for 15 minutes', status_changed_at = ${now}, updated_at = ${now}
-       WHERE desired = 'running' AND status = 'requested' AND claimed_by IS NULL AND status_changed_at <= ${unclaimedSince}
+       WHERE desired = 'running' AND status = 'requested' AND claimed_by IS NULL AND apply_failures = 0 AND status_changed_at <= ${unclaimedSince}
       RETURNING id::text AS id, owner_oid
     `;
     failed.push(...unclaimed);

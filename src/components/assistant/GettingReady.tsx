@@ -780,21 +780,21 @@ export function WarmingUp({
         <button type="button" onClick={onDismiss} className={failed && start === undefined ? FOOTER_PRIMARY : FOOTER_QUIET}>
           {failed ? "Carry on without it" : "Carry on while it starts"}
         </button>
-        {/* A failure stays one until someone tries again, and before this the only way to was in Settings. */}
-        {failed && start !== undefined ? <StartButton start={start} label="Try again" className={FOOTER_PRIMARY} /> : null}
+        {/* A failure stays one until someone tries again, so the way to is here, where the failure is said. */}
+        {failed && start !== undefined ? <StartButton start={() => start()} label="Try again" className={FOOTER_PRIMARY} /> : null}
       </div>
     </ReadyShell>
   );
 }
 
 /** `startAssistant`: starts a stopped assistant, or tries a failed one again. */
-export type StartAssistantAction = () => Promise<ActionResult>;
+export type StartAssistantAction = (input?: { conversationId?: unknown }) => Promise<ActionResult>;
 
 /**
  * Starts the assistant, saying so while it goes and why if it could not. The page follows the assistant's own events
  * from there, so nothing here waits for it to come up.
  */
-function StartButton({ start, label, className }: { start: StartAssistantAction; label: string; className: string }) {
+export function StartButton({ start, label, className }: { start: () => Promise<ActionResult>; label: string; className: string }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const press = async () => {
@@ -839,7 +839,7 @@ function PodNotice({ assistant, start, onHide }: { assistant: AssistantSummary; 
         {said}
       </p>
       <StartButton
-        start={start}
+        start={() => start()}
         label={failed ? "Try again" : "Start now"}
         className="shrink-0 rounded-full px-2.5 py-1 text-[13px] font-medium text-asst-accent-soft hover:bg-asst-active disabled:opacity-60"
       />
