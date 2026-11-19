@@ -1031,7 +1031,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@hmcts-cft/wa-spec@workspace:packages/wa-spec":
+"@hmcts-cft/wa-spec@workspace:*, @hmcts-cft/wa-spec@workspace:packages/wa-spec":
   version: 0.0.0-use.local
   resolution: "@hmcts-cft/wa-spec@workspace:packages/wa-spec"
   dependencies:
@@ -4248,6 +4248,7 @@ __metadata:
     "@biomejs/biome": "npm:2.6.6"
     "@hmcts-cft/cloud-native-platform": "npm:2.3.0"
     "@hmcts-cft/notify-tools": "npm:0.1.0"
+    "@hmcts-cft/wa-spec": "workspace:*"
     "@playwright/test": "npm:1.64.1"
     "@prisma/adapter-pg": "npm:7.10.1"
     "@prisma/client": "npm:7.10.1"

@@ -27,6 +27,8 @@ WORKDIR /app
 
 COPY --chown=hmcts:hmcts tsconfig.json tsconfig.cli.json next.config.mjs biome.json prisma.config.ts postcss.config.mjs ./
 COPY --chown=hmcts:hmcts src ./src
+# The spec package ships TypeScript source, which `next build` compiles into the server bundle.
+COPY --chown=hmcts:hmcts packages/wa-spec/src ./packages/wa-spec/src
 COPY --chown=hmcts:hmcts public ./public
 COPY --chown=hmcts:hmcts prisma ./prisma
 

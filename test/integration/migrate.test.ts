@@ -205,7 +205,8 @@ describe("migrate", () => {
       "transcript_entry",
       "user",
       "virtual_agent",
-      "virtual_agent_login"
+      "virtual_agent_login",
+      "wa_spec_version"
     ]);
   });
 
