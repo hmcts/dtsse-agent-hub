@@ -17,15 +17,21 @@ export interface TaskRows {
   rows: Array<{ index: number; row: Row; mayApply?: true }>;
 }
 
-/** Whether an output value names the task. */
-const mentions = (value: Expr | undefined, taskId: string): boolean => {
-  if (typeof value === "string") {
-    return value === taskId;
-  }
-  return typeof value === "object" && value !== null && "feel" in value && value.feel.includes(`"${taskId}"`);
-};
-
 type Match = "yes" | "maybe" | "no";
+
+const hasLiteral = (value: unknown, taskId: string): boolean =>
+  value === taskId || (typeof value === "object" && value !== null && Object.values(value).some((v) => hasLiteral(v, taskId)));
+
+/** Whether an output value names the task: a scalar or FEEL text does, and a structured expression with the id somewhere in it may. */
+const mentions = (value: Expr | undefined, taskId: string): Match => {
+  if (typeof value === "string") {
+    return value === taskId ? "yes" : "no";
+  }
+  if (typeof value === "object" && value !== null && "feel" in value) {
+    return value.feel.includes(`"${taskId}"`) ? "yes" : "no";
+  }
+  return hasLiteral(value, taskId) ? "maybe" : "no";
+};
 
 /** Whether an input cell selects the task: an empty cell selects every task, and a FEEL or comparison cell cannot be decided here. */
 const selects = (cell: Cell | undefined, taskId: string): Match => {
@@ -50,7 +56,7 @@ export function taskRows(spec: Spec, taskId: string): TaskRows[] {
   const categories = new Set<string>();
   const initiation = spec.decisions.initiation;
   initiation?.rows.forEach((row) => {
-    if (mentions(row.returns?.taskId, taskId) && typeof row.returns?.processCategories === "string") {
+    if (mentions(row.returns?.taskId, taskId) !== "no" && typeof row.returns?.processCategories === "string") {
       categories.add(row.returns.processCategories);
     }
   });
@@ -64,8 +70,11 @@ export function taskRows(spec: Spec, taskId: string): TaskRows[] {
           return match === "no" ? [] : [{ index, row, ...(match === "maybe" ? { mayApply: true as const } : {}) }];
         }
         const value = row.returns?.[where.name];
-        const hit = kind === "cancellation" ? typeof value === "string" && categories.has(value) : mentions(value, taskId);
-        return hit ? [{ index, row }] : [];
+        if (kind === "cancellation") {
+          return typeof value === "string" && categories.has(value) ? [{ index, row }] : [];
+        }
+        const match = mentions(value, taskId);
+        return match === "no" ? [] : [{ index, row, ...(match === "maybe" ? { mayApply: true as const } : {}) }];
       });
     if (rows.length > 0) {
       found.push({ kind, rows });

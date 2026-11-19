@@ -2,6 +2,9 @@ import { XMLParser } from "fast-xml-parser";
 
 export interface DmnInput {
   id?: string;
+  /** The text of the column's allowed values, and the id of its `<inputValues>`. */
+  allowedValues?: string;
+  allowedValuesId?: string;
   expressionId?: string;
   width?: string;
   label?: string;
@@ -182,6 +185,7 @@ function parseTable(table: Node): DmnTable {
       ...optional<Omit<DmnInput, "expression">>({
         id: attr(input, "id"),
         expressionId: attr(expression, "id"),
+        ...(input.inputValues ? { allowedValues: textOf(input.inputValues as Node), allowedValuesId: attr(input.inputValues as Node, "id") } : {}),
         width: attr(input, "biodi:width"),
         label: attr(input, "label"),
         inputVariable: attr(input, "camunda:inputVariable"),
@@ -319,7 +323,7 @@ function storedIds(doc: DmnDocument): Set<string> {
   for (const decision of doc.decisions) {
     ids.push(decision.id, decision.variable?.id, decision.literal?.id, decision.table?.id, ...(decision.requirementIds ?? []));
     for (const input of decision.table?.inputs ?? []) {
-      ids.push(input.id, input.expressionId);
+      ids.push(input.id, input.expressionId, input.allowedValuesId);
     }
     for (const output of decision.table?.outputs ?? []) {
       ids.push(output.id);
@@ -385,7 +389,11 @@ function writeTable(table: DmnTable, id: ReturnType<typeof idFactory>, base: str
       ["expressionLanguage", input.expressionLanguage]
     ])}>\n`;
     out += text(`${pad}    `, input.expression);
-    out += `${pad}  </inputExpression>\n${pad}</input>\n`;
+    out += `${pad}  </inputExpression>\n`;
+    if (input.allowedValues !== undefined) {
+      out += `${pad}  <inputValues${attrs([["id", input.allowedValuesId ?? id("InputValues", base, index)]])}>\n${text(`${pad}    `, input.allowedValues)}${pad}  </inputValues>\n`;
+    }
+    out += `${pad}</input>\n`;
   });
   table.outputs.forEach((output, index) => {
     out += `${pad}<output${attrs([
@@ -478,9 +486,11 @@ function writeDiagram(doc: DmnDocument, requirements: Array<{ from: string; to: 
   const shaped = new Set(items.filter((item) => item.type === "shape").map((item) => item.ref));
   const edged = new Set(items.filter((item) => item.type === "edge").map((item) => item.ref));
   const main = doc.decisions.find((d) => d.table) ?? doc.decisions[0];
-  doc.decisions.forEach((decision, index) => {
+  const others = doc.decisions.filter((d) => d !== main);
+  for (const decision of doc.decisions) {
     if (!shaped.has(decision.id)) {
-      const at = decision === main ? { x: 160, y: 80 } : { x: 160 + ((index - 1) % 4) * 220, y: 250 + Math.floor((index - 1) / 4) * 170 };
+      const slot = others.indexOf(decision);
+      const at = decision === main ? { x: 160, y: 80 } : { x: 160 + (slot % 4) * 220, y: 250 + Math.floor(slot / 4) * 170 };
       items.push({
         type: "shape",
         id: id("DMNShape", decision.id),
@@ -488,7 +498,7 @@ function writeDiagram(doc: DmnDocument, requirements: Array<{ from: string; to: 
         bounds: { x: String(at.x), y: String(at.y), width: String(SHAPE_WIDTH), height: String(SHAPE_HEIGHT) }
       });
     }
-  });
+  }
   const boundsOf = new Map(items.flatMap((item) => (item.type === "shape" ? [[item.ref, item.bounds] as const] : [])));
   for (const requirement of requirements) {
     if (!edged.has(requirement.id)) {
@@ -545,6 +555,7 @@ const USED_ATTRIBUTES: Record<string, string[]> = {
   decisionTable: ["id", "hitPolicy", "aggregation", "biodi:annotationsWidth"],
   input: ["id", "label", "biodi:width", "camunda:inputVariable"],
   inputExpression: ["id", "typeRef", "expressionLanguage"],
+  inputValues: ["id"],
   output: ["id", "label", "name", "typeRef", "biodi:width"],
   rule: ["id"],
   inputEntry: ["id"],
@@ -565,13 +576,14 @@ const KNOWN_ELEMENTS: Record<string, string[]> = {
   decisionTable: ["decision"],
   input: ["decisionTable"],
   inputExpression: ["input"],
+  inputValues: ["input"],
   output: ["decisionTable"],
   rule: ["decisionTable"],
   description: ["rule"],
   inputEntry: ["rule"],
   outputEntry: ["rule"],
   literalExpression: ["decision"],
-  text: ["inputExpression", "inputEntry", "outputEntry", "literalExpression"]
+  text: ["inputExpression", "inputValues", "inputEntry", "outputEntry", "literalExpression"]
 };
 
 export interface Inspection {

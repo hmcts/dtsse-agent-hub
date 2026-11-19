@@ -83,6 +83,7 @@ const InputOverride = z.strictObject({
   variable: z.string().nullable().optional(),
   typeRef: z.string().nullable().optional(),
   language: z.string().nullable().optional(),
+  allowedValues: z.string().nullable().optional(),
   expression: Expr.optional()
 });
 
@@ -94,6 +95,8 @@ export const InputColumn = z.strictObject({
   variable: z.string().optional(),
   typeRef: z.string().optional(),
   language: z.string().optional(),
+  /** The text of the column's list of allowed values, such as `"C100","FL401"`. */
+  allowedValues: z.string().optional(),
   expression: Expr.optional(),
   only: z.array(CaseTypeId).optional(),
   overrides: z.record(CaseTypeId, InputOverride).optional()
@@ -208,9 +211,14 @@ export type Spec = z.infer<typeof Spec>;
 export function validateSpec(spec: Spec): string[] {
   const problems: string[] = [];
   const caseTypes = new Set(spec.caseTypes.map((c) => c.id));
-  for (const [what, value] of [["service slug", spec.service.slug], ...spec.caseTypes.map((c) => ["case type", c.id] as const)]) {
-    if (!/^[A-Za-z0-9_.-]+$/.test(value)) {
-      problems.push(`${what} ${value}: only letters, digits, "_", "." and "-" are allowed, as it becomes part of a decision id and file name`);
+  if (!/^[A-Za-z0-9_.-]+$/.test(spec.service.slug)) {
+    problems.push(`service slug ${spec.service.slug}: only letters, digits, "_", "." and "-" are allowed, as it becomes part of a decision id and file name`);
+  }
+  for (const { id } of spec.caseTypes) {
+    if (!/^[A-Za-z0-9_.]+$/.test(id)) {
+      problems.push(
+        `case type ${id}: only letters, digits, "_" and "." are allowed, as it becomes part of a decision id and file name, where "-" ends the service slug`
+      );
     }
   }
   const known = (where: string, ids: string[] | undefined) => {
@@ -234,6 +242,7 @@ export function validateSpec(spec: Spec): string[] {
     }
     known(`${kind}.overrides`, Object.keys(decision.overrides ?? {}));
     known(kind, decision.only);
+    const own = decision.only ?? [...caseTypes];
     for (const column of [...decision.inputs, ...decision.outputs]) {
       known(`${kind} column`, column.only);
       known(`${kind} column overrides`, Object.keys(column.overrides ?? {}));
@@ -246,7 +255,7 @@ export function validateSpec(spec: Spec): string[] {
         if (!column) {
           problems.push(`${where}: unknown input ${key}`);
         } else {
-          for (const id of row.only ?? [...caseTypes]) {
+          for (const id of row.only ?? own) {
             if (column.only && !column.only.includes(id)) {
               problems.push(`${where}: input ${key} does not exist for ${id}`);
             }
@@ -258,7 +267,7 @@ export function validateSpec(spec: Spec): string[] {
         if (!column) {
           problems.push(`${where}: unknown output ${name}`);
         } else {
-          for (const id of row.only ?? [...caseTypes]) {
+          for (const id of row.only ?? own) {
             if (column.only && !column.only.includes(id)) {
               problems.push(`${where}: output ${name} does not exist for ${id}`);
             }
@@ -269,12 +278,15 @@ export function validateSpec(spec: Spec): string[] {
     const helperNames = new Set((decision.helpers ?? []).map((h) => h.name));
     const sharing = new Map<string, Array<string[] | undefined>>();
     for (const helper of decision.helpers ?? []) {
+      if (helper.name === "table") {
+        problems.push(`${kind}: a helper cannot be named table, which stands for the main decision in a dependency`);
+      }
       known(`${kind} helper ${helper.name}`, helper.only);
       known(`${kind} helper ${helper.name} overrides`, Object.keys(helper.overrides ?? {}));
       sharing.set(helper.name, [...(sharing.get(helper.name) ?? []), helper.only]);
     }
     for (const [name, onlys] of sharing) {
-      const claimed = onlys.flatMap((only) => only ?? [...caseTypes]);
+      const claimed = onlys.flatMap((only) => only ?? own);
       if (onlys.length > 1 && new Set(claimed).size !== claimed.length) {
         problems.push(`${kind}: helper ${name} is defined more than once for the same case type`);
       }
@@ -288,7 +300,7 @@ export function validateSpec(spec: Spec): string[] {
         problems.push(`${kind}: dependency on unknown helper ${dependency.requires}`);
       }
       const present = (name: string, id: string) => (decision.helpers ?? []).some((h) => h.name === name && (h.only === undefined || h.only.includes(id)));
-      for (const id of dependency.only ?? [...caseTypes]) {
+      for (const id of dependency.only ?? own) {
         if (
           helperNames.has(dependency.requires) &&
           (dependency.decision === "table" || present(dependency.decision, id)) &&

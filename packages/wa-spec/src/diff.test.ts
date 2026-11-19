@@ -166,3 +166,11 @@ describe("diffDocuments variables", () => {
     expect(diffDocuments("f", base(), b).map((d) => d.message)).toEqual([expect.stringContaining("variable differs")]);
   });
 });
+
+describe("diffDocuments duplicate names in the second document", () => {
+  it("should report a name used twice when only the second document repeats it", () => {
+    const b = clone(base());
+    b.decisions.push({ ...structuredClone(b.decisions[1] as DmnDocument["decisions"][number]), id: "Decision_TWIN" });
+    expect(diffDocuments("f", base(), b).map((d) => d.message)).toContain("decision name used 1 times in first and 2 in second");
+  });
+});
