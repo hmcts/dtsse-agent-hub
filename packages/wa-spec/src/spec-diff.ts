@@ -1,3 +1,5 @@
+import { byCodePoint } from "./merge.ts";
+import { stable } from "./model-compile.ts";
 import type { Spec } from "./schema.ts";
 
 const MAX_DIFFERENCES = 40;
@@ -7,10 +9,25 @@ const MAX_DIFFERENCES = 40;
  * and of values in an entry is what a COLLECT or RULE ORDER table returns in. `differences` holds the first
  * MAX_DIFFERENCES; `total` counts them all. Both are empty or zero when the specs are equal.
  */
-export function compareSpecs(a: Spec, b: Spec): { differences: string[]; total: number } {
+export function compareSpecs(a: Spec, b: Spec, options: { ignoreRuleOrder?: boolean } = {}): { differences: string[]; total: number } {
   const found = { differences: [] as string[], total: 0 };
-  walk(JSON.parse(JSON.stringify(a)), JSON.parse(JSON.stringify(b)), "spec", found);
+  const plain = (spec: Spec): Spec => (options.ignoreRuleOrder ? withRowsAsSets(spec) : JSON.parse(JSON.stringify(spec)));
+  walk(plain(a), plain(b), "spec", found);
   return found;
+}
+
+/** The spec with each table's rows in a fixed order, so tables with the same rows in any order compare equal. */
+function withRowsAsSets(spec: Spec): Spec {
+  const copy: Spec = JSON.parse(JSON.stringify(spec));
+  for (const decision of Object.values(copy.decisions)) {
+    if (decision) {
+      decision.rows = decision.rows
+        .map((row) => ({ key: stable(row), row }))
+        .sort((x, y) => byCodePoint(x.key, y.key))
+        .map((x) => x.row);
+    }
+  }
+  return copy;
 }
 
 export const diffSpecs = (a: Spec, b: Spec): string[] => compareSpecs(a, b).differences;

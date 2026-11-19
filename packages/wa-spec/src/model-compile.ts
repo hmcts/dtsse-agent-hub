@@ -69,10 +69,13 @@ export function stable(value: unknown): string {
 
 export const signature = (content: Content, cases: string[]): string => stable({ content, cases });
 
-type Atoms = Record<Kind, Atom[]>;
+export type Atoms = Record<Kind, Atom[]>;
 
 const caseOrder = (model: Model): string[] => model.caseTypes.map((c) => c.id);
-const inOrder = (model: Model, cases: string[]): string[] => caseOrder(model).filter((c) => cases.includes(c));
+
+/** The case types of `cases` in the order `order` lists them. */
+export const inCaseOrder = (order: string[], cases: string[]): string[] => order.filter((c) => cases.includes(c));
+const inOrder = (model: Model, cases: string[]): string[] => inCaseOrder(caseOrder(model), cases);
 
 /** An entry's case types: those of `base` it names, or all of `base` when it names none. */
 const within = (model: Model, only: string[] | undefined, base: string[]): string[] => (only ? inOrder(model, only).filter((c) => base.includes(c)) : base);
@@ -187,14 +190,14 @@ function triggerContent(task: Task, trigger: Trigger): Content {
     when[key] = decodeCell(cell);
   }
   const returns: Record<string, Expr> = { taskId: task.id };
-  const name = trigger.initialName ?? task.initialName;
+  const name = trigger.initialName !== undefined ? trigger.initialName : task.initialName;
   if (name !== undefined) {
     returns.name = name;
   }
   if (trigger.delay !== undefined) {
     returns.delayDuration = trigger.delay;
   }
-  const category = trigger.cancelCategory ?? task.cancelCategory;
+  const category = trigger.cancelCategory !== undefined ? trigger.cancelCategory : task.cancelCategory;
   if (category !== undefined) {
     returns.processCategories = category;
   }
@@ -311,7 +314,7 @@ function withRefs(atoms: Atom[]): Atom[] {
   });
 }
 
-const overlapping = (a: string[], b: string[]): boolean => a.some((x) => b.includes(x));
+export const overlapping = (a: string[], b: string[]): boolean => a.some((x) => b.includes(x));
 
 export const bucketOf = (atom: Atom): string => `${atom.task}/${atom.slot}`;
 
@@ -558,12 +561,12 @@ export function standardDecision(kind: Kind, model: Model): Decision {
  * The table-centric spec a model describes. `ordering` fixes the rows' order and grouping, which a COLLECT or RULE ORDER
  * table returns in; without it rows follow the model's own order and tasks with identical content share a row.
  */
-export function compileModel(model: Model, ordering?: Ordering): Spec {
+export function compileModel(model: Model, ordering?: Ordering, collected?: Atoms): Spec {
   const invalid = validateModel(model);
   if (invalid.length > 0) {
     throw new Error(`Invalid model:\n${invalid.map((p) => `  ${p}`).join("\n")}`);
   }
-  const atoms = collectAtoms(model);
+  const atoms = collected ?? collectAtoms(model);
   const all = caseOrder(model);
   const decisions: Spec["decisions"] = {};
   for (const kind of KINDS) {

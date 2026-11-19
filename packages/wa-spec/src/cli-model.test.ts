@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { parse, stringify } from "yaml";
 import { sampleDmn } from "./__fixtures__/dmn.ts";
 
 const cli = fileURLToPath(new URL("./cli.ts", import.meta.url));
@@ -73,5 +74,28 @@ describe("cli model commands", () => {
     expect(pruned.stderr).toContain("removed: wa-task-completion-demo-ct_gone.dmn");
     expect(existsSync(stale)).toBe(false);
     expect(existsSync(join(out, "wa-task-completion-demo-ct_a.dmn"))).toBe(true);
+  });
+});
+
+describe("cli model options", () => {
+  it("should record the layout given to lift in the model, relative to the model file, and refuse a missing one", () => {
+    const { dir } = imported();
+    mkdirSync(join(dir, "m"));
+    expect(run("lift", join(dir, "spec.yaml"), "-o", join(dir, "m", "model.yaml"), "--layout", join(dir, "spec.layout.yaml")).status).toBe(0);
+    expect(readFileSync(join(dir, "m", "model.yaml"), "utf8")).toContain("layout: ../spec.layout.yaml");
+    const missing = run("lift", join(dir, "spec.yaml"), "-o", join(dir, "n.yaml"), "--layout", join(dir, "none.yaml"));
+    expect(missing.status).toBe(2);
+    expect(missing.stderr).toContain("does not exist");
+  });
+
+  it("should honour --ignore-rule-order when diffing two YAML specs with the same rows in another order", () => {
+    const { dir } = imported();
+    const reversed = parse(readFileSync(join(dir, "spec.yaml"), "utf8"));
+    reversed.decisions.completion.rows.reverse();
+    writeFileSync(join(dir, "reversed.yaml"), stringify(reversed));
+    expect(run("diff", join(dir, "spec.yaml"), join(dir, "reversed.yaml")).status).toBe(1);
+    const relaxed = run("diff", join(dir, "spec.yaml"), join(dir, "reversed.yaml"), "--ignore-rule-order");
+    expect(relaxed.status).toBe(0);
+    expect(relaxed.stdout).toContain("no differences");
   });
 });

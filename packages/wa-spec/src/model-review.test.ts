@@ -356,3 +356,85 @@ tasks: [{id: A, permissions: p}]
     expect(orderPathBeside("out/model.yml")).toBe("out/model.order.yaml");
   });
 });
+
+const NULL_NAME_SPEC = {
+  version: 1 as const,
+  service: { slug: "x" },
+  caseTypes: [{ id: "A" }],
+  decisions: {
+    initiation: {
+      name: "i",
+      hitPolicy: "COLLECT" as const,
+      inputs: [{ key: "eventId", typeRef: "string" }],
+      outputs: [
+        { name: "taskId", typeRef: "string" },
+        { name: "name", typeRef: "string" },
+        { name: "processCategories", typeRef: "string" }
+      ],
+      rows: [
+        { when: { eventId: { in: ["e1"] } }, returns: { taskId: "T", name: "N", processCategories: "C" } },
+        { when: { eventId: { in: ["e2"] } }, returns: { taskId: "T", name: "N", processCategories: "C" } },
+        { when: { eventId: { in: ["e3"] } }, returns: { taskId: "T", name: null, processCategories: null } }
+      ]
+    }
+  }
+};
+
+const TWO_RULES = `
+kind: wa-model
+version: 1
+service: {slug: demo}
+caseTypes: [{id: ct_a}]
+tasks: []
+cancellations:
+  - {events: a, action: Cancel}
+  - {events: b, action: Cancel}
+`;
+
+describe("round four", () => {
+  it("should keep an explicit null name and category on one trigger when the other triggers share a value", () => {
+    const lifted = liftSpec(NULL_NAME_SPEC);
+    expect(lifted.report.differences).toEqual([]);
+    expect(lifted.model.tasks[0]?.create?.[2]).toMatchObject({ initialName: null, cancelCategory: null });
+    expect(compileModel(lifted.model, lifted.ordering).decisions.initiation?.rows[2]?.returns).toEqual({ taskId: "T", name: null, processCategories: null });
+  });
+
+  it("should compare rows as sets when the diff ignores rule order", () => {
+    const a = compileModel(parseModel(BASE));
+    const b = structuredClone(a);
+    b.decisions.cancellation?.rows.reverse();
+    expect(compareSpecs(a, b).total).toBeGreaterThan(0);
+    expect(compareSpecs(a, b, { ignoreRuleOrder: true }).total).toBe(0);
+  });
+
+  it("should reject a cancellation id used twice or equal to another rule's position when validating", () => {
+    expect(() => parseModel(TWO_RULES.replace("{events: a,", "{id: x, events: a,").replace("{events: b,", "{id: x, events: b,"))).toThrow(
+      "id x is used by another rule"
+    );
+    expect(() => parseModel(TWO_RULES.replace("{events: a,", "{id: '2', events: a,"))).toThrow("id 2 is the position of a rule with no id");
+  });
+
+  it("should reject an override of a removed role and an add of a role the profile grants when validating", () => {
+    const text = (spec: string) => `
+kind: wa-model
+version: 1
+service: {slug: demo}
+caseTypes: [{id: ct_a}]
+roles: {admin: {}}
+permissionProfiles: {p: {admin: {perms: [Read]}}}
+tasks: [{id: A, permissions: ${spec}}]
+`;
+    expect(() => parseModel(text("{profile: p, remove: [admin], override: {admin: {priority: 1}}}"))).toThrow("overrides admin, which it also removes");
+    expect(() => parseModel(text("{profile: p, add: {admin: {perms: [Own]}}}"))).toThrow("adds admin, which profile p already grants");
+    expect(() => parseModel(text("{profile: p, remove: [admin], add: {admin: {perms: [Own]}}}"))).not.toThrow();
+  });
+
+  it("should reject an entry that says reconfigure false when the task lists the attribute as reconfigurable", () => {
+    const text = BASE.replace("workType: w1", "workType: {value: w1, reconfigure: false}\n    reconfigure: [workType]");
+    expect(() => parseModel(text)).toThrow("workType is in reconfigure but an entry of it says reconfigure: false");
+  });
+
+  it("should reject role fields the model does not use when parsing", () => {
+    expect(() => parseModel(BASE.replace("roles: {admin: {}}", "roles: {admin: {type: CASE}}"))).toThrow();
+  });
+});

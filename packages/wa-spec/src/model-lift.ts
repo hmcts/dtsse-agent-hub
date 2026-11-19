@@ -19,7 +19,18 @@ import {
   type Val,
   type ValEntry
 } from "./model.ts";
-import { ALL_TASKS, type Atom, type Content, collectAtoms, compileModel, RULES, stable, withCanonicalEvent } from "./model-compile.ts";
+import {
+  ALL_TASKS,
+  type Atom,
+  type Content,
+  collectAtoms,
+  compileModel,
+  inCaseOrder,
+  overlapping,
+  RULES,
+  stable,
+  withCanonicalEvent
+} from "./model-compile.ts";
 import { type Cell, type Decision, type Expr, KINDS, type Kind, type Row, type Spec } from "./schema.ts";
 import { diffSpecs } from "./spec-diff.ts";
 
@@ -69,7 +80,6 @@ interface Classified {
 
 const isName = (value: unknown): value is string => typeof value === "string" && NAME_PATTERN.test(value);
 const subset = (a: string[], b: string[]) => a.every((x) => b.includes(x));
-const overlaps = (a: string[], b: string[]) => a.some((x) => b.includes(x));
 const sameSet = (a: string[], b: string[]) => a.length === b.length && subset(a, b);
 const onlyKeys = (value: object, allowed: string[]) => Object.keys(value).every((k) => allowed.includes(k));
 
@@ -83,7 +93,7 @@ interface Ent<T> {
 /** Adds an entry, folding it into an identical one for other case types when there is one. */
 function addEntry<T>(list: Array<Ent<T>>, data: T, cases: string[]): void {
   const key = stable(data);
-  const same = list.find((e) => e.key === key && !overlaps(e.cases, cases));
+  const same = list.find((e) => e.key === key && !overlapping(e.cases, cases));
   if (same) {
     same.cases = [...same.cases, ...cases];
   } else {
@@ -141,7 +151,7 @@ function grantOf(returns: Record<string, Expr>, description: string | undefined)
 function classify(kind: Kind, row: Row, index: number, caseIds: string[]): Classified | string {
   let cases = caseIds;
   if (row.only !== undefined) {
-    const ordered = caseIds.filter((c) => row.only?.includes(c));
+    const ordered = inCaseOrder(caseIds, row.only);
     if (row.only.length === 0 || !row.only.every((c, i) => c === ordered[i]) || ordered.length === caseIds.length) {
       return "its case types are not a proper subset in the spec's case type order";
     }
@@ -364,7 +374,7 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
     if (typeof entry.result !== "string") {
       for (const item of entry.result.items) {
         const key = item.bucket;
-        if (overlaps(seenGrants.get(key) ?? [], item.cases)) {
+        if (overlapping(seenGrants.get(key) ?? [], item.cases)) {
           twiceGranted.set(key, `${item.task} is granted ${item.content.returns.name as string} twice for one case type`);
         }
         seenGrants.set(key, [...(seenGrants.get(key) ?? []), ...item.cases]);
@@ -471,7 +481,7 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
   }
 
   // Permission profiles: tasks whose grants are identical share one.
-  type Group = { cases: string[]; set: GrantSet };
+  type Group = { cases: string[]; set: GrantSet; key: string };
   const groupsOf = (acc: TaskAcc): Group[] => {
     const cases = caseIds.filter((c) => [...acc.grants.values()].some((list) => list.some((e) => e.cases.includes(c))));
     const groups: Group[] = [];
@@ -484,11 +494,12 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
         }
       }
       const set = { roles: roleList };
-      const same = groups.find((g) => setKey(g.set) === setKey(set));
+      const key = setKey(set);
+      const same = groups.find((g) => g.key === key);
       if (same) {
         same.cases.push(c);
       } else {
-        groups.push({ cases: [c], set });
+        groups.push({ cases: [c], set, key });
       }
     }
     return groups;
@@ -497,7 +508,7 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
   const usage = new Map<string, { set: GrantSet; tasks: Set<string> }>();
   for (const [id, groups] of taskGroups) {
     for (const group of groups) {
-      const key = setKey(group.set);
+      const key = group.key;
       const used = usage.get(key) ?? { set: group.set, tasks: new Set<string>() };
       used.tasks.add(id);
       usage.set(key, used);
@@ -535,7 +546,7 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
     }
     return caseIds.filter((c) => used.has(c));
   };
-  const ordered = <T>(entry: Ent<T>): string[] => caseIds.filter((c) => entry.cases.includes(c));
+  const ordered = <T>(entry: Ent<T>): string[] => inCaseOrder(caseIds, entry.cases);
 
   const modelTasks: Task[] = [...tasks.values()].map((acc) => {
     const taskCases = allCasesOf(acc);
@@ -600,7 +611,7 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
     // Permissions.
     const groups = taskGroups.get(acc.id) ?? [];
     const specs = groups.map((group): PermissionSpec => {
-      const name = profileOf.get(setKey(group.set));
+      const name = profileOf.get(group.key);
       const scope = sameSet(group.cases, taskCases) ? {} : { only: group.cases };
       if (name) {
         return { profile: name, ...scope };
@@ -809,7 +820,7 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
       for (const item of result.items) {
         const wanted = stable(item.content);
         const atom = (buckets.get(item.bucket) ?? []).find(
-          (a) => a.contentKey === wanted && subset(item.cases, a.cases) && !overlaps(used.get(a) ?? [], item.cases)
+          (a) => a.contentKey === wanted && subset(item.cases, a.cases) && !overlapping(used.get(a) ?? [], item.cases)
         );
         if (!atom) {
           unmatched ??= `${kind} row ${entry.index}: no model entry for ${item.bucket}`;
@@ -831,7 +842,7 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
   ) as Record<Kind, KindCount>;
   let differences: string[];
   try {
-    differences = unmatched ? [unmatched] : diffSpecs(spec, compileModel(model, ordering));
+    differences = unmatched ? [unmatched] : diffSpecs(spec, compileModel(model, ordering, atoms));
   } catch (error) {
     differences = [(error as Error).message];
   }

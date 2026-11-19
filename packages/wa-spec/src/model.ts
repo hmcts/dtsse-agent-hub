@@ -173,12 +173,7 @@ export const Task = z.strictObject({
 });
 export type Task = z.infer<typeof Task>;
 
-export const Role = z.strictObject({
-  category: Expr.optional(),
-  type: z.enum(["ORGANISATION", "CASE"]).optional(),
-  crdRoleIds: z.array(z.string()).optional(),
-  description: z.string().optional()
-});
+export const Role = z.strictObject({ category: Expr.optional() });
 export type Role = z.infer<typeof Role>;
 
 /** A configuration row that applies to every task, such as the case name or the location. */
@@ -235,9 +230,12 @@ export const Model = z.strictObject({
 export type Model = z.infer<typeof Model>;
 
 /**
- * Where each table's row order and grouping comes from. A row is its tasks' references (`<task>/<slot>`, with `.2`,
- * `.3` for a repeated slot), optionally ending in `@<case types>` where the row covers fewer case types than its
- * entries, or `~<n>` for the nth row of the model's `tables` residue.
+ * Where each table's row order and grouping comes from. A row is a space-separated list of references to the model's entries:
+ * `<task>/<slot>` for a task's entry (a configuration attribute, a role, `create`, `complete`, `type`), `*`\/<name>` for a
+ * default, `!/<id>` for a cancellation rule (its position when it has no `id`) and `~<n>` for the nth row of the model's
+ * `tables` residue. A slot with several entries adds `#<hash>` of the entry's content and case types, and `.2`, `.3` for
+ * identical ones. A reference whose entry has since changed stands for the one entry of that slot no reference names. A row
+ * ends in `@<case types>` where it covers fewer case types than its entries.
  */
 export const OrderRow = z.union([z.string(), z.strictObject({ row: z.string(), description: z.string() })]);
 export type OrderRow = z.infer<typeof OrderRow>;
@@ -373,6 +371,17 @@ export function validateModel(model: Model): string[] {
     }
     for (const spec of specs) {
       scoped(`${where} permissions`, spec.only);
+      const held = new Set(Object.keys(profiles[spec.profile ?? ""] ?? {}));
+      for (const r of Object.keys(spec.override ?? {})) {
+        if (spec.remove?.includes(r)) {
+          problems.push(`${where}: overrides ${r}, which it also removes`);
+        }
+      }
+      for (const r of Object.keys(spec.add ?? {})) {
+        if (held.has(r) && !spec.remove?.includes(r)) {
+          problems.push(`${where}: adds ${r}, which profile ${spec.profile} already grants (override it, or remove and add it)`);
+        }
+      }
       if (spec.profile !== undefined && !(spec.profile in profiles)) {
         problems.push(`${where}: unknown permission profile ${spec.profile}`);
       }
@@ -402,14 +411,30 @@ export function validateModel(model: Model): string[] {
         }
       }
     }
+    for (const [name, val] of attributes) {
+      if (task.reconfigure?.includes(name) && (Array.isArray(val) ? val : [val]).some((e) => isValEntry(e) && e.reconfigure === false)) {
+        problems.push(`${where}: ${name} is in reconfigure but an entry of it says reconfigure: false`);
+      }
+    }
     for (const name of task.reconfigure ?? []) {
       if (!reconfigurable.has(name)) {
         problems.push(`${where}: reconfigure names ${name}, which is not one of its attributes`);
       }
     }
   }
+  const ruleIds = new Set<string>();
+  const positions = new Set((model.cancellations ?? []).flatMap((rule, index) => (rule.id === undefined ? [String(index + 1)] : [])));
   for (const [index, rule] of (model.cancellations ?? []).entries()) {
     known(`cancellations[${index}]`, rule.only);
+    if (rule.id !== undefined) {
+      if (ruleIds.has(rule.id)) {
+        problems.push(`cancellations[${index}]: id ${rule.id} is used by another rule`);
+      }
+      if (positions.has(rule.id)) {
+        problems.push(`cancellations[${index}]: id ${rule.id} is the position of a rule with no id`);
+      }
+      ruleIds.add(rule.id);
+    }
   }
   return problems;
 }

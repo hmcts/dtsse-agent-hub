@@ -19,7 +19,7 @@ const USAGE = `wa-spec: Work Allocation configuration spec
                                                  a model ("kind: wa-model") is compiled first; the layout is --layout,
                                                  the model layout field, or <name>.layout.yaml. Lists the task DMNs in
                                                  <dir> the spec no longer has, and removes them with --prune
-  wa-spec lift <spec.yaml> -o <model.yaml> [--report <report.md>]
+  wa-spec lift <spec.yaml> -o <model.yaml> [--report <report.md>] [--layout <layout.yaml>]
                                                  the task- and role-centric model of a spec, with <model>.order.yaml
                                                  that keeps the tables' row order; exits 1 unless it compiles back equal
   wa-spec compile <model.yaml> -o <spec.yaml> [--layout <layout.yaml>]
@@ -106,7 +106,10 @@ function main(argv: string[]): number {
       fail(USAGE);
     }
     const spec = parseSpec(readText(specPath));
-    const layoutPath = layoutPathFor(specPath);
+    const layoutPath = values.layout ?? layoutPathFor(specPath);
+    if (values.layout && !exists(values.layout)) {
+      fail(`the layout file ${values.layout} does not exist`);
+    }
     const orderPath = orderPathBeside(values.output);
     const { model, ordering, report } = liftSpec(spec, {
       ...(exists(layoutPath) ? { layout: relative(dirname(resolve(values.output)), resolve(layoutPath)) } : {}),
@@ -149,7 +152,7 @@ function main(argv: string[]): number {
       fail(USAGE);
     }
     if (/\.ya?ml$/.test(a) && /\.ya?ml$/.test(b)) {
-      const { differences, total } = compareSpecs(loadSpecOnly(a), loadSpecOnly(b));
+      const { differences, total } = compareSpecs(loadSpecOnly(a), loadSpecOnly(b), { ignoreRuleOrder: values["ignore-rule-order"] });
       const shown = differences.length < total ? `first ${differences.length} of ${total} differences` : `${total} differences`;
       process.stdout.write(total === 0 ? "no differences\n" : `${differences.join("\n")}\n${shown}\n`);
       return total === 0 ? 0 : 1;

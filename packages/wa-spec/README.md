@@ -39,10 +39,10 @@ A model holds `service` and `caseTypes`; `roles` (with their category); `permiss
 COLLECT and RULE ORDER tables return in row order, which ET's tests compare by index, so row order and grouping are kept in `<model>.order.yaml`, named by the model's `order` field. Each row lists the model entries it was made of (`<task>/<slot>`, `#<hash>` of the entry's content and case types where a slot has several entries, `.2` for identical ones, `!/<id>` for a cancellation rule, by its `id` (its position when it has none), `*/<name>` for a default, `~<n>` for the nth row of `tables`), with `@case,case` where the row covers fewer case types than its entries and a `description` where the row has one. A token whose entry has since been edited, or that predates its slot gaining entries, stands for the one entry of that `<task>/<slot>` no token names, so editing a value keeps its row's place. Entries the file does not mention (a new task) join an existing row with the same content, or are appended; entries it names that no longer exist are dropped. Without the file rows follow the model's own order. The model's `layout` field names the layout file `generate` applies.
 
 ```
-wa-spec lift spec.yaml -o model.yaml [--report lift.md]
+wa-spec lift spec.yaml -o model.yaml [--report lift.md] [--layout layout.yaml]
 wa-spec compile model.yaml -o spec.yaml
 wa-spec generate model.yaml -o <dir> [--layout layout.yaml]
-wa-spec diff model.yaml spec.yaml
+wa-spec diff model.yaml spec.yaml [--ignore-rule-order]
 ```
 
 `lift` compiles its own result and exits 1 unless it equals the spec, row order included.
