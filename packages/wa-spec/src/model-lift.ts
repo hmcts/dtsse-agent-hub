@@ -25,6 +25,7 @@ import {
   type Content,
   collectAtoms,
   compileModel,
+  fingerprintOf,
   inCaseOrder,
   overlapping,
   RULES,
@@ -88,17 +89,21 @@ interface Ent<T> {
   /** `stable(data)`, computed once. */
   key: string;
   cases: string[];
+  /** The description of the table row this entry heads. */
+  note?: string;
 }
 
 /** Adds an entry, folding it into an identical one for other case types when there is one. */
-function addEntry<T>(list: Array<Ent<T>>, data: T, cases: string[]): void {
+function addEntry<T>(list: Array<Ent<T>>, data: T, cases: string[]): Ent<T> {
   const key = stable(data);
   const same = list.find((e) => e.key === key && !overlapping(e.cases, cases));
   if (same) {
     same.cases = [...same.cases, ...cases];
-  } else {
-    list.push({ data, key, cases: [...cases] });
+    return same;
   }
+  const added = { data, key, cases: [...cases] };
+  list.push(added);
+  return added;
 }
 
 interface TriggerData {
@@ -319,6 +324,7 @@ interface LeafEntry {
   value: Expr;
   cases: string[];
   reconfigure: boolean;
+  note?: string;
 }
 
 /** A configuration value as the model writes it: bare when it applies to all of the task's case types, else with its scope. */
@@ -326,10 +332,15 @@ function leaf(entries: LeafEntry[], taskCases: string[], uniform: boolean): Val 
   const rendered = entries.map((entry): Expr | ValEntry => {
     const scoped = !sameSet(entry.cases, taskCases);
     const explicit = entry.reconfigure && !uniform;
-    if (!scoped && !explicit) {
+    if (!scoped && !explicit && entry.note === undefined) {
       return entry.value;
     }
-    return { value: entry.value, ...(scoped ? { only: entry.cases } : {}), ...(explicit ? { reconfigure: true } : {}) };
+    return {
+      value: entry.value,
+      ...(entry.note === undefined ? {} : { note: entry.note }),
+      ...(scoped ? { only: entry.cases } : {}),
+      ...(explicit ? { reconfigure: true } : {})
+    };
   });
   return rendered.length === 1 ? (rendered[0] as Val) : (rendered as Val);
 }
@@ -396,11 +407,17 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
     }
   }
 
+  // A trigger with no name would take the task type's name when compiled, so such rows stay as rows.
+  const typed = new Set(classified["task-types"].flatMap((e) => (typeof e.result === "string" ? [] : e.result.items.map((i) => i.task))));
   for (const kind of KINDS) {
     for (const entry of classified[kind]) {
       const result = entry.result;
       const twice = typeof result === "string" || kind !== "permissions" ? undefined : result.items.map((i) => twiceGranted.get(i.bucket)).find(Boolean);
-      const failure = typeof result === "string" ? result : kind === "permissions" ? (permissionsStay ?? twice) : undefined;
+      const unnamed =
+        kind === "initiation" && typeof result !== "string" && result.items.some((i) => !("name" in i.content.returns) && typed.has(i.task))
+          ? "it creates a task with no name, but the task type has one"
+          : undefined;
+      const failure = typeof result === "string" ? result : kind === "permissions" ? (permissionsStay ?? twice) : unnamed;
       if (typeof result === "string" || failure !== undefined) {
         residue[kind].push(entry.row);
         entry.residueIndex = residue[kind].length;
@@ -412,12 +429,13 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
         cancellationRows.push({ row: entry.index, classified: result, src: entry.row });
         continue;
       }
-      for (const item of items) {
+      for (const [position, item] of items.entries()) {
         const returns = item.content.returns;
         const acc = item.task === ALL_TASKS ? undefined : getTask(item.task);
+        let added: Ent<unknown> | undefined;
         if (kind === "initiation" && acc) {
           const { eventId, postEventState, ...extras } = item.content.when;
-          addEntry(
+          added = addEntry(
             acc.triggers,
             {
               event: eventId as Cell,
@@ -430,9 +448,9 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
             cases
           );
         } else if (kind === "task-types" && acc) {
-          addEntry(acc.names, returns.taskTypeName as Expr, cases);
+          added = addEntry(acc.names, returns.taskTypeName as Expr, cases);
         } else if (kind === "completion" && acc) {
-          addEntry(
+          added = addEntry(
             acc.completions,
             { event: item.content.when.eventID as Cell, ...("completionMode" in returns ? { mode: returns.completionMode as Expr } : {}) },
             cases
@@ -442,9 +460,9 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
           if (acc) {
             const list = acc.attrs.get(returns.name as string) ?? [];
             acc.attrs.set(returns.name as string, list);
-            addEntry(list, data, cases);
+            added = addEntry(list, data, cases);
           } else {
-            addEntry(defaultsConfig, { name: returns.name as string, ...data }, cases);
+            added = addEntry(defaultsConfig, { name: returns.name as string, ...data }, cases);
           }
         } else if (kind === "permissions") {
           const grant = grantOf(returns, item.content.description) as Grant;
@@ -453,6 +471,9 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
           const list = target.get(role) ?? [];
           target.set(role, list);
           addEntry(list, grant, cases);
+        }
+        if (added && position === 0 && entry.row.description !== undefined) {
+          added.note ??= entry.row.description;
         }
       }
     }
@@ -526,7 +547,7 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
       .filter((c) => c !== "");
     const base = categories.length > 0 ? `${[...new Set(categories)].map((c, i) => (i === 0 ? c : capitalised(c))).join("And")}Worker` : "taskGrants";
     let name = base;
-    for (let n = 2; name in profiles; n++) {
+    for (let n = 2; Object.hasOwn(profiles, name); n++) {
       name = `${base}${n}`;
     }
     profiles[name] = Object.fromEntries(used.set.roles);
@@ -555,7 +576,7 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
 
     if (acc.names.length > 0) {
       task.name = leaf(
-        acc.names.map((e) => ({ value: e.data, cases: ordered(e), reconfigure: false })),
+        acc.names.map((e) => ({ value: e.data, cases: ordered(e), reconfigure: false, ...(e.note === undefined ? {} : { note: e.note }) })),
         taskCases,
         true
       );
@@ -571,7 +592,9 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
         : undefined;
     const taskName = uniform(initialNames);
     const taskCategory = uniform(categories);
-    if (taskName !== undefined) {
+    const names = acc.names;
+    const plain = names.length === 1 && names[0] && sameSet(names[0].cases, taskCases) && names[0].note === undefined ? names[0].data : undefined;
+    if (taskName !== undefined && !(plain !== undefined && stable(plain) === stable(taskName))) {
       task.initialName = taskName;
     }
     if (taskCases.length < caseIds.length) {
@@ -591,7 +614,7 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
         reconfigure.push(name);
       }
       return leaf(
-        list.map((e) => ({ value: e.data.value, cases: ordered(e), reconfigure: e.data.reconfigure })),
+        list.map((e) => ({ value: e.data.value, cases: ordered(e), reconfigure: e.data.reconfigure, ...(e.note === undefined ? {} : { note: e.note }) })),
         taskCases,
         all || none
       );
@@ -645,6 +668,7 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
           ...(d.name !== undefined && stable(d.name) !== stable(taskName) ? { initialName: d.name } : {}),
           ...(d.delay !== undefined ? { delay: d.delay } : {}),
           ...(d.category !== undefined && stable(d.category) !== stable(taskCategory) ? { cancelCategory: d.category } : {}),
+          ...(e.note === undefined ? {} : { note: e.note }),
           ...scoped(e)
         };
       });
@@ -656,6 +680,7 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
       task.complete = acc.completions.map((e) => ({
         event: encodeCell(e.data.event),
         ...(e.data.mode !== undefined ? { mode: e.data.mode } : {}),
+        ...(e.note === undefined ? {} : { note: e.note }),
         ...scoped(e)
       }));
     }
@@ -677,7 +702,8 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
     const description = acc.attrs.get("description");
     if (description) {
       const only = description.length === 1 ? description[0] : undefined;
-      const link = only && typeof only.data.value === "string" && sameSet(only.cases, taskCases) ? parseLinkText(only.data.value) : undefined;
+      const link =
+        only && typeof only.data.value === "string" && only.note === undefined && sameSet(only.cases, taskCases) ? parseLinkText(only.data.value) : undefined;
       if (only && link && linkText(link) === only.data.value) {
         task.link = link;
         taken.add("description");
@@ -719,6 +745,7 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
       name: e.data.name,
       value: e.data.value,
       ...(e.data.reconfigure ? { reconfigure: true } : {}),
+      ...(e.note === undefined ? {} : { note: e.note }),
       ...(sameSet(e.cases, caseIds) ? {} : { only: ordered(e) })
     }));
   }
@@ -798,6 +825,7 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
   const atoms = collectAtoms(model);
   const ordering: Ordering = { version: 1, rows: {} };
   let unmatched: string | undefined;
+  const fingerprints: NonNullable<Ordering["fingerprints"]> = {};
   for (const kind of KINDS) {
     if (!spec.decisions[kind]) {
       continue;
@@ -816,6 +844,7 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
       }
       const result = entry.result as Classified;
       const tokens: string[] = [];
+      const matched: Atom[] = [];
       let differs = false;
       for (const item of result.items) {
         const wanted = stable(item.content);
@@ -828,15 +857,23 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
         }
         used.set(atom, [...(used.get(atom) ?? []), ...item.cases]);
         tokens.push(atom.ref);
+        matched.push(atom);
+        if (atom.ref.includes("#")) {
+          fingerprints[kind] = { ...fingerprints[kind], [atom.ref]: fingerprintOf(atom) };
+        }
         differs ||= !sameSet(atom.cases, result.cases);
       }
       const text = [...tokens, ...(differs ? [`@${result.cases.join(",")}`] : [])].join(" ");
       const keepsNote = kind === "permissions" || kind === "cancellation";
-      rows.push(entry.row.description !== undefined && !keepsNote ? { row: text, description: entry.row.description } : text);
+      const described = keepsNote || matched[0]?.note === entry.row.description;
+      rows.push(described ? text : { row: text, description: entry.row.description ?? null });
     }
     ordering.rows[kind] = rows;
   }
 
+  if (Object.keys(fingerprints).length > 0) {
+    ordering.fingerprints = fingerprints;
+  }
   const counts = Object.fromEntries(
     KINDS.map((kind) => [kind, { rows: classified[kind].length, lifted: classified[kind].length - residue[kind].length, residue: residue[kind].length }])
   ) as Record<Kind, KindCount>;

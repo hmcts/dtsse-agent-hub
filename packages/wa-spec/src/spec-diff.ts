@@ -1,25 +1,43 @@
+import { ruleOrderMatters } from "./diff.ts";
 import { byCodePoint } from "./merge.ts";
 import { stable } from "./model-compile.ts";
-import type { Spec } from "./schema.ts";
+import { KINDS, type Kind, type Spec } from "./schema.ts";
 
 const MAX_DIFFERENCES = 40;
 
+export interface CompareOptions {
+  /** Compare every table's rows as a set, whatever its hit policy. */
+  ignoreRuleOrder?: boolean;
+  /** Compare row order everywhere, which is what a lift's own check needs. */
+  strict?: boolean;
+}
+
 /**
- * Differences between two specs, compared as data: object keys in any order, arrays in order, because the order of rows
- * and of values in an entry is what a COLLECT or RULE ORDER table returns in. `differences` holds the first
- * MAX_DIFFERENCES; `total` counts them all. Both are empty or zero when the specs are equal.
+ * Differences between two specs, compared as data: object keys in any order, arrays in order. A table's rows are compared
+ * as a set where its hit policy makes their order irrelevant (as the DMN diff does), or always with `ignoreRuleOrder`,
+ * and in order everywhere with `strict`. `differences` holds the first MAX_DIFFERENCES; `total` counts them all.
  */
-export function compareSpecs(a: Spec, b: Spec, options: { ignoreRuleOrder?: boolean } = {}): { differences: string[]; total: number } {
+export function compareSpecs(a: Spec, b: Spec, options: CompareOptions = {}): { differences: string[]; total: number } {
   const found = { differences: [] as string[], total: 0 };
-  const plain = (spec: Spec): Spec => (options.ignoreRuleOrder ? withRowsAsSets(spec) : JSON.parse(JSON.stringify(spec)));
-  walk(plain(a), plain(b), "spec", found);
+  const matters = (spec: Spec, kind: Kind): boolean => {
+    const decision = spec.decisions[kind];
+    const all = [decision, ...Object.values(decision?.overrides ?? {})];
+    return all.some(
+      (d) =>
+        d &&
+        ruleOrderMatters(d.hitPolicy ?? decision?.hitPolicy ?? "COLLECT", d.aggregation === undefined ? decision?.aggregation : (d.aggregation ?? undefined))
+    );
+  };
+  const relaxed = new Set(KINDS.filter((kind) => !options.strict && (options.ignoreRuleOrder || !(matters(a, kind) || matters(b, kind)))));
+  walk(withRows(a, relaxed), withRows(b, relaxed), "spec", found);
   return found;
 }
 
-/** The spec with each table's rows in a fixed order, so tables with the same rows in any order compare equal. */
-function withRowsAsSets(spec: Spec): Spec {
+/** A copy of the spec with the rows of the given tables in a fixed order, so tables with the same rows in any order compare equal. */
+function withRows(spec: Spec, asSets: Set<Kind>): Spec {
   const copy: Spec = JSON.parse(JSON.stringify(spec));
-  for (const decision of Object.values(copy.decisions)) {
+  for (const kind of asSets) {
+    const decision = copy.decisions[kind];
     if (decision) {
       decision.rows = decision.rows
         .map((row) => ({ key: stable(row), row }))
@@ -30,7 +48,8 @@ function withRowsAsSets(spec: Spec): Spec {
   return copy;
 }
 
-export const diffSpecs = (a: Spec, b: Spec): string[] => compareSpecs(a, b).differences;
+/** Strict: every table's rows in order. */
+export const diffSpecs = (a: Spec, b: Spec): string[] => compareSpecs(a, b, { strict: true }).differences;
 
 type Found = { differences: string[]; total: number };
 

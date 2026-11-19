@@ -10,6 +10,7 @@ import {
   type Model,
   type Ordering,
   type OrderRow,
+  ownEntry,
   permissionSpecs,
   type Task,
   type Trigger,
@@ -34,6 +35,8 @@ export interface Atom {
   content: Content;
   /** `stable(content)`, computed once. */
   contentKey: string;
+  /** The description of the table row this entry heads. */
+  note?: string;
 }
 
 /** The kinds whose rows list several tasks in a `taskType` cell, and that cell's input key. */
@@ -46,16 +49,18 @@ export const GROUPED: Partial<Record<Kind, string>> = { configuration: "taskType
 export const EVENT_KEYS: Partial<Record<Kind, string>> = { initiation: "eventId", completion: "eventID" };
 const EVENT_SPELLINGS = ["eventId", "eventID"];
 
-/** A row's conditions with the event column under the kind's own spelling. */
-export function withCanonicalEvent(kind: Kind, when: Record<string, Cell>): Record<string, Cell> {
-  const spelling = EVENT_KEYS[kind];
+/** A row's conditions with the event column, whichever way it is spelt, under the spelling `to`. */
+function respellEvent(when: Record<string, Cell>, to: string | undefined): Record<string, Cell> {
   const found = EVENT_SPELLINGS.find((key) => key in when);
-  if (!spelling || !found || found === spelling) {
+  if (!to || !found || found === to) {
     return when;
   }
   const { [found]: event, ...rest } = when;
-  return { ...rest, [spelling]: event as Cell };
+  return { ...rest, [to]: event as Cell };
 }
+
+/** A row's conditions with the event column under the kind's own spelling. */
+export const withCanonicalEvent = (kind: Kind, when: Record<string, Cell>): Record<string, Cell> => respellEvent(when, EVENT_KEYS[kind]);
 
 /** The pseudo-task of rows that apply to every task, and of cancellation rules. */
 export const ALL_TASKS = "*";
@@ -113,6 +118,7 @@ interface ValPiece {
   value: Expr;
   cases: string[];
   reconfigure: boolean | undefined;
+  note?: string;
 }
 
 function valPieces(model: Model, val: Val, cases: string[]): ValPiece[] {
@@ -126,7 +132,8 @@ function valPieces(model: Model, val: Val, cases: string[]): ValPiece[] {
     return pieces(model, entry, own, overrides).map((piece) => ({
       value: piece.entry.value,
       cases: piece.cases,
-      reconfigure: entry.reconfigure
+      reconfigure: entry.reconfigure,
+      ...(entry.note === undefined ? {} : { note: entry.note })
     }));
   });
 }
@@ -140,7 +147,7 @@ export interface ResolvedGrant {
 /** The grants a task's permissions come to: its profile, less what it removes, with its overrides and additions. */
 export function resolveGrants(model: Model, task: Task): ResolvedGrant[] {
   return permissionSpecs(task).flatMap((spec) => {
-    const grants = new Map<string, Grant>(Object.entries(model.permissionProfiles?.[spec.profile ?? ""] ?? {}));
+    const grants = new Map<string, Grant>(Object.entries(ownEntry(model.permissionProfiles, spec.profile) ?? {}));
     for (const role of spec.remove ?? []) {
       grants.delete(role);
     }
@@ -161,7 +168,7 @@ export function resolveGrants(model: Model, task: Task): ResolvedGrant[] {
 export const joinPerms = (perms: Grant["perms"]): string => (typeof perms === "string" ? perms : perms.join(", "));
 
 export function grantContent(model: Model, role: string, grant: Grant): Content {
-  const category = grant.category !== undefined ? grant.category : model.roles?.[role]?.category;
+  const category = grant.category !== undefined ? grant.category : ownEntry(model.roles, role)?.category;
   const returns: Record<string, Expr> = { name: role, value: joinPerms(grant.perms) };
   if (category !== undefined) {
     returns.roleCategory = category;
@@ -181,6 +188,11 @@ export function grantContent(model: Model, role: string, grant: Grant): Content 
   return { when: {}, returns, ...(grant.note === undefined ? {} : { description: grant.note }) };
 }
 
+/** The task's name in the task-type list, when it is one value for every case type. */
+function plainName(task: Task): Expr | undefined {
+  return task.name === undefined || Array.isArray(task.name) || isValEntry(task.name) ? undefined : task.name;
+}
+
 function triggerContent(task: Task, trigger: Trigger): Content {
   const when: Record<string, Cell> = { eventId: decodeCell(trigger.event) };
   if (trigger.postState !== undefined) {
@@ -190,7 +202,7 @@ function triggerContent(task: Task, trigger: Trigger): Content {
     when[key] = decodeCell(cell);
   }
   const returns: Record<string, Expr> = { taskId: task.id };
-  const name = trigger.initialName !== undefined ? trigger.initialName : task.initialName;
+  const name = trigger.initialName !== undefined ? trigger.initialName : task.initialName !== undefined ? task.initialName : plainName(task);
   if (name !== undefined) {
     returns.name = name;
   }
@@ -237,17 +249,24 @@ function cancellationContent(rule: Cancellation, category: Expr | undefined): Co
 /** Every row's worth of content the model describes, per kind, in the order it compiles when nothing says otherwise. */
 export function collectAtoms(model: Model): Atoms {
   const atoms = Object.fromEntries(KINDS.map((kind) => [kind, [] as Atom[]])) as Atoms;
-  const add = (kind: Kind, task: string, slot: string, cases: string[], content: Content) => {
-    atoms[kind].push({ ref: `${task}/${slot}`, task, slot, cases, content, contentKey: stable(content) });
+  const add = (kind: Kind, task: string, slot: string, cases: string[], content: Content, note?: string) => {
+    atoms[kind].push({ ref: `${task}/${slot}`, task, slot, cases, content, contentKey: stable(content), ...(note === undefined ? {} : { note }) });
   };
   const all = caseOrder(model);
 
   for (const attribute of model.defaults?.configuration ?? []) {
     const cases = attribute.only ? inOrder(model, attribute.only) : all;
-    add("configuration", ALL_TASKS, attribute.name, cases, {
-      when: {},
-      returns: { name: attribute.name, value: attribute.value, canReconfigure: attribute.reconfigure ?? false }
-    });
+    add(
+      "configuration",
+      ALL_TASKS,
+      attribute.name,
+      cases,
+      {
+        when: {},
+        returns: { name: attribute.name, value: attribute.value, canReconfigure: attribute.reconfigure ?? false }
+      },
+      attribute.note
+    );
   }
   for (const [role, grant] of Object.entries(model.defaults?.permissions ?? {})) {
     add("permissions", ALL_TASKS, role, all, grantContent(model, role, grant));
@@ -256,23 +275,23 @@ export function collectAtoms(model: Model): Atoms {
   for (const task of model.tasks) {
     const own = taskCases(model, task);
     for (const piece of task.name === undefined ? [] : valPieces(model, task.name, own)) {
-      add("task-types", task.id, "type", piece.cases, { when: {}, returns: { taskTypeId: task.id, taskTypeName: piece.value } });
+      add("task-types", task.id, "type", piece.cases, { when: {}, returns: { taskTypeId: task.id, taskTypeName: piece.value } }, piece.note);
     }
     for (const trigger of task.create ?? []) {
       for (const piece of pieces(model, trigger, within(model, trigger.only, own), trigger.overrides)) {
-        add("initiation", task.id, "create", piece.cases, triggerContent(task, piece.entry));
+        add("initiation", task.id, "create", piece.cases, triggerContent(task, piece.entry), piece.entry.note);
       }
     }
     for (const completion of task.complete ?? []) {
       for (const piece of pieces(model, completion, within(model, completion.only, own), completion.overrides)) {
-        add("completion", task.id, "complete", piece.cases, completionContent(task, piece.entry));
+        add("completion", task.id, "complete", piece.cases, completionContent(task, piece.entry), piece.entry.note);
       }
     }
     const reconfigurable = new Set(task.reconfigure ?? []);
     for (const [name, val] of attributesOf(task)) {
       for (const piece of valPieces(model, val, own)) {
         const canReconfigure = piece.reconfigure ?? reconfigurable.has(name);
-        add("configuration", task.id, name, piece.cases, { when: {}, returns: { name, value: piece.value, canReconfigure } });
+        add("configuration", task.id, name, piece.cases, { when: {}, returns: { name, value: piece.value, canReconfigure } }, piece.note);
       }
     }
     for (const { role, grant, cases } of resolveGrants(model, task)) {
@@ -316,6 +335,21 @@ function withRefs(atoms: Atom[]): Atom[] {
 
 export const overlapping = (a: string[], b: string[]): boolean => a.some((x) => b.includes(x));
 
+/** What an atom looked like, for matching an edited entry to the reference it replaced: its case types, then a hash of each field. */
+export function fingerprintOf(atom: Atom): string {
+  const fields = (side: string, record: Record<string, unknown>) =>
+    Object.entries(record).map(([key, value]) => `${side}.${key}=${createHash("sha1").update(stable(value)).digest("hex").slice(0, 4)}`);
+  return [atom.cases.join(","), ...fields("w", atom.content.when), ...fields("r", atom.content.returns)].join(";");
+}
+
+function closeness(was: string, atom: Atom): number {
+  const [cases = "", ...fields] = was.split(";");
+  const before = cases.split(",");
+  const kept = before.length === atom.cases.length && before.every((c) => atom.cases.includes(c)) ? 1000 : overlapping(before, atom.cases) ? 500 : 0;
+  const now = fingerprintOf(atom).split(";").slice(1);
+  return kept + fields.filter((field) => now.includes(field)).length;
+}
+
 export const bucketOf = (atom: Atom): string => `${atom.task}/${atom.slot}`;
 
 interface OutRow {
@@ -332,13 +366,10 @@ function orderedRow(kind: Kind, decision: Decision, out: OutRow, all: string[], 
   if (out.residue) {
     return out.residue;
   }
-  const when: Record<string, Cell> = { ...out.content.when };
-  const spelling = EVENT_KEYS[kind];
-  const actual = decision.inputs.find((c) => EVENT_SPELLINGS.includes(c.key))?.key;
-  if (spelling && actual && actual !== spelling && spelling in when) {
-    when[actual] = when[spelling] as Cell;
-    delete when[spelling];
-  }
+  const when: Record<string, Cell> = respellEvent(
+    { ...out.content.when },
+    EVENT_KEYS[kind] && decision.inputs.find((c) => EVENT_SPELLINGS.includes(c.key))?.key
+  );
   if (out.grouped && taskKey) {
     when[taskKey] = { in: out.tasks };
   }
@@ -364,15 +395,57 @@ function orderedRow(kind: Kind, decision: Decision, out: OutRow, all: string[], 
 }
 
 /** The rows of one table: the ordering file's rows first, then whatever it does not mention, then unplaced residue rows. */
-function buildRows(kind: Kind, decision: Decision, atoms: Atom[], residue: Row[], order: OrderRow[] | undefined, all: string[]): Row[] {
+function buildRows(
+  kind: Kind,
+  decision: Decision,
+  atoms: Atom[],
+  residue: Row[],
+  order: OrderRow[] | undefined,
+  all: string[],
+  fingerprints: Record<string, string> | undefined
+): Row[] {
   const taskKey = GROUPED[kind];
   const byRef = new Map(atoms.map((atom) => [atom.ref, atom]));
   const named = new Set((order ?? []).flatMap((item) => (typeof item === "string" ? item : item.row).split(" ")));
-  const claimed = new Set<Atom>();
+  const taken = new Set<Atom>();
   // A token whose atom changed (its hash covers content and case types) or that was written before its slot gained atoms
-  // stands for an atom of the same `<task>/<slot>` that no token names and that covers the row's case types. The mapping
-  // is kept, so every row naming the token finds the same atom.
+  // stands for an atom of the same `<task>/<slot>` that no token names. Stale tokens are matched to those atoms by
+  // closeness to what the token's entry looked like (same case types, then most fields equal), best pairs first, and the
+  // mapping is kept, so every row naming a token finds the same atom.
   const mapped = new Map<string, Atom[]>();
+  const spares = atoms.filter((a) => !named.has(a.ref));
+  const stale = [...named].filter((t) => t !== "" && !/^[@~]/.test(t) && !byRef.has(t));
+  // Without a fingerprint, only the case types of the rows naming the token say which atom it stood for.
+  const rowCases = new Map<string, string[]>();
+  for (const item of order ?? []) {
+    const tokens = (typeof item === "string" ? item : item.row).split(" ");
+    const only = tokens
+      .find((t) => t.startsWith("@"))
+      ?.slice(1)
+      .split(",");
+    for (const token of only ? tokens : []) {
+      rowCases.set(token, [...(rowCases.get(token) ?? []), ...(only ?? [])]);
+    }
+  }
+  const pairs = stale
+    .flatMap((token) =>
+      spares
+        .filter((a) => bucketOf(a) === token.replace(/#.*$/, ""))
+        .map((atom) => {
+          const fingerprint = fingerprints?.[token];
+          const wanted = rowCases.get(token);
+          const score = fingerprint ? closeness(fingerprint, atom) : !wanted || overlapping(wanted, atom.cases) ? 1 : 0;
+          return { token, atom, score };
+        })
+    )
+    .filter((pair) => pair.score > 0)
+    .sort((x, y) => y.score - x.score);
+  for (const { token, atom } of pairs) {
+    if (!mapped.has(token) && !taken.has(atom)) {
+      mapped.set(token, [atom]);
+      taken.add(atom);
+    }
+  }
   const atomOf = (token: string, only: string[] | undefined): Atom | undefined => {
     const exact = byRef.get(token);
     if (exact) {
@@ -384,10 +457,9 @@ function buildRows(kind: Kind, decision: Decision, atoms: Atom[], residue: Row[]
     if (again) {
       return again;
     }
-    const bucket = token.replace(/#.*$/, "");
-    const spare = atoms.find((a) => bucketOf(a) === bucket && !named.has(a.ref) && !claimed.has(a) && fits(a));
+    const spare = spares.find((a) => bucketOf(a) === token.replace(/#.*$/, "") && !taken.has(a) && fits(a));
     if (spare) {
-      claimed.add(spare);
+      taken.add(spare);
       mapped.set(token, [...known, spare]);
     }
     return spare;
@@ -407,6 +479,7 @@ function buildRows(kind: Kind, decision: Decision, atoms: Atom[], residue: Row[]
 
   for (const item of order ?? []) {
     const { row, description } = typeof item === "string" ? { row: item, description: undefined } : item;
+    // An object row states its description (null: none); otherwise the row has that of the first entry it names.
     const tokens = row.split(" ").filter(Boolean);
     const only = tokens
       .find((t) => t.startsWith("@"))
@@ -435,8 +508,9 @@ function buildRows(kind: Kind, decision: Decision, atoms: Atom[], residue: Row[]
       }
     }
     const first = new Map<string, OutRow>();
+    const rowDescription = description === undefined ? members[0]?.atom.note : (description ?? undefined);
     for (const { atom, cases } of members) {
-      const made = outRow(atom, cases, description);
+      const made = outRow(atom, cases, rowDescription);
       const shared = made.grouped ? first.get(made.sig) : undefined;
       if (shared) {
         shared.tasks.push(atom.task);
@@ -455,7 +529,7 @@ function buildRows(kind: Kind, decision: Decision, atoms: Atom[], residue: Row[]
     if (left.length === 0) {
       continue;
     }
-    const made = outRow(atom, left, undefined);
+    const made = outRow(atom, left, atom.note);
     const floor = lastRowOf(atom.task);
     const at = made.grouped ? out.findLastIndex((o) => o.grouped && o.sig === made.sig) : -1;
     const shared = at >= 0 && at > floor ? out[at] : undefined;
@@ -575,7 +649,10 @@ export function compileModel(model: Model, ordering?: Ordering, collected?: Atom
       continue;
     }
     const decision = table ?? standardDecision(kind, model);
-    decisions[kind] = { ...decision, rows: buildRows(kind, decision, atoms[kind], table?.rows ?? [], ordering?.rows[kind], all) };
+    decisions[kind] = {
+      ...decision,
+      rows: buildRows(kind, decision, atoms[kind], table?.rows ?? [], ordering?.rows[kind], all, ordering?.fingerprints?.[kind])
+    };
   }
   const spec: Spec = { version: 1, service: model.service, caseTypes: model.caseTypes, decisions };
   const problems = validateSpec(spec);

@@ -72,8 +72,7 @@ rows:
     - ReviewReferralResponseJudiciaryMultiple/create
     - ReviewReferralResponseAdminMultiple/create
   configuration:
-    - row: "*/caseName#c41842"
-      description: 1v1 scenario - Concatenates Claimant's forename name with that of respondent to create the case name displayed on task lists
+    - "*/caseName#c41842"
     - "*/caseName#389bce"
     - "*/region#d5b732"
     - "*/location#c0b6b6"
@@ -82,14 +81,10 @@ rows:
     - "*/region#25f347"
     - "*/location#e336c0"
     - "*/locationName#6aab9e"
-    - row: "*/caseManagementCategory#d0dce3"
-      description: Sets the case category that is displayed in the task list UI
-    - row: "*/caseManagementCategory#c72dc0"
-      description: Sets the case category that is displayed in the task list UI
-    - row: "*/nextHearingDate"
-      description: Use nextListedDate until onboarded to HMC
-    - row: Et1Vetting/workType ReviewReferralAdmin/workType ReviewReferralLegalOps/workType SendEt1Notification/workType ListServeClaim/workType Rule21/workType ET3Processing/workType ReviewReferralResponseLegalOps/workType ReviewReferralResponseAdmin/workType IssueInitialConsiderationDirections/workType ListAHearing/workType ReviewRule21Referral/workType SendEt3Notification/workType ReviewECCResponse/workType ExpiredBfAction/workType ReferEmployersContractClaim/workType
-      description: Name of the type of work - this is based on the filter. All Judgment tasks will be decision making work.
+    - "*/caseManagementCategory#d0dce3"
+    - "*/caseManagementCategory#c72dc0"
+    - "*/nextHearingDate"
+    - Et1Vetting/workType ReviewReferralAdmin/workType ReviewReferralLegalOps/workType SendEt1Notification/workType ListServeClaim/workType Rule21/workType ET3Processing/workType ReviewReferralResponseLegalOps/workType ReviewReferralResponseAdmin/workType IssueInitialConsiderationDirections/workType ListAHearing/workType ReviewRule21Referral/workType SendEt3Notification/workType ReviewECCResponse/workType ExpiredBfAction/workType ReferEmployersContractClaim/workType
     - ReviewReferralJudiciary/workType ReviewReferralResponseJudiciary/workType DraftAndSignJudgment/workType CompleteInitialConsideration/workType
     - IssuePostHearingDirection/workType IssueJudgment/workType IssueOrder/workType
     - ContactTribunalWithAnApplication/workType AmendClaimantDetails/workType AmendRespondentDetails/workType WithdrawAllOrPartOfCase/workType SubmitRespondentPseResponse/workType SubmitClaimantPseResponse/workType ReviewSupportRequestAdmin/workType ReviewSupportRequestLegalOfficer/workType ReviewSupportRequestJudge/workType ArrangeSupport/workType
@@ -147,8 +142,7 @@ rows:
     - DraftAndSignJudgment/dueDateIntervalDays
     - DraftAndSignJudgment/dueDateSkipNonWorkingDays
     - DraftAndSignJudgment/dueDateNonWorkingDaysOfWeek
-    - row: ReviewReferralAdminMultiple/workType ReviewReferralLegalOpsMultiple/workType MultiplesReviewReferralResponseLegalOps/workType ReviewReferralResponseAdminMultiple/workType
-      description: Name of the type of work - this is based on the filter. All Judgment tasks will be decision making work.
+    - ReviewReferralAdminMultiple/workType ReviewReferralLegalOpsMultiple/workType MultiplesReviewReferralResponseLegalOps/workType ReviewReferralResponseAdminMultiple/workType
     - ReviewReferralJudiciaryMultiple/workType ReviewReferralResponseJudiciaryMultiple/workType
     - ReviewReferralAdminMultiple/roleCategory ReviewReferralResponseAdminMultiple/roleCategory
     - ReviewReferralJudiciaryMultiple/roleCategory ReviewReferralResponseJudiciaryMultiple/roleCategory
@@ -334,3 +328,87 @@ rows:
     - MultiplesReviewReferralResponseLegalOps/type
     - ReviewReferralResponseJudiciaryMultiple/type
     - ReviewReferralResponseAdminMultiple/type
+fingerprints:
+  initiation:
+    Et1Vetting/create#cfd8d6: et_englandwales,et_scotland;w.eventId=95b9;w.postEventState=1837;r.taskId=8a40;r.name=2071;r.processCategories=d1c5
+    Et1Vetting/create#db4458: et_englandwales,et_scotland;w.eventId=9a70;w.postEventState=1837;r.taskId=8a40;r.name=2071;r.processCategories=d1c5
+    ReviewReferralAdmin/create#0d2a52: et_englandwales,et_scotland;w.eventId=63c0;w.referCaseTo=d888;r.taskId=217e;r.name=9dfa;r.processCategories=dae5
+    IssueJudgment/create#0b0ba9: et_englandwales,et_scotland;w.eventId=63c0;w.referCaseTo=d888;w.referralSubject=3e74;r.taskId=268a;r.name=7e75;r.processCategories=dcb2
+    ReviewReferralJudiciary/create#a3c4db: et_englandwales,et_scotland;w.eventId=63c0;w.referCaseTo=a23f;r.taskId=b77f;r.name=9dfa;r.processCategories=dae5
+    ReviewReferralLegalOps/create#f55921: et_englandwales,et_scotland;w.eventId=63c0;w.referCaseTo=aa53;r.taskId=6dc8;r.name=9dfa;r.processCategories=dae5
+    ReviewReferralLegalOps/create#0ce40d: et_englandwales,et_scotland;w.eventId=274b;w.updateReferCaseTo=aa53;r.taskId=6dc8;r.name=9dfa;r.processCategories=dae5
+    ReviewReferralAdmin/create#920043: et_englandwales;w.eventId=274b;w.updateReferCaseTo=d888;r.taskId=217e;r.name=9dfa;r.processCategories=dae5
+    ReviewReferralJudiciary/create#fe71bd: et_englandwales;w.eventId=274b;w.updateReferCaseTo=a23f;r.taskId=b77f;r.name=9dfa;r.processCategories=dae5
+    ReviewReferralLegalOps/create#a6e5c0: et_scotland;w.eventId=274b;w.updateReferCaseTo=d888;r.taskId=6dc8;r.name=9dfa;r.processCategories=dae5
+    ReviewReferralLegalOps/create#90b934: et_scotland;w.eventId=274b;w.updateReferCaseTo=a23f;r.taskId=6dc8;r.name=9dfa;r.processCategories=dae5
+    IssueJudgment/create#2503b4: et_englandwales,et_scotland;w.eventId=8559;w.isJudgmentOrOrder=55c5;r.taskId=268a;r.name=7e75;r.processCategories=dcb2
+    ET3Processing/create#7e811c: et_englandwales,et_scotland;w.eventId=c8bd;w.postEventState=8cdc;r.taskId=9ec2;r.name=c07a;r.processCategories=4f40
+    CompleteInitialConsideration/create#cd7b62: et_englandwales,et_scotland;w.eventId=0783;w.isECCReplyReceived=55c5;r.taskId=fe96;r.name=88d1;r.processCategories=4f40
+    ET3Processing/create#fa92fb: et_englandwales,et_scotland;w.eventId=0783;w.et3FormReceived=55c5;r.taskId=9ec2;r.name=c07a;r.processCategories=4f40
+    CompleteInitialConsideration/create#692b60: et_englandwales,et_scotland;w.eventId=53f5;w.postEventState=8cdc;w.isThereAnEt3Response=55c5;w.isECC=fbf6;r.taskId=fe96;r.name=88d1;r.processCategories=4f40
+    IssueInitialConsiderationDirections/create#6bbf83: et_englandwales,et_scotland;w.eventId=49bf;w.postEventState=8cdc;r.taskId=26a8;r.name=f0d6;r.processCategories=dcb2
+    IssueInitialConsiderationDirections/create#f30630: et_englandwales,et_scotland;w.eventId=e04c;w.postEventState=8cdc;r.taskId=26a8;r.name=f0d6;r.processCategories=dcb2
+    ContactTribunalWithAnApplication/create#a83526: et_englandwales,et_scotland;w.eventId=bed6;w.submissionReasonApplication=e420;r.taskId=4079;r.name=7306;r.processCategories=7194
+    ContactTribunalWithAnApplication/create#86cc76: et_englandwales,et_scotland;w.eventId=143b;w.applicationResponseFrom=5469;w.responseToApplicationType=84e2;r.taskId=4079;r.name=2976;r.processCategories=7194
+    ContactTribunalWithAnApplication/create#98c0ac: et_englandwales,et_scotland;w.eventId=ec7e;w.submissionReasonApplication=5b1c;r.taskId=4079;r.name=7306;r.processCategories=7194
+    ContactTribunalWithAnApplication/create#162599: et_englandwales,et_scotland;w.eventId=f3d0;w.applicationResponseFrom=c59c;w.responseToApplicationType=84e2;r.taskId=4079;r.name=2976;r.processCategories=7194
+    AmendClaimantDetails/create#35bcbf: et_englandwales,et_scotland;w.eventId=bed6;w.submissionReasonApplication=3471;r.taskId=057b;r.name=214d;r.processCategories=434c
+    AmendRespondentDetails/create#aa04fc: et_englandwales,et_scotland;w.eventId=143b;w.applicationResponseFrom=5469;w.responseToApplicationType=2672;r.taskId=417c;r.name=214d;r.processCategories=434c
+    AmendRespondentDetails/create#b0e633: et_englandwales,et_scotland;w.eventId=ec7e;w.submissionReasonApplication=2672;r.taskId=417c;r.name=214d;r.processCategories=434c
+    AmendClaimantDetails/create#b3f02c: et_englandwales,et_scotland;w.eventId=f3d0;w.applicationResponseFrom=c59c;w.responseToApplicationType=3471;r.taskId=057b;r.name=214d;r.processCategories=434c
+    WithdrawAllOrPartOfCase/create#817468: et_englandwales,et_scotland;w.eventId=bed6;w.submissionReasonApplication=e120;r.taskId=2656;r.name=9a5a;r.processCategories=434c
+    Et1Vetting/create#2df75d: et_englandwales,et_scotland;w.eventId=13c6;w.postEventState=1837;r.taskId=8a40;r.name=2071;r.processCategories=d1c5
+    ContactTribunalWithAnApplication/create#58d943: et_englandwales,et_scotland;w.eventId=b2ee;w.submissionReasonApplication=2ac6;r.taskId=4079;r.name=7306;r.processCategories=7194
+    AmendClaimantDetails/create#90bba8: et_englandwales;w.eventId=b2ee;w.submissionReasonApplication=3471;r.taskId=057b;r.name=214d;r.processCategories=7194
+    WithdrawAllOrPartOfCase/create#cbebc9: et_englandwales;w.eventId=b2ee;w.submissionReasonApplication=de48;r.taskId=2656;r.name=9a5a;r.processCategories=7194
+    AmendClaimantDetails/create#abc297: et_scotland;w.eventId=b2ee;w.submissionReasonApplication=3471;r.taskId=057b;r.name=214d;r.processCategories=434c
+    WithdrawAllOrPartOfCase/create#e7568a: et_scotland;w.eventId=b2ee;w.submissionReasonApplication=de48;r.taskId=2656;r.name=9a5a;r.processCategories=434c
+    ContactTribunalWithAnApplication/create#2d499d: et_englandwales,et_scotland;w.eventId=be49;w.applicationResponseFrom=70a4;w.responseToApplicationType=84e2;r.taskId=4079;r.name=2976;r.processCategories=7194
+    AmendRespondentDetails/create#f06a8c: et_englandwales;w.eventId=be49;w.applicationResponseFrom=70a4;w.responseToApplicationType=2672;r.taskId=417c;r.name=214d;r.processCategories=7194
+    AmendRespondentDetails/create#fafff1: et_scotland;w.eventId=be49;w.applicationResponseFrom=70a4;w.responseToApplicationType=2672;r.taskId=417c;r.name=214d;r.processCategories=434c
+    ET3Processing/create#928891: et_englandwales,et_scotland;w.eventId=5395;w.postEventState=8cdc;r.taskId=9ec2;r.name=c07a;r.processCategories=4f40
+    Et1Vetting/create#6e5b78: et_englandwales,et_scotland;w.eventId=94ef;w.postEventState=1837;r.taskId=8a40;r.name=2071;r.processCategories=d1c5
+    ContactTribunalWithAnApplication/create#2c064c: et_englandwales,et_scotland;w.eventId=96b5;w.submissionReasonApplication=5b1c;r.taskId=4079;r.name=7306;r.processCategories=7194
+    ContactTribunalWithAnApplication/create#9a8768: et_englandwales,et_scotland;w.eventId=59b9;w.applicationResponseFrom=c59c;w.responseToApplicationType=354f;r.taskId=4079;r.name=2976;r.processCategories=7194
+    AmendRespondentDetails/create#ed8c53: et_englandwales,et_scotland;w.eventId=96b5;w.submissionReasonApplication=2672;r.taskId=417c;r.name=214d;r.processCategories=7194
+    SubmitRespondentPseResponse/create#7c6c5a: et_englandwales,et_scotland;w.eventId=3871;r.taskId=3f8c;r.name=60dd;r.processCategories=7194
+    SubmitRespondentPseResponse/create#5eb0ba: et_englandwales,et_scotland;w.eventId=17ff;r.taskId=3f8c;r.name=60dd;r.processCategories=7194
+    SubmitClaimantPseResponse/create#bbbda6: et_englandwales,et_scotland;w.eventId=6afd;w.notificationResponseIsECCFromClaimant=fbf6;r.taskId=3d72;r.name=60dd;r.processCategories=7194
+    SubmitClaimantPseResponse/create#ca8743: et_englandwales,et_scotland;w.eventId=bcf9;w.notificationResponseIsECCFromClaimant=fbf6;r.taskId=3d72;r.name=60dd;r.processCategories=7194
+  configuration:
+    "*/caseName#c41842": et_englandwales,et_scotland;r.name=18d1;r.value=255a;r.canReconfigure=5ffe
+    "*/caseName#389bce": et_englandwales_multiple,et_scotland_multiple;r.name=18d1;r.value=749b;r.canReconfigure=5ffe
+    "*/region#d5b732": et_englandwales,et_englandwales_multiple;r.name=563b;r.value=f327;r.canReconfigure=5ffe
+    "*/location#c0b6b6": et_englandwales;r.name=8d49;r.value=2d6a;r.canReconfigure=5ffe
+    "*/location#0e9c47": et_englandwales_multiple;r.name=8d49;r.value=73c4;r.canReconfigure=5ffe
+    "*/locationName#248a52": et_englandwales,et_englandwales_multiple;r.name=a491;r.value=d660;r.canReconfigure=5ffe
+    "*/region#25f347": et_scotland,et_scotland_multiple;r.name=563b;r.value=5119;r.canReconfigure=5ffe
+    "*/location#e336c0": et_scotland,et_scotland_multiple;r.name=8d49;r.value=052a;r.canReconfigure=5ffe
+    "*/locationName#6aab9e": et_scotland,et_scotland_multiple;r.name=a491;r.value=cb46;r.canReconfigure=5ffe
+    "*/caseManagementCategory#d0dce3": et_englandwales,et_scotland;r.name=f018;r.value=1d21;r.canReconfigure=7cb6
+    "*/caseManagementCategory#c72dc0": et_englandwales_multiple,et_scotland_multiple;r.name=f018;r.value=40e2;r.canReconfigure=7cb6
+    ReviewRule21Referral/roleCategory#e67d8e: et_englandwales,et_scotland;r.name=bc96;r.value=37ed;r.canReconfigure=5ffe
+    ReviewRule21Referral/roleCategory#fb3470: et_scotland;r.name=bc96;r.value=37ed;r.canReconfigure=5ffe
+    ContactTribunalWithAnApplication/description#3a783b: et_englandwales;r.name=0288;r.value=8785;r.canReconfigure=5ffe
+    ContactTribunalWithAnApplication/description#cda221: et_scotland;r.name=0288;r.value=17ef;r.canReconfigure=5ffe
+    "*/calculatedDates#25ca6d": et_englandwales,et_scotland;r.name=a9c1;r.value=50ff;r.canReconfigure=7cb6
+    "*/dueDateTime#dbf378": et_englandwales,et_scotland;r.name=afec;r.value=fdd2;r.canReconfigure=7cb6
+    "*/dueDateOrigin#934451": et_englandwales,et_scotland;r.name=df64;r.value=320d;r.canReconfigure=7cb6
+    "*/calculatedDates#cf0d6f": et_englandwales_multiple,et_scotland_multiple;r.name=a9c1;r.value=50ff;r.canReconfigure=5ffe
+    "*/dueDateOrigin#4b469f": et_englandwales_multiple,et_scotland_multiple;r.name=df64;r.value=320d;r.canReconfigure=5ffe
+    "*/dueDateTime#24753b": et_englandwales_multiple,et_scotland_multiple;r.name=afec;r.value=fdd2;r.canReconfigure=5ffe
+    "*/dueDateNonWorkingCalendar#eaf98e": et_englandwales,et_englandwales_multiple;r.name=3d91;r.value=4b9f;r.canReconfigure=5ffe
+    "*/dueDateNonWorkingCalendar#8c155f": et_scotland,et_scotland_multiple;r.name=3d91;r.value=7ef7;r.canReconfigure=5ffe
+  permissions:
+    reviewSpecificAccessRequestLegalOps/specific-access-approver-legal-ops#51b867: et_englandwales;r.name=ac5d;r.value=1d2f;r.roleCategory=37ed;r.autoAssignable=7cb6
+    reviewSpecificAccessRequestLegalOps/specific-access-approver-legal-ops#1310ca: et_scotland;r.name=ac5d;r.value=1d2f;r.roleCategory=37ed;r.autoAssignable=7cb6
+  cancellation:
+    "!/Cancel-disposeCase#832271": et_englandwales,et_scotland;w.event=bb74;r.action=ef13;r.processCategories=d1c5
+    "!/Cancel-disposeCase#0c1bce": et_englandwales,et_scotland;w.event=bb74;r.action=ef13;r.processCategories=4f40
+    "!/Cancel-disposeCase#051065": et_englandwales,et_scotland;w.event=bb74;r.action=ef13;r.processCategories=dcb2
+    "!/Cancel-disposeCase#967034": et_englandwales,et_scotland;w.event=bb74;r.action=ef13;r.processCategories=0369
+    "!/Cancel-disposeCase#e54983": et_englandwales,et_scotland;w.event=bb74;r.action=ef13;r.processCategories=7194
+    "!/Cancel-disposeCase#34540a": et_englandwales,et_scotland;w.event=bb74;r.action=ef13;r.processCategories=434c
+    "!/Cancel-disposeCase#230864": et_englandwales,et_scotland;w.event=bb74;r.action=ef13;r.processCategories=21bc
+    "!/Cancel-close#803ca9": et_englandwales_multiple,et_scotland_multiple;w.event=09fe;r.action=ef13;r.processCategories=d1c5
+    "!/Cancel-close#7eabae": et_englandwales_multiple,et_scotland_multiple;w.event=09fe;r.action=ef13;r.processCategories=4f40

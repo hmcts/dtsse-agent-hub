@@ -39,6 +39,7 @@ defaults:
               field: caseData.respondent
             otherwise: Unknown
       reconfigure: true
+      note: 1v1 scenario - Concatenates Claimant's forename name with that of respondent to create the case name displayed on task lists
       only: [ et_englandwales, et_scotland ]
     - name: caseName
       value:
@@ -151,9 +152,11 @@ defaults:
         use:
           field: caseData.caseManagementCategory.selectedLabel
         otherwise: Employment
+      note: Sets the case category that is displayed in the task list UI
       only: [ et_englandwales, et_scotland ]
     - name: caseManagementCategory
       value: Employment
+      note: Sets the case category that is displayed in the task list UI
       only: [ et_englandwales_multiple, et_scotland_multiple ]
     - name: nextHearingDate
       value:
@@ -164,6 +167,7 @@ defaults:
           field: caseData.nextListedDate
         otherwise: ""
       reconfigure: true
+      note: Use nextListedDate until onboarded to HMC
     - name: calculatedDates
       value: nextHearingDate,dueDate,priorityDate
       only: [ et_englandwales, et_scotland ]
@@ -373,7 +377,9 @@ tasks:
     name: ET1 Vetting
     initialName: Et1 Vetting
     only: [ et_englandwales, et_scotland ]
-    workType: routine_work
+    workType:
+      value: routine_work
+      note: Name of the type of work - this is based on the filter. All Judgment tasks will be decision making work.
     roleCategory: ADMIN
     permissions: adminAndCtscWorker
     create:
@@ -474,7 +480,6 @@ tasks:
     reconfigure: [ workType, roleCategory, description ]
   - id: IssuePostHearingDirection
     name: Issue Post Hearing Direction
-    initialName: Issue Post Hearing Direction
     only: [ et_englandwales, et_scotland ]
     workType: hearing_work
     roleCategory: ADMIN
@@ -501,7 +506,6 @@ tasks:
     reconfigure: [ workType, roleCategory, dueDateIntervalDays, description ]
   - id: IssueJudgment
     name: Issue Judgment
-    initialName: Issue Judgment
     only: [ et_englandwales, et_scotland ]
     workType: hearing_work
     roleCategory: ADMIN
@@ -943,7 +947,6 @@ tasks:
     reconfigure: [ workType, roleCategory, title, description ]
   - id: IssueOrder
     name: Issue Order
-    initialName: Issue Order
     only: [ et_englandwales, et_scotland ]
     workType: hearing_work
     roleCategory: ADMIN
@@ -977,7 +980,6 @@ tasks:
     reconfigure: [ workType, roleCategory, dueDateIntervalDays, description ]
   - id: ListServeClaim
     name: List/ Serve Claim
-    initialName: List/ Serve Claim
     only: [ et_englandwales, et_scotland ]
     workType: routine_work
     roleCategory: ADMIN
@@ -1002,7 +1004,6 @@ tasks:
     reconfigure: [ workType, roleCategory, dueDateIntervalDays, description ]
   - id: SendEt1Notification
     name: Send ET1 Notification
-    initialName: Send ET1 Notification
     only: [ et_englandwales, et_scotland ]
     workType: routine_work
     roleCategory: ADMIN
@@ -1027,7 +1028,6 @@ tasks:
     reconfigure: [ workType, roleCategory, dueDateIntervalDays, description ]
   - id: Rule21
     name: Rule 22
-    initialName: Rule 22
     only: [ et_englandwales, et_scotland ]
     workType: routine_work
     roleCategory: ADMIN
@@ -1052,7 +1052,6 @@ tasks:
     reconfigure: [ workType, roleCategory, dueDateIntervalDays, description ]
   - id: ExpiredBfAction
     name: Expired Bf Action
-    initialName: Expired Bf Action
     only: [ et_englandwales, et_scotland ]
     workType: routine_work
     roleCategory: ADMIN
@@ -1079,7 +1078,6 @@ tasks:
     reconfigure: [ workType, roleCategory, dueDateIntervalDays, description ]
   - id: ET3Processing
     name: ET3 Processing
-    initialName: ET3 Processing
     only: [ et_englandwales, et_scotland ]
     workType: routine_work
     roleCategory: ADMIN
@@ -1109,7 +1107,6 @@ tasks:
     reconfigure: [ workType, roleCategory, dueDateIntervalDays, description ]
   - id: CompleteInitialConsideration
     name: Complete Initial Consideration
-    initialName: Complete Initial Consideration
     only: [ et_englandwales, et_scotland ]
     workType: decision_making_work
     roleCategory: JUDICIAL
@@ -1140,7 +1137,6 @@ tasks:
     reconfigure: [ workType, roleCategory, dueDateIntervalDays, description ]
   - id: ReviewRule21Referral
     name: Review Rule 22 Referral
-    initialName: Review Rule 22 Referral
     only: [ et_englandwales, et_scotland ]
     workType: routine_work
     roleCategory:
@@ -1167,7 +1163,6 @@ tasks:
     reconfigure: [ workType, roleCategory, dueDateIntervalDays, description ]
   - id: SendEt3Notification
     name: Send ET3 Notification
-    initialName: Send ET3 Notification
     only: [ et_englandwales, et_scotland ]
     workType: routine_work
     roleCategory: ADMIN
@@ -1195,7 +1190,6 @@ tasks:
     reconfigure: [ workType, roleCategory, dueDateIntervalDays, description ]
   - id: ReferEmployersContractClaim
     name: Refer Employer's Contract Claim
-    initialName: Refer Employer's Contract Claim
     only: [ et_englandwales, et_scotland ]
     workType: routine_work
     roleCategory: ADMIN
@@ -1223,7 +1217,6 @@ tasks:
     reconfigure: [ workType, roleCategory, dueDateIntervalDays, description ]
   - id: IssueInitialConsiderationDirections
     name: Issue Initial Consideration Directions
-    initialName: Issue Initial Consideration Directions
     only: [ et_englandwales, et_scotland ]
     workType: routine_work
     roleCategory: ADMIN
@@ -1259,7 +1252,6 @@ tasks:
     reconfigure: [ workType, roleCategory, dueDateIntervalDays, description ]
   - id: ListAHearing
     name: List A Hearing
-    initialName: List A Hearing
     only: [ et_englandwales, et_scotland ]
     workType: routine_work
     roleCategory: ADMIN
@@ -1296,7 +1288,6 @@ tasks:
     reconfigure: [ workType, roleCategory, dueDateIntervalDays, description ]
   - id: DraftAndSignJudgment
     name: Draft And Sign Judgment/Order
-    initialName: Draft And Sign Judgment/Order
     only: [ et_englandwales, et_scotland ]
     workType: decision_making_work
     roleCategory: JUDICIAL
@@ -1658,7 +1649,6 @@ tasks:
     reconfigure: [ workType, roleCategory, dueDateIntervalDays, description ]
   - id: ReviewECCResponse
     name: Reply to Employer's Contract Claim received
-    initialName: Reply to Employer's Contract Claim received
     only: [ et_englandwales, et_scotland ]
     workType: routine_work
     roleCategory: ADMIN
@@ -2167,7 +2157,9 @@ tasks:
     initialName:
       field: LATEST_REFERRAL_TASK_NAME
     only: [ et_englandwales_multiple, et_scotland_multiple ]
-    workType: routine_work
+    workType:
+      value: routine_work
+      note: Name of the type of work - this is based on the filter. All Judgment tasks will be decision making work.
     roleCategory: ADMIN
     permissions: adminAndCtscWorker
     create:

@@ -9,7 +9,7 @@ import { compileModel } from "./model-compile.ts";
 import { loadSpecFile, loadSpecOnly, orderPathBeside, parseModel, stringifyModel, stringifyOrdering } from "./model-io.ts";
 import { liftSpec } from "./model-lift.ts";
 import type { Row } from "./schema.ts";
-import { compareSpecs } from "./spec-diff.ts";
+import { compareSpecs, diffSpecs } from "./spec-diff.ts";
 import { stringifySpec } from "./spec-io.ts";
 
 const BASE = `
@@ -436,5 +436,150 @@ tasks: [{id: A, permissions: ${spec}}]
 
   it("should reject role fields the model does not use when parsing", () => {
     expect(() => parseModel(BASE.replace("roles: {admin: {}}", "roles: {admin: {type: CASE}}"))).toThrow();
+  });
+});
+
+const cfgRow = (when: Record<string, unknown>, returns: Record<string, unknown>, only?: string[], description?: string): Row =>
+  ({
+    ...(description === undefined ? {} : { description }),
+    ...(only ? { only } : {}),
+    when,
+    returns
+  }) as Row;
+
+const VARIANT_SPEC = {
+  version: 1 as const,
+  service: { slug: "x" },
+  caseTypes: [{ id: "ct_a" }, { id: "ct_b" }, { id: "ct_c" }],
+  decisions: {
+    configuration: {
+      name: "c",
+      hitPolicy: "COLLECT" as const,
+      inputs: [
+        { key: "caseData", typeRef: "string" },
+        { key: "taskType", typeRef: "string" }
+      ],
+      outputs: [
+        { name: "name", typeRef: "string" },
+        { name: "value", typeRef: "string" },
+        { name: "canReconfigure", typeRef: "boolean" }
+      ],
+      rows: [
+        cfgRow({ taskType: { in: ["A"] } }, { name: "title", value: "x", canReconfigure: false }, ["ct_a"]),
+        cfgRow({ taskType: { in: ["M"] } }, { name: "title", value: "m", canReconfigure: false }, ["ct_a", "ct_b"]),
+        cfgRow({ taskType: { in: ["A"] } }, { name: "title", value: "y", canReconfigure: false }, ["ct_b"]),
+        cfgRow({ taskType: { in: ["Z"] } }, { name: "title", value: "z", canReconfigure: false }, ["ct_a", "ct_b"], "the last one")
+      ]
+    }
+  }
+};
+
+describe("round five", () => {
+  it("should match a stale token to the closest entry when one variant is deleted and another edited", () => {
+    const { model, ordering, report } = liftSpec(VARIANT_SPEC);
+    expect(report.differences).toEqual([]);
+    const a = model.tasks.find((t) => t.id === "A") as Model["tasks"][number];
+    const edited = { ...model, tasks: model.tasks.map((t) => (t === a ? { ...t, title: { value: "y2", only: ["ct_b"] } } : t)) } as Model;
+    const rows = configRows(edited, ordering).map((r) => r.returns?.value);
+    expect(rows).toEqual(["m", "y2", "z"]);
+  });
+
+  it("should give a trigger the task type's name when it has no initial name, and keep an explicit null", () => {
+    const model = parseModel(`
+kind: wa-model
+version: 1
+service: {slug: demo}
+caseTypes: [{id: ct_a}]
+tasks:
+  - id: T
+    name: The task
+    create: [{event: e1}, {event: e2, initialName: Other}, {event: e3, initialName: null}]
+`);
+    const rows = compileModel(model).decisions.initiation?.rows ?? [];
+    expect(rows.map((r) => r.returns?.name)).toEqual(["The task", "Other", null]);
+  });
+
+  it("should leave initialName out when the task's creation name equals its name, and keep a different one", () => {
+    const { model } = liftSpec(
+      compileModel(
+        parseModel(`
+kind: wa-model
+version: 1
+service: {slug: demo}
+caseTypes: [{id: ct_a}]
+tasks:
+  - {id: Same, name: Same, initialName: Same, create: [{event: e}]}
+  - {id: Other, name: Other, initialName: Created, create: [{event: f}]}
+`)
+      )
+    );
+    expect(model.tasks.map((t) => t.initialName)).toEqual([undefined, "Created"]);
+  });
+
+  it("should keep a trigger with no name as a row when the task type has a name", () => {
+    const spec = structuredClone(NULL_NAME_SPEC);
+    const decisions = spec.decisions as Record<string, unknown>;
+    decisions["task-types"] = {
+      name: "t",
+      hitPolicy: "COLLECT",
+      inputs: [{ key: "input", typeRef: "string" }],
+      outputs: [
+        { name: "taskTypeId", typeRef: "string" },
+        { name: "taskTypeName", typeRef: "string" }
+      ],
+      rows: [{ returns: { taskTypeId: "T", taskTypeName: "Task" } }]
+    };
+    spec.decisions.initiation.rows[0] = { when: { eventId: { in: ["e1"] } }, returns: { taskId: "T" } } as never;
+    const lifted = liftSpec(spec as never);
+    expect(lifted.report.residue).toEqual([{ kind: "initiation", row: 1, reason: "it creates a task with no name, but the task type has one" }]);
+    expect(lifted.report.differences).toEqual([]);
+  });
+
+  it("should keep a row's description in the model, on the entry heading the row, and not in the ordering", () => {
+    const { model, ordering, report } = liftSpec(VARIANT_SPEC);
+    expect(report.differences).toEqual([]);
+    const z = model.tasks.find((t) => t.id === "Z") as Model["tasks"][number];
+    expect(z.title).toEqual({ value: "z", note: "the last one" });
+    expect(ordering.rows.configuration?.every((row) => typeof row === "string")).toBe(true);
+  });
+
+  it("should state a description in the ordering when the entry heading the row is also first in a row without one", () => {
+    const spec = structuredClone(VARIANT_SPEC);
+    spec.decisions.configuration.rows = [
+      cfgRow({ taskType: { in: ["A"] } }, { name: "title", value: "x", canReconfigure: false }, ["ct_a"], "first"),
+      cfgRow({ taskType: { in: ["A"] } }, { name: "title", value: "x", canReconfigure: false }, ["ct_b"])
+    ] as never;
+    const { ordering, report } = liftSpec(spec);
+    expect(report.differences).toEqual([]);
+    expect(ordering.rows.configuration?.some((row) => typeof row === "object" && row.description === null)).toBe(true);
+  });
+
+  it("should compare rows as sets only where the hit policy allows when diffing without a flag", () => {
+    const a = compileModel(parseModel(BASE));
+    const b = structuredClone(a);
+    for (const spec of [a, b]) {
+      (spec.decisions.cancellation as { hitPolicy: string }).hitPolicy = "UNIQUE";
+    }
+    b.decisions.cancellation?.rows.reverse();
+    expect(compareSpecs(a, b).total).toBe(0);
+    expect(compareSpecs(a, b, { strict: true }).total).toBeGreaterThan(0);
+    expect(diffSpecs(a, b).length).toBeGreaterThan(0);
+    (a.decisions.cancellation as { hitPolicy: string }).hitPolicy = "COLLECT";
+    (b.decisions.cancellation as { hitPolicy: string }).hitPolicy = "COLLECT";
+    expect(compareSpecs(a, b).total).toBeGreaterThan(0);
+  });
+
+  it("should not take a name inherited from Object.prototype for a profile when validating", () => {
+    const text = BASE.replace("workType: w1", "workType: w1\n    permissions: constructor");
+    expect(() => parseModel(text)).toThrow("unknown permission profile constructor");
+  });
+
+  it("should export the model entry points and not its internals when imported from the package index", async () => {
+    const api = await import("./index.ts");
+    expect(typeof api.liftSpec).toBe("function");
+    expect(typeof api.compileModel).toBe("function");
+    expect(typeof api.loadSpecFile).toBe("function");
+    expect("collectAtoms" in api).toBe(false);
+    expect("attributesOf" in api).toBe(false);
   });
 });

@@ -75,11 +75,15 @@ describe("cli model commands", () => {
 });
 
 describe("cli model options", () => {
-  it("should record the layout given to lift in the model, relative to the model file, and refuse a missing one", () => {
+  it("should record the layout given to lift in the model, relative to the model file, when lifting with --layout", () => {
     const { dir } = imported();
     mkdirSync(join(dir, "m"));
     expect(run("lift", join(dir, "spec.yaml"), "-o", join(dir, "m", "model.yaml"), "--layout", join(dir, "spec.layout.yaml")).status).toBe(0);
     expect(readFileSync(join(dir, "m", "model.yaml"), "utf8")).toContain("layout: ../spec.layout.yaml");
+  });
+
+  it("should refuse to lift and exit 2 when the layout given with --layout does not exist", () => {
+    const { dir } = imported();
     const missing = run("lift", join(dir, "spec.yaml"), "-o", join(dir, "n.yaml"), "--layout", join(dir, "none.yaml"));
     expect(missing.status).toBe(2);
     expect(missing.stderr).toContain("does not exist");

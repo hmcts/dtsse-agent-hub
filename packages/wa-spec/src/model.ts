@@ -43,6 +43,8 @@ export const ValEntry = z.strictObject({
   value: Expr,
   only: z.array(CaseTypeId).optional(),
   reconfigure: z.boolean().optional(),
+  /** The description of the table row this entry heads. */
+  note: z.string().optional(),
   overrides: z.record(CaseTypeId, Expr).optional()
 });
 export type ValEntry = z.infer<typeof ValEntry>;
@@ -107,6 +109,8 @@ export const Trigger = z.strictObject({
   delay: Expr.optional(),
   /** The category cancellation rules address, where this trigger differs from the task's `cancelCategory`. */
   cancelCategory: Expr.optional(),
+  /** The description of the table row this trigger heads. */
+  note: z.string().optional(),
   only: z.array(CaseTypeId).optional(),
   overrides: z.record(CaseTypeId, z.strictObject({ event: FriendlyCell.optional(), postState: FriendlyCell.optional() }).nullable()).optional()
 });
@@ -115,6 +119,8 @@ export type Trigger = z.infer<typeof Trigger>;
 export const Completion = z.strictObject({
   event: FriendlyCell,
   mode: Expr.optional(),
+  /** The description of the table row this completion heads. */
+  note: z.string().optional(),
   only: z.array(CaseTypeId).optional(),
   overrides: z.record(CaseTypeId, z.strictObject({ event: FriendlyCell.optional(), mode: Expr.optional() }).nullable()).optional()
 });
@@ -150,7 +156,7 @@ export const Task = z.strictObject({
   id: Name,
   /** The name in the task-type list. Case type variants use entries. */
   name: Val.optional(),
-  /** The name the task is created with, where it differs from `name`. */
+  /** The name the task is created with, where it differs from `name`. A trigger without one uses `name`. */
   initialName: Expr.optional(),
   only: z.array(CaseTypeId).optional(),
   workType: Val.optional(),
@@ -181,6 +187,7 @@ export const DefaultAttribute = z.strictObject({
   name: Name,
   value: Expr,
   reconfigure: z.boolean().optional(),
+  note: z.string().optional(),
   only: z.array(CaseTypeId).optional()
 });
 export type DefaultAttribute = z.infer<typeof DefaultAttribute>;
@@ -235,16 +242,23 @@ export type Model = z.infer<typeof Model>;
  * default, `!/<id>` for a cancellation rule (its position when it has no `id`) and `~<n>` for the nth row of the model's
  * `tables` residue. A slot with several entries adds `#<hash>` of the entry's content and case types, and `.2`, `.3` for
  * identical ones. A reference whose entry has since changed stands for the one entry of that slot no reference names. A row
- * ends in `@<case types>` where it covers fewer case types than its entries.
+ * ends in `@<case types>` where it covers fewer case types than its entries. A row has the description of its first
+ * entry's `note`; an object row states another (`null` for none).
  */
-export const OrderRow = z.union([z.string(), z.strictObject({ row: z.string(), description: z.string() })]);
+export const OrderRow = z.union([z.string(), z.strictObject({ row: z.string(), description: z.string().nullable() })]);
 export type OrderRow = z.infer<typeof OrderRow>;
 
 export const Ordering = z.strictObject({
   version: z.literal(1),
-  rows: z.partialRecord(z.enum(KINDS), z.array(OrderRow))
+  rows: z.partialRecord(z.enum(KINDS), z.array(OrderRow)),
+  /** What each hashed reference's entry looked like, so an edited entry is matched to its reference by closeness. */
+  fingerprints: z.partialRecord(z.enum(KINDS), z.record(z.string(), z.string())).optional()
 });
 export type Ordering = z.infer<typeof Ordering>;
+
+/** The entry of a user-keyed record, never one inherited from `Object.prototype`. */
+export const ownEntry = <T>(record: Record<string, T> | undefined, key: string | undefined): T | undefined =>
+  record && key !== undefined && Object.hasOwn(record, key) ? record[key] : undefined;
 
 /** A task's configuration attributes in the order they are listed and compiled, by DMN attribute name. */
 export function attributesOf(task: Task): Array<[string, Val]> {
@@ -357,7 +371,7 @@ export function validateModel(model: Model): string[] {
     const specs = permissionSpecs(task);
     const granted = specs.map((spec) => ({
       cases: spec.only ?? own,
-      roles: new Set([...Object.keys(profiles[spec.profile ?? ""] ?? {}).filter((r) => !spec.remove?.includes(r)), ...Object.keys(spec.add ?? {})])
+      roles: new Set([...Object.keys(ownEntry(profiles, spec.profile) ?? {}).filter((r) => !spec.remove?.includes(r)), ...Object.keys(spec.add ?? {})])
     }));
     for (const [i, a] of granted.entries()) {
       for (const b of granted.slice(i + 1)) {
@@ -371,7 +385,7 @@ export function validateModel(model: Model): string[] {
     }
     for (const spec of specs) {
       scoped(`${where} permissions`, spec.only);
-      const held = new Set(Object.keys(profiles[spec.profile ?? ""] ?? {}));
+      const held = new Set(Object.keys(ownEntry(profiles, spec.profile) ?? {}));
       for (const r of Object.keys(spec.override ?? {})) {
         if (spec.remove?.includes(r)) {
           problems.push(`${where}: overrides ${r}, which it also removes`);
@@ -382,17 +396,16 @@ export function validateModel(model: Model): string[] {
           problems.push(`${where}: adds ${r}, which profile ${spec.profile} already grants (override it, or remove and add it)`);
         }
       }
-      if (spec.profile !== undefined && !(spec.profile in profiles)) {
+      if (spec.profile !== undefined && !Object.hasOwn(profiles, spec.profile)) {
         problems.push(`${where}: unknown permission profile ${spec.profile}`);
       }
-      const inherited = new Set(Object.keys(profiles[spec.profile ?? ""] ?? {}));
       for (const r of spec.remove ?? []) {
-        if (!inherited.has(r)) {
+        if (!held.has(r)) {
           problems.push(`${where}: removes ${r}, which profile ${spec.profile ?? "(none)"} does not grant`);
         }
       }
       for (const r of Object.keys(spec.override ?? {})) {
-        if (!inherited.has(r)) {
+        if (!held.has(r)) {
           problems.push(`${where}: overrides ${r}, which profile ${spec.profile ?? "(none)"} does not grant`);
         }
       }
