@@ -8,7 +8,8 @@ const TASK_COLUMN: Record<Kind, { side: "when" | "returns"; name: string }> = {
   permissions: { side: "when", name: "taskType" },
   completion: { side: "returns", name: "taskType" },
   cancellation: { side: "returns", name: "processCategories" },
-  "task-types": { side: "returns", name: "taskTypeId" }
+  "task-types": { side: "returns", name: "taskTypeId" },
+  "allowed-days": { side: "when", name: "taskId" }
 };
 
 export interface TaskRows {
@@ -20,6 +21,10 @@ export interface TaskRows {
 type Match = "yes" | "maybe" | "no";
 
 /** Whether a cancellation row's process categories include one the task is created with; an empty cell is every category. */
+/** Whether a structured value can give a result the spec does not spell out, such as a field read, in some branch. */
+const canBeRead = (value: Expr | undefined): boolean =>
+  typeof value === "object" && value !== null && ("if" in value ? canBeRead(value.use) || canBeRead(value.otherwise) : true);
+
 const cancels = (value: Expr | undefined, categories: Set<string>): Match => {
   if (value === undefined) {
     return "yes";
@@ -27,7 +32,11 @@ const cancels = (value: Expr | undefined, categories: Set<string>): Match => {
   if (typeof value === "string") {
     return listed(value).some((c) => categories.has(c)) ? "yes" : "no";
   }
-  return typeof value === "object" && value !== null && "feel" in value ? "maybe" : categoriesOf(value).some((c) => categories.has(c)) ? "maybe" : "no";
+  return typeof value === "object" && value !== null && "feel" in value
+    ? "maybe"
+    : categoriesOf(value).some((c) => categories.has(c)) || canBeRead(value)
+      ? "maybe"
+      : "no";
 };
 
 /** Every string in a structured expression, which is where a task id or process category would be written. */
@@ -55,7 +64,7 @@ const mentions = (value: Expr | undefined, taskId: string): Match => {
   if (typeof value === "object" && value !== null && "feel" in value) {
     return value.feel.includes(`"${taskId}"`) ? "yes" : "maybe";
   }
-  return literalsOf(value).includes(taskId) ? "maybe" : "no";
+  return literalsOf(value).includes(taskId) || canBeRead(value) ? "maybe" : "no";
 };
 
 /** Whether an input cell selects the task: an empty cell selects every task, and a FEEL or comparison cell cannot be decided here. */

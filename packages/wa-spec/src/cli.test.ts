@@ -157,3 +157,35 @@ describe("cli generate and stale files", () => {
     expect(result.stderr).toBe("");
   });
 });
+
+describe("cli errors name the file", () => {
+  it("should name the spec and the field when a spec fails its schema", () => {
+    const { dir } = workspace();
+    writeFileSync(join(dir, "bad.yaml"), "version: 1\nservice: {}\ncaseTypes: []\ndecisions: {}\n");
+    const result = run("generate", join(dir, "bad.yaml"), "-o", join(dir, "out"));
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("bad.yaml");
+    expect(result.stderr).toContain("service.slug");
+    expect(result.stderr).not.toContain('"code"');
+  });
+
+  it("should name the layout when it fails its schema", () => {
+    const { dir, input } = workspace();
+    run("import", input, "-o", join(dir, "spec.yaml"));
+    writeFileSync(
+      join(dir, "spec.layout.yaml"),
+      "version: 1\nfiles:\n  completion/ct_a:\n    id: x\n    decisions:\n      table:\n        inputs: [[null, a]]\n"
+    );
+    const result = run("generate", join(dir, "spec.yaml"), "-o", join(dir, "out"));
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("spec.layout.yaml");
+    expect(result.stderr).not.toContain('"code"');
+  });
+
+  it("should exit 2 when a path to compare does not exist", () => {
+    const { dir } = workspace();
+    const result = run("diff", join(dir, "nothing"), join(dir, "dmn"));
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("does not exist");
+  });
+});

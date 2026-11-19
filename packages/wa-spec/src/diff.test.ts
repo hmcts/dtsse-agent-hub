@@ -130,13 +130,13 @@ describe("diffPaths", () => {
 
   it("should list files present on one side only and compare the rest when two directories are given", () => {
     const { a, b } = dirs();
-    write(a, "wa-task-one.dmn", base());
-    write(a, "wa-task-gone.dmn", base());
-    write(b, "wa-task-one.dmn", base());
-    write(b, "wa-task-new.dmn", base());
-    expect(diffPaths({ dir: a }, { dir: b }).map((d) => `${d.file}: ${d.message}`)).toEqual([
-      "wa-task-gone.dmn: file only in first",
-      "wa-task-new.dmn: file only in second"
+    write(a, "wa-task-completion-demo-one.dmn", base());
+    write(a, "wa-task-completion-demo-gone.dmn", base());
+    write(b, "wa-task-completion-demo-one.dmn", base());
+    write(b, "wa-task-completion-demo-new.dmn", base());
+    expect(diffPaths(a, b).map((d) => `${d.file}: ${d.message}`)).toEqual([
+      "wa-task-completion-demo-gone.dmn: file only in first",
+      "wa-task-completion-demo-new.dmn: file only in second"
     ]);
   });
 
@@ -144,10 +144,10 @@ describe("diffPaths", () => {
     const { a, b } = dirs();
     const changed = clone(base());
     table(changed).rules.pop();
-    write(a, "x.dmn", base());
-    write(b, "y.dmn", changed);
-    const differences = diffPaths({ dir: a, file: "x.dmn" }, { dir: b, file: "y.dmn" });
-    expect(differences.map((d) => d.file)).toEqual(["x.dmn", "x.dmn"]);
+    write(a, "wa-task-completion-demo-x.dmn", base());
+    write(b, "wa-task-completion-demo-y.dmn", changed);
+    const differences = diffPaths(join(a, "wa-task-completion-demo-x.dmn"), join(b, "wa-task-completion-demo-y.dmn"));
+    expect(differences.map((d) => d.file)).toEqual(["wa-task-completion-demo-x.dmn", "wa-task-completion-demo-x.dmn"]);
     expect(differences.map((d) => d.message)[0]).toBe("rule count differs: 2 vs 1");
   });
 });
@@ -184,11 +184,7 @@ describe("diffPaths constructs the model does not carry", () => {
       (xml: string) => xml.replace("<variable", "<description>about</description><variable"),
       "element <description> in <decision>"
     ],
-    [
-      "an expression language on an entry",
-      (xml: string) => xml.replace("<inputEntry ", '<inputEntry expressionLanguage="juel" '),
-      "attribute expressionLanguage on <inputEntry>"
-    ],
+    ["an unknown attribute on an entry", (xml: string) => xml.replace("<inputEntry ", '<inputEntry foo="bar" '), "attribute foo on <inputEntry>"],
     [
       "a version tag on a decision",
       (xml: string) => xml.replace("<decision ", '<decision camunda:versionTag="1" '),
@@ -202,11 +198,11 @@ describe("diffPaths constructs the model does not carry", () => {
   ])("should report %s when only one side has it", (_what, change, construct) => {
     const [a, b] = [dir(), dir()];
     const xml = sampleDmn("ct_a");
-    put(a, "wa-task-x.dmn", change(xml));
-    put(b, "wa-task-x.dmn", xml);
-    const messages = diffPaths({ dir: a }, { dir: b }).map((d) => d.message);
+    put(a, "wa-task-completion-demo-x.dmn", change(xml));
+    put(b, "wa-task-completion-demo-x.dmn", xml);
+    const messages = diffPaths(a, b).map((d) => d.message);
     expect(messages).toEqual([expect.stringContaining(`${construct} occurs`)]);
-    expect(diffPaths({ dir: a }, { dir: a })).toEqual([]);
+    expect(diffPaths(a, a)).toEqual([]);
   });
 });
 

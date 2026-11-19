@@ -166,3 +166,35 @@ describe("taskRows comma-separated categories", () => {
     ).toEqual([1]);
   });
 });
+
+describe("taskRows values read from fields", () => {
+  it("should mark a row as may apply when its task id can come from a field read in some branch", () => {
+    const dynamic = SpecSchema.parse({
+      version: 1,
+      service: { slug: "demo" },
+      caseTypes: [{ id: "ct_a" }],
+      decisions: {
+        initiation: {
+          name: "I",
+          hitPolicy: "COLLECT",
+          inputs: [],
+          outputs: [{ name: "taskId" }, { name: "processCategories" }],
+          rows: [
+            { returns: { taskId: { if: { field: "a", op: "exists" }, use: "other", otherwise: { field: "taskName" } }, processCategories: "catX" } },
+            { returns: { taskId: { if: { field: "a", op: "exists" }, use: "other", otherwise: "another" } } }
+          ]
+        },
+        cancellation: {
+          name: "C",
+          hitPolicy: "COLLECT",
+          inputs: [],
+          outputs: [{ name: "processCategories" }],
+          rows: [{ returns: { processCategories: { field: "category" } } }]
+        }
+      }
+    });
+    const found = taskRows(dynamic, "T1");
+    expect(found.find((f) => f.kind === "initiation")?.rows.map((r) => [r.index, r.mayApply])).toEqual([[1, true]]);
+    expect(found.find((f) => f.kind === "cancellation")?.rows.map((r) => [r.index, r.mayApply])).toEqual([[1, true]]);
+  });
+});

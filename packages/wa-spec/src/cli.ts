@@ -1,8 +1,9 @@
-import { basename, dirname, join } from "node:path";
+import { join } from "node:path";
 import { parseArgs } from "node:util";
+import { ZodError } from "zod";
 import { diffPaths, renderDifferences } from "./diff.ts";
-import { exists, isDirectory, listDir, readText, writeText } from "./file-io.ts";
-import { isWaTaskDmn, parseFileName } from "./file-names.ts";
+import { exists, listDir, readText, writeText } from "./file-io.ts";
+import { parseFileName } from "./file-names.ts";
 import { generateAll } from "./generator.ts";
 import { importDmns, renderReport } from "./importer.ts";
 import { layoutPathFor, parseLayout, parseSpec, stringifyLayout, stringifySpec } from "./spec-io.ts";
@@ -18,6 +19,18 @@ const USAGE = `wa-spec: Work Allocation configuration spec
                                                  a file of the same name; exits 1 when they differ
   wa-spec show <spec.yaml> <taskId>              the rows of every kind that concern one task
 `;
+
+/** Reads and parses a file the tools wrote, naming the file and, for a schema failure, each field at fault. */
+function load<T>(path: string, parse: (text: string) => T): T {
+  try {
+    return parse(readText(path));
+  } catch (error) {
+    if (error instanceof ZodError) {
+      throw new Error(`${path} is not valid:\n${error.issues.map((issue) => `  ${issue.path.join(".")}: ${issue.message}`).join("\n")}`);
+    }
+    throw new Error(`${path}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
 
 function fail(message: string): never {
   process.stderr.write(`${message}\n`);
@@ -44,7 +57,7 @@ function main(argv: string[]): number {
       fail(USAGE);
     }
     const files = listDir(dir)
-      .filter(isWaTaskDmn)
+      .filter((name) => name.endsWith(".dmn"))
       .map((name) => ({ name, xml: readText(join(dir, name)) }));
     const { spec, layout, report } = importDmns(files, {
       jurisdiction: values.jurisdiction,
@@ -67,8 +80,8 @@ function main(argv: string[]): number {
       fail(USAGE);
     }
     const layoutPath = layoutPathFor(specPath);
-    const spec = parseSpec(readText(specPath));
-    const files = generateAll(spec, exists(layoutPath) ? parseLayout(readText(layoutPath)) : undefined);
+    const spec = load(specPath, parseSpec);
+    const files = generateAll(spec, exists(layoutPath) ? load(layoutPath, parseLayout) : undefined);
     for (const file of files) {
       writeText(join(values.output, file.fileName), file.xml);
     }
@@ -88,21 +101,7 @@ function main(argv: string[]): number {
     if (!a || !b) {
       fail(USAGE);
     }
-    const side = (path: string, counterpart: string) => {
-      if (!isDirectory(path)) {
-        return { dir: dirname(path), file: basename(path) };
-      }
-      return isDirectory(counterpart) ? { dir: path } : { dir: path, file: basename(counterpart) };
-    };
-    for (const [file, other] of [
-      [a, b],
-      [b, a]
-    ] as const) {
-      if (!isDirectory(file) && isDirectory(other) && !exists(join(other, basename(file)))) {
-        fail(`${other} has no file named ${basename(file)} to compare ${file} with`);
-      }
-    }
-    const differences = diffPaths(side(a, b), side(b, a), { ignoreRuleOrder: values["ignore-rule-order"] });
+    const differences = diffPaths(a, b, { ignoreRuleOrder: values["ignore-rule-order"] });
     if (differences.length === 0) {
       process.stdout.write("no differences\n");
       return 0;
@@ -115,7 +114,7 @@ function main(argv: string[]): number {
     if (!specPath || !taskId) {
       fail(USAGE);
     }
-    process.stdout.write(`${renderTaskRows(taskRows(parseSpec(readText(specPath)), taskId))}\n`);
+    process.stdout.write(`${renderTaskRows(taskRows(load(specPath, parseSpec), taskId))}\n`);
     return 0;
   }
   process.stdout.write(USAGE);

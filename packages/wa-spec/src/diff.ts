@@ -1,7 +1,7 @@
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { type DmnDecision, type DmnDocument, type DmnInput, type DmnOutput, type DmnRule, type Inspection, readDmn } from "./dmn-model.ts";
 import { canonicalCell, canonicalExpr } from "./feel.ts";
-import { listDir, readText } from "./file-io.ts";
+import { exists, isDirectory, listDir, readText } from "./file-io.ts";
 import { isWaTaskDmn } from "./file-names.ts";
 import { align, byCodePoint } from "./merge.ts";
 
@@ -32,7 +32,13 @@ export function ruleOrderMatters(hitPolicy: string, aggregation: string | undefi
 }
 
 function ruleSignature(rule: DmnRule): string {
-  return JSON.stringify([rule.description || null, rule.inputs.map(canonicalCell), rule.outputs.map(canonicalExpr)]);
+  return JSON.stringify([
+    rule.description || null,
+    rule.inputs.map(canonicalCell),
+    rule.outputs.map(canonicalExpr),
+    (rule.inputLanguages ?? []).join("|"),
+    (rule.outputLanguages ?? []).join("|")
+  ]);
 }
 
 function describeRule(rule: DmnRule, index: number): string {
@@ -210,8 +216,34 @@ export function diffInspections(file: string, a: Inspection, b: Inspection): Dif
 
 const dmnFiles = (dir: string): string[] => listDir(dir).filter(isWaTaskDmn).sort(byCodePoint);
 
-/** Compares two files, or two directories file by file by name. */
-export function diffPaths(a: { dir: string; file?: string }, b: { dir: string; file?: string }, options: DiffOptions = {}): Difference[] {
+/**
+ * Compares two files, two directories file by file by name, or a file with the file of the same name in a directory. A path that
+ * is missing, or a directory without that file, is an error.
+ */
+export function diffPaths(pathA: string, pathB: string, options: DiffOptions = {}): Difference[] {
+  for (const path of [pathA, pathB]) {
+    if (!exists(path)) {
+      throw new Error(`${path} does not exist`);
+    }
+  }
+  for (const [file, other] of [
+    [pathA, pathB],
+    [pathB, pathA]
+  ] as const) {
+    if (!isDirectory(file) && isDirectory(other) && !exists(join(other, basename(file)))) {
+      throw new Error(`${other} has no file named ${basename(file)} to compare ${file} with`);
+    }
+  }
+  const side = (path: string, counterpart: string): { dir: string; file?: string } => {
+    if (!isDirectory(path)) {
+      return { dir: dirname(path), file: basename(path) };
+    }
+    return isDirectory(counterpart) ? { dir: path } : { dir: path, file: basename(counterpart) };
+  };
+  return diffSides(side(pathA, pathB), side(pathB, pathA), options);
+}
+
+function diffSides(a: { dir: string; file?: string }, b: { dir: string; file?: string }, options: DiffOptions): Difference[] {
   const out: Difference[] = [];
   const names = a.file && b.file ? [[a.file, b.file]] : [];
   if (!a.file || !b.file) {
