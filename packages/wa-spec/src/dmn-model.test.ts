@@ -260,3 +260,15 @@ describe("roots and empty values", () => {
     expect(readDmn(empty('<inputValues id="v"/>')).document.decisions[0]?.table?.inputs[0]).toMatchObject({ allowedValues: "", allowedValuesId: "v" });
   });
 });
+
+describe("attribute scanning", () => {
+  it("should normalise a tab in an attribute value that holds a greater-than sign when the tag has one", () => {
+    const xml = sampleDmn("ct_a").replace('label="Event ID"', 'label="a > b\tc"');
+    expect(readDmn(xml).document.decisions[0]?.table?.inputs[0]?.label).toBe("a > b c");
+  });
+
+  it("should leave tabs in comments and CDATA alone when the file has them", () => {
+    const xml = sampleDmn("ct_a").replace("<decision ", "<!-- a\t> b --><decision ");
+    expect(readDmn(xml).document.decisions).toHaveLength(2);
+  });
+});

@@ -2,7 +2,7 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { diffPaths, renderDifferences } from "./diff.ts";
 import { exists, listDir, readText, writeText } from "./file-io.ts";
-import { parseFileName } from "./file-names.ts";
+import { decisionKeyOf, parseFileName } from "./file-names.ts";
 import { generateAll } from "./generator.ts";
 import { importDmns, renderReport } from "./importer.ts";
 import { explained, layoutPathOf, loadSpecFile, loadSpecOnly, orderPathBeside, stringifyModel, stringifyOrdering } from "./model-io.ts";
@@ -85,9 +85,10 @@ function main(argv: string[]): number {
       writeText(join(values.output, file.fileName), file.xml);
     }
     const made = new Set(files.map((file) => file.fileName));
-    const stale = (exists(values.output) ? listTaskFiles(values.output) : []).filter((file) => {
+    const madeKeys = new Set(files.map((file) => decisionKeyOf(spec.service.slug, file.kind, file.caseType)));
+    const stale = (exists(values.output) ? listTaskFiles(values.output, made) : []).filter((file) => {
       const parsed = file.key === undefined ? undefined : parseFileName(`${file.key}.dmn`);
-      return !made.has(file.name) && parsed?.service === spec.service.slug && !files.some((f) => f.kind === parsed.kind && f.caseType === parsed.caseType);
+      return file.key !== undefined && (madeKeys.has(file.key) || parsed?.service === spec.service.slug);
     });
     if (stale.length > 0) {
       process.stderr.write(`left in place, as the spec does not generate them: ${stale.map((file) => file.name).join(", ")}\n`);

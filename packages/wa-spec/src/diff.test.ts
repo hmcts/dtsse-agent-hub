@@ -317,3 +317,14 @@ describe("diffPaths pairs files by task key", () => {
     expect(() => diffPaths(a, b)).toThrow(/^broken\.dmn: not a DMN file/);
   });
 });
+
+describe("diffDocuments table ids", () => {
+  it("should report a different id when only the second side's id is a task key", () => {
+    const a = base();
+    const b = clone(a);
+    a.decisions[0]!.id = "my_table";
+    expect(diffDocuments("f", a, b).map((d) => d.message)).toEqual(["decision id differs: my_table vs wa-task-completion-demo-ct_a"]);
+    b.decisions[0]!.id = "also_not_a_key";
+    expect(diffDocuments("f", a, b)).toEqual([]);
+  });
+});

@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { parseDmn } from "./__fixtures__/dmn.ts";
 import { diffDocuments } from "./diff.ts";
 import { generateAll } from "./generator.ts";
-import { importDmns } from "./importer.ts";
+import { importDmns, renderReport } from "./importer.ts";
 import { byCodePoint } from "./merge.ts";
 import { parseLayout, parseSpec, stringifyLayout, stringifySpec } from "./spec-io.ts";
 import { taskRows } from "./task-view.ts";
@@ -99,5 +99,25 @@ describe("ET with columns added", () => {
       const repeated = ids.filter((id, i) => ids.indexOf(id) !== i);
       expect(repeated, file.fileName).toEqual([]);
     }
+  });
+});
+
+describe("ET example files", () => {
+  const examples = fileURLToPath(new URL("../examples/et", import.meta.url));
+  const files = readdirSync(resources)
+    .filter((name) => name.startsWith("wa-task-") && name.endsWith(".dmn"))
+    .map((name) => ({ name, xml: readFileSync(join(resources, name), "utf8") }));
+  const imported = importDmns(files, { jurisdiction: "EMPLOYMENT", serviceCode: "BHA1", displayName: "Employment" });
+
+  it("should equal the committed spec when the fixtures are imported", () => {
+    expect(stringifySpec(imported.spec)).toBe(readFileSync(join(examples, "spec.yaml"), "utf8"));
+  });
+
+  it("should equal the committed layout when the fixtures are imported", () => {
+    expect(stringifyLayout(imported.layout)).toBe(readFileSync(join(examples, "spec.layout.yaml"), "utf8"));
+  });
+
+  it("should equal the committed report when the fixtures are imported", () => {
+    expect(renderReport(imported.report)).toBe(readFileSync(join(examples, "import-report.md"), "utf8"));
   });
 });

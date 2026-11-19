@@ -187,7 +187,7 @@ export function diffDocuments(file: string, a: DmnDocument, b: DmnDocument, opti
       out.push({ file, decision: decision.name, message: "decision only in first" });
       continue;
     }
-    if (decision.table && other.table && decision.id !== other.id && parseFileName(`${decision.id}.dmn`)) {
+    if (decision.table && other.table && decision.id !== other.id && (isTaskKey(decision.id) || isTaskKey(other.id))) {
       out.push({ file, decision: decision.name, message: `decision id differs: ${decision.id} vs ${other.id}` });
     }
     const required = (d: DmnDecision, names: Map<string, string>) => [...new Set(d.requires.map((id) => names.get(id) ?? id))].sort(byCodePoint);
@@ -247,14 +247,14 @@ export function diffPaths(pathA: string, pathB: string, options: DiffOptions = {
   return diffSides(side(pathA, pathB), side(pathB, pathA), options);
 }
 
+const isTaskKey = (id: string): boolean => parseFileName(`${id}.dmn`) !== undefined;
+
 function diffSides(a: { dir: string; file?: string }, b: { dir: string; file?: string }, options: DiffOptions): Difference[] {
   const out: Difference[] = [];
   const pairs: Array<[TaskFile, TaskFile]> = [];
   if (a.file && b.file) {
-    pairs.push([
-      { name: a.file, xml: readText(join(a.dir, a.file)) },
-      { name: b.file, xml: readText(join(b.dir, b.file)) }
-    ]);
+    const read = (dir: string, name: string): TaskFile => ({ name, read: readDmnFile(name, readText(join(dir, name))) });
+    pairs.push([read(a.dir, a.file), read(b.dir, b.file)]);
   } else {
     const [fa, fb] = [listTaskFiles(a.dir), listTaskFiles(b.dir)];
     const byKey = (files: TaskFile[], side: string) => {
@@ -288,8 +288,10 @@ function diffSides(a: { dir: string; file?: string }, b: { dir: string; file?: s
     }
   }
   for (const [first, second] of pairs) {
-    const [x, y] = [readDmnFile(first.name, first.xml), readDmnFile(second.name, second.xml)];
-    out.push(...diffInspections(first.name, x.inspection, y.inspection), ...diffDocuments(first.name, x.document, y.document, options));
+    out.push(
+      ...diffInspections(first.name, first.read.inspection, second.read.inspection),
+      ...diffDocuments(first.name, first.read.document, second.read.document, options)
+    );
   }
   return out;
 }

@@ -178,7 +178,30 @@ function groupTree(nodes: Ordered, attrs?: Node): Node | string {
  * for one survives; the parser decodes both alike, so the literal ones are replaced first.
  */
 function normaliseAttributes(xml: string): string {
-  return xml.replace(/<[^<>]*>/g, (tag) => tag.replace(/="[^"]*"|='[^']*'/g, (value) => value.replace(/\r\n|[\t\r\n]/g, " ")));
+  const spaced = (value: string) => value.replace(/\r\n|[\t\r\n]/g, " ");
+  let out = "";
+  let i = 0;
+  while (i < xml.length) {
+    if (xml.charAt(i) !== "<") {
+      out += xml.charAt(i++);
+    } else if (xml.startsWith("<!--", i) || xml.startsWith("<![CDATA[", i)) {
+      const end = xml.indexOf(xml.startsWith("<!--", i) ? "-->" : "]]>", i);
+      const stop = end < 0 ? xml.length : end + 3;
+      out += xml.slice(i, stop);
+      i = stop;
+    } else {
+      let j = i + 1;
+      let quote = "";
+      while (j < xml.length && (quote !== "" || xml.charAt(j) !== ">")) {
+        const c = xml.charAt(j);
+        quote = quote === "" ? (c === '"' || c === "'" ? c : "") : c === quote ? "" : quote;
+        j++;
+      }
+      out += xml.slice(i, j + 1).replace(/"[^"]*"|'[^']*'/g, spaced);
+      i = j + 1;
+    }
+  }
+  return out;
 }
 
 function asList(value: unknown): Node[] {
@@ -276,7 +299,6 @@ function parseTable(table: Node): DmnTable {
   } as DmnTable;
 }
 
-/** A DMN file's document, and what the model leaves out of it, from one read of the XML. */
 /**
  * The ordered tree with the prefix of the DMN namespace removed from element names, so a file whose elements are written
  * `<dmn:decision>` reads like one written `<decision>`. A root that is not a DMN `definitions` element is an error.
@@ -305,6 +327,7 @@ function dmnElements(ordered: Ordered): Ordered {
   return strip(ordered);
 }
 
+/** A DMN file's document, and what the model leaves out of it, from one read of the XML. */
 export function readDmn(xml: string): { document: DmnDocument; inspection: Inspection } {
   const ordered = dmnElements(orderedParser.parse(normaliseAttributes(xml)) as Ordered);
   const tree = groupTree(ordered) as Node;
