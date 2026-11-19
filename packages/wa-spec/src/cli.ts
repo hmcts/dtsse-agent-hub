@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { diffPaths, renderDifferences } from "./diff.ts";
+import { exists, isDirectory, listDir, readText, writeText } from "./file-io.ts";
 import { generateAll } from "./generator.ts";
 import { importDmns, renderReport } from "./importer.ts";
 import { loadSpecFile, stringifyModel, stringifyOrdering } from "./model-io.ts";
@@ -52,21 +52,19 @@ function main(argv: string[]): number {
     if (!dir || !values.output) {
       fail(USAGE);
     }
-    const files = readdirSync(dir)
+    const files = listDir(dir)
       .filter((name) => name.startsWith("wa-task-") && name.endsWith(".dmn"))
-      .map((name) => ({ name, xml: readFileSync(join(dir, name), "utf8") }));
+      .map((name) => ({ name, xml: readText(join(dir, name)) }));
     const { spec, layout, report } = importDmns(files, {
       jurisdiction: values.jurisdiction,
       serviceCode: values["service-code"],
       displayName: values["display-name"]
     });
-    mkdirSync(dirname(values.output), { recursive: true });
-    writeFileSync(values.output, stringifySpec(spec));
-    writeFileSync(layoutPathFor(values.output), stringifyLayout(layout));
+    writeText(values.output, stringifySpec(spec));
+    writeText(layoutPathFor(values.output), stringifyLayout(layout));
     const markdown = renderReport(report);
     if (values.report) {
-      mkdirSync(dirname(values.report), { recursive: true });
-      writeFileSync(values.report, markdown);
+      writeText(values.report, markdown);
     }
     const rawFeel = Object.values(report.entries).reduce((n, e) => n + e.rawFeel, 0);
     process.stdout.write(`imported ${report.files.length} files; ${rawFeel} raw FEEL entries; ${report.unrepresentable.length} unrepresentable constructs\n`);
@@ -77,11 +75,10 @@ function main(argv: string[]): number {
     if (!specPath || !values.output) {
       fail(USAGE);
     }
-    mkdirSync(values.output, { recursive: true });
     const loaded = loadSpecFile(specPath, values.layout);
     const files = generateAll(loaded.spec, loaded.layout);
     for (const file of files) {
-      writeFileSync(join(values.output, file.fileName), file.xml);
+      writeText(join(values.output, file.fileName), file.xml);
     }
     process.stdout.write(`generated ${files.length} files in ${values.output}\n`);
     return 0;
@@ -91,19 +88,17 @@ function main(argv: string[]): number {
     if (!specPath || !values.output) {
       fail(USAGE);
     }
-    const spec = parseSpec(readFileSync(specPath, "utf8"));
+    const spec = parseSpec(readText(specPath));
     const layoutPath = layoutPathFor(specPath);
     const orderPath = `${values.output.replace(/\.ya?ml$/, "")}.order.yaml`;
     const { model, ordering, report } = liftSpec(spec, {
-      ...(existsSync(layoutPath) ? { layout: relative(dirname(resolve(values.output)), resolve(layoutPath)) } : {}),
+      ...(exists(layoutPath) ? { layout: relative(dirname(resolve(values.output)), resolve(layoutPath)) } : {}),
       order: basename(orderPath)
     });
-    mkdirSync(dirname(values.output), { recursive: true });
-    writeFileSync(values.output, stringifyModel(model));
-    writeFileSync(orderPath, stringifyOrdering(ordering));
+    writeText(values.output, stringifyModel(model));
+    writeText(orderPath, stringifyOrdering(ordering));
     if (values.report) {
-      mkdirSync(dirname(values.report), { recursive: true });
-      writeFileSync(values.report, renderLiftReport(report, spec.service.displayName ?? spec.service.slug));
+      writeText(values.report, renderLiftReport(report, spec.service.displayName ?? spec.service.slug));
     }
     const residue = Object.values(report.counts).reduce((n, c) => n + c.residue, 0);
     const rows = Object.values(report.counts).reduce((n, c) => n + c.rows, 0);
@@ -121,12 +116,11 @@ function main(argv: string[]): number {
     if (!loaded.isModel) {
       fail(`${modelPath} is not a model (it has no \`kind: wa-model\`)`);
     }
-    mkdirSync(dirname(values.output), { recursive: true });
-    writeFileSync(values.output, stringifySpec(loaded.spec));
+    writeText(values.output, stringifySpec(loaded.spec));
     if (loaded.layout) {
       const target = layoutPathFor(values.output);
       if (loaded.layoutPath !== resolve(target)) {
-        writeFileSync(target, stringifyLayout(loaded.layout));
+        writeText(target, stringifyLayout(loaded.layout));
       }
     }
     process.stdout.write(`compiled ${modelPath} to ${values.output}\n`);
@@ -142,18 +136,17 @@ function main(argv: string[]): number {
       process.stdout.write(differences.length === 0 ? "no differences\n" : `${differences.join("\n")}\n${differences.length} differences\n`);
       return differences.length === 0 ? 0 : 1;
     }
-    const isDir = (path: string) => statSync(path).isDirectory();
     const side = (path: string, counterpart: string) => {
-      if (!isDir(path)) {
+      if (!isDirectory(path)) {
         return { dir: dirname(path), file: basename(path) };
       }
-      return isDir(counterpart) ? { dir: path } : { dir: path, file: basename(counterpart) };
+      return isDirectory(counterpart) ? { dir: path } : { dir: path, file: basename(counterpart) };
     };
     for (const [file, other] of [
       [a, b],
       [b, a]
     ] as const) {
-      if (!isDir(file) && isDir(other) && !existsSync(join(other, basename(file)))) {
+      if (!isDirectory(file) && isDirectory(other) && !exists(join(other, basename(file)))) {
         fail(`${other} has no file named ${basename(file)} to compare ${file} with`);
       }
     }
@@ -170,11 +163,16 @@ function main(argv: string[]): number {
     if (!specPath || !taskId) {
       fail(USAGE);
     }
-    process.stdout.write(`${renderTaskRows(taskRows(parseSpec(readFileSync(specPath, "utf8")), taskId))}\n`);
+    process.stdout.write(`${renderTaskRows(taskRows(parseSpec(readText(specPath)), taskId))}\n`);
     return 0;
   }
   process.stdout.write(USAGE);
   return command === undefined || command === "help" ? 0 : 2;
 }
 
-process.exitCode = main(process.argv.slice(2));
+try {
+  process.exitCode = main(process.argv.slice(2));
+} catch (error) {
+  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+  process.exitCode = 2;
+}

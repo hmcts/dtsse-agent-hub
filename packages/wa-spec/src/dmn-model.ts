@@ -69,6 +69,8 @@ export interface DmnDocument {
   namespaces?: Array<[string, string]>;
   exporter?: string;
   exporterVersion?: string;
+  /** Other attributes of the root element the modeler adds, such as `modeler:executionPlatform`, in file order. */
+  attributes?: Array<[string, string]>;
   decisions: DmnDecision[];
   diagram?: DmnDiagram;
 }
@@ -82,6 +84,7 @@ const parser = new XMLParser({
   attributeNamePrefix: "@_",
   parseAttributeValue: false,
   parseTagValue: false,
+  htmlEntities: true,
   trimValues: false,
   isArray: (name) => LIST_TAGS.has(name)
 });
@@ -91,6 +94,7 @@ const orderedParser = new XMLParser({
   attributeNamePrefix: "@_",
   parseAttributeValue: false,
   parseTagValue: false,
+  htmlEntities: true,
   preserveOrder: true
 });
 
@@ -223,8 +227,18 @@ function parseTable(table: Node): DmnTable {
   } as DmnTable;
 }
 
+/** A DMN file's document, and what `parseDmn` leaves out of it, from one read of the XML. */
+export function readDmn(xml: string): { document: DmnDocument; inspection: Inspection } {
+  const tree = parser.parse(xml) as Node;
+  return { document: documentOf(tree, xml), inspection: inspectTree(tree) };
+}
+
 export function parseDmn(xml: string): DmnDocument {
-  const root = (parser.parse(xml) as Node).definitions as Node;
+  return documentOf(parser.parse(xml) as Node, xml);
+}
+
+function documentOf(tree: Node, xml: string): DmnDocument {
+  const root = tree.definitions as Node;
   const decisionNodes = asList(root.decision);
   const decisions = decisionNodes.map((node): DmnDecision => {
     const variable = node.variable as Node | undefined;
@@ -263,22 +277,27 @@ export function parseDmn(xml: string): DmnDocument {
   const namespaces = Object.entries(root)
     .filter(([key, value]) => key.startsWith("@_xmlns") && typeof value === "string")
     .map(([key, value]): [string, string] => [key.slice(2), value as string]);
+  const modeler = Object.entries(root)
+    .filter(([key, value]) => key.startsWith("@_modeler:") && typeof value === "string")
+    .map(([key, value]): [string, string] => [key.slice(2), value as string]);
   return {
     id: attr(root, "id") ?? "",
     name: attr(root, "name") ?? "",
     ...(namespaces.length > 0 ? { namespaces } : {}),
     ...optional<{ exporter?: string; exporterVersion?: string }>({ exporter: attr(root, "exporter"), exporterVersion: attr(root, "exporterVersion") }),
+    ...(modeler.length > 0 ? { attributes: modeler } : {}),
     decisions,
     ...(diagram ? { diagram } : {})
   };
 }
 
 function escapeText(text: string): string {
-  return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+  return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll("\r", "&#13;");
 }
 
+/** A line break or tab in an attribute is written as a character reference, as a parser would otherwise read it as a space. */
 function escapeAttr(text: string): string {
-  return escapeText(text).replaceAll('"', "&quot;");
+  return escapeText(text).replaceAll('"', "&quot;").replaceAll("\n", "&#10;").replaceAll("\t", "&#9;");
 }
 
 function attrs(pairs: Array<[string, string | undefined]>): string {
@@ -317,15 +336,19 @@ function storedIds(doc: DmnDocument): Set<string> {
  * repeat an id the document already has, stored or generated, gets a number added.
  */
 function idFactory(prefix: string, taken: Set<string>): (kind: string, ...parts: Array<string | number>) => string {
-  return (kind, ...parts) => {
-    const base = ncName(`${kind}_${[prefix, ...parts].join("_")}`);
-    let candidate = base;
-    for (let n = 1; taken.has(candidate); n++) {
-      candidate = `${base}_${n}`;
-    }
-    taken.add(candidate);
-    return candidate;
-  };
+  return (kind, ...parts) => uniqueId(ncName(`${kind}_${[prefix, ...parts].join("_")}`), taken);
+}
+
+/** `base`, or `base` with the first number added that makes it new to `taken`, which it joins. */
+export function uniqueId(base: string, taken: Set<string>): string {
+  let candidate = base;
+  let n = 0;
+  while (taken.has(candidate)) {
+    n++;
+    candidate = `${base}_${n}`;
+  }
+  taken.add(candidate);
+  return candidate;
 }
 
 const NAMESPACES: Array<[string, string]> = [
@@ -392,13 +415,7 @@ function writeTable(table: DmnTable, id: ReturnType<typeof idFactory>, base: str
 /** Serialises the model as a DMN 1.3 file in Camunda Modeler's layout. Ids and diagram items the model lacks are generated. */
 export function writeDmn(doc: DmnDocument): string {
   const id = idFactory(doc.id, storedIds(doc));
-  let out = `<?xml version="1.0" encoding="UTF-8"?>\n<definitions${attrs(doc.namespaces ?? NAMESPACES)}${attrs([
-    ["id", doc.id],
-    ["name", doc.name],
-    ["namespace", "http://camunda.org/schema/1.0/dmn"], // NOSONAR: the DMN namespace the Camunda engine expects
-    ["exporter", doc.exporter ?? "Camunda Modeler"],
-    ["exporterVersion", doc.exporterVersion ?? "5.50.1"]
-  ])}>\n`;
+  let out = "";
   const requirements: Array<{ from: string; to: string; id: string }> = [];
   for (const decision of doc.decisions) {
     out += `  <decision${attrs([
@@ -430,7 +447,21 @@ export function writeDmn(doc: DmnDocument): string {
     out += "  </decision>\n";
   }
   out += writeDiagram(doc, requirements, id);
-  return `${out}</definitions>\n`;
+  const declared = doc.namespaces ?? NAMESPACES;
+  const missing = NAMESPACES.filter(
+    ([name]) => !declared.some(([have]) => have === name) && (name === "xmlns" || new RegExp(`[<\\s]${name.slice(6)}:`).test(out))
+  );
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<definitions${attrs([...declared, ...missing])}${attrs([
+    ["id", doc.id],
+    ["name", doc.name],
+    ["namespace", "http://camunda.org/schema/1.0/dmn"], // NOSONAR: the DMN namespace the Camunda engine expects
+    ["exporter", doc.exporter ?? "Camunda Modeler"],
+    ["exporterVersion", doc.exporterVersion ?? "5.50.1"],
+    ...(doc.attributes ?? [])
+  ])}>
+${out}</definitions>
+`;
 }
 
 const SHAPE_WIDTH = 180;
@@ -552,6 +583,10 @@ export interface Inspection {
 
 /** Lists, for one DMN file, what `parseDmn` does not carry into the model. */
 export function inspectDmn(xml: string): Inspection {
+  return inspectTree(parser.parse(xml) as Node);
+}
+
+function inspectTree(root: Node): Inspection {
   const presentation = new Map<string, number>();
   const unrepresentable = new Map<string, number>();
   const bump = (map: Map<string, number>, key: string) => map.set(key, (map.get(key) ?? 0) + 1);
@@ -574,7 +609,7 @@ export function inspectDmn(xml: string): Inspection {
       for (const [key, child] of Object.entries(node as Node)) {
         if (key.startsWith("@_")) {
           const attribute = key.slice(2);
-          if (attribute.startsWith("xmlns") || USED_ATTRIBUTES[name]?.includes(attribute)) {
+          if (attribute.startsWith("xmlns") || (name === "definitions" && attribute.startsWith("modeler:")) || USED_ATTRIBUTES[name]?.includes(attribute)) {
             continue;
           }
           if (PRESENTATION_ATTRIBUTES.has(attribute)) {
@@ -588,7 +623,6 @@ export function inspectDmn(xml: string): Inspection {
       }
     }
   };
-  const root = parser.parse(xml) as Node;
   for (const [key, value] of Object.entries(root)) {
     if (key !== "?xml") {
       walk(key, "", value);

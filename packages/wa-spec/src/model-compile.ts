@@ -1,3 +1,4 @@
+import { byCodePoint } from "./merge.ts";
 import {
   ADDITIONAL_PREFIX,
   type Cancellation,
@@ -43,7 +44,7 @@ export const RULES = "!";
 
 export function stable(value: unknown): string {
   return JSON.stringify(value, (_key, v: unknown) =>
-    v !== null && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : v
+    v !== null && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => byCodePoint(a, b))) : v
   );
 }
 

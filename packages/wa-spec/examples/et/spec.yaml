@@ -2840,7 +2840,7 @@ decisions:
               then 1000
               else 5000
           canReconfigure: false
-      - only: [ et_englandwales ]
+      - only: [ et_englandwales, et_scotland ]
         when:
           taskType:
             in: [ ReviewReferralResponseAdmin, ReviewReferralResponseJudiciary, ReviewReferralResponseLegalOps ]
@@ -2849,21 +2849,6 @@ decisions:
           value:
             feel: |-
               if (caseData != null
-              and caseData.referralCollection != null
-              and count(caseData.referralCollection[count(value.referralReplyCollection)>0])>0
-              and sort(flatten(caseData.referralCollection.value.referralReplyCollection), function(x,y) date and time(if(x.value.replyDateTime!=null)then x.value.replyDateTime else "2023-01-01T00:00:00.000") > date and time(if(y.value.replyDateTime!=null)then y.value.replyDateTime else "2023-01-01T00:00:00.000"))[1].value.isUrgentReply = "Yes")
-              then 1000
-              else 5000
-          canReconfigure: false
-      - only: [ et_scotland ]
-        when:
-          taskType:
-            in: [ ReviewReferralResponseAdmin, ReviewReferralResponseJudiciary, ReviewReferralResponseLegalOps ]
-        returns:
-          name: majorPriority
-          value:
-            feel: |-
-              if (caseData!=null
               and caseData.referralCollection != null
               and count(caseData.referralCollection[count(value.referralReplyCollection)>0])>0
               and sort(flatten(caseData.referralCollection.value.referralReplyCollection), function(x,y) date and time(if(x.value.replyDateTime!=null)then x.value.replyDateTime else "2023-01-01T00:00:00.000") > date and time(if(y.value.replyDateTime!=null)then y.value.replyDateTime else "2023-01-01T00:00:00.000"))[1].value.isUrgentReply = "Yes")

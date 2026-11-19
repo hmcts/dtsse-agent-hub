@@ -7,12 +7,12 @@
 | Table | Rows | In the model | In the residue |
 | --- | ---: | ---: | ---: |
 | initiation | 70 | 70 | 0 |
-| configuration | 118 | 118 | 0 |
+| configuration | 117 | 117 | 0 |
 | permissions | 34 | 34 | 0 |
 | completion | 37 | 35 | 2 |
 | cancellation | 20 | 20 | 0 |
 | task-types | 44 | 44 | 0 |
-| total | 323 | 321 | 2 |
+| total | 322 | 320 | 2 |
 
 ## Not lifted
 

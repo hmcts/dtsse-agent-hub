@@ -67,3 +67,6 @@ export function majority<T>(
   }
   return { base: best.value, differing: values.filter((v) => key(v.value) !== key(best.value)) };
 }
+
+/** Orders strings by code point, which is what a bare `.sort()` would do for them but says so. */
+export const byCodePoint = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);

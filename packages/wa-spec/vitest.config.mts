@@ -10,7 +10,13 @@ export default defineConfig({
       include: ["src/**"],
       exclude: ["src/**/*.test.ts", "src/index.ts", "src/cli.ts"],
       reporter: ["lcov", "text"],
-      reportsDirectory: "coverage"
+      reportsDirectory: "coverage",
+      thresholds: {
+        statements: 97,
+        lines: 96,
+        branches: 88,
+        functions: 99
+      }
     }
   }
 });

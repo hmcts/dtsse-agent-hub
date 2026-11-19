@@ -117,3 +117,96 @@ describe("importDmns constructs the generator would change", () => {
     expect(parseDmn(out[1]?.xml as string).decisions[1]?.variable).toBeUndefined();
   });
 });
+
+describe("importDmns keys and null literals", () => {
+  it("should keep a helper whose expression is the null literal as null when it is imported", () => {
+    const xml = sampleDmn("ct_a").replace(/(<literalExpression[^>]*>\s*<text>)[^<]*/, "$1null");
+    const { spec } = importDmns([{ name: "wa-task-completion-demo-ct_a.dmn", xml }]);
+    expect(spec.decisions.completion?.helpers?.[0]?.expression).toBeNull();
+  });
+
+  it("should give repeated input keys numbers no other key in the table has when a numbered key already exists", () => {
+    const doc = parseDmn(sampleDmn("ct_a"));
+    const table = doc.decisions[0]?.table;
+    if (!table) {
+      throw new Error("no table");
+    }
+    table.inputs = ["Event Id", "Event Id", "Event Id 2"].map((label) => ({ label, expression: "" }));
+    table.rules = [];
+    const { spec } = importDmns([{ name: "wa-task-completion-demo-ct_a.dmn", xml: writeDmn(doc) }]);
+    expect(spec.decisions.completion?.inputs.map((c) => c.key)).toEqual(["eventId", "eventId3", "eventId2"]);
+  });
+});
+
+describe("importDmns across kinds, attributes and checks", () => {
+  const named = (kind: string, slug: string, caseType: string, xml: string) => ({ name: `wa-task-${kind}-${slug}-${caseType}.dmn`, xml });
+
+  it("should record the case types a kind applies to when a case type has no file of that kind", () => {
+    const { spec } = importDmns([
+      file("ct_a"),
+      file("ct_b"),
+      named(
+        "cancellation",
+        "demo",
+        "ct_a",
+        sampleDmn("ct_a")
+          .replaceAll("wa-completion-definition", "wa-cancellation-definition")
+          .replaceAll("wa-task-completion-demo", "wa-task-cancellation-demo")
+      )
+    ]);
+    expect(spec.decisions.completion?.only).toBeUndefined();
+    expect(spec.decisions.cancellation?.only).toEqual(["ct_a"]);
+    expect(generateAll(spec).map((f) => f.fileName)).toEqual([
+      "wa-task-completion-demo-ct_a.dmn",
+      "wa-task-completion-demo-ct_b.dmn",
+      "wa-task-cancellation-demo-ct_a.dmn"
+    ]);
+  });
+
+  it("should not count a case type or slug when its file has no decision table", () => {
+    const { spec, report } = importDmns([file("ct_a"), named("completion", "other", "ct_z", "<definitions/>")]);
+    expect(spec.caseTypes.map((c) => c.id)).toEqual(["ct_a"]);
+    expect(spec.service.slug).toBe("demo");
+    expect(report.notes.join()).toContain("no decision table found");
+  });
+
+  it("should keep the modeler attributes and namespace of the root element when the file has them", () => {
+    const xml = sampleDmn("ct_a")
+      .replace("<definitions ", '<definitions xmlns:modeler="http://camunda.org/schema/modeler/1.0" ')
+      .replace('exporterVersion="5.50.1"', 'exporterVersion="5.50.1" modeler:executionPlatform="Camunda Platform" modeler:executionPlatformVersion="7.17.0"');
+    const { spec, layout, report } = importDmns([{ name: "wa-task-completion-demo-ct_a.dmn", xml }]);
+    expect(report.unrepresentable).toEqual([]);
+    const out = generateAll(spec, layout)[0]?.xml ?? "";
+    expect(out).toContain('modeler:executionPlatform="Camunda Platform" modeler:executionPlatformVersion="7.17.0"');
+    expect(out).toContain('xmlns:modeler="http://camunda.org/schema/modeler/1.0"');
+    expect(generateAll(spec)[0]?.xml).not.toContain("modeler:");
+  });
+
+  it("should carry a helper's variable name and its absence per case type when they differ from the helper's name", () => {
+    const renamed = sampleDmn("ct_a").replace(
+      '<variable id="InformationItem_wa-completion-definition-ct_a_Decision_LATEST" name="LATEST"',
+      '<variable id="V1" name="latest"'
+    );
+    expect(renamed).toContain('name="latest"');
+    const { spec, layout, report } = importDmns([{ name: "wa-task-completion-demo-ct_a.dmn", xml: renamed }, file("ct_b")]);
+    expect(report.unrepresentable).toEqual([]);
+    const out = generateAll(spec, layout);
+    expect(parseDmn(out[0]?.xml ?? "").decisions[1]?.variable?.name).toBe("latest");
+    expect(parseDmn(out[1]?.xml ?? "").decisions[1]?.variable?.name).toBe("LATEST");
+    expect(generateAll(spec).map((f) => parseDmn(f.xml).decisions[1]?.variable?.name)).toEqual(["latest", "LATEST"]);
+  });
+
+  it("should say which output is duplicated when a table has two outputs of one name", () => {
+    const doc = parseDmn(sampleDmn("ct_a"));
+    const outputs = doc.decisions[0]?.table?.outputs;
+    outputs?.push({ name: "taskType" });
+    for (const rule of doc.decisions[0]?.table?.rules ?? []) {
+      rule.outputs.push("");
+    }
+    expect(() => importDmns([{ name: "wa-task-completion-demo-ct_a.dmn", xml: writeDmn(doc) }])).toThrow(/duplicate output name taskType/);
+  });
+
+  it("should refuse to return a spec that does not validate when the files name a service that cannot be an id", () => {
+    expect(() => importDmns([{ name: "wa-task-completion-my svc-ct_a.dmn", xml: sampleDmn("ct_a") }])).toThrow(/invalid spec[\s\S]*service slug my svc/);
+  });
+});

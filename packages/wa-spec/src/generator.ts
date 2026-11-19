@@ -1,4 +1,4 @@
-import { type DmnDecision, type DmnDocument, type DmnInput, type DmnOutput, type DmnRule, ncName, writeDmn } from "./dmn-model.ts";
+import { type DmnDecision, type DmnDocument, type DmnInput, type DmnOutput, type DmnRule, ncName, uniqueId, writeDmn } from "./dmn-model.ts";
 import { renderCell, renderExpr } from "./feel.ts";
 import { applyLayout, type Layout, layoutKey } from "./layout.ts";
 import { type Decision, type Expr, KINDS, type Kind, type Spec } from "./schema.ts";
@@ -34,7 +34,7 @@ export function decisionKey(spec: Spec, kind: Kind, caseType: string): string {
  */
 export function generateDocument(spec: Spec, kind: Kind, caseType: string, layout?: Layout): DmnDocument | undefined {
   const decision: Decision | undefined = spec.decisions[kind];
-  if (!decision || !spec.caseTypes.some((c) => c.id === caseType)) {
+  if (!decision || !applies(decision.only, caseType) || !spec.caseTypes.some((c) => c.id === caseType)) {
     return undefined;
   }
   const own = decision.overrides?.[caseType];
@@ -52,7 +52,7 @@ export function generateDocument(spec: Spec, kind: Kind, caseType: string, layou
       ...(inputVariable === undefined ? {} : { inputVariable }),
       ...(typeRef === undefined ? {} : { typeRef }),
       ...(expressionLanguage === undefined ? {} : { expressionLanguage }),
-      expression: renderExpr((override?.expression ?? column.expression) as Expr | undefined)
+      expression: renderExpr((override?.expression === undefined ? column.expression : override.expression) as Expr | undefined)
     };
   });
   const tableOutputs: DmnOutput[] = outputs.map((column) => {
@@ -71,7 +71,9 @@ export function generateDocument(spec: Spec, kind: Kind, caseType: string, layou
 
   const fileLayout = layout?.files[layoutKey(kind, caseType)];
   const helpers = (decision.helpers ?? []).filter((h) => applies(h.only, caseType));
-  const helperId = (name: string): string => fileLayout?.decisions[name]?.id ?? ncName(`Decision_${name}`);
+  const taken = new Set([decisionKey(spec, kind, caseType), ...helpers.flatMap((h) => fileLayout?.decisions[h.name]?.id ?? [])]);
+  const helperIds = new Map(helpers.map((h) => [h.name, fileLayout?.decisions[h.name]?.id ?? uniqueId(ncName(`Decision_${h.name}`), taken)]));
+  const helperId = (name: string): string => helperIds.get(name) ?? ncName(`Decision_${name}`);
   const requiresOf = (from: string): string[] =>
     (decision.dependencies ?? []).filter((d) => d.decision === from && applies(d.only, caseType)).map((d) => helperId(d.requires));
   const mainId = decisionKey(spec, kind, caseType);
@@ -90,14 +92,17 @@ export function generateDocument(spec: Spec, kind: Kind, caseType: string, layou
     const helperTtl = overridden(override?.historyTimeToLive, helper.historyTimeToLive);
     const typeRef = overridden(override?.typeRef, helper.typeRef);
     const language = overridden(override?.language, helper.language);
-    const hasVariable = (override?.variable ?? helper.variable) !== false;
+    const variableName = override?.variable === undefined ? helper.variable : override.variable;
     return {
       id: helperId(helper.name),
       name: helper.name,
       ...(helperTtl === undefined ? {} : { historyTimeToLive: helperTtl }),
-      ...(hasVariable ? { variable: { name: helper.name, ...(typeRef === undefined ? {} : { typeRef }) } } : {}),
+      ...(variableName === false ? {} : { variable: { name: variableName ?? helper.name, ...(typeRef === undefined ? {} : { typeRef }) } }),
       requires: requiresOf(helper.name),
-      literal: { text: renderExpr(override?.expression ?? helper.expression), ...(language === undefined ? {} : { expressionLanguage: language }) }
+      literal: {
+        text: renderExpr(override?.expression === undefined ? helper.expression : override.expression),
+        ...(language === undefined ? {} : { expressionLanguage: language })
+      }
     };
   });
   const definitionId = ncName(kind === "task-types" ? `wa-task-types-definition-${caseType}` : `wa-${kind}-definition-${caseType}`);

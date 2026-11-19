@@ -1,6 +1,6 @@
-import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { parse } from "yaml";
+import { exists, readText } from "./file-io.ts";
 import type { Layout } from "./layout.ts";
 import { Model, Ordering, validateModel } from "./model.ts";
 import { compileModel } from "./model-compile.ts";
@@ -35,13 +35,13 @@ export const stringifyOrdering = (ordering: Ordering): string => toYaml(ordering
 /** Where a model's ordering file is: its `order` field, else `<name>.order.yaml` beside it, when that exists. */
 export function orderPathFor(modelPath: string, model: Model): string | undefined {
   const path = model.order ? resolve(dirname(modelPath), model.order) : `${modelPath.replace(/\.ya?ml$/, "")}.order.yaml`;
-  return existsSync(path) ? path : undefined;
+  return exists(path) ? path : undefined;
 }
 
 /** Where a model's layout file is: its `layout` field, else `<name>.layout.yaml` beside it, when that exists. */
 export function modelLayoutPath(modelPath: string, model: Model): string | undefined {
   const path = model.layout ? resolve(dirname(modelPath), model.layout) : layoutPathFor(modelPath);
-  return existsSync(path) ? path : undefined;
+  return exists(path) ? path : undefined;
 }
 
 export interface LoadedSpec {
@@ -54,19 +54,19 @@ export interface LoadedSpec {
 
 /** Reads a spec file or a model file as a spec, with the layout beside it, compiling a model with its ordering. */
 export function loadSpecFile(path: string, layoutOverride?: string): LoadedSpec {
-  const text = readFileSync(path, "utf8");
+  const text = readText(path);
   if (isModelDocument(parse(text))) {
     const model = parseModel(text);
     const orderPath = orderPathFor(path, model);
-    const spec = compileModel(model, orderPath ? parseOrdering(readFileSync(orderPath, "utf8")) : undefined);
+    const spec = compileModel(model, orderPath ? parseOrdering(readText(orderPath)) : undefined);
     const layoutPath = layoutOverride ? resolve(layoutOverride) : modelLayoutPath(path, model);
-    return { spec, layout: layoutPath ? parseLayout(readFileSync(layoutPath, "utf8")) : undefined, layoutPath, isModel: true };
+    return { spec, layout: layoutPath ? parseLayout(readText(layoutPath)) : undefined, layoutPath, isModel: true };
   }
   const layoutPath = layoutOverride ? resolve(layoutOverride) : layoutPathFor(path);
   return {
     spec: parseSpec(text),
-    layout: existsSync(layoutPath) ? parseLayout(readFileSync(layoutPath, "utf8")) : undefined,
-    layoutPath: existsSync(layoutPath) ? layoutPath : undefined,
+    layout: exists(layoutPath) ? parseLayout(readText(layoutPath)) : undefined,
+    layoutPath: exists(layoutPath) ? layoutPath : undefined,
     isModel: false
   };
 }

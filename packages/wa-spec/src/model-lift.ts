@@ -1,3 +1,4 @@
+import { byCodePoint } from "./merge.ts";
 import {
   ADDITIONAL_PREFIX,
   type Cancellation,
@@ -274,7 +275,7 @@ interface GrantSet {
   roles: Array<[string, Grant]>;
 }
 
-const setKey = (set: GrantSet): string => stable([...set.roles].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+const setKey = (set: GrantSet): string => stable([...set.roles].sort(([a], [b]) => byCodePoint(a, b)));
 
 /** How a task's grants differ from a profile, in the terms of a permission spec, or undefined when they differ too much to say. */
 function deltaFrom(profile: Record<string, Grant>, set: GrantSet): { spec: PermissionSpec; cost: number } {
@@ -373,6 +374,20 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
           permissionsStay = `${item.task} is granted ${item.content.returns.name as string} twice for one case type`;
         }
         seenGrants.set(key, [...(seenGrants.get(key) ?? []), ...item.cases]);
+      }
+    }
+  }
+
+  // A default grant is one per role and covers every case type, so any other shape of one keeps permissions as rows.
+  const defaultGrantRows = new Map<string, number>();
+  for (const entry of classified.permissions) {
+    if (typeof entry.result !== "string") {
+      for (const item of entry.result.items.filter((i) => i.task === ALL_TASKS)) {
+        const role = item.content.returns.name as string;
+        defaultGrantRows.set(role, (defaultGrantRows.get(role) ?? 0) + 1);
+        if (item.cases.length !== caseIds.length || (defaultGrantRows.get(role) ?? 0) > 1) {
+          permissionsStay ??= `the default grant of ${role} is not one grant for every case type`;
+        }
       }
     }
   }

@@ -140,15 +140,15 @@ describe("renderExpr", () => {
 
 describe("normaliseFeel", () => {
   it("should collapse whitespace outside strings and keep it inside when the text has both", () => {
-    expect(normaliseFeel('  if   a  =  "x   y"\n then 1  ')).toBe('if a = "x   y" then 1');
+    expect(normaliseFeel('  if   a  =  "x   y"\n then 1  ')).toBe('if a="x   y"then 1');
   });
 
   it("should keep an escaped quote inside the string when normalising", () => {
-    expect(normaliseFeel('a  =  "say \\"  hi  \\"" and   b')).toBe('a = "say \\"  hi  \\"" and b');
+    expect(normaliseFeel('a  =  "say \\"  hi  \\"" and   b')).toBe('a="say \\"  hi  \\""and b');
   });
 
   it("should leave unlexable characters in place when the text has any", () => {
-    expect(normaliseFeel("a[ 1 ]   ??")).toBe("a[ 1 ] ??");
+    expect(normaliseFeel("a[ 1 ]   ??")).toBe("a[1]??");
   });
 });
 
@@ -185,6 +185,60 @@ describe("canonical forms", () => {
   });
 
   it("should collapse whitespace outside strings only when normalising FEEL", () => {
-    expect(normaliseFeel('  x   +  "a  b" ')).toBe('x + "a  b"');
+    expect(normaliseFeel('  x   +  "a  b" ')).toBe('x+"a  b"');
+  });
+});
+
+describe("renderExpr precedence", () => {
+  it("should parenthesise an or that is the operand of a truthy test when it sits inside an and", () => {
+    const expr = {
+      if: {
+        all: [
+          {
+            truthy: {
+              any: [
+                { field: "a", op: "eq" as const, value: 1 },
+                { field: "b", op: "eq" as const, value: 2 }
+              ]
+            }
+          },
+          { field: "c", op: "eq" as const, value: 3 }
+        ]
+      },
+      use: 1,
+      otherwise: 2
+    };
+    const text = renderExpr(expr);
+    expect(text).toBe("if ((a = 1 or b = 2) and c = 3) then 1 else 2");
+    expect(parseExpr(text)).toEqual({
+      if: {
+        all: [
+          {
+            any: [
+              { field: "a", op: "eq", value: 1 },
+              { field: "b", op: "eq", value: 2 }
+            ]
+          },
+          { field: "c", op: "eq", value: 3 }
+        ]
+      },
+      use: 1,
+      otherwise: 2
+    });
+  });
+});
+
+describe("canonical forms across spacing and grouping", () => {
+  it("should treat FEEL as equal when whitespace between symbols differs", () => {
+    expect(normaliseFeel("count(a[x>1])>0")).toBe(normaliseFeel("count( a[x > 1] ) > 0"));
+    expect(normaliseFeel("a  and  b")).toBe("a and b");
+    expect(normaliseFeel("starts with(x, 1)")).toBe("starts with(x,1)");
+    expect(normaliseFeel("a[x>1]")).not.toBe(normaliseFeel("a [x > 1] b"));
+  });
+
+  it("should flatten a nested and or or when the grouping does not change the meaning", () => {
+    expect(parseExpr("if a and (b and c) then 1 else 2")).toEqual(parseExpr("if a and b and c then 1 else 2"));
+    expect(canonicalExpr("if (a or (b or c)) then 1 else 2")).toBe(canonicalExpr("if a or b or c then 1 else 2"));
+    expect(parseExpr("if a and (b or c) then 1 else 2")).not.toEqual(parseExpr("if a and b or c then 1 else 2"));
   });
 });

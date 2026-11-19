@@ -20,6 +20,7 @@ contract changes. Running virtual agents is [`docs/virtual-agents.md`](docs/virt
 | Path | What it holds |
 | --- | --- |
 | `packages/agent-hub/` | The published client, `@hmcts-cft/agent-hub`: hooks, bridge, CLI and the pod runtime (`virtual-agent/entrypoint.sh`, the Assistant's supervisor), and the plugins it carries in `plugins/` (`welsh`, `slides`, `m365`, `m365-files`), which a pod copies onto its disk: `slides`, `m365` and `m365-files` always, `welsh` when its owner ticks it. Its own tests, typecheck and README |
+| `packages/wa-spec/` | `@hmcts-cft/wa-spec`: the Work Allocation task-configuration spec, and the CLI that imports a service's DMNs into it, generates them back (ids and layout from a `spec.layout.yaml` beside the spec), diffs two sets, and lifts a spec into a task- and role-centric model (`lift`, `compile`) that generates the same DMNs. Its own tests, typecheck, coverage thresholds and README |
 | `src/app/api/agent/**` | Agent API route handlers, each wrapped in `agentRoute` / `ownedAgentRoute` (`src/agent-api/route.ts`) |
 | `src/app/api/virtual/**`, `src/app/api/orchestrator/**` | Pod routes (`virtualRoute`, its own launch token only) and orchestrator routes (`orchestratorRoute`); 404 unless `VIRTUAL_AGENTS_ENABLED=true` |
 | `src/agent-auth/` | Bearer validation against the tenant JWKS, launch-token callers, the orchestrator's app-only token, and the `AGENT_AUTH_DISABLED` dev bypasses |
@@ -78,9 +79,9 @@ contract changes. Running virtual agents is [`docs/virtual-agents.md`](docs/virt
 | --- | --- |
 | `yarn db:generate` | Generates the Prisma client into `src/store/generated/`; typecheck fails without it |
 | `yarn lint` | `biome check --error-on-warnings .` |
-| `yarn typecheck` | the app, `tsconfig.cli.json` and `tsconfig.e2e.json` |
+| `yarn typecheck` | the app, `tsconfig.cli.json` and `tsconfig.e2e.json`, then the published client and `wa-spec` |
 | `yarn test:e2e` | Playwright and axe against `TEST_URL`; see the README for a full local run |
-| `yarn test` | unit suites of the app and the published client, with coverage and its thresholds. `test:coverage` is a no-op: the pipeline calls both, so collecting it in `test` runs the suites once |
+| `yarn test` | unit suites of the app, the published client and `wa-spec`, with coverage and its thresholds. `test:coverage` is a no-op: the pipeline calls both, so collecting it in `test` runs the suites once |
 | `yarn test:integration` | needs `yarn deps:up`; a database per worker, migrated on use. `INTEGRATION_WORKERS` sets how many (default 6). Always collects coverage for the pipeline's Sonar scan; add `--coverage.enabled=false` locally to skip it |
 | `yarn build` | `next build` plus the CLIs, `dist/cli/migrate.js` and `dist/cli/orchestrator.js` |
 

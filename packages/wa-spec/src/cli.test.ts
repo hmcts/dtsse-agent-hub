@@ -104,3 +104,23 @@ describe("cli", () => {
     expect(execFileSync(process.execPath, ["--import", "tsx", cli, "help"], { encoding: "utf8" })).toContain("wa-spec import");
   });
 });
+
+describe("cli errors", () => {
+  it("should exit 2 and print the message when a spec cannot be read", () => {
+    const { dir } = workspace();
+    writeFileSync(join(dir, "bad.yaml"), "version: 2\n");
+    const result = run("generate", join(dir, "bad.yaml"), "-o", join(dir, "out"));
+    expect(result.status).toBe(2);
+    expect(result.stderr.length).toBeGreaterThan(0);
+  });
+
+  it("should exit 2 when the import cannot be turned into a valid spec", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wa-spec-"));
+    const input = join(dir, "dmn");
+    mkdirSync(input);
+    writeFileSync(join(input, "wa-task-completion-my svc-ct_c.dmn"), sampleDmn("ct_c"));
+    const result = run("import", input, "-o", join(dir, "spec.yaml"));
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("invalid spec");
+  });
+});

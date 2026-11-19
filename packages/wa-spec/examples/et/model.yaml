@@ -521,7 +521,7 @@ tasks:
     due:
       days: 5
     priority:
-      major: &a8
+      major: &a7
         if:
           all:
             - field: caseData
@@ -699,26 +699,15 @@ tasks:
           then 1
           else 2
     priority:
-      major:
-        - value: &a5
-            feel: |-
-              if (caseData != null
-              and caseData.referralCollection != null
-              and count(caseData.referralCollection[count(value.referralReplyCollection)>0])>0
-              and sort(flatten(caseData.referralCollection.value.referralReplyCollection), function(x,y) date and time(if(x.value.replyDateTime!=null)then x.value.replyDateTime else "2023-01-01T00:00:00.000") > date and time(if(y.value.replyDateTime!=null)then y.value.replyDateTime else "2023-01-01T00:00:00.000"))[1].value.isUrgentReply = "Yes")
-              then 1000
-              else 5000
-          only: [ et_englandwales ]
-        - value: &a6
-            feel: |-
-              if (caseData!=null
-              and caseData.referralCollection != null
-              and count(caseData.referralCollection[count(value.referralReplyCollection)>0])>0
-              and sort(flatten(caseData.referralCollection.value.referralReplyCollection), function(x,y) date and time(if(x.value.replyDateTime!=null)then x.value.replyDateTime else "2023-01-01T00:00:00.000") > date and time(if(y.value.replyDateTime!=null)then y.value.replyDateTime else "2023-01-01T00:00:00.000"))[1].value.isUrgentReply = "Yes")
-              then 1000
-              else 5000
-          only: [ et_scotland ]
-      minor: &a7
+      major: &a5
+        feel: |-
+          if (caseData != null
+          and caseData.referralCollection != null
+          and count(caseData.referralCollection[count(value.referralReplyCollection)>0])>0
+          and sort(flatten(caseData.referralCollection.value.referralReplyCollection), function(x,y) date and time(if(x.value.replyDateTime!=null)then x.value.replyDateTime else "2023-01-01T00:00:00.000") > date and time(if(y.value.replyDateTime!=null)then y.value.replyDateTime else "2023-01-01T00:00:00.000"))[1].value.isUrgentReply = "Yes")
+          then 1000
+          else 5000
+      minor: &a6
         feel: |-
           if (caseData!=null
           and caseData.referralCollection != null
@@ -771,12 +760,8 @@ tasks:
     due:
       days: *a4
     priority:
-      major:
-        - value: *a5
-          only: [ et_englandwales ]
-        - value: *a6
-          only: [ et_scotland ]
-      minor: *a7
+      major: *a5
+      minor: *a6
       dateOriginRef: dueDate
     title:
       if:
@@ -835,12 +820,8 @@ tasks:
     due:
       days: *a4
     priority:
-      major:
-        - value: *a5
-          only: [ et_englandwales ]
-        - value: *a6
-          only: [ et_scotland ]
-      minor: *a7
+      major: *a5
+      minor: *a6
       dateOriginRef: dueDate
     title:
       if:
@@ -894,7 +875,7 @@ tasks:
     due:
       days: 5
     priority:
-      major: *a8
+      major: *a7
       minor: 500
       dateOriginRef: dueDate
     description: "[View Order](/cases/case-details/${[CASE_REFERENCE]}#Judgments) and [Issue Order](/cases/case-details/${[CASE_REFERENCE]}/trigger/sendNotification/sendNotification1)"
@@ -1624,7 +1605,7 @@ tasks:
     due:
       days: 3
     priority:
-      major: &a9
+      major: &a8
         if:
           field: caseData.nextListedDate
           op: exists
@@ -1684,7 +1665,7 @@ tasks:
     due:
       days: 3
     priority:
-      major: *a9
+      major: *a8
       minor: 500
       dateOriginEarliest: dueDate, nextHearingDate
     description: "[Review the notification response](/cases/case-details/${[CASE_REFERENCE]}#Notifications) and [Respond to the notification response](/cases/case-details/${[CASE_REFERENCE]}/trigger/respondNotification/respondNotification1)"
@@ -1702,7 +1683,7 @@ tasks:
           adminSupportTaskRequired: true
     cancelCategory: ReviewSupportAdmin
     due:
-      days: &a10
+      days: &a9
         if:
           field: caseData.nextListedDate
           op: exists
@@ -1723,7 +1704,7 @@ tasks:
           otherwise: 10
         otherwise: 10
     priority:
-      major: &a11
+      major: &a10
         if:
           field: caseData.nextListedDate
           op: exists
@@ -1743,7 +1724,7 @@ tasks:
           use: 1000
           otherwise: 5001
         otherwise: 5001
-      minor: &a12
+      minor: &a11
         if:
           field: caseData.nextListedDate
           op: exists
@@ -1796,10 +1777,10 @@ tasks:
           legalOfficerSupportTaskRequired: true
     cancelCategory: ReviewSupportLegalOfficer
     due:
-      days: *a10
+      days: *a9
     priority:
-      major: *a11
-      minor: *a12
+      major: *a10
+      minor: *a11
     title: LO - Review Support Request
     link:
       label: Review RA Request
@@ -1840,10 +1821,10 @@ tasks:
           judgeSupportTaskRequired: true
     cancelCategory: ReviewSupportJudge
     due:
-      days: *a10
+      days: *a9
     priority:
-      major: *a11
-      minor: *a12
+      major: *a10
+      minor: *a11
     title: EJ - Review Support Request
     link:
       label: Review RA Request
@@ -1866,10 +1847,10 @@ tasks:
           arrangeSupportTaskRequired: true
     cancelCategory: ArrangeSupport
     due:
-      days: *a10
+      days: *a9
     priority:
-      major: *a11
-      minor: *a12
+      major: *a10
+      minor: *a11
     title:
       if:
         all:
@@ -1899,7 +1880,7 @@ tasks:
         mode: Auto
     cancelCategory: Vetting
     due:
-      days: &a13
+      days: &a12
         feel: |-
           if (caseData != null
           and caseData.referralCollection != null
@@ -1908,7 +1889,7 @@ tasks:
           then 1
           else 2
     priority:
-      major: &a14
+      major: &a13
         feel: |-
           if (caseData != null
           and caseData.referralCollection != null
@@ -1916,7 +1897,7 @@ tasks:
           and sort(caseData.referralCollection, function(x,y) number(x.value.referralNumber) > number(y.value.referralNumber))[1].value.isUrgent = "Yes")
           then 1000
           else 5000
-      minor: &a15
+      minor: &a14
         feel: |-
           if (caseData != null
           and caseData.referralCollection != null
@@ -1947,10 +1928,10 @@ tasks:
         mode: Auto
     cancelCategory: Vetting
     due:
-      days: *a13
+      days: *a12
     priority:
-      major: *a14
-      minor: *a15
+      major: *a13
+      minor: *a14
       dateOriginEarliest: dueDate, nextHearingDate
     link:
       label: Reply to the Referral
@@ -1974,10 +1955,10 @@ tasks:
         mode: Auto
     cancelCategory: Vetting
     due:
-      days: *a13
+      days: *a12
     priority:
-      major: *a14
-      minor: *a15
+      major: *a13
+      minor: *a14
       dateOriginEarliest: dueDate, nextHearingDate
     link:
       label: Reply to the Referral
@@ -2001,7 +1982,7 @@ tasks:
         mode: Auto
     cancelCategory: Processing
     due:
-      days: &a16
+      days: &a15
         feel: |-
           if (caseData!=null
           and caseData.referralCollection != null
@@ -2010,7 +1991,7 @@ tasks:
           then 1
           else 2
     priority:
-      major: &a17
+      major: &a16
         feel: |-
           if (caseData != null
           and caseData.referralCollection != null
@@ -2018,7 +1999,7 @@ tasks:
           and sort(flatten(caseData.referralCollection.value.referralReplyCollection), function(x,y) date and time(if(x.value.replyDateTime!=null)then x.value.replyDateTime else "2023-01-01T00:00:00.000") > date and time(if(y.value.replyDateTime!=null)then y.value.replyDateTime else "2023-01-01T00:00:00.000"))[1].value.isUrgentReply = "Yes")
           then 1000
           else 5000
-      minor: &a18
+      minor: &a17
         feel: |-
           if (caseData!=null
           and caseData.referralCollection != null
@@ -2049,10 +2030,10 @@ tasks:
         mode: Auto
     cancelCategory: Processing
     due:
-      days: *a16
+      days: *a15
     priority:
-      major: *a17
-      minor: *a18
+      major: *a16
+      minor: *a17
       dateOriginRef: dueDate
     description: |-
       **Review the Referral Response**
@@ -2076,10 +2057,10 @@ tasks:
         mode: Auto
     cancelCategory: Processing
     due:
-      days: *a16
+      days: *a15
     priority:
-      major: *a17
-      minor: *a18
+      major: *a16
+      minor: *a17
       dateOriginRef: dueDate
     description: |-
       **Review the Referral Response**
@@ -2097,7 +2078,7 @@ tasks:
           perms: [ Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn, Assign, Unassign ]
           autoAssign: false
           note: Judge Access Request Permissions
-    description: &a19
+    description: &a18
       if:
         all:
           - field: taskAttributes
@@ -2115,7 +2096,7 @@ tasks:
           - /specific-access)
       otherwise: ""
     additionalProperties:
-      roleAssignmentId: &a20
+      roleAssignmentId: &a19
         if:
           all:
             - field: taskAttributes
@@ -2144,9 +2125,9 @@ tasks:
             autoAssign: false
             note: Access Request for Legal Caseworker 
         only: [ et_scotland ]
-    description: *a19
+    description: *a18
     additionalProperties:
-      roleAssignmentId: *a20
+      roleAssignmentId: *a19
     reconfigure: [ workType, roleCategory, description, additionalProperties_roleAssignmentId ]
   - id: reviewSpecificAccessRequestAdmin
     name: Review Specific Access Request (Admin)
@@ -2159,9 +2140,9 @@ tasks:
           perms: [ Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn, Assign, Unassign ]
           autoAssign: false
           note: Access Request for Hearing Centre Team Leader
-    description: *a19
+    description: *a18
     additionalProperties:
-      roleAssignmentId: *a20
+      roleAssignmentId: *a19
     reconfigure: [ workType, roleCategory, description, additionalProperties_roleAssignmentId ]
   - id: reviewSpecificAccessRequestCTSC
     name: Review Specific Access Request (CTSC)
@@ -2174,9 +2155,9 @@ tasks:
           perms: [ Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn, Assign, Unassign ]
           autoAssign: true
           note: Access Request for CTSC
-    description: *a19
+    description: *a18
     additionalProperties:
-      roleAssignmentId: *a20
+      roleAssignmentId: *a19
     reconfigure: [ workType, roleCategory, description, additionalProperties_roleAssignmentId ]
 cancellations:
   - events: [ disposeCase, rollbackMigrateCase, caseTransferECM ]
