@@ -22,10 +22,10 @@ const DecisionLayout = z.strictObject({
   annotationsWidth: Words.optional(),
   /** Information requirement ids by the name of the helper required. */
   requirements: z.record(z.string(), Words).optional(),
-  /** `<id> <expression id> <width> <allowed values id>` by input key. */
-  inputs: z.record(z.string(), Words).optional(),
+  /** `[key, "<id> <expression id> <width> <allowed values id>"]` for each input column, in order. */
+  inputs: z.array(z.tuple([z.string(), Words])).optional(),
   /** `<id> <width>` by output name. */
-  outputs: z.record(z.string(), Words).optional(),
+  outputs: z.array(z.tuple([z.string(), Words])).optional(),
   /** `<content hash> <rule id> <input entry ids…> <output entry ids…>`, in rule order. */
   rules: z.array(Words).optional(),
   /**
@@ -127,13 +127,11 @@ function decisionLayout(
     ...(Object.keys(texts).length > 0 ? { texts } : {}),
     ...(table
       ? {
-          inputs: Object.fromEntries(
-            table.inputs.map((input, i) => [
-              inputKeys[i] as string,
-              [out(input.id), out(input.expressionId), out(input.width), out(input.allowedValuesId)].join(" ")
-            ])
-          ),
-          outputs: Object.fromEntries(table.outputs.map((output) => [output.name, [out(output.id), out(output.width)].join(" ")])),
+          inputs: table.inputs.map((input, i): [string, string] => [
+            inputKeys[i] as string,
+            [out(input.id), out(input.expressionId), out(input.width), out(input.allowedValuesId)].join(" ")
+          ]),
+          outputs: table.outputs.map((output): [string, string] => [output.name, [out(output.id), out(output.width)].join(" ")]),
           rules: table.rules.map((rule, i) =>
             [ruleHash(rules[i] ?? rule), out(rule.id), ...(rule.inputIds ?? []).map(out), ...(rule.outputIds ?? []).map(out)].join(" ")
           )
@@ -243,8 +241,9 @@ export function applyLayout(doc: DmnDocument, layout: FileLayout | undefined, in
     const table = decision.table;
     const split = (text: string | undefined) => (text ?? "").split(" ").map(back);
     const stored = matchRules(table?.rules ?? [], own.rules ?? []);
-    const storedInputs = Object.keys(own.inputs ?? {});
-    const storedOutputs = Object.keys(own.outputs ?? {});
+    const storedInputs = (own.inputs ?? []).map(([key]) => key);
+    const storedOutputs = (own.outputs ?? []).map(([name]) => name);
+    const columnOf = (columns: Array<[string, string]> | undefined, key: string) => columns?.find(([name]) => name === key)?.[1];
     const order = Object.keys(own.requirements ?? {});
     const rank = (required: string): number => {
       const at = order.indexOf(names.get(required) ?? "");
@@ -272,7 +271,7 @@ export function applyLayout(doc: DmnDocument, layout: FileLayout | undefined, in
               ...(own.table ? { id: own.table } : {}),
               ...(own.annotationsWidth ? { annotationsWidth: own.annotationsWidth } : {}),
               inputs: table.inputs.map((input, i) => {
-                const [id, expressionId, width, allowedValuesId] = split(own.inputs?.[inputKeys[i] as string]);
+                const [id, expressionId, width, allowedValuesId] = split(columnOf(own.inputs, inputKeys[i] as string));
                 return {
                   ...input,
                   ...(id ? { id } : {}),
@@ -283,7 +282,7 @@ export function applyLayout(doc: DmnDocument, layout: FileLayout | undefined, in
                 };
               }),
               outputs: table.outputs.map((output) => {
-                const [id, width] = split(own.outputs?.[output.name]);
+                const [id, width] = split(columnOf(own.outputs, output.name));
                 return { ...output, ...(id ? { id } : {}), ...(width ? { width } : {}) };
               }),
               rules: table.rules.map((rule, r): DmnRule => {

@@ -134,3 +134,35 @@ describe("taskRows cancellation and FEEL", () => {
     ]);
   });
 });
+
+describe("taskRows comma-separated categories", () => {
+  const listed = SpecSchema.parse({
+    version: 1,
+    service: { slug: "demo" },
+    caseTypes: [{ id: "ct_a" }],
+    decisions: {
+      initiation: {
+        name: "I",
+        hitPolicy: "COLLECT",
+        inputs: [],
+        outputs: [{ name: "taskId" }, { name: "processCategories" }],
+        rows: [{ returns: { taskId: "T1", processCategories: "catA, catB" } }]
+      },
+      cancellation: {
+        name: "C",
+        hitPolicy: "COLLECT",
+        inputs: [],
+        outputs: [{ name: "processCategories" }],
+        rows: [{ returns: { processCategories: "catB,catC" } }, { returns: { processCategories: "catD,catE" } }]
+      }
+    }
+  });
+
+  it("should match a cancellation row when any category in either list is shared", () => {
+    expect(
+      taskRows(listed, "T1")
+        .find((f) => f.kind === "cancellation")
+        ?.rows.map((r) => r.index)
+    ).toEqual([1]);
+  });
+});

@@ -244,3 +244,24 @@ describe("validateSpec scope and uniqueness", () => {
     expect(validateSpec(bare)).toEqual(["completion: ct_b has no outputs"]);
   });
 });
+
+describe("validateSpec aggregation", () => {
+  const withAggregation = (extra: Record<string, unknown>) => Spec.parse(spec({ decisions: { completion: { ...decision, ...extra } } }));
+
+  it("should reject an aggregation when the hit policy is not COLLECT", () => {
+    expect(validateSpec(withAggregation({ hitPolicy: "FIRST", aggregation: "SUM" }))).toEqual([
+      "completion: ct_a has aggregation SUM with hit policy FIRST, and only COLLECT aggregates",
+      "completion: ct_b has aggregation SUM with hit policy FIRST, and only COLLECT aggregates"
+    ]);
+  });
+
+  it("should check each case type's own hit policy and aggregation when overrides change them", () => {
+    expect(validateSpec(withAggregation({ aggregation: "SUM", overrides: { ct_b: { hitPolicy: "UNIQUE" } } }))).toEqual([
+      "completion: ct_b has aggregation SUM with hit policy UNIQUE, and only COLLECT aggregates"
+    ]);
+    expect(
+      validateSpec(withAggregation({ hitPolicy: "FIRST", aggregation: "SUM", overrides: { ct_a: { aggregation: null }, ct_b: { aggregation: null } } }))
+    ).toEqual([]);
+    expect(validateSpec(withAggregation({ aggregation: "SUM" }))).toEqual([]);
+  });
+});

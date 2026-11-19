@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
 /*
@@ -13,8 +13,6 @@ export const listDir = (dir: string): string[] => readdirSync(dir); // NOSONAR: 
 export const isDirectory = (path: string): boolean => statSync(path).isDirectory(); // NOSONAR: a path the operator passed
 
 export const exists = (path: string): boolean => existsSync(path); // NOSONAR: a path the operator passed
-
-export const removeFile = (path: string): void => rmSync(path); // NOSONAR: a path the operator passed
 
 /** Writes the file, creating the directories above it. */
 export function writeText(path: string, text: string): void {

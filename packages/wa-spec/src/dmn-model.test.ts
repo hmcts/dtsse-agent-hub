@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { sampleDmn } from "./__fixtures__/dmn.ts";
-import { type DmnDocument, inspectDmn, ncName, parseDmn, readDmn, writeDmn } from "./dmn-model.ts";
+import { inspectDmn, parseDmn, sampleDmn } from "./__fixtures__/dmn.ts";
+import { type DmnDocument, ncName, readDmn, writeDmn } from "./dmn-model.ts";
 
 describe("parseDmn and writeDmn", () => {
   it("should read back what was written when the document is written and parsed again", () => {
@@ -193,11 +193,10 @@ describe("entities and namespaces", () => {
 });
 
 describe("readDmn", () => {
-  it("should give the same document and inspection as parsing and inspecting separately when the file has both", () => {
-    const xml = sampleDmn("ct_a").replace("<rule ", '<rule extra="1" ');
-    const { document, inspection } = readDmn(xml);
-    expect(document).toEqual(parseDmn(xml));
-    expect(inspection).toEqual(inspectDmn(xml));
+  it("should give the document and what the model leaves out when the file has an extra attribute", () => {
+    const { document, inspection } = readDmn(sampleDmn("ct_a").replace("<rule ", '<rule extra="1" '));
+    expect(document.decisions[0]?.table?.rules).toHaveLength(2);
+    expect(inspection.unrepresentable.get("attribute extra on <rule>")).toBe(1);
   });
 });
 

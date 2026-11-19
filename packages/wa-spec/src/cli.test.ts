@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { sampleDmn } from "./__fixtures__/dmn.ts";
-import { byCodePoint } from "./merge.ts";
 
 const cli = fileURLToPath(new URL("./cli.ts", import.meta.url));
 const run = (...args: string[]) =>
@@ -127,33 +126,7 @@ describe("cli errors", () => {
 });
 
 describe("cli generate and stale files", () => {
-  it("should list task DMNs the spec no longer has and leave them when --prune is not given", () => {
-    const { dir, input } = workspace();
-    run("import", input, "-o", join(dir, "spec.yaml"));
-    mkdirSync(join(dir, "out"));
-    writeFileSync(join(dir, "out", "wa-task-completion-demo-ct_old.dmn"), "<definitions/>");
-    writeFileSync(join(dir, "out", "other.dmn"), "<definitions/>");
-    const result = run("generate", join(dir, "spec.yaml"), "-o", join(dir, "out"));
-    expect(result.status).toBe(0);
-    expect(result.stderr).toContain("wa-task-completion-demo-ct_old.dmn");
-    expect(result.stderr).not.toContain("other.dmn");
-    expect(readdirSync(join(dir, "out"))).toContain("wa-task-completion-demo-ct_old.dmn");
-  });
-
-  it("should delete them when --prune is given and only them", () => {
-    const { dir, input } = workspace();
-    run("import", input, "-o", join(dir, "spec.yaml"));
-    mkdirSync(join(dir, "out"));
-    writeFileSync(join(dir, "out", "wa-task-completion-demo-ct_old.dmn"), "<definitions/>");
-    writeFileSync(join(dir, "out", "other.dmn"), "<definitions/>");
-    const result = run("generate", join(dir, "spec.yaml"), "-o", join(dir, "out"), "--prune");
-    expect(result.stderr).toContain("removed: wa-task-completion-demo-ct_old.dmn");
-    expect(readdirSync(join(dir, "out")).sort(byCodePoint)).toEqual(["other.dmn", "wa-task-completion-demo-ct_a.dmn", "wa-task-completion-demo-ct_b.dmn"]);
-  });
-});
-
-describe("cli generate pruning scope", () => {
-  it("should remove only files of this service whose kind and case type the spec no longer generates when --prune is given", () => {
+  it("should list task DMNs of the service that the spec does not generate and leave every file in place when the directory holds some", () => {
     const { dir, input } = workspace();
     run("import", input, "-o", join(dir, "spec.yaml"));
     mkdirSync(join(dir, "out"));
@@ -161,18 +134,18 @@ describe("cli generate pruning scope", () => {
       "wa-task-completion-demo-ct_old.dmn",
       "wa-task-completion-other-ct_a.dmn",
       "wa-task-bogus-demo-ct_a.dmn",
-      "wa-task-initiation-demo-ct_a.dmn"
+      "wa-task-initiation-demo-ct_a.dmn",
+      "other.dmn"
     ];
     for (const name of names) {
       writeFileSync(join(dir, "out", name), "<definitions/>");
     }
-    run("generate", join(dir, "spec.yaml"), "-o", join(dir, "out"), "--prune");
-    expect(readdirSync(join(dir, "out")).sort(byCodePoint)).toEqual([
-      "wa-task-bogus-demo-ct_a.dmn",
-      "wa-task-completion-demo-ct_a.dmn",
-      "wa-task-completion-demo-ct_b.dmn",
-      "wa-task-completion-other-ct_a.dmn"
-    ]);
+    const result = run("generate", join(dir, "spec.yaml"), "-o", join(dir, "out"));
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain("wa-task-completion-demo-ct_old.dmn, wa-task-initiation-demo-ct_a.dmn");
+    expect(result.stderr).not.toContain("other");
+    expect(result.stderr).not.toContain("bogus");
+    expect(readdirSync(join(dir, "out"))).toHaveLength(7);
   });
 
   it("should not fail when nothing is generated and the output directory does not exist", () => {

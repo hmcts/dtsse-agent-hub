@@ -2,9 +2,9 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { sampleDmn } from "./__fixtures__/dmn.ts";
+import { parseDmn, sampleDmn } from "./__fixtures__/dmn.ts";
 import { diffDocuments, diffPaths, renderDifferences, ruleOrderMatters } from "./diff.ts";
-import { type DmnDocument, parseDmn, writeDmn } from "./dmn-model.ts";
+import { type DmnDocument, writeDmn } from "./dmn-model.ts";
 
 const base = (hitPolicy = "COLLECT"): DmnDocument => parseDmn(sampleDmn("ct_a", { hitPolicy }));
 const clone = (doc: DmnDocument): DmnDocument => structuredClone(doc);

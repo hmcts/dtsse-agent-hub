@@ -256,6 +256,12 @@ export function validateSpec(spec: Spec): string[] {
       }
     };
     for (const id of own) {
+      const override = decision.overrides?.[id];
+      const hitPolicy = override?.hitPolicy ?? decision.hitPolicy;
+      const aggregation = override?.aggregation === undefined ? decision.aggregation : override.aggregation;
+      if (aggregation && hitPolicy !== "COLLECT") {
+        problems.push(`${kind}: ${id} has aggregation ${aggregation} with hit policy ${hitPolicy}, and only COLLECT aggregates`);
+      }
       if (!decision.outputs.some((o) => o.only === undefined || o.only.includes(id))) {
         problems.push(`${kind}: ${id} has no outputs`);
       }

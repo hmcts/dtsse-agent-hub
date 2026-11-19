@@ -1,7 +1,7 @@
 import { basename, dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { diffPaths, renderDifferences } from "./diff.ts";
-import { exists, isDirectory, listDir, readText, removeFile, writeText } from "./file-io.ts";
+import { exists, isDirectory, listDir, readText, writeText } from "./file-io.ts";
 import { isWaTaskDmn, parseFileName } from "./file-names.ts";
 import { generateAll } from "./generator.ts";
 import { importDmns, renderReport } from "./importer.ts";
@@ -12,8 +12,8 @@ const USAGE = `wa-spec: Work Allocation configuration spec
 
   wa-spec import <dmn-dir> -o <spec.yaml> [--report <report.md>] [--jurisdiction J] [--service-code C] [--display-name N]
                                                  also writes the ids and layout to <spec>.layout.yaml
-  wa-spec generate <spec.yaml> -o <dir> [--prune]  uses <spec>.layout.yaml when it exists; lists the task DMNs in <dir>
-                                                 the spec no longer has, and removes them with --prune
+  wa-spec generate <spec.yaml> -o <dir>          uses <spec>.layout.yaml when it exists; lists the task DMNs of the
+                                                 spec's service in <dir> that it did not generate, and leaves them
   wa-spec diff <a> <b> [--ignore-rule-order]     two DMN files or two directories, or a file and a directory holding
                                                  a file of the same name; exits 1 when they differ
   wa-spec show <spec.yaml> <taskId>              the rows of every kind that concern one task
@@ -35,8 +35,7 @@ function main(argv: string[]): number {
       jurisdiction: { type: "string" },
       "service-code": { type: "string" },
       "display-name": { type: "string" },
-      "ignore-rule-order": { type: "boolean" },
-      prune: { type: "boolean" }
+      "ignore-rule-order": { type: "boolean" }
     }
   });
   if (command === "import") {
@@ -78,13 +77,8 @@ function main(argv: string[]): number {
       const parsed = parseFileName(name);
       return parsed?.service === spec.service.slug && !made.has(`${parsed.kind}/${parsed.caseType}`);
     });
-    for (const name of stale) {
-      if (values.prune) {
-        removeFile(join(values.output, name));
-      }
-    }
     if (stale.length > 0) {
-      process.stderr.write(`${values.prune ? "removed" : "left in place, and not in the spec (--prune removes them)"}: ${stale.join(", ")}\n`);
+      process.stderr.write(`left in place, as the spec does not generate them: ${stale.join(", ")}\n`);
     }
     process.stdout.write(`generated ${files.length} files in ${values.output}\n`);
     return 0;
