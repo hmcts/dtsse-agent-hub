@@ -22,7 +22,8 @@ export function PortSettings({ load }: { load: () => Promise<AssistantAgent | nu
         Web servers
       </h3>
       <p className="text-pretty text-[13px] text-asst-muted">
-        Servers your assistant starts on 0.0.0.0 can be opened here. Only you can open them through these links.
+        Servers your assistant starts on 0.0.0.0 can be opened here. A server's first link opens it for you alone, signed in. Its VPN address has no sign-in, so
+        anyone on the HMCTS VPN who has that address can open it too.
       </p>
       {failed ? (
         <p className="text-[13px] text-asst-error">Your web servers could not be read. Close settings and open them again.</p>
@@ -53,7 +54,7 @@ function Ports({ agent }: { agent: AssistantAgent }) {
               </a>
               {viewerUrl === undefined ? null : (
                 <span className="text-xs text-asst-muted">
-                  On the VPN:{" "}
+                  On the VPN, open to anyone with the address:{" "}
                   <a href={url} target="_blank" rel="noreferrer noopener" className="break-all underline hover:text-asst-text">
                     {url}
                   </a>

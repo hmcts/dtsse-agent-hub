@@ -46,19 +46,21 @@ function pasteable(kind: SavedKind, claudeTokenUsable: boolean): boolean {
 /** `route` is the assistant's own, which decides whether its Claude comes through Azure or through a Claude token. */
 function removeQuestion(kind: SavedKind, route: ModelRoute): string {
   const ask = `Remove your ${TITLES[kind]}?`;
+  // Every one but Microsoft 365 is held by the pod, so removing it restarts a running assistant, which is said.
+  const restart = " A running assistant restarts to stop using it. Your chats are kept.";
   if (kind === "claude" && route === "own-licence") {
-    return `${ask} Your assistant reaches Claude with it, so it cannot answer again until you paste a new one.`;
+    return `${ask} Your assistant reaches Claude with it, so it cannot answer again until you paste a new one.${restart}`;
   }
   if (kind === "azure" && route === "gateway") {
-    return `${ask} Your assistant reaches Claude through it, so it cannot answer again until you sign in to Azure again.`;
+    return `${ask} Your assistant reaches Claude through it, so it cannot answer again until you sign in to Azure again.${restart}`;
   }
   if (kind === "microsoft") {
     return `${ask} Your agents can no longer read your mail, calendar, Teams chats, meetings or files until you connect again.`;
   }
   if (kind === "github") {
-    return `${ask} Your assistant cannot reach GitHub until you sign in to GitHub again.`;
+    return `${ask} Your assistant cannot reach GitHub until you sign in to GitHub again.${restart}`;
   }
-  return `${ask} Your assistant stops using it the next time it starts.`;
+  return `${ask}${restart}`;
 }
 
 /** One row per kind that is stored or can be pasted; a sign-in that is neither has nothing to do here. */

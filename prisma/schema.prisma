@@ -1047,7 +1047,7 @@ model AssistantLookup {
   /// For a github_project lookup: the owner whose Projects to search.
   githubOwner    String?   @map("github_owner")
   signIn         Boolean   @default(false) @map("sign_in")
-  /// pending, done or failed.
+  /// pending, done, failed, or cancelled once the browser stopped waiting for it.
   status         String    @default("pending")
   results        Json?
   /// signed_out, failed or superseded, when status is failed.

@@ -5,6 +5,7 @@ import { exportableDocument } from "./artefact-store.ts";
 import { announce, type ConversationRow } from "./conversation-row.ts";
 import { GITHUB_EXPORT_TIMEOUT_MS, GITHUB_SELECT, type GithubExportView, githubExportView, readGithubProject, readGithubRepo } from "./github.ts";
 import { JIRA_SELECT } from "./jira.ts";
+import { duplicateTicket } from "./jira-store.ts";
 import { hasPod } from "./pods.ts";
 import { MAX_GITHUB_ERROR } from "./schemas.ts";
 
@@ -59,7 +60,8 @@ export async function requestGithubExport(
     const documentId = await exportableDocument(tx, conversation, document, "ticket");
     const updated = await tx.$executeRaw`
       UPDATE assistant_document
-         SET github_export_id = gen_random_uuid(), github_repo = ${checked}, github_status = 'pending', github_error = NULL,
+         SET github_export_id = CASE WHEN github_status = 'pending' AND github_repo = ${checked} AND github_export_id IS NOT NULL THEN github_export_id ELSE gen_random_uuid() END,
+             github_repo = ${checked}, github_status = 'pending', github_error = NULL,
              github_requested_at = ${now},
              github_project_owner = ${board?.owner ?? null}, github_project_number = ${board?.number ?? null}::int,
              github_project_title = ${board?.title ?? null}, github_project_error = NULL
@@ -100,20 +102,26 @@ export async function recordGithubExport(
   conversation: Pick<ConversationRow, "id" | "virtualAgentId" | "ownerOid">,
   result: GithubExportResult
 ): Promise<void> {
-  const where = { conversationId: conversation.id, githubExportId: result.export_id, githubNumber: null };
-  const data =
-    "number" in result
-      ? {
-          githubStatus: "done",
-          githubNumber: result.number,
-          githubError: null,
-          githubProjectError: result.project_error?.slice(0, MAX_GITHUB_ERROR) ?? null
-        }
-      : { githubStatus: "failed", githubError: result.error.slice(0, MAX_GITHUB_ERROR) };
   await prisma.$transaction(async (tx) => {
-    const { count } = await tx.assistantDocument.updateMany({ where, data });
-    if (count > 0) {
-      await announce(tx, conversation);
+    // One ticket a document at report time too: see `recordJiraExport`.
+    const document = await tx.assistantDocument.findFirst({
+      where: { conversationId: conversation.id, githubExportId: result.export_id, githubNumber: null },
+      select: { id: true, githubRepo: true, jiraKey: true }
+    });
+    if (document === null) {
+      return;
     }
+    const data = !("number" in result)
+      ? { githubStatus: "failed", githubError: result.error.slice(0, MAX_GITHUB_ERROR) }
+      : document.jiraKey !== null
+        ? { githubStatus: "failed", githubError: duplicateTicket(`${document.githubRepo}#${result.number}`, `in Jira as ${document.jiraKey}`) }
+        : {
+            githubStatus: "done",
+            githubNumber: result.number,
+            githubError: null,
+            githubProjectError: result.project_error?.slice(0, MAX_GITHUB_ERROR) ?? null
+          };
+    await tx.assistantDocument.update({ where: { id: document.id }, data });
+    await announce(tx, conversation);
   });
 }

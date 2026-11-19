@@ -4,7 +4,7 @@ import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { findVirtualAgent } from "../virtual-agents/store.ts";
 import { wakeAssistant } from "./assistant-store.ts";
-import { announce, type ConversationRow } from "./conversation-row.ts";
+import { announce, type ConversationRow, storedStops } from "./conversation-row.ts";
 import { readAssistantModel } from "./model-store.ts";
 import { hasPod } from "./pods.ts";
 import type { SessionsReport } from "./schemas.ts";
@@ -22,6 +22,8 @@ const MAX_STOP_HISTORY = 50;
  * for, and `reportSessions` only ever sees a pod's own conversations. So a wake recorded here would be a row that
  * said a session had been asked for, for ever, with nobody having been asked and nothing able to answer.
  */
+// It leaves `last_active_at` alone, which orders the sidebar: a wake can be a focus of the box with nothing sent, and
+// reading an old chat is not using it. A message moves the chat up through `touchConversation`, as it is sent.
 export async function requestWake(prisma: PrismaClient, conversation: ConversationRow, now: Date = new Date()): Promise<void> {
   if (!hasPod(conversation)) {
     return;
@@ -29,7 +31,7 @@ export async function requestWake(prisma: PrismaClient, conversation: Conversati
   await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`
       UPDATE assistant_conversation
-         SET wake_requested_at = COALESCE(wake_requested_at, ${now}), last_active_at = ${now}, updated_at = ${now}
+         SET wake_requested_at = COALESCE(wake_requested_at, ${now}), updated_at = ${now}
        WHERE id = ${conversation.id}::uuid
     `;
     await announce(tx, conversation);
@@ -87,8 +89,12 @@ export async function stopAnswer(prisma: PrismaClient, conversation: Conversatio
   if (!clientSupports(agent.clientFeatures, "stop")) {
     return "unsupported-client";
   }
-  const history = [...conversation.stopHistory, { at: now.toISOString() }].slice(-MAX_STOP_HISTORY);
   await prisma.$transaction(async (tx) => {
+    // Read again under the row's lock, so two stops at once both land in the history rather than one overwriting it.
+    const [row] = await tx.$queryRaw<{ stop_history: unknown }[]>`
+      SELECT stop_history FROM assistant_conversation WHERE id = ${conversation.id}::uuid FOR UPDATE
+    `;
+    const history = [...storedStops(row?.stop_history), { at: now.toISOString() }].slice(-MAX_STOP_HISTORY);
     // Written as `setProduct` writes the product history, rather than through the typed client: Prisma's JSON input
     // type takes no array of a named interface, and the two histories are better off written the same way.
     await tx.$executeRaw`

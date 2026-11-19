@@ -106,8 +106,11 @@ describe("the small checks", () => {
     expect(fileIdsOf({})).toEqual([]);
   });
 
-  it("should know an xlsx by its zip header", () => {
-    expect(isXlsx(new Uint8Array([0x50, 0x4b, 0x03, 0x04, 1]))).toBe(true);
+  it("should know an xlsx by its zip header and the entries a spreadsheet has, and refuse any other zip", () => {
+    const zip = (names: string) => new Uint8Array([0x50, 0x4b, 0x03, 0x04, ...new TextEncoder().encode(names)]);
+    expect(isXlsx(zip("[Content_Types].xml xl/workbook.xml"))).toBe(true);
+    expect(isXlsx(zip("word/document.xml [Content_Types].xml"))).toBe(false);
+    expect(isXlsx(zip("photo.jpg"))).toBe(false);
     expect(isXlsx(new TextEncoder().encode("English,Welsh"))).toBe(false);
   });
 

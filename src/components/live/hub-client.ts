@@ -123,13 +123,17 @@ function browserDependencies(): HubClientDependencies {
   };
 }
 
-/** Connects and keeps connected until the returned function is called. */
-export function connectHub(url: string, handlers: HubHandlers, dependencies: HubClientDependencies = browserDependencies()): () => void {
+/**
+ * Connects and keeps connected until the returned function is called. `catchUp` is for a stream opened in place of
+ * another, as moving between chats does: what happened while neither was open is unknown, so the first open says
+ * `resync`, exactly as a reconnect after an error does.
+ */
+export function connectHub(url: string, handlers: HubHandlers, dependencies: HubClientDependencies = browserDependencies(), catchUp = false): () => void {
   let stopped = false;
   let source: EventSourceLike | undefined;
   let timer: unknown;
   let attempt = 0;
-  let missed = false;
+  let missed = catchUp;
 
   function connect(): void {
     if (stopped) {

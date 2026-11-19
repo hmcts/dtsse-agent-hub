@@ -174,9 +174,14 @@ export interface CreatedUpload {
  *
  * The conversation's row is taken first, so the caps are read and acted on one starter at a time: at the default
  * isolation level two tabs would otherwise both read the same total and both find room for the last file. What a
- * conversation holds counts every upload still alive, fetched ones included: the pod's disk keeps them, and
- * `/workspace` filling up breaks its repository clones rather than just the next upload.
+ * conversation holds is what its pod's disk is holding for it: every upload still alive, and every one sent with a
+ * message whose copy the person has not deleted in Settings, even once the hub has let go of its own bytes. The sweep
+ * expires an upload's row after its window, but the pod keeps the file, and `/workspace` filling up breaks its
+ * repository clones rather than just the next upload — so the cap would otherwise reset every window.
  */
+/** How long an upload can go without a part arriving before it counts as abandoned rather than on its way. */
+export const STALLED_UPLOAD_MS = 15 * 60_000;
+
 export async function createUpload(prisma: PrismaClient, upload: NewUpload): Promise<CreatedUpload> {
   if (!isUploadSize(upload.size)) {
     throw new HttpError(400, `a file is 1 byte to ${describeBytes(MAX_UPLOAD_BYTES)}`, { reason: "file_too_big" satisfies UploadRefusal });
@@ -185,14 +190,23 @@ export async function createUpload(prisma: PrismaClient, upload: NewUpload): Pro
   const mediaType = isMediaType(upload.mediaType) ? upload.mediaType.toLowerCase() : DEFAULT_MEDIA_TYPE;
   return await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT 1 FROM assistant_conversation WHERE id = ${upload.conversationId}::uuid FOR UPDATE`;
-    const pending = await tx.assistantUpload.count({ where: { conversationId: upload.conversationId, messageId: null, state: { in: ["pending", "stored"] } } });
+    // The files the composer can show: the stored ones, and ones still on their way up. One left half-sent by a tab
+    // that closed shows nowhere, so once it has gone quiet it no longer takes a place the person cannot see or free.
+    const pending = await tx.assistantUpload.count({
+      where: {
+        conversationId: upload.conversationId,
+        messageId: null,
+        OR: [{ state: "stored" }, { state: "pending", updatedAt: { gte: new Date(Date.now() - STALLED_UPLOAD_MS) } }]
+      }
+    });
     if (pending >= MAX_ATTACHMENTS_PER_MESSAGE) {
       throw new HttpError(409, `a message carries at most ${MAX_ATTACHMENTS_PER_MESSAGE} files`, { reason: "too_many_files" satisfies UploadRefusal });
     }
     const [total] = await tx.$queryRaw<{ bytes: bigint }[]>`
       SELECT COALESCE(sum(bytes), 0)::bigint AS bytes
         FROM assistant_upload
-       WHERE conversation_id = ${upload.conversationId}::uuid AND state <> 'expired'
+       WHERE conversation_id = ${upload.conversationId}::uuid
+         AND (state <> 'expired' OR (message_id IS NOT NULL AND pod_delete_requested_at IS NULL))
     `;
     if (Number(total?.bytes ?? 0) + size > MAX_CONVERSATION_BYTES) {
       throw new HttpError(409, `this conversation's files add up to at most ${describeBytes(MAX_CONVERSATION_BYTES)}`, {
@@ -230,7 +244,12 @@ export async function putUploadPart(prisma: PrismaClient, upload: UploadRow, ind
     // The browser sends parts in parallel, and two of them counting what has arrived at once would each see a
     // snapshot without the other's row — leaving a complete upload `pending` for ever. Taking the upload's row first
     // serialises the parts of one file and nothing else, so other files still go up at the same time.
-    await tx.$executeRaw`SELECT 1 FROM assistant_upload WHERE id = ${upload.id}::uuid FOR UPDATE`;
+    // Its state is read again under the lock: the sweep may have expired it since it was looked up, and a part written
+    // to an expired upload would be a row nothing ever deletes.
+    const [locked] = await tx.$queryRaw<{ state: string }[]>`SELECT state FROM assistant_upload WHERE id = ${upload.id}::uuid FOR UPDATE`;
+    if (locked?.state !== "pending" && locked?.state !== "stored") {
+      throw new HttpError(404, "this file is no longer being uploaded", { reason: "no_such_upload" satisfies UploadRefusal });
+    }
     await tx.assistantUploadPart.upsert({
       where: { uploadId_index: { uploadId: upload.id, index } },
       create: { uploadId: upload.id, index, data },
@@ -243,9 +262,9 @@ export async function putUploadPart(prisma: PrismaClient, upload: UploadRow, ind
        WHERE upload_id = ${upload.id}::uuid
     `;
     const received = Number(arrived?.received ?? 0);
-    if (Number(arrived?.parts ?? 0) === partCount(upload.bytes)) {
-      await tx.assistantUpload.update({ where: { id: upload.id }, data: { state: "stored", updatedAt: new Date() } });
-    }
+    // Touched with each part, so an upload still arriving reads as on its way to the four-file limit.
+    const done = Number(arrived?.parts ?? 0) === partCount(upload.bytes);
+    await tx.assistantUpload.update({ where: { id: upload.id }, data: { ...(done ? { state: "stored" } : {}), updatedAt: new Date() } });
     return { received };
   });
 }

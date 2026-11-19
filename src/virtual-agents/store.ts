@@ -903,3 +903,14 @@ export async function liveVirtualAgents(db: Database): Promise<LiveVirtualAgent[
     cluster: row.cluster
   }));
 }
+
+/**
+ * Restarts every one of the owner's agents that is meant to be running, for a change that only a new pod picks up, such
+ * as a sign-in removed. Stopped ones need nothing: they start without it.
+ */
+export async function restartRunningAgents(prisma: PrismaClient, ownerOid: string, detail: string, now: Date = new Date()): Promise<void> {
+  const running = await prisma.virtualAgent.findMany({ where: { ownerOid, desired: "running" }, select: { id: true } });
+  for (const agent of running) {
+    await restartVirtualAgent(prisma, ownerOid, agent.id, detail, now);
+  }
+}

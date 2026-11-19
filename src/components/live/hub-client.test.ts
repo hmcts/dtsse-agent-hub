@@ -170,6 +170,16 @@ describe("connectHub", () => {
     expect(received).toEqual([["resync", {}]]);
   });
 
+  it("should ask the page to re-read when it opens in place of another stream, and only on that first open", () => {
+    const { sources, dependencies, received, handlers } = harness();
+    connectHub("/api/ui/stream?watch=b", handlers, dependencies, true);
+
+    sources[0]!.emit("open");
+    sources[0]!.emit("open");
+
+    expect(received).toEqual([["resync", {}]]);
+  });
+
   it("should close and cancel a pending retry when it is stopped", async () => {
     const { sources, timers, dependencies, handlers } = harness();
     const stop = connectHub("/api/ui/stream", handlers, dependencies);

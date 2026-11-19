@@ -47,24 +47,36 @@ export function HubStreamProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
+  // The stream the tab had before this one, so a new one opened in its place catches up on what fell between them: the
+  // page was read before the new stream opened, and anything announced in between — a reply landing as the person
+  // moved to its chat — would otherwise not be heard until something else changed.
+  const previousUrl = useRef<string | null>(null);
+
   useEffect(() => {
     if (ended) {
       return;
     }
-    return connectHub(url, {
-      event: (type, data) => {
-        if (type === "resync" && waitingRefresh.current === null) {
-          waitingRefresh.current = whenOnline(() => {
-            waitingRefresh.current = null;
-            router.refresh();
-          });
-        }
-        for (const listener of [...listeners.current]) {
-          listener(type, data);
-        }
+    const catchUp = previousUrl.current !== null && previousUrl.current !== url;
+    previousUrl.current = url;
+    return connectHub(
+      url,
+      {
+        event: (type, data) => {
+          if (type === "resync" && waitingRefresh.current === null) {
+            waitingRefresh.current = whenOnline(() => {
+              waitingRefresh.current = null;
+              router.refresh();
+            });
+          }
+          for (const listener of [...listeners.current]) {
+            listener(type, data);
+          }
+        },
+        signedOut: endSession
       },
-      signedOut: endSession
-    });
+      undefined,
+      catchUp
+    );
   }, [url, router, ended, endSession]);
 
   const value = useMemo<HubContextValue>(

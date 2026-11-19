@@ -12,11 +12,19 @@ describe("checkCredential for github", () => {
   it.each([
     ["a classic personal token", `ghp_${"a".repeat(36)}`],
     ["an OAuth token", `gho_${"B1".repeat(18)}`],
-    ["a server token", `ghs_${"c".repeat(20)}`],
-    ["a user-to-server token", `ghu_${"d".repeat(40)}`],
     ["a fine-grained token", `github_pat_11ABC_${"e".repeat(70)}`]
   ])("should accept %s when it matches GitHub's format", (_label, value) => {
     expect(checkCredential("github", value)).toEqual({ ok: true, value, accountLabel: null });
+  });
+
+  it.each([
+    ["a GitHub App installation token", `ghs_${"c".repeat(20)}`],
+    ["a GitHub App user token", `ghu_${"d".repeat(40)}`]
+  ])("should refuse %s, which expires within hours, saying why", (_label, value) => {
+    expect(checkCredential("github", value)).toEqual({
+      ok: false,
+      error: "that GitHub token expires within hours; use a personal access token (ghp_ or github_pat_) instead"
+    });
   });
 
   it("should trim surrounding whitespace when the paste carries a newline", () => {

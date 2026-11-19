@@ -287,3 +287,32 @@ export function documentSummaryJson(document: StoredDocument) {
     updated_at: document.updatedAt?.toISOString() ?? null
   };
 }
+
+/** The export tools whose request is a message the chat sends, and can be abandoned if that message does not go. */
+export type ExportTool = "jira" | "github" | "confluence";
+
+/** Said on the document when its export's request never reached the assistant, so it can be asked for again at once. */
+export const EXPORT_NOT_SENT = "the request could not be sent to your assistant, so nothing was created; try again";
+
+/**
+ * Marks the document's export failed when the chat message that asks for it was not sent: the export is written
+ * pending first, so the footer says so as the request goes, and without this a message that failed would leave it
+ * "pending" until the 15-minute window let it be asked for again. Only a pending one, so a result that has somehow
+ * landed is left as it is. Announced, so the panel shows the failure.
+ */
+export async function abandonExport(prisma: PrismaClient, conversation: ConversationRef, documentId: string, tool: ExportTool): Promise<void> {
+  if (!UUID_RE.test(documentId)) {
+    return;
+  }
+  await prisma.$transaction(async (tx) => {
+    const updated =
+      tool === "jira"
+        ? await tx.$executeRaw`UPDATE assistant_document SET jira_status = 'failed', jira_error = ${EXPORT_NOT_SENT} WHERE id = ${documentId}::uuid AND conversation_id = ${conversation.id}::uuid AND jira_status = 'pending'`
+        : tool === "github"
+          ? await tx.$executeRaw`UPDATE assistant_document SET github_status = 'failed', github_error = ${EXPORT_NOT_SENT} WHERE id = ${documentId}::uuid AND conversation_id = ${conversation.id}::uuid AND github_status = 'pending'`
+          : await tx.$executeRaw`UPDATE assistant_document SET confluence_status = 'failed', confluence_error = ${EXPORT_NOT_SENT} WHERE id = ${documentId}::uuid AND conversation_id = ${conversation.id}::uuid AND confluence_status = 'pending'`;
+    if (updated > 0) {
+      await announce(tx, conversation);
+    }
+  });
+}

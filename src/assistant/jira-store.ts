@@ -47,7 +47,8 @@ export async function requestJiraExport(
     const documentId = await exportableDocument(tx, conversation, document, "ticket");
     const updated = await tx.$executeRaw`
       UPDATE assistant_document
-         SET jira_export_id = gen_random_uuid(), jira_project = ${project}, jira_status = 'pending', jira_error = NULL,
+         SET jira_export_id = CASE WHEN jira_status = 'pending' AND jira_project = ${project} AND jira_export_id IS NOT NULL THEN jira_export_id ELSE gen_random_uuid() END,
+             jira_project = ${project}, jira_status = 'pending', jira_error = NULL,
              jira_requested_at = ${now}
        WHERE id = ${documentId}::uuid
          AND jira_key IS NULL
@@ -78,21 +79,39 @@ export async function requestJiraExport(
 export type JiraExportResult = { export_id: string; key: string } | { export_id: string; error: string };
 
 /**
- * The session's result for an export, found by its id among the conversation's documents. Kept only for that document's current export, and never over a key: a
- * report for an export the person has since retried, or a second report, changes nothing.
+ * The session's result for an export, found by its id among the conversation's documents. Kept only for that
+ * document's current export, and never over a key: a report for an export the person has since retried elsewhere,
+ * or a second report, changes nothing.
+ *
+ * One ticket a document holds at report time as it does at request time: a ticket that arrives after the document
+ * has gone to GitHub in the meantime is recorded as a failure naming it, so the person knows there is a second one to
+ * delete rather than seeing the document claim two. A key in a project other than the one asked for is kept, with the
+ * project it is really in, so the footer says where the ticket went.
  */
 export async function recordJiraExport(
   prisma: PrismaClient,
   conversation: Pick<ConversationRow, "id" | "virtualAgentId" | "ownerOid">,
   result: JiraExportResult
 ): Promise<void> {
-  const where = { conversationId: conversation.id, jiraExportId: result.export_id, jiraKey: null };
-  const data =
-    "key" in result ? { jiraStatus: "done", jiraKey: result.key, jiraError: null } : { jiraStatus: "failed", jiraError: result.error.slice(0, MAX_JIRA_ERROR) };
   await prisma.$transaction(async (tx) => {
-    const { count } = await tx.assistantDocument.updateMany({ where, data });
-    if (count > 0) {
-      await announce(tx, conversation);
+    const document = await tx.assistantDocument.findFirst({
+      where: { conversationId: conversation.id, jiraExportId: result.export_id, jiraKey: null },
+      select: { id: true, githubNumber: true, githubRepo: true }
+    });
+    if (document === null) {
+      return;
     }
+    const data = !("key" in result)
+      ? { jiraStatus: "failed", jiraError: result.error.slice(0, MAX_JIRA_ERROR) }
+      : document.githubNumber !== null
+        ? { jiraStatus: "failed", jiraError: duplicateTicket(result.key, `on GitHub as ${document.githubRepo}#${document.githubNumber}`) }
+        : { jiraStatus: "done", jiraKey: result.key, jiraProject: result.key.split("-")[0], jiraError: null };
+    await tx.assistantDocument.update({ where: { id: document.id }, data });
+    await announce(tx, conversation);
   });
+}
+
+/** Said when a late ticket arrives for a document already on the other tool: there are now two, and which to delete. */
+export function duplicateTicket(late: string, kept: string): string {
+  return `This document was already ${kept}, so ${late} is a second ticket for it. Delete ${late} if you do not need it.`;
 }

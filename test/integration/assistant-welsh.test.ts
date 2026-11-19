@@ -7,7 +7,17 @@ import * as downloadRoute from "../../src/app/api/ui/assistant/welsh/files/[file
 import * as uploadRoute from "../../src/app/api/ui/assistant/welsh/files/route.ts";
 import * as welshRoute from "../../src/app/api/ui/assistant/welsh/route.ts";
 import { WELSH_JOB_TIMEOUT_MS, WELSH_RATE_LIMIT, WELSH_RETENTION_MS } from "../../src/assistant/welsh.ts";
-import { answerWelsh, askWelsh, ownerFile, pendingWelsh, podFile, putJobFile, readWelsh, saveUpload } from "../../src/assistant/welsh-store.ts";
+import {
+  answerWelsh,
+  askWelsh,
+  MAX_WELSH_UPLOADS,
+  ownerFile,
+  pendingWelsh,
+  podFile,
+  putJobFile,
+  readWelsh,
+  saveUpload
+} from "../../src/assistant/welsh-store.ts";
 import { setDesired } from "../../src/virtual-agents/store.ts";
 import { ALICE, type AssistantFixture, BOB, podFixture } from "./assistant-pod.ts";
 import { connect, prisma, resetDatabase } from "./database.ts";
@@ -40,7 +50,8 @@ async function withPlugin(id: string): Promise<string> {
   return id;
 }
 const assistantOf: AssistantFixture = async (...args) => withPlugin(await claimingWelsh(...args));
-const XLSX = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 1, 2, 3]);
+/** The start of a zip, and the entry names every .xlsx carries, which is what `isXlsx` looks for. */
+const XLSX = new Uint8Array([0x50, 0x4b, 0x03, 0x04, ...new TextEncoder().encode("[Content_Types].xml xl/workbook.xml")]);
 
 function browser(
   handler: (request: NextRequest) => Promise<Response>,
@@ -237,7 +248,42 @@ describe("welsh jobs", () => {
     expect(await readWelsh(prisma, ALICE.oid, huge)).toMatchObject({ status: "failed" });
 
     const forgotten = await jobOf();
-    expect(await readWelsh(prisma, ALICE.oid, forgotten, new Date(Date.now() + WELSH_JOB_TIMEOUT_MS + 1000))).toEqual({ status: "timeout" });
+    const late = new Date(Date.now() + WELSH_JOB_TIMEOUT_MS + 1000);
+    expect(await readWelsh(prisma, ALICE.oid, forgotten, late)).toEqual({ status: "timeout" });
+    // Not handed to a pod that reconnects after it timed out, which would start it then; one still in time is.
+    expect(await pendingWelsh(prisma, assistant, forgotten, late)).toBeUndefined();
+    expect(await pendingWelsh(prisma, assistant, forgotten)).toBeDefined();
+  });
+
+  it("should refuse uploads past the rate limit or past what one assistant may hold, and clear old ones as it uploads", async () => {
+    const assistant = await assistantOf(ALICE);
+    const old = new Date(Date.now() - WELSH_RETENTION_MS - 1000);
+    await saveUpload(prisma, ALICE.oid, "old.xlsx", XLSX, old);
+    await prisma.assistantWelshFile.createMany({
+      data: Array.from({ length: WELSH_RATE_LIMIT - 1 }, (_, n) => ({
+        virtualAgentId: assistant,
+        ownerOid: ALICE.oid,
+        name: `r${n}.xlsx`,
+        bytes: Buffer.from(XLSX)
+      }))
+    });
+
+    await saveUpload(prisma, ALICE.oid, "now.xlsx", XLSX);
+    expect(await prisma.assistantWelshFile.count({ where: { createdAt: old } })).toBe(0);
+    await expect(saveUpload(prisma, ALICE.oid, "too-soon.xlsx", XLSX)).rejects.toMatchObject({ status: 429 });
+
+    const hourAgo = new Date(Date.now() - 2 * 3_600_000);
+    await prisma.assistantWelshFile.updateMany({ data: { createdAt: hourAgo } });
+    await prisma.assistantWelshFile.createMany({
+      data: Array.from({ length: MAX_WELSH_UPLOADS - WELSH_RATE_LIMIT }, (_, n) => ({
+        virtualAgentId: assistant,
+        ownerOid: ALICE.oid,
+        name: `s${n}.xlsx`,
+        bytes: Buffer.from(XLSX),
+        createdAt: hourAgo
+      }))
+    });
+    await expect(saveUpload(prisma, ALICE.oid, "one-more.xlsx", XLSX)).rejects.toMatchObject({ status: 409 });
   });
 
   it("should refuse jobs past the rate limit, and sweep jobs and files older than a week", async () => {

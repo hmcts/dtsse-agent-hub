@@ -136,6 +136,7 @@ async function dropAbandoned(tx: Database, retentionHours: number, batch: number
        AND NOT EXISTS (SELECT 1 FROM assistant_document d WHERE d.conversation_id = c.id AND d.version > 0)
        AND c.forked_at IS NULL
        AND c.created_at < now() - make_interval(hours => ${retentionHours}::int)
+       AND c.last_active_at < now() - make_interval(hours => ${retentionHours}::int)
        AND NOT EXISTS (
              SELECT 1 FROM assistant_upload u
               WHERE u.conversation_id = c.id
@@ -148,6 +149,9 @@ async function dropAbandoned(tx: Database, retentionHours: number, batch: number
            )
      ORDER BY c.created_at
      LIMIT ${batch}::int
+     -- Held while this decides, and passed over while a send is touching it, so a first message going as the sweep
+     -- runs either keeps its chat or is refused with the chat already gone: never sent into one deleted after.
+       FOR UPDATE OF c SKIP LOCKED
   `;
   for (const row of abandoned) {
     await tx.assistantConversation.delete({ where: { id: row.id } });

@@ -161,7 +161,12 @@ export async function shareConversation(prisma: PrismaClient, actorOid: string, 
 export async function unshareConversation(prisma: PrismaClient, actorOid: string, id: string, recipientOid: string): Promise<SharePerson[]> {
   const conversation = await ownedConversation(prisma, actorOid, id);
   await prisma.$transaction(async (tx) => {
-    const { count } = await tx.assistantConversationShare.deleteMany({ where: { conversationId: id, recipientOid } });
+    // The fork offer goes with the share: it lets the person read the chat too (`conversationAccess` reads both), so
+    // taking them off the list and leaving the offer would leave them reading it. Withdrawing only an offer, by
+    // contrast, leaves a share the owner gave as it is.
+    const { count: shared } = await tx.assistantConversationShare.deleteMany({ where: { conversationId: id, recipientOid } });
+    const { count: offered } = await tx.assistantConversationFork.deleteMany({ where: { conversationId: id, recipientOid } });
+    const count = shared + offered;
     if (count > 0) {
       await announceShares(tx, conversation);
     }

@@ -427,7 +427,7 @@ describe("saveCredential and removeCredential", () => {
 
     const result = await saveCredential(form({ kind: "github", value: ` ${GITHUB}\n`, ownerOid: BOB.oid }));
 
-    expect(result).toEqual({ ok: true, confirmation: "Your GitHub token is stored" });
+    expect(result).toEqual({ ok: true, confirmation: "Your GitHub token is stored. Your assistant uses it from its next start." });
     const row = await prisma.credential.findFirstOrThrow();
     expect(row).toMatchObject({ ownerOid: devIdentity("alice").oid, kind: "github" });
     expect(revalidated).toContain("/assistant");
@@ -447,7 +447,10 @@ describe("saveCredential and removeCredential", () => {
   it("should save a Claude token when the viewer is on their own licence", async () => {
     actAs("own-licence");
 
-    expect(await saveCredential(form({ kind: "claude", value: CLAUDE }))).toEqual({ ok: true, confirmation: "Your Claude token is stored" });
+    expect(await saveCredential(form({ kind: "claude", value: CLAUDE }))).toEqual({
+      ok: true,
+      confirmation: "Your Claude token is stored. Your assistant uses it from its next start."
+    });
     expect(await readCredential(prisma, localStore(), devIdentity("own-licence").oid, "claude")).toBe(CLAUDE);
   });
 
@@ -470,7 +473,10 @@ describe("saveCredential and removeCredential", () => {
     await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "own-licence", name: "assistant" });
     actAs("alice");
 
-    expect(await saveCredential(form({ kind: "claude", value: CLAUDE }))).toEqual({ ok: true, confirmation: "Your Claude token is stored" });
+    expect(await saveCredential(form({ kind: "claude", value: CLAUDE }))).toEqual({
+      ok: true,
+      confirmation: "Your Claude token is stored. Your assistant uses it from its next start."
+    });
     expect(await readCredential(prisma, localStore(), ALICE.oid, "claude")).toBe(CLAUDE);
   });
 
@@ -480,7 +486,10 @@ describe("saveCredential and removeCredential", () => {
     await createVirtualAgent(prisma, { owner: who, modelRoute: "gateway", name: "assistant" });
     actAs("own-licence");
 
-    expect(await saveCredential(form({ kind: "claude", value: CLAUDE }))).toEqual({ ok: true, confirmation: "Your Claude token is stored" });
+    expect(await saveCredential(form({ kind: "claude", value: CLAUDE }))).toEqual({
+      ok: true,
+      confirmation: "Your Claude token is stored. Your assistant uses it from its next start."
+    });
     expect(await readCredential(prisma, localStore(), who.oid, "claude")).toBe(CLAUDE);
   });
 
@@ -532,6 +541,35 @@ describe("saveCredential and removeCredential", () => {
     expect(await prisma.credential.count()).toBe(0);
   });
 
+  it("should restart a running assistant when a sign-in it holds is removed, so it stops using it, and leave a stopped one", async () => {
+    await insertUser(ALICE);
+    const running = await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "own-licence", name: "assistant" });
+    const stopped = await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "own-licence", name: "spare" });
+    await setDesired(prisma, ALICE.oid, stopped.id, "stopped");
+    await prisma.virtualAgent.update({ where: { id: running.id }, data: { status: "running" } });
+    actAs("alice");
+    await saveCredential(form({ kind: "github", value: GITHUB }));
+
+    expect(await removeCredential(form({ kind: "github" }))).toEqual({ ok: true });
+
+    expect(await prisma.virtualAgent.findUniqueOrThrow({ where: { id: running.id } })).toMatchObject({
+      status: "provisioning",
+      statusDetail: "restarting to stop using a removed sign-in"
+    });
+    expect((await prisma.virtualAgent.findUniqueOrThrow({ where: { id: stopped.id } })).desired).toBe("stopped");
+  });
+
+  it("should restart nothing when a sign-in the hub reads for itself is removed", async () => {
+    await insertUser(ALICE);
+    const running = await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "own-licence", name: "assistant" });
+    await prisma.virtualAgent.update({ where: { id: running.id }, data: { status: "running" } });
+    actAs("alice");
+
+    expect(await removeCredential(form({ kind: "microsoft" }))).toEqual({ ok: true });
+
+    expect((await prisma.virtualAgent.findUniqueOrThrow({ where: { id: running.id } })).status).toBe("running");
+  });
+
   it("should refuse to delete when no kind is named", async () => {
     actAs("alice");
 
@@ -565,7 +603,10 @@ describe("a Jenkins API token", () => {
   it("should save a pasted token from the web and list it with the others", async () => {
     actAs("alice");
 
-    expect(await saveCredential(form({ kind: "jenkins", value: JENKINS }))).toEqual({ ok: true, confirmation: "Your Jenkins API token is stored" });
+    expect(await saveCredential(form({ kind: "jenkins", value: JENKINS }))).toEqual({
+      ok: true,
+      confirmation: "Your Jenkins API token is stored. Your assistant uses it from its next start."
+    });
 
     const statuses = await credentialStatus(prisma, devIdentity("alice").oid);
     expect(statuses.map((status) => [status.kind, status.stored])).toContainEqual(["jenkins", true]);

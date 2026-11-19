@@ -288,9 +288,9 @@ export type StoredCredential = Pick<CredentialStatus, "stored" | "updatedAt"> | 
  * tells a credential that works from one a pod has just failed to use.
  *
  * A sign-in is over and unsuccessful in two ways, and both count. A pod reports `expired` or `failed`. Or its code
- * simply runs out: `failLogin` and `failForAzureAccount` are the only writers of those two states and both need a
- * pod's report, and no sweep touches `virtual_agent_login` — so a pod that stops before reporting leaves a `pending`
- * row with its expiry in the past for ever, and reading that as a sign-in still in flight reads the fault as fine.
+ * simply runs out: a pod that stops before reporting leaves a `pending` row with its expiry in the past, which the
+ * virtual-agent sweep marks `expired` on its next pass, and until it does, reading that row as a sign-in still in
+ * flight would read the fault as fine. So the expiry is read here as well, rather than waiting on the sweep.
  *
  * The credential outlives either: `startLogin` and `failLogin` leave it alone, and a pod overwrites it only once a
  * new sign-in succeeds — the one exception being an Azure sign-in as somebody else's account, which `completeLogin`

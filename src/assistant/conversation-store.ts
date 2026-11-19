@@ -4,7 +4,7 @@ import { isUuid } from "../agents/ids.ts";
 import type { AgentStatus } from "../realtime/events.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { findAssistant } from "./assistant-store.ts";
-import { announce, ConversationNotFound, type ConversationRow, SELECT, toRow } from "./conversation-row.ts";
+import { announce, ConversationNotFound, type ConversationRow, SELECT, storedHistory, toRow } from "./conversation-row.ts";
 import { detachLocalSessions, markChatRemoved } from "./local-chat-store.ts";
 import { hasPod } from "./pods.ts";
 import { DEFAULT_PRODUCT, isProduct } from "./products.ts";
@@ -302,8 +302,13 @@ export async function setProduct(prisma: PrismaClient, ownerOid: string, id: str
   if (conversation === undefined) {
     throw new ConversationNotFound();
   }
-  const history = [...conversation.productHistory, { product, at: now.toISOString() }].slice(-MAX_PRODUCT_HISTORY);
   await prisma.$transaction(async (tx) => {
+    // The history is read again under the row's lock, not taken from the read above: two tabs changing the product
+    // at once would otherwise each write their own list, and one change would be lost from it.
+    const [row] = await tx.$queryRaw<{ product_history: unknown }[]>`
+      SELECT product_history FROM assistant_conversation WHERE id = ${id}::uuid FOR UPDATE
+    `;
+    const history = [...storedHistory(row?.product_history), { product, at: now.toISOString() }].slice(-MAX_PRODUCT_HISTORY);
     // The row decides whether this is a change, because a conversation left on a slug the list no longer offers
     // reads as the default: picking that default is a real change, which this stores and records in the history.
     const changed = await tx.$executeRaw`
@@ -394,4 +399,26 @@ export async function requireConversationOfAgent(db: Database, agentId: string):
     throw new HttpError(404, "that agent is not an assistant conversation's");
   }
   return conversation;
+}
+
+/**
+ * Removes a conversation nothing was said in, for a first message that failed to send. Only while it is still empty —
+ * no message to or from its agents — so a send that did land in the end is never taken with it. Announced, as every
+ * change to a conversation is.
+ */
+export async function discardUnsaid(prisma: PrismaClient, conversation: Pick<ConversationRow, "id" | "virtualAgentId" | "ownerOid">): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    const removed = await tx.$executeRaw`
+      DELETE FROM assistant_conversation c
+       WHERE c.id = ${conversation.id}::uuid
+         AND NOT EXISTS (
+               SELECT 1 FROM message m
+                WHERE m.target_agent_id IN (SELECT id FROM agent WHERE assistant_conversation_id = c.id)
+                   OR m.author_agent_id IN (SELECT id FROM agent WHERE assistant_conversation_id = c.id)
+             )
+    `;
+    if (removed > 0) {
+      await announce(tx, conversation);
+    }
+  });
 }

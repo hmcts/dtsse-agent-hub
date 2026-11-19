@@ -220,9 +220,17 @@ export function resultFits(result: unknown): boolean {
   return Buffer.byteLength(JSON.stringify(result), "utf8") <= MAX_WELSH_RESULT_BYTES;
 }
 
-/** An `.xlsx` is a zip, and every zip starts `PK\x03\x04`. Not proof it is a spreadsheet, but enough to refuse a typo. */
+/**
+ * An `.xlsx` is a zip — every zip starts `PK\x03\x04` — holding `[Content_Types].xml` and an `xl/` folder, whose
+ * names a zip stores as plain text. Not a full read of the archive, but enough to refuse a zip of something else here,
+ * rather than have the pod fail on it later with an error the person cannot act on.
+ */
 export function isXlsx(bytes: Uint8Array): boolean {
-  return bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04;
+  if (bytes.length < 4 || bytes[0] !== 0x50 || bytes[1] !== 0x4b || bytes[2] !== 0x03 || bytes[3] !== 0x04) {
+    return false;
+  }
+  const names = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return names.includes("[Content_Types].xml") && names.includes("xl/");
 }
 
 /** A file name as stored and offered back: the last path part, safe characters only, ending `.xlsx`. */

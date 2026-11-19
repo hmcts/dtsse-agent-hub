@@ -7,7 +7,7 @@ import { deleteCredential, putCredential } from "@/credentials/store";
 import { prisma } from "@/store/prisma";
 import { requireViewer } from "@/viewer/current";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
-import { liveModelRoutes } from "@/virtual-agents/store";
+import { liveModelRoutes, restartRunningAgents } from "@/virtual-agents/store";
 import { claudeTokenUsable } from "@/virtual-agents/views";
 import { type ActionResult, runAction, text } from "@/web/action";
 
@@ -52,9 +52,12 @@ export async function saveCredential(form: FormData): Promise<ActionResult<{ con
     }
     await putCredential(prisma, backend.store, { actorOid: viewer.oid, ownerOid: viewer.oid, kind, value: form.get("value"), via: "web" });
     revalidate();
-    return { ok: true, confirmation: `Your ${PASTEABLE[kind]} is stored` };
+    return { ok: true, confirmation: `Your ${PASTEABLE[kind]} is stored. Your assistant uses it from its next start.` };
   });
 }
+
+/** The sign-ins a pod holds for itself from its start, so that only a restart stops it using one. */
+const POD_HELD: ReadonlySet<string> = new Set(["github", "azure", "claude", "jenkins", "atlassian"]);
 
 export async function removeCredential(form: FormData): Promise<ActionResult> {
   return await runAction("delete credential", async () => {
@@ -68,6 +71,12 @@ export async function removeCredential(form: FormData): Promise<ActionResult> {
       return { ok: false, error: backend.reason };
     }
     await deleteCredential(prisma, backend.store, { actorOid: viewer.oid, ownerOid: viewer.oid, kind });
+    // A pod holds its sign-ins from its start, so a running one would go on using the one removed — which, for a token
+    // someone removes because it leaked, is the opposite of what they asked. Restarting their running agents is what
+    // makes a removal take effect; the question before it says so, and chats are kept.
+    if (POD_HELD.has(kind)) {
+      await restartRunningAgents(prisma, viewer.oid, "restarting to stop using a removed sign-in");
+    }
     revalidate();
     return { ok: true };
   });

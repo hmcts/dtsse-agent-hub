@@ -52,7 +52,8 @@ export async function requestConfluenceExport(
     const documentId = await exportableDocument(tx, conversation, document, "confluence");
     const updated = await tx.$executeRaw`
       UPDATE assistant_document
-         SET confluence_export_id = gen_random_uuid(), confluence_space_id = ${parent.space_id}, confluence_space_key = ${parent.space_key},
+         SET confluence_export_id = CASE WHEN confluence_status = 'pending' AND confluence_parent_id = ${parent.id} AND confluence_export_id IS NOT NULL THEN confluence_export_id ELSE gen_random_uuid() END,
+             confluence_space_id = ${parent.space_id}, confluence_space_key = ${parent.space_key},
              confluence_space_name = ${parent.space_name}, confluence_parent_id = ${parent.id}, confluence_parent_title = ${parent.title},
              confluence_status = 'pending', confluence_error = NULL, confluence_requested_at = ${now}
        WHERE id = ${documentId}::uuid
