@@ -51,12 +51,15 @@ export function HubStreamProvider({ children }: { children: React.ReactNode }) {
   // page was read before the new stream opened, and anything announced in between — a reply landing as the person
   // moved to its chat — would otherwise not be heard until something else changed.
   const previousUrl = useRef<string | null>(null);
+  const onChat = watched.agent !== null;
 
   useEffect(() => {
     if (ended) {
       return;
     }
-    const catchUp = previousUrl.current !== null && previousUrl.current !== url;
+    // Only onto a chat's stream, where an event lost in between is a reply that never shows; elsewhere the page read on
+    // arriving is current enough, and a resync would read it all again for nothing.
+    const catchUp = previousUrl.current !== null && previousUrl.current !== url && onChat;
     previousUrl.current = url;
     return connectHub(
       url,
@@ -77,7 +80,7 @@ export function HubStreamProvider({ children }: { children: React.ReactNode }) {
       undefined,
       catchUp
     );
-  }, [url, router, ended, endSession]);
+  }, [url, onChat, router, ended, endSession]);
 
   const value = useMemo<HubContextValue>(
     () => ({

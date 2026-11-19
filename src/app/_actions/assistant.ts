@@ -2,7 +2,16 @@
 
 import { revalidatePath } from "next/cache";
 import { HttpError } from "@/agent-api/http";
-import { type Artefact, ArtefactConflict, abandonExport, type ExportTool, removeDocument, UUID_RE, writeDocument } from "@/assistant/artefact-store";
+import {
+  type Artefact,
+  ArtefactConflict,
+  abandonExport,
+  type ExportTool,
+  exportIdOf,
+  removeDocument,
+  UUID_RE,
+  writeDocument
+} from "@/assistant/artefact-store";
 import { confluenceExportRequest } from "@/assistant/confluence";
 import { requestConfluenceExport } from "@/assistant/confluence-store";
 import type { ConversationRow } from "@/assistant/conversation-row";
@@ -71,21 +80,32 @@ const BLOCKED: { ok: false; error: string } = { ok: false, error: CHAT_BLOCKED }
  *
  * Read after the conversation, so the gate is only read where it can apply at all.
  */
+async function gated(viewer: Viewer, conversation: ConversationRow): Promise<boolean> {
+  return hasPod(conversation) && (await assistantChatGate(viewer)) === "blocked";
+}
+
 /**
  * Sends an export's request, which is the chat message that asks the assistant to carry it out. The export is already
- * pending by then, so a message that does not go marks it failed rather than leaving it pending with nothing coming.
+ * pending by then, so a message that does not go marks it failed rather than leaving it pending with nothing coming —
+ * unless the request kept an earlier attempt's id (`before`), which may yet answer.
  */
-async function sendOrAbandon(viewer: Viewer, conversation: ConversationRow, documentId: unknown, tool: ExportTool, body: string): Promise<void> {
+async function sendOrAbandon(
+  viewer: Viewer,
+  conversation: ConversationRow,
+  documentId: unknown,
+  tool: ExportTool,
+  before: string | null,
+  body: string
+): Promise<void> {
   try {
     await send(viewer.oid, conversation, body);
   } catch (error) {
-    await abandonExport(prisma, conversation, text(documentId), tool);
+    const started = await exportIdOf(prisma, conversation.id, documentId, tool);
+    if (started !== before) {
+      await abandonExport(prisma, conversation, text(documentId), tool, started);
+    }
     throw error;
   }
-}
-
-async function gated(viewer: Viewer, conversation: ConversationRow): Promise<boolean> {
-  return hasPod(conversation) && (await assistantChatGate(viewer)) === "blocked";
 }
 
 /**
@@ -362,7 +382,11 @@ export async function deleteConversation(input: { conversationId: unknown }): Pr
 
 /** How the request in the chat names the document, once the export has found it: by its title, in quotes. */
 async function named(conversationId: string, documentId: unknown): Promise<string> {
-  const row = await prisma.assistantDocument.findFirst({ where: { id: String(documentId), conversationId }, select: { title: true } });
+  // Read before the export is requested, so an id that is not one names nothing here and is refused by the request.
+  if (typeof documentId !== "string" || !UUID_RE.test(documentId)) {
+    return "this document";
+  }
+  const row = await prisma.assistantDocument.findFirst({ where: { id: documentId, conversationId }, select: { title: true } });
   return row?.title ? `the document "${row.title}"` : "this document";
 }
 
@@ -505,8 +529,9 @@ export async function exportArtefactToJira(input: { conversationId: unknown; doc
       return BLOCKED;
     }
     const ask = `Please export ${await named(conversation.id, input.documentId)} to the ${String(input.project)} backlog in Jira.`;
+    const before = await exportIdOf(prisma, conversation.id, input.documentId, "jira");
     await requestJiraExport(prisma, conversation, input.documentId, input.project);
-    await sendOrAbandon(viewer, conversation, input.documentId, "jira", ask);
+    await sendOrAbandon(viewer, conversation, input.documentId, "jira", before, ask);
     return { ok: true };
   });
 }
@@ -530,10 +555,11 @@ export async function exportArtefactToGithub(input: { conversationId: unknown; d
       return BLOCKED;
     }
     const document = await named(conversation.id, input.documentId);
+    const before = await exportIdOf(prisma, conversation.id, input.documentId, "github");
     const repo = await requestGithubExport(prisma, conversation, input.documentId, input.repo, input.project ?? null);
     const project = readGithubProject(input.project ?? null);
     const board = project ? `, on the "${project.title}" Project` : "";
-    await sendOrAbandon(viewer, conversation, input.documentId, "github", `Please create a GitHub issue for ${document} in ${repo}${board}.`);
+    await sendOrAbandon(viewer, conversation, input.documentId, "github", before, `Please create a GitHub issue for ${document} in ${repo}${board}.`);
     return { ok: true };
   });
 }
@@ -557,8 +583,9 @@ export async function exportArtefactToConfluence(input: { conversationId: unknow
       return BLOCKED;
     }
     const document = await named(conversation.id, input.documentId);
+    const before = await exportIdOf(prisma, conversation.id, input.documentId, "confluence");
     const parent = await requestConfluenceExport(prisma, conversation, input.documentId, input.parent);
-    await sendOrAbandon(viewer, conversation, input.documentId, "confluence", confluenceExportRequest(parent, document));
+    await sendOrAbandon(viewer, conversation, input.documentId, "confluence", before, confluenceExportRequest(parent, document));
     return { ok: true };
   });
 }

@@ -559,6 +559,17 @@ describe("saveCredential and removeCredential", () => {
     expect((await prisma.virtualAgent.findUniqueOrThrow({ where: { id: stopped.id } })).desired).toBe("stopped");
   });
 
+  it("should restart nothing when the sign-in removed was never stored", async () => {
+    await insertUser(ALICE);
+    const running = await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "own-licence", name: "assistant" });
+    await prisma.virtualAgent.update({ where: { id: running.id }, data: { status: "running" } });
+    actAs("alice");
+
+    expect(await removeCredential(form({ kind: "jenkins" }))).toEqual({ ok: true });
+
+    expect((await prisma.virtualAgent.findUniqueOrThrow({ where: { id: running.id } })).status).toBe("running");
+  });
+
   it("should restart nothing when a sign-in the hub reads for itself is removed", async () => {
     await insertUser(ALICE);
     const running = await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "own-licence", name: "assistant" });

@@ -168,6 +168,9 @@ export interface CreatedUpload {
   parts: number;
 }
 
+/** How long an upload can go without a part arriving before it counts as abandoned rather than on its way. */
+export const STALLED_UPLOAD_MS = 15 * 60_000;
+
 /**
  * Starts an upload: a `pending` row, and the part size the browser is to cut the file into. The sanitised
  * `stored_name` is decided here and is the authoritative one — the pod re-sanitises it, but never invents it.
@@ -179,9 +182,6 @@ export interface CreatedUpload {
  * expires an upload's row after its window, but the pod keeps the file, and `/workspace` filling up breaks its
  * repository clones rather than just the next upload — so the cap would otherwise reset every window.
  */
-/** How long an upload can go without a part arriving before it counts as abandoned rather than on its way. */
-export const STALLED_UPLOAD_MS = 15 * 60_000;
-
 export async function createUpload(prisma: PrismaClient, upload: NewUpload): Promise<CreatedUpload> {
   if (!isUploadSize(upload.size)) {
     throw new HttpError(400, `a file is 1 byte to ${describeBytes(MAX_UPLOAD_BYTES)}`, { reason: "file_too_big" satisfies UploadRefusal });
@@ -206,7 +206,13 @@ export async function createUpload(prisma: PrismaClient, upload: NewUpload): Pro
       SELECT COALESCE(sum(bytes), 0)::bigint AS bytes
         FROM assistant_upload
        WHERE conversation_id = ${upload.conversationId}::uuid
-         AND (state <> 'expired' OR (message_id IS NOT NULL AND pod_delete_requested_at IS NULL))
+         AND (
+               state <> 'expired'
+               -- Sent, and so on the pod's disk, until the person deletes it there, or the disk itself goes.
+               OR (message_id IS NOT NULL AND pod_delete_requested_at IS NULL
+                   AND EXISTS (SELECT 1 FROM assistant_conversation c JOIN virtual_agent v ON v.id = c.virtual_agent_id
+                                WHERE c.id = assistant_upload.conversation_id AND v.disk_deleted_at IS NULL))
+             )
     `;
     if (Number(total?.bytes ?? 0) + size > MAX_CONVERSATION_BYTES) {
       throw new HttpError(409, `this conversation's files add up to at most ${describeBytes(MAX_CONVERSATION_BYTES)}`, {

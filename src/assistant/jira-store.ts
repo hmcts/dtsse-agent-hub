@@ -94,6 +94,9 @@ export async function recordJiraExport(
   result: JiraExportResult
 ): Promise<void> {
   await prisma.$transaction(async (tx) => {
+    // The document's row is held while this reads and writes it, so a GitHub report for it, or a second report for
+    // this export, waits and then sees what this one wrote, rather than both finding the document free.
+    await tx.$queryRaw`SELECT 1 FROM assistant_document WHERE conversation_id = ${conversation.id}::uuid AND jira_export_id = ${result.export_id}::uuid FOR UPDATE`;
     const document = await tx.assistantDocument.findFirst({
       where: { conversationId: conversation.id, jiraExportId: result.export_id, jiraKey: null },
       select: { id: true, githubNumber: true, githubRepo: true }

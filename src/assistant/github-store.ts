@@ -103,7 +103,8 @@ export async function recordGithubExport(
   result: GithubExportResult
 ): Promise<void> {
   await prisma.$transaction(async (tx) => {
-    // One ticket a document at report time too: see `recordJiraExport`.
+    // One ticket a document at report time too, under the row's lock: see `recordJiraExport`.
+    await tx.$queryRaw`SELECT 1 FROM assistant_document WHERE conversation_id = ${conversation.id}::uuid AND github_export_id = ${result.export_id}::uuid FOR UPDATE`;
     const document = await tx.assistantDocument.findFirst({
       where: { conversationId: conversation.id, githubExportId: result.export_id, githubNumber: null },
       select: { id: true, githubRepo: true, jiraKey: true }

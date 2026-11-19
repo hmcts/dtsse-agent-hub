@@ -910,7 +910,14 @@ export async function liveVirtualAgents(db: Database): Promise<LiveVirtualAgent[
  */
 export async function restartRunningAgents(prisma: PrismaClient, ownerOid: string, detail: string, now: Date = new Date()): Promise<void> {
   const running = await prisma.virtualAgent.findMany({ where: { ownerOid, desired: "running" }, select: { id: true } });
+  // Each on its own: one deleted as this runs must not leave the rest running on what was removed.
   for (const agent of running) {
-    await restartVirtualAgent(prisma, ownerOid, agent.id, detail, now);
+    try {
+      await restartVirtualAgent(prisma, ownerOid, agent.id, detail, now);
+    } catch (error) {
+      if (!(error instanceof HttpError)) {
+        throw error;
+      }
+    }
   }
 }

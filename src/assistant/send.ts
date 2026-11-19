@@ -32,12 +32,16 @@ export async function sendToConversation(
   conversation: ConversationRow,
   message: ConversationMessage
 ): Promise<ThreadMessage> {
-  // Touched first, so the chat reads as in use before its message goes: the sweep of empty chats passes over one
-  // active since its window began, and holds the row while it decides, so a first message is never swept from under
-  // the person. A chat the sweep has already removed fails here, and the person keeps what they typed.
-  await touchConversation(prisma, conversation, message.title);
+  // A chat nothing has yet been said in is marked in use before its first message goes: the sweep of empty chats passes
+  // over one active since its window began, and holds the row while it decides, so a first message is never swept
+  // from under the person, and one already swept fails here with what they typed kept. Only its activity, and only for
+  // an empty chat: a chat with content is titled and moved up the sidebar once the message has actually gone.
+  await prisma.$executeRaw`
+    UPDATE assistant_conversation SET last_active_at = now() WHERE id = ${conversation.id}::uuid AND first_content_at IS NULL
+  `;
   const agentId = await conversationAgent(prisma, conversation);
   const sent = await directAsPerson(prisma, senderOid, agentId, message.body, message.alongside);
+  await touchConversation(prisma, conversation, message.title);
   const agent = await prisma.agent.findUnique({ where: { id: agentId }, select: { status: true } });
   if (needsWake(agent?.status, conversation.sessionState)) {
     // One wake at a time is asked of the session, but the pod is brought back however many have been: a message to a

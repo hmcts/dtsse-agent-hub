@@ -70,11 +70,12 @@ export async function removeCredential(form: FormData): Promise<ActionResult> {
     if (!backend.available) {
       return { ok: false, error: backend.reason };
     }
+    const held = (await prisma.credential.count({ where: { ownerOid: viewer.oid, kind } })) > 0;
     await deleteCredential(prisma, backend.store, { actorOid: viewer.oid, ownerOid: viewer.oid, kind });
     // A pod holds its sign-ins from its start, so a running one would go on using the one removed — which, for a token
     // someone removes because it leaked, is the opposite of what they asked. Restarting their running agents is what
     // makes a removal take effect; the question before it says so, and chats are kept.
-    if (POD_HELD.has(kind)) {
+    if (held && POD_HELD.has(kind)) {
       await restartRunningAgents(prisma, viewer.oid, "restarting to stop using a removed sign-in");
     }
     revalidate();

@@ -62,10 +62,10 @@ export async function askLookup(prisma: PrismaClient, question: LookupQuestion, 
     // The assistant's rows are taken one lookup at a time, so two tabs cannot both find room under the limit.
     await tx.$queryRaw`SELECT 1 FROM virtual_agent WHERE id = ${assistant.id}::uuid FOR UPDATE`;
     await tx.assistantLookup.deleteMany({ where: { virtualAgentId: assistant.id, createdAt: { lt: new Date(now.getTime() - LOOKUP_RETENTION_MS) } } });
-    // Searches the person moved on from before an answer are not counted: typing a word is a dozen searches, of which
-    // only the last is waited for, and counting the rest would answer the person with "that is a lot of searches".
+    // Cancelled ones count too: the pod was told of each as it was asked, so a client that gave up on every request at
+    // once would otherwise be an unlimited stream of searches for the pod and the services behind it.
     const recent = await tx.assistantLookup.count({
-      where: { virtualAgentId: assistant.id, createdAt: { gte: new Date(now.getTime() - LOOKUP_RATE_WINDOW_MS) }, NOT: { status: "cancelled" } }
+      where: { virtualAgentId: assistant.id, createdAt: { gte: new Date(now.getTime() - LOOKUP_RATE_WINDOW_MS) } }
     });
     if (recent >= LOOKUP_RATE_LIMIT) {
       throw new HttpError(429, "that is a lot of searches at once; wait a moment and try again");
@@ -216,9 +216,9 @@ export async function pendingLookup(db: Database, virtualAgentId: string, lookup
 }
 
 /**
- * A lookup the browser stopped waiting for, because the person typed on: no longer counted against the rate limit,
- * and an answer for it is not kept. The pod may already be running it, which nothing here can take back, but one that
- * has not reached it finds nothing to do.
+ * A lookup the browser stopped waiting for, because the person typed on: an answer for it is not kept, and a pod
+ * that has not yet started it is not handed it. One already running cannot be taken back, which is why it still counts
+ * against the rate limit.
  */
 export async function cancelLookup(prisma: PrismaClient, lookupId: string): Promise<void> {
   await prisma.assistantLookup.updateMany({ where: { id: lookupId, status: "pending" }, data: { status: "cancelled" } });

@@ -294,24 +294,46 @@ export type ExportTool = "jira" | "github" | "confluence";
 /** Said on the document when its export's request never reached the assistant, so it can be asked for again at once. */
 export const EXPORT_NOT_SENT = "the request could not be sent to your assistant, so nothing was created; try again";
 
+/** Each tool's columns, so one statement serves all three. */
+const EXPORT_COLUMNS = {
+  jira: { id: "jiraExportId", status: "jiraStatus", error: "jiraError" },
+  github: { id: "githubExportId", status: "githubStatus", error: "githubError" },
+  confluence: { id: "confluenceExportId", status: "confluenceStatus", error: "confluenceError" }
+} as const satisfies Record<ExportTool, { id: string; status: string; error: string }>;
+
+/** The document's current export id for `tool`, or `null`, so a caller can tell whether a request started a new one. */
+export async function exportIdOf(db: Database, conversationId: string, documentId: unknown, tool: ExportTool): Promise<string | null> {
+  if (typeof documentId !== "string" || !UUID_RE.test(documentId)) {
+    return null;
+  }
+  const row = await db.assistantDocument.findFirst({ where: { id: documentId, conversationId }, select: { [EXPORT_COLUMNS[tool].id]: true } });
+  return (row?.[EXPORT_COLUMNS[tool].id] as string | null | undefined) ?? null;
+}
+
 /**
  * Marks the document's export failed when the chat message that asks for it was not sent: the export is written
  * pending first, so the footer says so as the request goes, and without this a message that failed would leave it
- * "pending" until the 15-minute window let it be asked for again. Only a pending one, so a result that has somehow
- * landed is left as it is. Announced, so the panel shows the failure.
+ * "pending" until the 15-minute window let it be asked for again. Only a pending one, and only one this request
+ * started (`exportId`): a retry that kept an earlier attempt's id leaves it, as that attempt may still answer.
+ * Announced, so the panel shows the failure.
  */
-export async function abandonExport(prisma: PrismaClient, conversation: ConversationRef, documentId: string, tool: ExportTool): Promise<void> {
-  if (!UUID_RE.test(documentId)) {
+export async function abandonExport(
+  prisma: PrismaClient,
+  conversation: ConversationRef,
+  documentId: string,
+  tool: ExportTool,
+  exportId: string | null
+): Promise<void> {
+  if (!UUID_RE.test(documentId) || exportId === null) {
     return;
   }
+  const column = EXPORT_COLUMNS[tool];
   await prisma.$transaction(async (tx) => {
-    const updated =
-      tool === "jira"
-        ? await tx.$executeRaw`UPDATE assistant_document SET jira_status = 'failed', jira_error = ${EXPORT_NOT_SENT} WHERE id = ${documentId}::uuid AND conversation_id = ${conversation.id}::uuid AND jira_status = 'pending'`
-        : tool === "github"
-          ? await tx.$executeRaw`UPDATE assistant_document SET github_status = 'failed', github_error = ${EXPORT_NOT_SENT} WHERE id = ${documentId}::uuid AND conversation_id = ${conversation.id}::uuid AND github_status = 'pending'`
-          : await tx.$executeRaw`UPDATE assistant_document SET confluence_status = 'failed', confluence_error = ${EXPORT_NOT_SENT} WHERE id = ${documentId}::uuid AND conversation_id = ${conversation.id}::uuid AND confluence_status = 'pending'`;
-    if (updated > 0) {
+    const { count } = await tx.assistantDocument.updateMany({
+      where: { id: documentId, conversationId: conversation.id, [column.id]: exportId, [column.status]: "pending" },
+      data: { [column.status]: "failed", [column.error]: EXPORT_NOT_SENT }
+    });
+    if (count > 0) {
       await announce(tx, conversation);
     }
   });

@@ -288,10 +288,14 @@ describe("uploading a file", () => {
     ["fetched by the pod", "fetched", true, false, 409],
     ["sent and expired here, but kept on the pod's disk", "expired", true, false, 409],
     ["sent, expired, and deleted from the pod in Settings", "expired", true, true, 201],
-    ["never sent, and expired", "expired", false, false, 201]
+    ["never sent, and expired", "expired", false, false, 201],
+    ["sent and expired, on a pod whose disk has since been deleted", "expired", true, "disk", 201]
   ] as const)("should count a full conversation's files that were %s accordingly", async (_label, state, sent, deleted, status) => {
     // Arrange
-    await startedAssistant();
+    const { id: assistant } = await startedAssistant();
+    if (deleted === "disk") {
+      await prisma.virtualAgent.update({ where: { id: assistant }, data: { diskDeletedAt: new Date() } });
+    }
     const started = (await actions.startConversation({ product: "pcs", body: "files" })) as { id: string };
     const message = sent ? (await prisma.message.findFirstOrThrow({ select: { id: true } })).id : null;
     // The per-file cap means a full conversation takes several rows.
@@ -307,7 +311,7 @@ describe("uploading a file", () => {
           bytes: BigInt(MAX_UPLOAD_BYTES),
           state,
           messageId: message,
-          podDeleteRequestedAt: deleted ? new Date() : null
+          podDeleteRequestedAt: deleted === true ? new Date() : null
         }
       });
     }
