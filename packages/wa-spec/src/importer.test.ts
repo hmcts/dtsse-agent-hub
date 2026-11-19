@@ -255,3 +255,24 @@ describe("importDmns refusals and allowed values", () => {
     expect(parseDmn(generateAll(spec)[1]?.xml ?? "").decisions[0]?.table?.inputs[0]?.allowedValues).toBe('"a","b"');
   });
 });
+
+describe("importDmns requirements and hit policies", () => {
+  it("should keep the case types of a dependency as a set when a file repeats an information requirement", () => {
+    const requirement = /<informationRequirement[\s\S]*?<\/informationRequirement>/.exec(sampleDmn("ct_a"))?.[0] as string;
+    const twice = sampleDmn("ct_a").replace(requirement, `${requirement}${requirement.replace(/id="[^"]*"/, 'id="IR_dup"')}`);
+    const without = sampleDmn("ct_c").replace(requirement.replace(/ct_a/g, "ct_c"), "");
+    expect(without).not.toContain("<informationRequirement");
+    const { spec } = importDmns([
+      { name: "wa-task-completion-demo-ct_a.dmn", xml: twice },
+      file("ct_b"),
+      { name: "wa-task-completion-demo-ct_c.dmn", xml: without }
+    ]);
+    expect(spec.decisions.completion?.dependencies).toEqual([{ decision: "table", requires: "LATEST", only: ["ct_a", "ct_b"] }]);
+  });
+
+  it("should report a hit policy that needs output values as unrepresentable and skip the file when a table has one", () => {
+    const { report, spec } = importDmns([file("ct_a"), file("ct_b", { hitPolicy: "PRIORITY" })]);
+    expect(report.unrepresentable.map((u) => u.construct)).toEqual(["hit policy PRIORITY, which needs output values the spec cannot hold"]);
+    expect(spec.caseTypes.map((c) => c.id)).toEqual(["ct_a"]);
+  });
+});

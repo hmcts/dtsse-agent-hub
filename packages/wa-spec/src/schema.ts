@@ -3,7 +3,8 @@ import { z } from "zod";
 export const KINDS = ["initiation", "configuration", "permissions", "completion", "cancellation", "task-types"] as const;
 export type Kind = (typeof KINDS)[number];
 
-export const HIT_POLICIES = ["UNIQUE", "FIRST", "PRIORITY", "ANY", "COLLECT", "RULE ORDER", "OUTPUT ORDER"] as const;
+/** PRIORITY and OUTPUT ORDER rank outputs by an `<outputValues>` list, which the spec has no place for. */
+export const HIT_POLICIES = ["UNIQUE", "FIRST", "ANY", "COLLECT", "RULE ORDER"] as const;
 export const AGGREGATIONS = ["SUM", "MIN", "MAX", "COUNT"] as const;
 
 export const Scalar = z.union([z.string(), z.number(), z.boolean(), z.null()]);
@@ -214,6 +215,10 @@ export function validateSpec(spec: Spec): string[] {
   if (!/^[A-Za-z0-9_.-]+$/.test(spec.service.slug)) {
     problems.push(`service slug ${spec.service.slug}: only letters, digits, "_", "." and "-" are allowed, as it becomes part of a decision id and file name`);
   }
+  const ids = spec.caseTypes.map((c) => c.id);
+  for (const id of ids.filter((x, i) => ids.indexOf(x) !== i)) {
+    problems.push(`case type ${id} is listed more than once`);
+  }
   for (const { id } of spec.caseTypes) {
     if (!/^[A-Za-z0-9_.]+$/.test(id)) {
       problems.push(
@@ -243,13 +248,27 @@ export function validateSpec(spec: Spec): string[] {
     known(`${kind}.overrides`, Object.keys(decision.overrides ?? {}));
     known(kind, decision.only);
     const own = decision.only ?? [...caseTypes];
+    const within = (where: string, only: string[] | undefined) => {
+      for (const id of only ?? []) {
+        if (decision.only && caseTypes.has(id) && !decision.only.includes(id)) {
+          problems.push(`${where}: ${id} is not a case type of ${kind}`);
+        }
+      }
+    };
+    for (const id of own) {
+      if (!decision.outputs.some((o) => o.only === undefined || o.only.includes(id))) {
+        problems.push(`${kind}: ${id} has no outputs`);
+      }
+    }
     for (const column of [...decision.inputs, ...decision.outputs]) {
       known(`${kind} column`, column.only);
+      within(`${kind} column`, column.only);
       known(`${kind} column overrides`, Object.keys(column.overrides ?? {}));
     }
     decision.rows.forEach((row, index) => {
       const where = `${kind} row ${index + 1}`;
       known(where, row.only);
+      within(where, row.only);
       for (const key of Object.keys(row.when ?? {})) {
         const column = inputKeys.get(key);
         if (!column) {
@@ -282,6 +301,7 @@ export function validateSpec(spec: Spec): string[] {
         problems.push(`${kind}: a helper cannot be named table, which stands for the main decision in a dependency`);
       }
       known(`${kind} helper ${helper.name}`, helper.only);
+      within(`${kind} helper ${helper.name}`, helper.only);
       known(`${kind} helper ${helper.name} overrides`, Object.keys(helper.overrides ?? {}));
       sharing.set(helper.name, [...(sharing.get(helper.name) ?? []), helper.only]);
     }
@@ -293,6 +313,7 @@ export function validateSpec(spec: Spec): string[] {
     }
     for (const dependency of decision.dependencies ?? []) {
       known(`${kind} dependency ${dependency.decision} -> ${dependency.requires}`, dependency.only);
+      within(`${kind} dependency ${dependency.decision} -> ${dependency.requires}`, dependency.only);
       if (dependency.decision !== "table" && !helperNames.has(dependency.decision)) {
         problems.push(`${kind}: dependency from unknown decision ${dependency.decision}`);
       }

@@ -112,8 +112,7 @@ describe("ruleOrderMatters", () => {
     ["COLLECT", undefined, true],
     ["RULE ORDER", undefined, true],
     ["FIRST", undefined, true],
-    ["PRIORITY", undefined, true],
-    ["OUTPUT ORDER", undefined, true]
+    ["PRIORITY", undefined, true]
   ])("should decide %s %s as %s when asked whether rule order matters", (hitPolicy, aggregation, expected) => {
     expect(ruleOrderMatters(hitPolicy, aggregation)).toBe(expected);
   });
@@ -172,5 +171,41 @@ describe("diffDocuments duplicate names in the second document", () => {
     const b = clone(base());
     b.decisions.push({ ...structuredClone(b.decisions[1] as DmnDocument["decisions"][number]), id: "Decision_TWIN" });
     expect(diffDocuments("f", base(), b).map((d) => d.message)).toContain("decision name used 1 times in first and 2 in second");
+  });
+});
+
+describe("diffPaths constructs the model does not carry", () => {
+  const dir = () => mkdtempSync(join(tmpdir(), "wa-spec-diff-"));
+  const put = (where: string, name: string, xml: string) => writeFileSync(join(where, name), xml);
+
+  it.each([
+    [
+      "a description on a decision",
+      (xml: string) => xml.replace("<variable", "<description>about</description><variable"),
+      "element <description> in <decision>"
+    ],
+    [
+      "an expression language on an entry",
+      (xml: string) => xml.replace("<inputEntry ", '<inputEntry expressionLanguage="juel" '),
+      "attribute expressionLanguage on <inputEntry>"
+    ],
+    [
+      "a version tag on a decision",
+      (xml: string) => xml.replace("<decision ", '<decision camunda:versionTag="1" '),
+      "attribute camunda:versionTag on <decision>"
+    ],
+    [
+      "output values on an output",
+      (xml: string) => xml.replace(/<output /, '<outputValues id="o"><text>"a"</text></outputValues><output '),
+      "element <outputValues>"
+    ]
+  ])("should report %s when only one side has it", (_what, change, construct) => {
+    const [a, b] = [dir(), dir()];
+    const xml = sampleDmn("ct_a");
+    put(a, "wa-task-x.dmn", change(xml));
+    put(b, "wa-task-x.dmn", xml);
+    const messages = diffPaths({ dir: a }, { dir: b }).map((d) => d.message);
+    expect(messages).toEqual([expect.stringContaining(`${construct} occurs`)]);
+    expect(diffPaths({ dir: a }, { dir: a })).toEqual([]);
   });
 });

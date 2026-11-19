@@ -82,3 +82,55 @@ describe("taskRows structured values", () => {
     expect(taskRows(structured, "T9")[0]?.rows).toEqual([{ index: 1, row: structured.decisions.initiation?.rows[0], mayApply: true }]);
   });
 });
+
+describe("taskRows cancellation and FEEL", () => {
+  const cancel = SpecSchema.parse({
+    version: 1,
+    service: { slug: "demo" },
+    caseTypes: [{ id: "ct_a" }],
+    decisions: {
+      initiation: {
+        name: "I",
+        hitPolicy: "COLLECT",
+        inputs: [],
+        outputs: [{ name: "taskId" }, { name: "processCategories" }],
+        rows: [
+          { returns: { taskId: "T1", processCategories: { if: { field: "a", op: "exists" }, use: "catA", otherwise: "catB" } } },
+          { returns: { taskId: { feel: "other" }, processCategories: "catF" } },
+          { returns: { taskId: "T2", processCategories: "catZ" } }
+        ]
+      },
+      cancellation: {
+        name: "C",
+        hitPolicy: "COLLECT",
+        inputs: [],
+        outputs: [{ name: "processCategories" }],
+        rows: [
+          { returns: { processCategories: "catA" } },
+          { returns: { processCategories: "catZ" } },
+          {},
+          { returns: { processCategories: { feel: "x" } } },
+          { returns: { processCategories: { if: { field: "a", op: "exists" }, use: "catB", otherwise: null } } }
+        ]
+      }
+    }
+  });
+
+  it("should include cancellation rows that apply to every category or may match one when the task makes categories structurally", () => {
+    const rows = taskRows(cancel, "T1").find((f) => f.kind === "cancellation")?.rows;
+    expect(rows?.map((r) => [r.index, r.mayApply])).toEqual([
+      [1, undefined],
+      [3, undefined],
+      [4, true],
+      [5, true]
+    ]);
+  });
+
+  it("should keep a raw FEEL task cell as may apply when it does not name the task", () => {
+    const rows = taskRows(cancel, "T1").find((f) => f.kind === "initiation")?.rows;
+    expect(rows?.map((r) => [r.index, r.mayApply])).toEqual([
+      [1, undefined],
+      [2, true]
+    ]);
+  });
+});

@@ -248,6 +248,30 @@ export const Ordering = z.strictObject({
 });
 export type Ordering = z.infer<typeof Ordering>;
 
+/** A task's configuration attributes in the order they are listed and compiled, by DMN attribute name. */
+export function attributesOf(task: Task): Array<[string, Val]> {
+  const slots: Array<[string, Val | undefined]> = [
+    ["workType", task.workType],
+    ["roleCategory", task.roleCategory],
+    ["title", task.title],
+    ["description", task.link ? linkText(task.link) : task.description],
+    ...Object.entries(DUE_ATTRIBUTES).map(([key, name]): [string, Val | undefined] => [name, task.due?.[key as keyof typeof DUE_ATTRIBUTES]]),
+    ...Object.entries(PRIORITY_ATTRIBUTES).map(([key, name]): [string, Val | undefined] => [name, task.priority?.[key as keyof typeof PRIORITY_ATTRIBUTES]]),
+    ...Object.entries(task.additionalProperties ?? {}).map(([key, val]): [string, Val | undefined] => [`${ADDITIONAL_PREFIX}${key}`, val]),
+    ...Object.entries(task.attributes ?? {})
+  ];
+  return slots.filter((slot): slot is [string, Val] => slot[1] !== undefined);
+}
+
+/** A task's permissions as a list of specs: a profile name stands for that profile alone. */
+export function permissionSpecs(task: Task): PermissionSpec[] {
+  const permissions = task.permissions;
+  if (permissions === undefined) {
+    return [];
+  }
+  return typeof permissions === "string" ? [{ profile: permissions }] : [permissions].flat();
+}
+
 /** Checks the references the shape alone cannot: ids, roles, profiles and case types. */
 export function validateModel(model: Model): string[] {
   const problems: string[] = [];
@@ -332,7 +356,21 @@ export function validateModel(model: Model): string[] {
         }
       }
     }
-    const specs = task.permissions === undefined ? [] : typeof task.permissions === "string" ? [{ profile: task.permissions }] : [task.permissions].flat();
+    const specs = permissionSpecs(task);
+    const granted = specs.map((spec) => ({
+      cases: spec.only ?? own,
+      roles: new Set([...Object.keys(profiles[spec.profile ?? ""] ?? {}).filter((r) => !spec.remove?.includes(r)), ...Object.keys(spec.add ?? {})])
+    }));
+    for (const [i, a] of granted.entries()) {
+      for (const b of granted.slice(i + 1)) {
+        for (const r of a.roles) {
+          const both = a.cases.filter((c) => b.cases.includes(c));
+          if (b.roles.has(r) && both.length > 0) {
+            problems.push(`${where}: permissions grant ${r} twice for ${both.join(", ")}`);
+          }
+        }
+      }
+    }
     for (const spec of specs) {
       scoped(`${where} permissions`, spec.only);
       if (spec.profile !== undefined && !(spec.profile in profiles)) {
@@ -353,13 +391,17 @@ export function validateModel(model: Model): string[] {
         role(`${where} permissions`, r);
       }
     }
-    const reconfigurable = new Set<string>([
-      ...TOP_LEVEL_ATTRIBUTES.filter((name) => task[name] !== undefined || (name === "description" && task.link !== undefined)),
-      ...Object.entries(DUE_ATTRIBUTES).flatMap(([key, name]) => (task.due?.[key as keyof typeof DUE_ATTRIBUTES] === undefined ? [] : [name])),
-      ...Object.entries(PRIORITY_ATTRIBUTES).flatMap(([key, name]) => (task.priority?.[key as keyof typeof PRIORITY_ATTRIBUTES] === undefined ? [] : [name])),
-      ...Object.keys(task.additionalProperties ?? {}).map((k) => `${ADDITIONAL_PREFIX}${k}`),
-      ...Object.keys(task.attributes ?? {})
-    ]);
+    const attributes = attributesOf(task);
+    const reconfigurable = new Set(attributes.map(([name]) => name));
+    const covers = (val: Val): string[] => (Array.isArray(val) ? val : [val]).flatMap((e) => (isValEntry(e) && e.only ? e.only : own));
+    for (const [i, [name, val]] of attributes.entries()) {
+      for (const [other, otherVal] of attributes.slice(i + 1)) {
+        const both = covers(val).filter((c) => covers(otherVal).includes(c));
+        if (other === name && both.length > 0) {
+          problems.push(`${where}: ${name} is defined twice for ${[...new Set(both)].join(", ")}`);
+        }
+      }
+    }
     for (const name of task.reconfigure ?? []) {
       if (!reconfigurable.has(name)) {
         problems.push(`${where}: reconfigure names ${name}, which is not one of its attributes`);

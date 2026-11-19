@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { importDmns } from "./importer.ts";
 import type { Model } from "./model.ts";
 import { compileModel } from "./model-compile.ts";
-import { loadSpecFile, loadSpecOnly, parseModel, stringifyModel, stringifyOrdering } from "./model-io.ts";
+import { loadSpecFile, loadSpecOnly, orderPathBeside, parseModel, stringifyModel, stringifyOrdering } from "./model-io.ts";
 import { liftSpec } from "./model-lift.ts";
 import type { Row } from "./schema.ts";
 import { compareSpecs } from "./spec-diff.ts";
@@ -225,5 +225,134 @@ describe("round two", () => {
     const dir = mkdtempSync(join(tmpdir(), "wa-spec-diff-"));
     writeFileSync(join(dir, "m.yaml"), `${BASE}layout: missing.layout.yaml\n`);
     expect(loadSpecOnly(join(dir, "m.yaml")).decisions.configuration?.rows.length).toBeGreaterThan(0);
+  });
+});
+
+const STALE_SPEC = {
+  version: 1 as const,
+  service: { slug: "x" },
+  caseTypes: [{ id: "A" }, { id: "B" }, { id: "C" }],
+  decisions: {
+    configuration: {
+      name: "c",
+      hitPolicy: "COLLECT" as const,
+      inputs: [
+        { key: "caseData", typeRef: "string" },
+        { key: "taskType", typeRef: "string" }
+      ],
+      outputs: [
+        { name: "name", typeRef: "string" },
+        { name: "value", typeRef: "string" },
+        { name: "canReconfigure", typeRef: "boolean" }
+      ],
+      rows: [
+        { only: ["A"], when: { taskType: { in: ["t1"] } }, returns: { name: "title", value: "same", canReconfigure: false } },
+        { only: ["C"], when: { taskType: { in: ["t1"] } }, returns: { name: "title", value: "other", canReconfigure: false } },
+        { only: ["B"], when: { taskType: { in: ["t1"] } }, returns: { name: "title", value: "same", canReconfigure: false } },
+        { when: { taskType: { in: ["t1"] } }, returns: { name: "workType", value: "w", canReconfigure: false } }
+      ]
+    }
+  }
+};
+
+describe("round three", () => {
+  it("should keep every row naming a stale token in place when an entry shared by several rows is edited", () => {
+    const { model, ordering, report } = liftSpec(STALE_SPEC);
+    expect(report.differences).toEqual([]);
+    const entries = model.tasks[0]?.title as Array<{ value: string }>;
+    for (const entry of entries) {
+      if (entry.value === "same") {
+        entry.value = "changed";
+      }
+    }
+    const rows = compileModel(model, ordering).decisions.configuration?.rows ?? [];
+    expect(rows.map((r) => `${r.only?.join("") ?? "*"}:${r.returns?.value}`)).toEqual(["A:changed", "C:other", "B:changed", "*:w"]);
+  });
+
+  it("should leave an atom for a later token when an earlier stale token's case types do not overlap it", () => {
+    const model = parseModel(`
+kind: wa-model
+version: 1
+service: {slug: demo}
+caseTypes: [{id: ct_a}, {id: ct_b}, {id: ct_c}]
+tasks:
+  - {id: A, only: [ct_a], workType: [{value: w, only: [ct_a]}, {value: v, only: [ct_a]}]}
+  - {id: Z, only: [ct_a], title: z}
+`);
+    const ordering = { version: 1 as const, rows: { configuration: ["A/workType#dead1 @ct_c", "A/workType#dead2 @ct_a", "Z/title"] } };
+    const rows = configRows(model, ordering);
+    expect(rows.map((r) => r.returns?.name)).toEqual(["workType", "title", "workType"]);
+    expect(rows.map((r) => r.returns?.value)).toEqual(["w", "z", "v"]);
+  });
+
+  it("should reject one attribute defined in two fields of a task for the same case types when validating", () => {
+    const task = (attributes: string, extra = "") => BASE.replace("attributes: {custom:", `${extra}attributes: {${attributes}, custom:`);
+    expect(() => parseModel(task("workType: w2"))).toThrow("workType is defined twice for ct_a, ct_b");
+    expect(() => parseModel(task("dueDateIntervalDays: 2", "due: {days: 1}\n    "))).toThrow("dueDateIntervalDays is defined twice");
+    expect(() => parseModel(task("additionalProperties_x: 2", "additionalProperties: {x: 1}\n    "))).toThrow("additionalProperties_x is defined twice");
+    expect(() => parseModel(task("workType: {value: w2, only: [ct_c]}"))).toThrow("task's case types");
+  });
+
+  it("should reject two permission specs granting one role for the same case type when validating", () => {
+    const text = (second: string) => `
+kind: wa-model
+version: 1
+service: {slug: demo}
+caseTypes: [{id: ct_a}, {id: ct_b}]
+roles: {admin: {}}
+permissionProfiles: {p: {admin: {perms: [Read]}}}
+tasks:
+  - id: A
+    permissions:
+      - {profile: p, only: [ct_a]}
+      - {add: {admin: {perms: [Own]}}${second}}
+`;
+    expect(() => parseModel(text(""))).toThrow("permissions grant admin twice for ct_a");
+    expect(() => parseModel(text(", only: [ct_b]"))).not.toThrow();
+  });
+
+  it("should keep an explicit null category when the role has a category and when lifting it back", () => {
+    const model = parseModel(`
+kind: wa-model
+version: 1
+service: {slug: demo}
+caseTypes: [{id: ct_a}]
+roles: {admin: {category: ADMIN}}
+permissionProfiles: {p: {admin: {perms: [Read], category: null}}}
+tasks: [{id: A, permissions: p}]
+`);
+    const spec = compileModel(model);
+    expect(spec.decisions.permissions?.rows[0]?.returns).toEqual({ name: "admin", value: "Read", roleCategory: null });
+    expect(liftSpec(spec).report.differences).toEqual([]);
+  });
+
+  it("should lift event rows when the table spells its event column either way", () => {
+    const spec = compileModel(parseModel(BASE.replace("complete: [{event: done}]", "complete: [{event: done}]\n    create: [{event: made}]")));
+    const initiation = spec.decisions.initiation;
+    const completion = spec.decisions.completion;
+    if (!initiation || !completion) {
+      throw new Error("expected both tables");
+    }
+    const respell = (table: typeof initiation, from: string, to: string) => {
+      for (const column of table.inputs) {
+        column.key = column.key === from ? to : column.key;
+      }
+      for (const row of table.rows) {
+        if (row.when && from in row.when) {
+          row.when = Object.fromEntries(Object.entries(row.when).map(([k, v]) => [k === from ? to : k, v]));
+        }
+      }
+    };
+    respell(initiation, "eventId", "eventID");
+    respell(completion, "eventID", "eventId");
+    const lifted = liftSpec(spec);
+    expect(lifted.report.counts.initiation.residue).toBe(0);
+    expect(lifted.report.counts.completion.residue).toBe(0);
+    expect(lifted.report.differences).toEqual([]);
+  });
+
+  it("should name the ordering file beside a model by the one rule when building its path", () => {
+    expect(orderPathBeside("out/model.yaml")).toBe("out/model.order.yaml");
+    expect(orderPathBeside("out/model.yml")).toBe("out/model.order.yaml");
   });
 });

@@ -91,3 +91,22 @@ describe("layout", () => {
     expect(layout.files["completion/ct_a"]?.namespaces?.[0]).toMatch(/^xmlns /);
   });
 });
+
+describe("layout when the spec's columns change", () => {
+  it("should keep the rule and entry ids of the existing columns when an input column is added", () => {
+    const { spec, layout } = importDmns([fileA]);
+    const completion = spec.decisions.completion;
+    if (!completion) {
+      throw new Error("no completion decision");
+    }
+    completion.inputs.splice(1, 0, { key: "added", expression: { field: "x" } });
+    const original = parseDmn(fileA.xml).decisions[0]?.table;
+    const table = parseDmn(generateAll(spec, layout)[0]?.xml as string).decisions[0]?.table;
+    expect(table?.inputs).toHaveLength(3);
+    expect(table?.rules.map((r) => r.id)).toEqual(original?.rules.map((r) => r.id));
+    expect(table?.rules[0]?.inputIds?.[0]).toBe(original?.rules[0]?.inputIds?.[0]);
+    expect(table?.rules[0]?.inputIds?.[2]).toBe(original?.rules[0]?.inputIds?.[1]);
+    expect(table?.rules[0]?.inputIds?.[1]).toMatch(/^InputEntry_/);
+    expect(table?.rules[0]?.outputIds).toEqual(original?.rules[0]?.outputIds);
+  });
+});

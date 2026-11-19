@@ -1,18 +1,16 @@
 import { createHash } from "node:crypto";
 import { byCodePoint } from "./merge.ts";
 import {
-  ADDITIONAL_PREFIX,
+  attributesOf,
   type Cancellation,
   type Completion,
-  DUE_ATTRIBUTES,
   decodeCell,
   type Grant,
   isValEntry,
-  linkText,
   type Model,
   type Ordering,
   type OrderRow,
-  PRIORITY_ATTRIBUTES,
+  permissionSpecs,
   type Task,
   type Trigger,
   type Val,
@@ -34,10 +32,30 @@ export interface Atom {
   slot: string;
   cases: string[];
   content: Content;
+  /** `stable(content)`, computed once. */
+  contentKey: string;
 }
 
 /** The kinds whose rows list several tasks in a `taskType` cell, and that cell's input key. */
 export const GROUPED: Partial<Record<Kind, string>> = { configuration: "taskType", permissions: "taskType" };
+
+/**
+ * The event column's key, which services spell `eventId` or `eventID`: content uses the kind's own spelling, and a row
+ * takes the spelling of its decision's input column.
+ */
+export const EVENT_KEYS: Partial<Record<Kind, string>> = { initiation: "eventId", completion: "eventID" };
+const EVENT_SPELLINGS = ["eventId", "eventID"];
+
+/** A row's conditions with the event column under the kind's own spelling. */
+export function withCanonicalEvent(kind: Kind, when: Record<string, Cell>): Record<string, Cell> {
+  const spelling = EVENT_KEYS[kind];
+  const found = EVENT_SPELLINGS.find((key) => key in when);
+  if (!spelling || !found || found === spelling) {
+    return when;
+  }
+  const { [found]: event, ...rest } = when;
+  return { ...rest, [spelling]: event as Cell };
+}
 
 /** The pseudo-task of rows that apply to every task, and of cancellation rules. */
 export const ALL_TASKS = "*";
@@ -110,21 +128,6 @@ function valPieces(model: Model, val: Val, cases: string[]): ValPiece[] {
   });
 }
 
-/** A task's configuration attributes in the order they are listed and compiled, by DMN attribute name. */
-export function attributesOf(task: Task): Array<[string, Val]> {
-  const slots: Array<[string, Val | undefined]> = [
-    ["workType", task.workType],
-    ["roleCategory", task.roleCategory],
-    ["title", task.title],
-    ["description", task.link ? linkText(task.link) : task.description],
-    ...Object.entries(DUE_ATTRIBUTES).map(([key, name]): [string, Val | undefined] => [name, task.due?.[key as keyof typeof DUE_ATTRIBUTES]]),
-    ...Object.entries(PRIORITY_ATTRIBUTES).map(([key, name]): [string, Val | undefined] => [name, task.priority?.[key as keyof typeof PRIORITY_ATTRIBUTES]]),
-    ...Object.entries(task.additionalProperties ?? {}).map(([key, val]): [string, Val | undefined] => [`${ADDITIONAL_PREFIX}${key}`, val]),
-    ...Object.entries(task.attributes ?? {})
-  ];
-  return slots.filter((slot): slot is [string, Val] => slot[1] !== undefined);
-}
-
 export interface ResolvedGrant {
   role: string;
   grant: Grant;
@@ -133,12 +136,7 @@ export interface ResolvedGrant {
 
 /** The grants a task's permissions come to: its profile, less what it removes, with its overrides and additions. */
 export function resolveGrants(model: Model, task: Task): ResolvedGrant[] {
-  const permissions = task.permissions;
-  if (permissions === undefined) {
-    return [];
-  }
-  const specs = typeof permissions === "string" ? [{ profile: permissions }] : [permissions].flat();
-  return specs.flatMap((spec) => {
+  return permissionSpecs(task).flatMap((spec) => {
     const grants = new Map<string, Grant>(Object.entries(model.permissionProfiles?.[spec.profile ?? ""] ?? {}));
     for (const role of spec.remove ?? []) {
       grants.delete(role);
@@ -160,7 +158,7 @@ export function resolveGrants(model: Model, task: Task): ResolvedGrant[] {
 export const joinPerms = (perms: Grant["perms"]): string => (typeof perms === "string" ? perms : perms.join(", "));
 
 export function grantContent(model: Model, role: string, grant: Grant): Content {
-  const category = grant.category ?? model.roles?.[role]?.category;
+  const category = grant.category !== undefined ? grant.category : model.roles?.[role]?.category;
   const returns: Record<string, Expr> = { name: role, value: joinPerms(grant.perms) };
   if (category !== undefined) {
     returns.roleCategory = category;
@@ -237,7 +235,7 @@ function cancellationContent(rule: Cancellation, category: Expr | undefined): Co
 export function collectAtoms(model: Model): Atoms {
   const atoms = Object.fromEntries(KINDS.map((kind) => [kind, [] as Atom[]])) as Atoms;
   const add = (kind: Kind, task: string, slot: string, cases: string[], content: Content) => {
-    atoms[kind].push({ ref: `${task}/${slot}`, task, slot, cases, content });
+    atoms[kind].push({ ref: `${task}/${slot}`, task, slot, cases, content, contentKey: stable(content) });
   };
   const all = caseOrder(model);
 
@@ -327,14 +325,16 @@ interface OutRow {
   residue?: Row;
 }
 
-function orderedRow(decision: Decision, out: OutRow, all: string[], taskKey: string | undefined): Row {
+function orderedRow(kind: Kind, decision: Decision, out: OutRow, all: string[], taskKey: string | undefined): Row {
   if (out.residue) {
     return out.residue;
   }
   const when: Record<string, Cell> = { ...out.content.when };
-  if (when.eventID && !decision.inputs.some((c) => c.key === "eventID") && decision.inputs.some((c) => c.key === "eventId")) {
-    when.eventId = when.eventID;
-    delete when.eventID;
+  const spelling = EVENT_KEYS[kind];
+  const actual = decision.inputs.find((c) => EVENT_SPELLINGS.includes(c.key))?.key;
+  if (spelling && actual && actual !== spelling && spelling in when) {
+    when[actual] = when[spelling] as Cell;
+    delete when[spelling];
   }
   if (out.grouped && taskKey) {
     when[taskKey] = { in: out.tasks };
@@ -367,17 +367,25 @@ function buildRows(kind: Kind, decision: Decision, atoms: Atom[], residue: Row[]
   const named = new Set((order ?? []).flatMap((item) => (typeof item === "string" ? item : item.row).split(" ")));
   const claimed = new Set<Atom>();
   // A token whose atom changed (its hash covers content and case types) or that was written before its slot gained atoms
-  // stands for an atom of the same `<task>/<slot>` that no token names; the one covering its case types is preferred.
+  // stands for an atom of the same `<task>/<slot>` that no token names and that covers the row's case types. The mapping
+  // is kept, so every row naming the token finds the same atom.
+  const mapped = new Map<string, Atom[]>();
   const atomOf = (token: string, only: string[] | undefined): Atom | undefined => {
     const exact = byRef.get(token);
     if (exact) {
       return exact;
     }
+    const fits = (a: Atom) => !only || overlapping(a.cases, only);
+    const known = mapped.get(token) ?? [];
+    const again = known.find(fits);
+    if (again) {
+      return again;
+    }
     const bucket = token.replace(/#.*$/, "");
-    const spares = atoms.filter((a) => bucketOf(a) === bucket && !named.has(a.ref) && !claimed.has(a));
-    const spare = spares.find((a) => !only || overlapping(a.cases, only)) ?? spares[0];
+    const spare = atoms.find((a) => bucketOf(a) === bucket && !named.has(a.ref) && !claimed.has(a) && fits(a));
     if (spare) {
       claimed.add(spare);
+      mapped.set(token, [...known, spare]);
     }
     return spare;
   };
@@ -459,7 +467,7 @@ function buildRows(kind: Kind, decision: Decision, atoms: Atom[], residue: Row[]
       out.push({ sig: `~${index + 1}`, tasks: [], content: { when: {}, returns: {} }, cases: [], grouped: false, description: undefined, residue: rowOf });
     }
   });
-  return out.map((o) => orderedRow(decision, o, all, taskKey));
+  return out.map((o) => orderedRow(kind, decision, o, all, taskKey));
 }
 
 /** The standard Work Allocation columns for a table the model's `tables` does not define. */

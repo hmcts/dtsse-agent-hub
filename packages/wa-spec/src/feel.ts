@@ -42,7 +42,7 @@ function lex(text: string): Token[] {
       push(end >= text.length || value.includes("\\") ? "raw" : "str", value, source);
     } else if (/\d/.test(c)) {
       const literal = /^\d+(\.\d+)?/.exec(text.slice(i))?.[0] ?? "";
-      push(String(Number(literal)) === literal ? "num" : "raw", literal, literal);
+      push(plainNumber(Number(literal)) === literal ? "num" : "raw", literal, literal);
     } else if (/[A-Za-z_]/.test(c)) {
       const word = /^[A-Za-z_]\w*/.exec(text.slice(i))?.[0] ?? "";
       push(KEYWORDS.has(word) ? "kw" : "id", word, word);
@@ -313,7 +313,12 @@ export function renderScalar(value: Scalar): string {
   if (typeof value === "string") {
     return quote(value);
   }
-  return String(value);
+  return typeof value === "number" ? plainNumber(value) : String(value);
+}
+
+/** A number in plain decimal, as FEEL has no exponent notation. */
+function plainNumber(value: number): string {
+  return Number.isFinite(value) ? value.toLocaleString("en-US", { useGrouping: false, maximumFractionDigits: 20 }) : String(value);
 }
 
 function renderCond(cond: Cond, inAll = false): string {

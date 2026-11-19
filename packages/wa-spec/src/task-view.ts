@@ -19,8 +19,26 @@ export interface TaskRows {
 
 type Match = "yes" | "maybe" | "no";
 
-const hasLiteral = (value: unknown, taskId: string): boolean =>
-  value === taskId || (typeof value === "object" && value !== null && Object.values(value).some((v) => hasLiteral(v, taskId)));
+/** Whether a cancellation row's process categories include one the task is created with; an empty cell is every category. */
+const cancels = (value: Expr | undefined, categories: Set<string>): Match => {
+  if (value === undefined) {
+    return "yes";
+  }
+  if (typeof value === "string") {
+    return categories.has(value) ? "yes" : "no";
+  }
+  return typeof value === "object" && value !== null && "feel" in value ? "maybe" : categoriesOf(value).some((c) => categories.has(c)) ? "maybe" : "no";
+};
+
+/** Every string in a structured expression, which is where a task id or process category would be written. */
+const literalsOf = (value: unknown): string[] =>
+  typeof value === "string" ? [value] : typeof value === "object" && value !== null ? Object.values(value).flatMap(literalsOf) : [];
+
+const quoted = (text: string): string[] => [...text.matchAll(/"([^"]*)"/g)].map((m) => m[1] as string);
+
+/** The process categories a value may give: a string, the quoted strings of FEEL, or the strings of a structured expression. */
+const categoriesOf = (value: Expr | undefined): string[] =>
+  typeof value === "object" && value !== null && "feel" in value ? quoted(value.feel) : literalsOf(value);
 
 /** Whether an output value names the task: a scalar or FEEL text does, and a structured expression with the id somewhere in it may. */
 const mentions = (value: Expr | undefined, taskId: string): Match => {
@@ -28,9 +46,9 @@ const mentions = (value: Expr | undefined, taskId: string): Match => {
     return value === taskId ? "yes" : "no";
   }
   if (typeof value === "object" && value !== null && "feel" in value) {
-    return value.feel.includes(`"${taskId}"`) ? "yes" : "no";
+    return value.feel.includes(`"${taskId}"`) ? "yes" : "maybe";
   }
-  return hasLiteral(value, taskId) ? "maybe" : "no";
+  return literalsOf(value).includes(taskId) ? "maybe" : "no";
 };
 
 /** Whether an input cell selects the task: an empty cell selects every task, and a FEEL or comparison cell cannot be decided here. */
@@ -55,11 +73,13 @@ export function taskRows(spec: Spec, taskId: string): TaskRows[] {
   const found: TaskRows[] = [];
   const categories = new Set<string>();
   const initiation = spec.decisions.initiation;
-  initiation?.rows.forEach((row) => {
-    if (mentions(row.returns?.taskId, taskId) !== "no" && typeof row.returns?.processCategories === "string") {
-      categories.add(row.returns.processCategories);
+  for (const row of initiation?.rows ?? []) {
+    if (mentions(row.returns?.taskId, taskId) !== "no") {
+      for (const category of categoriesOf(row.returns?.processCategories)) {
+        categories.add(category);
+      }
     }
-  });
+  }
   for (const [kind, decision] of Object.entries(spec.decisions) as Array<[Kind, NonNullable<Spec["decisions"][Kind]>]>) {
     const where = TASK_COLUMN[kind];
     const rows = decision.rows
@@ -70,10 +90,7 @@ export function taskRows(spec: Spec, taskId: string): TaskRows[] {
           return match === "no" ? [] : [{ index, row, ...(match === "maybe" ? { mayApply: true as const } : {}) }];
         }
         const value = row.returns?.[where.name];
-        if (kind === "cancellation") {
-          return typeof value === "string" && categories.has(value) ? [{ index, row }] : [];
-        }
-        const match = mentions(value, taskId);
+        const match = kind === "cancellation" ? cancels(value, categories) : mentions(value, taskId);
         return match === "no" ? [] : [{ index, row, ...(match === "maybe" ? { mayApply: true as const } : {}) }];
       });
     if (rows.length > 0) {

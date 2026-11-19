@@ -19,7 +19,7 @@ import {
   type Val,
   type ValEntry
 } from "./model.ts";
-import { ALL_TASKS, type Atom, type Content, collectAtoms, compileModel, RULES, stable } from "./model-compile.ts";
+import { ALL_TASKS, type Atom, type Content, collectAtoms, compileModel, RULES, stable, withCanonicalEvent } from "./model-compile.ts";
 import { type Cell, type Decision, type Expr, KINDS, type Kind, type Row, type Spec } from "./schema.ts";
 import { diffSpecs } from "./spec-diff.ts";
 
@@ -75,17 +75,19 @@ const onlyKeys = (value: object, allowed: string[]) => Object.keys(value).every(
 
 interface Ent<T> {
   data: T;
+  /** `stable(data)`, computed once. */
+  key: string;
   cases: string[];
 }
 
 /** Adds an entry, folding it into an identical one for other case types when there is one. */
 function addEntry<T>(list: Array<Ent<T>>, data: T, cases: string[]): void {
   const key = stable(data);
-  const same = list.find((e) => stable(e.data) === key && !overlaps(e.cases, cases));
+  const same = list.find((e) => e.key === key && !overlaps(e.cases, cases));
   if (same) {
     same.cases = [...same.cases, ...cases];
   } else {
-    list.push({ data, cases: [...cases] });
+    list.push({ data, key, cases: [...cases] });
   }
 }
 
@@ -145,7 +147,7 @@ function classify(kind: Kind, row: Row, index: number, caseIds: string[]): Class
     }
     cases = ordered;
   }
-  const when = row.when ?? {};
+  const when = withCanonicalEvent(kind, row.when ?? {});
   const returns = row.returns ?? {};
   const make = (task: string, slot: string, content: Content): Item => ({
     row: index,
@@ -212,8 +214,8 @@ function classify(kind: Kind, row: Row, index: number, caseIds: string[]): Class
       return { cases, items: (tasks ?? [ALL_TASKS]).map((task) => make(task, returns.name as string, content)) };
     }
     case "completion": {
-      const event = when.eventID ?? when.eventId;
-      if (!event || !onlyKeys(when, ["eventID", "eventId"]) || Object.keys(when).length !== 1) {
+      const event = when.eventID;
+      if (!event || !onlyKeys(when, ["eventID"])) {
         return "it has no event, or conditions beyond it";
       }
       if (!isName(returns.taskType) || !onlyKeys(returns, ["taskType", "completionMode"])) {
@@ -807,7 +809,7 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
       for (const item of result.items) {
         const wanted = stable(item.content);
         const atom = (buckets.get(item.bucket) ?? []).find(
-          (a) => stable(a.content) === wanted && subset(item.cases, a.cases) && !overlaps(used.get(a) ?? [], item.cases)
+          (a) => a.contentKey === wanted && subset(item.cases, a.cases) && !overlaps(used.get(a) ?? [], item.cases)
         );
         if (!atom) {
           unmatched ??= `${kind} row ${entry.index}: no model entry for ${item.bucket}`;

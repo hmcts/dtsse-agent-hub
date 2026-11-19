@@ -1,4 +1,4 @@
-import { type DmnDecision, type DmnDocument, readDmn } from "./dmn-model.ts";
+import { type DmnDecision, type DmnDocument, type DmnInput, type DmnOutput, readDmn } from "./dmn-model.ts";
 import { isStructured, normaliseFeel, parseCell, parseExpr } from "./feel.ts";
 import { parseFileName } from "./file-names.ts";
 import { generateDocument } from "./generator.ts";
@@ -117,7 +117,7 @@ function setOverride<V>(overrides: Record<string, Record<string, V>>, caseType: 
 }
 
 function sameCaseTypes(subset: string[], all: string[]): string[] | undefined {
-  return subset.length === all.length ? undefined : subset;
+  return all.every((id) => subset.includes(id)) ? undefined : subset;
 }
 
 function pick<T>(values: Array<{ caseType: string; value: T | undefined }>): { base: T | undefined; overrides: Record<string, T | undefined> } {
@@ -125,6 +125,39 @@ function pick<T>(values: Array<{ caseType: string; value: T | undefined }>): { b
   const overrides: Record<string, T | undefined> = {};
   for (const d of differing) {
     overrides[d.caseType] = d.value;
+  }
+  return { base, overrides };
+}
+
+/** The spec's name for each property of an input column, and the DMN model's. */
+const INPUT_PROPERTIES = [
+  ["label", "label"],
+  ["variable", "inputVariable"],
+  ["typeRef", "typeRef"],
+  ["language", "expressionLanguage"],
+  ["allowedValues", "allowedValues"]
+] as const;
+
+const OUTPUT_PROPERTIES = [
+  ["label", "label"],
+  ["typeRef", "typeRef"]
+] as const;
+
+/** A column's properties as the commonest value among its case types, and what differs as per-case-type overrides. */
+function columnProperties<S extends object>(
+  perType: Array<{ caseType: string; source: S }>,
+  properties: ReadonlyArray<readonly [string, keyof S]>
+): { base: Record<string, unknown>; overrides: Record<string, Record<string, unknown>> } {
+  const base: Record<string, unknown> = {};
+  const overrides: Record<string, Record<string, unknown>> = {};
+  for (const [field, from] of properties) {
+    const picked = pick(perType.map(({ caseType, source }) => ({ caseType, value: source[from] as unknown })));
+    if (picked.base !== undefined) {
+      base[field] = picked.base;
+    }
+    for (const [caseType, value] of Object.entries(picked.overrides)) {
+      setOverride(overrides, caseType, field, value ?? null);
+    }
   }
   return { base, overrides };
 }
@@ -139,6 +172,7 @@ function importTables(kind: Kind, tables: Table[], allCaseTypes: string[], repor
     }
   }
   const keysByCaseType = new Map(tables.map((t) => [t.caseType, inputKeys(t.decision)]));
+  const tableOf = new Map(tables.map((t) => [t.caseType, t]));
 
   // Columns: merged by key; each case type's own order is kept as a subsequence of the result.
   let inputOrder: Array<Merged<string>> = [];
@@ -165,52 +199,23 @@ function importTables(kind: Kind, tables: Table[], allCaseTypes: string[], repor
 
   const inputs: InputColumn[] = inputOrder.map(({ item: key, caseTypes: present }) => {
     const perType = present.map((caseType) => {
-      const table = tables.find((t) => t.caseType === caseType) as Table;
       const index = (keysByCaseType.get(caseType) ?? []).indexOf(key);
-      const input = table.decision.table?.inputs[index];
-      return { caseType, input: input as NonNullable<typeof input> };
+      return { caseType, source: (tableOf.get(caseType) as Table).decision.table?.inputs[index] as NonNullable<DmnInput> };
     });
-    const props = (field: "label" | "typeRef" | "inputVariable" | "expressionLanguage" | "allowedValues") =>
-      pick(perType.map(({ caseType, input }) => ({ caseType, value: input[field] })));
-    const label = props("label");
-    const variable = props("inputVariable");
-    const typeRef = props("typeRef");
-    const language = props("expressionLanguage");
-    const allowedValues = props("allowedValues");
+    const { base, overrides } = columnProperties(perType, INPUT_PROPERTIES);
     const expression = pick(
-      perType.map(({ caseType, input }) => {
-        const expr = parseExpr(input.expression);
+      perType.map(({ caseType, source }) => {
+        const expr = parseExpr(source.expression);
         addRaw(report, kind, `input ${key}`, expr, caseType);
         return { caseType, value: expr === undefined ? "" : JSON.stringify(expr) };
       })
     );
-    const overrides: Record<string, Record<string, unknown>> = {};
-    const put = (caseType: string, field: string, value: unknown) => setOverride(overrides, caseType, field, value);
-    for (const [caseType, value] of Object.entries(label.overrides)) {
-      put(caseType, "label", value ?? null);
-    }
-    for (const [caseType, value] of Object.entries(variable.overrides)) {
-      put(caseType, "variable", value ?? null);
-    }
-    for (const [caseType, value] of Object.entries(typeRef.overrides)) {
-      put(caseType, "typeRef", value ?? null);
-    }
-    for (const [caseType, value] of Object.entries(language.overrides)) {
-      put(caseType, "language", value ?? null);
-    }
-    for (const [caseType, value] of Object.entries(allowedValues.overrides)) {
-      put(caseType, "allowedValues", value ?? null);
-    }
     for (const [caseType, value] of Object.entries(expression.overrides)) {
-      put(caseType, "expression", value === "" || value === undefined ? { feel: "" } : JSON.parse(value));
+      setOverride(overrides, caseType, "expression", value === "" || value === undefined ? { feel: "" } : JSON.parse(value));
     }
     return {
       key,
-      ...(label.base === undefined ? {} : { label: label.base }),
-      ...(variable.base === undefined ? {} : { variable: variable.base }),
-      ...(typeRef.base === undefined ? {} : { typeRef: typeRef.base }),
-      ...(language.base === undefined ? {} : { language: language.base }),
-      ...(allowedValues.base === undefined ? {} : { allowedValues: allowedValues.base }),
+      ...base,
       ...(expression.base === "" || expression.base === undefined ? {} : { expression: JSON.parse(expression.base) }),
       ...(sameCaseTypes(present, caseTypes) ? { only: present } : {}),
       ...(Object.keys(overrides).length > 0 ? { overrides } : {})
@@ -218,23 +223,14 @@ function importTables(kind: Kind, tables: Table[], allCaseTypes: string[], repor
   });
 
   const outputs: OutputColumn[] = outputOrder.map(({ item: name, caseTypes: present }) => {
-    const perType = present.map((caseType) => {
-      const table = tables.find((t) => t.caseType === caseType) as Table;
-      return { caseType, output: table.decision.table?.outputs.find((o) => o.name === name) as NonNullable<Table["decision"]["table"]>["outputs"][number] };
-    });
-    const label = pick(perType.map(({ caseType, output }) => ({ caseType, value: output.label })));
-    const typeRef = pick(perType.map(({ caseType, output }) => ({ caseType, value: output.typeRef })));
-    const overrides: Record<string, Record<string, unknown>> = {};
-    for (const [caseType, value] of Object.entries(label.overrides)) {
-      setOverride(overrides, caseType, "label", value ?? null);
-    }
-    for (const [caseType, value] of Object.entries(typeRef.overrides)) {
-      setOverride(overrides, caseType, "typeRef", value ?? null);
-    }
+    const perType = present.map((caseType) => ({
+      caseType,
+      source: (tableOf.get(caseType) as Table).decision.table?.outputs.find((o) => o.name === name) as NonNullable<DmnOutput>
+    }));
+    const { base, overrides } = columnProperties(perType, OUTPUT_PROPERTIES);
     return {
       name,
-      ...(label.base === undefined ? {} : { label: label.base }),
-      ...(typeRef.base === undefined ? {} : { typeRef: typeRef.base }),
+      ...base,
       ...(sameCaseTypes(present, caseTypes) ? { only: present } : {}),
       ...(Object.keys(overrides).length > 0 ? { overrides } : {})
     } as OutputColumn;
@@ -358,7 +354,9 @@ function importTables(kind: Kind, tables: Table[], allCaseTypes: string[], repor
         }
         const edge = edges.find((e) => e.dep.decision === from && e.dep.requires === to);
         if (edge) {
-          edge.caseTypes.push(table.caseType);
+          if (!edge.caseTypes.includes(table.caseType)) {
+            edge.caseTypes.push(table.caseType);
+          }
         } else {
           edges.push({ dep: { decision: from, requires: to }, caseTypes: [table.caseType] });
         }
@@ -443,6 +441,10 @@ export function importDmns(files: DmnFile[], options: ImportOptions = {}): { spe
     const decision = named ?? document.decisions.find((d) => d.table);
     if (!decision?.table) {
       report.notes.push(`${file.name}: no decision table found, skipped`);
+      continue;
+    }
+    if (!HIT_POLICIES.includes(decision.table.hitPolicy as (typeof HIT_POLICIES)[number])) {
+      flag(`hit policy ${decision.table.hitPolicy}, which needs output values the spec cannot hold`, file.name);
       continue;
     }
     slugs.set(match.service, [...(slugs.get(match.service) ?? []), file.name]);

@@ -5,7 +5,7 @@ import type { Layout } from "./layout.ts";
 import { Model, Ordering, validateModel } from "./model.ts";
 import { compileModel } from "./model-compile.ts";
 import type { Spec } from "./schema.ts";
-import { layoutPathFor, parseLayout, parseSpec, toYaml } from "./spec-io.ts";
+import { layoutPathFor, parseLayout, specFromDocument, toYaml } from "./spec-io.ts";
 
 /** Whether a parsed YAML document is a model rather than a table-centric spec. */
 export const isModelDocument = (document: unknown): boolean =>
@@ -44,9 +44,12 @@ export function orderPathFor(modelPath: string, model: Model): string | undefine
     }
     return named;
   }
-  const beside = `${modelPath.replace(/\.ya?ml$/, "")}.order.yaml`;
+  const beside = orderPathBeside(modelPath);
   return exists(beside) ? beside : undefined;
 }
+
+/** Where the ordering file of a model file goes when the model does not name one. */
+export const orderPathBeside = (modelPath: string): string => `${modelPath.replace(/\.ya?ml$/, "")}.order.yaml`;
 
 /** Where a layout file is: the one named (by `--layout` or the model's `layout` field), which must exist, else `<name>.layout.yaml` beside the file when that exists. */
 function layoutPathOf(path: string, named: string | undefined, base: string): string | undefined {
@@ -74,12 +77,14 @@ export interface LoadedSpec {
 /** Reads a spec file, or a model file compiled with its ordering, without its layout, which only DMN generation needs. */
 function readSpecFile(path: string): { spec: Spec; model: Model | undefined } {
   const text = readText(path);
-  if (isModelDocument(parse(text))) {
-    const model = parseModel(text);
+  const document: unknown = parse(text);
+  if (isModelDocument(document)) {
+    // compileModel validates, so the model is checked once.
+    const model = Model.parse(document);
     const orderPath = orderPathFor(path, model);
     return { spec: compileModel(model, orderPath ? parseOrdering(readText(orderPath)) : undefined), model };
   }
-  return { spec: parseSpec(text), model: undefined };
+  return { spec: specFromDocument(document), model: undefined };
 }
 
 export const loadSpecOnly = (path: string): Spec => readSpecFile(path).spec;

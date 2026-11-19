@@ -200,6 +200,31 @@ function original(texts: Record<string, string> | undefined, id: string | undefi
   return stored !== undefined && normaliseFeel(render(stored)) === normaliseFeel(current) ? stored : current;
 }
 
+/**
+ * The stored line for each generated rule. A rule keeps the line with the same content hash; when the spec has as many rules as
+ * were stored, the rules whose hash found nothing, such as every rule after a column was added, take the unused lines in order.
+ */
+function matchRules(rules: DmnRule[], lines: string[]): Array<string[] | undefined> {
+  const byHash = new Map<string, number[]>();
+  for (const [i, line] of lines.entries()) {
+    const hash = line.split(" ")[0] ?? "";
+    byHash.set(hash, [...(byHash.get(hash) ?? []), i]);
+  }
+  const taken = new Set<number>();
+  const found = rules.map((rule) => {
+    const at = byHash.get(ruleHash(rule))?.shift();
+    if (at !== undefined) {
+      taken.add(at);
+    }
+    return at;
+  });
+  const spare = lines.map((_, i) => i).filter((i) => !taken.has(i));
+  return found.map((at) => {
+    const line = at ?? (rules.length === lines.length ? spare.shift() : undefined);
+    return line === undefined ? undefined : (lines[line] as string).split(" ").slice(1);
+  });
+}
+
 /** Fills in the ids, widths and diagram a generated document lacks from what the file's layout stored. */
 export function applyLayout(doc: DmnDocument, layout: FileLayout | undefined, inputKeys: string[]): DmnDocument {
   if (!layout) {
@@ -214,11 +239,9 @@ export function applyLayout(doc: DmnDocument, layout: FileLayout | undefined, in
     }
     const table = decision.table;
     const split = (text: string | undefined) => (text ?? "").split(" ").map(back);
-    const queues = new Map<string, string[][]>();
-    for (const line of own.rules ?? []) {
-      const [hash = "", ...ids] = line.split(" ");
-      queues.set(hash, [...(queues.get(hash) ?? []), ids]);
-    }
+    const stored = matchRules(table?.rules ?? [], own.rules ?? []);
+    const storedInputs = Object.keys(own.inputs ?? {});
+    const storedOutputs = Object.keys(own.outputs ?? {});
     const order = Object.keys(own.requirements ?? {});
     const rank = (required: string): number => {
       const at = order.indexOf(names.get(required) ?? "");
@@ -260,14 +283,14 @@ export function applyLayout(doc: DmnDocument, layout: FileLayout | undefined, in
                 const [id, width] = split(own.outputs?.[output.name]);
                 return { ...output, ...(id ? { id } : {}), ...(width ? { width } : {}) };
               }),
-              rules: table.rules.map((rule): DmnRule => {
-                const ids = queues.get(ruleHash(rule))?.shift();
+              rules: table.rules.map((rule, r): DmnRule => {
+                const ids = stored[r];
                 if (!ids) {
                   return rule;
                 }
                 const [id, ...entries] = ids.map(back);
-                const inputIds = entries.slice(0, rule.inputs.length).map((e) => e ?? "");
-                const outputIds = entries.slice(rule.inputs.length).map((e) => e ?? "");
+                const inputIds = inputKeys.map((key) => entries[storedInputs.indexOf(key)] ?? "");
+                const outputIds = table.outputs.map((o) => entries[storedInputs.length + storedOutputs.indexOf(o.name)] ?? "");
                 return {
                   ...rule,
                   ...(id ? { id } : {}),

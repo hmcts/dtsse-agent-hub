@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -122,5 +122,31 @@ describe("cli errors", () => {
     const result = run("import", input, "-o", join(dir, "spec.yaml"));
     expect(result.status).toBe(2);
     expect(result.stderr).toContain("invalid spec");
+  });
+});
+
+describe("cli generate and stale files", () => {
+  it("should list task DMNs the spec no longer has and leave them when --prune is not given", () => {
+    const { dir, input } = workspace();
+    run("import", input, "-o", join(dir, "spec.yaml"));
+    mkdirSync(join(dir, "out"));
+    writeFileSync(join(dir, "out", "wa-task-completion-demo-ct_old.dmn"), "<definitions/>");
+    writeFileSync(join(dir, "out", "other.dmn"), "<definitions/>");
+    const result = run("generate", join(dir, "spec.yaml"), "-o", join(dir, "out"));
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain("wa-task-completion-demo-ct_old.dmn");
+    expect(result.stderr).not.toContain("other.dmn");
+    expect(readdirSync(join(dir, "out"))).toContain("wa-task-completion-demo-ct_old.dmn");
+  });
+
+  it("should delete them when --prune is given and only them", () => {
+    const { dir, input } = workspace();
+    run("import", input, "-o", join(dir, "spec.yaml"));
+    mkdirSync(join(dir, "out"));
+    writeFileSync(join(dir, "out", "wa-task-completion-demo-ct_old.dmn"), "<definitions/>");
+    writeFileSync(join(dir, "out", "other.dmn"), "<definitions/>");
+    const result = run("generate", join(dir, "spec.yaml"), "-o", join(dir, "out"), "--prune");
+    expect(result.stderr).toContain("removed: wa-task-completion-demo-ct_old.dmn");
+    expect(readdirSync(join(dir, "out")).sort()).toEqual(["other.dmn", "wa-task-completion-demo-ct_a.dmn", "wa-task-completion-demo-ct_b.dmn"]);
   });
 });

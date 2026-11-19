@@ -1,11 +1,11 @@
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { diffPaths, renderDifferences } from "./diff.ts";
-import { exists, isDirectory, listDir, readText, writeText } from "./file-io.ts";
+import { exists, isDirectory, listDir, readText, removeFile, writeText } from "./file-io.ts";
 import { isWaTaskDmn } from "./file-names.ts";
 import { generateAll } from "./generator.ts";
 import { importDmns, renderReport } from "./importer.ts";
-import { loadSpecFile, loadSpecOnly, stringifyModel, stringifyOrdering } from "./model-io.ts";
+import { loadSpecFile, loadSpecOnly, orderPathBeside, stringifyModel, stringifyOrdering } from "./model-io.ts";
 import { liftSpec, renderLiftReport } from "./model-lift.ts";
 import { compareSpecs } from "./spec-diff.ts";
 import { layoutPathFor, parseSpec, stringifyLayout, stringifySpec } from "./spec-io.ts";
@@ -15,13 +15,15 @@ const USAGE = `wa-spec: Work Allocation configuration spec
 
   wa-spec import <dmn-dir> -o <spec.yaml> [--report <report.md>] [--jurisdiction J] [--service-code C] [--display-name N]
                                                  also writes the ids and layout to <spec>.layout.yaml
-  wa-spec generate <spec.yaml|model.yaml> -o <dir> [--layout <layout.yaml>]
-                                                 a model ("kind: wa-model") is compiled first; the layout is
-                                                 --layout, the model layout field, or <name>.layout.yaml
+  wa-spec generate <spec.yaml|model.yaml> -o <dir> [--layout <layout.yaml>] [--prune]
+                                                 a model ("kind: wa-model") is compiled first; the layout is --layout,
+                                                 the model layout field, or <name>.layout.yaml. Lists the task DMNs in
+                                                 <dir> the spec no longer has, and removes them with --prune
   wa-spec lift <spec.yaml> -o <model.yaml> [--report <report.md>]
                                                  the task- and role-centric model of a spec, with <model>.order.yaml
                                                  that keeps the tables' row order; exits 1 unless it compiles back equal
-  wa-spec compile <model.yaml> -o <spec.yaml>    the table-centric spec of a model, with its layout copied beside it
+  wa-spec compile <model.yaml> -o <spec.yaml> [--layout <layout.yaml>]
+                                                 the table-centric spec of a model, with its layout copied beside it
   wa-spec diff <a> <b> [--ignore-rule-order]     two DMN files or two directories, or a file and a directory holding
                                                  a file of the same name; exits 1 when they differ. Two YAML files
                                                  (specs or models) are compared as specs
@@ -45,7 +47,8 @@ function main(argv: string[]): number {
       "service-code": { type: "string" },
       "display-name": { type: "string" },
       layout: { type: "string" },
-      "ignore-rule-order": { type: "boolean" }
+      "ignore-rule-order": { type: "boolean" },
+      prune: { type: "boolean" }
     }
   });
   if (command === "import") {
@@ -81,6 +84,16 @@ function main(argv: string[]): number {
     for (const file of files) {
       writeText(join(values.output, file.fileName), file.xml);
     }
+    const made = new Set(files.map((file) => file.fileName));
+    const stale = listDir(values.output).filter((name) => isWaTaskDmn(name) && !made.has(name));
+    for (const name of stale) {
+      if (values.prune) {
+        removeFile(join(values.output, name));
+      }
+    }
+    if (stale.length > 0) {
+      process.stderr.write(`${values.prune ? "removed" : "left in place, and not in the spec (--prune removes them)"}: ${stale.join(", ")}\n`);
+    }
     process.stdout.write(`generated ${files.length} files in ${values.output}\n`);
     return 0;
   }
@@ -91,7 +104,7 @@ function main(argv: string[]): number {
     }
     const spec = parseSpec(readText(specPath));
     const layoutPath = layoutPathFor(specPath);
-    const orderPath = `${values.output.replace(/\.ya?ml$/, "")}.order.yaml`;
+    const orderPath = orderPathBeside(values.output);
     const { model, ordering, report } = liftSpec(spec, {
       ...(exists(layoutPath) ? { layout: relative(dirname(resolve(values.output)), resolve(layoutPath)) } : {}),
       order: basename(orderPath)
