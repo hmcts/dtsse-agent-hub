@@ -1,0 +1,160 @@
+{
+ "decision": "wa-task-types-employment-et_englandwales",
+ "source": "hmcts/et-wa-task-configuration@fa182449b8ef501c95e1f00137965994d835c4c3",
+ "scenarios": [
+  {
+   "test": "EmploymentTaskTypeTestEW",
+   "input": {},
+   "output": [
+    {
+     "taskTypeId": "AmendClaimantDetails",
+     "taskTypeName": "Amend Party Details (Claimant)"
+    },
+    {
+     "taskTypeId": "AmendRespondentDetails",
+     "taskTypeName": "Amend Party Details (Respondent)"
+    },
+    {
+     "taskTypeId": "CompleteInitialConsideration",
+     "taskTypeName": "Complete Initial Consideration"
+    },
+    {
+     "taskTypeId": "ContactTribunalWithAnApplication",
+     "taskTypeName": "Contact Tribunal With An Application"
+    },
+    {
+     "taskTypeId": "DraftAndSignJudgment",
+     "taskTypeName": "Draft And Sign Judgment/Order"
+    },
+    {
+     "taskTypeId": "Et1Vetting",
+     "taskTypeName": "ET1 Vetting"
+    },
+    {
+     "taskTypeId": "ET3Processing",
+     "taskTypeName": "ET3 Processing"
+    },
+    {
+     "taskTypeId": "IssueInitialConsiderationDirections",
+     "taskTypeName": "Issue Initial Consideration Directions"
+    },
+    {
+     "taskTypeId": "IssueJudgment",
+     "taskTypeName": "Issue Judgment"
+    },
+    {
+     "taskTypeId": "IssuePostHearingDirection",
+     "taskTypeName": "Issue Post Hearing Direction"
+    },
+    {
+     "taskTypeId": "ListAHearing",
+     "taskTypeName": "List A Hearing"
+    },
+    {
+     "taskTypeId": "ListServeClaim",
+     "taskTypeName": "List/ Serve Claim"
+    },
+    {
+     "taskTypeId": "ReviewECCResponse",
+     "taskTypeName": "Reply to Employer's Contract Claim received"
+    },
+    {
+     "taskTypeId": "ReviewReferralAdmin",
+     "taskTypeName": "Review Referral - Admin"
+    },
+    {
+     "taskTypeId": "ReviewReferralJudiciary",
+     "taskTypeName": "Review Referral - Judicial"
+    },
+    {
+     "taskTypeId": "ReviewReferralLegalOps",
+     "taskTypeName": "Review Referral - Legal Ops"
+    },
+    {
+     "taskTypeId": "ReviewReferralResponseAdmin",
+     "taskTypeName": "Review Referral Response - Admin"
+    },
+    {
+     "taskTypeId": "ReviewReferralResponseJudiciary",
+     "taskTypeName": "Review Referral Response - Judicial"
+    },
+    {
+     "taskTypeId": "ReviewReferralResponseLegalOps",
+     "taskTypeName": "Review Referral Response - Legal Ops"
+    },
+    {
+     "taskTypeId": "ReviewRule21Referral",
+     "taskTypeName": "Review Rule 22 Referral"
+    },
+    {
+     "taskTypeId": "Rule21",
+     "taskTypeName": "Rule 22"
+    },
+    {
+     "taskTypeId": "ExpiredBfAction",
+     "taskTypeName": "Expired Bf Action"
+    },
+    {
+     "taskTypeId": "ReferEmployersContractClaim",
+     "taskTypeName": "Refer Employer's Contract Claim"
+    },
+    {
+     "taskTypeId": "SendEt1Notification",
+     "taskTypeName": "Send ET1 Notification"
+    },
+    {
+     "taskTypeId": "SendEt3Notification",
+     "taskTypeName": "Send ET3 Notification"
+    },
+    {
+     "taskTypeId": "WithdrawAllOrPartOfCase",
+     "taskTypeName": "Withdraw All Or Part Of Case"
+    },
+    {
+     "taskTypeId": "reviewSpecificAccessRequestAdmin",
+     "taskTypeName": "Review Specific Access Request (Admin)"
+    },
+    {
+     "taskTypeId": "reviewSpecificAccessRequestCTSC",
+     "taskTypeName": "Review Specific Access Request (CTSC)"
+    },
+    {
+     "taskTypeId": "reviewSpecificAccessRequestJudiciary",
+     "taskTypeName": "Review Specific Access Request (Judiciary)"
+    },
+    {
+     "taskTypeId": "reviewSpecificAccessRequestLegalOps",
+     "taskTypeName": "Review Specific Access Request (Legal Ops)"
+    },
+    {
+     "taskTypeId": "IssueOrder",
+     "taskTypeName": "Issue Order"
+    },
+    {
+     "taskTypeId": "SubmitRespondentPseResponse",
+     "taskTypeName": "Review notification response"
+    },
+    {
+     "taskTypeId": "SubmitClaimantPseResponse",
+     "taskTypeName": "Review notification response"
+    },
+    {
+     "taskTypeId": "ReviewSupportRequestAdmin",
+     "taskTypeName": "Review Support Request Admin"
+    },
+    {
+     "taskTypeId": "ReviewSupportRequestLegalOfficer",
+     "taskTypeName": "Review Support Request LegalOfficer"
+    },
+    {
+     "taskTypeId": "ReviewSupportRequestJudge",
+     "taskTypeName": "Review Support Request Judge"
+    },
+    {
+     "taskTypeId": "ArrangeSupport",
+     "taskTypeName": "Arrange Support"
+    }
+   ]
+  }
+ ]
+}

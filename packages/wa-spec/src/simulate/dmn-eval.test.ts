@@ -1,0 +1,229 @@
+import { describe, expect, it } from "vitest";
+import type { DmnDecision, DmnDocument, DmnRule, DmnTable } from "../dmn-model.ts";
+import { DmnEvaluationError, evaluateDecision, evaluateTable } from "./dmn-eval.ts";
+import { UnsupportedLanguageError } from "./feel-eval.ts";
+
+const rule = (inputs: string[], outputs: string[], extra: Partial<DmnRule> = {}): DmnRule => ({ inputs, outputs, ...extra });
+
+/** A one-input table over `x`, with the output `out`. */
+const table = (hitPolicy: string, rules: DmnRule[], extra: Partial<DmnTable> = {}): DmnTable => ({
+  hitPolicy,
+  inputs: [{ expression: "x", typeRef: "string" }],
+  outputs: [{ name: "out" }],
+  rules,
+  ...extra
+});
+
+const rows = (hitPolicy: string, x: string, rules: DmnRule[], extra: Partial<DmnTable> = {}) => evaluateTable(table(hitPolicy, rules, extra), { x });
+
+describe("hit policies", () => {
+  const overlapping = [rule(['"a"'], ['"first"']), rule(['"a", "b"'], ['"second"']), rule(['"c"'], ['"third"'])];
+
+  it("should give the one matching rule when the policy is UNIQUE", () => {
+    expect(rows("UNIQUE", "b", overlapping)).toEqual([{ out: "second" }]);
+    expect(rows("UNIQUE", "z", overlapping)).toEqual([]);
+  });
+
+  it("should fail when two rules match and the policy is UNIQUE", () => {
+    expect(() => rows("UNIQUE", "a", overlapping)).toThrow(DmnEvaluationError);
+  });
+
+  it("should give the first matching rule when the policy is FIRST", () => {
+    expect(rows("FIRST", "a", overlapping)).toEqual([{ out: "first" }]);
+  });
+
+  it("should give the shared output when the policy is ANY and the matching rules agree", () => {
+    expect(rows("ANY", "a", [rule(['"a"'], ['"same"']), rule(['"a"'], ['"same"'])])).toEqual([{ out: "same" }]);
+  });
+
+  it("should fail when the policy is ANY and the matching rules differ", () => {
+    expect(() => rows("ANY", "a", overlapping)).toThrow("ANY hit policy");
+  });
+
+  it("should give every matching rule in rule order when the policy is RULE ORDER or COLLECT", () => {
+    expect(rows("RULE ORDER", "a", overlapping)).toEqual([{ out: "first" }, { out: "second" }]);
+    expect(rows("COLLECT", "a", overlapping)).toEqual([{ out: "first" }, { out: "second" }]);
+  });
+
+  it("should fail when the hit policy is one the spec does not have", () => {
+    expect(() => rows("PRIORITY", "a", overlapping)).toThrow("not supported");
+  });
+});
+
+describe("COLLECT with an aggregation", () => {
+  const numbers = [rule([""], ["3"]), rule([""], ["4"]), rule([""], ["4"]), rule(['"never"'], ["100"])];
+
+  it("should sum the matching outputs when the aggregation is SUM", () => {
+    expect(rows("COLLECT", "a", numbers, { aggregation: "SUM" })).toEqual([{ out: 11 }]);
+  });
+
+  it("should count the distinct matching outputs when the aggregation is COUNT", () => {
+    expect(rows("COLLECT", "a", numbers, { aggregation: "COUNT" })).toEqual([{ out: 2 }]);
+  });
+
+  it("should give the smallest or largest output when the aggregation is MIN or MAX", () => {
+    expect(rows("COLLECT", "a", numbers, { aggregation: "MIN" })).toEqual([{ out: 3 }]);
+    expect(rows("COLLECT", "a", numbers, { aggregation: "MAX" })).toEqual([{ out: 4 }]);
+  });
+
+  it("should give nothing for MIN and MAX and zero for SUM and COUNT when no rule matches", () => {
+    const none = [rule(['"never"'], ["1"])];
+    expect(rows("COLLECT", "a", none, { aggregation: "MIN" })).toEqual([]);
+    expect(rows("COLLECT", "a", none, { aggregation: "MAX" })).toEqual([]);
+    expect(rows("COLLECT", "a", none, { aggregation: "SUM" })).toEqual([{ out: 0 }]);
+    expect(rows("COLLECT", "a", none, { aggregation: "COUNT" })).toEqual([{ out: 0 }]);
+  });
+});
+
+describe("inputs and outputs", () => {
+  it("should read the variable the column names when its input expression is empty", () => {
+    const t = table("COLLECT", [rule(['"go"'], ['"hit"'])], { inputs: [{ expression: "", inputVariable: "event" }] });
+    expect(evaluateTable(t, { event: "go" })).toEqual([{ out: "hit" }]);
+    expect(evaluateTable(t, {})).toEqual([]);
+  });
+
+  it("should convert an input to its type when the column has one", () => {
+    const t = table("COLLECT", [rule(["true"], ['"yes"'])], { inputs: [{ expression: "flag", typeRef: "boolean" }] });
+    expect(evaluateTable(t, { flag: "true" })).toEqual([{ out: "yes" }]);
+    expect(evaluateTable(t, { flag: "no" })).toEqual([]);
+  });
+
+  it("should leave an output out when its entry is empty and keep it as null when the entry says null", () => {
+    const t = table("COLLECT", [rule([""], ["", "null"])], { outputs: [{ name: "a" }, { name: "b" }] });
+    expect(evaluateTable(t, {})).toEqual([{ b: null }]);
+  });
+
+  it("should give an empty row when a rule has no outputs", () => {
+    expect(rows("COLLECT", "a", [rule([""], [""])])).toEqual([{}]);
+  });
+
+  it("should convert outputs to the type their column names", () => {
+    const outputs = ["string", "integer", "long", "double", "boolean", "other", "integer"].map((typeRef, i) => ({ name: `o${i}`, typeRef }));
+    const t = table("COLLECT", [rule([""], ["5", '"7.9"', '"12"', '"1.5"', '"true"', "[1]", "null"])], { outputs });
+    expect(evaluateTable(t, {})).toEqual([{ o0: "5", o1: 7, o2: 12, o3: 1.5, o4: true, o5: [1], o6: null }]);
+  });
+
+  it("should keep an object when its column is typed string", () => {
+    const t = table("COLLECT", [rule([""], ["{a: 1}"])], { outputs: [{ name: "o", typeRef: "string" }] });
+    expect(evaluateTable(t, {})).toEqual([{ o: { a: 1 } }]);
+  });
+
+  it("should convert a number to an integer or double from a number or a string", () => {
+    const t = table("COLLECT", [rule([""], ["7.9", "2"])], {
+      outputs: [
+        { name: "i", typeRef: "integer" },
+        { name: "d", typeRef: "double" }
+      ]
+    });
+    expect(evaluateTable(t, {})).toEqual([{ i: 7, d: 2 }]);
+  });
+
+  it("should fail when an entry is in another expression language", () => {
+    expect(() => evaluateTable(table("COLLECT", [rule([""], ['"x"'], { outputLanguages: ["groovy"] })]), {})).toThrow(UnsupportedLanguageError);
+    expect(() => evaluateTable(table("COLLECT", [rule(['"x"'], ['"x"'], { inputLanguages: ["juel"] })]), {})).toThrow(UnsupportedLanguageError);
+    expect(() => evaluateTable(table("COLLECT", [], { inputs: [{ expression: "x", expressionLanguage: "juel" }] }), {})).toThrow(UnsupportedLanguageError);
+  });
+});
+
+describe("evaluateDecision", () => {
+  const literal = (id: string, name: string, text: string, requires: string[] = [], typeRef?: string): DmnDecision => ({
+    id,
+    name,
+    requires,
+    variable: { name, ...(typeRef ? { typeRef } : {}) },
+    literal: { text }
+  });
+  const document = (...decisions: DmnDecision[]): DmnDocument => ({ id: "d", name: "DRD", decisions });
+  const main = (requires: string[], t: DmnTable): DmnDecision => ({ id: "main", name: "main", requires, table: t });
+
+  it("should expose a required literal under its variable name when the main table reads it", () => {
+    const doc = document(
+      main(["lit"], table("COLLECT", [rule(['"AB"'], ['"found " + upper'])], { inputs: [{ expression: "upper" }] })),
+      literal("lit", "upper", "upper case(x)")
+    );
+    expect(evaluateDecision(doc, "main", { x: "ab" })).toEqual([{ out: "found AB" }]);
+  });
+
+  it("should evaluate a required decision's own requirements first and once when they are shared", () => {
+    const doc = document(
+      main(["b", "c"], table("COLLECT", [rule([""], ["b + c"])])),
+      literal("b", "b", "a + 1", ["a"]),
+      literal("c", "c", "a + 2", ["a"]),
+      literal("a", "a", "10")
+    );
+    expect(evaluateDecision(doc, "main", {})).toEqual([{ out: 23 }]);
+  });
+
+  it("should give the single value of a required table when it is single hit with one output", () => {
+    const helper: DmnDecision = {
+      id: "h",
+      name: "h",
+      requires: [],
+      variable: { name: "h" },
+      table: { hitPolicy: "FIRST", inputs: [], outputs: [{ name: "v" }], rules: [rule([], ['"one"'])] }
+    };
+    expect(evaluateDecision(document(main(["h"], table("COLLECT", [rule([""], ["h"])])), helper), "main", {})).toEqual([{ out: "one" }]);
+  });
+
+  it("should give a list of values when a required collecting table has one output and a list of rows when it has two", () => {
+    const one: DmnDecision = {
+      id: "h",
+      name: "h",
+      requires: [],
+      variable: { name: "h" },
+      table: { hitPolicy: "COLLECT", inputs: [], outputs: [{ name: "v" }], rules: [rule([], ['"a"']), rule([], ['"b"'])] }
+    };
+    const two: DmnDecision = {
+      id: "h",
+      name: "h",
+      requires: [],
+      variable: { name: "h" },
+      table: { hitPolicy: "RULE ORDER", inputs: [], outputs: [{ name: "v" }, { name: "w" }], rules: [rule([], ['"a"', "1"])] }
+    };
+    const mainOf = main(["h"], table("COLLECT", [rule([""], ["h"])]));
+    expect(evaluateDecision(document(mainOf, one), "main", {})).toEqual([{ out: ["a", "b"] }]);
+    expect(evaluateDecision(document(mainOf, two), "main", {})).toEqual([{ out: [{ v: "a", w: 1 }] }]);
+  });
+
+  it("should give the first row as a context when a required single hit table has several outputs", () => {
+    const helper: DmnDecision = {
+      id: "h",
+      name: "h",
+      requires: [],
+      variable: { name: "h" },
+      table: { hitPolicy: "FIRST", inputs: [], outputs: [{ name: "v" }, { name: "w" }], rules: [rule([], ['"a"', "1"])] }
+    };
+    expect(evaluateDecision(document(main(["h"], table("COLLECT", [rule([""], ["h.w"])])), helper), "main", {})).toEqual([{ out: 1 }]);
+  });
+
+  it("should give a single value of an aggregated required table", () => {
+    const helper: DmnDecision = {
+      id: "h",
+      name: "h",
+      requires: [],
+      variable: { name: "h" },
+      table: { hitPolicy: "COLLECT", aggregation: "SUM", inputs: [], outputs: [{ name: "v" }], rules: [rule([], ["1"]), rule([], ["2"])] }
+    };
+    expect(evaluateDecision(document(main(["h"], table("COLLECT", [rule([""], ["h"])])), helper), "main", {})).toEqual([{ out: 3 }]);
+  });
+
+  it("should give a literal decision as one row under its variable name and convert it to its type", () => {
+    expect(evaluateDecision(document(literal("l", "total", '"4"', [], "integer")), "l", {})).toEqual([{ total: 4 }]);
+  });
+
+  it("should fail when the decision is not in the document", () => {
+    expect(() => evaluateDecision(document(), "nope", {})).toThrow("not in the document");
+  });
+
+  it("should fail when a literal is in another expression language", () => {
+    const l: DmnDecision = { id: "l", name: "l", requires: [], literal: { text: "1", expressionLanguage: "juel" } };
+    expect(() => evaluateDecision(document(l), "l", {})).toThrow(UnsupportedLanguageError);
+  });
+
+  it("should name a literal by its decision when it has no variable and leave it out of what others read", () => {
+    const l: DmnDecision = { id: "l", name: "plain", requires: [], literal: { text: "5" } };
+    expect(evaluateDecision(document(l), "l", {})).toEqual([{ plain: 5 }]);
+    const empty: DmnDecision = { id: "e", name: "empty", requires: [], variable: { name: "empty" }, literal: { text: "" } };
+    expect(evaluateDecision(document(empty), "e", {})).toEqual([{ empty: null }]);
+  });
+});

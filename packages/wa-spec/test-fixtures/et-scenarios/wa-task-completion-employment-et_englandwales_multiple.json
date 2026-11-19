@@ -1,0 +1,72 @@
+{
+ "decision": "wa-task-completion-employment-et_englandwales_multiple",
+ "source": "hmcts/et-wa-task-configuration@fa182449b8ef501c95e1f00137965994d835c4c3",
+ "scenarios": [
+  {
+   "test": "EmploymentTaskCompletionMultipleTestEW",
+   "input": {
+    "eventId": "replyToReferral"
+   },
+   "output": [
+    {
+     "taskType": "ReviewReferralAdminMultiple",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewReferralJudiciaryMultiple",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewReferralLegalOpsMultiple",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "MultiplesReviewReferralResponseLegalOps",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewReferralResponseJudiciaryMultiple",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewReferralResponseAdminMultiple",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "test": "EmploymentTaskCompletionMultipleTestEW",
+   "input": {
+    "eventId": "closeReferral"
+   },
+   "output": [
+    {
+     "taskType": "ReviewReferralAdminMultiple",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewReferralJudiciaryMultiple",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewReferralLegalOpsMultiple",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "MultiplesReviewReferralResponseLegalOps",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewReferralResponseJudiciaryMultiple",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewReferralResponseAdminMultiple",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  }
+ ]
+}

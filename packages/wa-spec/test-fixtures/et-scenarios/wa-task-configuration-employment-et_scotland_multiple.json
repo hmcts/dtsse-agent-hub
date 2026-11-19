@@ -1,0 +1,3481 @@
+{
+ "decision": "wa-task-configuration-employment-et_scotland_multiple",
+ "source": "hmcts/et-wa-task-configuration@fa182449b8ef501c95e1f00137965994d835c4c3",
+ "scenarios": [
+  {
+   "test": "EmploymentTaskConfigurationMultipleTestScot",
+   "input": {
+    "taskAttributes": {
+     "roleAssignmentId": "c1dd13e4-8fb3-4863-bf07-cc5d66be1e7e",
+     "taskType": "ReviewReferralAdminMultiple",
+     "taskId": "1e885284-65da-4488-af1c-2a61c9d85f24"
+    },
+    "caseData": {
+     "multipleName": "Big Multiple"
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": true,
+     "name": "caseName",
+     "value": "Big Multiple"
+    },
+    {
+     "canReconfigure": true,
+     "name": "region",
+     "value": "11"
+    },
+    {
+     "canReconfigure": true,
+     "name": "location",
+     "value": "368308"
+    },
+    {
+     "canReconfigure": true,
+     "name": "locationName",
+     "value": "Edinburgh"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "Employment"
+    },
+    {
+     "canReconfigure": true,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": true,
+     "name": "workType",
+     "value": "routine_work"
+    },
+    {
+     "canReconfigure": true,
+     "name": "roleCategory",
+     "value": "ADMIN"
+    },
+    {
+     "canReconfigure": true,
+     "name": "description",
+     "value": "[Reply to the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/replyToReferral/replyToReferral1)"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": true,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateOrigin",
+     "value": "2026-11-19T21:41:43.798306258Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateTime",
+     "value": "16:00"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/scotland.json, https://raw.githubusercontent.com/hmcts/et-wa-task-configuration/master/src/main/resources/privilege-calendar-scotland.json"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "Yes"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateIntervalDays",
+     "value": "2"
+    },
+    {
+     "canReconfigure": true,
+     "name": "priorityDateOriginEarliest",
+     "value": "dueDate, nextHearingDate"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskConfigurationMultipleTestScot",
+   "input": {
+    "taskAttributes": {
+     "roleAssignmentId": "e01bdd5d-ad8d-4d0f-a118-6e1d1476d8bd",
+     "taskType": "ReviewReferralLegalOpsMultiple",
+     "taskId": "3e25f362-4e4a-4661-93ce-a7f0a2d1b7e5"
+    },
+    "caseData": {
+     "multipleName": "Big Multiple"
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": true,
+     "name": "caseName",
+     "value": "Big Multiple"
+    },
+    {
+     "canReconfigure": true,
+     "name": "region",
+     "value": "11"
+    },
+    {
+     "canReconfigure": true,
+     "name": "location",
+     "value": "368308"
+    },
+    {
+     "canReconfigure": true,
+     "name": "locationName",
+     "value": "Edinburgh"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "Employment"
+    },
+    {
+     "canReconfigure": true,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": true,
+     "name": "workType",
+     "value": "routine_work"
+    },
+    {
+     "canReconfigure": true,
+     "name": "roleCategory",
+     "value": "LEGAL_OPERATIONS"
+    },
+    {
+     "canReconfigure": true,
+     "name": "description",
+     "value": "[Reply to the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/replyToReferral/replyToReferral1)"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": true,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateOrigin",
+     "value": "2026-11-19T21:41:43.808227604Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateTime",
+     "value": "16:00"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/scotland.json, https://raw.githubusercontent.com/hmcts/et-wa-task-configuration/master/src/main/resources/privilege-calendar-scotland.json"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "Yes"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateIntervalDays",
+     "value": "2"
+    },
+    {
+     "canReconfigure": true,
+     "name": "priorityDateOriginEarliest",
+     "value": "dueDate, nextHearingDate"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskConfigurationMultipleTestScot",
+   "input": {
+    "taskAttributes": {
+     "roleAssignmentId": "b439b5fb-4e86-4695-af54-110b98cd82cb",
+     "taskType": "ReviewReferralJudiciaryMultiple",
+     "taskId": "92bdbc5c-6f5f-4018-8c85-459686260fa5"
+    },
+    "caseData": {
+     "multipleName": "Big Multiple"
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": true,
+     "name": "caseName",
+     "value": "Big Multiple"
+    },
+    {
+     "canReconfigure": true,
+     "name": "region",
+     "value": "11"
+    },
+    {
+     "canReconfigure": true,
+     "name": "location",
+     "value": "368308"
+    },
+    {
+     "canReconfigure": true,
+     "name": "locationName",
+     "value": "Edinburgh"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "Employment"
+    },
+    {
+     "canReconfigure": true,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": true,
+     "name": "workType",
+     "value": "decision_making_work"
+    },
+    {
+     "canReconfigure": true,
+     "name": "roleCategory",
+     "value": "JUDICIAL"
+    },
+    {
+     "canReconfigure": true,
+     "name": "description",
+     "value": "[Reply to the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/replyToReferral/replyToReferral1)"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": true,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateOrigin",
+     "value": "2026-11-19T21:41:43.817859125Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateTime",
+     "value": "16:00"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/scotland.json, https://raw.githubusercontent.com/hmcts/et-wa-task-configuration/master/src/main/resources/privilege-calendar-scotland.json"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "Yes"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateIntervalDays",
+     "value": "2"
+    },
+    {
+     "canReconfigure": true,
+     "name": "priorityDateOriginEarliest",
+     "value": "dueDate, nextHearingDate"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskConfigurationMultipleTestScot",
+   "input": {
+    "taskAttributes": {
+     "roleAssignmentId": "38421d38-1767-4e2c-beed-ecf0d1f39708",
+     "taskType": "MultiplesReviewReferralResponseLegalOps",
+     "taskId": "a1cabbf4-b80e-4618-8032-03dbcf2b0924"
+    },
+    "caseData": {
+     "multipleName": "Big Multiple"
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": true,
+     "name": "caseName",
+     "value": "Big Multiple"
+    },
+    {
+     "canReconfigure": true,
+     "name": "region",
+     "value": "11"
+    },
+    {
+     "canReconfigure": true,
+     "name": "location",
+     "value": "368308"
+    },
+    {
+     "canReconfigure": true,
+     "name": "locationName",
+     "value": "Edinburgh"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "Employment"
+    },
+    {
+     "canReconfigure": true,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": true,
+     "name": "workType",
+     "value": "routine_work"
+    },
+    {
+     "canReconfigure": true,
+     "name": "roleCategory",
+     "value": "LEGAL_OPERATIONS"
+    },
+    {
+     "canReconfigure": true,
+     "name": "description",
+     "value": "**Review the Referral Response**\n\nYou can also [Reply to the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/replyToReferral/replyToReferral1) or [Close the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/closeReferral/closeReferral1)"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": true,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateOrigin",
+     "value": "2026-11-19T21:41:43.827670446Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateTime",
+     "value": "16:00"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/scotland.json, https://raw.githubusercontent.com/hmcts/et-wa-task-configuration/master/src/main/resources/privilege-calendar-scotland.json"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "Yes"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateIntervalDays",
+     "value": "2"
+    },
+    {
+     "canReconfigure": true,
+     "name": "priorityDateOriginRef",
+     "value": "dueDate"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskConfigurationMultipleTestScot",
+   "input": {
+    "taskAttributes": {
+     "roleAssignmentId": "15aa03ae-7234-4e5b-82a5-4cfcb1ee7396",
+     "taskType": "ReviewReferralResponseJudiciaryMultiple",
+     "taskId": "bbc5f472-ce85-44a4-b67d-f21a05cdd29b"
+    },
+    "caseData": {
+     "multipleName": "Big Multiple"
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": true,
+     "name": "caseName",
+     "value": "Big Multiple"
+    },
+    {
+     "canReconfigure": true,
+     "name": "region",
+     "value": "11"
+    },
+    {
+     "canReconfigure": true,
+     "name": "location",
+     "value": "368308"
+    },
+    {
+     "canReconfigure": true,
+     "name": "locationName",
+     "value": "Edinburgh"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "Employment"
+    },
+    {
+     "canReconfigure": true,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": true,
+     "name": "workType",
+     "value": "decision_making_work"
+    },
+    {
+     "canReconfigure": true,
+     "name": "roleCategory",
+     "value": "JUDICIAL"
+    },
+    {
+     "canReconfigure": true,
+     "name": "description",
+     "value": "**Review the Referral Response**\n\nYou can also [Reply to the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/replyToReferral/replyToReferral1) or [Close the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/closeReferral/closeReferral1)"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": true,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateOrigin",
+     "value": "2026-11-19T21:41:43.836879343Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateTime",
+     "value": "16:00"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/scotland.json, https://raw.githubusercontent.com/hmcts/et-wa-task-configuration/master/src/main/resources/privilege-calendar-scotland.json"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "Yes"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateIntervalDays",
+     "value": "2"
+    },
+    {
+     "canReconfigure": true,
+     "name": "priorityDateOriginRef",
+     "value": "dueDate"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskConfigurationMultipleTestScot",
+   "input": {
+    "taskAttributes": {
+     "roleAssignmentId": "988e9868-a3df-4875-a0f1-7e325266e1d3",
+     "taskType": "ReviewReferralResponseAdminMultiple",
+     "taskId": "9b811262-83f7-4625-a912-0e324f6171f6"
+    },
+    "caseData": {
+     "multipleName": "Big Multiple"
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": true,
+     "name": "caseName",
+     "value": "Big Multiple"
+    },
+    {
+     "canReconfigure": true,
+     "name": "region",
+     "value": "11"
+    },
+    {
+     "canReconfigure": true,
+     "name": "location",
+     "value": "368308"
+    },
+    {
+     "canReconfigure": true,
+     "name": "locationName",
+     "value": "Edinburgh"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "Employment"
+    },
+    {
+     "canReconfigure": true,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": true,
+     "name": "workType",
+     "value": "routine_work"
+    },
+    {
+     "canReconfigure": true,
+     "name": "roleCategory",
+     "value": "ADMIN"
+    },
+    {
+     "canReconfigure": true,
+     "name": "description",
+     "value": "**Review the Referral Response**\n\nYou can also [Reply to the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/replyToReferral/replyToReferral1) or [Close the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/closeReferral/closeReferral1)"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": true,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateOrigin",
+     "value": "2026-11-19T21:41:43.847775222Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateTime",
+     "value": "16:00"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/scotland.json, https://raw.githubusercontent.com/hmcts/et-wa-task-configuration/master/src/main/resources/privilege-calendar-scotland.json"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "Yes"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateIntervalDays",
+     "value": "2"
+    },
+    {
+     "canReconfigure": true,
+     "name": "priorityDateOriginRef",
+     "value": "dueDate"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskConfigurationMultipleTestScot",
+   "input": {
+    "taskAttributes": {
+     "taskType": "Et1Vetting"
+    },
+    "caseData": {
+     "nextListedDate": "2024-02-01",
+     "multipleName": "Big Multiple"
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": true,
+     "name": "caseName",
+     "value": "Big Multiple"
+    },
+    {
+     "canReconfigure": true,
+     "name": "region",
+     "value": "11"
+    },
+    {
+     "canReconfigure": true,
+     "name": "location",
+     "value": "368308"
+    },
+    {
+     "canReconfigure": true,
+     "name": "locationName",
+     "value": "Edinburgh"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "Employment"
+    },
+    {
+     "canReconfigure": true,
+     "name": "nextHearingDate",
+     "value": "2024-02-01"
+    },
+    {
+     "canReconfigure": true,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateOrigin",
+     "value": "2026-11-19T21:41:43.856965240Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateTime",
+     "value": "16:00"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/scotland.json, https://raw.githubusercontent.com/hmcts/et-wa-task-configuration/master/src/main/resources/privilege-calendar-scotland.json"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "Yes"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskConfigurationMultipleTestScot",
+   "input": {
+    "taskAttributes": {
+     "taskType": "Et1Vetting"
+    },
+    "caseData": {
+     "nextListedDate": null,
+     "multipleName": "Big Multiple"
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": true,
+     "name": "caseName",
+     "value": "Big Multiple"
+    },
+    {
+     "canReconfigure": true,
+     "name": "region",
+     "value": "11"
+    },
+    {
+     "canReconfigure": true,
+     "name": "location",
+     "value": "368308"
+    },
+    {
+     "canReconfigure": true,
+     "name": "locationName",
+     "value": "Edinburgh"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "Employment"
+    },
+    {
+     "canReconfigure": true,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": true,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateOrigin",
+     "value": "2026-11-19T21:41:43.864083738Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateTime",
+     "value": "16:00"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/scotland.json, https://raw.githubusercontent.com/hmcts/et-wa-task-configuration/master/src/main/resources/privilege-calendar-scotland.json"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "Yes"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskConfigurationMultipleTestScot",
+   "input": {
+    "taskAttributes": {
+     "taskType": "Et1Vetting"
+    },
+    "caseData": {
+     "multipleName": "Big Multiple"
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": true,
+     "name": "caseName",
+     "value": "Big Multiple"
+    },
+    {
+     "canReconfigure": true,
+     "name": "region",
+     "value": "11"
+    },
+    {
+     "canReconfigure": true,
+     "name": "location",
+     "value": "368308"
+    },
+    {
+     "canReconfigure": true,
+     "name": "locationName",
+     "value": "Edinburgh"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "Employment"
+    },
+    {
+     "canReconfigure": true,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": true,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateOrigin",
+     "value": "2026-11-19T21:41:43.876231807Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateTime",
+     "value": "16:00"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/scotland.json, https://raw.githubusercontent.com/hmcts/et-wa-task-configuration/master/src/main/resources/privilege-calendar-scotland.json"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "Yes"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskConfigurationMultipleTestScot",
+   "input": {
+    "taskAttributes": {
+     "taskType": "Et1Vetting"
+    },
+    "caseData": {
+     "managingOffice": "Glasgow",
+     "caseManagementCategory": {
+      "selectedLabel": "Test"
+     },
+     "caseManagementLocation": {
+      "baseLocation": "366559",
+      "region": "11"
+     },
+     "multipleName": "Big Multiple"
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": true,
+     "name": "caseName",
+     "value": "Big Multiple"
+    },
+    {
+     "canReconfigure": true,
+     "name": "region",
+     "value": "11"
+    },
+    {
+     "canReconfigure": true,
+     "name": "location",
+     "value": "366559"
+    },
+    {
+     "canReconfigure": true,
+     "name": "locationName",
+     "value": "Glasgow"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "Employment"
+    },
+    {
+     "canReconfigure": true,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": true,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateOrigin",
+     "value": "2026-11-19T21:41:43.883317365Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateTime",
+     "value": "16:00"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/scotland.json, https://raw.githubusercontent.com/hmcts/et-wa-task-configuration/master/src/main/resources/privilege-calendar-scotland.json"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "Yes"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskConfigurationMultipleTestScot",
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewReferralAdminMultiple"
+    },
+    "caseData": {
+     "referralCollection": [
+      {
+       "value": {
+        "isUrgent": "No",
+        "referralNumber": "1"
+       }
+      },
+      {
+       "value": {
+        "isUrgent": "Yes",
+        "referralNumber": "2"
+       }
+      }
+     ],
+     "multipleName": "Big Multiple"
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": true,
+     "name": "caseName",
+     "value": "Big Multiple"
+    },
+    {
+     "canReconfigure": true,
+     "name": "region",
+     "value": "11"
+    },
+    {
+     "canReconfigure": true,
+     "name": "location",
+     "value": "368308"
+    },
+    {
+     "canReconfigure": true,
+     "name": "locationName",
+     "value": "Edinburgh"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "Employment"
+    },
+    {
+     "canReconfigure": true,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": true,
+     "name": "workType",
+     "value": "routine_work"
+    },
+    {
+     "canReconfigure": true,
+     "name": "roleCategory",
+     "value": "ADMIN"
+    },
+    {
+     "canReconfigure": true,
+     "name": "description",
+     "value": "[Reply to the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/replyToReferral/replyToReferral1)"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "1000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "100"
+    },
+    {
+     "canReconfigure": true,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateOrigin",
+     "value": "2026-11-19T21:41:43.892487263Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateTime",
+     "value": "16:00"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/scotland.json, https://raw.githubusercontent.com/hmcts/et-wa-task-configuration/master/src/main/resources/privilege-calendar-scotland.json"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "Yes"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateIntervalDays",
+     "value": "1"
+    },
+    {
+     "canReconfigure": true,
+     "name": "priorityDateOriginEarliest",
+     "value": "dueDate, nextHearingDate"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskConfigurationMultipleTestScot",
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewReferralAdminMultiple"
+    },
+    "caseData": {
+     "referralCollection": [
+      {
+       "value": {
+        "isUrgent": "Yes",
+        "referralNumber": "1"
+       }
+      },
+      {
+       "value": {
+        "isUrgent": "No",
+        "referralNumber": "2"
+       }
+      }
+     ],
+     "multipleName": "Big Multiple"
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": true,
+     "name": "caseName",
+     "value": "Big Multiple"
+    },
+    {
+     "canReconfigure": true,
+     "name": "region",
+     "value": "11"
+    },
+    {
+     "canReconfigure": true,
+     "name": "location",
+     "value": "368308"
+    },
+    {
+     "canReconfigure": true,
+     "name": "locationName",
+     "value": "Edinburgh"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "Employment"
+    },
+    {
+     "canReconfigure": true,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": true,
+     "name": "workType",
+     "value": "routine_work"
+    },
+    {
+     "canReconfigure": true,
+     "name": "roleCategory",
+     "value": "ADMIN"
+    },
+    {
+     "canReconfigure": true,
+     "name": "description",
+     "value": "[Reply to the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/replyToReferral/replyToReferral1)"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": true,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateOrigin",
+     "value": "2026-11-19T21:41:43.900889298Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateTime",
+     "value": "16:00"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/scotland.json, https://raw.githubusercontent.com/hmcts/et-wa-task-configuration/master/src/main/resources/privilege-calendar-scotland.json"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "Yes"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateIntervalDays",
+     "value": "2"
+    },
+    {
+     "canReconfigure": true,
+     "name": "priorityDateOriginEarliest",
+     "value": "dueDate, nextHearingDate"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskConfigurationMultipleTestScot",
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewReferralLegalOpsMultiple"
+    },
+    "caseData": {
+     "referralCollection": [
+      {
+       "value": {
+        "isUrgent": "No",
+        "referralNumber": "1"
+       }
+      },
+      {
+       "value": {
+        "isUrgent": "Yes",
+        "referralNumber": "2"
+       }
+      }
+     ],
+     "multipleName": "Big Multiple"
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": true,
+     "name": "caseName",
+     "value": "Big Multiple"
+    },
+    {
+     "canReconfigure": true,
+     "name": "region",
+     "value": "11"
+    },
+    {
+     "canReconfigure": true,
+     "name": "location",
+     "value": "368308"
+    },
+    {
+     "canReconfigure": true,
+     "name": "locationName",
+     "value": "Edinburgh"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "Employment"
+    },
+    {
+     "canReconfigure": true,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": true,
+     "name": "workType",
+     "value": "routine_work"
+    },
+    {
+     "canReconfigure": true,
+     "name": "roleCategory",
+     "value": "LEGAL_OPERATIONS"
+    },
+    {
+     "canReconfigure": true,
+     "name": "description",
+     "value": "[Reply to the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/replyToReferral/replyToReferral1)"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "1000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "100"
+    },
+    {
+     "canReconfigure": true,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateOrigin",
+     "value": "2026-11-19T21:41:43.908783982Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateTime",
+     "value": "16:00"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/scotland.json, https://raw.githubusercontent.com/hmcts/et-wa-task-configuration/master/src/main/resources/privilege-calendar-scotland.json"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "Yes"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateIntervalDays",
+     "value": "1"
+    },
+    {
+     "canReconfigure": true,
+     "name": "priorityDateOriginEarliest",
+     "value": "dueDate, nextHearingDate"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskConfigurationMultipleTestScot",
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewReferralLegalOpsMultiple"
+    },
+    "caseData": {
+     "referralCollection": [
+      {
+       "value": {
+        "isUrgent": "Yes",
+        "referralNumber": "1"
+       }
+      },
+      {
+       "value": {
+        "isUrgent": "No",
+        "referralNumber": "2"
+       }
+      }
+     ],
+     "multipleName": "Big Multiple"
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": true,
+     "name": "caseName",
+     "value": "Big Multiple"
+    },
+    {
+     "canReconfigure": true,
+     "name": "region",
+     "value": "11"
+    },
+    {
+     "canReconfigure": true,
+     "name": "location",
+     "value": "368308"
+    },
+    {
+     "canReconfigure": true,
+     "name": "locationName",
+     "value": "Edinburgh"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "Employment"
+    },
+    {
+     "canReconfigure": true,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": true,
+     "name": "workType",
+     "value": "routine_work"
+    },
+    {
+     "canReconfigure": true,
+     "name": "roleCategory",
+     "value": "LEGAL_OPERATIONS"
+    },
+    {
+     "canReconfigure": true,
+     "name": "description",
+     "value": "[Reply to the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/replyToReferral/replyToReferral1)"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": true,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateOrigin",
+     "value": "2026-11-19T21:41:43.916745595Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateTime",
+     "value": "16:00"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/scotland.json, https://raw.githubusercontent.com/hmcts/et-wa-task-configuration/master/src/main/resources/privilege-calendar-scotland.json"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "Yes"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateIntervalDays",
+     "value": "2"
+    },
+    {
+     "canReconfigure": true,
+     "name": "priorityDateOriginEarliest",
+     "value": "dueDate, nextHearingDate"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskConfigurationMultipleTestScot",
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewReferralJudiciaryMultiple"
+    },
+    "caseData": {
+     "referralCollection": [
+      {
+       "value": {
+        "isUrgent": "No",
+        "referralNumber": "1"
+       }
+      },
+      {
+       "value": {
+        "isUrgent": "Yes",
+        "referralNumber": "2"
+       }
+      }
+     ],
+     "multipleName": "Big Multiple"
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": true,
+     "name": "caseName",
+     "value": "Big Multiple"
+    },
+    {
+     "canReconfigure": true,
+     "name": "region",
+     "value": "11"
+    },
+    {
+     "canReconfigure": true,
+     "name": "location",
+     "value": "368308"
+    },
+    {
+     "canReconfigure": true,
+     "name": "locationName",
+     "value": "Edinburgh"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "Employment"
+    },
+    {
+     "canReconfigure": true,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": true,
+     "name": "workType",
+     "value": "decision_making_work"
+    },
+    {
+     "canReconfigure": true,
+     "name": "roleCategory",
+     "value": "JUDICIAL"
+    },
+    {
+     "canReconfigure": true,
+     "name": "description",
+     "value": "[Reply to the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/replyToReferral/replyToReferral1)"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "1000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "100"
+    },
+    {
+     "canReconfigure": true,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateOrigin",
+     "value": "2026-11-19T21:41:43.924499918Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateTime",
+     "value": "16:00"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/scotland.json, https://raw.githubusercontent.com/hmcts/et-wa-task-configuration/master/src/main/resources/privilege-calendar-scotland.json"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "Yes"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateIntervalDays",
+     "value": "1"
+    },
+    {
+     "canReconfigure": true,
+     "name": "priorityDateOriginEarliest",
+     "value": "dueDate, nextHearingDate"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskConfigurationMultipleTestScot",
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewReferralJudiciaryMultiple"
+    },
+    "caseData": {
+     "referralCollection": [
+      {
+       "value": {
+        "isUrgent": "Yes",
+        "referralNumber": "1"
+       }
+      },
+      {
+       "value": {
+        "isUrgent": "No",
+        "referralNumber": "2"
+       }
+      }
+     ],
+     "multipleName": "Big Multiple"
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": true,
+     "name": "caseName",
+     "value": "Big Multiple"
+    },
+    {
+     "canReconfigure": true,
+     "name": "region",
+     "value": "11"
+    },
+    {
+     "canReconfigure": true,
+     "name": "location",
+     "value": "368308"
+    },
+    {
+     "canReconfigure": true,
+     "name": "locationName",
+     "value": "Edinburgh"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "Employment"
+    },
+    {
+     "canReconfigure": true,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": true,
+     "name": "workType",
+     "value": "decision_making_work"
+    },
+    {
+     "canReconfigure": true,
+     "name": "roleCategory",
+     "value": "JUDICIAL"
+    },
+    {
+     "canReconfigure": true,
+     "name": "description",
+     "value": "[Reply to the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/replyToReferral/replyToReferral1)"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": true,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateOrigin",
+     "value": "2026-11-19T21:41:43.932582763Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateTime",
+     "value": "16:00"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/scotland.json, https://raw.githubusercontent.com/hmcts/et-wa-task-configuration/master/src/main/resources/privilege-calendar-scotland.json"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "Yes"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateIntervalDays",
+     "value": "2"
+    },
+    {
+     "canReconfigure": true,
+     "name": "priorityDateOriginEarliest",
+     "value": "dueDate, nextHearingDate"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskConfigurationMultipleTestScot",
+   "input": {
+    "taskAttributes": {
+     "taskType": "MultiplesReviewReferralResponseLegalOps"
+    },
+    "caseData": {
+     "referralCollection": [
+      {
+       "value": {
+        "referralReplyCollection": [
+         {
+          "value": {
+           "isUrgentReply": "No",
+           "replyDateTime": "2023-10-01T12:00:00.00"
+          }
+         },
+         {
+          "value": {
+           "isUrgentReply": "Yes",
+           "replyDateTime": "2023-10-01T14:00:00.00"
+          }
+         }
+        ]
+       }
+      },
+      {
+       "value": {
+        "referralReplyCollection": [
+         {
+          "value": {
+           "isUrgentReply": "No",
+           "replyDateTime": "2023-10-01T13:00:00.00"
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "multipleName": "Big Multiple"
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": true,
+     "name": "caseName",
+     "value": "Big Multiple"
+    },
+    {
+     "canReconfigure": true,
+     "name": "region",
+     "value": "11"
+    },
+    {
+     "canReconfigure": true,
+     "name": "location",
+     "value": "368308"
+    },
+    {
+     "canReconfigure": true,
+     "name": "locationName",
+     "value": "Edinburgh"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "Employment"
+    },
+    {
+     "canReconfigure": true,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": true,
+     "name": "workType",
+     "value": "routine_work"
+    },
+    {
+     "canReconfigure": true,
+     "name": "roleCategory",
+     "value": "LEGAL_OPERATIONS"
+    },
+    {
+     "canReconfigure": true,
+     "name": "description",
+     "value": "**Review the Referral Response**\n\nYou can also [Reply to the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/replyToReferral/replyToReferral1) or [Close the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/closeReferral/closeReferral1)"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "1000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "100"
+    },
+    {
+     "canReconfigure": true,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateOrigin",
+     "value": "2026-11-19T21:41:43.941582446Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateTime",
+     "value": "16:00"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/scotland.json, https://raw.githubusercontent.com/hmcts/et-wa-task-configuration/master/src/main/resources/privilege-calendar-scotland.json"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "Yes"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateIntervalDays",
+     "value": "1"
+    },
+    {
+     "canReconfigure": true,
+     "name": "priorityDateOriginRef",
+     "value": "dueDate"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskConfigurationMultipleTestScot",
+   "input": {
+    "taskAttributes": {
+     "taskType": "MultiplesReviewReferralResponseLegalOps"
+    },
+    "caseData": {
+     "referralCollection": [
+      {
+       "value": {
+        "referralReplyCollection": [
+         {
+          "value": {
+           "isUrgentReply": "Yes",
+           "replyDateTime": "2023-10-01T12:00:00.00"
+          }
+         },
+         {
+          "value": {
+           "isUrgentReply": "No",
+           "replyDateTime": "2023-10-01T14:00:00.00"
+          }
+         }
+        ]
+       }
+      },
+      {
+       "value": {
+        "referralReplyCollection": [
+         {
+          "value": {
+           "isUrgentReply": "Yes",
+           "replyDateTime": "2023-10-01T13:00:00.00"
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "multipleName": "Big Multiple"
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": true,
+     "name": "caseName",
+     "value": "Big Multiple"
+    },
+    {
+     "canReconfigure": true,
+     "name": "region",
+     "value": "11"
+    },
+    {
+     "canReconfigure": true,
+     "name": "location",
+     "value": "368308"
+    },
+    {
+     "canReconfigure": true,
+     "name": "locationName",
+     "value": "Edinburgh"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "Employment"
+    },
+    {
+     "canReconfigure": true,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": true,
+     "name": "workType",
+     "value": "routine_work"
+    },
+    {
+     "canReconfigure": true,
+     "name": "roleCategory",
+     "value": "LEGAL_OPERATIONS"
+    },
+    {
+     "canReconfigure": true,
+     "name": "description",
+     "value": "**Review the Referral Response**\n\nYou can also [Reply to the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/replyToReferral/replyToReferral1) or [Close the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/closeReferral/closeReferral1)"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": true,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateOrigin",
+     "value": "2026-11-19T21:41:43.951882831Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateTime",
+     "value": "16:00"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/scotland.json, https://raw.githubusercontent.com/hmcts/et-wa-task-configuration/master/src/main/resources/privilege-calendar-scotland.json"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "Yes"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateIntervalDays",
+     "value": "2"
+    },
+    {
+     "canReconfigure": true,
+     "name": "priorityDateOriginRef",
+     "value": "dueDate"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskConfigurationMultipleTestScot",
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewReferralResponseJudiciaryMultiple"
+    },
+    "caseData": {
+     "referralCollection": [
+      {
+       "value": {
+        "referralReplyCollection": [
+         {
+          "value": {
+           "isUrgentReply": "No",
+           "replyDateTime": "2023-10-01T12:00:00.00"
+          }
+         },
+         {
+          "value": {
+           "isUrgentReply": "Yes",
+           "replyDateTime": "2023-10-01T14:00:00.00"
+          }
+         }
+        ]
+       }
+      },
+      {
+       "value": {
+        "referralReplyCollection": [
+         {
+          "value": {
+           "isUrgentReply": "No",
+           "replyDateTime": "2023-10-01T13:00:00.00"
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "multipleName": "Big Multiple"
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": true,
+     "name": "caseName",
+     "value": "Big Multiple"
+    },
+    {
+     "canReconfigure": true,
+     "name": "region",
+     "value": "11"
+    },
+    {
+     "canReconfigure": true,
+     "name": "location",
+     "value": "368308"
+    },
+    {
+     "canReconfigure": true,
+     "name": "locationName",
+     "value": "Edinburgh"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "Employment"
+    },
+    {
+     "canReconfigure": true,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": true,
+     "name": "workType",
+     "value": "decision_making_work"
+    },
+    {
+     "canReconfigure": true,
+     "name": "roleCategory",
+     "value": "JUDICIAL"
+    },
+    {
+     "canReconfigure": true,
+     "name": "description",
+     "value": "**Review the Referral Response**\n\nYou can also [Reply to the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/replyToReferral/replyToReferral1) or [Close the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/closeReferral/closeReferral1)"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "1000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "100"
+    },
+    {
+     "canReconfigure": true,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateOrigin",
+     "value": "2026-11-19T21:41:43.962301684Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateTime",
+     "value": "16:00"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/scotland.json, https://raw.githubusercontent.com/hmcts/et-wa-task-configuration/master/src/main/resources/privilege-calendar-scotland.json"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "Yes"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateIntervalDays",
+     "value": "1"
+    },
+    {
+     "canReconfigure": true,
+     "name": "priorityDateOriginRef",
+     "value": "dueDate"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskConfigurationMultipleTestScot",
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewReferralResponseJudiciaryMultiple"
+    },
+    "caseData": {
+     "referralCollection": [
+      {
+       "value": {
+        "referralReplyCollection": [
+         {
+          "value": {
+           "isUrgentReply": "Yes",
+           "replyDateTime": "2023-10-01T12:00:00.00"
+          }
+         },
+         {
+          "value": {
+           "isUrgentReply": "No",
+           "replyDateTime": "2023-10-01T14:00:00.00"
+          }
+         }
+        ]
+       }
+      },
+      {
+       "value": {
+        "referralReplyCollection": [
+         {
+          "value": {
+           "isUrgentReply": "Yes",
+           "replyDateTime": "2023-10-01T13:00:00.00"
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "multipleName": "Big Multiple"
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": true,
+     "name": "caseName",
+     "value": "Big Multiple"
+    },
+    {
+     "canReconfigure": true,
+     "name": "region",
+     "value": "11"
+    },
+    {
+     "canReconfigure": true,
+     "name": "location",
+     "value": "368308"
+    },
+    {
+     "canReconfigure": true,
+     "name": "locationName",
+     "value": "Edinburgh"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "Employment"
+    },
+    {
+     "canReconfigure": true,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": true,
+     "name": "workType",
+     "value": "decision_making_work"
+    },
+    {
+     "canReconfigure": true,
+     "name": "roleCategory",
+     "value": "JUDICIAL"
+    },
+    {
+     "canReconfigure": true,
+     "name": "description",
+     "value": "**Review the Referral Response**\n\nYou can also [Reply to the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/replyToReferral/replyToReferral1) or [Close the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/closeReferral/closeReferral1)"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": true,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateOrigin",
+     "value": "2026-11-19T21:41:43.973029110Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateTime",
+     "value": "16:00"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/scotland.json, https://raw.githubusercontent.com/hmcts/et-wa-task-configuration/master/src/main/resources/privilege-calendar-scotland.json"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "Yes"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateIntervalDays",
+     "value": "2"
+    },
+    {
+     "canReconfigure": true,
+     "name": "priorityDateOriginRef",
+     "value": "dueDate"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskConfigurationMultipleTestScot",
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewReferralResponseAdminMultiple"
+    },
+    "caseData": {
+     "referralCollection": [
+      {
+       "value": {
+        "referralReplyCollection": [
+         {
+          "value": {
+           "isUrgentReply": "No",
+           "replyDateTime": "2023-10-01T12:00:00.00"
+          }
+         },
+         {
+          "value": {
+           "isUrgentReply": "Yes",
+           "replyDateTime": "2023-10-01T14:00:00.00"
+          }
+         }
+        ]
+       }
+      },
+      {
+       "value": {
+        "referralReplyCollection": [
+         {
+          "value": {
+           "isUrgentReply": "No",
+           "replyDateTime": "2023-10-01T13:00:00.00"
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "multipleName": "Big Multiple"
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": true,
+     "name": "caseName",
+     "value": "Big Multiple"
+    },
+    {
+     "canReconfigure": true,
+     "name": "region",
+     "value": "11"
+    },
+    {
+     "canReconfigure": true,
+     "name": "location",
+     "value": "368308"
+    },
+    {
+     "canReconfigure": true,
+     "name": "locationName",
+     "value": "Edinburgh"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "Employment"
+    },
+    {
+     "canReconfigure": true,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": true,
+     "name": "workType",
+     "value": "routine_work"
+    },
+    {
+     "canReconfigure": true,
+     "name": "roleCategory",
+     "value": "ADMIN"
+    },
+    {
+     "canReconfigure": true,
+     "name": "description",
+     "value": "**Review the Referral Response**\n\nYou can also [Reply to the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/replyToReferral/replyToReferral1) or [Close the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/closeReferral/closeReferral1)"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "1000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "100"
+    },
+    {
+     "canReconfigure": true,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateOrigin",
+     "value": "2026-11-19T21:41:43.983301814Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateTime",
+     "value": "16:00"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/scotland.json, https://raw.githubusercontent.com/hmcts/et-wa-task-configuration/master/src/main/resources/privilege-calendar-scotland.json"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "Yes"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateIntervalDays",
+     "value": "1"
+    },
+    {
+     "canReconfigure": true,
+     "name": "priorityDateOriginRef",
+     "value": "dueDate"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskConfigurationMultipleTestScot",
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewReferralResponseAdminMultiple"
+    },
+    "caseData": {
+     "referralCollection": [
+      {
+       "value": {
+        "referralReplyCollection": [
+         {
+          "value": {
+           "isUrgentReply": "Yes",
+           "replyDateTime": "2023-10-01T12:00:00.00"
+          }
+         },
+         {
+          "value": {
+           "isUrgentReply": "No",
+           "replyDateTime": "2023-10-01T14:00:00.00"
+          }
+         }
+        ]
+       }
+      },
+      {
+       "value": {
+        "referralReplyCollection": [
+         {
+          "value": {
+           "isUrgentReply": "Yes",
+           "replyDateTime": "2023-10-01T13:00:00.00"
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "multipleName": "Big Multiple"
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": true,
+     "name": "caseName",
+     "value": "Big Multiple"
+    },
+    {
+     "canReconfigure": true,
+     "name": "region",
+     "value": "11"
+    },
+    {
+     "canReconfigure": true,
+     "name": "location",
+     "value": "368308"
+    },
+    {
+     "canReconfigure": true,
+     "name": "locationName",
+     "value": "Edinburgh"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "Employment"
+    },
+    {
+     "canReconfigure": true,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": true,
+     "name": "workType",
+     "value": "routine_work"
+    },
+    {
+     "canReconfigure": true,
+     "name": "roleCategory",
+     "value": "ADMIN"
+    },
+    {
+     "canReconfigure": true,
+     "name": "description",
+     "value": "**Review the Referral Response**\n\nYou can also [Reply to the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/replyToReferral/replyToReferral1) or [Close the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/closeReferral/closeReferral1)"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": true,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateOrigin",
+     "value": "2026-11-19T21:41:43.993688919Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateTime",
+     "value": "16:00"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/scotland.json, https://raw.githubusercontent.com/hmcts/et-wa-task-configuration/master/src/main/resources/privilege-calendar-scotland.json"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "Yes"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateIntervalDays",
+     "value": "2"
+    },
+    {
+     "canReconfigure": true,
+     "name": "priorityDateOriginRef",
+     "value": "dueDate"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskConfigurationMultipleTestScot",
+   "input": {
+    "taskAttributes": {
+     "taskType": "someTaskType"
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": true,
+     "name": "caseName",
+     "value": null
+    },
+    {
+     "canReconfigure": true,
+     "name": "region",
+     "value": "11"
+    },
+    {
+     "canReconfigure": true,
+     "name": "location",
+     "value": "368308"
+    },
+    {
+     "canReconfigure": true,
+     "name": "locationName",
+     "value": "Edinburgh"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "Employment"
+    },
+    {
+     "canReconfigure": true,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": true,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateOrigin",
+     "value": "2026-11-19T21:41:44.010285387Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateTime",
+     "value": "16:00"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/scotland.json, https://raw.githubusercontent.com/hmcts/et-wa-task-configuration/master/src/main/resources/privilege-calendar-scotland.json"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "Yes"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskConfigurationMultipleTestScot",
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewReferralAdminMultiple"
+    },
+    "caseData": {
+     "multipleName": "Big Multiple"
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": true,
+     "name": "caseName",
+     "value": "Big Multiple"
+    },
+    {
+     "canReconfigure": true,
+     "name": "region",
+     "value": "11"
+    },
+    {
+     "canReconfigure": true,
+     "name": "location",
+     "value": "368308"
+    },
+    {
+     "canReconfigure": true,
+     "name": "locationName",
+     "value": "Edinburgh"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "Employment"
+    },
+    {
+     "canReconfigure": true,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": true,
+     "name": "workType",
+     "value": "routine_work"
+    },
+    {
+     "canReconfigure": true,
+     "name": "roleCategory",
+     "value": "ADMIN"
+    },
+    {
+     "canReconfigure": true,
+     "name": "description",
+     "value": "[Reply to the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/replyToReferral/replyToReferral1)"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": true,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateOrigin",
+     "value": "2026-11-19T21:41:44.019698010Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateTime",
+     "value": "16:00"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/scotland.json, https://raw.githubusercontent.com/hmcts/et-wa-task-configuration/master/src/main/resources/privilege-calendar-scotland.json"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "Yes"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateIntervalDays",
+     "value": "2"
+    },
+    {
+     "canReconfigure": true,
+     "name": "priorityDateOriginEarliest",
+     "value": "dueDate, nextHearingDate"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskConfigurationMultipleTestScot",
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewReferralLegalOpsMultiple"
+    },
+    "caseData": {
+     "multipleName": "Big Multiple"
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": true,
+     "name": "caseName",
+     "value": "Big Multiple"
+    },
+    {
+     "canReconfigure": true,
+     "name": "region",
+     "value": "11"
+    },
+    {
+     "canReconfigure": true,
+     "name": "location",
+     "value": "368308"
+    },
+    {
+     "canReconfigure": true,
+     "name": "locationName",
+     "value": "Edinburgh"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "Employment"
+    },
+    {
+     "canReconfigure": true,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": true,
+     "name": "workType",
+     "value": "routine_work"
+    },
+    {
+     "canReconfigure": true,
+     "name": "roleCategory",
+     "value": "LEGAL_OPERATIONS"
+    },
+    {
+     "canReconfigure": true,
+     "name": "description",
+     "value": "[Reply to the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/replyToReferral/replyToReferral1)"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": true,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateOrigin",
+     "value": "2026-11-19T21:41:44.028242679Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateTime",
+     "value": "16:00"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/scotland.json, https://raw.githubusercontent.com/hmcts/et-wa-task-configuration/master/src/main/resources/privilege-calendar-scotland.json"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "Yes"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateIntervalDays",
+     "value": "2"
+    },
+    {
+     "canReconfigure": true,
+     "name": "priorityDateOriginEarliest",
+     "value": "dueDate, nextHearingDate"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskConfigurationMultipleTestScot",
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewReferralJudiciaryMultiple"
+    },
+    "caseData": {
+     "multipleName": "Big Multiple"
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": true,
+     "name": "caseName",
+     "value": "Big Multiple"
+    },
+    {
+     "canReconfigure": true,
+     "name": "region",
+     "value": "11"
+    },
+    {
+     "canReconfigure": true,
+     "name": "location",
+     "value": "368308"
+    },
+    {
+     "canReconfigure": true,
+     "name": "locationName",
+     "value": "Edinburgh"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "Employment"
+    },
+    {
+     "canReconfigure": true,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": true,
+     "name": "workType",
+     "value": "decision_making_work"
+    },
+    {
+     "canReconfigure": true,
+     "name": "roleCategory",
+     "value": "JUDICIAL"
+    },
+    {
+     "canReconfigure": true,
+     "name": "description",
+     "value": "[Reply to the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/replyToReferral/replyToReferral1)"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": true,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateOrigin",
+     "value": "2026-11-19T21:41:44.039016936Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateTime",
+     "value": "16:00"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/scotland.json, https://raw.githubusercontent.com/hmcts/et-wa-task-configuration/master/src/main/resources/privilege-calendar-scotland.json"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "Yes"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateIntervalDays",
+     "value": "2"
+    },
+    {
+     "canReconfigure": true,
+     "name": "priorityDateOriginEarliest",
+     "value": "dueDate, nextHearingDate"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskConfigurationMultipleTestScot",
+   "input": {
+    "taskAttributes": {
+     "taskType": "MultiplesReviewReferralResponseLegalOps"
+    },
+    "caseData": {
+     "multipleName": "Big Multiple"
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": true,
+     "name": "caseName",
+     "value": "Big Multiple"
+    },
+    {
+     "canReconfigure": true,
+     "name": "region",
+     "value": "11"
+    },
+    {
+     "canReconfigure": true,
+     "name": "location",
+     "value": "368308"
+    },
+    {
+     "canReconfigure": true,
+     "name": "locationName",
+     "value": "Edinburgh"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "Employment"
+    },
+    {
+     "canReconfigure": true,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": true,
+     "name": "workType",
+     "value": "routine_work"
+    },
+    {
+     "canReconfigure": true,
+     "name": "roleCategory",
+     "value": "LEGAL_OPERATIONS"
+    },
+    {
+     "canReconfigure": true,
+     "name": "description",
+     "value": "**Review the Referral Response**\n\nYou can also [Reply to the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/replyToReferral/replyToReferral1) or [Close the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/closeReferral/closeReferral1)"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": true,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateOrigin",
+     "value": "2026-11-19T21:41:44.048006753Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateTime",
+     "value": "16:00"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/scotland.json, https://raw.githubusercontent.com/hmcts/et-wa-task-configuration/master/src/main/resources/privilege-calendar-scotland.json"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "Yes"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateIntervalDays",
+     "value": "2"
+    },
+    {
+     "canReconfigure": true,
+     "name": "priorityDateOriginRef",
+     "value": "dueDate"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskConfigurationMultipleTestScot",
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewReferralResponseJudiciaryMultiple"
+    },
+    "caseData": {
+     "multipleName": "Big Multiple"
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": true,
+     "name": "caseName",
+     "value": "Big Multiple"
+    },
+    {
+     "canReconfigure": true,
+     "name": "region",
+     "value": "11"
+    },
+    {
+     "canReconfigure": true,
+     "name": "location",
+     "value": "368308"
+    },
+    {
+     "canReconfigure": true,
+     "name": "locationName",
+     "value": "Edinburgh"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "Employment"
+    },
+    {
+     "canReconfigure": true,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": true,
+     "name": "workType",
+     "value": "decision_making_work"
+    },
+    {
+     "canReconfigure": true,
+     "name": "roleCategory",
+     "value": "JUDICIAL"
+    },
+    {
+     "canReconfigure": true,
+     "name": "description",
+     "value": "**Review the Referral Response**\n\nYou can also [Reply to the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/replyToReferral/replyToReferral1) or [Close the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/closeReferral/closeReferral1)"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": true,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateOrigin",
+     "value": "2026-11-19T21:41:44.056730351Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateTime",
+     "value": "16:00"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/scotland.json, https://raw.githubusercontent.com/hmcts/et-wa-task-configuration/master/src/main/resources/privilege-calendar-scotland.json"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "Yes"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateIntervalDays",
+     "value": "2"
+    },
+    {
+     "canReconfigure": true,
+     "name": "priorityDateOriginRef",
+     "value": "dueDate"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskConfigurationMultipleTestScot",
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewReferralResponseAdminMultiple"
+    },
+    "caseData": {
+     "multipleName": "Big Multiple"
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": true,
+     "name": "caseName",
+     "value": "Big Multiple"
+    },
+    {
+     "canReconfigure": true,
+     "name": "region",
+     "value": "11"
+    },
+    {
+     "canReconfigure": true,
+     "name": "location",
+     "value": "368308"
+    },
+    {
+     "canReconfigure": true,
+     "name": "locationName",
+     "value": "Edinburgh"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "Employment"
+    },
+    {
+     "canReconfigure": true,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": true,
+     "name": "workType",
+     "value": "routine_work"
+    },
+    {
+     "canReconfigure": true,
+     "name": "roleCategory",
+     "value": "ADMIN"
+    },
+    {
+     "canReconfigure": true,
+     "name": "description",
+     "value": "**Review the Referral Response**\n\nYou can also [Reply to the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/replyToReferral/replyToReferral1) or [Close the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/closeReferral/closeReferral1)"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": true,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateOrigin",
+     "value": "2026-11-19T21:41:44.065965477Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateTime",
+     "value": "16:00"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/scotland.json, https://raw.githubusercontent.com/hmcts/et-wa-task-configuration/master/src/main/resources/privilege-calendar-scotland.json"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "Yes"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateIntervalDays",
+     "value": "2"
+    },
+    {
+     "canReconfigure": true,
+     "name": "priorityDateOriginRef",
+     "value": "dueDate"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskConfigurationMultipleTestScot",
+   "input": {
+    "taskAttributes": {
+     "taskType": "someTask"
+    },
+    "caseData": {
+     "multipleName": "Big Multiple"
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": true,
+     "name": "caseName",
+     "value": "Big Multiple"
+    },
+    {
+     "canReconfigure": true,
+     "name": "region",
+     "value": "11"
+    },
+    {
+     "canReconfigure": true,
+     "name": "location",
+     "value": "368308"
+    },
+    {
+     "canReconfigure": true,
+     "name": "locationName",
+     "value": "Edinburgh"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "Employment"
+    },
+    {
+     "canReconfigure": true,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": true,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateOrigin",
+     "value": "2026-11-19T21:41:44.115509453Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateTime",
+     "value": "16:00"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/scotland.json, https://raw.githubusercontent.com/hmcts/et-wa-task-configuration/master/src/main/resources/privilege-calendar-scotland.json"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": true,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "Yes"
+    }
+   ]
+  }
+ ]
+}

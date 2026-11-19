@@ -11,6 +11,7 @@ export { compileModel } from "./model-compile.ts";
 export { loadSpecFile, loadSpecOnly, parseModel, parseOrdering, stringifyModel, stringifyOrdering } from "./model-io.ts";
 export { type LiftOptions, type LiftReport, type LiftResult, liftSpec, renderLiftReport } from "./model-lift.ts";
 export * from "./schema.ts";
+export * from "./simulate/index.ts";
 export { type CompareOptions, compareSpecs, diffSpecs } from "./spec-diff.ts";
 export * from "./spec-io.ts";
 export * from "./task-view.ts";

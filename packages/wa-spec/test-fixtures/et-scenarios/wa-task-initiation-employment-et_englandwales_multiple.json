@@ -1,0 +1,327 @@
+{
+ "decision": "wa-task-initiation-employment-et_englandwales_multiple",
+ "source": "hmcts/et-wa-task-configuration@fa182449b8ef501c95e1f00137965994d835c4c3",
+ "scenarios": [
+  {
+   "test": "EmploymentTaskInitiationMultipleTestEW",
+   "input": {
+    "eventId": "createReferral",
+    "additionalData": {
+     "Data": {
+      "referralCollection": [
+       {
+        "value": {
+         "referralNumber": "1",
+         "referralSubject": "Referral Subject 1",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "Admin",
+         "isUrgent": "Yes"
+        }
+       },
+       {
+        "value": {
+         "referralNumber": "2",
+         "referralSubject": "Referral Subject 2",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "Admin",
+         "isUrgent": "Yes"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Multiples Referral #2 - Referral Subject 2",
+     "processCategories": "Vetting",
+     "taskId": "ReviewReferralAdminMultiple"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationMultipleTestEW",
+   "input": {
+    "eventId": "createReferral",
+    "additionalData": {
+     "Data": {
+      "referralCollection": [
+       {
+        "value": {
+         "referralNumber": "1",
+         "referralSubject": "Referral Subject 1",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "Legal officer",
+         "isUrgent": "Yes"
+        }
+       },
+       {
+        "value": {
+         "referralNumber": "2",
+         "referralSubject": "Referral Subject 2",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "Legal officer",
+         "isUrgent": "Yes"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Multiples Referral #2 - Referral Subject 2",
+     "processCategories": "Vetting",
+     "taskId": "ReviewReferralLegalOpsMultiple"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationMultipleTestEW",
+   "input": {
+    "eventId": "createReferral",
+    "additionalData": {
+     "Data": {
+      "referralCollection": [
+       {
+        "value": {
+         "referralNumber": "1",
+         "referralSubject": "Referral Subject 1",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "Judge",
+         "isUrgent": "Yes"
+        }
+       },
+       {
+        "value": {
+         "referralNumber": "2",
+         "referralSubject": "ET1",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "Judge",
+         "isUrgent": "Yes"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Multiples Referral #2 - ET1",
+     "processCategories": "Vetting",
+     "taskId": "ReviewReferralJudiciaryMultiple"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationMultipleTestEW",
+   "input": {
+    "eventId": "replyToReferral",
+    "additionalData": {
+     "Data": {
+      "referralCollection": [
+       {
+        "value": {
+         "referralNumber": "1",
+         "referralSubject": "Referral Subject 1",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "",
+         "isUrgent": "",
+         "referralReplyCollection": [
+          {
+           "value": {
+            "referralNumber": "1",
+            "referralSubject": "Referral Subject 1",
+            "directionTo": "Legal officer",
+            "isUrgentReply": "Yes",
+            "replyDateTime": "2026-11-19T22:41:38"
+           }
+          },
+          {
+           "value": {
+            "referralNumber": "1",
+            "referralSubject": "Referral Subject 1",
+            "directionTo": "Legal officer",
+            "isUrgentReply": "Yes",
+            "replyDateTime": "2026-11-20T00:41:38"
+           }
+          }
+         ]
+        }
+       },
+       {
+        "value": {
+         "referralNumber": "2",
+         "referralSubject": "Referral Subject 2",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "",
+         "isUrgent": "",
+         "referralReplyCollection": [
+          {
+           "value": {
+            "referralNumber": "2",
+            "referralSubject": "Referral Subject 2",
+            "directionTo": "Legal officer",
+            "isUrgentReply": "Yes",
+            "replyDateTime": "2026-11-19T23:41:38"
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Multiples Referral #1 - Referral Subject 1 Response",
+     "processCategories": "Processing",
+     "taskId": "MultiplesReviewReferralResponseLegalOps"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationMultipleTestEW",
+   "input": {
+    "eventId": "replyToReferral",
+    "additionalData": {
+     "Data": {
+      "referralCollection": [
+       {
+        "value": {
+         "referralNumber": "1",
+         "referralSubject": "Referral Subject 1",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "",
+         "isUrgent": "",
+         "referralReplyCollection": [
+          {
+           "value": {
+            "referralNumber": "1",
+            "referralSubject": "Referral Subject 1",
+            "directionTo": "Judge",
+            "isUrgentReply": "Yes",
+            "replyDateTime": "2026-11-19T22:41:38"
+           }
+          },
+          {
+           "value": {
+            "referralNumber": "1",
+            "referralSubject": "Referral Subject 1",
+            "directionTo": "Judge",
+            "isUrgentReply": "Yes",
+            "replyDateTime": "2026-11-20T00:41:38"
+           }
+          }
+         ]
+        }
+       },
+       {
+        "value": {
+         "referralNumber": "2",
+         "referralSubject": "Referral Subject 2",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "",
+         "isUrgent": "",
+         "referralReplyCollection": [
+          {
+           "value": {
+            "referralNumber": "2",
+            "referralSubject": "Referral Subject 2",
+            "directionTo": "Judge",
+            "isUrgentReply": "Yes",
+            "replyDateTime": "2026-11-19T23:41:38"
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Multiples Referral #1 - Referral Subject 1 Response",
+     "processCategories": "Processing",
+     "taskId": "ReviewReferralResponseJudiciaryMultiple"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationMultipleTestEW",
+   "input": {
+    "eventId": "replyToReferral",
+    "additionalData": {
+     "Data": {
+      "referralCollection": [
+       {
+        "value": {
+         "referralNumber": "1",
+         "referralSubject": "Referral Subject 1",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "",
+         "isUrgent": "",
+         "referralReplyCollection": [
+          {
+           "value": {
+            "referralNumber": "1",
+            "referralSubject": "Referral Subject 1",
+            "directionTo": "Admin",
+            "isUrgentReply": "Yes",
+            "replyDateTime": "2026-11-19T22:41:38"
+           }
+          },
+          {
+           "value": {
+            "referralNumber": "1",
+            "referralSubject": "Referral Subject 1",
+            "directionTo": "Admin",
+            "isUrgentReply": "Yes",
+            "replyDateTime": "2026-11-20T00:41:38"
+           }
+          }
+         ]
+        }
+       },
+       {
+        "value": {
+         "referralNumber": "2",
+         "referralSubject": "Referral Subject 2",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "",
+         "isUrgent": "",
+         "referralReplyCollection": [
+          {
+           "value": {
+            "referralNumber": "2",
+            "referralSubject": "Referral Subject 2",
+            "directionTo": "Admin",
+            "isUrgentReply": "Yes",
+            "replyDateTime": "2026-11-19T23:41:38"
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Multiples Referral #1 - Referral Subject 1 Response",
+     "processCategories": "Processing",
+     "taskId": "ReviewReferralResponseAdminMultiple"
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,36 @@
+{
+ "decision": "wa-task-types-employment-et_englandwales_multiple",
+ "source": "hmcts/et-wa-task-configuration@fa182449b8ef501c95e1f00137965994d835c4c3",
+ "scenarios": [
+  {
+   "test": "EmploymentTaskTypeMultipleTestEW",
+   "input": {},
+   "output": [
+    {
+     "taskTypeId": "ReviewReferralAdminMultiple",
+     "taskTypeName": "Review Multiples Referral - Admin"
+    },
+    {
+     "taskTypeId": "ReviewReferralJudiciaryMultiple",
+     "taskTypeName": "Review Multiples Referral - Judicial"
+    },
+    {
+     "taskTypeId": "ReviewReferralLegalOpsMultiple",
+     "taskTypeName": "Review Multiples Referral - Legal Ops"
+    },
+    {
+     "taskTypeId": "MultiplesReviewReferralResponseLegalOps",
+     "taskTypeName": "Review Multiples Referral Response - Legal Ops"
+    },
+    {
+     "taskTypeId": "ReviewReferralResponseJudiciaryMultiple",
+     "taskTypeName": "Review Multiples Referral Response - Judicial"
+    },
+    {
+     "taskTypeId": "ReviewReferralResponseAdminMultiple",
+     "taskTypeName": "Review Multiples Referral Response - Admin"
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,3044 @@
+{
+ "decision": "wa-task-initiation-employment-et_englandwales",
+ "source": "hmcts/et-wa-task-configuration@fa182449b8ef501c95e1f00137965994d835c4c3",
+ "scenarios": [
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "SUBMIT_CASE_DRAFT",
+    "additionalData": {
+     "Data": {
+      "supportTaskState": {
+       "arrangeSupportTaskName": "I need help with forms"
+      }
+     }
+    },
+    "postEventState": "Submitted"
+   },
+   "output": [
+    {
+     "name": "Et1 Vetting",
+     "processCategories": "Vetting",
+     "taskId": "Et1Vetting"
+    },
+    {
+     "name": "Arrange Support - I need help with forms",
+     "processCategories": "ArrangeSupport",
+     "taskId": "ArrangeSupport"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "UPDATE_CASE_SUBMITTED",
+    "additionalData": {
+     "Data": {
+      "supportTaskState": {
+       "arrangeSupportTaskName": "I need help with forms"
+      }
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Arrange Support - I need help with forms",
+     "processCategories": "ArrangeSupport",
+     "taskId": "ArrangeSupport"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "SUBMIT_ET3_FORM",
+    "additionalData": {
+     "Data": {
+      "supportTaskState": {
+       "arrangeSupportTaskName": "I need help with forms"
+      }
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Arrange Support - I need help with forms",
+     "processCategories": "ArrangeSupport",
+     "taskId": "ArrangeSupport"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "UPDATE_ET3_FORM",
+    "additionalData": {
+     "Data": {
+      "supportTaskState": {
+       "arrangeSupportTaskName": "I need help with forms"
+      }
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Arrange Support - I need help with forms",
+     "processCategories": "ArrangeSupport",
+     "taskId": "ArrangeSupport"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "requestSupport",
+    "additionalData": {
+     "Data": {
+      "supportTaskState": {
+       "arrangeSupportTaskName": "I need help with forms"
+      }
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Arrange Support - I need help with forms",
+     "processCategories": "ArrangeSupport",
+     "taskId": "ArrangeSupport"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "createFlag",
+    "additionalData": {
+     "Data": {
+      "supportTaskState": {
+       "arrangeSupportTaskName": "I need help with forms"
+      }
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Arrange Support - I need help with forms",
+     "processCategories": "ArrangeSupport",
+     "taskId": "ArrangeSupport"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "manageFlags",
+    "additionalData": {
+     "Data": {
+      "supportTaskState": {
+       "arrangeSupportTaskName": "I need help with forms"
+      }
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Arrange Support - I need help with forms",
+     "processCategories": "ArrangeSupport",
+     "taskId": "ArrangeSupport"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "reviewAdminSupportRequest",
+    "additionalData": {
+     "Data": {
+      "supportTaskState": {
+       "arrangeSupportTaskName": "I need help with forms"
+      }
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Arrange Support - I need help with forms",
+     "processCategories": "ArrangeSupport",
+     "taskId": "ArrangeSupport"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "reviewLOSupportRequest",
+    "additionalData": {
+     "Data": {
+      "supportTaskState": {
+       "arrangeSupportTaskName": "I need help with forms"
+      }
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Arrange Support - I need help with forms",
+     "processCategories": "ArrangeSupport",
+     "taskId": "ArrangeSupport"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "reviewJudgeSupportRequest",
+    "additionalData": {
+     "Data": {
+      "supportTaskState": {
+       "arrangeSupportTaskName": "I need help with forms"
+      }
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Arrange Support - I need help with forms",
+     "processCategories": "ArrangeSupport",
+     "taskId": "ArrangeSupport"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "createArrangeSupportTask",
+    "additionalData": {
+     "Data": {
+      "supportTaskState": {
+       "arrangeSupportTaskName": "I need help with forms"
+      }
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Arrange Support - I need help with forms",
+     "processCategories": "ArrangeSupport",
+     "taskId": "ArrangeSupport"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "SUBMIT_CASE_DRAFT",
+    "postEventState": "Submitted"
+   },
+   "output": [
+    {
+     "name": "Et1 Vetting",
+     "processCategories": "Vetting",
+     "taskId": "Et1Vetting"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "initiateCase",
+    "postEventState": "Submitted"
+   },
+   "output": [
+    {
+     "name": "Et1 Vetting",
+     "processCategories": "Vetting",
+     "taskId": "Et1Vetting"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "createReferral",
+    "additionalData": {
+     "Data": {
+      "referralCollection": [
+       {
+        "value": {
+         "referralNumber": "1",
+         "referralSubject": "Referral Subject 1",
+         "referralSubjectSpecify": "Random Subject",
+         "referCaseTo": "Admin",
+         "isUrgent": "Yes"
+        }
+       },
+       {
+        "value": {
+         "referralNumber": "2",
+         "referralSubject": "Other",
+         "referralSubjectSpecify": "Random Subject",
+         "referCaseTo": "Admin",
+         "isUrgent": "Yes"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Referral",
+     "processCategories": "reviewReferralSerialNumberAndSubject_2 - Random Subject",
+     "taskId": "ReviewReferralAdmin"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "createReferral",
+    "additionalData": {
+     "Data": {
+      "referralCollection": [
+       {
+        "value": {
+         "referralNumber": "1",
+         "referralSubject": "Referral Subject 1",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "Admin",
+         "isUrgent": "Yes"
+        }
+       },
+       {
+        "value": {
+         "referralNumber": "2",
+         "referralSubject": "Referral Subject 2",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "Admin",
+         "isUrgent": "Yes"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Referral",
+     "processCategories": "reviewReferralSerialNumberAndSubject_2 - Referral Subject 2",
+     "taskId": "ReviewReferralAdmin"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "createReferral",
+    "additionalData": {
+     "Data": {
+      "referralCollection": [
+       {
+        "value": {
+         "referralNumber": "1",
+         "referralSubject": "Referral Subject 1",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "Admin",
+         "isUrgent": "Yes"
+        }
+       },
+       {
+        "value": {
+         "referralNumber": "2",
+         "referralSubject": "Hearings",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "Admin",
+         "isUrgent": "Yes"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Referral",
+     "processCategories": "reviewReferralSerialNumberAndSubject_2 - Hearings",
+     "taskId": "ReviewReferralAdmin"
+    },
+    {
+     "name": "Issue Post Hearing Direction",
+     "processCategories": "Hearing",
+     "taskId": "IssuePostHearingDirection"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "createReferral",
+    "additionalData": {
+     "Data": {
+      "referralCollection": [
+       {
+        "value": {
+         "referralNumber": "1",
+         "referralSubject": "Referral Subject 1",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "Admin",
+         "isUrgent": "Yes"
+        }
+       },
+       {
+        "value": {
+         "referralNumber": "2",
+         "referralSubject": "Judgment",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "Admin",
+         "isUrgent": "Yes"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Referral",
+     "processCategories": "reviewReferralSerialNumberAndSubject_2 - Judgment",
+     "taskId": "ReviewReferralAdmin"
+    },
+    {
+     "name": "Issue Judgment",
+     "processCategories": "Hearing",
+     "taskId": "IssueJudgment"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "createReferral",
+    "additionalData": {
+     "Data": {
+      "referralCollection": [
+       {
+        "value": {
+         "referralNumber": "1",
+         "referralSubject": "Referral Subject 1",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "Judge",
+         "isUrgent": "Yes"
+        }
+       },
+       {
+        "value": {
+         "referralNumber": "2",
+         "referralSubject": "ET1",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "Judge",
+         "isUrgent": "Yes"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Referral",
+     "processCategories": "reviewReferralSerialNumberAndSubject_2 - ET1",
+     "taskId": "ReviewReferralJudiciary"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "createReferral",
+    "additionalData": {
+     "Data": {
+      "referralCollection": [
+       {
+        "value": {
+         "referralNumber": "1",
+         "referralSubject": "Referral Subject 1",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "Judge",
+         "isUrgent": "Yes"
+        }
+       },
+       {
+        "value": {
+         "referralNumber": "2",
+         "referralSubject": "Rule 21",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "Judge",
+         "isUrgent": "Yes"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Referral",
+     "processCategories": "reviewReferralSerialNumberAndSubject_2 - Rule 21",
+     "taskId": "ReviewReferralJudiciary"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "createReferral",
+    "additionalData": {
+     "Data": {
+      "referralCollection": [
+       {
+        "value": {
+         "referralNumber": "1",
+         "referralSubject": "Referral Subject 1",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "Legal officer",
+         "isUrgent": "Yes"
+        }
+       },
+       {
+        "value": {
+         "referralNumber": "2",
+         "referralSubject": "Referral Subject 2",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "Legal officer",
+         "isUrgent": "Yes"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Referral",
+     "processCategories": "reviewReferralSerialNumberAndSubject_2 - Referral Subject 2",
+     "taskId": "ReviewReferralLegalOps"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "replyToReferral",
+    "additionalData": {
+     "Data": {
+      "referralCollection": [
+       {
+        "value": {
+         "referralNumber": "1",
+         "referralSubject": "Referral Subject 1",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "",
+         "isUrgent": "",
+         "referralReplyCollection": [
+          {
+           "value": {
+            "referralNumber": "1",
+            "referralSubject": "Referral Subject 1",
+            "directionTo": "Admin",
+            "isUrgentReply": "Yes",
+            "replyDateTime": "2026-11-19T22:41:38"
+           }
+          },
+          {
+           "value": {
+            "referralNumber": "1",
+            "referralSubject": "Referral Subject 1",
+            "directionTo": "Admin",
+            "isUrgentReply": "Yes",
+            "replyDateTime": "2026-11-20T00:41:38"
+           }
+          }
+         ]
+        }
+       },
+       {
+        "value": {
+         "referralNumber": "2",
+         "referralSubject": "Referral Subject 2",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "",
+         "isUrgent": "",
+         "referralReplyCollection": [
+          {
+           "value": {
+            "referralNumber": "2",
+            "referralSubject": "Referral Subject 2",
+            "directionTo": "Admin",
+            "isUrgentReply": "Yes",
+            "replyDateTime": "2026-11-19T23:41:38"
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Referral Response",
+     "processCategories": "reviewReferralResponseSerialNumberAndSubject_1 - Referral Subject 1",
+     "taskId": "ReviewReferralResponseAdmin"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "replyToReferral",
+    "additionalData": {
+     "Data": {
+      "referralCollection": [
+       {
+        "value": {
+         "referralNumber": "1",
+         "referralSubject": "Referral Subject 1",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "",
+         "isUrgent": "",
+         "referralReplyCollection": [
+          {
+           "value": {
+            "referralNumber": "1",
+            "referralSubject": "Referral Subject 1",
+            "directionTo": "Judge",
+            "isUrgentReply": "Yes",
+            "replyDateTime": "2026-11-19T22:41:38"
+           }
+          },
+          {
+           "value": {
+            "referralNumber": "1",
+            "referralSubject": "Referral Subject 1",
+            "directionTo": "Judge",
+            "isUrgentReply": "Yes",
+            "replyDateTime": "2026-11-20T00:41:38"
+           }
+          }
+         ]
+        }
+       },
+       {
+        "value": {
+         "referralNumber": "2",
+         "referralSubject": "Referral Subject 2",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "",
+         "isUrgent": "",
+         "referralReplyCollection": [
+          {
+           "value": {
+            "referralNumber": "2",
+            "referralSubject": "Referral Subject 2",
+            "directionTo": "Judge",
+            "isUrgentReply": "Yes",
+            "replyDateTime": "2026-11-19T23:41:38"
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Referral Response",
+     "processCategories": "reviewReferralResponseSerialNumberAndSubject_1 - Referral Subject 1",
+     "taskId": "ReviewReferralResponseJudiciary"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "replyToReferral",
+    "additionalData": {
+     "Data": {
+      "referralCollection": [
+       {
+        "value": {
+         "referralNumber": "1",
+         "referralSubject": "Other",
+         "referralSubjectSpecify": "Random Subject",
+         "referCaseTo": "Admin",
+         "isUrgent": "Yes",
+         "referralReplyCollection": [
+          {
+           "value": {
+            "referralNumber": "1",
+            "referralSubject": "Other",
+            "directionTo": "Judge",
+            "isUrgentReply": "",
+            "replyDateTime": "2026-11-19T22:41:38"
+           }
+          },
+          {
+           "value": {
+            "referralNumber": "1",
+            "referralSubject": "Other",
+            "directionTo": "Judge",
+            "isUrgentReply": "",
+            "replyDateTime": "2026-11-20T00:41:38"
+           }
+          }
+         ]
+        }
+       },
+       {
+        "value": {
+         "referralNumber": "2",
+         "referralSubject": "",
+         "referralSubjectSpecify": "Random Subject",
+         "referCaseTo": "Admin",
+         "isUrgent": "Yes",
+         "referralReplyCollection": [
+          {
+           "value": {
+            "referralNumber": "2",
+            "referralSubject": "",
+            "directionTo": "Judge",
+            "isUrgentReply": "",
+            "replyDateTime": "2026-11-19T23:41:38"
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Referral Response",
+     "processCategories": "reviewReferralResponseSerialNumberAndSubject_1 - Random Subject",
+     "taskId": "ReviewReferralResponseJudiciary"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "replyToReferral",
+    "additionalData": {
+     "Data": {
+      "referralCollection": [
+       {
+        "value": {
+         "referralNumber": "1",
+         "referralSubject": "Referral Subject 1",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "",
+         "isUrgent": "",
+         "referralReplyCollection": [
+          {
+           "value": {
+            "referralNumber": "1",
+            "referralSubject": "Referral Subject 1",
+            "directionTo": "Legal officer",
+            "isUrgentReply": "Yes",
+            "replyDateTime": "2026-11-19T22:41:38"
+           }
+          },
+          {
+           "value": {
+            "referralNumber": "1",
+            "referralSubject": "Referral Subject 1",
+            "directionTo": "Legal officer",
+            "isUrgentReply": "Yes",
+            "replyDateTime": "2026-11-20T00:41:38"
+           }
+          }
+         ]
+        }
+       },
+       {
+        "value": {
+         "referralNumber": "2",
+         "referralSubject": "Referral Subject 2",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "",
+         "isUrgent": "",
+         "referralReplyCollection": [
+          {
+           "value": {
+            "referralNumber": "2",
+            "referralSubject": "Referral Subject 2",
+            "directionTo": "Legal officer",
+            "isUrgentReply": "Yes",
+            "replyDateTime": "2026-11-19T23:41:38"
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Referral Response",
+     "processCategories": "reviewReferralResponseSerialNumberAndSubject_1 - Referral Subject 1",
+     "taskId": "ReviewReferralResponseLegalOps"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "draftAndSignJudgement",
+    "additionalData": {
+     "Data": {
+      "draftAndSignJudgement": {
+       "isJudgement": "true"
+      }
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Issue Judgment",
+     "processCategories": "Hearing",
+     "taskId": "IssueJudgment"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "draftAndSignJudgement",
+    "additionalData": {
+     "Data": {
+      "draftAndSignJudgement": {
+       "isJudgement": "false"
+      }
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Issue Order",
+     "processCategories": "Hearing",
+     "taskId": "IssueOrder"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "preAcceptanceCase",
+    "postEventState": "Accepted"
+   },
+   "output": [
+    {
+     "name": "List/ Serve Claim",
+     "processCategories": "Vetting",
+     "taskId": "ListServeClaim"
+    },
+    {
+     "name": "Send ET1 Notification",
+     "processCategories": "Vetting",
+     "taskId": "SendEt1Notification"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "preAcceptanceCase",
+    "postEventState": "Rejected"
+   },
+   "output": [
+    {
+     "name": "Send ET1 Notification",
+     "processCategories": "Vetting",
+     "taskId": "SendEt1Notification"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "WA_REVIEW_RULE21_REFERRAL",
+    "postEventState": "Accepted"
+   },
+   "output": [
+    {
+     "name": "Rule 22",
+     "processCategories": "Rule21",
+     "taskId": "Rule21"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "submitEt3",
+    "postEventState": "Accepted"
+   },
+   "output": [
+    {
+     "name": "ET3 Processing",
+     "processCategories": "Processing",
+     "taskId": "ET3Processing"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "amendRespondentDetails",
+    "additionalData": {
+     "Data": {
+      "respondentCollection": [
+       {
+        "value": {
+         "responseReceived": false,
+         "responseReceivedCount": null
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": []
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "amendRespondentDetails",
+    "additionalData": {
+     "Data": {
+      "respondentCollection": [
+       {
+        "value": {
+         "responseReceived": true,
+         "responseReceivedCount": "1"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "ET3 Processing",
+     "processCategories": "Processing",
+     "taskId": "ET3Processing"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "amendRespondentDetails",
+    "additionalData": {
+     "Data": {
+      "respondentCollection": [
+       {
+        "value": {
+         "responseReceived": true,
+         "responseReceivedCount": "2"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": []
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "amendRespondentDetails",
+    "additionalData": {
+     "Data": {
+      "respondentCollection": [
+       {
+        "value": {
+         "respondentEccReply": "",
+         "respondentEccReplyCount": null
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": []
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "amendRespondentDetails",
+    "additionalData": {
+     "Data": {
+      "respondentCollection": [
+       {
+        "value": {
+         "respondentEccReply": "Yes",
+         "respondentEccReplyCount": "1"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Complete Initial Consideration",
+     "processCategories": "Processing",
+     "taskId": "CompleteInitialConsideration"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "amendRespondentDetails",
+    "additionalData": {
+     "Data": {
+      "respondentCollection": [
+       {
+        "value": {
+         "respondentEccReply": "Yes",
+         "respondentEccReplyCount": "2"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": []
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "amendRespondentDetails",
+    "additionalData": {
+     "Data": {
+      "respondentCollection": [
+       {
+        "value": {
+         "respondentEccReply": "Yes",
+         "respondentEccReplyCount": "2"
+        }
+       },
+       {
+        "value": {
+         "respondentEccReply": "Yes",
+         "respondentEccReplyCount": "1"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Complete Initial Consideration",
+     "processCategories": "Processing",
+     "taskId": "CompleteInitialConsideration"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "amendRespondentDetails",
+    "additionalData": {
+     "Data": {
+      "respondentCollection": [
+       {
+        "value": {
+         "respondentEccReply": "Yes",
+         "respondentEccReplyCount": "3"
+        }
+       },
+       {
+        "value": {
+         "respondentEccReply": "",
+         "respondentEccReplyCount": null
+        }
+       },
+       {
+        "value": {
+         "respondentEccReply": "Yes",
+         "respondentEccReplyCount": "1"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Complete Initial Consideration",
+     "processCategories": "Processing",
+     "taskId": "CompleteInitialConsideration"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "amendRespondentDetails",
+    "additionalData": {
+     "Data": {
+      "respondentCollection": [
+       {
+        "value": {
+         "respondentEccReply": "Yes",
+         "respondentEccReplyCount": "2"
+        }
+       },
+       {
+        "value": {
+         "respondentEccReply": "",
+         "respondentEccReplyCount": null
+        }
+       },
+       {
+        "value": {
+         "respondentEccReply": "Yes",
+         "respondentEccReplyCount": "3"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": []
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "amendRespondentDetails",
+    "additionalData": {
+     "Data": {
+      "respondentCollection": [
+       {
+        "value": {
+         "respondentEccReply": "No",
+         "respondentEccReplyCount": "1"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Complete Initial Consideration",
+     "processCategories": "Processing",
+     "taskId": "CompleteInitialConsideration"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "amendRespondentDetails",
+    "additionalData": {
+     "Data": {
+      "respondentCollection": [
+       {
+        "value": {
+         "respondentEccReply": "",
+         "respondentEccReplyCount": "1"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Complete Initial Consideration",
+     "processCategories": "Processing",
+     "taskId": "CompleteInitialConsideration"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "amendRespondentDetails",
+    "additionalData": {
+     "Data": {
+      "respondentCollection": [
+       {
+        "value": {
+         "respondentEccReply": null,
+         "respondentEccReplyCount": "1"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Complete Initial Consideration",
+     "processCategories": "Processing",
+     "taskId": "CompleteInitialConsideration"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "amendRespondentDetails",
+    "additionalData": {
+     "Data": {
+      "respondentCollection": [
+       {
+        "value": {
+         "respondentEccReply": "No",
+         "respondentEccReplyCount": "2"
+        }
+       },
+       {
+        "value": {
+         "respondentEccReply": "Yes",
+         "respondentEccReplyCount": "1"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Complete Initial Consideration",
+     "processCategories": "Processing",
+     "taskId": "CompleteInitialConsideration"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "amendRespondentDetails",
+    "additionalData": {
+     "Data": {
+      "respondentCollection": [
+       {
+        "value": {
+         "respondentEccReply": "Yes",
+         "respondentEccReplyCount": "2"
+        }
+       },
+       {
+        "value": {
+         "respondentEccReply": "No",
+         "respondentEccReplyCount": "3"
+        }
+       },
+       {
+        "value": {
+         "respondentEccReply": "",
+         "respondentEccReplyCount": "1"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Complete Initial Consideration",
+     "processCategories": "Processing",
+     "taskId": "CompleteInitialConsideration"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "amendRespondentDetails",
+    "additionalData": {
+     "Data": {
+      "respondentCollection": [
+       {
+        "value": {
+         "respondentEccReply": "Yes",
+         "respondentEccReplyCount": "1"
+        }
+       },
+       {
+        "value": {
+         "respondentEccReply": "No",
+         "respondentEccReplyCount": "1"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Complete Initial Consideration",
+     "processCategories": "Processing",
+     "taskId": "CompleteInitialConsideration"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "et3Vetting",
+    "additionalData": {
+     "Data": {
+      "respondentCollection": [
+       {
+        "value": {
+         "et3Vetting": {
+          "et3IsThereAnEt3Response": false,
+          "et3ContractClaimSection7": true
+         }
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": "Accepted"
+   },
+   "output": [
+    {
+     "name": "Review Rule 22 Referral",
+     "processCategories": "Rule21",
+     "taskId": "ReviewRule21Referral"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "et3Vetting",
+    "additionalData": {
+     "Data": {
+      "respondentCollection": [
+       {
+        "value": {
+         "et3Vetting": {
+          "et3IsThereAnEt3Response": true,
+          "et3ContractClaimSection7": false
+         }
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": "Accepted"
+   },
+   "output": [
+    {
+     "name": "Complete Initial Consideration",
+     "processCategories": "Processing",
+     "taskId": "CompleteInitialConsideration"
+    },
+    {
+     "name": "Send ET3 Notification",
+     "processCategories": "Processing",
+     "taskId": "SendEt3Notification"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "et3Vetting",
+    "additionalData": {
+     "Data": {
+      "respondentCollection": [
+       {
+        "value": {
+         "et3Vetting": null
+        }
+       },
+       {
+        "value": {
+         "et3Vetting": {
+          "et3IsThereAnEt3Response": true,
+          "et3ContractClaimSection7": false
+         }
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": "Accepted"
+   },
+   "output": [
+    {
+     "name": "Complete Initial Consideration",
+     "processCategories": "Processing",
+     "taskId": "CompleteInitialConsideration"
+    },
+    {
+     "name": "Send ET3 Notification",
+     "processCategories": "Processing",
+     "taskId": "SendEt3Notification"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "et3Vetting",
+    "additionalData": {
+     "Data": {
+      "respondentCollection": [
+       {
+        "value": {
+         "et3Vetting": null
+        }
+       },
+       {
+        "value": {
+         "et3Vetting": {
+          "et3IsThereAnEt3Response": true,
+          "et3ContractClaimSection7": true
+         }
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": "Accepted"
+   },
+   "output": [
+    {
+     "name": "Refer Employer's Contract Claim",
+     "processCategories": "Processing",
+     "taskId": "ReferEmployersContractClaim"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "et3Vetting",
+    "additionalData": {
+     "Data": {
+      "respondentCollection": [
+       {
+        "value": {
+         "et3Vetting": {
+          "et3IsThereAnEt3Response": true,
+          "et3ContractClaimSection7": false
+         }
+        }
+       },
+       {
+        "value": {
+         "et3Vetting": {
+          "et3IsThereAnEt3Response": true,
+          "et3ContractClaimSection7": true
+         }
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": "Accepted"
+   },
+   "output": [
+    {
+     "name": "Refer Employer's Contract Claim",
+     "processCategories": "Processing",
+     "taskId": "ReferEmployersContractClaim"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "initialConsideration",
+    "additionalData": {
+     "Data": {
+      "etICCanProceed": true,
+      "etICHearingAlreadyListed": false,
+      "etICHearingNotListedListUpdated": [
+       "Seek comments on the video hearing",
+       "UDL hearing",
+       "Do not list"
+      ]
+     }
+    },
+    "postEventState": "Accepted"
+   },
+   "output": [
+    {
+     "name": "Issue Initial Consideration Directions",
+     "processCategories": "Hearing",
+     "taskId": "IssueInitialConsiderationDirections"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "initialConsideration",
+    "postEventState": "Accepted"
+   },
+   "output": [
+    {
+     "name": "Issue Initial Consideration Directions",
+     "processCategories": "Hearing",
+     "taskId": "IssueInitialConsiderationDirections"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "initialConsideration",
+    "additionalData": {
+     "Data": {
+      "etICCanProceed": true,
+      "etICHearingAlreadyListed": true,
+      "etICHearingNotListedListUpdated": [
+       "List for preliminary hearing",
+       "Seek comments on the video hearing",
+       "List for final hearing",
+       "UDL hearing"
+      ]
+     }
+    },
+    "postEventState": "Accepted"
+   },
+   "output": [
+    {
+     "name": "Issue Initial Consideration Directions",
+     "processCategories": "Hearing",
+     "taskId": "IssueInitialConsiderationDirections"
+    },
+    {
+     "name": "List A Hearing",
+     "processCategories": "Hearing",
+     "taskId": "ListAHearing"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "initialConsideration",
+    "additionalData": {
+     "Data": {
+      "etICCanProceed": true,
+      "etICHearingAlreadyListed": false,
+      "etICHearingNotListedListUpdated": [
+       "Seek comments on the video hearing",
+       "List for preliminary hearing",
+       "UDL hearing"
+      ]
+     }
+    },
+    "postEventState": "Accepted"
+   },
+   "output": [
+    {
+     "name": "Issue Initial Consideration Directions",
+     "processCategories": "Hearing",
+     "taskId": "IssueInitialConsiderationDirections"
+    },
+    {
+     "name": "List A Hearing",
+     "processCategories": "Hearing",
+     "taskId": "ListAHearing"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "initialConsideration",
+    "additionalData": {
+     "Data": {
+      "etICCanProceed": true,
+      "etICHearingAlreadyListed": false,
+      "etICHearingNotListedListUpdated": [
+       "Seek comments on the video hearing",
+       "List for final hearing",
+       "UDL hearing"
+      ]
+     }
+    },
+    "postEventState": "Accepted"
+   },
+   "output": [
+    {
+     "name": "Issue Initial Consideration Directions",
+     "processCategories": "Hearing",
+     "taskId": "IssueInitialConsiderationDirections"
+    },
+    {
+     "name": "List A Hearing",
+     "processCategories": "Hearing",
+     "taskId": "ListAHearing"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "initialConsideration",
+    "additionalData": {
+     "Data": {
+      "etICCanProceed": false,
+      "etInitialConsiderationRule27": {
+       "etICRule27ClaimToBe": "Dismissed in full"
+      }
+     }
+    },
+    "postEventState": "Accepted"
+   },
+   "output": [
+    {
+     "name": "Issue Initial Consideration Directions",
+     "processCategories": "Hearing",
+     "taskId": "IssueInitialConsiderationDirections"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "initialConsideration",
+    "additionalData": {
+     "Data": {
+      "etICCanProceed": true,
+      "etICHearingAlreadyListed": false,
+      "etICHearingNotListedListUpdated": [
+       "Seek comments on the video hearing",
+       "UDL hearing"
+      ]
+     }
+    },
+    "postEventState": "Accepted"
+   },
+   "output": [
+    {
+     "name": "Issue Initial Consideration Directions",
+     "processCategories": "Hearing",
+     "taskId": "IssueInitialConsiderationDirections"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "issueInitialConsiderationDirectionsWA",
+    "postEventState": "Accepted"
+   },
+   "output": [
+    {
+     "name": "Issue Initial Consideration Directions",
+     "processCategories": "Hearing",
+     "taskId": "IssueInitialConsiderationDirections"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "updateHearing",
+    "additionalData": {
+     "Data": {
+      "hearingDetailsCollection": [
+       {
+        "value": {
+         "hearingDetailsStatus": "Heard"
+        }
+       },
+       {
+        "value": {
+         "hearingDetailsStatus": "Vacated"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": "Accepted"
+   },
+   "output": [
+    {
+     "name": "Draft And Sign Judgment/Order",
+     "processCategories": "Judgment",
+     "taskId": "DraftAndSignJudgment"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "updateHearing",
+    "additionalData": {
+     "Data": {
+      "hearingDetailsCollection": [
+       {
+        "value": {
+         "hearingDetailsStatus": "Heard"
+        }
+       },
+       {
+        "value": {
+         "hearingDetailsStatus": "Postponed"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": "Accepted"
+   },
+   "output": [
+    {
+     "name": "Draft And Sign Judgment/Order",
+     "processCategories": "Judgment",
+     "taskId": "DraftAndSignJudgment"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "updateHearing",
+    "additionalData": {
+     "Data": {
+      "hearingDetailsCollection": [
+       {
+        "value": {
+         "hearingDetailsStatus": "Vacated"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": "Accepted"
+   },
+   "output": []
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "SUBMIT_CLAIMANT_TSE",
+    "additionalData": {
+     "Data": {
+      "genericTseApplicationCollection": [
+       {
+        "value": {
+         "number": "1",
+         "type": "Amend my claim"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": "Accepted"
+   },
+   "output": [
+    {
+     "name": "Review Application - Amend my claim",
+     "processCategories": "Application",
+     "taskId": "ContactTribunalWithAnApplication"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "SUBMIT_CLAIMANT_TSE",
+    "additionalData": {
+     "Data": {
+      "genericTseApplicationCollection": [
+       {
+        "value": {
+         "number": "1",
+         "type": "Contact about something else"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": "Accepted"
+   },
+   "output": [
+    {
+     "name": "Contact the tribunal",
+     "processCategories": "Application",
+     "taskId": "ContactTribunalWithAnApplication"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "CLAIMANT_TSE_RESPOND",
+    "additionalData": {
+     "Data": {
+      "genericTseApplicationCollection": [
+       {
+        "value": {
+         "number": "1",
+         "type": "Amend response",
+         "respondCollection": [
+          {
+           "value": {
+            "applicationType": "Amend response",
+            "from": "Claimant"
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": "Accepted"
+   },
+   "output": [
+    {
+     "name": "Review Application Response - Amend response",
+     "processCategories": "Application",
+     "taskId": "ContactTribunalWithAnApplication"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "CLAIMANT_TSE_RESPOND",
+    "additionalData": {
+     "Data": {
+      "genericTseApplicationCollection": [
+       {
+        "value": {
+         "number": "1",
+         "type": "Contact the tribunal",
+         "respondCollection": [
+          {
+           "value": {
+            "applicationType": "Contact the tribunal",
+            "from": "Claimant"
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": "Accepted"
+   },
+   "output": [
+    {
+     "name": "Contact the tribunal Response",
+     "processCategories": "Application",
+     "taskId": "ContactTribunalWithAnApplication"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "respondentTSE",
+    "additionalData": {
+     "Data": {
+      "genericTseApplicationCollection": [
+       {
+        "value": {
+         "number": "1",
+         "type": "Amend response"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": "Accepted"
+   },
+   "output": [
+    {
+     "name": "Review Application - Amend response",
+     "processCategories": "Application",
+     "taskId": "ContactTribunalWithAnApplication"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "respondentTSE",
+    "additionalData": {
+     "Data": {
+      "genericTseApplicationCollection": [
+       {
+        "value": {
+         "number": "1",
+         "type": "Contact the tribunal"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": "Accepted"
+   },
+   "output": [
+    {
+     "name": "Contact the tribunal",
+     "processCategories": "Application",
+     "taskId": "ContactTribunalWithAnApplication"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "tseRespond",
+    "additionalData": {
+     "Data": {
+      "genericTseApplicationCollection": [
+       {
+        "value": {
+         "number": "1",
+         "type": "Amend my claim",
+         "respondCollection": [
+          {
+           "value": {
+            "applicationType": "Amend my claim",
+            "from": "Respondent"
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": "Accepted"
+   },
+   "output": [
+    {
+     "name": "Review Application Response - Amend my claim",
+     "processCategories": "Application",
+     "taskId": "ContactTribunalWithAnApplication"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "tseRespond",
+    "additionalData": {
+     "Data": {
+      "genericTseApplicationCollection": [
+       {
+        "value": {
+         "number": "1",
+         "type": "Contact about something else",
+         "respondCollection": [
+          {
+           "value": {
+            "applicationType": "Contact about something else",
+            "from": "Respondent"
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": "Accepted"
+   },
+   "output": [
+    {
+     "name": "Contact the tribunal Response",
+     "processCategories": "Application",
+     "taskId": "ContactTribunalWithAnApplication"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "SUBMIT_CLAIMANT_TSE",
+    "additionalData": {
+     "Data": {
+      "genericTseApplicationCollection": [
+       {
+        "value": {
+         "number": "1",
+         "type": "Change my personal details"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Amend Party Details",
+     "processCategories": "Amendments",
+     "taskId": "AmendClaimantDetails"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "CLAIMANT_TSE_RESPOND",
+    "additionalData": {
+     "Data": {
+      "genericTseApplicationCollection": [
+       {
+        "value": {
+         "number": "1",
+         "type": "Change personal details",
+         "respondCollection": [
+          {
+           "value": {
+            "applicationType": "Change personal details",
+            "from": "Claimant"
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Amend Party Details",
+     "processCategories": "Amendments",
+     "taskId": "AmendRespondentDetails"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "respondentTSE",
+    "additionalData": {
+     "Data": {
+      "genericTseApplicationCollection": [
+       {
+        "value": {
+         "number": "1",
+         "type": "Change personal details"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Amend Party Details",
+     "processCategories": "Amendments",
+     "taskId": "AmendRespondentDetails"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "tseRespond",
+    "additionalData": {
+     "Data": {
+      "genericTseApplicationCollection": [
+       {
+        "value": {
+         "number": "1",
+         "type": "Change my personal details",
+         "respondCollection": [
+          {
+           "value": {
+            "applicationType": "Change my personal details",
+            "from": "Respondent"
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Amend Party Details",
+     "processCategories": "Amendments",
+     "taskId": "AmendClaimantDetails"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "SUBMIT_CLAIMANT_TSE",
+    "additionalData": {
+     "Data": {
+      "genericTseApplicationCollection": [
+       {
+        "value": {
+         "number": "1",
+         "type": "Withdraw all/part of claim",
+         "respondCollection": [
+          {
+           "value": {
+            "applicationType": "Withdraw all/part of claim",
+            "from": "Claimant"
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": "Accepted"
+   },
+   "output": [
+    {
+     "name": "Withdraw All or Part of Case",
+     "processCategories": "Amendments",
+     "taskId": "WithdrawAllOrPartOfCase"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "UPDATE_NOTIFICATION_RESPONSE",
+    "additionalData": {
+     "Data": {
+      "sendNotificationCollection": [
+       {
+        "value": {
+         "number": "1",
+         "sendNotificationResponsesCount": "0"
+        }
+       },
+       {
+        "value": {
+         "number": "2",
+         "sendNotificationResponsesCount": "1",
+         "respondCollection": [
+          {
+           "value": {
+            "from": "Claimant",
+            "datetime": "2026-11-19T23:41:38",
+            "isECC": "Yes"
+           }
+          }
+         ]
+        }
+       },
+       {
+        "value": {
+         "number": "3",
+         "sendNotificationResponsesCount": "2",
+         "respondCollection": [
+          {
+           "value": {
+            "from": "Claimant",
+            "datetime": "2026-11-19T22:41:38",
+            "isECC": "Yes"
+           }
+          },
+          {
+           "value": {
+            "from": "Respondent",
+            "datetime": "2026-11-20T00:41:38",
+            "isECC": "No"
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Reply to Employer's Contract Claim received",
+     "processCategories": "Vetting",
+     "taskId": "ReviewECCResponse"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "submitEt1Draft",
+    "postEventState": "Submitted"
+   },
+   "output": [
+    {
+     "name": "Et1 Vetting",
+     "processCategories": "Vetting",
+     "taskId": "Et1Vetting"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "SUBMIT_ET3_FORM",
+    "postEventState": "Accepted"
+   },
+   "output": [
+    {
+     "name": "ET3 Processing",
+     "processCategories": "Processing",
+     "taskId": "ET3Processing"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "SUBMIT_RESPONDENT_TSE",
+    "additionalData": {
+     "Data": {
+      "genericTseApplicationCollection": [
+       {
+        "value": {
+         "number": "1",
+         "type": "Amend response"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Application - Amend response",
+     "processCategories": "Application",
+     "taskId": "ContactTribunalWithAnApplication"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "RESPONDENT_TSE_RESPOND",
+    "additionalData": {
+     "Data": {
+      "genericTseApplicationCollection": [
+       {
+        "value": {
+         "number": "1",
+         "type": "Amend my claim",
+         "respondCollection": [
+          {
+           "value": {
+            "applicationType": "Amend my claim",
+            "from": "Respondent"
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": "Accepted"
+   },
+   "output": [
+    {
+     "name": "Review Application Response - Amend my claim",
+     "processCategories": "Application",
+     "taskId": "ContactTribunalWithAnApplication"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "createEcmCase",
+    "postEventState": "Submitted"
+   },
+   "output": [
+    {
+     "name": "Et1 Vetting",
+     "processCategories": "Vetting",
+     "taskId": "Et1Vetting"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "SUBMIT_STORED_PSE_RESPONSE",
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review notification response",
+     "processCategories": "Application",
+     "taskId": "SubmitClaimantPseResponse"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "UPDATE_NOTIFICATION_RESPONSE",
+    "additionalData": {
+     "Data": {
+      "sendNotificationCollection": [
+       {
+        "value": {
+         "number": "1",
+         "sendNotificationResponsesCount": "0"
+        }
+       },
+       {
+        "value": {
+         "number": "2",
+         "sendNotificationResponsesCount": "1",
+         "respondCollection": [
+          {
+           "value": {
+            "from": "Respondent",
+            "dateTime": "2025-06-01T10:00:00.000",
+            "isECC": "No"
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review notification 2 response",
+     "processCategories": "Application",
+     "taskId": "SubmitClaimantPseResponse"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "SUBMIT_STORED_PSE_RESPONSE",
+    "additionalData": {
+     "Data": {
+      "sendNotificationCollection": [
+       {
+        "value": {
+         "number": "1",
+         "sendNotificationResponsesCount": "0"
+        }
+       },
+       {
+        "value": {
+         "number": "2",
+         "sendNotificationResponsesCount": "1",
+         "respondCollection": [
+          {
+           "value": {
+            "from": "Respondent",
+            "dateTime": "2025-06-01T10:00:00.000",
+            "isECC": "No"
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review notification 2 response",
+     "processCategories": "Application",
+     "taskId": "SubmitClaimantPseResponse"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "SUBMIT_STORED_PSE_RESPONSE",
+    "additionalData": {
+     "Data": {
+      "sendNotificationCollection": [
+       {
+        "value": {
+         "number": "1",
+         "sendNotificationResponsesCount": "1",
+         "respondCollection": [
+          {
+           "value": {
+            "from": "Respondent",
+            "dateTime": null,
+            "isECC": "No"
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review notification 1 response",
+     "processCategories": "Application",
+     "taskId": "SubmitClaimantPseResponse"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "ADD_RESPONDENT_PSE_RESPONSE",
+    "additionalData": {
+     "Data": {
+      "sendNotificationCollection": [
+       {
+        "value": {
+         "number": "1",
+         "sendNotificationResponsesCount": "0"
+        }
+       },
+       {
+        "value": {
+         "number": "2",
+         "sendNotificationResponsesCount": "1",
+         "respondCollection": [
+          {
+           "value": {
+            "from": "Respondent",
+            "dateTime": "2025-06-01T10:00:00.000",
+            "isECC": "No"
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review notification 2 response",
+     "processCategories": "Application",
+     "taskId": "SubmitRespondentPseResponse"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "SUBMIT_RESPONDENT_PSE_RESPONSE",
+    "additionalData": {
+     "Data": {
+      "sendNotificationCollection": [
+       {
+        "value": {
+         "number": "1",
+         "sendNotificationResponsesCount": "0"
+        }
+       },
+       {
+        "value": {
+         "number": "2",
+         "sendNotificationResponsesCount": "1",
+         "respondCollection": [
+          {
+           "value": {
+            "from": "Respondent",
+            "dateTime": "2025-06-01T10:00:00.000",
+            "isECC": "No"
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review notification 2 response",
+     "processCategories": "Application",
+     "taskId": "SubmitRespondentPseResponse"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "UPDATE_CASE_SUBMITTED",
+    "postEventState": null
+   },
+   "output": []
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "UPDATE_ET3_FORM",
+    "postEventState": null
+   },
+   "output": []
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "requestSupport",
+    "postEventState": null
+   },
+   "output": []
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "SUBMIT_CASE_DRAFT",
+    "additionalData": {
+     "Data": {
+      "supportTaskState": {
+       "adminTaskRequired": true
+      }
+     }
+    },
+    "postEventState": "Submitted"
+   },
+   "output": [
+    {
+     "name": "Et1 Vetting",
+     "processCategories": "Vetting",
+     "taskId": "Et1Vetting"
+    },
+    {
+     "name": "Admin - Review Support Request",
+     "processCategories": "ReviewSupportAdmin",
+     "taskId": "ReviewSupportRequestAdmin"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "SUBMIT_CASE_DRAFT",
+    "additionalData": {
+     "Data": {
+      "supportTaskState": {
+       "legalOfficerTaskRequired": true
+      }
+     }
+    },
+    "postEventState": "Submitted"
+   },
+   "output": [
+    {
+     "name": "Et1 Vetting",
+     "processCategories": "Vetting",
+     "taskId": "Et1Vetting"
+    },
+    {
+     "name": "LO - Review Support Request",
+     "processCategories": "ReviewSupportLegalOfficer",
+     "taskId": "ReviewSupportRequestLegalOfficer"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "SUBMIT_CASE_DRAFT",
+    "additionalData": {
+     "Data": {
+      "supportTaskState": {
+       "judgeTaskRequired": true
+      }
+     }
+    },
+    "postEventState": "Submitted"
+   },
+   "output": [
+    {
+     "name": "Et1 Vetting",
+     "processCategories": "Vetting",
+     "taskId": "Et1Vetting"
+    },
+    {
+     "name": "EJ - Review Support Request",
+     "processCategories": "ReviewSupportJudge",
+     "taskId": "ReviewSupportRequestJudge"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "UPDATE_CASE_SUBMITTED",
+    "additionalData": {
+     "Data": {
+      "supportTaskState": {
+       "adminTaskRequired": true
+      }
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Admin - Review Support Request",
+     "processCategories": "ReviewSupportAdmin",
+     "taskId": "ReviewSupportRequestAdmin"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "UPDATE_CASE_SUBMITTED",
+    "additionalData": {
+     "Data": {
+      "supportTaskState": {
+       "legalOfficerTaskRequired": true
+      }
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "LO - Review Support Request",
+     "processCategories": "ReviewSupportLegalOfficer",
+     "taskId": "ReviewSupportRequestLegalOfficer"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "UPDATE_CASE_SUBMITTED",
+    "additionalData": {
+     "Data": {
+      "supportTaskState": {
+       "judgeTaskRequired": true
+      }
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "EJ - Review Support Request",
+     "processCategories": "ReviewSupportJudge",
+     "taskId": "ReviewSupportRequestJudge"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "SUBMIT_ET3_FORM",
+    "additionalData": {
+     "Data": {
+      "supportTaskState": {
+       "adminTaskRequired": true
+      }
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Admin - Review Support Request",
+     "processCategories": "ReviewSupportAdmin",
+     "taskId": "ReviewSupportRequestAdmin"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "SUBMIT_ET3_FORM",
+    "additionalData": {
+     "Data": {
+      "supportTaskState": {
+       "legalOfficerTaskRequired": true
+      }
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "LO - Review Support Request",
+     "processCategories": "ReviewSupportLegalOfficer",
+     "taskId": "ReviewSupportRequestLegalOfficer"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "SUBMIT_ET3_FORM",
+    "additionalData": {
+     "Data": {
+      "supportTaskState": {
+       "judgeTaskRequired": true
+      }
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "EJ - Review Support Request",
+     "processCategories": "ReviewSupportJudge",
+     "taskId": "ReviewSupportRequestJudge"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "UPDATE_ET3_FORM",
+    "additionalData": {
+     "Data": {
+      "supportTaskState": {
+       "adminTaskRequired": true
+      }
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Admin - Review Support Request",
+     "processCategories": "ReviewSupportAdmin",
+     "taskId": "ReviewSupportRequestAdmin"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "UPDATE_ET3_FORM",
+    "additionalData": {
+     "Data": {
+      "supportTaskState": {
+       "legalOfficerTaskRequired": true
+      }
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "LO - Review Support Request",
+     "processCategories": "ReviewSupportLegalOfficer",
+     "taskId": "ReviewSupportRequestLegalOfficer"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "UPDATE_ET3_FORM",
+    "additionalData": {
+     "Data": {
+      "supportTaskState": {
+       "judgeTaskRequired": true
+      }
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "EJ - Review Support Request",
+     "processCategories": "ReviewSupportJudge",
+     "taskId": "ReviewSupportRequestJudge"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "requestSupport",
+    "additionalData": {
+     "Data": {
+      "supportTaskState": {
+       "adminTaskRequired": true
+      }
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Admin - Review Support Request",
+     "processCategories": "ReviewSupportAdmin",
+     "taskId": "ReviewSupportRequestAdmin"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "requestSupport",
+    "additionalData": {
+     "Data": {
+      "supportTaskState": {
+       "legalOfficerTaskRequired": true
+      }
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "LO - Review Support Request",
+     "processCategories": "ReviewSupportLegalOfficer",
+     "taskId": "ReviewSupportRequestLegalOfficer"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "requestSupport",
+    "additionalData": {
+     "Data": {
+      "supportTaskState": {
+       "judgeTaskRequired": true
+      }
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "EJ - Review Support Request",
+     "processCategories": "ReviewSupportJudge",
+     "taskId": "ReviewSupportRequestJudge"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "createFlag",
+    "additionalData": {
+     "Data": {
+      "supportTaskState": {
+       "adminTaskRequired": true
+      }
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Admin - Review Support Request",
+     "processCategories": "ReviewSupportAdmin",
+     "taskId": "ReviewSupportRequestAdmin"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "createFlag",
+    "additionalData": {
+     "Data": {
+      "supportTaskState": {
+       "legalOfficerTaskRequired": true
+      }
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "LO - Review Support Request",
+     "processCategories": "ReviewSupportLegalOfficer",
+     "taskId": "ReviewSupportRequestLegalOfficer"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "createFlag",
+    "additionalData": {
+     "Data": {
+      "supportTaskState": {
+       "judgeTaskRequired": true
+      }
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "EJ - Review Support Request",
+     "processCategories": "ReviewSupportJudge",
+     "taskId": "ReviewSupportRequestJudge"
+    }
+   ]
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "UPDATE_CASE_SUBMITTED",
+    "additionalData": {
+     "Data": {
+      "supportTaskState": {
+       "adminTaskCreated": "Yes"
+      }
+     }
+    },
+    "postEventState": null
+   },
+   "output": []
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "SUBMIT_CASE_DRAFT",
+    "postEventState": null
+   },
+   "output": []
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "SUBMIT_ET3_FORM",
+    "postEventState": null
+   },
+   "output": []
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "createFlag",
+    "postEventState": null
+   },
+   "output": []
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "manageFlags",
+    "postEventState": null
+   },
+   "output": []
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "reviewAdminSupportRequest",
+    "postEventState": null
+   },
+   "output": []
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "reviewLOSupportRequest",
+    "postEventState": null
+   },
+   "output": []
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "reviewJudgeSupportRequest",
+    "postEventState": null
+   },
+   "output": []
+  },
+  {
+   "test": "EmploymentTaskInitiationTestEW",
+   "input": {
+    "eventId": "createArrangeSupportTask",
+    "postEventState": null
+   },
+   "output": []
+  }
+ ]
+}

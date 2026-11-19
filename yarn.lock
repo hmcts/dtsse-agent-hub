@@ -1036,6 +1036,7 @@ __metadata:
   resolution: "@hmcts-cft/wa-spec@workspace:packages/wa-spec"
   dependencies:
     fast-xml-parser: "npm:5.12.0"
+    feelin: "npm:8.2.0"
     yaml: "npm:2.9.1"
     zod: "npm:4.6.7"
   bin:
@@ -1345,6 +1346,31 @@ __metadata:
   version: 4.4.2
   resolution: "@js-sdsl/ordered-map@npm:4.4.2"
   checksum: 10c0/cc7e15dc4acf6d9ef663757279600bab70533d847dcc1ab01332e9e680bd30b77cdf9ad885cc774276f51d98b05a013571c940e5b360985af5eb798dc1a2ee2b
+  languageName: node
+  linkType: hard
+
+"@lezer/common@npm:^1.0.0, @lezer/common@npm:^1.3.0, @lezer/common@npm:^1.5.2":
+  version: 1.5.5
+  resolution: "@lezer/common@npm:1.5.5"
+  checksum: 10c0/d989bd7453d1fd90f2c0baf33fcf6e5f2082fcf3f1faf8b271ae51bef1ad388e2e53f5d91c16e841b70fe4d2ed7ed08adb3fb23cb03fee6455dad3c72f6ff998
+  languageName: node
+  linkType: hard
+
+"@lezer/highlight@npm:^1.2.3":
+  version: 1.2.5
+  resolution: "@lezer/highlight@npm:1.2.5"
+  dependencies:
+    "@lezer/common": "npm:^1.3.0"
+  checksum: 10c0/cb40f6efd8ba947b4a391368114ae394e36cbb2b7db07a7629278f9feed953d909868296f4acb936c7b70e4e7032458c5fcd6a2e836012ae6c02790b2de574fa
+  languageName: node
+  linkType: hard
+
+"@lezer/lr@npm:^1.4.10":
+  version: 1.4.12
+  resolution: "@lezer/lr@npm:1.4.12"
+  dependencies:
+    "@lezer/common": "npm:^1.0.0"
+  checksum: 10c0/3912ecd5f9ed916a13e929ab5f7d2cfc26d6d389b0b0d0673cbfb4d957042069f7c7182c991ebcb2019c4bba289102f81662200277b6c365911e62969fa67d74
   languageName: node
   linkType: hard
 
@@ -4586,6 +4612,18 @@ __metadata:
   languageName: node
   linkType: hard
 
+"feelin@npm:8.2.0":
+  version: 8.2.0
+  resolution: "feelin@npm:8.2.0"
+  dependencies:
+    "@lezer/common": "npm:^1.5.2"
+    lezer-feel: "npm:^3.0.1"
+    min-dash: "npm:^5.1.0"
+    temporal-polyfill: "npm:^1.0.4"
+  checksum: 10c0/acc76b5b9546f1fbd48a0d10a52e49a0986962b280bb4fd01d5e370ca0380bdc58655e3d1eec6f426ceb0d5e9496555fbcf0ba03523407b7686bb2eb7200f580
+  languageName: node
+  linkType: hard
+
 "find-my-way@npm:9.7.0":
   version: 9.7.0
   resolution: "find-my-way@npm:9.7.0"
@@ -4995,6 +5033,17 @@ __metadata:
   languageName: node
   linkType: hard
 
+"lezer-feel@npm:^3.0.1":
+  version: 3.0.1
+  resolution: "lezer-feel@npm:3.0.1"
+  dependencies:
+    "@lezer/highlight": "npm:^1.2.3"
+    "@lezer/lr": "npm:^1.4.10"
+    min-dash: "npm:^5.0.0"
+  checksum: 10c0/ffb8bf26e80cd2e845a623ada2f250695eda745d3cae5f17fbe2cdf5a29a1391ebba2186f56636a99f0dc1525dfe74ea4eeaa3bb9c3529eda362c5540d34ff5c
+  languageName: node
+  linkType: hard
+
 "lightningcss-android-arm64@npm:1.33.0":
   version: 1.33.0
   resolution: "lightningcss-android-arm64@npm:1.33.0"
@@ -5246,6 +5295,13 @@ __metadata:
   version: 2.27.1
   resolution: "mdn-data@npm:2.27.1"
   checksum: 10c0/eb8abf5d22e4d1e090346f5e81b67d23cef14c83940e445da5c44541ad874dc8fb9f6ca236e8258c3a489d9fb5884188a4d7d58773adb9089ac2c0b966796393
+  languageName: node
+  linkType: hard
+
+"min-dash@npm:^5.0.0, min-dash@npm:^5.1.0":
+  version: 5.1.0
+  resolution: "min-dash@npm:5.1.0"
+  checksum: 10c0/44d977d9a8dc45526e3b1badc903adb9d511937d7c895643d252947a7c6371970b89ac48f205a7207eed2f1426d6e538a1d95511d9e815ea48d23d35ef7c0ba5
   languageName: node
   linkType: hard
 
@@ -6320,6 +6376,30 @@ __metadata:
     minizlib: "npm:^3.1.0"
     yallist: "npm:^5.0.0"
   checksum: 10c0/1311f6be85a8157ac4c9147bae43e13923d2a1aae15e4aa1bd5239e4e03d2cf53cfe103dde7f35832fbb4c938b042856bc8e9a0afd29abd05e2d1608788c4fea
+  languageName: node
+  linkType: hard
+
+"temporal-polyfill@npm:^1.0.4":
+  version: 1.0.8
+  resolution: "temporal-polyfill@npm:1.0.8"
+  dependencies:
+    temporal-spec: "npm:1.0.1"
+    temporal-utils: "npm:1.0.4"
+  checksum: 10c0/91f225c02a39f824ce71b3710e9cbf8e28e9fb40428c42b5ee067263737a34005fa61b87822bce207e6ad4257b0ee40fb29c2cdbf540aba7fda5809f276f7f61
+  languageName: node
+  linkType: hard
+
+"temporal-spec@npm:1.0.1":
+  version: 1.0.1
+  resolution: "temporal-spec@npm:1.0.1"
+  checksum: 10c0/99f6bfe4a8e59cd0664d0e97706798a1e10d42b1b682da9b60778a4cb9a23362da01ea3d83a674ef426ed743bbab835e2e3d1acea5d2d4a9eabe33863237b014
+  languageName: node
+  linkType: hard
+
+"temporal-utils@npm:1.0.4":
+  version: 1.0.4
+  resolution: "temporal-utils@npm:1.0.4"
+  checksum: 10c0/cd5105d49f01794c5adfde697178364a70b56c28be60119922bbb1a96dd4d8de43537fa31883aff85e0c18b39cd2e1d2facfc794750e03621c6983f95b39da1b
   languageName: node
   linkType: hard
 

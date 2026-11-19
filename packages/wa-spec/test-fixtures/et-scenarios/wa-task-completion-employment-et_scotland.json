@@ -1,0 +1,346 @@
+{
+ "decision": "wa-task-completion-employment-et_scotland",
+ "source": "hmcts/et-wa-task-configuration@fa182449b8ef501c95e1f00137965994d835c4c3",
+ "scenarios": [
+  {
+   "test": "EmploymentTaskCompletionTestScot",
+   "input": {
+    "eventId": "preAcceptanceCase"
+   },
+   "output": [
+    {
+     "taskType": "Et1Vetting",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewReferralJudiciary",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewReferralLegalOps",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewReferralResponseJudiciary",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewReferralResponseLegalOps",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "test": "EmploymentTaskCompletionTestScot",
+   "input": {
+    "eventId": "replyToReferral"
+   },
+   "output": [
+    {
+     "taskType": "ReviewReferralAdmin",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewReferralResponseAdmin",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewReferralJudiciary",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewReferralLegalOps",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewReferralResponseJudiciary",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewReferralResponseLegalOps",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "test": "EmploymentTaskCompletionTestScot",
+   "input": {
+    "eventId": "closeReferral"
+   },
+   "output": [
+    {
+     "taskType": "ReviewReferralAdmin",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewReferralResponseAdmin",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewReferralJudiciary",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewReferralLegalOps",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewReferralResponseJudiciary",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewReferralResponseLegalOps",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "test": "EmploymentTaskCompletionTestScot",
+   "input": {
+    "eventId": "uploadDocumentForServing"
+   },
+   "output": [
+    {
+     "taskType": "ListServeClaim",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "test": "EmploymentTaskCompletionTestScot",
+   "input": {
+    "eventId": "generateCorrespondence"
+   },
+   "output": [
+    {
+     "taskType": "SendEt1Notification",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "IssuePostHearingDirection",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "IssueInitialConsiderationDirections",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "test": "EmploymentTaskCompletionTestScot",
+   "input": {
+    "eventId": "addAmendHearing"
+   },
+   "output": [
+    {
+     "taskType": "ListAHearing",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "test": "EmploymentTaskCompletionTestScot",
+   "input": {
+    "eventId": "issueInitialConsiderationDirectionsWA"
+   },
+   "output": [
+    {
+     "taskType": "ListAHearing",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "test": "EmploymentTaskCompletionTestScot",
+   "input": {
+    "eventId": "initialConsideration"
+   },
+   "output": [
+    {
+     "taskType": "CompleteInitialConsideration",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "test": "EmploymentTaskCompletionTestScot",
+   "input": {
+    "eventId": "et3Notification"
+   },
+   "output": [
+    {
+     "taskType": "SendEt3Notification",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "test": "EmploymentTaskCompletionTestScot",
+   "input": {
+    "eventId": "et3Vetting"
+   },
+   "output": [
+    {
+     "taskType": "Rule21",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ET3Processing",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "test": "EmploymentTaskCompletionTestScot",
+   "input": {
+    "eventId": "createReferral"
+   },
+   "output": [
+    {
+     "taskType": "ReviewRule21Referral",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReferEmployersContractClaim",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "WithdrawAllOrPartOfCase",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "test": "EmploymentTaskCompletionTestScot",
+   "input": {
+    "eventId": "draftAndSignJudgement"
+   },
+   "output": [
+    {
+     "taskType": "DraftAndSignJudgment",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "test": "EmploymentTaskCompletionTestScot",
+   "input": {
+    "eventId": "amendClaimantDetails"
+   },
+   "output": [
+    {
+     "taskType": "AmendClaimantDetails",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "test": "EmploymentTaskCompletionTestScot",
+   "input": {
+    "eventId": "amendRespondentDetails"
+   },
+   "output": [
+    {
+     "taskType": "ReviewECCResponse",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "AmendRespondentDetails",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "test": "EmploymentTaskCompletionTestScot",
+   "input": {
+    "eventId": "addAmendJudgment"
+   },
+   "output": [
+    {
+     "taskType": "IssueJudgment",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "test": "EmploymentTaskCompletionTestScot",
+   "input": {
+    "eventId": "disposeCase"
+   },
+   "output": [
+    {
+     "taskType": "WithdrawAllOrPartOfCase",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "test": "EmploymentTaskCompletionTestScot",
+   "input": {
+    "eventId": "tseAdmin"
+   },
+   "output": [
+    {
+     "taskType": "ContactTribunalWithAnApplication",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "test": "EmploymentTaskCompletionTestScot",
+   "input": {
+    "eventId": "tseAdmReply"
+   },
+   "output": [
+    {
+     "taskType": "ContactTribunalWithAnApplication",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "test": "EmploymentTaskCompletionTestScot",
+   "input": {
+    "eventId": "tseAdminCloseAnApplication"
+   },
+   "output": [
+    {
+     "taskType": "ContactTribunalWithAnApplication",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "test": "EmploymentTaskCompletionTestScot",
+   "input": {
+    "eventId": "sendNotification"
+   },
+   "output": [
+    {
+     "taskType": "IssueOrder",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  }
+ ]
+}
