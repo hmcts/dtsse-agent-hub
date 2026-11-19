@@ -1,4 +1,4 @@
-import { type DmnDecision, type DmnDocument, type DmnInput, type DmnOutput, readDmn } from "./dmn-model.ts";
+import type { DmnDecision, DmnDocument, DmnInput, DmnOutput } from "./dmn-model.ts";
 import { isStructured, normaliseFeel, parseCell, parseExpr } from "./feel.ts";
 import { fileNameOf, parseFileName } from "./file-names.ts";
 import { generateDocument } from "./generator.ts";
@@ -20,6 +20,7 @@ import {
   Spec,
   validateSpec
 } from "./schema.ts";
+import { keyedDecision, readDmnFile } from "./task-files.ts";
 
 export interface DmnFile {
   name: string;
@@ -490,8 +491,8 @@ export function importDmns(files: DmnFile[], options: ImportOptions = {}): { spe
       skip(file.name, "not a wa-task-<kind>-<service>-<caseType>.dmn file");
       continue;
     }
-    const { document, inspection } = readDmn(file.xml);
-    const keyed = document.decisions.find((d) => parseFileName(`${d.id}.dmn`) !== undefined);
+    const { document, inspection } = readDmnFile(file.name, file.xml);
+    const keyed = keyedDecision(document.decisions);
     const match = keyed ? parseFileName(`${keyed.id}.dmn`) : byName;
     if (!match) {
       skip(file.name, "a task DMN of a kind the spec does not know", true);
@@ -514,18 +515,15 @@ export function importDmns(files: DmnFile[], options: ImportOptions = {}): { spe
     }
     const unnamed = decision.table.outputs.findIndex((output) => output.name === "");
     if (unnamed >= 0) {
-      skipped.push(`${file.name}: an output column without a name`);
-      flag(`an output column without a name (column ${unnamed + 1})`, file.name);
+      skip(file.name, "an output column has no name", true, `an output column without a name (column ${unnamed + 1})`);
       continue;
     }
     if (!HIT_POLICIES.includes(decision.table.hitPolicy as (typeof HIT_POLICIES)[number])) {
-      skipped.push(`${file.name}: hit policy ${decision.table.hitPolicy}`);
-      flag(`hit policy ${decision.table.hitPolicy}, which needs output values the spec cannot hold`, file.name);
+      skip(file.name, `hit policy ${decision.table.hitPolicy}`, true, `hit policy ${decision.table.hitPolicy}, which needs output values the spec cannot hold`);
       continue;
     }
     if (decision.table.aggregation && !AGGREGATIONS.includes(decision.table.aggregation as (typeof AGGREGATIONS)[number])) {
-      skipped.push(`${file.name}: aggregation ${decision.table.aggregation}`);
-      flag(`aggregation ${decision.table.aggregation}, which the spec does not know`, file.name);
+      skip(file.name, `aggregation ${decision.table.aggregation}`, true, `aggregation ${decision.table.aggregation}, which the spec does not know`);
       continue;
     }
     slugs.set(match.service, [...(slugs.get(match.service) ?? []), file.name]);

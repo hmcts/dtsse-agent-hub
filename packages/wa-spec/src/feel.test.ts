@@ -256,3 +256,12 @@ describe("renderExpr numbers", () => {
     expect(parseExpr(text)).toEqual(value < 0 ? { feel: text } : value);
   });
 });
+
+describe("normaliseFeel keeps tokens apart", () => {
+  it("should keep a space between two tokens that would join into one when they were written apart", () => {
+    expect(normaliseFeel("a > = b")).not.toBe(normaliseFeel("a >= b"));
+    expect(normaliseFeel("a ! = b")).not.toBe(normaliseFeel("a != b"));
+    expect(normaliseFeel("a >= b")).toBe(normaliseFeel("a  >=  b"));
+    expect(normaliseFeel("f ( a , b )")).toBe(normaliseFeel("f(a,b)"));
+  });
+});

@@ -227,3 +227,36 @@ describe("attribute value normalisation", () => {
     expect(readDmn(xml).document.decisions[0]?.table?.rules[0]?.inputs[0]).toBe('"submit",\n\t"update"');
   });
 });
+
+describe("roots and empty values", () => {
+  const prefixed = (xml: string) =>
+    xml
+      .replace(
+        /<(\/?)(definitions|decision|variable|informationRequirement|requiredDecision|decisionTable|input|inputExpression|output|rule|description|inputEntry|outputEntry|literalExpression|text)\b/g,
+        "<$1dmn:$2"
+      )
+      .replace("<dmn:definitions ", '<dmn:definitions xmlns:dmn="https://www.omg.org/spec/DMN/20191111/MODEL/" ');
+
+  it("should read elements written with the DMN namespace prefix like unprefixed ones when the root is prefixed", () => {
+    const xml = sampleDmn("ct_a");
+    expect(readDmn(prefixed(xml)).document.decisions).toEqual(readDmn(xml).document.decisions);
+    expect(readDmn(prefixed(xml)).inspection.unrepresentable.size).toBe(0);
+  });
+
+  it("should write a default DMN namespace when the stored declarations lack one", () => {
+    const doc = readDmn(prefixed(sampleDmn("ct_a"))).document;
+    expect(/<definitions[^>]*>/.exec(writeDmn(doc))?.[0]).toContain(' xmlns="');
+  });
+
+  it("should refuse content that is not a DMN file when the root is something else", () => {
+    expect(() => readDmn("<html/>")).toThrow(/not a DMN file: its root element is <html>/);
+    expect(() => readDmn("")).toThrow(/root element is missing/);
+    expect(() => readDmn('<x:definitions xmlns:x="urn:other"/>')).toThrow(/not bound to a DMN namespace/);
+  });
+
+  it("should keep an empty allowed-values element as empty text when the input has one", () => {
+    const empty = (element: string) => sampleDmn("ct_a").replace("</inputExpression>", `</inputExpression>${element}`);
+    expect(readDmn(empty('<inputValues id="v"><text></text></inputValues>')).document.decisions[0]?.table?.inputs[0]?.allowedValues).toBe("");
+    expect(readDmn(empty('<inputValues id="v"/>')).document.decisions[0]?.table?.inputs[0]).toMatchObject({ allowedValues: "", allowedValuesId: "v" });
+  });
+});

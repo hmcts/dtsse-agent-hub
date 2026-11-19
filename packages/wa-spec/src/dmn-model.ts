@@ -227,7 +227,9 @@ function parseTable(table: Node): DmnTable {
       ...optional<Omit<DmnInput, "expression">>({
         id: attr(input, "id"),
         expressionId: attr(expression, "id"),
-        ...(input.inputValues ? { allowedValues: textOf(input.inputValues as Node), allowedValuesId: attr(input.inputValues as Node, "id") } : {}),
+        ...(input.inputValues !== undefined
+          ? { allowedValues: textOf(input.inputValues as Node), allowedValuesId: attr(input.inputValues as Node, "id") }
+          : {}),
         width: attr(input, "biodi:width"),
         label: attr(input, "label"),
         inputVariable: attr(input, "camunda:inputVariable"),
@@ -275,8 +277,36 @@ function parseTable(table: Node): DmnTable {
 }
 
 /** A DMN file's document, and what the model leaves out of it, from one read of the XML. */
+/**
+ * The ordered tree with the prefix of the DMN namespace removed from element names, so a file whose elements are written
+ * `<dmn:decision>` reads like one written `<decision>`. A root that is not a DMN `definitions` element is an error.
+ */
+function dmnElements(ordered: Ordered): Ordered {
+  const rootKey = ordered.flatMap((node) => Object.keys(node)).find((key) => key !== ":@" && !key.startsWith("?") && key !== "#text");
+  if (rootKey === undefined || rootKey.split(":").pop() !== "definitions") {
+    throw new Error(`not a DMN file: its root element is ${rootKey ? `<${rootKey}>` : "missing"}, not <definitions>`);
+  }
+  const prefix = rootKey.includes(":") ? rootKey.slice(0, rootKey.indexOf(":")) : "";
+  if (prefix === "") {
+    return ordered;
+  }
+  const bound = String((ordered.find((node) => rootKey in node)?.[":@"] as Node | undefined)?.[`@_xmlns:${prefix}`] ?? "");
+  if (!/^https?:\/\/www\.omg\.org\/spec\/DMN\//.test(bound)) {
+    throw new Error(`not a DMN file: the prefix ${prefix} of its root element is not bound to a DMN namespace`);
+  }
+  const strip = (nodes: Ordered): Ordered =>
+    nodes.map((node) =>
+      Object.fromEntries(
+        Object.entries(node).map(([key, value]) =>
+          key === ":@" || key === "#text" ? [key, value] : [key.startsWith(`${prefix}:`) ? key.slice(prefix.length + 1) : key, strip(value as Ordered)]
+        )
+      )
+    );
+  return strip(ordered);
+}
+
 export function readDmn(xml: string): { document: DmnDocument; inspection: Inspection } {
-  const ordered = orderedParser.parse(normaliseAttributes(xml)) as Ordered;
+  const ordered = dmnElements(orderedParser.parse(normaliseAttributes(xml)) as Ordered);
   const tree = groupTree(ordered) as Node;
   return { document: documentOf(tree, parseDiagram(ordered)), inspection: inspectTree(tree) };
 }

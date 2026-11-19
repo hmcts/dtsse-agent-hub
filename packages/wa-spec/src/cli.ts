@@ -9,6 +9,7 @@ import { explained, loadSpecFile, loadSpecOnly, orderPathBeside, stringifyModel,
 import { liftSpec, renderLiftReport } from "./model-lift.ts";
 import { compareSpecs } from "./spec-diff.ts";
 import { layoutPathFor, parseSpec, stringifyLayout, stringifySpec } from "./spec-io.ts";
+import { listTaskFiles } from "./task-files.ts";
 import { renderTaskRows, taskRows } from "./task-view.ts";
 
 const USAGE = `wa-spec: Work Allocation configuration spec
@@ -83,14 +84,13 @@ function main(argv: string[]): number {
     for (const file of files) {
       writeText(join(values.output, file.fileName), file.xml);
     }
-    const made = new Set(files.map((file) => `${file.kind}/${file.caseType}`));
-    const madeNames = new Set(files.map((file) => file.fileName));
-    const stale = (exists(values.output) ? listDir(values.output) : []).filter((name) => {
-      const parsed = parseFileName(name);
-      return !madeNames.has(name) && parsed?.service === spec.service.slug && !made.has(`${parsed.kind}/${parsed.caseType}`);
+    const made = new Set(files.map((file) => file.fileName));
+    const stale = (exists(values.output) ? listTaskFiles(values.output) : []).filter((file) => {
+      const parsed = file.key === undefined ? undefined : parseFileName(`${file.key}.dmn`);
+      return !made.has(file.name) && parsed?.service === spec.service.slug && !files.some((f) => f.kind === parsed.kind && f.caseType === parsed.caseType);
     });
     if (stale.length > 0) {
-      process.stderr.write(`left in place, as the spec does not generate them: ${stale.join(", ")}\n`);
+      process.stderr.write(`left in place, as the spec does not generate them: ${stale.map((file) => file.name).join(", ")}\n`);
     }
     process.stdout.write(`generated ${files.length} files in ${values.output}\n`);
     return 0;

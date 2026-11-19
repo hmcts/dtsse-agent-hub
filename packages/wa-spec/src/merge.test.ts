@@ -50,3 +50,18 @@ describe("byCodePoint", () => {
     expect(byCodePoint("a", "a")).toBe(0);
   });
 });
+
+describe("mergeSequences identity", () => {
+  it("should compute the identity of each item once across merges when sequences are folded in", () => {
+    let calls = 0;
+    const identity = (item: string) => {
+      calls++;
+      return item;
+    };
+    let merged = mergeSequences([], "a", ["x", "y"], identity);
+    merged = mergeSequences(merged, "b", ["x", "z"], identity);
+    merged = mergeSequences(merged, "c", ["y"], identity);
+    expect(calls).toBe(2 + 2 + 1);
+    expect(merged.map((m) => m.item)).toEqual(["x", "y", "z"]);
+  });
+});

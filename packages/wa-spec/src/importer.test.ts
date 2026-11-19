@@ -412,3 +412,16 @@ describe("importDmns names, languages and skipped files", () => {
     expect(report.unrepresentable.map((u) => u.construct)).toEqual(["aggregation MEDIAN, which the spec does not know"]);
   });
 });
+
+describe("importDmns read errors and notes", () => {
+  it("should name the file when its content is not a DMN file", () => {
+    expect(() => importDmns([file("ct_a"), { name: "wa-task-completion-demo-ct_b.dmn", xml: "<html/>" }])).toThrow(
+      /^wa-task-completion-demo-ct_b\.dmn: not a DMN file/
+    );
+  });
+
+  it("should note why a file was skipped when its hit policy, aggregation or output names are refused", () => {
+    const { report } = importDmns([file("ct_a"), file("ct_b", { hitPolicy: "PRIORITY" })]);
+    expect(report.notes.join()).toContain("wa-task-completion-demo-ct_b.dmn: hit policy PRIORITY, skipped");
+  });
+});

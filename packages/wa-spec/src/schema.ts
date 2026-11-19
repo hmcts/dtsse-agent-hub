@@ -242,6 +242,14 @@ export function validateSpec(spec: Spec): string[] {
       );
     }
   }
+  /** Reports a case type in `only` that the `label`'d decision, limited to `scope`, does not have. */
+  const within = (where: string, only: string[] | undefined, scope: string[] | undefined, label: string) => {
+    for (const id of only ?? []) {
+      if (scope && caseTypes.has(id) && !scope.includes(id)) {
+        problems.push(`${where}: ${id} is not a case type of ${label}`);
+      }
+    }
+  };
   const known = (where: string, ids: string[] | undefined) => {
     for (const id of ids ?? []) {
       if (!caseTypes.has(id)) {
@@ -272,13 +280,6 @@ export function validateSpec(spec: Spec): string[] {
       if (outputNames.size !== table.outputs.length) {
         problems.push(`${label}: duplicate output name`);
       }
-      const within = (where: string, only: string[] | undefined) => {
-        for (const id of only ?? []) {
-          if (scope && caseTypes.has(id) && !scope.includes(id)) {
-            problems.push(`${where}: ${id} is not a case type of ${label}`);
-          }
-        }
-      };
       for (const id of types) {
         const { hitPolicy, aggregation } = hit(id);
         if (aggregation && hitPolicy !== "COLLECT") {
@@ -290,13 +291,13 @@ export function validateSpec(spec: Spec): string[] {
       }
       for (const column of [...table.inputs, ...table.outputs]) {
         known(`${label} column`, column.only);
-        within(`${label} column`, column.only);
+        within(`${label} column`, column.only, scope, label);
         known(`${label} column overrides`, Object.keys(column.overrides ?? {}));
       }
       table.rows.forEach((row, index) => {
         const where = `${label} row ${index + 1}`;
         known(where, row.only);
-        within(where, row.only);
+        within(where, row.only, scope, label);
         for (const key of Object.keys(row.when ?? {})) {
           const column = inputKeys.get(key);
           if (!column) {
@@ -327,13 +328,6 @@ export function validateSpec(spec: Spec): string[] {
       hitPolicy: decision.overrides?.[id]?.hitPolicy ?? decision.hitPolicy,
       aggregation: decision.overrides?.[id]?.aggregation === undefined ? decision.aggregation : decision.overrides[id]?.aggregation
     }));
-    const within = (where: string, only: string[] | undefined) => {
-      for (const id of only ?? []) {
-        if (decision.only && caseTypes.has(id) && !decision.only.includes(id)) {
-          problems.push(`${where}: ${id} is not a case type of ${kind}`);
-        }
-      }
-    };
     const helperNames = new Set((decision.helpers ?? []).map((h) => h.name));
     const sharing = new Map<string, Array<string[] | undefined>>();
     for (const helper of decision.helpers ?? []) {
@@ -341,7 +335,7 @@ export function validateSpec(spec: Spec): string[] {
         problems.push(`${kind}: a helper cannot be named table, which stands for the main decision in a dependency`);
       }
       known(`${kind} helper ${helper.name}`, helper.only);
-      within(`${kind} helper ${helper.name}`, helper.only);
+      within(`${kind} helper ${helper.name}`, helper.only, decision.only, kind);
       known(`${kind} helper ${helper.name} overrides`, Object.keys(helper.overrides ?? {}));
       if (helper.outputs) {
         checkTable(
@@ -364,7 +358,7 @@ export function validateSpec(spec: Spec): string[] {
     }
     for (const dependency of decision.dependencies ?? []) {
       known(`${kind} dependency ${dependency.decision} -> ${dependency.requires}`, dependency.only);
-      within(`${kind} dependency ${dependency.decision} -> ${dependency.requires}`, dependency.only);
+      within(`${kind} dependency ${dependency.decision} -> ${dependency.requires}`, dependency.only, decision.only, kind);
       if (dependency.decision !== "table" && !helperNames.has(dependency.decision)) {
         problems.push(`${kind}: dependency from unknown decision ${dependency.decision}`);
       }
