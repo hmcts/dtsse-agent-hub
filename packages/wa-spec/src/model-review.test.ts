@@ -818,3 +818,53 @@ describe("round seven residue categories", () => {
     expect(lifted.report.differences).toEqual([]);
   });
 });
+
+describe("round eight", () => {
+  const fixtures = fileURLToPath(new URL("../test-fixtures/et", import.meta.url));
+  const files = readdirSync(fixtures)
+    .filter((n) => n.startsWith("wa-task-") && n.endsWith(".dmn"))
+    .map((name) => ({ name, xml: readFileSync(join(fixtures, name), "utf8") }));
+  const { spec } = importDmns(files, { jurisdiction: "EMPLOYMENT" });
+  const lifted = liftSpec(spec);
+  const model = parseModel(stringifyModel(lifted.model));
+
+  it("should accept comma separated categories on a task and on a rule when validating", () => {
+    const text = (task: string, rule: string) =>
+      BASE.replace("cancelCategory: X", `cancelCategory: ${task}`).replace("categories: [X, Y]", `categories: [${rule}, Y]`);
+    expect(() => parseModel(text('"caseProgression,followUpOverdue"', "caseProgression"))).not.toThrow();
+    expect(() => parseModel(text('"caseProgression, followUpOverdue"', '"followUpOverdue,caseProgression"'))).not.toThrow();
+    expect(() => parseModel(text('"caseProgression,followUpOverdue"', "other"))).toThrow("category other is not the cancelCategory of any task");
+  });
+
+  it("should keep the description of a row shared by several tasks when the first task is deleted", () => {
+    const without = { ...model, tasks: model.tasks.filter((t) => t.id !== "Et1Vetting") } as Model;
+    const rows = configRows(without, lifted.ordering).filter((r) => r.returns?.name === "workType" && r.returns?.value === "routine_work");
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((r) => typeof r.description === "string" && r.description.includes("type of work"))).toBe(true);
+    expect(rows.some((r) => tasksOf(r).includes("Et1Vetting"))).toBe(false);
+  });
+
+  it("should keep a task's workType bare when the description of its shared row is in the ordering", () => {
+    expect(model.tasks.find((t) => t.id === "Et1Vetting")?.workType).toBe("routine_work");
+  });
+
+  it("should leave every row where it was when a cancellation rule is renamed", () => {
+    const renamed = { ...model, cancellations: (model.cancellations ?? []).map((r, i) => (i === 0 ? { ...r, id: "renamed" } : r)) } as Model;
+    expect(diffSpecs(spec, compileModel(renamed, lifted.ordering))).toEqual([]);
+  });
+
+  it("should name the ordering file once in the error when a model's ordering file is missing, and when it is invalid", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wa-spec-order-"));
+    writeFileSync(join(dir, "m.yaml"), `${BASE}order: gone.order.yaml\n`);
+    let message = "";
+    try {
+      loadSpecFile(join(dir, "m.yaml"));
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message.split(join(dir, "m.yaml")).length - 1).toBe(1);
+    writeFileSync(join(dir, "bad.order.yaml"), "version: 2\n");
+    writeFileSync(join(dir, "n.yaml"), `${BASE}order: bad.order.yaml\n`);
+    expect(() => loadSpecFile(join(dir, "n.yaml"))).toThrow(/bad\.order\.yaml is not valid/);
+  });
+});

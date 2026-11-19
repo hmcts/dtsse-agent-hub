@@ -377,9 +377,7 @@ tasks:
     name: ET1 Vetting
     initialName: Et1 Vetting
     only: [ et_englandwales, et_scotland ]
-    workType:
-      value: routine_work
-      note: Name of the type of work - this is based on the filter. All Judgment tasks will be decision making work.
+    workType: routine_work
     roleCategory: ADMIN
     permissions: adminAndCtscWorker
     create:
@@ -2157,9 +2155,7 @@ tasks:
     initialName:
       field: LATEST_REFERRAL_TASK_NAME
     only: [ et_englandwales_multiple, et_scotland_multiple ]
-    workType:
-      value: routine_work
-      note: Name of the type of work - this is based on the filter. All Judgment tasks will be decision making work.
+    workType: routine_work
     roleCategory: ADMIN
     permissions: adminAndCtscWorker
     create:

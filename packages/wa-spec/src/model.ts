@@ -289,6 +289,13 @@ export function permissionSpecs(task: Task): PermissionSpec[] {
   return typeof permissions === "string" ? [{ profile: permissions }] : [permissions].flat();
 }
 
+/** A category value may list several, comma separated, as the WA task templates do. */
+const categoryParts = (category: string): string[] =>
+  category
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part) => part !== "");
+
 const RESERVED_WHEN = ["eventId", "eventID", "postEventState"];
 
 /** Checks the references the shape alone cannot: ids, roles, profiles and case types. */
@@ -409,11 +416,7 @@ export function validateModel(model: Model): string[] {
           problems.push(`${where}: overrides ${r}, which profile ${spec.profile ?? "(none)"} does not grant`);
         }
       }
-      for (const r of Object.keys(spec.add ?? {})) {
-        if (held.has(r) && !spec.remove?.includes(r)) {
-          problems.push(`${where}: adds ${r}, which profile ${spec.profile} already grants (override it, or remove and add it)`);
-        }
-      }
+
       if (spec.profile !== undefined && !Object.hasOwn(profiles, spec.profile)) {
         problems.push(`${where}: unknown permission profile ${spec.profile}`);
       }
@@ -424,6 +427,9 @@ export function validateModel(model: Model): string[] {
       }
       for (const r of Object.keys(spec.add ?? {})) {
         role(`${where} permissions`, r);
+        if (held.has(r) && !spec.remove?.includes(r)) {
+          problems.push(`${where}: adds ${r}, which profile ${spec.profile} already grants (override it, or remove and add it)`);
+        }
       }
     }
     const attributes = attributesOf(task);
@@ -464,7 +470,9 @@ export function validateModel(model: Model): string[] {
   for (const task of model.tasks) {
     for (const category of [task.cancelCategory, ...(task.create ?? []).map((t) => t.cancelCategory)]) {
       if (typeof category === "string") {
-        used.add(category);
+        for (const part of categoryParts(category)) {
+          used.add(part);
+        }
       } else if (category !== undefined) {
         computed = true;
       }
@@ -474,8 +482,10 @@ export function validateModel(model: Model): string[] {
   for (const [index, rule] of (model.cancellations ?? []).entries()) {
     known(`cancellations[${index}]`, rule.only);
     for (const category of computed ? [] : (rule.categories ?? [])) {
-      if (typeof category === "string" && category !== "*" && !used.has(category)) {
-        problems.push(`cancellations[${index}]: category ${category} is not the cancelCategory of any task`);
+      for (const part of typeof category === "string" ? categoryParts(category) : []) {
+        if (part !== "*" && !used.has(part)) {
+          problems.push(`cancellations[${index}]: category ${part} is not the cancelCategory of any task`);
+        }
       }
     }
     if (rule.id !== undefined) {

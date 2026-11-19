@@ -33,19 +33,26 @@ export function compareSpecs(a: Spec, b: Spec, options: CompareOptions = {}): { 
   return found;
 }
 
-/** A copy of the spec with the rows of the given tables in a fixed order, so tables with the same rows in any order compare equal. */
+/** The spec with the rows of the given tables in a fixed order, so tables with the same rows in any order compare equal; only those tables are copied. */
 function withRows(spec: Spec, asSets: Set<Kind>): Spec {
-  const copy: Spec = JSON.parse(JSON.stringify(spec));
-  for (const kind of asSets) {
-    const decision = copy.decisions[kind];
-    if (decision) {
-      decision.rows = decision.rows
-        .map((row) => ({ key: stable(row), row }))
-        .sort((x, y) => byCodePoint(x.key, y.key))
-        .map((x) => x.row);
-    }
-  }
-  return copy;
+  const sorted = [...asSets].flatMap((kind) => {
+    const decision = spec.decisions[kind];
+    return decision
+      ? [
+          [
+            kind,
+            {
+              ...decision,
+              rows: decision.rows
+                .map((row) => ({ key: stable(row), row }))
+                .sort((x, y) => byCodePoint(x.key, y.key))
+                .map((x) => x.row)
+            }
+          ] as const
+        ]
+      : [];
+  });
+  return sorted.length === 0 ? spec : { ...spec, decisions: { ...spec.decisions, ...Object.fromEntries(sorted) } };
 }
 
 /** Strict: every table's rows in order. */
@@ -68,10 +75,11 @@ function walk(a: unknown, b: unknown, path: string, found: Found): void {
   if (a !== null && b !== null && typeof a === "object" && typeof b === "object" && !Array.isArray(a) && !Array.isArray(b)) {
     const left = a as Record<string, unknown>;
     const right = b as Record<string, unknown>;
-    for (const key of new Set([...Object.keys(left), ...Object.keys(right)])) {
-      if (!(key in right)) {
+    const keys = (record: Record<string, unknown>) => Object.keys(record).filter((key) => record[key] !== undefined);
+    for (const key of new Set([...keys(left), ...keys(right)])) {
+      if (right[key] === undefined) {
         report(found, `${path}.${key}: only in the first`);
-      } else if (!(key in left)) {
+      } else if (left[key] === undefined) {
         report(found, `${path}.${key}: only in the second`);
       } else {
         walk(left[key], right[key], `${path}.${key}`, found);

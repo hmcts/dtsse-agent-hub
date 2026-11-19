@@ -500,8 +500,9 @@ function buildRows(
   const residueFor = new Map<string, number>(rowRefs.flatMap((ref, i) => (residueNamed.has(ref) ? [[ref, i]] : [])));
   const spareRows = rowRefs.flatMap((ref, i) => (residueNamed.has(ref) ? [] : [i]));
   const staleRows = [...residueNamed].filter((t) => !residueFor.has(t));
+  const spareRowPrints = new Map(spareRows.map((i) => [i, rowFingerprint(residue[i] as Row, all)]));
   for (const [token, i] of pairStale(staleRows, spareRows, (token, i) =>
-    fingerprints?.[token] ? closeness(fingerprints[token] as string, rowFingerprint(residue[i] as Row, all)) : 1
+    fingerprints?.[token] ? closeness(fingerprints[token] as string, spareRowPrints.get(i) as string) : 1
   )) {
     residueFor.set(token, i);
   }
@@ -519,13 +520,9 @@ function buildRows(
   }
   const sameSlot = (token: string, a: Atom) => bucketOf(a) === token.replace(/#.*$/, "");
   const eventOf = (fingerprint: string | undefined) => fingerprint?.split(";").find((field) => field.startsWith("w.event="));
-  // A cancellation rule with no id is named by a hash of itself, so an edited one is matched only to a rule it shares an event with.
+  // A cancellation rule that was renamed, or has no id and is named by a hash of itself, is matched to a rule it shares an event with.
   const sameRule = (token: string, a: Atom) =>
-    kind === "cancellation" &&
-    /^!\/r[0-9a-f]{6}(#|$)/.test(token) &&
-    /^r[0-9a-f]{6}$/.test(a.slot) &&
-    eventOf(fingerprints?.[token]) !== undefined &&
-    eventOf(fingerprints?.[token]) === eventOf(a.fingerprint);
+    kind === "cancellation" && a.task === RULES && eventOf(fingerprints?.[token]) !== undefined && eventOf(fingerprints?.[token]) === eventOf(a.fingerprint);
   for (const [token, atom] of pairStale(stale, spares, (token, atom) => {
     if (!sameSlot(token, atom) && !sameRule(token, atom)) {
       return 0;

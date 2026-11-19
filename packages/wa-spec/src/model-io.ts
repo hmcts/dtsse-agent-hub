@@ -41,7 +41,7 @@ export function orderPathFor(modelPath: string, model: Model): string | undefine
   if (model.order) {
     const named = resolve(dirname(modelPath), model.order);
     if (!exists(named)) {
-      throw new Error(`${modelPath} names the ordering file ${model.order}, which does not exist`);
+      throw new Error(`names the ordering file ${model.order}, which does not exist`);
     }
     return named;
   }
@@ -53,7 +53,7 @@ export function orderPathFor(modelPath: string, model: Model): string | undefine
 export const orderPathBeside = (modelPath: string): string => `${modelPath.replace(/\.ya?ml$/, "")}.order.yaml`;
 
 /** Where a layout file is: the one named (by `--layout` or the model's `layout` field), which must exist, else `<name>.layout.yaml` beside the file when that exists. */
-function layoutPathOf(path: string, named: string | undefined, base: string): string | undefined {
+export function layoutPathOf(path: string, named: string | undefined, base: string): string | undefined {
   if (named) {
     const resolved = resolve(base, named);
     if (!exists(resolved)) {
@@ -101,7 +101,7 @@ function readSpecText(path: string): { spec: Spec; model: Model | undefined } {
     // compileModel validates, so the model is checked once.
     const model = Model.parse(document);
     const orderPath = orderPathFor(path, model);
-    return { spec: compileModel(model, orderPath ? parseOrdering(readText(orderPath)) : undefined), model };
+    return { spec: compileModel(model, orderPath ? explained(orderPath, () => parseOrdering(readText(orderPath))) : undefined), model };
   }
   return { spec: specFromDocument(document), model: undefined };
 }

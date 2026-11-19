@@ -84,7 +84,8 @@ rows:
     - "*/caseManagementCategory#520789"
     - "*/caseManagementCategory#2925d7"
     - "*/nextHearingDate"
-    - Et1Vetting/workType ReviewReferralAdmin/workType ReviewReferralLegalOps/workType SendEt1Notification/workType ListServeClaim/workType Rule21/workType ET3Processing/workType ReviewReferralResponseLegalOps/workType ReviewReferralResponseAdmin/workType IssueInitialConsiderationDirections/workType ListAHearing/workType ReviewRule21Referral/workType SendEt3Notification/workType ReviewECCResponse/workType ExpiredBfAction/workType ReferEmployersContractClaim/workType
+    - row: Et1Vetting/workType ReviewReferralAdmin/workType ReviewReferralLegalOps/workType SendEt1Notification/workType ListServeClaim/workType Rule21/workType ET3Processing/workType ReviewReferralResponseLegalOps/workType ReviewReferralResponseAdmin/workType IssueInitialConsiderationDirections/workType ListAHearing/workType ReviewRule21Referral/workType SendEt3Notification/workType ReviewECCResponse/workType ExpiredBfAction/workType ReferEmployersContractClaim/workType
+      description: Name of the type of work - this is based on the filter. All Judgment tasks will be decision making work.
     - ReviewReferralJudiciary/workType ReviewReferralResponseJudiciary/workType DraftAndSignJudgment/workType CompleteInitialConsideration/workType
     - IssuePostHearingDirection/workType IssueJudgment/workType IssueOrder/workType
     - ContactTribunalWithAnApplication/workType AmendClaimantDetails/workType AmendRespondentDetails/workType WithdrawAllOrPartOfCase/workType SubmitRespondentPseResponse/workType SubmitClaimantPseResponse/workType ReviewSupportRequestAdmin/workType ReviewSupportRequestLegalOfficer/workType ReviewSupportRequestJudge/workType ArrangeSupport/workType
@@ -142,7 +143,8 @@ rows:
     - DraftAndSignJudgment/dueDateIntervalDays
     - DraftAndSignJudgment/dueDateSkipNonWorkingDays
     - DraftAndSignJudgment/dueDateNonWorkingDaysOfWeek
-    - ReviewReferralAdminMultiple/workType ReviewReferralLegalOpsMultiple/workType MultiplesReviewReferralResponseLegalOps/workType ReviewReferralResponseAdminMultiple/workType
+    - row: ReviewReferralAdminMultiple/workType ReviewReferralLegalOpsMultiple/workType MultiplesReviewReferralResponseLegalOps/workType ReviewReferralResponseAdminMultiple/workType
+      description: Name of the type of work - this is based on the filter. All Judgment tasks will be decision making work.
     - ReviewReferralJudiciaryMultiple/workType ReviewReferralResponseJudiciaryMultiple/workType
     - ReviewReferralAdminMultiple/roleCategory ReviewReferralResponseAdminMultiple/roleCategory
     - ReviewReferralJudiciaryMultiple/roleCategory ReviewReferralResponseJudiciaryMultiple/roleCategory

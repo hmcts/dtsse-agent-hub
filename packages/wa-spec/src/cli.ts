@@ -5,7 +5,7 @@ import { exists, listDir, readText, writeText } from "./file-io.ts";
 import { parseFileName } from "./file-names.ts";
 import { generateAll } from "./generator.ts";
 import { importDmns, renderReport } from "./importer.ts";
-import { explained, loadSpecFile, loadSpecOnly, orderPathBeside, stringifyModel, stringifyOrdering } from "./model-io.ts";
+import { explained, layoutPathOf, loadSpecFile, loadSpecOnly, orderPathBeside, stringifyModel, stringifyOrdering } from "./model-io.ts";
 import { liftSpec, renderLiftReport } from "./model-lift.ts";
 import { compareSpecs } from "./spec-diff.ts";
 import { layoutPathFor, parseSpec, stringifyLayout, stringifySpec } from "./spec-io.ts";
@@ -101,13 +101,10 @@ function main(argv: string[]): number {
       fail(USAGE);
     }
     const spec = explained(specPath, () => parseSpec(readText(specPath)));
-    const layoutPath = values.layout ?? layoutPathFor(specPath);
-    if (values.layout && !exists(values.layout)) {
-      fail(`the layout file ${values.layout} does not exist`);
-    }
+    const layoutPath = layoutPathOf(specPath, values.layout, process.cwd());
     const orderPath = orderPathBeside(values.output);
     const { model, ordering, report } = liftSpec(spec, {
-      ...(exists(layoutPath) ? { layout: relative(dirname(resolve(values.output)), resolve(layoutPath)) } : {}),
+      ...(layoutPath ? { layout: relative(dirname(resolve(values.output)), layoutPath) } : {}),
       order: basename(orderPath)
     });
     writeText(values.output, stringifyModel(model));

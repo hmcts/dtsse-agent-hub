@@ -152,7 +152,7 @@ describe("liftSpec and compileModel on ET", () => {
     const task = lifted.model.tasks.find((t) => t.id === "Et1Vetting");
     expect(task).toMatchObject({
       name: "ET1 Vetting",
-      workType: { value: "routine_work", note: expect.stringContaining("type of work") },
+      workType: "routine_work",
       roleCategory: "ADMIN",
       cancelCategory: "Vetting",
       due: { days: 5 },

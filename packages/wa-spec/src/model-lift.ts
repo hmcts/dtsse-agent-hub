@@ -475,7 +475,8 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
           target.set(role, list);
           addEntry(list, grant, cases);
         }
-        if (added && position === 0 && entry.row.description !== undefined) {
+        // The description of a row shared by several tasks belongs to the row, so the ordering states it; a row of one entry has it as that entry's note.
+        if (added && position === 0 && items.length === 1 && entry.row.description !== undefined) {
           added.note ??= entry.row.description;
         }
       }
@@ -700,9 +701,7 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
     };
     section(DUE_BY_NAME as Map<string, string>, "due");
     section(PRIORITY_BY_NAME as Map<string, string>, "priority");
-    for (const key of ["title"]) {
-      put(task, key, key);
-    }
+    put(task, "title", "title");
     const description = acc.attrs.get("description");
     if (description) {
       const only = description.length === 1 ? description[0] : undefined;
@@ -832,6 +831,11 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
   const ordering: Ordering = { version: 1, rows: {} };
   let unmatched: string | undefined;
   const fingerprints: NonNullable<Ordering["fingerprints"]> = {};
+  const remember = (kind: Kind, ref: string, print: string) => {
+    const own = fingerprints[kind] ?? {};
+    own[ref] = print;
+    fingerprints[kind] = own;
+  };
   for (const kind of KINDS) {
     if (!spec.decisions[kind]) {
       continue;
@@ -847,7 +851,7 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
     for (const entry of classified[kind]) {
       if (entry.residueIndex !== undefined) {
         const ref = residueRef[entry.residueIndex - 1] as string;
-        fingerprints[kind] = { ...fingerprints[kind], [ref]: rowFingerprint(entry.row, caseIds) };
+        remember(kind, ref, rowFingerprint(entry.row, caseIds));
         rows.push(ref);
         continue;
       }
@@ -869,7 +873,7 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
         tokens.push(atom.ref);
         matched.push(atom);
         if (atom.ref.includes("#")) {
-          fingerprints[kind] = { ...fingerprints[kind], [atom.ref]: atom.fingerprint };
+          remember(kind, atom.ref, atom.fingerprint);
         }
         differs ||= !sameSet(atom.cases, result.cases);
       }
