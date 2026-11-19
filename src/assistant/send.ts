@@ -5,6 +5,7 @@ import type { PrismaClient } from "../store/prisma.ts";
 import type { ConversationRow } from "./conversation-row.ts";
 import { conversationAgent, touchConversation } from "./conversation-store.ts";
 import { requestWake } from "./session-store.ts";
+import { needsWake } from "./wake.ts";
 
 /**
  * A message from the person into one of their own conversations, through the same `directAsPerson` as the hub's
@@ -35,7 +36,7 @@ export async function sendToConversation(
   const sent = await directAsPerson(prisma, senderOid, agentId, message.body, message.alongside);
   await touchConversation(prisma, conversation, message.title);
   const agent = await prisma.agent.findUnique({ where: { id: agentId }, select: { status: true } });
-  if (agent?.status !== "busy" && agent?.status !== "idle") {
+  if (conversation.wakeRequestedAt === null && needsWake(agent?.status, conversation.sessionState)) {
     await requestWake(prisma, conversation);
   }
   const loaded = await loadThreadMessage(prisma, BigInt(sent.id));

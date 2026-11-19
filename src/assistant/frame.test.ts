@@ -1,6 +1,20 @@
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { Database } from "../store/prisma.ts";
 import { assistantFrame } from "./frame.ts";
+
+// The published client is loaded by path, not imported: its sources are checked against their own `Env` type, which
+// this project's typecheck would otherwise apply to them as well.
+const clientModule = (name: string) => import(fileURLToPath(new URL(`../../packages/agent-hub/src/${name}.ts`, import.meta.url)));
+type ParsedFrame = Record<string, unknown> | null;
+type Client = {
+  parseAssistantFrame: (value: unknown) => ParsedFrame;
+  routeDelivery: (input: { fromOwner: boolean; session: string; frame: ParsedFrame; transcriptUploaded: boolean }) => { kind: string; frame?: ParsedFrame };
+  chooseEnvelope: (message: { id: string; body: string }, delivery: unknown) => string;
+};
+async function client(): Promise<Client> {
+  return { ...(await clientModule("frames")), ...(await clientModule("envelope")) } as Client;
+}
 
 /**
  * When the frame reads the deck's versions, with the database stood in for: `test/integration/assistant-deck-edit.test.ts`
@@ -252,5 +266,68 @@ describe("assistantFrame's decks", () => {
 
     expect(frame?.decks).toEqual([]);
     expect(frame).toMatchObject({ deck_version: 0, deck_revision: 0, deck_updated_by: null, deck_agent_version: 0 });
+  });
+});
+
+describe("assistantFrame as the published client reads it", () => {
+  const DOCMOSIS = "00000000-0000-4000-8000-0000000000a1";
+  const NOTIFY = "00000000-0000-4000-8000-0000000000b1";
+  const DOC = "00000000-0000-4000-8000-0000000000c1";
+
+  async function onTheWire(
+    documents: Record<string, unknown>[],
+    docmosisItems: Record<string, unknown>[],
+    notifyItems: Record<string, unknown>[],
+    deckVersion = 0
+  ) {
+    const { db } = stub({ deckVersion, deckUpdatedBy: deckVersion === 0 ? null : "user" }, null, docmosisItems, notifyItems, documents);
+    const frame = await assistantFrame(db, "va-1", undefined);
+    return JSON.parse(JSON.stringify(frame)) as unknown;
+  }
+
+  const document = (overrides: Record<string, unknown> = {}) => ({
+    id: DOC,
+    kind: "document",
+    title: null,
+    version: 0,
+    updatedBy: null,
+    markdown: "",
+    ...overrides
+  });
+
+  it("should keep every list and field for an empty conversation", async () => {
+    const { parseAssistantFrame } = await client();
+    const parsed = parseAssistantFrame(await onTheWire([], [], []));
+
+    expect(parsed).toMatchObject({ artefacts: [], decks: [], docmosis_templates: [], notify_templates: [], deck_version: 0, notify_updated_by: null });
+  });
+
+  it("should keep every document, template and null author", async () => {
+    const { parseAssistantFrame } = await client();
+    const parsed = parseAssistantFrame(
+      await onTheWire([document()], [docmosisItem(DOCMOSIS, { updatedBy: "user" })], [notifyItem(NOTIFY, { updatedBy: "agent" })], 2)
+    );
+
+    expect(parsed?.artefacts).toEqual([{ id: DOC, kind: "document", title: null, version: 0, updated_by: null }]);
+    expect(parsed?.docmosis_templates).toEqual([{ id: DOCMOSIS, name: "Claim form", version: 1, revision: 0, updated_by: "user" }]);
+    expect(parsed?.notify_templates).toEqual([{ id: NOTIFY, name: "Template", version: 1, revision: 0, updated_by: "agent" }]);
+    expect(parsed?.decks).toHaveLength(1);
+  });
+
+  it("should be treated as a conversation with its templates listed to the session", async () => {
+    const { parseAssistantFrame, routeDelivery, chooseEnvelope } = await client();
+    const parsed = parseAssistantFrame(await onTheWire([], [docmosisItem(DOCMOSIS, { updatedBy: "user" })], [notifyItem(NOTIFY, { updatedBy: "user" })]));
+    const delivery = routeDelivery({ fromOwner: true, session: "conversation", frame: parsed, transcriptUploaded: true });
+    const prompt = chooseEnvelope({ id: "1", body: "Create a new slide deck for this conversation." } as never, delivery);
+
+    expect(parsed).not.toBeNull();
+    expect(parsed).toMatchObject({
+      artefacts: [],
+      docmosis_templates: [{ id: DOCMOSIS, name: "Claim form", updated_by: "user" }],
+      notify_templates: [{ id: NOTIFY, updated_by: "user" }]
+    });
+    expect(delivery.kind).toBe("conversation");
+    expect(prompt).toContain("Create a new slide deck for this conversation.");
+    expect(prompt).toContain("Claim form");
   });
 });

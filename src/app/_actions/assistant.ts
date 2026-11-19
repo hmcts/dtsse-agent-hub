@@ -31,6 +31,7 @@ import { sendToConversation } from "@/assistant/send";
 import { requestWake, stopAnswer } from "@/assistant/session-store";
 import { attachUploads, uploadNames } from "@/assistant/upload-store";
 import { attachedBody, MAX_ATTACHMENTS_PER_MESSAGE } from "@/assistant/uploads";
+import { needsWake } from "@/assistant/wake";
 import type { ThreadMessage } from "@/messages/direct-thread";
 import { MAX_BODY } from "@/messages/limits";
 import { prisma } from "@/store/prisma";
@@ -226,7 +227,7 @@ export async function warmConversation(input: { conversationId: unknown }): Prom
     }
     const agentId = await conversationAgent(prisma, conversation);
     const agent = await prisma.agent.findUnique({ where: { id: agentId }, select: { status: true } });
-    if (agent?.status === "offline" && conversation.wakeRequestedAt === null) {
+    if (needsWake(agent?.status, conversation.sessionState) && conversation.wakeRequestedAt === null) {
       await requestWake(prisma, conversation);
     }
     return { ok: true };
