@@ -4,10 +4,12 @@ import { revalidatePath } from "next/cache";
 import { credentialBackend } from "@/credentials/backend";
 import { isCredentialKind } from "@/credentials/names";
 import { deleteCredential, putCredential } from "@/credentials/store";
+import { isShortLivedGithubToken, SHORT_LIVED_GITHUB_REFUSAL } from "@/credentials/validate";
 import { prisma } from "@/store/prisma";
 import { requireViewer } from "@/viewer/current";
+import { removeCredential as removeHeldCredential } from "@/virtual-agents/credential-removal";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
-import { liveModelRoutes, restartRunningAgents } from "@/virtual-agents/store";
+import { liveModelRoutes } from "@/virtual-agents/store";
 import { claudeTokenUsable } from "@/virtual-agents/views";
 import { type ActionResult, runAction, text } from "@/web/action";
 
@@ -46,6 +48,9 @@ export async function saveCredential(form: FormData): Promise<ActionResult<{ con
     if (kind === "claude" && !claudeTokenUsable(viewer.modelRoute, await liveModelRoutes(prisma, viewer.oid))) {
       return { ok: false, error: "your virtual agents reach Claude through HMCTS, so they need no Claude token" };
     }
+    if (kind === "github" && isShortLivedGithubToken(form.get("value"))) {
+      return { ok: false, error: SHORT_LIVED_GITHUB_REFUSAL };
+    }
     const backend = credentialBackend(prisma);
     if (!backend.available) {
       return { ok: false, error: backend.reason };
@@ -56,11 +61,8 @@ export async function saveCredential(form: FormData): Promise<ActionResult<{ con
   });
 }
 
-/** The sign-ins a pod holds for itself from its start, so that only a restart stops it using one. */
-const POD_HELD: ReadonlySet<string> = new Set(["github", "azure", "claude", "jenkins", "atlassian"]);
-
-export async function removeCredential(form: FormData): Promise<ActionResult> {
-  return await runAction("delete credential", async () => {
+export async function removeCredential(form: FormData): Promise<ActionResult<{ confirmation?: string }>> {
+  return await runAction<{ confirmation?: string }>("delete credential", async () => {
     const viewer = await requireViewer();
     const kind = text(form.get("kind"));
     if (!isCredentialKind(kind)) {
@@ -70,16 +72,11 @@ export async function removeCredential(form: FormData): Promise<ActionResult> {
     if (!backend.available) {
       return { ok: false, error: backend.reason };
     }
-    const held = (await prisma.credential.count({ where: { ownerOid: viewer.oid, kind } })) > 0;
-    await deleteCredential(prisma, backend.store, { actorOid: viewer.oid, ownerOid: viewer.oid, kind });
-    // A pod holds its sign-ins from its start, so a running one would go on using the one removed — which, for a token
-    // someone removes because it leaked, is the opposite of what they asked. Restarting their running agents is what
-    // makes a removal take effect; the question before it says so, and chats are kept.
-    if (held && POD_HELD.has(kind)) {
-      await restartRunningAgents(prisma, viewer.oid, "restarting to stop using a removed sign-in");
-    }
+    const { notRestarted } = await removeHeldCredential(prisma, backend.store, { actorOid: viewer.oid, ownerOid: viewer.oid, kind });
     revalidate();
-    return { ok: true };
+    return notRestarted === 0
+      ? { ok: true }
+      : { ok: true, confirmation: "Removed. Your assistant could not be restarted to stop using it, so restart it in Settings, under Your assistant." };
   });
 }
 

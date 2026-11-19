@@ -118,6 +118,7 @@ describe("lookupResponse", () => {
       { status: "failed", error: "superseded" },
       { status: "done", results: [] }
     ],
+    [{ status: "cancelled" }, { status: "done", results: [] }],
     [
       { status: "failed", error: "failed", detail: "Confluence is down" },
       { status: "failed", detail: "Confluence is down" }

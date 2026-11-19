@@ -89,8 +89,11 @@ export async function sweepUploads(prisma: PrismaClient, options: UploadSweepOpt
     let expired = 0;
     let parts = 0;
     if (ids.length > 0) {
-      parts = (await tx.assistantUploadPart.deleteMany({ where: { uploadId: { in: ids } } })).count;
+      // Expired first, which takes the uploads' rows: a part being written holds its upload's row, so this waits for
+      // it, and the delete that follows reads after it and takes its part with the rest. A part that comes after finds
+      // the upload expired and is refused (`putUploadPart`). The other order left a part written between the two.
       expired = (await tx.assistantUpload.updateMany({ where: { id: { in: ids } }, data: { state: "expired", updatedAt: new Date() } })).count;
+      parts = (await tx.assistantUploadPart.deleteMany({ where: { uploadId: { in: ids } } })).count;
     }
     return { expired, parts, conversations: await dropAbandoned(tx, retentionHours, batch) };
   });
@@ -115,15 +118,17 @@ export async function sweepUploads(prisma: PrismaClient, options: UploadSweepOpt
  * - **No document.** The session may have written one before the person said anything.
  * - **Not a fork.** A copy of someone else's chat holds its words before anyone says anything in it, and the
  *   recipient chose to take it.
- * - **It was created longer ago than the retention window, and holds no upload newer than it.** The window follows
- *   the last thing the person actually did in the conversation rather than only when it was made, so attaching a
- *   second file hours later puts the clock back rather than leaving a live composer to be swept out from under them.
+ * - **It was created and last active longer ago than the retention window, and holds no upload newer than it.** The
+ *   window follows the last thing the person actually did in the conversation rather than only when it was made, so
+ *   attaching a second file hours later puts the clock back rather than leaving a live composer to be swept out from
+ *   under them. A first message marks the chat active before it goes (`sendToConversation`), and the row is held
+ *   while this decides (`FOR UPDATE SKIP LOCKED`), so a message being sent is never swept with its chat.
  *
  * It deliberately does **not** require the conversation to still have an upload. Attaching a file and then removing
- * the chip deletes the upload row and leaves a conversation nothing else would ever collect; the same is true of a
- * `startConversation` whose first message failed after the row was created, which the new-chat screen does not reuse:
- * it keeps the draft, and the retry starts another conversation. An empty conversation is one nobody has said anything in, whatever route produced it, and
- * after the window it is rubbish either way.
+ * the chip deletes the upload row and leaves a conversation nothing else would ever collect. (A `startConversation`
+ * whose first message failed removes its own at once, `discardUnsaid`; one whose clean-up failed too is left here.)
+ * An empty conversation is one nobody has said anything in, whatever route produced it, and after the window it is
+ * rubbish either way.
  */
 async function dropAbandoned(tx: Database, retentionHours: number, batch: number): Promise<number> {
   // `virtual_agent_id` is null for a conversation that is a local session, which this leaves alone; the column is

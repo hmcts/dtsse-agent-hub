@@ -20,7 +20,7 @@ import * as lookupsRoute from "../../src/app/api/ui/assistant/lookups/route.ts";
 import * as lookupAnswerRoute from "../../src/app/api/virtual/[virtualAgentId]/lookups/[lookupId]/route.ts";
 import * as sessionsRoute from "../../src/app/api/virtual/[virtualAgentId]/sessions/route.ts";
 import * as statusRoute from "../../src/app/api/virtual/[virtualAgentId]/status/route.ts";
-import { abandonExport, EXPORT_NOT_SENT, exportIdOf, writeArtefact } from "../../src/assistant/artefact-store.ts";
+import { abandonExport, EXPORT_NOT_SENT, writeArtefact } from "../../src/assistant/artefact-store.ts";
 import { ensureAssistant, wakeAssistant } from "../../src/assistant/assistant-store.ts";
 import { CONFLUENCE_EXPORT_TIMEOUT_MS } from "../../src/assistant/confluence.ts";
 import {
@@ -1943,7 +1943,7 @@ describe("jira export", () => {
     const { id } = await written();
     await actions.exportArtefactToJira({ conversationId: id, documentId: docOf(id), project: "VIBE" });
     const conversation = (await findConversation(prisma, ALICE.oid, id))!;
-    const started = await exportIdOf(prisma, id, docOf(id), "jira");
+    const started = await currentExport(id);
 
     // Another attempt's id, as a retry that kept the first attempt's would leave: nothing is marked.
     await abandonExport(prisma, conversation, docOf(id), "jira", "00000000-0000-4000-8000-000000000000");
@@ -1952,9 +1952,8 @@ describe("jira export", () => {
     await abandonExport(prisma, conversation, docOf(id), "jira", started);
     expect((await assistantConversation(VIEWER, id))?.documents[0]?.jira).toMatchObject({ status: "failed", error: EXPORT_NOT_SENT });
 
-    await abandonExport(prisma, conversation, docOf(id), "github", await exportIdOf(prisma, id, docOf(id), "github"));
+    await abandonExport(prisma, conversation, docOf(id), "github", started);
     await abandonExport(prisma, conversation, "not an id", "jira", started);
-    expect(await exportIdOf(prisma, id, "not an id", "jira")).toBeNull();
     expect((await assistantConversation(VIEWER, id))?.documents[0]?.github).toMatchObject({ status: "none" });
   });
 

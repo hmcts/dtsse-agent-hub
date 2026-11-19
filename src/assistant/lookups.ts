@@ -218,8 +218,8 @@ export function lookupResponse(row: LookupRow): LookupResponse | undefined {
   if (row.error === "signed_out") {
     return { status: "signed_out" };
   }
-  if (row.error === "superseded") {
-    // The person has typed on, and the newer search is the one they are waiting for.
+  if (row.error === "superseded" || row.status === "cancelled") {
+    // The person has typed on, or closed the picker, and nobody is waiting for this one: it is not a failure to show.
     return { status: "done", results: [] };
   }
   return { status: "failed", detail: row.detail ?? "The search did not work. Try again." };

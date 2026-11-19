@@ -337,6 +337,39 @@ describe("uploading a file", () => {
     expect((await startUpload(conversation.id, { name: "fresh.pdf", size: 4 })).status).toBe(201);
   });
 
+  describe("when an upload that had gone quiet starts receiving parts again", () => {
+    /** One stalled upload of two parts, and `others` fresh ones beside it. */
+    async function resumable(others: number): Promise<string> {
+      await startedAssistant();
+      const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
+      const { uploadId } = await jsonOf<Created>(await startUpload(conversation.id, { name: "stalled.pdf", size: PART_BYTES + 4 }));
+      await prisma.assistantUpload.update({ where: { id: uploadId }, data: { updatedAt: new Date(Date.now() - STALLED_UPLOAD_MS - 60_000) } });
+      for (let n = 0; n < others; n += 1) {
+        expect((await startUpload(conversation.id, { name: `a${n}.pdf`, size: 4 })).status).toBe(201);
+      }
+      return uploadId;
+    }
+
+    it("should refuse its part when four other files have taken the places since", async () => {
+      const uploadId = await resumable(MAX_ATTACHMENTS_PER_MESSAGE);
+
+      const response = await putPart(uploadId, 0, filled(PART_BYTES, 1));
+
+      expect(response.status).toBe(409);
+      expect(await jsonOf(response)).toMatchObject({ reason: "too_many_files" });
+      expect(await prisma.assistantUploadPart.count({ where: { uploadId } })).toBe(0);
+    });
+
+    it("should take its place back when there is still one free", async () => {
+      const uploadId = await resumable(MAX_ATTACHMENTS_PER_MESSAGE - 1);
+
+      const response = await putPart(uploadId, 0, filled(PART_BYTES, 1));
+
+      expect(response.status).toBe(200);
+      expect((await prisma.assistantUpload.findUniqueOrThrow({ where: { id: uploadId } })).updatedAt.getTime()).toBeGreaterThan(Date.now() - 60_000);
+    });
+  });
+
   it("should refuse a part for an upload the sweep has expired, rather than store bytes nothing will delete", async () => {
     await startedAssistant();
     const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });

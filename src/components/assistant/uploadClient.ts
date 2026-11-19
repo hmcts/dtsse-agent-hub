@@ -127,7 +127,7 @@ const REFUSALS: Readonly<Record<UploadRefusal, string>> = {
   no_longer_held: "This file is not kept here for long, and this one has gone. Attach it again to send it once more.",
   file_too_big: `This file is too big. Each file must be ${describeBytes(MAX_UPLOAD_BYTES)} or less.`,
   too_many_files: `This message already has ${MAX_ATTACHMENTS_PER_MESSAGE} files. Send it, then attach the rest to your next one.`,
-  conversation_full: `This chat is full: its files can add up to ${describeBytes(MAX_CONVERSATION_BYTES)} in total. Start a new chat to attach more.`,
+  conversation_full: `This chat is full: its files can add up to ${describeBytes(MAX_CONVERSATION_BYTES)} in total. Delete files you no longer need in Settings, under Files, or start a new chat to attach more.`,
   part_too_big: "Part of the file was rejected as too large. Remove it and attach it again.",
   part_wrong_length: "The file changed while it was uploading. Remove it and attach it again."
 };

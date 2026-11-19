@@ -225,7 +225,11 @@ describe("refusalIn", () => {
     ["no_such_upload", 404, "This file is no longer being uploaded. Remove it and attach it again."],
     ["file_too_big", 400, "This file is too big. Each file must be 25 MB or less."],
     ["too_many_files", 409, "This message already has 4 files. Send it, then attach the rest to your next one."],
-    ["conversation_full", 409, "This chat is full: its files can add up to 200 MB in total. Start a new chat to attach more."],
+    [
+      "conversation_full",
+      409,
+      "This chat is full: its files can add up to 200 MB in total. Delete files you no longer need in Settings, under Files, or start a new chat to attach more."
+    ],
     ["part_too_big", 413, "Part of the file was rejected as too large. Remove it and attach it again."],
     ["part_wrong_length", 400, "The file changed while it was uploading. Remove it and attach it again."]
   ])("should word %s as a sentence of its own when the hub refuses with it", (reason, status, sentence) => {
@@ -238,7 +242,7 @@ describe("refusalIn", () => {
 
     expect(tooMany).not.toBe(full);
     expect(tooMany).toContain("attach the rest to your next one");
-    expect(full).toContain("Start a new chat");
+    expect(full).toContain("in Settings, under Files");
   });
 
   it("should keep the hub's own sentence when the reason is one this module does not know", () => {

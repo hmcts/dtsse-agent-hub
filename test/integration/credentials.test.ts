@@ -434,6 +434,18 @@ describe("saveCredential and removeCredential", () => {
     expect(JSON.stringify(result)).not.toContain(GITHUB);
   });
 
+  it("should refuse a pasted GitHub App token, which expires within hours, while the agent API still stores one", async () => {
+    actAs("alice");
+    const shortLived = `ghs_${"c".repeat(36)}`;
+
+    expect(await saveCredential(form({ kind: "github", value: shortLived }))).toEqual({
+      ok: false,
+      error: "that GitHub token expires within hours; use a personal access token (ghp_ or github_pat_) instead"
+    });
+    expect(await prisma.credential.count()).toBe(0);
+    expect((await put(ALICE, "github", { value: shortLived })).status).toBe(204);
+  });
+
   it("should refuse a Claude token when the viewer's agents reach Claude through HMCTS", async () => {
     actAs("alice");
 
@@ -541,44 +553,46 @@ describe("saveCredential and removeCredential", () => {
     expect(await prisma.credential.count()).toBe(0);
   });
 
-  it("should restart a running assistant when a sign-in it holds is removed, so it stops using it, and leave a stopped one", async () => {
-    await insertUser(ALICE);
-    const running = await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "own-licence", name: "assistant" });
-    const stopped = await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "own-licence", name: "spare" });
-    await setDesired(prisma, ALICE.oid, stopped.id, "stopped");
-    await prisma.virtualAgent.update({ where: { id: running.id }, data: { status: "running" } });
-    actAs("alice");
-    await saveCredential(form({ kind: "github", value: GITHUB }));
+  describe("when a sign-in a running assistant may hold is removed", () => {
+    /** Alice's running assistant on `modelRoute`, signed in as her on the web, and its status after `act`. */
+    async function statusAfter(act: () => Promise<unknown>, modelRoute: "own-licence" | "gateway" = "own-licence"): Promise<string> {
+      const running = await createVirtualAgent(prisma, { owner: ALICE, modelRoute, name: "assistant" });
+      await prisma.virtualAgent.update({ where: { id: running.id }, data: { status: "running" } });
+      await act();
+      return (await prisma.virtualAgent.findUniqueOrThrow({ where: { id: running.id } })).status;
+    }
 
-    expect(await removeCredential(form({ kind: "github" }))).toEqual({ ok: true });
-
-    expect(await prisma.virtualAgent.findUniqueOrThrow({ where: { id: running.id } })).toMatchObject({
-      status: "provisioning",
-      statusDetail: "restarting to stop using a removed sign-in"
+    beforeEach(async () => {
+      await insertUser(ALICE);
+      actAs("alice");
     });
-    expect((await prisma.virtualAgent.findUniqueOrThrow({ where: { id: stopped.id } })).desired).toBe("stopped");
-  });
 
-  it("should restart nothing when the sign-in removed was never stored", async () => {
-    await insertUser(ALICE);
-    const running = await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "own-licence", name: "assistant" });
-    await prisma.virtualAgent.update({ where: { id: running.id }, data: { status: "running" } });
-    actAs("alice");
+    it("should restart a running assistant when a sign-in it holds is removed, so it stops using it, and leave a stopped one", async () => {
+      const stopped = await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "own-licence", name: "spare" });
+      await setDesired(prisma, ALICE.oid, stopped.id, "stopped");
+      await saveCredential(form({ kind: "github", value: GITHUB }));
 
-    expect(await removeCredential(form({ kind: "jenkins" }))).toEqual({ ok: true });
+      expect(await statusAfter(async () => expect(await removeCredential(form({ kind: "github" }))).toEqual({ ok: true }))).toBe("provisioning");
+      expect((await prisma.virtualAgent.findUniqueOrThrow({ where: { id: stopped.id } })).desired).toBe("stopped");
+    });
 
-    expect((await prisma.virtualAgent.findUniqueOrThrow({ where: { id: running.id } })).status).toBe("running");
-  });
+    it("should restart a running assistant when the agent API removes a sign-in it holds, as the web does", async () => {
+      await put(ALICE, "github", { value: GITHUB });
 
-  it("should restart nothing when a sign-in the hub reads for itself is removed", async () => {
-    await insertUser(ALICE);
-    const running = await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "own-licence", name: "assistant" });
-    await prisma.virtualAgent.update({ where: { id: running.id }, data: { status: "running" } });
-    actAs("alice");
+      expect(await statusAfter(() => remove(ALICE, "github"))).toBe("provisioning");
+    });
 
-    expect(await removeCredential(form({ kind: "microsoft" }))).toEqual({ ok: true });
+    it.each([
+      ["the sign-in removed was never stored", "jenkins", "own-licence"],
+      ["a sign-in the hub reads for itself is removed", "microsoft", "own-licence"],
+      ["a Claude token is removed from an assistant on the HMCTS gateway, which never used it", "claude", "gateway"]
+    ] as const)("should restart nothing when %s", async (_when, kind, modelRoute) => {
+      if (kind === "claude") {
+        await put(ALICE, "claude", { value: CLAUDE });
+      }
 
-    expect((await prisma.virtualAgent.findUniqueOrThrow({ where: { id: running.id } })).status).toBe("running");
+      expect(await statusAfter(() => removeCredential(form({ kind })), modelRoute)).toBe("running");
+    });
   });
 
   it("should refuse to delete when no kind is named", async () => {

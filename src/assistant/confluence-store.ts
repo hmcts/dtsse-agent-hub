@@ -39,7 +39,7 @@ export async function requestConfluenceExport(
   document: unknown,
   rawParent: unknown,
   now: Date = new Date()
-): Promise<ConfluenceParent> {
+): Promise<{ parent: ConfluenceParent; exportId: string }> {
   if (!hasPod(conversation)) {
     throw new HttpError(409, "this chat is a session on your own computer, which cannot publish to Confluence; download the document and publish it yourself");
   }
@@ -48,9 +48,9 @@ export async function requestConfluenceExport(
     throw new HttpError(400, "pick a Confluence page to put the document under");
   }
   const staleBefore = new Date(now.getTime() - CONFLUENCE_EXPORT_TIMEOUT_MS);
-  await prisma.$transaction(async (tx) => {
+  const exportId = await prisma.$transaction(async (tx) => {
     const documentId = await exportableDocument(tx, conversation, document, "confluence");
-    const updated = await tx.$executeRaw`
+    const written = await tx.$queryRaw<{ id: string }[]>`
       UPDATE assistant_document
          SET confluence_export_id = CASE WHEN confluence_status = 'pending' AND confluence_parent_id = ${parent.id} AND confluence_export_id IS NOT NULL THEN confluence_export_id ELSE gen_random_uuid() END,
              confluence_space_id = ${parent.space_id}, confluence_space_key = ${parent.space_key},
@@ -60,8 +60,9 @@ export async function requestConfluenceExport(
          AND confluence_page_id IS NULL
          AND version > 0
          AND (confluence_status IS DISTINCT FROM 'pending' OR confluence_requested_at < ${staleBefore})
+      RETURNING confluence_export_id::text AS id
     `;
-    if (updated === 0) {
+    if (written[0] === undefined) {
       const row = await tx.assistantDocument.findUniqueOrThrow({ where: { id: documentId }, select: { version: true, confluencePageId: true } });
       if (row.confluencePageId !== null) {
         throw new HttpError(409, "this document is already in Confluence");
@@ -72,8 +73,9 @@ export async function requestConfluenceExport(
       throw new HttpError(409, "this document is already being published");
     }
     await announce(tx, conversation);
+    return written[0].id;
   });
-  return parent;
+  return { parent, exportId };
 }
 
 export type ConfluenceExportResult = { export_id: string; page_id: string; title?: string } | { export_id: string; error: string };

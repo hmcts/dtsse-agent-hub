@@ -33,7 +33,7 @@ export async function requestGithubExport(
   repo: unknown,
   project: unknown = null,
   now: Date = new Date()
-): Promise<string> {
+): Promise<{ repo: string; exportId: string }> {
   if (!hasPod(conversation)) {
     throw new HttpError(409, "this chat is a session on your own computer, which cannot export to GitHub; download the document and attach it yourself");
   }
@@ -56,9 +56,9 @@ export async function requestGithubExport(
     throw new HttpError(400, "pick the GitHub Project from the search, or none");
   }
   const staleBefore = new Date(now.getTime() - GITHUB_EXPORT_TIMEOUT_MS);
-  await prisma.$transaction(async (tx) => {
+  const exportId = await prisma.$transaction(async (tx) => {
     const documentId = await exportableDocument(tx, conversation, document, "ticket");
-    const updated = await tx.$executeRaw`
+    const written = await tx.$queryRaw<{ id: string }[]>`
       UPDATE assistant_document
          SET github_export_id = CASE WHEN github_status = 'pending' AND github_repo = ${checked} AND github_export_id IS NOT NULL THEN github_export_id ELSE gen_random_uuid() END,
              github_repo = ${checked}, github_status = 'pending', github_error = NULL,
@@ -72,8 +72,9 @@ export async function requestGithubExport(
          -- One ticket a document, whichever tool made it, as requestJiraExport has it.
          AND jira_key IS NULL
          AND (jira_status IS DISTINCT FROM 'pending' OR jira_requested_at < ${staleBefore})
+      RETURNING github_export_id::text AS id
     `;
-    if (updated === 0) {
+    if (written[0] === undefined) {
       const row = await tx.assistantDocument.findUniqueOrThrow({ where: { id: documentId }, select: { version: true, ...GITHUB_SELECT, ...JIRA_SELECT } });
       if (row.githubNumber !== null) {
         throw new HttpError(409, `this document is already on GitHub as ${row.githubRepo}#${row.githubNumber}`);
@@ -87,8 +88,9 @@ export async function requestGithubExport(
       throw new HttpError(409, "this document is already being exported");
     }
     await announce(tx, conversation);
+    return written[0].id;
   });
-  return checked;
+  return { repo: checked, exportId };
 }
 
 export type GithubExportResult = { export_id: string; number: number; project_error?: string } | { export_id: string; error: string };

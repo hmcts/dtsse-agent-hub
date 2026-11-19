@@ -35,7 +35,7 @@ export async function requestJiraExport(
   document: unknown,
   project: unknown,
   now: Date = new Date()
-): Promise<void> {
+): Promise<string> {
   if (!hasPod(conversation)) {
     throw new HttpError(409, "this chat is a session on your own computer, which cannot export to Jira; download the document and attach it yourself");
   }
@@ -43,9 +43,9 @@ export async function requestJiraExport(
     throw new HttpError(400, "pick a Jira project to export to");
   }
   const staleBefore = new Date(now.getTime() - JIRA_EXPORT_TIMEOUT_MS);
-  await prisma.$transaction(async (tx) => {
+  const exportId = await prisma.$transaction(async (tx) => {
     const documentId = await exportableDocument(tx, conversation, document, "ticket");
-    const updated = await tx.$executeRaw`
+    const written = await tx.$queryRaw<{ id: string }[]>`
       UPDATE assistant_document
          SET jira_export_id = CASE WHEN jira_status = 'pending' AND jira_project = ${project} AND jira_export_id IS NOT NULL THEN jira_export_id ELSE gen_random_uuid() END,
              jira_project = ${project}, jira_status = 'pending', jira_error = NULL,
@@ -58,8 +58,9 @@ export async function requestJiraExport(
          -- second for a document already on GitHub, or on its way there.
          AND github_number IS NULL
          AND (github_status IS DISTINCT FROM 'pending' OR github_requested_at < ${staleBefore})
+      RETURNING jira_export_id::text AS id
     `;
-    if (updated === 0) {
+    if (written[0] === undefined) {
       const row = await tx.assistantDocument.findUniqueOrThrow({ where: { id: documentId }, select: { version: true, ...JIRA_SELECT, ...GITHUB_SELECT } });
       if (row.jiraKey !== null) {
         throw new HttpError(409, `this document is already in Jira as ${row.jiraKey}`);
@@ -73,7 +74,9 @@ export async function requestJiraExport(
       throw new HttpError(409, "this document is already being exported");
     }
     await announce(tx, conversation);
+    return written[0].id;
   });
+  return exportId;
 }
 
 export type JiraExportResult = { export_id: string; key: string } | { export_id: string; error: string };

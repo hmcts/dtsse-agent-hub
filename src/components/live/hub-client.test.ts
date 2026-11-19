@@ -180,6 +180,17 @@ describe("connectHub", () => {
     expect(received).toEqual([["resync", {}]]);
   });
 
+  it("should tell the caller each time the stream opens", () => {
+    const { sources, dependencies, handlers } = harness();
+    const opened = vi.fn();
+    connectHub("/api/ui/stream", { ...handlers, opened }, dependencies);
+
+    sources[0]!.emit("open");
+    sources[0]!.emit("open");
+
+    expect(opened).toHaveBeenCalledTimes(2);
+  });
+
   it("should close and cancel a pending retry when it is stopped", async () => {
     const { sources, timers, dependencies, handlers } = harness();
     const stop = connectHub("/api/ui/stream", handlers, dependencies);

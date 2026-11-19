@@ -301,21 +301,12 @@ const EXPORT_COLUMNS = {
   confluence: { id: "confluenceExportId", status: "confluenceStatus", error: "confluenceError" }
 } as const satisfies Record<ExportTool, { id: string; status: string; error: string }>;
 
-/** The document's current export id for `tool`, or `null`, so a caller can tell whether a request started a new one. */
-export async function exportIdOf(db: Database, conversationId: string, documentId: unknown, tool: ExportTool): Promise<string | null> {
-  if (typeof documentId !== "string" || !UUID_RE.test(documentId)) {
-    return null;
-  }
-  const row = await db.assistantDocument.findFirst({ where: { id: documentId, conversationId }, select: { [EXPORT_COLUMNS[tool].id]: true } });
-  return (row?.[EXPORT_COLUMNS[tool].id] as string | null | undefined) ?? null;
-}
-
 /**
  * Marks the document's export failed when the chat message that asks for it was not sent: the export is written
  * pending first, so the footer says so as the request goes, and without this a message that failed would leave it
- * "pending" until the 15-minute window let it be asked for again. Only a pending one, and only one this request
- * started (`exportId`): a retry that kept an earlier attempt's id leaves it, as that attempt may still answer.
- * Announced, so the panel shows the failure.
+ * "pending" until the 15-minute window let it be asked for again. Only a pending one, and only the export the
+ * failed request wrote (`exportId`), so one another tab has since started is left alone. The id itself is kept, so
+ * an earlier attempt with the same id that does answer is still recorded. Announced, so the panel shows the failure.
  */
 export async function abandonExport(
   prisma: PrismaClient,

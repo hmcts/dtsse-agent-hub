@@ -2,16 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { HttpError } from "@/agent-api/http";
-import {
-  type Artefact,
-  ArtefactConflict,
-  abandonExport,
-  type ExportTool,
-  exportIdOf,
-  removeDocument,
-  UUID_RE,
-  writeDocument
-} from "@/assistant/artefact-store";
+import { type Artefact, ArtefactConflict, abandonExport, type ExportTool, removeDocument, UUID_RE, writeDocument } from "@/assistant/artefact-store";
 import { confluenceExportRequest } from "@/assistant/confluence";
 import { requestConfluenceExport } from "@/assistant/confluence-store";
 import type { ConversationRow } from "@/assistant/conversation-row";
@@ -85,26 +76,43 @@ async function gated(viewer: Viewer, conversation: ConversationRow): Promise<boo
 }
 
 /**
- * Sends an export's request, which is the chat message that asks the assistant to carry it out. The export is already
- * pending by then, so a message that does not go marks it failed rather than leaving it pending with nothing coming —
- * unless the request kept an earlier attempt's id (`before`), which may yet answer.
+ * An export: what every tool shares. The chat's gate, as for a message; then `request`, which writes the export
+ * pending and answers the id it wrote and the message that asks for it; then the message. A send that throws did not
+ * save the message (`sendToConversation`), so nothing is coming, and the export it marked pending is marked failed
+ * rather than left pending for 15 minutes. That clean-up is best effort: its own failure must not hide the send's.
  */
-async function sendOrAbandon(
-  viewer: Viewer,
-  conversation: ConversationRow,
-  documentId: unknown,
+async function exportDocument(
+  input: { conversationId: unknown; documentId: unknown },
   tool: ExportTool,
-  before: string | null,
-  body: string
-): Promise<void> {
+  request: (conversation: ConversationRow, document: string) => Promise<{ exportId: string; ask: string }>
+): Promise<ActionResult> {
+  if (!virtualAgentsEnabled()) {
+    return OFF;
+  }
+  const viewer = await requireViewer();
+  const conversation = await findConversation(prisma, viewer.oid, text(input.conversationId));
+  if (conversation === undefined) {
+    return MISSING;
+  }
+  if (await gated(viewer, conversation)) {
+    return BLOCKED;
+  }
+  const { exportId, ask } = await request(conversation, await named(conversation.id, input.documentId));
   try {
-    await send(viewer.oid, conversation, body);
+    await send(viewer.oid, conversation, ask);
   } catch (error) {
-    const started = await exportIdOf(prisma, conversation.id, documentId, tool);
-    if (started !== before) {
-      await abandonExport(prisma, conversation, text(documentId), tool, started);
-    }
+    await bestEffort("abandon an export", () => abandonExport(prisma, conversation, text(input.documentId), tool, exportId));
     throw error;
+  }
+  return { ok: true };
+}
+
+/** Runs a clean-up that must not replace the error it is cleaning up after: its own failure is logged. */
+async function bestEffort(what: string, work: () => Promise<void>): Promise<void> {
+  try {
+    await work();
+  } catch (error) {
+    console.warn(`could not ${what} after a failed send: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -185,7 +193,7 @@ export async function startConversation(input: { product: unknown; body: unknown
     } catch (error) {
       // The new-chat screen keeps the draft and starts another conversation on a retry, so this one, with nothing
       // said in it, would only be left for the sweep to find hours later.
-      await discardUnsaid(prisma, conversation);
+      await bestEffort("discard the empty chat", () => discardUnsaid(prisma, conversation));
       throw error;
     }
     revalidatePath("/assistant");
@@ -516,24 +524,12 @@ export async function removeDocmosisTemplate(input: { conversationId: unknown; i
  * through the conversation's events.
  */
 export async function exportArtefactToJira(input: { conversationId: unknown; documentId: unknown; project: unknown }): Promise<ActionResult> {
-  return await runAction("export artefact to jira", async () => {
-    if (!virtualAgentsEnabled()) {
-      return OFF;
-    }
-    const viewer = await requireViewer();
-    const conversation = await findConversation(prisma, viewer.oid, text(input.conversationId));
-    if (conversation === undefined) {
-      return MISSING;
-    }
-    if (await gated(viewer, conversation)) {
-      return BLOCKED;
-    }
-    const ask = `Please export ${await named(conversation.id, input.documentId)} to the ${String(input.project)} backlog in Jira.`;
-    const before = await exportIdOf(prisma, conversation.id, input.documentId, "jira");
-    await requestJiraExport(prisma, conversation, input.documentId, input.project);
-    await sendOrAbandon(viewer, conversation, input.documentId, "jira", before, ask);
-    return { ok: true };
-  });
+  return await runAction("export artefact to jira", () =>
+    exportDocument(input, "jira", async (conversation, document) => ({
+      exportId: await requestJiraExport(prisma, conversation, input.documentId, input.project),
+      ask: `Please export ${document} to the ${String(input.project)} backlog in Jira.`
+    }))
+  );
 }
 
 /**
@@ -542,26 +538,14 @@ export async function exportArtefactToJira(input: { conversationId: unknown; doc
  * chat and how to carry it out goes to the session in the message's frame.
  */
 export async function exportArtefactToGithub(input: { conversationId: unknown; documentId: unknown; repo: unknown; project?: unknown }): Promise<ActionResult> {
-  return await runAction("export artefact to github", async () => {
-    if (!virtualAgentsEnabled()) {
-      return OFF;
-    }
-    const viewer = await requireViewer();
-    const conversation = await findConversation(prisma, viewer.oid, text(input.conversationId));
-    if (conversation === undefined) {
-      return MISSING;
-    }
-    if (await gated(viewer, conversation)) {
-      return BLOCKED;
-    }
-    const document = await named(conversation.id, input.documentId);
-    const before = await exportIdOf(prisma, conversation.id, input.documentId, "github");
-    const repo = await requestGithubExport(prisma, conversation, input.documentId, input.repo, input.project ?? null);
-    const project = readGithubProject(input.project ?? null);
-    const board = project ? `, on the "${project.title}" Project` : "";
-    await sendOrAbandon(viewer, conversation, input.documentId, "github", before, `Please create a GitHub issue for ${document} in ${repo}${board}.`);
-    return { ok: true };
-  });
+  return await runAction("export artefact to github", () =>
+    exportDocument(input, "github", async (conversation, document) => {
+      const { repo, exportId } = await requestGithubExport(prisma, conversation, input.documentId, input.repo, input.project ?? null);
+      const project = readGithubProject(input.project ?? null);
+      const board = project ? `, on the "${project.title}" Project` : "";
+      return { exportId, ask: `Please create a GitHub issue for ${document} in ${repo}${board}.` };
+    })
+  );
 }
 
 /**
@@ -570,22 +554,10 @@ export async function exportArtefactToGithub(input: { conversationId: unknown; d
  * in the chat and how to carry it out goes to the session in the message's frame.
  */
 export async function exportArtefactToConfluence(input: { conversationId: unknown; documentId: unknown; parent: unknown }): Promise<ActionResult> {
-  return await runAction("export artefact to confluence", async () => {
-    if (!virtualAgentsEnabled()) {
-      return OFF;
-    }
-    const viewer = await requireViewer();
-    const conversation = await findConversation(prisma, viewer.oid, text(input.conversationId));
-    if (conversation === undefined) {
-      return MISSING;
-    }
-    if (await gated(viewer, conversation)) {
-      return BLOCKED;
-    }
-    const document = await named(conversation.id, input.documentId);
-    const before = await exportIdOf(prisma, conversation.id, input.documentId, "confluence");
-    const parent = await requestConfluenceExport(prisma, conversation, input.documentId, input.parent);
-    await sendOrAbandon(viewer, conversation, input.documentId, "confluence", before, confluenceExportRequest(parent, document));
-    return { ok: true };
-  });
+  return await runAction("export artefact to confluence", () =>
+    exportDocument(input, "confluence", async (conversation, document) => {
+      const { parent, exportId } = await requestConfluenceExport(prisma, conversation, input.documentId, input.parent);
+      return { exportId, ask: confluenceExportRequest(parent, document) };
+    })
+  );
 }

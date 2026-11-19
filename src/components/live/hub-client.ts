@@ -70,6 +70,8 @@ export interface HubHandlers {
   event: HubListener;
   /** Called once, with the connection closed for good, when the stream failed because the session has ended. */
   signedOut: () => void;
+  /** Called each time the stream opens. */
+  opened?: () => void;
 }
 
 export interface StreamWatch {
@@ -143,6 +145,7 @@ export function connectHub(url: string, handlers: HubHandlers, dependencies: Hub
     source = current;
     current.addEventListener("open", () => {
       attempt = 0;
+      handlers.opened?.();
       if (missed) {
         missed = false;
         handlers.event("resync", {});
