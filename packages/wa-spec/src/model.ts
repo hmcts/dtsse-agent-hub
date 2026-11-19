@@ -45,7 +45,8 @@ export const ValEntry = z.strictObject({
   reconfigure: z.boolean().optional(),
   /** The description of the table row this entry heads. */
   note: z.string().optional(),
-  overrides: z.record(CaseTypeId, Expr).optional()
+  /** A value for a case type, as itself or as `{value}` (which can be null); a null override drops the entry for that case type. */
+  overrides: z.record(CaseTypeId, z.union([z.strictObject({ value: Expr }), Expr])).optional()
 });
 export type ValEntry = z.infer<typeof ValEntry>;
 
@@ -436,15 +437,11 @@ export function validateModel(model: Model): string[] {
     }
   }
   const ruleIds = new Set<string>();
-  const positions = new Set((model.cancellations ?? []).flatMap((rule, index) => (rule.id === undefined ? [String(index + 1)] : [])));
   for (const [index, rule] of (model.cancellations ?? []).entries()) {
     known(`cancellations[${index}]`, rule.only);
     if (rule.id !== undefined) {
       if (ruleIds.has(rule.id)) {
         problems.push(`cancellations[${index}]: id ${rule.id} is used by another rule`);
-      }
-      if (positions.has(rule.id)) {
-        problems.push(`cancellations[${index}]: id ${rule.id} is the position of a rule with no id`);
       }
       ruleIds.add(rule.id);
     }

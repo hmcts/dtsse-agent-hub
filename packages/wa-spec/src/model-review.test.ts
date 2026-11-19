@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -407,11 +408,10 @@ describe("round four", () => {
     expect(compareSpecs(a, b, { ignoreRuleOrder: true }).total).toBe(0);
   });
 
-  it("should reject a cancellation id used twice or equal to another rule's position when validating", () => {
+  it("should reject a cancellation id used by two rules when validating", () => {
     expect(() => parseModel(TWO_RULES.replace("{events: a,", "{id: x, events: a,").replace("{events: b,", "{id: x, events: b,"))).toThrow(
       "id x is used by another rule"
     );
-    expect(() => parseModel(TWO_RULES.replace("{events: a,", "{id: '2', events: a,"))).toThrow("id 2 is the position of a rule with no id");
   });
 
   it("should reject an override of a removed role and an add of a role the profile grants when validating", () => {
@@ -629,5 +629,98 @@ describe("readable errors", () => {
     const dir = mkdtempSync(join(tmpdir(), "wa-spec-err-"));
     writeFileSync(join(dir, "bad.yaml"), "kind: wa-model\nversion: 1\nservice: {}\ncaseTypes: []\ntasks: []\n");
     expect(() => loadSpecFile(join(dir, "bad.yaml"))).toThrow(/bad\.yaml is not valid:[\s\S]*service\.slug/);
+  });
+});
+
+describe("round six names and refs", () => {
+  const NAMED = (name: string, extra = "") => `
+kind: wa-model
+version: 1
+service: {slug: demo}
+caseTypes: [{id: ct_a}, {id: ct_b}]
+tasks:
+  - id: T
+    name: ${name}
+    create: [{event: e${extra}}]
+`;
+
+  it("should take a name with a note for a trigger that has no initial name when compiling", () => {
+    const rows = compileModel(parseModel(NAMED("{value: Noted, note: heads the row}"))).decisions.initiation?.rows ?? [];
+    expect(rows.map((r) => r.returns?.name)).toEqual(["Noted"]);
+  });
+
+  it("should take each case type's own name for a trigger that has no initial name when the names are split by case type", () => {
+    const rows = compileModel(parseModel(NAMED("[{value: Alpha, only: [ct_a]}, {value: Beta, only: [ct_b]}]"))).decisions.initiation?.rows ?? [];
+    expect(rows.map((r) => [r.only, r.returns?.name])).toEqual([
+      [["ct_a"], "Alpha"],
+      [["ct_b"], "Beta"]
+    ]);
+  });
+
+  it("should name nothing for a case type the task has no name for when compiling a trigger with no initial name", () => {
+    const rows = compileModel(parseModel(NAMED("{value: Alpha, only: [ct_a]}"))).decisions.initiation?.rows ?? [];
+    expect(rows.map((r) => [r.only ?? null, r.returns?.name])).toEqual([
+      [["ct_a"], "Alpha"],
+      [["ct_b"], undefined]
+    ]);
+  });
+
+  it("should keep residue rows in place when an earlier residue row is deleted", () => {
+    const hasCase = (key: string) => ({ caseData: { feel: key } });
+    const spec = structuredClone(VARIANT_SPEC);
+    spec.decisions.configuration.rows = [
+      cfgRow(hasCase("a"), { name: "title", value: "r1", canReconfigure: false }),
+      cfgRow(hasCase("b"), { name: "title", value: "r2", canReconfigure: false }),
+      cfgRow({ taskType: { in: ["t1"] } }, { name: "workType", value: "w", canReconfigure: false }),
+      cfgRow(hasCase("c"), { name: "title", value: "r3", canReconfigure: false })
+    ] as never;
+    const { model, ordering, report } = liftSpec(spec);
+    expect(report.differences).toEqual([]);
+    expect(report.counts.configuration.residue).toBe(3);
+    const rows = model.tables?.configuration?.rows ?? [];
+    const edited = { ...model, tables: { ...model.tables, configuration: { ...model.tables?.configuration, rows: rows.slice(1) } } } as Model;
+    const values = configRows(edited, ordering).map((r) => r.returns?.value);
+    expect(values).toEqual(["r2", "w", "r3"]);
+  });
+
+  it("should drop the entry for a case type when a value override is null, and keep a null value written as {value: null}", () => {
+    const text = (override: string) => `
+kind: wa-model
+version: 1
+service: {slug: demo}
+caseTypes: [{id: ct_a}, {id: ct_b}]
+tasks: [{id: T, title: {value: x, overrides: {ct_b: ${override}}}}]
+`;
+    const rows = (override: string) => configRows(parseModel(text(override))).map((r) => [r.only ?? null, r.returns?.value]);
+    expect(rows("null")).toEqual([[["ct_a"], "x"]]);
+    expect(rows("{value: null}")).toEqual([
+      [["ct_a"], "x"],
+      [["ct_b"], null]
+    ]);
+    expect(rows("y")).toEqual([
+      [["ct_a"], "x"],
+      [["ct_b"], "y"]
+    ]);
+  });
+
+  it("should report an inserted row as inserted and not every later row as different when diffing specs", () => {
+    const a = compileModel(parseModel(BASE));
+    const b = structuredClone(a);
+    const rows = b.decisions.cancellation?.rows as Row[];
+    rows.splice(1, 0, { when: { event: { in: ["new"] } }, returns: { action: "Cancel" } });
+    const { differences, total } = compareSpecs(a, b, { strict: true });
+    expect(total).toBe(1);
+    expect(differences[0]).toContain("spec.decisions.cancellation.rows[1]: inserted");
+  });
+
+  it("should show the rows of a task when given a model", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wa-spec-show-"));
+    writeFileSync(join(dir, "m.yaml"), BASE);
+    const shown = spawnSync(process.execPath, ["--import", "tsx", fileURLToPath(new URL("./cli.ts", import.meta.url)), "show", join(dir, "m.yaml"), "A"], {
+      encoding: "utf8",
+      cwd: fileURLToPath(new URL("..", import.meta.url))
+    });
+    expect(shown.status).toBe(0);
+    expect(shown.stdout).toContain("workType");
   });
 });

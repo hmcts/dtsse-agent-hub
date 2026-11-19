@@ -35,6 +35,8 @@ export interface Atom {
   content: Content;
   /** `stable(content)`, computed once. */
   contentKey: string;
+  /** What the entry looked like: see `fingerprintOf`. */
+  fingerprint: string;
   /** The description of the table row this entry heads. */
   note?: string;
 }
@@ -128,7 +130,9 @@ function valPieces(model: Model, val: Val, cases: string[]): ValPiece[] {
       return [{ value: entry as Expr, cases, reconfigure: undefined }];
     }
     const own = within(model, entry.only, cases);
-    const overrides = entry.overrides && Object.fromEntries(Object.entries(entry.overrides).map(([c, value]) => [c, { value }]));
+    const overrides =
+      entry.overrides &&
+      Object.fromEntries(Object.entries(entry.overrides).map(([c, o]) => [c, o === null ? null : { value: isValEntry(o) ? o.value : (o as Expr) }]));
     return pieces(model, entry, own, overrides).map((piece) => ({
       value: piece.entry.value,
       cases: piece.cases,
@@ -188,12 +192,7 @@ export function grantContent(model: Model, role: string, grant: Grant): Content 
   return { when: {}, returns, ...(grant.note === undefined ? {} : { description: grant.note }) };
 }
 
-/** The task's name in the task-type list, when it is one value for every case type. */
-function plainName(task: Task): Expr | undefined {
-  return task.name === undefined || Array.isArray(task.name) || isValEntry(task.name) ? undefined : task.name;
-}
-
-function triggerContent(task: Task, trigger: Trigger): Content {
+function triggerContent(task: Task, trigger: Trigger, listedName: Expr | undefined): Content {
   const when: Record<string, Cell> = { eventId: decodeCell(trigger.event) };
   if (trigger.postState !== undefined) {
     when.postEventState = decodeCell(trigger.postState);
@@ -202,7 +201,7 @@ function triggerContent(task: Task, trigger: Trigger): Content {
     when[key] = decodeCell(cell);
   }
   const returns: Record<string, Expr> = { taskId: task.id };
-  const name = trigger.initialName !== undefined ? trigger.initialName : task.initialName !== undefined ? task.initialName : plainName(task);
+  const name = trigger.initialName !== undefined ? trigger.initialName : task.initialName !== undefined ? task.initialName : listedName;
   if (name !== undefined) {
     returns.name = name;
   }
@@ -246,11 +245,49 @@ function cancellationContent(rule: Cancellation, category: Expr | undefined): Co
   return { when, returns, ...(rule.note === undefined ? {} : { description: rule.note }) };
 }
 
+/**
+ * The case types a trigger covers, grouped by the name the task is created with there. A trigger and a task with no
+ * `initialName` take the task's `name` for each case type; where the task has none, the trigger names nothing.
+ */
+function namedParts(model: Model, task: Task, trigger: Trigger, cases: string[], own: string[]): Array<{ cases: string[]; name: Expr | undefined }> {
+  if (trigger.initialName !== undefined || task.initialName !== undefined) {
+    return [{ cases, name: undefined }];
+  }
+  const listed = new Map<string, Expr>();
+  for (const piece of task.name === undefined ? [] : valPieces(model, task.name, own)) {
+    for (const c of piece.cases) {
+      if (!listed.has(c)) {
+        listed.set(c, piece.value);
+      }
+    }
+  }
+  const parts: Array<{ cases: string[]; name: Expr | undefined }> = [];
+  for (const c of cases) {
+    const name = listed.get(c);
+    const same = parts.find((part) => (name === undefined ? part.name === undefined : part.name !== undefined && stable(part.name) === stable(name)));
+    if (same) {
+      same.cases.push(c);
+    } else {
+      parts.push({ cases: [c], name });
+    }
+  }
+  return parts;
+}
+
 /** Every row's worth of content the model describes, per kind, in the order it compiles when nothing says otherwise. */
 export function collectAtoms(model: Model): Atoms {
   const atoms = Object.fromEntries(KINDS.map((kind) => [kind, [] as Atom[]])) as Atoms;
   const add = (kind: Kind, task: string, slot: string, cases: string[], content: Content, note?: string) => {
-    atoms[kind].push({ ref: `${task}/${slot}`, task, slot, cases, content, contentKey: stable(content), ...(note === undefined ? {} : { note }) });
+    atoms[kind].push({
+      ref: `${task}/${slot}`,
+      task,
+      slot,
+      cases,
+      content,
+      contentKey: stable(content),
+      fingerprint: fingerprintOf(cases, content.when, content.returns),
+      ...(note === undefined ? {} : { note })
+    });
   };
   const all = caseOrder(model);
 
@@ -279,7 +316,9 @@ export function collectAtoms(model: Model): Atoms {
     }
     for (const trigger of task.create ?? []) {
       for (const piece of pieces(model, trigger, within(model, trigger.only, own), trigger.overrides)) {
-        add("initiation", task.id, "create", piece.cases, triggerContent(task, piece.entry), piece.entry.note);
+        for (const part of namedParts(model, task, piece.entry, piece.cases, own)) {
+          add("initiation", task.id, "create", part.cases, triggerContent(task, piece.entry, part.name), piece.entry.note);
+        }
       }
     }
     for (const completion of task.complete ?? []) {
@@ -299,10 +338,10 @@ export function collectAtoms(model: Model): Atoms {
     }
   }
 
-  for (const [index, rule] of (model.cancellations ?? []).entries()) {
+  for (const rule of model.cancellations ?? []) {
     const cases = rule.only ? inOrder(model, rule.only) : all;
     for (const category of rule.categories ?? [undefined]) {
-      add("cancellation", RULES, rule.id ?? String(index + 1), cases, cancellationContent(rule, category));
+      add("cancellation", RULES, rule.id ?? ruleSlot(rule), cases, cancellationContent(rule, category));
     }
   }
   for (const kind of KINDS) {
@@ -326,7 +365,7 @@ function withRefs(atoms: Atom[]): Atom[] {
     if (sizes.get(bucketOf(atom)) === 1) {
       return atom;
     }
-    const base = `${bucketOf(atom)}#${createHash("sha1").update(signature(atom.content, atom.cases)).digest("hex").slice(0, 6)}`;
+    const base = `${bucketOf(atom)}#${createHash("sha1").update(atomSignature(atom, atom.cases)).digest("hex").slice(0, 6)}`;
     const n = (seen.get(base) ?? 0) + 1;
     seen.set(base, n);
     return { ...atom, ref: n > 1 ? `${base}.${n}` : base };
@@ -336,19 +375,43 @@ function withRefs(atoms: Atom[]): Atom[] {
 export const overlapping = (a: string[], b: string[]): boolean => a.some((x) => b.includes(x));
 
 /** What an atom looked like, for matching an edited entry to the reference it replaced: its case types, then a hash of each field. */
-export function fingerprintOf(atom: Atom): string {
+export function fingerprintOf(cases: string[], when: Record<string, unknown>, returns: Record<string, unknown>): string {
   const fields = (side: string, record: Record<string, unknown>) =>
     Object.entries(record).map(([key, value]) => `${side}.${key}=${createHash("sha1").update(stable(value)).digest("hex").slice(0, 4)}`);
-  return [atom.cases.join(","), ...fields("w", atom.content.when), ...fields("r", atom.content.returns)].join(";");
+  return [cases.join(","), ...fields("w", when), ...fields("r", returns)].join(";");
 }
 
-function closeness(was: string, atom: Atom): number {
-  const [cases = "", ...fields] = was.split(";");
-  const before = cases.split(",");
-  const kept = before.length === atom.cases.length && before.every((c) => atom.cases.includes(c)) ? 1000 : overlapping(before, atom.cases) ? 500 : 0;
-  const now = fingerprintOf(atom).split(";").slice(1);
-  return kept + fields.filter((field) => now.includes(field)).length;
+/** An atom's identity for grouping rows: its content and the case types it covers here. */
+const atomSignature = (atom: Atom, cases: string[]): string => `${atom.contentKey}@${cases.join(",")}`;
+
+/** The fingerprint of a residue row, and the token it is named by: a hash of the row, with a count for identical rows. */
+export const rowFingerprint = (row: Row, all: string[]): string => fingerprintOf(row.only ?? all, row.when ?? {}, row.returns ?? {});
+
+export function residueRefs(rows: Row[]): string[] {
+  const seen = new Map<string, number>();
+  return rows.map((row) => {
+    const base = `~${createHash("sha1").update(stable(row)).digest("hex").slice(0, 6)}`;
+    const n = (seen.get(base) ?? 0) + 1;
+    seen.set(base, n);
+    return n > 1 ? `${base}.${n}` : base;
+  });
 }
+
+function closeness(was: string, now: string): number {
+  const [cases = "", ...fields] = was.split(";");
+  const [casesNow = "", ...fieldsNow] = now.split(";");
+  const before = cases.split(",");
+  const after = casesNow.split(",");
+  const kept = before.length === after.length && before.every((c) => after.includes(c)) ? 1000 : overlapping(before, after) ? 500 : 0;
+  return kept + fields.filter((field) => fieldsNow.includes(field)).length;
+}
+
+/** The slot of a cancellation rule with no `id`: a hash of the rule, so its place does not depend on its position. */
+const ruleSlot = (rule: Cancellation): string =>
+  `r${createHash("sha1")
+    .update(stable({ ...rule, categories: undefined }))
+    .digest("hex")
+    .slice(0, 6)}`;
 
 export const bucketOf = (atom: Atom): string => `${atom.task}/${atom.slot}`;
 
@@ -415,6 +478,24 @@ function buildRows(
   const mapped = new Map<string, Atom[]>();
   const spares = atoms.filter((a) => !named.has(a.ref));
   const stale = [...named].filter((t) => t !== "" && !/^[@~]/.test(t) && !byRef.has(t));
+  const rowRefs = residueRefs(residue);
+  const residueNamed = new Set([...named].filter((t) => t.startsWith("~")));
+  const residueFor = new Map<string, number>(rowRefs.flatMap((ref, i) => (residueNamed.has(ref) ? [[ref, i]] : [])));
+  const spareRows = rowRefs.flatMap((ref, i) => (residueNamed.has(ref) ? [] : [i]));
+  const takenRows = new Set<number>();
+  const staleRows = [...residueNamed].filter((t) => !residueFor.has(t));
+  const rowPairs = staleRows
+    .flatMap((token) =>
+      spareRows.map((i) => ({ token, i, score: fingerprints?.[token] ? closeness(fingerprints[token] as string, rowFingerprint(residue[i] as Row, all)) : 1 }))
+    )
+    .filter((pair) => pair.score > 0)
+    .sort((x, y) => y.score - x.score);
+  for (const { token, i } of rowPairs) {
+    if (!residueFor.has(token) && !takenRows.has(i)) {
+      residueFor.set(token, i);
+      takenRows.add(i);
+    }
+  }
   // Without a fingerprint, only the case types of the rows naming the token say which atom it stood for.
   const rowCases = new Map<string, string[]>();
   for (const item of order ?? []) {
@@ -430,11 +511,11 @@ function buildRows(
   const pairs = stale
     .flatMap((token) =>
       spares
-        .filter((a) => bucketOf(a) === token.replace(/#.*$/, ""))
+        .filter((a) => bucketOf(a) === token.replace(/#.*$/, "") || (kind === "cancellation" && a.task === RULES))
         .map((atom) => {
           const fingerprint = fingerprints?.[token];
           const wanted = rowCases.get(token);
-          const score = fingerprint ? closeness(fingerprint, atom) : !wanted || overlapping(wanted, atom.cases) ? 1 : 0;
+          const score = fingerprint ? closeness(fingerprint, atom.fingerprint) : !wanted || overlapping(wanted, atom.cases) ? 1 : 0;
           return { token, atom, score };
         })
     )
@@ -457,7 +538,7 @@ function buildRows(
     if (again) {
       return again;
     }
-    const spare = spares.find((a) => bucketOf(a) === token.replace(/#.*$/, "") && !taken.has(a) && fits(a));
+    const spare = spares.find((a) => (bucketOf(a) === token.replace(/#.*$/, "") || (kind === "cancellation" && a.task === RULES)) && !taken.has(a) && fits(a));
     if (spare) {
       taken.add(spare);
       mapped.set(token, [...known, spare]);
@@ -469,7 +550,7 @@ function buildRows(
   const usedResidue = new Set<number>();
   const isGrouped = (atom: Atom) => taskKey !== undefined && atom.task !== ALL_TASKS;
   const outRow = (atom: Atom, cases: string[], description: string | undefined): OutRow => ({
-    sig: signature(atom.content, cases),
+    sig: atomSignature(atom, cases),
     tasks: [atom.task],
     content: atom.content,
     cases,
@@ -488,7 +569,7 @@ function buildRows(
     const members: Array<{ atom: Atom; cases: string[] }> = [];
     for (const token of tokens) {
       if (token.startsWith("~")) {
-        const n = Number(token.slice(1));
+        const n = (residueFor.get(token) ?? -1) + 1;
         const rowOf = residue[n - 1];
         if (rowOf && !usedResidue.has(n)) {
           usedResidue.add(n);

@@ -81,7 +81,7 @@ function readSpecFile(path: string): { spec: Spec; model: Model | undefined } {
 }
 
 /** Runs a read that parses a file, naming the file in whatever goes wrong and, for a schema failure, each field at fault. */
-function explained<T>(path: string, read: () => T): T {
+export function explained<T>(path: string, read: () => T): T {
   try {
     return read();
   } catch (error) {

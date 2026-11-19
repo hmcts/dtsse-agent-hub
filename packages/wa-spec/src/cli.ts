@@ -1,12 +1,11 @@
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { ZodError } from "zod";
 import { diffPaths, renderDifferences } from "./diff.ts";
 import { exists, listDir, readText, writeText } from "./file-io.ts";
 import { parseFileName } from "./file-names.ts";
 import { generateAll } from "./generator.ts";
 import { importDmns, renderReport } from "./importer.ts";
-import { loadSpecFile, loadSpecOnly, orderPathBeside, stringifyModel, stringifyOrdering } from "./model-io.ts";
+import { explained, loadSpecFile, loadSpecOnly, orderPathBeside, stringifyModel, stringifyOrdering } from "./model-io.ts";
 import { liftSpec, renderLiftReport } from "./model-lift.ts";
 import { compareSpecs } from "./spec-diff.ts";
 import { layoutPathFor, parseSpec, stringifyLayout, stringifySpec } from "./spec-io.ts";
@@ -28,20 +27,8 @@ const USAGE = `wa-spec: Work Allocation configuration spec
   wa-spec diff <a> <b> [--ignore-rule-order]     two DMN files or two directories, or a file and a directory holding
                                                  a file of the same name; exits 1 when they differ. Two YAML files
                                                  (specs or models) are compared as specs
-  wa-spec show <spec.yaml> <taskId>              the rows of every kind that concern one task
+  wa-spec show <spec.yaml|model.yaml> <taskId>   the rows of every kind that concern one task
 `;
-
-/** Reads and parses a file the tools wrote, naming the file and, for a schema failure, each field at fault. */
-function load<T>(path: string, parse: (text: string) => T): T {
-  try {
-    return parse(readText(path));
-  } catch (error) {
-    if (error instanceof ZodError) {
-      throw new Error(`${path} is not valid:\n${error.issues.map((issue) => `  ${issue.path.join(".")}: ${issue.message}`).join("\n")}`);
-    }
-    throw new Error(`${path}: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
 
 function fail(message: string): never {
   process.stderr.write(`${message}\n`);
@@ -112,7 +99,7 @@ function main(argv: string[]): number {
     if (!specPath || !values.output) {
       fail(USAGE);
     }
-    const spec = load(specPath, parseSpec);
+    const spec = explained(specPath, () => parseSpec(readText(specPath)));
     const layoutPath = values.layout ?? layoutPathFor(specPath);
     if (values.layout && !exists(values.layout)) {
       fail(`the layout file ${values.layout} does not exist`);
@@ -177,7 +164,7 @@ function main(argv: string[]): number {
     if (!specPath || !taskId) {
       fail(USAGE);
     }
-    process.stdout.write(`${renderTaskRows(taskRows(load(specPath, parseSpec), taskId))}\n`);
+    process.stdout.write(`${renderTaskRows(taskRows(loadSpecOnly(specPath), taskId))}\n`);
     return 0;
   }
   process.stdout.write(USAGE);

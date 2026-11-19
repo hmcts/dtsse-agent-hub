@@ -25,10 +25,11 @@ import {
   type Content,
   collectAtoms,
   compileModel,
-  fingerprintOf,
   inCaseOrder,
   overlapping,
   RULES,
+  residueRefs,
+  rowFingerprint,
   stable,
   withCanonicalEvent
 } from "./model-compile.ts";
@@ -307,7 +308,7 @@ function deltaFrom(profile: Record<string, Grant>, set: GrantSet): { spec: Permi
     }
   }
   for (const [role, grant] of set.roles) {
-    if (!(role in profile)) {
+    if (!Object.hasOwn(profile, role)) {
       add[role] = grant;
     }
   }
@@ -757,6 +758,7 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
 
   // Cancellation rules: adjacent rows that differ only in category share a rule.
   const rules: Cancellation[] = [];
+  const ruleOfRow = new Map<number, number>();
   let previous: { key: string; row: number } | undefined;
   for (const { row, classified: result, src } of cancellationRows) {
     const item = result.items[0] as Item;
@@ -785,6 +787,7 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
         ...(src.only ? { only: src.only } : {})
       });
     }
+    ruleOfRow.set(row, rules.length - 1);
     previous = { key, row };
   }
 
@@ -834,14 +837,17 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
     }
     const buckets = new Map<string, Atom[]>();
     for (const atom of atoms[kind]) {
-      const key = atom.task === RULES ? RULES : `${atom.task}/${atom.slot}`;
+      const key = `${atom.task}/${atom.slot}`;
       buckets.set(key, [...(buckets.get(key) ?? []), atom]);
     }
+    const residueRef = residueRefs(residue[kind]);
     const used = new Map<Atom, string[]>();
     const rows: OrderRow[] = [];
     for (const entry of classified[kind]) {
       if (entry.residueIndex !== undefined) {
-        rows.push(`~${entry.residueIndex}`);
+        const ref = residueRef[entry.residueIndex - 1] as string;
+        fingerprints[kind] = { ...fingerprints[kind], [ref]: rowFingerprint(entry.row, caseIds) };
+        rows.push(ref);
         continue;
       }
       const result = entry.result as Classified;
@@ -850,18 +856,19 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
       let differs = false;
       for (const item of result.items) {
         const wanted = stable(item.content);
-        const atom = (buckets.get(item.bucket) ?? []).find(
+        const bucket = kind === "cancellation" ? `${RULES}/${cancellations[ruleOfRow.get(entry.index) ?? 0]?.id}` : item.bucket;
+        const atom = (buckets.get(bucket) ?? []).find(
           (a) => a.contentKey === wanted && subset(item.cases, a.cases) && !overlapping(used.get(a) ?? [], item.cases)
         );
         if (!atom) {
-          unmatched ??= `${kind} row ${entry.index}: no model entry for ${item.bucket}`;
+          unmatched ??= `${kind} row ${entry.index}: no model entry for ${bucket}`;
           continue;
         }
         used.set(atom, [...(used.get(atom) ?? []), ...item.cases]);
         tokens.push(atom.ref);
         matched.push(atom);
         if (atom.ref.includes("#")) {
-          fingerprints[kind] = { ...fingerprints[kind], [atom.ref]: fingerprintOf(atom) };
+          fingerprints[kind] = { ...fingerprints[kind], [atom.ref]: atom.fingerprint };
         }
         differs ||= !sameSet(atom.cases, result.cases);
       }

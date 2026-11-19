@@ -386,7 +386,7 @@ describe("diffSpecs", () => {
     b.service.displayName = "Demo";
     const differences = diffSpecs(a, b);
     expect(differences).toContain("spec.service.displayName: only in the second");
-    expect(differences).toContain("spec.decisions.initiation.rows: 2 items vs 1");
+    expect(differences.some((d) => d.startsWith("spec.decisions.initiation.rows[1]: removed {"))).toBe(true);
     expect(differences.some((d) => d.startsWith("spec.decisions.completion.rows[0].returns"))).toBe(true);
   });
 });
