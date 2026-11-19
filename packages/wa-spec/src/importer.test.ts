@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { sampleDmn } from "./__fixtures__/dmn.ts";
-import { parseDmn, writeDmn } from "./dmn-model.ts";
+import { parseDmn, sampleDmn } from "./__fixtures__/dmn.ts";
+import { writeDmn } from "./dmn-model.ts";
 import { generateAll } from "./generator.ts";
 import { importDmns, renderReport } from "./importer.ts";
 import { validateSpec } from "./schema.ts";
@@ -224,8 +224,8 @@ describe("importDmns refusals and allowed values", () => {
   });
 
   it("should throw and name both files when a kind and case type have two files", () => {
-    expect(() => importDmns([dmn("completion", "one", "ct_a"), dmn("completion", "two", "ct_a")])).toThrow(
-      /wa-task-completion-one-ct_a\.dmn and wa-task-completion-two-ct_a\.dmn are both the completion DMN of ct_a/
+    expect(() => importDmns([dmn("completion", "one", "ct_a"), dmn("completion", "one", "ct_a")])).toThrow(
+      /wa-task-completion-one-ct_a\.dmn and wa-task-completion-one-ct_a\.dmn are both the completion DMN of ct_a/
     );
   });
 
@@ -289,3 +289,17 @@ describe("importDmns helper requiring the main decision", () => {
 });
 
 type DmnDecisionOf = ReturnType<typeof parseDmn>["decisions"][number];
+
+describe("importDmns requirements to missing decisions and error order", () => {
+  it("should flag a requirement that points at a decision the file lacks and drop the edge when the file has one", () => {
+    const xml = sampleDmn("ct_a").replace('href="#Decision_LATEST"', 'href="#Decision_GONE"');
+    const { report, spec } = importDmns([{ name: "wa-task-completion-demo-ct_a.dmn", xml }]);
+    expect(report.unrepresentable.map((u) => u.construct)).toEqual(["Demo completion requires a decision the file does not have"]);
+    expect(spec.decisions.completion?.dependencies).toBeUndefined();
+  });
+
+  it("should name the services before the duplicate files when both problems are present", () => {
+    const names = ["wa-task-completion-one-ct_a.dmn", "wa-task-completion-two-ct_a.dmn"].map((name) => ({ name, xml: sampleDmn("ct_a") }));
+    expect(() => importDmns([...names, { name: "wa-task-completion-one-ct_a.dmn", xml: sampleDmn("ct_a") }])).toThrow(/more than one service/);
+  });
+});

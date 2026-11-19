@@ -1,7 +1,7 @@
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { diffPaths, renderDifferences } from "./diff.ts";
-import { exists, isDirectory, listDir, readText, removeFile, writeText } from "./file-io.ts";
+import { exists, isDirectory, listDir, readText, writeText } from "./file-io.ts";
 import { isWaTaskDmn, parseFileName } from "./file-names.ts";
 import { generateAll } from "./generator.ts";
 import { importDmns, renderReport } from "./importer.ts";
@@ -15,10 +15,10 @@ const USAGE = `wa-spec: Work Allocation configuration spec
 
   wa-spec import <dmn-dir> -o <spec.yaml> [--report <report.md>] [--jurisdiction J] [--service-code C] [--display-name N]
                                                  also writes the ids and layout to <spec>.layout.yaml
-  wa-spec generate <spec.yaml|model.yaml> -o <dir> [--layout <layout.yaml>] [--prune]
+  wa-spec generate <spec.yaml|model.yaml> -o <dir> [--layout <layout.yaml>]
                                                  a model ("kind: wa-model") is compiled first; the layout is --layout,
-                                                 the model layout field, or <name>.layout.yaml. Lists the task DMNs in
-                                                 <dir> the spec no longer has, and removes them with --prune
+                                                 the model layout field, or <name>.layout.yaml. Lists the task DMNs of
+                                                 the spec's service in <dir> that it did not generate, and leaves them
   wa-spec lift <spec.yaml> -o <model.yaml> [--report <report.md>] [--layout <layout.yaml>]
                                                  the task- and role-centric model of a spec, with <model>.order.yaml
                                                  that keeps the tables' row order; exits 1 unless it compiles back equal
@@ -47,8 +47,7 @@ function main(argv: string[]): number {
       "service-code": { type: "string" },
       "display-name": { type: "string" },
       layout: { type: "string" },
-      "ignore-rule-order": { type: "boolean" },
-      prune: { type: "boolean" }
+      "ignore-rule-order": { type: "boolean" }
     }
   });
   if (command === "import") {
@@ -89,13 +88,8 @@ function main(argv: string[]): number {
       const parsed = parseFileName(name);
       return parsed?.service === spec.service.slug && !made.has(`${parsed.kind}/${parsed.caseType}`);
     });
-    for (const name of stale) {
-      if (values.prune) {
-        removeFile(join(values.output, name));
-      }
-    }
     if (stale.length > 0) {
-      process.stderr.write(`${values.prune ? "removed" : "left in place, and not in the spec (--prune removes them)"}: ${stale.join(", ")}\n`);
+      process.stderr.write(`left in place, as the spec does not generate them: ${stale.join(", ")}\n`);
     }
     process.stdout.write(`generated ${files.length} files in ${values.output}\n`);
     return 0;

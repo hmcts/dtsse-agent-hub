@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sampleDmn } from "./__fixtures__/dmn.ts";
-import { parseDmn } from "./dmn-model.ts";
+import { parseDmn, sampleDmn } from "./__fixtures__/dmn.ts";
 import { decisionKey, generateAll, generateDocument } from "./generator.ts";
 import { importDmns } from "./importer.ts";
 import { type Spec, Spec as SpecSchema } from "./schema.ts";

@@ -28,14 +28,16 @@ files:
             "disposeCase",
             "et3Response", "rollbackMigrateCase","caseTransferECM"
         inputs:
-          fromState: Input_1 InputExpression_1 - -
-          event: InputClause_0ain215 LiteralExpression_0h2l2zj 265 -
-          state: InputClause_0bomy63 LiteralExpression_1g5glfi - -
+          - [ fromState, Input_1 InputExpression_1 - - ]
+          - - event
+            - InputClause_0ain215 LiteralExpression_0h2l2zj 265 -
+          - - state
+            - InputClause_0bomy63 LiteralExpression_1g5glfi - -
         outputs:
-          action: OutputClause_18zgoaj -
-          warningCode: OutputClause_0tu8bqp -
-          warningText: OutputClause_1kfc3jv -
-          processCategories: OutputClause_0dqzted 277
+          - [ action, OutputClause_18zgoaj - ]
+          - [ warningCode, OutputClause_0tu8bqp - ]
+          - [ warningText, OutputClause_1kfc3jv - ]
+          - [ processCategories, OutputClause_0dqzted 277 ]
         rules:
           - 034d65959685 DecisionRule_0623eaq UnaryTests_0pawl5b UnaryTests_0puirp2 UnaryTests_1nrvqbg LiteralExpression_1ucqosp LiteralExpression_1uyvgku LiteralExpression_1965v3p LiteralExpression_1lsdk2d
           - f1e89c429b80 DecisionRule_1pgnaox UnaryTests_02udgat UnaryTests_1woxl8e UnaryTests_1lt298h LiteralExpression_15v2291 LiteralExpression_1acxajd LiteralExpression_0788pov LiteralExpression_1p7t7rc
@@ -72,14 +74,16 @@ files:
       table:
         table: DecisionTable_0z3jx1g
         inputs:
-          fromState: Input_1 InputExpression_1 - -
-          event: InputClause_0ain215 LiteralExpression_0h2l2zj 265 -
-          state: InputClause_0bomy63 LiteralExpression_1g5glfi - -
+          - [ fromState, Input_1 InputExpression_1 - - ]
+          - - event
+            - InputClause_0ain215 LiteralExpression_0h2l2zj 265 -
+          - - state
+            - InputClause_0bomy63 LiteralExpression_1g5glfi - -
         outputs:
-          action: OutputClause_18zgoaj -
-          warningCode: OutputClause_0tu8bqp -
-          warningText: OutputClause_1kfc3jv -
-          processCategories: OutputClause_0dqzted 277
+          - [ action, OutputClause_18zgoaj - ]
+          - [ warningCode, OutputClause_0tu8bqp - ]
+          - [ warningText, OutputClause_1kfc3jv - ]
+          - [ processCategories, OutputClause_0dqzted 277 ]
         rules:
           - 52ed75831ab9 DecisionRule_0gwlszp UnaryTests_05k2w5r UnaryTests_048qp41 UnaryTests_1rhmbnn LiteralExpression_1j1l9uw LiteralExpression_0zaz5ta LiteralExpression_0f3bdou LiteralExpression_0xwbzkp
           - e63d4cea6d87 DecisionRule_0bjq06q UnaryTests_036vtgq UnaryTests_1apei4o UnaryTests_043mplw LiteralExpression_1eoo06c LiteralExpression_1g7oejj LiteralExpression_05dxr2v LiteralExpression_1idaz0h
@@ -115,14 +119,16 @@ files:
             "disposeCase",
             "et3Response", "rollbackMigrateCase","caseTransferECM"
         inputs:
-          fromState: Input_1 InputExpression_1 - -
-          event: InputClause_0ain215 LiteralExpression_0h2l2zj 271 -
-          state: InputClause_0bomy63 LiteralExpression_1g5glfi - -
+          - [ fromState, Input_1 InputExpression_1 - - ]
+          - - event
+            - InputClause_0ain215 LiteralExpression_0h2l2zj 271 -
+          - - state
+            - InputClause_0bomy63 LiteralExpression_1g5glfi - -
         outputs:
-          action: OutputClause_18zgoaj -
-          warningCode: OutputClause_0tu8bqp -
-          warningText: OutputClause_1kfc3jv -
-          processCategories: OutputClause_0dqzted 277
+          - [ action, OutputClause_18zgoaj - ]
+          - [ warningCode, OutputClause_0tu8bqp - ]
+          - [ warningText, OutputClause_1kfc3jv - ]
+          - [ processCategories, OutputClause_0dqzted 277 ]
         rules:
           - 034d65959685 DecisionRule_0623eaq UnaryTests_0pawl5b UnaryTests_0puirp2 UnaryTests_1nrvqbg LiteralExpression_1ucqosp LiteralExpression_1uyvgku LiteralExpression_1965v3p LiteralExpression_1lsdk2d
           - f1e89c429b80 DecisionRule_1pgnaox UnaryTests_02udgat UnaryTests_1woxl8e UnaryTests_1lt298h LiteralExpression_15v2291 LiteralExpression_1acxajd LiteralExpression_0788pov LiteralExpression_1p7t7rc
@@ -159,14 +165,16 @@ files:
       table:
         table: DecisionTable_0z3jx1g
         inputs:
-          fromState: Input_1 InputExpression_1 - -
-          event: InputClause_0ain215 LiteralExpression_0h2l2zj 271 -
-          state: InputClause_0bomy63 LiteralExpression_1g5glfi - -
+          - [ fromState, Input_1 InputExpression_1 - - ]
+          - - event
+            - InputClause_0ain215 LiteralExpression_0h2l2zj 271 -
+          - - state
+            - InputClause_0bomy63 LiteralExpression_1g5glfi - -
         outputs:
-          action: OutputClause_18zgoaj -
-          warningCode: OutputClause_0tu8bqp -
-          warningText: OutputClause_1kfc3jv -
-          processCategories: OutputClause_0dqzted 277
+          - [ action, OutputClause_18zgoaj - ]
+          - [ warningCode, OutputClause_0tu8bqp - ]
+          - [ warningText, OutputClause_1kfc3jv - ]
+          - [ processCategories, OutputClause_0dqzted 277 ]
         rules:
           - 52ed75831ab9 DecisionRule_0bov00l UnaryTests_0pfbr44 UnaryTests_0elis0e UnaryTests_1gxbui4 LiteralExpression_15mri9v LiteralExpression_1wlghmr LiteralExpression_1xgb10y LiteralExpression_1yio69d
           - e63d4cea6d87 DecisionRule_1t94cmr UnaryTests_18n6244 UnaryTests_0sepicc UnaryTests_133y0ug LiteralExpression_1fhcstw LiteralExpression_08keycj LiteralExpression_0qk5wc8 LiteralExpression_13bnols
@@ -247,10 +255,10 @@ files:
             "sendNotification",
             "caseTransferECM"
         inputs:
-          eventID: eventId LiteralExpression_1ngg489 355 -
+          - [ eventID, eventId LiteralExpression_1ngg489 355 - ]
         outputs:
-          taskType: Output_1 389
-          completionMode: OutputClause_1mldd9e 220
+          - [ taskType, Output_1 389 ]
+          - [ completionMode, OutputClause_1mldd9e 220 ]
         rules:
           - cb67ebff58b4 DecisionRule_12eenty UnaryTests_17cg7de LiteralExpression_1lk4wxe LiteralExpression_0ap1s9l
           - 2e0dfca88bb8 DecisionRule_1jameda UnaryTests_0q8217i LiteralExpression_1ku023r LiteralExpression_15g3yjk
@@ -322,10 +330,10 @@ files:
             "replyToReferral",
             "closeReferral"
         inputs:
-          eventID: eventId LiteralExpression_1ngg489 392 -
+          - [ eventID, eventId LiteralExpression_1ngg489 392 - ]
         outputs:
-          taskType: Output_1 341
-          completionMode: OutputClause_1mldd9e -
+          - [ taskType, Output_1 341 ]
+          - [ completionMode, OutputClause_1mldd9e - ]
         rules:
           - 7f8bf577e531 DecisionRule_1jameda UnaryTests_0q8217i LiteralExpression_1ku023r LiteralExpression_15g3yjk
           - 246961e9f087 DecisionRule_00owiss UnaryTests_0l84new LiteralExpression_0tdmwpw LiteralExpression_0mv4xsp
@@ -411,10 +419,10 @@ files:
             "sendNotification",
             "caseTransferECM"
         inputs:
-          eventID: eventId LiteralExpression_1ngg489 392 -
+          - [ eventID, eventId LiteralExpression_1ngg489 392 - ]
         outputs:
-          taskType: Output_1 353
-          completionMode: OutputClause_1mldd9e -
+          - [ taskType, Output_1 353 ]
+          - [ completionMode, OutputClause_1mldd9e - ]
         rules:
           - cb67ebff58b4 DecisionRule_12eenty UnaryTests_17cg7de LiteralExpression_1lk4wxe LiteralExpression_0ap1s9l
           - 2e0dfca88bb8 DecisionRule_1jameda UnaryTests_0q8217i LiteralExpression_1ku023r LiteralExpression_15g3yjk
@@ -486,10 +494,10 @@ files:
             "replyToReferral",
             "closeReferral"
         inputs:
-          eventID: eventId LiteralExpression_1ngg489 392 -
+          - [ eventID, eventId LiteralExpression_1ngg489 392 - ]
         outputs:
-          taskType: Output_1 377
-          completionMode: OutputClause_1mldd9e -
+          - [ taskType, Output_1 377 ]
+          - [ completionMode, OutputClause_1mldd9e - ]
         rules:
           - 7f8bf577e531 DecisionRule_1jameda UnaryTests_0q8217i LiteralExpression_1ku023r LiteralExpression_15g3yjk
           - 246961e9f087 DecisionRule_0toaplc UnaryTests_030e1io LiteralExpression_12l4agw LiteralExpression_0oahqe1
@@ -891,12 +899,14 @@ files:
             else 5001
             else 5001
         inputs:
-          caseData: InputClause_1gxyo7f LiteralExpression_0mra7c4 - -
-          taskType: InputClause_00c59gm LiteralExpression_1ngi22k 357 -
+          - - caseData
+            - InputClause_1gxyo7f LiteralExpression_0mra7c4 - -
+          - - taskType
+            - InputClause_00c59gm LiteralExpression_1ngi22k 357 -
         outputs:
-          name: Output_1 325
-          value: OutputClause_021y3bb 629
-          canReconfigure: OutputClause_0tefly7 -
+          - [ name, Output_1 325 ]
+          - [ value, OutputClause_021y3bb 629 ]
+          - [ canReconfigure, OutputClause_0tefly7 - ]
         rules:
           - a126dee94e6e DecisionRule_19opwhc UnaryTests_11xjbt2 UnaryTests_05z0qu3 LiteralExpression_1gcdayj LiteralExpression_1eo7s5z LiteralExpression_15e9efr
           - e0c7182fe436 DecisionRule_0pte5im UnaryTests_1c0whl2 UnaryTests_0xah181 LiteralExpression_0g8ycb8 LiteralExpression_06wi6cv LiteralExpression_1ngriuw
@@ -1105,12 +1115,14 @@ files:
             "ReviewReferralResponseJudiciaryMultiple",
             "ReviewReferralResponseAdminMultiple"
         inputs:
-          caseData: InputClause_1gxyo7f LiteralExpression_0mra7c4 150 -
-          taskType: InputClause_00c59gm LiteralExpression_1ngi22k 362 -
+          - - caseData
+            - InputClause_1gxyo7f LiteralExpression_0mra7c4 150 -
+          - - taskType
+            - InputClause_00c59gm LiteralExpression_1ngi22k 362 -
         outputs:
-          name: Output_1 258
-          value: OutputClause_021y3bb 1014
-          canReconfigure: OutputClause_0tefly7 -
+          - [ name, Output_1 258 ]
+          - [ value, OutputClause_021y3bb 1014 ]
+          - [ canReconfigure, OutputClause_0tefly7 - ]
         rules:
           - f17a9250b5a5 DecisionRule_0cps1im UnaryTests_1qi47tg UnaryTests_1yo1btj LiteralExpression_0natb9g LiteralExpression_0k43gid LiteralExpression_0cg37fr
           - e0c7182fe436 DecisionRule_0wlp2bc UnaryTests_03a2cqx UnaryTests_185ex2d LiteralExpression_1t1n543 LiteralExpression_0jejm4d LiteralExpression_1uymtq0
@@ -1537,12 +1549,14 @@ files:
             else 5001
             else 5001
         inputs:
-          caseData: InputClause_1gxyo7f LiteralExpression_0mra7c4 - -
-          taskType: InputClause_00c59gm LiteralExpression_1ngi22k 436 -
+          - - caseData
+            - InputClause_1gxyo7f LiteralExpression_0mra7c4 - -
+          - - taskType
+            - InputClause_00c59gm LiteralExpression_1ngi22k 436 -
         outputs:
-          name: Output_1 260
-          value: OutputClause_021y3bb 645
-          canReconfigure: OutputClause_0tefly7 231
+          - [ name, Output_1 260 ]
+          - [ value, OutputClause_021y3bb 645 ]
+          - [ canReconfigure, OutputClause_0tefly7 231 ]
         rules:
           - a126dee94e6e DecisionRule_19opwhc UnaryTests_11xjbt2 UnaryTests_05z0qu3 LiteralExpression_1gcdayj LiteralExpression_1eo7s5z LiteralExpression_15e9efr
           - 7e6fc7798b42 DecisionRule_0w78ygd UnaryTests_080l3co UnaryTests_0od99fb LiteralExpression_1pw07id LiteralExpression_0xbryov LiteralExpression_1nvk3fu
@@ -1751,12 +1765,14 @@ files:
             "ReviewReferralResponseJudiciaryMultiple",
             "ReviewReferralResponseAdminMultiple"
         inputs:
-          caseData: InputClause_1gxyo7f LiteralExpression_0mra7c4 150 -
-          taskType: InputClause_00c59gm LiteralExpression_1ngi22k 363 -
+          - - caseData
+            - InputClause_1gxyo7f LiteralExpression_0mra7c4 150 -
+          - - taskType
+            - InputClause_00c59gm LiteralExpression_1ngi22k 363 -
         outputs:
-          name: Output_1 260
-          value: OutputClause_021y3bb 966
-          canReconfigure: OutputClause_0tefly7 -
+          - [ name, Output_1 260 ]
+          - [ value, OutputClause_021y3bb 966 ]
+          - [ canReconfigure, OutputClause_0tefly7 - ]
         rules:
           - f17a9250b5a5 DecisionRule_19opwhc UnaryTests_11xjbt2 UnaryTests_05z0qu3 LiteralExpression_1gcdayj LiteralExpression_1eo7s5z LiteralExpression_15e9efr
           - 7e6fc7798b42 DecisionRule_0w78ygd UnaryTests_080l3co UnaryTests_0od99fb LiteralExpression_1pw07id LiteralExpression_0xbryov LiteralExpression_1nvk3fu
@@ -2035,33 +2051,54 @@ files:
             "Withdraw all/part of claim"
           LiteralExpression_164l0el: '"Arrange Support - "+ARRANGE_SUPPORT_TASK_NAME'
         inputs:
-          eventId: Input_1 InputExpression_1 346 -
-          postEventState: InputClause_0gxli97 LiteralExpression_0dijl5x 405 -
-          referCaseTo: InputClause_1nkkapg LiteralExpression_1h40nek 150 -
-          referralSubject: InputClause_1idexf5 LiteralExpression_0tjv49t 151 -
-          updateReferCaseTo: InputClause_09nugtb LiteralExpression_0pb37xa 263 -
-          directionTo: InputClause_1gia5s6 LiteralExpression_1tb9c3z 168 -
-          et3FormReceived: InputClause_15dbuhn LiteralExpression_1sd7ihy - -
-          isThereAnEt3Response: InputClause_02rzajk LiteralExpression_0nbums3 - -
-          isECC: InputClause_0la0ez2 LiteralExpression_0b9h9z9 192 -
-          isECCReplyReceived: InputClause_0ezn9nq LiteralExpression_07dvuz0 192 -
-          respondentECCReply: InputClause_83f99dd1 LiteralExpression_473d2661 - -
-          listAHearing: InputClause_16zvm0d LiteralExpression_0p48kud 150 -
-          hearingsHeard: InputClause_1bo0rip LiteralExpression_1ozm2ha 150 -
-          submissionReasonApplication: InputClause_0z98r1i LiteralExpression_1ebb1do 197 -
-          applicationResponseFrom: InputClause_1bd9l8t LiteralExpression_100989p 150 -
-          responseToApplicationType: InputClause_02rm1d2 LiteralExpression_009rrzp 186 -
-          notificationResponseIsECCFromClaimant: InputClause_1j45uoy LiteralExpression_1pdr93n - -
-          isJudgmentOrOrder: InputClause_10353bl LiteralExpression_19s7vic 192 -
-          adminSupportTaskRequired: Input_support_admin_ew InputExpression_support_admin_ew - -
-          legalOfficerSupportTaskRequired: Input_support_legalofficer_ew InputExpression_support_legalofficer_ew - -
-          judgeSupportTaskRequired: Input_support_judge_ew InputExpression_support_judge_ew - -
-          arrangeSupportTaskRequired: Input_arrange_support_ew InputExpression_arrange_support_ew - -
+          - [ eventId, Input_1 InputExpression_1 346 - ]
+          - - postEventState
+            - InputClause_0gxli97 LiteralExpression_0dijl5x 405 -
+          - - referCaseTo
+            - InputClause_1nkkapg LiteralExpression_1h40nek 150 -
+          - - referralSubject
+            - InputClause_1idexf5 LiteralExpression_0tjv49t 151 -
+          - - updateReferCaseTo
+            - InputClause_09nugtb LiteralExpression_0pb37xa 263 -
+          - - directionTo
+            - InputClause_1gia5s6 LiteralExpression_1tb9c3z 168 -
+          - - et3FormReceived
+            - InputClause_15dbuhn LiteralExpression_1sd7ihy - -
+          - - isThereAnEt3Response
+            - InputClause_02rzajk LiteralExpression_0nbums3 - -
+          - - isECC
+            - InputClause_0la0ez2 LiteralExpression_0b9h9z9 192 -
+          - - isECCReplyReceived
+            - InputClause_0ezn9nq LiteralExpression_07dvuz0 192 -
+          - - respondentECCReply
+            - InputClause_83f99dd1 LiteralExpression_473d2661 - -
+          - - listAHearing
+            - InputClause_16zvm0d LiteralExpression_0p48kud 150 -
+          - - hearingsHeard
+            - InputClause_1bo0rip LiteralExpression_1ozm2ha 150 -
+          - - submissionReasonApplication
+            - InputClause_0z98r1i LiteralExpression_1ebb1do 197 -
+          - - applicationResponseFrom
+            - InputClause_1bd9l8t LiteralExpression_100989p 150 -
+          - - responseToApplicationType
+            - InputClause_02rm1d2 LiteralExpression_009rrzp 186 -
+          - - notificationResponseIsECCFromClaimant
+            - InputClause_1j45uoy LiteralExpression_1pdr93n - -
+          - - isJudgmentOrOrder
+            - InputClause_10353bl LiteralExpression_19s7vic 192 -
+          - - adminSupportTaskRequired
+            - Input_support_admin_ew InputExpression_support_admin_ew - -
+          - - legalOfficerSupportTaskRequired
+            - Input_support_legalofficer_ew InputExpression_support_legalofficer_ew - -
+          - - judgeSupportTaskRequired
+            - Input_support_judge_ew InputExpression_support_judge_ew - -
+          - - arrangeSupportTaskRequired
+            - Input_arrange_support_ew InputExpression_arrange_support_ew - -
         outputs:
-          taskId: Output_1 324
-          name: OutputClause_18hhub7 347
-          delayDuration: OutputClause_165p3r3 152
-          processCategories: OutputClause_10rno4c 1171
+          - [ taskId, Output_1 324 ]
+          - [ name, OutputClause_18hhub7 347 ]
+          - [ delayDuration, OutputClause_165p3r3 152 ]
+          - [ processCategories, OutputClause_10rno4c 1171 ]
         rules:
           - 48e97ac77887 DecisionRule_1sfku1u UnaryTests_1671vji UnaryTests_1ematrk UnaryTests_0bys6y7 UnaryTests_1ns71cw UnaryTests_03bk6vf UnaryTests_1ko29uf UnaryTests_06jyp0b UnaryTests_13215ds UnaryTests_07q4mo7 UnaryTests_18y9e4p UnaryTests_33bbb61b UnaryTests_0ipvukl UnaryTests_0o0aa97 UnaryTests_0zqmf3j UnaryTests_0kq9q09 UnaryTests_1seervd UnaryTests_1i2m01r UnaryTests_1gxelkx UnaryTests_support_admin_ew_1 UnaryTests_support_legalofficer_ew_1 UnaryTests_support_judge_ew_1 UnaryTests_arrange_support_required_DecisionRule_1sfku1u LiteralExpression_1inzx22 LiteralExpression_1yustuj LiteralExpression_1cvrhi0 LiteralExpression_186e388
           - ccc43eaf2313 DecisionRule_0hbk3fj UnaryTests_13alaqq UnaryTests_0xypdbm UnaryTests_0dkzb1n UnaryTests_0fkehd6 UnaryTests_1arvbns UnaryTests_0bjjpkz UnaryTests_01b98gg UnaryTests_1ja1sn3 UnaryTests_056081o UnaryTests_07pkszn UnaryTests_f25fb0ba UnaryTests_1ewoe79 UnaryTests_0nota27 UnaryTests_1b39pdm UnaryTests_070wbin UnaryTests_1tlk5fl UnaryTests_13lksm8 UnaryTests_0x41t20 UnaryTests_support_admin_ew_2 UnaryTests_support_legalofficer_ew_2 UnaryTests_support_judge_ew_2 UnaryTests_arrange_support_required_DecisionRule_0hbk3fj LiteralExpression_1yxstmm LiteralExpression_0wpk61g LiteralExpression_1989e25 LiteralExpression_0dzet4n
@@ -2270,16 +2307,20 @@ files:
           LATEST_REFERRAL_REPLY_TASK_NAME: InformationRequirement_0dnw86r
           LATEST_REFERRAL_TASK_NAME: InformationRequirement_19o3lfi
         inputs:
-          eventId: Input_1 InputExpression_1 188 -
-          postEventState: InputClause_0gxli97 LiteralExpression_0dijl5x 195 -
-          referCaseTo: InputClause_1nkkapg LiteralExpression_1h40nek 150 -
-          referralSubject: InputClause_1idexf5 LiteralExpression_0tjv49t 164 -
-          directionTo: InputClause_1gia5s6 LiteralExpression_1tb9c3z 150 -
+          - [ eventId, Input_1 InputExpression_1 188 - ]
+          - - postEventState
+            - InputClause_0gxli97 LiteralExpression_0dijl5x 195 -
+          - - referCaseTo
+            - InputClause_1nkkapg LiteralExpression_1h40nek 150 -
+          - - referralSubject
+            - InputClause_1idexf5 LiteralExpression_0tjv49t 164 -
+          - - directionTo
+            - InputClause_1gia5s6 LiteralExpression_1tb9c3z 150 -
         outputs:
-          taskId: Output_1 359
-          name: OutputClause_0p5fhhd 280
-          delayDuration: OutputClause_165p3r3 152
-          processCategories: OutputClause_10rno4c 251
+          - [ taskId, Output_1 359 ]
+          - [ name, OutputClause_0p5fhhd 280 ]
+          - [ delayDuration, OutputClause_165p3r3 152 ]
+          - [ processCategories, OutputClause_10rno4c 251 ]
         rules:
           - e318945e8cfc DecisionRule_0utzcvo UnaryTests_163041w UnaryTests_0xcs5s3 UnaryTests_1xkeuj2 UnaryTests_1frkc1e UnaryTests_0s5w63e LiteralExpression_1p21nx8 LiteralExpression_16yf2nj LiteralExpression_0n9o39e LiteralExpression_0c8d2go
           - b42df78e0d11 DecisionRule_0y5f594 UnaryTests_1ileldy UnaryTests_1crcz12 UnaryTests_0ki9dxi UnaryTests_13f96lo UnaryTests_08fuwjv LiteralExpression_18h76lo LiteralExpression_035scdn LiteralExpression_0nj6ces LiteralExpression_1kue0dj
@@ -2611,34 +2652,56 @@ files:
             "Withdraw all/part of claim"
           LiteralExpression_164l0el: '"Arrange Support - "+ARRANGE_SUPPORT_TASK_NAME'
         inputs:
-          eventId: Input_1 InputExpression_1 267 -
-          postEventState: InputClause_0gxli97 LiteralExpression_0dijl5x 428 -
-          referCaseTo: InputClause_1nkkapg LiteralExpression_1h40nek 150 -
-          referralSubject: InputClause_1idexf5 LiteralExpression_0tjv49t 220 -
-          updateReferCaseTo: InputClause_1jc2my4 LiteralExpression_1x15f9w - -
-          directionTo: InputClause_1gia5s6 LiteralExpression_1tb9c3z 150 -
-          et3FormReceived: InputClause_1xga2us LiteralExpression_03vw0p2 - -
-          isThereAnEt3Response: InputClause_18qp9rh LiteralExpression_1y14227 - -
-          isECC: InputClause_0r1wqre LiteralExpression_1vk0scy - -
-          isECCReplyReceived: InputClause_1p24pi6 LiteralExpression_05mg3no - -
-          respondentECCReply: InputClause_97c7601b LiteralExpression_7a8dbe72 - -
-          listAHearing: InputClause_1hr458y LiteralExpression_08h2bgb - -
-          strikeOutClaimStrikeOutResponse: InputClause_0w8if58 LiteralExpression_1o6638k - -
-          hearingsHeard: InputClause_0ps66wm LiteralExpression_13al11j - -
-          submissionReasonApplication: InputClause_0z98r1i LiteralExpression_1ebb1do 313 -
-          applicationResponseFrom: InputClause_0w8d76g LiteralExpression_1ks5p0n - -
-          responseToApplicationType: InputClause_1ki9c2f LiteralExpression_0egdmqz 270 -
-          notificationResponseIsECCFromClaimant: InputClause_16vtjv4 LiteralExpression_1hsr3p7 - -
-          isJudgmentOrOrder: InputClause_0833q0e LiteralExpression_130ucvr - -
-          adminSupportTaskRequired: Input_support_admin_scot InputExpression_support_admin_scot - -
-          legalOfficerSupportTaskRequired: Input_support_legalofficer_scot InputExpression_support_legalofficer_scot - -
-          judgeSupportTaskRequired: Input_support_judge_scot InputExpression_support_judge_scot - -
-          arrangeSupportTaskRequired: Input_arrange_support_scot InputExpression_arrange_support_scot - -
+          - [ eventId, Input_1 InputExpression_1 267 - ]
+          - - postEventState
+            - InputClause_0gxli97 LiteralExpression_0dijl5x 428 -
+          - - referCaseTo
+            - InputClause_1nkkapg LiteralExpression_1h40nek 150 -
+          - - referralSubject
+            - InputClause_1idexf5 LiteralExpression_0tjv49t 220 -
+          - - updateReferCaseTo
+            - InputClause_1jc2my4 LiteralExpression_1x15f9w - -
+          - - directionTo
+            - InputClause_1gia5s6 LiteralExpression_1tb9c3z 150 -
+          - - et3FormReceived
+            - InputClause_1xga2us LiteralExpression_03vw0p2 - -
+          - - isThereAnEt3Response
+            - InputClause_18qp9rh LiteralExpression_1y14227 - -
+          - - isECC
+            - InputClause_0r1wqre LiteralExpression_1vk0scy - -
+          - - isECCReplyReceived
+            - InputClause_1p24pi6 LiteralExpression_05mg3no - -
+          - - respondentECCReply
+            - InputClause_97c7601b LiteralExpression_7a8dbe72 - -
+          - - listAHearing
+            - InputClause_1hr458y LiteralExpression_08h2bgb - -
+          - - strikeOutClaimStrikeOutResponse
+            - InputClause_0w8if58 LiteralExpression_1o6638k - -
+          - - hearingsHeard
+            - InputClause_0ps66wm LiteralExpression_13al11j - -
+          - - submissionReasonApplication
+            - InputClause_0z98r1i LiteralExpression_1ebb1do 313 -
+          - - applicationResponseFrom
+            - InputClause_0w8d76g LiteralExpression_1ks5p0n - -
+          - - responseToApplicationType
+            - InputClause_1ki9c2f LiteralExpression_0egdmqz 270 -
+          - - notificationResponseIsECCFromClaimant
+            - InputClause_16vtjv4 LiteralExpression_1hsr3p7 - -
+          - - isJudgmentOrOrder
+            - InputClause_0833q0e LiteralExpression_130ucvr - -
+          - - adminSupportTaskRequired
+            - Input_support_admin_scot InputExpression_support_admin_scot - -
+          - - legalOfficerSupportTaskRequired
+            - Input_support_legalofficer_scot InputExpression_support_legalofficer_scot - -
+          - - judgeSupportTaskRequired
+            - Input_support_judge_scot InputExpression_support_judge_scot - -
+          - - arrangeSupportTaskRequired
+            - Input_arrange_support_scot InputExpression_arrange_support_scot - -
         outputs:
-          taskId: Output_1 333
-          name: OutputClause_0p5fhhd 315
-          delayDuration: OutputClause_165p3r3 150
-          processCategories: OutputClause_10rno4c 1010
+          - [ taskId, Output_1 333 ]
+          - [ name, OutputClause_0p5fhhd 315 ]
+          - [ delayDuration, OutputClause_165p3r3 150 ]
+          - [ processCategories, OutputClause_10rno4c 1010 ]
         rules:
           - 939fca072b9f DecisionRule_1sfku1u UnaryTests_1671vji UnaryTests_1ematrk UnaryTests_0bys6y7 UnaryTests_1ns71cw UnaryTests_083fed7 UnaryTests_1ko29uf UnaryTests_0sbfl0g UnaryTests_17v1ye3 UnaryTests_1ylkzam UnaryTests_0vo34je UnaryTests_3482740a UnaryTests_1meohc3 UnaryTests_0uw2bq6 UnaryTests_0bl6x9q UnaryTests_0zqmf3j UnaryTests_1wm91lu UnaryTests_1epxvut UnaryTests_0a1p3xk UnaryTests_1dkh41c UnaryTests_support_admin_scot_1 UnaryTests_support_legalofficer_scot_1 UnaryTests_support_judge_scot_1 UnaryTests_arrange_support_required_DecisionRule_1sfku1u LiteralExpression_1inzx22 LiteralExpression_0qwsri9 LiteralExpression_1cvrhi0 LiteralExpression_186e388
           - e8afdd91a192 DecisionRule_0gnpjw9 UnaryTests_1o1uc1d UnaryTests_1wyh4vb UnaryTests_1vi0ume UnaryTests_04ispif UnaryTests_05v2quy UnaryTests_17vcoux UnaryTests_01ajr66 UnaryTests_19l3m24 UnaryTests_0urhnfh UnaryTests_14npr7e UnaryTests_1f850494 UnaryTests_1rxt7yj UnaryTests_12w6g18 UnaryTests_0942wly UnaryTests_0c3ooyz UnaryTests_059jnx3 UnaryTests_0qjwpby UnaryTests_03jjj9s UnaryTests_13ovbjb UnaryTests_support_admin_scot_2 UnaryTests_support_legalofficer_scot_2 UnaryTests_support_judge_scot_2 UnaryTests_arrange_support_required_DecisionRule_0gnpjw9 LiteralExpression_0hbunlz LiteralExpression_01cd1bs LiteralExpression_05j5akv LiteralExpression_1nkk9vb
@@ -2847,16 +2910,20 @@ files:
           LATEST_REFERRAL_TASK_NAME: InformationRequirement_1l2v2xj
           LATEST_REFERRAL_REPLY_TASK_NAME: InformationRequirement_05r15im
         inputs:
-          eventId: Input_1 InputExpression_1 193 -
-          postEventState: InputClause_0gxli97 LiteralExpression_0dijl5x 192 -
-          referCaseTo: InputClause_1nkkapg LiteralExpression_1h40nek 150 -
-          referralSubject: InputClause_1idexf5 LiteralExpression_0tjv49t 159 -
-          directionTo: InputClause_1gia5s6 LiteralExpression_1tb9c3z 150 -
+          - [ eventId, Input_1 InputExpression_1 193 - ]
+          - - postEventState
+            - InputClause_0gxli97 LiteralExpression_0dijl5x 192 -
+          - - referCaseTo
+            - InputClause_1nkkapg LiteralExpression_1h40nek 150 -
+          - - referralSubject
+            - InputClause_1idexf5 LiteralExpression_0tjv49t 159 -
+          - - directionTo
+            - InputClause_1gia5s6 LiteralExpression_1tb9c3z 150 -
         outputs:
-          taskId: Output_1 360
-          name: OutputClause_0p5fhhd 288
-          delayDuration: OutputClause_165p3r3 150
-          processCategories: OutputClause_10rno4c 258
+          - [ taskId, Output_1 360 ]
+          - [ name, OutputClause_0p5fhhd 288 ]
+          - [ delayDuration, OutputClause_165p3r3 150 ]
+          - [ processCategories, OutputClause_10rno4c 258 ]
         rules:
           - e318945e8cfc DecisionRule_0utzcvo UnaryTests_163041w UnaryTests_0xcs5s3 UnaryTests_1xkeuj2 UnaryTests_1frkc1e UnaryTests_0s5w63e LiteralExpression_1p21nx8 LiteralExpression_16yf2nj LiteralExpression_0n9o39e LiteralExpression_0c8d2go
           - b42df78e0d11 DecisionRule_1skd0cv UnaryTests_0gxctoq UnaryTests_0ma71ii UnaryTests_07xx957 UnaryTests_1l982ks UnaryTests_1akzcdm LiteralExpression_1jodb9u LiteralExpression_06jyk6x LiteralExpression_1jb2kui LiteralExpression_10lszsg
@@ -3102,16 +3169,17 @@ files:
             "SendEt1Notification",
             "ListServeClaim"
         inputs:
-          taskType: InputClause_12crj6e LiteralExpression_11cu08d 393 -
-          case: Input_1 InputExpression_1 150 -
+          - - taskType
+            - InputClause_12crj6e LiteralExpression_11cu08d 393 -
+          - [ case, Input_1 InputExpression_1 150 - ]
         outputs:
-          caseAccessCategory: OutputClause_1q156ce 208
-          name: Output_1 208
-          value: OutputClause_1mzxe7i 249
-          roleCategory: OutputClause_05whhwf 168
-          authorisations: OutputClause_16bocer 150
-          assignmentPriority: OutputClause_1n914lw 150
-          autoAssignable: OutputClause_04cbxc1 150
+          - [ caseAccessCategory, OutputClause_1q156ce 208 ]
+          - [ name, Output_1 208 ]
+          - [ value, OutputClause_1mzxe7i 249 ]
+          - [ roleCategory, OutputClause_05whhwf 168 ]
+          - [ authorisations, OutputClause_16bocer 150 ]
+          - [ assignmentPriority, OutputClause_1n914lw 150 ]
+          - [ autoAssignable, OutputClause_04cbxc1 150 ]
         rules:
           - d0883ea0fdba DecisionRule_03pnfh8 UnaryTests_1ossj9o UnaryTests_0occzoo LiteralExpression_1g6zwdd LiteralExpression_0766p7u LiteralExpression_1gda35a LiteralExpression_0uxj36c LiteralExpression_188mn11 LiteralExpression_1hkzpbs LiteralExpression_0a25vtn
           - f1d40469576a DecisionRule_0ivpl63 UnaryTests_155q736 UnaryTests_0buofva LiteralExpression_0z4247e LiteralExpression_09mnhlx LiteralExpression_0ekjswr LiteralExpression_1tlohef LiteralExpression_0rn9vbl LiteralExpression_1048wbc LiteralExpression_1oc4t5p
@@ -3192,16 +3260,17 @@ files:
           DecisionRule_19o8m59#description: ""
           DecisionRule_0dp6n1a#description: ""
         inputs:
-          taskType: InputClause_12crj6e LiteralExpression_11cu08d 380 -
-          case: Input_1 InputExpression_1 150 -
+          - - taskType
+            - InputClause_12crj6e LiteralExpression_11cu08d 380 -
+          - [ case, Input_1 InputExpression_1 150 - ]
         outputs:
-          caseAccessCategory: OutputClause_1q156ce 208
-          name: Output_1 273
-          value: OutputClause_1mzxe7i 249
-          roleCategory: OutputClause_05whhwf 168
-          authorisations: OutputClause_16bocer 150
-          assignmentPriority: OutputClause_1n914lw 150
-          autoAssignable: OutputClause_04cbxc1 150
+          - [ caseAccessCategory, OutputClause_1q156ce 208 ]
+          - [ name, Output_1 273 ]
+          - [ value, OutputClause_1mzxe7i 249 ]
+          - [ roleCategory, OutputClause_05whhwf 168 ]
+          - [ authorisations, OutputClause_16bocer 150 ]
+          - [ assignmentPriority, OutputClause_1n914lw 150 ]
+          - [ autoAssignable, OutputClause_04cbxc1 150 ]
         rules:
           - d0883ea0fdba DecisionRule_03pnfh8 UnaryTests_1ossj9o UnaryTests_0occzoo LiteralExpression_1g6zwdd LiteralExpression_0766p7u LiteralExpression_1gda35a LiteralExpression_0uxj36c LiteralExpression_188mn11 LiteralExpression_1hkzpbs LiteralExpression_0a25vtn
           - ea8ae10e3e92 DecisionRule_0l9yo60 UnaryTests_1x2w84t UnaryTests_1useskg LiteralExpression_18bsaed LiteralExpression_1tf5lkk LiteralExpression_09qxosi LiteralExpression_18ch88p LiteralExpression_1w1q0sq LiteralExpression_0tnde29 LiteralExpression_0uconqv
@@ -3405,16 +3474,17 @@ files:
             "SendEt1Notification",
             "ListServeClaim"
         inputs:
-          taskType: InputClause_12crj6e LiteralExpression_11cu08d 441 -
-          case: Input_1 InputExpression_1 150 -
+          - - taskType
+            - InputClause_12crj6e LiteralExpression_11cu08d 441 -
+          - [ case, Input_1 InputExpression_1 150 - ]
         outputs:
-          caseAccessCategory: OutputClause_1q156ce 208
-          name: Output_1 208
-          value: OutputClause_1mzxe7i 249
-          roleCategory: OutputClause_05whhwf 168
-          authorisations: OutputClause_16bocer 150
-          assignmentPriority: OutputClause_1n914lw 150
-          autoAssignable: OutputClause_04cbxc1 150
+          - [ caseAccessCategory, OutputClause_1q156ce 208 ]
+          - [ name, Output_1 208 ]
+          - [ value, OutputClause_1mzxe7i 249 ]
+          - [ roleCategory, OutputClause_05whhwf 168 ]
+          - [ authorisations, OutputClause_16bocer 150 ]
+          - [ assignmentPriority, OutputClause_1n914lw 150 ]
+          - [ autoAssignable, OutputClause_04cbxc1 150 ]
         rules:
           - d0883ea0fdba DecisionRule_03pnfh8 UnaryTests_1ossj9o UnaryTests_0occzoo LiteralExpression_1g6zwdd LiteralExpression_0766p7u LiteralExpression_1gda35a LiteralExpression_0uxj36c LiteralExpression_188mn11 LiteralExpression_1hkzpbs LiteralExpression_0a25vtn
           - f1d40469576a DecisionRule_0ivpl63 UnaryTests_155q736 UnaryTests_0buofva LiteralExpression_0z4247e LiteralExpression_09mnhlx LiteralExpression_0ekjswr LiteralExpression_1tlohef LiteralExpression_0rn9vbl LiteralExpression_1048wbc LiteralExpression_1oc4t5p
@@ -3495,16 +3565,17 @@ files:
           DecisionRule_19o8m59#description: ""
           DecisionRule_0dp6n1a#description: ""
         inputs:
-          taskType: InputClause_12crj6e LiteralExpression_11cu08d 380 -
-          case: Input_1 InputExpression_1 150 -
+          - - taskType
+            - InputClause_12crj6e LiteralExpression_11cu08d 380 -
+          - [ case, Input_1 InputExpression_1 150 - ]
         outputs:
-          caseAccessCategory: OutputClause_1q156ce 208
-          name: Output_1 273
-          value: OutputClause_1mzxe7i 249
-          roleCategory: OutputClause_05whhwf 168
-          authorisations: OutputClause_16bocer 150
-          assignmentPriority: OutputClause_1n914lw 150
-          autoAssignable: OutputClause_04cbxc1 150
+          - [ caseAccessCategory, OutputClause_1q156ce 208 ]
+          - [ name, Output_1 273 ]
+          - [ value, OutputClause_1mzxe7i 249 ]
+          - [ roleCategory, OutputClause_05whhwf 168 ]
+          - [ authorisations, OutputClause_16bocer 150 ]
+          - [ assignmentPriority, OutputClause_1n914lw 150 ]
+          - [ autoAssignable, OutputClause_04cbxc1 150 ]
         rules:
           - d0883ea0fdba DecisionRule_03pnfh8 UnaryTests_1ossj9o UnaryTests_0occzoo LiteralExpression_1g6zwdd LiteralExpression_0766p7u LiteralExpression_1gda35a LiteralExpression_0uxj36c LiteralExpression_188mn11 LiteralExpression_1hkzpbs LiteralExpression_0a25vtn
           - ea8ae10e3e92 DecisionRule_19v10fg UnaryTests_0mfa6cb UnaryTests_0aiz1eh LiteralExpression_188m4hd LiteralExpression_13vp53z LiteralExpression_0mu2rv7 LiteralExpression_06ecmnx LiteralExpression_1j19gcc LiteralExpression_0psew37 LiteralExpression_1nc96w6
@@ -3540,10 +3611,10 @@ files:
         texts:
           LiteralExpression_11ww7x3: '"Review Referral - Judicial" '
         inputs:
-          input: Input_1 InputExpression_1 - -
+          - [ input, Input_1 InputExpression_1 - - ]
         outputs:
-          taskTypeId: Output_1 362
-          taskTypeName: OutputClause_0aeuwfu 452
+          - [ taskTypeId, Output_1 362 ]
+          - [ taskTypeName, OutputClause_0aeuwfu 452 ]
         rules:
           - 0c97b2bc66ac DecisionRule_1h596w0 UnaryTests_0fpzi87 LiteralExpression_1cv7y1d LiteralExpression_00vtfbs
           - b3f90766dccd DecisionRule_0oah9qj UnaryTests_13iew8r LiteralExpression_0mkjghi LiteralExpression_1qrijiq
@@ -3600,10 +3671,10 @@ files:
       table:
         table: DecisionTable_17knzal
         inputs:
-          input: Input_1 InputExpression_1 - -
+          - [ input, Input_1 InputExpression_1 - - ]
         outputs:
-          taskTypeId: Output_1 344
-          taskTypeName: OutputClause_0aeuwfu 452
+          - [ taskTypeId, Output_1 344 ]
+          - [ taskTypeName, OutputClause_0aeuwfu 452 ]
         rules:
           - fe5df6bc3d32 DecisionRule_0aenrnf UnaryTests_0m29qlf LiteralExpression_09gw2nd LiteralExpression_18he837
           - f2105f83af1f DecisionRule_0xutjp6 UnaryTests_19nslaw LiteralExpression_162om1k LiteralExpression_1l9z856
@@ -3629,10 +3700,10 @@ files:
       table:
         table: DecisionTable_17knzal
         inputs:
-          input: Input_1 InputExpression_1 - -
+          - [ input, Input_1 InputExpression_1 - - ]
         outputs:
-          taskTypeId: Output_1 350
-          taskTypeName: OutputClause_0aeuwfu 452
+          - [ taskTypeId, Output_1 350 ]
+          - [ taskTypeName, OutputClause_0aeuwfu 452 ]
         rules:
           - 0c97b2bc66ac DecisionRule_1h596w0 UnaryTests_0fpzi87 LiteralExpression_1cv7y1d LiteralExpression_00vtfbs
           - b3f90766dccd DecisionRule_0pyra8w UnaryTests_1k7j04y LiteralExpression_01xxkeu LiteralExpression_1uvuild
@@ -3689,10 +3760,10 @@ files:
       table:
         table: DecisionTable_17knzal
         inputs:
-          input: Input_1 InputExpression_1 - -
+          - [ input, Input_1 InputExpression_1 - - ]
         outputs:
-          taskTypeId: Output_1 369
-          taskTypeName: OutputClause_0aeuwfu 426
+          - [ taskTypeId, Output_1 369 ]
+          - [ taskTypeName, OutputClause_0aeuwfu 426 ]
         rules:
           - fe5df6bc3d32 DecisionRule_0aenrnf UnaryTests_0m29qlf LiteralExpression_09gw2nd LiteralExpression_18he837
           - f2105f83af1f DecisionRule_149nvwm UnaryTests_09tlzn5 LiteralExpression_169iyos LiteralExpression_1wc3ha8

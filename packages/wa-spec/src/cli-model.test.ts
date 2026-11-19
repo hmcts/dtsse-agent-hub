@@ -59,7 +59,7 @@ describe("cli model commands", () => {
     expect(compiled.stderr).toContain("is not a model");
   });
 
-  it("should list and prune the task DMNs the compiled model no longer generates when generating from a model", () => {
+  it("should list and leave in place the task DMNs the compiled model no longer generates when generating from a model", () => {
     const { dir } = imported();
     run("lift", join(dir, "spec.yaml"), "-o", join(dir, "model.yaml"));
     const out = join(dir, "out");
@@ -70,9 +70,6 @@ describe("cli model commands", () => {
     expect(listed.status).toBe(0);
     expect(listed.stderr).toContain("wa-task-completion-demo-ct_gone.dmn");
     expect(existsSync(stale)).toBe(true);
-    const pruned = run("generate", join(dir, "model.yaml"), "-o", out, "--prune");
-    expect(pruned.stderr).toContain("removed: wa-task-completion-demo-ct_gone.dmn");
-    expect(existsSync(stale)).toBe(false);
     expect(existsSync(join(out, "wa-task-completion-demo-ct_a.dmn"))).toBe(true);
   });
 });

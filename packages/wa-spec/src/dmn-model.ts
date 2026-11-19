@@ -231,14 +231,13 @@ function parseTable(table: Node): DmnTable {
   } as DmnTable;
 }
 
-/** A DMN file's document, and what `parseDmn` leaves out of it, from one read of the XML. */
+/**
+ * A DMN file's document, and what the model leaves out of it. The tree is read once for both; the diagram needs a second,
+ * order-preserving read, because the first read groups shapes and edges apart.
+ */
 export function readDmn(xml: string): { document: DmnDocument; inspection: Inspection } {
   const tree = parser.parse(xml) as Node;
   return { document: documentOf(tree, xml), inspection: inspectTree(tree) };
-}
-
-export function parseDmn(xml: string): DmnDocument {
-  return documentOf(parser.parse(xml) as Node, xml);
 }
 
 function documentOf(tree: Node, xml: string): DmnDocument {
@@ -593,11 +592,7 @@ export interface Inspection {
   unrepresentable: Map<string, number>;
 }
 
-/** Lists, for one DMN file, what `parseDmn` does not carry into the model. */
-export function inspectDmn(xml: string): Inspection {
-  return inspectTree(parser.parse(xml) as Node);
-}
-
+/** Lists, for one DMN file, what the model does not carry. */
 function inspectTree(root: Node): Inspection {
   const presentation = new Map<string, number>();
   const unrepresentable = new Map<string, number>();

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { sampleDmn } from "./__fixtures__/dmn.ts";
-import { parseDmn } from "./dmn-model.ts";
+import { parseDmn, sampleDmn } from "./__fixtures__/dmn.ts";
+import { writeDmn } from "./dmn-model.ts";
 import { generateAll, generateDocument } from "./generator.ts";
 import { importDmns } from "./importer.ts";
 import { applyLayout } from "./layout.ts";
@@ -108,5 +108,26 @@ describe("layout when the spec's columns change", () => {
     expect(table?.rules[0]?.inputIds?.[2]).toBe(original?.rules[0]?.inputIds?.[1]);
     expect(table?.rules[0]?.inputIds?.[1]).toMatch(/^InputEntry_/);
     expect(table?.rules[0]?.outputIds).toEqual(original?.rules[0]?.outputIds);
+  });
+});
+
+describe("layout column ids", () => {
+  it("should keep each entry id with its column when a column key is an integer", () => {
+    const doc = parseDmn(fileA.xml);
+    const table = doc.decisions[0]?.table;
+    if (!table) {
+      throw new Error("no table");
+    }
+    table.inputs = [
+      { label: "Foo", expression: "", id: "In_foo", expressionId: "Ex_foo" },
+      { label: "2", expression: "", id: "In_two", expressionId: "Ex_two" }
+    ];
+    table.rules = [{ id: "R1", inputIds: ["E_foo", "E_two"], inputs: ['"a"', '"b"'], outputIds: ["O1", "O2"], outputs: ['"x"', '"y"'] }];
+    const xml = writeDmn({ ...doc, decisions: [{ ...(doc.decisions[0] as NonNullable<(typeof doc.decisions)[0]>) }] });
+    const { spec, layout } = importDmns([{ name: fileA.name, xml }]);
+    expect(spec.decisions.completion?.inputs.map((c) => c.key)).toEqual(["foo", "2"]);
+    const rule = parseDmn(generateAll(spec, layout)[0]?.xml as string).decisions[0]?.table;
+    expect(rule?.inputs.map((i) => i.id)).toEqual(["In_foo", "In_two"]);
+    expect(rule?.rules[0]?.inputIds).toEqual(["E_foo", "E_two"]);
   });
 });

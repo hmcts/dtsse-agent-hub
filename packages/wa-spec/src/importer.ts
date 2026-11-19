@@ -134,6 +134,12 @@ const INPUT_PROPERTIES = [
   ["allowedValues", "allowedValues"]
 ] as const;
 
+const HELPER_PROPERTIES = [
+  ["typeRef", "typeRef"],
+  ["language", "language"],
+  ["historyTimeToLive", "historyTimeToLive"]
+] as const;
+
 const OUTPUT_PROPERTIES = [
   ["label", "label"],
   ["typeRef", "typeRef"]
@@ -291,9 +297,13 @@ function importTables(kind: Kind, tables: Table[], allCaseTypes: string[], repor
       const table = tables.find((t) => t.caseType === caseType) as Table;
       return { caseType, helper: table.helpers.find((h) => h.name === name) as DmnDecision };
     });
-    const typeRef = pick(perType.map(({ caseType, helper }) => ({ caseType, value: helper.variable?.typeRef })));
-    const language = pick(perType.map(({ caseType, helper }) => ({ caseType, value: helper.literal?.expressionLanguage })));
-    const ttl = pick(perType.map(({ caseType, helper }) => ({ caseType, value: helper.historyTimeToLive })));
+    const { base, overrides } = columnProperties(
+      perType.map(({ caseType, helper }) => ({
+        caseType,
+        source: { typeRef: helper.variable?.typeRef, language: helper.literal?.expressionLanguage, historyTimeToLive: helper.historyTimeToLive }
+      })),
+      HELPER_PROPERTIES
+    );
     const variable = pick(
       perType.map(({ caseType, helper }) => ({
         caseType,
@@ -307,18 +317,8 @@ function importTables(kind: Kind, tables: Table[], allCaseTypes: string[], repor
         return { caseType, value: JSON.stringify(expr === undefined ? { feel: "" } : expr) };
       })
     );
-    const overrides: Record<string, Record<string, unknown>> = {};
     for (const [caseType, value] of Object.entries(expression.overrides)) {
       setOverride(overrides, caseType, "expression", JSON.parse(value ?? '{"feel":""}'));
-    }
-    for (const [field, picked] of [
-      ["typeRef", typeRef],
-      ["language", language],
-      ["historyTimeToLive", ttl]
-    ] as const) {
-      for (const [caseType, value] of Object.entries(picked.overrides)) {
-        setOverride(overrides, caseType, field, value ?? null);
-      }
     }
     for (const [caseType, value] of Object.entries(variable.overrides)) {
       setOverride(overrides, caseType, "variable", value ?? null);
@@ -326,9 +326,7 @@ function importTables(kind: Kind, tables: Table[], allCaseTypes: string[], repor
     return {
       name,
       ...(variable.base === undefined ? {} : { variable: variable.base }),
-      ...(typeRef.base === undefined ? {} : { typeRef: typeRef.base }),
-      ...(language.base === undefined ? {} : { language: language.base }),
-      ...(ttl.base === undefined ? {} : { historyTimeToLive: ttl.base }),
+      ...base,
       expression: JSON.parse(expression.base ?? '{"feel":""}'),
       ...(sameCaseTypes(present, caseTypes) ? { only: present } : {}),
       ...(Object.keys(overrides).length > 0 ? { overrides } : {})
@@ -344,7 +342,7 @@ function importTables(kind: Kind, tables: Table[], allCaseTypes: string[], repor
         continue;
       }
       for (const required of decision.requires) {
-        if (required === table.decision.id) {
+        if (required === table.decision.id || !nameOf.has(required)) {
           continue;
         }
         const to = nameOf.get(required) ?? required;
@@ -412,6 +410,7 @@ export function importDmns(files: DmnFile[], options: ImportOptions = {}): { spe
   const rawIndex = new Map<string, RawFeelUse>();
   const slugs = new Map<string, string[]>();
   const parsedFiles = new Map<string, string>();
+  const duplicates: string[] = [];
   const caseTypeOrder: string[] = [];
   const unrepresentable = new Map<string, { count: number; files: string[] }>();
   const presentation = new Map<string, number>();
@@ -432,7 +431,9 @@ export function importDmns(files: DmnFile[], options: ImportOptions = {}): { spe
     const { kind, caseType } = match;
     const sameFile = parsedFiles.get(`${kind}/${caseType}`);
     if (sameFile) {
-      throw new Error(`${sameFile} and ${file.name} are both the ${kind} DMN of ${caseType}`);
+      slugs.set(match.service, [...(slugs.get(match.service) ?? []), file.name]);
+      duplicates.push(`${sameFile} and ${file.name} are both the ${kind} DMN of ${caseType}`);
+      continue;
     }
     parsedFiles.set(`${kind}/${caseType}`, file.name);
     const { document, inspection } = readDmn(file.xml);
@@ -477,6 +478,12 @@ export function importDmns(files: DmnFile[], options: ImportOptions = {}): { spe
       helperNames.add(helper.name);
       helpers.push(helper);
     }
+    const ids = new Set(document.decisions.map((d) => d.id));
+    for (const d of document.decisions) {
+      if (d.requires.some((required) => !ids.has(required))) {
+        flag(`${d.name} requires a decision the file does not have`, file.name);
+      }
+    }
     if (document.name !== "DRD") {
       report.notes.push(`${file.name}: definitions name ${document.name} is replaced with DRD`);
     }
@@ -502,6 +509,10 @@ export function importDmns(files: DmnFile[], options: ImportOptions = {}): { spe
     throw new Error(
       `The files name more than one service, and a spec holds one:\n${[...slugs].map(([slug, names]) => `  ${slug}: ${names.join(", ")}`).join("\n")}`
     );
+  }
+
+  if (duplicates.length > 0) {
+    throw new Error(duplicates.join("\n"));
   }
 
   const decisions: Spec["decisions"] = {};

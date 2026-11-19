@@ -25,7 +25,7 @@ const cancels = (value: Expr | undefined, categories: Set<string>): Match => {
     return "yes";
   }
   if (typeof value === "string") {
-    return categories.has(value) ? "yes" : "no";
+    return listed(value).some((c) => categories.has(c)) ? "yes" : "no";
   }
   return typeof value === "object" && value !== null && "feel" in value ? "maybe" : categoriesOf(value).some((c) => categories.has(c)) ? "maybe" : "no";
 };
@@ -36,9 +36,16 @@ const literalsOf = (value: unknown): string[] =>
 
 const quoted = (text: string): string[] => [...text.matchAll(/"([^"]*)"/g)].map((m) => m[1] as string);
 
-/** The process categories a value may give: a string, the quoted strings of FEEL, or the strings of a structured expression. */
+/** Process categories are written as comma-separated lists, which the case event handler splits. */
+const listed = (text: string): string[] =>
+  text
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+/** The process categories a value may give: a string, the quoted strings of FEEL, or the strings of a structured expression, each split on commas. */
 const categoriesOf = (value: Expr | undefined): string[] =>
-  typeof value === "object" && value !== null && "feel" in value ? quoted(value.feel) : literalsOf(value);
+  (typeof value === "object" && value !== null && "feel" in value ? quoted(value.feel) : literalsOf(value)).flatMap(listed);
 
 /** Whether an output value names the task: a scalar or FEEL text does, and a structured expression with the id somewhere in it may. */
 const mentions = (value: Expr | undefined, taskId: string): Match => {

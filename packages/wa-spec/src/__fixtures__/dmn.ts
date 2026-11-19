@@ -1,4 +1,10 @@
-import { type DmnDocument, writeDmn } from "../dmn-model.ts";
+import { type DmnDocument, readDmn, writeDmn } from "../dmn-model.ts";
+
+/** The model of a DMN file. */
+export const parseDmn = (xml: string): DmnDocument => readDmn(xml).document;
+
+/** What the model leaves out of a DMN file. */
+export const inspectDmn = (xml: string) => readDmn(xml).inspection;
 
 /** A small two-input completion-style table, as DMN text, for the case type `caseType`. */
 export function sampleDmn(caseType: string, options: { extraRule?: boolean; hitPolicy?: string; name?: string } = {}): string {
