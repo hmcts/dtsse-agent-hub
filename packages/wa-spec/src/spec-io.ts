@@ -16,11 +16,11 @@ const SHORT_LIST = 4;
 const SHORT_ITEM = 40;
 
 /** YAML with short scalar lists on one line, so a row reads as a few lines rather than a column of dashes. */
-export function toYaml(value: unknown): string {
+export function toYaml(value: unknown, shortList = SHORT_LIST): string {
   const doc = new Document(value);
   visit(doc, {
     Seq(_key, node) {
-      const short = node.items.length <= SHORT_LIST && node.items.every((item) => isScalar(item) && String(item.value).length < SHORT_ITEM);
+      const short = node.items.length <= shortList && node.items.every((item) => isScalar(item) && String(item.value).length < SHORT_ITEM);
       if (short) {
         node.flow = true;
       }
