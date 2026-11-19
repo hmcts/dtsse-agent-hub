@@ -80,10 +80,8 @@ function inputKeys(decision: DmnDecision): string[] {
   });
 }
 
-const rawIndex = new WeakMap<ImportReport, Map<string, RawFeelUse>>();
-
 /** Counts one parsed entry, and records it when it fell back to raw FEEL. */
-function addRaw(report: ImportReport, kind: Kind, where: string, parsed: Expr | Cell | undefined, caseType: string): void {
+function addRaw(report: ImportReport, index: Map<string, RawFeelUse>, kind: Kind, where: string, parsed: Expr | Cell | undefined, caseType: string): void {
   const stats = report.entries[kind] ?? { total: 0, structured: 0, rawFeel: 0 };
   report.entries[kind] = stats;
   if (parsed === undefined) {
@@ -97,8 +95,6 @@ function addRaw(report: ImportReport, kind: Kind, where: string, parsed: Expr | 
   stats.rawFeel++;
   const text = (parsed as { feel: string }).feel;
   const normalised = normaliseFeel(text);
-  const index = rawIndex.get(report) ?? new Map<string, RawFeelUse>();
-  rawIndex.set(report, index);
   const key = `${kind}|${where}|${normalised}`;
   const existing = index.get(key);
   if (existing) {
@@ -162,7 +158,7 @@ function columnProperties<S extends object>(
   return { base, overrides };
 }
 
-function importTables(kind: Kind, tables: Table[], allCaseTypes: string[], report: ImportReport): Decision {
+function importTables(kind: Kind, tables: Table[], allCaseTypes: string[], report: ImportReport, rawIndex: Map<string, RawFeelUse>): Decision {
   const caseTypes = tables.map((t) => t.caseType);
   for (const table of tables) {
     const names = (table.decision.table?.outputs ?? []).map((o) => o.name);
@@ -206,7 +202,7 @@ function importTables(kind: Kind, tables: Table[], allCaseTypes: string[], repor
     const expression = pick(
       perType.map(({ caseType, source }) => {
         const expr = parseExpr(source.expression);
-        addRaw(report, kind, `input ${key}`, expr, caseType);
+        addRaw(report, rawIndex, kind, `input ${key}`, expr, caseType);
         return { caseType, value: expr === undefined ? "" : JSON.stringify(expr) };
       })
     );
@@ -246,7 +242,7 @@ function importTables(kind: Kind, tables: Table[], allCaseTypes: string[], repor
         const cell = parseCell(text);
         if (cell !== undefined) {
           when[keys[index] as string] = cell;
-          addRaw(report, kind, `input ${keys[index]} entry`, cell, table.caseType);
+          addRaw(report, rawIndex, kind, `input ${keys[index]} entry`, cell, table.caseType);
         }
       });
       const returns: Record<string, Expr> = {};
@@ -254,7 +250,7 @@ function importTables(kind: Kind, tables: Table[], allCaseTypes: string[], repor
         const expr = parseExpr(text);
         if (expr !== undefined) {
           returns[outputNames[index] as string] = expr;
-          addRaw(report, kind, `output ${outputNames[index]}`, expr, table.caseType);
+          addRaw(report, rawIndex, kind, `output ${outputNames[index]}`, expr, table.caseType);
         }
       });
       return {
@@ -307,7 +303,7 @@ function importTables(kind: Kind, tables: Table[], allCaseTypes: string[], repor
     const expression = pick(
       perType.map(({ caseType, helper }) => {
         const expr = parseExpr(helper.literal?.text ?? "");
-        addRaw(report, kind, `helper ${name}`, expr, caseType);
+        addRaw(report, rawIndex, kind, `helper ${name}`, expr, caseType);
         return { caseType, value: JSON.stringify(expr === undefined ? { feel: "" } : expr) };
       })
     );
@@ -348,6 +344,9 @@ function importTables(kind: Kind, tables: Table[], allCaseTypes: string[], repor
         continue;
       }
       for (const required of decision.requires) {
+        if (required === table.decision.id) {
+          continue;
+        }
         const to = nameOf.get(required) ?? required;
         if (to === "table") {
           continue;
@@ -410,6 +409,7 @@ function importTables(kind: Kind, tables: Table[], allCaseTypes: string[], repor
 export function importDmns(files: DmnFile[], options: ImportOptions = {}): { spec: Spec; layout: Layout; report: ImportReport } {
   const report: ImportReport = { files: [], entries: {}, rawFeel: [], unrepresentable: [], presentation: [], notes: [] };
   const byKind = new Map<Kind, Table[]>();
+  const rawIndex = new Map<string, RawFeelUse>();
   const slugs = new Map<string, string[]>();
   const parsedFiles = new Map<string, string>();
   const caseTypeOrder: string[] = [];
@@ -471,6 +471,9 @@ export function importDmns(files: DmnFile[], options: ImportOptions = {}): { spe
         flag(`more than one helper decision is named ${helper.name}`, file.name);
         continue;
       }
+      if (helper.requires.includes(decision.id)) {
+        flag(`helper ${helper.name} requires the main decision`, file.name);
+      }
       helperNames.add(helper.name);
       helpers.push(helper);
     }
@@ -505,7 +508,7 @@ export function importDmns(files: DmnFile[], options: ImportOptions = {}): { spe
   for (const kind of KINDS) {
     const tables = byKind.get(kind);
     if (tables) {
-      decisions[kind] = importTables(kind, tables, caseTypeOrder, report);
+      decisions[kind] = importTables(kind, tables, caseTypeOrder, report, rawIndex);
     }
   }
   const spec: Spec = {

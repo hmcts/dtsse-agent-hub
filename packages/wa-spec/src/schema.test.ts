@@ -187,7 +187,7 @@ describe("validateSpec scoped decisions and names", () => {
     expect(validateSpec(Spec.parse(spec({ decisions: { completion: { ...decision, inputs: [{ key: "eventId", only: ["ct_a"] }] } } })))).toHaveLength(1);
   });
 
-  it("should check a dependency and same-named helpers against the decision's own case types", () => {
+  it("should check a dependency and same-named helpers against the decision's own case types when the decision is limited to some", () => {
     const helpers = [{ name: "H", expression: 1, only: ["ct_a"] }];
     expect(validateSpec(scoped({ helpers, dependencies: [{ decision: "table", requires: "H" }] }))).toEqual([]);
     expect(
@@ -219,7 +219,7 @@ describe("validateSpec scope and uniqueness", () => {
     }
   });
 
-  it("should reject a row or column that names a case type its decision does not have", () => {
+  it("should reject a row or column that names a case type its decision does not have when the decision is limited", () => {
     const limited = (rowOnly: string[], columnOnly: string[]) =>
       Spec.parse(
         spec({
@@ -238,7 +238,7 @@ describe("validateSpec scope and uniqueness", () => {
     expect(validateSpec(limited(["ct_a"], ["ct_a", "ct_b"])).join()).toContain("completion column: ct_b is not a case type of completion");
   });
 
-  it("should reject a case type listed twice and a case type left with no outputs", () => {
+  it("should reject a case type listed twice and a case type left with no outputs when the spec has them", () => {
     expect(validateSpec(Spec.parse(spec({ caseTypes: [{ id: "ct_a" }, { id: "ct_a" }] })))).toContain("case type ct_a is listed more than once");
     const bare = Spec.parse(spec({ decisions: { completion: { ...decision, outputs: [{ name: "taskType", only: ["ct_a"] }], rows: [] } } }));
     expect(validateSpec(bare)).toEqual(["completion: ct_b has no outputs"]);

@@ -276,3 +276,16 @@ describe("importDmns requirements and hit policies", () => {
     expect(spec.caseTypes.map((c) => c.id)).toEqual(["ct_a"]);
   });
 });
+
+describe("importDmns helper requiring the main decision", () => {
+  it("should report a helper that requires the main decision as unrepresentable and still return a valid spec when a file has one", () => {
+    const doc = parseDmn(sampleDmn("ct_a"));
+    const [table, helper] = doc.decisions as [DmnDecisionOf, DmnDecisionOf];
+    helper.requires = [table.id];
+    const { report, spec } = importDmns([{ name: "wa-task-completion-demo-ct_a.dmn", xml: writeDmn(doc) }]);
+    expect(report.unrepresentable.map((u) => u.construct)).toEqual(["helper LATEST requires the main decision"]);
+    expect(spec.decisions.completion?.dependencies).toEqual([{ decision: "table", requires: "LATEST" }]);
+  });
+});
+
+type DmnDecisionOf = ReturnType<typeof parseDmn>["decisions"][number];

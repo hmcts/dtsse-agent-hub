@@ -209,3 +209,23 @@ describe("diffPaths constructs the model does not carry", () => {
     expect(diffPaths({ dir: a }, { dir: a })).toEqual([]);
   });
 });
+
+describe("diffDocuments allowed values", () => {
+  it("should treat allowed values as equal when they differ only in layout", () => {
+    const a = base();
+    const input = table(a).inputs[0];
+    if (input) {
+      input.allowedValues = '"a","b"';
+    }
+    const b = clone(a);
+    const other = table(b).inputs[0];
+    if (other) {
+      other.allowedValues = '"a",\n  "b"';
+    }
+    expect(diffDocuments("f", a, b)).toEqual([]);
+    if (other) {
+      other.allowedValues = '"a","c"';
+    }
+    expect(diffDocuments("f", a, b)).toHaveLength(1);
+  });
+});

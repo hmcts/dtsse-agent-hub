@@ -2,7 +2,7 @@ import { basename, dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { diffPaths, renderDifferences } from "./diff.ts";
 import { exists, isDirectory, listDir, readText, removeFile, writeText } from "./file-io.ts";
-import { isWaTaskDmn } from "./file-names.ts";
+import { isWaTaskDmn, parseFileName } from "./file-names.ts";
 import { generateAll } from "./generator.ts";
 import { importDmns, renderReport } from "./importer.ts";
 import { layoutPathFor, parseLayout, parseSpec, stringifyLayout, stringifySpec } from "./spec-io.ts";
@@ -68,12 +68,16 @@ function main(argv: string[]): number {
       fail(USAGE);
     }
     const layoutPath = layoutPathFor(specPath);
-    const files = generateAll(parseSpec(readText(specPath)), exists(layoutPath) ? parseLayout(readText(layoutPath)) : undefined);
+    const spec = parseSpec(readText(specPath));
+    const files = generateAll(spec, exists(layoutPath) ? parseLayout(readText(layoutPath)) : undefined);
     for (const file of files) {
       writeText(join(values.output, file.fileName), file.xml);
     }
-    const made = new Set(files.map((file) => file.fileName));
-    const stale = listDir(values.output).filter((name) => isWaTaskDmn(name) && !made.has(name));
+    const made = new Set(files.map((file) => `${file.kind}/${file.caseType}`));
+    const stale = (exists(values.output) ? listDir(values.output) : []).filter((name) => {
+      const parsed = parseFileName(name);
+      return parsed?.service === spec.service.slug && !made.has(`${parsed.kind}/${parsed.caseType}`);
+    });
     for (const name of stale) {
       if (values.prune) {
         removeFile(join(values.output, name));

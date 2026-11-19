@@ -81,3 +81,23 @@ describe("ET round trip", () => {
     );
   });
 });
+
+describe("ET with columns added", () => {
+  it("should give every generated DMN unique ids when an input and an output column are added to every kind", () => {
+    const files = readdirSync(resources)
+      .filter((name) => name.startsWith("wa-task-") && name.endsWith(".dmn"))
+      .map((name) => ({ name, xml: readFileSync(join(resources, name), "utf8") }));
+    const { spec, layout } = importDmns(files, { jurisdiction: "EMPLOYMENT" });
+    for (const decision of Object.values(spec.decisions)) {
+      decision?.inputs.push({ key: "addedIn", expression: { field: "x" } });
+      decision?.outputs.push({ name: "addedOut" });
+    }
+    const generated = generateAll(parseSpec(stringifySpec(spec)), layout);
+    expect(generated).toHaveLength(24);
+    for (const file of generated) {
+      const ids = [...file.xml.matchAll(/ id="([^"]*)"/g)].map((m) => m[1] as string);
+      const repeated = ids.filter((id, i) => ids.indexOf(id) !== i);
+      expect(repeated, file.fileName).toEqual([]);
+    }
+  });
+});
