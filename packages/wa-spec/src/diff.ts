@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { type DmnDecision, type DmnDocument, type DmnInput, type DmnOutput, type DmnRule, parseDmn } from "./dmn-model.ts";
+import { type DmnDecision, type DmnDocument, type DmnInput, type DmnOutput, type DmnRule, type Inspection, readDmn } from "./dmn-model.ts";
 import { canonicalCell, canonicalExpr } from "./feel.ts";
 import { listDir, readText } from "./file-io.ts";
 import { isWaTaskDmn } from "./file-names.ts";
@@ -17,8 +17,8 @@ export interface Difference {
 }
 
 /**
- * Whether the order of a table's rules changes what it returns. FIRST stops at the first match, RULE ORDER and
- * OUTPUT ORDER return in order by definition, and Camunda returns a plain COLLECT's matches in rule order, which
+ * Whether the order of a table's rules changes what it returns. FIRST stops at the first match, RULE ORDER
+ * returns in order by definition, any policy the spec does not support is taken to be order-sensitive, and Camunda returns a plain COLLECT's matches in rule order, which
  * ET's tests assert on. UNIQUE and ANY return at most one distinct result, and an aggregated COLLECT is one value.
  */
 export function ruleOrderMatters(hitPolicy: string, aggregation: string | undefined): boolean {
@@ -197,6 +197,17 @@ export function diffDocuments(file: string, a: DmnDocument, b: DmnDocument, opti
   return out;
 }
 
+/** Constructs the model does not carry, which a diff of models cannot see: each one that occurs a different number of times on the two sides. */
+export function diffInspections(file: string, a: Inspection, b: Inspection): Difference[] {
+  return [...new Set([...a.unrepresentable.keys(), ...b.unrepresentable.keys()])]
+    .filter((construct) => (a.unrepresentable.get(construct) ?? 0) !== (b.unrepresentable.get(construct) ?? 0))
+    .sort(byCodePoint)
+    .map((construct) => ({
+      file,
+      message: `${construct} occurs ${a.unrepresentable.get(construct) ?? 0} times in first and ${b.unrepresentable.get(construct) ?? 0} in second`
+    }));
+}
+
 const dmnFiles = (dir: string): string[] => listDir(dir).filter(isWaTaskDmn).sort(byCodePoint);
 
 /** Compares two files, or two directories file by file by name. */
@@ -220,7 +231,12 @@ export function diffPaths(a: { dir: string; file?: string }, b: { dir: string; f
     }
   }
   for (const [nameA, nameB] of names) {
-    out.push(...diffDocuments(nameA as string, parseDmn(readText(join(a.dir, nameA as string))), parseDmn(readText(join(b.dir, nameB as string))), options));
+    const first = readDmn(readText(join(a.dir, nameA as string)));
+    const second = readDmn(readText(join(b.dir, nameB as string)));
+    out.push(
+      ...diffInspections(nameA as string, first.inspection, second.inspection),
+      ...diffDocuments(nameA as string, first.document, second.document, options)
+    );
   }
   return out;
 }

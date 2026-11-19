@@ -242,3 +242,17 @@ describe("canonical forms across spacing and grouping", () => {
     expect(parseExpr("if a and (b or c) then 1 else 2")).not.toEqual(parseExpr("if a and b or c then 1 else 2"));
   });
 });
+
+describe("renderExpr numbers", () => {
+  it.each([
+    [1e-7, "0.0000001"],
+    [1e21, "1000000000000000000000"],
+    [1.5, "1.5"],
+    [-2, "-2"],
+    [0, "0"],
+    [123456789, "123456789"]
+  ])("should write %s in plain decimal when rendering a number", (value, text) => {
+    expect(renderExpr(value)).toBe(text);
+    expect(parseExpr(text)).toEqual(value < 0 ? { feel: text } : value);
+  });
+});

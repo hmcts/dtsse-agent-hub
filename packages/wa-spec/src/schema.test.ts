@@ -211,3 +211,36 @@ describe("validateSpec scoped decisions and names", () => {
     expect(validateSpec(Spec.parse(spec({ service: { slug: "a-b" } })))).toEqual([]);
   });
 });
+
+describe("validateSpec scope and uniqueness", () => {
+  it("should reject PRIORITY and OUTPUT ORDER when the spec names a hit policy that needs output values", () => {
+    for (const hitPolicy of ["PRIORITY", "OUTPUT ORDER"]) {
+      expect(() => Spec.parse(spec({ decisions: { completion: { ...decision, hitPolicy } } }))).toThrow();
+    }
+  });
+
+  it("should reject a row or column that names a case type its decision does not have", () => {
+    const limited = (rowOnly: string[], columnOnly: string[]) =>
+      Spec.parse(
+        spec({
+          decisions: {
+            completion: {
+              ...decision,
+              only: ["ct_a"],
+              inputs: [{ key: "eventId", only: columnOnly }],
+              rows: [{ only: rowOnly, when: { eventId: { in: ["a"] } }, returns: { taskType: "T" } }]
+            }
+          }
+        })
+      );
+    expect(validateSpec(limited(["ct_a"], ["ct_a"]))).toEqual([]);
+    expect(validateSpec(limited(["ct_b"], ["ct_a"])).join()).toContain("completion row 1: ct_b is not a case type of completion");
+    expect(validateSpec(limited(["ct_a"], ["ct_a", "ct_b"])).join()).toContain("completion column: ct_b is not a case type of completion");
+  });
+
+  it("should reject a case type listed twice and a case type left with no outputs", () => {
+    expect(validateSpec(Spec.parse(spec({ caseTypes: [{ id: "ct_a" }, { id: "ct_a" }] })))).toContain("case type ct_a is listed more than once");
+    const bare = Spec.parse(spec({ decisions: { completion: { ...decision, outputs: [{ name: "taskType", only: ["ct_a"] }], rows: [] } } }));
+    expect(validateSpec(bare)).toEqual(["completion: ct_b has no outputs"]);
+  });
+});
