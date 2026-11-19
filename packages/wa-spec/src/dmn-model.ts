@@ -164,7 +164,13 @@ function groupTree(nodes: Ordered, attrs?: Node): Node | string {
       out[tag] = Array.isArray(existing) ? [...existing, value] : [existing, value];
     }
   }
-  return !hasChildren && attrs === undefined ? text : out;
+  if (!hasChildren && attrs === undefined) {
+    return text;
+  }
+  if (text.trim() !== "") {
+    out["#text"] = text;
+  }
+  return out;
 }
 
 /**
@@ -630,23 +636,33 @@ export interface Inspection {
   presentation: Map<string, number>;
   /** Anything else the file contains: a semantic construct the spec has no place for. */
   unrepresentable: Map<string, number>;
+  /** What each unrepresentable construct holds, one canonical text per occurrence, so a change of value can be told. */
+  values: Map<string, string[]>;
 }
+
+/** An unmodelled element as text, without its ids. */
+const canonicalNode = (value: unknown): string => JSON.stringify(value, (key, v) => (key === "@_id" ? undefined : v));
 
 /** Lists, for one DMN file, what the model does not carry. */
 function inspectTree(root: Node): Inspection {
   const presentation = new Map<string, number>();
   const unrepresentable = new Map<string, number>();
+  const values = new Map<string, string[]>();
   const bump = (map: Map<string, number>, key: string) => map.set(key, (map.get(key) ?? 0) + 1);
+  const flagged = (key: string, value: string) => {
+    bump(unrepresentable, key);
+    values.set(key, [...(values.get(key) ?? []), value]);
+  };
   const walk = (name: string, parent: string, value: unknown) => {
     if (name === "dmndi:DMNDI") {
       return;
     }
     if (!KNOWN_ELEMENTS[name]) {
-      bump(unrepresentable, `element <${name}>`);
+      flagged(`element <${name}>`, canonicalNode(value));
       return;
     }
     if (!KNOWN_ELEMENTS[name]?.includes(parent)) {
-      bump(unrepresentable, `element <${name}> in <${parent}>`);
+      flagged(`element <${name}> in <${parent}>`, canonicalNode(value));
       return;
     }
     for (const node of Array.isArray(value) ? value : [value]) {
@@ -662,7 +678,7 @@ function inspectTree(root: Node): Inspection {
           if (PRESENTATION_ATTRIBUTES.has(attribute)) {
             bump(presentation, `attribute ${attribute}`);
           } else {
-            bump(unrepresentable, `attribute ${attribute} on <${name}>`);
+            flagged(`attribute ${attribute} on <${name}>`, String(child));
           }
         } else if (key !== "#text") {
           walk(key, name, child);
@@ -675,5 +691,5 @@ function inspectTree(root: Node): Inspection {
       walk(key, "", value);
     }
   }
-  return { presentation, unrepresentable };
+  return { presentation, unrepresentable, values };
 }

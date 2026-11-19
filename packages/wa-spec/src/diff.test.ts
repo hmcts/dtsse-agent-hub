@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseDmn, sampleDmn } from "./__fixtures__/dmn.ts";
-import { diffDocuments, diffPaths, renderDifferences, ruleOrderMatters } from "./diff.ts";
-import { type DmnDocument, writeDmn } from "./dmn-model.ts";
+import { diffDocuments, diffInspections, diffPaths, renderDifferences, ruleOrderMatters } from "./diff.ts";
+import { type DmnDocument, readDmn, writeDmn } from "./dmn-model.ts";
 
 const base = (hitPolicy = "COLLECT"): DmnDocument => parseDmn(sampleDmn("ct_a", { hitPolicy }));
 const clone = (doc: DmnDocument): DmnDocument => structuredClone(doc);
@@ -223,5 +223,48 @@ describe("diffDocuments allowed values", () => {
       other.allowedValues = '"a","c"';
     }
     expect(diffDocuments("f", a, b)).toHaveLength(1);
+  });
+});
+
+describe("diffDocuments with differing columns", () => {
+  it("should report the column difference and still compare rules when the column counts match", () => {
+    const b = clone(base());
+    table(b).inputs[0]!.label = "Renamed";
+    table(b).rules[1]!.outputs[0] = '"Changed"';
+    const messages = diffDocuments("f", base(), b).map((d) => d.message);
+    expect(messages.some((m) => m.startsWith("input column 1 differs"))).toBe(true);
+    expect(messages.some((m) => m.startsWith("only in first: rule 2"))).toBe(true);
+  });
+
+  it("should not compare rules when the column counts differ", () => {
+    const b = clone(base());
+    table(b).inputs.pop();
+    const messages = diffDocuments("f", base(), b).map((d) => d.message);
+    expect(messages).toEqual(["input count differs: 2 vs 1"]);
+  });
+
+  it("should treat repeated requirements as one when comparing what a decision requires", () => {
+    const b = clone(base());
+    const main = b.decisions[0];
+    if (main) {
+      main.requires = [...main.requires, ...main.requires];
+    }
+    expect(diffDocuments("f", base(), b)).toEqual([]);
+  });
+});
+
+describe("diffInspections values", () => {
+  const withValue = (value: string, extra = "") => sampleDmn("ct_a").replace("<decision ", `<decision camunda:versionTag="${value}"${extra} `);
+
+  it("should report a changed value of an unmodelled attribute when the count is the same", () => {
+    const [a, b] = [readDmn(withValue("1")).inspection, readDmn(withValue("2")).inspection];
+    expect(diffInspections("f", a, b).map((d) => d.message)).toEqual(["attribute camunda:versionTag on <decision> differs: 1 vs 2"]);
+    expect(diffInspections("f", a, a)).toEqual([]);
+  });
+
+  it("should report a changed unmodelled element when the count is the same", () => {
+    const element = (text: string) => sampleDmn("ct_a").replace("<variable", `<extensionElements><x:y xmlns:x="u">${text}</x:y></extensionElements><variable`);
+    const messages = diffInspections("f", readDmn(element("a")).inspection, readDmn(element("b")).inspection).map((d) => d.message);
+    expect(messages).toEqual([expect.stringContaining("element <extensionElements> differs")]);
   });
 });

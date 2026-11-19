@@ -86,9 +86,10 @@ function main(argv: string[]): number {
       writeText(join(values.output, file.fileName), file.xml);
     }
     const made = new Set(files.map((file) => `${file.kind}/${file.caseType}`));
+    const madeNames = new Set(files.map((file) => file.fileName));
     const stale = (exists(values.output) ? listDir(values.output) : []).filter((name) => {
       const parsed = parseFileName(name);
-      return parsed?.service === spec.service.slug && !made.has(`${parsed.kind}/${parsed.caseType}`);
+      return !madeNames.has(name) && parsed?.service === spec.service.slug && !made.has(`${parsed.kind}/${parsed.caseType}`);
     });
     if (stale.length > 0) {
       process.stderr.write(`left in place, as the spec does not generate them: ${stale.join(", ")}\n`);

@@ -265,3 +265,90 @@ describe("validateSpec aggregation", () => {
     expect(validateSpec(withAggregation({ aggregation: "SUM" }))).toEqual([]);
   });
 });
+
+describe("validateSpec dependency graph", () => {
+  const graph = (dependencies: unknown[]) =>
+    Spec.parse(
+      spec({
+        decisions: {
+          completion: {
+            ...decision,
+            helpers: [
+              { name: "A", expression: 1 },
+              { name: "B", expression: 2 }
+            ],
+            dependencies
+          }
+        }
+      })
+    );
+
+  it("should reject a helper that requires itself when a dependency names it twice", () => {
+    expect(validateSpec(graph([{ decision: "A", requires: "A" }])).join()).toContain("completion: A requires itself");
+  });
+
+  it("should reject a cycle among helpers for the case types it applies to", () => {
+    const problems = validateSpec(
+      graph([
+        { decision: "A", requires: "B" },
+        { decision: "B", requires: "A", only: ["ct_a"] }
+      ])
+    );
+    expect(problems).toEqual(["completion: ct_a has a dependency cycle"]);
+  });
+
+  it("should reject the same dependency listed twice for one case type and accept it for different ones", () => {
+    expect(
+      validateSpec(
+        graph([
+          { decision: "table", requires: "A" },
+          { decision: "table", requires: "A" }
+        ])
+      ).join()
+    ).toContain("has the dependency table -> A more than once");
+    expect(
+      validateSpec(
+        graph([
+          { decision: "table", requires: "A", only: ["ct_a"] },
+          { decision: "table", requires: "A", only: ["ct_b"] }
+        ])
+      )
+    ).toEqual([]);
+  });
+
+  it("should accept a chain of helpers when nothing loops back", () => {
+    expect(
+      validateSpec(
+        graph([
+          { decision: "table", requires: "A" },
+          { decision: "A", requires: "B" }
+        ])
+      )
+    ).toEqual([]);
+  });
+});
+
+describe("validateSpec helper tables", () => {
+  const withTable = (helper: Record<string, unknown>) =>
+    Spec.parse(
+      spec({
+        decisions: {
+          completion: { ...decision, helpers: [{ name: "T", hitPolicy: "FIRST", inputs: [{ key: "k" }], outputs: [{ name: "o" }], rows: [], ...helper }] }
+        }
+      })
+    );
+
+  it("should accept a helper that is a decision table when its rows name its own columns", () => {
+    expect(validateSpec(withTable({ rows: [{ when: { k: { in: ["a"] } }, returns: { o: "x" } }] }))).toEqual([]);
+  });
+
+  it("should check a helper table's rows and columns when the helper is a decision table", () => {
+    expect(validateSpec(withTable({ rows: [{ when: { missing: { in: ["a"] } } }] }))).toEqual(["completion helper T row 1: unknown input missing"]);
+    expect(validateSpec(withTable({ aggregation: "SUM" })).join()).toContain("completion helper T: ct_a has aggregation SUM with hit policy FIRST");
+  });
+
+  it("should refuse a helper with both an expression and a table or with neither when the spec is parsed", () => {
+    expect(() => withTable({ expression: 1 })).toThrow();
+    expect(() => Spec.parse(spec({ decisions: { completion: { ...decision, helpers: [{ name: "T" }] } } }))).toThrow();
+  });
+});

@@ -74,7 +74,7 @@ describe("layout", () => {
   it("should leave the document as generated when there is no layout for it", () => {
     const { spec } = importDmns(files);
     const bare = generateDocument(spec, "completion", "ct_a");
-    expect(applyLayout(bare as NonNullable<typeof bare>, undefined, [])).toBe(bare);
+    expect(applyLayout(bare as NonNullable<typeof bare>, undefined, {})).toBe(bare);
   });
 
   it("should keep the layout of a different file untouched when asked about a case type it lacks", () => {

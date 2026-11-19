@@ -208,14 +208,16 @@ describe("importDmns across kinds, attributes and checks", () => {
   });
 
   it("should refuse to return a spec that does not validate when the files name a service that cannot be an id", () => {
-    expect(() => importDmns([{ name: "wa-task-completion-my svc-ct_a.dmn", xml: sampleDmn("ct_a") }])).toThrow(/invalid spec[\s\S]*service slug my svc/);
+    expect(() => importDmns([{ name: "wa-task-completion-my svc-ct_a.dmn", xml: sampleDmn("ct_a").replaceAll("-demo-", "-my svc-") }])).toThrow(
+      /invalid spec[\s\S]*service slug my svc/
+    );
   });
 });
 
 describe("importDmns refusals and allowed values", () => {
   const dmn = (kind: string, slug: string, caseType: string) => ({
     name: `wa-task-${kind}-${slug}-${caseType}.dmn`,
-    xml: sampleDmn(caseType)
+    xml: sampleDmn(caseType).replaceAll("-demo-", `-${slug}-`)
   });
 
   it("should throw and name the files when they belong to more than one service", () => {
@@ -300,8 +302,8 @@ describe("importDmns requirements to missing decisions and error order", () => {
   });
 
   it("should name the services before the duplicate files when both problems are present", () => {
-    const names = ["wa-task-completion-one-ct_a.dmn", "wa-task-completion-two-ct_a.dmn"].map((name) => ({ name, xml: sampleDmn("ct_a") }));
-    expect(() => importDmns([...names, { name: "wa-task-completion-one-ct_a.dmn", xml: sampleDmn("ct_a") }])).toThrow(/more than one service/);
+    const names = ["one", "two"].map((slug) => ({ name: `wa-task-completion-${slug}-ct_a.dmn`, xml: sampleDmn("ct_a").replaceAll("-demo-", `-${slug}-`) }));
+    expect(() => importDmns([...names, { name: "wa-task-completion-one-ct_a.dmn", xml: names[0]?.xml ?? "" }])).toThrow(/more than one service/);
   });
 });
 
@@ -309,7 +311,7 @@ describe("importDmns files it cannot place", () => {
   const named = (name: string, xml: string) => ({ name, xml });
 
   it("should report a task DMN of an unknown kind as unrepresentable when the directory has one", () => {
-    const { report } = importDmns([file("ct_a"), named("wa-task-mystery-demo-ct_a.dmn", sampleDmn("ct_a"))]);
+    const { report } = importDmns([file("ct_a"), named("wa-task-mystery-demo-ct_a.dmn", "<definitions/>")]);
     expect(report.unrepresentable).toEqual([{ construct: "a task DMN of a kind the spec does not know", count: 1, files: ["wa-task-mystery-demo-ct_a.dmn"] }]);
   });
 
@@ -332,20 +334,40 @@ describe("importDmns files it cannot place", () => {
     expect(report.unrepresentable.map((u) => u.construct)).toEqual(["an output column without a name (column 1)"]);
   });
 
-  it("should skip a helper that is a decision table without leaving a layout entry or an empty literal when the file has one", () => {
+  it("should carry a helper that is a decision table, with its layout, when the file has one", () => {
+    const original = sampleDmn("ct_a");
+    const helper = /<decision id="Decision_LATEST"[\s\S]*?<\/decision>/.exec(original)?.[0] as string;
+    const asTable = helper.replace(
+      /<literalExpression[\s\S]*?<\/literalExpression>/,
+      '<decisionTable id="DT" hitPolicy="FIRST"><input id="I" label="Key" camunda:inputVariable="key"><inputExpression id="IE" typeRef="string"><text></text></inputExpression></input><output id="O" name="o" typeRef="string" /><rule id="R1"><inputEntry id="E1"><text>"a"</text></inputEntry><outputEntry id="E2"><text>"x"</text></outputEntry></rule></decisionTable>'
+    );
+    const { spec, layout, report } = importDmns([{ name: "wa-task-completion-demo-ct_a.dmn", xml: original.replace(helper, asTable) }]);
+    expect(report.unrepresentable).toEqual([]);
+    const carried = spec.decisions.completion?.helpers?.[0];
+    expect(carried).toMatchObject({ name: "LATEST", hitPolicy: "FIRST", inputs: [{ key: "key" }], outputs: [{ name: "o" }] });
+    expect(carried?.expression).toBeUndefined();
+    expect(carried?.rows).toEqual([{ when: { key: { in: ["a"] } }, returns: { o: "x" } }]);
+    const out = generateAll(parseSpec(stringifySpec(spec)), parseLayout(stringifyLayout(layout)))[0]?.xml ?? "";
+    const helperOut = parseDmn(out).decisions[1];
+    expect(helperOut?.table).toMatchObject({
+      id: "DT",
+      hitPolicy: "FIRST",
+      rules: [{ id: "R1", inputIds: ["E1"], outputIds: ["E2"], inputs: ['"a"'], outputs: ['"x"'] }]
+    });
+    expect(helperOut?.literal).toBeUndefined();
+    expect(parseDmn(generateAll(spec)[0]?.xml ?? "").decisions[1]?.table?.rules).toHaveLength(1);
+  });
+
+  it("should refuse a helper that is a table in one case type and an expression in another", () => {
     const original = sampleDmn("ct_a");
     const helper = /<decision id="Decision_LATEST"[\s\S]*?<\/decision>/.exec(original)?.[0] as string;
     const asTable = helper.replace(
       /<literalExpression[\s\S]*?<\/literalExpression>/,
       '<decisionTable id="DT"><input id="I"><inputExpression id="IE"><text></text></inputExpression></input><output id="O" name="o" /></decisionTable>'
     );
-    const { spec, layout, report } = importDmns([{ name: "wa-task-completion-demo-ct_a.dmn", xml: original.replace(helper, asTable) }]);
-    expect(report.unrepresentable.map((u) => u.construct)).toEqual(["helper decision LATEST is not a literal expression"]);
-    expect(spec.decisions.completion?.helpers).toBeUndefined();
-    expect(spec.decisions.completion?.dependencies).toBeUndefined();
-    expect(Object.keys(layout.files["completion/ct_a"]?.decisions ?? {})).toEqual(["table"]);
-    expect(() => parseLayout(stringifyLayout(layout))).not.toThrow();
-    expect(generateAll(parseSpec(stringifySpec(spec)), parseLayout(stringifyLayout(layout)))).toHaveLength(1);
+    expect(() => importDmns([{ name: "wa-task-completion-demo-ct_a.dmn", xml: original.replace(helper, asTable) }, file("ct_b")])).toThrow(
+      /decision table in some case types/
+    );
   });
 
   it("should carry the expression language of an entry when a file sets one", () => {
@@ -355,5 +377,38 @@ describe("importDmns files it cannot place", () => {
     expect(spec.decisions.completion?.rows[0]?.returns?.taskType).toEqual({ feel: '"Review"', language: "feel" });
     expect(generateAll(spec, layout)[0]?.xml).toContain('expressionLanguage="feel"');
     expect(generateAll(spec)[0]?.xml).toContain('expressionLanguage="feel"');
+  });
+});
+
+describe("importDmns names, languages and skipped files", () => {
+  it("should read the kind, service and case type from the main decision id and keep the file's own name when they differ", () => {
+    const xml = sampleDmn("ct_a").replaceAll("wa-task-completion-demo-ct_a", "wa-task-completion-svc-ct_z");
+    const { spec, layout } = importDmns([{ name: "wa-task-completion-misnamed.dmn", xml }]);
+    expect(spec.service.slug).toBe("svc");
+    expect(spec.caseTypes.map((c) => c.id)).toEqual(["ct_z"]);
+    expect(generateAll(spec, layout).map((f) => f.fileName)).toEqual(["wa-task-completion-misnamed.dmn"]);
+    expect(generateAll(spec).map((f) => f.fileName)).toEqual(["wa-task-completion-svc-ct_z.dmn"]);
+  });
+
+  it("should list why each file was skipped when no task DMN could be imported", () => {
+    expect(() =>
+      importDmns([
+        { name: "notes.dmn", xml: "<definitions/>" },
+        { name: "wa-task-completion-demo-ct_a.dmn", xml: "<definitions/>" }
+      ])
+    ).toThrow(/No task DMN could be imported:\n {2}notes\.dmn: not a wa-task[\s\S]*wa-task-completion-demo-ct_a\.dmn: no decision table found/);
+    expect(() => importDmns([])).toThrow(/none was given/);
+  });
+
+  it("should keep the expression language of an empty entry when the entry names one", () => {
+    const xml = sampleDmn("ct_a").replace(/<inputEntry ([^>]*)>\s*<text><\/text>/, '<inputEntry $1 expressionLanguage="feel"><text></text>');
+    const { spec, layout } = importDmns([{ name: "wa-task-completion-demo-ct_a.dmn", xml }]);
+    expect(generateAll(spec, layout)[0]?.xml).toContain('expressionLanguage="feel"');
+  });
+
+  it("should flag an aggregation the spec does not know and skip the file when a table has one", () => {
+    const xml = sampleDmn("ct_a").replace('hitPolicy="COLLECT"', 'hitPolicy="COLLECT" aggregation="MEDIAN"');
+    const { report } = importDmns([file("ct_b"), { name: "wa-task-completion-demo-ct_a.dmn", xml }]);
+    expect(report.unrepresentable.map((u) => u.construct)).toEqual(["aggregation MEDIAN, which the spec does not know"]);
   });
 });
