@@ -338,12 +338,13 @@ describe("liftSpec on a varied model", () => {
     expect(result.model.tables?.initiation?.rows).toHaveLength(1);
   });
 
-  it("should leave permissions as rows when a role is granted twice to one task for a case type", () => {
+  it("should leave only the rows granting a role twice as rows when a role is granted twice to one task for a case type", () => {
     const twice = structuredClone(spec);
     const first = twice.decisions.permissions?.rows[0] as Row;
     twice.decisions.permissions?.rows.push(structuredClone(first));
     const result = liftSpec(twice);
-    expect(result.report.counts.permissions.lifted).toBe(0);
+    const total = spec.decisions.permissions?.rows.length ?? 0;
+    expect(result.report.counts.permissions).toEqual({ rows: total + 1, lifted: total - 1, residue: 2 });
     expect(result.report.residue.some((r) => r.kind === "permissions" && r.reason.includes("twice"))).toBe(true);
     expect(result.report.differences).toEqual([]);
   });

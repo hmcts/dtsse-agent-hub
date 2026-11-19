@@ -236,11 +236,7 @@ function cancellationContent(rule: Cancellation, category: Expr | undefined): Co
 /** Every row's worth of content the model describes, per kind, in the order it compiles when nothing says otherwise. */
 export function collectAtoms(model: Model): Atoms {
   const atoms = Object.fromEntries(KINDS.map((kind) => [kind, [] as Atom[]])) as Atoms;
-  const counts = new Map<string, number>();
   const add = (kind: Kind, task: string, slot: string, cases: string[], content: Content) => {
-    const key = `${kind}:${task}/${slot}`;
-    const n = (counts.get(key) ?? 0) + 1;
-    counts.set(key, n);
     atoms[kind].push({ ref: `${task}/${slot}`, task, slot, cases, content });
   };
   const all = caseOrder(model);
@@ -317,6 +313,8 @@ function withRefs(atoms: Atom[]): Atom[] {
   });
 }
 
+const overlapping = (a: string[], b: string[]): boolean => a.some((x) => b.includes(x));
+
 export const bucketOf = (atom: Atom): string => `${atom.task}/${atom.slot}`;
 
 interface OutRow {
@@ -368,13 +366,16 @@ function buildRows(kind: Kind, decision: Decision, atoms: Atom[], residue: Row[]
   const byRef = new Map(atoms.map((atom) => [atom.ref, atom]));
   const named = new Set((order ?? []).flatMap((item) => (typeof item === "string" ? item : item.row).split(" ")));
   const claimed = new Set<Atom>();
-  // A slot that gained atoms since the ordering was written is still named by its bare `<task>/<slot>`: it stands for an atom no token names.
-  const atomOf = (token: string): Atom | undefined => {
+  // A token whose atom changed (its hash covers content and case types) or that was written before its slot gained atoms
+  // stands for an atom of the same `<task>/<slot>` that no token names; the one covering its case types is preferred.
+  const atomOf = (token: string, only: string[] | undefined): Atom | undefined => {
     const exact = byRef.get(token);
     if (exact) {
       return exact;
     }
-    const spare = atoms.find((a) => bucketOf(a) === token && !named.has(a.ref) && !claimed.has(a));
+    const bucket = token.replace(/#.*$/, "");
+    const spares = atoms.filter((a) => bucketOf(a) === bucket && !named.has(a.ref) && !claimed.has(a));
+    const spare = spares.find((a) => !only || overlapping(a.cases, only)) ?? spares[0];
     if (spare) {
       claimed.add(spare);
     }
@@ -410,7 +411,7 @@ function buildRows(kind: Kind, decision: Decision, atoms: Atom[], residue: Row[]
           out.push({ sig: `~${n}`, tasks: [], content: { when: {}, returns: {} }, cases: [], grouped: false, description: undefined, residue: rowOf });
         }
       } else if (!token.startsWith("@")) {
-        const atom = atomOf(token);
+        const atom = atomOf(token, only);
         const cases = atom && (only ? atom.cases.filter((c) => only.includes(c)) : atom.cases);
         if (atom && cases && cases.length > 0) {
           members.push({ atom, cases });

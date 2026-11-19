@@ -425,7 +425,7 @@ tasks:
         - " - "
         - field: CURRENT_REFERRAL_SUBJECT
     due:
-      days: &a1
+      days:
         feel: |-
           if (caseData != null
           and caseData.referralCollection != null
@@ -434,7 +434,7 @@ tasks:
           then 1
           else 2
     priority:
-      major: &a2
+      major:
         feel: |-
           if (caseData != null
           and caseData.referralCollection != null
@@ -442,7 +442,7 @@ tasks:
           and sort(caseData.referralCollection, function(x,y) number(x.value.referralNumber) > number(y.value.referralNumber))[1].value.isUrgent = "Yes")
           then 1000
           else 5000
-      minor: &a3
+      minor:
         feel: |-
           if (caseData != null
           and caseData.referralCollection != null
@@ -521,7 +521,7 @@ tasks:
     due:
       days: 5
     priority:
-      major: &a7
+      major:
         if:
           all:
             - field: caseData
@@ -562,10 +562,31 @@ tasks:
         - " - "
         - field: CURRENT_REFERRAL_SUBJECT
     due:
-      days: *a1
+      days:
+        feel: |-
+          if (caseData != null
+          and caseData.referralCollection != null
+          and count(caseData.referralCollection) > 0
+          and sort(caseData.referralCollection, function(x,y) number(x.value.referralNumber) > number(y.value.referralNumber))[1].value.isUrgent = "Yes")
+          then 1
+          else 2
     priority:
-      major: *a2
-      minor: *a3
+      major:
+        feel: |-
+          if (caseData != null
+          and caseData.referralCollection != null
+          and count(caseData.referralCollection) > 0
+          and sort(caseData.referralCollection, function(x,y) number(x.value.referralNumber) > number(y.value.referralNumber))[1].value.isUrgent = "Yes")
+          then 1000
+          else 5000
+      minor:
+        feel: |-
+          if (caseData != null
+          and caseData.referralCollection != null
+          and count(caseData.referralCollection) > 0
+          and sort(caseData.referralCollection, function(x,y) number(x.value.referralNumber) > number(y.value.referralNumber))[1].value.isUrgent = "Yes")
+          then 100
+          else 500
       dateOriginEarliest: dueDate, nextHearingDate
     title:
       if:
@@ -633,10 +654,31 @@ tasks:
         - " - "
         - field: CURRENT_REFERRAL_SUBJECT
     due:
-      days: *a1
+      days:
+        feel: |-
+          if (caseData != null
+          and caseData.referralCollection != null
+          and count(caseData.referralCollection) > 0
+          and sort(caseData.referralCollection, function(x,y) number(x.value.referralNumber) > number(y.value.referralNumber))[1].value.isUrgent = "Yes")
+          then 1
+          else 2
     priority:
-      major: *a2
-      minor: *a3
+      major:
+        feel: |-
+          if (caseData != null
+          and caseData.referralCollection != null
+          and count(caseData.referralCollection) > 0
+          and sort(caseData.referralCollection, function(x,y) number(x.value.referralNumber) > number(y.value.referralNumber))[1].value.isUrgent = "Yes")
+          then 1000
+          else 5000
+      minor:
+        feel: |-
+          if (caseData != null
+          and caseData.referralCollection != null
+          and count(caseData.referralCollection) > 0
+          and sort(caseData.referralCollection, function(x,y) number(x.value.referralNumber) > number(y.value.referralNumber))[1].value.isUrgent = "Yes")
+          then 100
+          else 500
       dateOriginEarliest: dueDate, nextHearingDate
     title:
       if:
@@ -690,7 +732,7 @@ tasks:
         - " - "
         - field: CURRENT_REFERRAL_RESPONSE_SUBJECT
     due:
-      days: &a4
+      days:
         feel: |-
           if (caseData!=null
           and caseData.referralCollection != null
@@ -699,7 +741,7 @@ tasks:
           then 1
           else 2
     priority:
-      major: &a5
+      major:
         feel: |-
           if (caseData != null
           and caseData.referralCollection != null
@@ -707,7 +749,7 @@ tasks:
           and sort(flatten(caseData.referralCollection.value.referralReplyCollection), function(x,y) date and time(if(x.value.replyDateTime!=null)then x.value.replyDateTime else "2023-01-01T00:00:00.000") > date and time(if(y.value.replyDateTime!=null)then y.value.replyDateTime else "2023-01-01T00:00:00.000"))[1].value.isUrgentReply = "Yes")
           then 1000
           else 5000
-      minor: &a6
+      minor:
         feel: |-
           if (caseData!=null
           and caseData.referralCollection != null
@@ -758,10 +800,31 @@ tasks:
         - " - "
         - field: CURRENT_REFERRAL_RESPONSE_SUBJECT
     due:
-      days: *a4
+      days:
+        feel: |-
+          if (caseData!=null
+          and caseData.referralCollection != null
+          and count(caseData.referralCollection[count(value.referralReplyCollection)>0])>0
+          and sort(flatten(caseData.referralCollection.value.referralReplyCollection), function(x,y) date and time(if(x.value.replyDateTime!=null)then x.value.replyDateTime else "2023-01-01T00:00:00.000") > date and time(if(y.value.replyDateTime!=null)then y.value.replyDateTime else "2023-01-01T00:00:00.000"))[1].value.isUrgentReply = "Yes")
+          then 1
+          else 2
     priority:
-      major: *a5
-      minor: *a6
+      major:
+        feel: |-
+          if (caseData != null
+          and caseData.referralCollection != null
+          and count(caseData.referralCollection[count(value.referralReplyCollection)>0])>0
+          and sort(flatten(caseData.referralCollection.value.referralReplyCollection), function(x,y) date and time(if(x.value.replyDateTime!=null)then x.value.replyDateTime else "2023-01-01T00:00:00.000") > date and time(if(y.value.replyDateTime!=null)then y.value.replyDateTime else "2023-01-01T00:00:00.000"))[1].value.isUrgentReply = "Yes")
+          then 1000
+          else 5000
+      minor:
+        feel: |-
+          if (caseData!=null
+          and caseData.referralCollection != null
+          and count(caseData.referralCollection[count(value.referralReplyCollection)>0])>0
+          and sort(flatten(caseData.referralCollection.value.referralReplyCollection), function(x,y) date and time(if(x.value.replyDateTime!=null)then x.value.replyDateTime else "2023-01-01T00:00:00.000") > date and time(if(y.value.replyDateTime!=null)then y.value.replyDateTime else "2023-01-01T00:00:00.000"))[1].value.isUrgentReply = "Yes")
+          then 100
+          else 500
       dateOriginRef: dueDate
     title:
       if:
@@ -818,10 +881,31 @@ tasks:
         - " - "
         - field: CURRENT_REFERRAL_RESPONSE_SUBJECT
     due:
-      days: *a4
+      days:
+        feel: |-
+          if (caseData!=null
+          and caseData.referralCollection != null
+          and count(caseData.referralCollection[count(value.referralReplyCollection)>0])>0
+          and sort(flatten(caseData.referralCollection.value.referralReplyCollection), function(x,y) date and time(if(x.value.replyDateTime!=null)then x.value.replyDateTime else "2023-01-01T00:00:00.000") > date and time(if(y.value.replyDateTime!=null)then y.value.replyDateTime else "2023-01-01T00:00:00.000"))[1].value.isUrgentReply = "Yes")
+          then 1
+          else 2
     priority:
-      major: *a5
-      minor: *a6
+      major:
+        feel: |-
+          if (caseData != null
+          and caseData.referralCollection != null
+          and count(caseData.referralCollection[count(value.referralReplyCollection)>0])>0
+          and sort(flatten(caseData.referralCollection.value.referralReplyCollection), function(x,y) date and time(if(x.value.replyDateTime!=null)then x.value.replyDateTime else "2023-01-01T00:00:00.000") > date and time(if(y.value.replyDateTime!=null)then y.value.replyDateTime else "2023-01-01T00:00:00.000"))[1].value.isUrgentReply = "Yes")
+          then 1000
+          else 5000
+      minor:
+        feel: |-
+          if (caseData!=null
+          and caseData.referralCollection != null
+          and count(caseData.referralCollection[count(value.referralReplyCollection)>0])>0
+          and sort(flatten(caseData.referralCollection.value.referralReplyCollection), function(x,y) date and time(if(x.value.replyDateTime!=null)then x.value.replyDateTime else "2023-01-01T00:00:00.000") > date and time(if(y.value.replyDateTime!=null)then y.value.replyDateTime else "2023-01-01T00:00:00.000"))[1].value.isUrgentReply = "Yes")
+          then 100
+          else 500
       dateOriginRef: dueDate
     title:
       if:
@@ -875,7 +959,18 @@ tasks:
     due:
       days: 5
     priority:
-      major: *a7
+      major:
+        if:
+          all:
+            - field: caseData
+              op: exists
+            - field: caseData.draftAndSignJudgement
+              op: exists
+            - field: caseData.draftAndSignJudgement.isUrgent
+              op: eq
+              value: Yes
+        use: 1000
+        otherwise: 5000
       minor: 500
       dateOriginRef: dueDate
     description: "[View Order](/cases/case-details/${[CASE_REFERENCE]}#Judgments) and [Issue Order](/cases/case-details/${[CASE_REFERENCE]}/trigger/sendNotification/sendNotification1)"
@@ -1605,7 +1700,7 @@ tasks:
     due:
       days: 3
     priority:
-      major: &a8
+      major:
         if:
           field: caseData.nextListedDate
           op: exists
@@ -1665,7 +1760,40 @@ tasks:
     due:
       days: 3
     priority:
-      major: *a8
+      major:
+        if:
+          field: caseData.nextListedDate
+          op: exists
+        use:
+          if:
+            left:
+              minus:
+                - call: date
+                  args:
+                    - field: caseData.nextListedDate
+                - call: today
+                  args: []
+            op: le
+            right:
+              call: duration
+              args: [ P10D ]
+          use: 2001
+          otherwise:
+            if:
+              left:
+                minus:
+                  - call: date
+                    args:
+                      - field: caseData.nextListedDate
+                  - call: today
+                    args: []
+              op: le
+              right:
+                call: duration
+                args: [ P30D ]
+            use: 5000
+            otherwise: 5001
+        otherwise: 5001
       minor: 500
       dateOriginEarliest: dueDate, nextHearingDate
     description: "[Review the notification response](/cases/case-details/${[CASE_REFERENCE]}#Notifications) and [Respond to the notification response](/cases/case-details/${[CASE_REFERENCE]}/trigger/respondNotification/respondNotification1)"
@@ -1683,7 +1811,7 @@ tasks:
           adminSupportTaskRequired: true
     cancelCategory: ReviewSupportAdmin
     due:
-      days: &a9
+      days:
         if:
           field: caseData.nextListedDate
           op: exists
@@ -1704,7 +1832,7 @@ tasks:
           otherwise: 10
         otherwise: 10
     priority:
-      major: &a10
+      major:
         if:
           field: caseData.nextListedDate
           op: exists
@@ -1724,7 +1852,7 @@ tasks:
           use: 1000
           otherwise: 5001
         otherwise: 5001
-      minor: &a11
+      minor:
         if:
           field: caseData.nextListedDate
           op: exists
@@ -1777,10 +1905,67 @@ tasks:
           legalOfficerSupportTaskRequired: true
     cancelCategory: ReviewSupportLegalOfficer
     due:
-      days: *a9
+      days:
+        if:
+          field: caseData.nextListedDate
+          op: exists
+        use:
+          if:
+            left:
+              minus:
+                - call: date
+                  args:
+                    - field: caseData.nextListedDate
+                - call: today
+                  args: []
+            op: le
+            right:
+              call: duration
+              args: [ P30D ]
+          use: 1
+          otherwise: 10
+        otherwise: 10
     priority:
-      major: *a10
-      minor: *a11
+      major:
+        if:
+          field: caseData.nextListedDate
+          op: exists
+        use:
+          if:
+            left:
+              minus:
+                - call: date
+                  args:
+                    - field: caseData.nextListedDate
+                - call: today
+                  args: []
+            op: le
+            right:
+              call: duration
+              args: [ P3D ]
+          use: 1000
+          otherwise: 5001
+        otherwise: 5001
+      minor:
+        if:
+          field: caseData.nextListedDate
+          op: exists
+        use:
+          if:
+            left:
+              minus:
+                - call: date
+                  args:
+                    - field: caseData.nextListedDate
+                - call: today
+                  args: []
+            op: le
+            right:
+              call: duration
+              args: [ P3D ]
+          use: 100
+          otherwise: 500
+        otherwise: 500
     title: LO - Review Support Request
     link:
       label: Review RA Request
@@ -1821,10 +2006,67 @@ tasks:
           judgeSupportTaskRequired: true
     cancelCategory: ReviewSupportJudge
     due:
-      days: *a9
+      days:
+        if:
+          field: caseData.nextListedDate
+          op: exists
+        use:
+          if:
+            left:
+              minus:
+                - call: date
+                  args:
+                    - field: caseData.nextListedDate
+                - call: today
+                  args: []
+            op: le
+            right:
+              call: duration
+              args: [ P30D ]
+          use: 1
+          otherwise: 10
+        otherwise: 10
     priority:
-      major: *a10
-      minor: *a11
+      major:
+        if:
+          field: caseData.nextListedDate
+          op: exists
+        use:
+          if:
+            left:
+              minus:
+                - call: date
+                  args:
+                    - field: caseData.nextListedDate
+                - call: today
+                  args: []
+            op: le
+            right:
+              call: duration
+              args: [ P3D ]
+          use: 1000
+          otherwise: 5001
+        otherwise: 5001
+      minor:
+        if:
+          field: caseData.nextListedDate
+          op: exists
+        use:
+          if:
+            left:
+              minus:
+                - call: date
+                  args:
+                    - field: caseData.nextListedDate
+                - call: today
+                  args: []
+            op: le
+            right:
+              call: duration
+              args: [ P3D ]
+          use: 100
+          otherwise: 500
+        otherwise: 500
     title: EJ - Review Support Request
     link:
       label: Review RA Request
@@ -1847,10 +2089,67 @@ tasks:
           arrangeSupportTaskRequired: true
     cancelCategory: ArrangeSupport
     due:
-      days: *a9
+      days:
+        if:
+          field: caseData.nextListedDate
+          op: exists
+        use:
+          if:
+            left:
+              minus:
+                - call: date
+                  args:
+                    - field: caseData.nextListedDate
+                - call: today
+                  args: []
+            op: le
+            right:
+              call: duration
+              args: [ P30D ]
+          use: 1
+          otherwise: 10
+        otherwise: 10
     priority:
-      major: *a10
-      minor: *a11
+      major:
+        if:
+          field: caseData.nextListedDate
+          op: exists
+        use:
+          if:
+            left:
+              minus:
+                - call: date
+                  args:
+                    - field: caseData.nextListedDate
+                - call: today
+                  args: []
+            op: le
+            right:
+              call: duration
+              args: [ P3D ]
+          use: 1000
+          otherwise: 5001
+        otherwise: 5001
+      minor:
+        if:
+          field: caseData.nextListedDate
+          op: exists
+        use:
+          if:
+            left:
+              minus:
+                - call: date
+                  args:
+                    - field: caseData.nextListedDate
+                - call: today
+                  args: []
+            op: le
+            right:
+              call: duration
+              args: [ P3D ]
+          use: 100
+          otherwise: 500
+        otherwise: 500
     title:
       if:
         all:
@@ -1880,7 +2179,7 @@ tasks:
         mode: Auto
     cancelCategory: Vetting
     due:
-      days: &a12
+      days:
         feel: |-
           if (caseData != null
           and caseData.referralCollection != null
@@ -1889,7 +2188,7 @@ tasks:
           then 1
           else 2
     priority:
-      major: &a13
+      major:
         feel: |-
           if (caseData != null
           and caseData.referralCollection != null
@@ -1897,7 +2196,7 @@ tasks:
           and sort(caseData.referralCollection, function(x,y) number(x.value.referralNumber) > number(y.value.referralNumber))[1].value.isUrgent = "Yes")
           then 1000
           else 5000
-      minor: &a14
+      minor:
         feel: |-
           if (caseData != null
           and caseData.referralCollection != null
@@ -1928,10 +2227,31 @@ tasks:
         mode: Auto
     cancelCategory: Vetting
     due:
-      days: *a12
+      days:
+        feel: |-
+          if (caseData != null
+          and caseData.referralCollection != null
+          and count(caseData.referralCollection) > 0
+          and sort(caseData.referralCollection, function(x,y) number(x.value.referralNumber) > number(y.value.referralNumber))[1].value.isUrgent = "Yes")
+          then 1
+          else 2
     priority:
-      major: *a13
-      minor: *a14
+      major:
+        feel: |-
+          if (caseData != null
+          and caseData.referralCollection != null
+          and count(caseData.referralCollection) > 0
+          and sort(caseData.referralCollection, function(x,y) number(x.value.referralNumber) > number(y.value.referralNumber))[1].value.isUrgent = "Yes")
+          then 1000
+          else 5000
+      minor:
+        feel: |-
+          if (caseData != null
+          and caseData.referralCollection != null
+          and count(caseData.referralCollection) > 0
+          and sort(caseData.referralCollection, function(x,y) number(x.value.referralNumber) > number(y.value.referralNumber))[1].value.isUrgent = "Yes")
+          then 100
+          else 500
       dateOriginEarliest: dueDate, nextHearingDate
     link:
       label: Reply to the Referral
@@ -1955,10 +2275,31 @@ tasks:
         mode: Auto
     cancelCategory: Vetting
     due:
-      days: *a12
+      days:
+        feel: |-
+          if (caseData != null
+          and caseData.referralCollection != null
+          and count(caseData.referralCollection) > 0
+          and sort(caseData.referralCollection, function(x,y) number(x.value.referralNumber) > number(y.value.referralNumber))[1].value.isUrgent = "Yes")
+          then 1
+          else 2
     priority:
-      major: *a13
-      minor: *a14
+      major:
+        feel: |-
+          if (caseData != null
+          and caseData.referralCollection != null
+          and count(caseData.referralCollection) > 0
+          and sort(caseData.referralCollection, function(x,y) number(x.value.referralNumber) > number(y.value.referralNumber))[1].value.isUrgent = "Yes")
+          then 1000
+          else 5000
+      minor:
+        feel: |-
+          if (caseData != null
+          and caseData.referralCollection != null
+          and count(caseData.referralCollection) > 0
+          and sort(caseData.referralCollection, function(x,y) number(x.value.referralNumber) > number(y.value.referralNumber))[1].value.isUrgent = "Yes")
+          then 100
+          else 500
       dateOriginEarliest: dueDate, nextHearingDate
     link:
       label: Reply to the Referral
@@ -1982,7 +2323,7 @@ tasks:
         mode: Auto
     cancelCategory: Processing
     due:
-      days: &a15
+      days:
         feel: |-
           if (caseData!=null
           and caseData.referralCollection != null
@@ -1991,7 +2332,7 @@ tasks:
           then 1
           else 2
     priority:
-      major: &a16
+      major:
         feel: |-
           if (caseData != null
           and caseData.referralCollection != null
@@ -1999,7 +2340,7 @@ tasks:
           and sort(flatten(caseData.referralCollection.value.referralReplyCollection), function(x,y) date and time(if(x.value.replyDateTime!=null)then x.value.replyDateTime else "2023-01-01T00:00:00.000") > date and time(if(y.value.replyDateTime!=null)then y.value.replyDateTime else "2023-01-01T00:00:00.000"))[1].value.isUrgentReply = "Yes")
           then 1000
           else 5000
-      minor: &a17
+      minor:
         feel: |-
           if (caseData!=null
           and caseData.referralCollection != null
@@ -2030,10 +2371,31 @@ tasks:
         mode: Auto
     cancelCategory: Processing
     due:
-      days: *a15
+      days:
+        feel: |-
+          if (caseData!=null
+          and caseData.referralCollection != null
+          and count(caseData.referralCollection[count(value.referralReplyCollection)>0])>0
+          and sort(flatten(caseData.referralCollection.value.referralReplyCollection), function(x,y) date and time(if(x.value.replyDateTime!=null)then x.value.replyDateTime else "2023-01-01T00:00:00.000") > date and time(if(y.value.replyDateTime!=null)then y.value.replyDateTime else "2023-01-01T00:00:00.000"))[1].value.isUrgentReply = "Yes")
+          then 1
+          else 2
     priority:
-      major: *a16
-      minor: *a17
+      major:
+        feel: |-
+          if (caseData != null
+          and caseData.referralCollection != null
+          and count(caseData.referralCollection[count(value.referralReplyCollection)>0])>0
+          and sort(flatten(caseData.referralCollection.value.referralReplyCollection), function(x,y) date and time(if(x.value.replyDateTime!=null)then x.value.replyDateTime else "2023-01-01T00:00:00.000") > date and time(if(y.value.replyDateTime!=null)then y.value.replyDateTime else "2023-01-01T00:00:00.000"))[1].value.isUrgentReply = "Yes")
+          then 1000
+          else 5000
+      minor:
+        feel: |-
+          if (caseData!=null
+          and caseData.referralCollection != null
+          and count(caseData.referralCollection[count(value.referralReplyCollection)>0])>0
+          and sort(flatten(caseData.referralCollection.value.referralReplyCollection), function(x,y) date and time(if(x.value.replyDateTime!=null)then x.value.replyDateTime else "2023-01-01T00:00:00.000") > date and time(if(y.value.replyDateTime!=null)then y.value.replyDateTime else "2023-01-01T00:00:00.000"))[1].value.isUrgentReply = "Yes")
+          then 100
+          else 500
       dateOriginRef: dueDate
     description: |-
       **Review the Referral Response**
@@ -2057,10 +2419,31 @@ tasks:
         mode: Auto
     cancelCategory: Processing
     due:
-      days: *a15
+      days:
+        feel: |-
+          if (caseData!=null
+          and caseData.referralCollection != null
+          and count(caseData.referralCollection[count(value.referralReplyCollection)>0])>0
+          and sort(flatten(caseData.referralCollection.value.referralReplyCollection), function(x,y) date and time(if(x.value.replyDateTime!=null)then x.value.replyDateTime else "2023-01-01T00:00:00.000") > date and time(if(y.value.replyDateTime!=null)then y.value.replyDateTime else "2023-01-01T00:00:00.000"))[1].value.isUrgentReply = "Yes")
+          then 1
+          else 2
     priority:
-      major: *a16
-      minor: *a17
+      major:
+        feel: |-
+          if (caseData != null
+          and caseData.referralCollection != null
+          and count(caseData.referralCollection[count(value.referralReplyCollection)>0])>0
+          and sort(flatten(caseData.referralCollection.value.referralReplyCollection), function(x,y) date and time(if(x.value.replyDateTime!=null)then x.value.replyDateTime else "2023-01-01T00:00:00.000") > date and time(if(y.value.replyDateTime!=null)then y.value.replyDateTime else "2023-01-01T00:00:00.000"))[1].value.isUrgentReply = "Yes")
+          then 1000
+          else 5000
+      minor:
+        feel: |-
+          if (caseData!=null
+          and caseData.referralCollection != null
+          and count(caseData.referralCollection[count(value.referralReplyCollection)>0])>0
+          and sort(flatten(caseData.referralCollection.value.referralReplyCollection), function(x,y) date and time(if(x.value.replyDateTime!=null)then x.value.replyDateTime else "2023-01-01T00:00:00.000") > date and time(if(y.value.replyDateTime!=null)then y.value.replyDateTime else "2023-01-01T00:00:00.000"))[1].value.isUrgentReply = "Yes")
+          then 100
+          else 500
       dateOriginRef: dueDate
     description: |-
       **Review the Referral Response**
@@ -2078,7 +2461,7 @@ tasks:
           perms: [ Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn, Assign, Unassign ]
           autoAssign: false
           note: Judge Access Request Permissions
-    description: &a18
+    description:
       if:
         all:
           - field: taskAttributes
@@ -2096,7 +2479,7 @@ tasks:
           - /specific-access)
       otherwise: ""
     additionalProperties:
-      roleAssignmentId: &a19
+      roleAssignmentId:
         if:
           all:
             - field: taskAttributes
@@ -2125,9 +2508,34 @@ tasks:
             autoAssign: false
             note: Access Request for Legal Caseworker 
         only: [ et_scotland ]
-    description: *a18
+    description:
+      if:
+        all:
+          - field: taskAttributes
+            op: exists
+          - field: taskAttributes.taskId
+            op: exists
+          - field: taskAttributes.roleAssignmentId
+            op: exists
+      use:
+        plus:
+          - "[Review Access Request](/role-access/"
+          - field: taskAttributes.taskId
+          - /assignment/
+          - field: taskAttributes.roleAssignmentId
+          - /specific-access)
+      otherwise: ""
     additionalProperties:
-      roleAssignmentId: *a19
+      roleAssignmentId:
+        if:
+          all:
+            - field: taskAttributes
+              op: exists
+            - field: taskAttributes.roleAssignmentId
+              op: exists
+        use:
+          field: taskAttributes.roleAssignmentId
+        otherwise: null
     reconfigure: [ workType, roleCategory, description, additionalProperties_roleAssignmentId ]
   - id: reviewSpecificAccessRequestAdmin
     name: Review Specific Access Request (Admin)
@@ -2140,9 +2548,34 @@ tasks:
           perms: [ Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn, Assign, Unassign ]
           autoAssign: false
           note: Access Request for Hearing Centre Team Leader
-    description: *a18
+    description:
+      if:
+        all:
+          - field: taskAttributes
+            op: exists
+          - field: taskAttributes.taskId
+            op: exists
+          - field: taskAttributes.roleAssignmentId
+            op: exists
+      use:
+        plus:
+          - "[Review Access Request](/role-access/"
+          - field: taskAttributes.taskId
+          - /assignment/
+          - field: taskAttributes.roleAssignmentId
+          - /specific-access)
+      otherwise: ""
     additionalProperties:
-      roleAssignmentId: *a19
+      roleAssignmentId:
+        if:
+          all:
+            - field: taskAttributes
+              op: exists
+            - field: taskAttributes.roleAssignmentId
+              op: exists
+        use:
+          field: taskAttributes.roleAssignmentId
+        otherwise: null
     reconfigure: [ workType, roleCategory, description, additionalProperties_roleAssignmentId ]
   - id: reviewSpecificAccessRequestCTSC
     name: Review Specific Access Request (CTSC)
@@ -2155,9 +2588,34 @@ tasks:
           perms: [ Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn, Assign, Unassign ]
           autoAssign: true
           note: Access Request for CTSC
-    description: *a18
+    description:
+      if:
+        all:
+          - field: taskAttributes
+            op: exists
+          - field: taskAttributes.taskId
+            op: exists
+          - field: taskAttributes.roleAssignmentId
+            op: exists
+      use:
+        plus:
+          - "[Review Access Request](/role-access/"
+          - field: taskAttributes.taskId
+          - /assignment/
+          - field: taskAttributes.roleAssignmentId
+          - /specific-access)
+      otherwise: ""
     additionalProperties:
-      roleAssignmentId: *a19
+      roleAssignmentId:
+        if:
+          all:
+            - field: taskAttributes
+              op: exists
+            - field: taskAttributes.roleAssignmentId
+              op: exists
+        use:
+          field: taskAttributes.roleAssignmentId
+        otherwise: null
     reconfigure: [ workType, roleCategory, description, additionalProperties_roleAssignmentId ]
 cancellations:
   - id: Cancel-disposeCase

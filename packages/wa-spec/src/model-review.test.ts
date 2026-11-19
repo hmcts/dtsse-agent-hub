@@ -1,10 +1,12 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { importDmns } from "./importer.ts";
 import type { Model } from "./model.ts";
 import { compileModel } from "./model-compile.ts";
-import { loadSpecFile, parseModel, stringifyModel, stringifyOrdering } from "./model-io.ts";
+import { loadSpecFile, loadSpecOnly, parseModel, stringifyModel, stringifyOrdering } from "./model-io.ts";
 import { liftSpec } from "./model-lift.ts";
 import type { Row } from "./schema.ts";
 import { compareSpecs } from "./spec-diff.ts";
@@ -161,5 +163,67 @@ describe("compareSpecs", () => {
     const { differences, total } = compareSpecs(a, b);
     expect(total).toBe(45);
     expect(differences).toHaveLength(40);
+  });
+});
+
+describe("round two", () => {
+  const files = readdirSync(fileURLToPath(new URL("../test-fixtures/et", import.meta.url)))
+    .filter((n) => n.startsWith("wa-task-") && n.endsWith(".dmn"))
+    .map((name) => ({ name, xml: readFileSync(join(fileURLToPath(new URL("../test-fixtures/et", import.meta.url)), name), "utf8") }));
+  const { spec } = importDmns(files, { jurisdiction: "EMPLOYMENT" });
+  const lifted = liftSpec(spec);
+  const model = parseModel(stringifyModel(lifted.model));
+
+  it("should write the model without anchors and aliases when two values are equal", () => {
+    expect(stringifyModel(lifted.model)).not.toMatch(/&a\d|\*a\d/);
+    expect(stringifyOrdering(lifted.ordering)).not.toMatch(/&a\d|\*a\d/);
+  });
+
+  it("should keep a row's place when one entry of a repeated slot is edited", () => {
+    const task = model.tasks.find((t) => t.id === "ReviewRule21Referral") as Model["tasks"][number];
+    const entries = task.roleCategory as unknown[];
+    expect(Array.isArray(entries)).toBe(true);
+    const edited = {
+      ...model,
+      tasks: model.tasks.map((t) => (t === task ? { ...t, roleCategory: [entries[0], { value: "ADMIN", only: ["et_scotland"] }] } : t))
+    } as Model;
+    const before = configRows(model, lifted.ordering);
+    const after = configRows(edited, lifted.ordering);
+    const place = (rows: Row[], value: string) =>
+      rows.findIndex(
+        (r) => r.returns?.name === "roleCategory" && r.returns?.value === value && tasksOf(r).includes("ReviewRule21Referral") && r.only?.[0] === "et_scotland"
+      );
+    expect(after.length).toBe(before.length + 1);
+    const was = place(before, "LEGAL_OPERATIONS");
+    expect(was).toBeGreaterThan(-1);
+    expect(place(after, "ADMIN")).toBeGreaterThanOrEqual(was);
+    expect(place(after, "ADMIN")).toBeLessThanOrEqual(was + 1);
+  });
+
+  it("should keep a cancellation rule's rows in place when its events are edited", () => {
+    const rules = (model.cancellations ?? []).map((r, i) => (i === 0 ? { ...r, events: ["disposeCase", "extra"] } : r));
+    const before = compileModel(model, lifted.ordering).decisions.cancellation?.rows ?? [];
+    const after = compileModel({ ...model, cancellations: rules }, lifted.ordering).decisions.cancellation?.rows ?? [];
+    expect(after).toHaveLength(before.length);
+    expect(after.map((r) => r.returns?.processCategories)).toEqual(before.map((r) => r.returns?.processCategories));
+    expect(after[0]?.when).toEqual({ event: { in: ["disposeCase", "extra"] } });
+  });
+
+  it("should reject a reconfigure name the task has no attribute for when validating", () => {
+    expect(() => parseModel(BASE.replace("workType: w1", "workType: w1\n    reconfigure: [title]"))).toThrow("reconfigure names title");
+    expect(() => parseModel(BASE.replace("workType: w1", "workType: w1\n    reconfigure: [workType, custom]"))).not.toThrow();
+  });
+
+  it("should reject an override for a case type the entry does not cover when validating", () => {
+    const text = BASE.replace("workType: w1", "workType: {value: w1, only: [ct_a], overrides: {ct_b: w2}}");
+    expect(() => parseModel(text)).toThrow("workType overrides: ct_b is not one of the entry's case types");
+    const task = BASE.replace("complete: [{event: done}]", "complete: [{event: done, overrides: {ct_c: null}}]");
+    expect(() => parseModel(task)).toThrow("complete overrides: ct_c is not one of the entry's case types");
+  });
+
+  it("should compare models without reading their layout when diffing", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wa-spec-diff-"));
+    writeFileSync(join(dir, "m.yaml"), `${BASE}layout: missing.layout.yaml\n`);
+    expect(loadSpecOnly(join(dir, "m.yaml")).decisions.configuration?.rows.length).toBeGreaterThan(0);
   });
 });

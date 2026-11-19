@@ -5,7 +5,7 @@ import { exists, isDirectory, listDir, readText, writeText } from "./file-io.ts"
 import { isWaTaskDmn } from "./file-names.ts";
 import { generateAll } from "./generator.ts";
 import { importDmns, renderReport } from "./importer.ts";
-import { loadSpecFile, stringifyModel, stringifyOrdering } from "./model-io.ts";
+import { loadSpecFile, loadSpecOnly, stringifyModel, stringifyOrdering } from "./model-io.ts";
 import { liftSpec, renderLiftReport } from "./model-lift.ts";
 import { compareSpecs } from "./spec-diff.ts";
 import { layoutPathFor, parseSpec, stringifyLayout, stringifySpec } from "./spec-io.ts";
@@ -133,7 +133,7 @@ function main(argv: string[]): number {
       fail(USAGE);
     }
     if (/\.ya?ml$/.test(a) && /\.ya?ml$/.test(b)) {
-      const { differences, total } = compareSpecs(loadSpecFile(a).spec, loadSpecFile(b).spec);
+      const { differences, total } = compareSpecs(loadSpecOnly(a), loadSpecOnly(b));
       const shown = differences.length < total ? `first ${differences.length} of ${total} differences` : `${total} differences`;
       process.stdout.write(total === 0 ? "no differences\n" : `${differences.join("\n")}\n${shown}\n`);
       return total === 0 ? 0 : 1;

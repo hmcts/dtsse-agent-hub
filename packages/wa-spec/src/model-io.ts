@@ -71,16 +71,26 @@ export interface LoadedSpec {
   isModel: boolean;
 }
 
-/** Reads a spec file or a model file as a spec, with the layout beside it, compiling a model with its ordering. */
-export function loadSpecFile(path: string, layoutOverride?: string): LoadedSpec {
+/** Reads a spec file, or a model file compiled with its ordering, without its layout, which only DMN generation needs. */
+function readSpecFile(path: string): { spec: Spec; model: Model | undefined } {
   const text = readText(path);
   if (isModelDocument(parse(text))) {
     const model = parseModel(text);
     const orderPath = orderPathFor(path, model);
-    const spec = compileModel(model, orderPath ? parseOrdering(readText(orderPath)) : undefined);
+    return { spec: compileModel(model, orderPath ? parseOrdering(readText(orderPath)) : undefined), model };
+  }
+  return { spec: parseSpec(text), model: undefined };
+}
+
+export const loadSpecOnly = (path: string): Spec => readSpecFile(path).spec;
+
+/** Reads a spec file or a model file as a spec, with the layout beside it, compiling a model with its ordering. */
+export function loadSpecFile(path: string, layoutOverride?: string): LoadedSpec {
+  const { spec, model } = readSpecFile(path);
+  if (model) {
     const layoutPath = layoutOverride ? layoutPathOf(path, layoutOverride, process.cwd()) : modelLayoutPath(path, model);
     return { spec, layout: layoutPath ? parseLayout(readText(layoutPath)) : undefined, layoutPath, isModel: true };
   }
   const layoutPath = layoutPathOf(path, layoutOverride, process.cwd());
-  return { spec: parseSpec(text), layout: layoutPath ? parseLayout(readText(layoutPath)) : undefined, layoutPath, isModel: false };
+  return { spec, layout: layoutPath ? parseLayout(readText(layoutPath)) : undefined, layoutPath, isModel: false };
 }

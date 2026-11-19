@@ -297,13 +297,21 @@ export function validateModel(model: Model): string[] {
         }
       }
     };
+    const overridden = (what: string, keys: string[], only: string[] | undefined) => {
+      known(what, keys);
+      for (const id of keys) {
+        if (caseTypes.has(id) && !(only ?? own).includes(id)) {
+          problems.push(`${what}: ${id} is not one of the entry's case types`);
+        }
+      }
+    };
     for (const trigger of task.create ?? []) {
       scoped(`${where} create`, trigger.only);
-      known(`${where} create overrides`, Object.keys(trigger.overrides ?? {}));
+      overridden(`${where} create overrides`, Object.keys(trigger.overrides ?? {}), trigger.only);
     }
     for (const completion of task.complete ?? []) {
       scoped(`${where} complete`, completion.only);
-      known(`${where} complete overrides`, Object.keys(completion.overrides ?? {}));
+      overridden(`${where} complete overrides`, Object.keys(completion.overrides ?? {}), completion.only);
     }
     const values: Array<[string, Val | undefined]> = [
       ["name", task.name],
@@ -320,7 +328,7 @@ export function validateModel(model: Model): string[] {
       for (const entry of Array.isArray(val) ? val : [val]) {
         if (isValEntry(entry)) {
           scoped(`${where} ${name}`, entry.only);
-          known(`${where} ${name} overrides`, Object.keys(entry.overrides ?? {}));
+          overridden(`${where} ${name} overrides`, Object.keys(entry.overrides ?? {}), entry.only);
         }
       }
     }
@@ -346,9 +354,9 @@ export function validateModel(model: Model): string[] {
       }
     }
     const reconfigurable = new Set<string>([
-      ...TOP_LEVEL_ATTRIBUTES,
-      ...Object.values(DUE_ATTRIBUTES),
-      ...Object.values(PRIORITY_ATTRIBUTES),
+      ...TOP_LEVEL_ATTRIBUTES.filter((name) => task[name] !== undefined || (name === "description" && task.link !== undefined)),
+      ...Object.entries(DUE_ATTRIBUTES).flatMap(([key, name]) => (task.due?.[key as keyof typeof DUE_ATTRIBUTES] === undefined ? [] : [name])),
+      ...Object.entries(PRIORITY_ATTRIBUTES).flatMap(([key, name]) => (task.priority?.[key as keyof typeof PRIORITY_ATTRIBUTES] === undefined ? [] : [name])),
       ...Object.keys(task.additionalProperties ?? {}).map((k) => `${ADDITIONAL_PREFIX}${k}`),
       ...Object.keys(task.attributes ?? {})
     ]);

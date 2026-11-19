@@ -1,4 +1,4 @@
-import { byCodePoint } from "./merge.ts";
+import { byCodePoint, majority } from "./merge.ts";
 import {
   ADDITIONAL_PREFIX,
   type Cancellation,
@@ -134,15 +134,6 @@ function grantOf(returns: Record<string, Expr>, description: string | undefined)
     ...(description === undefined ? {} : { note: description })
   };
 }
-
-const majority = <T>(values: T[]): T | undefined => {
-  const counts = new Map<string, { value: T; n: number }>();
-  for (const value of values) {
-    const key = stable(value);
-    counts.set(key, { value, n: (counts.get(key)?.n ?? 0) + 1 });
-  }
-  return [...counts.values()].sort((x, y) => y.n - x.n)[0]?.value;
-};
 
 /** Explains why a row is not about one task, or lifts it into items. */
 function classify(kind: Kind, row: Row, index: number, caseIds: string[]): Classified | string {
@@ -363,15 +354,16 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
     classified[kind] = (decision?.rows ?? []).map((row, i) => ({ row, index: i + 1, result: classify(kind, row, i + 1, caseIds) }));
   }
 
-  // A role granted twice to one task for the same case type cannot be a profile entry, so permissions stay as rows.
+  // A role granted twice to one task for the same case type cannot be a profile entry, so rows granting it stay as rows.
   const seenGrants = new Map<string, string[]>();
+  const twiceGranted = new Map<string, string>();
   let permissionsStay: string | undefined;
   for (const entry of classified.permissions) {
     if (typeof entry.result !== "string") {
       for (const item of entry.result.items) {
         const key = item.bucket;
         if (overlaps(seenGrants.get(key) ?? [], item.cases)) {
-          permissionsStay = `${item.task} is granted ${item.content.returns.name as string} twice for one case type`;
+          twiceGranted.set(key, `${item.task} is granted ${item.content.returns.name as string} twice for one case type`);
         }
         seenGrants.set(key, [...(seenGrants.get(key) ?? []), ...item.cases]);
       }
@@ -395,7 +387,8 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
   for (const kind of KINDS) {
     for (const entry of classified[kind]) {
       const result = entry.result;
-      const failure = typeof result === "string" ? result : kind === "permissions" ? permissionsStay : undefined;
+      const twice = typeof result === "string" || kind !== "permissions" ? undefined : result.items.map((i) => twiceGranted.get(i.bucket)).find(Boolean);
+      const failure = typeof result === "string" ? result : kind === "permissions" ? (permissionsStay ?? twice) : undefined;
       if (typeof result === "string" || failure !== undefined) {
         residue[kind].push(entry.row);
         entry.residueIndex = residue[kind].length;
@@ -557,7 +550,12 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
     const initialNames = acc.triggers.map((e) => e.data.name);
     const categories = acc.triggers.map((e) => e.data.category);
     const uniform = <T>(values: Array<T | undefined>): T | undefined =>
-      values.length > 0 && values.every((v) => v !== undefined) ? majority(values as T[]) : undefined;
+      values.length > 0 && values.every((v) => v !== undefined)
+        ? majority(
+            (values as T[]).map((value) => ({ caseType: "", value })),
+            stable
+          ).base
+        : undefined;
     const taskName = uniform(initialNames);
     const taskCategory = uniform(categories);
     if (taskName !== undefined) {
@@ -786,6 +784,7 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
   // The ordering file: for each row of each table, which entries of the model it was made of.
   const atoms = collectAtoms(model);
   const ordering: Ordering = { version: 1, rows: {} };
+  let unmatched: string | undefined;
   for (const kind of KINDS) {
     if (!spec.decisions[kind]) {
       continue;
@@ -811,7 +810,8 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
           (a) => stable(a.content) === wanted && subset(item.cases, a.cases) && !overlaps(used.get(a) ?? [], item.cases)
         );
         if (!atom) {
-          throw new Error(`${kind} row ${entry.index}: no model entry for ${item.bucket}`);
+          unmatched ??= `${kind} row ${entry.index}: no model entry for ${item.bucket}`;
+          continue;
         }
         used.set(atom, [...(used.get(atom) ?? []), ...item.cases]);
         tokens.push(atom.ref);
@@ -829,7 +829,7 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
   ) as Record<Kind, KindCount>;
   let differences: string[];
   try {
-    differences = diffSpecs(spec, compileModel(model, ordering));
+    differences = unmatched ? [unmatched] : diffSpecs(spec, compileModel(model, ordering));
   } catch (error) {
     differences = [(error as Error).message];
   }
