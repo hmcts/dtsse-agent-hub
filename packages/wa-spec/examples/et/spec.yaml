@@ -77,7 +77,7 @@ decisions:
             and count(additionalData.Data.referralCollection[count(value.referralReplyCollection)>0])>0)
             then sort(flatten(additionalData.Data.referralCollection[value.referralReplyCollection!=null].value.referralReplyCollection), function(x,y) date and time(if(x.value.replyDateTime!=null)then x.value.replyDateTime else "2023-01-01T00:00:00.000") > date and time(if(y.value.replyDateTime!=null)then y.value.replyDateTime else "2023-01-01T00:00:00.000")).value.directionTo[1]
             else null
-      - key: et3FormReceived
+      - key: eT3FormReceived
         label: ET3 form received
         typeRef: boolean
         expression:
@@ -766,7 +766,7 @@ decisions:
         when:
           eventId:
             in: [ amendRespondentDetails ]
-          et3FormReceived:
+          eT3FormReceived:
             in: [ true ]
         returns:
           taskId: ET3Processing

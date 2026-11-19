@@ -1,4 +1,12 @@
 #!/usr/bin/env bash
 set -eu
-here="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
-exec "$here/../../../node_modules/.bin/tsx" "$here/../src/cli.ts" "$@"
+# Resolve this script's own directory, following symlinks, without GNU readlink.
+source="$0"
+while [ -h "$source" ]; do
+  dir="$(cd -P "$(dirname "$source")" && pwd)"
+  source="$(readlink "$source")"
+  case "$source" in /*) ;; *) source="$dir/$source" ;; esac
+done
+here="$(cd -P "$(dirname "$source")" && pwd)"
+tsx="$(cd "$here/.." && node -e "process.stdout.write(require.resolve('tsx/cli'))")"
+exec node "$tsx" "$here/../src/cli.ts" "$@"

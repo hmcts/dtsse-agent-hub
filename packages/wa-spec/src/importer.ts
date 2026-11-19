@@ -60,7 +60,7 @@ interface Table {
 
 function camel(text: string): string {
   const words = text.split(/[^A-Za-z0-9]+/).filter(Boolean);
-  return words.map((w, i) => (i === 0 ? w.toLowerCase() : w.charAt(0).toUpperCase() + w.slice(1))).join("");
+  return words.map((w, i) => w.charAt(0)[i === 0 ? "toLowerCase" : "toUpperCase"]() + w.slice(1)).join("");
 }
 
 /** A column's key: its variable, else its label in camel case, else `input`; a repeated key gets a number. */
@@ -79,6 +79,11 @@ function inputKeys(decision: DmnDecision): string[] {
     taken.add(`${stems[i]}${n}`);
     return `${stems[i]}${n}`;
   });
+}
+
+/** An expression's text as the spec holds it: kept raw when the expression names a language other than FEEL. */
+function parseText(text: string, language: string | undefined): Expr | undefined {
+  return language !== undefined && language.toLowerCase() !== "feel" && text.trim() !== "" ? { feel: text.trim() } : parseExpr(text);
 }
 
 /** Counts one parsed entry, and records it when it fell back to raw FEEL. */
@@ -224,7 +229,7 @@ function mergeTable(
     const { base, overrides } = columnProperties(perType, INPUT_PROPERTIES);
     const expression = pick(
       perType.map(({ caseType, source }) => {
-        const expr = parseExpr(source.expression);
+        const expr = parseText(source.expression, source.expressionLanguage);
         addRaw(report, rawIndex, kind, `${label}input ${key}`, expr, caseType);
         return { caseType, value: expr === undefined ? "" : JSON.stringify(expr) };
       })
@@ -286,7 +291,9 @@ function mergeTable(
     });
   };
   const rowIdentity = (row: Row): string =>
-    JSON.stringify(row, (_key, value) => (typeof value === "object" && value !== null && "feel" in value ? { feel: normaliseFeel(value.feel) } : value));
+    JSON.stringify(row, (_key, value) =>
+      typeof value === "object" && value !== null && "feel" in value ? { ...value, feel: normaliseFeel(value.feel) } : value
+    );
   let rowOrder: Array<Merged<Row>> = [];
   for (const part of parts) {
     rowOrder = mergeSequences(rowOrder, part.caseType, rowsOf(part), rowIdentity);
@@ -364,7 +371,7 @@ function importTables(kind: Kind, tables: Table[], allCaseTypes: string[], repor
         : undefined;
     const expression = pick(
       perType.map(({ caseType, helper }) => {
-        const expr = merged ? undefined : parseExpr(helper.literal?.text ?? "");
+        const expr = merged ? undefined : parseText(helper.literal?.text ?? "", helper.literal?.expressionLanguage);
         if (!merged) {
           addRaw(report, rawIndex, kind, `helper ${name}`, expr, caseType);
         }

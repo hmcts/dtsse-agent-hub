@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -210,5 +210,25 @@ describe("cli generate stale files found by key", () => {
     const result = run("generate", join(dir, "spec.yaml"), "-o", input);
     expect(result.status).toBe(0);
     expect(result.stderr).toBe("");
+  });
+});
+
+describe("cli generate duplicates and symlinks", () => {
+  it("should list a file that holds a key the run just wrote under another name when the directory has one", () => {
+    const { dir, input } = workspace();
+    run("import", input, "-o", join(dir, "spec.yaml"));
+    mkdirSync(join(dir, "out"));
+    writeFileSync(join(dir, "out", "old-copy.dmn"), sampleDmn("ct_a"));
+    const result = run("generate", join(dir, "spec.yaml"), "-o", join(dir, "out"));
+    expect(result.stderr).toContain("old-copy.dmn");
+    expect(result.stderr).not.toContain("wa-task-completion-demo-ct_a.dmn");
+  });
+
+  it("should run through a symbolic link to the script when it is called by another name", () => {
+    const { dir } = workspace();
+    symlinkSync(bin, join(dir, "wa"));
+    const result = spawnSync(join(dir, "wa"), ["help"], { encoding: "utf8", cwd: dir });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("wa-spec import");
   });
 });

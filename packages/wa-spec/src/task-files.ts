@@ -21,18 +21,21 @@ export interface TaskFile {
   name: string;
   /** The task key the file holds, from its main decision's id or else its name; none when it is not a task DMN. */
   key?: string;
-  xml: string;
+  /** The file as read. */
+  read: ReturnType<typeof readDmn>;
 }
 
-/** Every DMN in a directory with the task key it holds, found as an import finds them: by the main decision's id, else the file name. */
-export function listTaskFiles(dir: string): TaskFile[] {
+/**
+ * Every DMN in a directory with the task key it holds, found as an import finds them: by the main decision's id, else the file
+ * name. Names in `skip` are not read.
+ */
+export function listTaskFiles(dir: string, skip: ReadonlySet<string> = new Set()): TaskFile[] {
   return listDir(dir)
-    .filter((name) => name.endsWith(".dmn"))
+    .filter((name) => name.endsWith(".dmn") && !skip.has(name))
     .sort(byCodePoint)
     .map((name) => {
-      const xml = readText(`${dir}/${name}`);
-      const keyed = keyedDecision(readDmnFile(name, xml).document.decisions);
-      const stem = name.replace(/\.dmn$/, "");
-      return { name, xml, ...(keyed ? { key: keyed.id } : parseFileName(name) ? { key: stem } : {}) };
+      const read = readDmnFile(name, readText(`${dir}/${name}`));
+      const keyed = keyedDecision(read.document.decisions);
+      return { name, read, ...(keyed ? { key: keyed.id } : parseFileName(name) ? { key: name.replace(/\.dmn$/, "") } : {}) };
     });
 }

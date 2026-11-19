@@ -425,3 +425,31 @@ describe("importDmns read errors and notes", () => {
     expect(report.notes.join()).toContain("wa-task-completion-demo-ct_b.dmn: hit policy PRIORITY, skipped");
   });
 });
+
+describe("importDmns identities, keys and languages", () => {
+  it("should keep rows apart when they differ only by the language of an entry", () => {
+    const withLanguage = sampleDmn("ct_b").replace("<outputEntry ", '<outputEntry expressionLanguage="juel" ');
+    const { spec } = importDmns([file("ct_a"), { name: "wa-task-completion-demo-ct_b.dmn", xml: withLanguage }]);
+    const rows = spec.decisions.completion?.rows ?? [];
+    expect(rows.filter((r) => r.only?.includes("ct_a")).length).toBeGreaterThan(0);
+    expect(rows.filter((r) => r.only?.includes("ct_b")).length).toBeGreaterThan(0);
+  });
+
+  it("should keep the capitals after the first letter when a label is a single camel-case word", () => {
+    const xml = sampleDmn("ct_a").replace('label="Event ID" camunda:inputVariable="eventId"', 'label="taskType"');
+    const { spec } = importDmns([{ name: "wa-task-completion-demo-ct_a.dmn", xml }]);
+    expect(spec.decisions.completion?.inputs[0]?.key).toBe("taskType");
+  });
+
+  it("should keep an input expression and a helper literal raw when they name a language other than FEEL", () => {
+    const xml = sampleDmn("ct_a")
+      .replace(
+        '<inputExpression id="InputExpression_wa-completion-definition-ct_a_wa-task-completion-demo-ct_a_0" typeRef="string">',
+        '<inputExpression id="IE0" typeRef="string" expressionLanguage="juel">'
+      )
+      .replace(/(<inputExpression id="IE0"[^>]*>\s*<text>)[^<]*/, "$1x.y");
+    const { spec, report } = importDmns([{ name: "wa-task-completion-demo-ct_a.dmn", xml }]);
+    expect(spec.decisions.completion?.inputs[0]?.expression).toEqual({ feel: "x.y" });
+    expect(report.rawFeel.some((r) => r.where === "input eventId")).toBe(true);
+  });
+});
