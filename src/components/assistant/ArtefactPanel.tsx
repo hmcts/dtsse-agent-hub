@@ -319,6 +319,18 @@ export function ArtefactPanel({
    * A conflict is the person's to settle, so closing on one saves nothing over the newer version.
    */
   const unsaved = useRef<{ title: string; markdown: string; base: number } | null>(null);
+  /**
+   * The version the next save is made against: the latest this panel knows of, moved by a save's reply as it lands
+   * rather than a render later. A timer set while an earlier save was in flight reads it when it fires, not the
+   * version there was when the person typed — which would be their own last save, and answered as a conflict.
+   */
+  const latestBase = useRef(base);
+  latestBase.current = Math.max(latestBase.current, base);
+  /** What is on screen, for a save's reply to tell whether it saved that or something typed before more was. */
+  const onScreen = useRef({ title, markdown });
+  onScreen.current = { title, markdown };
+  /** The save in flight, which the next one waits for, so two never race and the second goes against the first's version. */
+  const inFlight = useRef<Promise<void> | null>(null);
   unsaved.current = (state === "unsaved" || state === "failed") && conflict === null ? { title, markdown, base } : null;
   // Read by the closing save, which runs once, so a page that hands down new functions on each render cannot set it off.
   const closing = useRef({ conversationId, documentId, kind, save, onBusy, onUnsaved });
@@ -394,12 +406,29 @@ export function ArtefactPanel({
     }
     setSaveError(null);
     if (result.saved) {
+      latestBase.current = Math.max(latestBase.current, result.version);
       setBase(result.version);
-      setState("saved");
+      // Saved, unless the person typed on while it was going: then the newer text is still to save, and its timer is set.
+      const still = onScreen.current.markdown === next.markdown && onScreen.current.title === next.title;
+      setState(still ? "saved" : "unsaved");
       setConflict(null);
     } else {
       setState("unsaved");
       setConflict(result.current);
+    }
+  }
+
+  /** Saves once any save before it has answered, against the version that answer left. */
+  async function saveInTurn(nextTitle: string, nextMarkdown: string): Promise<void> {
+    // Only waits when there is something to wait for, so a save with none ahead of it goes at once.
+    if (inFlight.current !== null) {
+      await inFlight.current;
+    }
+    const run = persist({ title: nextTitle, markdown: nextMarkdown, base: latestBase.current });
+    inFlight.current = run;
+    await run;
+    if (inFlight.current === run) {
+      inFlight.current = null;
     }
   }
 
@@ -413,7 +442,7 @@ export function ArtefactPanel({
       clearTimeout(timer.current);
     }
     if (conflict === null) {
-      timer.current = setTimeout(() => void persist({ title: nextTitle, markdown: nextMarkdown, base }), SAVE_AFTER_MS);
+      timer.current = setTimeout(() => void saveInTurn(nextTitle, nextMarkdown), SAVE_AFTER_MS);
     }
   }
 

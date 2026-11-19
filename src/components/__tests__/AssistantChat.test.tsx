@@ -1039,11 +1039,28 @@ describe("ChatView product", () => {
     expect(setProduct).not.toHaveBeenCalled();
   });
 
+  it("should keep focus in the confirmation, and close it from its ×, keeping the product", () => {
+    const chatActions = actions();
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={chatActions} />);
+    fireEvent.change(screen.getByRole("combobox", { name: "Product" }), { target: { value: "pcs" } });
+    const dialog = screen.getByRole("dialog", { name: "Change product?" });
+    const change = within(dialog).getByRole("button", { name: "Change product" });
+    expect(document.activeElement).toBe(change);
+
+    fireEvent.keyDown(change, { key: "Tab" });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Keep the product" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(chatActions.setProduct).not.toHaveBeenCalled();
+  });
+
   it("should close the confirmation when the person presses Escape", () => {
     render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions()} />);
 
     fireEvent.change(screen.getByRole("combobox", { name: "Product" }), { target: { value: "pcs" } });
-    fireEvent.keyDown(window, { key: "Escape" });
+    // From where focus is, as a key press is: it reaches `document`, where the dialog listens, on its way up.
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
 
     expect(screen.queryByRole("dialog")).toBeNull();
   });

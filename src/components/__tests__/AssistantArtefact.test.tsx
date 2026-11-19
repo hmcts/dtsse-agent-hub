@@ -1053,3 +1053,52 @@ describe("ArtefactPanel remove", () => {
     expect(screen.getByRole("alert").textContent).toBe("that document no longer exists");
   });
 });
+
+describe("ArtefactPanel typing while a save is in flight", () => {
+  it("should save the newer text against the version the first save made, with no conflict over the person's own edit", async () => {
+    vi.useFakeTimers();
+    let answerFirst: (result: ActionResult<SaveArtefactResult>) => void = () => undefined;
+    const save = vi
+      .fn<SaveArtefactAction>()
+      .mockImplementationOnce(() => new Promise((resolve) => (answerFirst = resolve)))
+      .mockResolvedValueOnce({ ok: true, saved: true, version: 4 });
+    render(panel(snapshot(), save));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+    edit("first");
+    await pause(1000);
+    expect(save).toHaveBeenCalledTimes(1);
+    edit("first and more");
+    // The second pause ends while the first save is still out, so its save waits for that one's answer.
+    await pause(1000);
+    expect(save).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      answerFirst({ ok: true, saved: true, version: 3 });
+    });
+    // The first save's answer is not the text on screen, so it is not called saved.
+    await pause(0);
+
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(save).toHaveBeenLastCalledWith(expect.objectContaining({ markdown: "first and more", baseVersion: 3 }));
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(saveState()).toContain("Saved");
+  });
+
+  it("should say the newer text is not saved yet when the earlier save's answer arrives before it goes", async () => {
+    vi.useFakeTimers();
+    let answerFirst: (result: ActionResult<SaveArtefactResult>) => void = () => undefined;
+    const save = vi.fn<SaveArtefactAction>().mockImplementationOnce(() => new Promise((resolve) => (answerFirst = resolve)));
+    render(panel(snapshot(), save));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+    edit("first");
+    await pause(1000);
+    edit("first and more");
+    await act(async () => {
+      answerFirst({ ok: true, saved: true, version: 3 });
+    });
+
+    expect(saveState()).not.toContain("Saved");
+  });
+});

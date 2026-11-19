@@ -10,6 +10,7 @@ import { AnnouncerRegion, useAnnouncer } from "@/components/live/Announcer";
 import { type SkillMenuTheme, useSkillMenu } from "@/components/SkillMenu";
 import { useDraft } from "@/components/useDraft";
 import { MAX_BODY } from "@/messages/limits";
+import { actionThrew } from "@/web/action-fault";
 
 /**
  * The share of the limit at which the box starts counting characters: soon enough to cut a long paste before
@@ -451,7 +452,14 @@ export function Composer({
     setSending(true);
     setError(null);
     const uploadIds = held.current.flatMap((file) => (file.uploadId === null ? [] : [file.uploadId]));
-    const failure = await onSend(text, uploadIds);
+    // A call that throws never reached the hub or never came back: said like a refusal, and the box given back, rather
+    // than left disabled for good with nothing on screen.
+    let failure: string | null;
+    try {
+      failure = await onSend(text, uploadIds);
+    } catch (error) {
+      failure = actionThrew(error);
+    }
     setSending(false);
     if (failure === null) {
       // Forgets the draft of the message that was sent, which empties the box; anything typed while the send was in

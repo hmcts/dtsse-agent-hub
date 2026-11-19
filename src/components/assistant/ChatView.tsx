@@ -27,6 +27,7 @@ import type { ConversationView } from "@/assistant/views";
 import { useLiveConversation } from "@/components/agents/useLiveConversation";
 import { ArtefactPanel, type SaveArtefactAction, type UnsavedDraft } from "@/components/assistant/ArtefactPanel";
 import { AssistantMarkdown } from "@/components/assistant/AssistantMarkdown";
+import { AssistantModal } from "@/components/assistant/AssistantModal";
 import { Mark, SidebarToggle } from "@/components/assistant/AssistantShell";
 import { ChatMenu } from "@/components/assistant/ChatMenu";
 import { Composer } from "@/components/assistant/Composer";
@@ -403,49 +404,32 @@ function daySeparators(thread: readonly ThreadItem[], now: Date): Map<string, st
   return marks;
 }
 
+/**
+ * Asked before a chat's product changes. The Assistant's dialog frame keeps focus inside it and gives it back to the
+ * product chip as it closes; Change product is focused as it opens, since it is the dialog's one decision.
+ */
 function ConfirmProduct({ from, to, onCancel, onConfirm }: { from: string; to: string; onCancel: () => void; onConfirm: () => void }) {
   const confirm = useRef<HTMLButtonElement>(null);
-  // The dialog's one decision, focused as it opens.
-  useEffect(() => confirm.current?.focus(), []);
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        onCancel();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onCancel]);
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-5">
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="product-change-title"
-        className="flex w-full max-w-[420px] flex-col gap-3.5 rounded-2xl border border-asst-line bg-asst-hover p-[22px] shadow-2xl"
-      >
-        <h2 id="product-change-title" className="text-lg font-semibold">
-          Change product?
-        </h2>
-        <p className="text-pretty text-asst-body">
-          You're switching from <strong className="font-semibold text-asst-text">{productLabel(from)}</strong> to{" "}
-          <strong className="font-semibold text-asst-text">{productLabel(to)}</strong>. From now on, answers will use that product's context.
-        </p>
-        <div className="mt-1.5 flex justify-end gap-2.5">
-          <button type="button" onClick={onCancel} className="rounded-[10px] border border-asst-strong px-4 py-2.5 text-sm hover:bg-asst-active">
-            Cancel
-          </button>
-          <button
-            ref={confirm}
-            type="button"
-            onClick={onConfirm}
-            className="rounded-[10px] bg-asst-accent px-4 py-2.5 text-sm font-semibold text-asst-ink hover:bg-asst-accent-hover"
-          >
-            Change product
-          </button>
-        </div>
+    <AssistantModal title="Change product?" onClose={onCancel} initialFocus={confirm} closeLabel="Keep the product" className="max-w-[420px]">
+      <p className="text-pretty text-asst-body">
+        You're switching from <strong className="font-semibold text-asst-text">{productLabel(from)}</strong> to{" "}
+        <strong className="font-semibold text-asst-text">{productLabel(to)}</strong>. From now on, answers will use that product's context.
+      </p>
+      <div className="mt-1.5 flex justify-end gap-2.5">
+        <button type="button" onClick={onCancel} className="rounded-[10px] border border-asst-strong px-4 py-2.5 text-sm hover:bg-asst-active">
+          Cancel
+        </button>
+        <button
+          ref={confirm}
+          type="button"
+          onClick={onConfirm}
+          className="rounded-[10px] bg-asst-accent px-4 py-2.5 text-sm font-semibold text-asst-ink hover:bg-asst-accent-hover"
+        >
+          Change product
+        </button>
       </div>
-    </div>
+    </AssistantModal>
   );
 }
 

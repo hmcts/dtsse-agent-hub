@@ -113,19 +113,44 @@ export function ChatMenu({
   const ref = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const titleBox = useRef<HTMLInputElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
+  const keepChat = useRef<HTMLButtonElement>(null);
+  const [running, setRunning] = useState(false);
+  // Read as well as shown: two presses before the next render both see `running` false.
+  const busy = useRef(false);
 
-  const close = useCallback(() => {
-    if (ref.current?.contains(document.activeElement)) {
+  // Back to the trigger, unless a click outside closed it: that click is putting focus where the person wants it.
+  const close = useCallback((how: "keyboard" | "pointer" = "keyboard") => {
+    if (how === "keyboard" && ref.current?.contains(document.activeElement)) {
       trigger.current?.focus();
     }
     setOpen("closed");
   }, []);
 
+  // Focus goes into each pane as it opens: the menu's first item, the title box, or Cancel on the delete question,
+  // which is the safe answer to land on. Otherwise the item that was pressed goes with the pane it was in, and focus
+  // falls to the top of the page.
   useEffect(() => {
-    if (open === "rename") {
+    if (open === "menu") {
+      menu.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    } else if (open === "rename") {
       titleBox.current?.focus();
+    } else if (open === "delete") {
+      keepChat.current?.focus();
     }
   }, [open]);
+
+  /** Up and down move through the menu's items, wrapping at either end, as a menu's keys do. */
+  function moveInMenu(event: React.KeyboardEvent<HTMLDivElement>): void {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") {
+      return;
+    }
+    event.preventDefault();
+    const items = [...(menu.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
+    const at = items.indexOf(document.activeElement as HTMLElement);
+    const next = event.key === "ArrowDown" ? (at + 1) % items.length : (at - 1 + items.length) % items.length;
+    items[next]?.focus();
+  }
 
   useDismiss(open !== "closed", ref, close);
 
@@ -152,12 +177,20 @@ export function ChatMenu({
    * panel over it, so the panel closes on any answer at all and stays open only when none arrived.
    */
   async function run(what: string, work: () => Promise<void>): Promise<void> {
+    if (busy.current) {
+      return;
+    }
+    busy.current = true;
     setProblem(null);
+    setRunning(true);
     try {
       await work();
     } catch {
       setProblem(UNREACHABLE(what));
       return;
+    } finally {
+      busy.current = false;
+      setRunning(false);
     }
     close();
   }
@@ -184,11 +217,11 @@ export function ChatMenu({
           }`}
         >
           {open === "menu" ? (
-            <div role="menu" aria-label={label} className="flex flex-col gap-0.5">
-              <Link href={shareHref} role="menuitem" className={item} onClick={close}>
+            <div ref={menu} role="menu" aria-label={label} onKeyDown={moveInMenu} className="flex flex-col gap-0.5">
+              <Link href={shareHref} role="menuitem" className={item} onClick={() => close()}>
                 Share
               </Link>
-              <Link href={forkHref} role="menuitem" className={item} onClick={close}>
+              <Link href={forkHref} role="menuitem" className={item} onClick={() => close()}>
                 Fork
               </Link>
               <button type="button" role="menuitem" className={item} onClick={() => void run(pinned ? "unpin" : "pin", () => onPin(!pinned))}>
@@ -238,15 +271,17 @@ export function ChatMenu({
               <p className="text-sm">Delete this chat and its document? This cannot be undone.</p>
               {local ? <p className="text-sm">{LOCAL_DELETE_NOTE}</p> : null}
               <div className="flex justify-end gap-2">
-                <button type="button" onClick={close} className="rounded-lg border border-asst-strong px-3 py-1.5 text-sm">
+                <button ref={keepChat} type="button" onClick={() => close()} className="rounded-lg border border-asst-strong px-3 py-1.5 text-sm">
                   Cancel
                 </button>
+                {/* Once only: a second press while the first is going would answer that the chat no longer exists. */}
                 <button
                   type="button"
+                  disabled={running}
                   onClick={() => void run("delete", onDelete)}
-                  className="rounded-lg bg-asst-error px-3 py-1.5 text-sm font-semibold text-asst-ink"
+                  className="rounded-lg bg-asst-error px-3 py-1.5 text-sm font-semibold text-asst-ink disabled:opacity-60"
                 >
-                  Delete
+                  {running ? "Deleting…" : "Delete"}
                 </button>
               </div>
             </div>
