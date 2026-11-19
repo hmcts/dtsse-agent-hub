@@ -1,5 +1,6 @@
 import { type DmnDecision, type DmnDocument, type DmnInput, type DmnOutput, type DmnRule, ncName, uniqueId, writeDmn } from "./dmn-model.ts";
 import { renderCell, renderExpr } from "./feel.ts";
+import { decisionKeyOf, fileNameOf } from "./file-names.ts";
 import { applyLayout, type Layout, layoutKey } from "./layout.ts";
 import { type Decision, type Expr, KINDS, type Kind, type Spec } from "./schema.ts";
 
@@ -15,17 +16,8 @@ const overridden = <T>(override: T | null | undefined, base: T | undefined): T |
 
 const applies = (only: string[] | undefined, caseType: string): boolean => only === undefined || only.includes(caseType);
 
-const KIND_SLUG: Record<Kind, string> = {
-  initiation: "initiation",
-  configuration: "configuration",
-  permissions: "permissions",
-  completion: "completion",
-  cancellation: "cancellation",
-  "task-types": "types"
-};
-
 export function decisionKey(spec: Spec, kind: Kind, caseType: string): string {
-  return `wa-task-${KIND_SLUG[kind]}-${spec.service.slug}-${caseType}`;
+  return decisionKeyOf(spec.service.slug, kind, caseType);
 }
 
 /**
@@ -47,11 +39,13 @@ export function generateDocument(spec: Spec, kind: Kind, caseType: string, layou
     const inputVariable = overridden(override?.variable, column.variable);
     const typeRef = overridden(override?.typeRef, column.typeRef);
     const expressionLanguage = overridden(override?.language, column.language);
+    const allowedValues = overridden(override?.allowedValues, column.allowedValues);
     return {
       ...(label === undefined ? {} : { label }),
       ...(inputVariable === undefined ? {} : { inputVariable }),
       ...(typeRef === undefined ? {} : { typeRef }),
       ...(expressionLanguage === undefined ? {} : { expressionLanguage }),
+      ...(allowedValues === undefined ? {} : { allowedValues }),
       expression: renderExpr((override?.expression === undefined ? column.expression : override.expression) as Expr | undefined)
     };
   });
@@ -121,7 +115,7 @@ export function generateAll(spec: Spec, layout?: Layout): GeneratedFile[] {
     for (const { id: caseType } of spec.caseTypes) {
       const document = generateDocument(spec, kind, caseType, layout);
       if (document) {
-        files.push({ fileName: `${decisionKey(spec, kind, caseType)}.dmn`, kind, caseType, xml: writeDmn(document) });
+        files.push({ fileName: fileNameOf(spec.service.slug, kind, caseType), kind, caseType, xml: writeDmn(document) });
       }
     }
   }

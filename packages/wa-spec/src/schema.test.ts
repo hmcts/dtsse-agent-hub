@@ -165,3 +165,49 @@ describe("validateSpec dependencies on helpers that a case type lacks", () => {
     expect(validateSpec(build(helpers, [{ decision: "A", requires: "B" }]))).toEqual([]);
   });
 });
+
+describe("validateSpec scoped decisions and names", () => {
+  const scoped = (decisionExtra: Record<string, unknown>, rows: unknown[] = decision.rows) =>
+    Spec.parse(spec({ decisions: { completion: { ...decision, only: ["ct_a"], ...decisionExtra, rows } } }));
+
+  it("should check a row against the case types of its own decision when the decision is limited to some", () => {
+    const limited = Spec.parse(
+      spec({
+        decisions: {
+          completion: {
+            ...decision,
+            only: ["ct_a"],
+            inputs: [{ key: "eventId", only: ["ct_a"] }],
+            rows: [{ when: { eventId: { in: ["a"] } }, returns: { taskType: "T" } }]
+          }
+        }
+      })
+    );
+    expect(validateSpec(limited)).toEqual([]);
+    expect(validateSpec(Spec.parse(spec({ decisions: { completion: { ...decision, inputs: [{ key: "eventId", only: ["ct_a"] }] } } })))).toHaveLength(1);
+  });
+
+  it("should check a dependency and same-named helpers against the decision's own case types", () => {
+    const helpers = [{ name: "H", expression: 1, only: ["ct_a"] }];
+    expect(validateSpec(scoped({ helpers, dependencies: [{ decision: "table", requires: "H" }] }))).toEqual([]);
+    expect(
+      validateSpec(
+        scoped({
+          helpers: [
+            { name: "H", expression: 1 },
+            { name: "H", expression: 2, only: ["ct_a"] }
+          ]
+        })
+      )
+    ).toHaveLength(1);
+  });
+
+  it("should reject a helper named table when it would be mistaken for the main decision", () => {
+    expect(validateSpec(scoped({ helpers: [{ name: "table", expression: 1 }] }))[0]).toContain("cannot be named table");
+  });
+
+  it("should reject a hyphen in a case type and say why when the id is checked", () => {
+    expect(validateSpec(Spec.parse(spec({ caseTypes: [{ id: "ct-a" }] })))[0]).toContain('where "-" ends the service slug');
+    expect(validateSpec(Spec.parse(spec({ service: { slug: "a-b" } })))).toEqual([]);
+  });
+});

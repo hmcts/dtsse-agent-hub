@@ -22,7 +22,7 @@ const DecisionLayout = z.strictObject({
   annotationsWidth: Words.optional(),
   /** Information requirement ids by the name of the helper required. */
   requirements: z.record(z.string(), Words).optional(),
-  /** `<id> <expression id> <width>` by input key. */
+  /** `<id> <expression id> <width> <allowed values id>` by input key. */
   inputs: z.record(z.string(), Words).optional(),
   /** `<id> <width>` by output name. */
   outputs: z.record(z.string(), Words).optional(),
@@ -128,7 +128,10 @@ function decisionLayout(
     ...(table
       ? {
           inputs: Object.fromEntries(
-            table.inputs.map((input, i) => [inputKeys[i] as string, [out(input.id), out(input.expressionId), out(input.width)].join(" ")])
+            table.inputs.map((input, i) => [
+              inputKeys[i] as string,
+              [out(input.id), out(input.expressionId), out(input.width), out(input.allowedValuesId)].join(" ")
+            ])
           ),
           outputs: Object.fromEntries(table.outputs.map((output) => [output.name, [out(output.id), out(output.width)].join(" ")])),
           rules: table.rules.map((rule, i) =>
@@ -243,12 +246,13 @@ export function applyLayout(doc: DmnDocument, layout: FileLayout | undefined, in
               ...(own.table ? { id: own.table } : {}),
               ...(own.annotationsWidth ? { annotationsWidth: own.annotationsWidth } : {}),
               inputs: table.inputs.map((input, i) => {
-                const [id, expressionId, width] = split(own.inputs?.[inputKeys[i] as string]);
+                const [id, expressionId, width, allowedValuesId] = split(own.inputs?.[inputKeys[i] as string]);
                 return {
                   ...input,
                   ...(id ? { id } : {}),
                   ...(expressionId ? { expressionId } : {}),
                   ...(width ? { width } : {}),
+                  ...(allowedValuesId ? { allowedValuesId } : {}),
                   expression: original(own.texts, expressionId, input.expression, exprText)
                 };
               }),

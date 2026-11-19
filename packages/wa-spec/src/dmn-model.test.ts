@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { sampleDmn } from "./__fixtures__/dmn.ts";
-import { inspectDmn, ncName, parseDmn, readDmn, writeDmn } from "./dmn-model.ts";
+import { type DmnDocument, inspectDmn, ncName, parseDmn, readDmn, writeDmn } from "./dmn-model.ts";
 
 describe("parseDmn and writeDmn", () => {
   it("should read back what was written when the document is written and parsed again", () => {
@@ -198,5 +198,17 @@ describe("readDmn", () => {
     const { document, inspection } = readDmn(xml);
     expect(document).toEqual(parseDmn(xml));
     expect(inspection).toEqual(inspectDmn(xml));
+  });
+});
+
+describe("fallback diagram", () => {
+  it("should lay helpers out from the first grid slot when the table decision is not first", () => {
+    const doc = parseDmn(sampleDmn("ct_a"));
+    const [table, helper] = doc.decisions as [DmnDocument["decisions"][number], DmnDocument["decisions"][number]];
+    const xml = writeDmn({ id: "d", name: "DRD", decisions: [helper, table] });
+    const shapes = parseDmn(xml).diagram?.items.filter((i) => i.type === "shape") ?? [];
+    const at = (ref: string) => (shapes.find((s) => s.ref === ref) as { bounds: { x: string; y: string } }).bounds;
+    expect(at(table.id)).toMatchObject({ x: "160", y: "80" });
+    expect(at(helper.id)).toMatchObject({ x: "160", y: "250" });
   });
 });

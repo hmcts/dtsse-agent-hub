@@ -2,6 +2,7 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { diffPaths, renderDifferences } from "./diff.ts";
 import { exists, isDirectory, listDir, readText, writeText } from "./file-io.ts";
+import { isWaTaskDmn } from "./file-names.ts";
 import { generateAll } from "./generator.ts";
 import { importDmns, renderReport } from "./importer.ts";
 import { loadSpecFile, stringifyModel, stringifyOrdering } from "./model-io.ts";
@@ -53,7 +54,7 @@ function main(argv: string[]): number {
       fail(USAGE);
     }
     const files = listDir(dir)
-      .filter((name) => name.startsWith("wa-task-") && name.endsWith(".dmn"))
+      .filter(isWaTaskDmn)
       .map((name) => ({ name, xml: readText(join(dir, name)) }));
     const { spec, layout, report } = importDmns(files, {
       jurisdiction: values.jurisdiction,

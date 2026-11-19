@@ -59,3 +59,26 @@ describe("taskRows", () => {
     expect(renderTaskRows(taskRows(spec, "T1"))).toContain("mayApply: true");
   });
 });
+
+describe("taskRows structured values", () => {
+  it("should mark a row that names the task inside a structured expression as may apply when the task is T9", () => {
+    const structured = SpecSchema.parse({
+      version: 1,
+      service: { slug: "demo" },
+      caseTypes: [{ id: "ct_a" }],
+      decisions: {
+        initiation: {
+          name: "I",
+          hitPolicy: "COLLECT",
+          inputs: [],
+          outputs: [{ name: "taskId" }],
+          rows: [
+            { returns: { taskId: { if: { field: "a", op: "exists" }, use: "T9", otherwise: { call: "f", args: [{ plus: ["x", "T9"] }] } } } },
+            { returns: { taskId: { if: { field: "a", op: "exists" }, use: "T8", otherwise: null } } }
+          ]
+        }
+      }
+    });
+    expect(taskRows(structured, "T9")[0]?.rows).toEqual([{ index: 1, row: structured.decisions.initiation?.rows[0], mayApply: true }]);
+  });
+});

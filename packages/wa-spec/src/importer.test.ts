@@ -210,3 +210,48 @@ describe("importDmns across kinds, attributes and checks", () => {
     expect(() => importDmns([{ name: "wa-task-completion-my svc-ct_a.dmn", xml: sampleDmn("ct_a") }])).toThrow(/invalid spec[\s\S]*service slug my svc/);
   });
 });
+
+describe("importDmns refusals and allowed values", () => {
+  const dmn = (kind: string, slug: string, caseType: string) => ({
+    name: `wa-task-${kind}-${slug}-${caseType}.dmn`,
+    xml: sampleDmn(caseType)
+  });
+
+  it("should throw and name the files when they belong to more than one service", () => {
+    expect(() => importDmns([dmn("completion", "one", "ct_a"), dmn("completion", "two", "ct_b")])).toThrow(
+      /more than one service[\s\S]*one: wa-task-completion-one-ct_a\.dmn[\s\S]*two: wa-task-completion-two-ct_b\.dmn/
+    );
+  });
+
+  it("should throw and name both files when a kind and case type have two files", () => {
+    expect(() => importDmns([dmn("completion", "one", "ct_a"), dmn("completion", "two", "ct_a")])).toThrow(
+      /wa-task-completion-one-ct_a\.dmn and wa-task-completion-two-ct_a\.dmn are both the completion DMN of ct_a/
+    );
+  });
+
+  it("should report a helper named table as unrepresentable when a file has one", () => {
+    const xml = sampleDmn("ct_a").replaceAll('name="LATEST"', 'name="table"');
+    const { report } = importDmns([{ name: "wa-task-completion-demo-ct_a.dmn", xml }]);
+    expect(report.unrepresentable.map((u) => u.construct)).toEqual(["a helper decision named table, which the spec reserves for the main decision"]);
+  });
+
+  it("should carry a column's allowed values with an override per case type and write them back when the DMNs have them", () => {
+    const withValues = (caseType: string, text?: string) =>
+      sampleDmn(caseType).replace(
+        "</inputExpression>",
+        text === undefined ? "</inputExpression>" : `</inputExpression><inputValues id="IV_${caseType}"><text>${text}</text></inputValues>`
+      );
+    const { spec, layout, report } = importDmns([
+      { name: "wa-task-completion-demo-ct_a.dmn", xml: withValues("ct_a", '"a","b"') },
+      { name: "wa-task-completion-demo-ct_b.dmn", xml: withValues("ct_b", '"a","b"') },
+      { name: "wa-task-completion-demo-ct_c.dmn", xml: withValues("ct_c") }
+    ]);
+    expect(report.unrepresentable).toEqual([]);
+    expect(spec.decisions.completion?.inputs[0]?.allowedValues).toBe('"a","b"');
+    expect(spec.decisions.completion?.inputs[0]?.overrides?.ct_c?.allowedValues).toBeNull();
+    const out = generateAll(spec, layout);
+    expect(parseDmn(out[0]?.xml ?? "").decisions[0]?.table?.inputs[0]).toMatchObject({ allowedValues: '"a","b"', allowedValuesId: "IV_ct_a" });
+    expect(parseDmn(out[2]?.xml ?? "").decisions[0]?.table?.inputs[0]?.allowedValues).toBeUndefined();
+    expect(parseDmn(generateAll(spec)[1]?.xml ?? "").decisions[0]?.table?.inputs[0]?.allowedValues).toBe('"a","b"');
+  });
+});

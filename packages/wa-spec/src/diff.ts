@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { type DmnDecision, type DmnDocument, type DmnInput, type DmnOutput, type DmnRule, parseDmn } from "./dmn-model.ts";
 import { canonicalCell, canonicalExpr } from "./feel.ts";
 import { listDir, readText } from "./file-io.ts";
+import { isWaTaskDmn } from "./file-names.ts";
 import { align, byCodePoint } from "./merge.ts";
 
 export interface DiffOptions {
@@ -43,7 +44,14 @@ function describeRule(rule: DmnRule, index: number): string {
 }
 
 const inputSignature = (i: DmnInput): string =>
-  JSON.stringify([i.label ?? null, i.inputVariable ?? null, i.typeRef ?? null, i.expressionLanguage ?? null, canonicalExpr(i.expression)]);
+  JSON.stringify([
+    i.label ?? null,
+    i.inputVariable ?? null,
+    i.typeRef ?? null,
+    i.expressionLanguage ?? null,
+    i.allowedValues ?? null,
+    canonicalExpr(i.expression)
+  ]);
 
 const outputSignature = (o: DmnOutput): string => JSON.stringify([o.label ?? null, o.name, o.typeRef ?? null]);
 
@@ -160,9 +168,10 @@ export function diffDocuments(file: string, a: DmnDocument, b: DmnDocument, opti
   const nb = nameById(b);
   const da = keyedDecisions(a);
   const db = keyedDecisions(b);
-  for (const [name, count] of da.counts) {
-    if (count > 1 || (db.counts.get(name) ?? 0) > 1) {
-      out.push({ file, decision: name, message: `decision name used ${count} times in first and ${db.counts.get(name) ?? 0} in second` });
+  for (const name of new Set([...da.counts.keys(), ...db.counts.keys()])) {
+    const [first, second] = [da.counts.get(name) ?? 0, db.counts.get(name) ?? 0];
+    if (first > 1 || second > 1) {
+      out.push({ file, decision: name, message: `decision name used ${first} times in first and ${second} in second` });
     }
   }
   for (const [key, decision] of da.byKey) {
@@ -188,10 +197,7 @@ export function diffDocuments(file: string, a: DmnDocument, b: DmnDocument, opti
   return out;
 }
 
-const dmnFiles = (dir: string): string[] =>
-  listDir(dir)
-    .filter((f) => f.startsWith("wa-task-") && f.endsWith(".dmn"))
-    .sort(byCodePoint);
+const dmnFiles = (dir: string): string[] => listDir(dir).filter(isWaTaskDmn).sort(byCodePoint);
 
 /** Compares two files, or two directories file by file by name. */
 export function diffPaths(a: { dir: string; file?: string }, b: { dir: string; file?: string }, options: DiffOptions = {}): Difference[] {
