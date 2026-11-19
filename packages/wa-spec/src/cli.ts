@@ -6,7 +6,7 @@ import { generateAll } from "./generator.ts";
 import { importDmns, renderReport } from "./importer.ts";
 import { loadSpecFile, stringifyModel, stringifyOrdering } from "./model-io.ts";
 import { liftSpec, renderLiftReport } from "./model-lift.ts";
-import { diffSpecs } from "./spec-diff.ts";
+import { compareSpecs } from "./spec-diff.ts";
 import { layoutPathFor, parseSpec, stringifyLayout, stringifySpec } from "./spec-io.ts";
 import { renderTaskRows, taskRows } from "./task-view.ts";
 
@@ -132,9 +132,10 @@ function main(argv: string[]): number {
       fail(USAGE);
     }
     if (/\.ya?ml$/.test(a) && /\.ya?ml$/.test(b)) {
-      const differences = diffSpecs(loadSpecFile(a).spec, loadSpecFile(b).spec);
-      process.stdout.write(differences.length === 0 ? "no differences\n" : `${differences.join("\n")}\n${differences.length} differences\n`);
-      return differences.length === 0 ? 0 : 1;
+      const { differences, total } = compareSpecs(loadSpecFile(a).spec, loadSpecFile(b).spec);
+      const shown = differences.length < total ? `first ${differences.length} of ${total} differences` : `${total} differences`;
+      process.stdout.write(total === 0 ? "no differences\n" : `${differences.join("\n")}\n${shown}\n`);
+      return total === 0 ? 0 : 1;
     }
     const side = (path: string, counterpart: string) => {
       if (!isDirectory(path)) {

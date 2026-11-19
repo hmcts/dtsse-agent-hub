@@ -32,17 +32,36 @@ export function parseOrdering(yamlText: string): Ordering {
 
 export const stringifyOrdering = (ordering: Ordering): string => toYaml(ordering);
 
-/** Where a model's ordering file is: its `order` field, else `<name>.order.yaml` beside it, when that exists. */
+/**
+ * Where a model's ordering file is: its `order` field, which must exist, else `<name>.order.yaml` beside it when that
+ * exists. A named file that is missing would compile the rows in another order without a word, so it is an error.
+ */
 export function orderPathFor(modelPath: string, model: Model): string | undefined {
-  const path = model.order ? resolve(dirname(modelPath), model.order) : `${modelPath.replace(/\.ya?ml$/, "")}.order.yaml`;
-  return exists(path) ? path : undefined;
+  if (model.order) {
+    const named = resolve(dirname(modelPath), model.order);
+    if (!exists(named)) {
+      throw new Error(`${modelPath} names the ordering file ${model.order}, which does not exist`);
+    }
+    return named;
+  }
+  const beside = `${modelPath.replace(/\.ya?ml$/, "")}.order.yaml`;
+  return exists(beside) ? beside : undefined;
 }
 
-/** Where a model's layout file is: its `layout` field, else `<name>.layout.yaml` beside it, when that exists. */
-export function modelLayoutPath(modelPath: string, model: Model): string | undefined {
-  const path = model.layout ? resolve(dirname(modelPath), model.layout) : layoutPathFor(modelPath);
-  return exists(path) ? path : undefined;
+/** Where a layout file is: the one named (by `--layout` or the model's `layout` field), which must exist, else `<name>.layout.yaml` beside the file when that exists. */
+function layoutPathOf(path: string, named: string | undefined, base: string): string | undefined {
+  if (named) {
+    const resolved = resolve(base, named);
+    if (!exists(resolved)) {
+      throw new Error(`the layout file ${named} does not exist`);
+    }
+    return resolved;
+  }
+  const beside = layoutPathFor(path);
+  return exists(beside) ? beside : undefined;
 }
+
+export const modelLayoutPath = (modelPath: string, model: Model): string | undefined => layoutPathOf(modelPath, model.layout, dirname(modelPath));
 
 export interface LoadedSpec {
   spec: Spec;
@@ -59,14 +78,9 @@ export function loadSpecFile(path: string, layoutOverride?: string): LoadedSpec 
     const model = parseModel(text);
     const orderPath = orderPathFor(path, model);
     const spec = compileModel(model, orderPath ? parseOrdering(readText(orderPath)) : undefined);
-    const layoutPath = layoutOverride ? resolve(layoutOverride) : modelLayoutPath(path, model);
+    const layoutPath = layoutOverride ? layoutPathOf(path, layoutOverride, process.cwd()) : modelLayoutPath(path, model);
     return { spec, layout: layoutPath ? parseLayout(readText(layoutPath)) : undefined, layoutPath, isModel: true };
   }
-  const layoutPath = layoutOverride ? resolve(layoutOverride) : layoutPathFor(path);
-  return {
-    spec: parseSpec(text),
-    layout: exists(layoutPath) ? parseLayout(readText(layoutPath)) : undefined,
-    layoutPath: exists(layoutPath) ? layoutPath : undefined,
-    isModel: false
-  };
+  const layoutPath = layoutPathOf(path, layoutOverride, process.cwd());
+  return { spec: parseSpec(text), layout: layoutPath ? parseLayout(readText(layoutPath)) : undefined, layoutPath, isModel: false };
 }

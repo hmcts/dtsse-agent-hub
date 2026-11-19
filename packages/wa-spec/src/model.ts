@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CaseType, Cell, type Decision, Expr, KINDS, type Kind, Scalar, Service, Spec } from "./schema.ts";
+import { CaseType, Cell, Expr, KINDS, Scalar, Service, Spec } from "./schema.ts";
 
 /*
  * The task- and role-centric model: what a business analyst edits. It compiles to the table-centric spec in schema.ts,
@@ -199,6 +199,8 @@ export type Defaults = z.infer<typeof Defaults>;
 
 /** An event-driven rule: when one of these events happens, cancel (or warn about, or reconfigure) the tasks of these categories. */
 export const Cancellation = z.strictObject({
+  /** Names the rule in the ordering file, so adding or removing a rule does not re-point the others. */
+  id: Name.optional(),
   events: FriendlyCell,
   fromState: FriendlyCell.optional(),
   state: FriendlyCell.optional(),
@@ -286,16 +288,45 @@ export function validateModel(model: Model): string[] {
     if (task.link && task.description !== undefined) {
       problems.push(`${where}: has both a link and a description`);
     }
+    const own = task.only ?? [...caseTypes];
+    const scoped = (what: string, only: string[] | undefined) => {
+      known(what, only);
+      for (const id of only ?? []) {
+        if (caseTypes.has(id) && !own.includes(id)) {
+          problems.push(`${what}: ${id} is not one of the task's case types`);
+        }
+      }
+    };
     for (const trigger of task.create ?? []) {
-      known(`${where} create`, trigger.only);
+      scoped(`${where} create`, trigger.only);
       known(`${where} create overrides`, Object.keys(trigger.overrides ?? {}));
     }
     for (const completion of task.complete ?? []) {
-      known(`${where} complete`, completion.only);
+      scoped(`${where} complete`, completion.only);
+      known(`${where} complete overrides`, Object.keys(completion.overrides ?? {}));
+    }
+    const values: Array<[string, Val | undefined]> = [
+      ["name", task.name],
+      ["workType", task.workType],
+      ["roleCategory", task.roleCategory],
+      ["title", task.title],
+      ["description", task.description],
+      ...Object.entries(task.due ?? {}).map(([k, v]): [string, Val | undefined] => [`due.${k}`, v]),
+      ...Object.entries(task.priority ?? {}).map(([k, v]): [string, Val | undefined] => [`priority.${k}`, v]),
+      ...Object.entries(task.additionalProperties ?? {}).map(([k, v]): [string, Val | undefined] => [`additionalProperties.${k}`, v]),
+      ...Object.entries(task.attributes ?? {}).map(([k, v]): [string, Val | undefined] => [`attributes.${k}`, v])
+    ];
+    for (const [name, val] of values) {
+      for (const entry of Array.isArray(val) ? val : [val]) {
+        if (isValEntry(entry)) {
+          scoped(`${where} ${name}`, entry.only);
+          known(`${where} ${name} overrides`, Object.keys(entry.overrides ?? {}));
+        }
+      }
     }
     const specs = task.permissions === undefined ? [] : typeof task.permissions === "string" ? [{ profile: task.permissions }] : [task.permissions].flat();
     for (const spec of specs) {
-      known(`${where} permissions`, spec.only);
+      scoped(`${where} permissions`, spec.only);
       if (spec.profile !== undefined && !(spec.profile in profiles)) {
         problems.push(`${where}: unknown permission profile ${spec.profile}`);
       }
@@ -329,11 +360,6 @@ export function validateModel(model: Model): string[] {
   }
   for (const [index, rule] of (model.cancellations ?? []).entries()) {
     known(`cancellations[${index}]`, rule.only);
-  }
-  for (const [kind, table] of Object.entries(model.tables ?? {}) as Array<[Kind, Decision | undefined]>) {
-    if (table && !(KINDS as readonly string[]).includes(kind)) {
-      problems.push(`tables: unknown kind ${kind}`);
-    }
   }
   return problems;
 }

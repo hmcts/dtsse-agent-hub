@@ -1,66 +1,66 @@
 version: 1
 rows:
   initiation:
-    - Et1Vetting/create
-    - Et1Vetting/create.2
-    - ReviewReferralAdmin/create
+    - Et1Vetting/create#cfd8d6
+    - Et1Vetting/create#db4458
+    - ReviewReferralAdmin/create#0d2a52
     - IssuePostHearingDirection/create
-    - IssueJudgment/create
-    - ReviewReferralJudiciary/create
-    - ReviewReferralLegalOps/create
+    - IssueJudgment/create#0b0ba9
+    - ReviewReferralJudiciary/create#a3c4db
+    - ReviewReferralLegalOps/create#f55921
     - ReviewReferralResponseAdmin/create
     - ReviewReferralResponseJudiciary/create
     - ReviewReferralResponseLegalOps/create
-    - ReviewReferralLegalOps/create.2
-    - ReviewReferralAdmin/create.2
-    - ReviewReferralJudiciary/create.2
-    - ReviewReferralLegalOps/create.3
-    - ReviewReferralLegalOps/create.4
-    - IssueJudgment/create.2
+    - ReviewReferralLegalOps/create#0ce40d
+    - ReviewReferralAdmin/create#920043
+    - ReviewReferralJudiciary/create#fe71bd
+    - ReviewReferralLegalOps/create#a6e5c0
+    - ReviewReferralLegalOps/create#90b934
+    - IssueJudgment/create#2503b4
     - IssueOrder/create
     - ListServeClaim/create
     - SendEt1Notification/create
     - Rule21/create
     - ExpiredBfAction/create
-    - ET3Processing/create
-    - CompleteInitialConsideration/create
-    - ET3Processing/create.2
+    - ET3Processing/create#7e811c
+    - CompleteInitialConsideration/create#cd7b62
+    - ET3Processing/create#fa92fb
     - ReviewRule21Referral/create
-    - CompleteInitialConsideration/create.2
+    - CompleteInitialConsideration/create#692b60
     - SendEt3Notification/create
     - ReferEmployersContractClaim/create
-    - IssueInitialConsiderationDirections/create
+    - IssueInitialConsiderationDirections/create#6bbf83
     - ListAHearing/create
-    - IssueInitialConsiderationDirections/create.2
+    - IssueInitialConsiderationDirections/create#f30630
     - DraftAndSignJudgment/create
-    - ContactTribunalWithAnApplication/create
-    - ContactTribunalWithAnApplication/create.2
-    - ContactTribunalWithAnApplication/create.3
-    - ContactTribunalWithAnApplication/create.4
-    - AmendClaimantDetails/create
-    - AmendRespondentDetails/create
-    - AmendRespondentDetails/create.2
-    - AmendClaimantDetails/create.2
-    - WithdrawAllOrPartOfCase/create
+    - ContactTribunalWithAnApplication/create#a83526
+    - ContactTribunalWithAnApplication/create#86cc76
+    - ContactTribunalWithAnApplication/create#98c0ac
+    - ContactTribunalWithAnApplication/create#162599
+    - AmendClaimantDetails/create#35bcbf
+    - AmendRespondentDetails/create#aa04fc
+    - AmendRespondentDetails/create#b0e633
+    - AmendClaimantDetails/create#b3f02c
+    - WithdrawAllOrPartOfCase/create#817468
     - ReviewECCResponse/create
-    - Et1Vetting/create.3
-    - ContactTribunalWithAnApplication/create.5
-    - AmendClaimantDetails/create.3
-    - WithdrawAllOrPartOfCase/create.2
-    - AmendClaimantDetails/create.4
-    - WithdrawAllOrPartOfCase/create.3
-    - ContactTribunalWithAnApplication/create.6
-    - AmendRespondentDetails/create.3
-    - AmendRespondentDetails/create.4
-    - ET3Processing/create.3
-    - Et1Vetting/create.4
-    - ContactTribunalWithAnApplication/create.7
-    - ContactTribunalWithAnApplication/create.8
-    - AmendRespondentDetails/create.5
-    - SubmitRespondentPseResponse/create
-    - SubmitRespondentPseResponse/create.2
-    - SubmitClaimantPseResponse/create
-    - SubmitClaimantPseResponse/create.2
+    - Et1Vetting/create#2df75d
+    - ContactTribunalWithAnApplication/create#58d943
+    - AmendClaimantDetails/create#90bba8
+    - WithdrawAllOrPartOfCase/create#cbebc9
+    - AmendClaimantDetails/create#abc297
+    - WithdrawAllOrPartOfCase/create#e7568a
+    - ContactTribunalWithAnApplication/create#2d499d
+    - AmendRespondentDetails/create#f06a8c
+    - AmendRespondentDetails/create#fafff1
+    - ET3Processing/create#928891
+    - Et1Vetting/create#6e5b78
+    - ContactTribunalWithAnApplication/create#2c064c
+    - ContactTribunalWithAnApplication/create#9a8768
+    - AmendRespondentDetails/create#ed8c53
+    - SubmitRespondentPseResponse/create#7c6c5a
+    - SubmitRespondentPseResponse/create#5eb0ba
+    - SubmitClaimantPseResponse/create#bbbda6
+    - SubmitClaimantPseResponse/create#ca8743
     - ReviewSupportRequestAdmin/create
     - ReviewSupportRequestLegalOfficer/create
     - ReviewSupportRequestJudge/create
@@ -72,19 +72,19 @@ rows:
     - ReviewReferralResponseJudiciaryMultiple/create
     - ReviewReferralResponseAdminMultiple/create
   configuration:
-    - row: "*/caseName"
+    - row: "*/caseName#c41842"
       description: 1v1 scenario - Concatenates Claimant's forename name with that of respondent to create the case name displayed on task lists
-    - "*/caseName.2"
-    - "*/region"
-    - "*/location"
-    - "*/location.2"
-    - "*/locationName"
-    - "*/region.2"
-    - "*/location.3"
-    - "*/locationName.2"
-    - row: "*/caseManagementCategory"
+    - "*/caseName#389bce"
+    - "*/region#d5b732"
+    - "*/location#c0b6b6"
+    - "*/location#0e9c47"
+    - "*/locationName#248a52"
+    - "*/region#25f347"
+    - "*/location#e336c0"
+    - "*/locationName#6aab9e"
+    - row: "*/caseManagementCategory#d0dce3"
       description: Sets the case category that is displayed in the task list UI
-    - row: "*/caseManagementCategory.2"
+    - row: "*/caseManagementCategory#c72dc0"
       description: Sets the case category that is displayed in the task list UI
     - row: "*/nextHearingDate"
       description: Use nextListedDate until onboarded to HMC
@@ -95,9 +95,9 @@ rows:
     - ContactTribunalWithAnApplication/workType AmendClaimantDetails/workType AmendRespondentDetails/workType WithdrawAllOrPartOfCase/workType SubmitRespondentPseResponse/workType SubmitClaimantPseResponse/workType ReviewSupportRequestAdmin/workType ReviewSupportRequestLegalOfficer/workType ReviewSupportRequestJudge/workType ArrangeSupport/workType
     - reviewSpecificAccessRequestJudiciary/workType reviewSpecificAccessRequestLegalOps/workType reviewSpecificAccessRequestAdmin/workType reviewSpecificAccessRequestCTSC/workType
     - ReviewReferralJudiciary/roleCategory reviewSpecificAccessRequestJudiciary/roleCategory ReviewReferralResponseJudiciary/roleCategory CompleteInitialConsideration/roleCategory DraftAndSignJudgment/roleCategory ReviewSupportRequestJudge/roleCategory
-    - ReviewReferralLegalOps/roleCategory reviewSpecificAccessRequestLegalOps/roleCategory ReviewRule21Referral/roleCategory ReviewReferralResponseLegalOps/roleCategory ReviewSupportRequestLegalOfficer/roleCategory @et_englandwales
+    - ReviewReferralLegalOps/roleCategory reviewSpecificAccessRequestLegalOps/roleCategory ReviewRule21Referral/roleCategory#e67d8e ReviewReferralResponseLegalOps/roleCategory ReviewSupportRequestLegalOfficer/roleCategory @et_englandwales
     - Et1Vetting/roleCategory ReviewReferralAdmin/roleCategory ReviewReferralResponseAdmin/roleCategory SendEt1Notification/roleCategory ListServeClaim/roleCategory reviewSpecificAccessRequestAdmin/roleCategory Rule21/roleCategory ET3Processing/roleCategory IssueInitialConsiderationDirections/roleCategory ListAHearing/roleCategory IssuePostHearingDirection/roleCategory IssueJudgment/roleCategory ContactTribunalWithAnApplication/roleCategory AmendClaimantDetails/roleCategory AmendRespondentDetails/roleCategory WithdrawAllOrPartOfCase/roleCategory SendEt3Notification/roleCategory ReviewECCResponse/roleCategory ExpiredBfAction/roleCategory ReferEmployersContractClaim/roleCategory IssueOrder/roleCategory SubmitRespondentPseResponse/roleCategory SubmitClaimantPseResponse/roleCategory ReviewSupportRequestAdmin/roleCategory ArrangeSupport/roleCategory @et_englandwales
-    - ReviewReferralLegalOps/roleCategory reviewSpecificAccessRequestLegalOps/roleCategory ReviewRule21Referral/roleCategory ReviewReferralResponseLegalOps/roleCategory ReviewRule21Referral/roleCategory.2 ReviewSupportRequestLegalOfficer/roleCategory @et_scotland
+    - ReviewReferralLegalOps/roleCategory reviewSpecificAccessRequestLegalOps/roleCategory ReviewRule21Referral/roleCategory#e67d8e ReviewReferralResponseLegalOps/roleCategory ReviewRule21Referral/roleCategory#fb3470 ReviewSupportRequestLegalOfficer/roleCategory @et_scotland
     - Et1Vetting/roleCategory ReviewReferralAdmin/roleCategory ReviewReferralResponseAdmin/roleCategory SendEt1Notification/roleCategory ListServeClaim/roleCategory reviewSpecificAccessRequestAdmin/roleCategory Rule21/roleCategory ET3Processing/roleCategory IssueInitialConsiderationDirections/roleCategory ListAHearing/roleCategory IssuePostHearingDirection/roleCategory IssueJudgment/roleCategory ContactTribunalWithAnApplication/roleCategory AmendClaimantDetails/roleCategory AmendRespondentDetails/roleCategory WithdrawAllOrPartOfCase/roleCategory SendEt3Notification/roleCategory ReviewECCResponse/roleCategory ExpiredBfAction/roleCategory IssueOrder/roleCategory ReferEmployersContractClaim/roleCategory SubmitRespondentPseResponse/roleCategory SubmitClaimantPseResponse/roleCategory ReviewSupportRequestAdmin/roleCategory ArrangeSupport/roleCategory @et_scotland
     - reviewSpecificAccessRequestCTSC/roleCategory
     - reviewSpecificAccessRequestJudiciary/additionalProperties_roleAssignmentId reviewSpecificAccessRequestLegalOps/additionalProperties_roleAssignmentId reviewSpecificAccessRequestAdmin/additionalProperties_roleAssignmentId reviewSpecificAccessRequestCTSC/additionalProperties_roleAssignmentId
@@ -123,8 +123,8 @@ rows:
     - ReviewECCResponse/description
     - ReviewRule21Referral/description @et_scotland
     - DraftAndSignJudgment/description
-    - ContactTribunalWithAnApplication/description
-    - ContactTribunalWithAnApplication/description.2
+    - ContactTribunalWithAnApplication/description#3a783b
+    - ContactTribunalWithAnApplication/description#cda221
     - AmendClaimantDetails/description
     - AmendRespondentDetails/description
     - WithdrawAllOrPartOfCase/description
@@ -139,10 +139,10 @@ rows:
     - Et1Vetting/minorPriority Rule21/minorPriority ET3Processing/minorPriority IssueInitialConsiderationDirections/minorPriority ListAHearing/minorPriority DraftAndSignJudgment/minorPriority IssuePostHearingDirection/minorPriority SendEt1Notification/minorPriority ListServeClaim/minorPriority ReviewRule21Referral/minorPriority IssueJudgment/minorPriority CompleteInitialConsideration/minorPriority SendEt3Notification/minorPriority AmendClaimantDetails/minorPriority AmendRespondentDetails/minorPriority ContactTribunalWithAnApplication/minorPriority WithdrawAllOrPartOfCase/minorPriority ReviewECCResponse/minorPriority ExpiredBfAction/minorPriority IssueOrder/minorPriority ReferEmployersContractClaim/minorPriority SubmitRespondentPseResponse/minorPriority SubmitClaimantPseResponse/minorPriority
     - ReviewReferralAdmin/minorPriority ReviewReferralJudiciary/minorPriority ReviewReferralLegalOps/minorPriority
     - ReviewReferralResponseAdmin/minorPriority ReviewReferralResponseJudiciary/minorPriority ReviewReferralResponseLegalOps/minorPriority
-    - "*/calculatedDates"
-    - "*/dueDateTime @et_englandwales"
-    - "*/dueDateOrigin"
-    - "*/dueDateTime @et_scotland"
+    - "*/calculatedDates#25ca6d"
+    - "*/dueDateTime#dbf378 @et_englandwales"
+    - "*/dueDateOrigin#934451"
+    - "*/dueDateTime#dbf378 @et_scotland"
     - DraftAndSignJudgment/dueDateOrigin
     - DraftAndSignJudgment/dueDateIntervalDays
     - DraftAndSignJudgment/dueDateSkipNonWorkingDays
@@ -159,11 +159,11 @@ rows:
     - MultiplesReviewReferralResponseLegalOps/majorPriority ReviewReferralResponseJudiciaryMultiple/majorPriority ReviewReferralResponseAdminMultiple/majorPriority
     - ReviewReferralAdminMultiple/minorPriority ReviewReferralJudiciaryMultiple/minorPriority ReviewReferralLegalOpsMultiple/minorPriority
     - MultiplesReviewReferralResponseLegalOps/minorPriority ReviewReferralResponseJudiciaryMultiple/minorPriority ReviewReferralResponseAdminMultiple/minorPriority
-    - "*/calculatedDates.2"
-    - "*/dueDateOrigin.2"
-    - "*/dueDateTime.2"
-    - "*/dueDateNonWorkingCalendar"
-    - "*/dueDateNonWorkingCalendar.2"
+    - "*/calculatedDates#cf0d6f"
+    - "*/dueDateOrigin#4b469f"
+    - "*/dueDateTime#24753b"
+    - "*/dueDateNonWorkingCalendar#eaf98e"
+    - "*/dueDateNonWorkingCalendar#8c155f"
     - "*/dueDateNonWorkingDaysOfWeek"
     - "*/dueDateSkipNonWorkingDays"
     - "*/dueDateMustBeWorkingDay"
@@ -205,8 +205,8 @@ rows:
     - "*/leadership-judge"
     - ReviewReferralLegalOps/judge ReviewReferralResponseLegalOps/judge ReviewRule21Referral/judge ReviewReferralJudiciary/judge ReviewReferralResponseJudiciary/judge CompleteInitialConsideration/judge DraftAndSignJudgment/judge ReviewSupportRequestJudge/judge
     - ReviewReferralLegalOps/fee-paid-judge ReviewReferralResponseLegalOps/fee-paid-judge ReviewRule21Referral/fee-paid-judge ReviewReferralJudiciary/fee-paid-judge ReviewReferralResponseJudiciary/fee-paid-judge CompleteInitialConsideration/fee-paid-judge DraftAndSignJudgment/fee-paid-judge ReviewSupportRequestJudge/fee-paid-judge
-    - reviewSpecificAccessRequestLegalOps/specific-access-approver-legal-ops
-    - reviewSpecificAccessRequestLegalOps/specific-access-approver-legal-ops.2
+    - reviewSpecificAccessRequestLegalOps/specific-access-approver-legal-ops#51b867
+    - reviewSpecificAccessRequestLegalOps/specific-access-approver-legal-ops#1310ca
     - ReviewReferralLegalOps/allocated-tribunal-caseworker ReviewReferralResponseLegalOps/allocated-tribunal-caseworker ReviewRule21Referral/allocated-tribunal-caseworker ReviewReferralJudiciary/allocated-tribunal-caseworker ReviewReferralResponseJudiciary/allocated-tribunal-caseworker CompleteInitialConsideration/allocated-tribunal-caseworker DraftAndSignJudgment/allocated-tribunal-caseworker ReviewSupportRequestLegalOfficer/allocated-tribunal-caseworker
     - ReviewReferralLegalOps/senior-tribunal-caseworker ReviewReferralResponseLegalOps/senior-tribunal-caseworker ReviewRule21Referral/senior-tribunal-caseworker ReviewReferralJudiciary/senior-tribunal-caseworker ReviewReferralResponseJudiciary/senior-tribunal-caseworker CompleteInitialConsideration/senior-tribunal-caseworker DraftAndSignJudgment/senior-tribunal-caseworker ReviewSupportRequestLegalOfficer/senior-tribunal-caseworker
     - ReviewReferralLegalOps/tribunal-caseworker ReviewReferralResponseLegalOps/tribunal-caseworker ReviewRule21Referral/tribunal-caseworker ReviewReferralJudiciary/tribunal-caseworker ReviewReferralResponseJudiciary/tribunal-caseworker CompleteInitialConsideration/tribunal-caseworker DraftAndSignJudgment/tribunal-caseworker ReviewSupportRequestLegalOfficer/tribunal-caseworker
@@ -269,26 +269,26 @@ rows:
     - ReviewReferralResponseAdminMultiple/complete
     - ~2
   cancellation:
-    - "!/1"
-    - "!/1.2"
-    - "!/1.3"
-    - "!/1.4"
-    - "!/1.5"
-    - "!/1.6"
-    - "!/1.7"
-    - "!/2"
-    - "!/3"
-    - "!/4"
-    - "!/5"
-    - "!/6"
-    - "!/7"
-    - "!/8"
-    - "!/9"
-    - "!/10"
-    - "!/11"
-    - "!/12"
-    - "!/13"
-    - "!/13.2"
+    - "!/Cancel-disposeCase#832271"
+    - "!/Cancel-disposeCase#0c1bce"
+    - "!/Cancel-disposeCase#051065"
+    - "!/Cancel-disposeCase#967034"
+    - "!/Cancel-disposeCase#e54983"
+    - "!/Cancel-disposeCase#34540a"
+    - "!/Cancel-disposeCase#230864"
+    - "!/Cancel-disposeCase-2"
+    - "!/Reconfigure-addAmendHearing"
+    - "!/Reconfigure-addAmendJurisdiction"
+    - "!/Reconfigure-caseTransferDifferentCountry"
+    - "!/Reconfigure-caseTransferSameCountry"
+    - "!/Reconfigure-amendCaseDetails"
+    - "!/Reconfigure-RECONFIGURE_WA_TASKS"
+    - "!/Reconfigure-assignCase"
+    - "!/Cancel-closeAdminReviewSupportTask"
+    - "!/Cancel-closeLOReviewSupportTask"
+    - "!/Cancel-closeJudgeReviewSupportTask"
+    - "!/Cancel-close#803ca9"
+    - "!/Cancel-close#7eabae"
   task-types:
     - AmendClaimantDetails/type
     - AmendRespondentDetails/type

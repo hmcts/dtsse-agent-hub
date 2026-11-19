@@ -2160,48 +2160,61 @@ tasks:
       roleAssignmentId: *a19
     reconfigure: [ workType, roleCategory, description, additionalProperties_roleAssignmentId ]
 cancellations:
-  - events: [ disposeCase, rollbackMigrateCase, caseTransferECM ]
+  - id: Cancel-disposeCase
+    events: [ disposeCase, rollbackMigrateCase, caseTransferECM ]
     action: Cancel
     categories: [ Vetting, Processing, Hearing, Judgment, Application, Amendments, ArrangeSupport ]
     only: [ et_englandwales, et_scotland ]
-  - events: [ disposeCase, et3Response, rollbackMigrateCase, caseTransferECM ]
+  - id: Cancel-disposeCase-2
+    events: [ disposeCase, et3Response, rollbackMigrateCase, caseTransferECM ]
     action: Cancel
     categories: [ Rule21 ]
     only: [ et_englandwales, et_scotland ]
-  - events: addAmendHearing
+  - id: Reconfigure-addAmendHearing
+    events: addAmendHearing
     action: Reconfigure
     only: [ et_englandwales, et_scotland ]
-  - events: addAmendJurisdiction
+  - id: Reconfigure-addAmendJurisdiction
+    events: addAmendJurisdiction
     action: Reconfigure
     only: [ et_englandwales, et_scotland ]
-  - events: caseTransferDifferentCountry
+  - id: Reconfigure-caseTransferDifferentCountry
+    events: caseTransferDifferentCountry
     action: Reconfigure
     only: [ et_englandwales, et_scotland ]
-  - events: caseTransferSameCountry
+  - id: Reconfigure-caseTransferSameCountry
+    events: caseTransferSameCountry
     action: Reconfigure
     only: [ et_englandwales ]
-  - events: amendCaseDetails
+  - id: Reconfigure-amendCaseDetails
+    events: amendCaseDetails
     action: Reconfigure
     only: [ et_scotland ]
-  - events: RECONFIGURE_WA_TASKS
+  - id: Reconfigure-RECONFIGURE_WA_TASKS
+    events: RECONFIGURE_WA_TASKS
     action: Reconfigure
     only: [ et_englandwales, et_scotland ]
-  - events: assignCase
+  - id: Reconfigure-assignCase
+    events: assignCase
     action: Reconfigure
     only: [ et_englandwales, et_scotland ]
-  - events: [ closeAdminReviewSupportTask, disposeCase, rollbackMigrateCase, caseTransferECM ]
+  - id: Cancel-closeAdminReviewSupportTask
+    events: [ closeAdminReviewSupportTask, disposeCase, rollbackMigrateCase, caseTransferECM ]
     action: Cancel
     categories: [ ReviewSupportAdmin ]
     only: [ et_englandwales, et_scotland ]
-  - events: [ closeLOReviewSupportTask, disposeCase, rollbackMigrateCase, caseTransferECM ]
+  - id: Cancel-closeLOReviewSupportTask
+    events: [ closeLOReviewSupportTask, disposeCase, rollbackMigrateCase, caseTransferECM ]
     action: Cancel
     categories: [ ReviewSupportLegalOfficer ]
     only: [ et_englandwales, et_scotland ]
-  - events: [ closeJudgeReviewSupportTask, disposeCase, rollbackMigrateCase, caseTransferECM ]
+  - id: Cancel-closeJudgeReviewSupportTask
+    events: [ closeJudgeReviewSupportTask, disposeCase, rollbackMigrateCase, caseTransferECM ]
     action: Cancel
     categories: [ ReviewSupportJudge ]
     only: [ et_englandwales, et_scotland ]
-  - events: close
+  - id: Cancel-close
+    events: close
     action: Cancel
     categories: [ Vetting, Processing ]
     only: [ et_englandwales_multiple, et_scotland_multiple ]

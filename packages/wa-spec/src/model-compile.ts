@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { byCodePoint } from "./merge.ts";
 import {
   ADDITIONAL_PREFIX,
@@ -55,6 +56,9 @@ type Atoms = Record<Kind, Atom[]>;
 const caseOrder = (model: Model): string[] => model.caseTypes.map((c) => c.id);
 const inOrder = (model: Model, cases: string[]): string[] => caseOrder(model).filter((c) => cases.includes(c));
 
+/** An entry's case types: those of `base` it names, or all of `base` when it names none. */
+const within = (model: Model, only: string[] | undefined, base: string[]): string[] => (only ? inOrder(model, only).filter((c) => base.includes(c)) : base);
+
 export function taskCases(model: Model, task: Task): string[] {
   return task.only ? inOrder(model, task.only) : caseOrder(model);
 }
@@ -96,7 +100,7 @@ function valPieces(model: Model, val: Val, cases: string[]): ValPiece[] {
     if (!isValEntry(entry)) {
       return [{ value: entry as Expr, cases, reconfigure: undefined }];
     }
-    const own = entry.only ? inOrder(model, entry.only) : cases;
+    const own = within(model, entry.only, cases);
     const overrides = entry.overrides && Object.fromEntries(Object.entries(entry.overrides).map(([c, value]) => [c, { value }]));
     return pieces(model, entry, own, overrides).map((piece) => ({
       value: piece.entry.value,
@@ -148,7 +152,7 @@ export function resolveGrants(model: Model, task: Task): ResolvedGrant[] {
     for (const [role, grant] of Object.entries(spec.add ?? {})) {
       grants.set(role, grant);
     }
-    const cases = spec.only ? inOrder(model, spec.only) : taskCases(model, task);
+    const cases = within(model, spec.only, taskCases(model, task));
     return [...grants].map(([role, grant]) => ({ role, grant, cases }));
   });
 }
@@ -237,7 +241,7 @@ export function collectAtoms(model: Model): Atoms {
     const key = `${kind}:${task}/${slot}`;
     const n = (counts.get(key) ?? 0) + 1;
     counts.set(key, n);
-    atoms[kind].push({ ref: `${task}/${slot}${n > 1 ? `.${n}` : ""}`, task, slot, cases, content });
+    atoms[kind].push({ ref: `${task}/${slot}`, task, slot, cases, content });
   };
   const all = caseOrder(model);
 
@@ -258,12 +262,12 @@ export function collectAtoms(model: Model): Atoms {
       add("task-types", task.id, "type", piece.cases, { when: {}, returns: { taskTypeId: task.id, taskTypeName: piece.value } });
     }
     for (const trigger of task.create ?? []) {
-      for (const piece of pieces(model, trigger, trigger.only ? inOrder(model, trigger.only) : own, trigger.overrides)) {
+      for (const piece of pieces(model, trigger, within(model, trigger.only, own), trigger.overrides)) {
         add("initiation", task.id, "create", piece.cases, triggerContent(task, piece.entry));
       }
     }
     for (const completion of task.complete ?? []) {
-      for (const piece of pieces(model, completion, completion.only ? inOrder(model, completion.only) : own, completion.overrides)) {
+      for (const piece of pieces(model, completion, within(model, completion.only, own), completion.overrides)) {
         add("completion", task.id, "complete", piece.cases, completionContent(task, piece.entry));
       }
     }
@@ -282,11 +286,38 @@ export function collectAtoms(model: Model): Atoms {
   for (const [index, rule] of (model.cancellations ?? []).entries()) {
     const cases = rule.only ? inOrder(model, rule.only) : all;
     for (const category of rule.categories ?? [undefined]) {
-      add("cancellation", RULES, String(index + 1), cases, cancellationContent(rule, category));
+      add("cancellation", RULES, rule.id ?? String(index + 1), cases, cancellationContent(rule, category));
     }
+  }
+  for (const kind of KINDS) {
+    atoms[kind] = withRefs(atoms[kind]);
   }
   return atoms;
 }
+
+/**
+ * Gives every atom the reference the ordering file names it by. A slot with one atom is `<task>/<slot>`; a slot with
+ * several (case type variants, a cancellation rule's categories) adds a hash of the atom's content and case types, so an
+ * insertion beside an atom does not re-point the others. Identical atoms are told apart by a count.
+ */
+function withRefs(atoms: Atom[]): Atom[] {
+  const sizes = new Map<string, number>();
+  for (const atom of atoms) {
+    sizes.set(bucketOf(atom), (sizes.get(bucketOf(atom)) ?? 0) + 1);
+  }
+  const seen = new Map<string, number>();
+  return atoms.map((atom) => {
+    if (sizes.get(bucketOf(atom)) === 1) {
+      return atom;
+    }
+    const base = `${bucketOf(atom)}#${createHash("sha1").update(signature(atom.content, atom.cases)).digest("hex").slice(0, 6)}`;
+    const n = (seen.get(base) ?? 0) + 1;
+    seen.set(base, n);
+    return { ...atom, ref: n > 1 ? `${base}.${n}` : base };
+  });
+}
+
+export const bucketOf = (atom: Atom): string => `${atom.task}/${atom.slot}`;
 
 interface OutRow {
   sig: string;
@@ -335,6 +366,20 @@ function orderedRow(decision: Decision, out: OutRow, all: string[], taskKey: str
 function buildRows(kind: Kind, decision: Decision, atoms: Atom[], residue: Row[], order: OrderRow[] | undefined, all: string[]): Row[] {
   const taskKey = GROUPED[kind];
   const byRef = new Map(atoms.map((atom) => [atom.ref, atom]));
+  const named = new Set((order ?? []).flatMap((item) => (typeof item === "string" ? item : item.row).split(" ")));
+  const claimed = new Set<Atom>();
+  // A slot that gained atoms since the ordering was written is still named by its bare `<task>/<slot>`: it stands for an atom no token names.
+  const atomOf = (token: string): Atom | undefined => {
+    const exact = byRef.get(token);
+    if (exact) {
+      return exact;
+    }
+    const spare = atoms.find((a) => bucketOf(a) === token && !named.has(a.ref) && !claimed.has(a));
+    if (spare) {
+      claimed.add(spare);
+    }
+    return spare;
+  };
   const covered = new Map<string, Set<string>>();
   const out: OutRow[] = [];
   const usedResidue = new Set<number>();
@@ -365,7 +410,7 @@ function buildRows(kind: Kind, decision: Decision, atoms: Atom[], residue: Row[]
           out.push({ sig: `~${n}`, tasks: [], content: { when: {}, returns: {} }, cases: [], grouped: false, description: undefined, residue: rowOf });
         }
       } else if (!token.startsWith("@")) {
-        const atom = byRef.get(token);
+        const atom = atomOf(token);
         const cases = atom && (only ? atom.cases.filter((c) => only.includes(c)) : atom.cases);
         if (atom && cases && cases.length > 0) {
           members.push({ atom, cases });
@@ -390,6 +435,8 @@ function buildRows(kind: Kind, decision: Decision, atoms: Atom[], residue: Row[]
     }
   }
 
+  // A task's rows must keep their order, so an atom joins an earlier row only if no earlier row already holds the task.
+  const lastRowOf = (task: string): number => out.findLastIndex((o) => o.tasks.includes(task));
   for (const atom of atoms) {
     const seen = covered.get(atom.ref);
     const left = atom.cases.filter((c) => !seen?.has(c));
@@ -397,7 +444,9 @@ function buildRows(kind: Kind, decision: Decision, atoms: Atom[], residue: Row[]
       continue;
     }
     const made = outRow(atom, left, undefined);
-    const shared = made.grouped ? out.findLast((o) => o.grouped && o.sig === made.sig) : undefined;
+    const floor = lastRowOf(atom.task);
+    const at = made.grouped ? out.findLastIndex((o) => o.grouped && o.sig === made.sig) : -1;
+    const shared = at >= 0 && at > floor ? out[at] : undefined;
     if (shared) {
       shared.tasks.push(atom.task);
     } else {

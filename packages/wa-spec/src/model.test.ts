@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { importDmns } from "./importer.ts";
+import { byCodePoint } from "./merge.ts";
 import { decodeCell, encodeCell, linkText, type Model, type Ordering, parseLinkText, validateModel } from "./model.ts";
 import { compileModel } from "./model-compile.ts";
 import { isModelDocument, loadSpecFile, orderPathFor, parseModel, parseOrdering, stringifyModel, stringifyOrdering } from "./model-io.ts";
@@ -217,7 +218,7 @@ describe("liftSpec and compileModel on ET", () => {
     const original = lifted.spec.decisions.permissions?.rows ?? [];
     const rows = spec.decisions.permissions?.rows ?? [];
     const changed = rows.filter((r) => r.returns?.value === "Read");
-    expect(changed.flatMap(taskCell).sort()).toEqual([...users].sort());
+    expect(changed.flatMap(taskCell).sort(byCodePoint)).toEqual([...users].sort(byCodePoint));
     expect(rows.length).toBeGreaterThanOrEqual(original.length);
     expect(rows.filter((r) => r.returns?.name === "allocated-admin-caseworker").length).toBe(
       original.filter((r) => r.returns?.name === "allocated-admin-caseworker").length
@@ -315,7 +316,16 @@ describe("liftSpec on a varied model", () => {
 
   it("should lift a warning rule with its states and note when the rule has no category", () => {
     expect(lifted.model.cancellations).toEqual([
-      { events: "gone", fromState: "Open", state: "Closed", action: "Warn", warning: { code: "W1", text: "Careful" }, note: "warns", only: ["ct_a"] }
+      {
+        id: "Warn-gone",
+        events: "gone",
+        fromState: "Open",
+        state: "Closed",
+        action: "Warn",
+        warning: { code: "W1", text: "Careful" },
+        note: "warns",
+        only: ["ct_a"]
+      }
     ]);
   });
 

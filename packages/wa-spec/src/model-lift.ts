@@ -123,7 +123,7 @@ function grantOf(returns: Record<string, Expr>, description: string | undefined)
     return undefined;
   }
   const parts = value.split(", ");
-  const perms = value !== "" && parts.join(", ") === value && parts.every((p) => p !== "") ? parts : value;
+  const perms = value !== "" && parts.every((p) => p !== "") ? parts : value;
   return {
     perms,
     ...("roleCategory" in returns ? { category: returns.roleCategory as Expr } : {}),
@@ -277,7 +277,7 @@ interface GrantSet {
 
 const setKey = (set: GrantSet): string => stable([...set.roles].sort(([a], [b]) => byCodePoint(a, b)));
 
-/** How a task's grants differ from a profile, in the terms of a permission spec, or undefined when they differ too much to say. */
+/** How a task's grants differ from a profile, in the terms of a permission spec, and how many changes that takes. */
 function deltaFrom(profile: Record<string, Grant>, set: GrantSet): { spec: PermissionSpec; cost: number } {
   const target = new Map(set.roles);
   const remove: string[] = [];
@@ -394,16 +394,17 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
 
   for (const kind of KINDS) {
     for (const entry of classified[kind]) {
-      const failure = typeof entry.result === "string" ? entry.result : kind === "permissions" ? permissionsStay : undefined;
-      if (failure !== undefined || typeof entry.result === "string") {
+      const result = entry.result;
+      const failure = typeof result === "string" ? result : kind === "permissions" ? permissionsStay : undefined;
+      if (typeof result === "string" || failure !== undefined) {
         residue[kind].push(entry.row);
         entry.residueIndex = residue[kind].length;
-        reasons.push({ kind, row: entry.index, reason: failure ?? (entry.result as string) });
+        reasons.push({ kind, row: entry.index, reason: failure ?? "" });
         continue;
       }
-      const { items, cases } = entry.result;
+      const { items, cases } = result;
       if (kind === "cancellation") {
-        cancellationRows.push({ row: entry.index, classified: entry.result, src: entry.row });
+        cancellationRows.push({ row: entry.index, classified: result, src: entry.row });
         continue;
       }
       for (const item of items) {
@@ -715,8 +716,7 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
   }
 
   // Cancellation rules: adjacent rows that differ only in category share a rule.
-  const cancellations: Cancellation[] = [];
-  const ruleOfRow = new Map<number, number>();
+  const rules: Cancellation[] = [];
   let previous: { key: string; row: number } | undefined;
   for (const { row, classified: result, src } of cancellationRows) {
     const item = result.items[0] as Item;
@@ -724,10 +724,10 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
     const key = stable([item.content.when, returns, item.content.description, src.only]);
     const category = "processCategories" in item.content.returns ? processCategories : undefined;
     const when = item.content.when;
-    if (previous && previous.key === key && previous.row === row - 1 && category !== undefined && cancellations.at(-1)?.categories) {
-      cancellations.at(-1)?.categories?.push(category as Expr);
+    if (previous && previous.key === key && previous.row === row - 1 && category !== undefined && rules.at(-1)?.categories) {
+      rules.at(-1)?.categories?.push(category as Expr);
     } else {
-      cancellations.push({
+      rules.push({
         events: encodeCell(when.event as Cell),
         ...(when.fromState ? { fromState: encodeCell(when.fromState) } : {}),
         ...(when.state ? { state: encodeCell(when.state) } : {}),
@@ -745,9 +745,20 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
         ...(src.only ? { only: src.only } : {})
       });
     }
-    ruleOfRow.set(row, cancellations.length);
     previous = { key, row };
   }
+
+  const taken = new Set<string>();
+  const cancellations: Cancellation[] = rules.map((rule) => {
+    const words = [rule.action, ...[rule.events].flat()].filter((w): w is string => typeof w === "string").slice(0, 2);
+    const base = words.join("-").replace(/[^A-Za-z0-9_.-]/g, "") || "rule";
+    let id = base;
+    for (let n = 2; taken.has(id); n++) {
+      id = `${base}-${n}`;
+    }
+    taken.add(id);
+    return { id, ...rule };
+  });
 
   const tables: NonNullable<Model["tables"]> = {};
   for (const kind of KINDS) {
