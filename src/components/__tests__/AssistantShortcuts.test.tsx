@@ -202,8 +202,10 @@ describe("sendsMessage", () => {
     ...extra
   });
 
-  it("should send on Enter alone by default, and never mid-composition", () => {
+  it("should send on Enter by default, with Ctrl or Cmd too, and never with Shift or mid-composition", () => {
     expect(sendsMessage(press("Enter"), "enter")).toBe(true);
+    expect(sendsMessage(press("Enter", { ctrlKey: true }), "enter")).toBe(true);
+    expect(sendsMessage(press("Enter", { metaKey: true }), "enter")).toBe(true);
     expect(sendsMessage(press("Enter", { shiftKey: true }), "enter")).toBe(false);
     expect(sendsMessage(press("Enter", { isComposing: true }), "enter")).toBe(false);
     expect(sendsMessage(press("a"), "enter")).toBe(false);
@@ -228,8 +230,9 @@ describe("composerPlaceholder", () => {
 describe("dayLabel", () => {
   const now = new Date("2026-11-19T12:00:00Z");
 
-  it("should say Today and Yesterday by the day in London", () => {
+  it("should say Today and Yesterday by the day in London, and Today for a moment ahead of a slow clock", () => {
     expect(dayLabel(new Date("2026-11-19T00:30:00Z"), now)).toBe("Today");
+    expect(dayLabel(new Date("2026-11-20T00:05:00Z"), now)).toBe("Today");
     expect(dayLabel(new Date("2026-11-18T23:59:00Z"), now)).toBe("Yesterday");
   });
 

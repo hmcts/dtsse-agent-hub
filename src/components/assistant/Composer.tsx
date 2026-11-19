@@ -91,6 +91,20 @@ export interface ComposerFiller {
 }
 
 /**
+ * What the empty box says: what it can do beyond words, but only what it can do here, so a "/" list is mentioned only
+ * where there are skills, and dropping a file only where one can be attached.
+ */
+export function composerPlaceholder(skills: boolean, files: boolean): string {
+  if (skills && files) {
+    return "Message CFT Workspace. Type / for skills, or drop files here";
+  }
+  if (skills) {
+    return "Message CFT Workspace. Type / for skills";
+  }
+  return files ? "Message CFT Workspace, or drop files here" : "Message CFT Workspace";
+}
+
+/**
  * The message box: Enter sends and Shift+Enter starts a new line, as in any chat. The + menu attaches files or fills
  * the box from a saved template for the person to complete. Files can also be pasted into the box or dropped on it,
  * or on `dropZone` — the message pane — so the target is large. `onFocus` lets the page warm a session up before they
@@ -115,20 +129,6 @@ export interface ComposerFiller {
  * Typing "/" offers `skills` through `SkillMenu` — the conversation's session's, or on the new-chat screen the pod's —
  * and nothing at all when there are none.
  */
-/**
- * What the empty box says: what it can do beyond words, but only what it can do here, so a "/" list is mentioned only
- * where there are skills, and dropping a file only where one can be attached.
- */
-export function composerPlaceholder(skills: boolean, files: boolean): string {
-  if (skills && files) {
-    return "Message CFT Workspace. Type / for skills, or drop files here";
-  }
-  if (skills) {
-    return "Message CFT Workspace. Type / for skills";
-  }
-  return files ? "Message CFT Workspace, or drop files here" : "Message CFT Workspace";
-}
-
 export function Composer({
   templates,
   onSend,

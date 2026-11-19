@@ -57,12 +57,15 @@ export function useSendKey(): [SendKey, (next: SendKey) => void] {
   return [key, choose];
 }
 
-/** Whether this key press sends, for the composer's box. Composing text in an input method is never a send. */
+/**
+ * Whether this key press sends, for the composer's box. Composing text in an input method is never a send. With Enter
+ * sending, Ctrl/Cmd+Enter sends too, as it always has and as people used to other tools press it.
+ */
 export function sendsMessage(event: { key: string; shiftKey: boolean; ctrlKey: boolean; metaKey: boolean; isComposing: boolean }, key: SendKey): boolean {
   if (event.key !== "Enter" || event.isComposing) {
     return false;
   }
-  return key === "enter" ? !event.shiftKey && !event.ctrlKey && !event.metaKey : event.ctrlKey || event.metaKey;
+  return key === "enter" ? !event.shiftKey : event.ctrlKey || event.metaKey;
 }
 
 /** "⌘" on a Mac, "Ctrl" elsewhere: the modifier the shortcuts are written with. Ctrl until there is a browser to ask. */

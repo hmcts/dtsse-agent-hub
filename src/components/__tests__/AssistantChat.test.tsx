@@ -3076,6 +3076,40 @@ describe("ChatView answer actions", () => {
   });
 });
 
+describe("ChatView sending words again", () => {
+  it("should send a message once when Send it again is pressed twice quickly, then offer it no more", async () => {
+    let finish: (value: { ok: true; message: ThreadMessage }) => void = () => undefined;
+    const chatActions = actions({ send: vi.fn(() => new Promise<{ ok: true; message: ThreadMessage }>((resolve) => (finish = resolve))) });
+    const lost = page({ messages: [message("1", { body: "Are you there?", delivery: "expired" })] });
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ page: lost })} templates={TEMPLATES} actions={chatActions} />);
+
+    const button = screen.getByRole("button", { name: "Send it again" });
+    act(() => {
+      fireEvent.click(button);
+      fireEvent.click(button);
+    });
+    await act(async () => {
+      finish({ ok: true, message: message("2", { body: "Are you there?" }) });
+    });
+
+    expect(chatActions.send).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "Send it again" })).toBeNull();
+    expect(screen.getByText(/Sent again below\./)).toBeTruthy();
+  });
+
+  it("should offer no Ask again when the message it would repeat carried files, which would be left out", () => {
+    const withFiles = page({
+      messages: [
+        message("1", { body: "Summarise this", attachments: [{ id: "u1", name: "a.pdf", media_type: "application/pdf", bytes: 3, available_until: null }] })
+      ],
+      entries: [entry("2", { content: { text: "A summary." } })]
+    });
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ page: withFiles })} templates={TEMPLATES} actions={actions()} />);
+
+    expect(screen.queryByRole("button", { name: "Ask again" })).toBeNull();
+  });
+});
+
 describe("ChatView Escape", () => {
   function working(): ConversationView {
     return conversation({ agentStatus: "busy", clientFeatures: ["stop"], page: page({ messages: [message("1")] }) });
@@ -3112,6 +3146,30 @@ describe("ChatView Escape", () => {
     });
 
     expect(chatActions.stop).not.toHaveBeenCalled();
+  });
+
+  it("should leave the answer alone when Escape is closing something in the sidebar, or the drawer is open", async () => {
+    const chatActions = actions();
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={working()} templates={TEMPLATES} actions={chatActions} />);
+    const sidebar = document.createElement("aside");
+    sidebar.setAttribute("aria-label", "Conversations");
+    const search = document.createElement("input");
+    sidebar.append(search);
+    document.body.append(sidebar);
+
+    await act(async () => {
+      fireEvent.keyDown(search, { key: "Escape" });
+    });
+    const drawer = document.createElement("button");
+    drawer.setAttribute("aria-label", "Close sidebar");
+    document.body.append(drawer);
+    await act(async () => {
+      fireEvent.keyDown(document.body, { key: "Escape" });
+    });
+
+    expect(chatActions.stop).not.toHaveBeenCalled();
+    sidebar.remove();
+    drawer.remove();
   });
 
   it("should not listen for Escape when there is no answer to stop", async () => {

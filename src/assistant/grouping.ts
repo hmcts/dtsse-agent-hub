@@ -33,6 +33,11 @@ const WEEKDAY_DATE = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London
 const WEEKDAY_DATE_YEAR = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", weekday: "long", day: "numeric", month: "long", year: "numeric" });
 const CLOCK = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 
+/** The day in London as a number, which changes at midnight there: for a view to notice that the day has turned. */
+export function dayNumber(at: Date): number {
+  return londonDay(at);
+}
+
 /** Whether two instants fall on the same day in London. */
 export function sameDay(a: Date, b: Date): boolean {
   return londonDay(a) === londonDay(b);
@@ -44,7 +49,9 @@ export function sameDay(a: Date, b: Date): boolean {
  */
 export function dayLabel(at: Date, now: Date): string {
   const days = londonDay(now) - londonDay(at);
-  if (days === 0) {
+  // Today for anything ahead of the clock too: a browser clock a little behind sees a message from a moment ago as
+  // tomorrow's, which a date would make a puzzle of.
+  if (days <= 0) {
     return "Today";
   }
   if (days === 1) {
