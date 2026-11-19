@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { sampleDmn } from "./__fixtures__/dmn.ts";
+import { byCodePoint } from "./merge.ts";
 
 const cli = fileURLToPath(new URL("./cli.ts", import.meta.url));
 const run = (...args: string[]) =>
@@ -147,6 +148,39 @@ describe("cli generate and stale files", () => {
     writeFileSync(join(dir, "out", "other.dmn"), "<definitions/>");
     const result = run("generate", join(dir, "spec.yaml"), "-o", join(dir, "out"), "--prune");
     expect(result.stderr).toContain("removed: wa-task-completion-demo-ct_old.dmn");
-    expect(readdirSync(join(dir, "out")).sort()).toEqual(["other.dmn", "wa-task-completion-demo-ct_a.dmn", "wa-task-completion-demo-ct_b.dmn"]);
+    expect(readdirSync(join(dir, "out")).sort(byCodePoint)).toEqual(["other.dmn", "wa-task-completion-demo-ct_a.dmn", "wa-task-completion-demo-ct_b.dmn"]);
+  });
+});
+
+describe("cli generate pruning scope", () => {
+  it("should remove only files of this service whose kind and case type the spec no longer generates when --prune is given", () => {
+    const { dir, input } = workspace();
+    run("import", input, "-o", join(dir, "spec.yaml"));
+    mkdirSync(join(dir, "out"));
+    const names = [
+      "wa-task-completion-demo-ct_old.dmn",
+      "wa-task-completion-other-ct_a.dmn",
+      "wa-task-bogus-demo-ct_a.dmn",
+      "wa-task-initiation-demo-ct_a.dmn"
+    ];
+    for (const name of names) {
+      writeFileSync(join(dir, "out", name), "<definitions/>");
+    }
+    run("generate", join(dir, "spec.yaml"), "-o", join(dir, "out"), "--prune");
+    expect(readdirSync(join(dir, "out")).sort(byCodePoint)).toEqual([
+      "wa-task-bogus-demo-ct_a.dmn",
+      "wa-task-completion-demo-ct_a.dmn",
+      "wa-task-completion-demo-ct_b.dmn",
+      "wa-task-completion-other-ct_a.dmn"
+    ]);
+  });
+
+  it("should not fail when nothing is generated and the output directory does not exist", () => {
+    const { dir } = workspace();
+    const empty = join(dir, "empty.yaml");
+    writeFileSync(empty, "version: 1\nservice:\n  slug: demo\ncaseTypes:\n  - id: ct_a\ndecisions: {}\n");
+    const result = run("generate", empty, "-o", join(dir, "missing"));
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
   });
 });

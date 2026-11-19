@@ -49,7 +49,7 @@ const inputSignature = (i: DmnInput): string =>
     i.inputVariable ?? null,
     i.typeRef ?? null,
     i.expressionLanguage ?? null,
-    i.allowedValues ?? null,
+    i.allowedValues === undefined ? null : canonicalCell(i.allowedValues),
     canonicalExpr(i.expression)
   ]);
 

@@ -225,6 +225,9 @@ function matchRules(rules: DmnRule[], lines: string[]): Array<string[] | undefin
   });
 }
 
+/** The stored id at `at`, or none when the column was not in the layout (`column` below zero). */
+const storedEntry = (entries: Array<string | undefined>, at: number, column = at): string => (column < 0 ? "" : (entries[at] ?? ""));
+
 /** Fills in the ids, widths and diagram a generated document lacks from what the file's layout stored. */
 export function applyLayout(doc: DmnDocument, layout: FileLayout | undefined, inputKeys: string[]): DmnDocument {
   if (!layout) {
@@ -289,8 +292,10 @@ export function applyLayout(doc: DmnDocument, layout: FileLayout | undefined, in
                   return rule;
                 }
                 const [id, ...entries] = ids.map(back);
-                const inputIds = inputKeys.map((key) => entries[storedInputs.indexOf(key)] ?? "");
-                const outputIds = table.outputs.map((o) => entries[storedInputs.length + storedOutputs.indexOf(o.name)] ?? "");
+                const inputIds = inputKeys.map((key) => storedEntry(entries, storedInputs.indexOf(key)));
+                const outputIds = table.outputs.map((o) =>
+                  storedEntry(entries, storedInputs.length + storedOutputs.indexOf(o.name), storedOutputs.indexOf(o.name))
+                );
                 return {
                   ...rule,
                   ...(id ? { id } : {}),
