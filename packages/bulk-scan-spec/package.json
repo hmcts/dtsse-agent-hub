@@ -1,0 +1,29 @@
+{
+  "name": "@hmcts-cft/bulk-scan-spec",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "One reviewed field spec per Bulk Scan form, with importers and generators for the Exela SIP and the HMCTS transformation sheet, and a drift checker against service OCR code.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "import": "node src/cli.ts import",
+    "generate": "node src/cli.ts generate",
+    "drift": "node src/cli.ts drift",
+    "roundtrip": "node src/cli.ts roundtrip",
+    "codegen": "node src/cli.ts codegen",
+    "typecheck": "yarn run -T tsc -p tsconfig.json --noEmit",
+    "test": "yarn run -T vitest run",
+    "test:coverage": "yarn run -T vitest run --coverage"
+  },
+  "dependencies": {
+    "exceljs": "4.4.0",
+    "yaml": "2.9.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "ajv": "8.20.0"
+  }
+}

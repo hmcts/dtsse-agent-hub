@@ -6,6 +6,7 @@
 !.yarnrc.yml
 !.yarn/
 !packages/agent-hub/package.json
+!packages/bulk-scan-spec/package.json
 !tsconfig.json
 !tsconfig.cli.json
 !next.config.mjs
