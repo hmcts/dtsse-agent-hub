@@ -81,6 +81,7 @@ interface Classified {
   cases: string[];
 }
 
+const TRIGGER_OUTPUTS = ["taskId", "name", "delayDuration", "processCategories"];
 const isName = (value: unknown): value is string => typeof value === "string" && NAME_PATTERN.test(value);
 const subset = (a: string[], b: string[]) => a.every((x) => b.includes(x));
 const sameSet = (a: string[], b: string[]) => a.length === b.length && subset(a, b);
@@ -115,6 +116,7 @@ interface TriggerData {
   name?: Expr;
   delay?: Expr;
   category?: Expr;
+  outputs: Record<string, Expr>;
 }
 
 interface CompletionData {
@@ -124,7 +126,9 @@ interface CompletionData {
 
 interface AttrData {
   value: Expr;
-  reconfigure: boolean;
+  /** The row's `canReconfigure`; null where the table has no such column. */
+  reconfigure: Expr;
+  when?: Record<string, Cell>;
 }
 
 interface TaskAcc {
@@ -191,9 +195,6 @@ function classify(kind: Kind, row: Row, index: number, caseIds: string[]): Class
       if (!isName(returns.taskId)) {
         return "it does not create a task with a plain task id";
       }
-      if (!onlyKeys(returns, ["taskId", "name", "delayDuration", "processCategories"])) {
-        return "it returns columns a task trigger has no place for";
-      }
       return { cases, items: [make(returns.taskId, "create", { when: { ...when }, returns: { ...returns } })] };
     }
     case "configuration": {
@@ -201,13 +202,11 @@ function classify(kind: Kind, row: Row, index: number, caseIds: string[]): Class
       if (typeof tasks === "string") {
         return tasks;
       }
-      if (!onlyKeys(when, ["taskType"])) {
-        return "it has conditions beyond the task type";
-      }
-      if (!isName(returns.name) || !("value" in returns) || typeof returns.canReconfigure !== "boolean" || Object.keys(returns).length !== 3) {
+      if (!isName(returns.name) || !("value" in returns) || !onlyKeys(returns, ["name", "value", "canReconfigure"])) {
         return "it is not an attribute name, a value and a reconfigure flag";
       }
-      const content: Content = { when: {}, returns: { ...returns } };
+      const { taskType: _tasks, ...others } = when;
+      const content: Content = { when: others, returns: { ...returns } };
       return { cases, items: (tasks ?? [ALL_TASKS]).map((task) => make(task, returns.name as string, content)) };
     }
     case "permissions": {
@@ -250,8 +249,8 @@ function classify(kind: Kind, row: Row, index: number, caseIds: string[]): Class
     }
     case "cancellation": {
       if (
-        !when.event ||
-        !onlyKeys(when, ["fromState", "event", "state"]) ||
+        Object.keys(when).length === 0 ||
+        !onlyKeys(when, ["fromState", "event", "state", "toState"]) ||
         !returns.action ||
         !onlyKeys(returns, ["action", "warningCode", "warningText", "processCategories"])
       ) {
@@ -327,7 +326,8 @@ function deltaFrom(profile: Record<string, Grant>, set: GrantSet): { spec: Permi
 interface LeafEntry {
   value: Expr;
   cases: string[];
-  reconfigure: boolean;
+  reconfigure: Expr;
+  when?: Record<string, Cell>;
   note?: string;
 }
 
@@ -335,15 +335,16 @@ interface LeafEntry {
 function leaf(entries: LeafEntry[], taskCases: string[], uniform: boolean): Val {
   const rendered = entries.map((entry): Expr | ValEntry => {
     const scoped = !sameSet(entry.cases, taskCases);
-    const explicit = entry.reconfigure && !uniform;
-    if (!scoped && !explicit && entry.note === undefined) {
+    const explicit = typeof entry.reconfigure === "boolean" ? entry.reconfigure && !uniform : true;
+    if (!scoped && !explicit && entry.note === undefined && entry.when === undefined) {
       return entry.value;
     }
     return {
       value: entry.value,
       ...(entry.note === undefined ? {} : { note: entry.note }),
+      ...(entry.when === undefined ? {} : { when: Object.fromEntries(Object.entries(entry.when).map(([key, cell]) => [key, encodeCell(cell)])) }),
       ...(scoped ? { only: entry.cases } : {}),
-      ...(explicit ? { reconfigure: true } : {})
+      ...(explicit ? { reconfigure: entry.reconfigure } : {})
     };
   });
   return rendered.length === 1 ? (rendered[0] as Val) : (rendered as Val);
@@ -368,7 +369,7 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
     }
     return acc;
   };
-  const defaultsConfig: Array<Ent<{ name: string; value: Expr; reconfigure: boolean }>> = [];
+  const defaultsConfig: Array<Ent<{ name: string; value: Expr; reconfigure: Expr; when?: Record<string, Cell> }>> = [];
   const defaultGrants = new Map<string, Array<Ent<Grant>>>();
   const cancellationRows: Array<{ row: number; classified: Classified; src: Row }> = [];
 
@@ -384,7 +385,6 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
   // A role granted twice to one task for the same case type cannot be a profile entry, so rows granting it stay as rows.
   const seenGrants = new Map<string, string[]>();
   const twiceGranted = new Map<string, string>();
-  let permissionsStay: string | undefined;
   for (const entry of classified.permissions) {
     if (typeof entry.result !== "string") {
       for (const item of entry.result.items) {
@@ -393,20 +393,6 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
           twiceGranted.set(key, `${item.task} is granted ${item.content.returns.name as string} twice for one case type`);
         }
         seenGrants.set(key, [...(seenGrants.get(key) ?? []), ...item.cases]);
-      }
-    }
-  }
-
-  // A default grant is one per role and covers every case type, so any other shape of one keeps permissions as rows.
-  const defaultGrantRows = new Map<string, number>();
-  for (const entry of classified.permissions) {
-    if (typeof entry.result !== "string") {
-      for (const item of entry.result.items.filter((i) => i.task === ALL_TASKS)) {
-        const role = item.content.returns.name as string;
-        defaultGrantRows.set(role, (defaultGrantRows.get(role) ?? 0) + 1);
-        if (item.cases.length !== caseIds.length || (defaultGrantRows.get(role) ?? 0) > 1) {
-          permissionsStay ??= `the default grant of ${role} is not one grant for every case type`;
-        }
       }
     }
   }
@@ -445,8 +431,7 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
         kind === "initiation" && typeof result !== "string" && result.items.some((i) => !("name" in i.content.returns) && typed.has(i.task))
           ? "it creates a task with no name, but the task type has one"
           : undefined;
-      const failure =
-        typeof result === "string" ? result : kind === "permissions" ? (permissionsStay ?? twice) : kind === "cancellation" ? staleCategory(result) : unnamed;
+      const failure = typeof result === "string" ? result : kind === "permissions" ? twice : kind === "cancellation" ? staleCategory(result) : unnamed;
       if (typeof result === "string" || failure !== undefined) {
         residue[kind].push(entry.row);
         entry.residueIndex = residue[kind].length;
@@ -470,6 +455,7 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
               event: eventId as Cell,
               ...(postEventState ? { postState: postEventState } : {}),
               extras,
+              outputs: Object.fromEntries(Object.entries(returns).filter(([key]) => !TRIGGER_OUTPUTS.includes(key))),
               ...("name" in returns ? { name: returns.name as Expr } : {}),
               ...("delayDuration" in returns ? { delay: returns.delayDuration as Expr } : {}),
               ...("processCategories" in returns ? { category: returns.processCategories as Expr } : {})
@@ -485,7 +471,11 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
             cases
           );
         } else if (kind === "configuration") {
-          const data = { value: returns.value as Expr, reconfigure: returns.canReconfigure as boolean };
+          const data: AttrData = {
+            value: returns.value as Expr,
+            reconfigure: "canReconfigure" in returns ? (returns.canReconfigure as Expr) : null,
+            ...(Object.keys(item.content.when).length > 0 ? { when: item.content.when } : {})
+          };
           if (acc) {
             const list = acc.attrs.get(returns.name as string) ?? [];
             acc.attrs.set(returns.name as string, list);
@@ -639,13 +629,19 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
       if (!list) {
         return undefined;
       }
-      const all = list.every((e) => e.data.reconfigure);
-      const none = list.every((e) => !e.data.reconfigure);
+      const all = list.every((e) => e.data.reconfigure === true);
+      const none = list.every((e) => e.data.reconfigure === false);
       if (all) {
         reconfigure.push(name);
       }
       return leaf(
-        list.map((e) => ({ value: e.data.value, cases: ordered(e), reconfigure: e.data.reconfigure, ...(e.note === undefined ? {} : { note: e.note }) })),
+        list.map((e) => ({
+          value: e.data.value,
+          cases: ordered(e),
+          reconfigure: e.data.reconfigure,
+          ...(e.data.when === undefined ? {} : { when: e.data.when }),
+          ...(e.note === undefined ? {} : { note: e.note })
+        })),
         taskCases,
         all || none
       );
@@ -698,6 +694,7 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
           ...(Object.keys(extras).length > 0 ? { when: extras } : {}),
           ...(d.name !== undefined && stable(d.name) !== stable(taskName) ? { initialName: d.name } : {}),
           ...(d.delay !== undefined ? { delay: d.delay } : {}),
+          ...(Object.keys(d.outputs).length > 0 ? { outputs: d.outputs } : {}),
           ...(d.category !== undefined && stable(d.category) !== stable(taskCategory) ? { cancelCategory: d.category } : {}),
           ...(e.note === undefined ? {} : { note: e.note }),
           ...scoped(e)
@@ -732,11 +729,18 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
     if (description) {
       const only = description.length === 1 ? description[0] : undefined;
       const link =
-        only && typeof only.data.value === "string" && only.note === undefined && sameSet(only.cases, taskCases) ? parseLinkText(only.data.value) : undefined;
+        only &&
+        typeof only.data.value === "string" &&
+        only.note === undefined &&
+        only.data.when === undefined &&
+        typeof only.data.reconfigure === "boolean" &&
+        sameSet(only.cases, taskCases)
+          ? parseLinkText(only.data.value)
+          : undefined;
       if (only && link && linkText(link) === only.data.value) {
         task.link = link;
         taken.add("description");
-        if (only.data.reconfigure) {
+        if (only.data.reconfigure === true) {
           reconfigure.push("description");
         }
       } else {
@@ -773,13 +777,19 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
     defaults.configuration = defaultsConfig.map((e) => ({
       name: e.data.name,
       value: e.data.value,
-      ...(e.data.reconfigure ? { reconfigure: true } : {}),
+      ...(e.data.reconfigure === false ? {} : { reconfigure: e.data.reconfigure }),
+      ...(e.data.when === undefined ? {} : { when: Object.fromEntries(Object.entries(e.data.when).map(([key, cell]) => [key, encodeCell(cell)])) }),
       ...(e.note === undefined ? {} : { note: e.note }),
       ...(sameSet(e.cases, caseIds) ? {} : { only: ordered(e) })
     }));
   }
   if (defaultGrants.size > 0) {
-    defaults.permissions = Object.fromEntries([...defaultGrants].map(([role, list]) => [role, (list[0] as Ent<Grant>).data]));
+    defaults.permissions = Object.fromEntries(
+      [...defaultGrants].map(([role, list]) => [
+        role,
+        list.length === 1 && sameSet((list[0] as Ent<Grant>).cases, caseIds) ? (list[0] as Ent<Grant>).data : list.map((e) => ({ ...e.data, only: ordered(e) }))
+      ])
+    );
   }
 
   // Cancellation rules: adjacent rows that differ only in category share a rule.
@@ -796,9 +806,10 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
       rules.at(-1)?.categories?.push(category as Expr);
     } else {
       rules.push({
-        events: encodeCell(when.event as Cell),
+        ...(when.event ? { events: encodeCell(when.event) } : {}),
         ...(when.fromState ? { fromState: encodeCell(when.fromState) } : {}),
         ...(when.state ? { state: encodeCell(when.state) } : {}),
+        ...(when.toState ? { toState: encodeCell(when.toState) } : {}),
         action: returns.action as Expr,
         ...("warningCode" in returns || "warningText" in returns
           ? {
@@ -819,7 +830,7 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
 
   const taken = new Set<string>();
   const cancellations: Cancellation[] = rules.map((rule) => {
-    const words = [rule.action, ...[rule.events].flat()].filter((w): w is string => typeof w === "string").slice(0, 2);
+    const words = [rule.action, ...[rule.events ?? []].flat()].filter((w): w is string => typeof w === "string").slice(0, 2);
     const base = words.join("-").replace(/[^A-Za-z0-9_.-]/g, "") || "rule";
     let id = base;
     for (let n = 2; taken.has(id); n++) {

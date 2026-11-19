@@ -387,18 +387,13 @@ describe("lifting rows that are not about one task", () => {
       { when: { taskType: { in: ["not a name"] } }, returns: { name: "a", value: "b", canReconfigure: false } },
       "its taskType is not a plain list of task ids"
     ],
-    [
-      "configuration",
-      { when: { caseData: { in: ["x"] } }, returns: { name: "a", value: "b", canReconfigure: false } },
-      "it has conditions beyond the task type"
-    ],
-    ["configuration", { returns: { name: "a", value: "b" } }, "it is not an attribute name, a value and a reconfigure flag"],
+    ["configuration", { returns: { name: "not a name", value: "b", canReconfigure: false } }, "it is not an attribute name, a value and a reconfigure flag"],
     ["permissions", { when: { taskType: { in: ["not a name"] } }, returns: { name: "admin", value: "Read" } }, "its taskType is not a plain list of task ids"],
     ["permissions", { when: { case: { in: ["x"] } }, returns: { name: "admin", value: "Read" } }, "it has conditions beyond the task type"],
     ["permissions", { returns: { name: "admin", value: 3 } }, "its permissions are not a plain list"],
     ["completion", { when: {}, returns: { taskType: "Vetting" } }, "it has no event, or conditions beyond it"],
     ["task-types", { returns: { taskTypeId: "T" } }, "it is not a task type and its name"],
-    ["cancellation", { when: { state: { in: ["s"] } }, returns: { action: "Cancel" } }, "it is not an event, an action and optionally a category"],
+    ["cancellation", { when: {}, returns: { action: "Cancel" } }, "it is not an event, an action and optionally a category"],
     [
       "initiation",
       { only: ["ct_b", "ct_a"], when: { eventId: { in: ["e"] } }, returns: { taskId: "T" } },
@@ -452,28 +447,62 @@ describe("carrying decision case types and helper variables through the residue"
 });
 
 describe("lifting default grants", () => {
-  it("should keep permissions as rows when a default grant covers only some case types", () => {
+  const withRows = (...rows: Row[]) => {
     const spec = base();
     const permissions = spec.decisions.permissions;
     if (permissions === undefined) {
       throw new Error("no permissions");
     }
-    permissions.rows.push({ only: ["ct_a"], returns: { name: "supervisor", value: "Read" } });
-    const result = liftSpec(spec);
-    expect(result.report.counts.permissions.lifted).toBe(0);
-    expect(result.report.residue.some((r) => r.reason.includes("default grant of supervisor"))).toBe(true);
+    permissions.rows.push(...rows);
+    return liftSpec(spec);
+  };
+
+  it("should lift a default grant that covers only some case types as one grant for each group of case types when lifting", () => {
+    const result = withRows(
+      { only: ["ct_a"], returns: { name: "supervisor", value: "Read" } },
+      { only: ["ct_b"], returns: { name: "supervisor", value: "Own" } }
+    );
     expect(result.report.differences).toEqual([]);
+    expect(result.report.counts.permissions.residue).toBe(0);
+    expect(result.model.defaults?.permissions?.supervisor).toEqual([
+      { perms: ["Read"], only: ["ct_a"] },
+      { perms: ["Own"], only: ["ct_b"] }
+    ]);
   });
 
-  it("should keep permissions as rows when a role has two default grants", () => {
+  it("should keep only the rows granting a role twice as rows when a role has two default grants for one case type", () => {
+    const result = withRows({ returns: { name: "supervisor", value: "Read" } }, { returns: { name: "supervisor", value: "Own" } });
+    expect(result.report.differences).toEqual([]);
+    expect(result.report.counts.permissions.residue).toBe(2);
+  });
+});
+
+describe("lifting what the services write beyond the standard columns", () => {
+  it("should keep extra initiation outputs, a non-boolean or missing canReconfigure, extra configuration conditions and state-only cancellations when lifting", () => {
     const spec = base();
-    const permissions = spec.decisions.permissions;
-    if (permissions === undefined) {
-      throw new Error("no permissions");
-    }
-    permissions.rows.push({ returns: { name: "supervisor", value: "Read" } }, { returns: { name: "supervisor", value: "Own" } });
+    const at = (kind: Kind, row: Row) => {
+      const decision = spec.decisions[kind];
+      if (decision === undefined) {
+        throw new Error(`no ${kind}`);
+      }
+      decision.rows.push(row);
+    };
+    const initiation = spec.decisions.initiation;
+    initiation?.outputs.push({ name: "workingDaysAllowed", typeRef: "integer" });
+    spec.decisions.configuration?.inputs.push({ key: "toggle", typeRef: "boolean" });
+    at("initiation", { when: { eventId: { in: ["extra"] } }, returns: { taskId: "Vetting", name: "Vetting", workingDaysAllowed: 5 } });
+    at("configuration", { when: { taskType: { in: ["Vetting"] } }, returns: { name: "title", value: "T", canReconfigure: "true" } });
+    at("configuration", { when: { taskType: { in: ["Vetting"] } }, returns: { name: "description", value: "D" } });
+    at("configuration", { when: { taskType: { in: ["Vetting"] }, toggle: { in: [true] } }, returns: { name: "workType", value: "w", canReconfigure: false } });
+    at("cancellation", { when: { fromState: { in: ["Closed"] } }, returns: { action: "Cancel" } });
     const result = liftSpec(spec);
     expect(result.report.differences).toEqual([]);
-    expect(result.report.counts.permissions.lifted).toBe(0);
+    expect(result.report.residue.filter((r) => r.kind !== "completion")).toEqual([]);
+    const task = result.model.tasks.find((t) => t.id === "Vetting");
+    expect(task?.create?.some((t) => t.outputs?.workingDaysAllowed === 5)).toBe(true);
+    expect(task?.title).toEqual({ value: "T", reconfigure: "true" });
+    expect(task?.description).toEqual({ value: "D", reconfigure: null });
+    expect(task?.workType).toEqual(expect.arrayContaining([{ value: "w", when: { toggle: true } }]));
+    expect(result.model.cancellations?.some((r) => r.events === undefined && r.fromState === "Closed")).toBe(true);
   });
 });

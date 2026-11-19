@@ -13,7 +13,7 @@ const CaseTypeId = z.string().min(1);
 const OnlyList = z.array(CaseTypeId).min(1);
 
 /** An identifier that also appears in a row reference of the ordering file, so it has no whitespace or separators. */
-export const NAME_PATTERN = /^[A-Za-z0-9_.-]+$/;
+export const NAME_PATTERN = /^[A-Za-z0-9_./-]+$/;
 const Name = z.string().regex(NAME_PATTERN, "letters, digits, `_`, `.` and `-` only");
 
 /**
@@ -45,7 +45,10 @@ export function encodeCell(cell: Cell): FriendlyCell {
 export const ValEntry = z.strictObject({
   value: Expr,
   only: OnlyList.optional(),
-  reconfigure: z.boolean().optional(),
+  /** The row's `canReconfigure`: a boolean, another value where the service writes one, or null where the table has no such column. */
+  reconfigure: Expr.optional(),
+  /** Conditions on the configuration table's other input columns, by column key. */
+  when: z.record(z.string().min(1), FriendlyCell).optional(),
   /** The description of the table row this entry heads. */
   note: z.string().optional(),
   /** A value for a case type, as itself or as `{value}` (which can be null); a null override drops the entry for that case type. */
@@ -111,6 +114,8 @@ export const Trigger = z.strictObject({
   /** The name the task is created with, where this trigger differs from the task's `initialName`. */
   initialName: Expr.optional(),
   delay: Expr.optional(),
+  /** The values of the initiation table's other output columns, by column name, such as `workingDaysAllowed`. */
+  outputs: z.record(z.string().min(1), Expr).optional(),
   /** The category cancellation rules address, where this trigger differs from the task's `cancelCategory`. */
   cancelCategory: Expr.optional(),
   /** The description of the table row this trigger heads. */
@@ -190,16 +195,21 @@ export type Role = z.infer<typeof Role>;
 export const DefaultAttribute = z.strictObject({
   name: Name,
   value: Expr,
-  reconfigure: z.boolean().optional(),
+  reconfigure: Expr.optional(),
+  when: z.record(z.string().min(1), FriendlyCell).optional(),
   note: z.string().optional(),
   only: OnlyList.optional()
 });
 export type DefaultAttribute = z.infer<typeof DefaultAttribute>;
 
+/** A grant every task has, for some or all case types. */
+export const DefaultGrant = Grant.extend({ only: OnlyList.optional() });
+export type DefaultGrant = z.infer<typeof DefaultGrant>;
+
 export const Defaults = z.strictObject({
   configuration: z.array(DefaultAttribute).optional(),
-  /** Grants every task has, by role. */
-  permissions: z.record(Name, Grant).optional()
+  /** Grants every task has, by role: one for all case types, or one for each of several groups of case types. */
+  permissions: z.record(Name, z.union([DefaultGrant, z.array(DefaultGrant).min(1)])).optional()
 });
 export type Defaults = z.infer<typeof Defaults>;
 
@@ -207,9 +217,10 @@ export type Defaults = z.infer<typeof Defaults>;
 export const Cancellation = z.strictObject({
   /** Names the rule in the ordering file, so adding or removing a rule does not re-point the others. */
   id: Name.optional(),
-  events: FriendlyCell,
+  events: FriendlyCell.optional(),
   fromState: FriendlyCell.optional(),
   state: FriendlyCell.optional(),
+  toState: FriendlyCell.optional(),
   action: Expr,
   warning: z.strictObject({ code: Expr.optional(), text: Expr.optional() }).optional(),
   /** The `cancelCategory` of each task it applies to; none when the action is not about particular tasks. */
@@ -293,6 +304,8 @@ export const categoryParts = (category: string): string[] =>
     .map((part) => part.trim())
     .filter((part) => part !== "");
 
+const TRIGGER_OUTPUTS = ["taskId", "name", "delayDuration", "processCategories"];
+
 const RESERVED_WHEN = ["eventId", "eventID", "postEventState"];
 
 /** Checks the references the shape alone cannot: ids, roles, profiles and case types. */
@@ -318,8 +331,18 @@ export function validateModel(model: Model): string[] {
       role(`profile ${name}`, r);
     }
   }
-  for (const r of Object.keys(model.defaults?.permissions ?? {})) {
+  for (const [r, grants] of Object.entries(model.defaults?.permissions ?? {})) {
     role("defaults.permissions", r);
+    const seen: string[] = [];
+    for (const grant of [grants].flat()) {
+      known(`defaults.permissions ${r}`, grant.only);
+      const cases = grant.only ?? [...caseTypes];
+      const both = cases.filter((c) => seen.includes(c));
+      if (both.length > 0) {
+        problems.push(`defaults.permissions: ${r} is granted twice for ${both.join(", ")}`);
+      }
+      seen.push(...cases);
+    }
   }
   for (const [index, attribute] of (model.defaults?.configuration ?? []).entries()) {
     known(`defaults.configuration[${index}]`, attribute.only);
@@ -353,6 +376,11 @@ export function validateModel(model: Model): string[] {
       }
     };
     for (const trigger of task.create ?? []) {
+      for (const key of Object.keys(trigger.outputs ?? {})) {
+        if (TRIGGER_OUTPUTS.includes(key)) {
+          problems.push(`${where} create: outputs names ${key}, which the trigger sets itself`);
+        }
+      }
       for (const key of Object.keys(trigger.when ?? {})) {
         if (RESERVED_WHEN.includes(key)) {
           problems.push(`${where} create: when names ${key}, which the trigger's event and postState set`);

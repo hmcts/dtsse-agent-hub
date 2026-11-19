@@ -46,8 +46,8 @@ export const GROUPED: Partial<Record<Kind, string>> = { configuration: "taskType
  * The event column's key, which services spell `eventId` or `eventID`: content uses the kind's own spelling, and a row
  * takes the spelling of its decision's input column.
  */
-export const EVENT_KEYS: Partial<Record<Kind, string>> = { initiation: "eventId", completion: "eventID" };
-const EVENT_SPELLINGS = ["eventId", "eventID"];
+export const EVENT_KEYS: Partial<Record<Kind, string>> = { initiation: "eventId", completion: "eventID", cancellation: "event" };
+const EVENT_SPELLINGS = ["eventId", "eventID", "event"];
 
 /** A row's conditions with the event column, whichever way it is spelt, under the spelling `to`. */
 function respellEvent(when: Record<string, Cell>, to: string | undefined): Record<string, Cell> {
@@ -117,7 +117,8 @@ function pieces<T extends object>(model: Model, entry: T, cases: string[], overr
 interface ValPiece {
   value: Expr;
   cases: string[];
-  reconfigure: boolean | undefined;
+  reconfigure: Expr | undefined;
+  when?: Record<string, Cell>;
   note?: string;
 }
 
@@ -135,6 +136,7 @@ function valPieces(model: Model, val: Val, cases: string[]): ValPiece[] {
       value: piece.entry.value,
       cases: piece.cases,
       reconfigure: entry.reconfigure,
+      ...(entry.when === undefined ? {} : { when: Object.fromEntries(Object.entries(entry.when).map(([key, cell]) => [key, decodeCell(cell)])) }),
       ...(entry.note === undefined ? {} : { note: entry.note })
     }));
   });
@@ -199,6 +201,9 @@ function triggerContent(task: Task, trigger: Trigger, listedName: Expr | undefin
     when[key] = decodeCell(cell);
   }
   const returns: Record<string, Expr> = { taskId: task.id };
+  for (const [key, value] of Object.entries(trigger.outputs ?? {})) {
+    returns[key] = value;
+  }
   const name = trigger.initialName !== undefined ? trigger.initialName : task.initialName !== undefined ? task.initialName : listedName;
   if (name !== undefined) {
     returns.name = name;
@@ -226,9 +231,14 @@ function cancellationContent(rule: Cancellation, category: Expr | undefined): Co
   if (rule.fromState !== undefined) {
     when.fromState = decodeCell(rule.fromState);
   }
-  when.event = decodeCell(rule.events);
+  if (rule.events !== undefined) {
+    when.event = decodeCell(rule.events);
+  }
   if (rule.state !== undefined) {
     when.state = decodeCell(rule.state);
+  }
+  if (rule.toState !== undefined) {
+    when.toState = decodeCell(rule.toState);
   }
   const returns: Record<string, Expr> = { action: rule.action };
   if (rule.warning?.code !== undefined) {
@@ -272,6 +282,10 @@ function namedParts(model: Model, task: Task, trigger: Trigger, cases: string[],
   return parts;
 }
 
+/** A configuration row's outputs: `null` for `canReconfigure` means the table has no such column. */
+const flagged = (name: string, value: Expr, canReconfigure: Expr): Record<string, Expr> =>
+  canReconfigure === null ? { name, value } : { name, value, canReconfigure };
+
 /** Every row's worth of content the model describes, per kind, in the order it compiles when nothing says otherwise. */
 export function collectAtoms(model: Model): Atoms {
   const atoms = Object.fromEntries(KINDS.map((kind) => [kind, [] as Atom[]])) as Atoms;
@@ -296,14 +310,16 @@ export function collectAtoms(model: Model): Atoms {
       attribute.name,
       cases,
       {
-        when: {},
-        returns: { name: attribute.name, value: attribute.value, canReconfigure: attribute.reconfigure ?? false }
+        when: Object.fromEntries(Object.entries(attribute.when ?? {}).map(([key, cell]) => [key, decodeCell(cell)])),
+        returns: flagged(attribute.name, attribute.value, attribute.reconfigure === undefined ? false : attribute.reconfigure)
       },
       attribute.note
     );
   }
-  for (const [role, grant] of Object.entries(model.defaults?.permissions ?? {})) {
-    add("permissions", ALL_TASKS, role, all, grantContent(model, role, grant));
+  for (const [role, grants] of Object.entries(model.defaults?.permissions ?? {})) {
+    for (const { only, ...grant } of [grants].flat()) {
+      add("permissions", ALL_TASKS, role, only ? inOrder(model, only) : all, grantContent(model, role, grant));
+    }
   }
 
   for (const task of model.tasks) {
@@ -326,8 +342,8 @@ export function collectAtoms(model: Model): Atoms {
     const reconfigurable = new Set(task.reconfigure ?? []);
     for (const [name, val] of attributesOf(task)) {
       for (const piece of valPieces(model, val, own)) {
-        const canReconfigure = piece.reconfigure ?? reconfigurable.has(name);
-        add("configuration", task.id, name, piece.cases, { when: {}, returns: { name, value: piece.value, canReconfigure } }, piece.note);
+        const canReconfigure = piece.reconfigure !== undefined ? piece.reconfigure : reconfigurable.has(name);
+        add("configuration", task.id, name, piece.cases, { when: piece.when ?? {}, returns: flagged(name, piece.value, canReconfigure) }, piece.note);
       }
     }
     for (const { role, grant, cases } of resolveGrants(model, task)) {
