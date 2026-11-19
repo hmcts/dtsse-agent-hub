@@ -131,11 +131,14 @@ describe("diffPaths", () => {
 
   it("should list files present on one side only and compare the rest when two directories are given", () => {
     const { a, b } = dirs();
-    write(a, "one.dmn", base());
-    write(a, "gone.dmn", base());
-    write(b, "one.dmn", base());
-    write(b, "new.dmn", base());
-    expect(diffPaths({ dir: a }, { dir: b }).map((d) => `${d.file}: ${d.message}`)).toEqual(["gone.dmn: file only in first", "new.dmn: file only in second"]);
+    write(a, "wa-task-one.dmn", base());
+    write(a, "wa-task-gone.dmn", base());
+    write(b, "wa-task-one.dmn", base());
+    write(b, "wa-task-new.dmn", base());
+    expect(diffPaths({ dir: a }, { dir: b }).map((d) => `${d.file}: ${d.message}`)).toEqual([
+      "wa-task-gone.dmn: file only in first",
+      "wa-task-new.dmn: file only in second"
+    ]);
   });
 
   it("should compare the two named files when each side is a file", () => {
@@ -147,5 +150,19 @@ describe("diffPaths", () => {
     const differences = diffPaths({ dir: a, file: "x.dmn" }, { dir: b, file: "y.dmn" });
     expect(differences.map((d) => d.file)).toEqual(["x.dmn", "x.dmn"]);
     expect(differences.map((d) => d.message)[0]).toBe("rule count differs: 2 vs 1");
+  });
+});
+
+describe("diffDocuments variables", () => {
+  it("should ignore the id of a helper's variable and compare its name and type when the other file has different ids", () => {
+    const b = clone(base());
+    const variable = b.decisions[1]?.variable;
+    if (!variable) {
+      throw new Error("no variable");
+    }
+    variable.id = "InformationItem_other";
+    expect(diffDocuments("f", base(), b)).toEqual([]);
+    variable.typeRef = "integer";
+    expect(diffDocuments("f", base(), b).map((d) => d.message)).toEqual([expect.stringContaining("variable differs")]);
   });
 });

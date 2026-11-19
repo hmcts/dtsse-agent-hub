@@ -119,11 +119,11 @@ export type Row = z.infer<typeof Row>;
 
 /**
  * A named literal-expression decision a table reads, such as the latest referral's task title. It carries a variable named
- * like itself unless `variable` is false.
+ * like itself unless `variable` names another or is false for none.
  */
 export const Helper = z.strictObject({
   name: z.string().min(1),
-  variable: z.literal(false).optional(),
+  variable: z.union([z.string().min(1), z.literal(false)]).optional(),
   typeRef: z.string().optional(),
   language: z.string().optional(),
   historyTimeToLive: z.string().optional(),
@@ -134,7 +134,11 @@ export const Helper = z.strictObject({
       CaseTypeId,
       z.strictObject({
         expression: Expr.optional(),
-        variable: z.boolean().optional(),
+        /** Absent inherits the helper's; `null` is a variable named like the helper. */
+        variable: z
+          .union([z.string().min(1), z.literal(false)])
+          .nullable()
+          .optional(),
         typeRef: z.string().nullable().optional(),
         language: z.string().nullable().optional(),
         historyTimeToLive: z.string().nullable().optional()
@@ -160,6 +164,8 @@ export const DecisionOverride = z.strictObject({
 });
 
 export const Decision = z.strictObject({
+  /** The case types that have this kind of decision, when not all of them do. */
+  only: z.array(CaseTypeId).optional(),
   name: z.string().min(1),
   hitPolicy: z.enum(HIT_POLICIES),
   aggregation: z.enum(AGGREGATIONS).optional(),
@@ -227,6 +233,7 @@ export function validateSpec(spec: Spec): string[] {
       problems.push(`${kind}: duplicate output name`);
     }
     known(`${kind}.overrides`, Object.keys(decision.overrides ?? {}));
+    known(kind, decision.only);
     for (const column of [...decision.inputs, ...decision.outputs]) {
       known(`${kind} column`, column.only);
       known(`${kind} column overrides`, Object.keys(column.overrides ?? {}));

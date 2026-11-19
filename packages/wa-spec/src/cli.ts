@@ -77,18 +77,17 @@ function main(argv: string[]): number {
     if (!a || !b) {
       fail(USAGE);
     }
-    const isDir = isDirectory;
     const side = (path: string, counterpart: string) => {
-      if (!isDir(path)) {
+      if (!isDirectory(path)) {
         return { dir: dirname(path), file: basename(path) };
       }
-      return isDir(counterpart) ? { dir: path } : { dir: path, file: basename(counterpart) };
+      return isDirectory(counterpart) ? { dir: path } : { dir: path, file: basename(counterpart) };
     };
     for (const [file, other] of [
       [a, b],
       [b, a]
     ] as const) {
-      if (!isDir(file) && isDir(other) && !exists(join(other, basename(file)))) {
+      if (!isDirectory(file) && isDirectory(other) && !exists(join(other, basename(file)))) {
         fail(`${other} has no file named ${basename(file)} to compare ${file} with`);
       }
     }
@@ -112,4 +111,9 @@ function main(argv: string[]): number {
   return command === undefined || command === "help" ? 0 : 2;
 }
 
-process.exitCode = main(process.argv.slice(2));
+try {
+  process.exitCode = main(process.argv.slice(2));
+} catch (error) {
+  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+  process.exitCode = 2;
+}

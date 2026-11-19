@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { align, majority, mergeSequences } from "./merge.ts";
+import { align, byCodePoint, majority, mergeSequences } from "./merge.ts";
 
 const ids = (m: Array<{ item: string; caseTypes: string[] }>) => m.map((x) => `${x.item}:${x.caseTypes.join("+")}`);
 
@@ -41,5 +41,12 @@ describe("align", () => {
 
   it("should list only additions when the first sequence is empty", () => {
     expect(align([], ["a"])).toEqual([{ op: "add", b: 0 }]);
+  });
+});
+
+describe("byCodePoint", () => {
+  it("should order strings by code point when used as a comparator", () => {
+    expect(["b", "B", "a", "_"].sort(byCodePoint)).toEqual(["B", "_", "a", "b"]);
+    expect(byCodePoint("a", "a")).toBe(0);
   });
 });

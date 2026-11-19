@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { sampleDmn } from "./__fixtures__/dmn.ts";
-import { inspectDmn, ncName, parseDmn, writeDmn } from "./dmn-model.ts";
+import { inspectDmn, ncName, parseDmn, readDmn, writeDmn } from "./dmn-model.ts";
 
 describe("parseDmn and writeDmn", () => {
   it("should read back what was written when the document is written and parsed again", () => {
@@ -189,5 +189,14 @@ describe("entities and namespaces", () => {
     const root = /<definitions[^>]*>/.exec(writeDmn(doc))?.[0] ?? "";
     expect(root.indexOf("xmlns:dc=")).toBeLessThan(root.indexOf('xmlns="'));
     expect(root.indexOf('xmlns="')).toBeLessThan(root.indexOf("xmlns:camunda="));
+  });
+});
+
+describe("readDmn", () => {
+  it("should give the same document and inspection as parsing and inspecting separately when the file has both", () => {
+    const xml = sampleDmn("ct_a").replace("<rule ", '<rule extra="1" ');
+    const { document, inspection } = readDmn(xml);
+    expect(document).toEqual(parseDmn(xml));
+    expect(inspection).toEqual(inspectDmn(xml));
   });
 });

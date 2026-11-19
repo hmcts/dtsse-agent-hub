@@ -34,7 +34,7 @@ export function decisionKey(spec: Spec, kind: Kind, caseType: string): string {
  */
 export function generateDocument(spec: Spec, kind: Kind, caseType: string, layout?: Layout): DmnDocument | undefined {
   const decision: Decision | undefined = spec.decisions[kind];
-  if (!decision || !spec.caseTypes.some((c) => c.id === caseType)) {
+  if (!decision || !applies(decision.only, caseType) || !spec.caseTypes.some((c) => c.id === caseType)) {
     return undefined;
   }
   const own = decision.overrides?.[caseType];
@@ -92,12 +92,12 @@ export function generateDocument(spec: Spec, kind: Kind, caseType: string, layou
     const helperTtl = overridden(override?.historyTimeToLive, helper.historyTimeToLive);
     const typeRef = overridden(override?.typeRef, helper.typeRef);
     const language = overridden(override?.language, helper.language);
-    const hasVariable = (override?.variable ?? helper.variable) !== false;
+    const variableName = override?.variable === undefined ? helper.variable : override.variable;
     return {
       id: helperId(helper.name),
       name: helper.name,
       ...(helperTtl === undefined ? {} : { historyTimeToLive: helperTtl }),
-      ...(hasVariable ? { variable: { name: helper.name, ...(typeRef === undefined ? {} : { typeRef }) } } : {}),
+      ...(variableName === false ? {} : { variable: { name: variableName ?? helper.name, ...(typeRef === undefined ? {} : { typeRef }) } }),
       requires: requiresOf(helper.name),
       literal: {
         text: renderExpr(override?.expression === undefined ? helper.expression : override.expression),

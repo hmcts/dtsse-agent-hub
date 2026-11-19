@@ -43,6 +43,8 @@ const FileLayout = z.strictObject({
   namespaces: z.array(Words).optional(),
   exporter: z.string().optional(),
   exporterVersion: z.string().optional(),
+  /** The root element's other attributes in file order, each `<name> <value>`. */
+  attributes: z.array(Words).optional(),
   /** Keyed by `table` for the main decision, or by a helper's name. */
   decisions: z.record(z.string(), DecisionLayout),
   diagram: z
@@ -178,6 +180,7 @@ export function layoutOf(doc: DmnDocument, main: DmnDecision, inputKeys: string[
   return {
     id: doc.id,
     ...(doc.namespaces ? { namespaces: doc.namespaces.map(([name, uri]) => `${name} ${uri}`) } : {}),
+    ...(doc.attributes ? { attributes: doc.attributes.map(([name, value]) => `${name} ${value}`) } : {}),
     ...(doc.exporter === undefined ? {} : { exporter: doc.exporter }),
     ...(doc.exporterVersion === undefined ? {} : { exporterVersion: doc.exporterVersion }),
     decisions,
@@ -281,6 +284,9 @@ export function applyLayout(doc: DmnDocument, layout: FileLayout | undefined, in
   return {
     ...doc,
     ...(namespaces ? { namespaces } : {}),
+    ...(layout.attributes
+      ? { attributes: layout.attributes.map((line): [string, string] => [line.split(" ")[0] as string, line.split(" ").slice(1).join(" ")]) }
+      : {}),
     ...(layout.exporter === undefined ? {} : { exporter: layout.exporter }),
     ...(layout.exporterVersion === undefined ? {} : { exporterVersion: layout.exporterVersion }),
     decisions,

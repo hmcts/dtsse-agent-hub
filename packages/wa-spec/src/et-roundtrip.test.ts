@@ -6,12 +6,11 @@ import { diffDocuments } from "./diff.ts";
 import { parseDmn } from "./dmn-model.ts";
 import { generateAll } from "./generator.ts";
 import { importDmns } from "./importer.ts";
+import { byCodePoint } from "./merge.ts";
 import { parseLayout, parseSpec, stringifyLayout, stringifySpec } from "./spec-io.ts";
 import { taskRows } from "./task-view.ts";
 
 const resources = fileURLToPath(new URL("../test-fixtures/et", import.meta.url));
-
-const byCodePoint = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 describe("ET round trip", () => {
   const files = readdirSync(resources)

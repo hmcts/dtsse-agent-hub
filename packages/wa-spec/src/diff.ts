@@ -1,8 +1,8 @@
 import { join } from "node:path";
-import { type DmnDecision, type DmnDocument, type DmnRule, parseDmn } from "./dmn-model.ts";
+import { type DmnDecision, type DmnDocument, type DmnInput, type DmnOutput, type DmnRule, parseDmn } from "./dmn-model.ts";
 import { canonicalCell, canonicalExpr } from "./feel.ts";
 import { listDir, readText } from "./file-io.ts";
-import { align } from "./merge.ts";
+import { align, byCodePoint } from "./merge.ts";
 
 export interface DiffOptions {
   /** Compare rules as a set even where the hit policy makes their order matter. */
@@ -42,13 +42,19 @@ function describeRule(rule: DmnRule, index: number): string {
   return `rule ${index + 1} (${text.length > 110 ? `${text.slice(0, 110)}...` : text})`;
 }
 
+const inputSignature = (i: DmnInput): string =>
+  JSON.stringify([i.label ?? null, i.inputVariable ?? null, i.typeRef ?? null, i.expressionLanguage ?? null, canonicalExpr(i.expression)]);
+
+const outputSignature = (o: DmnOutput): string => JSON.stringify([o.label ?? null, o.name, o.typeRef ?? null]);
+
 function diffDecision(file: string, a: DmnDecision, b: DmnDecision, options: DiffOptions, out: Difference[]): void {
   const at = (message: string) => out.push({ file, decision: a.name, message });
   if ((a.historyTimeToLive ?? "") !== (b.historyTimeToLive ?? "")) {
     at(`historyTimeToLive differs: ${a.historyTimeToLive} vs ${b.historyTimeToLive}`);
   }
-  if (JSON.stringify(a.variable ?? null) !== JSON.stringify(b.variable ?? null)) {
-    at(`variable differs: ${JSON.stringify(a.variable)} vs ${JSON.stringify(b.variable)}`);
+  const variable = (d: DmnDecision) => JSON.stringify(d.variable ? { name: d.variable.name, typeRef: d.variable.typeRef } : null);
+  if (variable(a) !== variable(b)) {
+    at(`variable differs: ${variable(a)} vs ${variable(b)}`);
   }
   if (Boolean(a.table) !== Boolean(b.table) || Boolean(a.literal) !== Boolean(b.literal)) {
     at("one is a decision table and the other is not");
@@ -68,14 +74,10 @@ function diffDecision(file: string, a: DmnDecision, b: DmnDecision, options: Dif
     if (ta.hitPolicy !== tb.hitPolicy || (ta.aggregation ?? "") !== (tb.aggregation ?? "")) {
       at(`hit policy differs: ${ta.hitPolicy} ${ta.aggregation ?? ""} vs ${tb.hitPolicy} ${tb.aggregation ?? ""}`);
     }
-    const colA = ta.inputs.map((i) =>
-      JSON.stringify([i.label ?? null, i.inputVariable ?? null, i.typeRef ?? null, i.expressionLanguage ?? null, canonicalExpr(i.expression)])
-    );
-    const colB = tb.inputs.map((i) =>
-      JSON.stringify([i.label ?? null, i.inputVariable ?? null, i.typeRef ?? null, i.expressionLanguage ?? null, canonicalExpr(i.expression)])
-    );
-    const outA = ta.outputs.map((o) => JSON.stringify([o.label ?? null, o.name, o.typeRef ?? null]));
-    const outB = tb.outputs.map((o) => JSON.stringify([o.label ?? null, o.name, o.typeRef ?? null]));
+    const colA = ta.inputs.map(inputSignature);
+    const colB = tb.inputs.map(inputSignature);
+    const outA = ta.outputs.map(outputSignature);
+    const outB = tb.outputs.map(outputSignature);
     let columnsEqual = true;
     for (const [what, x, y] of [
       ["input", colA, colB],
@@ -172,7 +174,7 @@ export function diffDocuments(file: string, a: DmnDocument, b: DmnDocument, opti
     if (decision.table && other.table && decision.id !== other.id) {
       out.push({ file, decision: decision.name, message: `decision id differs: ${decision.id} vs ${other.id}` });
     }
-    const required = (d: DmnDecision, names: Map<string, string>) => d.requires.map((id) => names.get(id) ?? id).sort((x, y) => (x < y ? -1 : x > y ? 1 : 0));
+    const required = (d: DmnDecision, names: Map<string, string>) => d.requires.map((id) => names.get(id) ?? id).sort(byCodePoint);
     if (JSON.stringify(required(decision, na)) !== JSON.stringify(required(other, nb))) {
       out.push({ file, decision: decision.name, message: `requires differ: ${required(decision, na).join(", ")} vs ${required(other, nb).join(", ")}` });
     }
@@ -188,8 +190,8 @@ export function diffDocuments(file: string, a: DmnDocument, b: DmnDocument, opti
 
 const dmnFiles = (dir: string): string[] =>
   listDir(dir)
-    .filter((f) => f.endsWith(".dmn"))
-    .sort((x, y) => (x < y ? -1 : x > y ? 1 : 0));
+    .filter((f) => f.startsWith("wa-task-") && f.endsWith(".dmn"))
+    .sort(byCodePoint);
 
 /** Compares two files, or two directories file by file by name. */
 export function diffPaths(a: { dir: string; file?: string }, b: { dir: string; file?: string }, options: DiffOptions = {}): Difference[] {

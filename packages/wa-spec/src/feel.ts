@@ -1,7 +1,7 @@
 import type { Cell, CompareOp, Comparison, Cond, Expr, Scalar } from "./schema.ts";
 
 /** `raw` is anything outside the structured forms: an escaped string, a number written another way, or a character the grammar lacks. */
-type Token = { t: "str" | "num" | "id" | "kw" | "op" | "raw"; v: string; text: string; space: boolean };
+type Token = { t: "str" | "num" | "id" | "kw" | "op" | "raw"; v: string; text: string };
 
 const KEYWORDS = new Set(["if", "then", "else", "and", "or", "null", "true", "false"]);
 const OPERATORS = ["!=", "<=", ">=", "=", "<", ">", "(", ")", ".", "+", "-", ","];
@@ -20,20 +20,17 @@ const MULTI_WORD_FUNCTIONS = [
   "lower case"
 ];
 
-/** Splits FEEL into tokens, keeping each token's source text and whether whitespace came before it. Every input lexes. */
+/** Splits FEEL into tokens, keeping each token's source text. Every input lexes. */
 function lex(text: string): Token[] {
   const tokens: Token[] = [];
   let i = 0;
-  let space = false;
   const push = (t: Token["t"], v: string, source: string) => {
-    tokens.push({ t, v, text: source, space: space && tokens.length > 0 });
-    space = false;
+    tokens.push({ t, v, text: source });
     i += source.length;
   };
   while (i < text.length) {
     const c = text.charAt(i);
     if (/\s/.test(c)) {
-      space = true;
       i++;
     } else if (c === '"') {
       let end = i + 1;
@@ -186,10 +183,12 @@ function parseNode(tokens: Token[]): Node {
     return left;
   };
   const chain = (word: "and" | "or", next: () => Node): Node => {
-    const items = [next()];
+    const items: Node[] = [];
+    const add = (node: Node) => (node.n === word ? items.push(...node.items) : items.push(node));
+    add(next());
     while (isKw(word)) {
       pos++;
-      items.push(next());
+      add(next());
     }
     return items.length === 1 ? (items[0] as Node) : { n: word, items };
   };
@@ -275,10 +274,14 @@ function toExpr(node: Node): Expr {
   }
 }
 
-/** Collapses whitespace outside string literals, so equal FEEL written with different layout compares equal. */
+/** Drops whitespace outside string literals, keeping one space only between two words, so FEEL written with different layout compares equal. */
 export function normaliseFeel(text: string): string {
+  const word = /^[\p{L}\p{N}_]$/u;
   return lex(text)
-    .map((token) => (token.space ? ` ${token.text}` : token.text))
+    .map((token, i, tokens) => {
+      const before = tokens[i - 1]?.text.at(-1) ?? "";
+      return word.test(before) && word.test(token.text.charAt(0)) ? ` ${token.text}` : token.text;
+    })
     .join("");
 }
 
