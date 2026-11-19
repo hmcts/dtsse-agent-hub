@@ -35,8 +35,6 @@ export interface Atom {
   content: Content;
   /** `stable(content)`, computed once. */
   contentKey: string;
-  /** What the entry looked like: see `fingerprintOf`. */
-  fingerprint: string;
   /** The description of the table row this entry heads. */
   note?: string;
 }
@@ -285,7 +283,6 @@ export function collectAtoms(model: Model): Atoms {
       cases,
       content,
       contentKey: stable(content),
-      fingerprint: fingerprintOf(cases, content.when, content.returns),
       ...(note === undefined ? {} : { note })
     });
   };
@@ -374,37 +371,8 @@ function withRefs(atoms: Atom[]): Atom[] {
 
 export const overlapping = (a: string[], b: string[]): boolean => a.some((x) => b.includes(x));
 
-/** What an atom looked like, for matching an edited entry to the reference it replaced: its case types, then a hash of each field. */
-export function fingerprintOf(cases: string[], when: Record<string, unknown>, returns: Record<string, unknown>): string {
-  const fields = (side: string, record: Record<string, unknown>) =>
-    Object.entries(record).map(([key, value]) => `${side}.${key}=${createHash("sha1").update(stable(value)).digest("hex").slice(0, 4)}`);
-  return [cases.join(","), ...fields("w", when), ...fields("r", returns)].join(";");
-}
-
 /** An atom's identity for grouping rows: its content and the case types it covers here. */
 const atomSignature = (atom: Atom, cases: string[]): string => `${atom.contentKey}@${cases.join(",")}`;
-
-/** The fingerprint of a residue row, and the token it is named by: a hash of the row, with a count for identical rows. */
-export const rowFingerprint = (row: Row, all: string[]): string => fingerprintOf(row.only ?? all, row.when ?? {}, row.returns ?? {});
-
-export function residueRefs(rows: Row[]): string[] {
-  const seen = new Map<string, number>();
-  return rows.map((row) => {
-    const base = `~${createHash("sha1").update(stable(row)).digest("hex").slice(0, 6)}`;
-    const n = (seen.get(base) ?? 0) + 1;
-    seen.set(base, n);
-    return n > 1 ? `${base}.${n}` : base;
-  });
-}
-
-function closeness(was: string, now: string): number {
-  const [cases = "", ...fields] = was.split(";");
-  const [casesNow = "", ...fieldsNow] = now.split(";");
-  const before = cases.split(",");
-  const after = casesNow.split(",");
-  const kept = before.length === after.length && before.every((c) => after.includes(c)) ? 1000 : overlapping(before, after) ? 500 : 0;
-  return kept + fields.filter((field) => fieldsNow.includes(field)).length;
-}
 
 /** The slot of a cancellation rule with no `id`: a hash of the rule, so its place does not depend on its position. */
 const ruleSlot = (rule: Cancellation): string =>
@@ -457,101 +425,12 @@ function orderedRow(kind: Kind, decision: Decision, out: OutRow, all: string[], 
   };
 }
 
-/** Matches stale tokens to unnamed candidates, best score first (ties in token, then candidate, order); a score of 0 never matches. */
-function pairStale<T>(tokens: string[], candidates: T[], score: (token: string, candidate: T) => number): Map<string, T> {
-  const pairs = tokens
-    .flatMap((token) => candidates.map((candidate) => ({ token, candidate, score: score(token, candidate) })))
-    .filter((pair) => pair.score > 0)
-    .sort((x, y) => y.score - x.score);
-  const matched = new Map<string, T>();
-  const taken = new Set<T>();
-  for (const { token, candidate } of pairs) {
-    if (!matched.has(token) && !taken.has(candidate)) {
-      matched.set(token, candidate);
-      taken.add(candidate);
-    }
-  }
-  return matched;
-}
-
 /** The rows of one table: the ordering file's rows first, then whatever it does not mention, then unplaced residue rows. */
-function buildRows(
-  kind: Kind,
-  decision: Decision,
-  atoms: Atom[],
-  residue: Row[],
-  order: OrderRow[] | undefined,
-  all: string[],
-  fingerprints: Record<string, string> | undefined
-): Row[] {
+function buildRows(kind: Kind, decision: Decision, atoms: Atom[], residue: Row[], order: OrderRow[] | undefined, all: string[]): Row[] {
   const taskKey = GROUPED[kind];
   const byRef = new Map(atoms.map((atom) => [atom.ref, atom]));
-  const named = new Set((order ?? []).flatMap((item) => (typeof item === "string" ? item : item.row).split(" ")));
-  const taken = new Set<Atom>();
-  // A token whose atom changed (its hash covers content and case types) or that was written before its slot gained atoms
-  // stands for an atom of the same `<task>/<slot>` that no token names. Stale tokens are matched to those atoms by
-  // closeness to what the token's entry looked like (same case types, then most fields equal), best pairs first, and the
-  // mapping is kept, so every row naming a token finds the same atom.
-  const mapped = new Map<string, Atom[]>();
-  const spares = atoms.filter((a) => !named.has(a.ref));
-  const stale = [...named].filter((t) => t !== "" && !/^[@~]/.test(t) && !byRef.has(t));
-  const rowRefs = residueRefs(residue);
-  const residueNamed = new Set([...named].filter((t) => t.startsWith("~")));
-  const residueFor = new Map<string, number>(rowRefs.flatMap((ref, i) => (residueNamed.has(ref) ? [[ref, i]] : [])));
-  const spareRows = rowRefs.flatMap((ref, i) => (residueNamed.has(ref) ? [] : [i]));
-  const staleRows = [...residueNamed].filter((t) => !residueFor.has(t));
-  const spareRowPrints = new Map(spareRows.map((i) => [i, rowFingerprint(residue[i] as Row, all)]));
-  for (const [token, i] of pairStale(staleRows, spareRows, (token, i) =>
-    fingerprints?.[token] ? closeness(fingerprints[token] as string, spareRowPrints.get(i) as string) : 1
-  )) {
-    residueFor.set(token, i);
-  }
-  // Without a fingerprint, only the case types of the rows naming the token say which atom it stood for.
-  const rowCases = new Map<string, string[]>();
-  for (const item of order ?? []) {
-    const tokens = (typeof item === "string" ? item : item.row).split(" ");
-    const only = tokens
-      .find((t) => t.startsWith("@"))
-      ?.slice(1)
-      .split(",");
-    for (const token of only ? tokens : []) {
-      rowCases.set(token, [...(rowCases.get(token) ?? []), ...(only ?? [])]);
-    }
-  }
-  const sameSlot = (token: string, a: Atom) => bucketOf(a) === token.replace(/#.*$/, "");
-  const eventOf = (fingerprint: string | undefined) => fingerprint?.split(";").find((field) => field.startsWith("w.event="));
-  // A cancellation rule that was renamed, or has no id and is named by a hash of itself, is matched to a rule it shares an event with.
-  const sameRule = (token: string, a: Atom) =>
-    kind === "cancellation" && a.task === RULES && eventOf(fingerprints?.[token]) !== undefined && eventOf(fingerprints?.[token]) === eventOf(a.fingerprint);
-  for (const [token, atom] of pairStale(stale, spares, (token, atom) => {
-    if (!sameSlot(token, atom) && !sameRule(token, atom)) {
-      return 0;
-    }
-    const fingerprint = fingerprints?.[token];
-    const wanted = rowCases.get(token);
-    return fingerprint ? closeness(fingerprint, atom.fingerprint) : !wanted || overlapping(wanted, atom.cases) ? 1 : 0;
-  })) {
-    mapped.set(token, [atom]);
-    taken.add(atom);
-  }
-  const atomOf = (token: string, only: string[] | undefined): Atom | undefined => {
-    const exact = byRef.get(token);
-    if (exact) {
-      return exact;
-    }
-    const fits = (a: Atom) => !only || overlapping(a.cases, only);
-    const known = mapped.get(token) ?? [];
-    const again = known.find(fits);
-    if (again) {
-      return again;
-    }
-    const spare = spares.find((a) => sameSlot(token, a) && !taken.has(a) && fits(a));
-    if (spare) {
-      taken.add(spare);
-      mapped.set(token, [...known, spare]);
-    }
-    return spare;
-  };
+  // A reference that names no entry (it was edited or deleted) is skipped; the entry is then placed with the unnamed ones.
+  const atomOf = (token: string): Atom | undefined => byRef.get(token);
   const covered = new Map<string, Set<string>>();
   const out: OutRow[] = [];
   const usedResidue = new Set<number>();
@@ -576,14 +455,14 @@ function buildRows(
     const members: Array<{ atom: Atom; cases: string[] }> = [];
     for (const token of tokens) {
       if (token.startsWith("~")) {
-        const n = (residueFor.get(token) ?? -1) + 1;
+        const n = Number(token.slice(1));
         const rowOf = residue[n - 1];
         if (rowOf && !usedResidue.has(n)) {
           usedResidue.add(n);
           out.push({ sig: `~${n}`, tasks: [], content: { when: {}, returns: {} }, cases: [], grouped: false, description: undefined, residue: rowOf });
         }
       } else if (!token.startsWith("@")) {
-        const atom = atomOf(token, only);
+        const atom = atomOf(token);
         const cases = atom && (only ? atom.cases.filter((c) => only.includes(c)) : atom.cases);
         if (atom && cases && cases.length > 0) {
           members.push({ atom, cases });
@@ -748,7 +627,7 @@ export function compileModel(model: Model, ordering?: Ordering, collected?: Atom
     const decision = table ?? standardDecision(kind, model);
     decisions[kind] = {
       ...decision,
-      rows: buildRows(kind, decision, atoms[kind], table?.rows ?? [], ordering?.rows[kind], all, ordering?.fingerprints?.[kind])
+      rows: buildRows(kind, decision, atoms[kind], table?.rows ?? [], ordering?.rows[kind], all)
     };
   }
   const spec: Spec = { version: 1, service: model.service, caseTypes: model.caseTypes, decisions };

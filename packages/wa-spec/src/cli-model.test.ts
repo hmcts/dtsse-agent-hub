@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parse, stringify } from "yaml";
 import { sampleDmn } from "./__fixtures__/dmn.ts";
+import { BASE } from "./__fixtures__/model.ts";
 
 const cli = fileURLToPath(new URL("./cli.ts", import.meta.url));
 const run = (...args: string[]) =>
@@ -98,5 +99,18 @@ describe("cli model options", () => {
     const relaxed = run("diff", join(dir, "spec.yaml"), join(dir, "reversed.yaml"), "--ignore-rule-order");
     expect(relaxed.status).toBe(0);
     expect(relaxed.stdout).toContain("no differences");
+  });
+});
+
+describe("cli show", () => {
+  it("should show the rows of a task when given a model", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wa-spec-show-"));
+    writeFileSync(join(dir, "m.yaml"), BASE);
+    const shown = spawnSync(process.execPath, ["--import", "tsx", fileURLToPath(new URL("./cli.ts", import.meta.url)), "show", join(dir, "m.yaml"), "A"], {
+      encoding: "utf8",
+      cwd: fileURLToPath(new URL("..", import.meta.url))
+    });
+    expect(shown.status).toBe(0);
+    expect(shown.stdout).toContain("workType");
   });
 });

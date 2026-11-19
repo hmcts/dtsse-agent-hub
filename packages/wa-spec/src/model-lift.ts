@@ -29,8 +29,6 @@ import {
   inCaseOrder,
   overlapping,
   RULES,
-  residueRefs,
-  rowFingerprint,
   stable,
   withCanonicalEvent
 } from "./model-compile.ts";
@@ -858,12 +856,6 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
   const atoms = collectAtoms(model);
   const ordering: Ordering = { version: 1, rows: {} };
   let unmatched: string | undefined;
-  const fingerprints: NonNullable<Ordering["fingerprints"]> = {};
-  const remember = (kind: Kind, ref: string, print: string) => {
-    const own = fingerprints[kind] ?? {};
-    own[ref] = print;
-    fingerprints[kind] = own;
-  };
   for (const kind of KINDS) {
     if (!spec.decisions[kind]) {
       continue;
@@ -873,14 +865,11 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
       const key = `${atom.task}/${atom.slot}`;
       buckets.set(key, [...(buckets.get(key) ?? []), atom]);
     }
-    const residueRef = residueRefs(residue[kind]);
     const used = new Map<Atom, string[]>();
     const rows: OrderRow[] = [];
     for (const entry of classified[kind]) {
       if (entry.residueIndex !== undefined) {
-        const ref = residueRef[entry.residueIndex - 1] as string;
-        remember(kind, ref, rowFingerprint(entry.row, caseIds));
-        rows.push(ref);
+        rows.push(`~${entry.residueIndex}`);
         continue;
       }
       const result = entry.result as Classified;
@@ -900,9 +889,6 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
         used.set(atom, [...(used.get(atom) ?? []), ...item.cases]);
         tokens.push(atom.ref);
         matched.push(atom);
-        if (atom.ref.includes("#") || kind === "cancellation") {
-          remember(kind, atom.ref, atom.fingerprint);
-        }
         differs ||= !sameSet(atom.cases, result.cases);
       }
       const text = [...tokens, ...(differs ? [`@${result.cases.join(",")}`] : [])].join(" ");
@@ -913,9 +899,6 @@ export function liftSpec(spec: Spec, options: LiftOptions = {}): LiftResult {
     ordering.rows[kind] = rows;
   }
 
-  if (Object.keys(fingerprints).length > 0) {
-    ordering.fingerprints = fingerprints;
-  }
   const counts = Object.fromEntries(
     KINDS.map((kind) => [kind, { rows: classified[kind].length, lifted: classified[kind].length - residue[kind].length, residue: residue[kind].length }])
   ) as Record<Kind, KindCount>;

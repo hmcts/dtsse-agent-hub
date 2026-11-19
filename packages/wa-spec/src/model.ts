@@ -242,22 +242,19 @@ export type Model = z.infer<typeof Model>;
 
 /**
  * Where each table's row order and grouping comes from. A row is a space-separated list of references to the model's entries:
- * `<task>/<slot>` for a task's entry (a configuration attribute, a role, `create`, `complete`, `type`), `*`\/<name>` for a
- * default, `!/<id>` for a cancellation rule (`!/r<hash>` when it has no `id`) and `~<hash>` for a row of the model's
+ * `<task>/<slot>` for a task's entry (a configuration attribute, a role, `create`, `complete`, `type`), `*\/<name>` for a
+ * default, `!/<id>` for a cancellation rule (`!/r<hash>` when it has no `id`) and `~<n>` for the nth row of the model's
  * `tables` residue. A slot with several entries adds `#<hash>` of the entry's content and case types, and `.2`, `.3` for
- * identical ones. A reference whose entry has since changed stands for the closest entry of that slot (or residue row, or
- * cancellation rule of that id) that no reference names, using the order file's `fingerprints`. A row
- * ends in `@<case types>` where it covers fewer case types than its entries. A row has the description of its first
- * entry's `note`; an object row states another (`null` for none).
+ * identical ones. A row ends in `@<case types>` where it covers fewer case types than its entries, and has the description
+ * of its first entry's `note`; an object row states another (`null` for none). An entry no reference names, because it was
+ * added or edited, joins an existing row of identical content or is appended.
  */
 export const OrderRow = z.union([z.string(), z.strictObject({ row: z.string(), description: z.string().nullable() })]);
 export type OrderRow = z.infer<typeof OrderRow>;
 
 export const Ordering = z.strictObject({
   version: z.literal(1),
-  rows: z.partialRecord(z.enum(KINDS), z.array(OrderRow)),
-  /** What each hashed reference's entry looked like, so an edited entry is matched to its reference by closeness. */
-  fingerprints: z.partialRecord(z.enum(KINDS), z.record(z.string(), z.string())).optional()
+  rows: z.partialRecord(z.enum(KINDS), z.array(OrderRow))
 });
 export type Ordering = z.infer<typeof Ordering>;
 
