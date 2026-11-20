@@ -72,6 +72,7 @@ export default defineConfig({
         "src/assistant/upload-disk.ts",
         "src/assistant/lookup-store.ts",
         "src/assistant/welsh-store.ts",
+        "src/assistant/wa-builder-store.ts",
         "src/assistant/export-default-store.ts",
         "src/assistant/fork-store.ts",
         "src/assistant/artefact-store.ts",

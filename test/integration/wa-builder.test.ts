@@ -17,21 +17,22 @@ beforeEach(resetDatabase);
 
 describe("wa specs", () => {
   it("should read back ET's model, ordering and layout unchanged when saved as version 1", async () => {
-    expect(await saveWaSpec(prisma, { service: "employment", model, ordering, layout, savedBy: "alice" })).toEqual({ version: 1 });
+    expect(await saveWaSpec(prisma, { service: "employment", model, ordering, layout, savedBy: "alice", basedOn: 0 })).toEqual({ version: 1 });
 
     const read = await getWaSpec(prisma, "employment");
 
     expect(read).toMatchObject({ service: "employment", version: 1, savedBy: "alice" });
-    expect(read?.model).toEqual(model);
+    const { order: _order, layout: _layout, ...withoutFiles } = model;
+    expect(read?.model).toEqual(withoutFiles);
     expect(read?.ordering).toEqual(ordering);
     expect(read?.layout).toEqual(layout);
   });
 
   it("should number versions per service and read the latest when none is named", async () => {
-    await saveWaSpec(prisma, { service: "employment", model, savedBy: "alice" });
+    await saveWaSpec(prisma, { service: "employment", model, savedBy: "alice", basedOn: 0 });
     await saveWaSpec(prisma, { service: "employment", model, savedBy: "bob", basedOn: 1 });
     const other = { ...model, service: { ...model.service, slug: "civil", displayName: "Civil" } };
-    await saveWaSpec(prisma, { service: "civil", model: other, savedBy: "alice" });
+    await saveWaSpec(prisma, { service: "civil", model: other, savedBy: "alice", basedOn: 0 });
 
     expect((await getWaSpec(prisma, "employment"))?.version).toBe(2);
     expect((await getWaSpec(prisma, "employment", 1))?.savedBy).toBe("alice");
@@ -43,14 +44,14 @@ describe("wa specs", () => {
   it("should store a service whose slug has an underscore when it is saved", async () => {
     const other = { ...model, service: { ...model.service, slug: "st_cic" } };
 
-    expect(await saveWaSpec(prisma, { service: "st_cic", model: other, savedBy: "alice" })).toEqual({ version: 1 });
+    expect(await saveWaSpec(prisma, { service: "st_cic", model: other, savedBy: "alice", basedOn: 0 })).toEqual({ version: 1 });
   });
 
   it("should list each service once at its latest version when several are saved", async () => {
-    await saveWaSpec(prisma, { service: "employment", model, savedBy: "alice" });
-    await saveWaSpec(prisma, { service: "employment", model, savedBy: "alice" });
+    await saveWaSpec(prisma, { service: "employment", model, savedBy: "alice", basedOn: 0 });
+    await saveWaSpec(prisma, { service: "employment", model, savedBy: "alice", basedOn: 1 });
     const other = { ...model, service: { ...model.service, slug: "civil", displayName: "Civil" } };
-    await saveWaSpec(prisma, { service: "civil", model: other, savedBy: "alice" });
+    await saveWaSpec(prisma, { service: "civil", model: other, savedBy: "alice", basedOn: 0 });
 
     const services = await listWaServices(prisma);
 
@@ -62,21 +63,25 @@ describe("wa specs", () => {
   });
 
   it("should refuse when the edit is based on a version that is not the latest", async () => {
-    await saveWaSpec(prisma, { service: "employment", model, savedBy: "alice" });
+    await saveWaSpec(prisma, { service: "employment", model, savedBy: "alice", basedOn: 0 });
     await saveWaSpec(prisma, { service: "employment", model, savedBy: "alice", basedOn: 1 });
 
     await expect(saveWaSpec(prisma, { service: "employment", model, savedBy: "bob", basedOn: 1 })).rejects.toBeInstanceOf(WaVersionConflict);
     expect((await getWaSpec(prisma, "employment"))?.version).toBe(2);
   });
 
-  it("should save every one as its own version when saves race", async () => {
-    const saves = await Promise.all([1, 2, 3, 4].map((n) => saveWaSpec(prisma, { service: "employment", model, savedBy: `person-${n}` })));
+  it("should store one version and refuse the rest when four first saves race", async () => {
+    const results = await Promise.allSettled([1, 2, 3, 4].map((n) => saveWaSpec(prisma, { service: "employment", model, savedBy: `person-${n}`, basedOn: 0 })));
 
-    expect(saves.map(({ version }) => version).sort((a, b) => a - b)).toEqual([1, 2, 3, 4]);
+    expect(results.filter(({ status }) => status === "fulfilled")).toHaveLength(1);
+    for (const result of results.filter((r) => r.status === "rejected")) {
+      expect(result.reason).toBeInstanceOf(WaVersionConflict);
+    }
+    expect((await getWaSpec(prisma, "employment"))?.version).toBe(1);
   });
 
   it("should let only one save through when two edits race from the same version", async () => {
-    await saveWaSpec(prisma, { service: "employment", model, savedBy: "alice" });
+    await saveWaSpec(prisma, { service: "employment", model, savedBy: "alice", basedOn: 0 });
 
     const results = await Promise.allSettled([
       saveWaSpec(prisma, { service: "employment", model, savedBy: "alice", basedOn: 1 }),
@@ -84,15 +89,16 @@ describe("wa specs", () => {
     ]);
 
     expect(results.map(({ status }) => status).sort((a, b) => a.localeCompare(b))).toEqual(["fulfilled", "rejected"]);
+    expect(results.find((r) => r.status === "rejected")?.reason).toBeInstanceOf(WaVersionConflict);
   });
 
   it("should refuse and store nothing when the model is for another service", async () => {
-    await expect(saveWaSpec(prisma, { service: "civil", model, savedBy: "alice" })).rejects.toBeInstanceOf(InvalidWaSpec);
+    await expect(saveWaSpec(prisma, { service: "civil", model, savedBy: "alice", basedOn: 0 })).rejects.toBeInstanceOf(InvalidWaSpec);
     expect(await listWaServices(prisma)).toEqual([]);
   });
 
-  it("should refuse to change or delete a saved version", async () => {
-    await saveWaSpec(prisma, { service: "employment", model, savedBy: "alice" });
+  it("should refuse to change or delete a saved version when the row is updated or deleted directly", async () => {
+    await saveWaSpec(prisma, { service: "employment", model, savedBy: "alice", basedOn: 0 });
 
     await expect(prisma.waSpecVersion.update({ where: { service_version: { service: "employment", version: 1 } }, data: { savedBy: "bob" } })).rejects.toThrow(
       /append-only/

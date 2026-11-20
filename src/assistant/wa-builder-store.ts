@@ -30,8 +30,8 @@ export interface WaSpecSave {
   ordering?: Ordering;
   layout?: Layout;
   savedBy: string;
-  /** The version the edit started from; a save is refused when a later one exists. */
-  basedOn?: number;
+  /** The version the edit started from, 0 for a service's first; a save is refused when it is not the latest. */
+  basedOn: number;
 }
 
 /** Each service's latest version, by service. */
@@ -63,12 +63,12 @@ export async function saveWaSpec(prisma: PrismaClient, input: WaSpecSave): Promi
     throw new InvalidWaSpec(problems.join("\n"));
   }
   const documents = waDocuments(input);
-  return prisma.$transaction(async (tx) => {
+  return await prisma.$transaction(async (tx) => {
     // Saves to one service are taken one at a time, so two cannot both be the next version.
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`wa_spec_version:${input.service}`}, 0))`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`wa_spec_version:${input.service}`}))`;
     const latest = await tx.waSpecVersion.aggregate({ where: { service: input.service }, _max: { version: true } });
     const current = latest._max.version ?? 0;
-    if (input.basedOn !== undefined && input.basedOn !== current) {
+    if (input.basedOn !== current) {
       throw new WaVersionConflict(current, input.basedOn);
     }
     const version = current + 1;

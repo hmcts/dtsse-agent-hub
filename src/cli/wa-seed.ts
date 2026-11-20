@@ -11,17 +11,19 @@ import { loadSecrets } from "../platform/secrets.ts";
  * package ships TypeScript source and the image carries only the compiled CLIs. Against AAT, point `DATABASE_URL` or
  * `POSTGRES_*` at it first. It refuses when the service already has a spec.
  */
+const readText = (path: string): string => readFileSync(path, "utf8"); // NOSONAR: a path the operator passed
+
 const DEFAULT_MODEL = fileURLToPath(new URL("../../packages/wa-spec/examples/et/model.yaml", import.meta.url));
 
 async function run(): Promise<number> {
   await loadSecrets((chartPath) => getPropertiesVolumeSecrets({ chartPath, failOnError: false }));
   const argument = process.argv[2];
   const modelPath = argument === undefined ? DEFAULT_MODEL : resolve(process.env.INIT_CWD ?? process.cwd(), argument);
-  const model = parseModel(readFileSync(modelPath, "utf8"));
+  const model = parseModel(readText(modelPath));
   const orderPath = orderPathFor(modelPath, model);
   const layoutPath = modelLayoutPath(modelPath, model);
-  const ordering = orderPath === undefined ? undefined : parseOrdering(readFileSync(orderPath, "utf8"));
-  const layout = layoutPath === undefined ? undefined : parseLayout(readFileSync(layoutPath, "utf8"));
+  const ordering = orderPath === undefined ? undefined : parseOrdering(readText(orderPath));
+  const layout = layoutPath === undefined ? undefined : parseLayout(readText(layoutPath));
 
   const { prisma } = await import("../store/prisma.ts");
   const { saveWaSpec } = await import("../assistant/wa-builder-store.ts");
