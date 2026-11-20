@@ -181,16 +181,16 @@ describe("checking what editing can break", () => {
   const edited = (change: (spec: FormSpec) => FormSpec) => checkSpec(JSON.parse(JSON.stringify(change(SPEC))));
   const withRule = (rule: object) => (spec: FormSpec) => mapField(spec, 0, 1, (f) => ({ ...f, rules: [rule as never] }));
 
-  it("should flag the empty key of a new field on its own row", () => {
+  it("should flag the empty key on its own row when a new field has no key yet", () => {
     const checked = edited((spec) => addField(spec, 0));
     expect(!checked.ok && checked.issues.map((i) => i.path)).toEqual(["sections.0.fields.3.keys.0"]);
   });
 
-  it("should accept a rule on a key the form does not read, which the generated code leaves as a TODO rather than failing to compile", () => {
+  it("should accept a rule when it names a key the form does not read, since the generated code leaves it as a TODO", () => {
     expect(edited(withRule({ when: { nope: "x" }, set: { applicantFirstName: { from: "nope" } } })).ok).toBe(true);
   });
 
-  it("should accept a condition on a key of the form, a sheet id and a value the row writes", () => {
+  it("should accept a condition when it names a key of the form, a sheet id or a value the row writes", () => {
     for (const when of [{ firstName: null }, { "1.1": "x" }, { "ccd:kind": "divorce" }]) {
       expect(edited(withRule({ when, outcome: "warning" })).ok).toBe(true);
     }
@@ -228,7 +228,7 @@ describe("simulating", () => {
     expect(simulate(exception, { data: { k: "v" } })).toMatchObject({ expected: { transformation: "exception-record" }, caseData: {} });
   });
 
-  it("should change an envelope's outcome and case data once a rule is added in the editor", () => {
+  it("should change an envelope's outcome and case data when a rule is added in the editor", () => {
     const data = simulate(SPEC, {}).data;
     expect(simulate(SPEC, { data }).expected.transformation).not.toBe("exception-record");
 

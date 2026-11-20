@@ -293,7 +293,9 @@ describe("bulk scan editor", () => {
     fireEvent.change(screen.getByLabelText("Label of 1.2"), { target: { value: "Full name" } });
     fireEvent.change(screen.getByLabelText("Maximum length of 1.2"), { target: { value: "40" } });
     fireEvent.change(screen.getByLabelText("Keys of 1.2"), { target: { value: "name, other" } });
+    fireEvent.blur(screen.getByLabelText("Keys of 1.2"));
     fireEvent.change(screen.getByLabelText("CCD ids of 1.2"), { target: { value: "ccdName" } });
+    fireEvent.blur(screen.getByLabelText("CCD ids of 1.2"));
     fireEvent.change(screen.getByLabelText("Form type (document_sub_type)"), { target: { value: "T2" } });
     fireEvent.click(save);
 
@@ -358,9 +360,10 @@ describe("typing into the editor", () => {
 
     await user.clear(keys);
     await user.type(keys, "name, other");
+    expect(keys.value).toBe("name, other");
     await user.type(screen.getByLabelText("CCD ids of 1.2"), "ccdA ccdB");
 
-    expect(keys.value).toBe("name, other");
+    expect(keys.value).toBe("name other");
     expect((screen.getByLabelText("CCD ids of 1.2") as HTMLInputElement).value).toBe("ccdA ccdB");
     await user.click(screen.getByRole("button", { name: "Save as a new version" }));
     const field = JSON.parse(fetchMock.mock.calls[0]?.[1].body).spec.sections[0].fields[1];

@@ -41,16 +41,26 @@ export function inferredFormat(key: string): keyof typeof FORMAT_REGEXES | undef
   return undefined;
 }
 
+/** A key the generated code can name: a word of letters, digits and underscores that starts with a letter. */
+export function isModelKey(key: string): boolean {
+  return /^[A-Za-z][A-Za-z0-9_]*$/.test(key);
+}
+
+/** Whether the engine reads the keys of a row at all: a field row that is not marked as not read. */
+export function readsKeys(field: Field): boolean {
+  return field.role === "field" && field.mandatory !== "not-read";
+}
+
 /** One model per key the service reads. A key the form does not read has none, and a key on several rows is mandatory if any row says so. */
 export function keyModels(spec: FormSpec): KeyModel[] {
   const models = new Map<string, KeyModel>();
   for (const field of allFields(spec)) {
-    if (field.role !== "field" || field.mandatory === "not-read") {
+    if (!readsKeys(field)) {
       continue;
     }
     const options = field.group?.options.map((o) => o.key) ?? [];
     for (const key of field.keys) {
-      if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(key)) {
+      if (!isModelKey(key)) {
         throw new Error(`the key "${key}" is not a word of letters, digits and underscores starting with a letter`);
       }
       const set = valueSetFor(field, key);

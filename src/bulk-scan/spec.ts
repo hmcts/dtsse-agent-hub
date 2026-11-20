@@ -2,7 +2,6 @@ import {
   caseDataFor,
   type Data,
   expectedFor,
-  type Field,
   type FormSpec,
   formSpecSchema,
   fromPdf,
@@ -11,7 +10,9 @@ import {
   generateTransformWorkbook,
   importSip,
   importTransformSheet,
+  isModelKey,
   modelByKey,
+  readsKeys,
   readWorkbookBytes,
   type Scenario,
   SIP,
@@ -154,18 +155,13 @@ export function checkSpec(raw: unknown): { ok: true; spec: FormSpec } | { ok: fa
   return { ok: true, spec: parsed.data };
 }
 
-/** Where the engine reads a key: a row that is read at all. */
-function readsKeys(field: Field): boolean {
-  return field.role === "field" && field.mandatory !== "not-read";
-}
-
 /** A key the generated code names as an identifier must be a word; a new row's empty key is refused on its own row. */
 function keyShapeIssues(spec: FormSpec): SpecIssue[] {
   return spec.sections.flatMap((section, s) =>
     section.fields.flatMap((field, f) =>
       readsKeys(field)
         ? field.keys.flatMap((key, k) =>
-            /^[A-Za-z][A-Za-z0-9_]*$/.test(key)
+            isModelKey(key)
               ? []
               : [{ path: `sections.${s}.fields.${f}.keys.${k}`, message: `the key "${key}" must be letters, digits and underscores, starting with a letter` }]
           )

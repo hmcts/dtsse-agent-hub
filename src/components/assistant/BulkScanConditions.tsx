@@ -1,6 +1,6 @@
 "use client";
 
-import { type Condition, OPERATORS, type Operator } from "@/bulk-scan/edit";
+import { type Condition, looksTyped, OPERATORS, type Operator } from "@/bulk-scan/edit";
 import { FIELD, SECONDARY } from "@/components/assistant/WelshParts";
 
 export interface KeyChoice {
@@ -60,8 +60,14 @@ export function BulkScanConditions({
                 aria-label={`${label}, condition ${n} value`}
                 value={condition.value}
                 className={`${FIELD} w-40`}
-                onChange={(e) => replace(i, { value: e.target.value })}
+                onChange={(e) => replace(i, { value: e.target.value, typed: false })}
               />
+            ) : null}
+            {(condition.op === "=" || condition.op === "!=") && looksTyped(condition.value) ? (
+              <label className="flex items-center gap-1.5 text-xs">
+                <input type="checkbox" checked={condition.typed === true} onChange={(e) => replace(i, { typed: e.target.checked })} />
+                {`${label}, condition ${n}: ${condition.value} is the value, not the word`}
+              </label>
             ) : null}
             <button type="button" className={SECONDARY} onClick={() => onChange(conditions.filter((_, at) => at !== i))}>
               {`Remove ${label}, condition ${n}`}

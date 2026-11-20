@@ -3,7 +3,7 @@ export * from "./code-keys.ts";
 export * from "./codegen/case-data.ts";
 export * from "./codegen/index.ts";
 export type { Data } from "./codegen/model.ts";
-export { modelByKey } from "./codegen/model.ts";
+export { isModelKey, modelByKey, readsKeys } from "./codegen/model.ts";
 export * from "./codegen/scenarios.ts";
 export * from "./drift.ts";
 export { valueSets } from "./emits.ts";

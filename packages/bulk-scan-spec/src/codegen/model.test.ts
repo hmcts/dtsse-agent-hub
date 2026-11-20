@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { fileText, JAVA, spec as sp6, spec as sp9, spec } from "../__fixtures__/helpers.ts";
 import { nfdivFiles } from "../codegen/java.ts";
-import { evaluateRules, FORMAT_REGEXES, partitionRules } from "../codegen/model.ts";
+import { evaluateRules, FORMAT_REGEXES, isModelKey, partitionRules, readsKeys } from "../codegen/model.ts";
 import { expectedFor, validData } from "../codegen/scenarios.ts";
 import {
   anchoredPattern,
@@ -201,5 +201,16 @@ describe("key models", () => {
   it("should leave out a key the form does not read when the models are built", () => {
     const models = km2(spec([{ id: "2.1", keys: ["fullName"], mandatory: "not-read", inputType: "none" }, { keys: ["b"] }]));
     expect(models.map((m) => m.key)).toEqual(["b"]);
+  });
+});
+
+describe("which keys the engine reads", () => {
+  it("should accept a word of letters, digits and underscores starting with a letter, and refuse any other key", () => {
+    expect([isModelKey("firstName"), isModelKey("a_1"), isModelKey(""), isModelKey("1a"), isModelKey("a b")]).toEqual([true, true, false, false, false]);
+  });
+
+  it("should read the keys of a field row unless it is marked not read, and none of a label row", () => {
+    const row = (over: object) => ({ role: "field", mandatory: "optional", ...over }) as never;
+    expect([readsKeys(row({})), readsKeys(row({ mandatory: "not-read" })), readsKeys(row({ role: "label" }))]).toEqual([true, false, false]);
   });
 });

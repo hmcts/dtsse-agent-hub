@@ -244,7 +244,7 @@ describe("the engine", () => {
     expect(sent.case_data).toEqual({ applicantFirstName: "Ada" });
   });
 
-  it("should drive the simulator with a rule added in a saved version, and leave the earlier version as it was", async () => {
+  it("should drive the simulator with the rule when a version is saved with it, and leave the earlier version as it was", async () => {
     const [id] = (await upload()) as [string];
     const run = async (version: number) =>
       jsonOf<{ expected: { transformation: string } }>(

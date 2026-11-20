@@ -1,7 +1,20 @@
 "use client";
 
 import type { Field, Outcome, Rule } from "@hmcts-cft/bulk-scan-spec";
-import { type AssignmentRow, addRule, assignmentsOf, groupsOf, mapRule, moveRule, removeRule, withAssignments, withElse, withGroups } from "@/bulk-scan/edit";
+import {
+  type AssignmentRow,
+  addRule,
+  assignmentsOf,
+  groupsOf,
+  looksTyped,
+  mapRule,
+  moveRule,
+  removeRule,
+  withAssignments,
+  withElse,
+  withGroups,
+  withoutAction
+} from "@/bulk-scan/edit";
 import { BulkScanConditions, type KeyChoice, nextCondition } from "@/components/assistant/BulkScanConditions";
 import { FIELD, SECONDARY } from "@/components/assistant/WelshParts";
 
@@ -196,9 +209,15 @@ function RuleBranch({
                   aria-label={`${label}, assignment ${i + 1} value`}
                   value={row.value}
                   className={`${FIELD} w-40`}
-                  onChange={(e) => replace({ value: e.target.value })}
+                  onChange={(e) => replace({ value: e.target.value, typed: false })}
                 />
               )}
+              {!row.copy && looksTyped(row.value) ? (
+                <label className="flex items-center gap-1.5 text-xs">
+                  <input type="checkbox" checked={row.typed === true} onChange={(e) => replace({ typed: e.target.checked })} />
+                  {`${label}, assignment ${i + 1}: ${row.value} is the value, not the word`}
+                </label>
+              ) : null}
               <button type="button" className={SECONDARY} onClick={() => setRows(assignments.filter((_, at) => at !== i))}>
                 {`Remove ${label}, assignment ${i + 1}`}
               </button>
@@ -242,7 +261,14 @@ function RuleBranch({
           onChange={(e) => onChange((r) => ({ ...r, note: e.target.value }))}
         />
       </div>
-      {rule.action ? <p className="text-xs text-asst-muted">{`English the importer could not read: ${rule.action}`}</p> : null}
+      {rule.action ? (
+        <div className="flex flex-wrap items-center gap-2 text-xs text-asst-muted">
+          <span>{`English the importer could not read: ${rule.action}`}</span>
+          <button type="button" className={SECONDARY} onClick={() => onChange(withoutAction)}>
+            {`Remove the English of ${label}`}
+          </button>
+        </div>
+      ) : null}
     </>
   );
 }

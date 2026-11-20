@@ -1,6 +1,7 @@
 import type { Assignment, Emit, Field, FormSpec, Operand, Rule, Scalar, Section } from "@hmcts-cft/bulk-scan-spec";
 import { emitsOf, valueSets } from "@hmcts-cft/bulk-scan-spec/emits";
 import { renderCasePath, renderLogic } from "@hmcts-cft/bulk-scan-spec/logic";
+import { readsKeys } from "@hmcts-cft/bulk-scan-spec/model";
 import { isNegation, isTickedTest } from "@hmcts-cft/bulk-scan-spec/schema";
 
 /**
@@ -36,6 +37,50 @@ export function mapField(spec: FormSpec, sectionIndex: number, fieldIndex: numbe
   };
 }
 
+/** The keys a new list has in place of the old: those at the same position when the list is as long as it was, else none. */
+function renamesBetween(before: readonly string[], after: readonly string[]): [string, string][] {
+  return before.length !== after.length
+    ? []
+    : before.flatMap((key, i): [string, string][] => (after[i] !== undefined && after[i] !== key ? [[key, after[i] as string]] : []));
+}
+
+function renameIn(when: Record<string, Operand>, from: string, to: string): Record<string, Operand> {
+  return Object.fromEntries(Object.entries(when).map(([key, operand]) => [key === from ? to : key, operand]));
+}
+
+/** A field's conditions, copies and mandatory condition, with a key renamed. */
+function renameRefs(field: Field, from: string, to: string): Field {
+  const rules = field.rules.map((rule) => {
+    const next: Rule = { ...rule };
+    if (rule.when) {
+      next.when = renameIn(rule.when, from, to);
+    }
+    if (rule.whenAny) {
+      next.whenAny = rule.whenAny.map((group) => renameIn(group, from, to));
+    }
+    if (rule.set) {
+      next.set = Object.fromEntries(
+        Object.entries(rule.set).map(([target, v]) => [target, v !== null && typeof v === "object" && v.from === from ? { from: to } : v])
+      );
+    }
+    return next;
+  });
+  const required = field.required?.when ? { ...field.required, when: renameIn(field.required.when, from, to) } : field.required;
+  return { ...field, rules, ...(required ? { required } : {}) };
+}
+
+/** A field's own record of a key it carries: its allowed values and its group's options. */
+function renameOwn(field: Field, from: string, to: string): Field {
+  const next: Field = { ...renameRefs(field, from, to) };
+  if (field.emits) {
+    next.emits = field.emits.map((e) => (e.key === from ? { ...e, key: to } : e));
+  }
+  if (field.group) {
+    next.group = { ...field.group, options: field.group.options.map((o) => (o.key === from ? { ...o, key: to } : o)) };
+  }
+  return next;
+}
+
 /** An option of a group exists only for a key the field has, so a group follows its field's keys; fewer than two keys is no group. */
 function regroup(field: Field): Field {
   if (!field.group) {
@@ -45,15 +90,20 @@ function regroup(field: Field): Field {
     const { group: _group, ...rest } = field;
     return rest;
   }
-  return { ...field, group: { ...field.group, options: field.keys.map((key) => field.group?.options.find((o) => o.key === key) ?? { key }) } };
+  const options = field.keys.map((key) => field.group?.options.find((o) => o.key === key) ?? { key });
+  return { ...field, group: { ...field.group, size: options.length, options } };
 }
 
 /**
- * The spec with one field's row values changed. An empty id, regex or maximum length is the field without one; a group
- * follows the keys, and a field that stops being conditional loses its condition.
+ * The spec with one field's row values changed. An empty id, regex or maximum length is the field without one. When the
+ * keys change, a key that is spelt differently at the same place is the same key renamed, so its allowed values, group
+ * option and every condition and copy that names it follow it; the group then follows the keys. A field that stops being
+ * conditional loses its condition.
  */
 export function patchField(spec: FormSpec, sectionIndex: number, fieldIndex: number, patch: FieldPatch): FormSpec {
-  return mapField(spec, sectionIndex, fieldIndex, (field) => {
+  const before = spec.sections[sectionIndex]?.fields[fieldIndex];
+  const renames = patch.keys && before ? renamesBetween(before.keys, patch.keys) : [];
+  const changed = mapField(spec, sectionIndex, fieldIndex, (field) => {
     let next: Field = { ...field, ...patch };
     for (const optional of ["id", "regex", "maxLength"] as const) {
       if (next[optional] === "" || next[optional] === undefined) {
@@ -61,6 +111,9 @@ export function patchField(spec: FormSpec, sectionIndex: number, fieldIndex: num
       }
     }
     if (patch.keys) {
+      for (const [from, to] of renames) {
+        next = renameOwn(next, from, to);
+      }
       next = regroup(next);
     }
     if (patch.mandatory !== undefined && patch.mandatory !== "conditional") {
@@ -68,6 +121,21 @@ export function patchField(spec: FormSpec, sectionIndex: number, fieldIndex: num
     }
     return next;
   });
+  let result = changed;
+  for (const [from, to] of renames) {
+    // A key another row still has keeps the conditions that name it.
+    if (result.sections.some((section) => section.fields.some((field) => field.keys.includes(from)))) {
+      continue;
+    }
+    result = {
+      ...result,
+      sections: result.sections.map((section, s) => ({
+        ...section,
+        fields: section.fields.map((field, f) => (s === sectionIndex && f === fieldIndex ? field : renameRefs(field, from, to)))
+      }))
+    };
+  }
+  return result;
 }
 
 /** A section's own values. */
@@ -109,7 +177,12 @@ export function moveField(spec: FormSpec, sectionIndex: number, fieldIndex: numb
 }
 
 export function addSection(spec: FormSpec): FormSpec {
-  return { ...spec, sections: [...spec.sections, { id: String(spec.sections.length + 1), title: "", fields: [] }] };
+  const taken = new Set(spec.sections.map((s) => s.id));
+  let n = spec.sections.length + 1;
+  while (taken.has(String(n))) {
+    n += 1;
+  }
+  return { ...spec, sections: [...spec.sections, { id: String(n), title: "", fields: [] }] };
 }
 
 export function removeSection(spec: FormSpec, sectionIndex: number): FormSpec {
@@ -122,9 +195,7 @@ export function moveSection(spec: FormSpec, sectionIndex: number, by: -1 | 1): F
 
 /** The keys the model reads: those of a field row that is read at all. Rule conditions and copies may name only these. */
 export function formKeys(spec: FormSpec): string[] {
-  const keys = spec.sections.flatMap((s) =>
-    s.fields.filter((f) => f.role === "field" && f.mandatory !== "not-read").flatMap((f) => f.keys.filter((k) => k !== ""))
-  );
+  const keys = spec.sections.flatMap((s) => s.fields.filter(readsKeys).flatMap((f) => f.keys.filter((k) => k !== "")));
   return [...new Set(keys)];
 }
 
@@ -193,10 +264,15 @@ export function withGroup(field: Field, grouped: boolean): Field {
       };
 }
 
-/** What a typed value means: the words the sheet uses for null, true and false, else the text. */
-export function scalarOf(text: string): Scalar {
+/** Whether a value reads like one the schema also has as a true, false or null, which a person may mean as that rather than as text. */
+export function looksTyped(text: string): boolean {
+  return /^(true|false|null)$/i.test(text);
+}
+
+/** What a value is: the text, or, when the row says it is one, the true, false or null it spells. */
+export function scalarOf(text: string, typed: boolean): Scalar {
   const lower = text.toLowerCase();
-  return lower === "null" ? null : lower === "true" ? true : lower === "false" ? false : text;
+  return typed ? (lower === "null" ? null : lower === "true" ? true : lower === "false" ? false : text) : text;
 }
 
 export function textOf(value: Scalar): string {
@@ -218,24 +294,28 @@ export interface Condition {
   key: string;
   op: Operator;
   value: string;
+  /** The value is a true, false or null of the schema, not the text that spells it. */
+  typed?: boolean;
 }
+
+const isTyped = (value: Scalar): boolean => value === null || typeof value === "boolean";
 
 export function conditionOf(key: string, operand: Operand): Condition {
   if (isTickedTest(operand)) {
     return { key, op: operand.ticked ? "ticked" : "unticked", value: "" };
   }
   if (isNegation(operand)) {
-    return operand.not === null ? { key, op: "filled", value: "" } : { key, op: "!=", value: textOf(operand.not) };
+    return operand.not === null ? { key, op: "filled", value: "" } : { key, op: "!=", value: textOf(operand.not), typed: isTyped(operand.not) };
   }
-  return operand === null ? { key, op: "blank", value: "" } : { key, op: "=", value: textOf(operand) };
+  return operand === null ? { key, op: "blank", value: "" } : { key, op: "=", value: textOf(operand), typed: isTyped(operand) };
 }
 
 export function operandOf(condition: Condition): Operand {
   switch (condition.op) {
     case "=":
-      return scalarOf(condition.value);
+      return scalarOf(condition.value, condition.typed === true);
     case "!=":
-      return { not: scalarOf(condition.value) };
+      return { not: scalarOf(condition.value, condition.typed === true) };
     case "blank":
       return null;
     case "filled":
@@ -262,13 +342,25 @@ export function conditionLabel(condition: Condition): string {
   return condition.op === "=" || condition.op === "!=" ? `${condition.key} ${words} ${condition.value}` : `${condition.key} ${words}`;
 }
 
-/** A field mandatory only when all of these hold, worded as the sheet would; none is no condition. */
+/** The sheet-style wording of conditions: what `required.label` is when this editor wrote it. */
+function wordsOfConditions(conditions: readonly Condition[]): string {
+  return conditions.map(conditionLabel).join(" AND ");
+}
+
+/**
+ * A field mandatory only when all of these hold. The label the sheet or the person wrote is kept; one is generated only
+ * when there is none, or when the old one is what this editor generated for the conditions it replaces. With no
+ * conditions left the field keeps its label and loses the test.
+ */
 export function withRequired(field: Field, conditions: readonly Condition[]): Field {
+  const old = field.required;
+  const generated = old ? wordsOfConditions(conditionsOf(old.when)) : "";
+  const label = old && old.label !== "" && old.label !== generated ? old.label : wordsOfConditions(conditions);
+  const { required: _required, ...rest } = field;
   if (conditions.length === 0) {
-    const { required: _required, ...rest } = field;
-    return rest;
+    return label === "" ? rest : { ...rest, required: { label } };
   }
-  return { ...field, required: { label: conditions.map(conditionLabel).join(" AND "), when: whenOf(conditions) } };
+  return { ...rest, required: { label, when: whenOf(conditions) } };
 }
 
 /** A branch's condition groups: one conjunction, or the OR alternatives. */
@@ -304,17 +396,21 @@ export interface AssignmentRow {
   target: string;
   copy: boolean;
   value: string;
+  /** A literal that is a true, false or null of the schema, not the text that spells it. */
+  typed?: boolean;
 }
 
 export function assignmentsOf(rule: Rule): AssignmentRow[] {
   return Object.entries(rule.set ?? {}).map(([target, v]: [string, Assignment]) =>
-    v !== null && typeof v === "object" ? { target, copy: true, value: v.from } : { target, copy: false, value: textOf(v) }
+    v !== null && typeof v === "object" ? { target, copy: true, value: v.from } : { target, copy: false, value: textOf(v), typed: isTyped(v) }
   );
 }
 
 export function withAssignments(rule: Rule, rows: readonly AssignmentRow[]): Rule {
   const { set: _set, ...rest } = rule;
-  return rows.length === 0 ? rest : { ...rest, set: Object.fromEntries(rows.map((r) => [r.target, r.copy ? { from: r.value } : scalarOf(r.value)])) };
+  return rows.length === 0
+    ? rest
+    : { ...rest, set: Object.fromEntries(rows.map((r) => [r.target, r.copy ? { from: r.value } : scalarOf(r.value, r.typed === true)])) };
 }
 
 /** The rule at `index` replaced by what `change` makes of it; an unset outcome, note or independent flag is left off. */
@@ -422,4 +518,10 @@ export function casePathWords(field: Field): string {
 export function allowedFor(field: Field, key: string): { values: string[]; blankAllowed: boolean } {
   const set = valueSets(field).find((s) => s.key === key);
   return { values: set?.allowed ?? [], blankAllowed: set?.blankAllowed ?? true };
+}
+
+/** The branch without the English the importer could not turn into conditions, once the branch says it in conditions and assignments. */
+export function withoutAction(rule: Rule): Rule {
+  const { action: _action, ...rest } = rule;
+  return rest;
 }

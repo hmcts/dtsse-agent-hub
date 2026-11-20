@@ -231,21 +231,33 @@ export function BulkScanFields({
 }
 
 /**
- * A list typed as words. The text is kept as typed and only its words go up, because showing the words joined back would
- * swallow a space or comma the moment it was typed, leaving no way to start the next one.
+ * A list typed as words. The text is kept as typed and only goes up when the person leaves the box or presses Enter, so
+ * a key that is half retyped is never taken for a new key, and what names it (its allowed values, group and rules) is
+ * carried to the finished spelling once. A change from outside, such as a row that moved here, replaces the text.
  */
 function WordsInput({ label, words, onChange }: Readonly<{ label: string; words: readonly string[]; onChange: (words: string[]) => void }>) {
-  const [text, setText] = useState(words.join(" "));
-  const current = wordsOf(text);
-  const shown = current.join(" ") === words.join(" ") ? text : words.join(" ");
+  const joined = words.join(" ");
+  const [state, setState] = useState({ base: joined, text: joined });
+  if (state.base !== joined) {
+    setState({ base: joined, text: joined });
+  }
+  const commit = () => {
+    const typed = wordsOf(state.text);
+    if (typed.join(" ") !== joined) {
+      onChange(typed);
+    }
+  };
   return (
     <input
       aria-label={label}
-      value={shown}
+      value={state.text}
       className={CELL}
-      onChange={(e) => {
-        setText(e.target.value);
-        onChange(wordsOf(e.target.value));
+      onChange={(e) => setState({ base: state.base, text: e.target.value })}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          commit();
+        }
       }}
     />
   );

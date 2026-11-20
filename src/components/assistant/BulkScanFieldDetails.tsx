@@ -183,6 +183,8 @@ function AllowedValues({
         <input
           type="checkbox"
           checked={blankAllowed}
+          disabled={values.length === 0}
+          title={values.length === 0 ? "A free-text key can always be blank" : undefined}
           onChange={(e) => onField((f) => withAllowed(f, keyName, allowedFor(f, keyName).values, e.target.checked))}
         />
         {`Blank is allowed for ${keyName} in ${name}`}
