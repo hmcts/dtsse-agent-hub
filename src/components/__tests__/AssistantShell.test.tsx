@@ -237,7 +237,7 @@ describe("AssistantShell", () => {
     expect(screen.queryByRole("menu", { name: "Workflows" })).toBeNull();
   });
 
-  it("should offer the Welsh page, and not Scheduled while it is not built, when the person's assistant has the Welsh plugin ticked", () => {
+  it("should offer the Welsh page and the Work Allocation builder, and not Scheduled while it is not built, when the person's assistant has the Welsh plugin ticked", () => {
     render(shell({ welsh: true }));
 
     fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
@@ -247,13 +247,18 @@ describe("AssistantShell", () => {
       within(menu)
         .getAllByRole("menuitem")
         .map((item) => item.getAttribute("href"))
-    ).toEqual(["/assistant/welsh"]);
+    ).toEqual(["/assistant/welsh", "/assistant/wa-builder"]);
   });
 
-  it("should show no workflows plus at all when there is nothing behind it", () => {
+  it("should offer only the Work Allocation builder when nothing else is offered", () => {
     render(shell());
+    fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
 
-    expect(screen.queryByRole("button", { name: "Workflows" })).toBeNull();
+    expect(
+      within(screen.getByRole("menu", { name: "Workflows" }))
+        .getAllByRole("menuitem")
+        .map((item) => item.getAttribute("href"))
+    ).toEqual(["/assistant/wa-builder"]);
   });
 
   it("should offer a new feedback project, and not the list of them, when feedback is on", () => {
@@ -264,7 +269,7 @@ describe("AssistantShell", () => {
       within(screen.getByRole("menu", { name: "Workflows" }))
         .getAllByRole("menuitem")
         .map((item) => item.getAttribute("href"));
-    expect(hrefs()).toEqual(["/assistant/welsh", "/assistant/feedback/new"]);
+    expect(hrefs()).toEqual(["/assistant/welsh", "/assistant/wa-builder", "/assistant/feedback/new"]);
     expect(screen.getByRole("menuitem", { name: /New feedback project/ }).textContent).toContain("Share a prototype for comments and recorded feedback");
   });
 
@@ -285,7 +290,7 @@ describe("AssistantShell", () => {
       within(screen.getByRole("menu", { name: "Workflows" }))
         .getAllByRole("menuitem")
         .map((item) => item.querySelector("span")?.textContent)
-    ).toEqual(["Morning briefing", "Welsh translations"]);
+    ).toEqual(["Morning briefing", "Welsh translations", "Work Allocation builder"]);
   });
 
   it("should not offer the morning briefing when the page does not say it is offered", () => {

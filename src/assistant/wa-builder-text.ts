@@ -1,0 +1,583 @@
+import {
+  attributesOf,
+  byCodePoint,
+  type Cancellation,
+  type Cond,
+  categoryParts,
+  completionPieces,
+  type Expr,
+  type Grant,
+  type Model,
+  ownEntry,
+  permissionSpecs,
+  resolveGrants,
+  type Task,
+  type Trigger,
+  taskCases,
+  triggerPieces,
+  type Val,
+  valPieces
+} from "@hmcts-cft/wa-spec";
+
+/*
+ * What a Work Allocation model says, in words. Everything here is pure: the pages call it with a model and show its
+ * strings. Names that belong to the service (fields, events, states) come out in backticks, which `textParts` splits so
+ * a component can set them as code.
+ */
+
+type FriendlyCell = Trigger["event"];
+
+const OP_WORDS = { eq: "is", ne: "is not", gt: "is more than", ge: "is at least", lt: "is less than", le: "is at most" } as const;
+
+const code = (text: string): string => `\`${text.replace(/\s+/g, " ").trim()}\``;
+
+const scalar = (value: string | number | boolean | null | undefined): string =>
+  value === null || value === undefined ? "empty" : typeof value === "string" ? `"${value}"` : String(value);
+
+const listOf = (items: string[], joiner: "and" | "or"): string =>
+  items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} ${joiner} ${items[items.length - 1]}`;
+
+const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+
+export const isRawFeel = (expr: Expr | undefined): expr is { feel: string; language?: string } => isObject(expr) && "feel" in expr;
+
+export function describeCond(cond: Cond, nested = false): string {
+  if ("all" in cond || "any" in cond) {
+    const parts = "all" in cond ? cond.all : cond.any;
+    const text = parts.map((part) => describeCond(part, true)).join("all" in cond ? " and " : " or ");
+    return nested ? `(${text})` : text;
+  }
+  if ("truthy" in cond) {
+    return `${describeExpr(cond.truthy)} is true`;
+  }
+  if ("left" in cond) {
+    return `${describeExpr(cond.left)} ${OP_WORDS[cond.op]} ${describeExpr(cond.right)}`;
+  }
+  if (cond.op === "exists") {
+    return `${code(cond.field)} is set`;
+  }
+  if (cond.op === "notExists") {
+    return `${code(cond.field)} is not set`;
+  }
+  return `${code(cond.field)} ${OP_WORDS[cond.op]} ${scalar(cond.value)}`;
+}
+
+export function describeExpr(expr: Expr): string {
+  if (expr === null || typeof expr !== "object") {
+    return scalar(expr);
+  }
+  if ("feel" in expr) {
+    return code(expr.feel);
+  }
+  if ("if" in expr) {
+    return `if ${describeCond(expr.if)}, then ${describeExpr(expr.use)}, otherwise ${describeExpr(expr.otherwise)}`;
+  }
+  if ("plus" in expr) {
+    return expr.plus.map(describeExpr).join(" + ");
+  }
+  if ("minus" in expr) {
+    return `${describeExpr(expr.minus[0])} minus ${describeExpr(expr.minus[1])}`;
+  }
+  if ("call" in expr) {
+    return `${expr.call}(${expr.args.map(describeExpr).join(", ")})`;
+  }
+  if ("quantifier" in expr) {
+    return `${expr.quantifier === "some" ? "some" : "every"} ${expr.variable} in ${describeExpr(expr.over)} where ${describeExpr(expr.satisfies)}`;
+  }
+  if ("op" in expr || "all" in expr || "any" in expr || "truthy" in expr) {
+    return describeCond(expr as Cond);
+  }
+  return code((expr as { field: string }).field);
+}
+
+/** An expression in one short cell: a plain value as itself, anything computed as "calculated". */
+export const briefExpr = (expr: Expr | undefined): string =>
+  expr === undefined ? "" : expr === null ? "–" : typeof expr === "object" ? "calculated" : String(expr);
+
+/** A plain string, when the expression is one. */
+export const plainText = (expr: Expr | undefined): string | undefined => (typeof expr === "string" ? expr : undefined);
+
+/** Splits text on its backtick spans so a component can set them as code. */
+export function textParts(text: string): Array<{ text: string; code: boolean }> {
+  return text
+    .split("`")
+    .map((part, index) => ({ text: part, code: index % 2 === 1 }))
+    .filter((part) => part.text !== "");
+}
+
+const cellValues = (cell: FriendlyCell): { values: Array<string | number | boolean | null>; not: boolean } | undefined => {
+  if (Array.isArray(cell)) {
+    return { values: cell, not: false };
+  }
+  if (isObject(cell)) {
+    return "in" in cell
+      ? { values: cell.in as Array<string | number | boolean | null>, not: false }
+      : "notIn" in cell
+        ? { values: cell.notIn as Array<string | number | boolean | null>, not: true }
+        : undefined;
+  }
+  return { values: [cell], not: false };
+};
+
+/** The names a cell matches, as a phrase: `a`, one of `a` or `b`, not `a`, or its comparison or FEEL. */
+export function describeCell(cell: FriendlyCell): string {
+  const listed = cellValues(cell);
+  if (listed === undefined) {
+    const object = cell as { cmp?: string; value?: string | number; feel?: string };
+    return object.feel === undefined ? `${object.cmp} ${object.value}` : code(object.feel);
+  }
+  const names = listed.values.map((value) => (value === null ? "empty" : code(String(value))));
+  const phrase = names.length === 1 ? (names[0] as string) : `one of ${listOf(names, "or")}`;
+  return listed.not ? `not ${phrase}` : phrase;
+}
+
+/** A column condition: `referCaseTo` is `Admin`. */
+export function describeColumn(column: string, cell: FriendlyCell): string {
+  const listed = cellValues(cell);
+  if (listed === undefined) {
+    const object = cell as { cmp?: string; feel?: string; value?: string | number };
+    return object.feel === undefined
+      ? `${code(column)} ${OP_WORDS[object.cmp === ">" ? "gt" : object.cmp === ">=" ? "ge" : object.cmp === "<" ? "lt" : "le"]} ${object.value}`
+      : `${code(column)} matches ${code(object.feel)}`;
+  }
+  const names = listed.values.map((value) => (value === null ? "empty" : code(String(value))));
+  const verb = listed.not ? "is not" : "is";
+  return names.length === 1 ? `${code(column)} ${verb} ${names[0]}` : `${code(column)} ${verb} one of ${listOf(names, "or")}`;
+}
+
+export const describeConditions = (when: Record<string, FriendlyCell> | undefined): string =>
+  Object.entries(when ?? {})
+    .map(([column, cell]) => describeColumn(column, cell))
+    .join(" and ");
+
+/** "Created when `event` leaves the case in `state`, if the condition holds." */
+export function describeTrigger(trigger: Trigger): string {
+  const event = describeCell(trigger.event);
+  let text = `Created when ${event} happens`;
+  if (trigger.postState !== undefined) {
+    text = `Created when ${event} leaves the case in ${describeCell(trigger.postState)}`;
+  }
+  const condition = describeConditions(trigger.when);
+  if (condition !== "") {
+    text += ` if ${condition}`;
+  }
+  if (trigger.delay !== undefined && trigger.delay !== null) {
+    text += `, after a delay of ${describeExpr(trigger.delay)}`;
+  }
+  if (trigger.initialName !== undefined && trigger.initialName !== null) {
+    text += `, named ${describeExpr(trigger.initialName)}`;
+  }
+  const outputs = Object.entries(trigger.outputs ?? {}).map(([name, value]) => `${name} ${describeExpr(value)}`);
+  if (outputs.length > 0) {
+    text += `, with ${listOf(outputs, "and")}`;
+  }
+  if (trigger.cancelCategory !== undefined && trigger.cancelCategory !== null) {
+    text += `, category ${describeExpr(trigger.cancelCategory)}`;
+  }
+  return text;
+}
+
+/** "Completed by `event` (auto)". */
+export function describeCompletion(completion: { event: FriendlyCell; mode?: Expr }): string {
+  const mode = completion.mode === undefined ? "" : ` (${typeof completion.mode === "string" ? completion.mode.toLowerCase() : describeExpr(completion.mode)})`;
+  return `Completed by ${describeCell(completion.event)}${mode}`;
+}
+
+const ACTION_WORDS: Record<string, string> = { Cancel: "Cancelled", Warn: "Warns", Reconfigure: "Reconfigured" };
+
+/** "Cancelled when `event` happens while the case is in `state` (category Vetting)". */
+export function describeCancellation(rule: Cancellation): string {
+  const action = typeof rule.action === "string" ? (ACTION_WORDS[rule.action] ?? rule.action) : describeExpr(rule.action);
+  let text = rule.events === undefined ? `${action} on any event` : `${action} when ${describeCell(rule.events)} happens`;
+  if (rule.fromState !== undefined) {
+    text += ` while the case is in ${describeCell(rule.fromState)}`;
+  }
+  const after = [
+    ...(rule.state === undefined ? [] : [`leaves the case in ${describeCell(rule.state)}`]),
+    ...(rule.toState === undefined ? [] : [`moves the case to ${describeCell(rule.toState)}`])
+  ];
+  if (after.length > 0) {
+    text += `${rule.events === undefined ? " that" : " and"} ${listOf(after, "and")}`;
+  }
+  const categories = (rule.categories ?? []).map(describeExpr);
+  if (categories.length > 0) {
+    text += ` (${categories.length === 1 ? "category" : "categories"} ${listOf(categories, "and")})`;
+  }
+  if (rule.warning?.code !== undefined || rule.warning?.text !== undefined) {
+    const code = rule.warning.code === undefined ? "" : ` ${describeExpr(rule.warning.code)}`;
+    const message = rule.warning.text === undefined ? "" : `: ${describeExpr(rule.warning.text)}`;
+    text += `, warning${code}${message}`;
+  }
+  if (rule.note !== undefined) {
+    text += `. Note: ${rule.note}`;
+  }
+  return text;
+}
+
+export const caseTypeIds = (model: Model): string[] => model.caseTypes.map((c) => c.id);
+
+export const caseTypeLabel = (model: Model, id: string): string => model.caseTypes.find((c) => c.id === id)?.displayName ?? id;
+
+export interface ByCaseType<T> {
+  caseTypes: string[];
+  value: T;
+}
+
+/** Case types whose resolved values are identical, together, in the order the case types are listed. */
+export function groupByCaseType<T>(caseTypes: string[], resolve: (caseType: string) => T): Array<ByCaseType<T>> {
+  const groups: Array<ByCaseType<T> & { key: string }> = [];
+  for (const caseType of caseTypes) {
+    const value = resolve(caseType);
+    const key = JSON.stringify(value);
+    const existing = groups.find((group) => group.key === key);
+    if (existing) {
+      existing.caseTypes.push(caseType);
+    } else {
+      groups.push({ key, caseTypes: [caseType], value });
+    }
+  }
+  return groups.map(({ caseTypes: ids, value }) => ({ caseTypes: ids, value }));
+}
+
+export interface ResolvedValue {
+  value: Expr;
+  /** Conditions on the table's other input columns, which make the value apply only to some cases. */
+  when?: Record<string, FriendlyCell>;
+}
+
+/** What a value is for one case type: each distinct value its entries give, with the condition it applies under, if any. */
+export function resolvePieces(model: Model, val: Val | undefined, caseType: string, taskCases: string[]): ResolvedValue[] {
+  const seen = new Set<string>();
+  return (val === undefined ? [] : valPieces(model, val, taskCases))
+    .filter((piece) => piece.cases.includes(caseType))
+    .map((piece): ResolvedValue => ({ value: piece.value, ...(piece.when === undefined ? {} : { when: piece.when }) }))
+    .filter((piece) => {
+      const key = JSON.stringify(piece);
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+}
+
+/** What a value is for one case type: nothing, or one expression, or several where the service has different rows. */
+export const resolveVal = (model: Model, val: Val | undefined, caseType: string, taskCases: string[]): Expr[] =>
+  resolvePieces(model, val, caseType, taskCases).map((piece) => piece.value);
+
+export const resolveTriggers = (model: Model, task: Task, caseType: string): Trigger[] =>
+  triggerPieces(model, task)
+    .filter((piece) => piece.cases.includes(caseType))
+    .map((piece) => piece.trigger);
+
+export const resolveCompletions = (model: Model, task: Task, caseType: string): Array<{ event: FriendlyCell; mode?: Expr }> =>
+  completionPieces(model, task)
+    .filter((piece) => piece.cases.includes(caseType))
+    .map((piece) => piece.completion);
+
+/** The task's name for the list: the first of these case types (by default its own) that gives a plain one. */
+export function taskName(model: Model, task: Task, among: string[] = taskCases(model, task)): string {
+  const cases = taskCases(model, task);
+  for (const caseType of among) {
+    const name = plainText(resolveVal(model, task.name, caseType, cases)[0]);
+    if (name !== undefined) {
+      return name;
+    }
+  }
+  return task.id;
+}
+
+/** One case type's value of a task's attribute, in one short cell. */
+export function briefVal(model: Model, val: Val | undefined, caseType: string, taskCases: string[]): string {
+  const pieces = resolvePieces(model, val, caseType, taskCases);
+  const always = [...new Set(pieces.filter((piece) => piece.when === undefined).map((piece) => briefExpr(piece.value)))];
+  const others = [...new Set(pieces.filter((piece) => piece.when !== undefined).map((piece) => briefExpr(piece.value)))].filter(
+    (value) => !always.includes(value)
+  );
+  if (always.length === 0) {
+    return others.length === 0 ? "" : `${listOf(others, "or")} depending on case data`;
+  }
+  return others.length === 0 ? always.join(", ") : `${always.join(", ")}, or ${listOf(others, "or")} depending on case data`;
+}
+
+/** Every value a task's attribute can take in one case type, whatever case data decides. */
+export function possibleValues(model: Model, val: Val | undefined, caseType: string, taskCases: string[]): string[] {
+  return [...new Set(resolvePieces(model, val, caseType, taskCases).map((piece) => briefExpr(piece.value)))];
+}
+
+/** A value across the task's case types: the one value, or each value with the case types it is for. */
+export function briefAcrossCaseTypes(model: Model, task: Task, resolve: (caseType: string) => string): string {
+  const groups = groupByCaseType(taskCases(model, task), resolve);
+  const [only] = groups;
+  if (groups.every((group) => group.value === "")) {
+    return "";
+  }
+  return groups.length === 1 && only
+    ? only.value
+    : groups.map((group) => `${group.value === "" ? "none" : group.value} (${group.caseTypes.map((id) => caseTypeLabel(model, id)).join(", ")})`).join("; ");
+}
+
+export interface PermissionRow {
+  role: string;
+  category: string;
+  perms: string[];
+  priority: string;
+  autoAssign: string;
+  /** What a row applies only when, as phrases: its authorisations, case access category and a category of its own. */
+  conditions: string[];
+  /** Where the row comes from: the task's profile, a change to it, a grant the task adds, or a grant every task has. */
+  source: "profile" | "changed" | "added" | "default";
+  profile?: string;
+  /** The profile whose grant for this role an addition replaces. */
+  replaces?: string;
+  note?: string;
+}
+
+export const permissionNames = (perms: Grant["perms"]): string[] =>
+  [perms]
+    .flat()
+    .flatMap((perm) => perm.split(","))
+    .map((perm) => perm.trim())
+    .filter((perm) => perm !== "");
+
+const plain = (expr: Expr): string => (typeof expr === "string" ? expr : describeExpr(expr));
+
+/** What a grant applies only when: the authorisation a person needs, the case access category, and a category that is not the role's. */
+export function grantConditions(grant: Grant, roleCategory: Expr | undefined): string[] {
+  return [
+    ...(grant.authorisations === undefined ? [] : [`needs authorisation ${plain(grant.authorisations)}`]),
+    ...(grant.caseAccessCategory === undefined ? [] : [`case access category ${plain(grant.caseAccessCategory)}`]),
+    ...(grant.category === undefined || JSON.stringify(grant.category) === JSON.stringify(roleCategory)
+      ? []
+      : [grant.category === null ? "counts as no category" : `counts as category ${plain(grant.category)}`])
+  ];
+}
+
+/** A category in a cell: a value as itself, an explicit `null` as none, and nothing as a dash. */
+const categoryText = (category: Expr | undefined): string => (category === null ? "none" : briefExpr(category) || "–");
+
+function permissionRow(model: Model, role: string, grant: Grant, source: PermissionRow["source"], profile?: string, replaces?: string): PermissionRow {
+  return {
+    role,
+    category: categoryText(grant.category !== undefined ? grant.category : ownEntry(model.roles, role)?.category),
+    perms: permissionNames(grant.perms),
+    priority: grant.priority === undefined ? "–" : briefExpr(grant.priority),
+    autoAssign: grant.autoAssign === undefined ? "–" : briefExpr(grant.autoAssign),
+    conditions: grantConditions(grant, ownEntry(model.roles, role)?.category),
+    source,
+    ...(profile === undefined ? {} : { profile }),
+    ...(replaces === undefined ? {} : { replaces }),
+    ...(grant.note === undefined ? {} : { note: grant.note })
+  };
+}
+
+/** A task's permissions for one case type: its profile with the task's own changes, then what every task has. */
+export function resolvePermissions(model: Model, task: Task, caseType: string): PermissionRow[] {
+  const rows: PermissionRow[] = resolveGrants(model, task)
+    .filter((resolved) => resolved.cases.includes(caseType))
+    .map((resolved) => permissionRow(model, resolved.role, resolved.grant, resolved.source, resolved.profile, resolved.replaces));
+  for (const [role, grants] of Object.entries(model.defaults?.permissions ?? {})) {
+    for (const grant of [grants].flat()) {
+      if ((grant.only ?? caseTypeIds(model)).includes(caseType)) {
+        rows.push(permissionRow(model, role, grant, "default"));
+      }
+    }
+  }
+  return rows;
+}
+
+/** The permission columns of a grid, in the order WA lists them, then any other a service uses. */
+const PERMISSION_ORDER = [
+  "Read",
+  "Own",
+  "Manage",
+  "Claim",
+  "Unclaim",
+  "UnclaimAssign",
+  "Assign",
+  "Unassign",
+  "Complete",
+  "CompleteOwn",
+  "Cancel",
+  "Execute",
+  "Refer"
+];
+
+export function permissionColumns(rows: Array<{ perms: string[] }>): string[] {
+  const used = new Set(rows.flatMap((row) => row.perms));
+  const known = PERMISSION_ORDER.filter((perm) => used.has(perm));
+  return [...known, ...[...used].filter((perm) => !PERMISSION_ORDER.includes(perm)).sort(byCodePoint)];
+}
+
+/** The tasks whose permissions use a profile. */
+export const tasksUsingProfile = (model: Model, profile: string): Task[] =>
+  model.tasks.filter((task) => permissionSpecs(task).some((spec) => spec.profile === profile));
+
+/** Roles by category, categories and roles in code point order, roles without a category last. */
+export function rolesByCategory(model: Model): Array<{ category: string; roles: string[] }> {
+  const groups = new Map<string, string[]>();
+  for (const [role, definition] of Object.entries(model.roles ?? {})) {
+    const category = definition.category === undefined || definition.category === null ? "No category" : briefExpr(definition.category);
+    groups.set(category, [...(groups.get(category) ?? []), role]);
+  }
+  return [...groups.entries()]
+    .map(([category, roles]) => ({ category, roles: roles.sort(byCodePoint) }))
+    .sort((a, b) => (a.category === "No category" ? 1 : b.category === "No category" ? -1 : byCodePoint(a.category, b.category)));
+}
+
+export interface CancelCategories {
+  named: string[];
+  /** A category that is worked out for each case, so a rule naming categories may or may not match it. */
+  calculated: boolean;
+}
+
+/** The categories a task's cancellation rules find it by in one case type: its own and those of the triggers that apply there. */
+export function cancelCategories(model: Model, task: Task, caseType: string): CancelCategories {
+  const triggers = resolveTriggers(model, task, caseType);
+  const all = (
+    triggers.length === 0
+      ? [task.cancelCategory]
+      : triggers.map((trigger) => (trigger.cancelCategory !== undefined ? trigger.cancelCategory : task.cancelCategory))
+  ).filter((c): c is NonNullable<Expr> => c !== undefined && c !== null);
+  const named = all.flatMap((category) => (typeof category === "string" ? categoryParts(category) : []));
+  return { named: [...new Set(named)], calculated: all.some((category) => typeof category !== "string") };
+}
+
+export interface TaskRule {
+  rule: Cancellation;
+  /** The rule or the task's category is calculated, so the rule may or may not act on this task. */
+  mayApply: boolean;
+}
+
+function rulesWhere(model: Model, task: Task, caseType: string, wanted: (rule: Cancellation) => boolean): TaskRule[] {
+  if (!taskCases(model, task).includes(caseType)) {
+    return [];
+  }
+  const { named, calculated } = cancelCategories(model, task, caseType);
+  return (model.cancellations ?? []).flatMap((rule): TaskRule[] => {
+    if (!wanted(rule) || !(rule.only ?? caseTypeIds(model)).includes(caseType)) {
+      return [];
+    }
+    if (rule.categories === undefined || rule.categories.some((category) => category === null)) {
+      return [{ rule, mayApply: false }];
+    }
+    // A rule row "A,B" correlates on both categories, so it finds only a task that carries both.
+    const matches = rule.categories.some((category) => {
+      const parts = typeof category === "string" ? categoryParts(category) : [];
+      return parts.length > 0 && parts.every((part) => part === "*" || named.includes(part));
+    });
+    if (matches) {
+      return [{ rule, mayApply: false }];
+    }
+    return calculated || rule.categories.some((category) => typeof category !== "string") ? [{ rule, mayApply: true }] : [];
+  });
+}
+
+/**
+ * The cancelling and warning rules that act on a task in one case type. A rule with no categories is about every task; a
+ * rule or task with a calculated category may apply.
+ */
+export const rulesForTask = (model: Model, task: Task, caseType: string): TaskRule[] =>
+  rulesWhere(model, task, caseType, (rule) => rule.action !== "Reconfigure");
+
+/** The rules that recalculate a task in one case type, matched to it by category as its cancelling rules are. */
+export const reconfigureRules = (model: Model, task: Task, caseType: string): TaskRule[] =>
+  rulesWhere(model, task, caseType, (rule) => rule.action === "Reconfigure");
+
+export interface BoardTask {
+  task: Task;
+  name: string;
+  caseTypes: string[];
+}
+
+export type BoardGrouping = "roleCategory" | "workType";
+
+/**
+ * Tasks grouped by role category or work type, optionally only those of one case type. A task whose group differs by
+ * case type is in each of its groups, with the case types it is there for.
+ */
+export function boardGroups(model: Model, by: BoardGrouping, caseType?: string): Array<{ group: string; tasks: BoardTask[] }> {
+  const groups = new Map<string, Map<string, string[]>>();
+  for (const task of model.tasks) {
+    const own = taskCases(model, task);
+    for (const id of own.filter((candidate) => caseType === undefined || candidate === caseType)) {
+      const name = taskName(model, task, [id]);
+      const values = possibleValues(model, task[by], id, own);
+      for (const value of values.length === 0 ? [""] : values) {
+        const group = value === "" ? "Not set" : value;
+        const rows = groups.get(group) ?? new Map<string, string[]>();
+        const key = `${task.id}\u0000${name}`;
+        rows.set(key, [...(rows.get(key) ?? []), id]);
+        groups.set(group, rows);
+      }
+    }
+  }
+  const taskById = new Map(model.tasks.map((task) => [task.id, task]));
+  const board = new Map<string, BoardTask[]>(
+    [...groups].map(([group, rows]) => [
+      group,
+      [...rows].flatMap(([key, caseTypes]): BoardTask[] => {
+        const [id, name] = key.split("\u0000") as [string, string];
+        const task = taskById.get(id);
+        return task === undefined ? [] : [{ task, name, caseTypes }];
+      })
+    ])
+  );
+  return [...board.entries()]
+    .map(([group, tasks]) => ({ group, tasks }))
+    .sort((a, b) => (a.group === "Not set" ? 1 : b.group === "Not set" ? -1 : byCodePoint(a.group, b.group)));
+}
+
+export const DUE_LABELS: Record<string, string> = {
+  days: "Due after (days)",
+  origin: "Counted from",
+  originRef: "Counted from (field)",
+  originEarliest: "Counted from the earliest of",
+  originLatest: "Counted from the latest of",
+  time: "Due at (time)",
+  skipNonWorkingDays: "Skip non-working days",
+  nonWorkingDaysOfWeek: "Non-working days of the week",
+  nonWorkingCalendar: "Non-working day calendar",
+  mustBeWorkingDay: "Must fall on a working day",
+  calculatedDates: "Dates calculated"
+};
+
+export const PRIORITY_LABELS: Record<string, string> = {
+  major: "Major priority",
+  minor: "Minor priority",
+  dateOrigin: "Priority date counted from",
+  dateOriginRef: "Priority date counted from (field)",
+  dateOriginEarliest: "Priority date counted from the earliest of",
+  dateOriginLatest: "Priority date counted from the latest of",
+  dateIntervalDays: "Priority date interval (days)"
+};
+
+/** The sentence for a task's link: where in Manage Case it takes the person. */
+export const describeLink = (link: { label: string; event: string; page: string }): string =>
+  `"${link.label}" opens ${code(link.event)}, on page ${code(link.page)}`;
+
+/** A cancelling or warning rule for one task, saying so when its category is calculated and it may not apply. */
+export const describeTaskRule = ({ rule, mayApply }: TaskRule): string =>
+  mayApply ? `${describeCancellation(rule)}. May apply: a category it names or the task's is calculated` : describeCancellation(rule);
+
+/**
+ * The attributes a case change recalculates for a task in one case type: each attribute's own `reconfigure` where its
+ * entry has one, otherwise whether the task lists it. An entry whose flag is a value other than a boolean shows it.
+ */
+export function reconfiguredAttributes(model: Model, task: Task, caseType: string): string[] {
+  const cases = taskCases(model, task);
+  const listed = new Set(task.reconfigure ?? []);
+  const flagged = (name: string, flag: Expr): string[] => {
+    const text = typeof flag === "string" ? flag.trim().toLowerCase() : flag;
+    return text === false || text === "false" || text === null ? [] : [text === true || text === "true" ? name : `${name} (${describeExpr(flag)})`];
+  };
+  const own = attributesOf(task).flatMap(([name, val]) =>
+    valPieces(model, val, cases)
+      .filter((piece) => piece.cases.includes(caseType))
+      .flatMap((piece) => flagged(name, piece.reconfigure !== undefined ? piece.reconfigure : listed.has(name)))
+  );
+  const everyTask = (model.defaults?.configuration ?? [])
+    .filter((attribute) => (attribute.only ?? caseTypeIds(model)).includes(caseType))
+    .flatMap((attribute) => flagged(attribute.name, attribute.reconfigure === undefined ? false : attribute.reconfigure));
+  return [...new Set([...own, ...everyTask])];
+}

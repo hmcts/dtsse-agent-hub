@@ -127,13 +127,13 @@ describe("profile names and package exports", () => {
     expect(() => parseModel(text)).toThrow("unknown permission profile constructor");
   });
 
-  it("should export the model entry points and not its internals when imported from the package index", async () => {
+  it("should export the model entry points and the helpers the builder pages read, but not collectAtoms when imported from the package index", async () => {
     const api = await import("./index.ts");
     expect(typeof api.liftSpec).toBe("function");
     expect(typeof api.compileModel).toBe("function");
     expect(typeof api.loadSpecFile).toBe("function");
     expect("collectAtoms" in api).toBe(false);
-    expect("attributesOf" in api).toBe(false);
+    expect(typeof api.attributesOf).toBe("function");
   });
 });
 
