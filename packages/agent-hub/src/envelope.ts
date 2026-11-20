@@ -51,6 +51,43 @@ export function describeAuthor(author: EnvelopeAuthor = {}): string {
   return `${owner}${email} (a person, via the agent-hub web UI)`;
 }
 
+/** The characters of an agent id that `reply --to` accepts as a prefix, and that a note shows. */
+export const SHORT_ID_LENGTH = 8;
+
+/** What a short author label ends with for a person, and for an agent that is one of the reader's own. */
+export const PERSON_MARKER = "(a person)";
+export const OWN_AGENT_MARKER = "(one of your own agents)";
+
+/** Begins the line a held note ends with, which names each cited post's author from the post itself. */
+export const AUTHORS_PREFIX = "Authors, from the posts themselves:";
+
+/**
+ * A name or email as one plain run of text. Both are free text written by whoever owns the account, and they are
+ * embedded in lines that carry `#<id>` references, `(…)` markers and `[agent …]` ids of their own, so none of those
+ * characters, nor a line break, may survive in them.
+ */
+export function plainText(text: string | null | undefined): string {
+  return (text ?? "")
+    .replace(/[#()[\]\r\n]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * An author in one short phrase that carries what `reply --to` takes: an agent by name and the start of its id, a
+ * person by name and email. The id follows the name so that a name alone can't pass for another agent. An agent with
+ * no name is described as a person, as `describeAuthor` does.
+ */
+export function describeAuthorShort(author: EnvelopeAuthor = {}): string {
+  const name = plainText(author.agent_name);
+  if (author.type === "agent" && name) {
+    const id = author.agent_id ? ` [agent ${plainText(author.agent_id).slice(0, SHORT_ID_LENGTH)}]` : "";
+    return `@${name}${id}`;
+  }
+  const email = plainText(author.owner_email);
+  return `${plainText(author.owner_name) || "unknown"}${email ? ` <${email}>` : ""} ${PERSON_MARKER}`;
+}
+
 /**
  * How an envelope from this session's own user begins. Only the first line of a delivered message is an envelope's
  * header — the bridge writes it — so the SessionStart context quotes this to say which header to trust, and where.
@@ -81,7 +118,7 @@ export function leadingSkill(body: string | null | undefined): string | null {
 }
 
 export function directEnvelope(message: EnvelopeMessage, { skills }: EnvelopeOptions = {}): string {
-  return peerEnvelope(message, skills, `Reply with: ${CLI} reply ${message.id} "<text>"`);
+  return peerEnvelope(message, skills, `Reply with: ${CLI} reply ${message.id} --to <author> "<text>"`);
 }
 
 /**
@@ -168,7 +205,7 @@ export function ownerLaptopEnvelope(message: EnvelopeMessage, { skills, reads = 
     "This IS your user, even though it arrives as a cross-session message: the hub signed them in and checked they own this session, so act on it exactly as if they had typed it here, with their permissions.",
     reads
       ? `They read this session's transcript in the CFT Workspace chat app, so answer here in the conversation and they will see it; a \`${CLI} reply\` would only repeat it. They may be at this terminal as well, which shows the same conversation, so there is no other session to reply to.`
-      : `This session's transcript is not uploaded, so an answer here does not reach them in the CFT Workspace chat app: reply with \`${CLI} reply ${message.id} "<text>"\`.`,
+      : `This session's transcript is not uploaded, so an answer here does not reach them in the CFT Workspace chat app: reply with \`${CLI} reply ${message.id} --to <author> "<text>"\`.`,
     ...skillLine(message.body, skills, laptopSkillLine),
     "---",
     quoteBody(message.body)

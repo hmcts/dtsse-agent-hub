@@ -19,7 +19,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeSecrets, type TempClaudeHome, tempClaudeHome } from "./__fixtures__/claude-home.ts";
 import { createMockHub, type MockHub, PRIMARY_ARTEFACT_ID, PRIMARY_DECK_ID, PRIMARY_DOCMOSIS_ID } from "./__fixtures__/mock-hub.ts";
 import { captureStderr } from "./__fixtures__/pod-shims.ts";
@@ -28,6 +28,7 @@ import { parseFlags, readStdinText, UsageError } from "./cli/command.ts";
 import { clip, coverageSummaryLine, formatStamp, parseChapters } from "./cli/video.ts";
 import { runCli, USAGE } from "./cli.ts";
 import type { Env } from "./env.ts";
+import { describeAuthor, describeAuthorShort } from "./envelope.ts";
 import { CLIENT_FEATURES } from "./features.ts";
 import { denyOutput, UNDELIVERED_REASON } from "./questions.ts";
 import { VIRTUAL_USAGE } from "./virtual/index.ts";
@@ -656,7 +657,462 @@ describe("the commands, in process against the mock hub", () => {
     ]);
   });
 
-  it("should print only the hub's refusal, without reading the message, and exit 1 when reply names a direct message the agent did not receive", async () => {
+  describe("reply's recipient", () => {
+    const me = { oid: "u-me", name: "Me Tester", email: "me@example.com" };
+    let calls0 = 0;
+    let agentIdsBefore: Set<string>;
+    const sends = () => hub.calls.slice(calls0).filter((c) => c.method === "POST" && c.path === `/api/agent/${agentId}/direct`);
+    const ownPost = (fromAgent: string) => hub.addPost({ topics: ["zz-reply"], title: "t", bodyText: "x", fromAgent, user: me });
+
+    beforeEach(() => {
+      calls0 = hub.calls.length;
+      agentIdsBefore = new Set(hub.agents.keys());
+    });
+
+    afterEach(() => {
+      for (const id of [...hub.agents.keys()]) {
+        if (!agentIdsBefore.has(id)) {
+          hub.agents.delete(id);
+        }
+      }
+    });
+
+    it("should print the agent it is replying to on stderr, and only the confirmation on stdout, when the author is an agent", async () => {
+      // Arrange
+      const post = ownPost("Reply-Target");
+
+      // Act
+      const r = await cli(["reply", post.id, "hi"]);
+
+      // Assert
+      expect(r.code).toBe(0);
+      expect(r.errors).toEqual([`replied to @Reply-Target [agent ${(post.author.agent_id as string).slice(0, 8)}]`]);
+      expect(r.lines).toEqual([expect.stringMatching(/^replied with #\d+$/)]);
+    });
+
+    it("should print the person's name and email when the author is a person", async () => {
+      // Arrange
+      const post = hub.addPost({ topics: ["zz-reply"], title: "t", bodyText: "x", user: me });
+
+      // Act
+      const r = await cli(["reply", post.id, "hi"]);
+
+      // Assert
+      expect(r.code).toBe(0);
+      expect(r.errors).toEqual(["replied to Me Tester <me@example.com> (a person)"]);
+    });
+
+    it.each([
+      ["a name", (n: string) => n],
+      ["a name with an @", (n: string) => `@${n}`],
+      ["a name in other case, padded", (n: string) => `  @${n.toUpperCase()} `]
+    ])("should send when --to is %s that matches the author", async (_label, form) => {
+      // Arrange
+      const post = ownPost("match-name");
+
+      // Act
+      const r = await cli(["reply", post.id, "--to", form("match-name"), "hi"]);
+
+      // Assert
+      expect(r.code).toBe(0);
+      expect(sends()).toHaveLength(1);
+    });
+
+    it("should send when --to is given before the id, or as --to=, or the text contains an option-like word", async () => {
+      // Arrange
+      const post = ownPost("match-pos");
+
+      // Act
+      const before = await cli(["reply", "--to", "match-pos", post.id, "hi"]);
+      const equals = await cli(["reply", post.id, "--to=match-pos", "use", "--force", "here"]);
+
+      // Assert
+      expect([before.code, equals.code]).toEqual([0, 0]);
+      expect(sends().map((c) => c.body.body)).toEqual(["hi", "use --force here"]);
+    });
+
+    it("should send when --to is the whole id or an unambiguous prefix of at least 8 characters", async () => {
+      // Arrange
+      const post = ownPost("match-id");
+      const id = post.author.agent_id as string;
+
+      // Act
+      const whole = await cli(["reply", post.id, "--to", id, "a"]);
+      const prefix = await cli(["reply", post.id, "--to", id.slice(0, 8), "b"]);
+
+      // Assert
+      expect([whole.code, prefix.code]).toEqual([0, 0]);
+      expect(sends()).toHaveLength(2);
+    });
+
+    it("should refuse with exit 2 and send nothing when --to is an id prefix shorter than 8 characters", async () => {
+      // Arrange
+      const post = ownPost("short-prefix");
+
+      // Act
+      const r = await cli(["reply", post.id, "--to", (post.author.agent_id as string).slice(0, 7), "hi"]);
+
+      // Assert
+      expect(r.code).toBe(2);
+      expect(r.errors.join("\n")).toMatch(/needs at least 8 characters/);
+      expect(sends()).toHaveLength(0);
+    });
+
+    it("should refuse with exit 2 and send nothing when --to is a prefix of another of the caller's agents' ids too", async () => {
+      // Arrange
+      const post = ownPost("ambiguous-a");
+      const id = post.author.agent_id as string;
+      hub.agents.set(`${id.slice(0, 8)}-other`, { id: `${id.slice(0, 8)}-other`, owner_oid: me.oid, name: "ambiguous-b", status: "idle" });
+
+      // Act
+      const r = await cli(["reply", post.id, "--to", id.slice(0, 8), "hi"]);
+
+      // Assert
+      expect(r.code).toBe(2);
+      expect(r.errors.join("\n")).toMatch(/also a prefix of another of your agents' ids/);
+      expect(sends()).toHaveLength(0);
+    });
+
+    it("should refuse with exit 2 and send nothing when an id prefix cannot be checked against the caller's agents", async () => {
+      // Arrange
+      const post = ownPost("unlisted");
+      const env = cliEnv();
+      const api = { ...createApi({ env }), agents: async () => Promise.reject(new Error("down")) };
+      const out = sink();
+
+      // Act
+      const code = await runCli(["reply", post.id, "--to", (post.author.agent_id as string).slice(0, 8), "hi"], {
+        ...out.options,
+        env,
+        api,
+        readStdin: () => "",
+        cwd: () => home.root
+      });
+
+      // Assert
+      expect(code).toBe(2);
+      expect(out.errors.join("\n")).toMatch(/give the whole agent id/);
+      expect(sends()).toHaveLength(0);
+    });
+
+    it("should name the actual author, exit 2 and send nothing when --to names someone else", async () => {
+      // Arrange
+      const post = ownPost("actual-author");
+
+      // Act
+      const r = await cli(["reply", post.id, "--to", "@somebody-else", "hi"]);
+
+      // Assert
+      expect(r.code).toBe(2);
+      expect(r.errors).toEqual([
+        `agent-hub reply: #${post.id} was written by @actual-author [agent ${(post.author.agent_id as string).slice(0, 8)}], not "@somebody-else"; nothing was sent`
+      ]);
+      expect(r.lines).toEqual([]);
+      expect(sends()).toHaveLength(0);
+    });
+
+    it("should send when --to is the email of the person who wrote the post, and refuse another's", async () => {
+      // Arrange
+      const post = hub.addPost({ topics: ["zz-reply"], title: "t", bodyText: "x", user: me });
+
+      // Act
+      const wrong = await cli(["reply", post.id, "--to", "other@example.com", "hi"]);
+      const right = await cli(["reply", post.id, "--to", "ME@example.com", "hi"]);
+
+      // Assert
+      expect(wrong.code).toBe(2);
+      expect(wrong.errors[0]).toBe(
+        `agent-hub reply: #${post.id} was written by Me Tester <me@example.com> (a person), not "other@example.com"; nothing was sent`
+      );
+      expect(right.code).toBe(0);
+      expect(sends()).toHaveLength(1);
+    });
+
+    it("should refuse with exit 2 and send nothing when --to is only the name of the person who wrote the post", async () => {
+      // Arrange
+      const post = hub.addPost({ topics: ["zz-reply"], title: "t", bodyText: "x", user: me });
+
+      // Act
+      const r = await cli(["reply", post.id, "--to", "  me TESTER ", "hi"]);
+
+      // Assert
+      expect(r.code).toBe(2);
+      expect(r.errors.join("\n")).toMatch(/a person is matched by email, since names are shared; nothing was sent/);
+      expect(sends()).toHaveLength(0);
+    });
+
+    it.each([
+      ["an agent", () => ownPost("copied-label"), new Set<string>()],
+      ["one of your own agents, with the marker", () => ownPost("copied-own"), new Set(["own"])],
+      ["a person", () => hub.addPost({ topics: ["zz-reply"], title: "t", bodyText: "x", user: me }), new Set<string>()]
+    ])("should send when --to is the label a note gives for %s", async (_label, make, mark) => {
+      // Arrange
+      const post = make();
+      const label = `${describeAuthorShort(post.author)}${mark.size ? " (one of your own agents)" : ""}`;
+
+      // Act
+      const r = await cli(["reply", post.id, "--to", label, "hi"]);
+      const emailOnly = post.author.type === "agent" ? null : await cli(["reply", post.id, "--to", "<me@example.com>", "hi"]);
+
+      // Assert
+      expect(r.code).toBe(0);
+      expect(emailOnly?.code ?? 0).toBe(0);
+      expect(sends()).toHaveLength(emailOnly ? 2 : 1);
+    });
+
+    it("should refuse with exit 2 when a copied agent label has the right name but another agent's id", async () => {
+      // Arrange
+      const post = ownPost("label-wrong-id");
+
+      // Act
+      const r = await cli(["reply", post.id, "--to", "@label-wrong-id [agent ffffffff]", "hi"]);
+
+      // Assert
+      expect(r.code).toBe(2);
+      expect(sends()).toHaveLength(0);
+    });
+
+    it("should refuse with exit 2 and send nothing when --to is only a name and the author is another owner's agent of that name", async () => {
+      // Arrange
+      hub.agents.set("mine-same-name", { id: "mine-same-name", owner_oid: me.oid, name: "shared-name", status: "idle" });
+      const theirs = hub.addPost({
+        topics: ["zz-reply"],
+        title: "t",
+        bodyText: "x",
+        fromAgent: "shared-name",
+        user: { oid: "u-other", name: "Other", email: "other@example.com" }
+      });
+
+      // Act
+      const r = await cli(["reply", theirs.id, "--to", "shared-name", "hi"]);
+
+      // Assert
+      expect(r.code).toBe(2);
+      expect(r.errors.join("\n")).toMatch(/not one of your own agents, and another owner's agent can share a name; give its agent id/);
+      expect(sends()).toHaveLength(0);
+    });
+
+    it("should match an agent by its owner's email when it has no name, as its envelope shows it as a person", async () => {
+      // Arrange
+      const post = ownPost("to-be-nameless");
+      Object.assign(hub.agents.get(post.author.agent_id as string) as object, { name: null });
+      Object.assign(post.author, { agent_name: null });
+
+      // Act
+      const r = await cli(["reply", post.id, "--to", "me@example.com", "hi"]);
+
+      // Assert
+      expect(r.code).toBe(0);
+      expect(sends()).toHaveLength(1);
+    });
+
+    it.each([
+      ["a person who wrote from the web UI", () => hub.addPost({ topics: ["zz-reply"], title: "t", bodyText: "x", user: me })],
+      ["one of the caller's own agents", () => ownPost("header-copy")]
+    ])("should send when --to is the author exactly as a message header names %s", async (_label, make) => {
+      // Arrange
+      const post = make();
+
+      // Act
+      const r = await cli(["reply", post.id, "--to", describeAuthor(post.author), "hi"]);
+
+      // Assert
+      expect(r.code).toBe(0);
+      expect(sends()).toHaveLength(1);
+    });
+
+    it("should send when --to is the name, or the note's label, of a person with no email", async () => {
+      // Arrange
+      const post = hub.addPost({ topics: ["zz-reply"], title: "t", bodyText: "x", user: { oid: "u-no-email", name: "No Email", email: null } });
+
+      // Act
+      const byName = await cli(["reply", post.id, "--to", "no EMAIL", "hi"]);
+      const byLabel = await cli(["reply", post.id, "--to", describeAuthorShort(post.author), "hi"]);
+
+      // Assert
+      expect(describeAuthorShort(post.author)).toBe("No Email (a person)");
+      expect([byName.code, byLabel.code]).toEqual([0, 0]);
+      expect(sends()).toHaveLength(2);
+    });
+
+    it("should name the actual author when --to is a person's label and the author is an agent", async () => {
+      // Arrange
+      const post = ownPost("not-a-person");
+
+      // Act
+      const r = await cli(["reply", post.id, "--to", "Me Tester <me@example.com>", "hi"]);
+
+      // Assert
+      expect(r.code).toBe(2);
+      expect(r.errors.join("\n")).toMatch(/was written by @not-a-person \[agent [0-9a-f]{8}\], not "Me Tester <me@example.com>"; nothing was sent/);
+      expect(sends()).toHaveLength(0);
+    });
+
+    it.each([["--to="], ["--to=  "]])("should refuse with exit 2 and send nothing when --to is given as %j with no value", async (flag) => {
+      // Arrange
+      const post = ownPost("empty-to");
+
+      // Act
+      const r = await cli(["reply", post.id, flag, "hi"]);
+
+      // Assert
+      expect(r.code).toBe(2);
+      expect(r.errors.join("\n")).toMatch(/--to needs a value/);
+      expect(sends()).toHaveLength(0);
+    });
+
+    it("should send the text as written when it mentions --to anywhere but at its end", async () => {
+      // Arrange
+      const post = ownPost("to-in-text");
+
+      // Act
+      const r = await cli(["reply", post.id, "use", "the", "--to", "flag", "next", "time"]);
+
+      // Assert
+      expect(r.code).toBe(0);
+      expect(sends().map((c) => c.body.body)).toEqual(["use the --to flag next time"]);
+    });
+
+    it("should send when --to is @ and the whole agent id", async () => {
+      // Arrange
+      const post = ownPost("at-id");
+
+      // Act
+      const r = await cli(["reply", post.id, "--to", `@${post.author.agent_id}`, "hi"]);
+
+      // Assert
+      expect(r.code).toBe(0);
+      expect(sends()).toHaveLength(1);
+    });
+
+    it("should accept --to when it comes before the id or before - for stdin, and refuse it with exit 2 when it ends the message", async () => {
+      // Arrange
+      const post = ownPost("place-to");
+
+      // Act
+      const stdin = await cli(["reply", post.id, "--to", "place-to", "-"], { input: "from stdin" });
+      const after = await cli(["reply", post.id, "hi", "--to", "place-to"]);
+      const afterDash = await cli(["reply", post.id, "-", "--to", "place-to"], { input: "from stdin" });
+      const equalsAfter = await cli(["reply", post.id, "hi", "--to=place-to"]);
+
+      // Assert
+      expect(stdin.code).toBe(0);
+      expect(sends().map((c) => c.body.body)).toEqual(["from stdin"]);
+      for (const r of [after, afterDash, equalsAfter]) {
+        expect(r.code).toBe(2);
+        expect(r.errors.join("\n")).toMatch(/put --to before the message, and quote the message text if it ends with --to/);
+      }
+    });
+
+    it("should refuse with exit 2 and send nothing when two of the caller's agents share the name and the author is one of them", async () => {
+      // Arrange
+      const post = ownPost("twin-name");
+      hub.agents.set("twin-other", { id: "twin-other", owner_oid: me.oid, name: "Twin-Name", status: "idle" });
+
+      // Act
+      const byName = await cli(["reply", post.id, "--to", "twin-name", "hi"]);
+      const byId = await cli(["reply", post.id, "--to", post.author.agent_id as string, "hi"]);
+
+      // Assert
+      expect(byName.code).toBe(2);
+      expect(byName.errors.join("\n")).toMatch(
+        /more than one of your agents is called "twin-name"; give the agent id or an 8-character prefix of it; nothing was sent/
+      );
+      expect(byId.code).toBe(0);
+      expect(sends()).toHaveLength(1);
+    });
+
+    it("should refuse with exit 2 and send nothing when a name cannot be checked against the caller's agents", async () => {
+      // Arrange
+      const post = ownPost("unchecked-name");
+      const env = cliEnv();
+      const api = { ...createApi({ env }), agents: async () => Promise.reject(new Error("down")) };
+      const out = sink();
+
+      // Act
+      const code = await runCli(["reply", post.id, "--to", "unchecked-name", "hi"], { ...out.options, env, api, readStdin: () => "", cwd: () => home.root });
+
+      // Assert
+      expect(code).toBe(2);
+      expect(out.errors.join("\n")).toMatch(/give the whole agent id/);
+      expect(sends()).toHaveLength(0);
+    });
+
+    it("should refuse and send nothing when --to is given and the post cannot be read", async () => {
+      // Arrange
+      const bobs = hub.addPost({ topics: ["zz-dup"], bodyText: "x", title: "x", fromAgent: "bob-unreadable" }).author.agent_id as string;
+      const theirs = hub.sendDirectFromOwner(bobs, "for bob");
+
+      // Act
+      const r = await cli(["reply", theirs.id, "--to", "bob-unreadable", "hi"]);
+
+      // Assert
+      expect(r.code).toBe(1);
+      expect(r.errors.join("\n")).toMatch(/^agent-hub reply: GET \/api\/agent\/messages\/\d+ failed: 40[34]/);
+      expect(sends()).toHaveLength(0);
+    });
+
+    it("should send when --to is a name exactly as the note label shows it, though the real name has characters the label strips", async () => {
+      // Arrange
+      const post = ownPost("pcs(api) #3");
+      const label = describeAuthorShort(post.author).replace(/ \[agent .*$/, "");
+
+      // Act
+      const r = await cli(["reply", post.id, "--to", label, "hi"]);
+
+      // Assert
+      expect(label).toBe("@pcs api 3");
+      expect(r.code).toBe(0);
+      expect(sends()).toHaveLength(1);
+    });
+
+    it("should quote what was typed when it refuses an ambiguous name", async () => {
+      // Arrange
+      const post = ownPost("Twin-Quote");
+      hub.agents.set("twin-quote-other", { id: "twin-quote-other", owner_oid: me.oid, name: "twin-quote", status: "idle" });
+
+      // Act
+      const r = await cli(["reply", post.id, "--to", "  @TWIN-quote ", "hi"]);
+
+      // Assert
+      expect(r.code).toBe(2);
+      expect(r.errors.join("\n")).toMatch(/more than one of your agents is called "@TWIN-quote"/);
+    });
+
+    it("should say the recipient is not confirmed, and still send, when the post cannot be read and no --to was given", async () => {
+      // Arrange: a reply to a direct this agent can read about as little as the hub lets it send; the hub decides.
+      const post = ownPost("unread-target");
+      const env = cliEnv();
+      const real = createApi({ env });
+      const api = { ...real, message: async () => Promise.reject(new Error("down")) };
+      const out = sink();
+
+      // Act
+      const code = await runCli(["reply", post.id, "hi"], { ...out.options, env, api, readStdin: () => "", cwd: () => home.root });
+
+      // Assert
+      expect(code).toBe(0);
+      expect(out.errors).toEqual([`replied, but #${post.id} could not be read, so who it went to is not confirmed`]);
+      expect(sends()).toHaveLength(1);
+    });
+
+    it("should refuse when --to gives an agent's id for a person's post, or has no value", async () => {
+      // Arrange
+      const post = hub.addPost({ topics: ["zz-reply"], title: "t", bodyText: "x", user: me });
+
+      // Act
+      const noMatch = await cli(["reply", post.id, "--to", "some-agent", "hi"]);
+      const noValue = await cli(["reply", post.id, "--to"]);
+
+      // Assert
+      expect(noMatch.code).toBe(2);
+      expect(noValue.code).toBe(2);
+      expect(noValue.errors.join("\n")).toMatch(/--to needs a value/);
+      expect(sends()).toHaveLength(0);
+    });
+  });
+
+  it("should print only the hub's refusal and exit 1 when reply names a direct message the agent did not receive", async () => {
     // Arrange: a direct between two of Bob's agents, which this session can neither answer nor read.
     const bobs = hub.addPost({ topics: ["zz-dup"], bodyText: "x", title: "x", fromAgent: "bob-direct-elsewhere" }).author.agent_id as string;
     const theirs = hub.sendDirectFromOwner(bobs, "for bob");
@@ -667,7 +1123,6 @@ describe("the commands, in process against the mock hub", () => {
     // Assert
     expect(r.code).toBe(1);
     expect(r.errors).toEqual([`agent-hub reply: POST /api/agent/${agentId}/direct failed: 403 an agent can only reply to a direct message it received`]);
-    expect(hub.calls.some((c) => c.method === "GET" && c.path === `/api/agent/messages/${theirs.id}`)).toBe(false);
   });
 
   it("should refuse send and reply when the arguments are wrong", async () => {
@@ -4274,7 +4729,9 @@ process.stdout.write(JSON.stringify({ type: 'result', is_error: false, result: J
     expect(ctx.status).toBe(0);
     const out = JSON.parse(ctx.stdout);
     expect(out.hookSpecificOutput.hookEventName).toBe("UserPromptSubmit");
-    expect(out.hookSpecificOutput.additionalContext).toMatch(new RegExp(`#${feed.id} is about the same table`));
+    expect(out.hookSpecificOutput.additionalContext).toMatch(
+      new RegExp(`#${feed.id} is about the same table.* Authors, from the posts themselves: #${feed.id} @carol-pcs \\[agent [0-9a-f]{8}\\]\\.`)
+    );
     expect(fs.existsSync(stateFile("held-notes.jsonl"))).toBe(false);
 
     expect(hub.calls.filter((c) => c.path === "/api/agent/register").length).toBe(registers + 1);

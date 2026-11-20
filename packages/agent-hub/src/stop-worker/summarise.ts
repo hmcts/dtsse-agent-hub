@@ -1,7 +1,7 @@
 // What the summariser asks Haiku for, and what it will accept back. The topic taxonomy in the prompt is
 // cft-workspace's layout, the same one `agent.ts` reads paths against; the two are changed together.
 import { TOPIC_RE } from "../agent.ts";
-import { CLI } from "../envelope.ts";
+import { AUTHORS_PREFIX, CLI, describeAuthorShort, OWN_AGENT_MARKER } from "../envelope.ts";
 import { MAX_POST_TOPICS } from "../limits.ts";
 import type { Message } from "../wire.ts";
 import type { CandidateTopics } from "./candidates.ts";
@@ -182,7 +182,7 @@ PUBLISH ${offerPublish ? "is allowed this time" : 'is NOT allowed this time: set
 
 NOTIFY ${offerNotify ? "is allowed this time" : 'is NOT allowed this time: set "notify" to null'}.
 - Set "notify" only when a feed item below bears directly on what this session is working on now. Otherwise null.
-- Cite message ids as #<id>, say in one or two sentences why each matters, and tell the session it can run "${CLI} read <id>" for the full message.
+- Cite each message as "#<id>: <one or two sentences on why it matters>", and tell the session it can run "${CLI} read <id>" for the full message. Do not name the author: the client appends each cited post's author.
 
 Subscribed topics: ${listed(subscriptions)}
 Most active topics: ${listed(activeTopics)}
@@ -198,4 +198,44 @@ ${sliceText || "(nothing new)"}
 === New feed items on subscribed topics ===
 ${feedText || "(none)"}
 `;
+}
+
+/** How many cited posts a note names the authors of, and how long each label may be, which bound what a note gains. */
+export const MAX_NOTE_AUTHORS = 10;
+const MAX_AUTHOR_LABEL = 160;
+
+function authorLabel(m: Message, ownAgentIds: ReadonlySet<string> | null): string {
+  const own = m.author?.type === "agent" && m.author.agent_name && m.author.agent_id && ownAgentIds?.has(m.author.agent_id) ? ` ${OWN_AGENT_MARKER}` : "";
+  const label = `${describeAuthorShort(m.author)}${own}`;
+  return label.length > MAX_AUTHOR_LABEL ? `${label.slice(0, MAX_AUTHOR_LABEL - 1)}…` : label;
+}
+
+// A #<id> that is a GitHub or Jira reference ("PR #260", "issue #12", ".../pull/#5") is not a hub post.
+const MENTION = "(?<![\\w/&])(?<!\\b(?:PRs?|pull requests?|issues?|tickets?)\\s*)#(\\d+)(?!\\d)";
+
+/** The hub post ids a note cites as #<id>, in the order they are first cited. */
+export function citedIds(note: string): Set<string> {
+  return new Set([...note.matchAll(new RegExp(MENTION, "giu"))].map((m) => m[1] as string));
+}
+
+// The authors line the model may have written itself, in any case or punctuation, and everything after it: only the
+// line built from the posts may carry that heading.
+const FORGED_AUTHORS = /\s*authors\W+from\s+the\s+posts\s+themselves\b[\s\S]*$/i;
+
+/**
+ * Appends who wrote each feed post the note cites, taken from the post and never from the model, so whatever the
+ * model wrote about authorship is outranked by a line the session is told to trust. The note's own text is left as
+ * written, but for any authors line of the model's, which is cut: rewriting prose around a mention cannot tell a
+ * forged attribution from an ordinary sentence, and a forged authors line would pass as the trusted one.
+ */
+export function attributeNote(note: string, messages: readonly Message[], ownAgentIds: ReadonlySet<string> | null): string {
+  const text = note.replace(FORGED_AUTHORS, "").trimEnd();
+  const byId = new Map(messages.map((m) => [m.id, m]));
+  const authors = [...citedIds(text)]
+    .flatMap((id) => {
+      const m = byId.get(id);
+      return m ? [`#${id} ${authorLabel(m, ownAgentIds)}`] : [];
+    })
+    .slice(0, MAX_NOTE_AUTHORS);
+  return authors.length ? `${text} ${AUTHORS_PREFIX} ${authors.join("; ")}.` : text;
 }

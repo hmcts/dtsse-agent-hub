@@ -170,7 +170,7 @@ export type Api = {
   unsubscribe: (id: string, topics: string[]) => Promise<TopicListResponse>;
   topics: (params?: TopicsParams) => Promise<TopicsResponse>;
   topicMessages: (slug: string, params?: TopicMessagesParams) => Promise<MessagesResponse>;
-  agents: () => Promise<AgentsResponse>;
+  agents: (opts?: RequestOptions) => Promise<AgentsResponse>;
   message: (messageId: string) => Promise<MessageResponse>;
   virtualStatus: (id: string, phase: VirtualPhase, detail?: string) => Promise<null>;
   getCredential: (id: string, kind: CredentialKind) => Promise<string | null>;
@@ -449,7 +449,7 @@ export function createApi({
     topics: ({ prefix, limit } = {}) => request<TopicsResponse>("GET", `/api/agent/topics${qs({ prefix, limit })}`),
     topicMessages: (slug, { since, before, limit } = {}) =>
       request<MessagesResponse>("GET", `/api/agent/topics/${encodeURIComponent(slug)}/messages${qs({ since, before, limit })}`),
-    agents: () => request<AgentsResponse>("GET", "/api/agent/agents"),
+    agents: (opts) => request<AgentsResponse>("GET", "/api/agent/agents", undefined, opts),
     message: (messageId) => request<MessageResponse>("GET", `/api/agent/messages/${encodeURIComponent(messageId)}`),
     // Every report carries the claim, so the hub's copy is always the running build's; a hub that predates the field
     // ignores it.
