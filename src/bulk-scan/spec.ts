@@ -1,5 +1,4 @@
 import {
-  allFields,
   caseDataFor,
   type Data,
   expectedFor,
@@ -14,16 +13,13 @@ import {
   importTransformSheet,
   modelByKey,
   readWorkbookBytes,
-  renderCasePath,
-  renderLogic,
   type Scenario,
   SIP,
   scenarios,
   selectSheet,
   TARGETS,
   type Target,
-  validData,
-  valueSets
+  validData
 } from "@hmcts-cft/bulk-scan-spec";
 import { z } from "zod";
 import { HttpError } from "../agent-api/http.ts";
@@ -146,6 +142,10 @@ export function checkSpec(raw: unknown): { ok: true; spec: FormSpec } | { ok: fa
   if (regexIssues.length > 0) {
     return { ok: false, issues: regexIssues };
   }
+  const keyIssues = keyShapeIssues(parsed.data);
+  if (keyIssues.length > 0) {
+    return { ok: false, issues: keyIssues };
+  }
   try {
     modelByKey(parsed.data);
   } catch (error) {
@@ -154,24 +154,24 @@ export function checkSpec(raw: unknown): { ok: true; spec: FormSpec } | { ok: fa
   return { ok: true, spec: parsed.data };
 }
 
-/** What the editor shows of a field and cannot edit: its rules as the transformation sheet words them, and its allowed values. */
-export interface FieldNotes {
-  rules: string;
-  casePath: string;
-  allowed: string[];
+/** Where the engine reads a key: a row that is read at all. */
+function readsKeys(field: Field): boolean {
+  return field.role === "field" && field.mandatory !== "not-read";
 }
 
-export function fieldNotes(field: Field): FieldNotes {
-  return {
-    rules: (field.rules.length > 0 || field.logicPreamble ? renderLogic(field.rules, field.logicPreamble) : field.logicText) ?? "",
-    casePath: [renderCasePath(field.rules, field.neverExceeds), field.casePathNote].filter(Boolean).join("\n\n"),
-    allowed: valueSets(field).map((s) => `${s.key}: ${[...s.allowed, ...(s.blankAllowed ? ["(blank)"] : [])].join(" | ")}`)
-  };
-}
-
-/** Each field's notes, in the order of `allFields`, which is the order of the editor's rows. */
-export function allNotes(spec: FormSpec): FieldNotes[] {
-  return allFields(spec).map(fieldNotes);
+/** A key the generated code names as an identifier must be a word; a new row's empty key is refused on its own row. */
+function keyShapeIssues(spec: FormSpec): SpecIssue[] {
+  return spec.sections.flatMap((section, s) =>
+    section.fields.flatMap((field, f) =>
+      readsKeys(field)
+        ? field.keys.flatMap((key, k) =>
+            /^[A-Za-z][A-Za-z0-9_]*$/.test(key)
+              ? []
+              : [{ path: `sections.${s}.fields.${f}.keys.${k}`, message: `the key "${key}" must be letters, digits and underscores, starting with a letter` }]
+          )
+        : []
+    )
+  );
 }
 
 export type ScenarioEntry = Pick<Scenario, "name" | "kind" | "description">;

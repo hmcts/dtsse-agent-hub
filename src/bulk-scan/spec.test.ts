@@ -9,8 +9,8 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { HttpError } from "../agent-api/http.ts";
+import { addField, addRule, mapField, mapRule, withAssignments, withGroups } from "./edit.ts";
 import {
-  allNotes,
   checkSpec,
   codeDownload,
   envelopeKeys,
@@ -177,18 +177,27 @@ describe("checking a spec", () => {
   });
 });
 
-describe("what the editor shows", () => {
-  it("should word a field's rules and list its allowed values", () => {
-    const [, , kind] = allNotes(SPEC);
-    expect(kind?.rules).toContain("divorce");
-    expect(kind?.allowed).toEqual(["divorce: true | false", "dissolution: true | false"]);
+describe("checking what editing can break", () => {
+  const edited = (change: (spec: FormSpec) => FormSpec) => checkSpec(JSON.parse(JSON.stringify(change(SPEC))));
+  const withRule = (rule: object) => (spec: FormSpec) => mapField(spec, 0, 1, (f) => ({ ...f, rules: [rule as never] }));
+
+  it("should flag the empty key of a new field on its own row", () => {
+    const checked = edited((spec) => addField(spec, 0));
+    expect(!checked.ok && checked.issues.map((i) => i.path)).toEqual(["sections.0.fields.3.keys.0"]);
   });
 
-  it("should fall back to the field's English logic when it has no rules", () => {
-    const field = { ...(SPEC.sections[0]?.fields[0] as FormSpec["sections"][number]["fields"][number]), logicText: "if x then y" };
-    expect(allNotes({ ...SPEC, sections: [{ id: "1", title: "", fields: [field] }] })[0]?.rules).toBe("if x then y");
+  it("should accept a rule on a key the form does not read, which the generated code leaves as a TODO rather than failing to compile", () => {
+    expect(edited(withRule({ when: { nope: "x" }, set: { applicantFirstName: { from: "nope" } } })).ok).toBe(true);
   });
 
+  it("should accept a condition on a key of the form, a sheet id and a value the row writes", () => {
+    for (const when of [{ firstName: null }, { "1.1": "x" }, { "ccd:kind": "divorce" }]) {
+      expect(edited(withRule({ when, outcome: "warning" })).ok).toBe(true);
+    }
+  });
+});
+
+describe("what the simulator offers", () => {
   it("should list the scenarios and the keys of the envelope", () => {
     expect(scenarioEntries(SPEC).map((s) => s.name)).toContain("valid");
     expect(envelopeKeys(SPEC)).toEqual(["firstName", "email", "divorce", "dissolution"]);
@@ -217,6 +226,24 @@ describe("simulating", () => {
       ]
     });
     expect(simulate(exception, { data: { k: "v" } })).toMatchObject({ expected: { transformation: "exception-record" }, caseData: {} });
+  });
+
+  it("should change an envelope's outcome and case data once a rule is added in the editor", () => {
+    const data = simulate(SPEC, {}).data;
+    expect(simulate(SPEC, { data }).expected.transformation).not.toBe("exception-record");
+
+    const raised = mapField(SPEC, 0, 1, (f) =>
+      mapRule(addRule(f), 0, (r) => ({ ...withGroups(r, [[{ key: "email", op: "filled", value: "" }]]), outcome: "exception" as const }))
+    );
+    expect(simulate(raised, { data }).expected.transformation).toBe("exception-record");
+    expect(simulate(raised, { data: { ...data, email: "" } }).expected.transformation).not.toBe("exception-record");
+
+    const copied = mapField(SPEC, 0, 1, (f) => ({
+      ...f,
+      ccd: ["applicantEmail"],
+      rules: [withAssignments({}, [{ target: "applicantEmail", copy: true, value: "email" }])]
+    }));
+    expect(simulate(copied, { data: { ...data, email: "a@x.com" } }).caseData).toMatchObject({ applicantEmail: "a@x.com" });
   });
 
   it("should refuse a scenario the version does not have, and values that are not text", () => {

@@ -169,7 +169,7 @@ describe("saving versions", () => {
     const response = await save(id, bad);
 
     expect(response.status).toBe(422);
-    expect((await jsonOf<{ issues: { path: string }[] }>(response)).issues.map((i) => i.path)).toEqual(["sections"]);
+    expect((await jsonOf<{ issues: { path: string }[] }>(response)).issues.map((i) => i.path)).toEqual(["sections.0.fields.0.keys.0"]);
   });
 
   it("should refuse a body that has no spec", async () => {
@@ -242,6 +242,24 @@ describe("the engine", () => {
 
     expect(missing.expected.validation).toBe("warning");
     expect(sent.case_data).toEqual({ applicantFirstName: "Ada" });
+  });
+
+  it("should drive the simulator with a rule added in a saved version, and leave the earlier version as it was", async () => {
+    const [id] = (await upload()) as [string];
+    const run = async (version: number) =>
+      jsonOf<{ expected: { transformation: string } }>(
+        await simulateRoute.POST(as("alice", "/s", { method: "POST", body: JSON.stringify({ version, data: { firstName: "Ada" } }) }), context(id))
+      );
+    const rule = { when: { firstName: { not: null } }, outcome: "exception" };
+    const edited = {
+      ...SPEC,
+      sections: SPEC.sections.map((section, s) => ({ ...section, fields: section.fields.map((f, i) => (s === 0 && i === 0 ? { ...f, rules: [rule] } : f)) }))
+    };
+
+    expect((await save(id, edited)).status).toBe(201);
+
+    expect((await run(1)).expected.transformation).not.toBe("exception-record");
+    expect((await run(2)).expected.transformation).toBe("exception-record");
   });
 
   it("should download the SIP, the transformation sheet and a code zip of a version, and refuse an unknown kind or target", async () => {

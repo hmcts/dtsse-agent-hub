@@ -1,8 +1,11 @@
-import type { Field, FormSpec } from "@hmcts-cft/bulk-scan-spec";
+import type { Assignment, Emit, Field, FormSpec, Operand, Rule, Scalar, Section } from "@hmcts-cft/bulk-scan-spec";
+import { emitsOf, valueSets } from "@hmcts-cft/bulk-scan-spec/emits";
+import { renderCasePath, renderLogic } from "@hmcts-cft/bulk-scan-spec/logic";
+import { isNegation, isTickedTest } from "@hmcts-cft/bulk-scan-spec/schema";
 
 /**
- * The editor's changes to a spec, as pure functions on it. Only types come from the spec package: this runs in the
- * browser, which must not load the engine.
+ * The editor's changes to a spec, as pure functions on it. Only the schema, rule wording and allowed-value modules come
+ * from the spec package as code: this runs in the browser, which must not load the engine or the importers.
  */
 
 /** The form-level values the editor changes. */
@@ -20,33 +23,329 @@ export function patchHeader(spec: FormSpec, patch: HeaderPatch): FormSpec {
   return { ...spec, form };
 }
 
-/** The field values the editor changes. */
+/** The field values the editor changes in a row. */
 export type FieldPatch = Partial<Pick<Field, "id" | "label" | "keys" | "ccd" | "inputType" | "mandatory" | "regex" | "maxLength">>;
 
-/** The spec with one field replaced. An empty id, regex or maximum length is the field without one. */
-export function patchField(spec: FormSpec, sectionIndex: number, fieldIndex: number, patch: FieldPatch): FormSpec {
+/** The spec with one field replaced by what `change` makes of it. */
+export function mapField(spec: FormSpec, sectionIndex: number, fieldIndex: number, change: (field: Field) => Field): FormSpec {
   return {
     ...spec,
     sections: spec.sections.map((section, s) =>
-      s !== sectionIndex
-        ? section
-        : {
-            ...section,
-            fields: section.fields.map((field, f) => {
-              if (f !== fieldIndex) {
-                return field;
-              }
-              const next: Field = { ...field, ...patch };
-              for (const optional of ["id", "regex", "maxLength"] as const) {
-                if (next[optional] === "" || next[optional] === undefined) {
-                  delete next[optional];
-                }
-              }
-              return next;
-            })
-          }
+      s !== sectionIndex ? section : { ...section, fields: section.fields.map((field, f) => (f === fieldIndex ? change(field) : field)) }
     )
   };
+}
+
+/** An option of a group exists only for a key the field has, so a group follows its field's keys; fewer than two keys is no group. */
+function regroup(field: Field): Field {
+  if (!field.group) {
+    return field;
+  }
+  if (field.keys.length < 2) {
+    const { group: _group, ...rest } = field;
+    return rest;
+  }
+  return { ...field, group: { ...field.group, options: field.keys.map((key) => field.group?.options.find((o) => o.key === key) ?? { key }) } };
+}
+
+/**
+ * The spec with one field's row values changed. An empty id, regex or maximum length is the field without one; a group
+ * follows the keys, and a field that stops being conditional loses its condition.
+ */
+export function patchField(spec: FormSpec, sectionIndex: number, fieldIndex: number, patch: FieldPatch): FormSpec {
+  return mapField(spec, sectionIndex, fieldIndex, (field) => {
+    let next: Field = { ...field, ...patch };
+    for (const optional of ["id", "regex", "maxLength"] as const) {
+      if (next[optional] === "" || next[optional] === undefined) {
+        delete next[optional];
+      }
+    }
+    if (patch.keys) {
+      next = regroup(next);
+    }
+    if (patch.mandatory !== undefined && patch.mandatory !== "conditional") {
+      delete next.required;
+    }
+    return next;
+  });
+}
+
+/** A section's own values. */
+export function patchSection(spec: FormSpec, sectionIndex: number, patch: Partial<Pick<Section, "id" | "title">>): FormSpec {
+  return { ...spec, sections: spec.sections.map((section, s) => (s === sectionIndex ? { ...section, ...patch } : section)) };
+}
+
+function moved<T>(items: readonly T[], from: number, by: -1 | 1): T[] {
+  const to = from + by;
+  const item = items[from];
+  if (item === undefined || to < 0 || to >= items.length) {
+    return [...items];
+  }
+  const rest = items.filter((_, i) => i !== from);
+  return [...rest.slice(0, to), item, ...rest.slice(to)];
+}
+
+/** A new field is an optional text field with an empty key, which `checkSpec` refuses until it has one. */
+export function blankField(): Field {
+  return { role: "field", label: "", inputType: "text", mandatory: "optional", keys: [""], ccd: [], rules: [], todo: [] };
+}
+
+export function addField(spec: FormSpec, sectionIndex: number): FormSpec {
+  return { ...spec, sections: spec.sections.map((section, s) => (s === sectionIndex ? { ...section, fields: [...section.fields, blankField()] } : section)) };
+}
+
+export function removeField(spec: FormSpec, sectionIndex: number, fieldIndex: number): FormSpec {
+  return {
+    ...spec,
+    sections: spec.sections.map((section, s) => (s === sectionIndex ? { ...section, fields: section.fields.filter((_, f) => f !== fieldIndex) } : section))
+  };
+}
+
+export function moveField(spec: FormSpec, sectionIndex: number, fieldIndex: number, by: -1 | 1): FormSpec {
+  return {
+    ...spec,
+    sections: spec.sections.map((section, s) => (s === sectionIndex ? { ...section, fields: moved(section.fields, fieldIndex, by) } : section))
+  };
+}
+
+export function addSection(spec: FormSpec): FormSpec {
+  return { ...spec, sections: [...spec.sections, { id: String(spec.sections.length + 1), title: "", fields: [] }] };
+}
+
+export function removeSection(spec: FormSpec, sectionIndex: number): FormSpec {
+  return { ...spec, sections: spec.sections.filter((_, s) => s !== sectionIndex) };
+}
+
+export function moveSection(spec: FormSpec, sectionIndex: number, by: -1 | 1): FormSpec {
+  return { ...spec, sections: moved(spec.sections, sectionIndex, by) };
+}
+
+/** The keys the model reads: those of a field row that is read at all. Rule conditions and copies may name only these. */
+export function formKeys(spec: FormSpec): string[] {
+  const keys = spec.sections.flatMap((s) =>
+    s.fields.filter((f) => f.role === "field" && f.mandatory !== "not-read").flatMap((f) => f.keys.filter((k) => k !== ""))
+  );
+  return [...new Set(keys)];
+}
+
+/** The sheet ids a condition may name instead of a key, with the row's label. */
+export function sheetIds(spec: FormSpec): { id: string; label: string }[] {
+  return spec.sections.flatMap((s) => s.fields.flatMap((f) => (f.id ? [{ id: f.id, label: f.label.split("\n")[0]?.trim() ?? "" }] : [])));
+}
+
+/** Every CCD field id a row of the form names. */
+export function ccdIds(spec: FormSpec): string[] {
+  return [...new Set(spec.sections.flatMap((s) => s.fields.flatMap((f) => f.ccd)))];
+}
+
+/** Removes the TODO or the review marker at `index` of a field once a person has dealt with it. */
+export function clearTodo(spec: FormSpec, sectionIndex: number, fieldIndex: number, index: number): FormSpec {
+  return mapField(spec, sectionIndex, fieldIndex, (field) => ({ ...field, todo: field.todo.filter((_, i) => i !== index) }));
+}
+
+export function clearReview(spec: FormSpec, sectionIndex: number, fieldIndex: number, index: number): FormSpec {
+  return mapField(spec, sectionIndex, fieldIndex, (field) => {
+    const { review, ...rest } = field;
+    const left = (review ?? []).filter((_, i) => i !== index);
+    return left.length > 0 ? { ...rest, review: left } : rest;
+  });
+}
+
+/** Drops the English a field's logic was kept as, once its rules say it. */
+export function clearLogicText(field: Field): Field {
+  const { logicText: _text, ...rest } = field;
+  return rest;
+}
+
+/** Starts the rule list of a field whose logic is still English; the English stays beside it until it is cleared. */
+export function writeAsRules(field: Field): Field {
+  return field.rules.length > 0 ? field : { ...field, rules: [{}] };
+}
+
+/** The exact strings Exela sends for one key, and whether blank is a value it may send. */
+export function withAllowed(field: Field, key: string, values: readonly string[], blankAllowed: boolean): Field {
+  const before = emitsOf(field);
+  const old = before.filter((e) => e.key === key);
+  const made: Emit[] = [
+    ...values.map((value) => {
+      const when = old.find((e) => e.value === value)?.when;
+      return { ...(when ? { when } : {}), key, value };
+    }),
+    ...(blankAllowed ? [{ ...(old.find((e) => e.value === "")?.when ? { when: old.find((e) => e.value === "")?.when } : {}), key, value: "" }] : [])
+  ];
+  const first = before.findIndex((e) => e.key === key);
+  const rest = before.filter((e) => e.key !== key);
+  const at = first < 0 ? rest.length : before.slice(0, first).filter((e) => e.key !== key).length;
+  return { ...field, emits: [...rest.slice(0, at), ...made, ...rest.slice(at)] };
+}
+
+/** Whether the field's keys are one mutually exclusive group; turning it on needs two keys. */
+export function withGroup(field: Field, grouped: boolean): Field {
+  if (!grouped) {
+    const { group: _group, ...rest } = field;
+    return rest;
+  }
+  return field.keys.length < 2
+    ? field
+    : {
+        ...field,
+        group: { kind: "xor", size: field.keys.length, options: field.keys.map((key) => field.group?.options.find((o) => o.key === key) ?? { key }) }
+      };
+}
+
+/** What a typed value means: the words the sheet uses for null, true and false, else the text. */
+export function scalarOf(text: string): Scalar {
+  const lower = text.toLowerCase();
+  return lower === "null" ? null : lower === "true" ? true : lower === "false" ? false : text;
+}
+
+export function textOf(value: Scalar): string {
+  return value === null ? "null" : String(value);
+}
+
+export const OPERATORS = [
+  ["=", "="],
+  ["!=", "!="],
+  ["blank", "is blank"],
+  ["filled", "is not blank"],
+  ["ticked", "is ticked"],
+  ["unticked", "is not ticked"]
+] as const;
+export type Operator = (typeof OPERATORS)[number][0];
+
+/** A condition as a row of the editor. */
+export interface Condition {
+  key: string;
+  op: Operator;
+  value: string;
+}
+
+export function conditionOf(key: string, operand: Operand): Condition {
+  if (isTickedTest(operand)) {
+    return { key, op: operand.ticked ? "ticked" : "unticked", value: "" };
+  }
+  if (isNegation(operand)) {
+    return operand.not === null ? { key, op: "filled", value: "" } : { key, op: "!=", value: textOf(operand.not) };
+  }
+  return operand === null ? { key, op: "blank", value: "" } : { key, op: "=", value: textOf(operand) };
+}
+
+export function operandOf(condition: Condition): Operand {
+  switch (condition.op) {
+    case "=":
+      return scalarOf(condition.value);
+    case "!=":
+      return { not: scalarOf(condition.value) };
+    case "blank":
+      return null;
+    case "filled":
+      return { not: null };
+    case "ticked":
+      return { ticked: true };
+    default:
+      return { ticked: false };
+  }
+}
+
+export function conditionsOf(when: Record<string, Operand> | undefined): Condition[] {
+  return Object.entries(when ?? {}).map(([key, operand]) => conditionOf(key, operand));
+}
+
+/** The conditions as the schema's record; empty is none, since a branch that tests nothing has no `when`. */
+export function whenOf(conditions: readonly Condition[]): Record<string, Operand> | undefined {
+  return conditions.length === 0 ? undefined : Object.fromEntries(conditions.map((c) => [c.key, operandOf(c)]));
+}
+
+/** The words after "Mandatory if" for a condition, as a sheet would write them. */
+export function conditionLabel(condition: Condition): string {
+  const words = OPERATORS.find(([op]) => op === condition.op)?.[1] ?? condition.op;
+  return condition.op === "=" || condition.op === "!=" ? `${condition.key} ${words} ${condition.value}` : `${condition.key} ${words}`;
+}
+
+/** A field mandatory only when all of these hold, worded as the sheet would; none is no condition. */
+export function withRequired(field: Field, conditions: readonly Condition[]): Field {
+  if (conditions.length === 0) {
+    const { required: _required, ...rest } = field;
+    return rest;
+  }
+  return { ...field, required: { label: conditions.map(conditionLabel).join(" AND "), when: whenOf(conditions) } };
+}
+
+/** A branch's condition groups: one conjunction, or the OR alternatives. */
+export function groupsOf(rule: Rule): Condition[][] {
+  return (rule.whenAny ?? (rule.when ? [rule.when] : [])).map(conditionsOf);
+}
+
+/** The branch with these condition groups: none is unconditional, one is `when`, several are `whenAny`. */
+export function withGroups(rule: Rule, groups: readonly Condition[][]): Rule {
+  const { when: _when, whenAny: _whenAny, ...rest } = rule;
+  const present = groups.filter((g) => g.length > 0);
+  if (present.length === 0) {
+    return rest;
+  }
+  if (present.length === 1) {
+    return { ...rest, when: whenOf(present[0] ?? []) };
+  }
+  return { ...rest, whenAny: present.map((g) => whenOf(g) ?? {}) };
+}
+
+/** An ELSE branch tests nothing. */
+export function withElse(rule: Rule, otherwise: boolean): Rule {
+  if (!otherwise) {
+    const { otherwise: _otherwise, ...rest } = rule;
+    return rest;
+  }
+  const { when: _when, whenAny: _whenAny, ...rest } = rule;
+  return { ...rest, otherwise: true };
+}
+
+/** A branch's assignment as a row: a CCD field and a literal or a copy of a key. */
+export interface AssignmentRow {
+  target: string;
+  copy: boolean;
+  value: string;
+}
+
+export function assignmentsOf(rule: Rule): AssignmentRow[] {
+  return Object.entries(rule.set ?? {}).map(([target, v]: [string, Assignment]) =>
+    v !== null && typeof v === "object" ? { target, copy: true, value: v.from } : { target, copy: false, value: textOf(v) }
+  );
+}
+
+export function withAssignments(rule: Rule, rows: readonly AssignmentRow[]): Rule {
+  const { set: _set, ...rest } = rule;
+  return rows.length === 0 ? rest : { ...rest, set: Object.fromEntries(rows.map((r) => [r.target, r.copy ? { from: r.value } : scalarOf(r.value)])) };
+}
+
+/** The rule at `index` replaced by what `change` makes of it; an unset outcome, note or independent flag is left off. */
+export function mapRule(field: Field, index: number, change: (rule: Rule) => Rule): Field {
+  return {
+    ...field,
+    rules: field.rules.map((rule, i) => {
+      if (i !== index) {
+        return rule;
+      }
+      const next = change(rule);
+      for (const optional of ["outcome", "note", "independent"] as const) {
+        if (next[optional] === undefined || next[optional] === "" || next[optional] === false) {
+          delete next[optional];
+        }
+      }
+      return next;
+    })
+  };
+}
+
+export function addRule(field: Field): Field {
+  return { ...field, rules: [...field.rules, {}] };
+}
+
+export function removeRule(field: Field, index: number): Field {
+  return { ...field, rules: field.rules.filter((_, i) => i !== index) };
+}
+
+export function moveRule(field: Field, index: number, by: -1 | 1): Field {
+  return { ...field, rules: moved(field.rules, index, by) };
 }
 
 /** A list the editor shows as one line of words: keys and CCD ids are separated by spaces, commas or new lines. */
@@ -78,6 +377,10 @@ export function issuesByField(issues: readonly { path: string; message: string }
 export interface ReviewLine {
   /** `section.field` index. */
   at: string;
+  section: number;
+  field: number;
+  /** Position among the field's review markers. */
+  index: number;
   where: string;
   about: string;
   reason: string;
@@ -90,8 +393,11 @@ const RANK = { low: 0, medium: 1, high: 2 } as const;
 export function reviewChecklist(spec: FormSpec): ReviewLine[] {
   const lines = spec.sections.flatMap((section, s) =>
     section.fields.flatMap((field, f) =>
-      (field.review ?? []).map((r) => ({
+      (field.review ?? []).map((r, index) => ({
         at: `${s}.${f}`,
+        section: s,
+        field: f,
+        index,
         where: [field.id, field.label].filter(Boolean).join(" ") || field.keys[0] || "field",
         about: r.about,
         reason: r.reason,
@@ -100,4 +406,20 @@ export function reviewChecklist(spec: FormSpec): ReviewLine[] {
     )
   );
   return lines.sort((a, b) => RANK[a.confidence] - RANK[b.confidence]);
+}
+
+/** A field's rules as the transformation sheet words them; the English the sheet kept when the field has no rules. */
+export function logicWords(field: Field): string {
+  return (field.rules.length > 0 || field.logicPreamble ? renderLogic(field.rules, field.logicPreamble) : field.logicText) ?? "";
+}
+
+/** The case path column the field's rules produce. */
+export function casePathWords(field: Field): string {
+  return [renderCasePath(field.rules, field.neverExceeds), field.casePathNote].filter(Boolean).join("\n\n");
+}
+
+/** A key's allowed values as the editor lists them: the exact strings, and whether blank is one. */
+export function allowedFor(field: Field, key: string): { values: string[]; blankAllowed: boolean } {
+  const set = valueSets(field).find((s) => s.key === key);
+  return { values: set?.allowed ?? [], blankAllowed: set?.blankAllowed ?? true };
 }
