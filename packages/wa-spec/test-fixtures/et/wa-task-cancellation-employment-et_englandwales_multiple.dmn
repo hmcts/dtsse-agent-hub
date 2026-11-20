@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="https://www.omg.org/spec/DMN/20191111/MODEL/" xmlns:dmndi="https://www.omg.org/spec/DMN/20191111/DMNDI/" xmlns:dc="http://www.omg.org/spec/DMN/20180521/DC/" xmlns:biodi="http://bpmn.io/schema/dmn/biodi/2.0" xmlns:camunda="http://camunda.org/schema/1.0/dmn" id="wa-cancellation-definition-et_englandwales_multiple" name="DRD" namespace="http://camunda.org/schema/1.0/dmn" exporter="Camunda Modeler" exporterVersion="5.24.0">
+  <decision id="wa-task-cancellation-employment-et_englandwales_multiple" name="ET Multiple Task cancellation DMN" camunda:historyTimeToLive="P30D">
+    <decisionTable id="DecisionTable_0z3jx1g" hitPolicy="COLLECT">
+      <input id="Input_1" label="From State">
+        <inputExpression id="InputExpression_1" typeRef="string">
+          <text>fromState</text>
+        </inputExpression>
+      </input>
+      <input id="InputClause_0ain215" label="Event" biodi:width="265">
+        <inputExpression id="LiteralExpression_0h2l2zj" typeRef="string">
+          <text>event</text>
+        </inputExpression>
+      </input>
+      <input id="InputClause_0bomy63" label="State">
+        <inputExpression id="LiteralExpression_1g5glfi" typeRef="string">
+          <text>state</text>
+        </inputExpression>
+      </input>
+      <output id="OutputClause_18zgoaj" label="Action" name="action" typeRef="string" />
+      <output id="OutputClause_0tu8bqp" label="Warning Code" name="warningCode" typeRef="string" />
+      <output id="OutputClause_1kfc3jv" label="Warning Text" name="warningText" typeRef="string" />
+      <output id="OutputClause_0dqzted" label="Process Categories Identifiers" name="processCategories" typeRef="string" biodi:width="277" />
+      <rule id="DecisionRule_0gwlszp">
+        <inputEntry id="UnaryTests_05k2w5r">
+          <text></text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_048qp41">
+          <text>"close"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_1rhmbnn">
+          <text></text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_1j1l9uw">
+          <text>"Cancel"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_0zaz5ta">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_0f3bdou">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_0xwbzkp">
+          <text>"Vetting"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_0bjq06q">
+        <inputEntry id="UnaryTests_036vtgq">
+          <text></text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_1apei4o">
+          <text>"close"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_043mplw">
+          <text></text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_1eoo06c">
+          <text>"Cancel"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1g7oejj">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_05dxr2v">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1idaz0h">
+          <text>"Processing"</text>
+        </outputEntry>
+      </rule>
+    </decisionTable>
+  </decision>
+  <dmndi:DMNDI>
+    <dmndi:DMNDiagram>
+      <dmndi:DMNShape dmnElementRef="wa-task-cancellation-employment-et_englandwales_multiple">
+        <dc:Bounds height="80" width="180" x="160" y="100" />
+      </dmndi:DMNShape>
+    </dmndi:DMNDiagram>
+  </dmndi:DMNDI>
+</definitions>

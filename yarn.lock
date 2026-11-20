@@ -1031,6 +1031,18 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@hmcts-cft/wa-spec@workspace:packages/wa-spec":
+  version: 0.0.0-use.local
+  resolution: "@hmcts-cft/wa-spec@workspace:packages/wa-spec"
+  dependencies:
+    fast-xml-parser: "npm:5.12.0"
+    yaml: "npm:2.9.1"
+    zod: "npm:4.6.7"
+  bin:
+    wa-spec: bin/wa-spec
+  languageName: unknown
+  linkType: soft
+
 "@img/colour@npm:^1.1.0":
   version: 1.1.0
   resolution: "@img/colour@npm:1.1.0"
@@ -4539,7 +4551,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"fast-xml-parser@npm:^5.5.9":
+"fast-xml-parser@npm:5.12.0, fast-xml-parser@npm:^5.5.9":
   version: 5.12.0
   resolution: "fast-xml-parser@npm:5.12.0"
   dependencies:
@@ -6843,6 +6855,15 @@ __metadata:
   version: 5.0.0
   resolution: "yallist@npm:5.0.0"
   checksum: 10c0/a499c81ce6d4a1d260d4ea0f6d49ab4da09681e32c3f0472dee16667ed69d01dae63a3b81745a24bd78476ec4fcf856114cb4896ace738e01da34b2c42235416
+  languageName: node
+  linkType: hard
+
+"yaml@npm:2.9.1":
+  version: 2.9.1
+  resolution: "yaml@npm:2.9.1"
+  bin:
+    yaml: bin.mjs
+  checksum: 10c0/9d06676ef02b89559a8b10a71882bd2cdae81e8393dc8dbc871615c3259475d9609ad973d19cb3c9e71e72d6206e3d1e7aa241c7e55f3d16fd2e77db305827d6
   languageName: node
   linkType: hard
 

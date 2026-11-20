@@ -1,0 +1,382 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="https://www.omg.org/spec/DMN/20191111/MODEL/" xmlns:camunda="http://camunda.org/schema/1.0/dmn" xmlns:biodi="http://bpmn.io/schema/dmn/biodi/2.0" xmlns:dmndi="https://www.omg.org/spec/DMN/20191111/DMNDI/" xmlns:dc="http://www.omg.org/spec/DMN/20180521/DC/" xmlns:di="http://www.omg.org/spec/DMN/20180521/DI/" id="wa-initiation-definition-et_scotland_multiple" name="DRD" namespace="http://camunda.org/schema/1.0/dmn" exporter="Camunda Modeler" exporterVersion="5.24.0">
+  <decision id="wa-task-initiation-employment-et_scotland_multiple" name="ET Multiple Task initiation DMN" camunda:historyTimeToLive="P30D">
+    <informationRequirement id="InformationRequirement_1l2v2xj">
+      <requiredDecision href="#Decision_1xqgkq7" />
+    </informationRequirement>
+    <informationRequirement id="InformationRequirement_05r15im">
+      <requiredDecision href="#Decision_1merw3q" />
+    </informationRequirement>
+    <decisionTable id="DecisionTable_0jtevuc" hitPolicy="COLLECT">
+      <input id="Input_1" label="Event Id" biodi:width="193" camunda:inputVariable="eventId">
+        <inputExpression id="InputExpression_1" typeRef="string">
+          <text></text>
+        </inputExpression>
+      </input>
+      <input id="InputClause_0gxli97" label="Post event state" biodi:width="192" camunda:inputVariable="postEventState">
+        <inputExpression id="LiteralExpression_0dijl5x" typeRef="string">
+          <text></text>
+        </inputExpression>
+      </input>
+      <input id="InputClause_1nkkapg" label="Refer Case To" biodi:width="150" camunda:inputVariable="referCaseTo">
+        <inputExpression id="LiteralExpression_1h40nek" typeRef="string">
+          <text>if(additionalData!=null
+and additionalData.Data!=null
+and additionalData.Data.referralCollection!=null
+and count(additionalData.Data.referralCollection) &gt; 0)
+then sort(additionalData.Data.referralCollection, function(x,y) number(x.value.referralNumber) &gt; number(y.value.referralNumber)).value.referCaseTo[1]
+else null</text>
+        </inputExpression>
+      </input>
+      <input id="InputClause_1idexf5" label="Referral Subject" biodi:width="159" camunda:inputVariable="referralSubject">
+        <inputExpression id="LiteralExpression_0tjv49t" typeRef="string">
+          <text>if(additionalData!=null
+and additionalData.Data!=null
+and additionalData.Data.referralCollection!=null
+and count(additionalData.Data.referralCollection) &gt; 0)
+then sort(additionalData.Data.referralCollection, function(x,y) number(x.value.referralNumber) &gt; number(y.value.referralNumber)).value.referralSubject[1]
+else null</text>
+        </inputExpression>
+      </input>
+      <input id="InputClause_1gia5s6" label="Direction To" biodi:width="150" camunda:inputVariable="directionTo">
+        <inputExpression id="LiteralExpression_1tb9c3z" typeRef="string">
+          <text>if(additionalData!=null
+and additionalData.Data!=null
+and additionalData.Data.referralCollection!=null
+and count(additionalData.Data.referralCollection[count(value.referralReplyCollection)&gt;0])&gt;0)
+then sort(flatten(additionalData.Data.referralCollection[value.referralReplyCollection!=null].value.referralReplyCollection), function(x,y) date and time(if(x.value.replyDateTime!=null)then x.value.replyDateTime else "2023-01-01T00:00:00.000") &gt; date and time(if(y.value.replyDateTime!=null)then y.value.replyDateTime else "2023-01-01T00:00:00.000")).value.directionTo[1]
+else null</text>
+        </inputExpression>
+      </input>
+      <output id="Output_1" label="Task Id" name="taskId" typeRef="string" biodi:width="360" />
+      <output id="OutputClause_0p5fhhd" label="Name" name="name" typeRef="string" biodi:width="288" />
+      <output id="OutputClause_165p3r3" label="Delay Duration" name="delayDuration" typeRef="integer" biodi:width="150" />
+      <output id="OutputClause_10rno4c" label="Process Categories Identifiers" name="processCategories" typeRef="string" biodi:width="258" />
+      <rule id="DecisionRule_0utzcvo">
+        <inputEntry id="UnaryTests_163041w">
+          <text>"createReferral"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_0xcs5s3">
+          <text></text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_1xkeuj2">
+          <text>"Admin"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_1frkc1e">
+          <text></text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_0s5w63e">
+          <text></text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_1p21nx8">
+          <text>"ReviewReferralAdminMultiple"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_16yf2nj">
+          <text>LATEST_REFERRAL_TASK_NAME</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_0n9o39e">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_0c8d2go">
+          <text>"Vetting"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_1skd0cv">
+        <inputEntry id="UnaryTests_0gxctoq">
+          <text>"createReferral"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_0ma71ii">
+          <text></text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_07xx957">
+          <text>"Legal officer"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_1l982ks">
+          <text></text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_1akzcdm">
+          <text></text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_1jodb9u">
+          <text>"ReviewReferralLegalOpsMultiple"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_06jyk6x">
+          <text>LATEST_REFERRAL_TASK_NAME</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1jb2kui">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_10lszsg">
+          <text>"Vetting"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_12ppvo1">
+        <inputEntry id="UnaryTests_122abz6">
+          <text>"createReferral"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_1wbaiet">
+          <text></text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_1iinq8v">
+          <text>"Judge"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_1y0tstc">
+          <text></text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_1m60fya">
+          <text></text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_08o0qxl">
+          <text>"ReviewReferralJudiciaryMultiple"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_0fgv01v">
+          <text>LATEST_REFERRAL_TASK_NAME</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_04m3eoh">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_0dsutkd">
+          <text>"Vetting"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_112uuvf">
+        <inputEntry id="UnaryTests_0ta2snk">
+          <text>"replyToReferral"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_03ycfub">
+          <text></text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_01em7vz">
+          <text></text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_0jxnz9l">
+          <text></text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_0mzunt7">
+          <text>"Legal officer"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_1hrkox6">
+          <text>"MultiplesReviewReferralResponseLegalOps"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1adludt">
+          <text>LATEST_REFERRAL_REPLY_TASK_NAME</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_05qmv0d">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_0z6yewn">
+          <text>"Processing"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_03y3ngi">
+        <inputEntry id="UnaryTests_1u10vjh">
+          <text>"replyToReferral"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_1lrmkm3">
+          <text></text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_0nosgca">
+          <text></text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_0qxy7ei">
+          <text></text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_0ukpuq6">
+          <text>"Judge"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_0jq8mpe">
+          <text>"ReviewReferralResponseJudiciaryMultiple"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1bkq2mj">
+          <text>LATEST_REFERRAL_REPLY_TASK_NAME</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1ok5ngi">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1fa21wf">
+          <text>"Processing"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_1091a7e">
+        <inputEntry id="UnaryTests_13pdch8">
+          <text>"replyToReferral"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_03k67f3">
+          <text></text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_1susclz">
+          <text></text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_0mhrn0w">
+          <text></text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_1i2ik9g">
+          <text>"Admin"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_0kjlrvw">
+          <text>"ReviewReferralResponseAdminMultiple"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_0filidb">
+          <text>LATEST_REFERRAL_REPLY_TASK_NAME</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1j3ey0v">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_0lv07fp">
+          <text>"Processing"</text>
+        </outputEntry>
+      </rule>
+    </decisionTable>
+  </decision>
+  <decision id="Decision_1xqgkq7" name="LATEST_REFERRAL_TASK_NAME" camunda:historyTimeToLive="P30D">
+    <variable id="InformationItem_10nuodq" name="LATEST_REFERRAL_TASK_NAME" typeRef="string" />
+    <informationRequirement id="InformationRequirement_00i37do">
+      <requiredDecision href="#Decision_0eghxft" />
+    </informationRequirement>
+    <informationRequirement id="InformationRequirement_0w7qhtf">
+      <requiredDecision href="#Decision_0yepj5m" />
+    </informationRequirement>
+    <literalExpression id="LiteralExpression_0l31qx1">
+      <text>if(additionalData!=null
+and additionalData.Data!=null
+and additionalData.Data.referralCollection!=null
+and count(additionalData.Data.referralCollection) &gt; 0)
+then "Review Multiples Referral #" + LATEST_REFERRAL_NUMBER + " - " + LATEST_REFERRAL_SUBJECT
+else null</text>
+    </literalExpression>
+  </decision>
+  <decision id="Decision_1merw3q" name="LATEST_REFERRAL_REPLY_TASK_NAME" camunda:historyTimeToLive="P30D">
+    <variable id="InformationItem_0z7m2qk" name="LATEST_REFERRAL_REPLY_TASK_NAME" typeRef="string" />
+    <informationRequirement id="InformationRequirement_0hpfgbp">
+      <requiredDecision href="#Decision_03ddjz3" />
+    </informationRequirement>
+    <informationRequirement id="InformationRequirement_1ambi2i">
+      <requiredDecision href="#Decision_1hy3wcf" />
+    </informationRequirement>
+    <literalExpression id="LiteralExpression_11rmzca">
+      <text>if(additionalData!=null
+and additionalData.Data!=null
+and additionalData.Data.referralCollection!=null
+and count(additionalData.Data.referralCollection[count(value.referralReplyCollection)&gt;0])&gt;0)
+then "Review Multiples Referral #" + LATEST_REFERRAL_REPLY_NUMBER + " - " + LATEST_REFERRAL_REPLY_SUBJECT + " Response"
+else null</text>
+    </literalExpression>
+  </decision>
+  <decision id="Decision_0eghxft" name="LATEST_REFERRAL_NUMBER">
+    <variable id="InformationItem_05lutfc" name="LATEST_REFERRAL_NUMBER" typeRef="string" />
+    <literalExpression id="LiteralExpression_1aht3pd">
+      <text>if(additionalData!=null
+and additionalData.Data!=null
+and additionalData.Data.referralCollection!=null
+and count(additionalData.Data.referralCollection) &gt; 0
+and sort(additionalData.Data.referralCollection,function(x,y) number(x.value.referralNumber)&gt;number(y.value.referralNumber))[1].value.referralNumber!=null)
+then sort(additionalData.Data.referralCollection, function(x,y) number(x.value.referralNumber) &gt; number(y.value.referralNumber))[1].value.referralNumber
+else null</text>
+    </literalExpression>
+  </decision>
+  <decision id="Decision_0yepj5m" name="LATEST_REFERRAL_SUBJECT">
+    <variable id="InformationItem_0058uji" name="LATEST_REFERRAL_SUBJECT" typeRef="string" />
+    <literalExpression id="LiteralExpression_1kazms8">
+      <text>if(additionalData!=null
+and additionalData.Data!=null
+and additionalData.Data.referralCollection!=null
+and count(additionalData.Data.referralCollection) &gt; 0
+and sort(additionalData.Data.referralCollection,function(x,y) number(x.value.referralNumber)&gt;number(y.value.referralNumber))[1].value.referralSubject!=null)
+then sort(additionalData.Data.referralCollection, function(x,y) number(x.value.referralNumber) &gt; number(y.value.referralNumber))[1].value.referralSubject
+else null</text>
+    </literalExpression>
+  </decision>
+  <decision id="Decision_03ddjz3" name="LATEST_REFERRAL_REPLY_NUMBER">
+    <variable id="InformationItem_0pgmlnv" name="LATEST_REFERRAL_REPLY_NUMBER" typeRef="string" />
+    <literalExpression id="LiteralExpression_0vjaqpk">
+      <text>if(additionalData!=null
+and additionalData.Data!=null
+and additionalData.Data.referralCollection!=null
+and count(additionalData.Data.referralCollection[count(value.referralReplyCollection)&gt;0])&gt;0)
+then (
+  sort(
+    flatten(additionalData.Data.referralCollection[value.referralReplyCollection!=null].value.referralReplyCollection),
+    function(x,y)
+      date and time(if(x.value.replyDateTime!=null) then x.value.replyDateTime else "2023-01-01T00:00:00.000")
+      &gt;
+      date and time(if(y.value.replyDateTime!=null) then y.value.replyDateTime else "2023-01-01T00:00:00.000")
+    )[1].value.referralNumber
+)
+else null</text>
+    </literalExpression>
+  </decision>
+  <decision id="Decision_1hy3wcf" name="LATEST_REFERRAL_REPLY_SUBJECT">
+    <variable id="InformationItem_0ro9f88" name="LATEST_REFERRAL_REPLY_SUBJECT" typeRef="string" />
+    <literalExpression id="LiteralExpression_01hvmvg">
+      <text>if(additionalData!=null
+and additionalData.Data!=null
+and additionalData.Data.referralCollection!=null
+and count(additionalData.Data.referralCollection[count(value.referralReplyCollection)&gt;0])&gt;0)
+then (
+  sort(
+    flatten(additionalData.Data.referralCollection[value.referralReplyCollection!=null].value.referralReplyCollection),
+    function(x,y)
+      date and time(if(x.value.replyDateTime!=null) then x.value.replyDateTime else "2023-01-01T00:00:00.000")
+      &gt;
+      date and time(if(y.value.replyDateTime!=null) then y.value.replyDateTime else "2023-01-01T00:00:00.000")
+  )[1].value.referralSubject
+)
+else null</text>
+    </literalExpression>
+  </decision>
+  <dmndi:DMNDI>
+    <dmndi:DMNDiagram id="DMNDiagram_0b2rkcb">
+      <dmndi:DMNShape id="DMNShape_0wc7glt" dmnElementRef="wa-task-initiation-employment-et_scotland_multiple">
+        <dc:Bounds height="80" width="180" x="470" y="60" />
+      </dmndi:DMNShape>
+      <dmndi:DMNEdge id="DMNEdge_1srd5ad" dmnElementRef="InformationRequirement_1l2v2xj">
+        <di:waypoint x="350" y="220" />
+        <di:waypoint x="530" y="160" />
+        <di:waypoint x="530" y="140" />
+      </dmndi:DMNEdge>
+      <dmndi:DMNShape id="DMNShape_1bykp81" dmnElementRef="Decision_1xqgkq7">
+        <dc:Bounds height="80" width="180" x="260" y="220" />
+      </dmndi:DMNShape>
+      <dmndi:DMNEdge id="DMNEdge_0q240ep" dmnElementRef="InformationRequirement_05r15im">
+        <di:waypoint x="770" y="220" />
+        <di:waypoint x="590" y="160" />
+        <di:waypoint x="590" y="140" />
+      </dmndi:DMNEdge>
+      <dmndi:DMNShape id="DMNShape_0baejpx" dmnElementRef="Decision_1merw3q">
+        <dc:Bounds height="80" width="180" x="680" y="220" />
+      </dmndi:DMNShape>
+      <dmndi:DMNEdge id="DMNEdge_04kia0u" dmnElementRef="InformationRequirement_00i37do">
+        <di:waypoint x="250" y="340" />
+        <di:waypoint x="320" y="320" />
+        <di:waypoint x="320" y="300" />
+      </dmndi:DMNEdge>
+      <dmndi:DMNShape id="DMNShape_0p9429o" dmnElementRef="Decision_0eghxft">
+        <dc:Bounds height="80" width="180" x="160" y="340" />
+      </dmndi:DMNShape>
+      <dmndi:DMNEdge id="DMNEdge_0o2d37b" dmnElementRef="InformationRequirement_0w7qhtf">
+        <di:waypoint x="450" y="340" />
+        <di:waypoint x="380" y="320" />
+        <di:waypoint x="380" y="300" />
+      </dmndi:DMNEdge>
+      <dmndi:DMNShape id="DMNShape_0k48uc5" dmnElementRef="Decision_0yepj5m">
+        <dc:Bounds height="80" width="180" x="360" y="340" />
+      </dmndi:DMNShape>
+      <dmndi:DMNEdge id="DMNEdge_13lg7qf" dmnElementRef="InformationRequirement_0hpfgbp">
+        <di:waypoint x="670" y="340" />
+        <di:waypoint x="740" y="320" />
+        <di:waypoint x="740" y="300" />
+      </dmndi:DMNEdge>
+      <dmndi:DMNShape id="DMNShape_1dgmiib" dmnElementRef="Decision_03ddjz3">
+        <dc:Bounds height="80" width="180" x="580" y="340" />
+      </dmndi:DMNShape>
+      <dmndi:DMNEdge id="DMNEdge_1logy0w" dmnElementRef="InformationRequirement_1ambi2i">
+        <di:waypoint x="870" y="340" />
+        <di:waypoint x="800" y="320" />
+        <di:waypoint x="800" y="300" />
+      </dmndi:DMNEdge>
+      <dmndi:DMNShape id="DMNShape_0f9ko68" dmnElementRef="Decision_1hy3wcf">
+        <dc:Bounds height="80" width="180" x="780" y="340" />
+      </dmndi:DMNShape>
+    </dmndi:DMNDiagram>
+  </dmndi:DMNDI>
+</definitions>

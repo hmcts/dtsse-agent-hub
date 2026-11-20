@@ -1,0 +1,4904 @@
+version: 1
+service:
+  slug: employment
+  jurisdiction: EMPLOYMENT
+  serviceCode: BHA1
+  displayName: Employment
+caseTypes:
+  - id: et_englandwales
+  - id: et_englandwales_multiple
+  - id: et_scotland
+  - id: et_scotland_multiple
+decisions:
+  initiation:
+    name: ET Task initiation DMN
+    hitPolicy: COLLECT
+    historyTimeToLive: P30D
+    overrides:
+      et_englandwales_multiple:
+        name: ET Multiple Task initiation DMN
+      et_scotland_multiple:
+        name: ET Multiple Task initiation DMN
+    inputs:
+      - key: eventId
+        label: Event Id
+        variable: eventId
+        typeRef: string
+      - key: postEventState
+        label: Post event state
+        variable: postEventState
+        typeRef: string
+      - key: referCaseTo
+        label: Refer Case To
+        variable: referCaseTo
+        typeRef: string
+        expression:
+          feel: |-
+            if(additionalData!=null
+            and additionalData.Data!=null
+            and additionalData.Data.referralCollection!=null
+            and count(additionalData.Data.referralCollection) > 0)
+            then sort(additionalData.Data.referralCollection, function(x,y) number(x.value.referralNumber) > number(y.value.referralNumber)).value.referCaseTo[1]
+            else null
+      - key: referralSubject
+        label: Referral Subject
+        variable: referralSubject
+        typeRef: string
+        expression:
+          feel: |-
+            if(additionalData!=null
+            and additionalData.Data!=null
+            and additionalData.Data.referralCollection!=null
+            and count(additionalData.Data.referralCollection) > 0)
+            then sort(additionalData.Data.referralCollection, function(x,y) number(x.value.referralNumber) > number(y.value.referralNumber)).value.referralSubject[1]
+            else null
+      - key: updateReferCaseTo
+        label: Update Directed To
+        variable: updateReferCaseTo
+        typeRef: string
+        expression:
+          feel: |-
+            if(additionalData!=null
+            and additionalData.Data!=null
+            and additionalData.Data.referralCollection!=null
+            and count(additionalData.Data.referralCollection[count(value.updateReferralCollection)>0])>0)
+            then sort(flatten(additionalData.Data.referralCollection[value.updateReferralCollection!=null].value.updateReferralCollection), function(x,y) date and time(if(x.value.updateReferralDateTime!=null)then x.value.updateReferralDateTime else "2023-01-01T00:00:00.000") > date and time(if(y.value.updateReferralDateTime!=null)then y.value.updateReferralDateTime else "2023-01-01T00:00:00.000")).value.updateReferCaseTo[1]
+            else null
+        only: [ et_englandwales, et_scotland ]
+      - key: directionTo
+        label: Direction To
+        variable: directionTo
+        typeRef: string
+        expression:
+          feel: |-
+            if(additionalData!=null
+            and additionalData.Data!=null
+            and additionalData.Data.referralCollection!=null
+            and count(additionalData.Data.referralCollection[count(value.referralReplyCollection)>0])>0)
+            then sort(flatten(additionalData.Data.referralCollection[value.referralReplyCollection!=null].value.referralReplyCollection), function(x,y) date and time(if(x.value.replyDateTime!=null)then x.value.replyDateTime else "2023-01-01T00:00:00.000") > date and time(if(y.value.replyDateTime!=null)then y.value.replyDateTime else "2023-01-01T00:00:00.000")).value.directionTo[1]
+            else null
+      - key: eT3FormReceived
+        label: ET3 form received
+        typeRef: boolean
+        expression:
+          if:
+            all:
+              - field: additionalData
+                op: exists
+              - field: additionalData.Data
+                op: exists
+              - field: additionalData.Data.respondentCollection
+                op: exists
+              - left:
+                  call: count
+                  args:
+                    - field: additionalData.Data.respondentCollection
+                op: gt
+                right: 0
+          use:
+            if:
+              truthy:
+                field: additionalData.Data.respondentCollection[1].value.responseReceived
+            use:
+              if:
+                field: additionalData.Data.respondentCollection[1].value.responseReceivedCount
+                op: eq
+                value: "1"
+              use: true
+              otherwise: false
+            otherwise: false
+          otherwise: false
+        only: [ et_englandwales, et_scotland ]
+      - key: isThereAnEt3Response
+        label: Is There An Et3 Response
+        typeRef: boolean
+        expression:
+          if:
+            all:
+              - field: additionalData
+                op: exists
+              - field: additionalData.Data
+                op: exists
+              - field: additionalData.Data.respondentCollection
+                op: exists
+              - left:
+                  call: count
+                  args:
+                    - field: additionalData.Data.respondentCollection
+                op: gt
+                right: 0
+          use:
+            quantifier: some
+            variable: item
+            over:
+              field: additionalData.Data.respondentCollection
+            satisfies:
+              all:
+                - field: item.value.et3Vetting
+                  op: exists
+                - field: item.value.et3Vetting.et3IsThereAnEt3Response
+                  op: eq
+                  value: true
+          otherwise: false
+        only: [ et_englandwales, et_scotland ]
+      - key: isECC
+        label: Is ECC
+        typeRef: boolean
+        expression:
+          if:
+            all:
+              - field: additionalData
+                op: exists
+              - field: additionalData.Data
+                op: exists
+              - field: additionalData.Data.respondentCollection
+                op: exists
+              - left:
+                  call: count
+                  args:
+                    - field: additionalData.Data.respondentCollection
+                op: gt
+                right: 0
+          use:
+            quantifier: some
+            variable: item
+            over:
+              field: additionalData.Data.respondentCollection
+            satisfies:
+              all:
+                - field: item.value.et3Vetting
+                  op: exists
+                - field: item.value.et3Vetting.et3ContractClaimSection7
+                  op: eq
+                  value: true
+          otherwise: false
+        only: [ et_englandwales, et_scotland ]
+      - key: isECCReplyReceived
+        label: Is ECC Reply Received
+        typeRef: boolean
+        expression:
+          if:
+            all:
+              - field: additionalData
+                op: exists
+              - field: additionalData.Data
+                op: exists
+              - field: additionalData.Data.respondentCollection
+                op: exists
+              - left:
+                  call: count
+                  args:
+                    - field: additionalData.Data.respondentCollection
+                op: gt
+                right: 0
+          use:
+            quantifier: some
+            variable: item
+            over:
+              field: additionalData.Data.respondentCollection
+            satisfies:
+              field: item.value.respondentEccReplyCount
+              op: eq
+              value: "1"
+          otherwise: false
+        only: [ et_englandwales, et_scotland ]
+      - key: respondentECCReply
+        label: Respondent ECC Reply
+        typeRef: boolean
+        expression:
+          if:
+            all:
+              - field: additionalData
+                op: exists
+              - field: additionalData.Data
+                op: exists
+              - field: additionalData.Data.respondentCollection
+                op: exists
+              - left:
+                  call: count
+                  args:
+                    - field: additionalData.Data.respondentCollection
+                op: gt
+                right: 0
+              - field: additionalData.Data.respondentCollection[1].value.et3Vetting
+                op: exists
+          use:
+            field: additionalData.Data.respondentCollection[1].value.et3Vetting.et3ResponseEccYes
+          otherwise: null
+        only: [ et_englandwales, et_scotland ]
+      - key: listAHearing
+        label: List A Hearing
+        typeRef: boolean
+        language: feel
+        expression:
+          if:
+            all:
+              - field: additionalData.Data.etICHearingNotListedListUpdated
+                op: exists
+              - left:
+                  call: count
+                  args:
+                    - field: additionalData.Data.etICHearingNotListedListUpdated
+                op: gt
+                right: 0
+              - any:
+                  - truthy:
+                      call: list contains
+                      args:
+                        - field: additionalData.Data.etICHearingNotListedListUpdated
+                        - List for preliminary hearing
+                  - truthy:
+                      call: list contains
+                      args:
+                        - field: additionalData.Data.etICHearingNotListedListUpdated
+                        - List for final hearing
+          use: true
+          otherwise: false
+        only: [ et_englandwales, et_scotland ]
+        overrides:
+          et_scotland:
+            language: null
+      - key: strikeOutClaimStrikeOutResponse
+        label: Strike Out Claim/Strike Out Response
+        typeRef: string
+        expression:
+          if:
+            all:
+              - field: additionalData
+                op: exists
+              - field: additionalData.Data
+                op: exists
+              - field: additionalData.Data.etInitialConsiderationRule27
+                op: exists
+              - field: additionalData.Data.etInitialConsiderationRule27.etICRule27ClaimToBe
+                op: exists
+          use:
+            field: additionalData.Data.etInitialConsiderationRule27.etICRule27ClaimToBe
+          otherwise:
+            if:
+              all:
+                - field: additionalData
+                  op: exists
+                - field: additionalData.Data
+                  op: exists
+                - field: additionalData.Data.etInitialConsiderationRule28
+                  op: exists
+                - field: additionalData.Data.etInitialConsiderationRule28.etICRule28ClaimToBe
+                  op: exists
+            use:
+              field: additionalData.Data.etInitialConsiderationRule28.etICRule28ClaimToBe
+            otherwise: null
+        only: [ et_scotland ]
+      - key: hearingsHeard
+        label: Hearings Heard
+        typeRef: boolean
+        expression:
+          all:
+            - field: additionalData
+              op: exists
+            - field: additionalData.Data
+              op: exists
+            - field: additionalData.Data.hearingDetailsCollection
+              op: exists
+            - left:
+                call: count
+                args:
+                  - field: additionalData.Data.hearingDetailsCollection
+              op: gt
+              right: 0
+            - truthy:
+                quantifier: some
+                variable: x
+                over:
+                  field: additionalData.Data.hearingDetailsCollection
+                satisfies:
+                  field: x.value.hearingDetailsStatus
+                  op: eq
+                  value: Heard
+            - truthy:
+                quantifier: every
+                variable: x
+                over:
+                  field: additionalData.Data.hearingDetailsCollection
+                satisfies:
+                  any:
+                    - field: x.value.hearingDetailsStatus
+                      op: eq
+                      value: Heard
+                    - field: x.value.hearingDetailsStatus
+                      op: eq
+                      value: Vacated
+                    - field: x.value.hearingDetailsStatus
+                      op: eq
+                      value: Postponed
+        only: [ et_englandwales, et_scotland ]
+      - key: submissionReasonApplication
+        label: Submission Reason (Application)
+        typeRef: string
+        expression:
+          feel: |-
+            if(additionalData!=null
+            and additionalData.Data!=null
+            and additionalData.Data.genericTseApplicationCollection!=null
+            and count(additionalData.Data.genericTseApplicationCollection) > 0)
+            then sort(additionalData.Data.genericTseApplicationCollection,function(x,y) number(x.value.number) > number(y.value.number)).value.type[1]
+            else null
+        only: [ et_englandwales, et_scotland ]
+      - key: applicationResponseFrom
+        label: Application Response From
+        typeRef: string
+        expression:
+          feel: |-
+            if(additionalData!=null
+            and additionalData.Data!=null
+            and additionalData.Data.genericTseApplicationCollection!=null
+            and count(additionalData.Data.genericTseApplicationCollection[value.respondCollection!=null])>0)
+            then sort(flatten(additionalData.Data.genericTseApplicationCollection[value.respondCollection!=null].value.respondCollection), function(x,y) date and time(if(x.value.dateTime!=null)then x.value.dateTime else "2023-01-01T00:00:00.000") > date and time(if(y.value.dateTime!=null)then y.value.dateTime else "2023-01-01T00:00:00.000"))[1].value.from
+            else null
+        only: [ et_englandwales, et_scotland ]
+      - key: responseToApplicationType
+        label: Response to Application Type
+        typeRef: string
+        expression:
+          feel: |-
+            if(additionalData!=null
+            and additionalData.Data!=null
+            and additionalData.Data.genericTseApplicationCollection!=null
+            and count(additionalData.Data.genericTseApplicationCollection[value.respondCollection!=null])>0)
+            then sort(flatten(additionalData.Data.genericTseApplicationCollection[value.respondCollection!=null].value.respondCollection), function(x,y) date and time(if(x.value.dateTime!=null)then x.value.dateTime else "2023-01-01T00:00:00.000") > date and time(if(y.value.dateTime!=null)then y.value.dateTime else "2023-01-01T00:00:00.000"))[1].value.applicationType
+            else null
+        only: [ et_englandwales, et_scotland ]
+      - key: notificationResponseIsECCFromClaimant
+        label: Notification Response is ECC from Claimant
+        typeRef: boolean
+        expression:
+          field: LATEST_NOTIFICATION_RESPONSE_IS_ECC_FROM_CLAIMANT
+        only: [ et_englandwales, et_scotland ]
+      - key: isJudgmentOrOrder
+        label: Is Judgment Or Order
+        typeRef: boolean
+        expression:
+          if:
+            all:
+              - field: additionalData
+                op: exists
+              - field: additionalData.Data
+                op: exists
+              - field: additionalData.Data.draftAndSignJudgement
+                op: exists
+              - field: additionalData.Data.draftAndSignJudgement.isJudgement
+                op: exists
+          use:
+            field: additionalData.Data.draftAndSignJudgement.isJudgement
+          otherwise: false
+        only: [ et_englandwales, et_scotland ]
+      - key: adminSupportTaskRequired
+        label: Admin Support Task Required
+        typeRef: boolean
+        expression:
+          if:
+            all:
+              - field: additionalData
+                op: exists
+              - field: additionalData.Data
+                op: exists
+              - field: additionalData.Data.supportTaskState
+                op: exists
+              - field: additionalData.Data.supportTaskState.adminTaskRequired
+                op: exists
+          use:
+            field: additionalData.Data.supportTaskState.adminTaskRequired
+            op: eq
+            value: true
+          otherwise: false
+        only: [ et_englandwales, et_scotland ]
+      - key: legalOfficerSupportTaskRequired
+        label: Legal Officer Support Task Required
+        typeRef: boolean
+        expression:
+          if:
+            all:
+              - field: additionalData
+                op: exists
+              - field: additionalData.Data
+                op: exists
+              - field: additionalData.Data.supportTaskState
+                op: exists
+              - field: additionalData.Data.supportTaskState.legalOfficerTaskRequired
+                op: exists
+          use:
+            field: additionalData.Data.supportTaskState.legalOfficerTaskRequired
+            op: eq
+            value: true
+          otherwise: false
+        only: [ et_englandwales, et_scotland ]
+      - key: judgeSupportTaskRequired
+        label: Judge Support Task Required
+        typeRef: boolean
+        expression:
+          if:
+            all:
+              - field: additionalData
+                op: exists
+              - field: additionalData.Data
+                op: exists
+              - field: additionalData.Data.supportTaskState
+                op: exists
+              - field: additionalData.Data.supportTaskState.judgeTaskRequired
+                op: exists
+          use:
+            field: additionalData.Data.supportTaskState.judgeTaskRequired
+            op: eq
+            value: true
+          otherwise: false
+        only: [ et_englandwales, et_scotland ]
+      - key: arrangeSupportTaskRequired
+        label: Arrange Support Task Required
+        typeRef: boolean
+        expression:
+          field: ARRANGE_SUPPORT_TASK_NAME
+          op: exists
+        only: [ et_englandwales, et_scotland ]
+    outputs:
+      - name: taskId
+        label: Task Id
+        typeRef: string
+      - name: name
+        label: Name
+        typeRef: string
+      - name: delayDuration
+        label: Delay Duration
+        typeRef: integer
+      - name: processCategories
+        label: Process Categories Identifiers
+        typeRef: string
+    rows:
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ SUBMIT_CASE_DRAFT ]
+          postEventState:
+            in: [ Submitted ]
+        returns:
+          taskId: Et1Vetting
+          name: Et1 Vetting
+          processCategories: Vetting
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ initiateCase ]
+          postEventState:
+            in: [ Submitted ]
+        returns:
+          taskId: Et1Vetting
+          name: Et1 Vetting
+          processCategories: Vetting
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ createReferral ]
+          referCaseTo:
+            in: [ Admin ]
+        returns:
+          taskId: ReviewReferralAdmin
+          name: Review Referral
+          processCategories:
+            plus:
+              - reviewReferralSerialNumberAndSubject_
+              - field: CURRENT_REFERRAL_SERIAL_NUMBER
+              - " - "
+              - field: CURRENT_REFERRAL_SUBJECT
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ createReferral ]
+          referCaseTo:
+            in: [ Admin ]
+          referralSubject:
+            in: [ Hearings ]
+        returns:
+          taskId: IssuePostHearingDirection
+          name: Issue Post Hearing Direction
+          processCategories: Hearing
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ createReferral ]
+          referCaseTo:
+            in: [ Admin ]
+          referralSubject:
+            in: [ Judgment ]
+        returns:
+          taskId: IssueJudgment
+          name: Issue Judgment
+          processCategories: Hearing
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ createReferral ]
+          referCaseTo:
+            in: [ Judge ]
+        returns:
+          taskId: ReviewReferralJudiciary
+          name: Review Referral
+          processCategories:
+            plus:
+              - reviewReferralSerialNumberAndSubject_
+              - field: CURRENT_REFERRAL_SERIAL_NUMBER
+              - " - "
+              - field: CURRENT_REFERRAL_SUBJECT
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ createReferral ]
+          referCaseTo:
+            in: [ Legal officer ]
+        returns:
+          taskId: ReviewReferralLegalOps
+          name: Review Referral
+          processCategories:
+            plus:
+              - reviewReferralSerialNumberAndSubject_
+              - field: CURRENT_REFERRAL_SERIAL_NUMBER
+              - " - "
+              - field: CURRENT_REFERRAL_SUBJECT
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ replyToReferral ]
+          directionTo:
+            in: [ Admin ]
+        returns:
+          taskId: ReviewReferralResponseAdmin
+          name: Review Referral Response
+          processCategories:
+            plus:
+              - reviewReferralResponseSerialNumberAndSubject_
+              - field: CURRENT_REFERRAL_RESPONSE_SERIAL_NUMBER
+              - " - "
+              - field: CURRENT_REFERRAL_RESPONSE_SUBJECT
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ replyToReferral ]
+          directionTo:
+            in: [ Judge ]
+        returns:
+          taskId: ReviewReferralResponseJudiciary
+          name: Review Referral Response
+          processCategories:
+            plus:
+              - reviewReferralResponseSerialNumberAndSubject_
+              - field: CURRENT_REFERRAL_RESPONSE_SERIAL_NUMBER
+              - " - "
+              - field: CURRENT_REFERRAL_RESPONSE_SUBJECT
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ replyToReferral ]
+          directionTo:
+            in: [ Legal officer ]
+        returns:
+          taskId: ReviewReferralResponseLegalOps
+          name: Review Referral Response
+          processCategories:
+            plus:
+              - reviewReferralResponseSerialNumberAndSubject_
+              - field: CURRENT_REFERRAL_RESPONSE_SERIAL_NUMBER
+              - " - "
+              - field: CURRENT_REFERRAL_RESPONSE_SUBJECT
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ updateReferral ]
+          updateReferCaseTo:
+            in: [ Legal officer ]
+        returns:
+          taskId: ReviewReferralLegalOps
+          name: Review Referral
+          processCategories:
+            plus:
+              - reviewReferralSerialNumberAndSubject_
+              - field: CURRENT_REFERRAL_SERIAL_NUMBER
+              - " - "
+              - field: CURRENT_REFERRAL_SUBJECT
+      - only: [ et_englandwales ]
+        when:
+          eventId:
+            in: [ updateReferral ]
+          updateReferCaseTo:
+            in: [ Admin ]
+        returns:
+          taskId: ReviewReferralAdmin
+          name: Review Referral
+          processCategories:
+            plus:
+              - reviewReferralSerialNumberAndSubject_
+              - field: CURRENT_REFERRAL_SERIAL_NUMBER
+              - " - "
+              - field: CURRENT_REFERRAL_SUBJECT
+      - only: [ et_englandwales ]
+        when:
+          eventId:
+            in: [ updateReferral ]
+          updateReferCaseTo:
+            in: [ Judge ]
+        returns:
+          taskId: ReviewReferralJudiciary
+          name: Review Referral
+          processCategories:
+            plus:
+              - reviewReferralSerialNumberAndSubject_
+              - field: CURRENT_REFERRAL_SERIAL_NUMBER
+              - " - "
+              - field: CURRENT_REFERRAL_SUBJECT
+      - only: [ et_scotland ]
+        when:
+          eventId:
+            in: [ updateReferral ]
+          updateReferCaseTo:
+            in: [ Admin ]
+        returns:
+          taskId: ReviewReferralLegalOps
+          name: Review Referral
+          processCategories:
+            plus:
+              - reviewReferralSerialNumberAndSubject_
+              - field: CURRENT_REFERRAL_SERIAL_NUMBER
+              - " - "
+              - field: CURRENT_REFERRAL_SUBJECT
+      - only: [ et_scotland ]
+        when:
+          eventId:
+            in: [ updateReferral ]
+          updateReferCaseTo:
+            in: [ Judge ]
+        returns:
+          taskId: ReviewReferralLegalOps
+          name: Review Referral
+          processCategories:
+            plus:
+              - reviewReferralSerialNumberAndSubject_
+              - field: CURRENT_REFERRAL_SERIAL_NUMBER
+              - " - "
+              - field: CURRENT_REFERRAL_SUBJECT
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ draftAndSignJudgement ]
+          isJudgmentOrOrder:
+            in: [ true ]
+        returns:
+          taskId: IssueJudgment
+          name: Issue Judgment
+          processCategories: Hearing
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ draftAndSignJudgement ]
+          isJudgmentOrOrder:
+            in: [ false ]
+        returns:
+          taskId: IssueOrder
+          name: Issue Order
+          processCategories: Hearing
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ preAcceptanceCase ]
+          postEventState:
+            in: [ Accepted ]
+        returns:
+          taskId: ListServeClaim
+          name: List/ Serve Claim
+          processCategories: Vetting
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ preAcceptanceCase ]
+          postEventState:
+            in: [ Accepted, Rejected ]
+        returns:
+          taskId: SendEt1Notification
+          name: Send ET1 Notification
+          processCategories: Vetting
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ WA_REVIEW_RULE21_REFERRAL ]
+          postEventState:
+            in: [ Accepted ]
+        returns:
+          taskId: Rule21
+          name: Rule 22
+          processCategories: Rule21
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ WA_EXPIRED_BF_ACTION_TASK ]
+          postEventState:
+            in: [ Accepted, Rejected, Vetted, Submitted ]
+        returns:
+          taskId: ExpiredBfAction
+          name: Expired Bf Action
+          processCategories: ExpiredBfAction
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ submitEt3 ]
+          postEventState:
+            in: [ Accepted ]
+        returns:
+          taskId: ET3Processing
+          name: ET3 Processing
+          processCategories: Processing
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ amendRespondentDetails ]
+          isECCReplyReceived:
+            in: [ true ]
+        returns:
+          taskId: CompleteInitialConsideration
+          name: Complete Initial Consideration
+          processCategories: Processing
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ amendRespondentDetails ]
+          eT3FormReceived:
+            in: [ true ]
+        returns:
+          taskId: ET3Processing
+          name: ET3 Processing
+          processCategories: Processing
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ et3Vetting ]
+          postEventState:
+            in: [ Accepted ]
+          isThereAnEt3Response:
+            in: [ false ]
+        returns:
+          taskId: ReviewRule21Referral
+          name: Review Rule 22 Referral
+          processCategories: Rule21
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ et3Vetting ]
+          postEventState:
+            in: [ Accepted ]
+          isThereAnEt3Response:
+            in: [ true ]
+          isECC:
+            in: [ false ]
+        returns:
+          taskId: CompleteInitialConsideration
+          name: Complete Initial Consideration
+          processCategories: Processing
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ et3Vetting ]
+          postEventState:
+            in: [ Accepted ]
+          isThereAnEt3Response:
+            in: [ true ]
+          isECC:
+            in: [ false ]
+        returns:
+          taskId: SendEt3Notification
+          name: Send ET3 Notification
+          processCategories: Processing
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ et3Vetting ]
+          postEventState:
+            in: [ Accepted ]
+          isThereAnEt3Response:
+            in: [ true ]
+          isECC:
+            in: [ true ]
+        returns:
+          taskId: ReferEmployersContractClaim
+          name: Refer Employer's Contract Claim
+          processCategories: Processing
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ initialConsideration ]
+          postEventState:
+            in: [ Accepted ]
+        returns:
+          taskId: IssueInitialConsiderationDirections
+          name: Issue Initial Consideration Directions
+          processCategories: Hearing
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ initialConsideration ]
+          postEventState:
+            in: [ Accepted ]
+          listAHearing:
+            in: [ true ]
+        returns:
+          taskId: ListAHearing
+          name: List A Hearing
+          processCategories: Hearing
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ issueInitialConsiderationDirectionsWA ]
+          postEventState:
+            in: [ Accepted ]
+        returns:
+          taskId: IssueInitialConsiderationDirections
+          name: Issue Initial Consideration Directions
+          processCategories: Hearing
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ updateHearing ]
+          postEventState:
+            in: [ Accepted ]
+          hearingsHeard:
+            in: [ true ]
+        returns:
+          taskId: DraftAndSignJudgment
+          name: Draft And Sign Judgment/Order
+          processCategories: Judgment
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ SUBMIT_CLAIMANT_TSE ]
+          submissionReasonApplication:
+            in:
+              - Amend my claim
+              - Consider a decision afresh
+              - Contact about something else
+              - Order a witness to attend
+              - Order respondent to do something
+              - Postpone a hearing
+              - Reconsider judgement
+              - Restrict publicity
+              - Tell tribunal respondent not complied
+              - Vary/revoke an order
+              - Strike out all/part of response
+        returns:
+          taskId: ContactTribunalWithAnApplication
+          name:
+            field: LATEST_APPLICATION_TASK_NAME
+          processCategories: Application
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ CLAIMANT_TSE_RESPOND ]
+          applicationResponseFrom:
+            in: [ Claimant ]
+          responseToApplicationType:
+            in:
+              - Amend my claim
+              - Amend response
+              - Claimant not complied
+              - Consider a decision afresh
+              - Contact about something else
+              - Contact the tribunal
+              - Order a witness to attend to give evidence
+              - Order a witness to attend
+              - Order other party
+              - Order respondent to do something
+              - Postpone a hearing
+              - Reconsider judgement
+              - Restrict publicity
+              - Strike out all or part of a claim
+              - Strike out all/part of response
+              - Tell tribunal respondent not complied
+              - Vary or revoke an order
+              - Vary/revoke an order
+              - Withdraw all/part of claim
+        returns:
+          taskId: ContactTribunalWithAnApplication
+          name:
+            field: LATEST_APPLICATION_RESPOND_TASK_NAME
+          processCategories: Application
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ respondentTSE ]
+          submissionReasonApplication:
+            in:
+              - Amend response
+              - Claimant not complied
+              - Consider a decision afresh
+              - Contact the tribunal
+              - Order other party
+              - Order a witness to attend to give evidence
+              - Postpone a hearing
+              - Reconsider judgement
+              - Restrict publicity
+              - Strike out all or part of a claim
+              - Vary or revoke an order
+        returns:
+          taskId: ContactTribunalWithAnApplication
+          name:
+            field: LATEST_APPLICATION_TASK_NAME
+          processCategories: Application
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ tseRespond ]
+          applicationResponseFrom:
+            in: [ Respondent ]
+          responseToApplicationType:
+            in:
+              - Amend my claim
+              - Amend response
+              - Claimant not complied
+              - Consider a decision afresh
+              - Contact about something else
+              - Contact the tribunal
+              - Order a witness to attend to give evidence
+              - Order a witness to attend
+              - Order other party
+              - Order respondent to do something
+              - Postpone a hearing
+              - Reconsider judgement
+              - Restrict publicity
+              - Strike out all or part of a claim
+              - Strike out all/part of response
+              - Tell tribunal respondent not complied
+              - Vary or revoke an order
+              - Vary/revoke an order
+              - Withdraw all/part of claim
+        returns:
+          taskId: ContactTribunalWithAnApplication
+          name:
+            field: LATEST_APPLICATION_RESPOND_TASK_NAME
+          processCategories: Application
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ SUBMIT_CLAIMANT_TSE ]
+          submissionReasonApplication:
+            in: [ Change my personal details ]
+        returns:
+          taskId: AmendClaimantDetails
+          name: Amend Party Details
+          processCategories: Amendments
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ CLAIMANT_TSE_RESPOND ]
+          applicationResponseFrom:
+            in: [ Claimant ]
+          responseToApplicationType:
+            in: [ Change personal details ]
+        returns:
+          taskId: AmendRespondentDetails
+          name: Amend Party Details
+          processCategories: Amendments
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ respondentTSE ]
+          submissionReasonApplication:
+            in: [ Change personal details ]
+        returns:
+          taskId: AmendRespondentDetails
+          name: Amend Party Details
+          processCategories: Amendments
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ tseRespond ]
+          applicationResponseFrom:
+            in: [ Respondent ]
+          responseToApplicationType:
+            in: [ Change my personal details ]
+        returns:
+          taskId: AmendClaimantDetails
+          name: Amend Party Details
+          processCategories: Amendments
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ SUBMIT_CLAIMANT_TSE ]
+          submissionReasonApplication:
+            in: [ Withdraw all/part of claim ]
+        returns:
+          taskId: WithdrawAllOrPartOfCase
+          name: Withdraw All or Part of Case
+          processCategories: Amendments
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ UPDATE_NOTIFICATION_RESPONSE ]
+          notificationResponseIsECCFromClaimant:
+            in: [ true ]
+        returns:
+          taskId: ReviewECCResponse
+          name: Reply to Employer's Contract Claim received
+          processCategories: Vetting
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ submitEt1Draft ]
+          postEventState:
+            in: [ Submitted ]
+        returns:
+          taskId: Et1Vetting
+          name: Et1 Vetting
+          processCategories: Vetting
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ claimantTSE ]
+          submissionReasonApplication:
+            in:
+              - Amend claim
+              - Consider decision afresh
+              - Contact the tribunal
+              - Order a witness to attend to give evidence
+              - Order other party
+              - Postpone a hearing
+              - Reconsider judgment
+              - Respondent not complied
+              - Restrict publicity
+              - Strike out all or part of the response
+              - Vary or revoke an order
+        returns:
+          taskId: ContactTribunalWithAnApplication
+          name:
+            field: LATEST_APPLICATION_TASK_NAME
+          processCategories: Application
+      - only: [ et_englandwales ]
+        when:
+          eventId:
+            in: [ claimantTSE ]
+          submissionReasonApplication:
+            in: [ Change my personal details ]
+        returns:
+          taskId: AmendClaimantDetails
+          name: Amend Party Details
+          processCategories: Application
+      - only: [ et_englandwales ]
+        when:
+          eventId:
+            in: [ claimantTSE ]
+          submissionReasonApplication:
+            in: [ Withdraw all or part of claim ]
+        returns:
+          taskId: WithdrawAllOrPartOfCase
+          name: Withdraw All or Part of Case
+          processCategories: Application
+      - only: [ et_scotland ]
+        when:
+          eventId:
+            in: [ claimantTSE ]
+          submissionReasonApplication:
+            in: [ Change my personal details ]
+        returns:
+          taskId: AmendClaimantDetails
+          name: Amend Party Details
+          processCategories: Amendments
+      - only: [ et_scotland ]
+        when:
+          eventId:
+            in: [ claimantTSE ]
+          submissionReasonApplication:
+            in: [ Withdraw all or part of claim ]
+        returns:
+          taskId: WithdrawAllOrPartOfCase
+          name: Withdraw All or Part of Case
+          processCategories: Amendments
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ tseClaimantRepResponse ]
+          applicationResponseFrom:
+            in: [ Claimant Representative ]
+          responseToApplicationType:
+            in:
+              - Amend my claim
+              - Amend response
+              - Claimant not complied
+              - Consider a decision afresh
+              - Contact about something else
+              - Contact the tribunal
+              - Order a witness to attend to give evidence
+              - Order a witness to attend
+              - Order other party
+              - Order respondent to do something
+              - Postpone a hearing
+              - Reconsider judgement
+              - Restrict publicity
+              - Strike out all or part of a claim
+              - Strike out all/part of response
+              - Tell tribunal respondent not complied
+              - Vary or revoke an order
+              - Vary/revoke an order
+              - Withdraw all/part of claim
+        returns:
+          taskId: ContactTribunalWithAnApplication
+          name:
+            field: LATEST_APPLICATION_RESPOND_TASK_NAME
+          processCategories: Application
+      - only: [ et_englandwales ]
+        when:
+          eventId:
+            in: [ tseClaimantRepResponse ]
+          applicationResponseFrom:
+            in: [ Claimant Representative ]
+          responseToApplicationType:
+            in: [ Change personal details ]
+        returns:
+          taskId: AmendRespondentDetails
+          name: Amend Party Details
+          processCategories: Application
+      - only: [ et_scotland ]
+        when:
+          eventId:
+            in: [ tseClaimantRepResponse ]
+          applicationResponseFrom:
+            in: [ Claimant Representative ]
+          responseToApplicationType:
+            in: [ Change personal details ]
+        returns:
+          taskId: AmendRespondentDetails
+          name: Amend Party Details
+          processCategories: Amendments
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ SUBMIT_ET3_FORM ]
+          postEventState:
+            in: [ Accepted ]
+        returns:
+          taskId: ET3Processing
+          name: ET3 Processing
+          processCategories: Processing
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ createEcmCase ]
+          postEventState:
+            in: [ Submitted ]
+        returns:
+          taskId: Et1Vetting
+          name: Et1 Vetting
+          processCategories: Vetting
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ SUBMIT_RESPONDENT_TSE ]
+          submissionReasonApplication:
+            in:
+              - Amend response
+              - Claimant not complied
+              - Consider a decision afresh
+              - Contact the tribunal
+              - Order other party
+              - Order a witness to attend to give evidence
+              - Postpone a hearing
+              - Reconsider judgement
+              - Restrict publicity
+              - Strike out all or part of a claim
+              - Vary or revoke an order
+        returns:
+          taskId: ContactTribunalWithAnApplication
+          name:
+            field: LATEST_APPLICATION_TASK_NAME
+          processCategories: Application
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ RESPONDENT_TSE_RESPOND ]
+          applicationResponseFrom:
+            in: [ Respondent ]
+          responseToApplicationType:
+            in:
+              - Amend my claim
+              - Amend response
+              - Claimant not complied
+              - Consider a decision afresh
+              - Contact about something else
+              - Contact the tribunal
+              - Order a witness to attend to give evidence
+              - Order a witness to attend
+              - Order other party
+              - Order respondent to do something
+              - Postpone a hearing
+              - Reconsider judgement
+              - Restrict publicity
+              - Strike out all or part of a claim
+              - Strike out all/part of response
+              - Tell tribunal claimant not complied
+              - Vary or revoke an order
+              - Vary/revoke an order
+              - Withdraw all/part of claim
+        returns:
+          taskId: ContactTribunalWithAnApplication
+          name:
+            field: LATEST_APPLICATION_RESPOND_TASK_NAME
+          processCategories: Application
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ SUBMIT_RESPONDENT_TSE ]
+          submissionReasonApplication:
+            in: [ Change personal details ]
+        returns:
+          taskId: AmendRespondentDetails
+          name: Amend Party Details
+          processCategories: Application
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ ADD_RESPONDENT_PSE_RESPONSE ]
+        returns:
+          taskId: SubmitRespondentPseResponse
+          name:
+            field: CURRENT_NOTIFICATION_NAME
+          processCategories: Application
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ SUBMIT_RESPONDENT_PSE_RESPONSE ]
+        returns:
+          taskId: SubmitRespondentPseResponse
+          name:
+            field: CURRENT_NOTIFICATION_NAME
+          processCategories: Application
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ UPDATE_NOTIFICATION_RESPONSE ]
+          notificationResponseIsECCFromClaimant:
+            in: [ false ]
+        returns:
+          taskId: SubmitClaimantPseResponse
+          name:
+            field: CURRENT_NOTIFICATION_NAME
+          processCategories: Application
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in: [ SUBMIT_STORED_PSE_RESPONSE ]
+          notificationResponseIsECCFromClaimant:
+            in: [ false ]
+        returns:
+          taskId: SubmitClaimantPseResponse
+          name:
+            field: CURRENT_NOTIFICATION_NAME
+          processCategories: Application
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in:
+              - SUBMIT_CASE_DRAFT
+              - UPDATE_CASE_SUBMITTED
+              - SUBMIT_ET3_FORM
+              - UPDATE_ET3_FORM
+              - requestSupport
+              - createFlag
+          adminSupportTaskRequired:
+            in: [ true ]
+        returns:
+          taskId: ReviewSupportRequestAdmin
+          name: Admin - Review Support Request
+          processCategories: ReviewSupportAdmin
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in:
+              - SUBMIT_CASE_DRAFT
+              - UPDATE_CASE_SUBMITTED
+              - SUBMIT_ET3_FORM
+              - UPDATE_ET3_FORM
+              - requestSupport
+              - createFlag
+          legalOfficerSupportTaskRequired:
+            in: [ true ]
+        returns:
+          taskId: ReviewSupportRequestLegalOfficer
+          name: LO - Review Support Request
+          processCategories: ReviewSupportLegalOfficer
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in:
+              - SUBMIT_CASE_DRAFT
+              - UPDATE_CASE_SUBMITTED
+              - SUBMIT_ET3_FORM
+              - UPDATE_ET3_FORM
+              - requestSupport
+              - createFlag
+          judgeSupportTaskRequired:
+            in: [ true ]
+        returns:
+          taskId: ReviewSupportRequestJudge
+          name: EJ - Review Support Request
+          processCategories: ReviewSupportJudge
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventId:
+            in:
+              - SUBMIT_CASE_DRAFT
+              - UPDATE_CASE_SUBMITTED
+              - SUBMIT_ET3_FORM
+              - UPDATE_ET3_FORM
+              - requestSupport
+              - createFlag
+              - manageFlags
+              - reviewAdminSupportRequest
+              - reviewLOSupportRequest
+              - reviewJudgeSupportRequest
+              - createArrangeSupportTask
+          arrangeSupportTaskRequired:
+            in: [ true ]
+        returns:
+          taskId: ArrangeSupport
+          name:
+            plus:
+              - "Arrange Support - "
+              - field: ARRANGE_SUPPORT_TASK_NAME
+          processCategories: ArrangeSupport
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          eventId:
+            in: [ createReferral ]
+          referCaseTo:
+            in: [ Admin ]
+        returns:
+          taskId: ReviewReferralAdminMultiple
+          name:
+            field: LATEST_REFERRAL_TASK_NAME
+          processCategories: Vetting
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          eventId:
+            in: [ createReferral ]
+          referCaseTo:
+            in: [ Legal officer ]
+        returns:
+          taskId: ReviewReferralLegalOpsMultiple
+          name:
+            field: LATEST_REFERRAL_TASK_NAME
+          processCategories: Vetting
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          eventId:
+            in: [ createReferral ]
+          referCaseTo:
+            in: [ Judge ]
+        returns:
+          taskId: ReviewReferralJudiciaryMultiple
+          name:
+            field: LATEST_REFERRAL_TASK_NAME
+          processCategories: Vetting
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          eventId:
+            in: [ replyToReferral ]
+          directionTo:
+            in: [ Legal officer ]
+        returns:
+          taskId: MultiplesReviewReferralResponseLegalOps
+          name:
+            field: LATEST_REFERRAL_REPLY_TASK_NAME
+          processCategories: Processing
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          eventId:
+            in: [ replyToReferral ]
+          directionTo:
+            in: [ Judge ]
+        returns:
+          taskId: ReviewReferralResponseJudiciaryMultiple
+          name:
+            field: LATEST_REFERRAL_REPLY_TASK_NAME
+          processCategories: Processing
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          eventId:
+            in: [ replyToReferral ]
+          directionTo:
+            in: [ Admin ]
+        returns:
+          taskId: ReviewReferralResponseAdminMultiple
+          name:
+            field: LATEST_REFERRAL_REPLY_TASK_NAME
+          processCategories: Processing
+    helpers:
+      - name: LATEST_APPLICATION_TASK_NAME
+        typeRef: string
+        historyTimeToLive: P30D
+        expression:
+          if:
+            field: LATEST_APPLICATION_TYPE
+            op: exists
+          use:
+            if:
+              any:
+                - field: LATEST_APPLICATION_TYPE
+                  op: eq
+                  value: Contact about something else
+                - field: LATEST_APPLICATION_TYPE
+                  op: eq
+                  value: Contact the tribunal
+            use: Contact the tribunal
+            otherwise:
+              plus:
+                - "Review Application - "
+                - field: LATEST_APPLICATION_TYPE
+          otherwise: null
+        only: [ et_englandwales, et_scotland ]
+        overrides:
+          et_scotland:
+            historyTimeToLive: null
+      - name: LATEST_APPLICATION_TYPE
+        typeRef: string
+        expression:
+          feel: |-
+            if(additionalData!=null
+            and additionalData.Data!=null
+            and additionalData.Data.genericTseApplicationCollection!=null
+            and count(additionalData.Data.genericTseApplicationCollection) > 0)
+            then sort(
+              additionalData.Data.genericTseApplicationCollection,
+              function(x,y)
+                number(x.value.number)
+                >
+                number(y.value.number)
+            ).value.type[1]
+            else null
+        only: [ et_englandwales, et_scotland ]
+        overrides:
+          et_scotland:
+            expression:
+              feel: |-
+                if(additionalData!=null
+                and additionalData.Data!=null
+                and additionalData.Data.genericTseApplicationCollection!=null
+                and count(additionalData.Data.genericTseApplicationCollection) > 0)
+                then sort(additionalData.Data.genericTseApplicationCollection,function(x,y) number(x.value.number) > number(y.value.number)).value.type[1]
+                else null
+      - name: LATEST_APPLICATION_RESPOND_TASK_NAME
+        typeRef: string
+        expression:
+          if:
+            field: LATEST_APPLICATION_RESPOND_TYPE
+            op: exists
+          use:
+            if:
+              any:
+                - field: LATEST_APPLICATION_RESPOND_TYPE
+                  op: eq
+                  value: Contact about something else
+                - field: LATEST_APPLICATION_RESPOND_TYPE
+                  op: eq
+                  value: Contact the tribunal
+            use: Contact the tribunal Response
+            otherwise:
+              plus:
+                - "Review Application Response - "
+                - field: LATEST_APPLICATION_RESPOND_TYPE
+          otherwise: null
+        only: [ et_englandwales ]
+      - name: LATEST_APPLICATION_RESPOND_TYPE
+        typeRef: string
+        expression:
+          feel: |-
+            if(additionalData!=null
+            and additionalData.Data!=null
+            and additionalData.Data.genericTseApplicationCollection!=null
+            and count(additionalData.Data.genericTseApplicationCollection[value.respondCollection!=null])>0)
+            then sort(
+              flatten(additionalData.Data.genericTseApplicationCollection[value.respondCollection!=null].value.respondCollection),
+              function(x,y)
+                date and time(if(x.value.dateTime!=null)then x.value.dateTime else "2023-01-01T00:00:00.000")
+                >
+                date and time(if(y.value.dateTime!=null)then y.value.dateTime else "2023-01-01T00:00:00.000")
+            )[1].value.applicationType
+            else null
+        only: [ et_englandwales, et_scotland ]
+      - name: LATEST_APPLICATION_RESPOND_TASK_NAME
+        typeRef: string
+        expression:
+          if:
+            field: LATEST_APPLICATION_RESPOND_TYPE
+            op: exists
+          use:
+            if:
+              any:
+                - field: LATEST_APPLICATION_RESPOND_TYPE
+                  op: eq
+                  value: Contact about something else
+                - field: LATEST_APPLICATION_RESPOND_TYPE
+                  op: eq
+                  value: Contact the tribunal
+            use: Contact the tribunal Response
+            otherwise:
+              plus:
+                - "Review Application Response - "
+                - field: LATEST_APPLICATION_RESPOND_TYPE
+          otherwise: null
+        only: [ et_scotland ]
+      - name: LATEST_NOTIFICATION_RESPONSE_IS_ECC_FROM_CLAIMANT
+        typeRef: boolean
+        expression:
+          all:
+            - truthy:
+                field: LATEST_NOTIFICATION_RESPONSE_IS_ECC
+            - truthy:
+                field: LATEST_NOTIFICATION_RESPONSE_IS_FROM_CLAIMANT
+        only: [ et_englandwales, et_scotland ]
+      - name: LATEST_NOTIFICATION_RESPONSE_IS_ECC
+        typeRef: boolean
+        expression:
+          feel: |-
+            if(additionalData!=null
+            and additionalData.Data!=null
+            and additionalData.Data.sendNotificationCollection!=null
+            and count(additionalData.Data.sendNotificationCollection[number(value.sendNotificationResponsesCount)>0])>0)
+
+            then (sort(
+            flatten(additionalData.Data.sendNotificationCollection[number(value.sendNotificationResponsesCount)>0].value.respondCollection),
+            function(x,y)
+            date and time(if(x.value.dateTime!=null)then x.value.dateTime else "2023-01-01T00:00:00.000")
+            >
+            date and time(if(y.value.dateTime!=null)then y.value.dateTime else "2023-01-01T00:00:00.000")
+            )[1].value.isECC="Yes")
+
+            else false
+        only: [ et_englandwales, et_scotland ]
+      - name: LATEST_NOTIFICATION_RESPONSE_IS_FROM_CLAIMANT
+        typeRef: boolean
+        expression:
+          feel: |-
+            if(additionalData!=null
+            and additionalData.Data!=null
+            and additionalData.Data.sendNotificationCollection!=null
+            and count(additionalData.Data.sendNotificationCollection[number(value.sendNotificationResponsesCount)>0])>0)
+
+            then (sort(
+            flatten(additionalData.Data.sendNotificationCollection[number(value.sendNotificationResponsesCount)>0].value.respondCollection),
+            function(x,y)
+            date and time(if(x.value.dateTime!=null)then x.value.dateTime else "2023-01-01T00:00:00.000")
+            >
+            date and time(if(y.value.dateTime!=null)then y.value.dateTime else "2023-01-01T00:00:00.000")
+            )[1].value.from="Claimant")
+
+            else false
+        only: [ et_englandwales, et_scotland ]
+      - name: CURRENT_REFERRAL_SERIAL_NUMBER
+        typeRef: string
+        expression:
+          feel: |-
+            if(additionalData!=null
+            and additionalData.Data!=null
+            and additionalData.Data.referralCollection!=null
+            and count(additionalData.Data.referralCollection) > 0
+            and sort(additionalData.Data.referralCollection,function(x,y) number(x.value.referralNumber)>number(y.value.referralNumber))[1].value.referralNumber!=null)
+            then sort(
+              additionalData.Data.referralCollection,
+              function(x,y)
+                number(x.value.referralNumber)
+                >
+                number(y.value.referralNumber)
+            )[1].value.referralNumber
+            else ""
+        only: [ et_englandwales, et_scotland ]
+      - name: CURRENT_REFERRAL_SUBJECT
+        typeRef: string
+        expression:
+          feel: |-
+            if(additionalData!=null
+            and additionalData.Data!=null
+            and additionalData.Data.referralCollection!=null
+            and count(additionalData.Data.referralCollection) > 0)
+            then (
+              if(sort(additionalData.Data.referralCollection, function(x,y) number(x.value.referralNumber)>number(y.value.referralNumber))[1].value.referralSubject = "Other")
+              then (
+                if(sort(additionalData.Data.referralCollection, function(x,y) number(x.value.referralNumber)>number(y.value.referralNumber))[1].value.referralSubjectSpecify != null)
+                then sort(additionalData.Data.referralCollection, function(x,y) number(x.value.referralNumber)>number(y.value.referralNumber))[1].value.referralSubjectSpecify
+                else "Other"
+              )
+              else sort(additionalData.Data.referralCollection, function(x,y) number(x.value.referralNumber)>number(y.value.referralNumber))[1].value.referralSubject
+            )
+            else ""
+        only: [ et_englandwales, et_scotland ]
+      - name: CURRENT_REFERRAL_RESPONSE_SERIAL_NUMBER
+        typeRef: string
+        expression:
+          feel: |-
+            if(additionalData!=null
+            and additionalData.Data!=null
+            and additionalData.Data.referralCollection!=null
+            and count(additionalData.Data.referralCollection[value.referralReplyCollection != null and count(value.referralReplyCollection)>0])>0)
+            then (
+              sort(
+                flatten(additionalData.Data.referralCollection[value.referralReplyCollection!=null and count(value.referralReplyCollection) > 0].value.referralReplyCollection),
+                function(x,y)
+                  date and time(if(x.value.replyDateTime!=null) then x.value.replyDateTime else "0001-01-01T00:00:00")
+                  >
+                  date and time(if(y.value.replyDateTime!=null) then y.value.replyDateTime else "0001-01-01T00:00:00")
+              )[1].value.referralNumber
+            )
+            else ""
+        only: [ et_englandwales, et_scotland ]
+      - name: CURRENT_REFERRAL_RESPONSE_SUBJECT
+        typeRef: string
+        expression:
+          feel: |-
+            if(additionalData != null and additionalData.Data != null and additionalData.Data.referralCollection != null and count(additionalData.Data.referralCollection[value.referralReplyCollection != null and count(value.referralReplyCollection) > 0]) > 0)
+            then
+              if(
+                (additionalData.Data.referralCollection[value.referralNumber = sort(flatten(additionalData.Data.referralCollection[value.referralReplyCollection != null].value.referralReplyCollection), function(x, y) date and time(x.value.replyDateTime) > date and time(y.value.replyDateTime))[1].value.referralNumber][1].value.referralSubject) = "Other"
+              )
+              then
+                if(
+                  (additionalData.Data.referralCollection[value.referralNumber = sort(flatten(additionalData.Data.referralCollection[value.referralReplyCollection != null].value.referralReplyCollection), function(x, y) date and time(x.value.replyDateTime) > date and time(y.value.replyDateTime))[1].value.referralNumber][1].value.referralSubjectSpecify) != null
+                )
+                then
+                  (additionalData.Data.referralCollection[value.referralNumber = sort(flatten(additionalData.Data.referralCollection[value.referralReplyCollection != null].value.referralReplyCollection), function(x, y) date and time(x.value.replyDateTime) > date and time(y.value.replyDateTime))[1].value.referralNumber][1].value.referralSubjectSpecify)
+                else
+                  "Other"
+              else
+                (additionalData.Data.referralCollection[value.referralNumber = sort(flatten(additionalData.Data.referralCollection[value.referralReplyCollection != null].value.referralReplyCollection), function(x, y) date and time(x.value.replyDateTime) > date and time(y.value.replyDateTime))[1].value.referralNumber][1].value.referralSubject)
+            else
+              ""
+        only: [ et_englandwales, et_scotland ]
+      - name: CURRENT_NOTIFICATION_NAME
+        typeRef: string
+        expression:
+          feel: |-
+            if additionalData != null
+              and additionalData.Data != null
+              and additionalData.Data.sendNotificationCollection != null
+              and count(additionalData.Data.sendNotificationCollection[number(value.sendNotificationResponsesCount) > 0]) > 0
+            then (for r in [sort(
+                for i in 1..count(additionalData.Data.sendNotificationCollection)
+                return {
+                  position: i,
+                  latestDateTime: if(additionalData.Data.sendNotificationCollection[i].value.respondCollection != null
+                                    and count(additionalData.Data.sendNotificationCollection[i].value.respondCollection) > 0)
+                                  then sort(
+                                      additionalData.Data.sendNotificationCollection[i].value.respondCollection,
+                                      function(a, b)
+                                        date and time(if(a.value.dateTime != null) then a.value.dateTime else "2023-01-01T00:00:00.000") >
+                                        date and time(if(b.value.dateTime != null) then b.value.dateTime else "2023-01-01T00:00:00.000")
+                                    )[1].value.dateTime
+                                  else "2023-01-01T00:00:00.000"
+                },
+                function(x, y)
+                  date and time(if(x.latestDateTime != null) then x.latestDateTime else "2023-01-01T00:00:00.000") >
+                  date and time(if(y.latestDateTime != null) then y.latestDateTime else "2023-01-01T00:00:00.000")
+              )[1]]
+              return if r != null and r.position != null
+                     then "Review notification " + string(r.position) + " response"
+                     else "Review notification response"
+            )[1]
+            else "Review notification response"
+        only: [ et_englandwales, et_scotland ]
+      - name: ARRANGE_SUPPORT_TASK_NAME
+        typeRef: string
+        expression:
+          if:
+            all:
+              - field: additionalData
+                op: exists
+              - field: additionalData.Data
+                op: exists
+              - field: additionalData.Data.supportTaskState
+                op: exists
+          use:
+            field: additionalData.Data.supportTaskState.arrangeSupportTaskName
+          otherwise: null
+        only: [ et_englandwales, et_scotland ]
+      - name: LATEST_REFERRAL_REPLY_TASK_NAME
+        typeRef: string
+        historyTimeToLive: P30D
+        expression:
+          if:
+            all:
+              - field: LATEST_REFERRAL_REPLY_NUMBER
+                op: exists
+              - field: LATEST_REFERRAL_REPLY_SUBJECT
+                op: exists
+          use:
+            plus:
+              - "Review Multiples Referral #"
+              - field: LATEST_REFERRAL_REPLY_NUMBER
+              - " - "
+              - field: LATEST_REFERRAL_REPLY_SUBJECT
+              - " Response"
+          otherwise: null
+        only: [ et_englandwales_multiple ]
+      - name: LATEST_REFERRAL_TASK_NAME
+        typeRef: string
+        historyTimeToLive: P30D
+        expression:
+          if:
+            all:
+              - field: LATEST_REFERRAL_NUMBER
+                op: exists
+              - field: LATEST_REFERRAL_SUBJECT
+                op: exists
+          use:
+            plus:
+              - "Review Multiples Referral #"
+              - field: LATEST_REFERRAL_NUMBER
+              - " - "
+              - field: LATEST_REFERRAL_SUBJECT
+          otherwise: null
+        only: [ et_englandwales_multiple, et_scotland_multiple ]
+        overrides:
+          et_scotland_multiple:
+            expression:
+              if:
+                all:
+                  - field: additionalData
+                    op: exists
+                  - field: additionalData.Data
+                    op: exists
+                  - field: additionalData.Data.referralCollection
+                    op: exists
+                  - left:
+                      call: count
+                      args:
+                        - field: additionalData.Data.referralCollection
+                    op: gt
+                    right: 0
+              use:
+                plus:
+                  - "Review Multiples Referral #"
+                  - field: LATEST_REFERRAL_NUMBER
+                  - " - "
+                  - field: LATEST_REFERRAL_SUBJECT
+              otherwise: null
+      - name: LATEST_REFERRAL_REPLY_NUMBER
+        typeRef: string
+        expression:
+          feel: |-
+            if(additionalData!=null
+            and additionalData.Data!=null
+            and additionalData.Data.referralCollection!=null
+            and count(additionalData.Data.referralCollection[count(value.referralReplyCollection)>0])>0)
+            then (
+              sort(
+                flatten(additionalData.Data.referralCollection[value.referralReplyCollection!=null].value.referralReplyCollection),
+                function(x,y)
+                  date and time(if(x.value.replyDateTime!=null) then x.value.replyDateTime else "2023-01-01T00:00:00.000")
+                  >
+                  date and time(if(y.value.replyDateTime!=null) then y.value.replyDateTime else "2023-01-01T00:00:00.000")
+              )[1].value.referralNumber
+            )
+            else null
+        only: [ et_englandwales_multiple ]
+      - name: LATEST_REFERRAL_REPLY_SUBJECT
+        typeRef: string
+        expression:
+          feel: |-
+            if(additionalData!=null
+            and additionalData.Data!=null
+            and additionalData.Data.referralCollection!=null
+            and count(additionalData.Data.referralCollection[count(value.referralReplyCollection)>0])>0)
+            then (
+              sort(
+                flatten(additionalData.Data.referralCollection[value.referralReplyCollection!=null].value.referralReplyCollection),
+                function(x,y)
+                  date and time(if(x.value.replyDateTime!=null) then x.value.replyDateTime else "2023-01-01T00:00:00.000")
+                  >
+                  date and time(if(y.value.replyDateTime!=null) then y.value.replyDateTime else "2023-01-01T00:00:00.000")
+              )[1].value.referralSubject
+            )
+            else null
+        only: [ et_englandwales_multiple ]
+      - name: LATEST_REFERRAL_REPLY_TASK_NAME
+        typeRef: string
+        historyTimeToLive: P30D
+        expression:
+          feel: |-
+            if(additionalData!=null
+            and additionalData.Data!=null
+            and additionalData.Data.referralCollection!=null
+            and count(additionalData.Data.referralCollection[count(value.referralReplyCollection)>0])>0)
+            then "Review Multiples Referral #" + LATEST_REFERRAL_REPLY_NUMBER + " - " + LATEST_REFERRAL_REPLY_SUBJECT + " Response"
+            else null
+        only: [ et_scotland_multiple ]
+      - name: LATEST_REFERRAL_NUMBER
+        typeRef: string
+        expression:
+          feel: |-
+            if(additionalData!=null
+            and additionalData.Data!=null
+            and additionalData.Data.referralCollection!=null
+            and count(additionalData.Data.referralCollection) > 0
+            and sort(additionalData.Data.referralCollection,function(x,y) number(x.value.referralNumber)>number(y.value.referralNumber))[1].value.referralNumber!=null)
+            then sort(
+              additionalData.Data.referralCollection,
+              function(x,y)
+                number(x.value.referralNumber)
+                >
+                number(y.value.referralNumber)
+            )[1].value.referralNumber
+            else null
+        only: [ et_englandwales_multiple, et_scotland_multiple ]
+        overrides:
+          et_scotland_multiple:
+            expression:
+              feel: |-
+                if(additionalData!=null
+                and additionalData.Data!=null
+                and additionalData.Data.referralCollection!=null
+                and count(additionalData.Data.referralCollection) > 0
+                and sort(additionalData.Data.referralCollection,function(x,y) number(x.value.referralNumber)>number(y.value.referralNumber))[1].value.referralNumber!=null)
+                then sort(additionalData.Data.referralCollection, function(x,y) number(x.value.referralNumber) > number(y.value.referralNumber))[1].value.referralNumber
+                else null
+      - name: LATEST_REFERRAL_SUBJECT
+        typeRef: string
+        expression:
+          feel: |-
+            if(additionalData!=null
+            and additionalData.Data!=null
+            and additionalData.Data.referralCollection!=null
+            and count(additionalData.Data.referralCollection) > 0
+            and sort(additionalData.Data.referralCollection,function(x,y) number(x.value.referralNumber)>number(y.value.referralNumber))[1].value.referralSubject!=null)
+            then sort(
+              additionalData.Data.referralCollection,
+              function(x,y)
+                number(x.value.referralNumber)
+                >
+                number(y.value.referralNumber)
+            )[1].value.referralSubject
+            else null
+        only: [ et_englandwales_multiple, et_scotland_multiple ]
+        overrides:
+          et_scotland_multiple:
+            expression:
+              feel: |-
+                if(additionalData!=null
+                and additionalData.Data!=null
+                and additionalData.Data.referralCollection!=null
+                and count(additionalData.Data.referralCollection) > 0
+                and sort(additionalData.Data.referralCollection,function(x,y) number(x.value.referralNumber)>number(y.value.referralNumber))[1].value.referralSubject!=null)
+                then sort(additionalData.Data.referralCollection, function(x,y) number(x.value.referralNumber) > number(y.value.referralNumber))[1].value.referralSubject
+                else null
+      - name: LATEST_REFERRAL_REPLY_NUMBER
+        typeRef: string
+        expression:
+          feel: |-
+            if(additionalData!=null
+            and additionalData.Data!=null
+            and additionalData.Data.referralCollection!=null
+            and count(additionalData.Data.referralCollection[count(value.referralReplyCollection)>0])>0)
+            then (
+              sort(
+                flatten(additionalData.Data.referralCollection[value.referralReplyCollection!=null].value.referralReplyCollection),
+                function(x,y)
+                  date and time(if(x.value.replyDateTime!=null) then x.value.replyDateTime else "2023-01-01T00:00:00.000")
+                  >
+                  date and time(if(y.value.replyDateTime!=null) then y.value.replyDateTime else "2023-01-01T00:00:00.000")
+                )[1].value.referralNumber
+            )
+            else null
+        only: [ et_scotland_multiple ]
+      - name: LATEST_REFERRAL_REPLY_SUBJECT
+        typeRef: string
+        expression:
+          feel: |-
+            if(additionalData!=null
+            and additionalData.Data!=null
+            and additionalData.Data.referralCollection!=null
+            and count(additionalData.Data.referralCollection[count(value.referralReplyCollection)>0])>0)
+            then (
+              sort(
+                flatten(additionalData.Data.referralCollection[value.referralReplyCollection!=null].value.referralReplyCollection),
+                function(x,y)
+                  date and time(if(x.value.replyDateTime!=null) then x.value.replyDateTime else "2023-01-01T00:00:00.000")
+                  >
+                  date and time(if(y.value.replyDateTime!=null) then y.value.replyDateTime else "2023-01-01T00:00:00.000")
+              )[1].value.referralSubject
+            )
+            else null
+        only: [ et_scotland_multiple ]
+    dependencies:
+      - decision: table
+        requires: LATEST_APPLICATION_TASK_NAME
+        only: [ et_englandwales, et_scotland ]
+      - decision: table
+        requires: LATEST_APPLICATION_RESPOND_TASK_NAME
+        only: [ et_englandwales, et_scotland ]
+      - decision: table
+        requires: LATEST_NOTIFICATION_RESPONSE_IS_ECC_FROM_CLAIMANT
+        only: [ et_englandwales, et_scotland ]
+      - decision: table
+        requires: CURRENT_REFERRAL_SUBJECT
+        only: [ et_englandwales, et_scotland ]
+      - decision: table
+        requires: CURRENT_REFERRAL_SERIAL_NUMBER
+        only: [ et_englandwales, et_scotland ]
+      - decision: table
+        requires: CURRENT_REFERRAL_RESPONSE_SERIAL_NUMBER
+        only: [ et_englandwales, et_scotland ]
+      - decision: table
+        requires: CURRENT_REFERRAL_RESPONSE_SUBJECT
+        only: [ et_englandwales, et_scotland ]
+      - decision: table
+        requires: CURRENT_NOTIFICATION_NAME
+        only: [ et_englandwales, et_scotland ]
+      - decision: table
+        requires: ARRANGE_SUPPORT_TASK_NAME
+        only: [ et_englandwales, et_scotland ]
+      - decision: LATEST_APPLICATION_TASK_NAME
+        requires: LATEST_APPLICATION_TYPE
+        only: [ et_englandwales, et_scotland ]
+      - decision: LATEST_APPLICATION_RESPOND_TASK_NAME
+        requires: LATEST_APPLICATION_RESPOND_TYPE
+        only: [ et_englandwales, et_scotland ]
+      - decision: LATEST_NOTIFICATION_RESPONSE_IS_ECC_FROM_CLAIMANT
+        requires: LATEST_NOTIFICATION_RESPONSE_IS_ECC
+        only: [ et_englandwales, et_scotland ]
+      - decision: LATEST_NOTIFICATION_RESPONSE_IS_ECC_FROM_CLAIMANT
+        requires: LATEST_NOTIFICATION_RESPONSE_IS_FROM_CLAIMANT
+        only: [ et_englandwales, et_scotland ]
+      - decision: table
+        requires: LATEST_REFERRAL_REPLY_TASK_NAME
+        only: [ et_englandwales_multiple, et_scotland_multiple ]
+      - decision: table
+        requires: LATEST_REFERRAL_TASK_NAME
+        only: [ et_englandwales_multiple, et_scotland_multiple ]
+      - decision: LATEST_REFERRAL_REPLY_TASK_NAME
+        requires: LATEST_REFERRAL_REPLY_NUMBER
+        only: [ et_englandwales_multiple, et_scotland_multiple ]
+      - decision: LATEST_REFERRAL_REPLY_TASK_NAME
+        requires: LATEST_REFERRAL_REPLY_SUBJECT
+        only: [ et_englandwales_multiple, et_scotland_multiple ]
+      - decision: LATEST_REFERRAL_TASK_NAME
+        requires: LATEST_REFERRAL_NUMBER
+        only: [ et_englandwales_multiple, et_scotland_multiple ]
+      - decision: LATEST_REFERRAL_TASK_NAME
+        requires: LATEST_REFERRAL_SUBJECT
+        only: [ et_englandwales_multiple, et_scotland_multiple ]
+  configuration:
+    name: ET Task configuration DMN
+    hitPolicy: COLLECT
+    historyTimeToLive: P30D
+    overrides:
+      et_englandwales_multiple:
+        name: ET Multiple Task configuration DMN
+      et_scotland_multiple:
+        name: ET Multiple Task configuration DMN
+    inputs:
+      - key: caseData
+        label: CCD Case Data
+        variable: caseData
+        typeRef: string
+      - key: taskType
+        label: Task type
+        variable: taskType
+        typeRef: string
+        expression:
+          if:
+            all:
+              - field: taskAttributes
+                op: exists
+              - field: taskAttributes.taskType
+                op: exists
+          use:
+            field: taskAttributes.taskType
+          otherwise:
+            if:
+              field: taskType
+              op: exists
+            use:
+              field: taskType
+            otherwise: null
+    outputs:
+      - name: name
+        label: Name
+        typeRef: string
+      - name: value
+        label: Value
+        typeRef: string
+      - name: canReconfigure
+        label: Can Reconfigure?
+        typeRef: boolean
+    rows:
+      - description: 1v1 scenario - Concatenates Claimant's forename name with that of respondent to create the case name displayed on task lists
+        only: [ et_englandwales, et_scotland ]
+        returns:
+          name: caseName
+          value:
+            plus:
+              - if:
+                  field: caseData.ethosCaseReference
+                  op: exists
+                use:
+                  plus:
+                    - field: caseData.ethosCaseReference
+                    - " - "
+                otherwise: ""
+              - if:
+                  field: caseData.claimant
+                  op: exists
+                use:
+                  field: caseData.claimant
+                otherwise: Unknown
+              - " v "
+              - if:
+                  field: caseData.respondent
+                  op: exists
+                use:
+                  field: caseData.respondent
+                otherwise: Unknown
+          canReconfigure: true
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        returns:
+          name: caseName
+          value:
+            field: caseData.multipleName
+          canReconfigure: true
+      - only: [ et_englandwales, et_englandwales_multiple ]
+        returns:
+          name: region
+          value:
+            if:
+              all:
+                - field: caseData.caseManagementLocation
+                  op: exists
+                - field: caseData.caseManagementLocation.region
+                  op: exists
+            use:
+              field: caseData.caseManagementLocation.region
+            otherwise: "1"
+          canReconfigure: true
+      - only: [ et_englandwales ]
+        returns:
+          name: location
+          value:
+            if:
+              all:
+                - field: caseData.caseManagementLocation
+                  op: exists
+                - field: caseData.caseManagementLocation.baseLocation
+                  op: exists
+            use:
+              field: caseData.caseManagementLocation.baseLocation
+            otherwise: "369230"
+          canReconfigure: true
+      - only: [ et_englandwales_multiple ]
+        returns:
+          name: location
+          value:
+            if:
+              all:
+                - field: caseData.caseManagementLocation
+                  op: exists
+                - field: caseData.caseManagementLocation.baseLocation
+                  op: exists
+            use:
+              field: caseData.caseManagementLocation.baseLocation
+            otherwise: "21153"
+          canReconfigure: true
+      - only: [ et_englandwales, et_englandwales_multiple ]
+        returns:
+          name: locationName
+          value:
+            if:
+              all:
+                - field: caseData.caseManagementLocation
+                  op: exists
+                - field: caseData.caseManagementLocation.baseLocation
+                  op: exists
+                - field: caseData.managingOffice
+                  op: exists
+            use:
+              field: caseData.managingOffice
+            otherwise: London Central
+          canReconfigure: true
+      - only: [ et_scotland, et_scotland_multiple ]
+        returns:
+          name: region
+          value:
+            if:
+              all:
+                - field: caseData.caseManagementLocation
+                  op: exists
+                - field: caseData.caseManagementLocation.region
+                  op: exists
+            use:
+              field: caseData.caseManagementLocation.region
+            otherwise: "11"
+          canReconfigure: true
+      - only: [ et_scotland, et_scotland_multiple ]
+        returns:
+          name: location
+          value:
+            if:
+              all:
+                - field: caseData.caseManagementLocation
+                  op: exists
+                - field: caseData.caseManagementLocation.baseLocation
+                  op: exists
+            use:
+              field: caseData.caseManagementLocation.baseLocation
+            otherwise: "368308"
+          canReconfigure: true
+      - only: [ et_scotland, et_scotland_multiple ]
+        returns:
+          name: locationName
+          value:
+            if:
+              all:
+                - field: caseData.caseManagementLocation
+                  op: exists
+                - field: caseData.caseManagementLocation.baseLocation
+                  op: exists
+                - field: caseData.managingOffice
+                  op: exists
+            use:
+              field: caseData.managingOffice
+            otherwise: Edinburgh
+          canReconfigure: true
+      - description: Sets the case category that is displayed in the task list UI
+        only: [ et_englandwales, et_scotland ]
+        returns:
+          name: caseManagementCategory
+          value:
+            if:
+              all:
+                - field: caseData.caseManagementCategory
+                  op: exists
+                - field: caseData.caseManagementCategory.selectedLabel
+                  op: exists
+            use:
+              field: caseData.caseManagementCategory.selectedLabel
+            otherwise: Employment
+          canReconfigure: false
+      - description: Sets the case category that is displayed in the task list UI
+        only: [ et_englandwales_multiple, et_scotland_multiple ]
+        returns:
+          name: caseManagementCategory
+          value: Employment
+          canReconfigure: false
+      - description: Use nextListedDate until onboarded to HMC
+        returns:
+          name: nextHearingDate
+          value:
+            if:
+              field: caseData.nextListedDate
+              op: exists
+            use:
+              field: caseData.nextListedDate
+            otherwise: ""
+          canReconfigure: true
+      - description: Name of the type of work - this is based on the filter. All Judgment tasks will be decision making work.
+        only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in:
+              - Et1Vetting
+              - ReviewReferralAdmin
+              - ReviewReferralLegalOps
+              - SendEt1Notification
+              - ListServeClaim
+              - Rule21
+              - ET3Processing
+              - ReviewReferralResponseLegalOps
+              - ReviewReferralResponseAdmin
+              - IssueInitialConsiderationDirections
+              - ListAHearing
+              - ReviewRule21Referral
+              - SendEt3Notification
+              - ReviewECCResponse
+              - ExpiredBfAction
+              - ReferEmployersContractClaim
+        returns:
+          name: workType
+          value: routine_work
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ ReviewReferralJudiciary, ReviewReferralResponseJudiciary, DraftAndSignJudgment, CompleteInitialConsideration ]
+        returns:
+          name: workType
+          value: decision_making_work
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ IssuePostHearingDirection, IssueJudgment, IssueOrder ]
+        returns:
+          name: workType
+          value: hearing_work
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in:
+              - ContactTribunalWithAnApplication
+              - AmendClaimantDetails
+              - AmendRespondentDetails
+              - WithdrawAllOrPartOfCase
+              - SubmitRespondentPseResponse
+              - SubmitClaimantPseResponse
+              - ReviewSupportRequestAdmin
+              - ReviewSupportRequestLegalOfficer
+              - ReviewSupportRequestJudge
+              - ArrangeSupport
+        returns:
+          name: workType
+          value: applications
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ reviewSpecificAccessRequestJudiciary, reviewSpecificAccessRequestLegalOps, reviewSpecificAccessRequestAdmin, reviewSpecificAccessRequestCTSC ]
+        returns:
+          name: workType
+          value: access_requests
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in:
+              - ReviewReferralJudiciary
+              - reviewSpecificAccessRequestJudiciary
+              - ReviewReferralResponseJudiciary
+              - CompleteInitialConsideration
+              - DraftAndSignJudgment
+              - ReviewSupportRequestJudge
+        returns:
+          name: roleCategory
+          value: JUDICIAL
+          canReconfigure: true
+      - only: [ et_englandwales ]
+        when:
+          taskType:
+            in:
+              - ReviewReferralLegalOps
+              - reviewSpecificAccessRequestLegalOps
+              - ReviewRule21Referral
+              - ReviewReferralResponseLegalOps
+              - ReviewSupportRequestLegalOfficer
+        returns:
+          name: roleCategory
+          value: LEGAL_OPERATIONS
+          canReconfigure: true
+      - only: [ et_englandwales ]
+        when:
+          taskType:
+            in:
+              - Et1Vetting
+              - ReviewReferralAdmin
+              - ReviewReferralResponseAdmin
+              - SendEt1Notification
+              - ListServeClaim
+              - reviewSpecificAccessRequestAdmin
+              - Rule21
+              - ET3Processing
+              - IssueInitialConsiderationDirections
+              - ListAHearing
+              - IssuePostHearingDirection
+              - IssueJudgment
+              - ContactTribunalWithAnApplication
+              - AmendClaimantDetails
+              - AmendRespondentDetails
+              - WithdrawAllOrPartOfCase
+              - SendEt3Notification
+              - ReviewECCResponse
+              - ExpiredBfAction
+              - ReferEmployersContractClaim
+              - IssueOrder
+              - SubmitRespondentPseResponse
+              - SubmitClaimantPseResponse
+              - ReviewSupportRequestAdmin
+              - ArrangeSupport
+        returns:
+          name: roleCategory
+          value: ADMIN
+          canReconfigure: true
+      - only: [ et_scotland ]
+        when:
+          taskType:
+            in:
+              - ReviewReferralLegalOps
+              - reviewSpecificAccessRequestLegalOps
+              - ReviewRule21Referral
+              - ReviewReferralResponseLegalOps
+              - ReviewRule21Referral
+              - ReviewSupportRequestLegalOfficer
+        returns:
+          name: roleCategory
+          value: LEGAL_OPERATIONS
+          canReconfigure: true
+      - only: [ et_scotland ]
+        when:
+          taskType:
+            in:
+              - Et1Vetting
+              - ReviewReferralAdmin
+              - ReviewReferralResponseAdmin
+              - SendEt1Notification
+              - ListServeClaim
+              - reviewSpecificAccessRequestAdmin
+              - Rule21
+              - ET3Processing
+              - IssueInitialConsiderationDirections
+              - ListAHearing
+              - IssuePostHearingDirection
+              - IssueJudgment
+              - ContactTribunalWithAnApplication
+              - AmendClaimantDetails
+              - AmendRespondentDetails
+              - WithdrawAllOrPartOfCase
+              - SendEt3Notification
+              - ReviewECCResponse
+              - ExpiredBfAction
+              - IssueOrder
+              - ReferEmployersContractClaim
+              - SubmitRespondentPseResponse
+              - SubmitClaimantPseResponse
+              - ReviewSupportRequestAdmin
+              - ArrangeSupport
+        returns:
+          name: roleCategory
+          value: ADMIN
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ reviewSpecificAccessRequestCTSC ]
+        returns:
+          name: roleCategory
+          value: CTSC
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ reviewSpecificAccessRequestJudiciary, reviewSpecificAccessRequestLegalOps, reviewSpecificAccessRequestAdmin, reviewSpecificAccessRequestCTSC ]
+        returns:
+          name: additionalProperties_roleAssignmentId
+          value:
+            if:
+              all:
+                - field: taskAttributes
+                  op: exists
+                - field: taskAttributes.roleAssignmentId
+                  op: exists
+            use:
+              field: taskAttributes.roleAssignmentId
+            otherwise: null
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ Et1Vetting ]
+        returns:
+          name: description
+          value: "[ET1 Vetting](/cases/case-details/${[CASE_REFERENCE]}/trigger/et1Vetting/et1Vetting1)"
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ ReviewReferralAdmin, ReviewReferralJudiciary ]
+        returns:
+          name: description
+          value: "[Reply to the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/replyToReferral/replyToReferral1)"
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ ReviewReferralLegalOps ]
+        returns:
+          name: description
+          value: "[Update the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/updateReferral/updateReferral1) or [Reply to the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/replyToReferral/replyToReferral1)"
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ ReviewReferralAdmin ]
+        returns:
+          name: title
+          value:
+            if:
+              field: LATEST_REVIEW_REFERRAL_TASK_TITLE
+              op: exists
+            use:
+              field: LATEST_REVIEW_REFERRAL_TASK_TITLE
+            otherwise:
+              if:
+                all:
+                  - field: taskAttributes
+                    op: exists
+                  - field: taskAttributes.name
+                    op: exists
+              use:
+                field: taskAttributes.name
+              otherwise: Review Referral
+          canReconfigure: false
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ ReviewReferralJudiciary ]
+        returns:
+          name: title
+          value:
+            if:
+              field: LATEST_REVIEW_REFERRAL_TASK_TITLE
+              op: exists
+            use:
+              plus:
+                - "EJ - "
+                - field: LATEST_REVIEW_REFERRAL_TASK_TITLE
+            otherwise:
+              if:
+                all:
+                  - field: taskAttributes
+                    op: exists
+                  - field: taskAttributes.title
+                    op: exists
+              use:
+                if:
+                  truthy:
+                    call: starts with
+                    args:
+                      - field: taskAttributes.title
+                      - "EJ - "
+                use:
+                  field: taskAttributes.title
+                otherwise:
+                  plus:
+                    - "EJ - "
+                    - field: taskAttributes.title
+              otherwise: EJ - Review Referral
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ ReviewReferralLegalOps ]
+        returns:
+          name: title
+          value:
+            if:
+              field: LATEST_REVIEW_REFERRAL_TASK_TITLE
+              op: exists
+            use:
+              plus:
+                - "LO - "
+                - field: LATEST_REVIEW_REFERRAL_TASK_TITLE
+            otherwise:
+              if:
+                all:
+                  - field: taskAttributes
+                    op: exists
+                  - field: taskAttributes.title
+                    op: exists
+              use:
+                if:
+                  truthy:
+                    call: starts with
+                    args:
+                      - field: taskAttributes.title
+                      - "LO - "
+                use:
+                  field: taskAttributes.title
+                otherwise:
+                  plus:
+                    - "LO - "
+                    - field: taskAttributes.title
+              otherwise: LO - Review Referral
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ ReviewReferralResponseAdmin, ReviewReferralResponseJudiciary, ReviewReferralResponseLegalOps ]
+        returns:
+          name: description
+          value: |-
+            **Review the Referral Response**
+
+            You can also [Reply to the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/replyToReferral/replyToReferral1) or [Close the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/closeReferral/closeReferral1)
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ ReviewReferralResponseAdmin ]
+        returns:
+          name: title
+          value:
+            if:
+              field: LATEST_REVIEW_REFERRAL_RESPONSE_TASK_TITLE
+              op: exists
+            use:
+              field: LATEST_REVIEW_REFERRAL_RESPONSE_TASK_TITLE
+            otherwise:
+              if:
+                all:
+                  - field: taskAttributes
+                    op: exists
+                  - field: taskAttributes.name
+                    op: exists
+              use:
+                field: taskAttributes.name
+              otherwise: Review Referral Response
+          canReconfigure: false
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ ReviewReferralResponseJudiciary ]
+        returns:
+          name: title
+          value:
+            if:
+              field: LATEST_REVIEW_REFERRAL_RESPONSE_TASK_TITLE
+              op: exists
+            use:
+              plus:
+                - "EJ - "
+                - field: LATEST_REVIEW_REFERRAL_RESPONSE_TASK_TITLE
+            otherwise:
+              if:
+                all:
+                  - field: taskAttributes
+                    op: exists
+                  - field: taskAttributes.title
+                    op: exists
+              use:
+                if:
+                  truthy:
+                    call: starts with
+                    args:
+                      - field: taskAttributes.title
+                      - "EJ - "
+                use:
+                  field: taskAttributes.title
+                otherwise:
+                  plus:
+                    - "EJ - "
+                    - field: taskAttributes.title
+              otherwise: EJ - Review Referral Response
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ ReviewReferralResponseLegalOps ]
+        returns:
+          name: title
+          value:
+            if:
+              field: LATEST_REVIEW_REFERRAL_RESPONSE_TASK_TITLE
+              op: exists
+            use:
+              plus:
+                - "LO - "
+                - field: LATEST_REVIEW_REFERRAL_RESPONSE_TASK_TITLE
+            otherwise:
+              if:
+                all:
+                  - field: taskAttributes
+                    op: exists
+                  - field: taskAttributes.title
+                    op: exists
+              use:
+                if:
+                  truthy:
+                    call: starts with
+                    args:
+                      - field: taskAttributes.title
+                      - "LO - "
+                use:
+                  field: taskAttributes.title
+                otherwise:
+                  plus:
+                    - "LO - "
+                    - field: taskAttributes.title
+              otherwise: LO - Review Referral Response
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ ListServeClaim ]
+        returns:
+          name: description
+          value: "[Upload Document For Serving](/cases/case-details/${[CASE_REFERENCE]}/trigger/uploadDocumentForServing/uploadDocumentForServing1)"
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ SendEt1Notification, IssuePostHearingDirection, IssueInitialConsiderationDirections ]
+        returns:
+          name: description
+          value: "[Issue Directions](/cases/case-details/${[CASE_REFERENCE]}/trigger/generateCorrespondence/generateCorrespondence1)"
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ ListAHearing ]
+        returns:
+          name: description
+          value: "[List Hearing](/cases/case-details/${[CASE_REFERENCE]}/trigger/addAmendHearing/addAmendHearing1)"
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ CompleteInitialConsideration ]
+        returns:
+          name: description
+          value: "[Initial Consideration](/cases/case-details/${[CASE_REFERENCE]}/trigger/initialConsideration/initialConsideration1)"
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ SendEt3Notification ]
+        returns:
+          name: description
+          value: "[Issue ET3 Notification](/cases/case-details/${[CASE_REFERENCE]}/trigger/et3Notification/et3Notification1)"
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ Rule21, ET3Processing ]
+        returns:
+          name: description
+          value: "[ET3 Processing](/cases/case-details/${[CASE_REFERENCE]}/trigger/et3Vetting/et3Vetting1)"
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ ExpiredBfAction ]
+        returns:
+          name: description
+          value: "[Expired Bf Action](/cases/case-details/${[CASE_REFERENCE]}/trigger/broughtForward/broughtForward1)"
+          canReconfigure: true
+      - only: [ et_englandwales ]
+        when:
+          taskType:
+            in: [ ReviewRule21Referral ]
+        returns:
+          name: description
+          value: "[Review Rule 22 Referral](/cases/case-details/${[CASE_REFERENCE]}#Respondent)"
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ ReferEmployersContractClaim ]
+        returns:
+          name: description
+          value: "[Refer Employer's Contract Claim](/cases/case-details/${[CASE_REFERENCE]}/trigger/createReferral/createReferral1)"
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ ReviewECCResponse ]
+        returns:
+          name: description
+          value: "[Update Respondent's Details](/cases/case-details/${[CASE_REFERENCE]}/trigger/amendRespondentDetails/amendRespondentDetails1)"
+          canReconfigure: true
+      - only: [ et_scotland ]
+        when:
+          taskType:
+            in: [ ReviewRule21Referral ]
+        returns:
+          name: description
+          value: "[Review Rule 22 Referral](/cases/case-details/${[CASE_REFERENCE]}#Respondent)"
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ DraftAndSignJudgment ]
+        returns:
+          name: description
+          value: "[Draft and Sign Judgment/Order](/cases/case-details/${[CASE_REFERENCE]}/trigger/draftAndSignJudgement/draftAndSignJudgement1)"
+          canReconfigure: true
+      - only: [ et_englandwales ]
+        when:
+          taskType:
+            in: [ ContactTribunalWithAnApplication ]
+        returns:
+          name: description
+          value: "**Review the Application**. You can also [Record a decision](/cases/case-details/${[CASE_REFERENCE]}/trigger/tseAdmin/tseAdmin1), [Respond to an application](/cases/case-details/${[CASE_REFERENCE]}/trigger/tseAdmReply/tseAdmReply1) or [Close application](/cases/case-details/${[CASE_REFERENCE]}/trigger/tseAdminCloseAnApplication/tseAdminCloseAnApplication1)"
+          canReconfigure: true
+      - only: [ et_scotland ]
+        when:
+          taskType:
+            in: [ ContactTribunalWithAnApplication ]
+        returns:
+          name: description
+          value: |-
+            **Review the Application**. You can also [Record a decision](/cases/case-details/${[CASE_REFERENCE]}/trigger/tseAdmin/tseAdmin1),
+            [Respond to an application](/cases/case-details/${[CASE_REFERENCE]}/trigger/tseAdmReply/tseAdmReply1) or [Close application](/cases/case-details/${[CASE_REFERENCE]}/trigger/tseAdminCloseAnApplication/tseAdminCloseAnApplication1)
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ AmendClaimantDetails ]
+        returns:
+          name: description
+          value: "**Review the Application**. You can also update [Claimant Details](/cases/case-details/${[CASE_REFERENCE]}/trigger/amendClaimantDetails/amendClaimantDetails1)"
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ AmendRespondentDetails ]
+        returns:
+          name: description
+          value: "**Review the Application**. You can also update [Respondent Details](/cases/case-details/${[CASE_REFERENCE]}/trigger/amendRespondentDetails/amendRespondentDetails1)"
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ WithdrawAllOrPartOfCase ]
+        returns:
+          name: description
+          value: "**Review the Application**. You can also [Send a new referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/createReferral/createReferral1)"
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ IssueJudgment ]
+        returns:
+          name: description
+          value: "[View Judgment](/cases/case-details/${[CASE_REFERENCE]}#Judgments) and [Issue Judgment](/cases/case-details/${[CASE_REFERENCE]}/trigger/addAmendJudgment/addAmendJudgment1)"
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ IssueOrder ]
+        returns:
+          name: description
+          value: "[View Order](/cases/case-details/${[CASE_REFERENCE]}#Judgments) and [Issue Order](/cases/case-details/${[CASE_REFERENCE]}/trigger/sendNotification/sendNotification1)"
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ reviewSpecificAccessRequestJudiciary, reviewSpecificAccessRequestLegalOps, reviewSpecificAccessRequestAdmin, reviewSpecificAccessRequestCTSC ]
+        returns:
+          name: description
+          value:
+            if:
+              all:
+                - field: taskAttributes
+                  op: exists
+                - field: taskAttributes.taskId
+                  op: exists
+                - field: taskAttributes.roleAssignmentId
+                  op: exists
+            use:
+              plus:
+                - "[Review Access Request](/role-access/"
+                - field: taskAttributes.taskId
+                - /assignment/
+                - field: taskAttributes.roleAssignmentId
+                - /specific-access)
+            otherwise: ""
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in:
+              - Et1Vetting
+              - Rule21
+              - ET3Processing
+              - ListAHearing
+              - ListServeClaim
+              - SendEt1Notification
+              - DraftAndSignJudgment
+              - IssuePostHearingDirection
+              - ReviewRule21Referral
+              - CompleteInitialConsideration
+              - SendEt3Notification
+              - AmendClaimantDetails
+              - AmendRespondentDetails
+              - ContactTribunalWithAnApplication
+              - WithdrawAllOrPartOfCase
+              - ReviewECCResponse
+              - ExpiredBfAction
+              - ReferEmployersContractClaim
+        returns:
+          name: majorPriority
+          value: 5000
+          canReconfigure: false
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ ReviewReferralAdmin, ReviewReferralJudiciary, ReviewReferralLegalOps ]
+        returns:
+          name: majorPriority
+          value:
+            feel: |-
+              if (caseData != null
+              and caseData.referralCollection != null
+              and count(caseData.referralCollection) > 0
+              and sort(caseData.referralCollection, function(x,y) number(x.value.referralNumber) > number(y.value.referralNumber))[1].value.isUrgent = "Yes")
+              then 1000
+              else 5000
+          canReconfigure: false
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ ReviewReferralResponseAdmin, ReviewReferralResponseJudiciary, ReviewReferralResponseLegalOps ]
+        returns:
+          name: majorPriority
+          value:
+            feel: |-
+              if (caseData != null
+              and caseData.referralCollection != null
+              and count(caseData.referralCollection[count(value.referralReplyCollection)>0])>0
+              and sort(flatten(caseData.referralCollection.value.referralReplyCollection), function(x,y) date and time(if(x.value.replyDateTime!=null)then x.value.replyDateTime else "2023-01-01T00:00:00.000") > date and time(if(y.value.replyDateTime!=null)then y.value.replyDateTime else "2023-01-01T00:00:00.000"))[1].value.isUrgentReply = "Yes")
+              then 1000
+              else 5000
+          canReconfigure: false
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ IssueJudgment, IssueOrder ]
+        returns:
+          name: majorPriority
+          value:
+            if:
+              all:
+                - field: caseData
+                  op: exists
+                - field: caseData.draftAndSignJudgement
+                  op: exists
+                - field: caseData.draftAndSignJudgement.isUrgent
+                  op: eq
+                  value: Yes
+            use: 1000
+            otherwise: 5000
+          canReconfigure: false
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ IssueInitialConsiderationDirections ]
+        returns:
+          name: majorPriority
+          value:
+            if:
+              all:
+                - field: caseData
+                  op: exists
+                - field: caseData.etICIsUrgent
+                  op: eq
+                  value: Yes
+            use: 1000
+            otherwise: 5000
+          canReconfigure: false
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in:
+              - Et1Vetting
+              - Rule21
+              - ET3Processing
+              - IssueInitialConsiderationDirections
+              - ListAHearing
+              - DraftAndSignJudgment
+              - IssuePostHearingDirection
+              - SendEt1Notification
+              - ListServeClaim
+              - ReviewRule21Referral
+              - IssueJudgment
+              - CompleteInitialConsideration
+              - SendEt3Notification
+              - AmendClaimantDetails
+              - AmendRespondentDetails
+              - ContactTribunalWithAnApplication
+              - WithdrawAllOrPartOfCase
+              - ReviewECCResponse
+              - ExpiredBfAction
+              - IssueOrder
+              - ReferEmployersContractClaim
+              - SubmitRespondentPseResponse
+              - SubmitClaimantPseResponse
+        returns:
+          name: minorPriority
+          value: 500
+          canReconfigure: false
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ ReviewReferralAdmin, ReviewReferralJudiciary, ReviewReferralLegalOps ]
+        returns:
+          name: minorPriority
+          value:
+            feel: |-
+              if (caseData != null
+              and caseData.referralCollection != null
+              and count(caseData.referralCollection) > 0
+              and sort(caseData.referralCollection, function(x,y) number(x.value.referralNumber) > number(y.value.referralNumber))[1].value.isUrgent = "Yes")
+              then 100
+              else 500
+          canReconfigure: false
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ ReviewReferralResponseAdmin, ReviewReferralResponseJudiciary, ReviewReferralResponseLegalOps ]
+        returns:
+          name: minorPriority
+          value:
+            feel: |-
+              if (caseData!=null
+              and caseData.referralCollection != null
+              and count(caseData.referralCollection[count(value.referralReplyCollection)>0])>0
+              and sort(flatten(caseData.referralCollection.value.referralReplyCollection), function(x,y) date and time(if(x.value.replyDateTime!=null)then x.value.replyDateTime else "2023-01-01T00:00:00.000") > date and time(if(y.value.replyDateTime!=null)then y.value.replyDateTime else "2023-01-01T00:00:00.000"))[1].value.isUrgentReply = "Yes")
+              then 100
+              else 500
+          canReconfigure: false
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          name: calculatedDates
+          value: nextHearingDate,dueDate,priorityDate
+          canReconfigure: false
+      - only: [ et_englandwales ]
+        returns:
+          name: dueDateTime
+          value:
+            call: time
+            args: [ 16:00 ]
+          canReconfigure: false
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          name: dueDateOrigin
+          value:
+            call: now
+            args: []
+          canReconfigure: false
+      - only: [ et_scotland ]
+        returns:
+          name: dueDateTime
+          value:
+            call: time
+            args: [ 16:00 ]
+          canReconfigure: false
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ DraftAndSignJudgment ]
+        returns:
+          name: dueDateOrigin
+          value:
+            feel: |-
+              if (caseData != null
+              and caseData.hearingDetailsCollection != null
+              and count(caseData.hearingDetailsCollection) = 1)
+              then date and time(caseData.hearingDetailsCollection[1].value.hearingDetailsDate)
+              else if caseData.hearingDetailsCollection != null and count(caseData.hearingDetailsCollection) > 1
+              then max(
+              flatten(
+                [ for h in caseData.hearingDetailsCollection return
+                 date and time(h.value.hearingDetailsDate) ]
+                )
+              )
+              else now()
+          canReconfigure: false
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ DraftAndSignJudgment ]
+        returns:
+          name: dueDateIntervalDays
+          value:
+            if:
+              left:
+                call: month
+                args:
+                  - field: dueDateOrigin
+              op: eq
+              right: 2
+            use: 18
+            otherwise:
+              if:
+                any:
+                  - left:
+                      call: month
+                      args:
+                        - field: dueDateOrigin
+                    op: eq
+                    right: 4
+                  - left:
+                      call: month
+                      args:
+                        - field: dueDateOrigin
+                    op: eq
+                    right: 6
+                  - left:
+                      call: month
+                      args:
+                        - field: dueDateOrigin
+                    op: eq
+                    right: 9
+                  - left:
+                      call: month
+                      args:
+                        - field: dueDateOrigin
+                    op: eq
+                    right: 11
+              use: 19
+              otherwise: 20
+          canReconfigure: false
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ DraftAndSignJudgment ]
+        returns:
+          name: dueDateSkipNonWorkingDays
+          value: "false"
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ DraftAndSignJudgment ]
+        returns:
+          name: dueDateNonWorkingDaysOfWeek
+          value: "false"
+          canReconfigure: true
+      - description: Name of the type of work - this is based on the filter. All Judgment tasks will be decision making work.
+        only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          taskType:
+            in: [ ReviewReferralAdminMultiple, ReviewReferralLegalOpsMultiple, MultiplesReviewReferralResponseLegalOps, ReviewReferralResponseAdminMultiple ]
+        returns:
+          name: workType
+          value: routine_work
+          canReconfigure: true
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          taskType:
+            in: [ ReviewReferralJudiciaryMultiple, ReviewReferralResponseJudiciaryMultiple ]
+        returns:
+          name: workType
+          value: decision_making_work
+          canReconfigure: true
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          taskType:
+            in: [ ReviewReferralAdminMultiple, ReviewReferralResponseAdminMultiple ]
+        returns:
+          name: roleCategory
+          value: ADMIN
+          canReconfigure: true
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          taskType:
+            in: [ ReviewReferralJudiciaryMultiple, ReviewReferralResponseJudiciaryMultiple ]
+        returns:
+          name: roleCategory
+          value: JUDICIAL
+          canReconfigure: true
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          taskType:
+            in: [ ReviewReferralLegalOpsMultiple, MultiplesReviewReferralResponseLegalOps ]
+        returns:
+          name: roleCategory
+          value: LEGAL_OPERATIONS
+          canReconfigure: true
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          taskType:
+            in: [ ReviewReferralAdminMultiple, ReviewReferralJudiciaryMultiple, ReviewReferralLegalOpsMultiple ]
+        returns:
+          name: description
+          value: "[Reply to the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/replyToReferral/replyToReferral1)"
+          canReconfigure: true
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          taskType:
+            in: [ MultiplesReviewReferralResponseLegalOps, ReviewReferralResponseJudiciaryMultiple, ReviewReferralResponseAdminMultiple ]
+        returns:
+          name: description
+          value: |-
+            **Review the Referral Response**
+
+            You can also [Reply to the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/replyToReferral/replyToReferral1) or [Close the Referral](/cases/case-details/${[CASE_REFERENCE]}/trigger/closeReferral/closeReferral1)
+          canReconfigure: true
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          taskType:
+            in: [ ReviewReferralAdminMultiple, ReviewReferralJudiciaryMultiple, ReviewReferralLegalOpsMultiple ]
+        returns:
+          name: majorPriority
+          value:
+            feel: |-
+              if (caseData != null
+              and caseData.referralCollection != null
+              and count(caseData.referralCollection) > 0
+              and sort(caseData.referralCollection, function(x,y) number(x.value.referralNumber) > number(y.value.referralNumber))[1].value.isUrgent = "Yes")
+              then 1000
+              else 5000
+          canReconfigure: false
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          taskType:
+            in: [ MultiplesReviewReferralResponseLegalOps, ReviewReferralResponseJudiciaryMultiple, ReviewReferralResponseAdminMultiple ]
+        returns:
+          name: majorPriority
+          value:
+            feel: |-
+              if (caseData != null
+              and caseData.referralCollection != null
+              and count(caseData.referralCollection[count(value.referralReplyCollection)>0])>0
+              and sort(flatten(caseData.referralCollection.value.referralReplyCollection), function(x,y) date and time(if(x.value.replyDateTime!=null)then x.value.replyDateTime else "2023-01-01T00:00:00.000") > date and time(if(y.value.replyDateTime!=null)then y.value.replyDateTime else "2023-01-01T00:00:00.000"))[1].value.isUrgentReply = "Yes")
+              then 1000
+              else 5000
+          canReconfigure: false
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          taskType:
+            in: [ ReviewReferralAdminMultiple, ReviewReferralJudiciaryMultiple, ReviewReferralLegalOpsMultiple ]
+        returns:
+          name: minorPriority
+          value:
+            feel: |-
+              if (caseData != null
+              and caseData.referralCollection != null
+              and count(caseData.referralCollection) > 0
+              and sort(caseData.referralCollection, function(x,y) number(x.value.referralNumber) > number(y.value.referralNumber))[1].value.isUrgent = "Yes")
+              then 100
+              else 500
+          canReconfigure: false
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          taskType:
+            in: [ MultiplesReviewReferralResponseLegalOps, ReviewReferralResponseJudiciaryMultiple, ReviewReferralResponseAdminMultiple ]
+        returns:
+          name: minorPriority
+          value:
+            feel: |-
+              if (caseData!=null
+              and caseData.referralCollection != null
+              and count(caseData.referralCollection[count(value.referralReplyCollection)>0])>0
+              and sort(flatten(caseData.referralCollection.value.referralReplyCollection), function(x,y) date and time(if(x.value.replyDateTime!=null)then x.value.replyDateTime else "2023-01-01T00:00:00.000") > date and time(if(y.value.replyDateTime!=null)then y.value.replyDateTime else "2023-01-01T00:00:00.000"))[1].value.isUrgentReply = "Yes")
+              then 100
+              else 500
+          canReconfigure: false
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        returns:
+          name: calculatedDates
+          value: nextHearingDate,dueDate,priorityDate
+          canReconfigure: true
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        returns:
+          name: dueDateOrigin
+          value:
+            call: now
+            args: []
+          canReconfigure: true
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        returns:
+          name: dueDateTime
+          value:
+            call: time
+            args: [ 16:00 ]
+          canReconfigure: true
+      - only: [ et_englandwales, et_englandwales_multiple ]
+        returns:
+          name: dueDateNonWorkingCalendar
+          value: https://www.gov.uk/bank-holidays/england-and-wales.json, https://raw.githubusercontent.com/hmcts/et-wa-task-configuration/master/src/main/resources/privilege-calendar-engwales.json
+          canReconfigure: true
+      - only: [ et_scotland, et_scotland_multiple ]
+        returns:
+          name: dueDateNonWorkingCalendar
+          value: https://www.gov.uk/bank-holidays/scotland.json, https://raw.githubusercontent.com/hmcts/et-wa-task-configuration/master/src/main/resources/privilege-calendar-scotland.json
+          canReconfigure: true
+      - returns:
+          name: dueDateNonWorkingDaysOfWeek
+          value: SATURDAY,SUNDAY
+          canReconfigure: true
+      - returns:
+          name: dueDateSkipNonWorkingDays
+          value: "true"
+          canReconfigure: true
+      - returns:
+          name: dueDateMustBeWorkingDay
+          value: Yes
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ ReviewReferralAdmin, ReviewReferralJudiciary, ReviewReferralLegalOps ]
+        returns:
+          name: dueDateIntervalDays
+          value:
+            feel: |-
+              if (caseData != null
+              and caseData.referralCollection != null
+              and count(caseData.referralCollection) > 0
+              and sort(caseData.referralCollection, function(x,y) number(x.value.referralNumber) > number(y.value.referralNumber))[1].value.isUrgent = "Yes")
+              then 1
+              else 2
+          canReconfigure: false
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ ReviewReferralResponseAdmin, ReviewReferralResponseJudiciary, ReviewReferralResponseLegalOps ]
+        returns:
+          name: dueDateIntervalDays
+          value:
+            feel: |-
+              if (caseData!=null
+              and caseData.referralCollection != null
+              and count(caseData.referralCollection[count(value.referralReplyCollection)>0])>0
+              and sort(flatten(caseData.referralCollection.value.referralReplyCollection), function(x,y) date and time(if(x.value.replyDateTime!=null)then x.value.replyDateTime else "2023-01-01T00:00:00.000") > date and time(if(y.value.replyDateTime!=null)then y.value.replyDateTime else "2023-01-01T00:00:00.000"))[1].value.isUrgentReply = "Yes")
+              then 1
+              else 2
+          canReconfigure: false
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ ReferEmployersContractClaim ]
+        returns:
+          name: dueDateIntervalDays
+          value: 0
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in:
+              - ListServeClaim
+              - SendEt1Notification
+              - SendEt3Notification
+              - AmendClaimantDetails
+              - AmendRespondentDetails
+              - WithdrawAllOrPartOfCase
+        returns:
+          name: dueDateIntervalDays
+          value: 1
+          canReconfigure: true
+      - only: [ et_englandwales ]
+        when:
+          taskType:
+            in:
+              - Rule21
+              - ReviewRule21Referral
+              - CompleteInitialConsideration
+              - ContactTribunalWithAnApplication
+              - ExpiredBfAction
+        returns:
+          name: dueDateIntervalDays
+          value: 2
+          canReconfigure: true
+      - only: [ et_scotland ]
+        when:
+          taskType:
+            in: [ Rule21, ReviewRule21Referral, CompleteInitialConsideration, ContactTribunalWithAnApplication ]
+        returns:
+          name: dueDateIntervalDays
+          value: 2
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ ET3Processing, ReviewECCResponse, SubmitRespondentPseResponse, SubmitClaimantPseResponse ]
+        returns:
+          name: dueDateIntervalDays
+          value: 3
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in:
+              - Et1Vetting
+              - IssueInitialConsiderationDirections
+              - IssuePostHearingDirection
+              - IssueJudgment
+              - IssueOrder
+        returns:
+          name: dueDateIntervalDays
+          value: 5
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ ListAHearing ]
+        returns:
+          name: dueDateIntervalDays
+          value: 10
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in:
+              - Et1Vetting
+              - Rule21
+              - ET3Processing
+              - IssueInitialConsiderationDirections
+              - ListAHearing
+              - DraftAndSignJudgment
+              - IssuePostHearingDirection
+              - SendEt1Notification
+              - ListServeClaim
+              - ReviewRule21Referral
+              - IssueJudgment
+              - CompleteInitialConsideration
+              - SendEt3Notification
+              - AmendClaimantDetails
+              - AmendRespondentDetails
+              - ContactTribunalWithAnApplication
+              - WithdrawAllOrPartOfCase
+              - ReviewReferralResponseAdmin
+              - ReviewReferralResponseJudiciary
+              - ReviewReferralResponseLegalOps
+              - ReviewECCResponse
+              - ExpiredBfAction
+              - IssueOrder
+              - ReferEmployersContractClaim
+        returns:
+          name: priorityDateOriginRef
+          value: dueDate
+          canReconfigure: false
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in:
+              - ReviewReferralAdmin
+              - ReviewReferralJudiciary
+              - ReviewReferralLegalOps
+              - SubmitRespondentPseResponse
+              - SubmitClaimantPseResponse
+        returns:
+          name: priorityDateOriginEarliest
+          value: dueDate, nextHearingDate
+          canReconfigure: false
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ SubmitRespondentPseResponse, SubmitClaimantPseResponse ]
+        returns:
+          name: majorPriority
+          value:
+            if:
+              field: caseData.nextListedDate
+              op: exists
+            use:
+              if:
+                left:
+                  minus:
+                    - call: date
+                      args:
+                        - field: caseData.nextListedDate
+                    - call: today
+                      args: []
+                op: le
+                right:
+                  call: duration
+                  args: [ P10D ]
+              use: 2001
+              otherwise:
+                if:
+                  left:
+                    minus:
+                      - call: date
+                        args:
+                          - field: caseData.nextListedDate
+                      - call: today
+                        args: []
+                  op: le
+                  right:
+                    call: duration
+                    args: [ P30D ]
+                use: 5000
+                otherwise: 5001
+            otherwise: 5001
+          canReconfigure: false
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ SubmitRespondentPseResponse, SubmitClaimantPseResponse ]
+        returns:
+          name: description
+          value: "[Review the notification response](/cases/case-details/${[CASE_REFERENCE]}#Notifications) and [Respond to the notification response](/cases/case-details/${[CASE_REFERENCE]}/trigger/respondNotification/respondNotification1)"
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ ReviewSupportRequestAdmin ]
+        returns:
+          name: title
+          value: Admin - Review Support Request
+          canReconfigure: false
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ ReviewSupportRequestLegalOfficer ]
+        returns:
+          name: title
+          value: LO - Review Support Request
+          canReconfigure: false
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ ReviewSupportRequestJudge ]
+        returns:
+          name: title
+          value: EJ - Review Support Request
+          canReconfigure: false
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ ArrangeSupport ]
+        returns:
+          name: title
+          value:
+            if:
+              all:
+                - field: taskAttributes
+                  op: exists
+                - field: taskAttributes.name
+                  op: exists
+            use:
+              field: taskAttributes.name
+            otherwise: Arrange Support
+          canReconfigure: false
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ ReviewSupportRequestAdmin ]
+        returns:
+          name: description
+          value: "[Review RA Request](/cases/case-details/${[CASE_REFERENCE]}/trigger/reviewAdminSupportRequest/reviewAdminSupportRequest1)"
+          canReconfigure: false
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ ReviewSupportRequestLegalOfficer ]
+        returns:
+          name: description
+          value: "[Review RA Request](/cases/case-details/${[CASE_REFERENCE]}/trigger/reviewLOSupportRequest/reviewLOSupportRequest1)"
+          canReconfigure: false
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ ReviewSupportRequestJudge ]
+        returns:
+          name: description
+          value: "[Review RA Request](/cases/case-details/${[CASE_REFERENCE]}/trigger/reviewJudgeSupportRequest/reviewJudgeSupportRequest1)"
+          canReconfigure: false
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ ArrangeSupport ]
+        returns:
+          name: description
+          value: "[Check Case Flags Tab and Arrange Support](/cases/case-details/${[CASE_REFERENCE]}#caseFlags)"
+          canReconfigure: false
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ ReviewSupportRequestAdmin, ReviewSupportRequestLegalOfficer, ReviewSupportRequestJudge, ArrangeSupport ]
+        returns:
+          name: dueDateIntervalDays
+          value:
+            if:
+              field: caseData.nextListedDate
+              op: exists
+            use:
+              if:
+                left:
+                  minus:
+                    - call: date
+                      args:
+                        - field: caseData.nextListedDate
+                    - call: today
+                      args: []
+                op: le
+                right:
+                  call: duration
+                  args: [ P30D ]
+              use: 1
+              otherwise: 10
+            otherwise: 10
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ ReviewSupportRequestAdmin, ReviewSupportRequestLegalOfficer, ReviewSupportRequestJudge, ArrangeSupport ]
+        returns:
+          name: minorPriority
+          value:
+            if:
+              field: caseData.nextListedDate
+              op: exists
+            use:
+              if:
+                left:
+                  minus:
+                    - call: date
+                      args:
+                        - field: caseData.nextListedDate
+                    - call: today
+                      args: []
+                op: le
+                right:
+                  call: duration
+                  args: [ P3D ]
+              use: 100
+              otherwise: 500
+            otherwise: 500
+          canReconfigure: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ ReviewSupportRequestAdmin, ReviewSupportRequestLegalOfficer, ReviewSupportRequestJudge, ArrangeSupport ]
+        returns:
+          name: majorPriority
+          value:
+            if:
+              field: caseData.nextListedDate
+              op: exists
+            use:
+              if:
+                left:
+                  minus:
+                    - call: date
+                      args:
+                        - field: caseData.nextListedDate
+                    - call: today
+                      args: []
+                op: le
+                right:
+                  call: duration
+                  args: [ P3D ]
+              use: 1000
+              otherwise: 5001
+            otherwise: 5001
+          canReconfigure: true
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          taskType:
+            in: [ ReviewReferralAdminMultiple, ReviewReferralJudiciaryMultiple, ReviewReferralLegalOpsMultiple ]
+        returns:
+          name: dueDateIntervalDays
+          value:
+            feel: |-
+              if (caseData != null
+              and caseData.referralCollection != null
+              and count(caseData.referralCollection) > 0
+              and sort(caseData.referralCollection, function(x,y) number(x.value.referralNumber) > number(y.value.referralNumber))[1].value.isUrgent = "Yes")
+              then 1
+              else 2
+          canReconfigure: false
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          taskType:
+            in: [ MultiplesReviewReferralResponseLegalOps, ReviewReferralResponseJudiciaryMultiple, ReviewReferralResponseAdminMultiple ]
+        returns:
+          name: dueDateIntervalDays
+          value:
+            feel: |-
+              if (caseData!=null
+              and caseData.referralCollection != null
+              and count(caseData.referralCollection[count(value.referralReplyCollection)>0])>0
+              and sort(flatten(caseData.referralCollection.value.referralReplyCollection), function(x,y) date and time(if(x.value.replyDateTime!=null)then x.value.replyDateTime else "2023-01-01T00:00:00.000") > date and time(if(y.value.replyDateTime!=null)then y.value.replyDateTime else "2023-01-01T00:00:00.000"))[1].value.isUrgentReply = "Yes")
+              then 1
+              else 2
+          canReconfigure: false
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          taskType:
+            in: [ ReviewReferralAdminMultiple, ReviewReferralJudiciaryMultiple, ReviewReferralLegalOpsMultiple ]
+        returns:
+          name: priorityDateOriginEarliest
+          value: dueDate, nextHearingDate
+          canReconfigure: true
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          taskType:
+            in: [ MultiplesReviewReferralResponseLegalOps, ReviewReferralResponseJudiciaryMultiple, ReviewReferralResponseAdminMultiple ]
+        returns:
+          name: priorityDateOriginRef
+          value: dueDate
+          canReconfigure: true
+    helpers:
+      - name: LATEST_REVIEW_REFERRAL_TASK_TITLE
+        typeRef: string
+        expression:
+          if:
+            field: reviewReferralSerialNumberAndSubject
+            op: exists
+          use:
+            plus:
+              - "Review Referral #"
+              - field: reviewReferralSerialNumberAndSubject
+          otherwise: null
+        only: [ et_englandwales, et_scotland ]
+      - name: reviewReferralSerialNumberAndSubject
+        typeRef: string
+        expression:
+          feel: |-
+            {
+              "__prefix" : "__processCategory__reviewReferralSerialNumberAndSubject_",
+              "__attribute_entries" : get entries(taskAttributes),
+              "__matching_keys" : for __item in __attribute_entries return if starts with(__item.key, __prefix) then substring(__item.key, string length(__prefix) + 1) else null,
+              "__filtered_keys" : __matching_keys[item != null],
+              "__nonempty_keys" : append(__filtered_keys, null),
+              "__nullable_review_referral_serial_number_and_subject" : __nonempty_keys[1]
+            }.__nullable_review_referral_serial_number_and_subject
+        only: [ et_englandwales, et_scotland ]
+      - name: LATEST_REVIEW_REFERRAL_RESPONSE_TASK_TITLE
+        expression:
+          if:
+            field: referralReviewResponseSerialNumberAndSubject
+            op: exists
+          use:
+            plus:
+              - "Review Referral Response #"
+              - field: referralReviewResponseSerialNumberAndSubject
+          otherwise: null
+        only: [ et_englandwales ]
+      - name: referralReviewResponseSerialNumberAndSubject
+        typeRef: string
+        expression:
+          feel: |-
+            {
+              "__prefix" : "__processCategory__reviewReferralResponseSerialNumberAndSubject_",
+              "__attribute_entries" : get entries(taskAttributes),
+              "__matching_keys" : for __item in __attribute_entries return if starts with(__item.key, __prefix) then substring(__item.key, string length(__prefix) + 1) else null,
+              "__filtered_keys" : __matching_keys[item != null],
+              "__nonempty_keys" : append(__filtered_keys, null),
+              "__nullable_review_referral_response_serial_number_and_subject" : __nonempty_keys[1]
+            }.__nullable_review_referral_response_serial_number_and_subject
+        only: [ et_englandwales, et_scotland ]
+      - name: LATEST_REVIEW_REFERRAL_RESPONSE_TASK_TITLE
+        typeRef: string
+        expression:
+          if:
+            field: referralReviewResponseSerialNumberAndSubject
+            op: exists
+          use:
+            plus:
+              - "Review Referral Response #"
+              - field: referralReviewResponseSerialNumberAndSubject
+          otherwise: null
+        only: [ et_scotland ]
+    dependencies:
+      - decision: table
+        requires: LATEST_REVIEW_REFERRAL_TASK_TITLE
+        only: [ et_englandwales, et_scotland ]
+      - decision: table
+        requires: LATEST_REVIEW_REFERRAL_RESPONSE_TASK_TITLE
+        only: [ et_englandwales, et_scotland ]
+      - decision: LATEST_REVIEW_REFERRAL_TASK_TITLE
+        requires: reviewReferralSerialNumberAndSubject
+        only: [ et_englandwales, et_scotland ]
+      - decision: LATEST_REVIEW_REFERRAL_RESPONSE_TASK_TITLE
+        requires: referralReviewResponseSerialNumberAndSubject
+        only: [ et_englandwales, et_scotland ]
+  permissions:
+    name: ET Task permissions DMN
+    hitPolicy: RULE ORDER
+    historyTimeToLive: P30D
+    overrides:
+      et_englandwales_multiple:
+        name: ET Multiple Task permissions DMN
+      et_scotland_multiple:
+        name: ET Multiple Task permissions DMN
+    inputs:
+      - key: taskType
+        label: Task Type
+        variable: taskType
+        typeRef: string
+        language: feel
+        expression:
+          if:
+            all:
+              - field: taskAttributes
+                op: exists
+              - field: taskAttributes.taskType
+                op: exists
+          use:
+            field: taskAttributes.taskType
+          otherwise: r1
+      - key: case
+        label: Case Data
+        variable: case
+        typeRef: string
+    outputs:
+      - name: caseAccessCategory
+        label: Case Access Category
+        typeRef: string
+      - name: name
+        label: Name
+        typeRef: string
+      - name: value
+        label: Value
+        typeRef: string
+      - name: roleCategory
+        label: RoleCategory
+        typeRef: string
+      - name: authorisations
+        label: Authorisations
+        typeRef: string
+      - name: assignmentPriority
+        label: Assignment Priority
+        typeRef: integer
+      - name: autoAssignable
+        label: Auto Assignable
+        typeRef: boolean
+    rows:
+      - description: supervisor task permissions
+        returns:
+          name: task-supervisor
+          value: Read, Manage, Claim, Unclaim, Assign, Unassign, Complete
+          autoAssignable: false
+      - description: Judge Access Request Permissions
+        only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ reviewSpecificAccessRequestJudiciary ]
+        returns:
+          name: specific-access-approver-judiciary
+          value: Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn, Assign, Unassign
+          roleCategory: JUDICIAL
+          autoAssignable: false
+      - description: Case Role for Auto Assignment - Lead Judge Permissions
+        only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in:
+              - ReviewReferralLegalOps
+              - ReviewReferralResponseLegalOps
+              - ReviewRule21Referral
+              - ReviewReferralJudiciary
+              - ReviewReferralResponseJudiciary
+              - CompleteInitialConsideration
+              - DraftAndSignJudgment
+              - ReviewSupportRequestJudge
+        returns:
+          name: lead-judge
+          value: Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn
+          roleCategory: JUDICIAL
+          assignmentPriority: 1
+          autoAssignable: true
+      - description: Case Role for Auto Assignment - Hearing Judge Permissions
+        only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in:
+              - ReviewReferralLegalOps
+              - ReviewReferralResponseLegalOps
+              - ReviewRule21Referral
+              - ReviewReferralJudiciary
+              - ReviewReferralResponseJudiciary
+              - CompleteInitialConsideration
+              - DraftAndSignJudgment
+              - ReviewSupportRequestJudge
+        returns:
+          name: hearing-judge
+          value: Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn
+          roleCategory: JUDICIAL
+          assignmentPriority: 2
+          autoAssignable: true
+      - description: Case Role for Auto Assignment - Lead Judge Permissions
+        only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          taskType:
+            in: [ ReviewReferralLegalOpsMultiple, ReviewReferralJudiciaryMultiple, MultiplesReviewReferralResponseLegalOps, ReviewReferralResponseJudiciaryMultiple ]
+        returns:
+          name: lead-judge
+          value: Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn
+          roleCategory: JUDICIAL
+          assignmentPriority: 1
+          autoAssignable: true
+      - description: Case Role for Auto Assignment - Hearing Judge Permissions
+        only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          taskType:
+            in: [ ReviewReferralLegalOpsMultiple, ReviewReferralJudiciaryMultiple, MultiplesReviewReferralResponseLegalOps, ReviewReferralResponseJudiciaryMultiple ]
+        returns:
+          name: hearing-judge
+          value: Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn
+          roleCategory: JUDICIAL
+          assignmentPriority: 2
+          autoAssignable: true
+      - description: Leadership Judge Permissions
+        returns:
+          name: leadership-judge
+          value: Read, Execute, Manage, Claim, Assign, Unassign, Complete
+          roleCategory: JUDICIAL
+          assignmentPriority: 5
+          autoAssignable: false
+      - description: Judge Permissions
+        only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in:
+              - ReviewReferralLegalOps
+              - ReviewReferralResponseLegalOps
+              - ReviewRule21Referral
+              - ReviewReferralJudiciary
+              - ReviewReferralResponseJudiciary
+              - CompleteInitialConsideration
+              - DraftAndSignJudgment
+              - ReviewSupportRequestJudge
+        returns:
+          name: judge
+          value: Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn
+          roleCategory: JUDICIAL
+          assignmentPriority: 3
+          autoAssignable: false
+      - description: Judge Permissions
+        only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in:
+              - ReviewReferralLegalOps
+              - ReviewReferralResponseLegalOps
+              - ReviewRule21Referral
+              - ReviewReferralJudiciary
+              - ReviewReferralResponseJudiciary
+              - CompleteInitialConsideration
+              - DraftAndSignJudgment
+              - ReviewSupportRequestJudge
+        returns:
+          name: fee-paid-judge
+          value: Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn
+          roleCategory: JUDICIAL
+          assignmentPriority: 3
+          autoAssignable: false
+      - description: Access Request for Legal Caseworker
+        only: [ et_englandwales ]
+        when:
+          taskType:
+            in: [ reviewSpecificAccessRequestLegalOps ]
+        returns:
+          name: specific-access-approver-legal-ops
+          value: Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn, Assign, Unassign
+          roleCategory: LEGAL_OPERATIONS
+          autoAssignable: false
+      - description: Access Request for Legal Caseworker 
+        only: [ et_scotland ]
+        when:
+          taskType:
+            in: [ reviewSpecificAccessRequestLegalOps ]
+        returns:
+          name: specific-access-approver-legal-ops
+          value: Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn, Assign, Unassign
+          roleCategory: LEGAL_OPERATIONS
+          autoAssignable: false
+      - description: Case Role for Auto Assignment - Allocated Tribunal Caseworker
+        only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in:
+              - ReviewReferralLegalOps
+              - ReviewReferralResponseLegalOps
+              - ReviewRule21Referral
+              - ReviewReferralJudiciary
+              - ReviewReferralResponseJudiciary
+              - CompleteInitialConsideration
+              - DraftAndSignJudgment
+              - ReviewSupportRequestLegalOfficer
+        returns:
+          name: allocated-tribunal-caseworker
+          value: Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn
+          roleCategory: LEGAL_OPERATIONS
+          assignmentPriority: 1
+          autoAssignable: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in:
+              - ReviewReferralLegalOps
+              - ReviewReferralResponseLegalOps
+              - ReviewRule21Referral
+              - ReviewReferralJudiciary
+              - ReviewReferralResponseJudiciary
+              - CompleteInitialConsideration
+              - DraftAndSignJudgment
+              - ReviewSupportRequestLegalOfficer
+        returns:
+          name: senior-tribunal-caseworker
+          value: Assign, Unassign, Complete, Cancel
+          roleCategory: LEGAL_OPERATIONS
+          assignmentPriority: 4
+          autoAssignable: false
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in:
+              - ReviewReferralLegalOps
+              - ReviewReferralResponseLegalOps
+              - ReviewRule21Referral
+              - ReviewReferralJudiciary
+              - ReviewReferralResponseJudiciary
+              - CompleteInitialConsideration
+              - DraftAndSignJudgment
+              - ReviewSupportRequestLegalOfficer
+        returns:
+          name: tribunal-caseworker
+          value: Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn
+          roleCategory: LEGAL_OPERATIONS
+          assignmentPriority: 3
+          autoAssignable: false
+      - description: Access Request for Hearing Centre Team Leader
+        only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ reviewSpecificAccessRequestAdmin ]
+        returns:
+          name: specific-access-approver-admin
+          value: Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn, Assign, Unassign
+          roleCategory: ADMIN
+          autoAssignable: false
+      - description: Case Role for Auto Assignment - Allocated Admin Caseworker
+        only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in:
+              - Et1Vetting
+              - ReviewReferralAdmin
+              - ReviewReferralResponseAdmin
+              - SendEt1Notification
+              - ListServeClaim
+              - Rule21
+              - ET3Processing
+              - SendEt3Notification
+              - IssueInitialConsiderationDirections
+              - IssuePostHearingDirection
+              - IssueJudgment
+              - AmendClaimantDetails
+              - AmendRespondentDetails
+              - WithdrawAllOrPartOfCase
+              - ContactTribunalWithAnApplication
+              - ListAHearing
+              - ReviewECCResponse
+              - ExpiredBfAction
+              - IssueOrder
+              - ReferEmployersContractClaim
+              - SubmitRespondentPseResponse
+              - SubmitClaimantPseResponse
+              - ReviewSupportRequestAdmin
+              - ArrangeSupport
+        returns:
+          name: allocated-admin-caseworker
+          value: Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn
+          roleCategory: ADMIN
+          assignmentPriority: 2
+          autoAssignable: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in:
+              - Et1Vetting
+              - ReviewReferralAdmin
+              - ReviewReferralResponseAdmin
+              - SendEt1Notification
+              - ListServeClaim
+              - Rule21
+              - ET3Processing
+              - SendEt3Notification
+              - IssueInitialConsiderationDirections
+              - IssuePostHearingDirection
+              - IssueJudgment
+              - AmendClaimantDetails
+              - AmendRespondentDetails
+              - WithdrawAllOrPartOfCase
+              - ContactTribunalWithAnApplication
+              - ListAHearing
+              - ReviewECCResponse
+              - ExpiredBfAction
+              - IssueOrder
+              - ReferEmployersContractClaim
+              - SubmitRespondentPseResponse
+              - SubmitClaimantPseResponse
+              - ReviewSupportRequestAdmin
+              - ArrangeSupport
+        returns:
+          name: hearing-centre-team-leader
+          value: Assign, Unassign, Complete, Cancel
+          roleCategory: ADMIN
+          assignmentPriority: 6
+          autoAssignable: false
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in:
+              - Et1Vetting
+              - ReviewReferralAdmin
+              - ReviewReferralResponseAdmin
+              - SendEt1Notification
+              - ListServeClaim
+              - Rule21
+              - ET3Processing
+              - SendEt3Notification
+              - IssueInitialConsiderationDirections
+              - IssuePostHearingDirection
+              - IssueJudgment
+              - AmendClaimantDetails
+              - AmendRespondentDetails
+              - WithdrawAllOrPartOfCase
+              - ContactTribunalWithAnApplication
+              - ListAHearing
+              - ReviewECCResponse
+              - ExpiredBfAction
+              - IssueOrder
+              - ReferEmployersContractClaim
+              - SubmitRespondentPseResponse
+              - SubmitClaimantPseResponse
+              - ReviewSupportRequestAdmin
+              - ArrangeSupport
+        returns:
+          name: hearing-centre-admin
+          value: Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn
+          roleCategory: ADMIN
+          assignmentPriority: 4
+          autoAssignable: false
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ ListAHearing ]
+        returns:
+          name: regional-centre-team-leader
+          value: Read, Own, Manage, Claim, Unclaim, Assign, Unassign, Complete, Cancel
+          roleCategory: ADMIN
+          assignmentPriority: 6
+          autoAssignable: false
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ ListAHearing ]
+        returns:
+          name: regional-centre-admin
+          value: Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn
+          roleCategory: ADMIN
+          assignmentPriority: 4
+          autoAssignable: false
+      - description: Access Request for CTSC
+        only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in: [ reviewSpecificAccessRequestCTSC ]
+        returns:
+          name: specific-access-approver-ctsc
+          value: Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn, Assign, Unassign
+          roleCategory: CTSC
+          autoAssignable: true
+      - description: Case Role for Auto Assignment - Allocated CTSC Caseworker
+        only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in:
+              - Et1Vetting
+              - ReviewReferralAdmin
+              - ReviewReferralResponseAdmin
+              - SendEt1Notification
+              - ListServeClaim
+        returns:
+          name: allocated-ctsc-caseworker
+          value: Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn
+          roleCategory: CTSC
+          assignmentPriority: 1
+          autoAssignable: true
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in:
+              - Et1Vetting
+              - ReviewReferralAdmin
+              - ReviewReferralResponseAdmin
+              - SendEt1Notification
+              - ListServeClaim
+        returns:
+          name: ctsc-team-leader
+          value: Assign, Unassign, Complete
+          roleCategory: CTSC
+          assignmentPriority: 5
+          autoAssignable: false
+      - description: Access Request for CTSC
+        only: [ et_englandwales, et_scotland ]
+        when:
+          taskType:
+            in:
+              - Et1Vetting
+              - ReviewReferralAdmin
+              - ReviewReferralResponseAdmin
+              - SendEt1Notification
+              - ListServeClaim
+        returns:
+          name: ctsc
+          value: Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn
+          roleCategory: CTSC
+          assignmentPriority: 3
+          autoAssignable: false
+      - description: Judge Permissions
+        only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          taskType:
+            in: [ ReviewReferralLegalOpsMultiple, ReviewReferralJudiciaryMultiple, MultiplesReviewReferralResponseLegalOps, ReviewReferralResponseJudiciaryMultiple ]
+        returns:
+          name: judge
+          value: Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn
+          roleCategory: JUDICIAL
+          assignmentPriority: 3
+          autoAssignable: false
+      - description: Case Role for Auto Assignment - Allocated Tribunal Caseworker
+        only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          taskType:
+            in: [ ReviewReferralLegalOpsMultiple, ReviewReferralJudiciaryMultiple, MultiplesReviewReferralResponseLegalOps, ReviewReferralResponseJudiciaryMultiple ]
+        returns:
+          name: allocated-tribunal-caseworker
+          value: Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn
+          roleCategory: LEGAL_OPERATIONS
+          assignmentPriority: 1
+          autoAssignable: true
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          taskType:
+            in: [ ReviewReferralLegalOpsMultiple, ReviewReferralJudiciaryMultiple, MultiplesReviewReferralResponseLegalOps, ReviewReferralResponseJudiciaryMultiple ]
+        returns:
+          name: senior-tribunal-caseworker
+          value: Assign, Unassign, Complete, Cancel
+          roleCategory: LEGAL_OPERATIONS
+          assignmentPriority: 4
+          autoAssignable: false
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          taskType:
+            in: [ ReviewReferralLegalOpsMultiple, ReviewReferralJudiciaryMultiple, MultiplesReviewReferralResponseLegalOps, ReviewReferralResponseJudiciaryMultiple ]
+        returns:
+          name: tribunal-caseworker
+          value: Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn
+          roleCategory: LEGAL_OPERATIONS
+          assignmentPriority: 3
+          autoAssignable: false
+      - description: Case Role for Auto Assignment - Allocated Admin Caseworker
+        only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          taskType:
+            in: [ ReviewReferralAdminMultiple, ReviewReferralResponseAdminMultiple ]
+        returns:
+          name: allocated-admin-caseworker
+          value: Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn
+          roleCategory: ADMIN
+          assignmentPriority: 2
+          autoAssignable: true
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          taskType:
+            in: [ ReviewReferralAdminMultiple, ReviewReferralResponseAdminMultiple ]
+        returns:
+          name: hearing-centre-team-leader
+          value: Assign, Unassign, Complete, Cancel
+          roleCategory: ADMIN
+          assignmentPriority: 6
+          autoAssignable: false
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          taskType:
+            in: [ ReviewReferralAdminMultiple, ReviewReferralResponseAdminMultiple ]
+        returns:
+          name: hearing-centre-admin
+          value: Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn
+          roleCategory: ADMIN
+          assignmentPriority: 4
+          autoAssignable: false
+      - description: Case Role for Auto Assignment - Allocated CTSC Caseworker
+        only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          taskType:
+            in: [ ReviewReferralAdminMultiple, ReviewReferralResponseAdminMultiple ]
+        returns:
+          name: allocated-ctsc-caseworker
+          value: Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn
+          roleCategory: CTSC
+          assignmentPriority: 1
+          autoAssignable: true
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          taskType:
+            in: [ ReviewReferralAdminMultiple, ReviewReferralResponseAdminMultiple ]
+        returns:
+          name: ctsc-team-leader
+          value: Assign, Unassign, Complete
+          roleCategory: CTSC
+          assignmentPriority: 5
+          autoAssignable: false
+      - description: Access Request for CTSC
+        only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          taskType:
+            in: [ ReviewReferralAdminMultiple, ReviewReferralResponseAdminMultiple ]
+        returns:
+          name: ctsc
+          value: Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn
+          roleCategory: CTSC
+          assignmentPriority: 3
+          autoAssignable: false
+  completion:
+    name: ET Task completion DMN
+    hitPolicy: COLLECT
+    historyTimeToLive: P30D
+    overrides:
+      et_englandwales_multiple:
+        name: ET Multiple Task completion DMN
+      et_scotland_multiple:
+        name: ET Multiple Task completion DMN
+    inputs:
+      - key: eventID
+        label: Event ID
+        typeRef: string
+        expression:
+          field: eventId
+    outputs:
+      - name: taskType
+        label: Task Type
+        typeRef: string
+      - name: completionMode
+        label: Completion Mode
+        typeRef: string
+    rows:
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventID:
+            in: [ preAcceptanceCase ]
+        returns:
+          taskType: Et1Vetting
+          completionMode: Auto
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventID:
+            in: [ replyToReferral, closeReferral ]
+        returns:
+          taskType: ReviewReferralAdmin
+          completionMode: Auto
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventID:
+            in: [ replyToReferral, closeReferral ]
+        returns:
+          taskType: ReviewReferralResponseAdmin
+          completionMode: Auto
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventID:
+            in: [ preAcceptanceCase, replyToReferral, closeReferral ]
+        returns:
+          taskType: ReviewReferralJudiciary
+          completionMode: Auto
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventID:
+            in: [ preAcceptanceCase, replyToReferral, closeReferral, updateReferral ]
+        returns:
+          taskType: ReviewReferralLegalOps
+          completionMode: Auto
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventID:
+            in: [ preAcceptanceCase, replyToReferral, closeReferral ]
+        returns:
+          taskType: ReviewReferralResponseJudiciary
+          completionMode: Auto
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventID:
+            in: [ preAcceptanceCase, replyToReferral, closeReferral ]
+        returns:
+          taskType: ReviewReferralResponseLegalOps
+          completionMode: Auto
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventID:
+            in: [ uploadDocumentForServing ]
+        returns:
+          taskType: ListServeClaim
+          completionMode: Auto
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventID:
+            in: [ generateCorrespondence ]
+        returns:
+          taskType: SendEt1Notification
+          completionMode: Auto
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventID:
+            in: [ generateCorrespondence ]
+        returns:
+          taskType: IssuePostHearingDirection
+          completionMode: Auto
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventID:
+            in: [ generateCorrespondence ]
+        returns:
+          taskType: IssueInitialConsiderationDirections
+          completionMode: Auto
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventID:
+            in: [ addAmendHearing, issueInitialConsiderationDirectionsWA ]
+        returns:
+          taskType: ListAHearing
+          completionMode: Auto
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventID:
+            in: [ initialConsideration ]
+        returns:
+          taskType: CompleteInitialConsideration
+          completionMode: Auto
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventID:
+            in: [ et3Notification ]
+        returns:
+          taskType: SendEt3Notification
+          completionMode: Auto
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventID:
+            in: [ et3Vetting ]
+        returns:
+          taskType: Rule21
+          completionMode: Auto
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventID:
+            in: [ et3Vetting ]
+        returns:
+          taskType: ET3Processing
+          completionMode: Auto
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventID:
+            in: [ createReferral ]
+        returns:
+          taskType: ReviewRule21Referral
+          completionMode: Auto
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventID:
+            in: [ tseAdmin, tseAdmReply, tseAdminCloseAnApplication ]
+        returns:
+          taskType: ContactTribunalWithAnApplication
+          completionMode: Auto
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventID:
+            in: [ amendRespondentDetails ]
+        returns:
+          taskType: ReviewECCResponse
+          completionMode: Auto
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventID:
+            in: [ createReferral ]
+        returns:
+          taskType: ReferEmployersContractClaim
+          completionMode: Auto
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventID:
+            in: [ draftAndSignJudgement ]
+        returns:
+          taskType: DraftAndSignJudgment
+          completionMode: Auto
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventID:
+            in: [ amendClaimantDetails ]
+        returns:
+          taskType: AmendClaimantDetails
+          completionMode: Auto
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventID:
+            in: [ amendRespondentDetails ]
+        returns:
+          taskType: AmendRespondentDetails
+          completionMode: Auto
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventID:
+            in: [ addAmendJudgment ]
+        returns:
+          taskType: IssueJudgment
+          completionMode: Auto
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventID:
+            in: [ disposeCase, createReferral ]
+        returns:
+          taskType: WithdrawAllOrPartOfCase
+          completionMode: Auto
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventID:
+            in: [ broughtForward ]
+        returns:
+          taskType: ExpiredBfAction
+          completionMode: Auto
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventID:
+            in: [ sendNotification ]
+        returns:
+          taskType: IssueOrder
+          completionMode: Auto
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventID:
+            in: [ respondNotification ]
+        returns:
+          taskType: SubmitRespondentPseResponse
+          completionMode: Auto
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          eventID:
+            in: [ respondNotification ]
+        returns:
+          taskType: SubmitClaimantPseResponse
+          completionMode: Auto
+      - description: Left empty so event can be triggered without a task
+        only: [ et_englandwales, et_scotland ]
+        when:
+          eventID:
+            in:
+              - preAcceptanceCase
+              - replyToReferral
+              - closeReferral
+              - updateReferral
+              - uploadDocumentForServing
+              - generateCorrespondence
+              - addAmendHearing
+              - issueInitialConsiderationDirectionsWA
+              - initialConsideration
+              - et3Notification
+              - et3Vetting
+              - createReferral
+              - draftAndSignJudgement
+              - amendClaimantDetails
+              - amendRespondentDetails
+              - addAmendJudgment
+              - disposeCase
+              - tseAdmin
+              - tseAdmReply
+              - tseAdminCloseAnApplication
+              - broughtForward
+              - respondNotification
+              - sendNotification
+              - caseTransferECM
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          eventID:
+            in: [ replyToReferral, closeReferral ]
+        returns:
+          taskType: ReviewReferralAdminMultiple
+          completionMode: Auto
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          eventID:
+            in: [ replyToReferral, closeReferral ]
+        returns:
+          taskType: ReviewReferralJudiciaryMultiple
+          completionMode: Auto
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          eventID:
+            in: [ replyToReferral, closeReferral ]
+        returns:
+          taskType: ReviewReferralLegalOpsMultiple
+          completionMode: Auto
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          eventID:
+            in: [ replyToReferral, closeReferral ]
+        returns:
+          taskType: MultiplesReviewReferralResponseLegalOps
+          completionMode: Auto
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          eventID:
+            in: [ replyToReferral, closeReferral ]
+        returns:
+          taskType: ReviewReferralResponseJudiciaryMultiple
+          completionMode: Auto
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          eventID:
+            in: [ replyToReferral, closeReferral ]
+        returns:
+          taskType: ReviewReferralResponseAdminMultiple
+          completionMode: Auto
+      - description: Left empty so event can be triggered without a task
+        only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          eventID:
+            in: [ replyToReferral, closeReferral ]
+  cancellation:
+    name: ET Task cancellation DMN
+    hitPolicy: COLLECT
+    historyTimeToLive: P30D
+    overrides:
+      et_englandwales_multiple:
+        name: ET Multiple Task cancellation DMN
+      et_scotland_multiple:
+        name: ET Multiple Task cancellation DMN
+    inputs:
+      - key: fromState
+        label: From State
+        typeRef: string
+        expression:
+          field: fromState
+      - key: event
+        label: Event
+        typeRef: string
+        expression:
+          field: event
+      - key: state
+        label: State
+        typeRef: string
+        expression:
+          field: state
+    outputs:
+      - name: action
+        label: Action
+        typeRef: string
+      - name: warningCode
+        label: Warning Code
+        typeRef: string
+      - name: warningText
+        label: Warning Text
+        typeRef: string
+      - name: processCategories
+        label: Process Categories Identifiers
+        typeRef: string
+    rows:
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          event:
+            in: [ disposeCase, rollbackMigrateCase, caseTransferECM ]
+        returns:
+          action: Cancel
+          processCategories: Vetting
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          event:
+            in: [ disposeCase, rollbackMigrateCase, caseTransferECM ]
+        returns:
+          action: Cancel
+          processCategories: Processing
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          event:
+            in: [ disposeCase, rollbackMigrateCase, caseTransferECM ]
+        returns:
+          action: Cancel
+          processCategories: Hearing
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          event:
+            in: [ disposeCase, rollbackMigrateCase, caseTransferECM ]
+        returns:
+          action: Cancel
+          processCategories: Judgment
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          event:
+            in: [ disposeCase, rollbackMigrateCase, caseTransferECM ]
+        returns:
+          action: Cancel
+          processCategories: Application
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          event:
+            in: [ disposeCase, rollbackMigrateCase, caseTransferECM ]
+        returns:
+          action: Cancel
+          processCategories: Amendments
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          event:
+            in: [ disposeCase, rollbackMigrateCase, caseTransferECM ]
+        returns:
+          action: Cancel
+          processCategories: ArrangeSupport
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          event:
+            in: [ disposeCase, et3Response, rollbackMigrateCase, caseTransferECM ]
+        returns:
+          action: Cancel
+          processCategories: Rule21
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          event:
+            in: [ addAmendHearing ]
+        returns:
+          action: Reconfigure
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          event:
+            in: [ addAmendJurisdiction ]
+        returns:
+          action: Reconfigure
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          event:
+            in: [ caseTransferDifferentCountry ]
+        returns:
+          action: Reconfigure
+      - only: [ et_englandwales ]
+        when:
+          event:
+            in: [ caseTransferSameCountry ]
+        returns:
+          action: Reconfigure
+      - only: [ et_scotland ]
+        when:
+          event:
+            in: [ amendCaseDetails ]
+        returns:
+          action: Reconfigure
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          event:
+            in: [ RECONFIGURE_WA_TASKS ]
+        returns:
+          action: Reconfigure
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          event:
+            in: [ assignCase ]
+        returns:
+          action: Reconfigure
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          event:
+            in: [ closeAdminReviewSupportTask, disposeCase, rollbackMigrateCase, caseTransferECM ]
+        returns:
+          action: Cancel
+          processCategories: ReviewSupportAdmin
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          event:
+            in: [ closeLOReviewSupportTask, disposeCase, rollbackMigrateCase, caseTransferECM ]
+        returns:
+          action: Cancel
+          processCategories: ReviewSupportLegalOfficer
+      - only: [ et_englandwales, et_scotland ]
+        when:
+          event:
+            in: [ closeJudgeReviewSupportTask, disposeCase, rollbackMigrateCase, caseTransferECM ]
+        returns:
+          action: Cancel
+          processCategories: ReviewSupportJudge
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          event:
+            in: [ close ]
+        returns:
+          action: Cancel
+          processCategories: Vetting
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        when:
+          event:
+            in: [ close ]
+        returns:
+          action: Cancel
+          processCategories: Processing
+  task-types:
+    name: ET Task Types DMN
+    hitPolicy: COLLECT
+    historyTimeToLive: P30D
+    overrides:
+      et_englandwales_multiple:
+        name: ET Multiple Task Types DMN
+      et_scotland_multiple:
+        name: ET Multiple Task Types DMN
+    inputs:
+      - key: input
+        typeRef: string
+    outputs:
+      - name: taskTypeId
+        typeRef: string
+      - name: taskTypeName
+        typeRef: string
+    rows:
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          taskTypeId: AmendClaimantDetails
+          taskTypeName: Amend Party Details (Claimant)
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          taskTypeId: AmendRespondentDetails
+          taskTypeName: Amend Party Details (Respondent)
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          taskTypeId: CompleteInitialConsideration
+          taskTypeName: Complete Initial Consideration
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          taskTypeId: ContactTribunalWithAnApplication
+          taskTypeName: Contact Tribunal With An Application
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          taskTypeId: DraftAndSignJudgment
+          taskTypeName: Draft And Sign Judgment/Order
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          taskTypeId: Et1Vetting
+          taskTypeName: ET1 Vetting
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          taskTypeId: ET3Processing
+          taskTypeName: ET3 Processing
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          taskTypeId: IssueInitialConsiderationDirections
+          taskTypeName: Issue Initial Consideration Directions
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          taskTypeId: IssueJudgment
+          taskTypeName: Issue Judgment
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          taskTypeId: IssuePostHearingDirection
+          taskTypeName: Issue Post Hearing Direction
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          taskTypeId: ListAHearing
+          taskTypeName: List A Hearing
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          taskTypeId: ListServeClaim
+          taskTypeName: List/ Serve Claim
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          taskTypeId: ReviewECCResponse
+          taskTypeName: Reply to Employer's Contract Claim received
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          taskTypeId: ReviewReferralAdmin
+          taskTypeName: Review Referral - Admin
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          taskTypeId: ReviewReferralJudiciary
+          taskTypeName: Review Referral - Judicial
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          taskTypeId: ReviewReferralLegalOps
+          taskTypeName: Review Referral - Legal Ops
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          taskTypeId: ReviewReferralResponseAdmin
+          taskTypeName: Review Referral Response - Admin
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          taskTypeId: ReviewReferralResponseJudiciary
+          taskTypeName: Review Referral Response - Judicial
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          taskTypeId: ReviewReferralResponseLegalOps
+          taskTypeName: Review Referral Response - Legal Ops
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          taskTypeId: ReviewRule21Referral
+          taskTypeName: Review Rule 22 Referral
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          taskTypeId: Rule21
+          taskTypeName: Rule 22
+      - only: [ et_englandwales ]
+        returns:
+          taskTypeId: ExpiredBfAction
+          taskTypeName: Expired Bf Action
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          taskTypeId: ReferEmployersContractClaim
+          taskTypeName: Refer Employer's Contract Claim
+      - only: [ et_scotland ]
+        returns:
+          taskTypeId: ExpiredBfAction
+          taskTypeName: Expired Bf Action
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          taskTypeId: SendEt1Notification
+          taskTypeName: Send ET1 Notification
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          taskTypeId: SendEt3Notification
+          taskTypeName: Send ET3 Notification
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          taskTypeId: WithdrawAllOrPartOfCase
+          taskTypeName: Withdraw All Or Part Of Case
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          taskTypeId: reviewSpecificAccessRequestAdmin
+          taskTypeName: Review Specific Access Request (Admin)
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          taskTypeId: reviewSpecificAccessRequestCTSC
+          taskTypeName: Review Specific Access Request (CTSC)
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          taskTypeId: reviewSpecificAccessRequestJudiciary
+          taskTypeName: Review Specific Access Request (Judiciary)
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          taskTypeId: reviewSpecificAccessRequestLegalOps
+          taskTypeName: Review Specific Access Request (Legal Ops)
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          taskTypeId: IssueOrder
+          taskTypeName: Issue Order
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          taskTypeId: SubmitRespondentPseResponse
+          taskTypeName: Review notification response
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          taskTypeId: SubmitClaimantPseResponse
+          taskTypeName: Review notification response
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          taskTypeId: ReviewSupportRequestAdmin
+          taskTypeName: Review Support Request Admin
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          taskTypeId: ReviewSupportRequestLegalOfficer
+          taskTypeName: Review Support Request LegalOfficer
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          taskTypeId: ReviewSupportRequestJudge
+          taskTypeName: Review Support Request Judge
+      - only: [ et_englandwales, et_scotland ]
+        returns:
+          taskTypeId: ArrangeSupport
+          taskTypeName: Arrange Support
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        returns:
+          taskTypeId: ReviewReferralAdminMultiple
+          taskTypeName: Review Multiples Referral - Admin
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        returns:
+          taskTypeId: ReviewReferralJudiciaryMultiple
+          taskTypeName: Review Multiples Referral - Judicial
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        returns:
+          taskTypeId: ReviewReferralLegalOpsMultiple
+          taskTypeName: Review Multiples Referral - Legal Ops
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        returns:
+          taskTypeId: MultiplesReviewReferralResponseLegalOps
+          taskTypeName: Review Multiples Referral Response - Legal Ops
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        returns:
+          taskTypeId: ReviewReferralResponseJudiciaryMultiple
+          taskTypeName: Review Multiples Referral Response - Judicial
+      - only: [ et_englandwales_multiple, et_scotland_multiple ]
+        returns:
+          taskTypeId: ReviewReferralResponseAdminMultiple
+          taskTypeName: Review Multiples Referral Response - Admin

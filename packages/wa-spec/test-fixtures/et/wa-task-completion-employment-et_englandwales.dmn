@@ -1,0 +1,390 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="https://www.omg.org/spec/DMN/20191111/MODEL/" xmlns:dmndi="https://www.omg.org/spec/DMN/20191111/DMNDI/" xmlns:dc="http://www.omg.org/spec/DMN/20180521/DC/" xmlns:biodi="http://bpmn.io/schema/dmn/biodi/2.0" xmlns:camunda="http://camunda.org/schema/1.0/dmn" id="wa-completion-definition-et_englandwales" name="DRD" namespace="http://camunda.org/schema/1.0/dmn" exporter="Camunda Modeler" exporterVersion="5.36.1">
+  <decision id="wa-task-completion-employment-et_englandwales" name="ET Task completion DMN" camunda:historyTimeToLive="P30D">
+    <decisionTable id="DecisionTable_01re27m" hitPolicy="COLLECT">
+      <input id="eventId" label="Event ID" biodi:width="355">
+        <inputExpression id="LiteralExpression_1ngg489" typeRef="string">
+          <text>eventId</text>
+        </inputExpression>
+      </input>
+      <output id="Output_1" label="Task Type" name="taskType" typeRef="string" biodi:width="389" />
+      <output id="OutputClause_1mldd9e" label="Completion Mode" name="completionMode" typeRef="string" biodi:width="220" />
+      <rule id="DecisionRule_12eenty">
+        <inputEntry id="UnaryTests_17cg7de">
+          <text>"preAcceptanceCase"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_1lk4wxe">
+          <text>"Et1Vetting"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_0ap1s9l">
+          <text>"Auto"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_1jameda">
+        <inputEntry id="UnaryTests_0q8217i">
+          <text>"replyToReferral",
+"closeReferral"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_1ku023r">
+          <text>"ReviewReferralAdmin"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_15g3yjk">
+          <text>"Auto"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_05insq9">
+        <inputEntry id="UnaryTests_0mdh83n">
+          <text>"replyToReferral",
+"closeReferral"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_0gpygso">
+          <text>"ReviewReferralResponseAdmin"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1iy3i7f">
+          <text>"Auto"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_1n1hrr1">
+        <inputEntry id="UnaryTests_0d3nkez">
+          <text>"preAcceptanceCase",
+"replyToReferral",
+"closeReferral"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_0m9i08l">
+          <text>"ReviewReferralJudiciary"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_0vrbgdt">
+          <text>"Auto"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_0rgoz1c">
+        <inputEntry id="UnaryTests_0wfbt17">
+          <text>"preAcceptanceCase",
+"replyToReferral",
+"closeReferral",
+"updateReferral"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_0nsl2oy">
+          <text>"ReviewReferralLegalOps"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_0zn07yk">
+          <text>"Auto"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_0xysxnl">
+        <inputEntry id="UnaryTests_12rci1m">
+          <text>"preAcceptanceCase",
+"replyToReferral",
+"closeReferral"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_0du4aig">
+          <text>"ReviewReferralResponseJudiciary"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1idsnct">
+          <text>"Auto"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_12zrnvl">
+        <inputEntry id="UnaryTests_185czjm">
+          <text>"preAcceptanceCase",
+"replyToReferral",
+"closeReferral"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_076usvw">
+          <text>"ReviewReferralResponseLegalOps"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_121a35m">
+          <text>"Auto"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_1e7c3we">
+        <inputEntry id="UnaryTests_1u4doqe">
+          <text>"uploadDocumentForServing"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_1yvpnta">
+          <text>"ListServeClaim"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_12qcwv6">
+          <text>"Auto"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_098q0pb">
+        <inputEntry id="UnaryTests_15bidkx">
+          <text>"generateCorrespondence"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_0h0we02">
+          <text>"SendEt1Notification"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_0vbhm39">
+          <text>"Auto"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_0tsg2dv">
+        <inputEntry id="UnaryTests_1rp99c7">
+          <text>"generateCorrespondence"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_0e69sj5">
+          <text>"IssuePostHearingDirection"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1vnufnp">
+          <text>"Auto"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_0o1t3oy">
+        <inputEntry id="UnaryTests_0i0mhhb">
+          <text>"generateCorrespondence"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_12lsf0x">
+          <text>"IssueInitialConsiderationDirections"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_0u58y0q">
+          <text>"Auto"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_1cpmht8">
+        <inputEntry id="UnaryTests_1ninaep">
+          <text>"addAmendHearing",
+"issueInitialConsiderationDirectionsWA"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_0spvbsg">
+          <text>"ListAHearing"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1o4tf5m">
+          <text>"Auto"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_17wj6dr">
+        <inputEntry id="UnaryTests_1d95t1o">
+          <text>"initialConsideration"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_16ob96j">
+          <text>"CompleteInitialConsideration"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_0at1lsz">
+          <text>"Auto"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_0dw8qxi">
+        <inputEntry id="UnaryTests_0dsgzdi">
+          <text>"et3Notification"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_0g9uw3d">
+          <text>"SendEt3Notification"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_16kqmlf">
+          <text>"Auto"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_17mys57">
+        <inputEntry id="UnaryTests_10m37oi">
+          <text>"et3Vetting"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_1gn8gbd">
+          <text>"Rule21"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_0jz9ueb">
+          <text>"Auto"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_0m15s4f">
+        <inputEntry id="UnaryTests_12rgcau">
+          <text>"et3Vetting"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_1x2aji9">
+          <text>"ET3Processing"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_07hil2z">
+          <text>"Auto"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_12huova">
+        <inputEntry id="UnaryTests_1061un4">
+          <text>"createReferral"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_0xln4uh">
+          <text>"ReviewRule21Referral"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1s25vmw">
+          <text>"Auto"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_0u1o0z1">
+        <inputEntry id="UnaryTests_0e11rgz">
+          <text>"tseAdmin",
+"tseAdmReply",
+"tseAdminCloseAnApplication"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_19nqhth">
+          <text>"ContactTribunalWithAnApplication"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_0hyc3y5">
+          <text>"Auto"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_0u0gc5h">
+        <inputEntry id="UnaryTests_18kkbzn">
+          <text>"amendRespondentDetails"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_15tj8vx">
+          <text>"ReviewECCResponse"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1i7ohgk">
+          <text>"Auto"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_1nzflni">
+        <inputEntry id="UnaryTests_1keafq1">
+          <text>"createReferral"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_1fv5i14">
+          <text>"ReferEmployersContractClaim"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_15pfhig">
+          <text>"Auto"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_1ufk5zq">
+        <inputEntry id="UnaryTests_1orgb5e">
+          <text>"draftAndSignJudgement"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_0xiq9w4">
+          <text>"DraftAndSignJudgment"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1vjviwy">
+          <text>"Auto"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_0842grb">
+        <inputEntry id="UnaryTests_0dc2iyv">
+          <text>"amendClaimantDetails"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_1n9c9z0">
+          <text>"AmendClaimantDetails"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_0uomgjm">
+          <text>"Auto"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_0aeopm1">
+        <inputEntry id="UnaryTests_1yu55q7">
+          <text>"amendRespondentDetails"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_1frymd6">
+          <text>"AmendRespondentDetails"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1bkn3yk">
+          <text>"Auto"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_0w6li7w">
+        <inputEntry id="UnaryTests_10o0695">
+          <text>"addAmendJudgment"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_0mysecs">
+          <text>"IssueJudgment"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1rabwo6">
+          <text>"Auto"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_0hnkgbm">
+        <inputEntry id="UnaryTests_18iikza">
+          <text>"disposeCase",
+"createReferral"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_00u0nnr">
+          <text>"WithdrawAllOrPartOfCase"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_19ls3bl">
+          <text>"Auto"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_08xf7ct">
+        <inputEntry id="UnaryTests_046btu6">
+          <text>"broughtForward"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_0t5ral4">
+          <text>"ExpiredBfAction"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1xgou2v">
+          <text>"Auto"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_0p1njyg">
+        <inputEntry id="UnaryTests_0thzgr8">
+          <text>"sendNotification"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_02xsnyp">
+          <text>"IssueOrder"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_1cfz230">
+          <text>"Auto"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_0er888n">
+        <inputEntry id="UnaryTests_0sqlbr5">
+          <text>"respondNotification"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_0jw36xr">
+          <text>"SubmitRespondentPseResponse"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_17001jl">
+          <text>"Auto"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_claimant_pse_completion">
+        <inputEntry id="UnaryTests_claimant_pse_completion">
+          <text>"respondNotification"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_claimant_pse_completion_tt">
+          <text>"SubmitClaimantPseResponse"</text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_claimant_pse_completion_mo">
+          <text>"Auto"</text>
+        </outputEntry>
+      </rule>
+      <rule id="DecisionRule_0rmnuh1">
+        <description>Left empty so event can be triggered without a task</description>
+        <inputEntry id="UnaryTests_0iocquq">
+          <text>"preAcceptanceCase",
+"replyToReferral",
+"closeReferral",
+"updateReferral",
+"uploadDocumentForServing",
+"generateCorrespondence",
+"addAmendHearing",
+"issueInitialConsiderationDirectionsWA",
+"initialConsideration",
+"et3Notification",
+"et3Vetting",
+"createReferral",
+"draftAndSignJudgement",
+"amendClaimantDetails",
+"amendRespondentDetails",
+"addAmendJudgment",
+"disposeCase",
+"tseAdmin",
+"tseAdmReply",
+"tseAdminCloseAnApplication",
+"broughtForward",
+"respondNotification",
+"sendNotification",
+"caseTransferECM"</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_067qoh4">
+          <text></text>
+        </outputEntry>
+        <outputEntry id="LiteralExpression_11ndvk8">
+          <text></text>
+        </outputEntry>
+      </rule>
+    </decisionTable>
+  </decision>
+  <dmndi:DMNDI>
+    <dmndi:DMNDiagram>
+      <dmndi:DMNShape dmnElementRef="wa-task-completion-employment-et_englandwales">
+        <dc:Bounds height="80" width="180" x="160" y="80" />
+      </dmndi:DMNShape>
+    </dmndi:DMNDiagram>
+  </dmndi:DMNDI>
+</definitions>

@@ -17,6 +17,7 @@ COPY --chown=hmcts:hmcts .yarn ./.yarn
 # client's package.json comes in even though the server does not consume the client: manifest only, never its
 # src/, bin/ or dist/.
 COPY --chown=hmcts:hmcts packages/agent-hub/package.json ./packages/agent-hub/
+COPY --chown=hmcts:hmcts packages/wa-spec/package.json ./packages/wa-spec/
 
 RUN yarn install --immutable
 
@@ -47,6 +48,7 @@ ENV NODE_ENV=production
 COPY --chown=hmcts:hmcts package.json yarn.lock .yarnrc.yml ./
 COPY --chown=hmcts:hmcts .yarn ./.yarn
 COPY --chown=hmcts:hmcts packages/agent-hub/package.json ./packages/agent-hub/
+COPY --chown=hmcts:hmcts packages/wa-spec/package.json ./packages/wa-spec/
 RUN yarn workspaces focus --production 2>/dev/null || yarn install --immutable
 
 COPY --from=build --chown=hmcts:hmcts /app/.next/standalone ./

@@ -1,0 +1,18 @@
+{
+  // Run by Node through tsx, never bundled or emitted: `nodenext` resolution, no DOM, and nothing from the Next app.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "lib": ["esnext"],
+    "types": ["node"],
+    "allowJs": false,
+    "noEmit": true,
+    "verbatimModuleSyntax": true,
+    "incremental": false,
+    "plugins": [],
+    "paths": {}
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules"]
+}
