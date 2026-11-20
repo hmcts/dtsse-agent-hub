@@ -1,12 +1,14 @@
-import { join } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { ZodError } from "zod";
 import { diffPaths, renderDifferences } from "./diff.ts";
 import { exists, listDir, readText, writeText } from "./file-io.ts";
 import { decisionKeyOf, parseFileName } from "./file-names.ts";
 import { generateAll } from "./generator.ts";
 import { importDmns, renderReport } from "./importer.ts";
-import { layoutPathFor, parseLayout, parseSpec, stringifyLayout, stringifySpec } from "./spec-io.ts";
+import { explained, layoutPathOf, loadSpecFile, loadSpecOnly, orderPathBeside, stringifyModel, stringifyOrdering } from "./model-io.ts";
+import { liftSpec, renderLiftReport } from "./model-lift.ts";
+import { compareSpecs } from "./spec-diff.ts";
+import { layoutPathFor, parseSpec, stringifyLayout, stringifySpec } from "./spec-io.ts";
 import { listTaskFiles } from "./task-files.ts";
 import { renderTaskRows, taskRows } from "./task-view.ts";
 
@@ -14,24 +16,20 @@ const USAGE = `wa-spec: Work Allocation configuration spec
 
   wa-spec import <dmn-dir> -o <spec.yaml> [--report <report.md>] [--jurisdiction J] [--service-code C] [--display-name N]
                                                  also writes the ids and layout to <spec>.layout.yaml
-  wa-spec generate <spec.yaml> -o <dir>          uses <spec>.layout.yaml when it exists; lists the task DMNs of the
-                                                 spec's service in <dir> that it did not generate, and leaves them
+  wa-spec generate <spec.yaml|model.yaml> -o <dir> [--layout <layout.yaml>]
+                                                 a model ("kind: wa-model") is compiled first; the layout is --layout,
+                                                 the model layout field, or <name>.layout.yaml. Lists the task DMNs of
+                                                 the spec's service in <dir> that it did not generate, and leaves them
+  wa-spec lift <spec.yaml> -o <model.yaml> [--report <report.md>] [--layout <layout.yaml>]
+                                                 the task- and role-centric model of a spec, with <model>.order.yaml
+                                                 that keeps the tables' row order; exits 1 unless it compiles back equal
+  wa-spec compile <model.yaml> -o <spec.yaml> [--layout <layout.yaml>]
+                                                 the table-centric spec of a model, with its layout copied beside it
   wa-spec diff <a> <b> [--ignore-rule-order]     two DMN files or two directories, or a file and a directory holding
-                                                 a file of the same name; exits 1 when they differ
-  wa-spec show <spec.yaml> <taskId>              the rows of every kind that concern one task
+                                                 a file of the same name; exits 1 when they differ. Two YAML files
+                                                 (specs or models) are compared as specs
+  wa-spec show <spec.yaml|model.yaml> <taskId>   the rows of every kind that concern one task
 `;
-
-/** Reads and parses a file the tools wrote, naming the file and, for a schema failure, each field at fault. */
-function load<T>(path: string, parse: (text: string) => T): T {
-  try {
-    return parse(readText(path));
-  } catch (error) {
-    if (error instanceof ZodError) {
-      throw new Error(`${path} is not valid:\n${error.issues.map((issue) => `  ${issue.path.join(".")}: ${issue.message}`).join("\n")}`);
-    }
-    throw new Error(`${path}: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
 
 function fail(message: string): never {
   process.stderr.write(`${message}\n`);
@@ -49,6 +47,7 @@ function main(argv: string[]): number {
       jurisdiction: { type: "string" },
       "service-code": { type: "string" },
       "display-name": { type: "string" },
+      layout: { type: "string" },
       "ignore-rule-order": { type: "boolean" }
     }
   });
@@ -80,9 +79,8 @@ function main(argv: string[]): number {
     if (!specPath || !values.output) {
       fail(USAGE);
     }
-    const layoutPath = layoutPathFor(specPath);
-    const spec = load(specPath, parseSpec);
-    const files = generateAll(spec, exists(layoutPath) ? load(layoutPath, parseLayout) : undefined);
+    const { spec, layout } = loadSpecFile(specPath, values.layout);
+    const files = generateAll(spec, layout);
     for (const file of files) {
       writeText(join(values.output, file.fileName), file.xml);
     }
@@ -98,10 +96,59 @@ function main(argv: string[]): number {
     process.stdout.write(`generated ${files.length} files in ${values.output}\n`);
     return 0;
   }
+  if (command === "lift") {
+    const [specPath] = positionals;
+    if (!specPath || !values.output) {
+      fail(USAGE);
+    }
+    const spec = explained(specPath, () => parseSpec(readText(specPath)));
+    const layoutPath = layoutPathOf(specPath, values.layout, process.cwd());
+    const orderPath = orderPathBeside(values.output);
+    const { model, ordering, report } = liftSpec(spec, {
+      ...(layoutPath ? { layout: relative(dirname(resolve(values.output)), layoutPath) } : {}),
+      order: basename(orderPath)
+    });
+    writeText(values.output, stringifyModel(model));
+    writeText(orderPath, stringifyOrdering(ordering));
+    if (values.report) {
+      writeText(values.report, renderLiftReport(report, spec.service.displayName ?? spec.service.slug));
+    }
+    const residue = Object.values(report.counts).reduce((n, c) => n + c.residue, 0);
+    const rows = Object.values(report.counts).reduce((n, c) => n + c.rows, 0);
+    process.stdout.write(
+      `lifted ${rows - residue} of ${rows} rows into ${report.tasks} tasks and ${report.profiles} profiles; ${residue} rows stay in tables; ${report.differences.length === 0 ? "compiles back equal" : `${report.totalDifferences} differences on compiling back`}\n`
+    );
+    return report.differences.length === 0 ? 0 : 1;
+  }
+  if (command === "compile") {
+    const [modelPath] = positionals;
+    if (!modelPath || !values.output) {
+      fail(USAGE);
+    }
+    const loaded = loadSpecFile(modelPath, values.layout);
+    if (!loaded.isModel) {
+      fail(`${modelPath} is not a model (it has no \`kind: wa-model\`)`);
+    }
+    writeText(values.output, stringifySpec(loaded.spec));
+    if (loaded.layout) {
+      const target = layoutPathFor(values.output);
+      if (loaded.layoutPath !== resolve(target)) {
+        writeText(target, stringifyLayout(loaded.layout));
+      }
+    }
+    process.stdout.write(`compiled ${modelPath} to ${values.output}\n`);
+    return 0;
+  }
   if (command === "diff") {
     const [a, b] = positionals;
     if (!a || !b) {
       fail(USAGE);
+    }
+    if (/\.ya?ml$/.test(a) && /\.ya?ml$/.test(b)) {
+      const { differences, total } = compareSpecs(loadSpecOnly(a), loadSpecOnly(b), { ignoreRuleOrder: values["ignore-rule-order"] });
+      const shown = differences.length < total ? `first ${differences.length} of ${total} differences` : `${total} differences`;
+      process.stdout.write(total === 0 ? "no differences\n" : `${differences.join("\n")}\n${shown}\n`);
+      return total === 0 ? 0 : 1;
     }
     const differences = diffPaths(a, b, { ignoreRuleOrder: values["ignore-rule-order"] });
     if (differences.length === 0) {
@@ -116,7 +163,7 @@ function main(argv: string[]): number {
     if (!specPath || !taskId) {
       fail(USAGE);
     }
-    process.stdout.write(`${renderTaskRows(taskRows(load(specPath, parseSpec), taskId))}\n`);
+    process.stdout.write(`${renderTaskRows(taskRows(loadSpecOnly(specPath), taskId))}\n`);
     return 0;
   }
   process.stdout.write(USAGE);

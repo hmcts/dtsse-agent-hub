@@ -12,7 +12,7 @@ What a DMN carries that is not content (element ids, column widths, the decision
 wa-spec import <dmn-dir> -o spec.yaml [--report report.md] [--jurisdiction J] [--service-code C] [--display-name N]
 wa-spec generate spec.yaml -o <dir>
 wa-spec diff <a> <b> [--ignore-rule-order]
-wa-spec show spec.yaml <taskId>
+wa-spec show spec.yaml|model.yaml <taskId>
 ```
 
 Run it as `packages/wa-spec/bin/wa-spec` from a checkout after `yarn install`; relative paths resolve against the directory you run it from.
@@ -27,3 +27,22 @@ Run it as `packages/wa-spec/bin/wa-spec` from a checkout after `yarn install`; r
 yarn workspace @hmcts-cft/wa-spec run typecheck
 yarn workspace @hmcts-cft/wa-spec run test
 ```
+
+## The task and role model
+
+The spec above mirrors the six decision tables. For editing, `wa-spec lift` turns it into a model written in tasks and roles (`examples/et/model.yaml`), and `compile` turns the model back into the spec, which `generate` turns into DMNs.
+
+A model holds `service` and `caseTypes`; `roles` (with their category); `permissionProfiles`, named role-to-grant sets many tasks share; `defaults`, the configuration rows and grants that apply to every task (a default grant is one grant, or a list of grants each with its own `only`); `tasks`; `cancellations`; and `tables`. A task carries its name, the events that create it (`create`: event, post-state, extra conditions, delay, and `outputs` for the initiation table's other output columns such as `workingDaysAllowed`), the events that complete it (`complete`), its `cancelCategory`, work type, role category, `due` and `priority` attributes, `title`, `description` or a `link`, other `attributes`, the DMN attributes a case change recalculates (`reconfigure`), and `permissions`: a profile name, or a profile with `remove`, `override` and `add`, or a list of those scoped by `only`. A cancellation rule lists an `action` and the conditions it fires on (`events`, `fromState`, `state`, `toState`, any of them), optionally a `warning`, and the `categories` of the tasks it applies to. A value entry may carry `when` (conditions on the configuration table's other input columns) and `reconfigure` (its `canReconfigure`: a boolean, the string a service writes, or null where the table has no such column). `only` scopes any entry to case types; `overrides: {caseType: value}` replaces a value, trigger or completion for some case types (null drops it for that case type; `{value: null}` is a null value).
+
+`tables` is the escape hatch, in the spec's own form: column definitions, helper decisions, dependencies, hit policies, and any row that is not about one task (for ET, the two completion rows that exist so an event completes nothing). A table the model does not define gets the standard Work Allocation columns.
+
+COLLECT and RULE ORDER tables return in row order, which ET's tests compare by index, so row order and grouping are kept in `<model>.order.yaml`, named by the model's `order` field. Each row lists the model entries it was made of (`<task>/<slot>`, `#<hash>` of the entry's content and case types where a slot has several entries, `.2` for identical ones, `!/<id>` for a cancellation rule, by its `id` (a hash of the rule when it has none), `*/<name>` for a default, `~<n>` for the nth row of `tables`), with `@case,case` where the row covers fewer case types than its entries and a `description` where the row has one. A slot's ref is bare (`<task>/<slot>`) when the slot has one entry and carries a hash when it has several, so adding a slot's second entry, or removing all but one, also changes the ref of the entry that was there, and that entry moves to the end too. An entry no reference names, because it was added or edited, joins an existing row with the same content or is appended; a reference to an entry that no longer exists is skipped. Without the file rows follow the model's own order. The model's `layout` field names the layout file `generate` applies.
+
+```
+wa-spec lift spec.yaml -o model.yaml [--report lift.md] [--layout layout.yaml]
+wa-spec compile model.yaml -o spec.yaml
+wa-spec generate model.yaml -o <dir> [--layout layout.yaml]
+wa-spec diff model.yaml spec.yaml [--ignore-rule-order]
+```
+
+`lift` compiles its own result and exits 1 unless it equals the spec, row order included.

@@ -3,8 +3,11 @@ import { Layout } from "./layout.ts";
 import { Spec, validateSpec } from "./schema.ts";
 
 /** Parses and checks a spec: the shape first, then the references between its parts. */
-export function parseSpec(yamlText: string): Spec {
-  const spec = Spec.parse(parse(yamlText));
+export const parseSpec = (yamlText: string): Spec => specFromDocument(parse(yamlText));
+
+/** Checks a spec already parsed from YAML. */
+export function specFromDocument(document: unknown): Spec {
+  const spec = Spec.parse(document);
   const problems = validateSpec(spec);
   if (problems.length > 0) {
     throw new Error(`Invalid spec:\n${problems.map((p) => `  ${p}`).join("\n")}`);
@@ -16,11 +19,11 @@ const SHORT_LIST = 4;
 const SHORT_ITEM = 40;
 
 /** YAML with short scalar lists on one line, so a row reads as a few lines rather than a column of dashes. */
-export function toYaml(value: unknown): string {
-  const doc = new Document(value);
+export function toYaml(value: unknown, shortList = SHORT_LIST): string {
+  const doc = new Document(value, { aliasDuplicateObjects: false });
   visit(doc, {
     Seq(_key, node) {
-      const short = node.items.length <= SHORT_LIST && node.items.every((item) => isScalar(item) && String(item.value).length < SHORT_ITEM);
+      const short = node.items.length <= shortList && node.items.every((item) => isScalar(item) && String(item.value).length < SHORT_ITEM);
       if (short) {
         node.flow = true;
       }

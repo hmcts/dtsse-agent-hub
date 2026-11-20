@@ -20,7 +20,7 @@ contract changes. Running virtual agents is [`docs/virtual-agents.md`](docs/virt
 | Path | What it holds |
 | --- | --- |
 | `packages/agent-hub/` | The published client, `@hmcts-cft/agent-hub`: hooks, bridge, CLI and the pod runtime (`virtual-agent/entrypoint.sh`, the Assistant's supervisor), and the plugins it carries in `plugins/` (`welsh`, `slides`, `m365`, `m365-files`), which a pod copies onto its disk: `slides`, `m365` and `m365-files` always, `welsh` when its owner ticks it. Its own tests, typecheck and README |
-| `packages/wa-spec/` | `@hmcts-cft/wa-spec`: the Work Allocation task-configuration spec, and the CLI that imports a service's DMNs into it, generates them back (ids and layout from a `spec.layout.yaml` beside the spec) and diffs two sets. Its own tests, typecheck, coverage thresholds and README |
+| `packages/wa-spec/` | `@hmcts-cft/wa-spec`: the Work Allocation task-configuration spec, and the CLI that imports a service's DMNs into it, generates them back (ids and layout from a `spec.layout.yaml` beside the spec), diffs two sets, and lifts a spec into a task- and role-centric model (`lift`, `compile`) that generates the same DMNs. Its own tests, typecheck, coverage thresholds and README |
 | `src/app/api/agent/**` | Agent API route handlers, each wrapped in `agentRoute` / `ownedAgentRoute` (`src/agent-api/route.ts`) |
 | `src/app/api/virtual/**`, `src/app/api/orchestrator/**` | Pod routes (`virtualRoute`, its own launch token only) and orchestrator routes (`orchestratorRoute`); 404 unless `VIRTUAL_AGENTS_ENABLED=true` |
 | `src/agent-auth/` | Bearer validation against the tenant JWKS, launch-token callers, the orchestrator's app-only token, and the `AGENT_AUTH_DISABLED` dev bypasses |
