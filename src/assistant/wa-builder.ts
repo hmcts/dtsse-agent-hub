@@ -38,8 +38,8 @@ export class WaVersionConflict extends Error {
 export interface WaSpecInput {
   service: string;
   model: Model;
-  ordering?: Ordering | undefined;
-  layout?: Layout | undefined;
+  ordering?: Ordering;
+  layout?: Layout;
 }
 
 export interface WaSpecDocuments {
@@ -69,11 +69,15 @@ export function waSpecProblems({ service, model, ordering }: WaSpecInput): strin
   return [];
 }
 
-/** The documents to store, refusing any over the size limit. */
+/**
+ * The documents to store, refusing any over the size limit or that would not read back. The model's `order` and
+ * `layout` file names are dropped: the ordering and layout are columns of their own.
+ */
 export function waDocuments({ model, ordering, layout }: WaSpecInput): WaSpecDocuments {
+  const { order: _order, layout: _layout, ...stored } = model;
   const documents = {
     displayName: model.service.displayName ?? model.service.slug,
-    model: stringifyModel(model),
+    model: stringifyModel(stored),
     ordering: ordering === undefined ? null : stringifyOrdering(ordering),
     layout: layout === undefined ? null : stringifyLayout(layout)
   };
@@ -85,6 +89,11 @@ export function waDocuments({ model, ordering, layout }: WaSpecInput): WaSpecDoc
     if (text !== null && Buffer.byteLength(text) > MAX_WA_DOCUMENT_BYTES) {
       throw new InvalidWaSpec(`the ${name} is over ${MAX_WA_DOCUMENT_BYTES / 1024 / 1024} MiB`);
     }
+  }
+  try {
+    readWaDocuments(documents);
+  } catch (error) {
+    throw new InvalidWaSpec(`would not read back: ${error instanceof Error ? error.message : String(error)}`);
   }
   return documents;
 }

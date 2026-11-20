@@ -22,7 +22,8 @@ describe("wa specs", () => {
     const read = await getWaSpec(prisma, "employment");
 
     expect(read).toMatchObject({ service: "employment", version: 1, savedBy: "alice" });
-    expect(read?.model).toEqual(model);
+    const { order: _order, layout: _layout, ...withoutFiles } = model;
+    expect(read?.model).toEqual(withoutFiles);
     expect(read?.ordering).toEqual(ordering);
     expect(read?.layout).toEqual(layout);
   });

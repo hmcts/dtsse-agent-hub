@@ -63,7 +63,7 @@ export async function saveWaSpec(prisma: PrismaClient, input: WaSpecSave): Promi
     throw new InvalidWaSpec(problems.join("\n"));
   }
   const documents = waDocuments(input);
-  return prisma.$transaction(async (tx) => {
+  return await prisma.$transaction(async (tx) => {
     // Saves to one service are taken one at a time, so two cannot both be the next version.
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`wa_spec_version:${input.service}`}, 0))`;
     const latest = await tx.waSpecVersion.aggregate({ where: { service: input.service }, _max: { version: true } });
