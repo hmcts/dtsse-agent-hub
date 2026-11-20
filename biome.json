@@ -16,6 +16,7 @@
       "!**/build",
       "!**/node_modules",
       "!**/generated",
+      "!packages/wa-spec/test-fixtures",
       "!**/.yarn",
       "!**/.next",
       "!**/test-results",
