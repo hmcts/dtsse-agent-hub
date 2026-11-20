@@ -3,7 +3,7 @@ import Link from "next/link";
 import { type ByCaseType, caseTypeLabel, describeExpr, isRawFeel, textParts } from "@/assistant/wa-builder-text";
 
 export const LINK = "text-asst-accent underline hover:text-asst-accent-hover";
-const CODE = "whitespace-pre-wrap break-words rounded-sm bg-asst-active px-1.5 py-px font-plex-mono text-[0.9em]";
+export const CODE = "whitespace-pre-wrap break-words rounded-sm bg-asst-active px-1.5 py-px font-plex-mono text-[0.9em]";
 
 /** Words with the service's own names set as code. */
 export function Words({ text }: Readonly<{ text: string }>) {

@@ -7,6 +7,7 @@ import { WaBuilderSetup } from "@/components/assistant/WaBuilderSetup";
 import { isBoardGrouping, WaBuilderTaskBoard } from "@/components/assistant/WaBuilderTaskBoard";
 import { prisma } from "@/store/prisma";
 import { requireViewer } from "@/viewer/current";
+import { fullInstant } from "@/web/format";
 
 export const dynamic = "force-dynamic";
 
@@ -28,11 +29,10 @@ export default async function WaBuilderServicePage({
   const { model } = spec;
   const by = first(query.by);
   const caseType = first(query.caseType);
-  const saved = new Intl.DateTimeFormat("en-GB", { dateStyle: "long", timeStyle: "short", timeZone: "Europe/London" }).format(spec.savedAt);
   return (
     <WaBuilderPage
       title={model.service.displayName ?? service}
-      intro={`Version ${spec.version}, saved by ${spec.savedBy} on ${saved}. Read only.`}
+      intro={`Version ${spec.version}, saved by ${spec.savedBy} on ${fullInstant(spec.savedAt.toISOString())}. Read only.`}
       back={{ href: "/assistant/wa-builder", label: "Back to all services" }}
     >
       <ViewTabs service={service} current={view} version={spec.version} />

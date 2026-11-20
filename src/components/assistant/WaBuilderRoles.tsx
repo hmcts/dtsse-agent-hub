@@ -1,7 +1,7 @@
 import type { Model } from "@hmcts-cft/wa-spec";
 import Link from "next/link";
-import { briefExpr, permissionColumns, permissionNames, rolesByCategory, taskName, tasksUsingProfile } from "@/assistant/wa-builder-text";
-import { Grid, LINK, PermissionTick, Section, TD, TH, versionQuery, YesNo } from "@/components/assistant/WaBuilderParts";
+import { briefExpr, grantConditions, permissionColumns, permissionNames, rolesByCategory, taskName, tasksUsingProfile } from "@/assistant/wa-builder-text";
+import { Grid, LINK, PermissionTick, Section, TD, TH, versionQuery, Words, YesNo } from "@/components/assistant/WaBuilderParts";
 
 /** Each role's category, then each permission profile as a grid of roles against the permissions they hold. */
 export function WaBuilderRoles({ model, service, version }: Readonly<{ model: Model; service: string; version?: number }>) {
@@ -27,7 +27,12 @@ export function WaBuilderRoles({ model, service, version }: Readonly<{ model: Mo
       <Section id="wa-profiles" title="Permission profiles">
         {profiles.length === 0 ? <p className="text-[13px] text-asst-muted">None.</p> : null}
         {profiles.map(([name, grants]) => {
-          const rows = Object.entries(grants).map(([role, grant]) => ({ role, grant, perms: permissionNames(grant.perms) }));
+          const rows = Object.entries(grants).map(([role, grant]) => ({
+            role,
+            grant,
+            perms: permissionNames(grant.perms),
+            conditions: grantConditions(grant, model.roles?.[role]?.category)
+          }));
           const columns = permissionColumns(rows);
           const tasks = tasksUsingProfile(model, name);
           return (
@@ -50,10 +55,13 @@ export function WaBuilderRoles({ model, service, version }: Readonly<{ model: Mo
                     <th scope="col" className={TH}>
                       Auto-assign
                     </th>
+                    <th scope="col" className={TH}>
+                      Applies when
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map(({ role, grant, perms }) => (
+                  {rows.map(({ role, grant, perms, conditions }) => (
                     <tr key={role}>
                       <th scope="row" className={`${TD} font-medium`}>
                         {role}
@@ -65,6 +73,7 @@ export function WaBuilderRoles({ model, service, version }: Readonly<{ model: Mo
                       ))}
                       <td className={TD}>{grant.priority === undefined ? "–" : briefExpr(grant.priority)}</td>
                       <td className={TD}>{grant.autoAssign === undefined ? "–" : <YesNo value={briefExpr(grant.autoAssign)} />}</td>
+                      <td className={TD}>{conditions.length === 0 ? "–" : <Words text={conditions.join("; ")} />}</td>
                     </tr>
                   ))}
                 </tbody>

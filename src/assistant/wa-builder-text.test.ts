@@ -3,18 +3,24 @@ import { type Model, parseModel, type Task } from "@hmcts-cft/wa-spec";
 import { describe, expect, it } from "vitest";
 import {
   boardGroups,
+  briefAcrossCaseTypes,
   briefExpr,
+  briefVal,
   cancelCategories,
   caseTypeIds,
+  describeCancellation,
   describeCell,
   describeCompletion,
   describeCond,
   describeExpr,
   describeTaskRule,
   describeTrigger,
+  grantConditions,
   groupByCaseType,
   isRawFeel,
   permissionColumns,
+  permissionNames,
+  reconfigureRules,
   resolveCompletions,
   resolvePermissions,
   resolveTriggers,
@@ -117,6 +123,56 @@ describe("a trigger, completion and cancellation of ET1 Vetting", () => {
 
   it("should find no cancelling rules when the task is not for that case type", () => {
     expect(rulesForTask(et, vetting, "et_englandwales_multiple")).toEqual([]);
+  });
+
+  it("should say which case types have no value when a value is set for only some of them", () => {
+    const some: Task = { id: "T", due: { days: { value: 5, only: ["et_englandwales"] } } };
+    expect(briefAcrossCaseTypes(et, some, (id) => briefVal(some.due?.days, id, caseTypeIds(et)))).toBe(
+      "5 (et_englandwales); none (et_englandwales_multiple, et_scotland, et_scotland_multiple)"
+    );
+    expect(briefAcrossCaseTypes(et, some, () => "")).toBe("");
+  });
+
+  it("should find the reconfigure rules that name no category, or the task's, when the task is reconfigured", () => {
+    expect(reconfigureRules(et, task("Et1Vetting"), "et_englandwales").map((r) => r.rule.id)).toContain("Reconfigure-addAmendHearing");
+    const mixed = {
+      ...et,
+      cancellations: [
+        { id: "a", events: "x", action: "Reconfigure", categories: ["Vetting"] },
+        { id: "b", events: "x", action: "Reconfigure", categories: ["Other"] },
+        { id: "c", events: "x", action: "Reconfigure", categories: [{ feel: "y" }] }
+      ]
+    } as Model;
+    expect(reconfigureRules(mixed, task("Et1Vetting"), "et_scotland").map((r) => [r.rule.id, r.mayApply])).toEqual([
+      ["a", false],
+      ["c", true]
+    ]);
+  });
+
+  it("should include the warning and the note when a rule warns", () => {
+    expect(
+      describeCancellation({ events: "x", action: "Warn", warning: { code: "TA01", text: "Mind the gap" }, categories: ["Vetting"], note: "Agreed with BA" })
+    ).toBe('Warns when `x` happens (category "Vetting"), warning "TA01": "Mind the gap". Note: Agreed with BA');
+  });
+
+  it("should say what a trigger names and sets when it has an initial name and outputs", () => {
+    expect(describeTrigger({ event: "a", postState: "S", initialName: "Name A", outputs: { workingDaysAllowed: 5 } })).toBe(
+      'Created when `a` leaves the case in `S`, named "Name A", with workingDaysAllowed 5'
+    );
+  });
+
+  it("should split permissions on commas when a list holds one comma-separated string", () => {
+    expect(permissionNames(["Read,Own,Claim"])).toEqual(["Read", "Own", "Claim"]);
+    expect(permissionNames("Read, Own")).toEqual(["Read", "Own"]);
+  });
+
+  it("should list a grant's authorisations, case access category and own category when they are set", () => {
+    expect(grantConditions({ perms: "Read", authorisations: "294", caseAccessCategory: "civil", category: "CTSC" }, "JUDICIAL")).toEqual([
+      "needs authorisation 294",
+      "case access category civil",
+      "counts as category CTSC"
+    ]);
+    expect(grantConditions({ perms: "Read", category: "ADMIN" }, "ADMIN")).toEqual([]);
   });
 
   it("should find a rule with no categories when it is for the task's case type, since it is about every task", () => {

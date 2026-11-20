@@ -32,7 +32,7 @@ describe("the builder's views", () => {
     expect(screen.getByRole("link", { name: "Employment" }).getAttribute("href")).toBe("/assistant/wa-builder/employment");
     const row = screen.getByRole("row", { name: /Employment/ });
     expect(within(row).getByText("3")).toBeDefined();
-    expect(within(row).getByText(/19 Nov 2026/)).toBeDefined();
+    expect(row.querySelector("time")?.getAttribute("title")).toContain("19 November 2026 at 10:00");
   });
 
   it("should say so when no service is held", () => {
@@ -94,6 +94,25 @@ describe("the builder's views", () => {
     const ids = screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.id);
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids.every((id) => /^wa-group-\d+$/.test(id))).toBe(true);
+  });
+
+  it("should show what a grant applies only when, and the task's names, when a task has them", () => {
+    const model = {
+      ...et,
+      roles: { judge: { category: "JUDICIAL" } },
+      permissionProfiles: { p: { judge: { perms: ["Read,Own"], authorisations: "294", caseAccessCategory: "civil", category: "CTSC" } } },
+      defaults: undefined
+    } as Model;
+    const named = { ...task("Et1Vetting"), permissions: "p", initialName: "Et1 Vetting" };
+    render(<WaBuilderTaskDetail model={model} task={named} />);
+
+    const grid = screen.getByRole("region", { name: "Task permissions" });
+    expect(within(grid).getByRole("row", { name: /judge/ }).textContent).toContain(
+      "needs authorisation 294; case access category civil; counts as category CTSC"
+    );
+    expect(within(grid).getAllByText("✓").length).toBe(2);
+    expect(screen.getByText("Name when created")).toBeDefined();
+    expect(screen.getByText("Et1 Vetting")).toBeDefined();
   });
 
   it("should show a calculated setting as itself, not as No, when a setting is not a plain boolean", () => {

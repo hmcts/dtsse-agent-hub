@@ -5,6 +5,7 @@ export * from "./file-names.ts";
 export * from "./generator.ts";
 export * from "./importer.ts";
 export * from "./layout.ts";
+export { byCodePoint } from "./merge.ts";
 export type { Cancellation, Completion, Grant, Ordering, PermissionSpec, Role, Task, Trigger, Val } from "./model.ts";
 export { categoryParts, isValEntry, Model, ownEntry, permissionSpecs, validateModel } from "./model.ts";
 export { compileModel } from "./model-compile.ts";

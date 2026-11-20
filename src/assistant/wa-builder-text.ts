@@ -1,4 +1,5 @@
 import {
+  byCodePoint,
   type Cancellation,
   type Cond,
   categoryParts,
@@ -31,8 +32,6 @@ const scalar = (value: string | number | boolean | null | undefined): string =>
 
 const listOf = (items: string[], joiner: "and" | "or"): string =>
   items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} ${joiner} ${items[items.length - 1]}`;
-
-export const compare = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -142,7 +141,7 @@ export function describeColumn(column: string, cell: FriendlyCell): string {
   return names.length === 1 ? `${code(column)} ${verb} ${names[0]}` : `${code(column)} ${verb} one of ${listOf(names, "or")}`;
 }
 
-const conditions = (when: Record<string, FriendlyCell> | undefined): string =>
+export const describeConditions = (when: Record<string, FriendlyCell> | undefined): string =>
   Object.entries(when ?? {})
     .map(([column, cell]) => describeColumn(column, cell))
     .join(" and ");
@@ -154,12 +153,22 @@ export function describeTrigger(trigger: Trigger): string {
   if (trigger.postState !== undefined) {
     text = `Created when ${event} leaves the case in ${describeCell(trigger.postState)}`;
   }
-  const condition = conditions(trigger.when);
+  const condition = describeConditions(trigger.when);
   if (condition !== "") {
     text += ` if ${condition}`;
   }
   if (trigger.delay !== undefined && trigger.delay !== null) {
     text += `, after a delay of ${describeExpr(trigger.delay)}`;
+  }
+  if (trigger.initialName !== undefined && trigger.initialName !== null) {
+    text += `, named ${describeExpr(trigger.initialName)}`;
+  }
+  const outputs = Object.entries(trigger.outputs ?? {}).map(([name, value]) => `${name} ${describeExpr(value)}`);
+  if (outputs.length > 0) {
+    text += `, with ${listOf(outputs, "and")}`;
+  }
+  if (trigger.cancelCategory !== undefined && trigger.cancelCategory !== null) {
+    text += `, category ${describeExpr(trigger.cancelCategory)}`;
   }
   return text;
 }
@@ -188,6 +197,14 @@ export function describeCancellation(rule: Cancellation): string {
   const categories = (rule.categories ?? []).map(describeExpr);
   if (categories.length > 0) {
     text += ` (${categories.length === 1 ? "category" : "categories"} ${listOf(categories, "and")})`;
+  }
+  if (rule.warning?.code !== undefined || rule.warning?.text !== undefined) {
+    const code = rule.warning.code === undefined ? "" : ` ${describeExpr(rule.warning.code)}`;
+    const message = rule.warning.text === undefined ? "" : `: ${describeExpr(rule.warning.text)}`;
+    text += `, warning${code}${message}`;
+  }
+  if (rule.note !== undefined) {
+    text += `. Note: ${rule.note}`;
   }
   return text;
 }
@@ -278,11 +295,14 @@ export const briefVal = (val: Val | undefined, caseType: string, taskCases: stri
 
 /** A value across the task's case types: the one value, or each value with the case types it is for. */
 export function briefAcrossCaseTypes(model: Model, task: Task, resolve: (caseType: string) => string): string {
-  const groups = groupByCaseType(taskCaseTypes(model, task), resolve).filter((group) => group.value !== "");
+  const groups = groupByCaseType(taskCaseTypes(model, task), resolve);
   const [only] = groups;
+  if (groups.every((group) => group.value === "")) {
+    return "";
+  }
   return groups.length === 1 && only
     ? only.value
-    : groups.map((group) => `${group.value} (${group.caseTypes.map((id) => caseTypeLabel(model, id)).join(", ")})`).join("; ");
+    : groups.map((group) => `${group.value === "" ? "none" : group.value} (${group.caseTypes.map((id) => caseTypeLabel(model, id)).join(", ")})`).join("; ");
 }
 
 export interface PermissionRow {
@@ -291,8 +311,8 @@ export interface PermissionRow {
   perms: string[];
   priority: string;
   autoAssign: string;
-  authorisations: string;
-  caseAccessCategory: string;
+  /** What a row applies only when, as phrases: its authorisations, case access category and a category of its own. */
+  conditions: string[];
   /** Where the row comes from: the task's profile, a change to it, a grant the task adds, or a grant every task has. */
   source: "profile" | "changed" | "added" | "default";
   profile?: string;
@@ -300,7 +320,22 @@ export interface PermissionRow {
 }
 
 export const permissionNames = (perms: Grant["perms"]): string[] =>
-  (Array.isArray(perms) ? perms : perms.split(",")).map((perm) => perm.trim()).filter((perm) => perm !== "");
+  [perms]
+    .flat()
+    .flatMap((perm) => perm.split(","))
+    .map((perm) => perm.trim())
+    .filter((perm) => perm !== "");
+
+const plain = (expr: Expr): string => (typeof expr === "string" ? expr : describeExpr(expr));
+
+/** What a grant applies only when: the authorisation a person needs, the case access category, and a category that is not the role's. */
+export function grantConditions(grant: Grant, roleCategory: Expr | undefined): string[] {
+  return [
+    ...(grant.authorisations === undefined ? [] : [`needs authorisation ${plain(grant.authorisations)}`]),
+    ...(grant.caseAccessCategory === undefined ? [] : [`case access category ${plain(grant.caseAccessCategory)}`]),
+    ...(grant.category === undefined || JSON.stringify(grant.category) === JSON.stringify(roleCategory) ? [] : [`counts as category ${plain(grant.category)}`])
+  ];
+}
 
 function permissionRow(model: Model, role: string, grant: Grant, source: PermissionRow["source"], profile?: string): PermissionRow {
   return {
@@ -309,8 +344,7 @@ function permissionRow(model: Model, role: string, grant: Grant, source: Permiss
     perms: permissionNames(grant.perms),
     priority: grant.priority === undefined ? "–" : briefExpr(grant.priority),
     autoAssign: grant.autoAssign === undefined ? "–" : briefExpr(grant.autoAssign),
-    authorisations: grant.authorisations === undefined ? "" : briefExpr(grant.authorisations),
-    caseAccessCategory: grant.caseAccessCategory === undefined ? "" : briefExpr(grant.caseAccessCategory),
+    conditions: grantConditions(grant, ownEntry(model.roles, role)?.category),
     source,
     ...(profile === undefined ? {} : { profile }),
     ...(grant.note === undefined ? {} : { note: grant.note })
@@ -365,7 +399,7 @@ const PERMISSION_ORDER = [
 export function permissionColumns(rows: Array<{ perms: string[] }>): string[] {
   const used = new Set(rows.flatMap((row) => row.perms));
   const known = PERMISSION_ORDER.filter((perm) => used.has(perm));
-  return [...known, ...[...used].filter((perm) => !PERMISSION_ORDER.includes(perm)).sort(compare)];
+  return [...known, ...[...used].filter((perm) => !PERMISSION_ORDER.includes(perm)).sort(byCodePoint)];
 }
 
 /** The tasks whose permissions use a profile. */
@@ -380,8 +414,8 @@ export function rolesByCategory(model: Model): Array<{ category: string; roles: 
     groups.set(category, [...(groups.get(category) ?? []), role]);
   }
   return [...groups.entries()]
-    .map(([category, roles]) => ({ category, roles: roles.sort(compare) }))
-    .sort((a, b) => (a.category === "No category" ? 1 : b.category === "No category" ? -1 : compare(a.category, b.category)));
+    .map(([category, roles]) => ({ category, roles: roles.sort(byCodePoint) }))
+    .sort((a, b) => (a.category === "No category" ? 1 : b.category === "No category" ? -1 : byCodePoint(a.category, b.category)));
 }
 
 export interface CancelCategories {
@@ -406,17 +440,13 @@ export interface TaskRule {
   mayApply: boolean;
 }
 
-/**
- * The cancelling and warning rules that act on a task in one case type. A rule with no categories is about every task; a
- * rule or task with a calculated category may apply.
- */
-export function rulesForTask(model: Model, task: Task, caseType: string): TaskRule[] {
+function rulesWhere(model: Model, task: Task, caseType: string, wanted: (rule: Cancellation) => boolean): TaskRule[] {
   if (!taskCaseTypes(model, task).includes(caseType)) {
     return [];
   }
   const { named, calculated } = cancelCategories(model, task, caseType);
   return (model.cancellations ?? []).flatMap((rule): TaskRule[] => {
-    if (rule.action === "Reconfigure" || !(rule.only ?? caseTypeIds(model)).includes(caseType)) {
+    if (!wanted(rule) || !(rule.only ?? caseTypeIds(model)).includes(caseType)) {
       return [];
     }
     if (rule.categories === undefined) {
@@ -430,9 +460,16 @@ export function rulesForTask(model: Model, task: Task, caseType: string): TaskRu
   });
 }
 
-/** The rules that recalculate a case's tasks in this case type. */
-export const reconfigureRules = (model: Model, caseType: string): Cancellation[] =>
-  (model.cancellations ?? []).filter((rule) => rule.action === "Reconfigure" && (rule.only ?? caseTypeIds(model)).includes(caseType));
+/**
+ * The cancelling and warning rules that act on a task in one case type. A rule with no categories is about every task; a
+ * rule or task with a calculated category may apply.
+ */
+export const rulesForTask = (model: Model, task: Task, caseType: string): TaskRule[] =>
+  rulesWhere(model, task, caseType, (rule) => rule.action !== "Reconfigure");
+
+/** The rules that recalculate a task in one case type, matched to it by category as its cancelling rules are. */
+export const reconfigureRules = (model: Model, task: Task, caseType: string): TaskRule[] =>
+  rulesWhere(model, task, caseType, (rule) => rule.action === "Reconfigure");
 
 export interface BoardTask {
   task: Task;
@@ -457,7 +494,7 @@ export function boardGroups(model: Model, by: BoardGrouping, caseType?: string):
   }
   return [...groups.entries()]
     .map(([group, tasks]) => ({ group, tasks }))
-    .sort((a, b) => (a.group === "Not set" ? 1 : b.group === "Not set" ? -1 : compare(a.group, b.group)));
+    .sort((a, b) => (a.group === "Not set" ? 1 : b.group === "Not set" ? -1 : byCodePoint(a.group, b.group)));
 }
 
 export const DUE_LABELS: Record<string, string> = {

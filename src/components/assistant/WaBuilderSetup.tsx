@@ -1,6 +1,6 @@
 import type { Model } from "@hmcts-cft/wa-spec";
-import { briefExpr, caseTypeIds, caseTypeLabel, describeColumn, permissionNames } from "@/assistant/wa-builder-text";
-import { ExprView, Grid, Section, TD, TH, Words, YesNo } from "@/components/assistant/WaBuilderParts";
+import { briefExpr, caseTypeIds, caseTypeLabel, describeConditions, grantConditions, permissionNames } from "@/assistant/wa-builder-text";
+import { CODE, ExprView, Grid, Section, TD, TH, Words, YesNo } from "@/components/assistant/WaBuilderParts";
 
 const caseTypesText = (model: Model, only: string[] | undefined) => (only ?? caseTypeIds(model)).map((id) => caseTypeLabel(model, id)).join(", ");
 
@@ -25,7 +25,7 @@ export function WaBuilderSetup({ model }: Readonly<{ model: Model }>) {
               {model.caseTypes.map((caseType) => (
                 <li key={caseType.id}>
                   {caseType.displayName === undefined ? null : `${caseType.displayName}, `}
-                  <code className="rounded-sm bg-asst-active px-1.5 py-px font-plex-mono text-[0.9em]">{caseType.id}</code>
+                  <code className={CODE}>{caseType.id}</code>
                 </li>
               ))}
             </ul>
@@ -63,12 +63,7 @@ export function WaBuilderSetup({ model }: Readonly<{ model: Model }>) {
                     <ExprView expr={attribute.value} />
                     {attribute.when === undefined ? null : (
                       <p className="pt-1 text-xs text-asst-muted">
-                        When{" "}
-                        <Words
-                          text={Object.entries(attribute.when)
-                            .map(([column, cell]) => describeColumn(column, cell))
-                            .join(" and ")}
-                        />
+                        When <Words text={describeConditions(attribute.when)} />
                       </p>
                     )}
                     {attribute.note === undefined ? null : <p className="pt-1 text-xs text-asst-muted">{attribute.note}</p>}
@@ -101,6 +96,9 @@ export function WaBuilderSetup({ model }: Readonly<{ model: Model }>) {
                   Auto-assign
                 </th>
                 <th scope="col" className={TH}>
+                  Applies when
+                </th>
+                <th scope="col" className={TH}>
                   Case types
                 </th>
               </tr>
@@ -114,6 +112,7 @@ export function WaBuilderSetup({ model }: Readonly<{ model: Model }>) {
                   <td className={TD}>{permissionNames(grant.perms).join(", ")}</td>
                   <td className={TD}>{grant.priority === undefined ? "–" : briefExpr(grant.priority)}</td>
                   <td className={TD}>{grant.autoAssign === undefined ? "–" : <YesNo value={briefExpr(grant.autoAssign)} />}</td>
+                  <td className={TD}>{grantConditions(grant, model.roles?.[role]?.category).join("; ") || "–"}</td>
                   <td className={TD}>{caseTypesText(model, grant.only)}</td>
                 </tr>
               ))}

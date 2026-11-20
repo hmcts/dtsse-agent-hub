@@ -1,14 +1,6 @@
 import Link from "next/link";
 import { Grid, LINK, TD, TH } from "@/components/assistant/WaBuilderParts";
-
-const UPDATED = new Intl.DateTimeFormat("en-GB", {
-  day: "numeric",
-  month: "short",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-  timeZone: "Europe/London"
-});
+import { fullInstant, instant } from "@/web/format";
 
 export interface WaServiceRow {
   service: string;
@@ -51,7 +43,9 @@ export function WaBuilderServiceList({ services }: Readonly<{ services: readonly
             </th>
             <td className={TD}>{row.latestVersion}</td>
             <td className={TD}>
-              <time dateTime={row.updatedAt.toISOString()}>{UPDATED.format(row.updatedAt)}</time>
+              <time dateTime={row.updatedAt.toISOString()} title={fullInstant(row.updatedAt.toISOString())}>
+                {instant(row.updatedAt.toISOString())}
+              </time>
             </td>
           </tr>
         ))}

@@ -3,7 +3,6 @@ import {
   cancelCategories,
   caseTypeLabel,
   DUE_LABELS,
-  describeCancellation,
   describeCompletion,
   describeLink,
   describeTaskRule,
@@ -19,7 +18,7 @@ import {
   rulesForTask,
   taskCaseTypes
 } from "@/assistant/wa-builder-text";
-import { ExprView, Grid, PerCaseType, PermissionTick, Section, TD, TH, Words, YesNo } from "@/components/assistant/WaBuilderParts";
+import { CODE, ExprView, Grid, PerCaseType, PermissionTick, Section, TD, TH, Words, YesNo } from "@/components/assistant/WaBuilderParts";
 
 const SOURCE: Record<string, string> = { profile: "Profile", changed: "Profile, changed for this task", added: "Added for this task", default: "Every task" };
 
@@ -28,8 +27,8 @@ function Sentences({ items, empty }: Readonly<{ items: string[]; empty: string }
     <p className="text-[13px] text-asst-muted">{empty}</p>
   ) : (
     <ul className="flex list-disc flex-col gap-1.5 pl-5 text-[13px]">
-      {items.map((item) => (
-        <li key={item}>
+      {items.map((item, index) => (
+        <li key={`${index}-${item}`}>
           <Words text={item} />
         </li>
       ))}
@@ -47,8 +46,8 @@ function ValueCell({ model, task, val }: Readonly<{ model: Model; task: Task; va
           <span className="text-asst-muted">Not set</span>
         ) : (
           <ul className="flex flex-col gap-1">
-            {values.map((value) => (
-              <li key={JSON.stringify(value)}>
+            {values.map((value, index) => (
+              <li key={`${index}-${JSON.stringify(value)}`}>
                 <ExprView expr={value} />
               </li>
             ))}
@@ -96,8 +95,20 @@ export function WaBuilderTaskDetail({ model, task }: Readonly<{ model: Model; ta
       <dl className="grid grid-cols-1 gap-x-6 gap-y-1.5 text-[13px] min-[560px]:grid-cols-[max-content_1fr]">
         <dt className="text-asst-muted">Task id</dt>
         <dd>
-          <code className="rounded-sm bg-asst-active px-1.5 py-px font-plex-mono text-[0.9em]">{task.id}</code>
+          <code className={CODE}>{task.id}</code>
         </dd>
+        <dt className="text-asst-muted">Name</dt>
+        <dd>
+          <ValueCell model={model} task={task} val={task.name} />
+        </dd>
+        {task.initialName === undefined ? null : (
+          <>
+            <dt className="text-asst-muted">Name when created</dt>
+            <dd>
+              <ValueCell model={model} task={task} val={task.initialName} />
+            </dd>
+          </>
+        )}
         <dt className="text-asst-muted">Case types</dt>
         <dd>{cases.map((id) => caseTypeLabel(model, id)).join(", ")}</dd>
         <dt className="text-asst-muted">Work type</dt>
@@ -152,7 +163,7 @@ export function WaBuilderTaskDetail({ model, task }: Readonly<{ model: Model; ta
             These are recalculated: <Words text={task.reconfigure.map((name) => `\`${name}\``).join(", ")} />.
           </p>
         )}
-        <PerCaseType model={model} groups={groupByCaseType(cases, (id) => reconfigureRules(model, id).map(describeCancellation))}>
+        <PerCaseType model={model} groups={groupByCaseType(cases, (id) => reconfigureRules(model, task, id).map(describeTaskRule))}>
           {(items: string[]) => <Sentences items={items} empty="No event reconfigures tasks." />}
         </PerCaseType>
       </Section>
@@ -193,13 +204,16 @@ export function WaBuilderTaskDetail({ model, task }: Readonly<{ model: Model; ta
                       Auto-assign
                     </th>
                     <th scope="col" className={TH}>
+                      Applies when
+                    </th>
+                    <th scope="col" className={TH}>
                       From
                     </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((row) => (
-                    <tr key={`${row.role}-${row.source}-${row.profile ?? ""}`}>
+                  {rows.map((row, index) => (
+                    <tr key={`${index}-${row.role}-${row.source}-${row.profile ?? ""}`}>
                       <th scope="row" className={`${TD} font-medium`}>
                         {row.role}
                       </th>
@@ -213,6 +227,7 @@ export function WaBuilderTaskDetail({ model, task }: Readonly<{ model: Model; ta
                       <td className={TD}>
                         <YesNo value={row.autoAssign} />
                       </td>
+                      <td className={TD}>{row.conditions.length === 0 ? "–" : <Words text={row.conditions.join("; ")} />}</td>
                       <td className={TD}>
                         {SOURCE[row.source]}
                         {row.profile === undefined ? "" : `: ${row.profile}`}

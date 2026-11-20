@@ -27,9 +27,10 @@ const NEW_FEEDBACK: Workflow = { href: "/assistant/feedback/new", label: "New fe
  * who has connected Microsoft 365, which most of it reads, and whose pod's client claims `morning-briefing`
  * (`offersBriefing`). It is not a page: it starts a chat whose first message runs the briefing, the same way the
  * new-chat screen starts one, and opens it.
- * Welsh translations is offered only to someone whose assistant has the plugin that runs it. Scheduled prompts are not
- * offered at all until they are built: a menu item opening a page that says "not available yet" is a dead end. A new feedback project is offered wherever prototype feedback is on; the projects themselves are in the
- * sidebar's list.
+ * Welsh translations is offered only to someone whose assistant has the plugin that runs it. The Work Allocation builder is
+ * offered to everyone, so the plus is always there. Scheduled prompts are not offered at all until they are built: a menu
+ * item opening a page that says "not available yet" is a dead end. A new feedback project is offered wherever prototype
+ * feedback is on; the projects themselves are in the sidebar's list.
  *
  * Dismissed by Escape or a click outside, in the same shape as the chat menu: closing from the keyboard puts focus
  * back on the trigger, while a click elsewhere leaves focus where the click put it.
@@ -89,11 +90,6 @@ export function WorkflowsMenu({
   }
 
   useDismiss(open, ref, close);
-
-  // No plus at all when there is nothing behind it: a button that opens an empty menu is a dead end of its own.
-  if (workflows.length === 0 && !(briefing && start !== undefined)) {
-    return null;
-  }
   return (
     <div ref={ref} className="relative flex shrink-0">
       <button
