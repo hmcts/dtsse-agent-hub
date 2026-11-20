@@ -118,8 +118,9 @@ describe("uploads", () => {
     expect((await refusal(importUpload("x.xlsx", new TextEncoder().encode("hello")))).status).toBe(400);
   });
 
-  it("should refuse a zip that is not a workbook", async () => {
-    expect((await refusal(importUpload("x.xlsx", new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0])))).message).toContain("could not be read");
+  it("should refuse a zip that is not a workbook when it names a workbook's entries but cannot be read", async () => {
+    const bytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, ...new TextEncoder().encode("[Content_Types].xml xl/")]);
+    expect((await refusal(importUpload("x.xlsx", bytes))).message).toContain("could not be read");
   });
 
   it("should take the forms a PDF's draft holds", async () => {
