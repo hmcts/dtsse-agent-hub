@@ -392,7 +392,7 @@ describe("typing into the editor", () => {
   it("should send the version the edit started from, and refuse to save an older version over the later ones", async () => {
     fetchMock.mockResolvedValue(reply(201, { version: 4 }));
     const user = userEvent.setup();
-    const { rerender } = render(<BulkScanEditor view={{ ...VIEW, version: 3, versions: [{ ...VERSIONS[0]!, version: 3 }] }} signOff={vi.fn()} />);
+    render(<BulkScanEditor view={{ ...VIEW, version: 3, versions: [{ ...VERSIONS[0]!, version: 3 }] }} signOff={vi.fn()} />);
     await user.type(screen.getByLabelText("Label of 1.2"), "!");
     await user.click(screen.getByRole("button", { name: "Save as a new version" }));
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1].body).baseVersion).toBe(3);
