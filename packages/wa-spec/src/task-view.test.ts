@@ -153,17 +153,24 @@ describe("taskRows comma-separated categories", () => {
         hitPolicy: "COLLECT",
         inputs: [],
         outputs: [{ name: "processCategories" }],
-        rows: [{ returns: { processCategories: "catB,catC" } }, { returns: { processCategories: "catD,catE" } }]
+        rows: [
+          { returns: { processCategories: "catB,catC" } },
+          { returns: { processCategories: "catA, catB" } },
+          { returns: { processCategories: "catB" } },
+          { returns: { processCategories: "catD,catE" } },
+          { returns: {} },
+          { returns: { processCategories: null } }
+        ]
       }
     }
   });
 
-  it("should match a cancellation row when any category in either list is shared", () => {
+  it("should match a cancellation row only when the task has all of its categories, and one with no category applies to every task", () => {
     expect(
       taskRows(listed, "T1")
         .find((f) => f.kind === "cancellation")
         ?.rows.map((r) => r.index)
-    ).toEqual([1]);
+    ).toEqual([2, 3, 5, 6]);
   });
 });
 

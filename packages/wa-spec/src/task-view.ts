@@ -25,27 +25,32 @@ const canBeRead = (value: Expr | undefined): boolean =>
   typeof value === "object" && value !== null && ("if" in value ? canBeRead(value.use) || canBeRead(value.otherwise) : true);
 
 /** The process categories a task is created with: `sure` ones come from rows that name it, `possible` ones from rows that may. */
-interface Categories {
+export interface Categories {
   sure: Set<string>;
   possible: Set<string>;
 }
 
-/** Whether a cancellation row's process categories include one the task is created with; an empty cell is every category. */
-const cancels = (value: Expr | undefined, categories: Categories): Match => {
-  if (value === undefined) {
+/**
+ * Whether a cancellation row applies to a task with these categories. Work Allocation correlates a cancellation on the case
+ * only, so an empty or null cell applies to every task, and a list of categories applies only to a task that has all of them.
+ * A structured value is a possible match when it can give a category the task has, or one the spec does not spell out.
+ */
+export const cancels = (value: Expr | undefined, categories: Categories): Match => {
+  if (value === undefined || value === null || value === "") {
     return "yes";
   }
-  const listedValues = typeof value === "string" ? listed(value) : categoriesOf(value);
-  const structured = typeof value === "object" && value !== null;
-  if (!structured && listedValues.some((c) => categories.sure.has(c))) {
-    return "yes";
+  const has = (c: string) => categories.sure.has(c);
+  const mayHave = (c: string) => categories.sure.has(c) || categories.possible.has(c);
+  if (typeof value === "string") {
+    const wanted = listed(value);
+    return wanted.every(has) ? "yes" : wanted.every(mayHave) ? "maybe" : "no";
   }
-  const overlaps = listedValues.some((c) => categories.sure.has(c) || categories.possible.has(c));
-  return overlaps || (structured && ("feel" in value || canBeRead(value))) ? "maybe" : "no";
+  const wanted = categoriesOf(value);
+  return wanted.some(mayHave) || (typeof value === "object" && ("feel" in value || canBeRead(value))) ? "maybe" : "no";
 };
 
 /** Every string in a structured expression, which is where a task id or process category would be written. */
-const literalsOf = (value: unknown): string[] =>
+export const literalsOf = (value: unknown): string[] =>
   typeof value === "string" ? [value] : typeof value === "object" && value !== null ? Object.values(value).flatMap(literalsOf) : [];
 
 const quoted = (text: string): string[] => [...text.matchAll(/"([^"]*)"/g)].map((m) => m[1] as string);
@@ -58,7 +63,7 @@ const listed = (text: string): string[] =>
     .filter(Boolean);
 
 /** The process categories a value may give: a string, the quoted strings of FEEL, or the strings of a structured expression, each split on commas. */
-const categoriesOf = (value: Expr | undefined): string[] =>
+export const categoriesOf = (value: Expr | undefined): string[] =>
   (typeof value === "object" && value !== null && "feel" in value ? quoted(value.feel) : literalsOf(value)).flatMap(listed);
 
 /** Whether an output value names the task: a scalar or FEEL text does, and a structured expression with the id somewhere in it may. */

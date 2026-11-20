@@ -46,3 +46,34 @@ wa-spec diff model.yaml spec.yaml [--ignore-rule-order]
 ```
 
 `lift` compiles its own result and exits 1 unless it equals the spec, row order included.
+
+## The case lifecycle
+
+`wa-spec lifecycle` lays a spec's tasks over the case lifecycle of a service's CCD definition, to find what the definition cannot back.
+
+```
+wa-spec lifecycle <definition-dir> --spec <spec.yaml|model.yaml> [--case-type X] [--env prod|nonprod | --exclude <glob,...>] [--var NAME=value]... [--format yaml|json]
+```
+
+`<definition-dir>` is the directory the service passes to ccd-definition-processor as `json2xlsx -D`; it is not guessed from a repo root. It is read as the processor reads it: every `.json` file below it belongs to the sheet named by the first folder of its path (or by its own name for a file directly in it), and the files of a sheet are concatenated. Only `CaseType`, `State` and `CaseEvent` are read. `--exclude` is the processor's `-e`: patterns with `*`, repeatable or comma separated, and a file is left out when any segment of its path matches one. Nothing is excluded unless `--exclude` or `--env` says so. `--env` is shorthand for ET's pair, `*-prod.json` (`nonprod`) or `*-nonprod.json` (`prod`). `${NAME}` placeholders are replaced in every file's text before it is parsed, as the processor's `Substitutor` does, from the environment variables that start with `CCD_DEF` and from `--var NAME=value` (repeatable, taking precedence). A placeholder left unset in a column the reader needs (`CaseTypeID`, `ID`, `PreConditionState(s)`, `PostConditionState`, `Publish`) is an error naming the file and the variable. Symlinks are not followed.
+
+| Service | Definition directory | Build's exclusions |
+|---|---|---|
+| ET (E&W, Scotland) | `definitions/json` | `*-prod.json` or `*-nonprod.json` (`json-env.js`) |
+| Civil | `ccd-definition/civil`, `ccd-definition/generalapplication` | `UserProfile.json,*-prod.json`; prod `UserProfile.json,*-nonprod.json` (`bin/build-release-ccd-definition.sh`) |
+| PRL | `definitions/private-law/json` | `*-prod.json,*-preview.json,*-ignore.json` for demo, AAT, perftest and ITHC; `*-prod.json,*-sublive.json,*-ignore.json` for local and preview; `*-nonprod.json,*-sublive.json,*-preview.json,*-ignore.json` for prod (`package.json`) |
+| IA | `definitions/appeal/json`, `definitions/bail/json` | none; environments are substituted (`bin/generate-excel.sh`) |
+| SSCS | `definitions/benefit/sheets` | `*-nonshuttered.json` (or `*-shuttered.json`), plus `*-prod.json,*-WA-*` for WA off or `*-prod.json,*-nonWA*` for WA on; prod `*-nonprod.json,*-nonprod-*,*-WA-*,*preview.json`. Variables: `CCD_DEF_PUBLISH=Y` with WA on, `N` otherwise and in prod (`bin/create-xlsx.sh`) |
+| Finrem | `definitions/consented/json` or `definitions/contested/json`, each with `definitions/common/json` copied over it first (`copy-common-components-*` in `package.json`) | `*-prod.json` (prod `*-nonprod.json`), plus `*-wa-nonprod.json` for consented without WA (`bin/*/generate-excel-*.sh`). Variables: `CCD_DEF_CASE_TYPE_ID=FinancialRemedyMVP2` (consented) or `FinancialRemedyContested`; consented also `CCD_DEF_PUBLISH=Y` with WA on, `N` otherwise |
+| FPL | `ccd-definition` | `UserProfile.json,*-nonprod.json,*-testing.json,*-shuttered.json,*-local.json` for prod; `UserProfile.json,*-prod.json,*-shuttered.json,*-local.json` otherwise (`bin/build-release-ccd-definition.sh`) |
+
+A service on ccd-config-generator writes the same sheets to `build/definitions/<CaseType>/` (`CaseType.json`, `CaseEvent/<event>.json`, `State.json`, ...), so pass that directory. The generator omits `PostConditionState` for an event declared `postStateFromCallback()`; the reader then treats the event as able to move the case to any state.
+
+The output has, per case type of the definition that the spec lists (or the one named by `--case-type`, which the spec must list): the state count, the events that create, complete, cancel and reconfigure tasks, and `warnings` for
+
+- an event that creates, completes, cancels or reconfigures a task but is not published (`Publish` is `Y`, `Yes` or `True`), which Work Allocation never sees;
+- an event or state the spec names that the definition does not define;
+- a task created in a state the creating event does not leave the case in;
+- a cancel event whose pre-states cannot overlap the states a task can exist in, which are followed from where it is created through the events' post-states.
+
+A cancellation row whose `processCategories` is computed cannot be resolved to tasks. It is listed as `mayCancel` for the tasks the spec gives computed categories, and raises no warning other than the publish one. Rows whose event cell is FEEL are left out. An event defined twice for one case type stops the read, as the definition store would refuse it.

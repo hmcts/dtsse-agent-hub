@@ -1,3 +1,7 @@
+export * from "./ccd/definition-files.ts";
+export * from "./ccd/lifecycle.ts";
+export * from "./ccd/lifecycle-command.ts";
+export * from "./ccd/overlay.ts";
 export * from "./diff.ts";
 export * from "./dmn-model.ts";
 export * from "./feel.ts";

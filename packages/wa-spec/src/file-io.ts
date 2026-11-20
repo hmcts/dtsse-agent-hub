@@ -10,6 +10,10 @@ export const readText = (path: string): string => readFileSync(path, "utf8"); //
 
 export const listDir = (dir: string): string[] => readdirSync(dir); // NOSONAR: a directory the operator passed
 
+/** The entries of a directory, with whether each is a directory, a regular file or neither (a symlink is neither). */
+export const listEntries = (dir: string): Array<{ name: string; kind: "dir" | "file" | "other" }> =>
+  readdirSync(dir, { withFileTypes: true }).map((e) => ({ name: e.name, kind: e.isDirectory() ? "dir" : e.isFile() ? "file" : "other" })); // NOSONAR: a directory the operator passed
+
 export const isDirectory = (path: string): boolean => statSync(path).isDirectory(); // NOSONAR: a path the operator passed
 
 export const exists = (path: string): boolean => existsSync(path); // NOSONAR: a path the operator passed
