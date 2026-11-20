@@ -63,20 +63,24 @@ export function readDefinitionDir(dir: string, options: ReadOptions = {}): Recor
   const walk = (path: string, segments: string[]): void => {
     for (const { name, kind } of listEntries(path).sort((a, b) => byCodePoint(a.name, b.name))) {
       const below = [...segments, name];
-      if (excluded.some((pattern) => below.some((segment) => pattern.test(segment)))) {
+      const sheet = (below[0] as string).replace(/\.json$/, "");
+      if (!SHEETS.has(sheet) || excluded.some((pattern) => below.some((segment) => pattern.test(segment)))) {
         continue;
       }
       if (kind === "dir") {
         walk(`${path}/${name}`, below);
       } else if (kind === "file" && name.endsWith(".json")) {
-        const sheet = (below[0] as string).replace(/\.json$/, "");
-        if (SHEETS.has(sheet)) {
-          const rows = parsed(`${path}/${name}`, options.variables ?? {});
-          sheets[sheet] = [...(sheets[sheet] ?? []), ...rows];
-          if (options.sources) {
-            options.sources[sheet] = [...(options.sources[sheet] ?? []), ...rows.map((_, index) => `${path}/${name} row ${index + 1}`)];
-          }
+        const file = `${path}/${name}`;
+        const into = sheets[sheet] ?? [];
+        sheets[sheet] = into;
+        const from = options.sources && (options.sources[sheet] ?? []);
+        if (options.sources && from) {
+          options.sources[sheet] = from;
         }
+        parsed(file, options.variables ?? {}).forEach((row, index) => {
+          into.push(row);
+          from?.push(`${file} row ${index + 1}`);
+        });
       }
     }
   };

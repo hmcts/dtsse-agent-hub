@@ -329,7 +329,7 @@ describe("overlayTasks", () => {
     expect(run(either({ processCategories: "Vetting" }), cancel("Hearing"))).toBeUndefined();
   });
 
-  it("should say an about-to-submit callback may move the case when the event or a state-changing event has one", () => {
+  it("should say an about-to-submit callback may move the case when the creating event has one or one can fire on the way from the start states", () => {
     const withCallback = (lifecycle: Lifecycle): Lifecycle => ({
       ...lifecycle,
       events: lifecycle.events.map((e) => ({ ...e, aboutToSubmitCallback: true as const }))
@@ -347,8 +347,90 @@ describe("overlayTasks", () => {
       },
       ["x"]
     );
-    expect(overlayTasks(withCallback(chain), cancelled).warnings).toEqual([
+    const looping: Lifecycle = { ...chain, events: [...chain.events, { id: "loop", name: "loop", preStates: ["A"], postState: "A", publish: true }] };
+    expect(overlayTasks(withCallback(looping), cancelled).warnings).toEqual([
       "stop cancels task T from B, but the task exists only in A unless an about-to-submit callback moves the case"
     ]);
+    expect(overlayTasks(withCallback(chain), cancelled).warnings).toEqual(["stop cancels task T from B, but the task exists only in A"]);
+  });
+
+  describe("rows that describe events rather than name them", () => {
+    const lifecycle: Lifecycle = {
+      caseType: "X",
+      states: ["A", "B", "C"].map((id) => ({ id, name: id })),
+      events: [
+        { id: "start", name: "start", preStates: [], postState: "A", publish: true },
+        { id: "toB", name: "toB", preStates: ["A"], postState: "B", publish: false },
+        { id: "toC", name: "toC", preStates: ["A", "B"], postState: "C", publish: true },
+        { id: "stay", name: "stay", preStates: ["B"], postState: "*", publish: true }
+      ]
+    };
+    const initiation: Row[] = [{ when: { eventId: { in: ["start"] } }, returns: { taskId: "T", processCategories: "Cat" } }];
+    const run = (cancellation: Row[], more: Row[] = []) => overlayTasks(lifecycle, specWith({ initiation: [...initiation, ...more], cancellation }, ["x"]));
+
+    it("should cancel on every event that starts in the fromState and ends in the state when the row has no event cell", () => {
+      const { events, warnings } = run([{ when: { fromState: { in: ["A"] }, state: { in: ["C"] } }, returns: { action: "Cancel" } }]);
+      expect(events.toC).toEqual({ creates: [], completes: [], cancels: ["T"], reconfigures: [], derived: { cancels: ["T"] } });
+      expect(Object.keys(events)).toEqual(["start", "toC"]);
+      expect(warnings).toEqual([]);
+    });
+
+    it("should cover every event but those listed when the event cell is notIn, and leave a derived event's publish alone", () => {
+      const { events, warnings } = run([{ when: { event: { notIn: ["toC"] } }, returns: { action: "Cancel" } }]);
+      expect(Object.keys(events)).toEqual(["start", "toB", "stay"]);
+      expect(events.toB?.derived).toEqual({ cancels: ["T"] });
+      expect(warnings).toEqual([]);
+    });
+
+    it("should keep a task out of the derived list when a row names the event", () => {
+      const { events, warnings } = run([
+        { when: { fromState: { in: ["A"] } }, returns: { action: "Cancel" } },
+        { when: { event: { in: ["toB"] } }, returns: { action: "Cancel" } }
+      ]);
+      expect(events.toB?.derived?.cancels).toEqual([]);
+      expect(events.toC?.derived?.cancels).toEqual(["T"]);
+      expect(warnings).toEqual(["toB cancels tasks but is not Publish: Y, so Work Allocation never sees it"]);
+    });
+
+    it("should let an event with a * post-state and an about-to-submit callback leave the case in any state", () => {
+      const callbackLifecycle: Lifecycle = {
+        ...lifecycle,
+        events: [...lifecycle.events, { id: "set", name: "set", preStates: "*", postState: "*", aboutToSubmitCallback: true, publish: true }]
+      };
+      const spec = specWith({ initiation, cancellation: [{ when: { event: { in: ["set", "stay"] }, state: { in: ["C"] } }, returns: { action: "Cancel" } }] }, [
+        "x"
+      ]);
+      const { events, warnings } = overlayTasks(callbackLifecycle, spec);
+      expect(events.set?.cancels).toEqual(["T"]);
+      expect(events.stay).toBeUndefined();
+      expect(warnings).toEqual([]);
+    });
+
+    it("should create a task on the events that leave the case in the postEventState when the row has no event cell", () => {
+      const { events } = run([], [{ when: { postEventState: { in: ["C"] } }, returns: { taskId: "U" } }]);
+      expect(events.toC?.creates).toEqual(["U"]);
+      expect(events.toC?.derived).toEqual({ creates: ["U"] });
+      expect(events.stay).toBeUndefined();
+    });
+
+    it("should drop the listed events that cannot leave the case in the state, and warn when none can", () => {
+      const some = run([{ when: { event: { in: ["toB", "toC"] }, state: { in: ["C"] } }, returns: { action: "Cancel" } }]);
+      expect(some.events.toB).toBeUndefined();
+      expect(some.events.toC?.cancels).toEqual(["T"]);
+      const none = run([{ when: { event: { in: ["toB"] }, state: { in: ["C"] } }, returns: { action: "Cancel" } }]);
+      expect(none.warnings).toEqual(["toB cannot leave the case in C, so a cancellation row for it never fires"]);
+      const nobody = run([{ when: { state: { in: ["C"] }, fromState: { in: ["C"] } }, returns: { action: "Cancel" } }]);
+      expect(nobody.warnings).toEqual(["no event can leave the case in C, so a cancellation row for it never fires"]);
+    });
+
+    it("should list the known tasks a computed task id names under the event instead of only a marker", () => {
+      const named = run(
+        [],
+        [{ when: { eventId: { in: ["toC"] } }, returns: { taskId: { if: { field: "x", op: "exists" }, use: "T", otherwise: "Unknown" } } }]
+      );
+      expect(named.events.toC?.creates).toEqual(["T"]);
+      const unnamed = run([], [{ when: { eventId: { in: ["toC"] } }, returns: { taskId: { field: "x" } } }]);
+      expect(unnamed.events.toC?.creates).toEqual(["computed task"]);
+    });
   });
 });
