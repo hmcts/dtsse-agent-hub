@@ -84,6 +84,14 @@ export const emitSchema = z.object({
 });
 export type Emit = z.infer<typeof emitSchema>;
 
+export const reviewSchema = z.object({
+  /** What was guessed. */
+  about: z.enum(["key", "type", "group", "ccd"]),
+  reason: z.string(),
+  confidence: z.enum(["low", "medium", "high"])
+});
+export type Review = z.infer<typeof reviewSchema>;
+
 export const fieldSchema = z
   .object({
     /** The sheet's ID column: "1.1", or a label such as "QR code" on non-question rows. Blank on continuation rows. */
@@ -121,6 +129,8 @@ export const fieldSchema = z
     /** Paragraphs of the case path column that are not a branch's outcome, e.g. a reminder about confidential addresses, or the whole cell of a row whose logic is not parsed. */
     casePathNote: z.string().optional(),
     todo: z.array(z.string()).default([]),
+    /** Guesses a generator proposed for this field, each for a person to confirm; absent on fields read from a sheet. */
+    review: z.array(reviewSchema).optional(),
     sip: z
       .object({
         tagName: z.string().optional(),
@@ -204,6 +214,8 @@ export type Overview = z.infer<typeof overviewSchema>;
 
 export const bundleSchema = z.object({
   overview: overviewSchema.optional(),
+  /** Set on a draft from a PDF with no form fields: the fields still have to be read from the page images. */
+  needsReview: z.object({ reason: z.string(), prompt: z.string() }).optional(),
   forms: z.array(formSpecSchema)
 });
 export type Bundle = z.infer<typeof bundleSchema>;

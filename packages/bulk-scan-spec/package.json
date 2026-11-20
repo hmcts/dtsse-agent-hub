@@ -10,6 +10,7 @@
   },
   "scripts": {
     "import": "node src/cli.ts import",
+    "from-pdf": "node src/cli.ts from-pdf",
     "generate": "node src/cli.ts generate",
     "drift": "node src/cli.ts drift",
     "roundtrip": "node src/cli.ts roundtrip",
@@ -20,10 +21,12 @@
   },
   "dependencies": {
     "exceljs": "4.4.0",
+    "pdfjs-dist": "6.5.438",
     "yaml": "2.9.0",
     "zod": "4.6.7"
   },
   "devDependencies": {
-    "ajv": "8.20.0"
+    "ajv": "8.20.0",
+    "pdf-lib": "1.17.1"
   }
 }
