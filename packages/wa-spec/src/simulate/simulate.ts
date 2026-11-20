@@ -92,6 +92,15 @@ const asString = (value: unknown): string | undefined => (typeof value === "stri
 /** WA splits process categories on commas and trims them. */
 const splitList = (value: unknown): string[] => (typeof value === "string" ? categoryParts(value) : []);
 
+/** The `yyyy-MM-dd` date in London of an instant. */
+function londonDate(instant: Date): string {
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(instant);
+  const part = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+const sameValue = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
+
 /** Task management trims the spaces after commas in the strings a DMN returns. */
 const trimLists = (value: unknown): unknown =>
   typeof value === "string" && value.includes(",") && value.includes(" ")
@@ -157,8 +166,7 @@ export function simulate(spec: Spec, input: SimInput): Timeline {
   };
 
   const caseId = input.caseId ?? "1234567890123456";
-  const today =
-    input.today ?? new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/London" }).format(input.now === undefined ? new Date() : new Date(input.now));
+  const today = input.today ?? londonDate(input.now === undefined ? new Date() : new Date(input.now));
   const tasks: SimTask[] = [];
   const attributesOf = new Map<string, Record<string, unknown>>();
   let caseData: CaseData = { ...input.caseData };
@@ -170,7 +178,7 @@ export function simulate(spec: Spec, input: SimInput): Timeline {
 
   const steps = input.events.map((event, index): StepResult => {
     const fromState = event.fromState ?? state;
-    const postState = event.postState ?? state;
+    const postState = event.postState ?? event.fromState ?? state;
     state = postState;
     caseData = { ...caseData, ...event.caseData };
     const additionalData = { Data: caseData };
@@ -213,7 +221,9 @@ export function simulate(spec: Spec, input: SimInput): Timeline {
       for (const task of tasks) {
         task.hasWarnings = true;
         if (!warning) {
-          step.warned.push({ task: ref(task) });
+          if (!step.warned.some((w) => w.task.id === task.id && w.code === undefined)) {
+            step.warned.push({ task: ref(task) });
+          }
         } else if (!task.warnings.some((w) => w.code === warning.code && w.text === warning.text)) {
           task.warnings.push(warning);
           step.warned.push({ task: ref(task), ...warning });
@@ -241,7 +251,7 @@ export function simulate(spec: Spec, input: SimInput): Timeline {
         const configuration = configurationOf(configure(before));
         const reconfigurable = configuration.filter((entry) => entry.canReconfigure === true);
         const changes = reconfigurable
-          .filter((entry) => before[entry.name] !== entry.value)
+          .filter((entry) => !sameValue(before[entry.name], entry.value))
           .map((entry) => ({ name: entry.name, from: before[entry.name], to: entry.value }));
         for (const entry of reconfigurable) {
           task.attributes[entry.name] = entry.value;
@@ -250,6 +260,7 @@ export function simulate(spec: Spec, input: SimInput): Timeline {
           }
         }
         attributesOf.set(task.id, { ...before, ...Object.fromEntries(reconfigurable.map((entry) => [entry.name, entry.value])) });
+        task.permissions = permissionsOf(table("permissions", { caseData, taskAttributes: before }), caseData);
         step.reconfigured.push({ task: ref(task), changes });
       }
     }

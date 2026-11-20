@@ -1,5 +1,5 @@
 import type { DmnDocument, DmnOutput, DmnTable } from "../dmn-model.ts";
-import { assertFeel, evalExpression, matchesEntry, type Variables, withClock } from "./feel-eval.ts";
+import { assertFeel, evalExpression, evalTyped, matchesEntry, toPlain, type Variables, withClock } from "./feel-eval.ts";
 
 export type OutputRow = Record<string, unknown>;
 
@@ -70,7 +70,7 @@ export function evaluateTable(table: DmnTable, givenVariables: Variables, now?: 
   const variables = withClock(givenVariables, now);
   const inputs = table.inputs.map((input, column) => {
     assertFeel(input.expressionLanguage, `input ${column + 1}`);
-    const value = input.expression.trim() === "" ? (variables[input.inputVariable ?? ""] ?? null) : evalExpression(input.expression, variables);
+    const value = input.expression.trim() === "" ? (variables[input.inputVariable ?? ""] ?? null) : evalTyped(input.expression, variables);
     return convertToType(value, input.typeRef);
   });
   const matched = table.rules.flatMap((_, index) => {
@@ -136,19 +136,18 @@ export function evaluateDecision(document: DmnDocument, decisionId: string, vari
       }
     }
     done.add(id);
-    let rows: OutputRow[];
     if (decision.table) {
-      rows = evaluateTable(decision.table, scope);
-    } else {
-      assertFeel(decision.literal?.expressionLanguage, `decision ${decision.name}`);
-      rows = [{ [decision.variable?.name ?? decision.name]: convertToType(evalExpression(decision.literal?.text ?? "", scope), decision.variable?.typeRef) }];
-    }
-    if (decision.table) {
+      const rows = evaluateTable(decision.table, scope);
       Object.assign(scope, tableVariables(decision.table, rows));
-    } else if (decision.variable) {
-      scope[decision.variable.name] = rows[0]?.[decision.variable.name];
+      return rows;
     }
-    return rows;
+    assertFeel(decision.literal?.expressionLanguage, `decision ${decision.name}`);
+    const name = decision.variable?.name ?? decision.name;
+    const typed = convertToType(evalTyped(decision.literal?.text ?? "", scope), decision.variable?.typeRef);
+    if (decision.variable) {
+      scope[name] = typed;
+    }
+    return [{ [name]: toPlain(typed) }];
   };
   return run(decisionId);
 }

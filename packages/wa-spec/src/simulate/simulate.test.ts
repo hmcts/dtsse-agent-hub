@@ -101,7 +101,8 @@ const spec = (): Spec =>
         rows: [
           { when: { eventId: { in: ["open"] } }, returns: { taskId: "TaskA", name: "Task A", processCategories: "Cat1, Cat2" } },
           { when: { eventId: { in: ["open"] } }, returns: { taskId: "TaskB", name: "Task B", processCategories: "Cat2" } },
-          { when: { eventId: { in: ["due"] }, due: { in: ["2026-12-01"] } }, returns: { taskId: "TaskC", name: "Task C" } }
+          { when: { eventId: { in: ["due"] }, due: { in: ["2026-12-01"] } }, returns: { taskId: "TaskC", name: "Task C" } },
+          { when: { eventId: { in: ["today"] } }, returns: { taskId: "TaskD", name: { feel: "now" } } }
         ]
       },
       configuration: {
@@ -113,6 +114,10 @@ const spec = (): Spec =>
           {
             when: { taskType: { in: ["TaskA"] } },
             returns: { name: "region", value: { feel: 'if caseData.region != null then caseData.region else "1"' }, canReconfigure: true }
+          },
+          {
+            when: { taskType: { in: ["TaskA"] } },
+            returns: { name: "obj", value: { feel: "if caseData.obj != null then caseData.obj else {a: 1}" }, canReconfigure: true }
           },
           {
             when: { taskType: { in: ["TaskA"] } },
@@ -134,7 +139,7 @@ const spec = (): Spec =>
           { name: "autoAssignable", typeRef: "boolean" }
         ],
         rows: [
-          { returns: { name: "supervisor", value: "Read, Manage", autoAssignable: false } },
+          { returns: { name: "supervisor", value: { feel: 'if caseData.perm != null then caseData.perm else "Read, Manage"' }, autoAssignable: false } },
           {
             returns: {
               name: "civil-only",
@@ -173,6 +178,7 @@ const spec = (): Spec =>
           { when: { event: { in: ["warnAll"] } }, returns: { action: "Warn", warningCode: "W2", warningText: "Everything" } },
           { when: { event: { in: ["warnAll"] } }, returns: { action: "Warn", warningCode: "W2", warningText: "Everything" } },
           { when: { event: { in: ["warnEmpty"] } }, returns: { action: "Warn", processCategories: "Cat1" } },
+          { when: { event: { in: ["warnEmpty"] } }, returns: { action: "Warn", processCategories: "Cat1" } },
           { when: { event: { in: ["reconfigure"] } }, returns: { action: "Reconfigure" } }
         ]
       }
@@ -193,7 +199,7 @@ describe("task lifecycle", () => {
 
   it("should trim the spaces after commas in what a DMN returns when it is configuration or permissions", () => {
     const [a] = run([]).steps[0]?.created ?? [];
-    expect(a?.attributes).toEqual({ region: "1", tags: "a,b,c" });
+    expect(a?.attributes).toEqual({ region: "1", obj: { a: 1 }, tags: "a,b,c" });
     expect(a?.permissions[0]).toMatchObject({ role: "supervisor", permissions: ["Read", "Manage"], autoAssignable: false });
   });
 
@@ -287,6 +293,33 @@ describe("task lifecycle", () => {
     expect(roles("CRIME, CIVIL")).toEqual(["supervisor"]);
     expect(roles("  ")).toEqual(["supervisor"]);
     expect(roles(7)).toEqual(["supervisor"]);
+  });
+
+  it("should replace the task's permissions when it is reconfigured", () => {
+    const { tasks, steps } = run([{ event: "reconfigure", caseData: { perm: "Read, Own" } }]);
+    expect(tasks[0]?.permissions[0]?.permissions).toEqual(["Read", "Own"]);
+    expect(steps[1]?.reconfigured).toHaveLength(2);
+  });
+
+  it("should compare reconfigured values by content when they are objects", () => {
+    const same = run([{ event: "reconfigure", caseData: { obj: { a: 1 } } }]).steps[1]?.reconfigured[0]?.changes;
+    expect(same).toEqual([]);
+    const changed = run([{ event: "reconfigure", caseData: { obj: { a: 2 } } }]).steps[1]?.reconfigured[0]?.changes;
+    expect(changed).toEqual([{ name: "obj", from: { a: 1 }, to: { a: 2 } }]);
+  });
+
+  it("should give initiation today's London date as now when the instant is just before midnight UTC in summer", () => {
+    const { tasks } = simulate(spec(), { caseType: "demo_case", now: "2026-07-01T23:30:00Z", events: [{ event: "today" }] });
+    expect(tasks[0]?.name).toBe("2026-07-02");
+  });
+
+  it("should stay in the state an event declares it starts from when it gives no post state", () => {
+    const { steps } = run([{ event: "x", fromState: "Elsewhere" }, { event: "y" }]);
+    expect(steps.map((s) => [s.fromState, s.postState])).toEqual([
+      [undefined, "Open"],
+      ["Elsewhere", "Elsewhere"],
+      ["Elsewhere", "Elsewhere"]
+    ]);
   });
 
   it("should keep the state when an event gives no post state", () => {

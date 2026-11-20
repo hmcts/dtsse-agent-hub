@@ -82,6 +82,14 @@ describe("inputs and outputs", () => {
     expect(evaluateTable(t, {})).toEqual([]);
   });
 
+  it("should keep an input's date type when the entries compare it with dates", () => {
+    const t = table("COLLECT", [rule(['< date("2026-02-01")'], ['"early"']), rule(['>= date("2026-02-01")'], ['"late"'])], {
+      inputs: [{ expression: "date(d)" }]
+    });
+    expect(evaluateTable(t, { d: "2026-01-15" })).toEqual([{ out: "early" }]);
+    expect(evaluateTable(t, { d: "2026-03-01" })).toEqual([{ out: "late" }]);
+  });
+
   it("should convert an input to its type when the column has one", () => {
     const t = table("COLLECT", [rule(["true"], ['"yes"'])], { inputs: [{ expression: "flag", typeRef: "boolean" }] });
     expect(evaluateTable(t, { flag: "true" })).toEqual([{ out: "yes" }]);
@@ -142,6 +150,14 @@ describe("evaluateDecision", () => {
       literal("lit", "upper", "upper case(x)")
     );
     expect(evaluateDecision(doc, "main", { x: "ab" })).toEqual([{ out: "found AB" }]);
+  });
+
+  it("should keep a required literal's date type when a later table compares it", () => {
+    const doc = document(
+      main(["l"], table("COLLECT", [rule(['< date("2026-02-01")'], ['"early"'])], { inputs: [{ expression: "when" }] })),
+      literal("l", "when", 'date("2026-01-15")')
+    );
+    expect(evaluateDecision(doc, "main", {})).toEqual([{ out: "early" }]);
   });
 
   it("should evaluate a required decision's own requirements first and once when they are shared", () => {

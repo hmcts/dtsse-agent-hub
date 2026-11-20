@@ -141,13 +141,16 @@ export function prepare(text: string): string {
   return out;
 }
 
-/** Evaluates a FEEL expression; an empty one is null, as Camunda treats an empty entry. */
-export function evalExpression(text: string, variables: Variables): unknown {
+/** Evaluates a FEEL expression, keeping its temporal values as feelin's types; an empty one is null, as Camunda treats an empty entry. */
+export function evalTyped(text: string, variables: Variables): unknown {
   if (text.trim() === "") {
     return null;
   }
-  return toPlain(run(text, () => evaluate(prepare(text), { ...CAMUNDA_BUILTINS, ...variables }).value));
+  return run(text, () => evaluate(prepare(text), { ...CAMUNDA_BUILTINS, ...variables }).value);
 }
+
+/** Evaluates a FEEL expression to plain values, as Camunda gives an output; an empty one is null. */
+export const evalExpression = (text: string, variables: Variables): unknown => toPlain(evalTyped(text, variables));
 
 /** Whether a decision table input entry (a FEEL unary-tests list) accepts the input value; an empty entry or `-` accepts anything. */
 export function matchesEntry(text: string, input: unknown, variables: Variables, inputVariable: string | undefined): boolean {

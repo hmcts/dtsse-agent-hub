@@ -23,7 +23,11 @@ if (!name || !clone) {
   console.error("usage: dump-scenarios.mjs <name> <task-configuration clone> [--max-bytes N]");
   process.exit(2);
 }
-const maxBytes = flag === "--max-bytes" ? Number(limit) : Number.POSITIVE_INFINITY;
+if (flag !== undefined && (flag !== "--max-bytes" || !(Number(limit) > 0))) {
+  console.error("--max-bytes needs a positive number of bytes");
+  process.exit(2);
+}
+const maxBytes = flag === undefined ? Number.POSITIVE_INFINITY : Number(limit);
 const out = fileURLToPath(new URL(`../test-fixtures/${name}-scenarios`, import.meta.url));
 const work = mkdtempSync(join(tmpdir(), `${name}-dump-`));
 const worktree = join(work, "clone");
@@ -109,6 +113,9 @@ try {
     byDecision.set(decision, [...(byDecision.get(decision) ?? []), { ...(required ? { required, requiredName } : {}), input, output }]);
   }
   mkdirSync(out, { recursive: true });
+  for (const old of readdirSync(out).filter((f) => f.endsWith(".json"))) {
+    rmSync(join(out, old));
+  }
   const dmns = join(work, "dmns");
   mkdirSync(dmns);
   for (const file of readdirSync(join(worktree, "src/main/resources")).filter((f) => /^wa-task-.*\.dmn$/.test(f))) {
