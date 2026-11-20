@@ -1,7 +1,7 @@
 import { type Model, taskCases } from "@hmcts-cft/wa-spec";
 import Link from "next/link";
 import { type BoardGrouping, boardGroups, briefAcrossCaseTypes, briefVal, caseTypeLabel } from "@/assistant/wa-builder-text";
-import { Grid, LINK, TD, TH, versionQuery } from "@/components/assistant/WaBuilderParts";
+import { boardQuery, Grid, LINK, TD, TH } from "@/components/assistant/WaBuilderParts";
 
 const GROUPINGS: ReadonlyArray<{ id: BoardGrouping; label: string }> = [
   { id: "roleCategory", label: "Role category" },
@@ -57,7 +57,11 @@ export function WaBuilderTaskBoard({
           Show tasks
         </button>
       </form>
-      {groups.length === 0 ? <p className="text-[13px] text-asst-muted">No task is configured for this case type.</p> : null}
+      {groups.length === 0 ? (
+        <p className="text-[13px] text-asst-muted">
+          {caseType === undefined ? "No task is configured." : `No task is configured for ${caseTypeLabel(model, caseType)}.`}
+        </p>
+      ) : null}
       {groups.map(({ group, tasks }, index) => (
         <section key={group} aria-labelledby={`wa-group-${index}`} className="flex flex-col gap-2">
           <h2 id={`wa-group-${index}`} className="text-base font-semibold">
@@ -90,7 +94,7 @@ export function WaBuilderTaskBoard({
                 return (
                   <tr key={`${task.id}-${caseTypes.join(",")}`}>
                     <th scope="row" className={`${TD} font-medium`}>
-                      <Link href={`${base}/tasks/${encodeURIComponent(task.id)}${versionQuery(version, "?")}`} className={LINK}>
+                      <Link href={`${base}/tasks/${encodeURIComponent(task.id)}${boardQuery({ version, by, caseType })}`} className={LINK}>
                         {name}
                       </Link>
                     </th>
@@ -98,7 +102,13 @@ export function WaBuilderTaskBoard({
                     <td className={TD}>{cell((id) => briefVal(model, task.due?.days, id, own)) || "–"}</td>
                     <td className={TD}>
                       {cell((id) =>
-                        [briefVal(model, task.priority?.major, id, own), briefVal(model, task.priority?.minor, id, own)].filter((v) => v !== "").join(" / ")
+                        [
+                          ["major", briefVal(model, task.priority?.major, id, own)],
+                          ["minor", briefVal(model, task.priority?.minor, id, own)]
+                        ]
+                          .filter(([, value]) => value !== "")
+                          .map(([label, value]) => `${label} ${value}`)
+                          .join(", ")
                       ) || "–"}
                     </td>
                     <td className={TD}>{caseTypes.map((id) => caseTypeLabel(model, id)).join(", ")}</td>

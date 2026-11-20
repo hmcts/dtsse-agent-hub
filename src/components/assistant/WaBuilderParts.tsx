@@ -155,5 +155,19 @@ export function requestedVersion(query: Record<string, string | string[] | undef
   return Number.isInteger(value) && value > 0 ? value : undefined;
 }
 
+/** The query that keeps a link to a task on the board it came from: its version, grouping and case type. */
+export function boardQuery(params: { version?: number | undefined; by?: string | undefined; caseType?: string | undefined }): string {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined) {
+      query.set(key, String(value));
+    }
+  }
+  return query.size === 0 ? "" : `?${query}`;
+}
+
 /** The suffix that keeps an in-builder link on the version being read. */
 export const versionQuery = (version: number | undefined, joiner: "?" | "&"): string => (version === undefined ? "" : `${joiner}version=${version}`);
+
+/** One value of a query parameter, the first when it is repeated. */
+export const queryValue = (value: string | string[] | undefined): string | undefined => (Array.isArray(value) ? value[0] : value);

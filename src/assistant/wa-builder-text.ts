@@ -14,7 +14,6 @@ import {
   type Task,
   type Trigger,
   taskCases,
-  triggerContent,
   triggerPieces,
   type Val,
   valPieces
@@ -239,14 +238,31 @@ export function groupByCaseType<T>(caseTypes: string[], resolve: (caseType: stri
   return groups.map(({ caseTypes: ids, value }) => ({ caseTypes: ids, value }));
 }
 
-/** What a value is for one case type: nothing, or one expression, or several where the service repeats the row. */
-export function resolveVal(model: Model, val: Val | undefined, caseType: string, taskCases: string[]): Expr[] {
-  return val === undefined
-    ? []
-    : valPieces(model, val, taskCases)
-        .filter((piece) => piece.cases.includes(caseType))
-        .map((piece) => piece.value);
+export interface ResolvedValue {
+  value: Expr;
+  /** Conditions on the table's other input columns, which make the value apply only to some cases. */
+  when?: Record<string, FriendlyCell>;
 }
+
+/** What a value is for one case type: each distinct value its entries give, with the condition it applies under, if any. */
+export function resolvePieces(model: Model, val: Val | undefined, caseType: string, taskCases: string[]): ResolvedValue[] {
+  const seen = new Set<string>();
+  return (val === undefined ? [] : valPieces(model, val, taskCases))
+    .filter((piece) => piece.cases.includes(caseType))
+    .map((piece): ResolvedValue => ({ value: piece.value, ...(piece.when === undefined ? {} : { when: piece.when }) }))
+    .filter((piece) => {
+      const key = JSON.stringify(piece);
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+}
+
+/** What a value is for one case type: nothing, or one expression, or several where the service has different rows. */
+export const resolveVal = (model: Model, val: Val | undefined, caseType: string, taskCases: string[]): Expr[] =>
+  resolvePieces(model, val, caseType, taskCases).map((piece) => piece.value);
 
 export const resolveTriggers = (model: Model, task: Task, caseType: string): Trigger[] =>
   triggerPieces(model, task)
@@ -271,8 +287,11 @@ export function taskName(model: Model, task: Task): string {
 }
 
 /** One case type's value of a task's attribute, in one short cell. */
-export const briefVal = (model: Model, val: Val | undefined, caseType: string, taskCases: string[]): string =>
-  resolveVal(model, val, caseType, taskCases).map(briefExpr).join(", ");
+export function briefVal(model: Model, val: Val | undefined, caseType: string, taskCases: string[]): string {
+  const pieces = resolvePieces(model, val, caseType, taskCases);
+  const always = pieces.filter((piece) => piece.when === undefined);
+  return always.length === 0 && pieces.length > 0 ? "depends on case data" : always.map((piece) => briefExpr(piece.value)).join(", ");
+}
 
 /** A value across the task's case types: the one value, or each value with the case types it is for. */
 export function briefAcrossCaseTypes(model: Model, task: Task, resolve: (caseType: string) => string): string {
@@ -404,7 +423,9 @@ export interface CancelCategories {
 export function cancelCategories(model: Model, task: Task, caseType: string): CancelCategories {
   const triggers = resolveTriggers(model, task, caseType);
   const all = (
-    triggers.length === 0 ? [task.cancelCategory] : triggers.map((trigger) => triggerContent(task, trigger, undefined).returns.processCategories)
+    triggers.length === 0
+      ? [task.cancelCategory]
+      : triggers.map((trigger) => (trigger.cancelCategory !== undefined ? trigger.cancelCategory : task.cancelCategory))
   ).filter((c): c is NonNullable<Expr> => c !== undefined && c !== null);
   const named = all.flatMap((category) => (typeof category === "string" ? categoryParts(category) : []));
   return { named: [...new Set(named)], calculated: all.some((category) => typeof category !== "string") };
@@ -516,14 +537,17 @@ export const describeTaskRule = ({ rule, mayApply }: TaskRule): string =>
 export function reconfiguredAttributes(model: Model, task: Task, caseType: string): string[] {
   const cases = taskCases(model, task);
   const listed = new Set(task.reconfigure ?? []);
-  const found = attributesOf(task).flatMap(([name, val]) =>
+  const flagged = (name: string, flag: Expr): string[] => {
+    const text = typeof flag === "string" ? flag.trim().toLowerCase() : flag;
+    return text === false || text === "false" || text === null ? [] : [text === true || text === "true" ? name : `${name} (${describeExpr(flag)})`];
+  };
+  const own = attributesOf(task).flatMap(([name, val]) =>
     valPieces(model, val, cases)
       .filter((piece) => piece.cases.includes(caseType))
-      .flatMap((piece) => {
-        const flag = piece.reconfigure !== undefined ? piece.reconfigure : listed.has(name);
-        const text = typeof flag === "string" ? flag.trim().toLowerCase() : flag;
-        return text === false || text === "false" || text === null ? [] : [text === true || text === "true" ? name : `${name} (${describeExpr(flag)})`];
-      })
+      .flatMap((piece) => flagged(name, piece.reconfigure !== undefined ? piece.reconfigure : listed.has(name)))
   );
-  return [...new Set(found)];
+  const everyTask = (model.defaults?.configuration ?? [])
+    .filter((attribute) => (attribute.only ?? caseTypeIds(model)).includes(caseType))
+    .flatMap((attribute) => flagged(attribute.name, attribute.reconfigure === undefined ? false : attribute.reconfigure));
+  return [...new Set([...own, ...everyTask])];
 }

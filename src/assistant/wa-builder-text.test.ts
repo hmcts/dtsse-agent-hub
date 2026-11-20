@@ -24,6 +24,7 @@ import {
   reconfigureRules,
   resolveCompletions,
   resolvePermissions,
+  resolvePieces,
   resolveTriggers,
   resolveVal,
   rolesByCategory,
@@ -208,8 +209,40 @@ describe("a trigger, completion and cancellation of ET1 Vetting", () => {
       description: { value: "d", reconfigure: "true" },
       title: { value: "t", only: ["et_scotland"], reconfigure: true }
     };
-    expect(reconfiguredAttributes(et, task, "et_englandwales")).toEqual(["roleCategory", "description"]);
-    expect(reconfiguredAttributes(et, task, "et_scotland")).toEqual(["roleCategory", "title", "description"]);
+    const bare = { ...et, defaults: undefined } as Model;
+    expect(reconfiguredAttributes(bare, task, "et_englandwales")).toEqual(["roleCategory", "description"]);
+    expect(reconfiguredAttributes(bare, task, "et_scotland")).toEqual(["roleCategory", "title", "description"]);
+  });
+
+  it("should add the service-wide settings that reconfigure, for the case types they are for, when attributes are recalculated", () => {
+    const task: Task = { id: "T" };
+    expect(reconfiguredAttributes(et, task, "et_englandwales")).toEqual(expect.arrayContaining(["caseName", "region", "location", "locationName"]));
+    expect(reconfiguredAttributes(et, task, "et_scotland")).toEqual(expect.arrayContaining(["caseName", "region", "location", "locationName"]));
+    expect(reconfiguredAttributes(et, task, "et_englandwales")).toHaveLength(new Set(reconfiguredAttributes(et, task, "et_englandwales")).size);
+  });
+
+  it("should show one value, not two, when two entries of a task's value agree for a case type", () => {
+    const rule21 = task("ReviewRule21Referral");
+    const cases = taskCases(et, rule21);
+    expect(resolveVal(et, rule21.roleCategory, "et_scotland", cases)).toEqual(["LEGAL_OPERATIONS"]);
+    expect(
+      boardGroups(et, "roleCategory")
+        .filter((g) => g.tasks.some((t) => t.task.id === "ReviewRule21Referral"))
+        .map((g) => g.group)
+    ).toEqual(["LEGAL_OPERATIONS"]);
+  });
+
+  it("should keep a value's condition, and group by the unconditional value, when an entry has a when", () => {
+    const conditional: Task = { id: "T", workType: [{ value: "a", when: { x: "1" } }, { value: "b" }] };
+    expect(resolvePieces(et, conditional.workType, "et_scotland", caseTypeIds(et))).toEqual([{ value: "a", when: { x: { in: ["1"] } } }, { value: "b" }]);
+    expect(briefVal(et, conditional.workType, "et_scotland", caseTypeIds(et))).toBe("b");
+    expect(briefVal(et, { value: "a", when: { x: "1" } }, "et_scotland", caseTypeIds(et))).toBe("depends on case data");
+  });
+
+  it("should say an addition replaces the profile's grant when the role is removed and then added", () => {
+    const model = { ...et, roles: {}, defaults: undefined, permissionProfiles: { p: { judge: { perms: "Read" } } } } as Model;
+    const [row] = resolvePermissions(model, { id: "T", permissions: { profile: "p", remove: ["judge"], add: { judge: { perms: "Own" } } } }, "et_scotland");
+    expect(row).toMatchObject({ source: "added", replaces: "p" });
   });
 
   it("should include the warning and the note when a rule warns", () => {

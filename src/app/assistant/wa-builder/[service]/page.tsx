@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { getWaSpec } from "@/assistant/wa-builder-store";
 import { WaBuilderPage } from "@/components/assistant/WaBuilderPage";
-import { isWaView, Placeholder, requestedVersion, ViewTabs, type WaView } from "@/components/assistant/WaBuilderParts";
+import { isWaView, Placeholder, queryValue, requestedVersion, ViewTabs, type WaView } from "@/components/assistant/WaBuilderParts";
 import { WaBuilderRoles } from "@/components/assistant/WaBuilderRoles";
 import { WaBuilderSetup } from "@/components/assistant/WaBuilderSetup";
 import { isBoardGrouping, WaBuilderTaskBoard } from "@/components/assistant/WaBuilderTaskBoard";
@@ -10,8 +10,6 @@ import { requireViewer } from "@/viewer/current";
 import { fullInstant } from "@/web/format";
 
 export const dynamic = "force-dynamic";
-
-const first = (value: string | string[] | undefined): string | undefined => (Array.isArray(value) ? value[0] : value);
 
 /** One service's configuration, a view at a time: `?view=`, `?version=`, and the board's `?by=` and `?caseType=`. */
 export default async function WaBuilderServicePage({
@@ -24,11 +22,11 @@ export default async function WaBuilderServicePage({
   if (spec === null) {
     notFound();
   }
-  const named = first(query.view);
+  const named = queryValue(query.view);
   const view: WaView = isWaView(named) ? named : "setup";
   const { model } = spec;
-  const by = first(query.by);
-  const caseType = first(query.caseType);
+  const by = queryValue(query.by);
+  const caseType = queryValue(query.caseType);
   return (
     <WaBuilderPage
       title={model.service.displayName ?? service}

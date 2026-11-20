@@ -15,7 +15,6 @@ export {
   type ResolvedGrant,
   resolveGrants,
   taskCases,
-  triggerContent,
   triggerPieces,
   type ValPiece,
   valPieces

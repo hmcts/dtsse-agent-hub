@@ -165,7 +165,12 @@ export function resolveGrants(model: Model, task: Task): ResolvedGrant[] {
         { grant, source: "profile", ...(spec.profile === undefined ? {} : { profile: spec.profile }) }
       ])
     );
+    const removed = new Map<string, string>();
     for (const role of spec.remove ?? []) {
+      const had = grants.get(role);
+      if (had?.profile !== undefined) {
+        removed.set(role, had.profile);
+      }
       grants.delete(role);
     }
     for (const [role, patch] of Object.entries(spec.override ?? {})) {
@@ -175,8 +180,8 @@ export function resolveGrants(model: Model, task: Task): ResolvedGrant[] {
       }
     }
     for (const [role, grant] of Object.entries(spec.add ?? {})) {
-      const replaced = grants.get(role);
-      grants.set(role, { grant, source: "added", ...(replaced?.profile === undefined ? {} : { replaces: replaced.profile }) });
+      const replaced = grants.get(role)?.profile ?? removed.get(role);
+      grants.set(role, { grant, source: "added", ...(replaced === undefined ? {} : { replaces: replaced }) });
     }
     const cases = within(model, spec.only, taskCases(model, task));
     return [...grants].map(([role, { grant, source, profile, replaces }]) => ({
@@ -213,7 +218,7 @@ export function grantContent(model: Model, role: string, grant: Grant): Content 
   return { when: {}, returns, ...(grant.note === undefined ? {} : { description: grant.note }) };
 }
 
-export function triggerContent(task: Task, trigger: Trigger, listedName: Expr | undefined): Content {
+function triggerContent(task: Task, trigger: Trigger, listedName: Expr | undefined): Content {
   const when: Record<string, Cell> = { eventId: decodeCell(trigger.event) };
   if (trigger.postState !== undefined) {
     when.postEventState = decodeCell(trigger.postState);

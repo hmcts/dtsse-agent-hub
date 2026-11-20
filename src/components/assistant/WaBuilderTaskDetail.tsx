@@ -1,21 +1,23 @@
-import { type Expr, type Model, type Task, taskCases, type Val } from "@hmcts-cft/wa-spec";
+import { type Model, type Task, taskCases, type Val } from "@hmcts-cft/wa-spec";
 import {
   cancelCategories,
   caseTypeLabel,
   DUE_LABELS,
   describeCompletion,
+  describeConditions,
   describeLink,
   describeTaskRule,
   describeTrigger,
   groupByCaseType,
   PRIORITY_LABELS,
   permissionColumns,
+  type ResolvedValue,
   reconfiguredAttributes,
   reconfigureRules,
   resolveCompletions,
   resolvePermissions,
+  resolvePieces,
   resolveTriggers,
-  resolveVal,
   rulesForTask
 } from "@/assistant/wa-builder-text";
 import { CODE, ExprView, Grid, PerCaseType, PermissionTick, Section, TD, TH, Words, YesNo } from "@/components/assistant/WaBuilderParts";
@@ -40,15 +42,21 @@ function Sentences({ items, empty }: Readonly<{ items: string[]; empty: string }
 function ValueCell({ model, task, val }: Readonly<{ model: Model; task: Task; val: Val | undefined }>) {
   const cases = taskCases(model, task);
   return (
-    <PerCaseType model={model} groups={groupByCaseType(cases, (id) => resolveVal(model, val, id, cases))}>
-      {(values: Expr[]) =>
+    <PerCaseType model={model} groups={groupByCaseType(cases, (id) => resolvePieces(model, val, id, cases))}>
+      {(values: ResolvedValue[]) =>
         values.length === 0 ? (
           <span className="text-asst-muted">Not set</span>
         ) : (
           <ul className="flex flex-col gap-1">
-            {values.map((value, index) => (
-              <li key={`${index}-${JSON.stringify(value)}`}>
-                <ExprView expr={value} />
+            {values.map((piece, index) => (
+              <li key={`${index}-${JSON.stringify(piece)}`}>
+                <ExprView expr={piece.value} />
+                {piece.when === undefined ? null : (
+                  <span className="text-xs text-asst-muted">
+                    {" "}
+                    when <Words text={describeConditions(piece.when)} />
+                  </span>
+                )}
               </li>
             ))}
           </ul>

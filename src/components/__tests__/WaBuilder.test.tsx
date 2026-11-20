@@ -88,9 +88,11 @@ describe("the builder's views", () => {
   });
 
   it("should keep the version in each task link, and give each group its own heading id, when the board is for a version", () => {
-    render(<WaBuilderTaskBoard model={et} service="employment" version={4} by="roleCategory" />);
+    render(<WaBuilderTaskBoard model={et} service="employment" version={4} by="workType" caseType="et_scotland" />);
 
-    expect(screen.getAllByRole("link", { name: "ET1 Vetting" })[0]?.getAttribute("href")).toBe("/assistant/wa-builder/employment/tasks/Et1Vetting?version=4");
+    expect(screen.getAllByRole("link", { name: "ET1 Vetting" })[0]?.getAttribute("href")).toBe(
+      "/assistant/wa-builder/employment/tasks/Et1Vetting?version=4&by=workType&caseType=et_scotland"
+    );
     const ids = screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.id);
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids.every((id) => /^wa-group-\d+$/.test(id))).toBe(true);
@@ -113,6 +115,19 @@ describe("the builder's views", () => {
     expect(within(grid).getAllByText("✓").length).toBe(2);
     expect(screen.getByText("Name when created")).toBeDefined();
     expect(screen.getByText("Et1 Vetting")).toBeDefined();
+  });
+
+  it("should say which filter found no task when the board is empty", () => {
+    const empty = { ...et, tasks: [] } as Model;
+    const { rerender } = render(<WaBuilderTaskBoard model={empty} service="employment" by="roleCategory" />);
+    expect(screen.getByText("No task is configured.")).toBeDefined();
+    rerender(<WaBuilderTaskBoard model={empty} service="employment" by="roleCategory" caseType="et_scotland" />);
+    expect(screen.getByText("No task is configured for et_scotland.")).toBeDefined();
+  });
+
+  it("should label major and minor priority when the board shows a task's priority", () => {
+    render(<WaBuilderTaskBoard model={et} service="employment" by="roleCategory" />);
+    expect(screen.getAllByText("major 5000, minor 500").length).toBeGreaterThan(0);
   });
 
   it("should show a calculated setting as itself, not as No, when a setting is not a plain boolean", () => {
