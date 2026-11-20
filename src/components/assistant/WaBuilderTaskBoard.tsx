@@ -1,6 +1,6 @@
-import type { Model } from "@hmcts-cft/wa-spec";
+import { type Model, taskCases } from "@hmcts-cft/wa-spec";
 import Link from "next/link";
-import { type BoardGrouping, boardGroups, briefAcrossCaseTypes, briefVal, caseTypeLabel, taskCaseTypes } from "@/assistant/wa-builder-text";
+import { type BoardGrouping, boardGroups, briefAcrossCaseTypes, briefVal, caseTypeLabel } from "@/assistant/wa-builder-text";
 import { Grid, LINK, TD, TH, versionQuery } from "@/components/assistant/WaBuilderParts";
 
 const GROUPINGS: ReadonlyArray<{ id: BoardGrouping; label: string }> = [
@@ -85,7 +85,7 @@ export function WaBuilderTaskBoard({
             </thead>
             <tbody>
               {tasks.map(({ task, name, caseTypes }) => {
-                const own = taskCaseTypes(model, task);
+                const own = taskCases(model, task);
                 const cell = (resolve: (id: string) => string) => briefAcrossCaseTypes(model, { ...task, only: caseTypes }, resolve);
                 return (
                   <tr key={`${task.id}-${caseTypes.join(",")}`}>

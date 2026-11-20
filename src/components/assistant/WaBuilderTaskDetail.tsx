@@ -1,4 +1,4 @@
-import type { Expr, Model, Task, Val } from "@hmcts-cft/wa-spec";
+import { type Expr, type Model, type Task, taskCases, type Val } from "@hmcts-cft/wa-spec";
 import {
   cancelCategories,
   caseTypeLabel,
@@ -10,13 +10,13 @@ import {
   groupByCaseType,
   PRIORITY_LABELS,
   permissionColumns,
+  reconfiguredAttributes,
   reconfigureRules,
   resolveCompletions,
   resolvePermissions,
   resolveTriggers,
   resolveVal,
-  rulesForTask,
-  taskCaseTypes
+  rulesForTask
 } from "@/assistant/wa-builder-text";
 import { CODE, ExprView, Grid, PerCaseType, PermissionTick, Section, TD, TH, Words, YesNo } from "@/components/assistant/WaBuilderParts";
 
@@ -38,7 +38,7 @@ function Sentences({ items, empty }: Readonly<{ items: string[]; empty: string }
 
 /** One attribute's value, shown once or once for each group of case types that differ. */
 function ValueCell({ model, task, val }: Readonly<{ model: Model; task: Task; val: Val | undefined }>) {
-  const cases = taskCaseTypes(model, task);
+  const cases = taskCases(model, task);
   return (
     <PerCaseType model={model} groups={groupByCaseType(cases, (id) => resolveVal(model, val, id, cases))}>
       {(values: Expr[]) =>
@@ -80,7 +80,7 @@ function ValueList({ model, task, rows }: Readonly<{ model: Model; task: Task; r
 
 /** One task in plain language: when it is made, finished, cancelled and recalculated, what it is worth and who may act on it. */
 export function WaBuilderTaskDetail({ model, task }: Readonly<{ model: Model; task: Task }>) {
-  const cases = taskCaseTypes(model, task);
+  const cases = taskCases(model, task);
   const link = task.link;
   const due = Object.entries(task.due ?? {}).map(([key, val]): [string, Val | undefined] => [DUE_LABELS[key] ?? key, val]);
   const priority = Object.entries(task.priority ?? {}).map(([key, val]): [string, Val | undefined] => [PRIORITY_LABELS[key] ?? key, val]);
@@ -156,13 +156,17 @@ export function WaBuilderTaskDetail({ model, task }: Readonly<{ model: Model; ta
       </Section>
 
       <Section id="wa-reconfigured" title="When the case changes">
-        {task.reconfigure === undefined || task.reconfigure.length === 0 ? (
-          <p className="text-[13px] text-asst-muted">Nothing is recalculated.</p>
-        ) : (
-          <p className="text-[13px]">
-            These are recalculated: <Words text={task.reconfigure.map((name) => `\`${name}\``).join(", ")} />.
-          </p>
-        )}
+        <PerCaseType model={model} groups={groupByCaseType(cases, (id) => reconfiguredAttributes(model, task, id))}>
+          {(names: string[]) =>
+            names.length === 0 ? (
+              <p className="text-[13px] text-asst-muted">Nothing is recalculated.</p>
+            ) : (
+              <p className="text-[13px]">
+                These are recalculated: <Words text={names.map((name) => `\`${name}\``).join(", ")} />.
+              </p>
+            )
+          }
+        </PerCaseType>
         <PerCaseType model={model} groups={groupByCaseType(cases, (id) => reconfigureRules(model, task, id).map(describeTaskRule))}>
           {(items: string[]) => <Sentences items={items} empty="No event reconfigures tasks." />}
         </PerCaseType>
@@ -231,6 +235,7 @@ export function WaBuilderTaskDetail({ model, task }: Readonly<{ model: Model; ta
                       <td className={TD}>
                         {SOURCE[row.source]}
                         {row.profile === undefined ? "" : `: ${row.profile}`}
+                        {row.replaces === undefined ? "" : `, replacing the grant of profile ${row.replaces}`}
                       </td>
                     </tr>
                   ))}

@@ -150,14 +150,20 @@ export interface ResolvedGrant {
   grant: Grant;
   cases: string[];
   source: GrantSource;
+  /** The profile the grant is from; an addition has none. */
   profile?: string;
+  /** For an addition that replaces a role the profile grants: the profile it replaces the role of. */
+  replaces?: string;
 }
 
 /** The grants a task's permissions come to: its profile, less what it removes, with its overrides and additions. */
 export function resolveGrants(model: Model, task: Task): ResolvedGrant[] {
   return permissionSpecs(task).flatMap((spec) => {
-    const grants = new Map<string, { grant: Grant; source: GrantSource }>(
-      Object.entries(ownEntry(model.permissionProfiles, spec.profile) ?? {}).map(([role, grant]) => [role, { grant, source: "profile" }])
+    const grants = new Map<string, { grant: Grant; source: GrantSource; profile?: string; replaces?: string }>(
+      Object.entries(ownEntry(model.permissionProfiles, spec.profile) ?? {}).map(([role, grant]) => [
+        role,
+        { grant, source: "profile", ...(spec.profile === undefined ? {} : { profile: spec.profile }) }
+      ])
     );
     for (const role of spec.remove ?? []) {
       grants.delete(role);
@@ -165,14 +171,22 @@ export function resolveGrants(model: Model, task: Task): ResolvedGrant[] {
     for (const [role, patch] of Object.entries(spec.override ?? {})) {
       const base = grants.get(role);
       if (base) {
-        grants.set(role, { grant: { ...base.grant, ...patch }, source: "changed" });
+        grants.set(role, { grant: { ...base.grant, ...patch }, source: "changed", ...(base.profile === undefined ? {} : { profile: base.profile }) });
       }
     }
     for (const [role, grant] of Object.entries(spec.add ?? {})) {
-      grants.set(role, { grant, source: "added" });
+      const replaced = grants.get(role);
+      grants.set(role, { grant, source: "added", ...(replaced?.profile === undefined ? {} : { replaces: replaced.profile }) });
     }
     const cases = within(model, spec.only, taskCases(model, task));
-    return [...grants].map(([role, { grant, source }]) => ({ role, grant, cases, source, ...(spec.profile === undefined ? {} : { profile: spec.profile }) }));
+    return [...grants].map(([role, { grant, source, profile, replaces }]) => ({
+      role,
+      grant,
+      cases,
+      source,
+      ...(profile === undefined ? {} : { profile }),
+      ...(replaces === undefined ? {} : { replaces })
+    }));
   });
 }
 

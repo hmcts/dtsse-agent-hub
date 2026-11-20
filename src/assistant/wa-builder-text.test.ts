@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { type Model, parseModel, type Task } from "@hmcts-cft/wa-spec";
+import { type Model, parseModel, type Task, taskCases } from "@hmcts-cft/wa-spec";
 import { describe, expect, it } from "vitest";
 import {
   boardGroups,
@@ -20,6 +20,7 @@ import {
   isRawFeel,
   permissionColumns,
   permissionNames,
+  reconfiguredAttributes,
   reconfigureRules,
   resolveCompletions,
   resolvePermissions,
@@ -28,7 +29,6 @@ import {
   rolesByCategory,
   rulesForTask,
   type TaskRule,
-  taskCaseTypes,
   taskName,
   tasksUsingProfile,
   textParts
@@ -67,7 +67,7 @@ describe("describeCond and describeExpr", () => {
   });
 
   it("should show raw FEEL as code, and know it is raw, when ET calculates a due date", () => {
-    const days = resolveVal(et, task("ReviewReferralAdmin").due?.days, "et_englandwales", taskCaseTypes(et, task("ReviewReferralAdmin")))[0];
+    const days = resolveVal(et, task("ReviewReferralAdmin").due?.days, "et_englandwales", taskCases(et, task("ReviewReferralAdmin")))[0];
     expect(isRawFeel(days)).toBe(true);
     expect(describeExpr(days ?? null)).toMatch(/^`if \(caseData != null and caseData\.referralCollection/);
     expect(briefExpr(days)).toBe("calculated");
@@ -174,6 +174,44 @@ describe("a trigger, completion and cancellation of ET1 Vetting", () => {
     expect(row?.conditions).toEqual(["counts as no category"]);
   });
 
+  it("should match a comma-separated rule category only to a task that carries all of its parts when the row names several", () => {
+    const rules = (categories: string[]) => ({ ...et, cancellations: [{ events: "x", action: "Cancel", categories }] }) as Model;
+    const both: Task = { id: "T", cancelCategory: "A,B" };
+    expect(rulesForTask(rules(["A,B"]), both, "et_scotland").length).toBe(1);
+    expect(rulesForTask(rules(["A,B"]), { id: "T", cancelCategory: "A" }, "et_scotland")).toEqual([]);
+    expect(rulesForTask(rules(["A", "C"]), both, "et_scotland").length).toBe(1);
+    expect(rulesForTask(rules(["A,C"]), both, "et_scotland")).toEqual([]);
+  });
+
+  it("should list a role with an explicit null category under no category when roles are grouped", () => {
+    const model = { ...et, roles: { a: { category: null }, b: {}, c: { category: "ADMIN" } } } as Model;
+    expect(rolesByCategory(model)).toEqual([
+      { category: "ADMIN", roles: ["c"] },
+      { category: "No category", roles: ["a", "b"] }
+    ]);
+  });
+
+  it("should say an addition replaces the profile's grant, and has no profile, when it adds a role the profile grants", () => {
+    const model = { ...et, roles: {}, defaults: undefined, permissionProfiles: { p: { judge: { perms: "Read" } } } } as Model;
+    const task: Task = { id: "T", permissions: { profile: "p", add: { judge: { perms: "Own" } } } };
+    const [row] = resolvePermissions(model, task, "et_scotland");
+    expect(row).toMatchObject({ source: "added", perms: ["Own"], replaces: "p" });
+    expect(row?.profile).toBeUndefined();
+  });
+
+  it("should use each entry's own reconfigure flag, and the task's list otherwise, when attributes are recalculated", () => {
+    const task: Task = {
+      id: "T",
+      reconfigure: ["workType", "roleCategory"],
+      workType: { value: "w", reconfigure: false },
+      roleCategory: "ADMIN",
+      description: { value: "d", reconfigure: "true" },
+      title: { value: "t", only: ["et_scotland"], reconfigure: true }
+    };
+    expect(reconfiguredAttributes(et, task, "et_englandwales")).toEqual(["roleCategory", "description"]);
+    expect(reconfiguredAttributes(et, task, "et_scotland")).toEqual(["roleCategory", "title", "description"]);
+  });
+
   it("should include the warning and the note when a rule warns", () => {
     expect(
       describeCancellation({ events: "x", action: "Warn", warning: { code: "TA01", text: "Mind the gap" }, categories: ["Vetting"], note: "Agreed with BA" })
@@ -219,7 +257,7 @@ describe("a trigger, completion and cancellation of ET1 Vetting", () => {
   });
 
   it("should say the task is not for multiples when its case types are listed", () => {
-    expect(taskCaseTypes(et, vetting)).toEqual(["et_englandwales", "et_scotland"]);
+    expect(taskCases(et, vetting)).toEqual(["et_englandwales", "et_scotland"]);
   });
 });
 

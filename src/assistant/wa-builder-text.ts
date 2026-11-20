@@ -1,4 +1,5 @@
 import {
+  attributesOf,
   byCodePoint,
   type Cancellation,
   type Cond,
@@ -12,6 +13,7 @@ import {
   resolveGrants,
   type Task,
   type Trigger,
+  taskCases,
   triggerContent,
   triggerPieces,
   type Val,
@@ -216,9 +218,6 @@ export const caseTypeIds = (model: Model): string[] => model.caseTypes.map((c) =
 
 export const caseTypeLabel = (model: Model, id: string): string => model.caseTypes.find((c) => c.id === id)?.displayName ?? id;
 
-/** The case types a task is for. */
-export const taskCaseTypes = (model: Model, task: Task): string[] => task.only ?? caseTypeIds(model);
-
 export interface ByCaseType<T> {
   caseTypes: string[];
   value: T;
@@ -261,7 +260,7 @@ export const resolveCompletions = (model: Model, task: Task, caseType: string): 
 
 /** The task's name for the list: its first case type's, when that is plain text. */
 export function taskName(model: Model, task: Task): string {
-  const cases = taskCaseTypes(model, task);
+  const cases = taskCases(model, task);
   for (const caseType of cases) {
     const name = plainText(resolveVal(model, task.name, caseType, cases)[0]);
     if (name !== undefined) {
@@ -277,7 +276,7 @@ export const briefVal = (model: Model, val: Val | undefined, caseType: string, t
 
 /** A value across the task's case types: the one value, or each value with the case types it is for. */
 export function briefAcrossCaseTypes(model: Model, task: Task, resolve: (caseType: string) => string): string {
-  const groups = groupByCaseType(taskCaseTypes(model, task), resolve);
+  const groups = groupByCaseType(taskCases(model, task), resolve);
   const [only] = groups;
   if (groups.every((group) => group.value === "")) {
     return "";
@@ -298,6 +297,8 @@ export interface PermissionRow {
   /** Where the row comes from: the task's profile, a change to it, a grant the task adds, or a grant every task has. */
   source: "profile" | "changed" | "added" | "default";
   profile?: string;
+  /** The profile whose grant for this role an addition replaces. */
+  replaces?: string;
   note?: string;
 }
 
@@ -324,7 +325,7 @@ export function grantConditions(grant: Grant, roleCategory: Expr | undefined): s
 /** A category in a cell: a value as itself, an explicit `null` as none, and nothing as a dash. */
 const categoryText = (category: Expr | undefined): string => (category === null ? "none" : briefExpr(category) || "–");
 
-function permissionRow(model: Model, role: string, grant: Grant, source: PermissionRow["source"], profile?: string): PermissionRow {
+function permissionRow(model: Model, role: string, grant: Grant, source: PermissionRow["source"], profile?: string, replaces?: string): PermissionRow {
   return {
     role,
     category: categoryText(grant.category !== undefined ? grant.category : ownEntry(model.roles, role)?.category),
@@ -334,6 +335,7 @@ function permissionRow(model: Model, role: string, grant: Grant, source: Permiss
     conditions: grantConditions(grant, ownEntry(model.roles, role)?.category),
     source,
     ...(profile === undefined ? {} : { profile }),
+    ...(replaces === undefined ? {} : { replaces }),
     ...(grant.note === undefined ? {} : { note: grant.note })
   };
 }
@@ -342,7 +344,7 @@ function permissionRow(model: Model, role: string, grant: Grant, source: Permiss
 export function resolvePermissions(model: Model, task: Task, caseType: string): PermissionRow[] {
   const rows: PermissionRow[] = resolveGrants(model, task)
     .filter((resolved) => resolved.cases.includes(caseType))
-    .map((resolved) => permissionRow(model, resolved.role, resolved.grant, resolved.source, resolved.profile));
+    .map((resolved) => permissionRow(model, resolved.role, resolved.grant, resolved.source, resolved.profile, resolved.replaces));
   for (const [role, grants] of Object.entries(model.defaults?.permissions ?? {})) {
     for (const grant of [grants].flat()) {
       if ((grant.only ?? caseTypeIds(model)).includes(caseType)) {
@@ -384,7 +386,7 @@ export const tasksUsingProfile = (model: Model, profile: string): Task[] =>
 export function rolesByCategory(model: Model): Array<{ category: string; roles: string[] }> {
   const groups = new Map<string, string[]>();
   for (const [role, definition] of Object.entries(model.roles ?? {})) {
-    const category = briefExpr(definition.category) || "No category";
+    const category = definition.category === undefined || definition.category === null ? "No category" : briefExpr(definition.category);
     groups.set(category, [...(groups.get(category) ?? []), role]);
   }
   return [...groups.entries()]
@@ -415,7 +417,7 @@ export interface TaskRule {
 }
 
 function rulesWhere(model: Model, task: Task, caseType: string, wanted: (rule: Cancellation) => boolean): TaskRule[] {
-  if (!taskCaseTypes(model, task).includes(caseType)) {
+  if (!taskCases(model, task).includes(caseType)) {
     return [];
   }
   const { named, calculated } = cancelCategories(model, task, caseType);
@@ -426,8 +428,12 @@ function rulesWhere(model: Model, task: Task, caseType: string, wanted: (rule: C
     if (rule.categories === undefined || rule.categories.some((category) => category === null)) {
       return [{ rule, mayApply: false }];
     }
-    const listed = rule.categories.flatMap((category) => (typeof category === "string" ? categoryParts(category) : []));
-    if (listed.some((category) => category === "*" || named.includes(category))) {
+    // A rule row "A,B" correlates on both categories, so it finds only a task that carries both.
+    const matches = rule.categories.some((category) => {
+      const parts = typeof category === "string" ? categoryParts(category) : [];
+      return parts.length > 0 && parts.every((part) => part === "*" || named.includes(part));
+    });
+    if (matches) {
       return [{ rule, mayApply: false }];
     }
     return calculated || rule.categories.some((category) => typeof category !== "string") ? [{ rule, mayApply: true }] : [];
@@ -460,8 +466,8 @@ export type BoardGrouping = "roleCategory" | "workType";
 export function boardGroups(model: Model, by: BoardGrouping, caseType?: string): Array<{ group: string; tasks: BoardTask[] }> {
   const groups = new Map<string, BoardTask[]>();
   for (const task of model.tasks) {
-    const cases = taskCaseTypes(model, task).filter((id) => caseType === undefined || id === caseType);
-    for (const { caseTypes, value } of groupByCaseType(cases, (id) => briefVal(model, task[by], id, taskCaseTypes(model, task)))) {
+    const cases = taskCases(model, task).filter((id) => caseType === undefined || id === caseType);
+    for (const { caseTypes, value } of groupByCaseType(cases, (id) => briefVal(model, task[by], id, taskCases(model, task)))) {
       const group = value === "" ? "Not set" : value;
       groups.set(group, [...(groups.get(group) ?? []), { task, name: taskName(model, task), caseTypes }]);
     }
@@ -502,3 +508,22 @@ export const describeLink = (link: { label: string; event: string; page: string 
 /** A cancelling or warning rule for one task, saying so when its category is calculated and it may not apply. */
 export const describeTaskRule = ({ rule, mayApply }: TaskRule): string =>
   mayApply ? `${describeCancellation(rule)}. May apply: a category it names or the task's is calculated` : describeCancellation(rule);
+
+/**
+ * The attributes a case change recalculates for a task in one case type: each attribute's own `reconfigure` where its
+ * entry has one, otherwise whether the task lists it. An entry whose flag is a value other than a boolean shows it.
+ */
+export function reconfiguredAttributes(model: Model, task: Task, caseType: string): string[] {
+  const cases = taskCases(model, task);
+  const listed = new Set(task.reconfigure ?? []);
+  const found = attributesOf(task).flatMap(([name, val]) =>
+    valPieces(model, val, cases)
+      .filter((piece) => piece.cases.includes(caseType))
+      .flatMap((piece) => {
+        const flag = piece.reconfigure !== undefined ? piece.reconfigure : listed.has(name);
+        const text = typeof flag === "string" ? flag.trim().toLowerCase() : flag;
+        return text === false || text === "false" || text === null ? [] : [text === true || text === "true" ? name : `${name} (${describeExpr(flag)})`];
+      })
+  );
+  return [...new Set(found)];
+}

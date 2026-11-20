@@ -68,7 +68,9 @@ export function WaBuilderSetup({ model }: Readonly<{ model: Model }>) {
                     )}
                     {attribute.note === undefined ? null : <p className="pt-1 text-xs text-asst-muted">{attribute.note}</p>}
                   </td>
-                  <td className={TD}>{attribute.reconfigure === undefined ? "–" : <YesNo value={briefExpr(attribute.reconfigure)} />}</td>
+                  <td className={TD}>
+                    {attribute.reconfigure === null ? "–" : <YesNo value={briefExpr(attribute.reconfigure === undefined ? false : attribute.reconfigure)} />}
+                  </td>
                   <td className={TD}>{caseTypesText(model, attribute.only)}</td>
                 </tr>
               ))}
