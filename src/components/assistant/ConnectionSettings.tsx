@@ -156,7 +156,7 @@ function Paste({
   // Through `connectorFor`, as every surface reads a connection's words, so the help follows the route as the getting-ready screen's does.
   const help = isConnection(saved.kind) ? connectorFor(saved.kind, route).help : null;
   return (
-    <ActionForm action={save} label={`Save your ${saved.title}`} onSuccess={() => onSaved()} className={BELOW} pendingText="Saving…">
+    <ActionForm action={save} label={`Save your ${saved.title}`} onSuccess={onSaved} className={BELOW} pendingText="Saving…">
       <input type="hidden" name="kind" value={saved.kind} />
       <label htmlFor={`${id}-value`} className="text-[13px] font-medium">
         {saved.stored ? `New ${saved.title}` : saved.title}
@@ -201,11 +201,11 @@ function Remove({
   confirm: string;
   remove: FormAction;
   onCancel: () => void;
-  onRemoved: (said?: string) => void;
+  onRemoved: () => void;
 }) {
   const confirm = useFocusOnMount<HTMLButtonElement>();
   return (
-    <ActionForm action={remove} label={label} onSuccess={(result) => onRemoved(result.confirmation)} className={BELOW}>
+    <ActionForm action={remove} label={label} onSuccess={onRemoved} className={BELOW}>
       <input type="hidden" name="kind" value={kind} />
       <p className="text-pretty text-[13px] font-semibold text-asst-text">{question}</p>
       <div className="flex flex-wrap items-center gap-3">
@@ -272,10 +272,9 @@ function Row({
     onSaid(null);
     setDoing(what);
   };
-  // A removal that worked but could not restart the assistant says so in place of the usual sentence.
-  const finish = (said: string) => (instead?: string) => {
+  const finish = (said: string) => () => {
     setDoing(null);
-    onSaid(instead ?? said);
+    onSaid(said);
   };
   // A code the pod relayed is the one thing to do on the row while it is live: shown here as on the getting-ready
   // screen, with nothing beside it that would restart the assistant or replace the credential out from under it.

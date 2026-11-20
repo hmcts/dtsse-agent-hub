@@ -90,7 +90,7 @@ describe("HubStreamProvider", () => {
     expect(current().url).toBe("/api/ui/stream");
   });
 
-  it("should re-read the page when it moves onto a chat after an earlier stream had opened", () => {
+  it("should re-read the page once the new stream opens when it moves from one stream to another", () => {
     const { rerender } = render(
       <HubStreamProvider>
         <Watching agent="agent-1" />
@@ -108,18 +108,13 @@ describe("HubStreamProvider", () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
-  it("should not re-read the page when it moves onto a chat before any stream had opened", () => {
-    const { rerender } = render(
+  it("should not re-read the page as it loads, moving from the statuses-only stream to its own before either opened", () => {
+    render(
       <HubStreamProvider>
         <Watching agent="agent-1" />
       </HubStreamProvider>
     );
 
-    rerender(
-      <HubStreamProvider>
-        <Watching agent="agent-2" />
-      </HubStreamProvider>
-    );
     act(() => current().emit("open"));
 
     expect(refresh).not.toHaveBeenCalled();

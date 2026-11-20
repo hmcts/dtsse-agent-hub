@@ -1,6 +1,7 @@
-import type { CredentialKind } from "../credentials/names.ts";
 import { type CredentialTarget, deleteCredential, type SecretStore } from "../credentials/store.ts";
 import type { PrismaClient } from "../store/prisma.ts";
+import { HELD_BY } from "./held-credentials.ts";
+import type { VirtualAgentStatus } from "./lifecycle.ts";
 import { restartVirtualAgent } from "./store.ts";
 
 /**
@@ -11,46 +12,29 @@ import { restartVirtualAgent } from "./store.ts";
  */
 
 /**
- * The sign-ins a pod holds for itself from its start, and which of the owner's agents use each: a Claude token only
- * reaches Claude for an agent on the person's own licence, so an agent on the gateway holds none to stop using.
+ * The statuses of an agent whose pod is up, and so has read its sign-ins. One `requested`, `failed` or stopped reads
+ * them when it next starts, and restarting it would only make it read as starting.
  */
-const HELD_BY: Partial<Record<CredentialKind, "every" | "own-licence">> = {
-  github: "every",
-  azure: "every",
-  atlassian: "every",
-  jenkins: "every",
-  claude: "own-licence"
-};
+const POD_UP: readonly VirtualAgentStatus[] = ["provisioning", "awaiting_credentials", "awaiting_login", "cloning", "running"];
 
-export interface Removal {
-  /** How many running agents could not be restarted, which go on with the removed sign-in until they next start. */
-  notRestarted: number;
-}
-
-/**
- * Deletes the credential, then restarts the owner's running agents that held it, when one was stored. The deletion is
- * what matters and is done first; a restart that fails is counted rather than thrown, so a removal that worked is never
- * reported as one that did not, and one agent failing does not leave the rest running on it.
- */
-export async function removeCredential(prisma: PrismaClient, store: SecretStore, target: CredentialTarget): Promise<Removal> {
+/** Deletes the credential, then restarts the owner's agents with a pod up that held it, when one was stored. */
+export async function removeCredential(prisma: PrismaClient, store: SecretStore, target: CredentialTarget): Promise<void> {
   const held = (await prisma.credential.count({ where: { ownerOid: target.ownerOid, kind: target.kind } })) > 0;
   await deleteCredential(prisma, store, target);
   const users = HELD_BY[target.kind];
   if (!held || users === undefined) {
-    return { notRestarted: 0 };
+    return;
   }
-  const running = await prisma.virtualAgent.findMany({
-    where: { ownerOid: target.ownerOid, desired: "running", ...(users === "own-licence" ? { modelRoute: "own_licence" as const } : {}) },
+  const up = await prisma.virtualAgent.findMany({
+    where: {
+      ownerOid: target.ownerOid,
+      desired: "running",
+      status: { in: [...POD_UP] },
+      ...(users === "own-licence" ? { modelRoute: "own_licence" as const } : {})
+    },
     select: { id: true }
   });
-  let notRestarted = 0;
-  for (const agent of running) {
-    try {
-      await restartVirtualAgent(prisma, target.ownerOid, agent.id, "restarting to stop using a removed sign-in");
-    } catch (error) {
-      notRestarted += 1;
-      console.warn(`could not restart virtual agent ${agent.id} after a sign-in was removed: ${error instanceof Error ? error.message : String(error)}`);
-    }
+  for (const agent of up) {
+    await restartVirtualAgent(prisma, target.ownerOid, agent.id, "restarting to stop using a removed sign-in");
   }
-  return { notRestarted };
 }

@@ -88,7 +88,7 @@ export type WakeOutcome = "started" | "restarted" | "already";
 export async function wakeAssistant(
   prisma: PrismaClient,
   ownerOid: string,
-  assistant: Pick<VirtualAgentRow, "id" | "desired" | "status">,
+  assistant: { id: string; desired: string; status: string },
   now: Date = new Date()
 ): Promise<WakeOutcome> {
   if (assistant.desired === "stopped") {

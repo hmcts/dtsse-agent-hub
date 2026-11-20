@@ -348,6 +348,15 @@ describe("a virtual agent's size", () => {
     expect(await row(id)).toMatchObject({ status: "provisioning", exposedPorts: [], applyFailures: 0 });
   });
 
+  it("should drop a failed pod's error when a new size replaces it, so it reads as starting and not still failing", async () => {
+    const { id } = await started(ALICE, "pcs-api");
+    await prisma.virtualAgent.update({ where: { id }, data: { status: "failed", statusDetail: "the pod ran out of memory" } });
+
+    await changeVirtualAgentPod(prisma, ALICE.oid, id, { size: "large" });
+
+    expect(await row(id)).toMatchObject({ status: "provisioning", statusDetail: null });
+  });
+
   it("should change the size of a stopped agent and claim it again so the StatefulSet is applied with it", async () => {
     const { id } = await started(ALICE, "pcs-api");
     await setDesired(prisma, ALICE.oid, id, "stopped");

@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "../store/prisma.ts";
 
-const { setDesired } = vi.hoisted(() => ({ setDesired: vi.fn() }));
-vi.mock("../virtual-agents/store.ts", () => ({ setDesired }));
+const { wakeAssistant } = vi.hoisted(() => ({ wakeAssistant: vi.fn() }));
+vi.mock("../assistant/assistant-store.ts", () => ({ wakeAssistant }));
 
 const { podReady, podState } = await import("./pod-ready.ts");
 
@@ -20,24 +20,29 @@ function pod(
 }
 
 beforeEach(() => {
-  setDesired.mockReset();
+  wakeAssistant.mockReset();
 });
 
 describe("podReady", () => {
   it("should answer ok for a running pod that claims the feature and has every change applied", async () => {
     expect(await podReady(prisma, "oid", pod(), "welsh", NOW)).toBe("ok");
-    expect(setDesired).not.toHaveBeenCalled();
+    expect(wakeAssistant).not.toHaveBeenCalled();
   });
 
   it("should start a stopped assistant as the actor and answer waking", async () => {
     expect(await podReady(prisma, "oid", pod({ desired: "stopped", status: "stopped" }), "welsh", NOW)).toBe("waking");
-    expect(setDesired).toHaveBeenCalledWith(prisma, "oid", "va-1", "running", NOW);
+    expect(wakeAssistant).toHaveBeenCalledWith(prisma, "oid", expect.objectContaining({ id: "va-1", desired: "stopped" }), NOW);
+  });
+
+  it("should try a failed assistant again as the actor and answer waking, rather than waking for ever", async () => {
+    expect(await podReady(prisma, "oid", pod({ status: "failed" }), "welsh", NOW)).toBe("waking");
+    expect(wakeAssistant).toHaveBeenCalledWith(prisma, "oid", expect.objectContaining({ id: "va-1", status: "failed" }), NOW);
   });
 
   it("should answer waking for a pod still booting, and unsupported for one whose client lacks the feature", async () => {
     expect(await podReady(prisma, "oid", pod({ status: "provisioning" }), "welsh", NOW)).toBe("waking");
     expect(await podReady(prisma, "oid", pod({}, ["lookups"]), "welsh", NOW)).toBe("unsupported");
-    expect(setDesired).not.toHaveBeenCalled();
+    expect(wakeAssistant).not.toHaveBeenCalled();
   });
 
   it("should answer unsupported for a pod job when the pod has run past the grace with no claim of its own", async () => {
@@ -55,7 +60,7 @@ describe("podReady", () => {
 describe("podState", () => {
   it("should answer stopped for a stopped assistant and start nothing", () => {
     expect(podState(pod({ desired: "stopped", status: "stopped" }), "welsh")).toBe("stopped");
-    expect(setDesired).not.toHaveBeenCalled();
+    expect(wakeAssistant).not.toHaveBeenCalled();
   });
 
   it("should answer as podReady does for a pod that is not stopped", () => {

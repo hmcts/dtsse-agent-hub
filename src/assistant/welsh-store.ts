@@ -252,16 +252,10 @@ export async function saveUpload(prisma: PrismaClient, viewerOid: string, name: 
     throw new HttpError(413, "that spreadsheet is over 5 MB");
   }
   return await prisma.$transaction(async (tx) => {
-    // One upload at a time per assistant, as jobs are, so two tabs cannot both find room under the limit. What is past
+    // One upload at a time per assistant, as jobs are, so two tabs cannot both find room under the cap. What is past
     // its retention goes first, here as well as when a job starts: uploads with no job after them would otherwise stay.
     await tx.$queryRaw`SELECT 1 FROM virtual_agent WHERE id = ${assistant.id}::uuid FOR UPDATE`;
     await tx.assistantWelshFile.deleteMany({ where: { virtualAgentId: assistant.id, createdAt: { lt: new Date(now.getTime() - WELSH_RETENTION_MS) } } });
-    const recent = await tx.assistantWelshFile.count({
-      where: { virtualAgentId: assistant.id, jobId: null, createdAt: { gte: new Date(now.getTime() - WELSH_RATE_WINDOW_MS) } }
-    });
-    if (recent >= WELSH_RATE_LIMIT) {
-      throw new HttpError(429, "that is a lot of spreadsheets at once; wait a moment and try again");
-    }
     const held = await tx.assistantWelshFile.count({ where: { virtualAgentId: assistant.id, jobId: null } });
     if (held >= MAX_WELSH_UPLOADS) {
       throw new HttpError(409, `you have ${MAX_WELSH_UPLOADS} spreadsheets uploaded this week; they are cleared after 7 days`);

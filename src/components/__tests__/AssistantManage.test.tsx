@@ -536,17 +536,6 @@ describe("the Assistant's Connections, one row per service", () => {
     expect(screen.getByRole("status").textContent).toBe("Your Claude token is removed");
   });
 
-  it("should say the assistant still needs restarting in place of the usual sentence when a removal could not restart it", async () => {
-    const note = "Removed. Your assistant could not be restarted to stop using it, so restart it in Settings, under Your assistant.";
-    const remove = vi.fn(async () => ({ ok: true as const, confirmation: note }));
-    await open({ tokens: tokens([status("claude")], { remove }) }, "Connections");
-
-    fireEvent.click(screen.getByRole("button", { name: "Remove your Claude token" }));
-    await submit("Remove your Claude token");
-
-    expect(screen.getByRole("status").textContent).toBe(note);
-  });
-
   it("should say why the credentials cannot be shown when the hub cannot read them", async () => {
     await open({ tokens: { ...tokens(), rows: [], unavailable: "no credential store is configured" } }, "Connections");
 

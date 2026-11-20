@@ -554,10 +554,14 @@ describe("saveCredential and removeCredential", () => {
   });
 
   describe("when a sign-in a running assistant may hold is removed", () => {
-    /** Alice's running assistant on `modelRoute`, signed in as her on the web, and its status after `act`. */
-    async function statusAfter(act: () => Promise<unknown>, modelRoute: "own-licence" | "gateway" = "own-licence"): Promise<string> {
+    /** Alice's assistant on `modelRoute`, meant to be running and at `status`, and its status after `act`. */
+    async function statusAfter(
+      act: () => Promise<unknown>,
+      modelRoute: "own-licence" | "gateway" = "own-licence",
+      status: "running" | "requested" | "failed" = "running"
+    ): Promise<string> {
       const running = await createVirtualAgent(prisma, { owner: ALICE, modelRoute, name: "assistant" });
-      await prisma.virtualAgent.update({ where: { id: running.id }, data: { status: "running" } });
+      await prisma.virtualAgent.update({ where: { id: running.id }, data: { status } });
       await act();
       return (await prisma.virtualAgent.findUniqueOrThrow({ where: { id: running.id } })).status;
     }
@@ -592,6 +596,12 @@ describe("saveCredential and removeCredential", () => {
       }
 
       expect(await statusAfter(() => removeCredential(form({ kind })), modelRoute)).toBe("running");
+    });
+
+    it.each(["requested", "failed"] as const)("should leave an assistant %s as it is, since it reads its sign-ins when it starts", async (status) => {
+      await put(ALICE, "github", { value: GITHUB });
+
+      expect(await statusAfter(() => removeCredential(form({ kind: "github" })), "own-licence", status)).toBe(status);
     });
   });
 

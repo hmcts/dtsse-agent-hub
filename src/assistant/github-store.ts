@@ -5,7 +5,6 @@ import { exportableDocument } from "./artefact-store.ts";
 import { announce, type ConversationRow } from "./conversation-row.ts";
 import { GITHUB_EXPORT_TIMEOUT_MS, GITHUB_SELECT, type GithubExportView, githubExportView, readGithubProject, readGithubRepo } from "./github.ts";
 import { JIRA_SELECT } from "./jira.ts";
-import { duplicateTicket } from "./jira-store.ts";
 import { hasPod } from "./pods.ts";
 import { MAX_GITHUB_ERROR } from "./schemas.ts";
 
@@ -33,7 +32,7 @@ export async function requestGithubExport(
   repo: unknown,
   project: unknown = null,
   now: Date = new Date()
-): Promise<{ repo: string; exportId: string }> {
+): Promise<string> {
   if (!hasPod(conversation)) {
     throw new HttpError(409, "this chat is a session on your own computer, which cannot export to GitHub; download the document and attach it yourself");
   }
@@ -56,12 +55,11 @@ export async function requestGithubExport(
     throw new HttpError(400, "pick the GitHub Project from the search, or none");
   }
   const staleBefore = new Date(now.getTime() - GITHUB_EXPORT_TIMEOUT_MS);
-  const exportId = await prisma.$transaction(async (tx) => {
+  await prisma.$transaction(async (tx) => {
     const documentId = await exportableDocument(tx, conversation, document, "ticket");
-    const written = await tx.$queryRaw<{ id: string }[]>`
+    const updated = await tx.$executeRaw`
       UPDATE assistant_document
-         SET github_export_id = CASE WHEN github_status = 'pending' AND github_repo = ${checked} AND github_export_id IS NOT NULL THEN github_export_id ELSE gen_random_uuid() END,
-             github_repo = ${checked}, github_status = 'pending', github_error = NULL,
+         SET github_export_id = gen_random_uuid(), github_repo = ${checked}, github_status = 'pending', github_error = NULL,
              github_requested_at = ${now},
              github_project_owner = ${board?.owner ?? null}, github_project_number = ${board?.number ?? null}::int,
              github_project_title = ${board?.title ?? null}, github_project_error = NULL
@@ -72,9 +70,8 @@ export async function requestGithubExport(
          -- One ticket a document, whichever tool made it, as requestJiraExport has it.
          AND jira_key IS NULL
          AND (jira_status IS DISTINCT FROM 'pending' OR jira_requested_at < ${staleBefore})
-      RETURNING github_export_id::text AS id
     `;
-    if (written[0] === undefined) {
+    if (updated === 0) {
       const row = await tx.assistantDocument.findUniqueOrThrow({ where: { id: documentId }, select: { version: true, ...GITHUB_SELECT, ...JIRA_SELECT } });
       if (row.githubNumber !== null) {
         throw new HttpError(409, `this document is already on GitHub as ${row.githubRepo}#${row.githubNumber}`);
@@ -88,9 +85,8 @@ export async function requestGithubExport(
       throw new HttpError(409, "this document is already being exported");
     }
     await announce(tx, conversation);
-    return written[0].id;
   });
-  return { repo: checked, exportId };
+  return checked;
 }
 
 export type GithubExportResult = { export_id: string; number: number; project_error?: string } | { export_id: string; error: string };
@@ -104,27 +100,20 @@ export async function recordGithubExport(
   conversation: Pick<ConversationRow, "id" | "virtualAgentId" | "ownerOid">,
   result: GithubExportResult
 ): Promise<void> {
+  const where = { conversationId: conversation.id, githubExportId: result.export_id, githubNumber: null };
+  const data =
+    "number" in result
+      ? {
+          githubStatus: "done",
+          githubNumber: result.number,
+          githubError: null,
+          githubProjectError: result.project_error?.slice(0, MAX_GITHUB_ERROR) ?? null
+        }
+      : { githubStatus: "failed", githubError: result.error.slice(0, MAX_GITHUB_ERROR) };
   await prisma.$transaction(async (tx) => {
-    // One ticket a document at report time too, under the row's lock: see `recordJiraExport`.
-    await tx.$queryRaw`SELECT 1 FROM assistant_document WHERE conversation_id = ${conversation.id}::uuid AND github_export_id = ${result.export_id}::uuid FOR UPDATE`;
-    const document = await tx.assistantDocument.findFirst({
-      where: { conversationId: conversation.id, githubExportId: result.export_id, githubNumber: null },
-      select: { id: true, githubRepo: true, jiraKey: true }
-    });
-    if (document === null) {
-      return;
+    const { count } = await tx.assistantDocument.updateMany({ where, data });
+    if (count > 0) {
+      await announce(tx, conversation);
     }
-    const data = !("number" in result)
-      ? { githubStatus: "failed", githubError: result.error.slice(0, MAX_GITHUB_ERROR) }
-      : document.jiraKey !== null
-        ? { githubStatus: "failed", githubError: duplicateTicket(`${document.githubRepo}#${result.number}`, `in Jira as ${document.jiraKey}`) }
-        : {
-            githubStatus: "done",
-            githubNumber: result.number,
-            githubError: null,
-            githubProjectError: result.project_error?.slice(0, MAX_GITHUB_ERROR) ?? null
-          };
-    await tx.assistantDocument.update({ where: { id: document.id }, data });
-    await announce(tx, conversation);
   });
 }

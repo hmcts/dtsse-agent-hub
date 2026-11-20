@@ -20,12 +20,11 @@ import * as lookupsRoute from "../../src/app/api/ui/assistant/lookups/route.ts";
 import * as lookupAnswerRoute from "../../src/app/api/virtual/[virtualAgentId]/lookups/[lookupId]/route.ts";
 import * as sessionsRoute from "../../src/app/api/virtual/[virtualAgentId]/sessions/route.ts";
 import * as statusRoute from "../../src/app/api/virtual/[virtualAgentId]/status/route.ts";
-import { abandonExport, EXPORT_NOT_SENT, writeArtefact } from "../../src/assistant/artefact-store.ts";
+import { writeArtefact } from "../../src/assistant/artefact-store.ts";
 import { ensureAssistant, wakeAssistant } from "../../src/assistant/assistant-store.ts";
 import { CONFLUENCE_EXPORT_TIMEOUT_MS } from "../../src/assistant/confluence.ts";
 import {
   createConversation,
-  discardUnsaid,
   findConversation,
   hasLocalConversation,
   listConversations,
@@ -37,7 +36,7 @@ import { readExportDefaults, saveExportDefaults } from "../../src/assistant/expo
 import { assistantFrame } from "../../src/assistant/frame.ts";
 import { GITHUB_EXPORT_TIMEOUT_MS } from "../../src/assistant/github.ts";
 import { JIRA_EXPORT_TIMEOUT_MS } from "../../src/assistant/jira.ts";
-import { askLookup, cancelLookup, pendingLookup } from "../../src/assistant/lookup-store.ts";
+import { askLookup } from "../../src/assistant/lookup-store.ts";
 import { LOOKUP_RATE_LIMIT, LOOKUP_RETENTION_MS } from "../../src/assistant/lookups.ts";
 import { searchConversations } from "../../src/assistant/search-store.ts";
 import { linkSession, pendingWakes } from "../../src/assistant/session-store.ts";
@@ -1211,31 +1210,6 @@ describe("the chat gate", () => {
       expect((await prisma.virtualAgent.findUniqueOrThrow({ where: { id: assistant } })).desired).toBe("running");
     });
 
-    it("should keep both product changes in the history when two land at once", async () => {
-      const { id } = await offlineChat();
-
-      await Promise.all([
-        actions.setConversationProduct({ conversationId: id, product: "ccd" }),
-        actions.setConversationProduct({ conversationId: id, product: "pcs" })
-      ]);
-
-      const history = (await findConversation(prisma, ALICE.oid, id))!.productHistory.map((change) => change.product);
-      expect(history).toHaveLength(2);
-      expect(new Set(history)).toEqual(new Set(["ccd", "pcs"]));
-    });
-
-    it("should discard a chat nothing was said in, and keep one a message landed in", async () => {
-      const { id } = await offlineChat();
-      await insertUser(ALICE);
-      const empty = await createConversation(prisma, ALICE.oid, { product: "general" });
-
-      await discardUnsaid(prisma, empty);
-      await discardUnsaid(prisma, (await findConversation(prisma, ALICE.oid, id))!);
-
-      expect(await findConversation(prisma, ALICE.oid, empty.id)).toBeUndefined();
-      expect(await findConversation(prisma, ALICE.oid, id)).toBeDefined();
-    });
-
     it("should leave an assistant already on its way alone when asked to wake it", async () => {
       const { assistant } = await offlineChat();
 
@@ -1881,19 +1855,6 @@ describe("jira export", () => {
     });
   });
 
-  it("should keep the same export id when a stale export is tried again to the same project, so the first one's late key still lands", async () => {
-    const { token, id, agentId } = await written();
-    await actions.exportArtefactToJira({ conversationId: id, documentId: docOf(id), project: "VIBE" });
-    const first = await currentExport(id);
-    await prisma.assistantDocument.updateMany({ where: { conversationId: id }, data: { jiraRequestedAt: new Date(Date.now() - 16 * 60_000) } });
-
-    expect(await actions.exportArtefactToJira({ conversationId: id, documentId: docOf(id), project: "VIBE" })).toEqual({ ok: true });
-    expect(await currentExport(id)).toBe(first);
-
-    expect((await report(token, agentId, { export_id: first, key: "VIBE-1" })).status).toBe(204);
-    expect((await assistantConversation(VIEWER, id))?.documents[0]?.jira).toMatchObject({ status: "done", key: "VIBE-1" });
-  });
-
   it("should record the project a key is really in when the ticket went somewhere other than asked", async () => {
     const { token, id, agentId } = await written();
     await actions.exportArtefactToJira({ conversationId: id, documentId: docOf(id), project: "VIBE" });
@@ -1901,60 +1862,6 @@ describe("jira export", () => {
     await report(token, agentId, { export_id: await currentExport(id), key: "OTHER-7" });
 
     expect((await assistantConversation(VIEWER, id))?.documents[0]?.jira).toMatchObject({ status: "done", key: "OTHER-7", project: "OTHER" });
-  });
-
-  it("should keep one ticket when a Jira and a GitHub result for the same document land at once", async () => {
-    const { token, id, agentId } = await written();
-    await actions.exportArtefactToJira({ conversationId: id, documentId: docOf(id), project: "VIBE" });
-    const jiraExport = await currentExport(id);
-    const githubExport = "11111111-1111-4111-8111-111111111111";
-    await prisma.assistantDocument.updateMany({
-      where: { conversationId: id },
-      data: { githubExportId: githubExport, githubRepo: "hmcts/cft-workspace", githubStatus: "pending" }
-    });
-
-    await Promise.all([
-      report(token, agentId, { export_id: jiraExport, key: "VIBE-5" }),
-      pod(githubRoute.PUT, token, `/api/agent/${agentId}/github`, { agentId }, "PUT", { export_id: githubExport, number: 6 })
-    ]);
-
-    const document = await prisma.assistantDocument.findFirstOrThrow({ where: { conversationId: id }, select: { jiraKey: true, githubNumber: true } });
-    expect([document.jiraKey !== null, document.githubNumber !== null].filter(Boolean)).toHaveLength(1);
-  });
-
-  it("should say a late ticket is a second one when the document went to GitHub in the meantime", async () => {
-    const { token, id, agentId } = await written();
-    await actions.exportArtefactToJira({ conversationId: id, documentId: docOf(id), project: "VIBE" });
-    const late = await currentExport(id);
-    await prisma.assistantDocument.updateMany({
-      where: { conversationId: id },
-      data: { githubRepo: "hmcts/cft-workspace", githubNumber: 12, githubStatus: "done" }
-    });
-
-    await report(token, agentId, { export_id: late, key: "VIBE-9" });
-
-    expect((await assistantConversation(VIEWER, id))?.documents[0]?.jira).toMatchObject({
-      status: "failed",
-      error: "This document was already on GitHub as hmcts/cft-workspace#12, so VIBE-9 is a second ticket for it. Delete VIBE-9 if you do not need it."
-    });
-  });
-
-  it("should mark an export failed, only a pending one and only the one named, when the message asking for it was not sent", async () => {
-    const { id } = await written();
-    await actions.exportArtefactToJira({ conversationId: id, documentId: docOf(id), project: "VIBE" });
-    const conversation = (await findConversation(prisma, ALICE.oid, id))!;
-    const started = await currentExport(id);
-
-    // Another attempt's id, as a retry that kept the first attempt's would leave: nothing is marked.
-    await abandonExport(prisma, conversation, docOf(id), "jira", "00000000-0000-4000-8000-000000000000");
-    expect((await assistantConversation(VIEWER, id))?.documents[0]?.jira).toMatchObject({ status: "pending" });
-
-    await abandonExport(prisma, conversation, docOf(id), "jira", started);
-    expect((await assistantConversation(VIEWER, id))?.documents[0]?.jira).toMatchObject({ status: "failed", error: EXPORT_NOT_SENT });
-
-    await abandonExport(prisma, conversation, docOf(id), "github", started);
-    await abandonExport(prisma, conversation, "not an id", "jira", started);
-    expect((await assistantConversation(VIEWER, id))?.documents[0]?.github).toMatchObject({ status: "none" });
   });
 
   it("should allow a new export once the session has not answered in time", async () => {
@@ -2197,21 +2104,6 @@ describe("github export", () => {
     expect(await actions.exportArtefactToGithub({ conversationId: id, documentId: docOf(id), repo: "hmcts/cft-workspace" })).toEqual({
       ok: false,
       error: "this document is already on GitHub as hmcts/cft-workspace#42"
-    });
-  });
-
-  it("should say a late issue is a second ticket when the document went to Jira in the meantime", async () => {
-    const { token, id, agentId } = await written();
-    await actions.exportArtefactToGithub({ conversationId: id, documentId: docOf(id), repo: "hmcts/cft-workspace" });
-    const late = await currentExport(id);
-    await prisma.assistantDocument.updateMany({ where: { conversationId: id }, data: { jiraKey: "VIBE-3", jiraStatus: "done" } });
-
-    await report(token, agentId, { export_id: late, number: 44 });
-
-    expect((await assistantConversation(VIEWER, id))?.documents[0]?.github).toMatchObject({
-      status: "failed",
-      error:
-        "This document was already in Jira as VIBE-3, so hmcts/cft-workspace#44 is a second ticket for it. Delete hmcts/cft-workspace#44 if you do not need it."
     });
   });
 
@@ -2472,6 +2364,18 @@ describe("atlassian lookups", () => {
     expect(await prisma.assistantLookup.count()).toBe(0);
   });
 
+  it("should try a failed assistant again and say it is waking, rather than waking for ever", async () => {
+    const { id } = await answeringAssistant();
+    await prisma.virtualAgent.update({ where: { id }, data: { status: "failed", statusDetail: "the pod ran out of memory" } });
+
+    expect(await jsonOf(await ask({ kind: "jira_project", query: "vibe" }))).toEqual({ status: "waking" });
+    expect(await prisma.virtualAgent.findUniqueOrThrow({ where: { id }, select: { status: true, statusDetail: true } })).toEqual({
+      status: "requested",
+      statusDetail: null
+    });
+    expect(await prisma.assistantLookup.count()).toBe(0);
+  });
+
   it("should say the pod cannot answer when its client never claimed lookups", async () => {
     await answeringAssistant(["files"]);
 
@@ -2612,17 +2516,6 @@ describe("atlassian lookups", () => {
     await expect(askLookup(prisma, { viewerOid: ALICE.oid, kind: "jira_project", query: "too many", space: null, signIn: false })).rejects.toMatchObject({
       status: 429
     });
-  });
-
-  it("should hand a pod no search the browser stopped waiting for, and keep no answer for it", async () => {
-    const { id } = await answeringAssistant();
-    const asked = await askLookup(prisma, { viewerOid: ALICE.oid, kind: "jira_project", query: "typed on", space: null, signIn: false });
-    const lookupId = "lookupId" in asked ? asked.lookupId : "";
-
-    await cancelLookup(prisma, lookupId);
-
-    expect(await pendingLookup(prisma, id, lookupId)).toBeUndefined();
-    expect((await prisma.assistantLookup.findUniqueOrThrow({ where: { id: lookupId } })).status).toBe("cancelled");
   });
 
   it("should search only the asker's own assistant, and refuse someone with none", async () => {

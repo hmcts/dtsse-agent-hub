@@ -1,4 +1,5 @@
 import { markConversationAgentsOffline } from "../agents/offline.ts";
+import { announce as announceConversation } from "../assistant/conversation-row.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database } from "../store/prisma.ts";
 
@@ -74,6 +75,6 @@ export async function forgetSessions(db: Database, virtualAgentIds: readonly str
     conversations.map((row) => row.id)
   );
   for (const row of conversations) {
-    await notify(db, { type: "assistant_conversation", conversation_id: row.id, virtual_agent_id: row.virtual_agent_id, owner_oid: row.owner_oid });
+    await announceConversation(db, { id: row.id, virtualAgentId: row.virtual_agent_id, ownerOid: row.owner_oid });
   }
 }

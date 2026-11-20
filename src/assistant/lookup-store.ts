@@ -5,8 +5,7 @@ import { isUuid } from "../agents/store.ts";
 import type { EventHub } from "../realtime/hub.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
-import { setDesired } from "../virtual-agents/store.ts";
-import { findAssistantWithClaims } from "./assistant-store.ts";
+import { findAssistantWithClaims, wakeAssistant } from "./assistant-store.ts";
 import {
   checkResults,
   isGithubKind,
@@ -40,8 +39,8 @@ export interface LookupQuestion {
 export type Asked = { lookupId: string; virtualAgentId: string } | { answer: LookupResponse };
 
 /**
- * Records the question for the viewer's own assistant and tells its pod. A stopped assistant is started rather than
- * asked, and a pod whose client cannot answer is not sent a frame nobody would read: a GitHub search needs
+ * Records the question for the viewer's own assistant and tells its pod. A stopped assistant is started, and a failed
+ * one tried again, rather than asked, and a pod whose client cannot answer is not sent a frame nobody would read: a GitHub search needs
  * `github-lookups` as well, which a client that knows only the Atlassian kinds does not claim.
  */
 export async function askLookup(prisma: PrismaClient, question: LookupQuestion, now: Date = new Date()): Promise<Asked> {
@@ -50,8 +49,9 @@ export async function askLookup(prisma: PrismaClient, question: LookupQuestion, 
     throw new HttpError(404, "you have no assistant to search with yet");
   }
   const { assistant, claims } = found;
-  if (assistant.desired === "stopped") {
-    await setDesired(prisma, question.viewerOid, assistant.id, "running", now);
+  // A failed one is tried again as a stopped one is started: otherwise the picker would say it was waking for ever.
+  if (assistant.desired === "stopped" || assistant.status === "failed") {
+    await wakeAssistant(prisma, question.viewerOid, assistant, now);
     return { answer: { status: "waking" } };
   }
   const gate = podGate({ status: assistant.status, ...claims }, isGithubKind(question.kind) ? "github-lookups" : "lookups");
@@ -62,8 +62,6 @@ export async function askLookup(prisma: PrismaClient, question: LookupQuestion, 
     // The assistant's rows are taken one lookup at a time, so two tabs cannot both find room under the limit.
     await tx.$queryRaw`SELECT 1 FROM virtual_agent WHERE id = ${assistant.id}::uuid FOR UPDATE`;
     await tx.assistantLookup.deleteMany({ where: { virtualAgentId: assistant.id, createdAt: { lt: new Date(now.getTime() - LOOKUP_RETENTION_MS) } } });
-    // Cancelled ones count too: the pod was told of each as it was asked, so a client that gave up on every request at
-    // once would otherwise be an unlimited stream of searches for the pod and the services behind it.
     const recent = await tx.assistantLookup.count({
       where: { virtualAgentId: assistant.id, createdAt: { gte: new Date(now.getTime() - LOOKUP_RATE_WINDOW_MS) } }
     });
@@ -213,13 +211,4 @@ export async function pendingLookup(db: Database, virtualAgentId: string, lookup
     return undefined;
   }
   return { lookup_id: lookupId, kind: row.kind, query: row.query, space: row.spaceKey, owner: row.githubOwner, sign_in: row.signIn };
-}
-
-/**
- * A lookup the browser stopped waiting for, because the person typed on: an answer for it is not kept, and a pod
- * that has not yet started it is not handed it. One already running cannot be taken back, which is why it still counts
- * against the rate limit.
- */
-export async function cancelLookup(prisma: PrismaClient, lookupId: string): Promise<void> {
-  await prisma.assistantLookup.updateMany({ where: { id: lookupId, status: "pending" }, data: { status: "cancelled" } });
 }

@@ -1,5 +1,5 @@
+import { wakeAssistant } from "../assistant/assistant-store.ts";
 import type { PrismaClient } from "../store/prisma.ts";
-import { setDesired } from "../virtual-agents/store.ts";
 import { type ClientFeature, type PodClaims, type PodJobFeature, podGate } from "./client-features.ts";
 
 /** What `podReady` needs of a virtual agent: its lifecycle columns and the claims `podGate` reads. */
@@ -28,7 +28,11 @@ export function podState(
   return assistant.generation > assistant.observedGeneration ? "waking" : "ok";
 }
 
-/** Whether a frame needing `feature` may be sent to the virtual agent's pod now (`podState`); a stopped one is started, by `actorOid`, and is `waking`. */
+/**
+ * Whether a frame needing `feature` may be sent to the virtual agent's pod now (`podState`). A stopped one is started
+ * and a failed one tried again, as `actorOid` (`wakeAssistant`), and is `waking`: a failed pod is otherwise never
+ * tried again, and whatever asked would say it was waking for ever.
+ */
 export async function podReady(
   prisma: PrismaClient,
   actorOid: string,
@@ -37,9 +41,9 @@ export async function podReady(
   now: Date
 ): Promise<"waking" | "unsupported" | "ok"> {
   const state = podState(readiness, feature, now);
-  if (state !== "stopped") {
+  if (state !== "stopped" && readiness.assistant.status !== "failed") {
     return state;
   }
-  await setDesired(prisma, actorOid, readiness.assistant.id, "running", now);
+  await wakeAssistant(prisma, actorOid, readiness.assistant, now);
   return "waking";
 }

@@ -2,14 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 import { HttpError } from "@/agent-api/http";
-import { type Artefact, ArtefactConflict, abandonExport, type ExportTool, removeDocument, UUID_RE, writeDocument } from "@/assistant/artefact-store";
+import { type Artefact, ArtefactConflict, removeDocument, UUID_RE, writeDocument } from "@/assistant/artefact-store";
 import { confluenceExportRequest } from "@/assistant/confluence";
 import { requestConfluenceExport } from "@/assistant/confluence-store";
 import type { ConversationRow } from "@/assistant/conversation-row";
 import {
   conversationAgent,
   createConversation,
-  discardUnsaid,
   findConversation,
   pinConversation as pin,
   deleteConversation as remove,
@@ -29,7 +28,7 @@ import { CHAT_BLOCKED } from "@/assistant/onboarding";
 import { hasPod } from "@/assistant/pods";
 import { MAX_ARTEFACT_MARKDOWN, MAX_ARTEFACT_TITLE } from "@/assistant/schemas";
 import { sendToConversation } from "@/assistant/send";
-import { requestWake, stopAnswer, wakeConversationPod } from "@/assistant/session-store";
+import { requestWake, stopAnswer } from "@/assistant/session-store";
 import { attachUploads, uploadNames } from "@/assistant/upload-store";
 import { attachedBody, MAX_ATTACHMENTS_PER_MESSAGE } from "@/assistant/uploads";
 import { needsWake } from "@/assistant/wake";
@@ -77,14 +76,12 @@ async function gated(viewer: Viewer, conversation: ConversationRow): Promise<boo
 
 /**
  * An export: what every tool shares. The chat's gate, as for a message; then `request`, which writes the export
- * pending and answers the id it wrote and the message that asks for it; then the message. A send that throws did not
- * save the message (`sendToConversation`), so nothing is coming, and the export it marked pending is marked failed
- * rather than left pending for 15 minutes. That clean-up is best effort: its own failure must not hide the send's.
+ * pending and answers the message that asks for it; then the message. A send that fails leaves the export pending
+ * until its window passes, when it can be asked for again.
  */
 async function exportDocument(
   input: { conversationId: unknown; documentId: unknown },
-  tool: ExportTool,
-  request: (conversation: ConversationRow, document: string) => Promise<{ exportId: string; ask: string }>
+  request: (conversation: ConversationRow, document: string) => Promise<string>
 ): Promise<ActionResult> {
   if (!virtualAgentsEnabled()) {
     return OFF;
@@ -97,23 +94,8 @@ async function exportDocument(
   if (await gated(viewer, conversation)) {
     return BLOCKED;
   }
-  const { exportId, ask } = await request(conversation, await named(conversation.id, input.documentId));
-  try {
-    await send(viewer.oid, conversation, ask);
-  } catch (error) {
-    await bestEffort("abandon an export", () => abandonExport(prisma, conversation, text(input.documentId), tool, exportId));
-    throw error;
-  }
+  await send(viewer.oid, conversation, await request(conversation, await named(conversation.id, input.documentId)));
   return { ok: true };
-}
-
-/** Runs a clean-up that must not replace the error it is cleaning up after: its own failure is logged. */
-async function bestEffort(what: string, work: () => Promise<void>): Promise<void> {
-  try {
-    await work();
-  } catch (error) {
-    console.warn(`could not ${what} after a failed send: ${error instanceof Error ? error.message : String(error)}`);
-  }
 }
 
 /**
@@ -188,14 +170,7 @@ export async function startConversation(input: { product: unknown; body: unknown
       return body;
     }
     const conversation = await createConversation(prisma, viewer.oid, { product: input.product, title: text(input.title) });
-    try {
-      await send(viewer.oid, conversation, body);
-    } catch (error) {
-      // The new-chat screen keeps the draft and starts another conversation on a retry, so this one, with nothing
-      // said in it, would only be left for the sweep to find hours later.
-      await bestEffort("discard the empty chat", () => discardUnsaid(prisma, conversation));
-      throw error;
-    }
+    await send(viewer.oid, conversation, body);
     revalidatePath("/assistant");
     return { ok: true, id: conversation.id };
   });
@@ -276,12 +251,9 @@ export async function warmConversation(input: { conversationId: unknown }): Prom
     }
     const agentId = await conversationAgent(prisma, conversation);
     const agent = await prisma.agent.findUnique({ where: { id: agentId }, select: { status: true } });
+    // Asked even with a wake pending: `requestWake` keeps the first one's time and brings back a stopped or failed pod.
     if (needsWake(agent?.status, conversation.sessionState)) {
-      if (conversation.wakeRequestedAt === null) {
-        await requestWake(prisma, conversation);
-      } else {
-        await wakeConversationPod(prisma, conversation);
-      }
+      await requestWake(prisma, conversation);
     }
     return { ok: true };
   });
@@ -525,10 +497,10 @@ export async function removeDocmosisTemplate(input: { conversationId: unknown; i
  */
 export async function exportArtefactToJira(input: { conversationId: unknown; documentId: unknown; project: unknown }): Promise<ActionResult> {
   return await runAction("export artefact to jira", () =>
-    exportDocument(input, "jira", async (conversation, document) => ({
-      exportId: await requestJiraExport(prisma, conversation, input.documentId, input.project),
-      ask: `Please export ${document} to the ${String(input.project)} backlog in Jira.`
-    }))
+    exportDocument(input, async (conversation, document) => {
+      await requestJiraExport(prisma, conversation, input.documentId, input.project);
+      return `Please export ${document} to the ${String(input.project)} backlog in Jira.`;
+    })
   );
 }
 
@@ -539,11 +511,11 @@ export async function exportArtefactToJira(input: { conversationId: unknown; doc
  */
 export async function exportArtefactToGithub(input: { conversationId: unknown; documentId: unknown; repo: unknown; project?: unknown }): Promise<ActionResult> {
   return await runAction("export artefact to github", () =>
-    exportDocument(input, "github", async (conversation, document) => {
-      const { repo, exportId } = await requestGithubExport(prisma, conversation, input.documentId, input.repo, input.project ?? null);
+    exportDocument(input, async (conversation, document) => {
+      const repo = await requestGithubExport(prisma, conversation, input.documentId, input.repo, input.project ?? null);
       const project = readGithubProject(input.project ?? null);
       const board = project ? `, on the "${project.title}" Project` : "";
-      return { exportId, ask: `Please create a GitHub issue for ${document} in ${repo}${board}.` };
+      return `Please create a GitHub issue for ${document} in ${repo}${board}.`;
     })
   );
 }
@@ -555,9 +527,8 @@ export async function exportArtefactToGithub(input: { conversationId: unknown; d
  */
 export async function exportArtefactToConfluence(input: { conversationId: unknown; documentId: unknown; parent: unknown }): Promise<ActionResult> {
   return await runAction("export artefact to confluence", () =>
-    exportDocument(input, "confluence", async (conversation, document) => {
-      const { parent, exportId } = await requestConfluenceExport(prisma, conversation, input.documentId, input.parent);
-      return { exportId, ask: confluenceExportRequest(parent, document) };
-    })
+    exportDocument(input, async (conversation, document) =>
+      confluenceExportRequest(await requestConfluenceExport(prisma, conversation, input.documentId, input.parent), document)
+    )
   );
 }

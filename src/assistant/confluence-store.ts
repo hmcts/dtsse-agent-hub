@@ -39,7 +39,7 @@ export async function requestConfluenceExport(
   document: unknown,
   rawParent: unknown,
   now: Date = new Date()
-): Promise<{ parent: ConfluenceParent; exportId: string }> {
+): Promise<ConfluenceParent> {
   if (!hasPod(conversation)) {
     throw new HttpError(409, "this chat is a session on your own computer, which cannot publish to Confluence; download the document and publish it yourself");
   }
@@ -48,21 +48,19 @@ export async function requestConfluenceExport(
     throw new HttpError(400, "pick a Confluence page to put the document under");
   }
   const staleBefore = new Date(now.getTime() - CONFLUENCE_EXPORT_TIMEOUT_MS);
-  const exportId = await prisma.$transaction(async (tx) => {
+  await prisma.$transaction(async (tx) => {
     const documentId = await exportableDocument(tx, conversation, document, "confluence");
-    const written = await tx.$queryRaw<{ id: string }[]>`
+    const updated = await tx.$executeRaw`
       UPDATE assistant_document
-         SET confluence_export_id = CASE WHEN confluence_status = 'pending' AND confluence_parent_id = ${parent.id} AND confluence_export_id IS NOT NULL THEN confluence_export_id ELSE gen_random_uuid() END,
-             confluence_space_id = ${parent.space_id}, confluence_space_key = ${parent.space_key},
+         SET confluence_export_id = gen_random_uuid(), confluence_space_id = ${parent.space_id}, confluence_space_key = ${parent.space_key},
              confluence_space_name = ${parent.space_name}, confluence_parent_id = ${parent.id}, confluence_parent_title = ${parent.title},
              confluence_status = 'pending', confluence_error = NULL, confluence_requested_at = ${now}
        WHERE id = ${documentId}::uuid
          AND confluence_page_id IS NULL
          AND version > 0
          AND (confluence_status IS DISTINCT FROM 'pending' OR confluence_requested_at < ${staleBefore})
-      RETURNING confluence_export_id::text AS id
     `;
-    if (written[0] === undefined) {
+    if (updated === 0) {
       const row = await tx.assistantDocument.findUniqueOrThrow({ where: { id: documentId }, select: { version: true, confluencePageId: true } });
       if (row.confluencePageId !== null) {
         throw new HttpError(409, "this document is already in Confluence");
@@ -73,9 +71,8 @@ export async function requestConfluenceExport(
       throw new HttpError(409, "this document is already being published");
     }
     await announce(tx, conversation);
-    return written[0].id;
   });
-  return { parent, exportId };
+  return parent;
 }
 
 export type ConfluenceExportResult = { export_id: string; page_id: string; title?: string } | { export_id: string; error: string };

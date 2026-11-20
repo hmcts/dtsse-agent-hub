@@ -50,18 +50,15 @@ export function HubStreamProvider({ children }: { children: React.ReactNode }) {
   // The stream the tab had before this one, so a new one opened in its place catches up on what fell between them: the
   // page was read before the new stream opened, and anything announced in between — a reply landing as the person
   // moved to its chat — would otherwise not be heard until something else changed. Only once a stream has opened: a
-  // tab still loading, whose first stream never connected, read every page it has just now and has nothing to catch up.
+  // page loading opens the statuses-only stream and then its own as it says what it watches, and has just read itself.
   const previousUrl = useRef<string | null>(null);
   const everOpened = useRef(false);
-  const onChat = watched.agent !== null;
 
   useEffect(() => {
     if (ended) {
       return;
     }
-    // Only onto a chat's stream, where an event lost in between is a reply that never shows; elsewhere the page read on
-    // arriving is current enough, and a resync would read it all again for nothing.
-    const catchUp = everOpened.current && previousUrl.current !== url && onChat;
+    const catchUp = everOpened.current && previousUrl.current !== url;
     previousUrl.current = url;
     return connectHub(
       url,
@@ -85,7 +82,7 @@ export function HubStreamProvider({ children }: { children: React.ReactNode }) {
       undefined,
       catchUp
     );
-  }, [url, onChat, router, ended, endSession]);
+  }, [url, router, ended, endSession]);
 
   const value = useMemo<HubContextValue>(
     () => ({

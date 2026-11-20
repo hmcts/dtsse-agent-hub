@@ -288,14 +288,10 @@ describe("uploading a file", () => {
     ["fetched by the pod", "fetched", true, false, 409],
     ["sent and expired here, but kept on the pod's disk", "expired", true, false, 409],
     ["sent, expired, and deleted from the pod in Settings", "expired", true, true, 201],
-    ["never sent, and expired", "expired", false, false, 201],
-    ["sent and expired, on a pod whose disk has since been deleted", "expired", true, "disk", 201]
+    ["never sent, and expired", "expired", false, false, 201]
   ] as const)("should count a full conversation's files that were %s accordingly", async (_label, state, sent, deleted, status) => {
     // Arrange
-    const { id: assistant } = await startedAssistant();
-    if (deleted === "disk") {
-      await prisma.virtualAgent.update({ where: { id: assistant }, data: { diskDeletedAt: new Date() } });
-    }
+    await startedAssistant();
     const started = (await actions.startConversation({ product: "pcs", body: "files" })) as { id: string };
     const message = sent ? (await prisma.message.findFirstOrThrow({ select: { id: true } })).id : null;
     // The per-file cap means a full conversation takes several rows.
@@ -323,51 +319,20 @@ describe("uploading a file", () => {
     expect(response.status).toBe(status);
   });
 
-  it("should not let an upload a closed tab left half-sent take a place in the next message once it has gone quiet", async () => {
+  it("should expire an upload a closed tab left half-sent once it has gone quiet, so it no longer takes a place", async () => {
     await startedAssistant();
     const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
     for (let n = 0; n < MAX_ATTACHMENTS_PER_MESSAGE; n += 1) {
       expect((await startUpload(conversation.id, { name: `a${n}.pdf`, size: 4 })).status).toBe(201);
     }
-    await prisma.assistantUpload.updateMany({
-      where: { conversationId: conversation.id },
-      data: { updatedAt: new Date(Date.now() - STALLED_UPLOAD_MS - 60_000) }
-    });
+    const [quiet, ...arriving] = await prisma.assistantUpload.findMany({ orderBy: { fileName: "asc" }, select: { id: true } });
+    await prisma.assistantUpload.update({ where: { id: quiet!.id }, data: { updatedAt: new Date(Date.now() - STALLED_UPLOAD_MS - 60_000) } });
 
+    expect(await sweepUploads(prisma)).toMatchObject({ expired: 1 });
+
+    expect((await prisma.assistantUpload.findUniqueOrThrow({ where: { id: quiet!.id } })).state).toBe("expired");
+    expect(await prisma.assistantUpload.count({ where: { id: { in: arriving.map((row) => row.id) }, state: "pending" } })).toBe(arriving.length);
     expect((await startUpload(conversation.id, { name: "fresh.pdf", size: 4 })).status).toBe(201);
-  });
-
-  describe("when an upload that had gone quiet starts receiving parts again", () => {
-    /** One stalled upload of two parts, and `others` fresh ones beside it. */
-    async function resumable(others: number): Promise<string> {
-      await startedAssistant();
-      const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
-      const { uploadId } = await jsonOf<Created>(await startUpload(conversation.id, { name: "stalled.pdf", size: PART_BYTES + 4 }));
-      await prisma.assistantUpload.update({ where: { id: uploadId }, data: { updatedAt: new Date(Date.now() - STALLED_UPLOAD_MS - 60_000) } });
-      for (let n = 0; n < others; n += 1) {
-        expect((await startUpload(conversation.id, { name: `a${n}.pdf`, size: 4 })).status).toBe(201);
-      }
-      return uploadId;
-    }
-
-    it("should refuse its part when four other files have taken the places since", async () => {
-      const uploadId = await resumable(MAX_ATTACHMENTS_PER_MESSAGE);
-
-      const response = await putPart(uploadId, 0, filled(PART_BYTES, 1));
-
-      expect(response.status).toBe(409);
-      expect(await jsonOf(response)).toMatchObject({ reason: "too_many_files" });
-      expect(await prisma.assistantUploadPart.count({ where: { uploadId } })).toBe(0);
-    });
-
-    it("should take its place back when there is still one free", async () => {
-      const uploadId = await resumable(MAX_ATTACHMENTS_PER_MESSAGE - 1);
-
-      const response = await putPart(uploadId, 0, filled(PART_BYTES, 1));
-
-      expect(response.status).toBe(200);
-      expect((await prisma.assistantUpload.findUniqueOrThrow({ where: { id: uploadId } })).updatedAt.getTime()).toBeGreaterThan(Date.now() - 60_000);
-    });
   });
 
   it("should refuse a part for an upload the sweep has expired, rather than store bytes nothing will delete", async () => {

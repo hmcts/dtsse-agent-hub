@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { HttpError } from "../agent-api/http.ts";
 import type { PrismaClient } from "../store/prisma.ts";
+import { restartsOnRemoval } from "./held-credentials.ts";
 
 const deleteCredential = vi.hoisted(() => vi.fn());
 const restartVirtualAgent = vi.hoisted(() => vi.fn());
@@ -12,9 +12,10 @@ const { removeCredential } = await import("./credential-removal.ts");
 
 const STORE = {} as never;
 const OWNER = "an-oid";
+const POD_UP = { in: ["provisioning", "awaiting_credentials", "awaiting_login", "cloning", "running"] };
 
-function database(stored: number, running: string[]) {
-  const findMany = vi.fn().mockResolvedValue(running.map((id) => ({ id })));
+function database(stored: number, up: string[]) {
+  const findMany = vi.fn().mockResolvedValue(up.map((id) => ({ id })));
   const prisma = { credential: { count: vi.fn().mockResolvedValue(stored) }, virtualAgent: { findMany } } as unknown as PrismaClient;
   return { prisma, findMany };
 }
@@ -22,17 +23,16 @@ function database(stored: number, running: string[]) {
 beforeEach(() => {
   deleteCredential.mockReset().mockResolvedValue(undefined);
   restartVirtualAgent.mockReset().mockResolvedValue({});
-  vi.spyOn(console, "warn").mockImplementation(() => undefined);
 });
 
 describe("removeCredential", () => {
-  it("should restart every running agent when a sign-in each holds is removed", async () => {
+  it("should restart every agent with a pod up when a sign-in each holds is removed", async () => {
     const { prisma, findMany } = database(1, ["a", "b"]);
 
-    expect(await removeCredential(prisma, STORE, { actorOid: OWNER, ownerOid: OWNER, kind: "github" })).toEqual({ notRestarted: 0 });
+    await removeCredential(prisma, STORE, { actorOid: OWNER, ownerOid: OWNER, kind: "github" });
 
     expect(deleteCredential).toHaveBeenCalledWith(prisma, STORE, { actorOid: OWNER, ownerOid: OWNER, kind: "github" });
-    expect(findMany.mock.calls[0]?.[0].where).toEqual({ ownerOid: OWNER, desired: "running" });
+    expect(findMany.mock.calls[0]?.[0].where).toEqual({ ownerOid: OWNER, desired: "running", status: POD_UP });
     expect(restartVirtualAgent.mock.calls.map((call) => call[2])).toEqual(["a", "b"]);
   });
 
@@ -41,7 +41,7 @@ describe("removeCredential", () => {
 
     await removeCredential(prisma, STORE, { actorOid: OWNER, ownerOid: OWNER, kind: "claude" });
 
-    expect(findMany.mock.calls[0]?.[0].where).toEqual({ ownerOid: OWNER, desired: "running", modelRoute: "own_licence" });
+    expect(findMany.mock.calls[0]?.[0].where).toEqual({ ownerOid: OWNER, desired: "running", status: POD_UP, modelRoute: "own_licence" });
   });
 
   it.each([
@@ -50,18 +50,29 @@ describe("removeCredential", () => {
   ] as const)("should restart nothing when %s", async (_when, stored, kind) => {
     const { prisma } = database(stored, ["a"]);
 
-    expect(await removeCredential(prisma, STORE, { actorOid: OWNER, ownerOid: OWNER, kind })).toEqual({ notRestarted: 0 });
+    await removeCredential(prisma, STORE, { actorOid: OWNER, ownerOid: OWNER, kind });
 
     expect(deleteCredential).toHaveBeenCalled();
     expect(restartVirtualAgent).not.toHaveBeenCalled();
   });
 
-  it("should count an agent it could not restart and still restart the rest when one restart fails", async () => {
-    const { prisma } = database(1, ["a", "b"]);
-    restartVirtualAgent.mockRejectedValueOnce(new HttpError(404, "no such virtual agent")).mockRejectedValueOnce("down");
+  it("should fail with the restart's error when an agent cannot be restarted, the sign-in already removed", async () => {
+    const { prisma } = database(1, ["a"]);
+    restartVirtualAgent.mockRejectedValueOnce(new Error("down"));
 
-    expect(await removeCredential(prisma, STORE, { actorOid: OWNER, ownerOid: OWNER, kind: "jenkins" })).toEqual({ notRestarted: 2 });
+    await expect(removeCredential(prisma, STORE, { actorOid: OWNER, ownerOid: OWNER, kind: "jenkins" })).rejects.toThrow("down");
 
-    expect(restartVirtualAgent).toHaveBeenCalledTimes(2);
+    expect(deleteCredential).toHaveBeenCalled();
+  });
+});
+
+describe("restartsOnRemoval", () => {
+  it.each([
+    ["github", "gateway", true],
+    ["claude", "own-licence", true],
+    ["claude", "gateway", false],
+    ["microsoft", "own-licence", false]
+  ] as const)("should say whether removing %s restarts an agent on the %s route", (kind, route, expected) => {
+    expect(restartsOnRemoval(kind, route)).toBe(expected);
   });
 });

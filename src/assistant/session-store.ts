@@ -4,7 +4,7 @@ import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { findVirtualAgent } from "../virtual-agents/store.ts";
 import { wakeAssistant } from "./assistant-store.ts";
-import { announce, type ConversationRow, storedStops } from "./conversation-row.ts";
+import { announce, type ConversationRow } from "./conversation-row.ts";
 import { readAssistantModel } from "./model-store.ts";
 import { hasPod } from "./pods.ts";
 import type { SessionsReport } from "./schemas.ts";
@@ -89,12 +89,8 @@ export async function stopAnswer(prisma: PrismaClient, conversation: Conversatio
   if (!clientSupports(agent.clientFeatures, "stop")) {
     return "unsupported-client";
   }
+  const history = [...conversation.stopHistory, { at: now.toISOString() }].slice(-MAX_STOP_HISTORY);
   await prisma.$transaction(async (tx) => {
-    // Read again under the row's lock, so two stops at once both land in the history rather than one overwriting it.
-    const [row] = await tx.$queryRaw<{ stop_history: unknown }[]>`
-      SELECT stop_history FROM assistant_conversation WHERE id = ${conversation.id}::uuid FOR UPDATE
-    `;
-    const history = [...storedStops(row?.stop_history), { at: now.toISOString() }].slice(-MAX_STOP_HISTORY);
     // Written as `setProduct` writes the product history, rather than through the typed client: Prisma's JSON input
     // type takes no array of a named interface, and the two histories are better off written the same way.
     await tx.$executeRaw`

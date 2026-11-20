@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { errorResponse, json, readJson } from "@/agent-api/http";
 import { GITHUB_OWNER_RE } from "@/assistant/github";
-import { askLookup, cancelLookup, waitForLookup } from "@/assistant/lookup-store";
+import { askLookup, waitForLookup } from "@/assistant/lookup-store";
 import { isGithubKind, isLookupKind, LOOKUP_WAIT_MS, type LookupResponse, lookupQuery, SPACE_KEY_RE, searchable } from "@/assistant/lookups";
 import { realtime } from "@/realtime/process";
 import { prisma } from "@/store/prisma";
@@ -67,10 +67,6 @@ export async function POST(request: NextRequest): Promise<Response> {
       // through the page instead, and searches again when it is done.
       return json({ status: "signing_in" } satisfies LookupResponse);
     }
-    const answer = await waitForLookup(prisma, hub, asked.lookupId, { timeoutMs: LOOKUP_WAIT_MS, signal: request.signal });
-    if (request.signal.aborted) {
-      await cancelLookup(prisma, asked.lookupId);
-    }
-    return json(answer);
+    return json(await waitForLookup(prisma, hub, asked.lookupId, { timeoutMs: LOOKUP_WAIT_MS, signal: request.signal }));
   });
 }

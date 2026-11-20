@@ -61,8 +61,8 @@ export async function saveCredential(form: FormData): Promise<ActionResult<{ con
   });
 }
 
-export async function removeCredential(form: FormData): Promise<ActionResult<{ confirmation?: string }>> {
-  return await runAction<{ confirmation?: string }>("delete credential", async () => {
+export async function removeCredential(form: FormData): Promise<ActionResult> {
+  return await runAction("delete credential", async () => {
     const viewer = await requireViewer();
     const kind = text(form.get("kind"));
     if (!isCredentialKind(kind)) {
@@ -72,11 +72,9 @@ export async function removeCredential(form: FormData): Promise<ActionResult<{ c
     if (!backend.available) {
       return { ok: false, error: backend.reason };
     }
-    const { notRestarted } = await removeHeldCredential(prisma, backend.store, { actorOid: viewer.oid, ownerOid: viewer.oid, kind });
+    await removeHeldCredential(prisma, backend.store, { actorOid: viewer.oid, ownerOid: viewer.oid, kind });
     revalidate();
-    return notRestarted === 0
-      ? { ok: true }
-      : { ok: true, confirmation: "Removed. Your assistant could not be restarted to stop using it, so restart it in Settings, under Your assistant." };
+    return { ok: true };
   });
 }
 

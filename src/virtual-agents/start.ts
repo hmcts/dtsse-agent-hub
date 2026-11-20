@@ -1,4 +1,4 @@
-import type { Database } from "../store/prisma.ts";
+import type { Database, PrismaClient } from "../store/prisma.ts";
 import { AUTO_START_UNUSED_DAYS } from "./schedule.ts";
 import { announce } from "./stop.ts";
 
@@ -78,10 +78,11 @@ export async function autoStartAssistants(db: Database, time: string, day: strin
  * generation, so an orchestrator claims and applies it as it would a start, and with none of the failed pod's token,
  * ports, memory report or client claim. `requested` rather than `provisioning`, because nothing is scheduled until an
  * orchestrator takes it — a failure that was nobody picking it up would otherwise read as a pod on its way. Whether it
- * was retried.
+ * was retried. One transaction, so the announcement goes out with the change and never for one rolled back.
  */
-export async function retryVirtualAgent(db: Database, ownerOid: string, id: string, now: Date): Promise<boolean> {
-  const retried = await db.$queryRaw<{ id: string; owner_oid: string }[]>`
+export async function retryVirtualAgent(prisma: PrismaClient, ownerOid: string, id: string, now: Date): Promise<boolean> {
+  return await prisma.$transaction(async (tx) => {
+    const retried = await tx.$queryRaw<{ id: string; owner_oid: string }[]>`
     UPDATE virtual_agent
        SET started_at = ${now}, stop_reason = NULL,
            memory_limit_bytes = NULL, memory_current_bytes = NULL, memory_peak_bytes = NULL, memory_anon_bytes = NULL, memory_reported_at = NULL,
@@ -92,8 +93,9 @@ export async function retryVirtualAgent(db: Database, ownerOid: string, id: stri
      WHERE id = ${id}::uuid AND owner_oid = ${ownerOid} AND desired = 'running' AND status = 'failed'
     RETURNING id::text AS id, owner_oid
   `;
-  for (const row of retried) {
-    await announce(db, row.id, row.owner_oid);
-  }
-  return retried.length > 0;
+    for (const row of retried) {
+      await announce(tx, row.id, row.owner_oid);
+    }
+    return retried.length > 0;
+  });
 }

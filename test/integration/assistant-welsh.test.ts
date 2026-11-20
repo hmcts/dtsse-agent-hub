@@ -255,12 +255,12 @@ describe("welsh jobs", () => {
     expect(await pendingWelsh(prisma, assistant, forgotten)).toBeDefined();
   });
 
-  it("should refuse uploads past the rate limit or past what one assistant may hold, and clear old ones as it uploads", async () => {
+  it("should refuse an upload past what one assistant may hold, and clear old ones as it uploads", async () => {
     const assistant = await assistantOf(ALICE);
     const old = new Date(Date.now() - WELSH_RETENTION_MS - 1000);
     await saveUpload(prisma, ALICE.oid, "old.xlsx", XLSX, old);
     await prisma.assistantWelshFile.createMany({
-      data: Array.from({ length: WELSH_RATE_LIMIT - 1 }, (_, n) => ({
+      data: Array.from({ length: MAX_WELSH_UPLOADS - 1 }, (_, n) => ({
         virtualAgentId: assistant,
         ownerOid: ALICE.oid,
         name: `r${n}.xlsx`,
@@ -270,19 +270,6 @@ describe("welsh jobs", () => {
 
     await saveUpload(prisma, ALICE.oid, "now.xlsx", XLSX);
     expect(await prisma.assistantWelshFile.count({ where: { createdAt: old } })).toBe(0);
-    await expect(saveUpload(prisma, ALICE.oid, "too-soon.xlsx", XLSX)).rejects.toMatchObject({ status: 429 });
-
-    const hourAgo = new Date(Date.now() - 2 * 3_600_000);
-    await prisma.assistantWelshFile.updateMany({ data: { createdAt: hourAgo } });
-    await prisma.assistantWelshFile.createMany({
-      data: Array.from({ length: MAX_WELSH_UPLOADS - WELSH_RATE_LIMIT }, (_, n) => ({
-        virtualAgentId: assistant,
-        ownerOid: ALICE.oid,
-        name: `s${n}.xlsx`,
-        bytes: Buffer.from(XLSX),
-        createdAt: hourAgo
-      }))
-    });
     await expect(saveUpload(prisma, ALICE.oid, "one-more.xlsx", XLSX)).rejects.toMatchObject({ status: 409 });
   });
 

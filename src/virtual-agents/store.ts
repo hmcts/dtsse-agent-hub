@@ -359,10 +359,17 @@ export async function changeVirtualAgentPod(
           ...NO_MEMORY_REPORT,
           ...noClientClaim(),
           // A pod that is up is replaced, so it reads as starting, as a restart does, rather than "ready" with the old
-          // pod's web servers still listed while it is torn down. One not yet claimed has no pod to replace and stays
+          // pod's web servers still listed while it is torn down, and without the old pod's error beside it — a pod that
+          // ran out of memory and is made bigger is starting, not still failing. One not yet claimed has no pod to replace and stays
           // `requested` for the orchestrator to pick up, and a stopped one takes the change as it next starts.
           ...(row.desired === "running" && row.status !== "requested"
-            ? { ...NO_PORTS, applyFailures: 0, status: "provisioning" as const, ...(row.status === "provisioning" ? {} : { statusChangedAt: now }) }
+            ? {
+                ...NO_PORTS,
+                applyFailures: 0,
+                status: "provisioning" as const,
+                statusDetail: null,
+                ...(row.status === "provisioning" ? {} : { statusChangedAt: now })
+              }
             : {}),
           updatedAt: now
         },
