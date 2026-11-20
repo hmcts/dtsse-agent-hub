@@ -52,8 +52,14 @@ describe("waDocuments", () => {
   });
 
   it("should refuse when a document reads back differently, naming the first difference", () => {
-    const lossy = { ...layout, files: { ...layout.files, extra: undefined } } as unknown as typeof layout;
+    const [name, file] = Object.entries(layout.files)[0] as [string, (typeof layout.files)[string]];
+    const lossy = { ...layout, files: { [name]: { ...file, decisions: { ["__proto__"]: { id: "x" } } } } } as unknown as typeof layout;
     expect(() => waDocuments({ service: "employment", model, layout: lossy })).toThrow(/would not read back the same: layout\.files/);
+  });
+
+  it("should accept when a key set to undefined is the only difference, as YAML drops it", () => {
+    const withUndefined = { ...layout, files: { ...layout.files, extra: undefined } } as unknown as typeof layout;
+    expect(() => waDocuments({ service: "employment", model, layout: withUndefined })).not.toThrow();
   });
 
   it("should refuse when a document would not read back", () => {

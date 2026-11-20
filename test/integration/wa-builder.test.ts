@@ -74,6 +74,9 @@ describe("wa specs", () => {
     const results = await Promise.allSettled([1, 2, 3, 4].map((n) => saveWaSpec(prisma, { service: "employment", model, savedBy: `person-${n}`, basedOn: 0 })));
 
     expect(results.filter(({ status }) => status === "fulfilled")).toHaveLength(1);
+    for (const result of results.filter((r) => r.status === "rejected")) {
+      expect(result.reason).toBeInstanceOf(WaVersionConflict);
+    }
     expect((await getWaSpec(prisma, "employment"))?.version).toBe(1);
   });
 
@@ -86,6 +89,7 @@ describe("wa specs", () => {
     ]);
 
     expect(results.map(({ status }) => status).sort((a, b) => a.localeCompare(b))).toEqual(["fulfilled", "rejected"]);
+    expect(results.find((r) => r.status === "rejected")?.reason).toBeInstanceOf(WaVersionConflict);
   });
 
   it("should refuse and store nothing when the model is for another service", async () => {

@@ -109,18 +109,22 @@ export function waDocuments({ model, ordering, layout }: WaSpecInput): WaSpecDoc
     ["ordering", ordering, read.ordering],
     ["layout", layout, read.layout]
   ] as const) {
-    if (!isDeepStrictEqual(written, parsed)) {
+    if (!sameDocument(written, parsed)) {
       throw new InvalidWaSpec(`would not read back the same: ${firstDifference(name, written, parsed)}`);
     }
   }
   return documents;
 }
 
+/** Whether two documents are the same once a key set to `undefined` is ignored, as YAML ignores it. */
+const sameDocument = (left: unknown, right: unknown): boolean => isDeepStrictEqual(plain(left), plain(right));
+const plain = (value: unknown): unknown => JSON.parse(JSON.stringify(value ?? null));
+
 /** The first top-level entry of a document that differs after a round trip, or the document when it is not an object in both. */
 function firstDifference(name: string, written: unknown, parsed: unknown): string {
   if (typeof written === "object" && written !== null && typeof parsed === "object" && parsed !== null) {
     const keys = [...new Set([...Object.keys(written), ...Object.keys(parsed)])];
-    const key = keys.find((k) => !isDeepStrictEqual((written as Record<string, unknown>)[k], (parsed as Record<string, unknown>)[k]));
+    const key = keys.find((k) => !sameDocument((written as Record<string, unknown>)[k], (parsed as Record<string, unknown>)[k]));
     if (key !== undefined) {
       return `${name}.${key}`;
     }
