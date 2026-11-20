@@ -59,6 +59,8 @@ export interface SimTask extends TaskRef {
   /** The configuration by name; where a name repeats the last row wins. */
   attributes: Record<string, unknown>;
   permissions: PermissionEntry[];
+  /** Whether a warning message reached it, even one with no code or text; the unique warnings it carries are `warnings`. */
+  hasWarnings: boolean;
   warnings: Array<{ code: string; text: string }>;
 }
 
@@ -72,7 +74,8 @@ export interface StepResult {
   /** Tasks the completion DMN names with a mode other than Auto: the user completes them. */
   completable: Array<{ task: TaskRef; completionMode: string }>;
   cancelled: Array<{ task: TaskRef; processCategories: string[] }>;
-  warned: Array<{ task: TaskRef; code: string; text: string }>;
+  /** A warning with no code or text flags the tasks without adding one, so `code` and `text` are absent. */
+  warned: Array<{ task: TaskRef; code?: string; text?: string }>;
   /** The reconfigurable attributes whose value the configuration DMN now gives differently. */
   reconfigured: Array<{ task: TaskRef; changes: Array<{ name: string; from: unknown; to: unknown }> }>;
 }
@@ -206,15 +209,31 @@ export function simulate(spec: Spec, input: SimInput): Timeline {
       }
     }
     const withoutData = table("cancellation", caseEvent);
-    for (const row of withoutData.filter((r) => r.action === "Warn")) {
-      const code = asString(row.warningCode);
-      const text = asString(row.warningText);
-      if (code && text) {
-        for (const task of matching([...splitList(row.taskCategories), ...splitList(row.processCategories)])) {
-          task.warnings.push({ code, text });
-          step.warned.push({ task: ref(task), code, text });
+    const warn = (tasks: SimTask[], warning?: { code: string; text: string }) => {
+      for (const task of tasks) {
+        task.hasWarnings = true;
+        if (!warning) {
+          step.warned.push({ task: ref(task) });
+        } else if (!task.warnings.some((w) => w.code === warning.code && w.text === warning.text)) {
+          task.warnings.push(warning);
+          step.warned.push({ task: ref(task), ...warning });
         }
       }
+    };
+    const warnRows = withoutData
+      .filter((r) => r.action === "Warn")
+      .map((row) => ({ row, categories: [...splitList(row.taskCategories), ...splitList(row.processCategories)] }));
+    const warningOf = ({ row }: (typeof warnRows)[number]) =>
+      typeof row.warningCode === "string" && typeof row.warningText === "string" ? { code: row.warningCode, text: row.warningText } : undefined;
+    for (const entry of warnRows.filter((e) => !warningOf(e))) {
+      warn(matching(entry.categories));
+    }
+    const caseWide = new Map(warnRows.filter((e) => warningOf(e) && e.categories.length === 0).map((e) => [JSON.stringify(warningOf(e)), warningOf(e)]));
+    for (const warning of caseWide.values()) {
+      warn(openTasks(), warning);
+    }
+    for (const entry of warnRows.filter((e) => warningOf(e) && e.categories.length > 0)) {
+      warn(matching(entry.categories), warningOf(entry));
     }
     if (withoutData.some((r) => r.action === "Reconfigure")) {
       for (const task of openTasks()) {
@@ -267,6 +286,7 @@ export function simulate(spec: Spec, input: SimInput): Timeline {
         configuration,
         attributes: Object.fromEntries(configuration.map((entry) => [entry.name, entry.value])),
         permissions,
+        hasWarnings: false,
         warnings: []
       };
       attributesOf.set(task.id, { ...taskAttributes, ...task.attributes });

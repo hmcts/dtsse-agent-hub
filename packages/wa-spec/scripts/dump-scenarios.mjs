@@ -8,10 +8,12 @@
 //
 //   node scripts/dump-scenarios.mjs <name> <task-configuration clone> [--max-bytes N]
 //
-// The instant is recorded as `dumpedAt`, since a DMN that reads today() or now() gives different answers on another day. A scenario that repeats an earlier one's input is dropped; when a decision's fixture would pass --max-bytes, scenarios are
-// thinned evenly, keeping the first of each test class.
+// The instant is recorded as `dumpedAt`, since a DMN that reads today() or now() gives different answers on another day. A scenario
+// that repeats an earlier one's input is dropped. When a decision's fixture would pass --max-bytes, every second scenario is
+// dropped, repeatedly, until it fits. The spec the service's DMNs import to is written beside the fixtures as spec.yaml, headed
+// with the commit it came from, so the scenarios can be run without the clone.
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -80,6 +82,9 @@ try {
   if (!instrumented.includes("dump(decision, decision")) {
     throw new Error(`${base}: evaluateDmnTable is not the expected shape`);
   }
+  if (source.includes("evaluateRequiredDecision") && !instrumented.includes("dump(dmnDecision, decision")) {
+    throw new Error(`${base}: evaluateRequiredDecision is not the expected shape, so scenarios for required decisions would be missing`);
+  }
   writeFileSync(path, instrumented);
   execFileSync(join(worktree, "gradlew"), ["test", "--rerun-tasks"], {
     cwd: worktree,
@@ -104,6 +109,14 @@ try {
     byDecision.set(decision, [...(byDecision.get(decision) ?? []), { ...(required ? { required, requiredName } : {}), input, output }]);
   }
   mkdirSync(out, { recursive: true });
+  const dmns = join(work, "dmns");
+  mkdirSync(dmns);
+  for (const file of readdirSync(join(worktree, "src/main/resources")).filter((f) => /^wa-task-.*\.dmn$/.test(f))) {
+    copyFileSync(join(worktree, "src/main/resources", file), join(dmns, file));
+  }
+  const imported = join(work, "spec.yaml");
+  execFileSync(fileURLToPath(new URL("../bin/wa-spec", import.meta.url)), ["import", dmns, "-o", imported], { stdio: "inherit" });
+  writeFileSync(join(out, "spec.yaml"), `# Imported by wa-spec from the DMNs of ${repo}@${sha}\n${readFileSync(imported, "utf8")}`);
   const total = { kept: 0, seen: seen.size };
   for (const [decision, scenarios] of [...byDecision].sort(([a], [b]) => (a < b ? -1 : 1))) {
     let kept = scenarios;

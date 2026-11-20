@@ -1,7 +1,7 @@
 {
  "decision": "wa-task-initiation-civil-civil",
  "source": "hmcts/civil-wa-task-configuration@8977b6611ea7520d1bb964d97ef59a16dabd7b1f",
- "dumpedAt": "2026-11-20T07:38:22.609Z",
+ "dumpedAt": "2026-11-20T08:19:36.069Z",
  "scenarios": [
   {
    "input": {
@@ -996,17 +996,17 @@
   },
   {
    "input": {
-    "postEventState": "CASE_ISSUED",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
       "qmLatestQuery": {
-       "isWelsh": false,
+       "queryId": "query-id",
        "isHearingRelated": false,
-       "queryId": "query-id"
+       "isWelsh": false
       }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "CASE_ISSUED"
    },
    "output": [
     {
@@ -1018,17 +1018,17 @@
   },
   {
    "input": {
-    "postEventState": "AWAITING_CASE_DETAILS",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
       "qmLatestQuery": {
-       "isWelsh": false,
+       "queryId": "query-id",
        "isHearingRelated": false,
-       "queryId": "query-id"
+       "isWelsh": false
       }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "AWAITING_CASE_DETAILS"
    },
    "output": [
     {
@@ -1040,17 +1040,17 @@
   },
   {
    "input": {
-    "postEventState": "AWAITING_RESPONDENT_ACKNOWLEDGEMENT",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
       "qmLatestQuery": {
-       "isWelsh": false,
+       "queryId": "query-id",
        "isHearingRelated": false,
-       "queryId": "query-id"
+       "isWelsh": false
       }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "AWAITING_RESPONDENT_ACKNOWLEDGEMENT"
    },
    "output": [
     {
@@ -1062,17 +1062,17 @@
   },
   {
    "input": {
-    "postEventState": "AWAITING_APPLICANT_INTENTION",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
       "qmLatestQuery": {
-       "isWelsh": false,
+       "queryId": "query-id",
        "isHearingRelated": false,
-       "queryId": "query-id"
+       "isWelsh": false
       }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "AWAITING_APPLICANT_INTENTION"
    },
    "output": [
     {
@@ -1084,17 +1084,17 @@
   },
   {
    "input": {
-    "postEventState": "IN_MEDIATION",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
       "qmLatestQuery": {
-       "isWelsh": false,
+       "queryId": "query-id",
        "isHearingRelated": false,
-       "queryId": "query-id"
+       "isWelsh": false
       }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "IN_MEDIATION"
    },
    "output": [
     {
@@ -1106,17 +1106,17 @@
   },
   {
    "input": {
-    "postEventState": "JUDICIAL_REFERRAL",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
       "qmLatestQuery": {
-       "isWelsh": false,
+       "queryId": "query-id",
        "isHearingRelated": false,
-       "queryId": "query-id"
+       "isWelsh": false
       }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "JUDICIAL_REFERRAL"
    },
    "output": [
     {
@@ -1128,17 +1128,17 @@
   },
   {
    "input": {
-    "postEventState": "CASE_SETTLED",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
       "qmLatestQuery": {
-       "isWelsh": false,
+       "queryId": "query-id",
        "isHearingRelated": false,
-       "queryId": "query-id"
+       "isWelsh": false
       }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "CASE_SETTLED"
    },
    "output": [
     {
@@ -1150,17 +1150,17 @@
   },
   {
    "input": {
-    "postEventState": "CASE_DISCONTINUED",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
       "qmLatestQuery": {
-       "isWelsh": false,
+       "queryId": "query-id",
        "isHearingRelated": false,
-       "queryId": "query-id"
+       "isWelsh": false
       }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "CASE_DISCONTINUED"
    },
    "output": [
     {
@@ -1172,17 +1172,17 @@
   },
   {
    "input": {
-    "postEventState": "JUDICIAL_REFERRAL",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
       "qmLatestQuery": {
-       "isWelsh": false,
+       "queryId": "query-id",
        "isHearingRelated": true,
-       "queryId": "query-id"
+       "isWelsh": false
       }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "JUDICIAL_REFERRAL"
    },
    "output": [
     {
@@ -1194,17 +1194,17 @@
   },
   {
    "input": {
-    "postEventState": "CASE_PROGRESSION",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
       "qmLatestQuery": {
-       "isWelsh": false,
+       "queryId": "query-id",
        "isHearingRelated": false,
-       "queryId": "query-id"
+       "isWelsh": false
       }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "CASE_PROGRESSION"
    },
    "output": [
     {
@@ -1216,17 +1216,17 @@
   },
   {
    "input": {
-    "postEventState": "CASE_PROGRESSION",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
       "qmLatestQuery": {
-       "isWelsh": false,
+       "queryId": "query-id",
        "isHearingRelated": true,
-       "queryId": "query-id"
+       "isWelsh": false
       }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "CASE_PROGRESSION"
    },
    "output": [
     {
@@ -1238,17 +1238,17 @@
   },
   {
    "input": {
-    "postEventState": "HEARING_READINESS",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
       "qmLatestQuery": {
-       "isWelsh": false,
+       "queryId": "query-id",
        "isHearingRelated": false,
-       "queryId": "query-id"
+       "isWelsh": false
       }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "HEARING_READINESS"
    },
    "output": [
     {
@@ -1260,17 +1260,17 @@
   },
   {
    "input": {
-    "postEventState": "HEARING_READINESS",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
       "qmLatestQuery": {
-       "isWelsh": false,
+       "queryId": "query-id",
        "isHearingRelated": true,
-       "queryId": "query-id"
+       "isWelsh": false
       }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "HEARING_READINESS"
    },
    "output": [
     {
@@ -1282,17 +1282,17 @@
   },
   {
    "input": {
-    "postEventState": "PREPARE_FOR_HEARING_CONDUCT_HEARING",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
       "qmLatestQuery": {
-       "isWelsh": false,
+       "queryId": "query-id",
        "isHearingRelated": false,
-       "queryId": "query-id"
+       "isWelsh": false
       }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "PREPARE_FOR_HEARING_CONDUCT_HEARING"
    },
    "output": [
     {
@@ -1304,17 +1304,17 @@
   },
   {
    "input": {
-    "postEventState": "PREPARE_FOR_HEARING_CONDUCT_HEARING",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
       "qmLatestQuery": {
-       "isWelsh": false,
+       "queryId": "query-id",
        "isHearingRelated": true,
-       "queryId": "query-id"
+       "isWelsh": false
       }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "PREPARE_FOR_HEARING_CONDUCT_HEARING"
    },
    "output": [
     {
@@ -1326,17 +1326,17 @@
   },
   {
    "input": {
-    "postEventState": "DECISION_OUTCOME",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
       "qmLatestQuery": {
-       "isWelsh": false,
+       "queryId": "query-id",
        "isHearingRelated": false,
-       "queryId": "query-id"
+       "isWelsh": false
       }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "DECISION_OUTCOME"
    },
    "output": [
     {
@@ -1348,17 +1348,17 @@
   },
   {
    "input": {
-    "postEventState": "DECISION_OUTCOME",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
       "qmLatestQuery": {
-       "isWelsh": false,
+       "queryId": "query-id",
        "isHearingRelated": true,
-       "queryId": "query-id"
+       "isWelsh": false
       }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "DECISION_OUTCOME"
    },
    "output": [
     {
@@ -1370,17 +1370,17 @@
   },
   {
    "input": {
-    "postEventState": "All_FINAL_ORDERS_ISSUED",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
       "qmLatestQuery": {
-       "isWelsh": false,
+       "queryId": "query-id",
        "isHearingRelated": false,
-       "queryId": "query-id"
+       "isWelsh": false
       }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "All_FINAL_ORDERS_ISSUED"
    },
    "output": [
     {
@@ -1392,17 +1392,17 @@
   },
   {
    "input": {
-    "postEventState": "All_FINAL_ORDERS_ISSUED",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
       "qmLatestQuery": {
-       "isWelsh": false,
+       "queryId": "query-id",
        "isHearingRelated": true,
-       "queryId": "query-id"
+       "isWelsh": false
       }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "All_FINAL_ORDERS_ISSUED"
    },
    "output": [
     {
@@ -1414,17 +1414,17 @@
   },
   {
    "input": {
-    "postEventState": "CASE_ISSUED",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
       "qmLatestQuery": {
-       "isWelsh": true,
+       "queryId": "query-id",
        "isHearingRelated": false,
-       "queryId": "query-id"
+       "isWelsh": true
       }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "CASE_ISSUED"
    },
    "output": [
     {
@@ -1436,17 +1436,17 @@
   },
   {
    "input": {
-    "postEventState": "AWAITING_CASE_DETAILS",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
       "qmLatestQuery": {
-       "isWelsh": true,
+       "queryId": "query-id",
        "isHearingRelated": false,
-       "queryId": "query-id"
+       "isWelsh": true
       }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "AWAITING_CASE_DETAILS"
    },
    "output": [
     {
@@ -1458,17 +1458,17 @@
   },
   {
    "input": {
-    "postEventState": "AWAITING_RESPONDENT_ACKNOWLEDGEMENT",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
       "qmLatestQuery": {
-       "isWelsh": true,
+       "queryId": "query-id",
        "isHearingRelated": false,
-       "queryId": "query-id"
+       "isWelsh": true
       }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "AWAITING_RESPONDENT_ACKNOWLEDGEMENT"
    },
    "output": [
     {
@@ -1480,17 +1480,17 @@
   },
   {
    "input": {
-    "postEventState": "AWAITING_APPLICANT_INTENTION",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
       "qmLatestQuery": {
-       "isWelsh": true,
+       "queryId": "query-id",
        "isHearingRelated": false,
-       "queryId": "query-id"
+       "isWelsh": true
       }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "AWAITING_APPLICANT_INTENTION"
    },
    "output": [
     {
@@ -1502,17 +1502,17 @@
   },
   {
    "input": {
-    "postEventState": "IN_MEDIATION",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
       "qmLatestQuery": {
-       "isWelsh": true,
+       "queryId": "query-id",
        "isHearingRelated": false,
-       "queryId": "query-id"
+       "isWelsh": true
       }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "IN_MEDIATION"
    },
    "output": [
     {
@@ -1524,17 +1524,17 @@
   },
   {
    "input": {
-    "postEventState": "JUDICIAL_REFERRAL",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
       "qmLatestQuery": {
-       "isWelsh": true,
+       "queryId": "query-id",
        "isHearingRelated": false,
-       "queryId": "query-id"
+       "isWelsh": true
       }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "JUDICIAL_REFERRAL"
    },
    "output": [
     {
@@ -1546,17 +1546,17 @@
   },
   {
    "input": {
-    "postEventState": "CASE_SETTLED",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
       "qmLatestQuery": {
-       "isWelsh": true,
+       "queryId": "query-id",
        "isHearingRelated": false,
-       "queryId": "query-id"
+       "isWelsh": true
       }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "CASE_SETTLED"
    },
    "output": [
     {
@@ -1568,17 +1568,17 @@
   },
   {
    "input": {
-    "postEventState": "CASE_DISCONTINUED",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
       "qmLatestQuery": {
-       "isWelsh": true,
+       "queryId": "query-id",
        "isHearingRelated": false,
-       "queryId": "query-id"
+       "isWelsh": true
       }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "CASE_DISCONTINUED"
    },
    "output": [
     {
@@ -1590,61 +1590,17 @@
   },
   {
    "input": {
-    "postEventState": "JUDICIAL_REFERRAL",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
       "qmLatestQuery": {
-       "isWelsh": true,
+       "queryId": "query-id",
        "isHearingRelated": true,
-       "queryId": "query-id"
+       "isWelsh": true
       }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
-   },
-   "output": [
-    {
-     "name": "Respond to a hearing related query",
-     "processCategories": "qmResponseTasks,queryManagement_queryID_query-id",
-     "taskId": "respondToHearingQueryWLU"
-    }
-   ]
-  },
-  {
-   "input": {
-    "postEventState": "CASE_PROGRESSION",
-    "additionalData": {
-     "Data": {
-      "qmLatestQuery": {
-       "isWelsh": true,
-       "isHearingRelated": false,
-       "queryId": "query-id"
-      }
-     }
-    },
-    "eventId": "queryManagementRaiseQuery"
-   },
-   "output": [
-    {
-     "name": "Respond to a query",
-     "processCategories": "qmResponseTasks,queryManagement_queryID_query-id",
-     "taskId": "respondToQueryWLU"
-    }
-   ]
-  },
-  {
-   "input": {
-    "postEventState": "CASE_PROGRESSION",
-    "additionalData": {
-     "Data": {
-      "qmLatestQuery": {
-       "isWelsh": true,
-       "isHearingRelated": true,
-       "queryId": "query-id"
-      }
-     }
-    },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "JUDICIAL_REFERRAL"
    },
    "output": [
     {
@@ -1656,17 +1612,17 @@
   },
   {
    "input": {
-    "postEventState": "HEARING_READINESS",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
       "qmLatestQuery": {
-       "isWelsh": true,
+       "queryId": "query-id",
        "isHearingRelated": false,
-       "queryId": "query-id"
+       "isWelsh": true
       }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "CASE_PROGRESSION"
    },
    "output": [
     {
@@ -1678,17 +1634,17 @@
   },
   {
    "input": {
-    "postEventState": "HEARING_READINESS",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
       "qmLatestQuery": {
-       "isWelsh": true,
+       "queryId": "query-id",
        "isHearingRelated": true,
-       "queryId": "query-id"
+       "isWelsh": true
       }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "CASE_PROGRESSION"
    },
    "output": [
     {
@@ -1700,17 +1656,17 @@
   },
   {
    "input": {
-    "postEventState": "PREPARE_FOR_HEARING_CONDUCT_HEARING",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
       "qmLatestQuery": {
-       "isWelsh": true,
+       "queryId": "query-id",
        "isHearingRelated": false,
-       "queryId": "query-id"
+       "isWelsh": true
       }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "HEARING_READINESS"
    },
    "output": [
     {
@@ -1722,17 +1678,17 @@
   },
   {
    "input": {
-    "postEventState": "PREPARE_FOR_HEARING_CONDUCT_HEARING",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
       "qmLatestQuery": {
-       "isWelsh": true,
+       "queryId": "query-id",
        "isHearingRelated": true,
-       "queryId": "query-id"
+       "isWelsh": true
       }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "HEARING_READINESS"
    },
    "output": [
     {
@@ -1744,17 +1700,17 @@
   },
   {
    "input": {
-    "postEventState": "DECISION_OUTCOME",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
       "qmLatestQuery": {
-       "isWelsh": true,
+       "queryId": "query-id",
        "isHearingRelated": false,
-       "queryId": "query-id"
+       "isWelsh": true
       }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "PREPARE_FOR_HEARING_CONDUCT_HEARING"
    },
    "output": [
     {
@@ -1766,17 +1722,17 @@
   },
   {
    "input": {
-    "postEventState": "DECISION_OUTCOME",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
       "qmLatestQuery": {
-       "isWelsh": true,
+       "queryId": "query-id",
        "isHearingRelated": true,
-       "queryId": "query-id"
+       "isWelsh": true
       }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "PREPARE_FOR_HEARING_CONDUCT_HEARING"
    },
    "output": [
     {
@@ -1788,17 +1744,17 @@
   },
   {
    "input": {
-    "postEventState": "All_FINAL_ORDERS_ISSUED",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
       "qmLatestQuery": {
-       "isWelsh": true,
+       "queryId": "query-id",
        "isHearingRelated": false,
-       "queryId": "query-id"
+       "isWelsh": true
       }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "DECISION_OUTCOME"
    },
    "output": [
     {
@@ -1810,17 +1766,61 @@
   },
   {
    "input": {
-    "postEventState": "All_FINAL_ORDERS_ISSUED",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
       "qmLatestQuery": {
-       "isWelsh": true,
+       "queryId": "query-id",
        "isHearingRelated": true,
-       "queryId": "query-id"
+       "isWelsh": true
       }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "DECISION_OUTCOME"
+   },
+   "output": [
+    {
+     "name": "Respond to a hearing related query",
+     "processCategories": "qmResponseTasks,queryManagement_queryID_query-id",
+     "taskId": "respondToHearingQueryWLU"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "queryManagementRaiseQuery",
+    "additionalData": {
+     "Data": {
+      "qmLatestQuery": {
+       "queryId": "query-id",
+       "isHearingRelated": false,
+       "isWelsh": true
+      }
+     }
+    },
+    "postEventState": "All_FINAL_ORDERS_ISSUED"
+   },
+   "output": [
+    {
+     "name": "Respond to a query",
+     "processCategories": "qmResponseTasks,queryManagement_queryID_query-id",
+     "taskId": "respondToQueryWLU"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "queryManagementRaiseQuery",
+    "additionalData": {
+     "Data": {
+      "qmLatestQuery": {
+       "queryId": "query-id",
+       "isHearingRelated": true,
+       "isWelsh": true
+      }
+     }
+    },
+    "postEventState": "All_FINAL_ORDERS_ISSUED"
    },
    "output": [
     {
@@ -4836,18 +4836,18 @@
   },
   {
    "input": {
-    "postEventState": "CASE_STAYED",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
+      "preStayState": "JUDICIAL_REFERRAL",
       "qmLatestQuery": {
-       "isWelsh": false,
+       "queryId": "query-id",
        "isHearingRelated": false,
-       "queryId": "query-id"
-      },
-      "preStayState": "JUDICIAL_REFERRAL"
+       "isWelsh": false
+      }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "CASE_STAYED"
    },
    "output": [
     {
@@ -4859,18 +4859,18 @@
   },
   {
    "input": {
-    "postEventState": "CASE_STAYED",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
+      "preStayState": "CASE_PROGRESSION",
       "qmLatestQuery": {
-       "isWelsh": false,
+       "queryId": "query-id",
        "isHearingRelated": false,
-       "queryId": "query-id"
-      },
-      "preStayState": "CASE_PROGRESSION"
+       "isWelsh": false
+      }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "CASE_STAYED"
    },
    "output": [
     {
@@ -4882,18 +4882,18 @@
   },
   {
    "input": {
-    "postEventState": "CASE_STAYED",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
+      "preStayState": "CASE_PROGRESSION",
       "qmLatestQuery": {
-       "isWelsh": false,
+       "queryId": "query-id",
        "isHearingRelated": true,
-       "queryId": "query-id"
-      },
-      "preStayState": "CASE_PROGRESSION"
+       "isWelsh": false
+      }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "CASE_STAYED"
    },
    "output": [
     {
@@ -4905,18 +4905,18 @@
   },
   {
    "input": {
-    "postEventState": "CASE_STAYED",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
+      "preStayState": "JUDICIAL_REFERRAL",
       "qmLatestQuery": {
-       "isWelsh": true,
+       "queryId": "query-id",
        "isHearingRelated": false,
-       "queryId": "query-id"
-      },
-      "preStayState": "JUDICIAL_REFERRAL"
+       "isWelsh": true
+      }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "CASE_STAYED"
    },
    "output": [
     {
@@ -4928,18 +4928,18 @@
   },
   {
    "input": {
-    "postEventState": "CASE_STAYED",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
+      "preStayState": "CASE_PROGRESSION",
       "qmLatestQuery": {
-       "isWelsh": true,
+       "queryId": "query-id",
        "isHearingRelated": false,
-       "queryId": "query-id"
-      },
-      "preStayState": "CASE_PROGRESSION"
+       "isWelsh": true
+      }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "CASE_STAYED"
    },
    "output": [
     {
@@ -4951,18 +4951,18 @@
   },
   {
    "input": {
-    "postEventState": "CASE_STAYED",
+    "eventId": "queryManagementRaiseQuery",
     "additionalData": {
      "Data": {
+      "preStayState": "CASE_PROGRESSION",
       "qmLatestQuery": {
-       "isWelsh": true,
+       "queryId": "query-id",
        "isHearingRelated": true,
-       "queryId": "query-id"
-      },
-      "preStayState": "CASE_PROGRESSION"
+       "isWelsh": true
+      }
      }
     },
-    "eventId": "queryManagementRaiseQuery"
+    "postEventState": "CASE_STAYED"
    },
    "output": [
     {
@@ -8535,8 +8535,8 @@
     "additionalData": {
      "Data": {
       "lastMessage": {
-       "messageId": "message-id",
-       "recipientRoleType": "JUDICIAL"
+       "recipientRoleType": "JUDICIAL",
+       "messageId": "message-id"
       }
      }
     }
@@ -8555,8 +8555,8 @@
     "additionalData": {
      "Data": {
       "lastMessage": {
-       "messageId": "message-id",
-       "recipientRoleType": "JUDICIAL_DISTRICT"
+       "recipientRoleType": "JUDICIAL_DISTRICT",
+       "messageId": "message-id"
       }
      }
     }
@@ -8575,8 +8575,8 @@
     "additionalData": {
      "Data": {
       "lastMessage": {
-       "messageId": "message-id",
-       "recipientRoleType": "JUDICIAL_CIRCUIT"
+       "recipientRoleType": "JUDICIAL_CIRCUIT",
+       "messageId": "message-id"
       }
      }
     }

@@ -170,6 +170,9 @@ const spec = (): Spec =>
           { when: { event: { in: ["cancelAll"] } }, returns: { action: "Cancel" } },
           { when: { event: { in: ["warn"] } }, returns: { action: "Warn", warningCode: "W1", warningText: "Careful", processCategories: "Cat2" } },
           { when: { event: { in: ["warn"] } }, returns: { action: "Warn", processCategories: "Cat2" } },
+          { when: { event: { in: ["warnAll"] } }, returns: { action: "Warn", warningCode: "W2", warningText: "Everything" } },
+          { when: { event: { in: ["warnAll"] } }, returns: { action: "Warn", warningCode: "W2", warningText: "Everything" } },
+          { when: { event: { in: ["warnEmpty"] } }, returns: { action: "Warn", processCategories: "Cat1" } },
           { when: { event: { in: ["reconfigure"] } }, returns: { action: "Reconfigure" } }
         ]
       }
@@ -234,13 +237,32 @@ describe("task lifecycle", () => {
     expect(names(run([{ event: "cancelAll" }]).steps[1]?.cancelled ?? [])).toEqual(["TaskA", "TaskB"]);
   });
 
-  it("should warn the tasks in the category when the row has a code and text and ignore a row without them", () => {
+  it("should warn the tasks in the category and flag those a row with no code or text names", () => {
     const { steps, tasks } = run([{ event: "warn" }]);
-    expect(steps[1]?.warned.map((w) => [w.task.taskType, w.code, w.text])).toEqual([
-      ["TaskA", "W1", "Careful"],
-      ["TaskB", "W1", "Careful"]
+    expect(steps[1]?.warned).toEqual([
+      { task: { id: "TaskA-1", taskType: "TaskA", name: "Task A" } },
+      { task: { id: "TaskB-2", taskType: "TaskB", name: "Task B" } },
+      { task: { id: "TaskA-1", taskType: "TaskA", name: "Task A" }, code: "W1", text: "Careful" },
+      { task: { id: "TaskB-2", taskType: "TaskB", name: "Task B" }, code: "W1", text: "Careful" }
     ]);
     expect(tasks[0]?.warnings).toEqual([{ code: "W1", text: "Careful" }]);
+    expect(tasks.map((t) => t.hasWarnings)).toEqual([true, true]);
+  });
+
+  it("should flag a task without adding a warning when the row has no code or text", () => {
+    const { steps, tasks } = run([{ event: "warnEmpty" }]);
+    expect(steps[1]?.warned).toEqual([{ task: { id: "TaskA-1", taskType: "TaskA", name: "Task A" } }]);
+    expect(tasks.map((t) => [t.hasWarnings, t.warnings])).toEqual([
+      [true, []],
+      [false, []]
+    ]);
+  });
+
+  it("should give every open task one copy of a warning when rows with no category repeat it", () => {
+    const { steps, tasks } = run([{ event: "warnAll" }, { event: "warnAll" }]);
+    expect(steps[1]?.warned).toHaveLength(2);
+    expect(steps[2]?.warned).toEqual([]);
+    expect(tasks.map((t) => t.warnings)).toEqual([[{ code: "W2", text: "Everything" }], [{ code: "W2", text: "Everything" }]]);
   });
 
   it("should report the reconfigurable attributes that change when case data changes", () => {

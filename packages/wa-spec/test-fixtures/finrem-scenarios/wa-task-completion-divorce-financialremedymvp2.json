@@ -1,0 +1,286 @@
+{
+ "decision": "wa-task-completion-divorce-financialremedymvp2",
+ "source": "hmcts/finrem-task-configuration@fc1ca4871f055cd0d27110f818f115025f898d2e",
+ "dumpedAt": "2026-11-20T08:20:22.502Z",
+ "scenarios": [
+  {
+   "input": {
+    "eventId": "FR_approveApplication"
+   },
+   "output": [
+    {
+     "taskType": "reviewApplication",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "FR_uploadApprovedOrder"
+   },
+   "output": [
+    {
+     "taskType": "reviewApplication",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "FR_orderRefusal"
+   },
+   "output": [
+    {
+     "taskType": "reviewApplication",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "FR_issueApplication"
+   },
+   "output": [
+    {
+     "taskType": "checkAndIssueApplication",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "FR_amendFinalOrder"
+   },
+   "output": [
+    {
+     "taskType": "processApprovedOrder",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "FR_HWFAcceptedAndIssue"
+   },
+   "output": [
+    {
+     "taskType": "checkHelpWithFees",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "FR_feeAccountDebitedAndIssue"
+   },
+   "output": [
+    {
+     "taskType": "checkHelpWithFees",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "FR_awaitingPaymentResponseFromHWF"
+   },
+   "output": [
+    {
+     "taskType": "checkHelpWithFees",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "FR_HWFDecisionMade"
+   },
+   "output": [
+    {
+     "taskType": "checkHelpWithFees",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "FR_paymentMadeFromHWF"
+   },
+   "output": [
+    {
+     "taskType": "checkHelpWithFees",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "FR_referToJudgeFromRespondToOrder"
+   },
+   "output": [
+    {
+     "taskType": "reviewOrderResponse",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "FR_listForHearing"
+   },
+   "output": [
+    {
+     "taskType": "checkResponseReceived",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewRefusedOrder",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "attachScannedDocs"
+   },
+   "output": [
+    {
+     "taskType": "processScannedDocuments",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "FR_issueApplicationFromInfoReceived"
+   },
+   "output": [
+    {
+     "taskType": "checkResponseReceived",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "FR_awaitingInfo"
+   },
+   "output": [
+    {
+     "taskType": "checkResponseReceived",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "FR_generalEmail"
+   },
+   "output": [
+    {
+     "taskType": "checkResponseReceived",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "FR_generalLetter"
+   },
+   "output": [
+    {
+     "taskType": "checkResponseReceived",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "FR_generalOrderFromInfoReceived"
+   },
+   "output": [
+    {
+     "taskType": "checkResponseReceived",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "FR_close"
+   },
+   "output": [
+    {
+     "taskType": "checkResponseReceived",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "unknownEvent"
+   },
+   "output": []
+  }
+ ]
+}

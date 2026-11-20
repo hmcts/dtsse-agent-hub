@@ -1,0 +1,3170 @@
+{
+ "decision": "wa-task-configuration-divorce-financialremedymvp2",
+ "source": "hmcts/finrem-task-configuration@fc1ca4871f055cd0d27110f818f115025f898d2e",
+ "dumpedAt": "2026-11-20T08:20:22.502Z",
+ "scenarios": [
+  {
+   "input": {
+    "taskType": "otherTaskType",
+    "caseData": {
+     "listForHearings": [
+      {
+       "value": {
+        "hearingDate": "2026-12-11"
+       }
+      },
+      {
+       "value": {
+        "hearingDate": "2026-11-26"
+       }
+      },
+      {
+       "value": {
+        "hearingDate": "2026-11-26"
+       }
+      }
+     ]
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": false,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "priorityDateOriginRef",
+     "value": "nextHearingDate,dueDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "nextHearingDate",
+     "value": "2026-11-26"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/england-and-wales.json"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "No"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateOrigin",
+     "value": "2026-11-20T08:20:30.805428597Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateTime",
+     "value": "14:00"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseName",
+     "value": "Financial Remedy"
+    },
+    {
+     "canReconfigure": false,
+     "name": "region",
+     "value": "2"
+    },
+    {
+     "canReconfigure": false,
+     "name": "location",
+     "value": "195496"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "FR Consented"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskType": "otherTaskType",
+    "caseData": {
+     "listForHearings": [
+      {
+       "value": {
+        "hearingDate": "2026-11-17"
+       }
+      },
+      {
+       "value": {
+        "hearingDate": "2026-11-20"
+       }
+      }
+     ]
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": false,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "priorityDateOriginRef",
+     "value": "nextHearingDate,dueDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "nextHearingDate",
+     "value": "2026-11-20"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/england-and-wales.json"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "No"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateOrigin",
+     "value": "2026-11-20T08:20:30.863231936Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateTime",
+     "value": "14:00"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseName",
+     "value": "Financial Remedy"
+    },
+    {
+     "canReconfigure": false,
+     "name": "region",
+     "value": "2"
+    },
+    {
+     "canReconfigure": false,
+     "name": "location",
+     "value": "195496"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "FR Consented"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskType": "otherTaskType",
+    "caseData": {
+     "listForHearings": [
+      {
+       "value": {
+        "hearingDate": "2026-11-10"
+       }
+      },
+      {
+       "value": {
+        "hearingDate": "2026-11-25"
+       }
+      },
+      {
+       "value": {
+        "hearingDate": "2026-12-10"
+       }
+      }
+     ]
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": false,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "priorityDateOriginRef",
+     "value": "nextHearingDate,dueDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "nextHearingDate",
+     "value": "2026-11-25"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/england-and-wales.json"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "No"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateOrigin",
+     "value": "2026-11-20T08:20:30.893463238Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateTime",
+     "value": "14:00"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseName",
+     "value": "Financial Remedy"
+    },
+    {
+     "canReconfigure": false,
+     "name": "region",
+     "value": "2"
+    },
+    {
+     "canReconfigure": false,
+     "name": "location",
+     "value": "195496"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "FR Consented"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskType": "otherTaskType",
+    "caseData": {
+     "listForHearings": [
+      {
+       "value": {
+        "hearingDate": "2026-12-02"
+       }
+      },
+      {
+       "value": {
+        "hearingDate": "2026-11-24"
+       }
+      },
+      {
+       "value": {
+        "hearingDate": "2026-12-15"
+       }
+      }
+     ]
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": false,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "priorityDateOriginRef",
+     "value": "nextHearingDate,dueDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "nextHearingDate",
+     "value": "2026-11-24"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/england-and-wales.json"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "No"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateOrigin",
+     "value": "2026-11-20T08:20:30.918271544Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateTime",
+     "value": "14:00"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseName",
+     "value": "Financial Remedy"
+    },
+    {
+     "canReconfigure": false,
+     "name": "region",
+     "value": "2"
+    },
+    {
+     "canReconfigure": false,
+     "name": "location",
+     "value": "195496"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "FR Consented"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskType": "otherTaskType",
+    "caseData": {
+     "listForHearings": [
+      {
+       "value": {
+        "hearingDate": "2026-12-04"
+       }
+      },
+      {
+       "value": {
+        "hearingDate": "2026-11-22"
+       }
+      },
+      {
+       "value": {
+        "hearingDate": "2026-11-20"
+       }
+      }
+     ]
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": false,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "priorityDateOriginRef",
+     "value": "nextHearingDate,dueDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "nextHearingDate",
+     "value": "2026-11-20"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/england-and-wales.json"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "No"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateOrigin",
+     "value": "2026-11-20T08:20:30.944339071Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateTime",
+     "value": "14:00"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseName",
+     "value": "Financial Remedy"
+    },
+    {
+     "canReconfigure": false,
+     "name": "region",
+     "value": "2"
+    },
+    {
+     "canReconfigure": false,
+     "name": "location",
+     "value": "195496"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "FR Consented"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskType": "reviewSpecificAccessRequestCTSC",
+    "taskAttributes": {
+     "roleAssignmentId": "99999",
+     "taskId": "4444t"
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": false,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "priorityDateOriginRef",
+     "value": "nextHearingDate,dueDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/england-and-wales.json"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "No"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateOrigin",
+     "value": "2026-11-20T08:20:30.965604906Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateTime",
+     "value": "14:00"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseName",
+     "value": "Financial Remedy"
+    },
+    {
+     "canReconfigure": false,
+     "name": "region",
+     "value": "2"
+    },
+    {
+     "canReconfigure": false,
+     "name": "location",
+     "value": "195496"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "FR Consented"
+    },
+    {
+     "canReconfigure": false,
+     "name": "roleCategory",
+     "value": "CTSC"
+    },
+    {
+     "canReconfigure": false,
+     "name": "workType",
+     "value": "access_requests"
+    },
+    {
+     "canReconfigure": false,
+     "name": "additionalProperties_roleAssignmentId",
+     "value": "99999"
+    },
+    {
+     "canReconfigure": false,
+     "name": "description",
+     "value": "[Review Access Request](/role-access/4444t/assignment/99999/specific-access)"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskType": "otherTaskType",
+    "caseData": {
+     "listForHearings": [
+      {
+       "value": {
+        "hearingDate": "2027-01-09"
+       }
+      },
+      {
+       "value": {
+        "hearingDate": "2026-12-08"
+       }
+      },
+      {
+       "value": {
+        "hearingDate": "2026-11-22"
+       }
+      }
+     ]
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": false,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "priorityDateOriginRef",
+     "value": "nextHearingDate,dueDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "nextHearingDate",
+     "value": "2026-11-22"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/england-and-wales.json"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "No"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateOrigin",
+     "value": "2026-11-20T08:20:30.992582941Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateTime",
+     "value": "14:00"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseName",
+     "value": "Financial Remedy"
+    },
+    {
+     "canReconfigure": false,
+     "name": "region",
+     "value": "2"
+    },
+    {
+     "canReconfigure": false,
+     "name": "location",
+     "value": "195496"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "FR Consented"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskType": "checkResponseReceived",
+    "caseData": {
+     "applicantLName": "Wright",
+     "caseNameHmctsInternal": "Phoenix Wright v Miles Edgeworth",
+     "appRespondentLName": "Edgeworth",
+     "caseManagementLocation": {
+      "baseLocation": "765324",
+      "region": "2"
+     }
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": false,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "priorityDateOriginRef",
+     "value": "nextHearingDate,dueDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/england-and-wales.json"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "No"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateOrigin",
+     "value": "2026-11-20T08:20:31.020602100Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateTime",
+     "value": "14:00"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseName",
+     "value": "Wright vs Edgeworth"
+    },
+    {
+     "canReconfigure": false,
+     "name": "region",
+     "value": "2"
+    },
+    {
+     "canReconfigure": false,
+     "name": "location",
+     "value": "765324"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "FR Consented"
+    },
+    {
+     "canReconfigure": false,
+     "name": "roleCategory",
+     "value": "CTSC"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateIntervalDays",
+     "value": "5"
+    },
+    {
+     "canReconfigure": false,
+     "name": "workType",
+     "value": "routine_work"
+    },
+    {
+     "canReconfigure": false,
+     "name": "description",
+     "value": "[Issue Application](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_issueApplicationFromInfoReceived/FR_issueApplicationFromInfoReceived1)<br>[Awaiting Information](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_awaitingInfo/FR_awaitingInfo1)<br>[Create General Email](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_generalEmail/FR_generalEmail1)<br>[Create General Letter](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_generalLetter/FR_generalLetter1)<br>[General Order](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_generalOrderFromInfoReceived/FR_generalOrderFromInfoReceived1)<br>[List for hearing](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_listForHearing/FR_listForHearing1)<br>[Close Case](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_close/FR_close1)"
+    },
+    {
+     "canReconfigure": false,
+     "name": "title",
+     "value": "Check Response Received"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskType": "otherTaskType",
+    "caseData": {
+     "listForHearings": [
+      {
+       "value": {}
+      },
+      {
+       "value": {
+        "hearingDate": "2026-11-27"
+       }
+      }
+     ]
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": false,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "priorityDateOriginRef",
+     "value": "nextHearingDate,dueDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "nextHearingDate",
+     "value": "2026-11-27"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/england-and-wales.json"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "No"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateOrigin",
+     "value": "2026-11-20T08:20:31.049529894Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateTime",
+     "value": "14:00"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseName",
+     "value": "Financial Remedy"
+    },
+    {
+     "canReconfigure": false,
+     "name": "region",
+     "value": "2"
+    },
+    {
+     "canReconfigure": false,
+     "name": "location",
+     "value": "195496"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "FR Consented"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskType": "reviewSpecificAccessRequestJudiciary"
+   },
+   "output": [
+    {
+     "canReconfigure": false,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "priorityDateOriginRef",
+     "value": "nextHearingDate,dueDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/england-and-wales.json"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "No"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateOrigin",
+     "value": "2026-11-20T08:20:31.068572809Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateTime",
+     "value": "14:00"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseName",
+     "value": "Financial Remedy"
+    },
+    {
+     "canReconfigure": false,
+     "name": "region",
+     "value": "2"
+    },
+    {
+     "canReconfigure": false,
+     "name": "location",
+     "value": "195496"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "FR Consented"
+    },
+    {
+     "canReconfigure": false,
+     "name": "roleCategory",
+     "value": "JUDICIAL"
+    },
+    {
+     "canReconfigure": false,
+     "name": "workType",
+     "value": "access_requests"
+    },
+    {
+     "canReconfigure": false,
+     "name": "additionalProperties_roleAssignmentId",
+     "value": ""
+    },
+    {
+     "canReconfigure": false,
+     "name": "description",
+     "value": ""
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskType": "otherTaskType",
+    "caseData": {}
+   },
+   "output": [
+    {
+     "canReconfigure": false,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "priorityDateOriginRef",
+     "value": "nextHearingDate,dueDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/england-and-wales.json"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "No"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateOrigin",
+     "value": "2026-11-20T08:20:31.085192475Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateTime",
+     "value": "14:00"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseName",
+     "value": "Financial Remedy"
+    },
+    {
+     "canReconfigure": false,
+     "name": "region",
+     "value": "2"
+    },
+    {
+     "canReconfigure": false,
+     "name": "location",
+     "value": "195496"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "FR Consented"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskType": "processScannedDocuments",
+    "caseData": {
+     "applicantLName": "Doe",
+     "caseNameHmctsInternal": "Applicant v Respondent",
+     "appRespondentLName": "Kirk",
+     "caseManagementLocation": {
+      "baseLocation": "366796",
+      "region": "2"
+     }
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": false,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "priorityDateOriginRef",
+     "value": "nextHearingDate,dueDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/england-and-wales.json"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "No"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateOrigin",
+     "value": "2026-11-20T08:20:31.101086970Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateTime",
+     "value": "14:00"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseName",
+     "value": "Doe vs Kirk"
+    },
+    {
+     "canReconfigure": false,
+     "name": "region",
+     "value": "2"
+    },
+    {
+     "canReconfigure": false,
+     "name": "location",
+     "value": "366796"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "FR Consented"
+    },
+    {
+     "canReconfigure": false,
+     "name": "roleCategory",
+     "value": "CTSC"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateIntervalDays",
+     "value": "5"
+    },
+    {
+     "canReconfigure": false,
+     "name": "workType",
+     "value": "evidence"
+    },
+    {
+     "canReconfigure": false,
+     "name": "description",
+     "value": "[Attach scanned document](/cases/case-details/${[CASE_REFERENCE]}/trigger/attachScannedDocs/attachScannedDocs1)"
+    },
+    {
+     "canReconfigure": false,
+     "name": "title",
+     "value": "Process Scanned Documents"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskType": "otherTaskType",
+    "caseData": {
+     "listForHearings": [
+      {
+       "value": {
+        "hearingDate": "2026-10-31"
+       }
+      },
+      {
+       "value": {
+        "hearingDate": "2026-11-15"
+       }
+      }
+     ]
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": false,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "priorityDateOriginRef",
+     "value": "nextHearingDate,dueDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/england-and-wales.json"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "No"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateOrigin",
+     "value": "2026-11-20T08:20:31.121536168Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateTime",
+     "value": "14:00"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseName",
+     "value": "Financial Remedy"
+    },
+    {
+     "canReconfigure": false,
+     "name": "region",
+     "value": "2"
+    },
+    {
+     "canReconfigure": false,
+     "name": "location",
+     "value": "195496"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "FR Consented"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskType": "reviewOrderResponse",
+    "caseData": {
+     "applicantLName": "Doe",
+     "caseNameHmctsInternal": "Applicant v Respondent",
+     "appRespondentLName": "Kirk",
+     "caseManagementLocation": {
+      "baseLocation": "366796",
+      "region": "2"
+     }
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": false,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "priorityDateOriginRef",
+     "value": "nextHearingDate,dueDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/england-and-wales.json"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "No"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateOrigin",
+     "value": "2026-11-20T08:20:31.137733229Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateTime",
+     "value": "14:00"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseName",
+     "value": "Doe vs Kirk"
+    },
+    {
+     "canReconfigure": false,
+     "name": "region",
+     "value": "2"
+    },
+    {
+     "canReconfigure": false,
+     "name": "location",
+     "value": "366796"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "FR Consented"
+    },
+    {
+     "canReconfigure": false,
+     "name": "roleCategory",
+     "value": "CTSC"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateIntervalDays",
+     "value": "5"
+    },
+    {
+     "canReconfigure": false,
+     "name": "title",
+     "value": "Review Order Response"
+    },
+    {
+     "canReconfigure": false,
+     "name": "description",
+     "value": "[Assign to Judge](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_referToJudgeFromRespondToOrder/FR_referToJudgeFromRespondToOrder1)"
+    },
+    {
+     "canReconfigure": false,
+     "name": "workType",
+     "value": "review_case"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskType": "otherTaskType",
+    "caseData": {
+     "listForHearings": [
+      {
+       "value": {}
+      },
+      {
+       "value": {}
+      }
+     ]
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": false,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "priorityDateOriginRef",
+     "value": "nextHearingDate,dueDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/england-and-wales.json"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "No"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateOrigin",
+     "value": "2026-11-20T08:20:31.155143181Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateTime",
+     "value": "14:00"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseName",
+     "value": "Financial Remedy"
+    },
+    {
+     "canReconfigure": false,
+     "name": "region",
+     "value": "2"
+    },
+    {
+     "canReconfigure": false,
+     "name": "location",
+     "value": "195496"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "FR Consented"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskType": "checkAndIssueApplication",
+    "caseData": {}
+   },
+   "output": [
+    {
+     "canReconfigure": false,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "priorityDateOriginRef",
+     "value": "nextHearingDate,dueDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/england-and-wales.json"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "No"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateOrigin",
+     "value": "2026-11-20T08:20:31.178081378Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateTime",
+     "value": "14:00"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseName",
+     "value": "Financial Remedy"
+    },
+    {
+     "canReconfigure": false,
+     "name": "region",
+     "value": "2"
+    },
+    {
+     "canReconfigure": false,
+     "name": "location",
+     "value": "195496"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "FR Consented"
+    },
+    {
+     "canReconfigure": false,
+     "name": "roleCategory",
+     "value": "CTSC"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateIntervalDays",
+     "value": "5"
+    },
+    {
+     "canReconfigure": false,
+     "name": "workType",
+     "value": "applications"
+    },
+    {
+     "canReconfigure": false,
+     "name": "description",
+     "value": "[Issue Application](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_issueApplication/FR_issueApplication1)"
+    },
+    {
+     "canReconfigure": false,
+     "name": "title",
+     "value": "Check and Issue Application"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskType": "reviewApplication",
+    "caseData": {
+     "applicantLName": "Doe",
+     "caseNameHmctsInternal": "Applicant v Respondent",
+     "appRespondentLName": "Kirk",
+     "caseManagementLocation": {
+      "baseLocation": "366796",
+      "region": "2"
+     }
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": false,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "priorityDateOriginRef",
+     "value": "nextHearingDate,dueDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/england-and-wales.json"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "No"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateOrigin",
+     "value": "2026-11-20T08:20:31.211236802Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateTime",
+     "value": "14:00"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseName",
+     "value": "Doe vs Kirk"
+    },
+    {
+     "canReconfigure": false,
+     "name": "region",
+     "value": "2"
+    },
+    {
+     "canReconfigure": false,
+     "name": "location",
+     "value": "366796"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "FR Consented"
+    },
+    {
+     "canReconfigure": false,
+     "name": "roleCategory",
+     "value": "JUDICIAL"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateIntervalDays",
+     "value": "10"
+    },
+    {
+     "canReconfigure": false,
+     "name": "workType",
+     "value": "decision_making_work"
+    },
+    {
+     "canReconfigure": false,
+     "name": "description",
+     "value": "[Approve Application](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_approveApplication/FR_approveApplication1)<br>[Upload Approved Order](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_uploadApprovedOrder/FR_uploadApprovedOrder1)<br>[Application Not Approved](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_orderRefusal/FR_orderRefusal1)"
+    },
+    {
+     "canReconfigure": false,
+     "name": "title",
+     "value": "Review Application"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskType": "otherTaskType",
+    "caseData": {
+     "listForHearings": [
+      {
+       "value": {
+        "hearingDate": "2026-12-25"
+       }
+      },
+      {
+       "value": {
+        "hearingDate": "2026-11-11"
+       }
+      },
+      {
+       "value": {}
+      },
+      {
+       "value": {
+        "hearingDate": "2026-11-28"
+       }
+      }
+     ]
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": false,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "priorityDateOriginRef",
+     "value": "nextHearingDate,dueDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "nextHearingDate",
+     "value": "2026-11-28"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/england-and-wales.json"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "No"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateOrigin",
+     "value": "2026-11-20T08:20:31.230152586Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateTime",
+     "value": "14:00"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseName",
+     "value": "Financial Remedy"
+    },
+    {
+     "canReconfigure": false,
+     "name": "region",
+     "value": "2"
+    },
+    {
+     "canReconfigure": false,
+     "name": "location",
+     "value": "195496"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "FR Consented"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskType": "otherTaskType",
+    "caseData": {
+     "listForHearings": [
+      {
+       "value": {
+        "hearingDate": "2027-01-04"
+       }
+      },
+      {
+       "value": {
+        "hearingDate": "2026-11-08"
+       }
+      },
+      {
+       "value": {
+        "hearingDate": "2026-11-23"
+       }
+      },
+      {
+       "value": {
+        "hearingDate": "2026-11-18"
+       }
+      },
+      {
+       "value": {
+        "hearingDate": "2026-12-06"
+       }
+      }
+     ]
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": false,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "priorityDateOriginRef",
+     "value": "nextHearingDate,dueDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "nextHearingDate",
+     "value": "2026-11-23"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/england-and-wales.json"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "No"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateOrigin",
+     "value": "2026-11-20T08:20:31.248151714Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateTime",
+     "value": "14:00"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseName",
+     "value": "Financial Remedy"
+    },
+    {
+     "canReconfigure": false,
+     "name": "region",
+     "value": "2"
+    },
+    {
+     "canReconfigure": false,
+     "name": "location",
+     "value": "195496"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "FR Consented"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskType": "reviewSpecificAccessRequestLegalOps"
+   },
+   "output": [
+    {
+     "canReconfigure": false,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "priorityDateOriginRef",
+     "value": "nextHearingDate,dueDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/england-and-wales.json"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "No"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateOrigin",
+     "value": "2026-11-20T08:20:31.263916645Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateTime",
+     "value": "14:00"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseName",
+     "value": "Financial Remedy"
+    },
+    {
+     "canReconfigure": false,
+     "name": "region",
+     "value": "2"
+    },
+    {
+     "canReconfigure": false,
+     "name": "location",
+     "value": "195496"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "FR Consented"
+    },
+    {
+     "canReconfigure": false,
+     "name": "workType",
+     "value": "access_requests"
+    },
+    {
+     "canReconfigure": false,
+     "name": "additionalProperties_roleAssignmentId",
+     "value": ""
+    },
+    {
+     "canReconfigure": false,
+     "name": "roleCategory",
+     "value": "LEGAL_OPERATIONS"
+    },
+    {
+     "canReconfigure": false,
+     "name": "description",
+     "value": ""
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskType": "otherTaskType",
+    "caseData": {
+     "listForHearings": [
+      {
+       "value": {
+        "hearingDate": "2026-11-23"
+       }
+      },
+      {
+       "value": {
+        "hearingDate": "2026-12-05"
+       }
+      },
+      {
+       "value": {
+        "hearingDate": "2026-12-30"
+       }
+      }
+     ]
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": false,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "priorityDateOriginRef",
+     "value": "nextHearingDate,dueDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "nextHearingDate",
+     "value": "2026-11-23"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/england-and-wales.json"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "No"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateOrigin",
+     "value": "2026-11-20T08:20:31.280627007Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateTime",
+     "value": "14:00"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseName",
+     "value": "Financial Remedy"
+    },
+    {
+     "canReconfigure": false,
+     "name": "region",
+     "value": "2"
+    },
+    {
+     "canReconfigure": false,
+     "name": "location",
+     "value": "195496"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "FR Consented"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskType": "otherTaskType",
+    "caseData": {
+     "listForHearings": [
+      {
+       "value": {
+        "hearingDate": "2026-11-19"
+       }
+      }
+     ]
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": false,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "priorityDateOriginRef",
+     "value": "nextHearingDate,dueDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/england-and-wales.json"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "No"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateOrigin",
+     "value": "2026-11-20T08:20:31.303850952Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateTime",
+     "value": "14:00"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseName",
+     "value": "Financial Remedy"
+    },
+    {
+     "canReconfigure": false,
+     "name": "region",
+     "value": "2"
+    },
+    {
+     "canReconfigure": false,
+     "name": "location",
+     "value": "195496"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "FR Consented"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskType": "unknownTaskType",
+    "caseData": {}
+   },
+   "output": [
+    {
+     "canReconfigure": false,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "priorityDateOriginRef",
+     "value": "nextHearingDate,dueDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/england-and-wales.json"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "No"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateOrigin",
+     "value": "2026-11-20T08:20:31.321589178Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateTime",
+     "value": "14:00"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseName",
+     "value": "Financial Remedy"
+    },
+    {
+     "canReconfigure": false,
+     "name": "region",
+     "value": "2"
+    },
+    {
+     "canReconfigure": false,
+     "name": "location",
+     "value": "195496"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "FR Consented"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskType": "processScannedDocuments",
+    "caseData": {}
+   },
+   "output": [
+    {
+     "canReconfigure": false,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "priorityDateOriginRef",
+     "value": "nextHearingDate,dueDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/england-and-wales.json"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "No"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateOrigin",
+     "value": "2026-11-20T08:20:31.345329209Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateTime",
+     "value": "14:00"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseName",
+     "value": "Financial Remedy"
+    },
+    {
+     "canReconfigure": false,
+     "name": "region",
+     "value": "2"
+    },
+    {
+     "canReconfigure": false,
+     "name": "location",
+     "value": "195496"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "FR Consented"
+    },
+    {
+     "canReconfigure": false,
+     "name": "roleCategory",
+     "value": "CTSC"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateIntervalDays",
+     "value": "5"
+    },
+    {
+     "canReconfigure": false,
+     "name": "workType",
+     "value": "evidence"
+    },
+    {
+     "canReconfigure": false,
+     "name": "description",
+     "value": "[Attach scanned document](/cases/case-details/${[CASE_REFERENCE]}/trigger/attachScannedDocs/attachScannedDocs1)"
+    },
+    {
+     "canReconfigure": false,
+     "name": "title",
+     "value": "Process Scanned Documents"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskType": "otherTaskType",
+    "caseData": {
+     "listForHearings": [
+      {
+       "value": {
+        "hearingDate": "2026-12-20"
+       }
+      }
+     ]
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": false,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "priorityDateOriginRef",
+     "value": "nextHearingDate,dueDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "nextHearingDate",
+     "value": "2026-12-20"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/england-and-wales.json"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "No"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateOrigin",
+     "value": "2026-11-20T08:20:31.363452293Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateTime",
+     "value": "14:00"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseName",
+     "value": "Financial Remedy"
+    },
+    {
+     "canReconfigure": false,
+     "name": "region",
+     "value": "2"
+    },
+    {
+     "canReconfigure": false,
+     "name": "location",
+     "value": "195496"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "FR Consented"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskType": "processApprovedOrder",
+    "caseData": {
+     "applicantLName": "Stark",
+     "caseNameHmctsInternal": "Tony Stark v Pepper Potts",
+     "appRespondentLName": "Potts",
+     "caseManagementLocation": {
+      "baseLocation": "765324",
+      "region": "2"
+     }
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": false,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "priorityDateOriginRef",
+     "value": "nextHearingDate,dueDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/england-and-wales.json"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "No"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateOrigin",
+     "value": "2026-11-20T08:20:31.381057198Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateTime",
+     "value": "14:00"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseName",
+     "value": "Stark vs Potts"
+    },
+    {
+     "canReconfigure": false,
+     "name": "region",
+     "value": "2"
+    },
+    {
+     "canReconfigure": false,
+     "name": "location",
+     "value": "765324"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "FR Consented"
+    },
+    {
+     "canReconfigure": false,
+     "name": "roleCategory",
+     "value": "CTSC"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateIntervalDays",
+     "value": "5"
+    },
+    {
+     "canReconfigure": false,
+     "name": "workType",
+     "value": "routine_work"
+    },
+    {
+     "canReconfigure": false,
+     "name": "description",
+     "value": "[Amend Final Order](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_amendFinalOrder/FR_amendFinalOrder1)"
+    },
+    {
+     "canReconfigure": false,
+     "name": "title",
+     "value": "Process Approved Order"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskType": "otherTaskType",
+    "caseData": {
+     "listForHearings": []
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": false,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "priorityDateOriginRef",
+     "value": "nextHearingDate,dueDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/england-and-wales.json"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "No"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateOrigin",
+     "value": "2026-11-20T08:20:31.397709923Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateTime",
+     "value": "14:00"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseName",
+     "value": "Financial Remedy"
+    },
+    {
+     "canReconfigure": false,
+     "name": "region",
+     "value": "2"
+    },
+    {
+     "canReconfigure": false,
+     "name": "location",
+     "value": "195496"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "FR Consented"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskType": "checkHelpWithFees",
+    "caseData": {
+     "applicantLName": "Wayne",
+     "caseNameHmctsInternal": "Bruce Wayne v Selina Kyle",
+     "appRespondentLName": "Kyle",
+     "caseManagementLocation": {
+      "baseLocation": "366796",
+      "region": "2"
+     }
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": false,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "priorityDateOriginRef",
+     "value": "nextHearingDate,dueDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/england-and-wales.json"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "No"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateOrigin",
+     "value": "2026-11-20T08:20:31.411392065Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateTime",
+     "value": "14:00"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseName",
+     "value": "Wayne vs Kyle"
+    },
+    {
+     "canReconfigure": false,
+     "name": "region",
+     "value": "2"
+    },
+    {
+     "canReconfigure": false,
+     "name": "location",
+     "value": "366796"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "FR Consented"
+    },
+    {
+     "canReconfigure": false,
+     "name": "roleCategory",
+     "value": "CTSC"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateIntervalDays",
+     "value": "5"
+    },
+    {
+     "canReconfigure": false,
+     "name": "workType",
+     "value": "applications"
+    },
+    {
+     "canReconfigure": false,
+     "name": "title",
+     "value": "Check Help With Fees"
+    },
+    {
+     "canReconfigure": false,
+     "name": "description",
+     "value": "[HWF Accepted & Issue](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_HWFAcceptedAndIssue/FR_HWFAcceptedAndIssue1)<br>[Fee Account Debited & Issue](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_feeAccountDebitedAndIssue/FR_feeAccountDebitedAndIssue1)<br>[Awaiting Payment Response](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_awaitingPaymentResponseFromHWF/FR_awaitingPaymentResponseFromHWF1)<br>[HWF Application Accepted](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_HWFDecisionMade/FR_HWFDecisionMade1)<br>[Fee Account Debited](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_paymentMadeFromHWF/FR_paymentMadeFromHWF1)"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskType": "reviewRefusedOrder",
+    "caseData": {
+     "applicantLName": "Parker",
+     "caseNameHmctsInternal": "Peter Parker v Mary Jane",
+     "appRespondentLName": "Jane",
+     "caseManagementLocation": {
+      "baseLocation": "366796",
+      "region": "2"
+     }
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": false,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "priorityDateOriginRef",
+     "value": "nextHearingDate,dueDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/england-and-wales.json"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "No"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateOrigin",
+     "value": "2026-11-20T08:20:31.425408691Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateTime",
+     "value": "14:00"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseName",
+     "value": "Parker vs Jane"
+    },
+    {
+     "canReconfigure": false,
+     "name": "region",
+     "value": "2"
+    },
+    {
+     "canReconfigure": false,
+     "name": "location",
+     "value": "366796"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "FR Consented"
+    },
+    {
+     "canReconfigure": false,
+     "name": "roleCategory",
+     "value": "CTSC"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateIntervalDays",
+     "value": "5"
+    },
+    {
+     "canReconfigure": false,
+     "name": "workType",
+     "value": "hearing_work"
+    },
+    {
+     "canReconfigure": false,
+     "name": "title",
+     "value": "Review Refused Order"
+    },
+    {
+     "canReconfigure": false,
+     "name": "description",
+     "value": "[List For Hearing](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_listForHearing/FR_listForHearing1)"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskType": "otherTaskType",
+    "caseData": {
+     "listForHearings": [
+      {
+       "value": {
+        "hearingDate": "2026-11-20"
+       }
+      }
+     ]
+    }
+   },
+   "output": [
+    {
+     "canReconfigure": false,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "priorityDateOriginRef",
+     "value": "nextHearingDate,dueDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "nextHearingDate",
+     "value": "2026-11-20"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/england-and-wales.json"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "No"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateOrigin",
+     "value": "2026-11-20T08:20:31.456963030Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateTime",
+     "value": "14:00"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseName",
+     "value": "Financial Remedy"
+    },
+    {
+     "canReconfigure": false,
+     "name": "region",
+     "value": "2"
+    },
+    {
+     "canReconfigure": false,
+     "name": "location",
+     "value": "195496"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "FR Consented"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskType": "reviewSpecificAccessRequestAdmin"
+   },
+   "output": [
+    {
+     "canReconfigure": false,
+     "name": "calculatedDates",
+     "value": "nextHearingDate,dueDate,priorityDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "priorityDateOriginRef",
+     "value": "nextHearingDate,dueDate"
+    },
+    {
+     "canReconfigure": false,
+     "name": "nextHearingDate",
+     "value": ""
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingCalendar",
+     "value": "https://www.gov.uk/bank-holidays/england-and-wales.json"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateNonWorkingDaysOfWeek",
+     "value": "SATURDAY,SUNDAY"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateSkipNonWorkingDays",
+     "value": "true"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateMustBeWorkingDay",
+     "value": "No"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateOrigin",
+     "value": "2026-11-20T08:20:31.482886431Z[Etc/UTC]"
+    },
+    {
+     "canReconfigure": false,
+     "name": "dueDateTime",
+     "value": "14:00"
+    },
+    {
+     "canReconfigure": false,
+     "name": "majorPriority",
+     "value": "5000"
+    },
+    {
+     "canReconfigure": false,
+     "name": "minorPriority",
+     "value": "500"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseName",
+     "value": "Financial Remedy"
+    },
+    {
+     "canReconfigure": false,
+     "name": "region",
+     "value": "2"
+    },
+    {
+     "canReconfigure": false,
+     "name": "location",
+     "value": "195496"
+    },
+    {
+     "canReconfigure": false,
+     "name": "caseManagementCategory",
+     "value": "FR Consented"
+    },
+    {
+     "canReconfigure": false,
+     "name": "workType",
+     "value": "access_requests"
+    },
+    {
+     "canReconfigure": false,
+     "name": "additionalProperties_roleAssignmentId",
+     "value": ""
+    },
+    {
+     "canReconfigure": false,
+     "name": "description",
+     "value": ""
+    },
+    {
+     "canReconfigure": false,
+     "name": "roleCategory",
+     "value": "ADMIN"
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,702 @@
+{
+ "decision": "wa-task-initiation-divorce-financialremedymvp2",
+ "source": "hmcts/finrem-task-configuration@fc1ca4871f055cd0d27110f818f115025f898d2e",
+ "dumpedAt": "2026-11-20T08:20:22.502Z",
+ "scenarios": [
+  {
+   "input": {
+    "eventId": "FR_approveApplication",
+    "postEventState": "consentOrderApproved"
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "eventId": "FR_uploadApprovedOrder",
+    "postEventState": "consentOrderApproved"
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "eventId": "FR_applicationPaymentSubmission",
+    "additionalData": {
+     "Data": {
+      "helpWithFeesQuestion": true
+     }
+    },
+    "postEventState": "caseAdded"
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "eventId": "attachScannedDocs",
+    "postEventState": ""
+   },
+   "output": [
+    {
+     "name": "Process Scanned Documents",
+     "delayDuration": 0,
+     "delayUntil": {
+      "delayUntil": "2026-11-20T08:20:31.532961952Z",
+      "delayUntilIntervalDays": "0"
+     },
+     "taskId": "processScannedDocuments"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "FR_orderRefusal",
+    "additionalData": {
+     "Data": {
+      "orderRefusalCollection": [
+       {
+        "id": "0",
+        "value": {
+         "orderRefusal": [
+          "The D81 incomplete"
+         ],
+         "orderRefusalOther": ""
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": "orderMade"
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "eventId": "FR_approveApplication",
+    "additionalData": {
+     "Data": {
+      "pensionCollection": []
+     }
+    },
+    "postEventState": "consentOrderApproved"
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "eventId": "FR_uploadApprovedOrder",
+    "additionalData": {
+     "Data": {
+      "pensionCollection": []
+     }
+    },
+    "postEventState": "consentOrderApproved"
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "eventId": "FR_orderRefusal",
+    "additionalData": {
+     "Data": {
+      "orderRefusalCollection": [
+       {
+        "id": "0",
+        "value": {
+         "orderRefusal": [
+          "The D81 incomplete"
+         ],
+         "orderRefusalOther": "Please clarify the pension figures"
+        }
+       },
+       {
+        "id": "1",
+        "value": {
+         "orderRefusal": [
+          "The D81 incomplete"
+         ],
+         "orderRefusalOther": ""
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": "orderMade"
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "eventId": "FR_orderRefusal",
+    "postEventState": "orderMade"
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "eventId": "FR_applicationPaymentSubmission",
+    "postEventState": "applicationSubmitted"
+   },
+   "output": [
+    {
+     "name": "Check and Issue Application",
+     "delayDuration": 0,
+     "delayUntil": {
+      "delayUntil": "2026-11-20T08:20:31.613726642Z",
+      "delayUntilIntervalDays": "0"
+     },
+     "taskId": "checkAndIssueApplication"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "FR_caseSubmissionFromAwaitingInfo",
+    "postEventState": "applicationSubmitted"
+   },
+   "output": [
+    {
+     "name": "Check and Issue Application",
+     "delayDuration": 0,
+     "delayUntil": {
+      "delayUntil": "2026-11-20T08:20:31.629973027Z",
+      "delayUntilIntervalDays": "0"
+     },
+     "taskId": "checkAndIssueApplication"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "FR_caseSubmissionFromInfoReceived",
+    "postEventState": "applicationSubmitted"
+   },
+   "output": [
+    {
+     "name": "Check and Issue Application",
+     "delayDuration": 0,
+     "delayUntil": {
+      "delayUntil": "2026-11-20T08:20:31.642559924Z",
+      "delayUntilIntervalDays": "0"
+     },
+     "taskId": "checkAndIssueApplication"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "FR_paymentMadeFromHWF",
+    "postEventState": "applicationSubmitted"
+   },
+   "output": [
+    {
+     "name": "Check and Issue Application",
+     "delayDuration": 0,
+     "delayUntil": {
+      "delayUntil": "2026-11-20T08:20:31.655125279Z",
+      "delayUntilIntervalDays": "0"
+     },
+     "taskId": "checkAndIssueApplication"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "FR_paymenetMade",
+    "postEventState": "applicationSubmitted"
+   },
+   "output": [
+    {
+     "name": "Check and Issue Application",
+     "delayDuration": 0,
+     "delayUntil": {
+      "delayUntil": "2026-11-20T08:20:31.666917733Z",
+      "delayUntilIntervalDays": "0"
+     },
+     "taskId": "checkAndIssueApplication"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "FR_paymentMadeFromAwaitingPayment",
+    "postEventState": "applicationSubmitted"
+   },
+   "output": [
+    {
+     "name": "Check and Issue Application",
+     "delayDuration": 0,
+     "delayUntil": {
+      "delayUntil": "2026-11-20T08:20:31.679135046Z",
+      "delayUntilIntervalDays": "0"
+     },
+     "taskId": "checkAndIssueApplication"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "FR_HWFDecisionMade",
+    "postEventState": "applicationSubmitted"
+   },
+   "output": [
+    {
+     "name": "Check and Issue Application",
+     "delayDuration": 0,
+     "delayUntil": {
+      "delayUntil": "2026-11-20T08:20:31.695983785Z",
+      "delayUntilIntervalDays": "0"
+     },
+     "taskId": "checkAndIssueApplication"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "FR_HWFDecisionMadeFromAwaitingPayment",
+    "postEventState": "applicationSubmitted"
+   },
+   "output": [
+    {
+     "name": "Check and Issue Application",
+     "delayDuration": 0,
+     "delayUntil": {
+      "delayUntil": "2026-11-20T08:20:31.704714039Z",
+      "delayUntilIntervalDays": "0"
+     },
+     "taskId": "checkAndIssueApplication"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "FR_applicationPaymentSubmission",
+    "postEventState": "awaitingHWFDecision"
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "eventId": "FR_respondToOrder",
+    "postEventState": ""
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "eventId": "FR_orderRefusal",
+    "additionalData": {
+     "Data": {
+      "orderRefusalCollection": [
+       {
+        "id": "0",
+        "value": {
+         "orderRefusal": [
+          "Hearing fixed for first available date"
+         ],
+         "orderRefusalOther": ""
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": "orderMade"
+   },
+   "output": [
+    {
+     "name": "Review Refused Order",
+     "delayDuration": 0,
+     "delayUntil": {
+      "delayUntil": "2026-11-20T08:20:31.728269854Z",
+      "delayUntilIntervalDays": "0"
+     },
+     "taskId": "reviewRefusedOrder"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "checkResponseReceived",
+    "postEventState": ""
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "eventId": "someOtherEvent",
+    "postEventState": ""
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "eventId": "FR_respondToOrder",
+    "postEventState": "responseReceived"
+   },
+   "output": [
+    {
+     "name": "Review Order Response",
+     "delayDuration": 0,
+     "delayUntil": {
+      "delayUntil": "2026-11-20T08:20:31.757410617Z",
+      "delayUntilIntervalDays": "0"
+     },
+     "taskId": "reviewOrderResponse"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "FR_issueApplication",
+    "postEventState": "someState"
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "eventId": "FR_referToJudgeFromRespondToOrder",
+    "postEventState": "someState"
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "eventId": "FR_approveApplication",
+    "additionalData": {
+     "Data": {
+      "someOtherField": "value"
+     }
+    },
+    "postEventState": "consentOrderApproved"
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "eventId": "FR_uploadApprovedOrder",
+    "additionalData": {
+     "Data": {
+      "someOtherField": "value"
+     }
+    },
+    "postEventState": "consentOrderApproved"
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "eventId": "FR_applicationPaymentSubmission",
+    "additionalData": {
+     "Data": {
+      "helpWithFeesQuestion": false
+     }
+    },
+    "postEventState": "awaitingHWFDecision"
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "eventId": "attachScannedDocs",
+    "additionalData": {
+     "Data": {
+      "evidenceHandled": true
+     }
+    },
+    "postEventState": ""
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "eventId": "FR_orderRefusal",
+    "additionalData": {
+     "Data": {
+      "orderRefusalCollection": [
+       {
+        "id": "0",
+        "value": {
+         "orderRefusal": [
+          "Hearing fixed for first available date"
+         ],
+         "orderRefusalOther": ""
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": "readyForHearing"
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "eventId": "FR_orderRefusal",
+    "additionalData": {
+     "Data": {
+      "orderRefusalCollection": [
+       {
+        "id": "0",
+        "value": {
+         "orderRefusal": [
+          "The D81 incomplete"
+         ],
+         "orderRefusalOther": ""
+        }
+       },
+       {
+        "id": "1",
+        "value": {
+         "orderRefusal": [
+          "The D81 incomplete"
+         ],
+         "orderRefusalOther": "Please clarify the pension figures"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": "orderMade"
+   },
+   "output": [
+    {
+     "name": "Review Refused Order",
+     "delayDuration": 0,
+     "delayUntil": {
+      "delayUntil": "2026-11-20T08:20:31.817815314Z",
+      "delayUntilIntervalDays": "0"
+     },
+     "taskId": "reviewRefusedOrder"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "FR_orderRefusal",
+    "additionalData": {
+     "Data": {
+      "orderRefusalCollection": [
+       {
+        "id": "0",
+        "value": {
+         "orderRefusal": [
+          "The D81 incomplete"
+         ],
+         "orderRefusalOther": "Please clarify the pension figures"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": "orderMade"
+   },
+   "output": [
+    {
+     "name": "Review Refused Order",
+     "delayDuration": 0,
+     "delayUntil": {
+      "delayUntil": "2026-11-20T08:20:31.828465873Z",
+      "delayUntilIntervalDays": "0"
+     },
+     "taskId": "reviewRefusedOrder"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "FR_approveApplication",
+    "additionalData": {
+     "Data": {
+      "pensionCollection": [
+       {
+        "id": "0"
+       }
+      ]
+     }
+    },
+    "postEventState": "consentOrderApproved"
+   },
+   "output": [
+    {
+     "name": "Process Approved Order",
+     "delayDuration": 0,
+     "delayUntil": {
+      "delayUntil": "2026-11-20T08:20:31.838074086Z",
+      "delayUntilIntervalDays": "0"
+     },
+     "taskId": "processApprovedOrder"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "FR_uploadApprovedOrder",
+    "additionalData": {
+     "Data": {
+      "pensionCollection": [
+       {
+        "id": "0"
+       }
+      ]
+     }
+    },
+    "postEventState": "consentOrderApproved"
+   },
+   "output": [
+    {
+     "name": "Process Approved Order",
+     "delayDuration": 0,
+     "delayUntil": {
+      "delayUntil": "2026-11-20T08:20:31.845303806Z",
+      "delayUntilIntervalDays": "0"
+     },
+     "taskId": "processApprovedOrder"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "FR_solUploadDocumentv2",
+    "postEventState": "infoReceived"
+   },
+   "output": [
+    {
+     "name": "Check Response Received",
+     "delayDuration": 0,
+     "delayUntil": {
+      "delayUntil": "2026-11-20T08:20:31.852341608Z",
+      "delayUntilIntervalDays": "0"
+     },
+     "taskId": "checkResponseReceived"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "FR_applicationPaymentSubmission",
+    "additionalData": {
+     "Data": {
+      "helpWithFeesQuestion": true
+     }
+    },
+    "postEventState": "awaitingHWFDecision"
+   },
+   "output": [
+    {
+     "name": "Check Help With Fees",
+     "delayDuration": 0,
+     "delayUntil": {
+      "delayUntil": "2026-11-20T08:20:31.859369485Z",
+      "delayUntilIntervalDays": "0"
+     },
+     "taskId": "checkHelpWithFees"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "unknownEvent",
+    "postEventState": ""
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "eventId": "someOtherEvent",
+    "additionalData": {
+     "Data": {
+      "evidenceHandled": false
+     }
+    },
+    "postEventState": ""
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "eventId": "FR_approveApplication",
+    "additionalData": {
+     "Data": {
+      "pensionCollection": [
+       {
+        "id": "0"
+       }
+      ]
+     }
+    },
+    "postEventState": "consentOrderMade"
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "eventId": "FR_uploadApprovedOrder",
+    "additionalData": {
+     "Data": {
+      "pensionCollection": [
+       {
+        "id": "0"
+       }
+      ]
+     }
+    },
+    "postEventState": "consentOrderMade"
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "eventId": "FR_issueApplication",
+    "postEventState": "referredToJudge"
+   },
+   "output": [
+    {
+     "name": "Review Application",
+     "delayDuration": 0,
+     "delayUntil": {
+      "delayUntil": "2026-11-20T08:20:31.893903991Z",
+      "delayUntilIntervalDays": "0"
+     },
+     "taskId": "reviewApplication"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "FR_referToJudgeFromRespondToOrder",
+    "postEventState": "referredToJudge"
+   },
+   "output": [
+    {
+     "name": "Review Application",
+     "delayDuration": 0,
+     "delayUntil": {
+      "delayUntil": "2026-11-20T08:20:31.902722227Z",
+      "delayUntilIntervalDays": "0"
+     },
+     "taskId": "reviewApplication"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "attachScannedDocs",
+    "additionalData": {
+     "Data": {
+      "evidenceHandled": false
+     }
+    },
+    "postEventState": ""
+   },
+   "output": [
+    {
+     "name": "Process Scanned Documents",
+     "delayDuration": 0,
+     "delayUntil": {
+      "delayUntil": "2026-11-20T08:20:31.910112999Z",
+      "delayUntilIntervalDays": "0"
+     },
+     "taskId": "processScannedDocuments"
+    }
+   ]
+  }
+ ]
+}

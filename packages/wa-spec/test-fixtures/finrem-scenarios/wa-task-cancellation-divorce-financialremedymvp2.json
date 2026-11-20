@@ -1,0 +1,27 @@
+{
+ "decision": "wa-task-cancellation-divorce-financialremedymvp2",
+ "source": "hmcts/finrem-task-configuration@fc1ca4871f055cd0d27110f818f115025f898d2e",
+ "dumpedAt": "2026-11-20T08:20:22.502Z",
+ "scenarios": [
+  {
+   "input": {
+    "fromState": "",
+    "state": "",
+    "event": "FR_close"
+   },
+   "output": [
+    {
+     "action": "Cancel"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": "",
+    "state": "",
+    "event": "unknownEvent"
+   },
+   "output": []
+  }
+ ]
+}

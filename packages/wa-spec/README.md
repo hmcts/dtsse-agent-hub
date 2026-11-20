@@ -23,7 +23,7 @@ Run it as `packages/wa-spec/bin/wa-spec` from a checkout after `yarn install`; r
 
 ## Simulator scenarios
 
-`src/simulate/scenarios.test.ts` runs the simulator's DMN evaluation against what Camunda gave in each service's own Java DMN tests. `test-fixtures/et-scenarios/`, `sscs-scenarios/` and `civil-scenarios/` are committed; each fixture names its source commit and the instant it ran (`dumpedAt`), which the test gives the DMNs as the time now. ET's spec is `examples/et/spec.yaml`; sscs and civil run against the spec their DMNs import to, read from the service's clone under the workspace `apps/`, and are skipped where it is absent.
+`src/simulate/scenarios.test.ts` runs the simulator's DMN evaluation against what Camunda gave in each service's own Java DMN tests. `test-fixtures/et-scenarios/`, `sscs-scenarios/`, `civil-scenarios/` and `finrem-scenarios/` are committed. Each fixture names its source commit and the instant it ran (`dumpedAt`), which the test gives the DMNs as the time now. Each directory but ET's holds the `spec.yaml` its service's DMNs import to, headed with the same commit, so the scenarios run without the service's clone; ET's spec is `examples/et/spec.yaml`.
 
 To regenerate a service's scenarios, or to dump one that is not committed, such as `prl`:
 

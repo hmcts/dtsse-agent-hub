@@ -1,0 +1,44 @@
+{
+ "decision": "wa-task-types-divorce-financialremedymvp2",
+ "source": "hmcts/finrem-task-configuration@fc1ca4871f055cd0d27110f818f115025f898d2e",
+ "dumpedAt": "2026-11-20T08:20:22.502Z",
+ "scenarios": [
+  {
+   "input": {},
+   "output": [
+    {
+     "taskTypeId": "processScannedDocuments",
+     "taskTypeName": "Process Scanned Documents"
+    },
+    {
+     "taskTypeId": "checkResponseReceived",
+     "taskTypeName": "Check Response Received"
+    },
+    {
+     "taskTypeId": "processApprovedOrder",
+     "taskTypeName": "Process Approved Order"
+    },
+    {
+     "taskTypeId": "checkHelpWithFees",
+     "taskTypeName": "Check Help With Fees"
+    },
+    {
+     "taskTypeId": "reviewApplication",
+     "taskTypeName": "Review Application"
+    },
+    {
+     "taskTypeId": "reviewRefusedOrder",
+     "taskTypeName": "Review Refused Order"
+    },
+    {
+     "taskTypeId": "checkAndIssueApplication",
+     "taskTypeName": "Check and Issue Application"
+    },
+    {
+     "taskTypeId": "reviewOrderResponse",
+     "taskTypeName": "Review Order Response"
+    }
+   ]
+  }
+ ]
+}

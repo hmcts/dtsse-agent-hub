@@ -1,7 +1,7 @@
 {
  "decision": "wa-task-allowed-days-sscs-benefit",
  "source": "hmcts/sscs-task-configuration@a3d3c0cd99c39be7614135158a7f155e6625e64b",
- "dumpedAt": "2026-11-20T07:38:03.702Z",
+ "dumpedAt": "2026-11-20T08:19:24.168Z",
  "scenarios": [
   {
    "input": {

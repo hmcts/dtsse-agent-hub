@@ -167,7 +167,13 @@ describe("evaluateDecision", () => {
   it("should expose each output column as the list of every matching rule's value when several rules matched", () => {
     const helper = helperTable({ hitPolicy: "COLLECT", outputs: [{ name: "v" }, { name: "w" }], rules: [rule([], ['"a"', "1"]), rule([], ['"b"', ""])] });
     expect(readsHelper("v", helper)).toEqual([{ out: ["a", "b"] }]);
-    expect(readsHelper("w", helper)).toEqual([{ out: [1, null] }]);
+    expect(readsHelper("w", helper)).toEqual([{ out: [1] }]);
+  });
+
+  it("should expose a list even when one rule matched when the required table is COLLECT or RULE ORDER", () => {
+    const rules = [rule([], ['"a"'])];
+    expect(readsHelper("v", helperTable({ hitPolicy: "COLLECT", outputs: [{ name: "v" }], rules }))).toEqual([{ out: ["a"] }]);
+    expect(readsHelper("v", helperTable({ hitPolicy: "RULE ORDER", outputs: [{ name: "v" }], rules }))).toEqual([{ out: ["a"] }]);
   });
 
   it("should expose nothing when no rule of a required table matched", () => {

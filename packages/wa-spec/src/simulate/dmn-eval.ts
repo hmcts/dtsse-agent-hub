@@ -100,24 +100,30 @@ export function evaluateTable(table: DmnTable, givenVariables: Variables, now?: 
 }
 
 /**
- * What a required decision table contributes to the decisions that need it, as Camunda's `addResultToVariableContext` does: its
- * output columns by name, holding the value when one rule matched and the list of every matching rule's value when several did.
+ * What a required decision table contributes to the decisions that need it, as Camunda's `DefaultDmnDecisionContext` does
+ * (`addResultToVariableContext`): nothing when no rule matched; for a single result of a table that is not COLLECT without an
+ * aggregation or RULE ORDER, its output columns by name; otherwise each output column as the list of the values of the matching
+ * rules that have it (`collectEntries`), a list even when one rule matched, with no padding for a rule that lacks it.
  */
-function tableVariables(rows: OutputRow[]): Variables {
-  if (rows.length === 1) {
+function tableVariables(table: DmnTable, rows: OutputRow[]): Variables {
+  if (rows.length === 0) {
+    return {};
+  }
+  const collecting = (table.hitPolicy === "COLLECT" && !table.aggregation) || table.hitPolicy === "RULE ORDER";
+  if (rows.length === 1 && !collecting) {
     return { ...rows[0] };
   }
   const names = new Set(rows.flatMap((row) => Object.keys(row)));
-  return Object.fromEntries([...names].map((name) => [name, rows.map((row) => row[name] ?? null)]));
+  return Object.fromEntries([...names].map((name) => [name, rows.filter((row) => name in row).map((row) => row[name])]));
 }
 
 /**
- * Evaluates a decision of the document (with the clock at `now` when given, otherwise the machine's): the decisions it requires first, each exposed under its variable name, then its own
- * table or literal expression. A literal gives one row holding its value under the decision's variable name.
+ * Evaluates a decision of the document (with the clock at `now` when given, otherwise the machine's): the decisions it requires first, each exposed to the
+ * ones after it, then its own table or literal expression. A literal gives one row holding its value under the decision's variable name.
  */
 export function evaluateDecision(document: DmnDocument, decisionId: string, variables: Variables, now?: string): OutputRow[] {
   const byId = new Map(document.decisions.map((d) => [d.id, d]));
-  const scope: Variables = withClock(variables, now);
+  const scope = withClock(variables, now);
   const done = new Set<string>();
   const run = (id: string): OutputRow[] => {
     const decision = byId.get(id);
@@ -138,7 +144,7 @@ export function evaluateDecision(document: DmnDocument, decisionId: string, vari
       rows = [{ [decision.variable?.name ?? decision.name]: convertToType(evalExpression(decision.literal?.text ?? "", scope), decision.variable?.typeRef) }];
     }
     if (decision.table) {
-      Object.assign(scope, tableVariables(rows));
+      Object.assign(scope, tableVariables(decision.table, rows));
     } else if (decision.variable) {
       scope[decision.variable.name] = rows[0]?.[decision.variable.name];
     }

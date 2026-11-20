@@ -1,11 +1,9 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseFileName } from "../file-names.ts";
 import { generateDocument } from "../generator.ts";
-import { importDmns } from "../importer.ts";
-import type { Spec } from "../schema.ts";
 import { parseSpec } from "../spec-io.ts";
 import { evaluateDecision } from "./dmn-eval.ts";
 
@@ -33,45 +31,24 @@ interface Fixture {
   scenarios: Array<{ required?: string; requiredName?: string; input: Record<string, unknown>; output: Array<Record<string, unknown>> }>;
 }
 
-/** The workspace's `apps/` directory, found above this package; it is absent when the package is checked out alone. */
-function appsDir(): string | undefined {
-  for (let dir = here("."); dirname(dir) !== dir; dir = dirname(dir)) {
-    if (existsSync(join(dir, "apps", "et"))) {
-      return join(dir, "apps");
-    }
-  }
-  return undefined;
-}
-
 /**
- * Each service's scenarios were dumped from its own Java DMN tests by `scripts/dump-scenarios.mjs`. ET runs against the spec
- * committed in `examples/`. The others run against the spec their DMNs import to, read from the service's clone in the workspace,
- * so no copy of those DMNs is kept here; they are skipped where the clone is absent. `prl` has no committed scenarios.
+ * Each service's scenarios were dumped from its own Java DMN tests by `scripts/dump-scenarios.mjs`, which writes the spec the
+ * service's DMNs import to beside them as `spec.yaml`. ET's is the one committed in `examples/`. Directories that are not
+ * committed, such as `prl-scenarios`, are run when present.
  */
-const importedFrom = (clone: string) => {
-  const resources = join(appsDir() ?? "", clone, "src/main/resources");
-  return {
-    available: appsDir() !== undefined && existsSync(resources),
-    spec: (): Spec =>
-      importDmns(
-        readdirSync(resources)
-          .filter((name) => /^wa-task-.*\.dmn$/.test(name))
-          .map((name) => ({ name, xml: readFileSync(join(resources, name), "utf8") }))
-      ).spec
-  };
-};
+const SERVICES = readdirSync(here("../../test-fixtures"))
+  .filter((entry) => entry.endsWith("-scenarios"))
+  .map((entry) => {
+    const own = here(`../../test-fixtures/${entry}/spec.yaml`);
+    return {
+      name: entry.replace(/-scenarios$/, ""),
+      scenarios: `../../test-fixtures/${entry}`,
+      specPath: existsSync(own) ? own : here("../../examples/et/spec.yaml")
+    };
+  });
 
-const SERVICES = [
-  { name: "et", available: true, spec: (): Spec => parseSpec(readFileSync(here("../../examples/et/spec.yaml"), "utf8")) },
-  { name: "sscs", ...importedFrom("sscs/sscs-task-configuration") },
-  { name: "civil", ...importedFrom("civil/civil-wa-task-configuration") },
-  { name: "prl", ...importedFrom("prl/prl-wa-task-configuration") }
-]
-  .map((service) => ({ ...service, scenarios: `../../test-fixtures/${service.name}-scenarios` }))
-  .filter((service) => service.available && existsSync(here(service.scenarios)));
-
-describe.each(SERVICES)("$name's Java DMN scenarios", ({ spec: loadSpec, scenarios: dir }) => {
-  const spec = loadSpec();
+describe.each(SERVICES)("$name's Java DMN scenarios", ({ specPath, scenarios: dir }) => {
+  const spec = parseSpec(readFileSync(specPath, "utf8"));
   for (const file of readdirSync(here(dir)).filter((name) => name.endsWith(".json"))) {
     const fixture = JSON.parse(readFileSync(join(here(dir), file), "utf8")) as Fixture;
     const parsed = parseFileName(`${fixture.decision}.dmn`);

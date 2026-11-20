@@ -1,14 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  assertFeel,
-  escapeLineBreaksInStrings,
-  evalExpression,
-  FeelSyntaxError,
-  matchesEntry,
-  toPlain,
-  UnsupportedLanguageError,
-  withClock
-} from "./feel-eval.ts";
+import { assertFeel, evalExpression, FeelSyntaxError, matchesEntry, prepare, toPlain, UnsupportedLanguageError, withClock } from "./feel-eval.ts";
 
 describe("evalExpression", () => {
   it("should be null when the expression is empty", () => {
@@ -49,13 +40,13 @@ describe("evalExpression", () => {
   });
 });
 
-describe("escapeLineBreaksInStrings", () => {
+describe("prepare", () => {
   it("should leave line breaks outside strings when they are whitespace", () => {
-    expect(escapeLineBreaksInStrings('if a\nthen "x"\nelse "y"')).toBe('if a\nthen "x"\nelse "y"');
+    expect(prepare('if a\nthen "x"\nelse "y"')).toBe('if a\nthen "x"\nelse "y"');
   });
 
   it("should escape carriage returns and line feeds inside strings", () => {
-    expect(escapeLineBreaksInStrings('"a\r\nb"')).toBe('"a\\r\\nb"');
+    expect(prepare('"a\r\nb"')).toBe('"a\\r\\nb"');
   });
 });
 
@@ -74,7 +65,9 @@ describe("toPlain", () => {
   });
 
   it("should keep zero seconds when a fraction of a second follows them", () => {
-    expect(evalExpression('date and time("2026-03-10T09:30:00.5")', {})).toBe("2026-03-10T09:30:00.5");
+    expect(evalExpression('date and time("2026-03-10T09:30:00.5")', {})).toBe("2026-03-10T09:30:00.500");
+    expect(evalExpression('date and time("2026-03-10T09:30:00.1234")', {})).toBe("2026-03-10T09:30:00.123400");
+    expect(evalExpression('{a: date and time("2026-03-10T09:30:00.5")}', {})).toEqual({ a: "2026-03-10T09:30:00.5" });
   });
 
   it("should keep the seconds and drop the region when the value is inside a context or list", () => {
@@ -131,12 +124,31 @@ describe("assertFeel", () => {
 describe("withClock", () => {
   it("should leave the clock alone when no instant is given", () => {
     const variables = { a: 1 };
-    expect(withClock(variables, undefined)).toBe(variables);
+    expect(withClock(variables, undefined)).toEqual(variables);
+    expect(withClock(variables, undefined)).not.toBe(variables);
   });
 
   it("should fix now() and today() at the instant when one is given", () => {
     const variables = withClock({}, "2026-11-20T07:56:00.5Z");
-    expect(evalExpression("now()", variables)).toBe("2026-11-20T07:56:00.5Z[UTC]");
+    expect(evalExpression("now()", variables)).toBe("2026-11-20T07:56:00.500Z[UTC]");
     expect(evalExpression("today()", variables)).toBe("2026-11-20");
+  });
+
+  it("should keep a variable called now as it is when now() reads the clock", () => {
+    const variables = withClock({ now: "2026-01-05" }, "2026-11-20T07:56:00Z");
+    expect(evalExpression("date(now)", variables)).toBe("2026-01-05");
+    expect(evalExpression("(date(now) - date(today())).days", variables)).toBe(-319);
+    expect(evalExpression('now() = date and time("2026-11-20T07:56:00Z")', variables)).toBe(true);
+  });
+
+  it("should leave the text of a string alone when it mentions now()", () => {
+    expect(evalExpression('"call now() later"', {})).toBe("call now() later");
+    expect(evalExpression("a.now()", { a: { now: () => 1 } })).toBe(1);
+  });
+
+  it("should not change the variables it was given when the clock is added", () => {
+    const variables = { a: 1 };
+    withClock(variables, "2026-11-20T07:56:00Z");
+    expect(variables).toEqual({ a: 1 });
   });
 });
