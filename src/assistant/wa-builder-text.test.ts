@@ -232,17 +232,52 @@ describe("a trigger, completion and cancellation of ET1 Vetting", () => {
     ).toEqual(["LEGAL_OPERATIONS"]);
   });
 
-  it("should keep a value's condition, and group by the unconditional value, when an entry has a when", () => {
+  it("should keep a value's condition, and name the others, when an entry has a when", () => {
     const conditional: Task = { id: "T", workType: [{ value: "a", when: { x: "1" } }, { value: "b" }] };
     expect(resolvePieces(et, conditional.workType, "et_scotland", caseTypeIds(et))).toEqual([{ value: "a", when: { x: { in: ["1"] } } }, { value: "b" }]);
-    expect(briefVal(et, conditional.workType, "et_scotland", caseTypeIds(et))).toBe("b");
-    expect(briefVal(et, { value: "a", when: { x: "1" } }, "et_scotland", caseTypeIds(et))).toBe("depends on case data");
+    expect(briefVal(et, conditional.workType, "et_scotland", caseTypeIds(et))).toBe("b, or a depending on case data");
+    expect(briefVal(et, { value: "a", when: { x: "1" } }, "et_scotland", caseTypeIds(et))).toBe("a depending on case data");
   });
 
   it("should say an addition replaces the profile's grant when the role is removed and then added", () => {
     const model = { ...et, roles: {}, defaults: undefined, permissionProfiles: { p: { judge: { perms: "Read" } } } } as Model;
     const [row] = resolvePermissions(model, { id: "T", permissions: { profile: "p", remove: ["judge"], add: { judge: { perms: "Own" } } } }, "et_scotland");
     expect(row).toMatchObject({ source: "added", replaces: "p" });
+  });
+
+  it("should list a task under each value it can take when a value depends on case data", () => {
+    const model = { ...et, tasks: [{ id: "T", name: "Task", workType: [{ value: "a", when: { x: "1" } }, { value: "b" }] }] } as Model;
+    const groups = boardGroups(model, "workType");
+    expect(groups.map((g) => g.group)).toEqual(["a", "b"]);
+    expect(groups.every((g) => g.tasks.length === 1)).toBe(true);
+  });
+
+  it("should name a board row for its own case types when the task is named differently in each", () => {
+    const model = {
+      ...et,
+      tasks: [
+        {
+          id: "T",
+          workType: "w",
+          name: [
+            { value: "Name EW", only: ["et_englandwales"] },
+            { value: "Name S", only: ["et_scotland"] }
+          ],
+          only: ["et_englandwales", "et_scotland"]
+        }
+      ]
+    } as Model;
+    const [group] = boardGroups(model, "workType");
+    expect(group?.tasks.map((t) => [t.name, t.caseTypes])).toEqual([
+      ["Name EW", ["et_englandwales"]],
+      ["Name S", ["et_scotland"]]
+    ]);
+    expect(boardGroups(model, "workType", "et_scotland")[0]?.tasks.map((t) => t.name)).toEqual(["Name S"]);
+  });
+
+  it("should word a rule with no event, and one that moves the case to a state, grammatically when the rule names states", () => {
+    expect(describeCancellation({ action: "Cancel", state: "B" })).toBe("Cancelled on any event that leaves the case in `B`");
+    expect(describeCancellation({ action: "Cancel", events: "x", toState: "C" })).toBe("Cancelled when `x` happens and moves the case to `C`");
   });
 
   it("should include the warning and the note when a rule warns", () => {

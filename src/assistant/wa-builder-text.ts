@@ -192,11 +192,12 @@ export function describeCancellation(rule: Cancellation): string {
   if (rule.fromState !== undefined) {
     text += ` while the case is in ${describeCell(rule.fromState)}`;
   }
-  if (rule.state !== undefined) {
-    text += ` and leaves the case in ${describeCell(rule.state)}`;
-  }
-  if (rule.toState !== undefined) {
-    text += ` and leaves the case in ${describeCell(rule.toState)}`;
+  const after = [
+    ...(rule.state === undefined ? [] : [`leaves the case in ${describeCell(rule.state)}`]),
+    ...(rule.toState === undefined ? [] : [`moves the case to ${describeCell(rule.toState)}`])
+  ];
+  if (after.length > 0) {
+    text += `${rule.events === undefined ? " that" : " and"} ${listOf(after, "and")}`;
   }
   const categories = (rule.categories ?? []).map(describeExpr);
   if (categories.length > 0) {
@@ -274,10 +275,10 @@ export const resolveCompletions = (model: Model, task: Task, caseType: string): 
     .filter((piece) => piece.cases.includes(caseType))
     .map((piece) => piece.completion);
 
-/** The task's name for the list: its first case type's, when that is plain text. */
-export function taskName(model: Model, task: Task): string {
+/** The task's name for the list: the first of these case types (by default its own) that gives a plain one. */
+export function taskName(model: Model, task: Task, among: string[] = taskCases(model, task)): string {
   const cases = taskCases(model, task);
-  for (const caseType of cases) {
+  for (const caseType of among) {
     const name = plainText(resolveVal(model, task.name, caseType, cases)[0]);
     if (name !== undefined) {
       return name;
@@ -289,8 +290,19 @@ export function taskName(model: Model, task: Task): string {
 /** One case type's value of a task's attribute, in one short cell. */
 export function briefVal(model: Model, val: Val | undefined, caseType: string, taskCases: string[]): string {
   const pieces = resolvePieces(model, val, caseType, taskCases);
-  const always = pieces.filter((piece) => piece.when === undefined);
-  return always.length === 0 && pieces.length > 0 ? "depends on case data" : always.map((piece) => briefExpr(piece.value)).join(", ");
+  const always = [...new Set(pieces.filter((piece) => piece.when === undefined).map((piece) => briefExpr(piece.value)))];
+  const others = [...new Set(pieces.filter((piece) => piece.when !== undefined).map((piece) => briefExpr(piece.value)))].filter(
+    (value) => !always.includes(value)
+  );
+  if (always.length === 0) {
+    return others.length === 0 ? "" : `${listOf(others, "or")} depending on case data`;
+  }
+  return others.length === 0 ? always.join(", ") : `${always.join(", ")}, or ${listOf(others, "or")} depending on case data`;
+}
+
+/** Every value a task's attribute can take in one case type, whatever case data decides. */
+export function possibleValues(model: Model, val: Val | undefined, caseType: string, taskCases: string[]): string[] {
+  return [...new Set(resolvePieces(model, val, caseType, taskCases).map((piece) => briefExpr(piece.value)))];
 }
 
 /** A value across the task's case types: the one value, or each value with the case types it is for. */
@@ -485,15 +497,33 @@ export type BoardGrouping = "roleCategory" | "workType";
  * case type is in each of its groups, with the case types it is there for.
  */
 export function boardGroups(model: Model, by: BoardGrouping, caseType?: string): Array<{ group: string; tasks: BoardTask[] }> {
-  const groups = new Map<string, BoardTask[]>();
+  const groups = new Map<string, Map<string, string[]>>();
   for (const task of model.tasks) {
-    const cases = taskCases(model, task).filter((id) => caseType === undefined || id === caseType);
-    for (const { caseTypes, value } of groupByCaseType(cases, (id) => briefVal(model, task[by], id, taskCases(model, task)))) {
-      const group = value === "" ? "Not set" : value;
-      groups.set(group, [...(groups.get(group) ?? []), { task, name: taskName(model, task), caseTypes }]);
+    const own = taskCases(model, task);
+    for (const id of own.filter((candidate) => caseType === undefined || candidate === caseType)) {
+      const name = taskName(model, task, [id]);
+      const values = possibleValues(model, task[by], id, own);
+      for (const value of values.length === 0 ? [""] : values) {
+        const group = value === "" ? "Not set" : value;
+        const rows = groups.get(group) ?? new Map<string, string[]>();
+        const key = `${task.id}\u0000${name}`;
+        rows.set(key, [...(rows.get(key) ?? []), id]);
+        groups.set(group, rows);
+      }
     }
   }
-  return [...groups.entries()]
+  const taskById = new Map(model.tasks.map((task) => [task.id, task]));
+  const board = new Map<string, BoardTask[]>(
+    [...groups].map(([group, rows]) => [
+      group,
+      [...rows].flatMap(([key, caseTypes]): BoardTask[] => {
+        const [id, name] = key.split("\u0000") as [string, string];
+        const task = taskById.get(id);
+        return task === undefined ? [] : [{ task, name, caseTypes }];
+      })
+    ])
+  );
+  return [...board.entries()]
     .map(([group, tasks]) => ({ group, tasks }))
     .sort((a, b) => (a.group === "Not set" ? 1 : b.group === "Not set" ? -1 : byCodePoint(a.group, b.group)));
 }
