@@ -45,6 +45,17 @@ describe("waDocuments", () => {
     expect(waDocuments({ service: "employment", model }).model).not.toMatch(/^(order|layout):/m);
   });
 
+  it("should refuse when the display name is empty or over the limit", () => {
+    const named = (displayName: string) => ({ ...model, service: { ...model.service, displayName } });
+    expect(() => waDocuments({ service: "employment", model: named("") })).toThrow(/display name/);
+    expect(() => waDocuments({ service: "employment", model: named("x".repeat(201)) })).toThrow(/display name/);
+  });
+
+  it("should refuse when a document reads back differently, naming the first difference", () => {
+    const lossy = { ...layout, files: { ...layout.files, extra: undefined } } as unknown as typeof layout;
+    expect(() => waDocuments({ service: "employment", model, layout: lossy })).toThrow(/would not read back the same: layout\.files/);
+  });
+
   it("should refuse when a document would not read back", () => {
     const broken = { version: 1, files: "no" } as unknown as typeof layout;
     expect(() => waDocuments({ service: "employment", model, layout: broken })).toThrow(/would not read back/);
@@ -63,7 +74,7 @@ describe("waDocuments", () => {
 });
 
 describe("WA_SERVICE_PATTERN", () => {
-  it("should accept hyphens and underscores and refuse a leading hyphen", () => {
+  it("should accept hyphens and underscores when the slug is lowercase and refuse a leading hyphen", () => {
     expect(WA_SERVICE_PATTERN.test("family-private-law")).toBe(true);
     expect(WA_SERVICE_PATTERN.test("possession_service")).toBe(true);
     expect(WA_SERVICE_PATTERN.test("-x")).toBe(false);
