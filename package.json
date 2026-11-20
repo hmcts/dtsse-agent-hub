@@ -91,6 +91,7 @@
     "@azure/identity": "4.14.1",
     "@opentelemetry/instrumentation-http": "0.222.0",
     "applicationinsights": "3.17.0",
+    "effect": "3.22.1",
     "pg": "8.23.1"
   },
   "dependenciesMeta": {
