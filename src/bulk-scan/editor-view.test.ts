@@ -14,6 +14,15 @@ describe("editor view", () => {
     expect(view.targets).toContain("nfdiv");
   });
 
+  it("should still open, with the simulator off and the reason, when its scenarios cannot be built", () => {
+    const view = bulkScanEditorView(
+      record({ ...good, sections: [{ id: "1", title: "", fields: [{ id: "1", keys: ["k"], regex: "[a-", mandatory: "mandatory" }] }] })
+    );
+    expect(view.spec.sections).toHaveLength(1);
+    expect(view.simulatorProblem).toEqual(expect.any(String));
+    expect(view.scenarios).toEqual([]);
+  });
+
   it("should refuse a stored version that no longer reads", () => {
     expect(() => bulkScanEditorView(record({ sections: "x" }))).toThrow(/no longer reads/);
   });

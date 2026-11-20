@@ -1,7 +1,7 @@
 "use client";
 
 import type { FormSpec } from "@hmcts-cft/bulk-scan-spec";
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
 import { type FieldPatch, maxLengthOf, wordsOf } from "@/bulk-scan/edit";
 import type { FieldNotes } from "@/bulk-scan/spec";
 import { FIELD } from "@/components/assistant/WelshParts";
@@ -74,12 +74,7 @@ export function BulkScanFields({
                       <input aria-label={`Label of ${name}`} value={field.label} className={CELL} onChange={(e) => onChange(s, f, { label: e.target.value })} />
                     </td>
                     <td className="py-1.5 pr-2">
-                      <input
-                        aria-label={`Keys of ${name}`}
-                        value={field.keys.join(" ")}
-                        className={CELL}
-                        onChange={(e) => onChange(s, f, { keys: wordsOf(e.target.value) })}
-                      />
+                      <WordsInput label={`Keys of ${name}`} words={field.keys} onChange={(keys) => onChange(s, f, { keys })} />
                     </td>
                     <td className="py-1.5 pr-2">
                       <select
@@ -123,16 +118,16 @@ export function BulkScanFields({
                         value={field.maxLength ?? ""}
                         inputMode="numeric"
                         className={`${CELL} w-20`}
-                        onChange={(e) => onChange(s, f, { maxLength: maxLengthOf(e.target.value) })}
+                        onChange={(e) => {
+                          // Digits only, so what is sent is always a number or nothing.
+                          if (/^\d*$/.test(e.target.value)) {
+                            onChange(s, f, { maxLength: maxLengthOf(e.target.value) });
+                          }
+                        }}
                       />
                     </td>
                     <td className="py-1.5">
-                      <input
-                        aria-label={`CCD ids of ${name}`}
-                        value={field.ccd.join(" ")}
-                        className={CELL}
-                        onChange={(e) => onChange(s, f, { ccd: wordsOf(e.target.value) })}
-                      />
+                      <WordsInput label={`CCD ids of ${name}`} words={field.ccd} onChange={(ccd) => onChange(s, f, { ccd })} />
                     </td>
                   </tr>
                   <tr className="border-b border-asst-line">
@@ -212,5 +207,26 @@ function FieldDetails({
         ))}
       </div>
     </details>
+  );
+}
+
+/**
+ * A list typed as words. The text is kept as typed and only its words go up, because showing the words joined back would
+ * swallow a space or comma the moment it was typed, leaving no way to start the next one.
+ */
+function WordsInput({ label, words, onChange }: Readonly<{ label: string; words: readonly string[]; onChange: (words: string[]) => void }>) {
+  const [text, setText] = useState(words.join(" "));
+  const current = wordsOf(text);
+  const shown = current.join(" ") === words.join(" ") ? text : words.join(" ");
+  return (
+    <input
+      aria-label={label}
+      value={shown}
+      className={CELL}
+      onChange={(e) => {
+        setText(e.target.value);
+        onChange(wordsOf(e.target.value));
+      }}
+    />
   );
 }

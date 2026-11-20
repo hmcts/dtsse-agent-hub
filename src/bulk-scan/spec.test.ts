@@ -7,6 +7,7 @@ import {
   readWorkbookBytes
 } from "@hmcts-cft/bulk-scan-spec";
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { HttpError } from "../agent-api/http.ts";
 import {
   allNotes,
@@ -25,15 +26,27 @@ import {
 } from "./spec.ts";
 
 const pdf = vi.hoisted(() => ({ result: undefined as unknown }));
-vi.mock("@hmcts-cft/bulk-scan-spec", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@hmcts-cft/bulk-scan-spec")>()),
-  fromPdf: async () => {
-    if (pdf.result === undefined) {
-      throw new Error("unreadable");
+const sip = vi.hoisted(() => ({ fail: false }));
+vi.mock("@hmcts-cft/bulk-scan-spec", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@hmcts-cft/bulk-scan-spec")>();
+  return {
+    ...actual,
+    importSip: (workbook: unknown) => {
+      if (sip.fail) {
+        z.object({ forms: z.array(z.object({ sections: z.array(z.object({ fields: z.array(z.object({ inputType: z.enum(["text"]) })) })) })) }).parse({
+          forms: [{ sections: [{ fields: [{ inputType: "bad" }] }] }]
+        });
+      }
+      return actual.importSip(workbook as never);
+    },
+    fromPdf: async () => {
+      if (pdf.result === undefined) {
+        throw new Error("unreadable");
+      }
+      return pdf.result;
     }
-    return pdf.result;
-  }
-}));
+  };
+});
 
 const SPEC: FormSpec = formSpecSchema.parse({
   form: { name: "T1", formType: "T1" },
@@ -254,5 +267,35 @@ describe("version in a request", () => {
       undefined,
       undefined
     ]);
+  });
+});
+
+describe("a regex the engine cannot compile", () => {
+  const withRegex = (regex: string) => {
+    const copy = JSON.parse(JSON.stringify(SPEC));
+    copy.sections[0].fields[1].regex = regex;
+    return copy;
+  };
+
+  it.each(["[a-", "(?i)abc"])("should be refused on its row when the regex is %s", (regex) => {
+    const checked = checkSpec(withRegex(regex));
+    expect(checked.ok).toBe(false);
+    expect(!checked.ok && checked.issues.map((i) => i.path)).toEqual(["sections.0.fields.1.regex"]);
+  });
+});
+
+describe("an upload whose spec the editor could not open", () => {
+  it("should be refused with what is wrong when a key is not a word", async () => {
+    const bad = JSON.parse(JSON.stringify(SPEC));
+    bad.sections[0].fields[0].keys = ["applicant-name"];
+    const error = await refusal(importUpload("sip.xlsx", await bytesOf(generateSipWorkbook({ forms: [bad] }))));
+    expect([error.status, error.message]).toEqual([422, expect.stringContaining("applicant-name")]);
+  });
+
+  it("should be refused with a readable message when the importer's own schema rejects the sheet", async () => {
+    sip.fail = true;
+    const error = await refusal(importUpload("sip.xlsx", await bytesOf(generateSipWorkbook({ forms: [SPEC] }))));
+    sip.fail = false;
+    expect([error.status, error.message]).toEqual([422, expect.stringContaining("forms.0.sections.0.fields.0.inputType")]);
   });
 });

@@ -1,7 +1,9 @@
 /**
  * @vitest-environment jsdom
  */
+
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BulkScanEditorView } from "@/bulk-scan/editor-view";
 import { BulkScanDownloads } from "@/components/assistant/BulkScanDownloads";
@@ -266,11 +268,12 @@ const VIEW: BulkScanEditorView = {
     { rules: "If a = true then kind = x", casePath: "1 success", allowed: ["a: true | false"] },
     { rules: "", casePath: "", allowed: [] }
   ],
-  versions: VERSIONS,
+  versions: [{ ...VERSIONS[1]!, signedOffBy: null, signedOffAt: null }],
   scenarios: [],
   keys: [],
   sample: {},
-  targets: ["fis"]
+  targets: ["fis"],
+  simulatorProblem: null
 };
 
 describe("bulk scan editor", () => {
@@ -301,7 +304,7 @@ describe("bulk scan editor", () => {
     fireEvent.click(save);
 
     await waitFor(() => expect(push).toHaveBeenCalledWith("/assistant/bulk-scan/s1"));
-    const sent = JSON.parse(fetchMock.mock.calls[0]?.[1].body);
+    const sent = JSON.parse(fetchMock.mock.calls[0]?.[1].body).spec;
     expect(sent.form.formType).toBe("T2");
     expect(sent.sections[0].fields[1]).toMatchObject({ label: "Full name", maxLength: 40, keys: ["name", "other"], ccd: ["ccdName"] });
   });
@@ -349,5 +352,66 @@ describe("bulk scan editor", () => {
 
     expect((screen.getByLabelText("Input type of 1.3") as HTMLSelectElement).value).toBe("date");
     expect((screen.getByLabelText("Regex of 1.3") as HTMLInputElement).value).toBe("^x$");
+  });
+});
+
+describe("typing into the editor", () => {
+  it("should keep what is typed in the keys and CCD ids boxes, separators included, and send the words", async () => {
+    fetchMock.mockResolvedValue(reply(201, { version: 2 }));
+    const user = userEvent.setup();
+    render(<BulkScanEditor view={VIEW} signOff={vi.fn()} />);
+    const keys = screen.getByLabelText("Keys of 1.2") as HTMLInputElement;
+
+    await user.clear(keys);
+    await user.type(keys, "name, other");
+    await user.type(screen.getByLabelText("CCD ids of 1.2"), "ccdA ccdB");
+
+    expect(keys.value).toBe("name, other");
+    expect((screen.getByLabelText("CCD ids of 1.2") as HTMLInputElement).value).toBe("ccdA ccdB");
+    await user.click(screen.getByRole("button", { name: "Save as a new version" }));
+    const field = JSON.parse(fetchMock.mock.calls[0]?.[1].body).spec.sections[0].fields[1];
+    expect([field.keys, field.ccd]).toEqual([
+      ["name", "other"],
+      ["ccdA", "ccdB"]
+    ]);
+  });
+
+  it("should take digits only in the maximum length box, so it is never not a number", async () => {
+    fetchMock.mockResolvedValue(reply(201, { version: 2 }));
+    const user = userEvent.setup();
+    render(<BulkScanEditor view={VIEW} signOff={vi.fn()} />);
+    const max = screen.getByLabelText("Maximum length of 1.2") as HTMLInputElement;
+
+    await user.type(max, "4x2");
+    expect(max.value).toBe("42");
+    await user.click(screen.getByRole("button", { name: "Save as a new version" }));
+
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1].body).spec.sections[0].fields[1].maxLength).toBe(42);
+  });
+
+  it("should send the version the edit started from, and refuse to save an older version over the later ones", async () => {
+    fetchMock.mockResolvedValue(reply(201, { version: 4 }));
+    const user = userEvent.setup();
+    const { rerender } = render(<BulkScanEditor view={{ ...VIEW, version: 3, versions: [{ ...VERSIONS[0]!, version: 3 }] }} signOff={vi.fn()} />);
+    await user.type(screen.getByLabelText("Label of 1.2"), "!");
+    await user.click(screen.getByRole("button", { name: "Save as a new version" }));
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1].body).baseVersion).toBe(3);
+
+    cleanup();
+    render(<BulkScanEditor view={{ ...VIEW, version: 1, versions: VERSIONS }} signOff={vi.fn()} />);
+    await user.type(screen.getByLabelText("Label of 1.2"), "!");
+    expect((screen.getByRole("button", { name: "Save as a new version" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/open version 2 to change it/i)).toBeTruthy();
+  });
+
+  it("should show the refusal when another save got there first", async () => {
+    fetchMock.mockResolvedValue(reply(409, { error: "this form has a newer version: reload the page" }));
+    const user = userEvent.setup();
+    render(<BulkScanEditor view={VIEW} signOff={vi.fn()} />);
+
+    await user.type(screen.getByLabelText("Label of 1.2"), "!");
+    await user.click(screen.getByRole("button", { name: "Save as a new version" }));
+
+    expect((await screen.findByText(/newer version/)).textContent).toContain("reload");
   });
 });

@@ -81,7 +81,7 @@ export async function readSpec(db: Database, target: SpecTarget, id: string, ver
       id: true,
       name: true,
       versions: {
-        select: { version: true, spec: true, createdAt: true, signedOffAt: true, savedBy: { select: { name: true } }, signedOffBy: { select: { name: true } } },
+        select: { version: true, createdAt: true, signedOffAt: true, savedBy: { select: { name: true } }, signedOffBy: { select: { name: true } } },
         orderBy: { version: "desc" }
       }
     }
@@ -90,11 +90,13 @@ export async function readSpec(db: Database, target: SpecTarget, id: string, ver
   if (!row || !shown) {
     return undefined;
   }
+  // Only the version being shown has its JSON read: a spec of many versions would otherwise load every one of them.
+  const held = await db.bulkScanSpecVersion.findUnique({ where: { specId_version: { specId: id, version: shown.version } }, select: { spec: true } });
   return {
     id: row.id,
     name: row.name,
     version: shown.version,
-    spec: shown.spec,
+    spec: held?.spec,
     versions: row.versions.map((v) => ({
       version: v.version,
       savedBy: v.savedBy.name,
@@ -126,8 +128,12 @@ export async function createSpecs(prisma: PrismaClient, target: SpecTarget, spec
   });
 }
 
-/** Saves the spec as the next version, and names the spec after it. Answers the number it got. */
-export async function saveVersion(prisma: PrismaClient, target: SpecTarget, id: string, next: NewSpec): Promise<number> {
+/**
+ * Saves the spec as the next version, and names the spec after it. Answers the number it got. `baseVersion` is the version
+ * the edit started from, and a save is refused unless it is still the latest, so a second tab or an old version never
+ * silently replaces later work.
+ */
+export async function saveVersion(prisma: PrismaClient, target: SpecTarget, id: string, baseVersion: number, next: NewSpec): Promise<number> {
   allow(target);
   if (!isUuid(id)) {
     throw new HttpError(404, GONE);
@@ -139,7 +145,14 @@ export async function saveVersion(prisma: PrismaClient, target: SpecTarget, id: 
       throw new HttpError(404, GONE);
     }
     const latest = await tx.bulkScanSpecVersion.aggregate({ where: { specId: id }, _max: { version: true } });
-    const version = (latest._max.version ?? 0) + 1;
+    const newest = latest._max.version ?? 0;
+    if (newest !== baseVersion) {
+      throw new HttpError(
+        409,
+        `this form is now at version ${newest}, and this edit started from version ${baseVersion}: reload the page and make the change again on version ${newest}`
+      );
+    }
+    const version = newest + 1;
     await tx.bulkScanSpecVersion.create({ data: { specId: id, version, spec: next.spec, savedByOid: target.actorOid } });
     await tx.bulkScanSpec.update({ where: { id }, data: { name: next.name } });
     return version;

@@ -68,8 +68,11 @@ async function upload(persona = "alice", name = "t1.xlsx"): Promise<string[]> {
   return (await jsonOf<{ ids: string[] }>(response)).ids;
 }
 
-function save(id: string, spec: unknown, persona = "alice") {
-  return versionsRoute.POST(as(persona, `/api/ui/assistant/bulk-scan/${id}/versions`, { method: "POST", body: JSON.stringify(spec) }), context(id));
+function save(id: string, spec: unknown, persona = "alice", baseVersion?: number) {
+  return versionsRoute.POST(
+    as(persona, `/api/ui/assistant/bulk-scan/${id}/versions`, { method: "POST", body: JSON.stringify({ baseVersion: baseVersion ?? 1, spec }) }),
+    context(id)
+  );
 }
 
 describe("starting a spec", () => {
@@ -115,7 +118,31 @@ describe("saving versions", () => {
 
     const answers = await Promise.all([save(id, SPEC), save(id, SPEC)]);
 
-    expect((await Promise.all(answers.map((a) => jsonOf<{ version: number }>(a)))).map((a) => a.version).sort((a, b) => a - b)).toEqual([2, 3]);
+    expect(answers.map((a) => a.status).sort((a, b) => a - b)).toEqual([201, 409]);
+    expect((await listSpecs(prisma, own(ALICE)))[0]?.version).toBe(2);
+  });
+
+  it("should refuse a save that started from a version that is no longer the latest, and save nothing", async () => {
+    const [id] = (await upload()) as [string];
+    await save(id, SPEC);
+
+    const stale = await save(id, { ...SPEC, form: { ...SPEC.form, name: "Stale" } }, "alice", 1);
+
+    expect(stale.status).toBe(409);
+    expect((await jsonOf<{ error: string }>(stale)).error).toContain("version 2");
+    expect((await readSpec(prisma, own(ALICE), id))?.versions).toHaveLength(2);
+    expect((await save(id, SPEC, "alice", 2)).status).toBe(201);
+  });
+
+  it("should refuse a regex the engine cannot compile on its row, and an upload with a key it cannot use", async () => {
+    const [id] = (await upload()) as [string];
+    const bad = JSON.parse(JSON.stringify(SPEC));
+    bad.sections[0].fields[1].regex = "[a-";
+
+    const response = await save(id, bad);
+
+    expect(response.status).toBe(422);
+    expect((await jsonOf<{ issues: { path: string }[] }>(response)).issues.map((i) => i.path)).toEqual(["sections.0.fields.1.regex"]);
   });
 
   it("should answer every place the schema refuses and save nothing", async () => {
@@ -145,11 +172,29 @@ describe("saving versions", () => {
     expect((await jsonOf<{ issues: { path: string }[] }>(response)).issues.map((i) => i.path)).toEqual(["sections"]);
   });
 
+  it("should refuse a body that has no spec", async () => {
+    const [id] = (await upload()) as [string];
+
+    expect((await versionsRoute.POST(as("alice", "/x", { method: "POST", body: JSON.stringify({ baseVersion: "1" }) }), context(id))).status).toBe(400);
+  });
+
   it("should refuse a body that is not JSON, or is past the limit", async () => {
     const [id] = (await upload()) as [string];
 
     expect((await versionsRoute.POST(as("alice", "/x", { method: "POST", body: "{" }), context(id))).status).toBe(400);
     expect((await versionsRoute.POST(as("alice", `/x`, { method: "POST", body: "x".repeat(MAX_SPEC_BYTES + 1) }), context(id))).status).toBe(413);
+  });
+});
+
+describe("when virtual agents are off", () => {
+  it("should refuse a sign-off and a delete, as the other Assistant actions do", async () => {
+    const [id] = (await upload()) as [string];
+    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "false");
+
+    expect((await actions.signOffSpec(formOf({ id, version: "1" }))).ok).toBe(false);
+    expect((await actions.deleteBulkScanSpec(formOf({ id }))).ok).toBe(false);
+    expect(await prisma.bulkScanSpec.count()).toBe(1);
+    expect((await readSpec(prisma, own(ALICE), id))?.versions[0]?.signedOffAt).toBeNull();
   });
 });
 

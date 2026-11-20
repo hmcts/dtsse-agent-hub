@@ -24,6 +24,8 @@ export function BulkScanEditor({ view, signOff }: Readonly<{ view: BulkScanEdito
   const [problems, setProblems] = useState<ReturnType<typeof issuesByField>>({ fields: new Map(), form: [] });
   const [error, setError] = useState<string | null>(null);
   const checklist = reviewChecklist(view.spec);
+  const latest = Math.max(...view.versions.map((v) => v.version));
+  const superseded = view.version !== latest;
 
   function change(next: FormSpec): void {
     setSpec(next);
@@ -37,7 +39,7 @@ export function BulkScanEditor({ view, signOff }: Readonly<{ view: BulkScanEdito
       const response = await fetch(`/api/ui/assistant/bulk-scan/${encodeURIComponent(view.id)}/versions`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(spec)
+        body: JSON.stringify({ baseVersion: view.version, spec })
       });
       const body = (await response.json().catch(() => ({}))) as { version?: unknown; issues?: { path: string; message: string }[]; error?: unknown };
       if (response.ok && typeof body.version === "number") {
@@ -105,10 +107,12 @@ export function BulkScanEditor({ view, signOff }: Readonly<{ view: BulkScanEdito
           onChange={(section: number, field: number, patch: FieldPatch) => change(patchField(spec, section, field, patch))}
         />
         <div className="flex flex-wrap items-center gap-3">
-          <button type="button" className={PRIMARY} disabled={saving || !dirty} onClick={() => void save()}>
+          <button type="button" className={PRIMARY} disabled={saving || !dirty || superseded} onClick={() => void save()}>
             {saving ? "Saving…" : "Save as a new version"}
           </button>
-          {dirty ? (
+          {superseded ? (
+            <span className="text-[13px] text-asst-muted">{`This is not the latest version: open version ${latest} to change it.`}</span>
+          ) : dirty ? (
             <span className="text-[13px] text-asst-muted">You have changes that are not saved. The simulator and downloads below use the saved version.</span>
           ) : null}
         </div>
@@ -126,7 +130,11 @@ export function BulkScanEditor({ view, signOff }: Readonly<{ view: BulkScanEdito
         )}
       </section>
 
-      <BulkScanSimulator specId={view.id} version={view.version} scenarios={view.scenarios} keys={view.keys} sample={view.sample} />
+      {view.simulatorProblem === null ? (
+        <BulkScanSimulator specId={view.id} version={view.version} scenarios={view.scenarios} keys={view.keys} sample={view.sample} />
+      ) : (
+        <p role="alert" className="text-[13px] text-asst-error">{`The simulator cannot run this version: ${view.simulatorProblem}`}</p>
+      )}
       <BulkScanDownloads specId={view.id} version={view.version} targets={view.targets} />
       <BulkScanVersions specId={view.id} viewing={view.version} versions={view.versions} signOff={signOff} />
     </div>

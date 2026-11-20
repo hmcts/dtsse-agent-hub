@@ -10,7 +10,7 @@ import { uiRefusals, uiViewer } from "../../../../request";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** Saves the edited spec as the next version, or answers every place it fails the schema so the editor can mark each one. */
+/** Saves the edited spec as the next version of the one it started from, or answers every place it fails the schema so the editor can mark each one. */
 export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const viewer = await uiViewer(request);
   if (viewer instanceof Response) {
@@ -30,11 +30,15 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
       }
       throw error;
     }
-    const checked = checkSpec(raw);
+    const body = raw as { baseVersion?: unknown; spec?: unknown } | null;
+    if (typeof body !== "object" || body === null || typeof body.baseVersion !== "number" || !Number.isInteger(body.baseVersion) || body.spec === undefined) {
+      return errorResponse(400, "send the spec and the version the edit started from");
+    }
+    const checked = checkSpec(body.spec);
     if (!checked.ok) {
       return errorResponse(422, "the spec has errors", { issues: checked.issues });
     }
-    const version = await saveVersion(prisma, { actorOid: viewer.oid, ownerOid: viewer.oid }, id, {
+    const version = await saveVersion(prisma, { actorOid: viewer.oid, ownerOid: viewer.oid }, id, body.baseVersion, {
       name: specName(checked.spec, "Untitled form"),
       spec: checked.spec
     });

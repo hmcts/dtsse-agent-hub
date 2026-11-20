@@ -27,6 +27,8 @@ import {
 } from "@hmcts-cft/bulk-scan-spec";
 import { z } from "zod";
 import { HttpError } from "../agent-api/http.ts";
+import { isPdf } from "../assistant/docmosis.ts";
+import { isXlsx } from "../assistant/welsh.ts";
 import { zipFiles } from "./zip.ts";
 
 /**
@@ -40,11 +42,6 @@ export const MAX_BULK_SCAN_FILE_BYTES = 5 * 1024 * 1024;
 export const MAX_SPEC_BYTES = 3 * 1024 * 1024;
 export const MAX_SPEC_NAME = 200;
 
-/** `%PDF`, and an `.xlsx` is a zip, which starts `PK\x03\x04`. Neither proves the content is readable, but both refuse a typo. */
-function startsWith(bytes: Uint8Array, magic: readonly number[]): boolean {
-  return magic.every((byte, i) => bytes[i] === byte);
-}
-
 export interface Imported {
   kind: "pdf" | "sip" | "transformation sheet";
   forms: FormSpec[];
@@ -52,7 +49,7 @@ export interface Imported {
 
 /** Reads an uploaded form PDF, Exela SIP or HMCTS transformation sheet into one spec per form it holds. */
 export async function importUpload(fileName: string, bytes: Uint8Array): Promise<Imported> {
-  if (startsWith(bytes, [0x25, 0x50, 0x44, 0x46])) {
+  if (isPdf(bytes)) {
     const result = await fromPdf({ pdf: fileName, bytes }).catch((error: unknown) => {
       console.error(`a form PDF could not be read: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`);
       return undefined;
@@ -65,7 +62,7 @@ export async function importUpload(fileName: string, bytes: Uint8Array): Promise
     }
     return { kind: "pdf", forms: result.bundle.forms };
   }
-  if (!startsWith(bytes, [0x50, 0x4b, 0x03, 0x04])) {
+  if (!isXlsx(bytes)) {
     throw new HttpError(400, "choose a form PDF, an Exela SIP or a transformation sheet (.xlsx)");
   }
   const workbook = await readWorkbookBytes(bytes).catch(() => undefined);
@@ -73,17 +70,42 @@ export async function importUpload(fileName: string, bytes: Uint8Array): Promise
     throw new HttpError(400, "that spreadsheet could not be read");
   }
   if (workbook.worksheets.some((s) => SIP.formSheetPattern.test(s.name))) {
-    const forms = importSip(workbook).forms;
+    const forms = readSheet(() => importSip(workbook).forms);
     if (forms.length === 0) {
       throw new HttpError(422, "that SIP has no filled-in form tab");
     }
-    return { kind: "sip", forms };
+    return openable({ kind: "sip", forms });
   }
-  const { spec } = importTransformSheet(selectSheet(workbook, undefined));
+  const { spec } = readSheet(() => importTransformSheet(selectSheet(workbook, undefined)));
   if (spec.sections.every((s) => s.fields.length === 0)) {
     throw new HttpError(422, "no field rows were found in the first sheet: is it a transformation sheet?");
   }
-  return { kind: "transformation sheet", forms: [spec] };
+  return openable({ kind: "transformation sheet", forms: [spec] });
+}
+
+/** An importer's refusal of a sheet that is not laid out as it expects, as the 422 that says where. */
+function readSheet<T>(read: () => T): T {
+  try {
+    return read();
+  } catch (error) {
+    if (error instanceof z.ZodError || (error instanceof Error && error.name === "ZodError")) {
+      const issues = (error as z.ZodError).issues.slice(0, 3).map((i) => `${i.path.join(".")}: ${i.message}`);
+      throw new HttpError(422, `that spreadsheet is not laid out as expected (${issues.join("; ")})`);
+    }
+    throw new HttpError(422, error instanceof Error ? error.message : "that spreadsheet could not be read");
+  }
+}
+
+/** An upload is kept only if the editor can open it, so a key or regex the engine cannot use is refused here, with the field. */
+function openable(imported: Imported): Imported {
+  for (const spec of imported.forms) {
+    const checked = checkSpec(spec);
+    if (!checked.ok) {
+      const shown = checked.issues.slice(0, 3).map((i) => `${i.path || "form"}: ${i.message}`);
+      throw new HttpError(422, `${specName(spec, "that form")} cannot be used as it stands (${shown.join("; ")})`);
+    }
+  }
+  return imported;
 }
 
 /** What a spec is called in the list: the form's name, else its form type. */
@@ -103,6 +125,26 @@ export function checkSpec(raw: unknown): { ok: true; spec: FormSpec } | { ok: fa
   const parsed = formSpecSchema.safeParse(raw);
   if (!parsed.success) {
     return { ok: false, issues: parsed.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })) };
+  }
+  const regexIssues = parsed.data.sections.flatMap((section, s) =>
+    section.fields.flatMap((field, f) => {
+      try {
+        if (field.regex) {
+          new RegExp(field.regex);
+        }
+        return [];
+      } catch (error) {
+        return [
+          {
+            path: `sections.${s}.fields.${f}.regex`,
+            message: `not a regular expression Node can run: ${error instanceof Error ? error.message : String(error)}`
+          }
+        ];
+      }
+    })
+  );
+  if (regexIssues.length > 0) {
+    return { ok: false, issues: regexIssues };
   }
   try {
     modelByKey(parsed.data);

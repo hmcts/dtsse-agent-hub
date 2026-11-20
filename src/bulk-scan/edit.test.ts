@@ -45,8 +45,7 @@ describe("reading what was typed", () => {
 
   it("should read a maximum length as a number, and an empty box as none", () => {
     expect(maxLengthOf("12")).toBe(12);
-    expect(maxLengthOf("  ")).toBeUndefined();
-    expect(maxLengthOf("x")).toBeNaN();
+    expect(maxLengthOf("")).toBeUndefined();
   });
 });
 

@@ -11,7 +11,10 @@ export async function loadSpec(db: Database, target: SpecTarget, id: string, ver
   }
   const checked = checkSpec(record.spec);
   if (!checked.ok) {
-    throw new HttpError(500, "that version no longer reads");
+    throw new HttpError(
+      422,
+      `that version cannot be used as it stands (${checked.issues.map((i) => `${i.path}: ${i.message}`).join("; ")}): save a corrected version`
+    );
   }
   return { record, spec: checked.spec };
 }

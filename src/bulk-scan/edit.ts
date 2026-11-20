@@ -54,9 +54,9 @@ export function wordsOf(text: string): string[] {
   return text.split(/[\s,]+/).filter((word) => word !== "");
 }
 
-/** A maximum length as typed: a whole number, or none for an empty box. A word is left for the schema to refuse. */
-export function maxLengthOf(text: string): number | undefined {
-  return text.trim() === "" ? undefined : Number(text);
+/** A maximum length typed as digits: a whole number, or none for an empty box. */
+export function maxLengthOf(digits: string): number | undefined {
+  return digits === "" ? undefined : Number(digits);
 }
 
 /** The rows a saved spec's issues belong to, by `section.field`, and the ones about the form as a whole. */
