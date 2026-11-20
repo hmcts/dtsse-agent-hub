@@ -1,0 +1,339 @@
+{
+ "decision": "wa-task-completion-employment-et_englandwales",
+ "source": "hmcts/et-wa-task-configuration@fa182449b8ef501c95e1f00137965994d835c4c3",
+ "dumpedAt": "2026-11-20T07:37:34.755Z",
+ "scenarios": [
+  {
+   "input": {
+    "eventId": "preAcceptanceCase"
+   },
+   "output": [
+    {
+     "taskType": "Et1Vetting",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewReferralJudiciary",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewReferralLegalOps",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewReferralResponseJudiciary",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewReferralResponseLegalOps",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "input": {
+    "eventId": "replyToReferral"
+   },
+   "output": [
+    {
+     "taskType": "ReviewReferralAdmin",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewReferralResponseAdmin",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewReferralJudiciary",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewReferralLegalOps",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewReferralResponseJudiciary",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewReferralResponseLegalOps",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "input": {
+    "eventId": "closeReferral"
+   },
+   "output": [
+    {
+     "taskType": "ReviewReferralAdmin",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewReferralResponseAdmin",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewReferralJudiciary",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewReferralLegalOps",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewReferralResponseJudiciary",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewReferralResponseLegalOps",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "input": {
+    "eventId": "uploadDocumentForServing"
+   },
+   "output": [
+    {
+     "taskType": "ListServeClaim",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "input": {
+    "eventId": "generateCorrespondence"
+   },
+   "output": [
+    {
+     "taskType": "SendEt1Notification",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "IssuePostHearingDirection",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "IssueInitialConsiderationDirections",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "input": {
+    "eventId": "addAmendHearing"
+   },
+   "output": [
+    {
+     "taskType": "ListAHearing",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "input": {
+    "eventId": "issueInitialConsiderationDirectionsWA"
+   },
+   "output": [
+    {
+     "taskType": "ListAHearing",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "input": {
+    "eventId": "initialConsideration"
+   },
+   "output": [
+    {
+     "taskType": "CompleteInitialConsideration",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "input": {
+    "eventId": "et3Notification"
+   },
+   "output": [
+    {
+     "taskType": "SendEt3Notification",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "input": {
+    "eventId": "et3Vetting"
+   },
+   "output": [
+    {
+     "taskType": "Rule21",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ET3Processing",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "input": {
+    "eventId": "createReferral"
+   },
+   "output": [
+    {
+     "taskType": "ReviewRule21Referral",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReferEmployersContractClaim",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "WithdrawAllOrPartOfCase",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "input": {
+    "eventId": "draftAndSignJudgement"
+   },
+   "output": [
+    {
+     "taskType": "DraftAndSignJudgment",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "input": {
+    "eventId": "amendClaimantDetails"
+   },
+   "output": [
+    {
+     "taskType": "AmendClaimantDetails",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "input": {
+    "eventId": "amendRespondentDetails"
+   },
+   "output": [
+    {
+     "taskType": "ReviewECCResponse",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "AmendRespondentDetails",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "input": {
+    "eventId": "addAmendJudgment"
+   },
+   "output": [
+    {
+     "taskType": "IssueJudgment",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "input": {
+    "eventId": "disposeCase"
+   },
+   "output": [
+    {
+     "taskType": "WithdrawAllOrPartOfCase",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "input": {
+    "eventId": "tseAdmin"
+   },
+   "output": [
+    {
+     "taskType": "ContactTribunalWithAnApplication",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "input": {
+    "eventId": "tseAdmReply"
+   },
+   "output": [
+    {
+     "taskType": "ContactTribunalWithAnApplication",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "input": {
+    "eventId": "tseAdminCloseAnApplication"
+   },
+   "output": [
+    {
+     "taskType": "ContactTribunalWithAnApplication",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "input": {
+    "eventId": "broughtForward"
+   },
+   "output": [
+    {
+     "taskType": "ExpiredBfAction",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  },
+  {
+   "input": {
+    "eventId": "sendNotification"
+   },
+   "output": [
+    {
+     "taskType": "IssueOrder",
+     "completionMode": "Auto"
+    },
+    {}
+   ]
+  }
+ ]
+}

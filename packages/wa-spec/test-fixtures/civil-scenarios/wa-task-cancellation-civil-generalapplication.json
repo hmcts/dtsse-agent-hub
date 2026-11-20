@@ -1,0 +1,188 @@
+{
+ "decision": "wa-task-cancellation-civil-generalapplication",
+ "source": "hmcts/civil-wa-task-configuration@8977b6611ea7520d1bb964d97ef59a16dabd7b1f",
+ "dumpedAt": "2026-11-20T08:19:36.069Z",
+ "scenarios": [
+  {
+   "input": {
+    "fromState": "",
+    "state": "APPLICATION_CLOSED",
+    "event": "MAIN_CASE_CLOSED"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "generalApplications"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "uploadTranslatedDocuments"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": "AWAITING_APPLICATION_PAYMENT",
+    "state": "APPLICATION_SUBMITTED_AWAITING_JUDICIAL_DECISION",
+    "event": "END_BUSINESS_PROCESS_GASPEC"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "applicationFee"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": "AWAITING_APPLICATION_PAYMENT",
+    "state": "AWAITING_RESPONDENT_RESPONSE",
+    "event": "END_BUSINESS_PROCESS_GASPEC"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "applicationFee"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": "AWAITING_APPLICATION_PAYMENT",
+    "state": "APPLICATION_DISMISSED",
+    "event": "END_BUSINESS_PROCESS_GASPEC"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "applicationFee"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": "APPLICATION_ADD_PAYMENT",
+    "state": "APPLICATION_SUBMITTED_AWAITING_JUDICIAL_DECISION",
+    "event": "MODIFY_STATE_AFTER_ADDITIONAL_FEE_PAID"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "applicationFee"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": "APPLICATION_ADD_PAYMENT",
+    "state": "AWAITING_RESPONDENT_RESPONSE",
+    "event": "MODIFY_STATE_AFTER_ADDITIONAL_FEE_PAID"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "applicationFee"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": "",
+    "state": "PROCEEDS_IN_HERITAGE",
+    "event": "APPLICATION_PROCEEDS_IN_HERITAGE"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "uploadTranslatedDocuments"
+    },
+    {
+     "warningCode": "claimOffline",
+     "action": "Warn",
+     "processCategories": "generalApplications",
+     "warningText": "This claim has been taken offline. Please review the claim before completing any tasks."
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": "",
+    "state": "any state",
+    "event": "PARENT_CLAIM_SETTLED"
+   },
+   "output": [
+    {
+     "warningCode": "claimSettled",
+     "action": "Warn",
+     "processCategories": "generalApplications",
+     "warningText": "This claim has been settled. Please review the claim before completing any tasks."
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": "",
+    "state": "any state",
+    "event": "PARENT_CLAIM_DISCONTINUED"
+   },
+   "output": [
+    {
+     "warningCode": "claimDiscontinued",
+     "action": "Warn",
+     "processCategories": "generalApplications",
+     "warningText": "This claim has been discontinued. Please review the claim before completing any tasks."
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": "",
+    "state": "any state",
+    "event": "TRIGGER_TASK_RECONFIG"
+   },
+   "output": [
+    {
+     "action": "ReConfigure"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": "",
+    "state": "",
+    "event": "TRIGGER_TASK_RECONFIG"
+   },
+   "output": [
+    {
+     "action": "ReConfigure"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": "",
+    "state": "APPLICATION_SUBMITTED_AWAITING_JUDICIAL_DECISION",
+    "event": "TRIGGER_LOCATION_UPDATE"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "generalApplicationsBeforeSdo"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": "",
+    "state": "ADDITIONAL_RESPONSE_TIME_EXPIRED",
+    "event": "TRIGGER_LOCATION_UPDATE"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "generalApplicationsBeforeSdo"
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,322 @@
+{
+ "decision": "wa-task-initiation-employment-et_scotland_multiple",
+ "source": "hmcts/et-wa-task-configuration@fa182449b8ef501c95e1f00137965994d835c4c3",
+ "dumpedAt": "2026-11-20T07:37:34.755Z",
+ "scenarios": [
+  {
+   "input": {
+    "eventId": "createReferral",
+    "additionalData": {
+     "Data": {
+      "referralCollection": [
+       {
+        "value": {
+         "referralNumber": "1",
+         "referralSubject": "Referral Subject 1",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "Admin",
+         "isUrgent": "Yes"
+        }
+       },
+       {
+        "value": {
+         "referralNumber": "2",
+         "referralSubject": "Referral Subject 2",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "Admin",
+         "isUrgent": "Yes"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Multiples Referral #2 - Referral Subject 2",
+     "processCategories": "Vetting",
+     "taskId": "ReviewReferralAdminMultiple"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "createReferral",
+    "additionalData": {
+     "Data": {
+      "referralCollection": [
+       {
+        "value": {
+         "referralNumber": "1",
+         "referralSubject": "Referral Subject 1",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "Legal officer",
+         "isUrgent": "Yes"
+        }
+       },
+       {
+        "value": {
+         "referralNumber": "2",
+         "referralSubject": "Referral Subject 2",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "Legal officer",
+         "isUrgent": "Yes"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Multiples Referral #2 - Referral Subject 2",
+     "processCategories": "Vetting",
+     "taskId": "ReviewReferralLegalOpsMultiple"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "createReferral",
+    "additionalData": {
+     "Data": {
+      "referralCollection": [
+       {
+        "value": {
+         "referralNumber": "1",
+         "referralSubject": "Referral Subject 1",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "Judge",
+         "isUrgent": "Yes"
+        }
+       },
+       {
+        "value": {
+         "referralNumber": "2",
+         "referralSubject": "ET1",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "Judge",
+         "isUrgent": "Yes"
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Multiples Referral #2 - ET1",
+     "processCategories": "Vetting",
+     "taskId": "ReviewReferralJudiciaryMultiple"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "replyToReferral",
+    "additionalData": {
+     "Data": {
+      "referralCollection": [
+       {
+        "value": {
+         "referralNumber": "1",
+         "referralSubject": "Referral Subject 1",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "",
+         "isUrgent": "",
+         "referralReplyCollection": [
+          {
+           "value": {
+            "referralNumber": "1",
+            "referralSubject": "Referral Subject 1",
+            "directionTo": "Legal officer",
+            "isUrgentReply": "Yes",
+            "replyDateTime": "2026-11-20T08:37:56"
+           }
+          },
+          {
+           "value": {
+            "referralNumber": "1",
+            "referralSubject": "Referral Subject 1",
+            "directionTo": "Legal officer",
+            "isUrgentReply": "Yes",
+            "replyDateTime": "2026-11-20T10:37:56"
+           }
+          }
+         ]
+        }
+       },
+       {
+        "value": {
+         "referralNumber": "2",
+         "referralSubject": "Referral Subject 2",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "",
+         "isUrgent": "",
+         "referralReplyCollection": [
+          {
+           "value": {
+            "referralNumber": "2",
+            "referralSubject": "Referral Subject 2",
+            "directionTo": "Legal officer",
+            "isUrgentReply": "Yes",
+            "replyDateTime": "2026-11-20T09:37:56"
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Multiples Referral #1 - Referral Subject 1 Response",
+     "processCategories": "Processing",
+     "taskId": "MultiplesReviewReferralResponseLegalOps"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "replyToReferral",
+    "additionalData": {
+     "Data": {
+      "referralCollection": [
+       {
+        "value": {
+         "referralNumber": "1",
+         "referralSubject": "Referral Subject 1",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "",
+         "isUrgent": "",
+         "referralReplyCollection": [
+          {
+           "value": {
+            "referralNumber": "1",
+            "referralSubject": "Referral Subject 1",
+            "directionTo": "Judge",
+            "isUrgentReply": "Yes",
+            "replyDateTime": "2026-11-20T08:37:56"
+           }
+          },
+          {
+           "value": {
+            "referralNumber": "1",
+            "referralSubject": "Referral Subject 1",
+            "directionTo": "Judge",
+            "isUrgentReply": "Yes",
+            "replyDateTime": "2026-11-20T10:37:56"
+           }
+          }
+         ]
+        }
+       },
+       {
+        "value": {
+         "referralNumber": "2",
+         "referralSubject": "Referral Subject 2",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "",
+         "isUrgent": "",
+         "referralReplyCollection": [
+          {
+           "value": {
+            "referralNumber": "2",
+            "referralSubject": "Referral Subject 2",
+            "directionTo": "Judge",
+            "isUrgentReply": "Yes",
+            "replyDateTime": "2026-11-20T09:37:56"
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Multiples Referral #1 - Referral Subject 1 Response",
+     "processCategories": "Processing",
+     "taskId": "ReviewReferralResponseJudiciaryMultiple"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "replyToReferral",
+    "additionalData": {
+     "Data": {
+      "referralCollection": [
+       {
+        "value": {
+         "referralNumber": "1",
+         "referralSubject": "Referral Subject 1",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "",
+         "isUrgent": "",
+         "referralReplyCollection": [
+          {
+           "value": {
+            "referralNumber": "1",
+            "referralSubject": "Referral Subject 1",
+            "directionTo": "Admin",
+            "isUrgentReply": "Yes",
+            "replyDateTime": "2026-11-20T08:37:56"
+           }
+          },
+          {
+           "value": {
+            "referralNumber": "1",
+            "referralSubject": "Referral Subject 1",
+            "directionTo": "Admin",
+            "isUrgentReply": "Yes",
+            "replyDateTime": "2026-11-20T10:37:56"
+           }
+          }
+         ]
+        }
+       },
+       {
+        "value": {
+         "referralNumber": "2",
+         "referralSubject": "Referral Subject 2",
+         "referralSubjectSpecify": "",
+         "referCaseTo": "",
+         "isUrgent": "",
+         "referralReplyCollection": [
+          {
+           "value": {
+            "referralNumber": "2",
+            "referralSubject": "Referral Subject 2",
+            "directionTo": "Admin",
+            "isUrgentReply": "Yes",
+            "replyDateTime": "2026-11-20T09:37:56"
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Multiples Referral #1 - Referral Subject 1 Response",
+     "processCategories": "Processing",
+     "taskId": "ReviewReferralResponseAdminMultiple"
+    }
+   ]
+  }
+ ]
+}

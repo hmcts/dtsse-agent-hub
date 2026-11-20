@@ -1,0 +1,276 @@
+{
+ "decision": "wa-task-permissions-divorce-financialremedymvp2",
+ "source": "hmcts/finrem-task-configuration@fc1ca4871f055cd0d27110f818f115025f898d2e",
+ "dumpedAt": "2026-11-20T08:20:22.502Z",
+ "scenarios": [
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "checkResponseReceived"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "authorisations": "SKILL:ABA2:CheckingApplications",
+     "name": "ctsc",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,CancelOwn,CompleteOwn,Execute"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "authorisations": "SKILL:ABA2:CheckingApplications",
+     "name": "ctsc-team-leader",
+     "roleCategory": "CTSC",
+     "value": "Read,Manage,Cancel,Complete,Unclaim,Unassign,Claim,Own,Execute,Assign"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "unknownTaskType"
+    }
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "reviewSpecificAccessRequestLegalOps"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "specific-access-approver-legal-ops",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,UnclaimAssign,Claim,Manage,Unclaim,UnassignClaim,CompleteOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "checkAndIssueApplication"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "authorisations": "SKILL:ABA2:CheckingApplications",
+     "name": "ctsc",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,CancelOwn,CompleteOwn,Execute"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "authorisations": "SKILL:ABA2:CheckingApplications",
+     "name": "ctsc-team-leader",
+     "roleCategory": "CTSC",
+     "value": "Read,Manage,Cancel,Complete,Unclaim,Unassign,Claim,Own,Execute,Assign"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "processScannedDocuments"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "authorisations": "SKILL:ABA2:ManageScannedDocuments",
+     "name": "ctsc",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,CancelOwn,CompleteOwn,Execute"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "authorisations": "SKILL:ABA2:ManageScannedDocuments",
+     "name": "ctsc-team-leader",
+     "roleCategory": "CTSC",
+     "value": "Read,Manage,Cancel,Complete,Unclaim,Unassign,Claim,Own,Execute,Assign"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "checkHelpWithFees"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "authorisations": "SKILL:ABA2:CheckingHWF",
+     "name": "ctsc",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,CancelOwn,CompleteOwn,Execute"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "authorisations": "SKILL:ABA2:CheckingHWF",
+     "name": "ctsc-team-leader",
+     "roleCategory": "CTSC",
+     "value": "Read,Manage,Cancel,Complete,Unclaim,Unassign,Claim,Own,Execute,Assign"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "reviewSpecificAccessRequestAdmin"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "specific-access-approver-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,UnclaimAssign,Claim,Manage,Unclaim,UnassignClaim,CompleteOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "reviewSpecificAccessRequestCTSC"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "specific-access-approver-ctsc",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,UnclaimAssign,Claim,Manage,Unclaim,UnassignClaim,CompleteOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "reviewApplication"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "authorisations": "410",
+     "name": "leadership-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read,Manage,Cancel,Complete,Unclaim,Unassign,Claim,Own,Execute,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "authorisations": "410",
+     "name": "judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read,CancelOwn, CompleteOwn,Claim,Unclaim,Execute"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "reviewOrderResponse"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "authorisations": "SKILL:ABA2:CheckOrderResponse",
+     "name": "ctsc",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,CancelOwn,CompleteOwn,Execute"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "authorisations": "SKILL:ABA2:CheckOrderResponse",
+     "name": "ctsc-team-leader",
+     "roleCategory": "CTSC",
+     "value": "Read,Manage,Cancel,Complete,Unclaim,Unassign,Claim,Own,Execute,Assign"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "reviewSpecificAccessRequestJudiciary"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "specific-access-approver-judiciary",
+     "roleCategory": "JUDICIAL",
+     "value": "Read,Own,UnclaimAssign,Claim,Manage,Unclaim,UnassignClaim,CompleteOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "reviewRefusedOrder"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "authorisations": "SKILL:ABA2:CheckRefusedOrder",
+     "name": "ctsc",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,CancelOwn,CompleteOwn,Execute"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "authorisations": "SKILL:ABA2:CheckRefusedOrder",
+     "name": "ctsc-team-leader",
+     "roleCategory": "CTSC",
+     "value": "Read,Manage,Cancel,Complete,Unclaim,Unassign,Claim,Own,Execute,Assign"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "processApprovedOrder"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "authorisations": "SKILL:ABA2:ProcessApprovedOrders",
+     "name": "ctsc",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,CancelOwn,CompleteOwn,Execute"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "authorisations": "SKILL:ABA2:ProcessApprovedOrders",
+     "name": "ctsc-team-leader",
+     "roleCategory": "CTSC",
+     "value": "Read,Manage,Cancel,Complete,Unclaim,Unassign,Claim,Own,Execute,Assign"
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,1102 @@
+# Imported by wa-spec from the DMNs of hmcts/finrem-task-configuration@fc1ca4871f055cd0d27110f818f115025f898d2e
+version: 1
+service:
+  slug: divorce
+caseTypes:
+  - id: financialremedymvp2
+decisions:
+  initiation:
+    name: Task initiation DMN
+    hitPolicy: COLLECT
+    historyTimeToLive: P90D
+    inputs:
+      - key: eventId
+        label: Event Id
+        variable: eventId
+        typeRef: string
+      - key: postEventState
+        label: Post event state
+        variable: postEventState
+        typeRef: string
+      - key: evidenceHandled
+        label: Supplementary evidence handled
+        variable: evidenceHandled
+        typeRef: boolean
+        expression:
+          if:
+            all:
+              - field: additionalData
+                op: exists
+              - field: additionalData.Data
+                op: exists
+              - field: additionalData.Data.evidenceHandled
+                op: exists
+          use:
+            field: additionalData.Data.evidenceHandled
+          otherwise: false
+      - key: pensionDocumentsCount
+        label: Pension documents present
+        variable: pensionDocumentsCount
+        typeRef: integer
+        expression:
+          if:
+            all:
+              - field: additionalData
+                op: exists
+              - field: additionalData.Data
+                op: exists
+              - field: additionalData.Data.pensionCollection
+                op: exists
+          use:
+            call: count
+            args:
+              - field: additionalData.Data.pensionCollection
+          otherwise: 0
+      - key: reviewRefusedHearingOrManualReason
+        label: Hearing to be listed or manual refusal reason entered
+        variable: reviewRefusedHearingOrManualReason
+        typeRef: boolean
+        expression:
+          feel: if(additionalData != null and additionalData.Data != null and additionalData.Data.orderRefusalCollection != null and count(additionalData.Data.orderRefusalCollection) > 0) then ((additionalData.Data.orderRefusalCollection[-1].value.orderRefusal != null and list contains(additionalData.Data.orderRefusalCollection[-1].value.orderRefusal, "Hearing fixed for first available date")) or (additionalData.Data.orderRefusalCollection[-1].value.orderRefusalOther != null and additionalData.Data.orderRefusalCollection[-1].value.orderRefusalOther != "")) else false
+      - key: helpWithFeesQuestion
+        label: Help with fees
+        variable: helpWithFeesQuestion
+        typeRef: boolean
+        expression:
+          if:
+            all:
+              - field: additionalData
+                op: exists
+              - field: additionalData.Data
+                op: exists
+              - field: additionalData.Data.helpWithFeesQuestion
+                op: exists
+          use:
+            field: additionalData.Data.helpWithFeesQuestion
+          otherwise: false
+    outputs:
+      - name: taskId
+        label: Task Id
+        typeRef: string
+      - name: name
+        label: Name
+        typeRef: string
+      - name: delayDuration
+        label: Delay Duration
+        typeRef: integer
+      - name: delayUntil
+        label: Delay Until
+        typeRef: json
+      - name: processCategories
+        label: Process Categories
+        typeRef: string
+    rows:
+      - when:
+          eventId:
+            in: [ attachScannedDocs ]
+          evidenceHandled:
+            in: [ false ]
+        returns:
+          taskId: processScannedDocuments
+          name: Process Scanned Documents
+          delayDuration: 0
+          delayUntil:
+            feel: |-
+              {
+                          "delayUntil": now(),
+                          "delayUntilIntervalDays": "0"
+                          }
+      - when:
+          eventId:
+            in: [ FR_solUploadDocumentv2 ]
+          postEventState:
+            in: [ infoReceived ]
+        returns:
+          taskId: checkResponseReceived
+          name: Check Response Received
+          delayDuration: 0
+          delayUntil:
+            feel: |-
+              {
+                          "delayUntil": now(),
+                          "delayUntilIntervalDays": "0"
+                          }
+      - when:
+          eventId:
+            in: [ FR_approveApplication, FR_uploadApprovedOrder ]
+          postEventState:
+            in: [ consentOrderApproved ]
+          pensionDocumentsCount:
+            cmp: ">"
+            value: 0
+        returns:
+          taskId: processApprovedOrder
+          name: Process Approved Order
+          delayDuration: 0
+          delayUntil:
+            feel: |-
+              {
+                          "delayUntil": now(),
+                          "delayUntilIntervalDays": "0"
+                          }
+      - when:
+          eventId:
+            in: [ FR_applicationPaymentSubmission ]
+          postEventState:
+            in: [ awaitingHWFDecision ]
+          helpWithFeesQuestion:
+            in: [ true ]
+        returns:
+          taskId: checkHelpWithFees
+          name: Check Help With Fees
+          delayDuration: 0
+          delayUntil:
+            feel: |-
+              {
+                          "delayUntil": now(),
+                          "delayUntilIntervalDays": "0"
+                          }
+      - when:
+          eventId:
+            in: [ FR_issueApplication, FR_referToJudgeFromRespondToOrder ]
+          postEventState:
+            in: [ referredToJudge ]
+        returns:
+          taskId: reviewApplication
+          name: Review Application
+          delayDuration: 0
+          delayUntil:
+            feel: |-
+              {
+                          "delayUntil": now(),
+                          "delayUntilIntervalDays": "0"
+                          }
+      - when:
+          eventId:
+            in: [ FR_orderRefusal ]
+          postEventState:
+            in: [ orderMade ]
+          reviewRefusedHearingOrManualReason:
+            in: [ true ]
+        returns:
+          taskId: reviewRefusedOrder
+          name: Review Refused Order
+          delayDuration: 0
+          delayUntil:
+            feel: |-
+              {
+                          "delayUntil": now(),
+                          "delayUntilIntervalDays": "0"
+                          }
+      - when:
+          eventId:
+            in:
+              - FR_applicationPaymentSubmission
+              - FR_caseSubmissionFromAwaitingInfo
+              - FR_caseSubmissionFromInfoReceived
+              - FR_paymentMadeFromHWF
+              - FR_paymenetMade
+              - FR_paymentMadeFromAwaitingPayment
+              - FR_HWFDecisionMade
+              - FR_HWFDecisionMadeFromAwaitingPayment
+          postEventState:
+            in: [ applicationSubmitted ]
+        returns:
+          taskId: checkAndIssueApplication
+          name: Check and Issue Application
+          delayDuration: 0
+          delayUntil:
+            feel: |-
+              {
+                          "delayUntil": now(),
+                          "delayUntilIntervalDays": "0"
+                          }
+      - when:
+          eventId:
+            in: [ FR_respondToOrder ]
+          postEventState:
+            in: [ responseReceived ]
+        returns:
+          taskId: reviewOrderResponse
+          name: Review Order Response
+          delayDuration: 0
+          delayUntil:
+            feel: |-
+              {
+                          "delayUntil": now(),
+                          "delayUntilIntervalDays": "0"
+                          }
+  configuration:
+    name: Task configuration DMN
+    hitPolicy: RULE ORDER
+    historyTimeToLive: P90D
+    inputs:
+      - key: caseData
+        label: CCD Case Data
+        variable: caseData
+        typeRef: string
+      - key: taskType
+        label: Task type
+        variable: taskType
+        typeRef: string
+        expression:
+          if:
+            all:
+              - field: taskAttributes
+                op: exists
+              - field: taskAttributes.taskType
+                op: exists
+          use:
+            field: taskAttributes.taskType
+          otherwise:
+            if:
+              field: taskType
+              op: exists
+            use:
+              field: taskType
+            otherwise: null
+    outputs:
+      - name: name
+        label: Name
+        typeRef: string
+      - name: value
+        label: Value
+        typeRef: string
+      - name: canReconfigure
+        label: Can Reconfigure?
+        typeRef: boolean
+    rows:
+      - returns:
+          name: calculatedDates
+          value: nextHearingDate,dueDate,priorityDate
+          canReconfigure: false
+      - returns:
+          name: priorityDateOriginRef
+          value: nextHearingDate,dueDate
+          canReconfigure: false
+      - returns:
+          name: nextHearingDate
+          value:
+            feel: |-
+              if (caseData != null and caseData.listForHearings != null and
+                          count(caseData.listForHearings[date(value.hearingDate) >= today()]) > 0) then
+                          sort(caseData.listForHearings[date(value.hearingDate) >= today()], function(x,y)
+                          date(y.value.hearingDate) > date(x.value.hearingDate))[1].value.hearingDate else ""
+          canReconfigure: false
+      - returns:
+          name: dueDateNonWorkingCalendar
+          value: https://www.gov.uk/bank-holidays/england-and-wales.json
+          canReconfigure: false
+      - returns:
+          name: dueDateNonWorkingDaysOfWeek
+          value: SATURDAY,SUNDAY
+          canReconfigure: false
+      - returns:
+          name: dueDateSkipNonWorkingDays
+          value: true
+          canReconfigure: false
+      - returns:
+          name: dueDateMustBeWorkingDay
+          value: No
+          canReconfigure: false
+      - returns:
+          name: dueDateOrigin
+          value:
+            call: now
+            args: []
+          canReconfigure: false
+      - returns:
+          name: dueDateTime
+          value:
+            call: time
+            args: [ 14:00 ]
+          canReconfigure: false
+      - returns:
+          name: majorPriority
+          value: 5000
+          canReconfigure: false
+      - returns:
+          name: minorPriority
+          value: 500
+          canReconfigure: false
+      - returns:
+          name: caseName
+          value:
+            if:
+              all:
+                - field: caseData
+                  op: exists
+                - field: caseData.applicantLName
+                  op: exists
+                - field: caseData.appRespondentLName
+                  op: exists
+            use:
+              plus:
+                - field: caseData.applicantLName
+                - " vs "
+                - field: caseData.appRespondentLName
+            otherwise: Financial Remedy
+          canReconfigure: false
+      - returns:
+          name: region
+          value:
+            if:
+              all:
+                - field: caseData
+                  op: exists
+                - field: caseData.caseManagementLocation
+                  op: exists
+            use:
+              field: caseData.caseManagementLocation.region
+            otherwise: 2
+          canReconfigure: false
+      - returns:
+          name: location
+          value:
+            if:
+              all:
+                - field: caseData
+                  op: exists
+                - field: caseData.caseManagementLocation
+                  op: exists
+            use:
+              field: caseData.caseManagementLocation.baseLocation
+            otherwise: 195496
+          canReconfigure: false
+      - returns:
+          name: caseManagementCategory
+          value: FR Consented
+          canReconfigure: false
+      - when:
+          taskType:
+            in:
+              - processScannedDocuments
+              - checkResponseReceived
+              - processApprovedOrder
+              - checkHelpWithFees
+              - reviewRefusedOrder
+              - checkAndIssueApplication
+              - reviewOrderResponse
+              - reviewSpecificAccessRequestCTSC
+        returns:
+          name: roleCategory
+          value: CTSC
+          canReconfigure: false
+      - when:
+          taskType:
+            in: [ reviewApplication, reviewSpecificAccessRequestJudiciary ]
+        returns:
+          name: roleCategory
+          value: JUDICIAL
+          canReconfigure: false
+      - when:
+          taskType:
+            in:
+              - processScannedDocuments
+              - checkResponseReceived
+              - processApprovedOrder
+              - checkHelpWithFees
+              - reviewRefusedOrder
+              - checkAndIssueApplication
+              - reviewOrderResponse
+        returns:
+          name: dueDateIntervalDays
+          value: 5
+          canReconfigure: false
+      - when:
+          taskType:
+            in: [ reviewApplication ]
+        returns:
+          name: dueDateIntervalDays
+          value: 10
+          canReconfigure: false
+      - when:
+          taskType:
+            in: [ processScannedDocuments ]
+        returns:
+          name: workType
+          value: evidence
+          canReconfigure: false
+      - when:
+          taskType:
+            in: [ processScannedDocuments ]
+        returns:
+          name: description
+          value: "[Attach scanned document](/cases/case-details/${[CASE_REFERENCE]}/trigger/attachScannedDocs/attachScannedDocs1)"
+          canReconfigure: false
+      - when:
+          taskType:
+            in: [ processScannedDocuments ]
+        returns:
+          name: title
+          value: Process Scanned Documents
+          canReconfigure: false
+      - when:
+          taskType:
+            in: [ checkResponseReceived, processApprovedOrder ]
+        returns:
+          name: workType
+          value: routine_work
+          canReconfigure: false
+      - when:
+          taskType:
+            in: [ checkResponseReceived ]
+        returns:
+          name: description
+          value: "[Issue Application](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_issueApplicationFromInfoReceived/FR_issueApplicationFromInfoReceived1)<br>[Awaiting Information](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_awaitingInfo/FR_awaitingInfo1)<br>[Create General Email](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_generalEmail/FR_generalEmail1)<br>[Create General Letter](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_generalLetter/FR_generalLetter1)<br>[General Order](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_generalOrderFromInfoReceived/FR_generalOrderFromInfoReceived1)<br>[List for hearing](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_listForHearing/FR_listForHearing1)<br>[Close Case](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_close/FR_close1)"
+          canReconfigure: false
+      - when:
+          taskType:
+            in: [ checkResponseReceived ]
+        returns:
+          name: title
+          value: Check Response Received
+          canReconfigure: false
+      - when:
+          taskType:
+            in: [ processApprovedOrder ]
+        returns:
+          name: description
+          value: "[Amend Final Order](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_amendFinalOrder/FR_amendFinalOrder1)"
+          canReconfigure: false
+      - when:
+          taskType:
+            in: [ processApprovedOrder ]
+        returns:
+          name: title
+          value: Process Approved Order
+          canReconfigure: false
+      - when:
+          taskType:
+            in: [ checkHelpWithFees ]
+        returns:
+          name: workType
+          value: applications
+          canReconfigure: false
+      - when:
+          taskType:
+            in: [ checkHelpWithFees ]
+        returns:
+          name: title
+          value: Check Help With Fees
+          canReconfigure: false
+      - when:
+          taskType:
+            in: [ checkHelpWithFees ]
+        returns:
+          name: description
+          value: "[HWF Accepted & Issue](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_HWFAcceptedAndIssue/FR_HWFAcceptedAndIssue1)<br>[Fee Account Debited & Issue](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_feeAccountDebitedAndIssue/FR_feeAccountDebitedAndIssue1)<br>[Awaiting Payment Response](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_awaitingPaymentResponseFromHWF/FR_awaitingPaymentResponseFromHWF1)<br>[HWF Application Accepted](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_HWFDecisionMade/FR_HWFDecisionMade1)<br>[Fee Account Debited](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_paymentMadeFromHWF/FR_paymentMadeFromHWF1)"
+          canReconfigure: false
+      - when:
+          taskType:
+            in: [ reviewApplication ]
+        returns:
+          name: workType
+          value: decision_making_work
+          canReconfigure: false
+      - when:
+          taskType:
+            in: [ reviewApplication ]
+        returns:
+          name: description
+          value: "[Approve Application](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_approveApplication/FR_approveApplication1)<br>[Upload Approved Order](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_uploadApprovedOrder/FR_uploadApprovedOrder1)<br>[Application Not Approved](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_orderRefusal/FR_orderRefusal1)"
+          canReconfigure: false
+      - when:
+          taskType:
+            in: [ reviewApplication ]
+        returns:
+          name: title
+          value: Review Application
+          canReconfigure: false
+      - when:
+          taskType:
+            in: [ reviewRefusedOrder ]
+        returns:
+          name: workType
+          value: hearing_work
+          canReconfigure: false
+      - when:
+          taskType:
+            in: [ reviewRefusedOrder ]
+        returns:
+          name: title
+          value: Review Refused Order
+          canReconfigure: false
+      - when:
+          taskType:
+            in: [ reviewRefusedOrder ]
+        returns:
+          name: description
+          value: "[List For Hearing](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_listForHearing/FR_listForHearing1)"
+          canReconfigure: false
+      - when:
+          taskType:
+            in: [ checkAndIssueApplication ]
+        returns:
+          name: workType
+          value: applications
+          canReconfigure: false
+      - when:
+          taskType:
+            in: [ checkAndIssueApplication ]
+        returns:
+          name: description
+          value: "[Issue Application](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_issueApplication/FR_issueApplication1)"
+          canReconfigure: false
+      - when:
+          taskType:
+            in: [ checkAndIssueApplication ]
+        returns:
+          name: title
+          value: Check and Issue Application
+          canReconfigure: false
+      - when:
+          taskType:
+            in: [ reviewOrderResponse ]
+        returns:
+          name: title
+          value: Review Order Response
+          canReconfigure: false
+      - when:
+          taskType:
+            in: [ reviewOrderResponse ]
+        returns:
+          name: description
+          value: "[Assign to Judge](/cases/case-details/${[CASE_REFERENCE]}/trigger/FR_referToJudgeFromRespondToOrder/FR_referToJudgeFromRespondToOrder1)"
+          canReconfigure: false
+      - when:
+          taskType:
+            in: [ reviewOrderResponse ]
+        returns:
+          name: workType
+          value: review_case
+          canReconfigure: false
+      - when:
+          taskType:
+            in: [ reviewSpecificAccessRequestJudiciary, reviewSpecificAccessRequestLegalOps, reviewSpecificAccessRequestAdmin, reviewSpecificAccessRequestCTSC ]
+        returns:
+          name: workType
+          value: access_requests
+          canReconfigure: false
+      - when:
+          taskType:
+            in: [ reviewSpecificAccessRequestJudiciary, reviewSpecificAccessRequestLegalOps, reviewSpecificAccessRequestAdmin, reviewSpecificAccessRequestCTSC ]
+        returns:
+          name: additionalProperties_roleAssignmentId
+          value:
+            if:
+              all:
+                - field: taskAttributes
+                  op: exists
+                - field: taskAttributes.roleAssignmentId
+                  op: exists
+            use:
+              field: taskAttributes.roleAssignmentId
+            otherwise: ""
+          canReconfigure: false
+      - when:
+          taskType:
+            in: [ reviewSpecificAccessRequestLegalOps ]
+        returns:
+          name: roleCategory
+          value: LEGAL_OPERATIONS
+          canReconfigure: false
+      - when:
+          taskType:
+            in: [ reviewSpecificAccessRequestCTSC, reviewSpecificAccessRequestAdmin, reviewSpecificAccessRequestJudiciary, reviewSpecificAccessRequestLegalOps ]
+        returns:
+          name: description
+          value:
+            if:
+              all:
+                - field: taskAttributes
+                  op: exists
+                - field: taskAttributes.taskId
+                  op: exists
+                - field: taskAttributes.roleAssignmentId
+                  op: exists
+            use:
+              plus:
+                - "[Review Access Request](/role-access/"
+                - field: taskAttributes.taskId
+                - /assignment/
+                - field: taskAttributes.roleAssignmentId
+                - /specific-access)
+            otherwise: ""
+          canReconfigure: false
+      - when:
+          taskType:
+            in: [ reviewSpecificAccessRequestAdmin ]
+        returns:
+          name: roleCategory
+          value: ADMIN
+          canReconfigure: false
+  permissions:
+    name: Permissions DMN
+    hitPolicy: RULE ORDER
+    historyTimeToLive: P90D
+    inputs:
+      - key: taskType
+        label: Task Type
+        variable: taskType
+        typeRef: string
+        expression:
+          if:
+            all:
+              - field: taskAttributes
+                op: exists
+              - field: taskAttributes.taskType
+                op: exists
+          use:
+            field: taskAttributes.taskType
+          otherwise: r1
+      - key: case
+        label: Case Data
+        variable: case
+        typeRef: string
+    outputs:
+      - name: caseAccessCategory
+        label: Case Access Category
+        typeRef: string
+      - name: name
+        label: name
+        typeRef: string
+      - name: value
+        label: value
+        typeRef: string
+      - name: roleCategory
+        label: RoleCategory
+        typeRef: string
+      - name: authorisations
+        label: Authorisations
+        typeRef: string
+      - name: assignmentPriority
+        label: Assignment Priority
+        typeRef: integer
+      - name: autoAssignable
+        label: Auto Assignable
+        typeRef: boolean
+    rows:
+      - when:
+          taskType:
+            in: [ processScannedDocuments ]
+        returns:
+          name: ctsc
+          value: Read,Own,Claim,CancelOwn,CompleteOwn,Execute
+          roleCategory: CTSC
+          authorisations: SKILL:ABA2:ManageScannedDocuments
+          assignmentPriority: 1
+          autoAssignable: false
+      - when:
+          taskType:
+            in: [ processScannedDocuments ]
+        returns:
+          name: ctsc-team-leader
+          value: Read,Manage,Cancel,Complete,Unclaim,Unassign,Claim,Own,Execute,Assign
+          roleCategory: CTSC
+          authorisations: SKILL:ABA2:ManageScannedDocuments
+          assignmentPriority: 1
+          autoAssignable: false
+      - when:
+          taskType:
+            in: [ checkResponseReceived ]
+        returns:
+          name: ctsc
+          value: Read,Own,Claim,CancelOwn,CompleteOwn,Execute
+          roleCategory: CTSC
+          authorisations: SKILL:ABA2:CheckingApplications
+          assignmentPriority: 1
+          autoAssignable: false
+      - when:
+          taskType:
+            in: [ checkResponseReceived ]
+        returns:
+          name: ctsc-team-leader
+          value: Read,Manage,Cancel,Complete,Unclaim,Unassign,Claim,Own,Execute,Assign
+          roleCategory: CTSC
+          authorisations: SKILL:ABA2:CheckingApplications
+          assignmentPriority: 1
+          autoAssignable: false
+      - when:
+          taskType:
+            in: [ processApprovedOrder ]
+        returns:
+          name: ctsc
+          value: Read,Own,Claim,CancelOwn,CompleteOwn,Execute
+          roleCategory: CTSC
+          authorisations: SKILL:ABA2:ProcessApprovedOrders
+          assignmentPriority: 1
+          autoAssignable: false
+      - when:
+          taskType:
+            in: [ processApprovedOrder ]
+        returns:
+          name: ctsc-team-leader
+          value: Read,Manage,Cancel,Complete,Unclaim,Unassign,Claim,Own,Execute,Assign
+          roleCategory: CTSC
+          authorisations: SKILL:ABA2:ProcessApprovedOrders
+          assignmentPriority: 1
+          autoAssignable: false
+      - when:
+          taskType:
+            in: [ checkHelpWithFees ]
+        returns:
+          name: ctsc
+          value: Read,Own,Claim,CancelOwn,CompleteOwn,Execute
+          roleCategory: CTSC
+          authorisations: SKILL:ABA2:CheckingHWF
+          assignmentPriority: 1
+          autoAssignable: false
+      - when:
+          taskType:
+            in: [ checkHelpWithFees ]
+        returns:
+          name: ctsc-team-leader
+          value: Read,Manage,Cancel,Complete,Unclaim,Unassign,Claim,Own,Execute,Assign
+          roleCategory: CTSC
+          authorisations: SKILL:ABA2:CheckingHWF
+          assignmentPriority: 1
+          autoAssignable: false
+      - when:
+          taskType:
+            in: [ reviewApplication ]
+        returns:
+          name: leadership-judge
+          value: Read,Manage,Cancel,Complete,Unclaim,Unassign,Claim,Own,Execute,Assign
+          roleCategory: JUDICIAL
+          authorisations: 410
+          assignmentPriority: 1
+          autoAssignable: false
+      - when:
+          taskType:
+            in: [ reviewApplication ]
+        returns:
+          name: judge
+          value: Read,CancelOwn, CompleteOwn,Claim,Unclaim,Execute
+          roleCategory: JUDICIAL
+          authorisations: 410
+          assignmentPriority: 1
+          autoAssignable: false
+      - when:
+          taskType:
+            in: [ reviewRefusedOrder ]
+        returns:
+          name: ctsc
+          value: Read,Own,Claim,CancelOwn,CompleteOwn,Execute
+          roleCategory: CTSC
+          authorisations: SKILL:ABA2:CheckRefusedOrder
+          assignmentPriority: 1
+          autoAssignable: false
+      - when:
+          taskType:
+            in: [ reviewRefusedOrder ]
+        returns:
+          name: ctsc-team-leader
+          value: Read,Manage,Cancel,Complete,Unclaim,Unassign,Claim,Own,Execute,Assign
+          roleCategory: CTSC
+          authorisations: SKILL:ABA2:CheckRefusedOrder
+          assignmentPriority: 1
+          autoAssignable: false
+      - when:
+          taskType:
+            in: [ checkAndIssueApplication ]
+        returns:
+          name: ctsc
+          value: Read,Own,Claim,CancelOwn,CompleteOwn,Execute
+          roleCategory: CTSC
+          authorisations: SKILL:ABA2:CheckingApplications
+          assignmentPriority: 1
+          autoAssignable: false
+      - when:
+          taskType:
+            in: [ checkAndIssueApplication ]
+        returns:
+          name: ctsc-team-leader
+          value: Read,Manage,Cancel,Complete,Unclaim,Unassign,Claim,Own,Execute,Assign
+          roleCategory: CTSC
+          authorisations: SKILL:ABA2:CheckingApplications
+          assignmentPriority: 1
+          autoAssignable: false
+      - when:
+          taskType:
+            in: [ reviewOrderResponse ]
+        returns:
+          name: ctsc
+          value: Read,Own,Claim,CancelOwn,CompleteOwn,Execute
+          roleCategory: CTSC
+          authorisations: SKILL:ABA2:CheckOrderResponse
+          assignmentPriority: 1
+          autoAssignable: false
+      - when:
+          taskType:
+            in: [ reviewOrderResponse ]
+        returns:
+          name: ctsc-team-leader
+          value: Read,Manage,Cancel,Complete,Unclaim,Unassign,Claim,Own,Execute,Assign
+          roleCategory: CTSC
+          authorisations: SKILL:ABA2:CheckOrderResponse
+          assignmentPriority: 1
+          autoAssignable: false
+      - description: Judicial specific access permissions
+        when:
+          taskType:
+            in: [ reviewSpecificAccessRequestJudiciary ]
+        returns:
+          name: specific-access-approver-judiciary
+          value: Read,Own,UnclaimAssign,Claim,Manage,Unclaim,UnassignClaim,CompleteOwn
+          roleCategory: JUDICIAL
+          assignmentPriority: 1
+          autoAssignable: false
+      - description: Legal operations specific access permissions
+        when:
+          taskType:
+            in: [ reviewSpecificAccessRequestLegalOps ]
+        returns:
+          name: specific-access-approver-legal-ops
+          value: Read,Own,UnclaimAssign,Claim,Manage,Unclaim,UnassignClaim,CompleteOwn
+          roleCategory: CTSC
+          autoAssignable: false
+      - description: Admin specific access permissions
+        when:
+          taskType:
+            in: [ reviewSpecificAccessRequestAdmin ]
+        returns:
+          name: specific-access-approver-admin
+          value: Read,Own,UnclaimAssign,Claim,Manage,Unclaim,UnassignClaim,CompleteOwn
+          roleCategory: ADMIN
+          autoAssignable: false
+      - description: CTSC specific access permissions
+        when:
+          taskType:
+            in: [ reviewSpecificAccessRequestCTSC ]
+        returns:
+          name: specific-access-approver-ctsc
+          value: Read,Own,UnclaimAssign,Claim,Manage,Unclaim,UnassignClaim,CompleteOwn
+          roleCategory: CTSC
+          autoAssignable: false
+  completion:
+    name: Task completion DMN
+    hitPolicy: COLLECT
+    historyTimeToLive: P90D
+    inputs:
+      - key: eventID
+        label: Event ID
+        typeRef: string
+        expression:
+          field: eventId
+    outputs:
+      - name: taskType
+        label: Task Type
+        typeRef: string
+      - name: completionMode
+        label: Completion Mode
+        typeRef: string
+    rows:
+      - when:
+          eventID:
+            in: [ attachScannedDocs ]
+        returns:
+          taskType: processScannedDocuments
+          completionMode: Auto
+      - when:
+          eventID:
+            in: [ attachScannedDocs ]
+        returns:
+          completionMode: Auto
+      - when:
+          eventID:
+            in:
+              - FR_issueApplicationFromInfoReceived
+              - FR_awaitingInfo
+              - FR_generalEmail
+              - FR_generalLetter
+              - FR_generalOrderFromInfoReceived
+              - FR_listForHearing
+              - FR_close
+        returns:
+          taskType: checkResponseReceived
+          completionMode: Auto
+      - when:
+          eventID:
+            in:
+              - FR_issueApplicationFromInfoReceived
+              - FR_awaitingInfo
+              - FR_generalEmail
+              - FR_generalLetter
+              - FR_generalOrderFromInfoReceived
+              - FR_listForHearing
+              - FR_close
+        returns:
+          completionMode: Auto
+      - when:
+          eventID:
+            in: [ FR_amendFinalOrder ]
+        returns:
+          taskType: processApprovedOrder
+          completionMode: Auto
+      - when:
+          eventID:
+            in: [ FR_amendFinalOrder ]
+        returns:
+          completionMode: Auto
+      - when:
+          eventID:
+            in:
+              - FR_HWFAcceptedAndIssue
+              - FR_feeAccountDebitedAndIssue
+              - FR_awaitingPaymentResponseFromHWF
+              - FR_HWFDecisionMade
+              - FR_paymentMadeFromHWF
+        returns:
+          taskType: checkHelpWithFees
+          completionMode: Auto
+      - when:
+          eventID:
+            in:
+              - FR_HWFAcceptedAndIssue
+              - FR_feeAccountDebitedAndIssue
+              - FR_awaitingPaymentResponseFromHWF
+              - FR_HWFDecisionMade
+              - FR_paymentMadeFromHWF
+        returns:
+          completionMode: Auto
+      - when:
+          eventID:
+            in: [ FR_approveApplication, FR_uploadApprovedOrder, FR_orderRefusal ]
+        returns:
+          taskType: reviewApplication
+          completionMode: Auto
+      - when:
+          eventID:
+            in: [ FR_approveApplication, FR_uploadApprovedOrder, FR_orderRefusal ]
+        returns:
+          completionMode: Auto
+      - when:
+          eventID:
+            in: [ FR_listForHearing ]
+        returns:
+          taskType: reviewRefusedOrder
+          completionMode: Auto
+      - when:
+          eventID:
+            in: [ FR_listForHearing ]
+        returns:
+          completionMode: Auto
+      - when:
+          eventID:
+            in: [ FR_issueApplication ]
+        returns:
+          taskType: checkAndIssueApplication
+          completionMode: Auto
+      - when:
+          eventID:
+            in: [ FR_issueApplication ]
+        returns:
+          completionMode: Auto
+      - when:
+          eventID:
+            in: [ FR_referToJudgeFromRespondToOrder ]
+        returns:
+          taskType: reviewOrderResponse
+          completionMode: Auto
+      - when:
+          eventID:
+            in: [ FR_referToJudgeFromRespondToOrder ]
+        returns:
+          completionMode: Auto
+  cancellation:
+    name: Task cancellation DMN
+    hitPolicy: COLLECT
+    historyTimeToLive: P90D
+    inputs:
+      - key: fromState
+        label: From State
+        typeRef: string
+        expression:
+          field: fromState
+      - key: event
+        label: Event
+        typeRef: string
+        expression:
+          field: event
+      - key: state
+        label: State
+        typeRef: string
+        expression:
+          field: state
+    outputs:
+      - name: action
+        label: Action
+        typeRef: string
+      - name: warningCode
+        label: Warning Code
+        typeRef: string
+      - name: warningText
+        label: Warning Text
+        typeRef: string
+      - name: processCategories
+        label: Process Categories
+        typeRef: string
+    rows:
+      - when:
+          event:
+            in: [ FR_close ]
+        returns:
+          action: Cancel
+  task-types:
+    name: Task Types DMN
+    hitPolicy: COLLECT
+    historyTimeToLive: P90D
+    inputs:
+      - key: input
+        typeRef: string
+    outputs:
+      - name: taskTypeId
+        typeRef: string
+      - name: taskTypeName
+        typeRef: string
+    rows:
+      - returns:
+          taskTypeId: processScannedDocuments
+          taskTypeName: Process Scanned Documents
+      - returns:
+          taskTypeId: checkResponseReceived
+          taskTypeName: Check Response Received
+      - returns:
+          taskTypeId: processApprovedOrder
+          taskTypeName: Process Approved Order
+      - returns:
+          taskTypeId: checkHelpWithFees
+          taskTypeName: Check Help With Fees
+      - returns:
+          taskTypeId: reviewApplication
+          taskTypeName: Review Application
+      - returns:
+          taskTypeId: reviewRefusedOrder
+          taskTypeName: Review Refused Order
+      - returns:
+          taskTypeId: checkAndIssueApplication
+          taskTypeName: Check and Issue Application
+      - returns:
+          taskTypeId: reviewOrderResponse
+          taskTypeName: Review Order Response
+  allowed-days:
+    name: Task allowed days DMN
+    hitPolicy: FIRST
+    historyTimeToLive: P90D
+    inputs:
+      - key: taskId
+        label: Task Id
+        variable: taskId
+        typeRef: string
+    outputs:
+      - name: taskId
+        label: Task Id
+        typeRef: string
+      - name: name
+        label: Name
+        typeRef: string
+      - name: workingDaysAllowed
+        label: Working Days Allowed
+        typeRef: integer
+    rows: []

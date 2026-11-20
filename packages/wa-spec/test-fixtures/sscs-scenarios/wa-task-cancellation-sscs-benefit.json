@@ -1,0 +1,1196 @@
+{
+ "decision": "wa-task-cancellation-sscs-benefit",
+ "source": "hmcts/sscs-task-configuration@a3d3c0cd99c39be7614135158a7f155e6625e64b",
+ "dumpedAt": "2026-11-20T08:19:24.168Z",
+ "scenarios": [
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "additionalData": {
+     "Data": {}
+    },
+    "event": "addHearing"
+   },
+   "output": [
+    {
+     "action": "Reconfigure"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "additionalData": {
+     "Data": {}
+    },
+    "event": "caseUpdated"
+   },
+   "output": [
+    {
+     "action": "Reconfigure"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "additionalData": {
+     "Data": {}
+    },
+    "event": "voidCase"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "reviewIncompleteAppeal"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewFtaResponse"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewFtaDueDate"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewConfidentialityRequest"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewUrgentHearingRequest"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredByTcwPreHearing"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "prepareForHearingJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "writeDecisionJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewReinstatementRequestJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "ftaNotProvidedAppointeeDetailsJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewPostponementRequestJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewValidAppeal"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewListingError"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewAdminAction"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewRoboticFail"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "allocateCaseRolesAndCreateBundle"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredByAdminJudgePreHearing"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmPanelComposition"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredToInterlocJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "contactParties"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewFtaValidityChallenge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "ftaRequestTimeExtension"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "prepareForHearingTribunalMember"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewPostponementRequestTCW"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredToInterlocTCW"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "ftaResponseOverdue"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredByJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "processAudioVideoEvidence"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewNonCompliantAppeal"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredByAdminTcw"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredByAdminJudgePostHearing"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "prepareHearingAppraiser"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "provideListingDirections"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "actionUnprocessedCorrespondence"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "actionUnprocessedCorrespondenceDormant"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "additionalData": {
+     "Data": {}
+    },
+    "event": "appealWithdrawn"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "reviewIncompleteAppeal"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewFtaResponse"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewFtaDueDate"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewConfidentialityRequest"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewUrgentHearingRequest"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredByTcwPreHearing"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "prepareForHearingJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "writeDecisionJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewReinstatementRequestJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "ftaNotProvidedAppointeeDetailsJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewPostponementRequestJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewValidAppeal"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewListingError"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewAdminAction"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewRoboticFail"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "allocateCaseRolesAndCreateBundle"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredByAdminJudgePreHearing"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmPanelComposition"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredToInterlocJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "contactParties"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewFtaValidityChallenge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "ftaRequestTimeExtension"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "prepareForHearingTribunalMember"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewPostponementRequestTCW"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredToInterlocTCW"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "ftaResponseOverdue"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredByJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "processAudioVideoEvidence"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewNonCompliantAppeal"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredByAdminTcw"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredByAdminJudgePostHearing"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "prepareHearingAppraiser"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "provideListingDirections"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "actionUnprocessedCorrespondence"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "actionUnprocessedCorrespondenceDormant"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "additionalData": {
+     "Data": {}
+    },
+    "event": "appealDormant"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "reviewIncompleteAppeal"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewFtaResponse"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewFtaDueDate"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewConfidentialityRequest"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewUrgentHearingRequest"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredByTcwPreHearing"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "prepareForHearingJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "writeDecisionJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewReinstatementRequestJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "ftaNotProvidedAppointeeDetailsJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewPostponementRequestJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewValidAppeal"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewListingError"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewAdminAction"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewRoboticFail"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "allocateCaseRolesAndCreateBundle"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredByAdminJudgePreHearing"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmPanelComposition"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredToInterlocJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "contactParties"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewFtaValidityChallenge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "ftaRequestTimeExtension"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "prepareForHearingTribunalMember"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewPostponementRequestTCW"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredToInterlocTCW"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "ftaResponseOverdue"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredByJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "processAudioVideoEvidence"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewNonCompliantAppeal"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredByAdminTcw"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredByAdminJudgePostHearing"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "prepareHearingAppraiser"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "provideListingDirections"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "actionUnprocessedCorrespondence"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "additionalData": {
+     "Data": {}
+    },
+    "event": "confirmLapsed"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "reviewIncompleteAppeal"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewFtaResponse"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewConfidentialityRequest"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewUrgentHearingRequest"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredByTcwPreHearing"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "prepareForHearingJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "writeDecisionJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewReinstatementRequestJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "ftaNotProvidedAppointeeDetailsJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewPostponementRequestJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "allocateCaseRolesAndCreateBundle"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredByAdminJudgePreHearing"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmPanelComposition"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredToInterlocJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "contactParties"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewFtaValidityChallenge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "ftaRequestTimeExtension"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "prepareForHearingTribunalMember"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewPostponementRequestTCW"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredToInterlocTCW"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "ftaResponseOverdue"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredByJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "processAudioVideoEvidence"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewNonCompliantAppeal"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredByAdminTcw"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredByAdminJudgePostHearing"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "prepareHearingAppraiser"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "provideListingDirections"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "actionUnprocessedCorrespondence"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "additionalData": {
+     "Data": {}
+    },
+    "event": "struckOut"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "reviewIncompleteAppeal"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewFtaResponse"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewFtaDueDate"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewConfidentialityRequest"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewUrgentHearingRequest"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "prepareForHearingJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "writeDecisionJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewReinstatementRequestJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewPostponementRequestJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewValidAppeal"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewListingError"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewAdminAction"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewRoboticFail"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "allocateCaseRolesAndCreateBundle"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredByAdminJudgePreHearing"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmPanelComposition"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredToInterlocJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "contactParties"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewFtaValidityChallenge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "ftaRequestTimeExtension"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "prepareForHearingTribunalMember"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewPostponementRequestTCW"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredToInterlocTCW"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "ftaResponseOverdue"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredByJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "processAudioVideoEvidence"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewNonCompliantAppeal"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredByAdminTcw"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredByAdminJudgePostHearing"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "prepareHearingAppraiser"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "provideListingDirections"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "actionUnprocessedCorrespondence"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "actionUnprocessedCorrespondenceDormant"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "additionalData": {
+     "Data": {}
+    },
+    "event": "validSendToInterloc"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "reviewIncompleteAppeal"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "contactParties"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "additionalData": {
+     "Data": {}
+    },
+    "event": "makeCaseUrgent"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "reviewIncompleteAppeal"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewBfDate"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "contactParties"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "additionalData": {
+     "Data": {}
+    },
+    "event": "readyToList"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "reviewIncompleteAppeal"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewFtaResponse"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewFtaDueDate"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "contactParties"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "additionalData": {
+     "Data": {}
+    },
+    "event": "decisionIssued"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "reviewIncompleteAppeal"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewConfidentialityRequest"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewUrgentHearingRequest"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredByTcwPreHearing"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "prepareForHearingJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "writeDecisionJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewReinstatementRequestJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "ftaNotProvidedAppointeeDetailsJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewPostponementRequestJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "contactParties"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewFtaValidityChallenge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "ftaRequestTimeExtension"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "prepareForHearingTribunalMember"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewPostponementRequestTCW"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "ftaResponseOverdue"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredByJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "processAudioVideoEvidence"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewNonCompliantAppeal"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredByAdminTcw"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "prepareHearingAppraiser"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "additionalData": {
+     "Data": {}
+    },
+    "event": "issueFinalDecision"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "reviewUrgentHearingRequest"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredByTcwPreHearing"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "prepareForHearingJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewReinstatementRequestJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "ftaNotProvidedAppointeeDetailsJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewPostponementRequestJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredByAdminJudgePreHearing"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmPanelComposition"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredToInterlocJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewFtaValidityChallenge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "ftaRequestTimeExtension"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "prepareForHearingTribunalMember"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewPostponementRequestTCW"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredToInterlocTCW"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "ftaResponseOverdue"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredByJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "processAudioVideoEvidence"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewNonCompliantAppeal"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredByAdminTcw"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "referredByAdminJudgePostHearing"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "prepareHearingAppraiser"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "provideListingDirections"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "additionalData": {
+     "Data": {}
+    },
+    "event": "cancelTranslations"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "Translation Tasks"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "additionalData": {
+     "Data": {}
+    },
+    "event": "interlocReviewStateAmend"
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "additionalData": {
+     "Data": {}
+    },
+    "event": "actionPostponementRequest"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "reviewPostponementRequestJudge"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "additionalData": {
+     "Data": {}
+    },
+    "event": "issueAdjournmentNotice"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "prepareForHearingTribunalMember"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "additionalData": {
+     "Data": {}
+    },
+    "event": "sentToDwp"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "reviewValidAppeal"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "additionalData": {
+     "Data": {}
+    },
+    "event": "responseReceived"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "ftaResponseOverdue"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "additionalData": {
+     "Data": {}
+    },
+    "event": "adminSendTorRsponseReceived"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "ftaResponseOverdue"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "additionalData": {
+     "Data": {}
+    },
+    "event": "postponementGranted"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "writeDecisionJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "prepareForHearingJudge"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "prepareForHearingTribunalMember"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "prepareHearingAppraiser"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "allocateCaseRolesAndCreateBundle"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "additionalData": {
+     "Data": {}
+    },
+    "event": "dwpUploadResponse"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "reviewFtaDueDate"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "additionalData": {
+     "Data": {}
+    },
+    "event": "sORRefused"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "uploadHearingRecordingSORCTSC"
+    }
+   ]
+  }
+ ]
+}

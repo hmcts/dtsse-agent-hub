@@ -1,0 +1,1051 @@
+{
+ "decision": "wa-task-permissions-civil-generalapplication",
+ "source": "hmcts/civil-wa-task-configuration@8977b6611ea7520d1bb964d97ef59a16dabd7b1f",
+ "dumpedAt": "2026-11-20T08:19:36.069Z",
+ "scenarios": [
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ScheduleApplicationHearing"
+    },
+    "caseData": {
+     "isCcmccLocation": "No"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewApplication"
+    },
+    "caseData": {
+     "isCcmccLocation": "No"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewRevisitedApplication"
+    },
+    "caseData": {
+     "isCcmccLocation": "No"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewOfflineApplication"
+    },
+    "caseData": {
+     "isCcmccLocation": "No"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ScheduleApplicationHearing"
+    },
+    "caseData": {
+     "isCcmccLocation": "Yes"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "national-business-centre",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "ctsc-team-leader",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewApplication"
+    },
+    "caseData": {
+     "isCcmccLocation": "Yes"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "national-business-centre",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "ctsc-team-leader",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewRevisitedApplication"
+    },
+    "caseData": {
+     "isCcmccLocation": "Yes"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "national-business-centre",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "ctsc-team-leader",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewOfflineApplication"
+    },
+    "caseData": {
+     "isCcmccLocation": "Yes"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "national-business-centre",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "ctsc-team-leader",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "reviewSpecificAccessRequestAdmin"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 1,
+     "name": "hearing-centre-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 1,
+     "name": "nbc-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewUnlessOrderApplication"
+    },
+    "caseData": {
+     "isCcmccLocation": "No"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "HelpWithFeesApplicationFee"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "ctsc-team-leader",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "HelpWithFeesAdditionalApplicationFee"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "ctsc-team-leader",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "applicationDocumentsWelshRequestAppSum"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "wlu-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "wlu-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "applicationDocumentsWelshRequestOrderMade"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "wlu-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "wlu-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "applicationDocumentsWelshRequestHearingOrder"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "wlu-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "wlu-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "applicationDocumentsWelshRequestRespondToMoreInfo"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "wlu-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "wlu-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "applicationDocumentsWelshRequestRespondToWrittenRep"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "wlu-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "wlu-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "applicationDocumentsWelshRequestAddlDoc"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "wlu-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "wlu-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "applicationDocumentsWelshRequestRespondToJudge"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "wlu-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "wlu-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "applicationDocumentsWelshRequestMoreInfo"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "wlu-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "wlu-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "applicationDocumentsWelshRequestWrittenResp"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "wlu-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "wlu-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "applicationDocumentsWelshRequestHearingSchedule"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "wlu-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "wlu-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "applicationDocumentsWelshRequestAppDismissed"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "wlu-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "wlu-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "applicationDocumentsWelshRequestJudgeDirection"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "wlu-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "wlu-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "applicationDocumentsWelshRequestFinalOrder"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "wlu-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "wlu-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "applicationDocumentsWelshRequestRespondToMoreInfoRespondent"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "wlu-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "wlu-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "applicationDocumentsWelshRequestRespondToWrittenRepRespondent"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "wlu-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "wlu-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "LegalAdvisorDecideOnApplication"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "tribunal-caseworker",
+     "roleCategory": "LEGAL_OPERATIONS",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "LegalAdvisorRevisitApplication"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "tribunal-caseworker",
+     "roleCategory": "LEGAL_OPERATIONS",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "reviewSpecificAccessRequestLegalOps"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 1,
+     "name": "senior-tribunal-caseworker",
+     "roleCategory": "LEGAL_OPERATIONS",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewApplicationOrder"
+    },
+    "caseData": {
+     "isCcmccLocation": "No"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "JudgeDecideOnApplication"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 0,
+     "name": "allocated-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 1,
+     "name": "lead-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 2,
+     "authorisations": "294",
+     "name": "judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "JudgeRevisitApplication"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 0,
+     "name": "allocated-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 1,
+     "name": "lead-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 2,
+     "authorisations": "294",
+     "name": "judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewStayTheClaimApplicationOrder"
+    },
+    "caseData": {
+     "isCcmccLocation": "No"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewUnlessOrderApplication"
+    },
+    "caseData": {
+     "isCcmccLocation": "Yes"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "national-business-centre",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "case": "anything"
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "reviewSpecificAccessRequestJudiciary"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 1,
+     "authorisations": "294",
+     "name": "judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "reviewSpecificAccessRequestCTSC"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 1,
+     "name": "ctsc-team-leader",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewStayTheClaimApplicationOrder"
+    },
+    "caseData": {
+     "isCcmccLocation": "Yes"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "national-business-centre",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewApplicationOrder"
+    },
+    "caseData": {
+     "isCcmccLocation": "Yes"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Unassign,Assign,Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "name": "national-business-centre",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,875 @@
+{
+ "decision": "wa-task-completion-sscs-benefit",
+ "source": "hmcts/sscs-task-configuration@a3d3c0cd99c39be7614135158a7f155e6625e64b",
+ "dumpedAt": "2026-11-20T08:19:24.168Z",
+ "scenarios": [
+  {
+   "input": {
+    "eventId": "ftaCommunication",
+    "additionalData": null
+   },
+   "output": [
+    {
+     "taskType": "reviewIncompleteAppeal",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "caseUpdated",
+    "additionalData": null
+   },
+   "output": [
+    {
+     "taskType": "reviewIncompleteAppeal",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "interlocInformationReceived",
+    "additionalData": null
+   },
+   "output": [
+    {
+     "taskType": "reviewAdminAction",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "validSendToInterloc",
+    "additionalData": null
+   },
+   "output": [
+    {
+     "taskType": "reviewAdminAction",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewFtaDueDate",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewConfidentialityRequest",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewReinstatementRequestJudge",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewBfDate",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredToInterlocJudge",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredToInterlocTCW",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "interlocSendToTcw",
+    "additionalData": null
+   },
+   "output": [
+    {
+     "taskType": "reviewAdminAction",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewUrgentHearingRequest",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredByTcwPreHearing",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewReinstatementRequestJudge",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ftaNotProvidedAppointeeDetailsJudge",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewBfDate",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredByAdminJudgePreHearing",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredToInterlocJudge",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredByAdminJudgePostHearing",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "hmctsResponseReviewed",
+    "additionalData": null
+   },
+   "output": [
+    {
+     "taskType": "reviewFtaResponse",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "requestTranslationFromWLU",
+    "additionalData": null
+   },
+   "output": [
+    {
+     "taskType": "reviewBilingualDocument",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "reviewConfidentialityRequest",
+    "additionalData": null
+   },
+   "output": [
+    {
+     "taskType": "reviewConfidentialityRequest",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "decisionIssued",
+    "additionalData": null
+   },
+   "output": [
+    {
+     "taskType": "referredByTcwPreHearing",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ftaNotProvidedAppointeeDetailsJudge",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredByAdminJudgePreHearing",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredToInterlocJudge",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewFtaValidityChallenge",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredToInterlocTCW",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewNonCompliantAppeal",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredByAdminJudgePostHearing",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "struckOut",
+    "additionalData": null
+   },
+   "output": [
+    {
+     "taskType": "ftaNotProvidedAppointeeDetailsJudge",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredByAdminJudgePreHearing",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredByAdminJudgePostHearing",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "abateCase",
+    "additionalData": null
+   },
+   "output": [
+    {
+     "taskType": "ftaNotProvidedAppointeeDetailsJudge",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "writeFinalDecision",
+    "additionalData": null
+   },
+   "output": [
+    {
+     "taskType": "referredByTcwPreHearing",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "prepareForHearingJudge",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "writeDecisionJudge",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ftaNotProvidedAppointeeDetailsJudge",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredByAdminJudgePreHearing",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredByAdminJudgePostHearing",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "actionPostponementRequest",
+    "additionalData": null
+   },
+   "output": [
+    {
+     "taskType": "reviewPostponementRequestJudge",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewPostponementRequestTCW",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "adjournCase",
+    "additionalData": null
+   },
+   "output": [
+    {
+     "taskType": "prepareForHearingJudge",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "writeDecisionJudge",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "issueAdjournmentNotice",
+    "additionalData": null
+   },
+   "output": [
+    {
+     "taskType": "issueDecisionJudge",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "sendToAdmin",
+    "additionalData": null
+   },
+   "output": [
+    {
+     "taskType": "reviewConfidentialityRequest",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewUrgentHearingRequest",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredByTcwPreHearing",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewReinstatementRequestJudge",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ftaNotProvidedAppointeeDetailsJudge",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredByAdminJudgePreHearing",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredToInterlocJudge",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewFtaValidityChallenge",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredToInterlocTCW",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredByJudge",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewNonCompliantAppeal",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredByAdminTcw",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewLibertytoApplyApplication",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewCorrectionApplicationJudge",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewLateStatementofReasonsApplication",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewPermissiontoAppealApplication",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewRemittedDecisionandProvideListingDirections",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewSetAsideApplication",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredByAdminJudgePostHearing",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "provideListingDirections",
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "directionIssued",
+    "additionalData": null
+   },
+   "output": [
+    {
+     "taskType": "reviewConfidentialityRequest",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewUrgentHearingRequest",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredByTcwPreHearing",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewReinstatementRequestJudge",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ftaNotProvidedAppointeeDetailsJudge",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredByAdminJudgePreHearing",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredToInterlocJudge",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewFtaValidityChallenge",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ftaRequestTimeExtension",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredToInterlocTCW",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ftaResponseOverdue",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredByJudge",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewNonCompliantAppeal",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredByAdminTcw",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewLibertytoApplyApplication",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewCorrectionApplicationJudge",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewLateStatementofReasonsApplication",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewPermissiontoAppealApplication",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewRemittedDecisionandProvideListingDirections",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewSetAsideApplication",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredByAdminJudgePostHearing",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "provideListingDirections",
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "issueFinalDecision",
+    "additionalData": null
+   },
+   "output": [
+    {
+     "taskType": "reviewConfidentialityRequest",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "issueDecisionJudge",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewCorrectionApplicationJudge",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "interlocReviewStateAmend",
+    "additionalData": null
+   },
+   "output": [
+    {
+     "taskType": "reviewConfidentialityRequest",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewUrgentHearingRequest",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredByTcwPreHearing",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewReinstatementRequestJudge",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ftaNotProvidedAppointeeDetailsJudge",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredByAdminJudgePreHearing",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredToInterlocJudge",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewFtaValidityChallenge",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ftaRequestTimeExtension",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredToInterlocTCW",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ftaResponseOverdue",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredByJudge",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "processAudioVideoEvidence",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewNonCompliantAppeal",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredByAdminTcw",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredByAdminJudgePostHearing",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "uploadWelshDocument",
+    "additionalData": null
+   },
+   "output": [
+    {
+     "taskType": "reviewValidAppeal",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "amendDueDate",
+    "additionalData": null
+   },
+   "output": [
+    {
+     "taskType": "reviewBfDate",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "updateListingRequirements",
+    "additionalData": null
+   },
+   "output": [
+    {
+     "taskType": "reviewListingError",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "createBundle",
+    "additionalData": null
+   },
+   "output": [
+    {
+     "taskType": "allocateCaseRolesAndCreateBundle",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "confirmPanelComposition",
+    "additionalData": null
+   },
+   "output": [
+    {
+     "taskType": "confirmPanelComposition",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "adminActionCorrection",
+    "additionalData": null
+   },
+   "output": [
+    {
+     "taskType": "reviewCorrectionApplicationAdmin",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "tcwReferToJudge",
+    "additionalData": null
+   },
+   "output": [
+    {
+     "taskType": "reviewFtaValidityChallenge",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredToInterlocTCW",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredByJudge",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewNonCompliantAppeal",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "referredByAdminTcw",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "processAudioVideo",
+    "additionalData": null
+   },
+   "output": [
+    {
+     "taskType": "processAudioVideoEvidence",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "sORWrite",
+    "additionalData": null
+   },
+   "output": [
+    {
+     "taskType": "writeStatementofReason",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewPermissiontoAppealApplication",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "postHearingReview",
+    "additionalData": null
+   },
+   "output": [
+    {
+     "taskType": "reviewLibertytoApplyApplication",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewCorrectionApplicationJudge",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewLateStatementofReasonsApplication",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewPermissiontoAppealApplication",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewSetAsideApplication",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "addNote",
+    "additionalData": null
+   },
+   "output": [
+    {
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "provideListingDirections",
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "uploadDocument",
+    "additionalData": null
+   },
+   "output": [
+    {
+     "taskType": "actionUnprocessedCorrespondence",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "actionUnprocessedCorrespondenceDormant",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "resendCaseToGAPS2",
+    "additionalData": null
+   },
+   "output": [
+    {
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewRoboticFail",
+     "completionMode": "Auto"
+    }
+   ]
+  }
+ ]
+}

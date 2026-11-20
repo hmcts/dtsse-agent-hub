@@ -1,0 +1,290 @@
+{
+ "decision": "wa-task-cancellation-employment-et_englandwales",
+ "source": "hmcts/et-wa-task-configuration@fa182449b8ef501c95e1f00137965994d835c4c3",
+ "dumpedAt": "2026-11-20T07:37:34.755Z",
+ "scenarios": [
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "event": "disposeCase"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "Vetting"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "Processing"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "Hearing"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "Judgment"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "Application"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "Amendments"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "ArrangeSupport"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "Rule21"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "ReviewSupportAdmin"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "ReviewSupportLegalOfficer"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "ReviewSupportJudge"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "event": "RECONFIGURE_WA_TASKS"
+   },
+   "output": [
+    {
+     "action": "Reconfigure"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "event": "et3Response"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "Rule21"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "event": "rollbackMigrateCase"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "Vetting"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "Processing"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "Hearing"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "Judgment"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "Application"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "Amendments"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "ArrangeSupport"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "Rule21"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "ReviewSupportAdmin"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "ReviewSupportLegalOfficer"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "ReviewSupportJudge"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "event": "addAmendHearing"
+   },
+   "output": [
+    {
+     "action": "Reconfigure"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "event": "addAmendJurisdiction"
+   },
+   "output": [
+    {
+     "action": "Reconfigure"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "event": "caseTransferDifferentCountry"
+   },
+   "output": [
+    {
+     "action": "Reconfigure"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "event": "caseTransferSameCountry"
+   },
+   "output": [
+    {
+     "action": "Reconfigure"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "event": "assignCase"
+   },
+   "output": [
+    {
+     "action": "Reconfigure"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "event": "caseTransferECM"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "Vetting"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "Processing"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "Hearing"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "Judgment"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "Application"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "Amendments"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "ArrangeSupport"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "Rule21"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "ReviewSupportAdmin"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "ReviewSupportLegalOfficer"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "ReviewSupportJudge"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "event": "closeAdminReviewSupportTask"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "ReviewSupportAdmin"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "event": "closeLOReviewSupportTask"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "ReviewSupportLegalOfficer"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "event": "closeJudgeReviewSupportTask"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "ReviewSupportJudge"
+    }
+   ]
+  }
+ ]
+}

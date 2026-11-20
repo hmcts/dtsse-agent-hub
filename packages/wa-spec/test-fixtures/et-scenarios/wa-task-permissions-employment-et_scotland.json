@@ -1,0 +1,1655 @@
+{
+ "decision": "wa-task-permissions-employment-et_scotland",
+ "source": "hmcts/et-wa-task-configuration@fa182449b8ef501c95e1f00137965994d835c4c3",
+ "dumpedAt": "2026-11-20T07:37:34.755Z",
+ "scenarios": [
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "reviewSpecificAccessRequestJudiciary"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read, Manage, Claim, Unclaim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "name": "specific-access-approver-judiciary",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn, Assign, Unassign"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "leadership-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Execute, Manage, Claim, Assign, Unassign, Complete"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewReferralJudiciary"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read, Manage, Claim, Unclaim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 1,
+     "name": "lead-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 2,
+     "name": "hearing-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "leadership-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Execute, Manage, Claim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 3,
+     "name": "judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 3,
+     "name": "fee-paid-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 1,
+     "name": "allocated-tribunal-caseworker",
+     "roleCategory": "LEGAL_OPERATIONS",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 4,
+     "name": "senior-tribunal-caseworker",
+     "roleCategory": "LEGAL_OPERATIONS",
+     "value": "Assign, Unassign, Complete, Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 3,
+     "name": "tribunal-caseworker",
+     "roleCategory": "LEGAL_OPERATIONS",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewReferralResponseJudiciary"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read, Manage, Claim, Unclaim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 1,
+     "name": "lead-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 2,
+     "name": "hearing-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "leadership-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Execute, Manage, Claim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 3,
+     "name": "judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 3,
+     "name": "fee-paid-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 1,
+     "name": "allocated-tribunal-caseworker",
+     "roleCategory": "LEGAL_OPERATIONS",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 4,
+     "name": "senior-tribunal-caseworker",
+     "roleCategory": "LEGAL_OPERATIONS",
+     "value": "Assign, Unassign, Complete, Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 3,
+     "name": "tribunal-caseworker",
+     "roleCategory": "LEGAL_OPERATIONS",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "CompleteInitialConsideration"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read, Manage, Claim, Unclaim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 1,
+     "name": "lead-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 2,
+     "name": "hearing-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "leadership-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Execute, Manage, Claim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 3,
+     "name": "judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 3,
+     "name": "fee-paid-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 1,
+     "name": "allocated-tribunal-caseworker",
+     "roleCategory": "LEGAL_OPERATIONS",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 4,
+     "name": "senior-tribunal-caseworker",
+     "roleCategory": "LEGAL_OPERATIONS",
+     "value": "Assign, Unassign, Complete, Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 3,
+     "name": "tribunal-caseworker",
+     "roleCategory": "LEGAL_OPERATIONS",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "DraftAndSignJudgment"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read, Manage, Claim, Unclaim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 1,
+     "name": "lead-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 2,
+     "name": "hearing-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "leadership-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Execute, Manage, Claim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 3,
+     "name": "judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 3,
+     "name": "fee-paid-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 1,
+     "name": "allocated-tribunal-caseworker",
+     "roleCategory": "LEGAL_OPERATIONS",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 4,
+     "name": "senior-tribunal-caseworker",
+     "roleCategory": "LEGAL_OPERATIONS",
+     "value": "Assign, Unassign, Complete, Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 3,
+     "name": "tribunal-caseworker",
+     "roleCategory": "LEGAL_OPERATIONS",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "reviewSpecificAccessRequestLegalOps"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read, Manage, Claim, Unclaim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "leadership-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Execute, Manage, Claim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "name": "specific-access-approver-legal-ops",
+     "roleCategory": "LEGAL_OPERATIONS",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn, Assign, Unassign"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewReferralLegalOps"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read, Manage, Claim, Unclaim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 1,
+     "name": "lead-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 2,
+     "name": "hearing-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "leadership-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Execute, Manage, Claim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 3,
+     "name": "judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 3,
+     "name": "fee-paid-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 1,
+     "name": "allocated-tribunal-caseworker",
+     "roleCategory": "LEGAL_OPERATIONS",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 4,
+     "name": "senior-tribunal-caseworker",
+     "roleCategory": "LEGAL_OPERATIONS",
+     "value": "Assign, Unassign, Complete, Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 3,
+     "name": "tribunal-caseworker",
+     "roleCategory": "LEGAL_OPERATIONS",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewReferralResponseLegalOps"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read, Manage, Claim, Unclaim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 1,
+     "name": "lead-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 2,
+     "name": "hearing-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "leadership-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Execute, Manage, Claim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 3,
+     "name": "judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 3,
+     "name": "fee-paid-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 1,
+     "name": "allocated-tribunal-caseworker",
+     "roleCategory": "LEGAL_OPERATIONS",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 4,
+     "name": "senior-tribunal-caseworker",
+     "roleCategory": "LEGAL_OPERATIONS",
+     "value": "Assign, Unassign, Complete, Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 3,
+     "name": "tribunal-caseworker",
+     "roleCategory": "LEGAL_OPERATIONS",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewRule21Referral"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read, Manage, Claim, Unclaim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 1,
+     "name": "lead-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 2,
+     "name": "hearing-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "leadership-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Execute, Manage, Claim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 3,
+     "name": "judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 3,
+     "name": "fee-paid-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 1,
+     "name": "allocated-tribunal-caseworker",
+     "roleCategory": "LEGAL_OPERATIONS",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 4,
+     "name": "senior-tribunal-caseworker",
+     "roleCategory": "LEGAL_OPERATIONS",
+     "value": "Assign, Unassign, Complete, Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 3,
+     "name": "tribunal-caseworker",
+     "roleCategory": "LEGAL_OPERATIONS",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "reviewSpecificAccessRequestAdmin"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read, Manage, Claim, Unclaim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "leadership-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Execute, Manage, Claim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "name": "specific-access-approver-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn, Assign, Unassign"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "Et1Vetting"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read, Manage, Claim, Unclaim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "leadership-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Execute, Manage, Claim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 2,
+     "name": "allocated-admin-caseworker",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 6,
+     "name": "hearing-centre-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Assign, Unassign, Complete, Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 4,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 1,
+     "name": "allocated-ctsc-caseworker",
+     "roleCategory": "CTSC",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "ctsc-team-leader",
+     "roleCategory": "CTSC",
+     "value": "Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 3,
+     "name": "ctsc",
+     "roleCategory": "CTSC",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewReferralAdmin"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read, Manage, Claim, Unclaim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "leadership-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Execute, Manage, Claim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 2,
+     "name": "allocated-admin-caseworker",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 6,
+     "name": "hearing-centre-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Assign, Unassign, Complete, Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 4,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 1,
+     "name": "allocated-ctsc-caseworker",
+     "roleCategory": "CTSC",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "ctsc-team-leader",
+     "roleCategory": "CTSC",
+     "value": "Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 3,
+     "name": "ctsc",
+     "roleCategory": "CTSC",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewReferralResponseAdmin"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read, Manage, Claim, Unclaim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "leadership-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Execute, Manage, Claim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 2,
+     "name": "allocated-admin-caseworker",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 6,
+     "name": "hearing-centre-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Assign, Unassign, Complete, Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 4,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 1,
+     "name": "allocated-ctsc-caseworker",
+     "roleCategory": "CTSC",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "ctsc-team-leader",
+     "roleCategory": "CTSC",
+     "value": "Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 3,
+     "name": "ctsc",
+     "roleCategory": "CTSC",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "SendEt1Notification"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read, Manage, Claim, Unclaim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "leadership-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Execute, Manage, Claim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 2,
+     "name": "allocated-admin-caseworker",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 6,
+     "name": "hearing-centre-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Assign, Unassign, Complete, Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 4,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 1,
+     "name": "allocated-ctsc-caseworker",
+     "roleCategory": "CTSC",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "ctsc-team-leader",
+     "roleCategory": "CTSC",
+     "value": "Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 3,
+     "name": "ctsc",
+     "roleCategory": "CTSC",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ListServeClaim"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read, Manage, Claim, Unclaim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "leadership-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Execute, Manage, Claim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 2,
+     "name": "allocated-admin-caseworker",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 6,
+     "name": "hearing-centre-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Assign, Unassign, Complete, Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 4,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 1,
+     "name": "allocated-ctsc-caseworker",
+     "roleCategory": "CTSC",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "ctsc-team-leader",
+     "roleCategory": "CTSC",
+     "value": "Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 3,
+     "name": "ctsc",
+     "roleCategory": "CTSC",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "Rule21"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read, Manage, Claim, Unclaim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "leadership-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Execute, Manage, Claim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 2,
+     "name": "allocated-admin-caseworker",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 6,
+     "name": "hearing-centre-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Assign, Unassign, Complete, Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 4,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ET3Processing"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read, Manage, Claim, Unclaim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "leadership-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Execute, Manage, Claim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 2,
+     "name": "allocated-admin-caseworker",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 6,
+     "name": "hearing-centre-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Assign, Unassign, Complete, Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 4,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "SendEt3Notification"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read, Manage, Claim, Unclaim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "leadership-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Execute, Manage, Claim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 2,
+     "name": "allocated-admin-caseworker",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 6,
+     "name": "hearing-centre-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Assign, Unassign, Complete, Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 4,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ListAHearing"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read, Manage, Claim, Unclaim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "leadership-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Execute, Manage, Claim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 2,
+     "name": "allocated-admin-caseworker",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 6,
+     "name": "hearing-centre-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Assign, Unassign, Complete, Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 4,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 6,
+     "name": "regional-centre-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, Assign, Unassign, Complete, Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 4,
+     "name": "regional-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "IssueInitialConsiderationDirections"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read, Manage, Claim, Unclaim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "leadership-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Execute, Manage, Claim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 2,
+     "name": "allocated-admin-caseworker",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 6,
+     "name": "hearing-centre-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Assign, Unassign, Complete, Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 4,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "IssuePostHearingDirection"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read, Manage, Claim, Unclaim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "leadership-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Execute, Manage, Claim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 2,
+     "name": "allocated-admin-caseworker",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 6,
+     "name": "hearing-centre-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Assign, Unassign, Complete, Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 4,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "IssueJudgment"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read, Manage, Claim, Unclaim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "leadership-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Execute, Manage, Claim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 2,
+     "name": "allocated-admin-caseworker",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 6,
+     "name": "hearing-centre-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Assign, Unassign, Complete, Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 4,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "AmendClaimantDetails"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read, Manage, Claim, Unclaim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "leadership-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Execute, Manage, Claim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 2,
+     "name": "allocated-admin-caseworker",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 6,
+     "name": "hearing-centre-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Assign, Unassign, Complete, Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 4,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "AmendRespondentDetails"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read, Manage, Claim, Unclaim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "leadership-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Execute, Manage, Claim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 2,
+     "name": "allocated-admin-caseworker",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 6,
+     "name": "hearing-centre-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Assign, Unassign, Complete, Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 4,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "WithdrawAllOrPartOfCase"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read, Manage, Claim, Unclaim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "leadership-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Execute, Manage, Claim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 2,
+     "name": "allocated-admin-caseworker",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 6,
+     "name": "hearing-centre-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Assign, Unassign, Complete, Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 4,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ContactTribunalWithAnApplication"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read, Manage, Claim, Unclaim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "leadership-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Execute, Manage, Claim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 2,
+     "name": "allocated-admin-caseworker",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 6,
+     "name": "hearing-centre-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Assign, Unassign, Complete, Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 4,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewECCResponse"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read, Manage, Claim, Unclaim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "leadership-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Execute, Manage, Claim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 2,
+     "name": "allocated-admin-caseworker",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 6,
+     "name": "hearing-centre-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Assign, Unassign, Complete, Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 4,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "reviewSpecificAccessRequestCTSC"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read, Manage, Claim, Unclaim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "leadership-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Execute, Manage, Claim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": true,
+     "name": "specific-access-approver-ctsc",
+     "roleCategory": "CTSC",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn, Assign, Unassign"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReferEmployersContractClaim"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read, Manage, Claim, Unclaim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "leadership-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Execute, Manage, Claim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 2,
+     "name": "allocated-admin-caseworker",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 6,
+     "name": "hearing-centre-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Assign, Unassign, Complete, Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 4,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewSupportRequestJudge"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read, Manage, Claim, Unclaim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 1,
+     "name": "lead-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 2,
+     "name": "hearing-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "leadership-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Execute, Manage, Claim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 3,
+     "name": "judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 3,
+     "name": "fee-paid-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewSupportRequestLegalOfficer"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read, Manage, Claim, Unclaim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "leadership-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Execute, Manage, Claim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 1,
+     "name": "allocated-tribunal-caseworker",
+     "roleCategory": "LEGAL_OPERATIONS",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 4,
+     "name": "senior-tribunal-caseworker",
+     "roleCategory": "LEGAL_OPERATIONS",
+     "value": "Assign, Unassign, Complete, Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 3,
+     "name": "tribunal-caseworker",
+     "roleCategory": "LEGAL_OPERATIONS",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewSupportRequestAdmin"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read, Manage, Claim, Unclaim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "leadership-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Execute, Manage, Claim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 2,
+     "name": "allocated-admin-caseworker",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 6,
+     "name": "hearing-centre-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Assign, Unassign, Complete, Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 4,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ArrangeSupport"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read, Manage, Claim, Unclaim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 5,
+     "name": "leadership-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read, Execute, Manage, Claim, Assign, Unassign, Complete"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 2,
+     "name": "allocated-admin-caseworker",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 6,
+     "name": "hearing-centre-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Assign, Unassign, Complete, Cancel"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 4,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read, Own, Manage, Claim, Unclaim, UnclaimAssign, CompleteOwn"
+    }
+   ]
+  }
+ ]
+}
