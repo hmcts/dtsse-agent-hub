@@ -139,10 +139,11 @@ n=$(($(cat "$FAKE_DIR/claude.count" 2>/dev/null || echo 0) + 1))
 echo "$n" >"$FAKE_DIR/claude.count"
 echo "start $n $(grep '^state=' "$VIRTUAL_AGENT_STATE/repos-state" 2>/dev/null)" >>"$FAKE_DIR/claude.log"
 echo "claude $n" >>"$FAKE_DIR/order.log"
-printf '%s\n' "$@" >"$FAKE_DIR/hai.argv.$n"
 pwd >"$FAKE_DIR/hai.pwd.$n"
 env | grep -E '^(HAI_ROUTE|HAI_IN_CONTAINER|HAI_NO_UPDATE|HAI_ENV_READY|HAI_GATEWAY_APIM_KEY|AGENT_HUB_MODEL_ROUTE|AWS_BEARER_TOKEN_BEDROCK|CLAUDE_CODE_OAUTH_TOKEN|CLAUDE_CODE_USE_BEDROCK|CLAUDE_CODE_SKIP_BEDROCK_AUTH|CLAUDE_CODE_API_KEY_HELPER_TTL_MS|AWS_REGION|ANTHROPIC_BEDROCK_BASE_URL|ANTHROPIC_CUSTOM_HEADERS|ANTHROPIC_DEFAULT_HAIKU_MODEL|ANTHROPIC_DEFAULT_SONNET_MODEL|ANTHROPIC_DEFAULT_OPUS_MODEL|AGENT_HUB_CLAUDE_SETTINGS)=' | sort >"$FAKE_DIR/hai.env.$n"
 cp "$HOME/.claude/CLAUDE.md" "$FAKE_DIR/claude_md.seen.$n" 2>/dev/null
+# Tests wait for the argv file and then read the others, so it is written last.
+printf '%s\n' "$@" >"$FAKE_DIR/hai.argv.$n"
 if [ "$n" -eq 1 ] && [ -n "${FAKE_CLAUDE_EXIT_FIRST:-}" ]; then "$REAL_SLEEP" 2; exit 0; fi
 exec "$REAL_SLEEP" 1000
 EOF
