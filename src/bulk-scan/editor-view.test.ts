@@ -5,10 +5,9 @@ const record = (spec: unknown) => ({ id: "i", name: "T", version: 2, spec, versi
 const good = { form: { name: "T", formType: "T" }, sections: [{ id: "1", title: "", fields: [{ id: "1", keys: ["k"], mandatory: "mandatory" }] }] };
 
 describe("editor view", () => {
-  it("should carry the spec with its notes, scenarios, keys and sample", () => {
+  it("should carry the spec with its scenarios, keys and sample", () => {
     const view = bulkScanEditorView(record(good));
     expect(view).toMatchObject({ id: "i", version: 2, keys: ["k"] });
-    expect(view.notes).toHaveLength(1);
     expect(view.scenarios.map((s) => s.name)).toContain("valid");
     expect(view.sample).toHaveProperty("k");
     expect(view.targets).toContain("nfdiv");

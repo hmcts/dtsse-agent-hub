@@ -264,10 +264,6 @@ const VIEW: BulkScanEditorView = {
     pageOrder: [],
     expectedDocuments: []
   },
-  notes: [
-    { rules: "If a = true then kind = x", casePath: "1 success", allowed: ["a: true | false"] },
-    { rules: "", casePath: "", allowed: [] }
-  ],
   versions: [{ ...VERSIONS[1]!, signedOffBy: null, signedOffAt: null }],
   scenarios: [],
   keys: [],
@@ -277,17 +273,15 @@ const VIEW: BulkScanEditorView = {
 };
 
 describe("bulk scan editor", () => {
-  it("should show each field's rules, group, allowed values, TODOs and review markers", () => {
+  it("should show each field's group, allowed values, TODOs and review markers", () => {
     render(<BulkScanEditor view={VIEW} signOff={vi.fn()} />);
 
-    expect(screen.getByText("If a = true then kind = x")).toBeTruthy();
     expect(screen.getByText("decide the outcome")).toBeTruthy();
-    expect(screen.getByText(/Check the group \(low confidence\)/)).toBeTruthy();
-    expect(screen.getByText("a, b")).toBeTruthy();
-    expect(screen.getByText("a: true | false")).toBeTruthy();
-    expect(screen.getByText("joint")).toBeTruthy();
+    expect(screen.getAllByText(/Check the group \(low confidence\)/).length).toBeGreaterThan(0);
+    expect((screen.getByLabelText(/keys of 1.1 are a mutually exclusive group/) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText("Allowed values of a in 1.1") as HTMLTextAreaElement).value).toBe("true\nfalse");
+    expect(screen.getByText(/The sheet says "joint"/)).toBeTruthy();
     expect(screen.getByRole("heading", { name: /Review checklist \(1 guesses/ })).toBeTruthy();
-    expect(screen.queryByText(/Rules and notes for 1.2/)).toBeNull();
   });
 
   it("should save only after a change, as the next version, and go to it", async () => {
@@ -299,7 +293,9 @@ describe("bulk scan editor", () => {
     fireEvent.change(screen.getByLabelText("Label of 1.2"), { target: { value: "Full name" } });
     fireEvent.change(screen.getByLabelText("Maximum length of 1.2"), { target: { value: "40" } });
     fireEvent.change(screen.getByLabelText("Keys of 1.2"), { target: { value: "name, other" } });
+    fireEvent.blur(screen.getByLabelText("Keys of 1.2"));
     fireEvent.change(screen.getByLabelText("CCD ids of 1.2"), { target: { value: "ccdName" } });
+    fireEvent.blur(screen.getByLabelText("CCD ids of 1.2"));
     fireEvent.change(screen.getByLabelText("Form type (document_sub_type)"), { target: { value: "T2" } });
     fireEvent.click(save);
 
@@ -364,9 +360,10 @@ describe("typing into the editor", () => {
 
     await user.clear(keys);
     await user.type(keys, "name, other");
+    expect(keys.value).toBe("name, other");
     await user.type(screen.getByLabelText("CCD ids of 1.2"), "ccdA ccdB");
 
-    expect(keys.value).toBe("name, other");
+    expect(keys.value).toBe("name other");
     expect((screen.getByLabelText("CCD ids of 1.2") as HTMLInputElement).value).toBe("ccdA ccdB");
     await user.click(screen.getByRole("button", { name: "Save as a new version" }));
     const field = JSON.parse(fetchMock.mock.calls[0]?.[1].body).spec.sections[0].fields[1];

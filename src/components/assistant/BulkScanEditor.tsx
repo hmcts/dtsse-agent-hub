@@ -3,13 +3,13 @@
 import type { FormSpec } from "@hmcts-cft/bulk-scan-spec";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { type FieldPatch, issuesByField, patchField, patchHeader, reviewChecklist } from "@/bulk-scan/edit";
+import { clearReview, issuesByField, patchHeader, reviewChecklist } from "@/bulk-scan/edit";
 import type { BulkScanEditorView } from "@/bulk-scan/editor-view";
 import { BulkScanDownloads } from "@/components/assistant/BulkScanDownloads";
 import { BulkScanFields } from "@/components/assistant/BulkScanFields";
 import { BulkScanSimulator } from "@/components/assistant/BulkScanSimulator";
 import { BulkScanVersions, type SignOffAction } from "@/components/assistant/BulkScanVersions";
-import { FIELD, PRIMARY } from "@/components/assistant/WelshParts";
+import { FIELD, PRIMARY, SECONDARY } from "@/components/assistant/WelshParts";
 
 /**
  * One spec: its form details, its fields, a save that makes the next version, and below those the simulator, the
@@ -23,13 +23,16 @@ export function BulkScanEditor({ view, signOff }: Readonly<{ view: BulkScanEdito
   const [saving, setSaving] = useState(false);
   const [problems, setProblems] = useState<ReturnType<typeof issuesByField>>({ fields: new Map(), form: [] });
   const [error, setError] = useState<string | null>(null);
-  const checklist = reviewChecklist(view.spec);
+  const checklist = reviewChecklist(spec);
   const latest = Math.max(...view.versions.map((v) => v.version));
   const superseded = view.version !== latest;
 
-  function change(next: FormSpec): void {
+  function change(next: FormSpec, moved = false): void {
     setSpec(next);
     setDirty(true);
+    if (moved) {
+      setProblems({ fields: new Map(), form: problems.form });
+    }
   }
 
   async function save(): Promise<void> {
@@ -82,11 +85,16 @@ export function BulkScanEditor({ view, signOff }: Readonly<{ view: BulkScanEdito
             {`Review checklist (${checklist.length} guesses, lowest confidence first)`}
           </h2>
           <p className="text-[13px] text-asst-body">
-            Each of these was guessed from the PDF. The mandatory column, validation and rules are not proposed at all.
+            Each of these was guessed from the PDF. The mandatory column, validation and rules are not proposed at all. Mark one done once you have checked it.
           </p>
-          <ul className="flex max-h-[240px] list-disc flex-col gap-0.5 overflow-y-auto pl-5 text-[13px]">
+          <ul className="flex max-h-[240px] list-disc flex-col gap-1 overflow-y-auto pl-5 text-[13px]">
             {checklist.map((line) => (
-              <li key={`${line.at}-${line.about}-${line.reason}`}>{`[${line.confidence}] ${line.where}: ${line.about}, ${line.reason}`}</li>
+              <li key={`${line.at}-${line.about}-${line.reason}`}>
+                {`[${line.confidence}] ${line.where}: ${line.about}, ${line.reason} `}
+                <button type="button" className={SECONDARY} onClick={() => change(clearReview(spec, line.section, line.field, line.index))}>
+                  {`Done: ${line.where} ${line.about}`}
+                </button>
+              </li>
             ))}
           </ul>
         </section>
@@ -97,15 +105,9 @@ export function BulkScanEditor({ view, signOff }: Readonly<{ view: BulkScanEdito
           Fields
         </h2>
         <p className="text-pretty text-[13px] text-asst-body">
-          Change a field in its row, then save a new version. XoR groups, allowed values and rules are shown under each field as the transformation sheet words
-          them, and are not edited here.
+          Change a field in its row and under it, add or move rows and sections, then save a new version.
         </p>
-        <BulkScanFields
-          spec={spec}
-          notes={view.notes}
-          issues={problems.fields}
-          onChange={(section: number, field: number, patch: FieldPatch) => change(patchField(spec, section, field, patch))}
-        />
+        <BulkScanFields spec={spec} issues={problems.fields} onSpec={change} />
         <div className="flex flex-wrap items-center gap-3">
           <button type="button" className={PRIMARY} disabled={saving || !dirty || superseded} onClick={() => void save()}>
             {saving ? "Saving…" : "Save as a new version"}

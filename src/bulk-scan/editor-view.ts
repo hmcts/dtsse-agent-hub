@@ -1,5 +1,5 @@
 import { type Data, type FormSpec, formSpecSchema, TARGETS, type Target, validData } from "@hmcts-cft/bulk-scan-spec";
-import { allNotes, envelopeKeys, type FieldNotes, type ScenarioEntry, scenarioEntries } from "./spec.ts";
+import { envelopeKeys, type ScenarioEntry, scenarioEntries } from "./spec.ts";
 import type { SpecRecord, VersionEntry } from "./spec-store.ts";
 
 /** Everything the editor page draws for one version of a spec. */
@@ -8,8 +8,6 @@ export interface BulkScanEditorView {
   name: string;
   version: number;
   spec: FormSpec;
-  /** One per field in the order of the editor's rows. */
-  notes: FieldNotes[];
   versions: VersionEntry[];
   scenarios: ScenarioEntry[];
   keys: string[];
@@ -33,5 +31,5 @@ export function bulkScanEditorView(record: SpecRecord): BulkScanEditorView {
   } catch (error) {
     simulator = { scenarios: [], keys: [], sample: {}, simulatorProblem: error instanceof Error ? error.message : String(error) };
   }
-  return { id: record.id, name: record.name, version: record.version, spec, notes: allNotes(spec), versions: record.versions, targets: TARGETS, ...simulator };
+  return { id: record.id, name: record.name, version: record.version, spec, versions: record.versions, targets: TARGETS, ...simulator };
 }
