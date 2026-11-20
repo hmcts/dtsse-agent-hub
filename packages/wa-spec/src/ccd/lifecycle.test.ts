@@ -35,17 +35,29 @@ describe("readCcdDefinition", () => {
     expect(() => readCcdDefinition({ CaseType: [{ ID: "X" }], CaseEvent: [row, row] })).toThrow("event e of X is defined more than once");
   });
 
+  it("should read Publish as true when it is Y, Yes or True in any case", () => {
+    const read = (Publish: string) =>
+      readCcdDefinition({ CaseType: [{ ID: "X" }], CaseEvent: [{ CaseTypeID: "X", ID: "e", PostConditionState: "S", Publish }] })[0]?.events[0]?.publish;
+    expect([read("Y"), read("True"), read("yes"), read("N"), read("False")]).toEqual([true, true, true, false, false]);
+  });
+
+  it("should keep a * beside named post-states as the case staying put", () => {
+    const [only] = readCcdDefinition({ CaseType: [{ ID: "X" }], CaseEvent: [{ CaseTypeID: "X", ID: "e", PostConditionState: 'Paid(paid="Yes"):1;*' }] });
+    expect(only?.events[0]).toMatchObject({ postState: "Paid", otherPostStates: ["*"] });
+    expect(only?.events[0]?.postStateFromCallback).toBeUndefined();
+  });
+
   it("should read nothing when the sheets are absent", () => {
     expect(readCcdDefinition({})).toEqual([]);
   });
 
-  it("should name a state and an event by its id when it has no name", () => {
+  it("should name a state and an event by its id, and leave its post-state to the callback, when it has no name or post-state", () => {
     const [only] = readCcdDefinition({
       CaseType: [{ ID: "X" }],
       State: [{ CaseTypeID: "X", ID: "S" }],
       CaseEvent: [{ CaseTypeID: "X", ID: "e", PostConditionState: "" }]
     });
     expect(only?.states).toEqual([{ id: "S", name: "S" }]);
-    expect(only?.events).toEqual([{ id: "e", name: "e", preStates: [], postState: "*", publish: false }]);
+    expect(only?.events).toEqual([{ id: "e", name: "e", preStates: [], postState: "*", postStateFromCallback: true, publish: false }]);
   });
 });

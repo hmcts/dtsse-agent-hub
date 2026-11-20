@@ -8,7 +8,8 @@ export interface LifecycleOptions {
   definitionDir: string;
   specPath: string;
   caseType?: string | undefined;
-  environment?: "prod" | "nonprod" | undefined;
+  /** The processor's `-e` patterns; `*-prod.json` (ET's non-production build) when none are given. */
+  exclude?: readonly string[] | undefined;
   format?: "yaml" | "json" | undefined;
 }
 
@@ -19,7 +20,10 @@ export interface LifecycleOptions {
 export function lifecycleReport(options: LifecycleOptions): string {
   const spec = loadSpecOnly(options.specPath);
   const wanted = options.caseType?.toLowerCase();
-  const lifecycles = readCcdDefinition(readDefinitionDir(options.definitionDir, options.environment)).filter((l) => {
+  if (wanted && !spec.caseTypes.some((c) => c.id.toLowerCase() === wanted)) {
+    throw new Error(`the spec does not list the case type ${options.caseType}`);
+  }
+  const lifecycles = readCcdDefinition(readDefinitionDir(options.definitionDir, options.exclude)).filter((l) => {
     const id = l.caseType.toLowerCase();
     return wanted ? id === wanted : spec.caseTypes.some((c) => c.id.toLowerCase() === id);
   });

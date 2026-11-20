@@ -1,5 +1,6 @@
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { ENVIRONMENT_EXCLUDES } from "./ccd/definition-files.ts";
 import { lifecycleReport } from "./ccd/lifecycle-command.ts";
 import { diffPaths, renderDifferences } from "./diff.ts";
 import { exists, listDir, readText, writeText } from "./file-io.ts";
@@ -30,7 +31,9 @@ const USAGE = `wa-spec: Work Allocation configuration spec
                                                  a file of the same name; exits 1 when they differ. Two YAML files
                                                  (specs or models) are compared as specs
   wa-spec show <spec.yaml|model.yaml> <taskId>   the rows of every kind that concern one task
-  wa-spec lifecycle <definition-dir> --spec <spec.yaml|model.yaml> [--case-type X] [--env prod|nonprod] [--format yaml|json]
+  wa-spec lifecycle <definition-dir> --spec <spec.yaml|model.yaml> [--case-type X] [--env prod|nonprod | --exclude <glob,...>] [--format yaml|json]
+                                                 <definition-dir> is the processor's -D root, with a folder or file per sheet; --exclude is its -e
+                                                 (repeatable or comma separated, matched per path segment), --env gives ET's
                                                  the spec's tasks laid over the case lifecycle of a CCD definition (JSON sheets), with
                                                  warnings for what the definition cannot back
 `;
@@ -56,6 +59,7 @@ function main(argv: string[]): number {
       spec: { type: "string" },
       "case-type": { type: "string" },
       env: { type: "string" },
+      exclude: { type: "string", multiple: true },
       format: { type: "string" }
     }
   });
@@ -179,12 +183,24 @@ function main(argv: string[]): number {
     if (!definitionDir || !values.spec) {
       fail(USAGE);
     }
+    if (
+      (values.env !== undefined && values.env !== "prod" && values.env !== "nonprod") ||
+      (values.format !== undefined && values.format !== "yaml" && values.format !== "json")
+    ) {
+      fail(`--env is prod or nonprod and --format is yaml or json\n${USAGE}`);
+    }
+    if (values.env !== undefined && values.exclude !== undefined) {
+      fail("--env and --exclude are alternatives");
+    }
+    const exclude =
+      values.exclude?.flatMap((patterns) => patterns.split(",").filter(Boolean)) ??
+      (values.env ? ENVIRONMENT_EXCLUDES[values.env as "prod" | "nonprod"] : undefined);
     process.stdout.write(
       lifecycleReport({
         definitionDir,
         specPath: values.spec,
         caseType: values["case-type"],
-        environment: values.env === "prod" ? "prod" : "nonprod",
+        exclude,
         format: values.format === "json" ? "json" : "yaml"
       })
     );

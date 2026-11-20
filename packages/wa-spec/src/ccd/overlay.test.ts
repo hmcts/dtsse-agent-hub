@@ -160,4 +160,52 @@ describe("overlayTasks", () => {
     });
     expect(overlayTasks(et, spec)).toEqual({ events: {}, warnings: [] });
   });
+
+  it("should read the event column under whichever spelling the spec's table uses", () => {
+    const spec = specWith({ completion: [{ when: { eventId: { in: ["preAcceptanceCase"] } }, returns: { taskType: "Et1Vetting" } }] });
+    expect(overlayTasks(et, spec).events.preAcceptanceCase?.completes).toEqual(["Et1Vetting"]);
+  });
+
+  it("should reach every state from an event whose post-state the callback chooses when a cancel event starts from a later state", () => {
+    const lifecycle: Lifecycle = {
+      caseType: "X",
+      states: ["A", "B"].map((id) => ({ id, name: id })),
+      events: [
+        { id: "start", name: "start", preStates: [], postState: "A", publish: true },
+        { id: "jump", name: "jump", preStates: ["A"], postState: "*", postStateFromCallback: true, publish: true },
+        { id: "stop", name: "stop", preStates: ["B"], postState: "A", publish: true }
+      ]
+    };
+    const spec = specWith(
+      {
+        initiation: [{ when: { eventId: { in: ["start"] } }, returns: { taskId: "T", processCategories: "C" } }],
+        cancellation: [{ when: { event: { in: ["stop"] } }, returns: { action: "Cancel", processCategories: "C" } }]
+      },
+      ["x"]
+    );
+    expect(overlayTasks(lifecycle, spec).warnings).toEqual([]);
+  });
+
+  it("should list a computed-category cancellation as a possible cancel of the tasks with computed categories and warn of nothing else", () => {
+    const spec = specWith({
+      initiation: [
+        { when: { eventId: { in: ["initiateCase"] } }, returns: { taskId: "Plain", processCategories: "Vetting" } },
+        { when: { eventId: { in: ["SUBMIT_CASE_DRAFT"] } }, returns: { taskId: "Referral", processCategories: { field: "CURRENT_REFERRAL" } } }
+      ],
+      cancellation: [{ when: { event: { in: ["disposeCase"] } }, returns: { action: "Cancel", processCategories: { feel: "x" } } }]
+    });
+    const { events, warnings } = overlayTasks(et, spec);
+    expect(events.disposeCase).toEqual({ creates: [], completes: [], cancels: [], reconfigures: [], mayCancel: ["Referral"] });
+    expect(warnings).toEqual([]);
+  });
+
+  it("should not warn that the state of a task's creation differs when the event may leave the case where it is", () => {
+    const lifecycle: Lifecycle = {
+      caseType: "X",
+      states: ["A", "B"].map((id) => ({ id, name: id })),
+      events: [{ id: "orders", name: "orders", preStates: ["A", "B"], postState: "B", otherPostStates: ["*"], publish: true }]
+    };
+    const spec = specWith({ initiation: [{ when: { eventId: { in: ["orders"] }, postEventState: { in: ["A"] } }, returns: { taskId: "T" } }] }, ["x"]);
+    expect(overlayTasks(lifecycle, spec).warnings).toEqual([]);
+  });
 });

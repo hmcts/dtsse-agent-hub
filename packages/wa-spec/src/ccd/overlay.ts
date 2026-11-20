@@ -1,5 +1,6 @@
 import { byCodePoint } from "../merge.ts";
-import type { Cell, Expr, Row, Spec } from "../schema.ts";
+import { withCanonicalEvent } from "../model-compile.ts";
+import type { Cell, Expr, Kind, Row, Spec } from "../schema.ts";
 import type { Lifecycle, LifecycleEvent } from "./lifecycle.ts";
 
 export interface EventTasks {
@@ -7,6 +8,8 @@ export interface EventTasks {
   completes: string[];
   cancels: string[];
   reconfigures: string[];
+  /** Tasks whose process category the spec computes, which a cancellation row with a computed category may cancel. */
+  mayCancel?: string[];
 }
 
 export interface Overlay {
@@ -38,7 +41,8 @@ function reachable(lifecycle: Lifecycle, start: string[]): Set<string> {
   for (let state = queue.shift(); state !== undefined; state = queue.shift()) {
     for (const event of lifecycle.events) {
       if (event.preStates === "*" || event.preStates.includes(state)) {
-        for (const next of [event.postState, ...(event.otherPostStates ?? [])]) {
+        const moves = event.postStateFromCallback ? lifecycle.states.map((s) => s.id) : [event.postState, ...(event.otherPostStates ?? [])];
+        for (const next of moves) {
           if (next !== "*" && !seen.has(next)) {
             seen.add(next);
             queue.push(next);
@@ -50,7 +54,10 @@ function reachable(lifecycle: Lifecycle, start: string[]): Set<string> {
   return seen;
 }
 
-const postStatesOf = (event: LifecycleEvent): string[] | "*" => (event.postState === "*" ? "*" : [event.postState, ...(event.otherPostStates ?? [])]);
+const postStatesOf = (event: LifecycleEvent): string[] | "*" => {
+  const all = [event.postState, ...(event.otherPostStates ?? [])];
+  return all.includes("*") ? "*" : all;
+};
 
 /**
  * Where each task of a spec's tables meets the lifecycle of one case type: the events that create, complete, cancel and
@@ -66,10 +73,14 @@ export function overlayTasks(lifecycle: Lifecycle, spec: Spec): Overlay {
   }
   const definedEvents = new Map(lifecycle.events.map((e) => [e.id, e]));
   const definedStates = new Set(lifecycle.states.map((s) => s.id));
-  const rowsOf = (kind: keyof Spec["decisions"]): Row[] => {
+  const rowsOf = (kind: Kind): Row[] => {
     const decision = spec.decisions[kind];
     const own = decision && (decision.only === undefined || decision.only.includes(caseType.id));
-    return own ? decision.rows.filter((row) => row.only === undefined || row.only.includes(caseType.id)) : [];
+    return own
+      ? decision.rows
+          .filter((row) => row.only === undefined || row.only.includes(caseType.id))
+          .map((row) => (row.when ? { ...row, when: withCanonicalEvent(kind, row.when) } : row))
+      : [];
   };
   const tasksOf = (event: string): EventTasks => (events[event] ??= { creates: [], completes: [], cancels: [], reconfigures: [] });
   const missingEvents = new Set<string>();
@@ -94,11 +105,15 @@ export function overlayTasks(lifecycle: Lifecycle, spec: Spec): Overlay {
   };
 
   const categories = new Map<string, string[]>();
+  const computedCategories = new Set<string>();
   const startStates = new Map<string, string[] | "*">();
   for (const row of rowsOf("initiation")) {
     const taskId = text(row.returns?.taskId);
     if (!taskId) {
       continue;
+    }
+    if (row.returns?.processCategories !== undefined && text(row.returns.processCategories) === undefined) {
+      computedCategories.add(taskId);
     }
     for (const category of categoriesOf(row.returns?.processCategories) ?? []) {
       categories.set(category, [...(categories.get(category) ?? []).filter((t) => t !== taskId), taskId]);
@@ -132,6 +147,18 @@ export function overlayTasks(lifecycle: Lifecycle, spec: Spec): Overlay {
     const ids = eventsIn(row.when?.event);
     statesIn(row.when?.fromState);
     statesIn(row.when?.state);
+    const computed = row.returns?.processCategories !== undefined && text(row.returns.processCategories) === undefined;
+    if (computed) {
+      for (const id of action === "Cancel" ? ids : []) {
+        const tasks = tasksOf(id);
+        const list = tasks.mayCancel ?? [];
+        tasks.mayCancel = list;
+        for (const taskId of computedCategories) {
+          addTo(list, taskId);
+        }
+      }
+      continue;
+    }
     const wanted = categoriesOf(row.returns?.processCategories);
     const affected = wanted ? [...new Set(wanted.flatMap((c) => categories.get(c) ?? []))] : taskIds;
     for (const id of ids) {
@@ -156,9 +183,11 @@ export function overlayTasks(lifecycle: Lifecycle, spec: Spec): Overlay {
   }
 
   for (const [id, tasks] of Object.entries(events)) {
-    const roles = (["creates", "completes", "cancels", "reconfigures"] as const).filter((role) => tasks[role].length > 0);
+    const roles = (["creates", "completes", "cancels", "reconfigures", "mayCancel"] as const).filter((role) => (tasks[role]?.length ?? 0) > 0);
     if (roles.length > 0 && !(definedEvents.get(id) as LifecycleEvent).publish) {
-      warnings.push(`${id} ${roles.join(" and ")} tasks but is not Publish: Y, so Work Allocation never sees it`);
+      warnings.push(
+        `${id} ${roles.map((r) => (r === "mayCancel" ? "may cancel" : r)).join(" and ")} tasks but is not Publish: Y, so Work Allocation never sees it`
+      );
     }
   }
   warnings.push(...[...missingEvents].map((e) => `the spec names the event ${e}, which ${lifecycle.caseType} does not define`));

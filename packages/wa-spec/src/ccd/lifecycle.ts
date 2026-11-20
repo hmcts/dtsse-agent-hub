@@ -11,9 +11,11 @@ export interface LifecycleEvent {
   name: string;
   /** The states the event can start from; empty for an event that creates the case. */
   preStates: string[] | "*";
-  /** The first post-state; a conditional post-state such as `Accepted(cond):1;Rejected` has the others in `otherPostStates`. */
+  /** The first post-state; a conditional post-state such as `Accepted(cond):1;Rejected` has the others in `otherPostStates`, where a `*` is the case staying in its state. */
   postState: string | "*";
   otherPostStates?: string[];
+  /** The definition names no post-state, as ccd-config-generator writes for `postStateFromCallback`: the about-to-submit callback chooses it, so it can be any state. */
+  postStateFromCallback?: true;
   /** Whether the event is `Publish: Y`, which is the only way Work Allocation sees it. */
   publish: boolean;
 }
@@ -48,10 +50,16 @@ const stateList = (text: string | undefined): string[] | "*" => {
   return states.includes("*") ? "*" : states;
 };
 
-/** A post-state may carry a condition and a priority, `Accepted(preAcceptCase.caseAccepted="Yes"):1`; the state is what precedes them. */
+/**
+ * A post-state may carry a condition and a priority, `Accepted(preAcceptCase.caseAccepted="Yes"):1`; the state is what precedes
+ * them. A `*` among other states is kept: the case may stay where it is.
+ */
 const postStates = (text: string | undefined): string[] | "*" => {
-  const listed = stateList(text);
-  return listed === "*" ? "*" : listed.map((s) => s.replace(/\(.*$/s, "").trim());
+  const listed = (text ?? "")
+    .split(";")
+    .map((s) => s.replace(/\(.*$/s, "").trim())
+    .filter(Boolean);
+  return listed.length === 0 || listed.every((s) => s === "*") ? "*" : listed;
 };
 
 /**
@@ -75,6 +83,7 @@ export function readCcdDefinition(files: Record<string, unknown>): Lifecycle[] {
     events: events
       .filter((e) => e.CaseTypeID === caseType)
       .map((e) => {
+        const fromCallback = (e.PostConditionState ?? "").trim() === "";
         const post = postStates(e.PostConditionState);
         const [first, ...others] = post === "*" ? ["*"] : post;
         return {
@@ -83,7 +92,8 @@ export function readCcdDefinition(files: Record<string, unknown>): Lifecycle[] {
           preStates: stateList(e["PreConditionState(s)"]),
           postState: first ?? "*",
           ...(others.length > 0 ? { otherPostStates: others } : {}),
-          publish: e.Publish?.trim().toUpperCase() === "Y"
+          ...(fromCallback ? { postStateFromCallback: true as const } : {}),
+          publish: ["Y", "YES", "TRUE"].includes(e.Publish?.trim().toUpperCase() ?? "")
         };
       })
   }));

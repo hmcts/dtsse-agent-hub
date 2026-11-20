@@ -1,30 +1,41 @@
-import { exists, isDirectory, listDir, readText } from "../file-io.ts";
+import { listEntries, readText } from "../file-io.ts";
 import { byCodePoint } from "../merge.ts";
 
 const SHEETS = new Set(["CaseType", "State", "CaseEvent"]);
 
-/** `CaseEvent-WA.json` and `CaseEvent/CaseEvent-WA.json` are both rows of the sheet `CaseEvent`. */
-const sheetOf = (fileName: string): string => fileName.replace(/\.json$/, "").split("-")[0] ?? "";
+/** The processor's exclusion patterns for each environment of a service that names its variants `-prod.json` and `-nonprod.json`, as ET does. */
+export const ENVIRONMENT_EXCLUDES = { nonprod: ["*-prod.json"], prod: ["*-nonprod.json"] } as const;
+
+/** A processor exclusion pattern: `*` stands for any run of characters, and the whole name must match. */
+const globToRegExp = (glob: string): RegExp => new RegExp(`^${glob.replace(/[.+^${}()|[\]\\?]/g, "\\$&").replaceAll("*", ".*")}$`, "i");
 
 /**
- * Reads the sheets a lifecycle needs from a definition directory, whether it is one directory per sheet holding one or more
- * files (ET's `definitions/json`) or the files side by side or per case type (what ccd-config-generator writes). Given a service repo's root it reads `definitions/json`, so the test fixtures a repo keeps elsewhere are not mistaken for sheets. A service that
- * keeps a `-prod` and a `-nonprod` file for the same sheet has one environment's files read.
+ * Reads the sheets a lifecycle needs from a definition directory the way ccd-definition-processor's `json2xlsx -D <dir>` reads
+ * them: every `.json` file below the directory belongs to the sheet named by the first folder of its path, or by its own name
+ * for a file directly in the directory, and a sheet's files are concatenated, a file holding one object being one row. A file is left out when any segment of its path
+ * matches one of the exclusion patterns (`-e` of the processor, matched per segment). Symlinks are not followed.
+ * `dir` must be the definition root, the processor's `-D`.
  */
-export function readDefinitionDir(dir: string, environment: "prod" | "nonprod" = "nonprod"): Record<string, unknown[]> {
-  const other = environment === "prod" ? "-nonprod.json" : "-prod.json";
+export function readDefinitionDir(dir: string, exclude: readonly string[] = ENVIRONMENT_EXCLUDES.nonprod): Record<string, unknown[]> {
+  const excluded = exclude.map(globToRegExp);
   const sheets: Record<string, unknown[]> = {};
-  const walk = (path: string): void => {
-    for (const name of listDir(path).sort(byCodePoint)) {
-      const child = `${path}/${name}`;
-      if (isDirectory(child)) {
-        walk(child);
-      } else if (name.endsWith(".json") && !name.endsWith(other) && SHEETS.has(sheetOf(name))) {
-        const rows: unknown = JSON.parse(readText(child));
-        sheets[sheetOf(name)] = [...(sheets[sheetOf(name)] ?? []), ...(Array.isArray(rows) ? rows : [])];
+  const walk = (path: string, segments: string[]): void => {
+    for (const { name, kind } of listEntries(path).sort((a, b) => byCodePoint(a.name, b.name))) {
+      const below = [...segments, name];
+      if (excluded.some((pattern) => below.some((segment) => pattern.test(segment)))) {
+        continue;
+      }
+      if (kind === "dir") {
+        walk(`${path}/${name}`, below);
+      } else if (kind === "file" && name.endsWith(".json")) {
+        const sheet = (below[0] as string).replace(/\.json$/, "");
+        if (SHEETS.has(sheet)) {
+          const rows: unknown = JSON.parse(readText(`${path}/${name}`));
+          sheets[sheet] = [...(sheets[sheet] ?? []), ...(Array.isArray(rows) ? rows : [rows])];
+        }
       }
     }
   };
-  walk(exists(`${dir}/definitions/json`) ? `${dir}/definitions/json` : dir);
+  walk(dir, []);
   return sheets;
 }

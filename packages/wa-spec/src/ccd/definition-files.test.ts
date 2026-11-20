@@ -1,9 +1,9 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ET_SHEETS } from "./__fixtures__/et-sheets.ts";
-import { readDefinitionDir } from "./definition-files.ts";
+import { ENVIRONMENT_EXCLUDES, readDefinitionDir } from "./definition-files.ts";
 import { readCcdDefinition } from "./lifecycle.ts";
 import { lifecycleReport } from "./lifecycle-command.ts";
 
@@ -31,7 +31,7 @@ describe("readDefinitionDir", () => {
     expect(Object.keys(sheets).sort()).toEqual(["CaseEvent", "CaseType", "State"]);
     expect(sheets.CaseEvent?.map((e) => (e as { ID: string }).ID)).toContain("nonprodOnly");
     expect(sheets.CaseEvent?.map((e) => (e as { ID: string }).ID)).not.toContain("prodOnly");
-    expect(readDefinitionDir(etLayout(), "prod").CaseEvent?.map((e) => (e as { ID: string }).ID)).toContain("prodOnly");
+    expect(readDefinitionDir(etLayout(), ENVIRONMENT_EXCLUDES.prod).CaseEvent?.map((e) => (e as { ID: string }).ID)).toContain("prodOnly");
   });
 
   it("should read the published row of an event when its prod and nonprod rows sit in different files", () => {
@@ -40,17 +40,44 @@ describe("readDefinitionDir", () => {
     write(dir, "CaseType/CaseType.json", ET_SHEETS.CaseType);
     write(dir, "CaseEvent/CaseEvent-prod.json", [{ ...row, Publish: "Y" }]);
     write(dir, "CaseEvent/CaseEvent-RetainAndDispose-nonprod.json", [row]);
-    const published = (environment: "prod" | "nonprod") => readCcdDefinition(readDefinitionDir(dir, environment))[0]?.events.map((e) => [e.id, e.publish]);
+    const published = (environment: "prod" | "nonprod") =>
+      readCcdDefinition(readDefinitionDir(dir, ENVIRONMENT_EXCLUDES[environment]))[0]?.events.map((e) => [e.id, e.publish]);
     expect(published("prod")).toEqual([["disposeCase", true]]);
     expect(published("nonprod")).toEqual([["disposeCase", false]]);
   });
 
-  it("should read sheets that sit beside each other under a case type directory when they are config-generator output", () => {
-    const dir = mkdtempSync(join(tmpdir(), "wa-spec-gen-"));
-    write(dir, "ET_EnglandWales/State.json", ET_SHEETS.State);
-    write(dir, "ET_EnglandWales/CaseEvent.json", ET_SHEETS.CaseEvent);
+  it("should name a sheet by the first folder of a file's path when the files sit in subfolders, as the processor does", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wa-spec-sub-"));
     write(dir, "CaseType.json", ET_SHEETS.CaseType);
-    expect(Object.keys(readDefinitionDir(dir)).sort()).toEqual(["CaseEvent", "CaseType", "State"]);
+    write(dir, "State.json", ET_SHEETS.State);
+    write(dir, "CaseEvent/Camunda/NotificationEventsHearing.json", ET_SHEETS.CaseEvent.slice(0, 3));
+    write(dir, "CaseEvent/User/Events.json", ET_SHEETS.CaseEvent.slice(3));
+    write(dir, "CaseEvent/User/One.json", { CaseTypeID: "ET_EnglandWales", ID: "single" });
+    write(dir, "Other/CaseEvent.json", [{ ID: "ignored" }]);
+    const sheets = readDefinitionDir(dir);
+    expect(Object.keys(sheets).sort()).toEqual(["CaseEvent", "CaseType", "State"]);
+    expect(sheets.CaseEvent).toHaveLength(ET_SHEETS.CaseEvent.length + 1);
+  });
+
+  it("should leave out a file when any segment of its path matches an exclusion pattern", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wa-spec-ex-"));
+    write(dir, "CaseEvent/a.json", [{ ID: "a" }]);
+    write(dir, "CaseEvent/b-preview.json", [{ ID: "b" }]);
+    write(dir, "CaseEvent/c-ignore.json", [{ ID: "c" }]);
+    write(dir, "CaseEvent/skipped-dir/d.json", [{ ID: "d" }]);
+    write(dir, "CaseEvent/UserProfile.json", [{ ID: "e" }]);
+    const ids = (exclude: string[]) => (readDefinitionDir(dir, exclude).CaseEvent as Array<{ ID: string }>).map((r) => r.ID);
+    expect(ids(["*-preview.json", "*-ignore.json", "skipped-dir", "USERPROFILE.json"])).toEqual(["a"]);
+    expect(ids([])).toEqual(["e", "a", "b", "c", "d"]);
+  });
+
+  it("should not follow a symlink when walking the definition", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wa-spec-link-"));
+    const outside = mkdtempSync(join(tmpdir(), "wa-spec-outside-"));
+    write(outside, "CaseEvent.json", [{ ID: "outside" }]);
+    write(dir, "CaseType.json", ET_SHEETS.CaseType);
+    symlinkSync(outside, join(dir, "CaseEvent"));
+    expect(Object.keys(readDefinitionDir(dir))).toEqual(["CaseType"]);
   });
 });
 
@@ -93,6 +120,6 @@ decisions:
   it("should fail when the definition has no case type the spec lists or the one named", () => {
     const dir = etLayout();
     expect(() => lifecycleReport({ definitionDir: dir, specPath: specPath(dir, ["other"]) })).toThrow("none of the spec's case types");
-    expect(() => lifecycleReport({ definitionDir: dir, specPath: specPath(dir, ["other"]), caseType: "nope" })).toThrow("no case type nope");
+    expect(() => lifecycleReport({ definitionDir: dir, specPath: specPath(dir, ["other"]), caseType: "nope" })).toThrow("does not list the case type nope");
   });
 });
