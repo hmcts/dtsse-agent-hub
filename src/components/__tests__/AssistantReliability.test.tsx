@@ -53,6 +53,11 @@ describe("actionThrew", () => {
     expect(actionThrew(new Error("fetch failed"))).toBe(ACTION_UNREACHABLE);
     expect(actionThrew("not an error")).toBe(ACTION_UNREACHABLE);
   });
+
+  it("should say the caller's own words for the connection when it has them, and still ask for a reload after a deploy", () => {
+    expect(actionThrew(new Error("fetch failed"), "The chat could not be sent.")).toBe("The chat could not be sent.");
+    expect(actionThrew(new Error("This request might be from an older or newer deployment."), "The chat could not be sent.")).toBe(ACTION_STALE_PAGE);
+  });
 });
 
 describe("Composer when the send throws", () => {

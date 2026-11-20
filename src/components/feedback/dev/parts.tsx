@@ -4,7 +4,7 @@ import { useEffect, useId, useState } from "react";
 import { MIN_PEOPLE_QUERY } from "@/access/rules";
 import { useSuggestions } from "@/components/useSuggestions";
 import type { ActionResult } from "@/web/action";
-import { ACTION_UNREACHABLE } from "@/web/action-fault";
+import { actionThrew } from "@/web/action-fault";
 import { FIELD, SECONDARY } from "./look";
 
 /** The interactive pieces the team's feedback pages share: the page's origin, actions, copying and the people picker. */
@@ -23,12 +23,12 @@ export function useOrigin(given?: string): string {
   return origin;
 }
 
-/** Calls a server action, turning a rejection (the network, not a refusal) into the sentence every action uses. */
+/** Calls a server action, turning a rejection (the network or a page from before a deploy, not a refusal) into the sentence every action uses. */
 export async function call<T extends object>(action: () => Promise<ActionResult<T>>): Promise<ActionResult<T>> {
   try {
     return await action();
-  } catch {
-    return { ok: false, error: ACTION_UNREACHABLE };
+  } catch (thrown) {
+    return { ok: false, error: actionThrew(thrown) };
   }
 }
 

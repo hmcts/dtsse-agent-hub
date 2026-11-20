@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useDismiss } from "@/components/assistant/useDismiss";
 import { moveFocusInMenu } from "@/components/assistant/useMenuButton";
-import { ACTION_STALE_PAGE, isStalePage } from "@/web/action-fault";
+import { actionThrew } from "@/web/action-fault";
 
 const TRIGGER = "flex h-[34px] w-[34px] items-center justify-center rounded-[9px] text-lg text-asst-muted hover:bg-asst-field hover:text-asst-text";
 
@@ -180,7 +180,7 @@ export function ChatMenu({
     try {
       await work();
     } catch (error) {
-      setProblem(isStalePage(error) ? ACTION_STALE_PAGE : UNREACHABLE(what));
+      setProblem(actionThrew(error, UNREACHABLE(what)));
       return;
     } finally {
       busy.current = false;

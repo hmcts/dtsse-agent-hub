@@ -5,7 +5,7 @@ import { panelPlacement, UNREACHABLE } from "@/components/assistant/ChatMenu";
 import { useDismiss } from "@/components/assistant/useDismiss";
 import { reviewPath } from "@/components/feedback/dev/look";
 import { ARCHIVED_PROJECT_DAYS } from "@/feedback/limits";
-import { ACTION_STALE_PAGE, isStalePage } from "@/web/action-fault";
+import { actionThrew } from "@/web/action-fault";
 
 const NOT_COPIED = "the link could not be copied; open the project to copy it from there";
 
@@ -68,7 +68,7 @@ export function FeedbackMenu({
     try {
       await work();
     } catch (error) {
-      setProblem(isStalePage(error) ? ACTION_STALE_PAGE : UNREACHABLE(what));
+      setProblem(actionThrew(error, UNREACHABLE(what)));
       return;
     }
     close();

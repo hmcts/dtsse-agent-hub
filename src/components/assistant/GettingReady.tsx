@@ -50,7 +50,7 @@ import type { CredentialStatus } from "@/credentials/store";
 import type { VirtualAgentStatus } from "@/virtual-agents/lifecycle";
 import type { LoginView } from "@/virtual-agents/logins";
 import type { ActionResult } from "@/web/action";
-import { ACTION_UNREACHABLE } from "@/web/action-fault";
+import { actionThrew } from "@/web/action-fault";
 
 const INPUT =
   "min-w-0 flex-1 rounded-lg border border-asst-strong bg-asst-field px-2.5 py-1.5 font-plex-mono text-sm text-asst-text outline-hidden focus:border-asst-accent-line";
@@ -805,8 +805,8 @@ export function StartButton({ start, label, className }: { start: () => Promise<
       if (!result.ok) {
         setError(result.error);
       }
-    } catch {
-      setError(ACTION_UNREACHABLE);
+    } catch (thrown) {
+      setError(actionThrew(thrown));
     } finally {
       setPending(false);
     }
