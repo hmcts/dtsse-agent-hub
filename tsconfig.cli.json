@@ -15,5 +15,5 @@
     "paths": {}
   },
   "include": ["src/cli/**/*.ts"],
-  "exclude": ["node_modules", "**/*.test.ts", "**/__tests__/**"]
+  "exclude": ["node_modules", "src/cli/wa-seed.ts", "**/*.test.ts", "**/__tests__/**"]
 }

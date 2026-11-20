@@ -36,6 +36,7 @@
     "typecheck": "tsc --noEmit && tsc -p tsconfig.cli.json --noEmit && tsc -p tsconfig.e2e.json --noEmit && yarn workspace @hmcts-cft/agent-hub run typecheck && yarn workspace @hmcts-cft/wa-spec run typecheck",
     "db:generate": "prisma generate",
     "db:migrate": "tsx src/cli/migrate.ts",
+    "wa:seed": "tsx src/cli/wa-seed.ts",
     "db:studio": "prisma studio",
     "e2e:browser": "playwright install chromium",
     "test:e2e": "yarn e2e:browser && playwright test --config test/e2e/playwright.config.ts"
@@ -46,6 +47,7 @@
     "@azure/storage-blob": "12.34.0",
     "@hmcts-cft/cloud-native-platform": "2.3.0",
     "@hmcts-cft/notify-tools": "0.1.0",
+    "@hmcts-cft/wa-spec": "workspace:*",
     "@prisma/adapter-pg": "7.10.1",
     "@prisma/client": "7.10.1",
     "@rrweb/record": "2.2.2",
