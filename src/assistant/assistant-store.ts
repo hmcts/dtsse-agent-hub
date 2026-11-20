@@ -1,6 +1,7 @@
 import type { PodClaims } from "../agents/client-features.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import type { ModelRoute } from "../viewer/identity.ts";
+import { retryVirtualAgent } from "../virtual-agents/start.ts";
 import { createVirtualAgent, findVirtualAgent, setDesired, type VirtualAgentRow } from "../virtual-agents/store.ts";
 
 const ASSISTANT_NAME = "assistant";
@@ -36,9 +37,9 @@ async function freeName(db: Database, ownerOid: string): Promise<string> {
 }
 
 /**
- * The virtual agent the person's Assistant runs on: their first, created as `assistant` when they have none, and
- * started whenever they come back to it stopped, so the pod is warming up while they sign in or type. It is an
- * ordinary virtual agent and counts towards their limit. Two tabs racing to create one are settled by the unique
+ * The virtual agent the person's Assistant runs on: their first, created as `assistant` when they have none, which
+ * starts it. One they have is returned as it is, stopped or not: `wakeAssistant` starts it again, for something they
+ * did. It is an ordinary virtual agent and counts towards their limit. Two tabs racing to create one are settled by the unique
  * name: the loser reads the winner's.
  */
 export async function ensureAssistant(prisma: PrismaClient, owner: { oid: string; modelRoute: ModelRoute }): Promise<VirtualAgentRow> {
@@ -60,7 +61,10 @@ export async function ensureAssistantWithClaims(
   const existing = await findAssistantWithClaims(prisma, owner.oid);
   if (existing !== undefined) {
     const { assistant, claims } = existing;
-    return { assistant: assistant.desired === "stopped" ? await setDesired(prisma, owner.oid, assistant.id, "running") : assistant, claims };
+    // As it is: a page being read is not the person asking for their assistant, and an open tab is read again on
+    // every change to it, the sweep's stops included. A stopped one stays stopped until they send, focus the message
+    // box or press Start, each of which goes through `wakeAssistant`.
+    return { assistant, claims };
   }
   try {
     return { assistant: await createVirtualAgent(prisma, { owner, modelRoute: owner.modelRoute, name: await freeName(prisma, owner.oid) }), claims: NO_CLAIMS };
@@ -71,4 +75,28 @@ export async function ensureAssistantWithClaims(
     }
     throw error;
   }
+}
+
+/** What waking the assistant did: started a stopped one, restarted a failed one, or nothing for one already on its way. */
+export type WakeOutcome = "started" | "restarted" | "already";
+
+/**
+ * Brings the person's assistant back for something they did: a stopped one is started, and a failed one restarted,
+ * since a failure leaves it meant to be running and nothing else would ever try it again. Anything else is already
+ * running or on its way, and is left alone.
+ */
+export async function wakeAssistant(
+  prisma: PrismaClient,
+  ownerOid: string,
+  assistant: { id: string; desired: string; status: string },
+  now: Date = new Date()
+): Promise<WakeOutcome> {
+  if (assistant.desired === "stopped") {
+    await setDesired(prisma, ownerOid, assistant.id, "running", now);
+    return "started";
+  }
+  if (assistant.desired === "running" && assistant.status === "failed" && (await retryVirtualAgent(prisma, ownerOid, assistant.id, now))) {
+    return "restarted";
+  }
+  return "already";
 }

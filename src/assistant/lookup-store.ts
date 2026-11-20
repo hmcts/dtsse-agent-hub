@@ -5,8 +5,7 @@ import { isUuid } from "../agents/store.ts";
 import type { EventHub } from "../realtime/hub.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
-import { setDesired } from "../virtual-agents/store.ts";
-import { findAssistantWithClaims } from "./assistant-store.ts";
+import { findAssistantWithClaims, wakeAssistant } from "./assistant-store.ts";
 import {
   checkResults,
   isGithubKind,
@@ -40,8 +39,8 @@ export interface LookupQuestion {
 export type Asked = { lookupId: string; virtualAgentId: string } | { answer: LookupResponse };
 
 /**
- * Records the question for the viewer's own assistant and tells its pod. A stopped assistant is started rather than
- * asked, and a pod whose client cannot answer is not sent a frame nobody would read: a GitHub search needs
+ * Records the question for the viewer's own assistant and tells its pod. A stopped assistant is started, and a failed
+ * one tried again, rather than asked, and a pod whose client cannot answer is not sent a frame nobody would read: a GitHub search needs
  * `github-lookups` as well, which a client that knows only the Atlassian kinds does not claim.
  */
 export async function askLookup(prisma: PrismaClient, question: LookupQuestion, now: Date = new Date()): Promise<Asked> {
@@ -50,8 +49,9 @@ export async function askLookup(prisma: PrismaClient, question: LookupQuestion, 
     throw new HttpError(404, "you have no assistant to search with yet");
   }
   const { assistant, claims } = found;
-  if (assistant.desired === "stopped") {
-    await setDesired(prisma, question.viewerOid, assistant.id, "running", now);
+  // A failed one is tried again as a stopped one is started: otherwise the picker would say it was waking for ever.
+  if (assistant.desired === "stopped" || assistant.status === "failed") {
+    await wakeAssistant(prisma, question.viewerOid, assistant, now);
     return { answer: { status: "waking" } };
   }
   const gate = podGate({ status: assistant.status, ...claims }, isGithubKind(question.kind) ? "github-lookups" : "lookups");

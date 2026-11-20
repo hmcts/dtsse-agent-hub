@@ -1,5 +1,6 @@
 import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
+import { STALLED_UPLOAD_MS } from "./upload-store.ts";
 
 /**
  * The one thing that stops Postgres filling with upload bytes, and that tidies away the conversations attaching a
@@ -56,7 +57,8 @@ export interface UploadSweepResult {
 }
 
 /**
- * Deletes the parts of a batch of the uploads older than `retentionHours`, and marks those uploads `expired`. Nothing
+ * Deletes the parts of a batch of the uploads older than `retentionHours`, or still arriving but with no part for
+ * `STALLED_UPLOAD_MS`, and marks those uploads `expired`. Nothing
  * is announced: a page showing the chip keeps it, which is right — the file was attached, and the chip works out for
  * itself when the window closes.
  *
@@ -80,8 +82,9 @@ export async function sweepUploads(prisma: PrismaClient, options: UploadSweepOpt
     const stale = await tx.$queryRaw<{ id: string }[]>`
       SELECT id::text AS id
         FROM assistant_upload
-       WHERE state IN ('pending', 'stored', 'fetched')
-         AND created_at < now() - make_interval(hours => ${retentionHours}::int)
+       WHERE (state IN ('pending', 'stored', 'fetched') AND created_at < now() - make_interval(hours => ${retentionHours}::int))
+          -- Half-sent and gone quiet: a tab that closed mid-upload, whose file would otherwise hold a place for hours.
+          OR (state = 'pending' AND updated_at < now() - make_interval(secs => ${STALLED_UPLOAD_MS / 1000}::int))
        ORDER BY created_at
        LIMIT ${batch}::int
     `;
@@ -89,8 +92,11 @@ export async function sweepUploads(prisma: PrismaClient, options: UploadSweepOpt
     let expired = 0;
     let parts = 0;
     if (ids.length > 0) {
-      parts = (await tx.assistantUploadPart.deleteMany({ where: { uploadId: { in: ids } } })).count;
+      // Expired first, which takes the uploads' rows: a part being written holds its upload's row, so this waits for
+      // it, and the delete that follows reads after it and takes its part with the rest. A part that comes after finds
+      // the upload expired and is refused (`putUploadPart`).
       expired = (await tx.assistantUpload.updateMany({ where: { id: { in: ids } }, data: { state: "expired", updatedAt: new Date() } })).count;
+      parts = (await tx.assistantUploadPart.deleteMany({ where: { uploadId: { in: ids } } })).count;
     }
     return { expired, parts, conversations: await dropAbandoned(tx, retentionHours, batch) };
   });
@@ -115,15 +121,16 @@ export async function sweepUploads(prisma: PrismaClient, options: UploadSweepOpt
  * - **No document.** The session may have written one before the person said anything.
  * - **Not a fork.** A copy of someone else's chat holds its words before anyone says anything in it, and the
  *   recipient chose to take it.
- * - **It was created longer ago than the retention window, and holds no upload newer than it.** The window follows
- *   the last thing the person actually did in the conversation rather than only when it was made, so attaching a
- *   second file hours later puts the clock back rather than leaving a live composer to be swept out from under them.
+ * - **It was created and last active longer ago than the retention window, and holds no upload newer than it.** The
+ *   window follows the last thing the person actually did in the conversation rather than only when it was made, so
+ *   attaching a second file hours later puts the clock back rather than leaving a live composer to be swept out from
+ *   under them.
  *
  * It deliberately does **not** require the conversation to still have an upload. Attaching a file and then removing
  * the chip deletes the upload row and leaves a conversation nothing else would ever collect; the same is true of a
  * `startConversation` whose first message failed after the row was created, which the new-chat screen does not reuse:
- * it keeps the draft, and the retry starts another conversation. An empty conversation is one nobody has said anything in, whatever route produced it, and
- * after the window it is rubbish either way.
+ * it keeps the draft, and the retry starts another conversation. An empty conversation is one nobody has said anything
+ * in, whatever route produced it, and after the window it is rubbish either way.
  */
 async function dropAbandoned(tx: Database, retentionHours: number, batch: number): Promise<number> {
   // `virtual_agent_id` is null for a conversation that is a local session, which this leaves alone; the column is
@@ -136,6 +143,7 @@ async function dropAbandoned(tx: Database, retentionHours: number, batch: number
        AND NOT EXISTS (SELECT 1 FROM assistant_document d WHERE d.conversation_id = c.id AND d.version > 0)
        AND c.forked_at IS NULL
        AND c.created_at < now() - make_interval(hours => ${retentionHours}::int)
+       AND c.last_active_at < now() - make_interval(hours => ${retentionHours}::int)
        AND NOT EXISTS (
              SELECT 1 FROM assistant_upload u
               WHERE u.conversation_id = c.id

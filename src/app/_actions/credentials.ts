@@ -4,8 +4,10 @@ import { revalidatePath } from "next/cache";
 import { credentialBackend } from "@/credentials/backend";
 import { isCredentialKind } from "@/credentials/names";
 import { deleteCredential, putCredential } from "@/credentials/store";
+import { isShortLivedGithubToken, SHORT_LIVED_GITHUB_REFUSAL } from "@/credentials/validate";
 import { prisma } from "@/store/prisma";
 import { requireViewer } from "@/viewer/current";
+import { removeCredential as removeHeldCredential } from "@/virtual-agents/credential-removal";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
 import { liveModelRoutes } from "@/virtual-agents/store";
 import { claudeTokenUsable } from "@/virtual-agents/views";
@@ -46,13 +48,16 @@ export async function saveCredential(form: FormData): Promise<ActionResult<{ con
     if (kind === "claude" && !claudeTokenUsable(viewer.modelRoute, await liveModelRoutes(prisma, viewer.oid))) {
       return { ok: false, error: "your virtual agents reach Claude through HMCTS, so they need no Claude token" };
     }
+    if (kind === "github" && isShortLivedGithubToken(form.get("value"))) {
+      return { ok: false, error: SHORT_LIVED_GITHUB_REFUSAL };
+    }
     const backend = credentialBackend(prisma);
     if (!backend.available) {
       return { ok: false, error: backend.reason };
     }
     await putCredential(prisma, backend.store, { actorOid: viewer.oid, ownerOid: viewer.oid, kind, value: form.get("value"), via: "web" });
     revalidate();
-    return { ok: true, confirmation: `Your ${PASTEABLE[kind]} is stored` };
+    return { ok: true, confirmation: `Your ${PASTEABLE[kind]} is stored. Your assistant uses it from its next start.` };
   });
 }
 
@@ -67,7 +72,7 @@ export async function removeCredential(form: FormData): Promise<ActionResult> {
     if (!backend.available) {
       return { ok: false, error: backend.reason };
     }
-    await deleteCredential(prisma, backend.store, { actorOid: viewer.oid, ownerOid: viewer.oid, kind });
+    await removeHeldCredential(prisma, backend.store, { actorOid: viewer.oid, ownerOid: viewer.oid, kind });
     revalidate();
     return { ok: true };
   });

@@ -14,6 +14,7 @@ import { agentConversation } from "../transcripts/views.ts";
 import type { ModelRoute } from "../viewer/identity.ts";
 import type { VirtualAgentDesired, VirtualAgentStatus } from "../virtual-agents/lifecycle.ts";
 import { type LoginView, loginViews } from "../virtual-agents/logins.ts";
+import type { StopReason } from "../virtual-agents/stop.ts";
 import type { VirtualAgentRow } from "../virtual-agents/store.ts";
 import { neededCredentials, optionalCredentials } from "../virtual-agents/views.ts";
 import { type Artefact, DOCUMENT_SELECT, OLDEST_FIRST, toDocument } from "./artefact-store.ts";
@@ -56,6 +57,8 @@ export interface AssistantSummary {
   statusChangedAt: string;
   /** When it was last asked to run, which names one wait: a choice about watching it does not outlive it. */
   startedAt: string;
+  /** Why it was last stopped, for the notice that offers to start it again; `null` when it was never stopped, or not said. */
+  stopReason: StopReason | null;
   readiness: Readiness;
   /** How its pod reaches Claude, which is fixed on its row and so is not always the person's own route. */
   modelRoute: ModelRoute;
@@ -173,7 +176,8 @@ export async function assistantSummary(db: Database, assistant: VirtualAgentRow,
     statusDetail: assistant.statusDetail,
     statusChangedAt: assistant.statusChangedAt.toISOString(),
     startedAt: assistant.startedAt.toISOString(),
-    readiness: readiness(assistant.status),
+    stopReason: assistant.stopReason,
+    readiness: readiness(assistant.status, assistant.desired),
     modelRoute: assistant.modelRoute,
     needed,
     optional: optionalCredentials(assistant.modelRoute),
@@ -395,6 +399,11 @@ export interface ConversationView {
    */
   clientFeatures: string[] | null;
   sessionState: SessionState | null;
+  /**
+   * The chat's pod could not start, and is meant to be running, so a message to it is not waiting on a start that is
+   * coming: the page says so, with a way to try again, rather than showing it waking for good. False for a local chat.
+   */
+  podFailed: boolean;
   sessionDetail: string | null;
   /** Every document, oldest first, each with its exports. */
   documents: DocumentView[];
@@ -472,12 +481,13 @@ export async function conversationView(db: Database, conversation: ConversationR
       video: row === null ? null : videoSummary(row)
     };
   };
-  const [current, documents, { fork, decks, docmosisTemplates, notifyTemplates, video }, page, questions] = await Promise.all([
+  const [current, documents, { fork, decks, docmosisTemplates, notifyTemplates, video }, page, questions, pod] = await Promise.all([
     db.agent.findUnique({ where: { id: agentId }, select: { status: true, skills: true, clientFeatures: true, repo: true, branch: true } }),
     documentViews(db, conversation.id),
     forkDeckAndDocmosis(),
     agentConversation(db, conversation.ownerOid, agent),
-    agentQuestions(db, conversation.ownerOid, agent)
+    agentQuestions(db, conversation.ownerOid, agent),
+    hasPod(conversation) ? db.virtualAgent.findUnique({ where: { id: conversation.virtualAgentId }, select: { status: true, desired: true } }) : null
   ]);
   const ownSkills = storedSkills(current?.skills);
   const skills =
@@ -498,6 +508,7 @@ export async function conversationView(db: Database, conversation: ConversationR
     clientFeatures: storedClientFeatures(current?.clientFeatures),
     sessionState: conversation.sessionState,
     sessionDetail: conversation.sessionDetail,
+    podFailed: pod?.status === "failed" && pod.desired === "running",
     documents,
     decks,
     docmosisTemplates,

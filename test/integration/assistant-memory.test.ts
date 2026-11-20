@@ -259,7 +259,8 @@ describe("the memory report of a pod the hub replaces", () => {
     expect(await actions.saveVirtualAgentPod(form({ id: assistant, size: "medium" }))).toMatchObject({ ok: true });
 
     expect(await stored(assistant)).toEqual(CLEARED);
-    expect((await assistantMemory(prisma, ALICE.oid, assistant))?.use).toEqual({ reported: false, reason: "waiting" });
+    // Its pod is being replaced, so it reads as not running until the new one reports, not as one yet to report.
+    expect((await assistantMemory(prisma, ALICE.oid, assistant))?.use).toEqual({ reported: false, reason: "not_running" });
   });
 
   it("should drop the report and the launch token together when the plugins change", async () => {

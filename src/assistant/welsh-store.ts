@@ -12,6 +12,7 @@ import {
   MAX_WELSH_FILE_BYTES,
   MAX_WELSH_FILES_PER_JOB,
   resultFits,
+  WELSH_JOB_TIMEOUT_MS,
   WELSH_NOT_TURNED_ON,
   WELSH_RATE_LIMIT,
   WELSH_RATE_WINDOW_MS,
@@ -250,12 +251,28 @@ export async function saveUpload(prisma: PrismaClient, viewerOid: string, name: 
   if (bytes.length === 0 || bytes.length > MAX_WELSH_FILE_BYTES) {
     throw new HttpError(413, "that spreadsheet is over 5 MB");
   }
-  const row = await prisma.assistantWelshFile.create({
-    data: { virtualAgentId: assistant.id, ownerOid: viewerOid, name, bytes: Buffer.from(bytes), createdAt: now },
-    select: { id: true }
+  return await prisma.$transaction(async (tx) => {
+    // One upload at a time per assistant, as jobs are, so two tabs cannot both find room under the cap. What is past
+    // its retention goes first, here as well as when a job starts: uploads with no job after them would otherwise stay.
+    await tx.$queryRaw`SELECT 1 FROM virtual_agent WHERE id = ${assistant.id}::uuid FOR UPDATE`;
+    await tx.assistantWelshFile.deleteMany({ where: { virtualAgentId: assistant.id, createdAt: { lt: new Date(now.getTime() - WELSH_RETENTION_MS) } } });
+    const held = await tx.assistantWelshFile.count({ where: { virtualAgentId: assistant.id, jobId: null } });
+    if (held >= MAX_WELSH_UPLOADS) {
+      throw new HttpError(409, `you have ${MAX_WELSH_UPLOADS} spreadsheets uploaded this week; they are cleared after 7 days`);
+    }
+    const row = await tx.assistantWelshFile.create({
+      data: { virtualAgentId: assistant.id, ownerOid: viewerOid, name, bytes: Buffer.from(bytes), createdAt: now },
+      select: { id: true }
+    });
+    return row.id;
   });
-  return row.id;
 }
+
+/**
+ * How many uploaded spreadsheets one assistant may hold at once, within the week they are kept: a return a week is the
+ * Welsh Language Unit's pace, so this is generous, and it bounds the 5 MB rows one person can leave in Postgres.
+ */
+export const MAX_WELSH_UPLOADS = 50;
 
 /** One of the viewer's own Welsh files, uploaded or made by one of their jobs, or `undefined`. */
 export async function ownerFile(db: Database, viewerOid: string, fileId: string): Promise<{ name: string; bytes: Uint8Array } | undefined> {
@@ -289,13 +306,18 @@ export interface WelshFrame {
   file_name?: string;
 }
 
-/** The frame for a job of this virtual agent's still waiting for an answer, or `undefined`. */
-export async function pendingWelsh(db: Database, virtualAgentId: string, jobId: string): Promise<WelshFrame | undefined> {
+/**
+ * The frame for a job of this virtual agent's still waiting for an answer, or `undefined`. Not for one past
+ * `WELSH_JOB_TIMEOUT_MS`: the person has been told it timed out, and a pod reconnecting would otherwise be handed it
+ * and start it then, which for a pull request or a story is the second one they were warned about. An answer from a
+ * pod already working on it is still taken, since that is the one they were told to check for.
+ */
+export async function pendingWelsh(db: Database, virtualAgentId: string, jobId: string, now: Date = new Date()): Promise<WelshFrame | undefined> {
   const row = await db.assistantWelshJob.findUnique({
     where: { id: jobId },
-    select: { virtualAgentId: true, kind: true, product: true, args: true, status: true }
+    select: { virtualAgentId: true, kind: true, product: true, args: true, status: true, createdAt: true }
   });
-  if (row === null || row.virtualAgentId !== virtualAgentId || row.status !== "pending") {
+  if (row === null || row.virtualAgentId !== virtualAgentId || row.status !== "pending" || now.getTime() - row.createdAt.getTime() > WELSH_JOB_TIMEOUT_MS) {
     return undefined;
   }
   const fileId = (row.args as { file_id?: unknown } | null)?.file_id;

@@ -169,13 +169,22 @@ export interface CreatedUpload {
 }
 
 /**
+ * How long an upload can go without a part arriving before the sweep expires it as abandoned: one left half-sent by a
+ * tab that closed shows nowhere, and would otherwise hold one of the four places until its retention window ended.
+ */
+export const STALLED_UPLOAD_MS = 15 * 60_000;
+
+/**
  * Starts an upload: a `pending` row, and the part size the browser is to cut the file into. The sanitised
  * `stored_name` is decided here and is the authoritative one — the pod re-sanitises it, but never invents it.
  *
  * The conversation's row is taken first, so the caps are read and acted on one starter at a time: at the default
  * isolation level two tabs would otherwise both read the same total and both find room for the last file. What a
- * conversation holds counts every upload still alive, fetched ones included: the pod's disk keeps them, and
- * `/workspace` filling up breaks its repository clones rather than just the next upload.
+ * conversation holds is what its pod's disk is holding for it: every upload still alive, and every one sent with a
+ * message whose copy the person has not deleted in Settings, even once the hub has let go of its own bytes. The sweep
+ * expires an upload's row after its window, but the pod keeps the file, and `/workspace` filling up breaks its
+ * repository clones rather than just the next upload — so the cap would otherwise reset every window. Once the pod's
+ * disk is deleted the sent files are still counted: an over-count the person clears in Settings.
  */
 export async function createUpload(prisma: PrismaClient, upload: NewUpload): Promise<CreatedUpload> {
   if (!isUploadSize(upload.size)) {
@@ -192,7 +201,12 @@ export async function createUpload(prisma: PrismaClient, upload: NewUpload): Pro
     const [total] = await tx.$queryRaw<{ bytes: bigint }[]>`
       SELECT COALESCE(sum(bytes), 0)::bigint AS bytes
         FROM assistant_upload
-       WHERE conversation_id = ${upload.conversationId}::uuid AND state <> 'expired'
+       WHERE conversation_id = ${upload.conversationId}::uuid
+         AND (
+               state <> 'expired'
+               -- Sent, and so on the pod's disk, until the person deletes it there.
+               OR (message_id IS NOT NULL AND pod_delete_requested_at IS NULL)
+             )
     `;
     if (Number(total?.bytes ?? 0) + size > MAX_CONVERSATION_BYTES) {
       throw new HttpError(409, `this conversation's files add up to at most ${describeBytes(MAX_CONVERSATION_BYTES)}`, {
@@ -230,7 +244,13 @@ export async function putUploadPart(prisma: PrismaClient, upload: UploadRow, ind
     // The browser sends parts in parallel, and two of them counting what has arrived at once would each see a
     // snapshot without the other's row — leaving a complete upload `pending` for ever. Taking the upload's row first
     // serialises the parts of one file and nothing else, so other files still go up at the same time.
-    await tx.$executeRaw`SELECT 1 FROM assistant_upload WHERE id = ${upload.id}::uuid FOR UPDATE`;
+    // Its state is read again under the lock: the sweep may have expired it since it was looked up — after its window,
+    // or after `STALLED_UPLOAD_MS` with no part — and a part written to an expired upload would be a row nothing ever
+    // deletes. A tab that comes back to a stalled upload is refused here and starts the file again.
+    const [locked] = await tx.$queryRaw<{ state: string }[]>`SELECT state FROM assistant_upload WHERE id = ${upload.id}::uuid FOR UPDATE`;
+    if (locked?.state !== "pending" && locked?.state !== "stored") {
+      throw new HttpError(404, "this file is no longer being uploaded", { reason: "no_such_upload" satisfies UploadRefusal });
+    }
     await tx.assistantUploadPart.upsert({
       where: { uploadId_index: { uploadId: upload.id, index } },
       create: { uploadId: upload.id, index, data },
@@ -243,9 +263,9 @@ export async function putUploadPart(prisma: PrismaClient, upload: UploadRow, ind
        WHERE upload_id = ${upload.id}::uuid
     `;
     const received = Number(arrived?.received ?? 0);
-    if (Number(arrived?.parts ?? 0) === partCount(upload.bytes)) {
-      await tx.assistantUpload.update({ where: { id: upload.id }, data: { state: "stored", updatedAt: new Date() } });
-    }
+    // Touched with each part, so the sweep does not take an upload still arriving for a stalled one.
+    const done = Number(arrived?.parts ?? 0) === partCount(upload.bytes);
+    await tx.assistantUpload.update({ where: { id: upload.id }, data: { ...(done ? { state: "stored" } : {}), updatedAt: new Date() } });
     return { received };
   });
 }

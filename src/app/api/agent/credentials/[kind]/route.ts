@@ -5,9 +5,10 @@ import { agentRoute } from "@/agent-api/route";
 import type { Caller } from "@/agent-auth/authenticate";
 import { type CredentialBackend, credentialBackend } from "@/credentials/backend";
 import { type CredentialKind, isCredentialKind } from "@/credentials/names";
-import { deleteCredential, putCredential, readCredential } from "@/credentials/store";
+import { putCredential, readCredential } from "@/credentials/store";
 import { checkAzureCacheOwner } from "@/credentials/validate";
 import { prisma } from "@/store/prisma";
+import { removeCredential } from "@/virtual-agents/credential-removal";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -75,6 +76,7 @@ export const PUT = agentRoute<{ kind: string }>(async ({ caller, request, params
 export const DELETE = agentRoute<{ kind: string }>(async ({ caller, params }) => {
   personal(caller);
   const kind = kindOf(params.kind);
-  await deleteCredential(prisma, available(credentialBackend(prisma)), { actorOid: caller.oid, ownerOid: caller.oid, kind });
+  // As the web's removal is: a running pod that held it is restarted, so it stops using it.
+  await removeCredential(prisma, available(credentialBackend(prisma)), { actorOid: caller.oid, ownerOid: caller.oid, kind });
   return noContent();
 });

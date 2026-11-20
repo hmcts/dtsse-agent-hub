@@ -90,6 +90,36 @@ describe("HubStreamProvider", () => {
     expect(current().url).toBe("/api/ui/stream");
   });
 
+  it("should re-read the page once the new stream opens when it moves from one stream to another", () => {
+    const { rerender } = render(
+      <HubStreamProvider>
+        <Watching agent="agent-1" />
+      </HubStreamProvider>
+    );
+    act(() => current().emit("open"));
+
+    rerender(
+      <HubStreamProvider>
+        <Watching agent="agent-2" />
+      </HubStreamProvider>
+    );
+    act(() => current().emit("open"));
+
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("should not re-read the page as it loads, moving from the statuses-only stream to its own before either opened", () => {
+    render(
+      <HubStreamProvider>
+        <Watching agent="agent-1" />
+      </HubStreamProvider>
+    );
+
+    act(() => current().emit("open"));
+
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
   it("should hand each event to the components that listen for its type when it arrives", async () => {
     render(
       <HubStreamProvider>

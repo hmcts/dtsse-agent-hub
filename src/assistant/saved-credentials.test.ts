@@ -42,12 +42,16 @@ describe("savedCredentials", () => {
     ["claude", "own-licence", "cannot answer again until you paste a new one"],
     ["azure", "gateway", "cannot answer again until you sign in to Azure again"],
     ["github", "gateway", "cannot reach GitHub until you sign in to GitHub again"],
-    ["azure", "own-licence", "stops using it the next time it starts"],
-    ["claude", "gateway", "stops using it the next time it starts"],
-    ["atlassian", "gateway", "stops using it the next time it starts"],
+    ["azure", "own-licence", "A running assistant restarts to stop using it. Your chats are kept."],
+    ["claude", "gateway", "Remove your Claude token? Your assistant does not use it now."],
+    ["atlassian", "gateway", "A running assistant restarts to stop using it. Your chats are kept."],
     ["microsoft", "gateway", "can no longer read your mail, calendar, Teams chats, meetings or files"]
   ] as const)("should say what removing a %s credential ends when the assistant is on the %s route", (kind, route, words) => {
     expect(savedCredentials([stored(kind)], route, true).find((row) => row.kind === kind)?.removeQuestion).toContain(words);
+  });
+
+  it("should promise no restart when a Claude token is removed from an assistant on the gateway, which never used it", () => {
+    expect(savedCredentials([stored("claude")], "gateway", true).find((row) => row.kind === "claude")?.removeQuestion).not.toContain("restarts");
   });
 });
 

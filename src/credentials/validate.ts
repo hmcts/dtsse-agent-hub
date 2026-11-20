@@ -12,6 +12,19 @@ const MAX_AZURE_CACHE_BYTES = 1024 * 1024;
 
 const GITHUB_TOKEN = /^(gh[opsu]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})$/;
 
+/**
+ * A GitHub App's installation or user token, `ghs_` or `ghu_`, which lasts an hour or eight. Every writer may store
+ * one — a pod's own `gh auth` can hand one over and refreshes it — but a person pasting one would see it read as
+ * connected and stop working the same day, with nothing saying why, so the web's paste refuses it with this reason.
+ */
+const SHORT_LIVED_GITHUB_TOKEN = /^gh[su]_[A-Za-z0-9]{20,}$/;
+
+export const SHORT_LIVED_GITHUB_REFUSAL = "that GitHub token expires within hours; use a personal access token (ghp_ or github_pat_) instead";
+
+export function isShortLivedGithubToken(raw: unknown): boolean {
+  return typeof raw === "string" && SHORT_LIVED_GITHUB_TOKEN.test(raw.trim());
+}
+
 /** `claude setup-token` prints an `sk-ant-oat…` OAuth token; an API key is `sk-ant-api…`, and both fit this. */
 const CLAUDE_TOKEN = /^sk-ant-[A-Za-z0-9_-]{20,}$/;
 

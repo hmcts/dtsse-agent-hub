@@ -2,7 +2,8 @@ import { clientSupports } from "../agents/client-features.ts";
 import { markConversationAgentsOffline } from "../agents/offline.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
-import { findVirtualAgent, setDesired } from "../virtual-agents/store.ts";
+import { findVirtualAgent } from "../virtual-agents/store.ts";
+import { wakeAssistant } from "./assistant-store.ts";
 import { announce, type ConversationRow } from "./conversation-row.ts";
 import { readAssistantModel } from "./model-store.ts";
 import { hasPod } from "./pods.ts";
@@ -21,6 +22,8 @@ const MAX_STOP_HISTORY = 50;
  * for, and `reportSessions` only ever sees a pod's own conversations. So a wake recorded here would be a row that
  * said a session had been asked for, for ever, with nobody having been asked and nothing able to answer.
  */
+// It leaves `last_active_at` alone, which orders the sidebar: a wake can be a focus of the box with nothing sent, and
+// reading an old chat is not using it. A message moves the chat up through `touchConversation`, as it is sent.
 export async function requestWake(prisma: PrismaClient, conversation: ConversationRow, now: Date = new Date()): Promise<void> {
   if (!hasPod(conversation)) {
     return;
@@ -28,14 +31,30 @@ export async function requestWake(prisma: PrismaClient, conversation: Conversati
   await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`
       UPDATE assistant_conversation
-         SET wake_requested_at = COALESCE(wake_requested_at, ${now}), last_active_at = ${now}, updated_at = ${now}
+         SET wake_requested_at = COALESCE(wake_requested_at, ${now}), updated_at = ${now}
        WHERE id = ${conversation.id}::uuid
     `;
     await announce(tx, conversation);
   });
+  await wakeConversationPod(prisma, conversation, now);
+}
+
+/**
+ * Brings back the pod a conversation runs on, stopped or failed, for something the person did in it: a message, a
+ * focus of its box, or Try again. A failed pod is otherwise never tried again, since it is still meant to be running.
+ * Whether a wake is already pending makes no difference: one asked for before a stop or a failure has nothing to wake.
+ */
+export async function wakeConversationPod(
+  prisma: PrismaClient,
+  conversation: Pick<ConversationRow, "virtualAgentId" | "ownerOid">,
+  now: Date = new Date()
+): Promise<void> {
+  if (conversation.virtualAgentId === null) {
+    return;
+  }
   const assistant = await findVirtualAgent(prisma, conversation.virtualAgentId);
-  if (assistant?.desired === "stopped") {
-    await setDesired(prisma, conversation.ownerOid, assistant.id, "running", now);
+  if (assistant !== undefined) {
+    await wakeAssistant(prisma, conversation.ownerOid, assistant, now);
   }
 }
 

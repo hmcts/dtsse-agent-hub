@@ -1,4 +1,5 @@
 import { markConversationAgentsOffline } from "../agents/offline.ts";
+import { announce as announceConversation } from "../assistant/conversation-row.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database } from "../store/prisma.ts";
 
@@ -44,17 +45,36 @@ export async function stopVirtualAgents(db: Database, ids: readonly string[], re
      WHERE id = ANY(${[...ids]}::uuid[]) AND desired = 'running'
     RETURNING id::text AS id, owner_oid
   `;
-  const conversations = await db.$queryRaw<{ id: string }[]>`
-    UPDATE assistant_conversation SET session_state = NULL, session_detail = NULL
-     WHERE virtual_agent_id = ANY(${stopped.map((row) => row.id)}::uuid[])
-    RETURNING id::text AS id
-  `;
-  await markConversationAgentsOffline(
+  await forgetSessions(
     db,
-    conversations.map((row) => row.id)
+    stopped.map((row) => row.id)
   );
   for (const row of stopped) {
     await announce(db, row.id, row.owner_oid);
   }
   return stopped.map((row) => ({ id: row.id, ownerOid: row.owner_oid }));
+}
+
+/**
+ * What a stopped pod leaves on its conversations: the sessions it said they had, which it is not there to answer any
+ * more. Left, a chat on a stopped pod says it is waiting for a free assistant. A wake asked for stays: it is a message
+ * the person sent, answered once the assistant is started again. Their agents are marked offline with them, and each
+ * conversation is announced, so a chat open on one shows it as it now is.
+ */
+export async function forgetSessions(db: Database, virtualAgentIds: readonly string[]): Promise<void> {
+  if (virtualAgentIds.length === 0) {
+    return;
+  }
+  const conversations = await db.$queryRaw<{ id: string; virtual_agent_id: string; owner_oid: string }[]>`
+    UPDATE assistant_conversation SET session_state = NULL, session_detail = NULL
+     WHERE virtual_agent_id = ANY(${[...virtualAgentIds]}::uuid[])
+    RETURNING id::text AS id, virtual_agent_id::text AS virtual_agent_id, owner_oid
+  `;
+  await markConversationAgentsOffline(
+    db,
+    conversations.map((row) => row.id)
+  );
+  for (const row of conversations) {
+    await announceConversation(db, { id: row.id, virtualAgentId: row.virtual_agent_id, ownerOid: row.owner_oid });
+  }
 }

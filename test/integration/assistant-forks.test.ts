@@ -144,6 +144,17 @@ describe("offering a conversation to fork", () => {
     expect(await forkRecipients(prisma, id)).toEqual([]);
   });
 
+  it("should take away all of a person's access when the owner un-shares the chat, an offer to fork it included", async () => {
+    const { id } = await chat();
+    await shareActions.shareChat({ conversationId: id, recipientOid: BOB.oid });
+    await forkActions.offerChatFork({ conversationId: id, recipientOid: BOB.oid });
+
+    expect(await shareActions.unshareChat({ conversationId: id, recipientOid: BOB.oid })).toMatchObject({ ok: true, people: [] });
+
+    expect(await forkRecipients(prisma, id)).toEqual([]);
+    expect(await sharedChat(viewerOf(BOB), id)).toBeUndefined();
+  });
+
   it("should report the chat as missing when someone other than the owner offers it", async () => {
     const { id } = await chat();
     actAs("carol");

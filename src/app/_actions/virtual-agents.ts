@@ -1,6 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { findAssistant, wakeAssistant } from "@/assistant/assistant-store";
+import { findConversation } from "@/assistant/conversation-store";
+import { wakeConversationPod } from "@/assistant/session-store";
 import { sessionSecret } from "@/auth/settings";
 import { credentialBackend } from "@/credentials/backend";
 import { isCredentialKind } from "@/credentials/names";
@@ -148,5 +151,35 @@ export async function reconnectSignIn(form: FormData): Promise<ActionResult<{ co
       confirmation:
         row.desired === "running" ? `${row.name} is restarting to sign in to ${title} again` : `${row.name} signs in to ${title} when it next starts`
     };
+  });
+}
+
+/**
+ * Starts the person's assistant when it is stopped, or tries a failed one again: the Start and Try again buttons. A
+ * page being read never does this by itself; see `ensureAssistantWithClaims`. From a chat it is the chat's own pod,
+ * which is not always the person's first virtual agent; from anywhere else it is their assistant.
+ */
+export async function startAssistant(input: { conversationId?: unknown } = {}): Promise<ActionResult> {
+  return await runAction("start assistant", async () => {
+    if (!virtualAgentsEnabled()) {
+      return OFF;
+    }
+    const viewer = await requireViewer();
+    if (input.conversationId !== undefined) {
+      const conversation = await findConversation(prisma, viewer.oid, text(input.conversationId));
+      if (conversation === undefined) {
+        return { ok: false, error: "That chat no longer exists." };
+      }
+      await wakeConversationPod(prisma, conversation);
+      revalidatePath("/assistant");
+      return { ok: true };
+    }
+    const assistant = await findAssistant(prisma, viewer.oid);
+    if (assistant === undefined) {
+      return { ok: false, error: "You have no assistant yet. Open CFT Workspace to set one up." };
+    }
+    await wakeAssistant(prisma, viewer.oid, assistant);
+    revalidatePath("/assistant");
+    return { ok: true };
   });
 }

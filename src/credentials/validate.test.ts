@@ -1,6 +1,6 @@
 import { gzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
-import { checkAzureCacheOwner, checkCredential, decodeAzureCache, MAX_CREDENTIAL_LENGTH } from "./validate.ts";
+import { checkAzureCacheOwner, checkCredential, decodeAzureCache, isShortLivedGithubToken, MAX_CREDENTIAL_LENGTH } from "./validate.ts";
 
 function azureCache(cache: unknown): string {
   return gzipSync(Buffer.from(JSON.stringify(cache), "utf8")).toString("base64");
@@ -17,6 +17,16 @@ describe("checkCredential for github", () => {
     ["a fine-grained token", `github_pat_11ABC_${"e".repeat(70)}`]
   ])("should accept %s when it matches GitHub's format", (_label, value) => {
     expect(checkCredential("github", value)).toEqual({ ok: true, value, accountLabel: null });
+  });
+
+  it.each([
+    [`ghs_${"c".repeat(20)}`, true],
+    [` ghu_${"d".repeat(40)}\n`, true],
+    [`ghp_${"a".repeat(36)}`, false],
+    ["ghs_short", false],
+    [undefined, false]
+  ])("should say whether %s is a short-lived GitHub App token", (value, expected) => {
+    expect(isShortLivedGithubToken(value)).toBe(expected);
   });
 
   it("should trim surrounding whitespace when the paste carries a newline", () => {

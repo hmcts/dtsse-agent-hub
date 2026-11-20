@@ -55,7 +55,8 @@ describe("morning briefing offer", () => {
     expect(await pod(id)).toEqual({ desired: "stopped", clientFeatures: null });
 
     expect(await offered()).toBe(true);
-    expect(await pod(id)).toEqual({ desired: "running", clientFeatures: null });
+    // The page offering it no longer starts the assistant: a stopped one stays stopped until the person asks.
+    expect(await pod(id)).toEqual({ desired: "stopped", clientFeatures: null });
   });
 
   it("should stop offering the briefing when a stop has cleared the pod's own claim and its main session never claimed it", async () => {
@@ -66,7 +67,8 @@ describe("morning briefing offer", () => {
     await setDesired(prisma, ALICE.oid, id, "stopped");
 
     expect(await offered()).toBe(false);
-    expect(await pod(id)).toEqual({ desired: "running", clientFeatures: null });
+    // The page offering it no longer starts the assistant: a stopped one stays stopped until the person asks.
+    expect(await pod(id)).toEqual({ desired: "stopped", clientFeatures: null });
   });
 
   it("should not offer the briefing when the pod's main session claims other features but not the briefing", async () => {

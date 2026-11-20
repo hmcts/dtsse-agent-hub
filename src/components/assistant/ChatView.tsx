@@ -40,6 +40,7 @@ import { DeckPanel, type SlideAsk } from "@/components/assistant/DeckPanel";
 import { DocmosisPanel, type LoadSettled, useTemplateLoad } from "@/components/assistant/DocmosisPanel";
 import { ticketsOffered } from "@/components/assistant/ExportFooter";
 import { ForkedThread } from "@/components/assistant/ForkedThread";
+import { type StartAssistantAction, StartButton } from "@/components/assistant/GettingReady";
 import type { ExportToGithubAction } from "@/components/assistant/GithubExport";
 import { ItemButtons } from "@/components/assistant/ItemButtons";
 import type { SwitcherItem } from "@/components/assistant/ItemSwitcher";
@@ -61,6 +62,8 @@ import { duration } from "@/web/format";
 import { RESTART_IN_SETTINGS } from "@/web/home";
 
 export interface ChatActions {
+  /** Tries the chat's pod again when it could not start. */
+  startAssistant?: StartAssistantAction;
   send: (input: { conversationId: unknown; body: unknown; uploadIds: unknown }) => Promise<ActionResult<{ message: ThreadMessage }>>;
   warm: (input: { conversationId: unknown }) => Promise<ActionResult>;
   /** `stopped` is false for a press the answer beat, which ends no turn and is told to nobody. */
@@ -383,6 +386,25 @@ function Item({
         </div>
       </div>
     </li>
+  );
+}
+
+/**
+ * In place of the waking dots for a message to a pod that could not start: what happened, and Try again, which
+ * restarts this chat's own pod. The page reads the pod's own events from there.
+ */
+function PodFailed({ start }: { start?: () => Promise<ActionResult> }) {
+  return (
+    <div className="flex flex-wrap items-center gap-3 text-[13px]">
+      <p className="text-asst-error">Your assistant could not start, so your message has not been read yet.</p>
+      {start === undefined ? null : (
+        <StartButton
+          start={start}
+          label="Try again"
+          className="rounded-lg border border-asst-strong px-3 py-1 text-asst-text hover:bg-asst-field disabled:opacity-60"
+        />
+      )}
+    </div>
   );
 }
 
@@ -843,6 +865,7 @@ export function ChatView({
   ];
   const shownDocument = documentOpen === null ? undefined : view.documents.find((document) => document.id === documentOpen.id);
   const tickets = ticketsOffered(ticketTool, shownDocument?.jira ?? NOT_EXPORTED, shownDocument?.github ?? NOT_EXPORTED);
+  const restartPod = actions.startAssistant;
   const thread = useMemo(
     () => threadItems(live.items, view.productHistory, view.stopHistory, view.local),
     [live.items, view.productHistory, view.stopHistory, view.local]
@@ -1320,7 +1343,10 @@ export function ChatView({
                 </Fragment>
               ))}
             </ol>
-            {doing.state === "idle" ? null : (
+            {/* A message waiting on a pod that could not start is not waking: nothing would start it, so this says so. */}
+            {doing.state === "waking" && view.podFailed ? (
+              <PodFailed start={restartPod === undefined ? undefined : () => restartPod({ conversationId: view.id })} />
+            ) : doing.state === "idle" ? null : (
               <div className="flex items-center gap-3">
                 <Dots doing={doing} />
                 {stoppable ? <StopButton onStop={stop} /> : null}

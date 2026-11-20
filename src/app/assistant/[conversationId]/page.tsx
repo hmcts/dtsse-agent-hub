@@ -28,7 +28,7 @@ import { offerChatFork, withdrawChatFork } from "@/app/_actions/forks";
 import { answerAgentQuestion } from "@/app/_actions/questions";
 import { shareChat, unshareChat } from "@/app/_actions/shares";
 import { deleteTemplate, saveTemplate } from "@/app/_actions/templates";
-import { pasteLoginCode, reconnectSignIn, restartVirtualAgent, saveVirtualAgentPod } from "@/app/_actions/virtual-agents";
+import { pasteLoginCode, reconnectSignIn, restartVirtualAgent, saveVirtualAgentPod, startAssistant } from "@/app/_actions/virtual-agents";
 import { SHARING_SETTINGS } from "@/app/assistant/sharing";
 import { connectionsData } from "@/assistant/connections";
 import { savedCredentialsData } from "@/assistant/saved-credentials";
@@ -59,6 +59,7 @@ import {
 export const dynamic = "force-dynamic";
 
 const ACTIONS: ChatActions = {
+  startAssistant,
   send: sendAssistantMessage,
   warm: warmConversation,
   stop: stopAssistantAnswer,

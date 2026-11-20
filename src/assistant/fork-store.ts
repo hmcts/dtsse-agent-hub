@@ -6,7 +6,7 @@ import { conversationItems, mergeEntries, type TranscriptEntryView } from "../tr
 import { agentConversation } from "../transcripts/views.ts";
 import type { ModelRoute } from "../viewer/identity.ts";
 import { OLDEST_FIRST } from "./artefact-store.ts";
-import { ensureAssistant } from "./assistant-store.ts";
+import { ensureAssistant, wakeAssistant } from "./assistant-store.ts";
 import { announce, ConversationNotFound, storedHistory, storedStops } from "./conversation-row.ts";
 import { createConversationAgent } from "./conversation-store.ts";
 import { copyDeck } from "./deck-store.ts";
@@ -195,6 +195,9 @@ export async function acceptFork(prisma: PrismaClient, viewer: { oid: string; mo
   const { thread, cut } = forkThread([...(earlier?.thread ?? []), ...own.thread]);
   const earlierHidden = cut || own.earlierHidden || (earlier?.earlierHidden ?? false);
   const assistant = await ensureAssistant(prisma, viewer);
+  // Taking a copy is the person asking to carry on with it, so their assistant is started for it, warming while the
+  // copy opens.
+  await wakeAssistant(prisma, viewer.oid, assistant);
   return await prisma.$transaction(async (tx) => {
     // The offer's row is what two tabs taking the copy at once queue on, so one makes it and the other finds it. A
     // row gone by now was withdrawn in between, which refuses the copy as it would have a moment later.

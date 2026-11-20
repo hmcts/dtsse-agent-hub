@@ -79,7 +79,8 @@ export type JiraExportResult = { export_id: string; key: string } | { export_id:
 
 /**
  * The session's result for an export, found by its id among the conversation's documents. Kept only for that document's current export, and never over a key: a
- * report for an export the person has since retried, or a second report, changes nothing.
+ * report for an export the person has since retried, or a second report, changes nothing. A key in a project other than
+ * the one asked for is kept with the project it is really in, so the footer says where the ticket went.
  */
 export async function recordJiraExport(
   prisma: PrismaClient,
@@ -88,7 +89,9 @@ export async function recordJiraExport(
 ): Promise<void> {
   const where = { conversationId: conversation.id, jiraExportId: result.export_id, jiraKey: null };
   const data =
-    "key" in result ? { jiraStatus: "done", jiraKey: result.key, jiraError: null } : { jiraStatus: "failed", jiraError: result.error.slice(0, MAX_JIRA_ERROR) };
+    "key" in result
+      ? { jiraStatus: "done", jiraKey: result.key, jiraProject: result.key.split("-")[0], jiraError: null }
+      : { jiraStatus: "failed", jiraError: result.error.slice(0, MAX_JIRA_ERROR) };
   await prisma.$transaction(async (tx) => {
     const { count } = await tx.assistantDocument.updateMany({ where, data });
     if (count > 0) {

@@ -36,7 +36,9 @@ export async function sendToConversation(
   const sent = await directAsPerson(prisma, senderOid, agentId, message.body, message.alongside);
   await touchConversation(prisma, conversation, message.title);
   const agent = await prisma.agent.findUnique({ where: { id: agentId }, select: { status: true } });
-  if (conversation.wakeRequestedAt === null && needsWake(agent?.status, conversation.sessionState)) {
+  // Asked however many wakes are already pending: `requestWake` keeps the first one's time, and brings back a pod that
+  // has stopped or failed since, which a message to it would otherwise wait on for ever.
+  if (needsWake(agent?.status, conversation.sessionState)) {
     await requestWake(prisma, conversation);
   }
   const loaded = await loadThreadMessage(prisma, BigInt(sent.id));

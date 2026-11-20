@@ -25,6 +25,7 @@ import * as conversationsRoute from "../../src/app/api/virtual/[virtualAgentId]/
 import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
 import { createConversation } from "../../src/assistant/conversation-store.ts";
 import { linkLocalSession } from "../../src/assistant/local-chat-store.ts";
+import { STALLED_UPLOAD_MS } from "../../src/assistant/upload-store.ts";
 import { startUploadSweep, sweepUploads } from "../../src/assistant/upload-sweep.ts";
 import { MAX_ATTACHMENTS_PER_MESSAGE, MAX_CONVERSATION_BYTES, MAX_UPLOAD_BYTES, PART_BYTES } from "../../src/assistant/uploads.ts";
 import { unsentChat } from "../../src/assistant/views.ts";
@@ -281,33 +282,69 @@ describe("uploading a file", () => {
     expect(await jsonOf(response)).toEqual({ reason: "too_many_files", error: `a message carries at most ${MAX_ATTACHMENTS_PER_MESSAGE} files` });
   });
 
-  it("should refuse a file that would take the conversation past its total", async () => {
+  // The total is what the pod's disk holds for the conversation: live uploads, and sent ones the hub has let go of but
+  // the pod kept, until the person deletes them in Settings. A file never sent is on nobody's disk once expired.
+  it.each([
+    ["fetched by the pod", "fetched", true, false, 409],
+    ["sent and expired here, but kept on the pod's disk", "expired", true, false, 409],
+    ["sent, expired, and deleted from the pod in Settings", "expired", true, true, 201],
+    ["never sent, and expired", "expired", false, false, 201]
+  ] as const)("should count a full conversation's files that were %s accordingly", async (_label, state, sent, deleted, status) => {
     // Arrange
     await startedAssistant();
-    const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
-    // Already fetched by the pod, and still counted: those bytes are on the pod's disk, which is the thing the total
-    // is protecting. The per-file cap means this takes several rows.
+    const started = (await actions.startConversation({ product: "pcs", body: "files" })) as { id: string };
+    const message = sent ? (await prisma.message.findFirstOrThrow({ select: { id: true } })).id : null;
+    // The per-file cap means a full conversation takes several rows.
     const full = Math.floor(MAX_CONVERSATION_BYTES / MAX_UPLOAD_BYTES);
     for (let n = 0; n < full; n += 1) {
       await prisma.assistantUpload.create({
         data: {
-          conversationId: conversation.id,
+          conversationId: started.id,
           ownerOid: ALICE.oid,
           fileName: `big-${n}.pdf`,
           storedName: `big-${n}.pdf`,
           mediaType: "application/pdf",
           bytes: BigInt(MAX_UPLOAD_BYTES),
-          state: "fetched"
+          state,
+          messageId: message,
+          podDeleteRequestedAt: deleted === true ? new Date() : null
         }
       });
     }
 
     // Act
-    const response = await startUpload(conversation.id, { name: "a.pdf", size: MAX_UPLOAD_BYTES });
+    const response = await startUpload(started.id, { name: "a.pdf", size: MAX_UPLOAD_BYTES });
 
     // Assert
-    expect(response.status).toBe(409);
-    expect(await jsonOf(response)).toMatchObject({ error: expect.stringContaining("add up to at most") });
+    expect(response.status).toBe(status);
+  });
+
+  it("should expire an upload a closed tab left half-sent once it has gone quiet, so it no longer takes a place", async () => {
+    await startedAssistant();
+    const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
+    for (let n = 0; n < MAX_ATTACHMENTS_PER_MESSAGE; n += 1) {
+      expect((await startUpload(conversation.id, { name: `a${n}.pdf`, size: 4 })).status).toBe(201);
+    }
+    const [quiet, ...arriving] = await prisma.assistantUpload.findMany({ orderBy: { fileName: "asc" }, select: { id: true } });
+    await prisma.assistantUpload.update({ where: { id: quiet!.id }, data: { updatedAt: new Date(Date.now() - STALLED_UPLOAD_MS - 60_000) } });
+
+    expect(await sweepUploads(prisma)).toMatchObject({ expired: 1 });
+
+    expect((await prisma.assistantUpload.findUniqueOrThrow({ where: { id: quiet!.id } })).state).toBe("expired");
+    expect(await prisma.assistantUpload.count({ where: { id: { in: arriving.map((row) => row.id) }, state: "pending" } })).toBe(arriving.length);
+    expect((await startUpload(conversation.id, { name: "fresh.pdf", size: 4 })).status).toBe(201);
+  });
+
+  it("should refuse a part for an upload the sweep has expired, rather than store bytes nothing will delete", async () => {
+    await startedAssistant();
+    const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
+    const { uploadId } = await jsonOf<Created>(await startUpload(conversation.id, { name: "a.pdf", size: 4 }));
+    await prisma.assistantUpload.update({ where: { id: uploadId }, data: { state: "expired" } });
+
+    const response = await putPart(uploadId, 0, filled(4, 1));
+
+    expect(response.status).toBe(404);
+    expect(await prisma.assistantUploadPart.count({ where: { uploadId } })).toBe(0);
   });
 
   it("should let only four through when five tabs start an upload at the same moment", async () => {
@@ -1628,7 +1665,7 @@ describe("the sweep of conversations attaching left behind", () => {
     const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
     // The conversation is backdated as well as its file: an upload cannot predate the conversation it belongs to,
     // and the sweep looks at both, so a helper that aged only one would be arranging something impossible.
-    await prisma.assistantConversation.update({ where: { id: conversation.id }, data: { createdAt: at } });
+    await prisma.assistantConversation.update({ where: { id: conversation.id }, data: { createdAt: at, lastActiveAt: at } });
     await prisma.assistantUpload.create({
       data: {
         conversationId: conversation.id,
@@ -1702,13 +1739,26 @@ describe("the sweep of conversations attaching left behind", () => {
     expect(await prisma.assistantConversation.count({ where: { id: conversation.id } })).toBe(1);
   });
 
+  it("should leave an old empty conversation the person has just used, so a first message is never swept from under them", async () => {
+    await startedAssistant();
+    const conversation = await abandoned(48);
+    await prisma.assistantConversation.update({ where: { id: conversation }, data: { lastActiveAt: new Date() } });
+
+    await sweepUploads(prisma);
+
+    expect(await prisma.assistantConversation.count({ where: { id: conversation } })).toBe(1);
+  });
+
   it("should delete an old empty conversation whatever became of its files, since nobody ever spoke in it", async () => {
     // It used to take an upload still being present, which left anything whose file had been removed — or whose
     // very first message failed after the row was created — in the table for ever with nothing to collect it.
     // Arrange
     await startedAssistant();
     const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
-    await prisma.assistantConversation.update({ where: { id: conversation.id }, data: { createdAt: new Date(Date.now() - 48 * 3_600_000) } });
+    await prisma.assistantConversation.update({
+      where: { id: conversation.id },
+      data: { createdAt: new Date(Date.now() - 48 * 3_600_000), lastActiveAt: new Date(Date.now() - 48 * 3_600_000) }
+    });
 
     // Act
     const result = await sweepUploads(prisma);
@@ -1728,7 +1778,10 @@ describe("the sweep of conversations attaching left behind", () => {
     // Arrange
     const agent = await prisma.agent.create({ data: { ownerOid: ALICE.oid, sessionId: "alices-laptop", name: "alices-laptop" }, select: { id: true } });
     const local = (await linkLocalSession(prisma, { ownerOid: ALICE.oid, agentId: agent.id, name: "alices-laptop" }))!;
-    await prisma.assistantConversation.update({ where: { id: local.id }, data: { createdAt: new Date(Date.now() - 48 * 3_600_000) } });
+    await prisma.assistantConversation.update({
+      where: { id: local.id },
+      data: { createdAt: new Date(Date.now() - 48 * 3_600_000), lastActiveAt: new Date(Date.now() - 48 * 3_600_000) }
+    });
 
     // Act
     const result = await sweepUploads(prisma);
@@ -2032,7 +2085,10 @@ describe("the sweep and a conversation whose file was removed", () => {
     const opened = ((await actions.openConversation({ product: "pcs" })) as { id: string }).id;
     const uploadId = await upload(opened, "letter.pdf", filled(6, 1));
     await ui(discardRoute.DELETE, { path: `/api/ui/uploads/${uploadId}`, params: { uploadId }, method: "DELETE" });
-    await prisma.assistantConversation.update({ where: { id: opened }, data: { createdAt: new Date(Date.now() - 5 * 3_600_000) } });
+    await prisma.assistantConversation.update({
+      where: { id: opened },
+      data: { createdAt: new Date(Date.now() - 5 * 3_600_000), lastActiveAt: new Date(Date.now() - 5 * 3_600_000) }
+    });
 
     // Act
     const result = await sweepUploads(prisma);

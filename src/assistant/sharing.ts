@@ -34,9 +34,9 @@ import { UNTITLED } from "./views.ts";
  * download for a share cannot simply reuse that route: it would have to force the served type to
  * `application/octet-stream` for everything outside a small allowlist, rather than rely on the disposition alone.
  *
- * One residue is worth knowing: a person who attached a file and typed nothing sends a message the hub words for
- * them, "I have attached <name>. Please take a look.", and that is their message, so a share shows it as written.
- * Rewriting a stored body at read time would make the share disagree with the chat it claims to be.
+ * A person who attached files and typed nothing sends a message the hub words for them, which counts the files and
+ * names none ("I have attached a file. Please take a look.", `attachedBody`), so a share shows it as written and no
+ * file name with it. The chat's title may still be a file's name, as it is the owner's, and a share shows the title.
  *
  * Nothing here is live. A share is a snapshot: a recipient sees whatever is there when they open the page, because
  * the hub tells only an owner's own tabs that their conversation changed, and the conversation's agent — which is

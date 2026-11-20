@@ -281,6 +281,38 @@ describe("a stored Claude token for the own-licence route", () => {
   });
 });
 
+describe("starting the person's assistant from the page", () => {
+  it("should start a stopped assistant, try a failed one again, and refuse when there is none yet", async () => {
+    actAs("alice");
+    await insertUser(ALICE);
+    expect(await actions.startAssistant()).toEqual({ ok: false, error: "You have no assistant yet. Open CFT Workspace to set one up." });
+
+    const { id } = await started(ALICE, "assistant");
+    await setDesired(prisma, ALICE.oid, id, "stopped");
+    expect(await actions.startAssistant()).toEqual({ ok: true });
+    expect((await row(id)).desired).toBe("running");
+
+    await prisma.virtualAgent.update({ where: { id }, data: { status: "failed" } });
+    expect(await actions.startAssistant()).toEqual({ ok: true });
+    expect((await row(id)).status).toBe("requested");
+  });
+
+  it("should try a chat's own pod again from the chat, and say so when the chat has gone", async () => {
+    actAs("alice");
+    await started(ALICE, "assistant");
+    const { id: second } = await started(ALICE, "second");
+    await prisma.virtualAgent.update({ where: { id: second }, data: { status: "failed" } });
+    const conversation = await prisma.assistantConversation.create({ data: { ownerOid: ALICE.oid, virtualAgentId: second }, select: { id: true } });
+
+    expect(await actions.startAssistant({ conversationId: conversation.id })).toEqual({ ok: true });
+    expect((await row(second)).status).toBe("requested");
+    expect(await actions.startAssistant({ conversationId: "00000000-0000-4000-8000-000000000000" })).toEqual({
+      ok: false,
+      error: "That chat no longer exists."
+    });
+  });
+});
+
 describe("a virtual agent's size", () => {
   it("should create a small agent unless another size is chosen, and refuse one that is not a size", async () => {
     await insertUser(ALICE);
@@ -304,6 +336,25 @@ describe("a virtual agent's size", () => {
 
     expect((await row(agent.id)).generation).toBe(agent.generation + 1);
     expect((await claim()).find((entry) => entry.id === agent.id)).toMatchObject({ size: "medium", generation: agent.generation + 1 });
+  });
+
+  it("should read a running pod as starting while a new size replaces it, without its old web servers", async () => {
+    const { id } = await started(ALICE, "pcs-api");
+    await reportPorts(prisma, id, { ports: [3000], localOnly: [] });
+    await prisma.virtualAgent.update({ where: { id }, data: { status: "running", applyFailures: 2 } });
+
+    await changeVirtualAgentPod(prisma, ALICE.oid, id, { size: "large" });
+
+    expect(await row(id)).toMatchObject({ status: "provisioning", exposedPorts: [], applyFailures: 0 });
+  });
+
+  it("should drop a failed pod's error when a new size replaces it, so it reads as starting and not still failing", async () => {
+    const { id } = await started(ALICE, "pcs-api");
+    await prisma.virtualAgent.update({ where: { id }, data: { status: "failed", statusDetail: "the pod ran out of memory" } });
+
+    await changeVirtualAgentPod(prisma, ALICE.oid, id, { size: "large" });
+
+    expect(await row(id)).toMatchObject({ status: "provisioning", statusDetail: null });
   });
 
   it("should change the size of a stopped agent and claim it again so the StatefulSet is applied with it", async () => {
