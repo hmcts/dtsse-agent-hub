@@ -1,9 +1,9 @@
 {
  "decision": "wa-task-completion-employment-et_englandwales_multiple",
  "source": "hmcts/et-wa-task-configuration@fa182449b8ef501c95e1f00137965994d835c4c3",
+ "dumpedAt": "2026-11-20T07:37:34.755Z",
  "scenarios": [
   {
-   "test": "EmploymentTaskCompletionMultipleTestEW",
    "input": {
     "eventId": "replyToReferral"
    },
@@ -36,7 +36,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskCompletionMultipleTestEW",
    "input": {
     "eventId": "closeReferral"
    },

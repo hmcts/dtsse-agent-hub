@@ -154,57 +154,30 @@ describe("evaluateDecision", () => {
     expect(evaluateDecision(doc, "main", {})).toEqual([{ out: 23 }]);
   });
 
-  it("should give the single value of a required table when it is single hit with one output", () => {
-    const helper: DmnDecision = {
-      id: "h",
-      name: "h",
-      requires: [],
-      variable: { name: "h" },
-      table: { hitPolicy: "FIRST", inputs: [], outputs: [{ name: "v" }], rules: [rule([], ['"one"'])] }
-    };
-    expect(evaluateDecision(document(main(["h"], table("COLLECT", [rule([""], ["h"])])), helper), "main", {})).toEqual([{ out: "one" }]);
+  const helperTable = (t: Omit<DmnTable, "inputs">): DmnDecision => ({ id: "h", name: "h", requires: [], table: { inputs: [], ...t } });
+  const readsHelper = (expression: string, helper: DmnDecision) =>
+    evaluateDecision(document(main(["h"], table("COLLECT", [rule([""], [expression])])), helper), "main", {});
+
+  it("should expose a required table's output columns by name when one rule matched, whatever the decision's variable", () => {
+    const helper = helperTable({ hitPolicy: "FIRST", outputs: [{ name: "v" }, { name: "w" }], rules: [rule([], ['"a"', "1"])] });
+    expect(readsHelper("v + string(w)", helper)).toEqual([{ out: "a1" }]);
+    expect(readsHelper("h", { ...helper, variable: { name: "h" } })).toEqual([{ out: null }]);
   });
 
-  it("should give a list of values when a required collecting table has one output and a list of rows when it has two", () => {
-    const one: DmnDecision = {
-      id: "h",
-      name: "h",
-      requires: [],
-      variable: { name: "h" },
-      table: { hitPolicy: "COLLECT", inputs: [], outputs: [{ name: "v" }], rules: [rule([], ['"a"']), rule([], ['"b"'])] }
-    };
-    const two: DmnDecision = {
-      id: "h",
-      name: "h",
-      requires: [],
-      variable: { name: "h" },
-      table: { hitPolicy: "RULE ORDER", inputs: [], outputs: [{ name: "v" }, { name: "w" }], rules: [rule([], ['"a"', "1"])] }
-    };
-    const mainOf = main(["h"], table("COLLECT", [rule([""], ["h"])]));
-    expect(evaluateDecision(document(mainOf, one), "main", {})).toEqual([{ out: ["a", "b"] }]);
-    expect(evaluateDecision(document(mainOf, two), "main", {})).toEqual([{ out: [{ v: "a", w: 1 }] }]);
+  it("should expose each output column as the list of every matching rule's value when several rules matched", () => {
+    const helper = helperTable({ hitPolicy: "COLLECT", outputs: [{ name: "v" }, { name: "w" }], rules: [rule([], ['"a"', "1"]), rule([], ['"b"', ""])] });
+    expect(readsHelper("v", helper)).toEqual([{ out: ["a", "b"] }]);
+    expect(readsHelper("w", helper)).toEqual([{ out: [1, null] }]);
   });
 
-  it("should give the first row as a context when a required single hit table has several outputs", () => {
-    const helper: DmnDecision = {
-      id: "h",
-      name: "h",
-      requires: [],
-      variable: { name: "h" },
-      table: { hitPolicy: "FIRST", inputs: [], outputs: [{ name: "v" }, { name: "w" }], rules: [rule([], ['"a"', "1"])] }
-    };
-    expect(evaluateDecision(document(main(["h"], table("COLLECT", [rule([""], ["h.w"])])), helper), "main", {})).toEqual([{ out: 1 }]);
+  it("should expose nothing when no rule of a required table matched", () => {
+    const helper = helperTable({ hitPolicy: "FIRST", outputs: [{ name: "v" }], rules: [] });
+    expect(readsHelper("v", helper)).toEqual([{ out: null }]);
   });
 
-  it("should give a single value of an aggregated required table", () => {
-    const helper: DmnDecision = {
-      id: "h",
-      name: "h",
-      requires: [],
-      variable: { name: "h" },
-      table: { hitPolicy: "COLLECT", aggregation: "SUM", inputs: [], outputs: [{ name: "v" }], rules: [rule([], ["1"]), rule([], ["2"])] }
-    };
-    expect(evaluateDecision(document(main(["h"], table("COLLECT", [rule([""], ["h"])])), helper), "main", {})).toEqual([{ out: 3 }]);
+  it("should expose the aggregate under the output column when the required table aggregates", () => {
+    const helper = helperTable({ hitPolicy: "COLLECT", aggregation: "SUM", outputs: [{ name: "v" }], rules: [rule([], ["1"]), rule([], ["2"])] });
+    expect(readsHelper("v", helper)).toEqual([{ out: 3 }]);
   });
 
   it("should give a literal decision as one row under its variable name and convert it to its type", () => {

@@ -1,0 +1,428 @@
+{
+ "decision": "wa-task-types-civil-civil",
+ "source": "hmcts/civil-wa-task-configuration@8977b6611ea7520d1bb964d97ef59a16dabd7b1f",
+ "dumpedAt": "2026-11-20T07:38:22.609Z",
+ "scenarios": [
+  {
+   "input": {},
+   "output": [
+    {
+     "taskTypeId": "summaryJudgmentDirections",
+     "taskTypeName": "Directions after Judgment"
+    },
+    {
+     "taskTypeId": "FastTrackDirections",
+     "taskTypeName": "Fast Track Directions"
+    },
+    {
+     "taskTypeId": "transferCaseOffline",
+     "taskTypeName": "Transfer Case Offline"
+    },
+    {
+     "taskTypeId": "transferCaseOffline",
+     "taskTypeName": "Transfer Case Offline"
+    },
+    {
+     "taskTypeId": "SmallClaimsTrackDirections",
+     "taskTypeName": "Small Claims Track Directions"
+    },
+    {
+     "taskTypeId": "LegalAdvisorSmallClaimsTrackDirections",
+     "taskTypeName": "Small Claims Track Directions - Legal Advisor"
+    },
+    {
+     "taskTypeId": "SmallClaimsTrackDirectionsReferral",
+     "taskTypeName": "Small Claims Track Directions - Referral"
+    },
+    {
+     "taskTypeId": "transferCaseOfflineNotSuitableSDO",
+     "taskTypeName": "Confirm Case Offline"
+    },
+    {
+     "taskTypeId": "reviewSpecificAccessRequestJudiciary",
+     "taskTypeName": "Specific Access Request - Judiciary"
+    },
+    {
+     "taskTypeId": "reviewSpecificAccessRequestLegalOps",
+     "taskTypeName": "Specific Access Request - LegalOps"
+    },
+    {
+     "taskTypeId": "reviewSpecificAccessRequestAdmin",
+     "taskTypeName": "Specific Access Request - Admin"
+    },
+    {
+     "taskTypeId": "reviewSpecificAccessRequestCTSC",
+     "taskTypeName": "Specific Access Request - CTSC"
+    },
+    {
+     "taskTypeId": "ReviewCaseFlagsForClaimant",
+     "taskTypeName": "Review Case Flags Claimant"
+    },
+    {
+     "taskTypeId": "ReviewCaseFlagsForDefendant",
+     "taskTypeName": "Review Case Flags Defendant"
+    },
+    {
+     "taskTypeId": "ScheduleAHearing",
+     "taskTypeName": "Schedule a Hearing"
+    },
+    {
+     "taskTypeId": "removeHearing",
+     "taskTypeName": "Remove a Scheduled Hearing"
+    },
+    {
+     "taskTypeId": "preHearingContact",
+     "taskTypeName": "Hearing/Trial Readiness - Pre hearing"
+    },
+    {
+     "taskTypeId": "transferOnlineCase",
+     "taskTypeName": "Request for Transfer Online Case"
+    },
+    {
+     "taskTypeId": "manualDetermination",
+     "taskTypeName": "Manual Determination"
+    },
+    {
+     "taskTypeId": "defendantWelshRequest",
+     "taskTypeName": "Defendant Welsh Request"
+    },
+    {
+     "taskTypeId": "OnlineCaseTransferReceived",
+     "taskTypeName": "Online Case Transfer Received"
+    },
+    {
+     "taskTypeId": "InitialDirectionFlightDelay",
+     "taskTypeName": "Initial Directions (Flight Delay)"
+    },
+    {
+     "taskTypeId": "JudgeDecideOnReconsiderRequest",
+     "taskTypeName": "Decision on Reconsideration Request"
+    },
+    {
+     "taskTypeId": "NIHLFastTrackDirections",
+     "taskTypeName": "Fast Track Directions - Noise induced hearing loss"
+    },
+    {
+     "taskTypeId": "HelpWithFeesHearingFee",
+     "taskTypeName": "Help With Fees Hearing Fee"
+    },
+    {
+     "taskTypeId": "reviewHearingException",
+     "taskTypeName": "Review Hearing Exception"
+    },
+    {
+     "taskTypeId": "sendCvpHearingLink",
+     "taskTypeName": "Send CVP Hearing Link"
+    },
+    {
+     "taskTypeId": "UpdateDetailsInCasemanSystem",
+     "taskTypeName": "Update details in caseman"
+    },
+    {
+     "taskTypeId": "OrderToSetAsideDefendedClaim",
+     "taskTypeName": "Defence received in time - order that judgment is set aside"
+    },
+    {
+     "taskTypeId": "ClaimSettledDivergenceTakeCaseOffline",
+     "taskTypeName": "Claim Settled Divergence - Take Case Offline"
+    },
+    {
+     "taskTypeId": "ClaimDiscontinuedDivergenceTakeCaseOffline",
+     "taskTypeName": "Claim Discontinued Divergence - Take Case Offline"
+    },
+    {
+     "taskTypeId": "ClaimDiscontinuedRemoveHearing",
+     "taskTypeName": "Claim Discontinued - Remove Hearing"
+    },
+    {
+     "taskTypeId": "ValidateDiscontinuanceCTSC",
+     "taskTypeName": "Claim Discontinued - Validate Discontinuance"
+    },
+    {
+     "taskTypeId": "ValidateDiscontinuanceAdmin",
+     "taskTypeName": "Claim Discontinued - Validate Discontinuance"
+    },
+    {
+     "taskTypeId": "JudgmentOnlineSetAsideTakeCaseOffline",
+     "taskTypeName": "Set Aside - Take Case Offline"
+    },
+    {
+     "taskTypeId": "claimantWelshRequest",
+     "taskTypeName": "Claimant Welsh Request"
+    },
+    {
+     "taskTypeId": "HelpWithFeesClaimIssue",
+     "taskTypeName": "Help With Fees Claim Issue"
+    },
+    {
+     "taskTypeId": "transferCaseOfflineLiP",
+     "taskTypeName": "Transfer Case Offline"
+    },
+    {
+     "taskTypeId": "applicationDocumentsWelshRequestAppSum",
+     "taskTypeName": "Application Documents Welsh Request - Application Summary document"
+    },
+    {
+     "taskTypeId": "applicationDocumentsWelshRequestOrderMade",
+     "taskTypeName": "Application Documents Welsh Request - General Order"
+    },
+    {
+     "taskTypeId": "applicationDocumentsWelshRequestHearingOrder",
+     "taskTypeName": "Application Documents Welsh Request - Hearing Order"
+    },
+    {
+     "taskTypeId": "applicationDocumentsWelshRequestRespondToMoreInfo",
+     "taskTypeName": "Application Documents Welsh Request - Response to the Request for more information"
+    },
+    {
+     "taskTypeId": "applicationDocumentsWelshRequestRespondToWrittenRep",
+     "taskTypeName": "Application Documents Welsh Request - Response to Written Representations"
+    },
+    {
+     "taskTypeId": "applicationDocumentsWelshRequestAddlDoc",
+     "taskTypeName": "Application Documents Welsh Request - Uploaded Documents"
+    },
+    {
+     "taskTypeId": "applicationDocumentsWelshRequestRespondToJudge",
+     "taskTypeName": "Application Documents Welsh Request - Respond to a Judge Direction Order"
+    },
+    {
+     "taskTypeId": "HelpWithFeesAdditionalApplicationFee",
+     "taskTypeName": "Help With Fees Additional Application Fee"
+    },
+    {
+     "taskTypeId": "HelpWithFeesApplicationFee",
+     "taskTypeName": "Help With Fees Application Fee"
+    },
+    {
+     "taskTypeId": "applicationDocumentsWelshRequestMoreInfo",
+     "taskTypeName": "Application Documents Welsh Request - Request for More Information"
+    },
+    {
+     "taskTypeId": "applicationDocumentsWelshRequestWrittenResp",
+     "taskTypeName": "Application Documents Welsh Request - Written Representations"
+    },
+    {
+     "taskTypeId": "applicationDocumentsWelshRequestHearingSchedule",
+     "taskTypeName": "Application Documents Welsh Request - Hearing Notice"
+    },
+    {
+     "taskTypeId": "applicationDocumentsWelshRequestAppDismissed",
+     "taskTypeName": "Application Documents Welsh Request - Dismissal Order"
+    },
+    {
+     "taskTypeId": "applicationDocumentsWelshRequestJudgeDirection",
+     "taskTypeName": "Application Documents Welsh Request - Judges Directions"
+    },
+    {
+     "taskTypeId": "applicationDocumentsWelshRequestFinalOrder",
+     "taskTypeName": "Application Documents Welsh Request - Final Order"
+    },
+    {
+     "taskTypeId": "manageStay",
+     "taskTypeName": "Manage Stay"
+    },
+    {
+     "taskTypeId": "createHearingNoticeMT",
+     "taskTypeName": "Create a hearing notice"
+    },
+    {
+     "taskTypeId": "createHearingNoticeInt",
+     "taskTypeName": "Create a hearing notice"
+    },
+    {
+     "taskTypeId": "allocateMultiTrack",
+     "taskTypeName": "Multi Track Directions"
+    },
+    {
+     "taskTypeId": "allocateMultiTrack",
+     "taskTypeName": "Multi Track Directions - Clinical Negligence"
+    },
+    {
+     "taskTypeId": "allocateMultiTrack",
+     "taskTypeName": "Multi Track Directions - Serious Personal Injury"
+    },
+    {
+     "taskTypeId": "allocateIntermediateTrack",
+     "taskTypeName": "Intermediate Track Directions"
+    },
+    {
+     "taskTypeId": "allocateIntermediateTrack",
+     "taskTypeName": "Intermediate Track Directions - Clinical Negligence"
+    },
+    {
+     "taskTypeId": "damagesListCMCMulti",
+     "taskTypeName": "List a CMC"
+    },
+    {
+     "taskTypeId": "damagesListCMCMulti",
+     "taskTypeName": "List a Multi Track hearing"
+    },
+    {
+     "taskTypeId": "damagesListCCMCMulti",
+     "taskTypeName": "List a CCMC"
+    },
+    {
+     "taskTypeId": "damagesListPtrMulti",
+     "taskTypeName": "List a PTR"
+    },
+    {
+     "taskTypeId": "damagesListTrialMulti",
+     "taskTypeName": "List a Trial"
+    },
+    {
+     "taskTypeId": "damagesListCMCInt",
+     "taskTypeName": "List a CMC"
+    },
+    {
+     "taskTypeId": "damagesListCMCInt",
+     "taskTypeName": "List a Intermediate Track hearing"
+    },
+    {
+     "taskTypeId": "damagesListPtrInt",
+     "taskTypeName": "List a PTR"
+    },
+    {
+     "taskTypeId": "damagesListTrialInt",
+     "taskTypeName": "List a Trial"
+    },
+    {
+     "taskTypeId": "specifiedListCMCMulti",
+     "taskTypeName": "List a CMC"
+    },
+    {
+     "taskTypeId": "specifiedListCMCMulti",
+     "taskTypeName": "List a Multi Track hearing"
+    },
+    {
+     "taskTypeId": "specifiedListCCMCMulti",
+     "taskTypeName": "List a CCMC"
+    },
+    {
+     "taskTypeId": "specifiedListPTRMulti",
+     "taskTypeName": "List a PTR"
+    },
+    {
+     "taskTypeId": "specifiedListTrialMulti",
+     "taskTypeName": "List a Trial"
+    },
+    {
+     "taskTypeId": "specifiedListCMCInt",
+     "taskTypeName": "List a CMC"
+    },
+    {
+     "taskTypeId": "specifiedListCMCInt",
+     "taskTypeName": "List a Intermediate Track hearing"
+    },
+    {
+     "taskTypeId": "specifiedListPTRInt",
+     "taskTypeName": "List a PTR"
+    },
+    {
+     "taskTypeId": "specifiedListTrialInt",
+     "taskTypeName": "List a Trial"
+    },
+    {
+     "taskTypeId": "ScheduleHMCHearing",
+     "taskTypeName": "Schedule HMC Hearing"
+    },
+    {
+     "taskTypeId": "RemoveHMCHearing",
+     "taskTypeName": "Remove HMC Hearing"
+    },
+    {
+     "taskTypeId": "removeHearing",
+     "taskTypeName": "Remove Hearing"
+    },
+    {
+     "taskTypeId": "transferCaseOfflineMinti",
+     "taskTypeName": "Transfer Case Offline"
+    },
+    {
+     "taskTypeId": "LegalAdvisorRevisitApplication",
+     "taskTypeName": "Legal Advisor Revisit Application"
+    },
+    {
+     "taskTypeId": "JudgeRevisitApplication",
+     "taskTypeName": "Judge Revisit Application"
+    },
+    {
+     "taskTypeId": "JudgeDecideOnApplication",
+     "taskTypeName": "Judge Decide On Application"
+    },
+    {
+     "taskTypeId": "ReviewApplication",
+     "taskTypeName": "Review Application"
+    },
+    {
+     "taskTypeId": "ReviewRevisitedApplication",
+     "taskTypeName": "Review Revisited Application"
+    },
+    {
+     "taskTypeId": "ScheduleApplicationHearing",
+     "taskTypeName": "Schedule Application Hearing"
+    },
+    {
+     "taskTypeId": "ReviewApplicationOrder",
+     "taskTypeName": "Review Application Order"
+    },
+    {
+     "taskTypeId": "ReviewStayTheClaimApplicationOrder",
+     "taskTypeName": "Review Stay The Claim Application Order"
+    },
+    {
+     "taskTypeId": "ReviewUnlessOrderApplication",
+     "taskTypeName": "Review Unless Order Application"
+    },
+    {
+     "taskTypeId": "LegalAdvisorDecideOnApplication",
+     "taskTypeName": "Legal Advisor Decide On Application"
+    },
+    {
+     "taskTypeId": "respondToQueryCTSC",
+     "taskTypeName": "Respond to a query"
+    },
+    {
+     "taskTypeId": "respondToQueryAdmin",
+     "taskTypeName": "Respond to a hearing related query"
+    },
+    {
+     "taskTypeId": "respondToQueryCTSC",
+     "taskTypeName": "Respond to a hearing related query"
+    },
+    {
+     "taskTypeId": "reviewMessageJudicial",
+     "taskTypeName": "Review message"
+    },
+    {
+     "taskTypeId": "reviewMessageCW",
+     "taskTypeName": "Review message"
+    },
+    {
+     "taskTypeId": "reviewMessageLA",
+     "taskTypeName": "Review message"
+    },
+    {
+     "taskTypeId": "reviewMessageWLU",
+     "taskTypeName": "Review message"
+    },
+    {
+     "taskTypeId": "uploadTranslatedOrderDocument",
+     "taskTypeName": "Upload Translated Order Document"
+    },
+    {
+     "taskTypeId": "finalOrderIssuedWelshRequest",
+     "taskTypeName": "Order Issued Welsh Request"
+    },
+    {
+     "taskTypeId": "respondToQueryWLU",
+     "taskTypeName": "Respond to a query - Welsh"
+    },
+    {
+     "taskTypeId": "respondToHearingQueryWLU",
+     "taskTypeName": "Respond to a hearing related query - Welsh"
+    }
+   ]
+  }
+ ]
+}

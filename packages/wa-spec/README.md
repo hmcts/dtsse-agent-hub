@@ -21,6 +21,18 @@ Run it as `packages/wa-spec/bin/wa-spec` from a checkout after `yarn install`; r
 
 `examples/et/` holds the spec imported from `hmcts/et-wa-task-configuration`, its layout and its coverage report. The round-trip test (`src/et-roundtrip.test.ts`) reads the 24 ET DMNs committed in `test-fixtures/et/`, whose README names the source commit.
 
+## Simulator scenarios
+
+`src/simulate/scenarios.test.ts` runs the simulator's DMN evaluation against what Camunda gave in each service's own Java DMN tests. `test-fixtures/et-scenarios/`, `sscs-scenarios/` and `civil-scenarios/` are committed; each fixture names its source commit and the instant it ran (`dumpedAt`), which the test gives the DMNs as the time now. ET's spec is `examples/et/spec.yaml`; sscs and civil run against the spec their DMNs import to, read from the service's clone under the workspace `apps/`, and are skipped where it is absent.
+
+To regenerate a service's scenarios, or to dump one that is not committed, such as `prl`:
+
+```
+node scripts/dump-scenarios.mjs <name> <path to the service's task-configuration clone>
+```
+
+It writes `test-fixtures/<name>-scenarios/` from a throwaway worktree of the clone and leaves the clone untouched. Do not commit `prl-scenarios`.
+
 ## Checks
 
 ```

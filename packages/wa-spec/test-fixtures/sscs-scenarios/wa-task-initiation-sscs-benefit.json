@@ -1,0 +1,2349 @@
+{
+ "decision": "wa-task-initiation-sscs-benefit",
+ "source": "hmcts/sscs-task-configuration@a3d3c0cd99c39be7614135158a7f155e6625e64b",
+ "dumpedAt": "2026-11-20T07:38:03.702Z",
+ "scenarios": [
+  {
+   "input": {
+    "eventId": "draftToIncompleteApplication",
+    "additionalData": {
+     "Data": {}
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "CTSC - Review Incomplete Appeal",
+     "workingDaysAllowed": 5,
+     "processCategories": "reviewIncompleteAppeal",
+     "taskId": "reviewIncompleteAppeal"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "incompleteApplicationReceived",
+    "additionalData": {
+     "Data": {}
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "CTSC - Review Incomplete Appeal",
+     "workingDaysAllowed": 5,
+     "processCategories": "reviewIncompleteAppeal",
+     "taskId": "reviewIncompleteAppeal"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "dwpSupplementaryResponse",
+    "additionalData": {
+     "Data": {}
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "CTSC - Action Unprocessed Correspondence",
+     "workingDaysAllowed": 10,
+     "processCategories": "actionUnprocessedCorrespondence",
+     "taskId": "actionUnprocessedCorrespondence"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "attachScannedDocs",
+    "additionalData": {
+     "Data": {}
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "CTSC - Action Unprocessed Correspondence",
+     "workingDaysAllowed": 10,
+     "processCategories": "actionUnprocessedCorrespondence",
+     "taskId": "actionUnprocessedCorrespondence"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "uploadDocumentFurtherEvidence",
+    "additionalData": {
+     "Data": {}
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "CTSC - Action Unprocessed Correspondence",
+     "workingDaysAllowed": 10,
+     "processCategories": "actionUnprocessedCorrespondence",
+     "taskId": "actionUnprocessedCorrespondence"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "dwpSupplementaryResponse",
+    "additionalData": {
+     "Data": {}
+    },
+    "postEventState": "dormantAppealState"
+   },
+   "output": [
+    {
+     "name": "CTSC - Action Unprocessed Correspondence - Dormant/Post Hearing",
+     "workingDaysAllowed": 10,
+     "processCategories": "actionUnprocessedCorrespondenceDormant",
+     "taskId": "actionUnprocessedCorrespondenceDormant"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "dwpSupplementaryResponse",
+    "additionalData": {
+     "Data": {}
+    },
+    "postEventState": "postHearing"
+   },
+   "output": [
+    {
+     "name": "CTSC - Action Unprocessed Correspondence - Dormant/Post Hearing",
+     "workingDaysAllowed": 10,
+     "processCategories": "actionUnprocessedCorrespondenceDormant",
+     "taskId": "actionUnprocessedCorrespondenceDormant"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "attachScannedDocs",
+    "additionalData": {
+     "Data": {}
+    },
+    "postEventState": "dormantAppealState"
+   },
+   "output": [
+    {
+     "name": "CTSC - Action Unprocessed Correspondence - Dormant/Post Hearing",
+     "workingDaysAllowed": 10,
+     "processCategories": "actionUnprocessedCorrespondenceDormant",
+     "taskId": "actionUnprocessedCorrespondenceDormant"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "attachScannedDocs",
+    "additionalData": {
+     "Data": {}
+    },
+    "postEventState": "postHearing"
+   },
+   "output": [
+    {
+     "name": "CTSC - Action Unprocessed Correspondence - Dormant/Post Hearing",
+     "workingDaysAllowed": 10,
+     "processCategories": "actionUnprocessedCorrespondenceDormant",
+     "taskId": "actionUnprocessedCorrespondenceDormant"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "uploadDocumentFurtherEvidence",
+    "additionalData": {
+     "Data": {}
+    },
+    "postEventState": "dormantAppealState"
+   },
+   "output": [
+    {
+     "name": "CTSC - Action Unprocessed Correspondence - Dormant/Post Hearing",
+     "workingDaysAllowed": 10,
+     "processCategories": "actionUnprocessedCorrespondenceDormant",
+     "taskId": "actionUnprocessedCorrespondenceDormant"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "uploadDocumentFurtherEvidence",
+    "additionalData": {
+     "Data": {}
+    },
+    "postEventState": "postHearing"
+   },
+   "output": [
+    {
+     "name": "CTSC - Action Unprocessed Correspondence - Dormant/Post Hearing",
+     "workingDaysAllowed": 10,
+     "processCategories": "actionUnprocessedCorrespondenceDormant",
+     "taskId": "actionUnprocessedCorrespondenceDormant"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "dwpUploadResponse",
+    "additionalData": {
+     "Data": {
+      "ftaResponseReviewRequired": true
+     }
+    },
+    "postEventState": "withDwp"
+   },
+   "output": [
+    {
+     "name": "CTSC - Review FTA Response",
+     "workingDaysAllowed": 2,
+     "processCategories": "reviewFtaResponse",
+     "taskId": "reviewFtaResponse"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "dwpChallengeValidity",
+    "additionalData": {
+     "Data": {}
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review FTA validity challenge - LO",
+     "workingDaysAllowed": 2,
+     "processCategories": "reviewFtaValidityChallenge",
+     "taskId": "reviewFtaValidityChallenge"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "dwpUploadResponse",
+    "additionalData": {
+     "Data": {
+      "ftaResponseReviewRequired": false
+     }
+    },
+    "postEventState": null
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "eventId": "sendToAdmin",
+    "additionalData": {
+     "Data": {}
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "CTSC - Review Admin Action",
+     "workingDaysAllowed": 5,
+     "processCategories": "reviewAdminAction",
+     "taskId": "reviewAdminAction"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "dwpUploadResponse",
+    "additionalData": {
+     "Data": {
+      "languagePreferenceWelsh": false,
+      "ftaResponseReviewRequired": false
+     }
+    },
+    "postEventState": null
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "eventId": "attachScannedDocs",
+    "additionalData": {
+     "Data": {
+      "languagePreferenceWelsh": true
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Bi-Lingual Document - CTSC",
+     "workingDaysAllowed": 10,
+     "processCategories": "Translation Tasks",
+     "taskId": "reviewBilingualDocument"
+    },
+    {
+     "name": "CTSC - Action Unprocessed Correspondence",
+     "workingDaysAllowed": 10,
+     "processCategories": "actionUnprocessedCorrespondence",
+     "taskId": "actionUnprocessedCorrespondence"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "uploadDocumentFurtherEvidence",
+    "additionalData": {
+     "Data": {
+      "languagePreferenceWelsh": true
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Bi-Lingual Document - CTSC",
+     "workingDaysAllowed": 10,
+     "processCategories": "Translation Tasks",
+     "taskId": "reviewBilingualDocument"
+    },
+    {
+     "name": "CTSC - Action Unprocessed Correspondence",
+     "workingDaysAllowed": 10,
+     "processCategories": "actionUnprocessedCorrespondence",
+     "taskId": "actionUnprocessedCorrespondence"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "dwpUploadResponse",
+    "additionalData": {
+     "Data": {
+      "ftaResponseReviewRequired": false
+     }
+    },
+    "postEventState": "withDwp"
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "eventId": "uploadDocument",
+    "additionalData": {
+     "Data": {
+      "languagePreferenceWelsh": true
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Bi-Lingual Document - CTSC",
+     "workingDaysAllowed": 10,
+     "processCategories": "Translation Tasks",
+     "taskId": "reviewBilingualDocument"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "actionFurtherEvidence",
+    "additionalData": {
+     "Data": {
+      "scannedDocumentTypes": [
+       "reinstatementRequest"
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Reinstatement Request - Judge",
+     "workingDaysAllowed": 2,
+     "processCategories": "reviewReinstatementRequestJudge",
+     "taskId": "reviewReinstatementRequestJudge"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "validAppealCreated",
+    "additionalData": {
+     "Data": {}
+    },
+    "postEventState": "validAppeal"
+   },
+   "output": [
+    {
+     "name": "CTSC - Review Valid Appeal",
+     "workingDaysAllowed": 5,
+     "processCategories": "reviewValidAppeal",
+     "delayDuration": 1,
+     "taskId": "reviewValidAppeal"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "readyToList",
+    "additionalData": {
+     "Data": {}
+    },
+    "postEventState": "listingError"
+   },
+   "output": [
+    {
+     "name": "CTSC - Review Listing Error",
+     "workingDaysAllowed": 3,
+     "processCategories": "reviewListingError",
+     "taskId": "reviewListingError"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "sendToRoboticsError",
+    "additionalData": {
+     "Data": {}
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "CTSC - Review Robotic Fail",
+     "workingDaysAllowed": 3,
+     "processCategories": "reviewRoboticFail",
+     "taskId": "reviewRoboticFail"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "directionDueToday",
+    "additionalData": {
+     "Data": {}
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review BF Date - CTSC",
+     "workingDaysAllowed": 5,
+     "processCategories": "reviewBfDate",
+     "taskId": "reviewBfDate"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "prepareForHearing",
+    "additionalData": {
+     "Data": {}
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Allocate Case Roles and Create Bundle - RPC",
+     "workingDaysAllowed": 3,
+     "processCategories": "allocateCaseRolesAndCreateBundle",
+     "taskId": "allocateCaseRolesAndCreateBundle"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "dwpSupplementaryResponse",
+    "additionalData": {
+     "Data": {
+      "languagePreferenceWelsh": true
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Bi-Lingual Document - CTSC",
+     "workingDaysAllowed": 10,
+     "processCategories": "Translation Tasks",
+     "taskId": "reviewBilingualDocument"
+    },
+    {
+     "name": "CTSC - Action Unprocessed Correspondence",
+     "workingDaysAllowed": 10,
+     "processCategories": "actionUnprocessedCorrespondence",
+     "taskId": "actionUnprocessedCorrespondence"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "actionFurtherEvidence",
+    "additionalData": {
+     "Data": {
+      "scannedDocumentTypes": [
+       "confidentialityRequest"
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Confidentiality Request - Judge",
+     "workingDaysAllowed": 2,
+     "processCategories": "reviewConfidentialityRequest",
+     "taskId": "reviewConfidentialityRequest"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "manageWelshDocuments",
+    "additionalData": {
+     "Data": {
+      "scannedDocumentTypes": [
+       "confidentialityRequest"
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Confidentiality Request - Judge",
+     "workingDaysAllowed": 2,
+     "processCategories": "reviewConfidentialityRequest",
+     "taskId": "reviewConfidentialityRequest"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "manageWelshDocuments",
+    "additionalData": {
+     "Data": {
+      "scannedDocumentTypes": [
+       "reinstatementRequest"
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Reinstatement Request - Judge",
+     "workingDaysAllowed": 2,
+     "processCategories": "reviewReinstatementRequestJudge",
+     "taskId": "reviewReinstatementRequestJudge"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "updateNotListable",
+    "additionalData": {
+     "Data": {
+      "action": "reviewByJudge"
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "FTA not Provided Appointee Details - Judge",
+     "workingDaysAllowed": 2,
+     "processCategories": "ftaNotProvidedAppointeeDetailsJudge",
+     "taskId": "ftaNotProvidedAppointeeDetailsJudge"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "actionPostponementRequest",
+    "additionalData": {
+     "Data": {
+      "action": "reviewByJudge"
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Postponement Request - Judge",
+     "workingDaysAllowed": 2,
+     "processCategories": "reviewPostponementRequestJudge",
+     "taskId": "reviewPostponementRequestJudge"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "manageWelshDocuments",
+    "additionalData": {
+     "Data": {
+      "scannedDocumentTypes": [
+       "urgentHearingRequest"
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Urgent Hearing Request - Judge",
+     "workingDaysAllowed": 2,
+     "processCategories": "reviewUrgentHearingRequest",
+     "taskId": "reviewUrgentHearingRequest"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "makeCaseUrgent",
+    "additionalData": {
+     "Data": {}
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Urgent Hearing Request - Judge",
+     "workingDaysAllowed": 2,
+     "processCategories": "reviewUrgentHearingRequest",
+     "taskId": "reviewUrgentHearingRequest"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "tcwReferToJudge",
+    "additionalData": {
+     "Data": {
+      "workType": "pre"
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Referred By TCW - Judge",
+     "workingDaysAllowed": 2,
+     "processCategories": "referredByTcwPreHearing",
+     "taskId": "referredByTcwPreHearing"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "createBundle",
+    "additionalData": {
+     "Data": {
+      "assignedCaseRoles": [
+       "hearing-judge"
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Prepare For Hearing - Judge",
+     "workingDaysAllowed": 2,
+     "processCategories": "prepareForHearingJudge",
+     "taskId": "prepareForHearingJudge"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "hearingToday",
+    "additionalData": {
+     "Data": {}
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Write Decision - Judge",
+     "workingDaysAllowed": 2,
+     "processCategories": "writeDecisionJudge",
+     "taskId": "writeDecisionJudge"
+    },
+    {
+     "name": "Update Hearing Details - RPC",
+     "workingDaysAllowed": 5,
+     "processCategories": "updateHearingDetails",
+     "taskId": "updateHearingDetails"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "validSendToInterloc",
+    "additionalData": {
+     "Data": {
+      "interlocReferralReason": "N/A",
+      "action": "reviewByJudge"
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Referred to interloc - Judge",
+     "workingDaysAllowed": 2,
+     "processCategories": "referredToInterlocJudge",
+     "taskId": "referredToInterlocJudge"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "validSendToInterloc",
+    "additionalData": {
+     "Data": {
+      "interlocReferralReason": "adviceOnHowToProceed",
+      "workType": "pre",
+      "action": "reviewByJudge"
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Referred By Admin - Judge",
+     "workingDaysAllowed": 2,
+     "processCategories": "referredByAdminJudgePreHearing",
+     "taskId": "referredByAdminJudgePreHearing"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "hmctsResponseReviewed",
+    "additionalData": {
+     "Data": {
+      "interlocReferralReason": "confirmPanelCompositionAndListingDirections",
+      "action": {
+       "value": {
+        "code": "reviewByJudge"
+       }
+      }
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Confirm Panel Composition - Judge",
+     "workingDaysAllowed": 2,
+     "processCategories": "confirmPanelComposition",
+     "taskId": "confirmPanelComposition"
+    },
+    {
+     "name": "Provide Listing Directions - Judge",
+     "workingDaysAllowed": 2,
+     "processCategories": "provideListingDirections",
+     "taskId": "provideListingDirections"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "validSendToInterloc",
+    "additionalData": {
+     "Data": {
+      "interlocReferralReason": "noResponseToDirection",
+      "action": "reviewByJudge"
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Referred to interloc - No response to a direction - Judge",
+     "workingDaysAllowed": 2,
+     "processCategories": "referredToInterlocJudge",
+     "taskId": "referredToInterlocJudge"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "validSendToInterloc",
+    "additionalData": {
+     "Data": {
+      "interlocReferralReason": "Other",
+      "action": "reviewByJudge"
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Referred to interloc - Judge",
+     "workingDaysAllowed": 2,
+     "processCategories": "referredToInterlocJudge",
+     "taskId": "referredToInterlocJudge"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "actionPostponementRequest",
+    "additionalData": {
+     "Data": {
+      "daysToHearing": 14
+     }
+    },
+    "postEventState": null
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "eventId": "actionPostponementRequest",
+    "additionalData": {
+     "Data": {
+      "daysToHearing": 6
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Contact Parties - RPC",
+     "workingDaysAllowed": 1,
+     "processCategories": "contactParties",
+     "taskId": "contactParties"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "correctionRequest",
+    "additionalData": {
+     "Data": {}
+    },
+    "postEventState": "postHearing"
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "eventId": "actionFurtherEvidence",
+    "additionalData": {
+     "Data": {
+      "furtherEvidenceAction": {
+       "value": {
+        "code": "adminActionCorrection"
+       }
+      },
+      "scannedDocumentTypes": [
+       "correctionApplication"
+      ]
+     }
+    },
+    "postEventState": "dormantAppealState"
+   },
+   "output": [
+    {
+     "name": "Review Correction Application - CTSC",
+     "workingDaysAllowed": 3,
+     "processCategories": "reviewCorrectionApplicationAdmin",
+     "taskId": "reviewCorrectionApplicationAdmin"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "dwpRequestTimeExtension",
+    "additionalData": {
+     "Data": {}
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Request FTA Time Extension - LO",
+     "workingDaysAllowed": 2,
+     "processCategories": "ftaRequestTimeExtension",
+     "taskId": "ftaRequestTimeExtension"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "createBundle",
+    "additionalData": {
+     "Data": {
+      "assignedCaseRoles": [
+       "tribunal-member-1",
+       "tribunal-member-2",
+       "tribunal-member-3",
+       "appraiser-1",
+       "appraiser-2"
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Prepare for hearing - Tribunal Member 1",
+     "workingDaysAllowed": 2,
+     "processCategories": "prepareForHearingTribunalMember",
+     "taskId": "prepareForHearingTribunalMember1"
+    },
+    {
+     "name": "Prepare for hearing - Tribunal Member 2",
+     "workingDaysAllowed": 2,
+     "processCategories": "prepareForHearingTribunalMember",
+     "taskId": "prepareForHearingTribunalMember2"
+    },
+    {
+     "name": "Prepare for hearing - Tribunal Member 3",
+     "workingDaysAllowed": 2,
+     "processCategories": "prepareForHearingTribunalMember",
+     "taskId": "prepareForHearingTribunalMember3"
+    },
+    {
+     "name": "Prepare for hearing - Appraiser 1",
+     "workingDaysAllowed": 2,
+     "processCategories": "prepareHearingAppraiser",
+     "taskId": "prepareHearingAppraiser1"
+    },
+    {
+     "name": "Prepare for hearing - Appraiser 2",
+     "workingDaysAllowed": 2,
+     "processCategories": "prepareHearingAppraiser",
+     "taskId": "prepareHearingAppraiser2"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "createBundle",
+    "additionalData": {
+     "Data": {
+      "assignedCaseRoles": [
+       "tribunal-member-1"
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Prepare for hearing - Tribunal Member 1",
+     "workingDaysAllowed": 2,
+     "processCategories": "prepareForHearingTribunalMember",
+     "taskId": "prepareForHearingTribunalMember1"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "createBundle",
+    "additionalData": {
+     "Data": {
+      "assignedCaseRoles": [
+       "tribunal-member-2"
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Prepare for hearing - Tribunal Member 2",
+     "workingDaysAllowed": 2,
+     "processCategories": "prepareForHearingTribunalMember",
+     "taskId": "prepareForHearingTribunalMember2"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "createBundle",
+    "additionalData": {
+     "Data": {
+      "assignedCaseRoles": [
+       "tribunal-member-3"
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Prepare for hearing - Tribunal Member 3",
+     "workingDaysAllowed": 2,
+     "processCategories": "prepareForHearingTribunalMember",
+     "taskId": "prepareForHearingTribunalMember3"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "createBundle",
+    "additionalData": {
+     "Data": {
+      "assignedCaseRoles": [
+       "appraiser-1"
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Prepare for hearing - Appraiser 1",
+     "workingDaysAllowed": 2,
+     "processCategories": "prepareHearingAppraiser",
+     "taskId": "prepareHearingAppraiser1"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "createBundle",
+    "additionalData": {
+     "Data": {
+      "assignedCaseRoles": [
+       "appraiser-2"
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Prepare for hearing - Appraiser 2",
+     "workingDaysAllowed": 2,
+     "processCategories": "prepareHearingAppraiser",
+     "taskId": "prepareHearingAppraiser2"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "newCaseRolesAssigned",
+    "additionalData": {
+     "Data": {
+      "assignedCaseRoles": [
+       "hearing-judge",
+       "tribunal-member-1",
+       "tribunal-member-2",
+       "tribunal-member-3",
+       "appraiser-1",
+       "appraiser-2"
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Prepare For Hearing - Judge",
+     "workingDaysAllowed": 2,
+     "processCategories": "prepareForHearingJudge",
+     "taskId": "prepareForHearingJudge"
+    },
+    {
+     "name": "Prepare for hearing - Tribunal Member 1",
+     "workingDaysAllowed": 2,
+     "processCategories": "prepareForHearingTribunalMember",
+     "taskId": "prepareForHearingTribunalMember1"
+    },
+    {
+     "name": "Prepare for hearing - Tribunal Member 2",
+     "workingDaysAllowed": 2,
+     "processCategories": "prepareForHearingTribunalMember",
+     "taskId": "prepareForHearingTribunalMember2"
+    },
+    {
+     "name": "Prepare for hearing - Tribunal Member 3",
+     "workingDaysAllowed": 2,
+     "processCategories": "prepareForHearingTribunalMember",
+     "taskId": "prepareForHearingTribunalMember3"
+    },
+    {
+     "name": "Prepare for hearing - Appraiser 1",
+     "workingDaysAllowed": 2,
+     "processCategories": "prepareHearingAppraiser",
+     "taskId": "prepareHearingAppraiser1"
+    },
+    {
+     "name": "Prepare for hearing - Appraiser 2",
+     "workingDaysAllowed": 2,
+     "processCategories": "prepareHearingAppraiser",
+     "taskId": "prepareHearingAppraiser2"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "createBundle",
+    "additionalData": {
+     "Data": {}
+    },
+    "postEventState": null
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "eventId": "validSendToInterloc",
+    "additionalData": {
+     "Data": {
+      "action": "reviewByTcw"
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Referred to interloc - LO",
+     "workingDaysAllowed": 2,
+     "processCategories": "referredToInterlocTCW",
+     "taskId": "referredToInterlocTCW"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "validSendToInterloc",
+    "additionalData": {
+     "Data": {
+      "interlocReferralReason": "timeExtension",
+      "action": "reviewByTcw"
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Referred to interloc - Time extension - LO",
+     "workingDaysAllowed": 2,
+     "processCategories": "referredToInterlocTCW",
+     "taskId": "referredToInterlocTCW"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "validSendToInterloc",
+    "additionalData": {
+     "Data": {
+      "action": "postponementRequestInterlocSendToTcw"
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review postponement request - LO",
+     "workingDaysAllowed": 2,
+     "processCategories": "reviewPostponementRequestTCW",
+     "taskId": "reviewPostponementRequestTCW"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "validSendToInterloc",
+    "additionalData": {
+     "Data": {
+      "interlocReferralReason": "adviceOnHowToProceed",
+      "action": "reviewByTcw"
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Referred by Admin - LO",
+     "workingDaysAllowed": 2,
+     "processCategories": "referredByAdminTcw",
+     "taskId": "referredByAdminTcw"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "manageWelshDocuments",
+    "additionalData": {
+     "Data": {
+      "scannedDocumentTypes": [
+       "postponementRequest"
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review postponement request - LO",
+     "workingDaysAllowed": 2,
+     "processCategories": "reviewPostponementRequestTCW",
+     "taskId": "reviewPostponementRequestTCW"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "postponementRequest",
+    "additionalData": {
+     "Data": {}
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review postponement request - LO",
+     "workingDaysAllowed": 2,
+     "processCategories": "reviewPostponementRequestTCW",
+     "taskId": "reviewPostponementRequestTCW"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "validSendToInterloc",
+    "additionalData": {
+     "Data": {
+      "interlocReferralReason": "complexCase",
+      "action": "reviewByTcw"
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Referred to interloc - Complex Case - LO",
+     "workingDaysAllowed": 2,
+     "processCategories": "referredToInterlocTCW",
+     "taskId": "referredToInterlocTCW"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "nonCompliantSendToInterloc",
+    "additionalData": {
+     "Data": {}
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Referred to interloc - LO",
+     "workingDaysAllowed": 2,
+     "processCategories": "referredToInterlocTCW",
+     "taskId": "referredToInterlocTCW"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "sentToDwp",
+    "additionalData": {
+     "Data": {
+      "caseManagementCategory": {
+       "value": {
+        "code": "childSupport"
+       }
+      }
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Referred to Interloc - FTA response overdue - LO",
+     "workingDaysAllowed": 2,
+     "processCategories": "ftaResponseOverdue",
+     "delayDuration": 42,
+     "taskId": "ftaResponseOverdue"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "sentToDwp",
+    "additionalData": {
+     "Data": {
+      "caseManagementCategory": {
+       "value": {
+        "code": "childSupport"
+       }
+      },
+      "dwpDueDate": "2026-11-27"
+     }
+    },
+    "postEventState": "withDwp"
+   },
+   "output": [
+    {
+     "name": "Review FTA Due Date - CTSC",
+     "workingDaysAllowed": 2,
+     "processCategories": "reviewFtaDueDate",
+     "delayDuration": 7,
+     "taskId": "reviewFtaDueDate"
+    },
+    {
+     "name": "Referred to Interloc - FTA response overdue - LO",
+     "workingDaysAllowed": 2,
+     "processCategories": "ftaResponseOverdue",
+     "delayDuration": 42,
+     "taskId": "ftaResponseOverdue"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "sentToDwp",
+    "additionalData": {
+     "Data": {
+      "caseManagementCategory": {
+       "value": {
+        "code": "PIP"
+       }
+      },
+      "dwpDueDate": "2026-11-27"
+     }
+    },
+    "postEventState": "withDwp"
+   },
+   "output": [
+    {
+     "name": "Review FTA Due Date - CTSC",
+     "workingDaysAllowed": 2,
+     "processCategories": "reviewFtaDueDate",
+     "delayDuration": 7,
+     "taskId": "reviewFtaDueDate"
+    },
+    {
+     "name": "Referred to Interloc - FTA response overdue - LO",
+     "workingDaysAllowed": 2,
+     "processCategories": "ftaResponseOverdue",
+     "delayDuration": 28,
+     "taskId": "ftaResponseOverdue"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "directionDueToday",
+    "additionalData": {
+     "Data": {
+      "directionTypeDl": {
+       "value": {
+        "code": "grantExtension"
+       }
+      }
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review BF Date - CTSC",
+     "workingDaysAllowed": 5,
+     "processCategories": "reviewBfDate",
+     "taskId": "reviewBfDate"
+    },
+    {
+     "name": "Referred to Interloc - FTA response overdue - LO",
+     "workingDaysAllowed": 2,
+     "processCategories": "ftaResponseOverdue",
+     "taskId": "ftaResponseOverdue"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "interlocSendToTcw",
+    "additionalData": {
+     "Data": {}
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Referred By Judge - LO",
+     "workingDaysAllowed": 2,
+     "processCategories": "referredByJudge",
+     "taskId": "referredByJudge"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "uploadDocument",
+    "additionalData": {
+     "Data": {
+      "scannedDocumentTypes": [
+       "audioDocument"
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Process audio/video evidence - LO",
+     "workingDaysAllowed": 2,
+     "processCategories": "processAudioVideoEvidence",
+     "taskId": "processAudioVideoEvidence"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "dwpSupplementaryResponse",
+    "additionalData": {
+     "Data": {
+      "scannedDocumentTypes": [
+       "videoDocument",
+       "audioDocument"
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Process audio/video evidence - LO",
+     "workingDaysAllowed": 2,
+     "processCategories": "processAudioVideoEvidence",
+     "taskId": "processAudioVideoEvidence"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "dwpUploadResponse",
+    "additionalData": {
+     "Data": {
+      "scannedDocumentTypes": [
+       "audioDocument",
+       "other"
+      ],
+      "ftaResponseReviewRequired": false
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Process audio/video evidence - LO",
+     "workingDaysAllowed": 2,
+     "processCategories": "processAudioVideoEvidence",
+     "taskId": "processAudioVideoEvidence"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "uploadFurtherEvidence",
+    "additionalData": {
+     "Data": {
+      "scannedDocumentTypes": [
+       "videoDocument"
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Process audio/video evidence - LO",
+     "workingDaysAllowed": 2,
+     "processCategories": "processAudioVideoEvidence",
+     "taskId": "processAudioVideoEvidence"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "uploadDocumentFurtherEvidence",
+    "additionalData": {
+     "Data": {
+      "scannedDocumentTypes": [
+       "videoDocument"
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Process audio/video evidence - LO",
+     "workingDaysAllowed": 2,
+     "processCategories": "processAudioVideoEvidence",
+     "taskId": "processAudioVideoEvidence"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "nonCompliant",
+    "additionalData": {
+     "Data": {}
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Non Compliant Appeal - LO",
+     "workingDaysAllowed": 2,
+     "processCategories": "reviewNonCompliantAppeal",
+     "taskId": "reviewNonCompliantAppeal"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "draftToNonCompliant",
+    "additionalData": {
+     "Data": {}
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Non Compliant Appeal - LO",
+     "workingDaysAllowed": 2,
+     "processCategories": "reviewNonCompliantAppeal",
+     "taskId": "reviewNonCompliantAppeal"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "sORRequest",
+    "additionalData": {
+     "Data": {
+      "sscsHearingRecordings": []
+     }
+    },
+    "postEventState": "postHearing"
+   },
+   "output": [
+    {
+     "name": "Upload Hearing Recording: SOR - CTSC",
+     "workingDaysAllowed": 2,
+     "processCategories": "uploadHearingRecordingSORCTSC",
+     "taskId": "uploadHearingRecordingSORCTSC"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "validSendToInterloc",
+    "additionalData": {
+     "Data": {
+      "interlocReferralReason": "reviewLibertyToApplyApplication"
+     }
+    },
+    "postEventState": "postHearing"
+   },
+   "output": [
+    {
+     "name": "Review Liberty to Apply Application - Judge",
+     "workingDaysAllowed": 2,
+     "processCategories": "reviewLibertytoApplyApplication",
+     "taskId": "reviewLibertytoApplyApplication"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "validSendToInterloc",
+    "additionalData": {
+     "Data": {
+      "interlocReferralReason": "reviewCorrectionApplication"
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Correction Application - Judge",
+     "workingDaysAllowed": 2,
+     "processCategories": "reviewCorrectionApplicationJudge",
+     "taskId": "reviewCorrectionApplicationJudge"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "adminActionCorrection",
+    "additionalData": {
+     "Data": {}
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Correction Application - Judge",
+     "workingDaysAllowed": 2,
+     "processCategories": "reviewCorrectionApplicationJudge",
+     "taskId": "reviewCorrectionApplicationJudge"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "validSendToInterloc",
+    "additionalData": {
+     "Data": {
+      "interlocReferralReason": "statementOfReasonsApplication",
+      "issueFinalDecisionDate": "2026-10-23"
+     }
+    },
+    "postEventState": "postHearing"
+   },
+   "output": [
+    {
+     "name": "Write Statement of Reason - Judge",
+     "workingDaysAllowed": 28,
+     "processCategories": "writeStatementofReason",
+     "taskId": "writeStatementofReason"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "setAsideRefusedSOR",
+    "additionalData": {
+     "Data": {
+      "issueFinalDecisionDate": "2026-10-23"
+     }
+    },
+    "postEventState": "postHearing"
+   },
+   "output": [
+    {
+     "name": "Write Statement of Reason - Judge",
+     "workingDaysAllowed": 28,
+     "processCategories": "writeStatementofReason",
+     "taskId": "writeStatementofReason"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "sORExtendTime",
+    "additionalData": {
+     "Data": {}
+    },
+    "postEventState": "postHearing"
+   },
+   "output": [
+    {
+     "name": "Write Statement of Reason - Judge",
+     "workingDaysAllowed": 28,
+     "processCategories": "writeStatementofReason",
+     "taskId": "writeStatementofReason"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "validSendToInterloc",
+    "additionalData": {
+     "Data": {
+      "interlocReferralReason": "lateStatementOfReasonsApplication",
+      "issueFinalDecisionDate": "2026-10-19"
+     }
+    },
+    "postEventState": "postHearing"
+   },
+   "output": [
+    {
+     "name": "Review Late SOR Application - Judge",
+     "workingDaysAllowed": 2,
+     "processCategories": "reviewLateStatementofReasonsApplication",
+     "taskId": "reviewLateStatementofReasonsApplication"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "validSendToInterloc",
+    "additionalData": {
+     "Data": {
+      "interlocReferralReason": "reviewPermissionToAppealApplication"
+     }
+    },
+    "postEventState": "postHearing"
+   },
+   "output": [
+    {
+     "name": "Review Permission to Appeal Application - Judge",
+     "workingDaysAllowed": 2,
+     "processCategories": "reviewPermissiontoAppealApplication",
+     "taskId": "reviewPermissiontoAppealApplication"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "validSendToInterloc",
+    "additionalData": {
+     "Data": {
+      "interlocReferralReason": "reviewPermissionToAppealApplication",
+      "otherParties": [
+       "other party 1"
+      ]
+     }
+    },
+    "postEventState": "postHearing"
+   },
+   "output": [
+    {
+     "name": "Review Permission to Appeal Application - Judge",
+     "workingDaysAllowed": 2,
+     "processCategories": "reviewPermissiontoAppealApplication",
+     "delayDuration": 21,
+     "taskId": "reviewPermissiontoAppealApplication"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "validSendToInterloc",
+    "additionalData": {
+     "Data": {
+      "interlocReferralReason": "reviewUpperTribunalDecision"
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Remitted Decision and Provide Listing Directions - Judge",
+     "workingDaysAllowed": 2,
+     "processCategories": "reviewRemittedDecisionandProvideListingDirections",
+     "taskId": "reviewRemittedDecisionandProvideListingDirections"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "libertyToApplyGranted",
+    "additionalData": {
+     "Data": {}
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Post Hearing Notice for Listing Requirements - CTSC",
+     "workingDaysAllowed": 10,
+     "processCategories": "reviewPostHearingNoticeforListingRequirements",
+     "taskId": "reviewPostHearingNoticeforListingRequirements"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "reviewAndSetAside",
+    "additionalData": {
+     "Data": {}
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Post Hearing Notice for Listing Requirements - CTSC",
+     "workingDaysAllowed": 10,
+     "processCategories": "reviewPostHearingNoticeforListingRequirements",
+     "taskId": "reviewPostHearingNoticeforListingRequirements"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "validSendToInterloc",
+    "additionalData": {
+     "Data": {
+      "interlocReferralReason": "reviewSetAsideApplication"
+     }
+    },
+    "postEventState": "dormantAppealState"
+   },
+   "output": [
+    {
+     "name": "Review Set Aside Application - Judge",
+     "workingDaysAllowed": 2,
+     "processCategories": "reviewSetAsideApplication",
+     "taskId": "reviewSetAsideApplication"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "validSendToInterloc",
+    "additionalData": {
+     "Data": {
+      "interlocReferralReason": "reviewSetAsideApplication",
+      "jointParty": "Yes"
+     }
+    },
+    "postEventState": "postHearing"
+   },
+   "output": [
+    {
+     "name": "Review Set Aside Application - Judge",
+     "workingDaysAllowed": 2,
+     "processCategories": "reviewSetAsideApplication",
+     "delayDuration": 21,
+     "taskId": "reviewSetAsideApplication"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "actionFurtherEvidence",
+    "additionalData": {
+     "Data": {
+      "furtherEvidenceAction": {
+       "value": {
+        "code": "sendToInterlocReviewByJudge"
+       }
+      },
+      "scannedDocumentTypes": [
+       "correctionApplication"
+      ]
+     }
+    },
+    "postEventState": "dormantAppealState"
+   },
+   "output": [
+    {
+     "name": "Review Application and Allocate Judge - CTSC",
+     "workingDaysAllowed": 3,
+     "processCategories": "reviewApplicationandAllocateJudge",
+     "taskId": "reviewApplicationandAllocateJudge"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "postHearingRequest",
+    "additionalData": {
+     "Data": {
+      "action": "correction"
+     }
+    },
+    "postEventState": "dormantAppealState"
+   },
+   "output": [
+    {
+     "name": "Review Application and Allocate Judge - CTSC",
+     "workingDaysAllowed": 3,
+     "processCategories": "reviewApplicationandAllocateJudge",
+     "taskId": "reviewApplicationandAllocateJudge"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "sendToFirstTier",
+    "additionalData": {
+     "Data": {
+      "sendToFirstTier": {
+       "action": "remitted"
+      }
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Allocate Judge and Share Remitted Decision - CTSC",
+     "workingDaysAllowed": 20,
+     "processCategories": "shareRemittedDecision",
+     "taskId": "shareRemittedDecision"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "sendToFirstTier",
+    "additionalData": {
+     "Data": {
+      "sendToFirstTier": {
+       "action": "remade"
+      }
+     }
+    },
+    "postEventState": "dormantAppealState"
+   },
+   "output": [
+    {
+     "name": "Share Remade Decision - CTSC",
+     "workingDaysAllowed": 20,
+     "processCategories": "shareRemadeDecision",
+     "taskId": "shareRemadeDecision"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "sendToFirstTier",
+    "additionalData": {
+     "Data": {
+      "sendToFirstTier": {
+       "action": "refused"
+      }
+     }
+    },
+    "postEventState": "dormantAppealState"
+   },
+   "output": [
+    {
+     "name": "Share Refused Decision - CTSC",
+     "workingDaysAllowed": 20,
+     "processCategories": "shareRefusedDecision",
+     "taskId": "shareRefusedDecision"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "libertyToApplyRequest",
+    "additionalData": {
+     "Data": {}
+    },
+    "postEventState": "dormantAppealState"
+   },
+   "output": [
+    {
+     "name": "Review Application and Allocate Judge - CTSC",
+     "workingDaysAllowed": 3,
+     "processCategories": "reviewApplicationandAllocateJudge",
+     "taskId": "reviewApplicationandAllocateJudge"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "permissionToAppealRequest",
+    "additionalData": {
+     "Data": {}
+    },
+    "postEventState": "dormantAppealState"
+   },
+   "output": [
+    {
+     "name": "Review Application and Allocate Judge - CTSC",
+     "workingDaysAllowed": 3,
+     "processCategories": "reviewApplicationandAllocateJudge",
+     "taskId": "reviewApplicationandAllocateJudge"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "setAsideRequest",
+    "additionalData": {
+     "Data": {}
+    },
+    "postEventState": "dormantAppealState"
+   },
+   "output": [
+    {
+     "name": "Review Application and Allocate Judge - CTSC",
+     "workingDaysAllowed": 3,
+     "processCategories": "reviewApplicationandAllocateJudge",
+     "taskId": "reviewApplicationandAllocateJudge"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "sORRequest",
+    "additionalData": {
+     "Data": {
+      "issueFinalDecisionDate": "2026-10-30"
+     }
+    },
+    "postEventState": "dormantAppealState"
+   },
+   "output": [
+    {
+     "name": "Review Application and Allocate Judge - CTSC",
+     "workingDaysAllowed": 3,
+     "processCategories": "reviewApplicationandAllocateJudge",
+     "taskId": "reviewApplicationandAllocateJudge"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "sORRequest",
+    "additionalData": {
+     "Data": {
+      "issueFinalDecisionDate": "2026-10-06"
+     }
+    },
+    "postEventState": "dormantAppealState"
+   },
+   "output": [
+    {
+     "name": "Review Late SOR Application and Allocate Judge - CTSC",
+     "workingDaysAllowed": 2,
+     "processCategories": "reviewStatementofReasonsApplication",
+     "taskId": "reviewLateStatementofReasonsApplicationAndAllocateJudge"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "validSendToInterloc",
+    "additionalData": {
+     "Data": {
+      "interlocReferralReason": "adviceOnHowToProceed",
+      "workType": "post",
+      "action": "reviewByJudge"
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Referred By Admin - Judge",
+     "workingDaysAllowed": 2,
+     "processCategories": "referredByAdminJudgePostHearing",
+     "taskId": "referredByAdminJudgePostHearing"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "validSendToInterloc",
+    "additionalData": {
+     "Data": {
+      "interlocReferralReason": "timeExtension",
+      "action": "reviewByJudge"
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Referred to interloc - Time extension - Judge",
+     "workingDaysAllowed": 2,
+     "processCategories": "referredToInterlocJudge",
+     "taskId": "referredToInterlocJudge"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "hmctsResponseReviewed",
+    "additionalData": {
+     "Data": {
+      "interlocReferralReason": "reviewPostponementRequest",
+      "action": {
+       "value": {
+        "code": "reviewByJudge"
+       }
+      }
+     }
+    },
+    "postEventState": null
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "eventId": "validSendToInterloc",
+    "additionalData": {
+     "Data": {
+      "interlocReferralReason": "reviewPostponementRequest",
+      "action": "reviewByJudge"
+     }
+    },
+    "postEventState": null
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "eventId": "validSendToInterloc",
+    "additionalData": {
+     "Data": {
+      "interlocReferralReason": "reviewReinstatementRequest",
+      "action": "reviewByJudge"
+     }
+    },
+    "postEventState": null
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "eventId": "nonCompliantSendToInterloc",
+    "additionalData": {
+     "Data": {
+      "interlocReferralReason": "reviewPostponementRequest"
+     }
+    },
+    "postEventState": null
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "eventId": "writeFinalDecision",
+    "additionalData": {
+     "Data": {}
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Issue Decision - Judge",
+     "workingDaysAllowed": 2,
+     "processCategories": "issueDecisionJudge",
+     "taskId": "issueDecisionJudge"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "hmctsResponseReviewed",
+    "additionalData": {
+     "Data": {
+      "interlocReferralReason": "listingDirections",
+      "action": {
+       "value": {
+        "code": "reviewByJudge"
+       }
+      }
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Provide Listing Directions - Judge",
+     "workingDaysAllowed": 2,
+     "processCategories": "provideListingDirections",
+     "taskId": "provideListingDirections"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "actionPostponementRequest",
+    "additionalData": {
+     "Data": {
+      "action": "reviewByTcw"
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review postponement request - LO",
+     "workingDaysAllowed": 2,
+     "processCategories": "reviewPostponementRequestTCW",
+     "taskId": "reviewPostponementRequestTCW"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "actionFurtherEvidence",
+    "additionalData": {
+     "Data": {
+      "furtherEvidenceAction": {
+       "value": {
+        "code": "sendToInterlocReviewByJudge"
+       }
+      },
+      "scannedDocumentTypes": [
+       "postponementRequest"
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": [
+    {
+     "name": "Review Postponement Request - Judge",
+     "workingDaysAllowed": 2,
+     "processCategories": "reviewPostponementRequestJudge",
+     "taskId": "reviewPostponementRequestJudge"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "actionFurtherEvidence",
+    "additionalData": {
+     "Data": {
+      "furtherEvidenceAction": {
+       "value": {
+        "code": "sendToInterlocReviewByTcw"
+       }
+      },
+      "scannedDocumentTypes": [
+       "postponementRequest"
+      ]
+     }
+    },
+    "postEventState": null
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "eventId": "validSendToInterloc",
+    "additionalData": {
+     "Data": {
+      "interlocReferralReason": "listingDirections",
+      "action": "reviewByJudge"
+     }
+    },
+    "postEventState": null
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "eventId": "validSendToInterloc",
+    "additionalData": {
+     "Data": {
+      "interlocReferralReason": "reviewPostponementRequest",
+      "action": "reviewByJudge"
+     }
+    },
+    "postEventState": "hearing"
+   },
+   "output": [
+    {
+     "name": "Review Postponement Request - Judge",
+     "workingDaysAllowed": 2,
+     "processCategories": "reviewPostponementRequestJudge",
+     "taskId": "reviewPostponementRequestJudge"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "validSendToInterloc",
+    "additionalData": {
+     "Data": {
+      "interlocReferralReason": "reviewPostponementRequest",
+      "action": "reviewByJudge"
+     }
+    },
+    "postEventState": "dormantAppealState"
+   },
+   "output": []
+  },
+  {
+   "input": {
+    "eventId": "validSendToInterloc",
+    "additionalData": {
+     "Data": {
+      "interlocReferralReason": "reviewPostponementRequest",
+      "action": "reviewByTcw"
+     }
+    },
+    "postEventState": "hearing"
+   },
+   "output": [
+    {
+     "name": "Review Postponement Request - LO",
+     "workingDaysAllowed": 2,
+     "processCategories": "reviewPostponementRequestTCW",
+     "taskId": "reviewPostponementRequestTCW"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "validSendToInterloc",
+    "additionalData": {
+     "Data": {
+      "interlocReferralReason": "reviewPostponementRequest",
+      "action": "reviewByTcw"
+     }
+    },
+    "postEventState": "dormantAppealState"
+   },
+   "output": []
+  },
+  {
+   "required": "sscs-task-initiation-date-calculation-defaults",
+   "requiredName": "Date Calculation Defaults",
+   "input": {
+    "additionalData": {
+     "Data": {
+      "isScottishCase": "No"
+     }
+    }
+   },
+   "output": [
+    {
+     "date_defaults_1": {
+      "delayUntilOrigin": "2026-11-20",
+      "delayUtilNonWorkingCalendar": "https://www.gov.uk/bank-holidays/england-and-wales.json"
+     }
+    }
+   ]
+  },
+  {
+   "required": "sscs-task-initiation-date-calculation-defaults",
+   "requiredName": "Date Calculation Defaults",
+   "input": {
+    "additionalData": {
+     "Data": {}
+    }
+   },
+   "output": [
+    {
+     "date_defaults_1": {
+      "delayUntilOrigin": "2026-11-20",
+      "delayUtilNonWorkingCalendar": "https://www.gov.uk/bank-holidays/england-and-wales.json"
+     }
+    }
+   ]
+  },
+  {
+   "required": "sscs-task-initiation-date-calculation-defaults",
+   "requiredName": "Date Calculation Defaults",
+   "input": {
+    "additionalData": {
+     "Data": {
+      "isScottishCase": "Yes",
+      "processingVenue": "Dundee"
+     }
+    }
+   },
+   "output": [
+    {
+     "date_defaults_1": {
+      "delayUntilOrigin": "2026-11-20",
+      "delayUtilNonWorkingCalendar": "https://www.gov.uk/bank-holidays/scotland.json"
+     }
+    }
+   ]
+  }
+ ]
+}

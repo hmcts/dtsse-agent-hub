@@ -1,5 +1,5 @@
-import type { DmnDecision, DmnDocument, DmnOutput, DmnTable } from "../dmn-model.ts";
-import { assertFeel, evalExpression, matchesEntry, type Variables } from "./feel-eval.ts";
+import type { DmnDocument, DmnOutput, DmnTable } from "../dmn-model.ts";
+import { assertFeel, evalExpression, matchesEntry, type Variables, withClock } from "./feel-eval.ts";
 
 export type OutputRow = Record<string, unknown>;
 
@@ -66,7 +66,8 @@ function aggregate(rows: OutputRow[], output: DmnOutput | undefined, aggregation
 }
 
 /** Applies a decision table the way Camunda 7 does: input expressions once, rules in order, then the hit policy. */
-export function evaluateTable(table: DmnTable, variables: Variables): OutputRow[] {
+export function evaluateTable(table: DmnTable, givenVariables: Variables, now?: string): OutputRow[] {
+  const variables = withClock(givenVariables, now);
   const inputs = table.inputs.map((input, column) => {
     assertFeel(input.expressionLanguage, `input ${column + 1}`);
     const value = input.expression.trim() === "" ? (variables[input.inputVariable ?? ""] ?? null) : evalExpression(input.expression, variables);
@@ -98,28 +99,25 @@ export function evaluateTable(table: DmnTable, variables: Variables): OutputRow[
   }
 }
 
-/** What a required decision contributes to the variables of the decisions that need it. */
-function resultValue(decision: DmnDecision, rows: OutputRow[]): unknown {
-  const table = decision.table;
-  if (!table) {
-    return rows[0];
+/**
+ * What a required decision table contributes to the decisions that need it, as Camunda's `addResultToVariableContext` does: its
+ * output columns by name, holding the value when one rule matched and the list of every matching rule's value when several did.
+ */
+function tableVariables(rows: OutputRow[]): Variables {
+  if (rows.length === 1) {
+    return { ...rows[0] };
   }
-  const single = table.outputs.length === 1 ? table.outputs[0]?.name : undefined;
-  const collects = table.hitPolicy === "COLLECT" || table.hitPolicy === "RULE ORDER";
-  if (collects && !table.aggregation) {
-    return single === undefined ? rows : rows.map((row) => row[single]);
-  }
-  const first = rows[0];
-  return single === undefined || first === undefined ? first : first[single];
+  const names = new Set(rows.flatMap((row) => Object.keys(row)));
+  return Object.fromEntries([...names].map((name) => [name, rows.map((row) => row[name] ?? null)]));
 }
 
 /**
- * Evaluates a decision of the document: the decisions it requires first, each exposed under its variable name, then its own
+ * Evaluates a decision of the document (with the clock at `now` when given, otherwise the machine's): the decisions it requires first, each exposed under its variable name, then its own
  * table or literal expression. A literal gives one row holding its value under the decision's variable name.
  */
-export function evaluateDecision(document: DmnDocument, decisionId: string, variables: Variables): OutputRow[] {
+export function evaluateDecision(document: DmnDocument, decisionId: string, variables: Variables, now?: string): OutputRow[] {
   const byId = new Map(document.decisions.map((d) => [d.id, d]));
-  const scope: Variables = { ...variables };
+  const scope: Variables = withClock(variables, now);
   const done = new Set<string>();
   const run = (id: string): OutputRow[] => {
     const decision = byId.get(id);
@@ -139,8 +137,10 @@ export function evaluateDecision(document: DmnDocument, decisionId: string, vari
       assertFeel(decision.literal?.expressionLanguage, `decision ${decision.name}`);
       rows = [{ [decision.variable?.name ?? decision.name]: convertToType(evalExpression(decision.literal?.text ?? "", scope), decision.variable?.typeRef) }];
     }
-    if (decision.variable) {
-      scope[decision.variable.name] = decision.literal ? rows[0]?.[decision.variable.name] : resultValue(decision, rows);
+    if (decision.table) {
+      Object.assign(scope, tableVariables(rows));
+    } else if (decision.variable) {
+      scope[decision.variable.name] = rows[0]?.[decision.variable.name];
     }
     return rows;
   };

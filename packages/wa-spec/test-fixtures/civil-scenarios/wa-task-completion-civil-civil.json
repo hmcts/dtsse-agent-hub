@@ -1,0 +1,486 @@
+{
+ "decision": "wa-task-completion-civil-civil",
+ "source": "hmcts/civil-wa-task-configuration@8977b6611ea7520d1bb964d97ef59a16dabd7b1f",
+ "dumpedAt": "2026-11-20T07:38:22.609Z",
+ "scenarios": [
+  {
+   "input": {
+    "eventId": "CONFIRM_LISTING_COMPLETED"
+   },
+   "output": [
+    {
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "damagesListCMCMulti",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "damagesListCCMCMulti",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "damagesListPTRMulti",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "damagesListTrialMulti",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "damagesListCMCInt",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "damagesListPTRInt",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "damagesListTrialInt",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "specifiedListCMCMulti",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "specifiedListCCMCMulti",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "specifiedListPTRMulti",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "specifiedListTrialMulti",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "specifiedListCMCInt",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "specifiedListPTRInt",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "specifiedListTrialInt",
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "AMEND_RESTITCH_BUNDLE"
+   },
+   "output": [
+    {
+     "taskType": "bundlefailedAmendandRestich",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "STAY_CASE"
+   },
+   "output": [
+    {
+     "taskType": "confirmOrderReviewStayCase",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "TRANSFER_ONLINE_CASE"
+   },
+   "output": [
+    {
+     "taskType": "transferOnlineCase",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "VALIDATE_DISCONTINUE_CLAIM_CLAIMANT"
+   },
+   "output": [
+    {
+     "taskType": "ValidateDiscontinuanceCTSC",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ValidateDiscontinuanceAdmin",
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "GENERATE_DIRECTIONS_ORDER"
+   },
+   "output": [
+    {
+     "taskType": "OrderToSetAsideDefendedClaim",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "allocateMultiTrack",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "allocateIntermediateTrack",
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "FEE_PAYMENT_OUTCOME"
+   },
+   "output": [
+    {
+     "taskType": "HelpWithFeesHearingFee",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "HelpWithFeesClaimIssue",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "STANDARD_DIRECTION_ORDER_DJ"
+   },
+   "output": [
+    {
+     "taskType": "summaryJudgmentDirections",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "TAKE_CASE_OFFLINE"
+   },
+   "output": [
+    {
+     "taskType": "transferCaseOffline"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "CASE_PROCEEDS_IN_CASEMAN"
+   },
+   "output": [
+    {
+     "taskType": "transferCaseOffline",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "transferCaseOfflineMinti",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "manualDetermination",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ClaimSettledDivergenceTakeCaseOffline",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "JudgmentOnlineSetAsideTakeCaseOffline",
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "UPLOAD_TRANSLATED_DOCUMENT"
+   },
+   "output": [
+    {
+     "taskType": "defendantWelshRequest",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "claimantWelshRequest",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "finalOrderIssuedWelshRequest",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "uploadTranslatedOrderDocument",
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "MANAGE_STAY"
+   },
+   "output": [
+    {
+     "taskType": "manageStay",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "confirmOrderReviewManageStay",
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "CONFIRM_ORDER_REVIEW"
+   },
+   "output": [
+    {
+     "taskType": "reviewOrder",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "HEARING_SCHEDULED"
+   },
+   "output": [
+    {
+     "taskType": "ScheduleAHearing",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ScheduleHMCHearing",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "createHearingNoticeMT",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "createHearingNoticeInt",
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "CREATE_SDO"
+   },
+   "output": [
+    {
+     "taskType": "FastTrackDirections",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "SmallClaimsTrackDirections",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "LegalAdvisorSmallClaimsTrackDirections",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "SmallClaimsTrackDirectionsReferral",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "InitialDirectionFlightDelay",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "NIHLFastTrackDirections",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "allocateMultiTrack",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "allocateIntermediateTrack",
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "NotSuitable_SDO"
+   },
+   "output": [
+    {
+     "taskType": "summaryJudgmentDirections",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "FastTrackDirections",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "SmallClaimsTrackDirections",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "SmallClaimsTrackDirectionsReferral",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "InitialDirectionFlightDelay",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "NIHLFastTrackDirections",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "allocateMultiTrack",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "allocateIntermediateTrack",
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "REFER_TO_JUDGE"
+   },
+   "output": [
+    {
+     "taskType": "LegalAdvisorSmallClaimsTrackDirections",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "DISMISS_CASE"
+   },
+   "output": [
+    {
+     "taskType": "confirmOrderReviewDismissCase",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "DECISION_ON_RECONSIDERATION_REQUEST"
+   },
+   "output": [
+    {
+     "taskType": "JudgeDecideOnReconsiderRequest",
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "queryManagementRespondQuery"
+   },
+   "output": [
+    {
+     "taskType": "respondToQueryCTSC",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "respondToQueryAdmin",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "respondToQueryWLU",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "respondToHearingQueryWLU",
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "ADD_CASE_NOTE"
+   },
+   "output": [
+    {
+     "taskType": "removeHearing",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "preHearingContact",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewOrder",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "sendCvpHearingLink",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "reviewHearingException",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "UpdateDetailsInCasemanSystem",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ClaimDiscontinuedRemoveHearing",
+     "completionMode": "Auto"
+    }
+   ]
+  }
+ ]
+}

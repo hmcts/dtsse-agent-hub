@@ -1,9 +1,9 @@
 {
  "decision": "wa-task-initiation-employment-et_scotland",
  "source": "hmcts/et-wa-task-configuration@fa182449b8ef501c95e1f00137965994d835c4c3",
+ "dumpedAt": "2026-11-20T07:37:34.755Z",
  "scenarios": [
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "SUBMIT_CASE_DRAFT",
     "additionalData": {
@@ -29,7 +29,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "UPDATE_CASE_SUBMITTED",
     "additionalData": {
@@ -50,7 +49,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "SUBMIT_ET3_FORM",
     "additionalData": {
@@ -71,7 +69,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "UPDATE_ET3_FORM",
     "additionalData": {
@@ -92,7 +89,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "requestSupport",
     "additionalData": {
@@ -113,7 +109,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "createFlag",
     "additionalData": {
@@ -134,7 +129,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "manageFlags",
     "additionalData": {
@@ -155,7 +149,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "reviewAdminSupportRequest",
     "additionalData": {
@@ -176,7 +169,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "reviewLOSupportRequest",
     "additionalData": {
@@ -197,7 +189,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "reviewJudgeSupportRequest",
     "additionalData": {
@@ -218,7 +209,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "createArrangeSupportTask",
     "additionalData": {
@@ -239,7 +229,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "SUBMIT_CASE_DRAFT",
     "postEventState": "Submitted"
@@ -253,7 +242,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "initiateCase",
     "postEventState": "Submitted"
@@ -267,7 +255,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "createReferral",
     "additionalData": {
@@ -305,7 +292,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "replyToReferral",
     "additionalData": {
@@ -325,7 +311,7 @@
             "referralSubject": "Other",
             "directionTo": "Judge",
             "isUrgentReply": "",
-            "replyDateTime": "2026-11-19T22:41:38"
+            "replyDateTime": "2026-11-20T08:37:56"
            }
           },
           {
@@ -334,7 +320,7 @@
             "referralSubject": "Other",
             "directionTo": "Judge",
             "isUrgentReply": "",
-            "replyDateTime": "2026-11-20T00:41:38"
+            "replyDateTime": "2026-11-20T10:37:56"
            }
           }
          ]
@@ -354,7 +340,7 @@
             "referralSubject": "",
             "directionTo": "Judge",
             "isUrgentReply": "",
-            "replyDateTime": "2026-11-19T23:41:38"
+            "replyDateTime": "2026-11-20T09:37:56"
            }
           }
          ]
@@ -374,7 +360,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "createReferral",
     "additionalData": {
@@ -412,7 +397,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "createReferral",
     "additionalData": {
@@ -455,7 +439,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "createReferral",
     "additionalData": {
@@ -498,7 +481,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "createReferral",
     "additionalData": {
@@ -536,7 +518,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "createReferral",
     "additionalData": {
@@ -574,7 +555,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "createReferral",
     "additionalData": {
@@ -612,7 +592,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "replyToReferral",
     "additionalData": {
@@ -632,7 +611,7 @@
             "referralSubject": "Referral Subject 1",
             "directionTo": "Admin",
             "isUrgentReply": "Yes",
-            "replyDateTime": "2026-11-19T22:41:38"
+            "replyDateTime": "2026-11-20T08:37:56"
            }
           },
           {
@@ -641,7 +620,7 @@
             "referralSubject": "Referral Subject 1",
             "directionTo": "Admin",
             "isUrgentReply": "Yes",
-            "replyDateTime": "2026-11-20T00:41:38"
+            "replyDateTime": "2026-11-20T10:37:56"
            }
           }
          ]
@@ -661,7 +640,7 @@
             "referralSubject": "Referral Subject 2",
             "directionTo": "Admin",
             "isUrgentReply": "Yes",
-            "replyDateTime": "2026-11-19T23:41:38"
+            "replyDateTime": "2026-11-20T09:37:56"
            }
           }
          ]
@@ -681,7 +660,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "replyToReferral",
     "additionalData": {
@@ -701,7 +679,7 @@
             "referralSubject": "Referral Subject 1",
             "directionTo": "Judge",
             "isUrgentReply": "Yes",
-            "replyDateTime": "2026-11-19T22:41:38"
+            "replyDateTime": "2026-11-20T08:37:56"
            }
           },
           {
@@ -710,7 +688,7 @@
             "referralSubject": "Referral Subject 1",
             "directionTo": "Judge",
             "isUrgentReply": "Yes",
-            "replyDateTime": "2026-11-20T00:41:38"
+            "replyDateTime": "2026-11-20T10:37:56"
            }
           }
          ]
@@ -730,7 +708,7 @@
             "referralSubject": "Referral Subject 2",
             "directionTo": "Judge",
             "isUrgentReply": "Yes",
-            "replyDateTime": "2026-11-19T23:41:38"
+            "replyDateTime": "2026-11-20T09:37:56"
            }
           }
          ]
@@ -750,7 +728,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "replyToReferral",
     "additionalData": {
@@ -770,7 +747,7 @@
             "referralSubject": "Referral Subject 1",
             "directionTo": "Legal officer",
             "isUrgentReply": "Yes",
-            "replyDateTime": "2026-11-19T22:41:38"
+            "replyDateTime": "2026-11-20T08:37:56"
            }
           },
           {
@@ -779,7 +756,7 @@
             "referralSubject": "Referral Subject 1",
             "directionTo": "Legal officer",
             "isUrgentReply": "Yes",
-            "replyDateTime": "2026-11-20T00:41:38"
+            "replyDateTime": "2026-11-20T10:37:56"
            }
           }
          ]
@@ -799,7 +776,7 @@
             "referralSubject": "Referral Subject 2",
             "directionTo": "Legal officer",
             "isUrgentReply": "Yes",
-            "replyDateTime": "2026-11-19T23:41:38"
+            "replyDateTime": "2026-11-20T09:37:56"
            }
           }
          ]
@@ -819,7 +796,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "draftAndSignJudgement",
     "additionalData": {
@@ -840,7 +816,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "draftAndSignJudgement",
     "additionalData": {
@@ -861,7 +836,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "preAcceptanceCase",
     "postEventState": "Accepted"
@@ -880,7 +854,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "preAcceptanceCase",
     "postEventState": "Rejected"
@@ -894,7 +867,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "WA_REVIEW_RULE21_REFERRAL",
     "postEventState": "Accepted"
@@ -908,7 +880,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "submitEt3",
     "postEventState": "Accepted"
@@ -922,7 +893,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "amendRespondentDetails",
     "additionalData": {
@@ -942,7 +912,6 @@
    "output": []
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "amendRespondentDetails",
     "additionalData": {
@@ -968,7 +937,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "amendRespondentDetails",
     "additionalData": {
@@ -988,7 +956,6 @@
    "output": []
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "amendRespondentDetails",
     "additionalData": {
@@ -1008,7 +975,6 @@
    "output": []
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "amendRespondentDetails",
     "additionalData": {
@@ -1034,7 +1000,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "amendRespondentDetails",
     "additionalData": {
@@ -1054,7 +1019,6 @@
    "output": []
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "amendRespondentDetails",
     "additionalData": {
@@ -1086,7 +1050,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "amendRespondentDetails",
     "additionalData": {
@@ -1124,7 +1087,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "amendRespondentDetails",
     "additionalData": {
@@ -1156,7 +1118,6 @@
    "output": []
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "amendRespondentDetails",
     "additionalData": {
@@ -1182,7 +1143,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "amendRespondentDetails",
     "additionalData": {
@@ -1208,7 +1168,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "amendRespondentDetails",
     "additionalData": {
@@ -1234,7 +1193,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "amendRespondentDetails",
     "additionalData": {
@@ -1266,7 +1224,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "amendRespondentDetails",
     "additionalData": {
@@ -1304,7 +1261,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "amendRespondentDetails",
     "additionalData": {
@@ -1336,7 +1292,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "et3Vetting",
     "additionalData": {
@@ -1364,7 +1319,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "et3Vetting",
     "additionalData": {
@@ -1397,7 +1351,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "et3Vetting",
     "additionalData": {
@@ -1435,7 +1388,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "et3Vetting",
     "additionalData": {
@@ -1468,7 +1420,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "et3Vetting",
     "additionalData": {
@@ -1504,7 +1455,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "initialConsideration",
     "postEventState": "Accepted"
@@ -1518,7 +1468,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "initialConsideration",
     "additionalData": {
@@ -1549,7 +1498,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "initialConsideration",
     "additionalData": {
@@ -1579,7 +1527,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "initialConsideration",
     "additionalData": {
@@ -1609,7 +1556,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "initialConsideration",
     "additionalData": {
@@ -1633,7 +1579,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "issueInitialConsiderationDirectionsWA",
     "postEventState": "Accepted"
@@ -1647,7 +1592,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "updateHearing",
     "additionalData": {
@@ -1682,7 +1626,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "updateHearing",
     "additionalData": {
@@ -1712,7 +1655,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "updateHearing",
     "additionalData": {
@@ -1736,7 +1678,6 @@
    "output": []
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "SUBMIT_CLAIMANT_TSE",
     "additionalData": {
@@ -1762,7 +1703,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "SUBMIT_CLAIMANT_TSE",
     "additionalData": {
@@ -1788,7 +1728,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "CLAIMANT_TSE_RESPOND",
     "additionalData": {
@@ -1822,7 +1761,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "CLAIMANT_TSE_RESPOND",
     "additionalData": {
@@ -1856,7 +1794,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "respondentTSE",
     "additionalData": {
@@ -1882,7 +1819,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "respondentTSE",
     "additionalData": {
@@ -1908,7 +1844,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "tseRespond",
     "additionalData": {
@@ -1942,7 +1877,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "tseRespond",
     "additionalData": {
@@ -1976,7 +1910,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "SUBMIT_CLAIMANT_TSE",
     "additionalData": {
@@ -2002,7 +1935,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "CLAIMANT_TSE_RESPOND",
     "additionalData": {
@@ -2036,7 +1968,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "respondentTSE",
     "additionalData": {
@@ -2062,7 +1993,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "tseRespond",
     "additionalData": {
@@ -2096,7 +2026,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "SUBMIT_CLAIMANT_TSE",
     "additionalData": {
@@ -2130,7 +2059,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "UPDATE_NOTIFICATION_RESPONSE",
     "additionalData": {
@@ -2150,7 +2078,7 @@
           {
            "value": {
             "from": "Claimant",
-            "datetime": "2026-11-19T23:41:38",
+            "datetime": "2026-11-20T09:37:56",
             "isECC": "Yes"
            }
           }
@@ -2165,14 +2093,14 @@
           {
            "value": {
             "from": "Claimant",
-            "datetime": "2026-11-19T22:41:38",
+            "datetime": "2026-11-20T08:37:56",
             "isECC": "Yes"
            }
           },
           {
            "value": {
             "from": "Respondent",
-            "datetime": "2026-11-20T00:41:38",
+            "datetime": "2026-11-20T10:37:56",
             "isECC": "No"
            }
           }
@@ -2193,7 +2121,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "submitEt1Draft",
     "postEventState": "Submitted"
@@ -2207,7 +2134,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "SUBMIT_ET3_FORM",
     "postEventState": "Accepted"
@@ -2221,7 +2147,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "createEcmCase",
     "postEventState": "Submitted"
@@ -2235,7 +2160,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "SUBMIT_STORED_PSE_RESPONSE",
     "postEventState": null
@@ -2249,7 +2173,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "UPDATE_NOTIFICATION_RESPONSE",
     "additionalData": {
@@ -2290,7 +2213,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "SUBMIT_STORED_PSE_RESPONSE",
     "additionalData": {
@@ -2331,7 +2253,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "SUBMIT_STORED_PSE_RESPONSE",
     "additionalData": {
@@ -2366,7 +2287,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "ADD_RESPONDENT_PSE_RESPONSE",
     "additionalData": {
@@ -2407,7 +2327,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "SUBMIT_RESPONDENT_PSE_RESPONSE",
     "additionalData": {
@@ -2448,7 +2367,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "UPDATE_CASE_SUBMITTED",
     "postEventState": null
@@ -2456,7 +2374,6 @@
    "output": []
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "UPDATE_ET3_FORM",
     "postEventState": null
@@ -2464,7 +2381,6 @@
    "output": []
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "requestSupport",
     "postEventState": null
@@ -2472,7 +2388,6 @@
    "output": []
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "SUBMIT_CASE_DRAFT",
     "additionalData": {
@@ -2498,7 +2413,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "SUBMIT_CASE_DRAFT",
     "additionalData": {
@@ -2524,7 +2438,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "SUBMIT_CASE_DRAFT",
     "additionalData": {
@@ -2550,7 +2463,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "UPDATE_CASE_SUBMITTED",
     "additionalData": {
@@ -2571,7 +2483,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "UPDATE_CASE_SUBMITTED",
     "additionalData": {
@@ -2592,7 +2503,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "UPDATE_CASE_SUBMITTED",
     "additionalData": {
@@ -2613,7 +2523,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "SUBMIT_ET3_FORM",
     "additionalData": {
@@ -2634,7 +2543,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "SUBMIT_ET3_FORM",
     "additionalData": {
@@ -2655,7 +2563,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "SUBMIT_ET3_FORM",
     "additionalData": {
@@ -2676,7 +2583,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "UPDATE_ET3_FORM",
     "additionalData": {
@@ -2697,7 +2603,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "UPDATE_ET3_FORM",
     "additionalData": {
@@ -2718,7 +2623,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "UPDATE_ET3_FORM",
     "additionalData": {
@@ -2739,7 +2643,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "requestSupport",
     "additionalData": {
@@ -2760,7 +2663,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "requestSupport",
     "additionalData": {
@@ -2781,7 +2683,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "requestSupport",
     "additionalData": {
@@ -2802,7 +2703,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "createFlag",
     "additionalData": {
@@ -2823,7 +2723,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "createFlag",
     "additionalData": {
@@ -2844,7 +2743,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "createFlag",
     "additionalData": {
@@ -2865,7 +2763,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "UPDATE_CASE_SUBMITTED",
     "additionalData": {
@@ -2880,7 +2777,6 @@
    "output": []
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "SUBMIT_CASE_DRAFT",
     "postEventState": null
@@ -2888,7 +2784,6 @@
    "output": []
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "SUBMIT_ET3_FORM",
     "postEventState": null
@@ -2896,7 +2791,6 @@
    "output": []
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "createFlag",
     "postEventState": null
@@ -2904,7 +2798,6 @@
    "output": []
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "manageFlags",
     "postEventState": null
@@ -2912,7 +2805,6 @@
    "output": []
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "reviewAdminSupportRequest",
     "postEventState": null
@@ -2920,7 +2812,6 @@
    "output": []
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "reviewLOSupportRequest",
     "postEventState": null
@@ -2928,7 +2819,6 @@
    "output": []
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "reviewJudgeSupportRequest",
     "postEventState": null
@@ -2936,7 +2826,6 @@
    "output": []
   },
   {
-   "test": "EmploymentTaskInitiationTestScot",
    "input": {
     "eventId": "createArrangeSupportTask",
     "postEventState": null

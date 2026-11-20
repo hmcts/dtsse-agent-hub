@@ -13,28 +13,72 @@ export function assertFeel(language: string | undefined, where: string): void {
   }
 }
 
-/** FEEL temporal values as the ISO text a JSON payload would carry; everything else as it is. */
-export function toPlain(value: unknown): unknown {
-  if (value instanceof FeelTime) {
-    return value.iso.replace(/^(\d\d:\d\d):00(?=$|[Z+-])/, "$1");
+/** Java's `toString` leaves out zero seconds, but only when there is no fraction of a second after them. */
+const withoutZeroSeconds = (text: string): string => text.replace(/^(.*T)?(\d\d:\d\d):00(?=$|[Z+-])/, "$1$2");
+
+/**
+ * A date and time as Java's `ZonedDateTime` or `LocalDateTime` writes it, which Camunda hands task management: a zoned one
+ * with its UTC offset (`Z` for zero) and a region zone in brackets, whatever time zone the machine is in. `nested` is a value
+ * inside a context or list, which Camunda's JSON writes with its seconds and without the region.
+ */
+function dateTimeText(value: FeelDateTime, nested: boolean): string {
+  const text = nested ? (t: string) => t : withoutZeroSeconds;
+  if (value.zone === null) {
+    return text(value.value.toString());
   }
-  if (value instanceof FeelDate || value instanceof FeelDateTime || value instanceof FeelDuration) {
+  const zoned = value.value.toZonedDateTime(value.zone);
+  const offset = zoned.offset === "+00:00" ? "Z" : zoned.offset;
+  const region = nested || /^[+-]\d\d:\d\d$|^Z$/.test(value.zone) ? "" : `[${value.zone}]`;
+  return `${text(zoned.toPlainDateTime().toString())}${offset}${region}`;
+}
+
+/** FEEL temporal values as the text Camunda gives for them; everything else as it is. */
+export function toPlain(value: unknown, nested = false): unknown {
+  if (value instanceof FeelTime) {
+    return nested ? value.iso : withoutZeroSeconds(value.iso);
+  }
+  if (value instanceof FeelDateTime) {
+    return dateTimeText(value, nested);
+  }
+  if (value instanceof FeelDate || value instanceof FeelDuration) {
     return (value as { iso?: string }).iso ?? String(value);
   }
   if (Array.isArray(value)) {
-    return value.map(toPlain);
+    return value.map((item) => toPlain(item, true));
   }
   if (value !== null && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype) {
-    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, toPlain(entry)]));
+    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, toPlain(entry, true)]));
   }
   return value;
 }
 
 /**
- * Built-ins where feelin differs from Camunda's FEEL for an input ET's tests give. feelin reads a context as a one-item list, so
- * `count` of one is 1; Camunda gives null for anything that is not a list.
+ * Built-ins where feelin differs from Camunda's FEEL for inputs the services' tests give. feelin reads a context as a one-item
+ * list, so `count` of one is 1; Camunda gives null for anything that is not a list. feelin's `contains` is for strings only;
+ * Camunda's also finds an item in a list, which sscs uses on the case roles.
  */
-const CAMUNDA_BUILTINS: Variables = { count: (list: unknown) => (Array.isArray(list) ? list.length : null) };
+const CAMUNDA_BUILTINS: Variables = {
+  count: (list: unknown) => (Array.isArray(list) ? list.length : null),
+  contains: (source: unknown, match: unknown) => {
+    if (Array.isArray(source)) {
+      return source.includes(match);
+    }
+    return typeof source === "string" && typeof match === "string" ? source.includes(match) : null;
+  }
+};
+
+/**
+ * The variables with `now()` and `today()` fixed at an instant, an ISO date and time with an offset. The DMNs read the clock, so
+ * a run that must be repeatable gives one rather than relying on the machine's.
+ */
+export function withClock(variables: Variables, now: string | undefined): Variables {
+  if (now === undefined) {
+    return variables;
+  }
+  const at = evaluate("date and time(s)", { s: now }).value;
+  const day = evaluate("date(s)", { s: now.slice(0, 10) }).value;
+  return { ...variables, now: () => at, today: () => day };
+}
 
 /** FEEL that does not parse, with the text that failed. */
 export class FeelSyntaxError extends Error {

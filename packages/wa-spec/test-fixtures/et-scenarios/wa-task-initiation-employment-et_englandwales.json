@@ -1,9 +1,9 @@
 {
  "decision": "wa-task-initiation-employment-et_englandwales",
  "source": "hmcts/et-wa-task-configuration@fa182449b8ef501c95e1f00137965994d835c4c3",
+ "dumpedAt": "2026-11-20T07:37:34.755Z",
  "scenarios": [
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "SUBMIT_CASE_DRAFT",
     "additionalData": {
@@ -29,7 +29,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "UPDATE_CASE_SUBMITTED",
     "additionalData": {
@@ -50,7 +49,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "SUBMIT_ET3_FORM",
     "additionalData": {
@@ -71,7 +69,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "UPDATE_ET3_FORM",
     "additionalData": {
@@ -92,7 +89,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "requestSupport",
     "additionalData": {
@@ -113,7 +109,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "createFlag",
     "additionalData": {
@@ -134,7 +129,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "manageFlags",
     "additionalData": {
@@ -155,7 +149,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "reviewAdminSupportRequest",
     "additionalData": {
@@ -176,7 +169,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "reviewLOSupportRequest",
     "additionalData": {
@@ -197,7 +189,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "reviewJudgeSupportRequest",
     "additionalData": {
@@ -218,7 +209,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "createArrangeSupportTask",
     "additionalData": {
@@ -239,7 +229,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "SUBMIT_CASE_DRAFT",
     "postEventState": "Submitted"
@@ -253,7 +242,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "initiateCase",
     "postEventState": "Submitted"
@@ -267,7 +255,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "createReferral",
     "additionalData": {
@@ -305,7 +292,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "createReferral",
     "additionalData": {
@@ -343,7 +329,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "createReferral",
     "additionalData": {
@@ -386,7 +371,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "createReferral",
     "additionalData": {
@@ -429,7 +413,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "createReferral",
     "additionalData": {
@@ -467,7 +450,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "createReferral",
     "additionalData": {
@@ -505,7 +487,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "createReferral",
     "additionalData": {
@@ -543,7 +524,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "replyToReferral",
     "additionalData": {
@@ -563,7 +543,7 @@
             "referralSubject": "Referral Subject 1",
             "directionTo": "Admin",
             "isUrgentReply": "Yes",
-            "replyDateTime": "2026-11-19T22:41:38"
+            "replyDateTime": "2026-11-20T08:37:56"
            }
           },
           {
@@ -572,7 +552,7 @@
             "referralSubject": "Referral Subject 1",
             "directionTo": "Admin",
             "isUrgentReply": "Yes",
-            "replyDateTime": "2026-11-20T00:41:38"
+            "replyDateTime": "2026-11-20T10:37:56"
            }
           }
          ]
@@ -592,7 +572,7 @@
             "referralSubject": "Referral Subject 2",
             "directionTo": "Admin",
             "isUrgentReply": "Yes",
-            "replyDateTime": "2026-11-19T23:41:38"
+            "replyDateTime": "2026-11-20T09:37:56"
            }
           }
          ]
@@ -612,7 +592,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "replyToReferral",
     "additionalData": {
@@ -632,7 +611,7 @@
             "referralSubject": "Referral Subject 1",
             "directionTo": "Judge",
             "isUrgentReply": "Yes",
-            "replyDateTime": "2026-11-19T22:41:38"
+            "replyDateTime": "2026-11-20T08:37:56"
            }
           },
           {
@@ -641,7 +620,7 @@
             "referralSubject": "Referral Subject 1",
             "directionTo": "Judge",
             "isUrgentReply": "Yes",
-            "replyDateTime": "2026-11-20T00:41:38"
+            "replyDateTime": "2026-11-20T10:37:56"
            }
           }
          ]
@@ -661,7 +640,7 @@
             "referralSubject": "Referral Subject 2",
             "directionTo": "Judge",
             "isUrgentReply": "Yes",
-            "replyDateTime": "2026-11-19T23:41:38"
+            "replyDateTime": "2026-11-20T09:37:56"
            }
           }
          ]
@@ -681,7 +660,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "replyToReferral",
     "additionalData": {
@@ -701,7 +679,7 @@
             "referralSubject": "Other",
             "directionTo": "Judge",
             "isUrgentReply": "",
-            "replyDateTime": "2026-11-19T22:41:38"
+            "replyDateTime": "2026-11-20T08:37:56"
            }
           },
           {
@@ -710,7 +688,7 @@
             "referralSubject": "Other",
             "directionTo": "Judge",
             "isUrgentReply": "",
-            "replyDateTime": "2026-11-20T00:41:38"
+            "replyDateTime": "2026-11-20T10:37:56"
            }
           }
          ]
@@ -730,7 +708,7 @@
             "referralSubject": "",
             "directionTo": "Judge",
             "isUrgentReply": "",
-            "replyDateTime": "2026-11-19T23:41:38"
+            "replyDateTime": "2026-11-20T09:37:56"
            }
           }
          ]
@@ -750,7 +728,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "replyToReferral",
     "additionalData": {
@@ -770,7 +747,7 @@
             "referralSubject": "Referral Subject 1",
             "directionTo": "Legal officer",
             "isUrgentReply": "Yes",
-            "replyDateTime": "2026-11-19T22:41:38"
+            "replyDateTime": "2026-11-20T08:37:56"
            }
           },
           {
@@ -779,7 +756,7 @@
             "referralSubject": "Referral Subject 1",
             "directionTo": "Legal officer",
             "isUrgentReply": "Yes",
-            "replyDateTime": "2026-11-20T00:41:38"
+            "replyDateTime": "2026-11-20T10:37:56"
            }
           }
          ]
@@ -799,7 +776,7 @@
             "referralSubject": "Referral Subject 2",
             "directionTo": "Legal officer",
             "isUrgentReply": "Yes",
-            "replyDateTime": "2026-11-19T23:41:38"
+            "replyDateTime": "2026-11-20T09:37:56"
            }
           }
          ]
@@ -819,7 +796,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "draftAndSignJudgement",
     "additionalData": {
@@ -840,7 +816,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "draftAndSignJudgement",
     "additionalData": {
@@ -861,7 +836,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "preAcceptanceCase",
     "postEventState": "Accepted"
@@ -880,7 +854,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "preAcceptanceCase",
     "postEventState": "Rejected"
@@ -894,7 +867,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "WA_REVIEW_RULE21_REFERRAL",
     "postEventState": "Accepted"
@@ -908,7 +880,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "submitEt3",
     "postEventState": "Accepted"
@@ -922,7 +893,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "amendRespondentDetails",
     "additionalData": {
@@ -942,7 +912,6 @@
    "output": []
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "amendRespondentDetails",
     "additionalData": {
@@ -968,7 +937,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "amendRespondentDetails",
     "additionalData": {
@@ -988,7 +956,6 @@
    "output": []
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "amendRespondentDetails",
     "additionalData": {
@@ -1008,7 +975,6 @@
    "output": []
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "amendRespondentDetails",
     "additionalData": {
@@ -1034,7 +1000,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "amendRespondentDetails",
     "additionalData": {
@@ -1054,7 +1019,6 @@
    "output": []
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "amendRespondentDetails",
     "additionalData": {
@@ -1086,7 +1050,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "amendRespondentDetails",
     "additionalData": {
@@ -1124,7 +1087,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "amendRespondentDetails",
     "additionalData": {
@@ -1156,7 +1118,6 @@
    "output": []
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "amendRespondentDetails",
     "additionalData": {
@@ -1182,7 +1143,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "amendRespondentDetails",
     "additionalData": {
@@ -1208,7 +1168,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "amendRespondentDetails",
     "additionalData": {
@@ -1234,7 +1193,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "amendRespondentDetails",
     "additionalData": {
@@ -1266,7 +1224,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "amendRespondentDetails",
     "additionalData": {
@@ -1304,7 +1261,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "amendRespondentDetails",
     "additionalData": {
@@ -1336,7 +1292,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "et3Vetting",
     "additionalData": {
@@ -1364,7 +1319,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "et3Vetting",
     "additionalData": {
@@ -1397,7 +1351,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "et3Vetting",
     "additionalData": {
@@ -1435,7 +1388,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "et3Vetting",
     "additionalData": {
@@ -1468,7 +1420,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "et3Vetting",
     "additionalData": {
@@ -1504,7 +1455,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "initialConsideration",
     "additionalData": {
@@ -1529,7 +1479,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "initialConsideration",
     "postEventState": "Accepted"
@@ -1543,7 +1492,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "initialConsideration",
     "additionalData": {
@@ -1574,7 +1522,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "initialConsideration",
     "additionalData": {
@@ -1604,7 +1551,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "initialConsideration",
     "additionalData": {
@@ -1634,7 +1580,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "initialConsideration",
     "additionalData": {
@@ -1656,7 +1601,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "initialConsideration",
     "additionalData": {
@@ -1680,7 +1624,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "issueInitialConsiderationDirectionsWA",
     "postEventState": "Accepted"
@@ -1694,7 +1637,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "updateHearing",
     "additionalData": {
@@ -1724,7 +1666,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "updateHearing",
     "additionalData": {
@@ -1754,7 +1695,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "updateHearing",
     "additionalData": {
@@ -1773,7 +1713,6 @@
    "output": []
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "SUBMIT_CLAIMANT_TSE",
     "additionalData": {
@@ -1799,7 +1738,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "SUBMIT_CLAIMANT_TSE",
     "additionalData": {
@@ -1825,7 +1763,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "CLAIMANT_TSE_RESPOND",
     "additionalData": {
@@ -1859,7 +1796,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "CLAIMANT_TSE_RESPOND",
     "additionalData": {
@@ -1893,7 +1829,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "respondentTSE",
     "additionalData": {
@@ -1919,7 +1854,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "respondentTSE",
     "additionalData": {
@@ -1945,7 +1879,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "tseRespond",
     "additionalData": {
@@ -1979,7 +1912,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "tseRespond",
     "additionalData": {
@@ -2013,7 +1945,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "SUBMIT_CLAIMANT_TSE",
     "additionalData": {
@@ -2039,7 +1970,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "CLAIMANT_TSE_RESPOND",
     "additionalData": {
@@ -2073,7 +2003,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "respondentTSE",
     "additionalData": {
@@ -2099,7 +2028,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "tseRespond",
     "additionalData": {
@@ -2133,7 +2061,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "SUBMIT_CLAIMANT_TSE",
     "additionalData": {
@@ -2167,7 +2094,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "UPDATE_NOTIFICATION_RESPONSE",
     "additionalData": {
@@ -2187,7 +2113,7 @@
           {
            "value": {
             "from": "Claimant",
-            "datetime": "2026-11-19T23:41:38",
+            "datetime": "2026-11-20T09:37:56",
             "isECC": "Yes"
            }
           }
@@ -2202,14 +2128,14 @@
           {
            "value": {
             "from": "Claimant",
-            "datetime": "2026-11-19T22:41:38",
+            "datetime": "2026-11-20T08:37:56",
             "isECC": "Yes"
            }
           },
           {
            "value": {
             "from": "Respondent",
-            "datetime": "2026-11-20T00:41:38",
+            "datetime": "2026-11-20T10:37:56",
             "isECC": "No"
            }
           }
@@ -2230,7 +2156,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "submitEt1Draft",
     "postEventState": "Submitted"
@@ -2244,7 +2169,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "SUBMIT_ET3_FORM",
     "postEventState": "Accepted"
@@ -2258,7 +2182,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "SUBMIT_RESPONDENT_TSE",
     "additionalData": {
@@ -2284,7 +2207,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "RESPONDENT_TSE_RESPOND",
     "additionalData": {
@@ -2318,7 +2240,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "createEcmCase",
     "postEventState": "Submitted"
@@ -2332,7 +2253,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "SUBMIT_STORED_PSE_RESPONSE",
     "postEventState": null
@@ -2346,7 +2266,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "UPDATE_NOTIFICATION_RESPONSE",
     "additionalData": {
@@ -2387,7 +2306,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "SUBMIT_STORED_PSE_RESPONSE",
     "additionalData": {
@@ -2428,7 +2346,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "SUBMIT_STORED_PSE_RESPONSE",
     "additionalData": {
@@ -2463,7 +2380,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "ADD_RESPONDENT_PSE_RESPONSE",
     "additionalData": {
@@ -2504,7 +2420,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "SUBMIT_RESPONDENT_PSE_RESPONSE",
     "additionalData": {
@@ -2545,7 +2460,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "UPDATE_CASE_SUBMITTED",
     "postEventState": null
@@ -2553,7 +2467,6 @@
    "output": []
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "UPDATE_ET3_FORM",
     "postEventState": null
@@ -2561,7 +2474,6 @@
    "output": []
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "requestSupport",
     "postEventState": null
@@ -2569,7 +2481,6 @@
    "output": []
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "SUBMIT_CASE_DRAFT",
     "additionalData": {
@@ -2595,7 +2506,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "SUBMIT_CASE_DRAFT",
     "additionalData": {
@@ -2621,7 +2531,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "SUBMIT_CASE_DRAFT",
     "additionalData": {
@@ -2647,7 +2556,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "UPDATE_CASE_SUBMITTED",
     "additionalData": {
@@ -2668,7 +2576,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "UPDATE_CASE_SUBMITTED",
     "additionalData": {
@@ -2689,7 +2596,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "UPDATE_CASE_SUBMITTED",
     "additionalData": {
@@ -2710,7 +2616,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "SUBMIT_ET3_FORM",
     "additionalData": {
@@ -2731,7 +2636,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "SUBMIT_ET3_FORM",
     "additionalData": {
@@ -2752,7 +2656,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "SUBMIT_ET3_FORM",
     "additionalData": {
@@ -2773,7 +2676,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "UPDATE_ET3_FORM",
     "additionalData": {
@@ -2794,7 +2696,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "UPDATE_ET3_FORM",
     "additionalData": {
@@ -2815,7 +2716,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "UPDATE_ET3_FORM",
     "additionalData": {
@@ -2836,7 +2736,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "requestSupport",
     "additionalData": {
@@ -2857,7 +2756,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "requestSupport",
     "additionalData": {
@@ -2878,7 +2776,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "requestSupport",
     "additionalData": {
@@ -2899,7 +2796,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "createFlag",
     "additionalData": {
@@ -2920,7 +2816,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "createFlag",
     "additionalData": {
@@ -2941,7 +2836,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "createFlag",
     "additionalData": {
@@ -2962,7 +2856,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "UPDATE_CASE_SUBMITTED",
     "additionalData": {
@@ -2977,7 +2870,6 @@
    "output": []
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "SUBMIT_CASE_DRAFT",
     "postEventState": null
@@ -2985,7 +2877,6 @@
    "output": []
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "SUBMIT_ET3_FORM",
     "postEventState": null
@@ -2993,7 +2884,6 @@
    "output": []
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "createFlag",
     "postEventState": null
@@ -3001,7 +2891,6 @@
    "output": []
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "manageFlags",
     "postEventState": null
@@ -3009,7 +2898,6 @@
    "output": []
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "reviewAdminSupportRequest",
     "postEventState": null
@@ -3017,7 +2905,6 @@
    "output": []
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "reviewLOSupportRequest",
     "postEventState": null
@@ -3025,7 +2912,6 @@
    "output": []
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "reviewJudgeSupportRequest",
     "postEventState": null
@@ -3033,7 +2919,6 @@
    "output": []
   },
   {
-   "test": "EmploymentTaskInitiationTestEW",
    "input": {
     "eventId": "createArrangeSupportTask",
     "postEventState": null

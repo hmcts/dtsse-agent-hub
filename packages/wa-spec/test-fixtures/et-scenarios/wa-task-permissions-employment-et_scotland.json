@@ -1,9 +1,9 @@
 {
  "decision": "wa-task-permissions-employment-et_scotland",
  "source": "hmcts/et-wa-task-configuration@fa182449b8ef501c95e1f00137965994d835c4c3",
+ "dumpedAt": "2026-11-20T07:37:34.755Z",
  "scenarios": [
   {
-   "test": "EmploymentTaskPermissionsTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "reviewSpecificAccessRequestJudiciary"
@@ -31,7 +31,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskPermissionsTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "ReviewReferralJudiciary"
@@ -102,7 +101,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskPermissionsTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "ReviewReferralResponseJudiciary"
@@ -173,7 +171,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskPermissionsTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "CompleteInitialConsideration"
@@ -244,7 +241,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskPermissionsTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "DraftAndSignJudgment"
@@ -315,7 +311,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskPermissionsTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "reviewSpecificAccessRequestLegalOps"
@@ -343,7 +338,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskPermissionsTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "ReviewReferralLegalOps"
@@ -414,7 +408,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskPermissionsTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "ReviewReferralResponseLegalOps"
@@ -485,7 +478,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskPermissionsTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "ReviewRule21Referral"
@@ -556,7 +548,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskPermissionsTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "reviewSpecificAccessRequestAdmin"
@@ -584,7 +575,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskPermissionsTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "Et1Vetting"
@@ -648,7 +638,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskPermissionsTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "ReviewReferralAdmin"
@@ -712,7 +701,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskPermissionsTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "ReviewReferralResponseAdmin"
@@ -776,7 +764,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskPermissionsTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "SendEt1Notification"
@@ -840,7 +827,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskPermissionsTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "ListServeClaim"
@@ -904,7 +890,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskPermissionsTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "Rule21"
@@ -947,7 +932,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskPermissionsTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "ET3Processing"
@@ -990,7 +974,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskPermissionsTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "SendEt3Notification"
@@ -1033,7 +1016,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskPermissionsTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "ListAHearing"
@@ -1090,7 +1072,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskPermissionsTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "IssueInitialConsiderationDirections"
@@ -1133,7 +1114,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskPermissionsTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "IssuePostHearingDirection"
@@ -1176,7 +1156,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskPermissionsTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "IssueJudgment"
@@ -1219,7 +1198,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskPermissionsTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "AmendClaimantDetails"
@@ -1262,7 +1240,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskPermissionsTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "AmendRespondentDetails"
@@ -1305,7 +1282,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskPermissionsTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "WithdrawAllOrPartOfCase"
@@ -1348,7 +1324,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskPermissionsTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "ContactTribunalWithAnApplication"
@@ -1391,7 +1366,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskPermissionsTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "ReviewECCResponse"
@@ -1434,7 +1408,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskPermissionsTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "reviewSpecificAccessRequestCTSC"
@@ -1462,7 +1435,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskPermissionsTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "ReferEmployersContractClaim"
@@ -1505,7 +1477,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskPermissionsTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "ReviewSupportRequestJudge"
@@ -1555,7 +1526,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskPermissionsTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "ReviewSupportRequestLegalOfficer"
@@ -1598,7 +1568,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskPermissionsTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "ReviewSupportRequestAdmin"
@@ -1641,7 +1610,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskPermissionsTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "ArrangeSupport"

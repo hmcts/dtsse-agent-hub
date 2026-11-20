@@ -1,0 +1,244 @@
+{
+ "decision": "wa-task-types-sscs-benefit",
+ "source": "hmcts/sscs-task-configuration@a3d3c0cd99c39be7614135158a7f155e6625e64b",
+ "dumpedAt": "2026-11-20T07:38:03.702Z",
+ "scenarios": [
+  {
+   "input": {},
+   "output": [
+    {
+     "taskTypeId": "reviewIncompleteAppeal",
+     "taskTypeName": "CTSC - Review Incomplete Appeal"
+    },
+    {
+     "taskTypeId": "reviewFtaResponse",
+     "taskTypeName": "CTSC - Review FTA Response"
+    },
+    {
+     "taskTypeId": "actionUnprocessedCorrespondence",
+     "taskTypeName": "CTSC - Action Unprocessed Correspondence"
+    },
+    {
+     "taskTypeId": "actionUnprocessedCorrespondenceDormant",
+     "taskTypeName": "CTSC - Action Unprocessed Correspondence - Dormant/Post Hearing"
+    },
+    {
+     "taskTypeId": "reviewBilingualDocument",
+     "taskTypeName": "Review Bi-Lingual Document - CTSC"
+    },
+    {
+     "taskTypeId": "reviewAdminAction",
+     "taskTypeName": "Review Admin Action - CTSC"
+    },
+    {
+     "taskTypeId": "reviewBfDate",
+     "taskTypeName": "Review BF Date - CTSC"
+    },
+    {
+     "taskTypeId": "reviewFtaDueDate",
+     "taskTypeName": "Review FTA Due Date - CTSC"
+    },
+    {
+     "taskTypeId": "reviewValidAppeal",
+     "taskTypeName": "CTSC - Review Valid Appeal"
+    },
+    {
+     "taskTypeId": "reviewListingError",
+     "taskTypeName": "CTSC - Review Listing Error"
+    },
+    {
+     "taskTypeId": "reviewRoboticFail",
+     "taskTypeName": "CTSC - Review Robotic Fail"
+    },
+    {
+     "taskTypeId": "allocateCaseRolesAndCreateBundle",
+     "taskTypeName": "Allocate Case Roles and Create Bundle - RPC"
+    },
+    {
+     "taskTypeId": "updateHearingDetails",
+     "taskTypeName": "Update Hearing Details - RPC"
+    },
+    {
+     "taskTypeId": "reviewConfidentialityRequest",
+     "taskTypeName": "Review Confidentiality Request - Judge"
+    },
+    {
+     "taskTypeId": "reviewReinstatementRequestJudge",
+     "taskTypeName": "Review Reinstatement Request - Judge"
+    },
+    {
+     "taskTypeId": "reviewUrgentHearingRequest",
+     "taskTypeName": "Review Urgent Hearing Request - Judge"
+    },
+    {
+     "taskTypeId": "processAudioVideoEvidence",
+     "taskTypeName": "Process Audio Video Evidence - LO"
+    },
+    {
+     "taskTypeId": "reviewNonCompliantAppeal",
+     "taskTypeName": "Review Non Compliant Appeal - LO"
+    },
+    {
+     "taskTypeId": "ftaNotProvidedAppointeeDetailsJudge",
+     "taskTypeName": "FTA Not Provided Appointee Details - Judge"
+    },
+    {
+     "taskTypeId": "reviewFtaValidityChallenge",
+     "taskTypeName": "Review FTA Validity Challenge - LO"
+    },
+    {
+     "taskTypeId": "referredByTcwPreHearing",
+     "taskTypeName": "Referred By TCW (Pre-hearing) - Judge"
+    },
+    {
+     "taskTypeId": "referredByJudge",
+     "taskTypeName": "Referred By Judge - LO"
+    },
+    {
+     "taskTypeId": "referredByAdminJudgePreHearing",
+     "taskTypeName": "Referred By Admin (Pre-hearing) - Judge"
+    },
+    {
+     "taskTypeId": "referredByAdminJudgePostHearing",
+     "taskTypeName": "Referred By Admin (Posthearing) - Judge"
+    },
+    {
+     "taskTypeId": "referredByAdminTcw",
+     "taskTypeName": "Referred By Admin - LO"
+    },
+    {
+     "taskTypeId": "reviewPostponementRequestJudge",
+     "taskTypeName": "Review Postponement Request - Judge"
+    },
+    {
+     "taskTypeId": "reviewPostponementRequestTCW",
+     "taskTypeName": "Review Postponement Request - LO"
+    },
+    {
+     "taskTypeId": "referredToInterlocJudge",
+     "taskTypeName": "Referred to Interloc - Judge"
+    },
+    {
+     "taskTypeId": "referredToInterlocTCW",
+     "taskTypeName": "Referred to Interloc - LO"
+    },
+    {
+     "taskTypeId": "confirmPanelComposition",
+     "taskTypeName": "Confirm Panel Composition - Judge"
+    },
+    {
+     "taskTypeId": "prepareForHearingJudge",
+     "taskTypeName": "Prepare For Hearing - Judge"
+    },
+    {
+     "taskTypeId": "prepareForHearingTribunalMember1",
+     "taskTypeName": "Prepare For Hearing - Tribunal Memeber 1"
+    },
+    {
+     "taskTypeId": "prepareForHearingTribunalMember2",
+     "taskTypeName": "Prepare For Hearing - Tribunal Memeber 2"
+    },
+    {
+     "taskTypeId": "prepareForHearingTribunalMember3",
+     "taskTypeName": "Prepare For Hearing - Tribunal Memeber 3"
+    },
+    {
+     "taskTypeId": "prepareHearingAppraiser1",
+     "taskTypeName": "Prepare For Hearing - Appraiser 1"
+    },
+    {
+     "taskTypeId": "prepareHearingAppraiser2",
+     "taskTypeName": "Prepare For Hearing - Appraiser 2"
+    },
+    {
+     "taskTypeId": "writeDecisionJudge",
+     "taskTypeName": "Write Decision - Judge"
+    },
+    {
+     "taskTypeId": "reviewCorrectionApplicationAdmin",
+     "taskTypeName": "Review Correction Application (Admin) - CTSC"
+    },
+    {
+     "taskTypeId": "reviewCorrectionApplicationJudge",
+     "taskTypeName": "Review Correction Application - Judge"
+    },
+    {
+     "taskTypeId": "uploadHearingRecordingSORCTSC",
+     "taskTypeName": "Upload Hearing Recording: SOR - CTSC"
+    },
+    {
+     "taskTypeId": "writeStatementofReason",
+     "taskTypeName": "Write Statement of Reason - Judge"
+    },
+    {
+     "taskTypeId": "reviewSetAsideApplication",
+     "taskTypeName": "Review Set Aside Application - Judge"
+    },
+    {
+     "taskTypeId": "reviewPermissiontoAppealApplication",
+     "taskTypeName": "Review Permission to Appeal Application - Judge"
+    },
+    {
+     "taskTypeId": "reviewLibertytoApplyApplication",
+     "taskTypeName": "Review Liberty to Apply Application - Judge"
+    },
+    {
+     "taskTypeId": "shareRemittedDecision",
+     "taskTypeName": "Share Remitted Decision - CTSC"
+    },
+    {
+     "taskTypeId": "reviewRemittedDecisionandProvideListingDirections",
+     "taskTypeName": "Review Remitted Decision and Provide Listing Directions - Judge"
+    },
+    {
+     "taskTypeId": "shareRemadeDecision",
+     "taskTypeName": "Share Remade Decision - CTSC"
+    },
+    {
+     "taskTypeId": "shareRefusedDecision",
+     "taskTypeName": "Share Refused Decision - CTSC"
+    },
+    {
+     "taskTypeId": "reviewCorrectionApplicationAdmin",
+     "taskTypeName": "Review Correction Application - CTSC"
+    },
+    {
+     "taskTypeId": "contactParties",
+     "taskTypeName": "Contact Parties - RPC"
+    },
+    {
+     "taskTypeId": "ftaResponseOverdue",
+     "taskTypeName": "Referred to Interloc - FTA response overdue - LO"
+    },
+    {
+     "taskTypeId": "reviewLateStatementofReasonsApplication",
+     "taskTypeName": "Review Late SOR Application - Judge"
+    },
+    {
+     "taskTypeId": "reviewLateStatementofReasonsApplicationAndAllocateJudge",
+     "taskTypeName": "Review Late SOR Application and Allocate Judge - CTSC"
+    },
+    {
+     "taskTypeId": "ftaRequestTimeExtension",
+     "taskTypeName": "Request FTA Time Extension - LO"
+    },
+    {
+     "taskTypeId": "reviewPostHearingNoticeforListingRequirements",
+     "taskTypeName": "Review Post Hearing Notice for Listing Requirements - CTSC"
+    },
+    {
+     "taskTypeId": "reviewApplicationandAllocateJudge",
+     "taskTypeName": "Review Application and Allocate Judge - CTSC"
+    },
+    {
+     "taskTypeId": "provideListingDirections",
+     "taskTypeName": "Provide Listing Directions - Judge"
+    },
+    {
+     "taskTypeId": "issueDecisionJudge",
+     "taskTypeName": "Issue Decision - Judge"
+    }
+   ]
+  }
+ ]
+}

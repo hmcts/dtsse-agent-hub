@@ -1,14 +1,14 @@
 {
  "decision": "wa-task-configuration-employment-et_scotland_multiple",
  "source": "hmcts/et-wa-task-configuration@fa182449b8ef501c95e1f00137965994d835c4c3",
+ "dumpedAt": "2026-11-20T07:37:34.755Z",
  "scenarios": [
   {
-   "test": "EmploymentTaskConfigurationMultipleTestScot",
    "input": {
     "taskAttributes": {
-     "roleAssignmentId": "c1dd13e4-8fb3-4863-bf07-cc5d66be1e7e",
      "taskType": "ReviewReferralAdminMultiple",
-     "taskId": "1e885284-65da-4488-af1c-2a61c9d85f24"
+     "taskId": "fa89b9a8-d5be-4d9d-aa3e-28a8ebcfec44",
+     "roleAssignmentId": "6515a66c-5b57-463f-b4e1-20959d10af97"
     },
     "caseData": {
      "multipleName": "Big Multiple"
@@ -78,7 +78,7 @@
     {
      "canReconfigure": true,
      "name": "dueDateOrigin",
-     "value": "2026-11-19T21:41:43.798306258Z[Etc/UTC]"
+     "value": "2026-11-20T07:38:02.449752138Z[Etc/UTC]"
     },
     {
      "canReconfigure": true,
@@ -118,12 +118,11 @@
    ]
   },
   {
-   "test": "EmploymentTaskConfigurationMultipleTestScot",
    "input": {
     "taskAttributes": {
-     "roleAssignmentId": "e01bdd5d-ad8d-4d0f-a118-6e1d1476d8bd",
      "taskType": "ReviewReferralLegalOpsMultiple",
-     "taskId": "3e25f362-4e4a-4661-93ce-a7f0a2d1b7e5"
+     "taskId": "9000055e-3cfc-47f9-a68d-4e1849c8f2ca",
+     "roleAssignmentId": "fc764668-bf26-4edf-af27-019c7f3cdc0f"
     },
     "caseData": {
      "multipleName": "Big Multiple"
@@ -193,7 +192,7 @@
     {
      "canReconfigure": true,
      "name": "dueDateOrigin",
-     "value": "2026-11-19T21:41:43.808227604Z[Etc/UTC]"
+     "value": "2026-11-20T07:38:02.460580323Z[Etc/UTC]"
     },
     {
      "canReconfigure": true,
@@ -233,12 +232,11 @@
    ]
   },
   {
-   "test": "EmploymentTaskConfigurationMultipleTestScot",
    "input": {
     "taskAttributes": {
-     "roleAssignmentId": "b439b5fb-4e86-4695-af54-110b98cd82cb",
      "taskType": "ReviewReferralJudiciaryMultiple",
-     "taskId": "92bdbc5c-6f5f-4018-8c85-459686260fa5"
+     "taskId": "f006ab77-c184-40e5-a2bb-adb9601dc115",
+     "roleAssignmentId": "9a6316b9-9d3b-4f22-86aa-cfd7781238f6"
     },
     "caseData": {
      "multipleName": "Big Multiple"
@@ -308,7 +306,7 @@
     {
      "canReconfigure": true,
      "name": "dueDateOrigin",
-     "value": "2026-11-19T21:41:43.817859125Z[Etc/UTC]"
+     "value": "2026-11-20T07:38:02.469715354Z[Etc/UTC]"
     },
     {
      "canReconfigure": true,
@@ -348,12 +346,11 @@
    ]
   },
   {
-   "test": "EmploymentTaskConfigurationMultipleTestScot",
    "input": {
     "taskAttributes": {
-     "roleAssignmentId": "38421d38-1767-4e2c-beed-ecf0d1f39708",
      "taskType": "MultiplesReviewReferralResponseLegalOps",
-     "taskId": "a1cabbf4-b80e-4618-8032-03dbcf2b0924"
+     "taskId": "f6da694f-b6b2-4329-b49d-f42b94b95640",
+     "roleAssignmentId": "76493e00-7565-4427-aac5-8b6d3c7525e4"
     },
     "caseData": {
      "multipleName": "Big Multiple"
@@ -423,7 +420,7 @@
     {
      "canReconfigure": true,
      "name": "dueDateOrigin",
-     "value": "2026-11-19T21:41:43.827670446Z[Etc/UTC]"
+     "value": "2026-11-20T07:38:02.478562463Z[Etc/UTC]"
     },
     {
      "canReconfigure": true,
@@ -463,12 +460,11 @@
    ]
   },
   {
-   "test": "EmploymentTaskConfigurationMultipleTestScot",
    "input": {
     "taskAttributes": {
-     "roleAssignmentId": "15aa03ae-7234-4e5b-82a5-4cfcb1ee7396",
      "taskType": "ReviewReferralResponseJudiciaryMultiple",
-     "taskId": "bbc5f472-ce85-44a4-b67d-f21a05cdd29b"
+     "taskId": "19c0f6b6-2010-4f56-b12a-7b6342f16f58",
+     "roleAssignmentId": "eefdc6b4-30cf-499d-9324-15770f42aa0f"
     },
     "caseData": {
      "multipleName": "Big Multiple"
@@ -538,7 +534,7 @@
     {
      "canReconfigure": true,
      "name": "dueDateOrigin",
-     "value": "2026-11-19T21:41:43.836879343Z[Etc/UTC]"
+     "value": "2026-11-20T07:38:02.488953571Z[Etc/UTC]"
     },
     {
      "canReconfigure": true,
@@ -578,12 +574,11 @@
    ]
   },
   {
-   "test": "EmploymentTaskConfigurationMultipleTestScot",
    "input": {
     "taskAttributes": {
-     "roleAssignmentId": "988e9868-a3df-4875-a0f1-7e325266e1d3",
      "taskType": "ReviewReferralResponseAdminMultiple",
-     "taskId": "9b811262-83f7-4625-a912-0e324f6171f6"
+     "taskId": "daf121d8-25d3-4236-9e89-cc55e821a57b",
+     "roleAssignmentId": "29a1b81b-28ea-468f-89c1-ed6275a4ae5d"
     },
     "caseData": {
      "multipleName": "Big Multiple"
@@ -653,7 +648,7 @@
     {
      "canReconfigure": true,
      "name": "dueDateOrigin",
-     "value": "2026-11-19T21:41:43.847775222Z[Etc/UTC]"
+     "value": "2026-11-20T07:38:02.498266740Z[Etc/UTC]"
     },
     {
      "canReconfigure": true,
@@ -693,7 +688,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskConfigurationMultipleTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "Et1Vetting"
@@ -742,7 +736,7 @@
     {
      "canReconfigure": true,
      "name": "dueDateOrigin",
-     "value": "2026-11-19T21:41:43.856965240Z[Etc/UTC]"
+     "value": "2026-11-20T07:38:02.508067631Z[Etc/UTC]"
     },
     {
      "canReconfigure": true,
@@ -772,7 +766,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskConfigurationMultipleTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "Et1Vetting"
@@ -821,7 +814,7 @@
     {
      "canReconfigure": true,
      "name": "dueDateOrigin",
-     "value": "2026-11-19T21:41:43.864083738Z[Etc/UTC]"
+     "value": "2026-11-20T07:38:02.516722671Z[Etc/UTC]"
     },
     {
      "canReconfigure": true,
@@ -851,7 +844,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskConfigurationMultipleTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "Et1Vetting"
@@ -899,7 +891,7 @@
     {
      "canReconfigure": true,
      "name": "dueDateOrigin",
-     "value": "2026-11-19T21:41:43.876231807Z[Etc/UTC]"
+     "value": "2026-11-20T07:38:02.530585784Z[Etc/UTC]"
     },
     {
      "canReconfigure": true,
@@ -929,7 +921,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskConfigurationMultipleTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "Et1Vetting"
@@ -985,7 +976,7 @@
     {
      "canReconfigure": true,
      "name": "dueDateOrigin",
-     "value": "2026-11-19T21:41:43.883317365Z[Etc/UTC]"
+     "value": "2026-11-20T07:38:02.538307323Z[Etc/UTC]"
     },
     {
      "canReconfigure": true,
@@ -1015,7 +1006,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskConfigurationMultipleTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "ReviewReferralAdminMultiple"
@@ -1102,7 +1092,7 @@
     {
      "canReconfigure": true,
      "name": "dueDateOrigin",
-     "value": "2026-11-19T21:41:43.892487263Z[Etc/UTC]"
+     "value": "2026-11-20T07:38:02.547729465Z[Etc/UTC]"
     },
     {
      "canReconfigure": true,
@@ -1142,7 +1132,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskConfigurationMultipleTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "ReviewReferralAdminMultiple"
@@ -1229,7 +1218,7 @@
     {
      "canReconfigure": true,
      "name": "dueDateOrigin",
-     "value": "2026-11-19T21:41:43.900889298Z[Etc/UTC]"
+     "value": "2026-11-20T07:38:02.558199431Z[Etc/UTC]"
     },
     {
      "canReconfigure": true,
@@ -1269,7 +1258,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskConfigurationMultipleTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "ReviewReferralLegalOpsMultiple"
@@ -1356,7 +1344,7 @@
     {
      "canReconfigure": true,
      "name": "dueDateOrigin",
-     "value": "2026-11-19T21:41:43.908783982Z[Etc/UTC]"
+     "value": "2026-11-20T07:38:02.567728645Z[Etc/UTC]"
     },
     {
      "canReconfigure": true,
@@ -1396,7 +1384,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskConfigurationMultipleTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "ReviewReferralLegalOpsMultiple"
@@ -1483,7 +1470,7 @@
     {
      "canReconfigure": true,
      "name": "dueDateOrigin",
-     "value": "2026-11-19T21:41:43.916745595Z[Etc/UTC]"
+     "value": "2026-11-20T07:38:02.577267413Z[Etc/UTC]"
     },
     {
      "canReconfigure": true,
@@ -1523,7 +1510,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskConfigurationMultipleTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "ReviewReferralJudiciaryMultiple"
@@ -1610,7 +1596,7 @@
     {
      "canReconfigure": true,
      "name": "dueDateOrigin",
-     "value": "2026-11-19T21:41:43.924499918Z[Etc/UTC]"
+     "value": "2026-11-20T07:38:02.587101985Z[Etc/UTC]"
     },
     {
      "canReconfigure": true,
@@ -1650,7 +1636,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskConfigurationMultipleTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "ReviewReferralJudiciaryMultiple"
@@ -1737,7 +1722,7 @@
     {
      "canReconfigure": true,
      "name": "dueDateOrigin",
-     "value": "2026-11-19T21:41:43.932582763Z[Etc/UTC]"
+     "value": "2026-11-20T07:38:02.599604194Z[Etc/UTC]"
     },
     {
      "canReconfigure": true,
@@ -1777,7 +1762,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskConfigurationMultipleTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "MultiplesReviewReferralResponseLegalOps"
@@ -1882,7 +1866,7 @@
     {
      "canReconfigure": true,
      "name": "dueDateOrigin",
-     "value": "2026-11-19T21:41:43.941582446Z[Etc/UTC]"
+     "value": "2026-11-20T07:38:02.610410185Z[Etc/UTC]"
     },
     {
      "canReconfigure": true,
@@ -1922,7 +1906,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskConfigurationMultipleTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "MultiplesReviewReferralResponseLegalOps"
@@ -2027,7 +2010,7 @@
     {
      "canReconfigure": true,
      "name": "dueDateOrigin",
-     "value": "2026-11-19T21:41:43.951882831Z[Etc/UTC]"
+     "value": "2026-11-20T07:38:02.625475824Z[Etc/UTC]"
     },
     {
      "canReconfigure": true,
@@ -2067,7 +2050,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskConfigurationMultipleTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "ReviewReferralResponseJudiciaryMultiple"
@@ -2172,7 +2154,7 @@
     {
      "canReconfigure": true,
      "name": "dueDateOrigin",
-     "value": "2026-11-19T21:41:43.962301684Z[Etc/UTC]"
+     "value": "2026-11-20T07:38:02.639981883Z[Etc/UTC]"
     },
     {
      "canReconfigure": true,
@@ -2212,7 +2194,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskConfigurationMultipleTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "ReviewReferralResponseJudiciaryMultiple"
@@ -2317,7 +2298,7 @@
     {
      "canReconfigure": true,
      "name": "dueDateOrigin",
-     "value": "2026-11-19T21:41:43.973029110Z[Etc/UTC]"
+     "value": "2026-11-20T07:38:02.650388684Z[Etc/UTC]"
     },
     {
      "canReconfigure": true,
@@ -2357,7 +2338,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskConfigurationMultipleTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "ReviewReferralResponseAdminMultiple"
@@ -2462,7 +2442,7 @@
     {
      "canReconfigure": true,
      "name": "dueDateOrigin",
-     "value": "2026-11-19T21:41:43.983301814Z[Etc/UTC]"
+     "value": "2026-11-20T07:38:02.660439802Z[Etc/UTC]"
     },
     {
      "canReconfigure": true,
@@ -2502,7 +2482,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskConfigurationMultipleTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "ReviewReferralResponseAdminMultiple"
@@ -2607,7 +2586,7 @@
     {
      "canReconfigure": true,
      "name": "dueDateOrigin",
-     "value": "2026-11-19T21:41:43.993688919Z[Etc/UTC]"
+     "value": "2026-11-20T07:38:02.670529687Z[Etc/UTC]"
     },
     {
      "canReconfigure": true,
@@ -2647,7 +2626,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskConfigurationMultipleTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "someTaskType"
@@ -2692,7 +2670,7 @@
     {
      "canReconfigure": true,
      "name": "dueDateOrigin",
-     "value": "2026-11-19T21:41:44.010285387Z[Etc/UTC]"
+     "value": "2026-11-20T07:38:02.687672807Z[Etc/UTC]"
     },
     {
      "canReconfigure": true,
@@ -2722,7 +2700,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskConfigurationMultipleTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "ReviewReferralAdminMultiple"
@@ -2795,7 +2772,7 @@
     {
      "canReconfigure": true,
      "name": "dueDateOrigin",
-     "value": "2026-11-19T21:41:44.019698010Z[Etc/UTC]"
+     "value": "2026-11-20T07:38:02.696839967Z[Etc/UTC]"
     },
     {
      "canReconfigure": true,
@@ -2835,7 +2812,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskConfigurationMultipleTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "ReviewReferralLegalOpsMultiple"
@@ -2908,7 +2884,7 @@
     {
      "canReconfigure": true,
      "name": "dueDateOrigin",
-     "value": "2026-11-19T21:41:44.028242679Z[Etc/UTC]"
+     "value": "2026-11-20T07:38:02.705598653Z[Etc/UTC]"
     },
     {
      "canReconfigure": true,
@@ -2948,7 +2924,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskConfigurationMultipleTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "ReviewReferralJudiciaryMultiple"
@@ -3021,7 +2996,7 @@
     {
      "canReconfigure": true,
      "name": "dueDateOrigin",
-     "value": "2026-11-19T21:41:44.039016936Z[Etc/UTC]"
+     "value": "2026-11-20T07:38:02.713749356Z[Etc/UTC]"
     },
     {
      "canReconfigure": true,
@@ -3061,7 +3036,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskConfigurationMultipleTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "MultiplesReviewReferralResponseLegalOps"
@@ -3134,7 +3108,7 @@
     {
      "canReconfigure": true,
      "name": "dueDateOrigin",
-     "value": "2026-11-19T21:41:44.048006753Z[Etc/UTC]"
+     "value": "2026-11-20T07:38:02.721708761Z[Etc/UTC]"
     },
     {
      "canReconfigure": true,
@@ -3174,7 +3148,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskConfigurationMultipleTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "ReviewReferralResponseJudiciaryMultiple"
@@ -3247,7 +3220,7 @@
     {
      "canReconfigure": true,
      "name": "dueDateOrigin",
-     "value": "2026-11-19T21:41:44.056730351Z[Etc/UTC]"
+     "value": "2026-11-20T07:38:02.729733815Z[Etc/UTC]"
     },
     {
      "canReconfigure": true,
@@ -3287,7 +3260,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskConfigurationMultipleTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "ReviewReferralResponseAdminMultiple"
@@ -3360,7 +3332,7 @@
     {
      "canReconfigure": true,
      "name": "dueDateOrigin",
-     "value": "2026-11-19T21:41:44.065965477Z[Etc/UTC]"
+     "value": "2026-11-20T07:38:02.737663195Z[Etc/UTC]"
     },
     {
      "canReconfigure": true,
@@ -3400,7 +3372,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskConfigurationMultipleTestScot",
    "input": {
     "taskAttributes": {
      "taskType": "someTask"
@@ -3448,7 +3419,7 @@
     {
      "canReconfigure": true,
      "name": "dueDateOrigin",
-     "value": "2026-11-19T21:41:44.115509453Z[Etc/UTC]"
+     "value": "2026-11-20T07:38:02.784238875Z[Etc/UTC]"
     },
     {
      "canReconfigure": true,

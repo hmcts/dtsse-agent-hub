@@ -1,9 +1,9 @@
 {
  "decision": "wa-task-completion-employment-et_englandwales",
  "source": "hmcts/et-wa-task-configuration@fa182449b8ef501c95e1f00137965994d835c4c3",
+ "dumpedAt": "2026-11-20T07:37:34.755Z",
  "scenarios": [
   {
-   "test": "EmploymentTaskCompletionTestEW",
    "input": {
     "eventId": "preAcceptanceCase"
    },
@@ -32,7 +32,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskCompletionTestEW",
    "input": {
     "eventId": "replyToReferral"
    },
@@ -65,7 +64,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskCompletionTestEW",
    "input": {
     "eventId": "closeReferral"
    },
@@ -98,7 +96,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskCompletionTestEW",
    "input": {
     "eventId": "uploadDocumentForServing"
    },
@@ -111,7 +108,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskCompletionTestEW",
    "input": {
     "eventId": "generateCorrespondence"
    },
@@ -132,7 +128,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskCompletionTestEW",
    "input": {
     "eventId": "addAmendHearing"
    },
@@ -145,7 +140,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskCompletionTestEW",
    "input": {
     "eventId": "issueInitialConsiderationDirectionsWA"
    },
@@ -158,7 +152,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskCompletionTestEW",
    "input": {
     "eventId": "initialConsideration"
    },
@@ -171,7 +164,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskCompletionTestEW",
    "input": {
     "eventId": "et3Notification"
    },
@@ -184,7 +176,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskCompletionTestEW",
    "input": {
     "eventId": "et3Vetting"
    },
@@ -201,7 +192,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskCompletionTestEW",
    "input": {
     "eventId": "createReferral"
    },
@@ -222,7 +212,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskCompletionTestEW",
    "input": {
     "eventId": "draftAndSignJudgement"
    },
@@ -235,7 +224,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskCompletionTestEW",
    "input": {
     "eventId": "amendClaimantDetails"
    },
@@ -248,7 +236,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskCompletionTestEW",
    "input": {
     "eventId": "amendRespondentDetails"
    },
@@ -265,7 +252,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskCompletionTestEW",
    "input": {
     "eventId": "addAmendJudgment"
    },
@@ -278,7 +264,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskCompletionTestEW",
    "input": {
     "eventId": "disposeCase"
    },
@@ -291,7 +276,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskCompletionTestEW",
    "input": {
     "eventId": "tseAdmin"
    },
@@ -304,7 +288,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskCompletionTestEW",
    "input": {
     "eventId": "tseAdmReply"
    },
@@ -317,7 +300,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskCompletionTestEW",
    "input": {
     "eventId": "tseAdminCloseAnApplication"
    },
@@ -330,7 +312,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskCompletionTestEW",
    "input": {
     "eventId": "broughtForward"
    },
@@ -343,7 +324,6 @@
    ]
   },
   {
-   "test": "EmploymentTaskCompletionTestEW",
    "input": {
     "eventId": "sendNotification"
    },

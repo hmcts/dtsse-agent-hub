@@ -1,5 +1,6 @@
 import type { DmnDocument } from "../dmn-model.ts";
 import { generateDocument } from "../generator.ts";
+import { categoryParts } from "../model.ts";
 import type { Kind, Spec } from "../schema.ts";
 import { evaluateDecision, type OutputRow } from "./dmn-eval.ts";
 
@@ -8,8 +9,9 @@ export type CaseData = Record<string, unknown>;
 /** One event on the case. `caseData` is merged into the case data before the DMNs run, as the event's submission would. */
 export interface SimEvent {
   event: string;
-  /** The state before the event; the previous event's `postState` when left out. */
+  /** The state before the event; the state the previous event left the case in when left out. */
   fromState?: string;
+  /** The state after the event; the case stays in its current state when left out, as CCD's new state does. */
   postState?: string;
   caseData?: CaseData;
 }
@@ -19,7 +21,9 @@ export interface SimInput {
   caseData?: CaseData;
   events: SimEvent[];
   caseId?: string;
-  /** The date the case event handler passes initiation as `now`, `yyyy-MM-dd`. */
+  /** The instant the DMNs see as now, an ISO date and time with an offset; the machine's clock when left out. */
+  now?: string;
+  /** The date the case event handler passes initiation as `now`, `yyyy-MM-dd`; the date of `now` in London when left out. */
   today?: string;
 }
 
@@ -83,13 +87,7 @@ export interface Timeline {
 const asString = (value: unknown): string | undefined => (typeof value === "string" ? value : undefined);
 
 /** WA splits process categories on commas and trims them. */
-const splitList = (value: unknown): string[] =>
-  typeof value === "string"
-    ? value
-        .split(",")
-        .map((part) => part.trim())
-        .filter(Boolean)
-    : [];
+const splitList = (value: unknown): string[] => (typeof value === "string" ? categoryParts(value) : []);
 
 /** Task management trims the spaces after commas in the strings a DMN returns. */
 const trimLists = (value: unknown): unknown =>
@@ -114,11 +112,15 @@ function configurationOf(rows: OutputRow[]): ConfigEntry[] {
 
 /** The permission rows that apply to the case: those with a case access category need one of theirs on the case. */
 function permissionsOf(rows: OutputRow[], caseData: CaseData): PermissionEntry[] {
-  const caseCategories = splitList(caseData.caseAccessCategory);
+  const onCase = typeof caseData.caseAccessCategory === "string" ? caseData.caseAccessCategory : "";
   return rows
     .filter((row) => {
-      const wanted = splitList(row.caseAccessCategory);
-      return wanted.length === 0 || wanted.some((category) => caseCategories.includes(category));
+      const wanted = trimLists(row.caseAccessCategory);
+      if (typeof wanted !== "string" || wanted.trim() === "") {
+        return true;
+      }
+      const caseCategories = onCase.split(",");
+      return onCase.trim() !== "" && wanted.split(",").some((category) => caseCategories.includes(category));
     })
     .map((row) => {
       const roleCategory = asString(row.roleCategory);
@@ -148,11 +150,12 @@ export function simulate(spec: Spec, input: SimInput): Timeline {
     }
     const document = documents.get(kind);
     const main = document?.decisions[0];
-    return document && main ? evaluateDecision(document, main.id, variables) : [];
+    return document && main ? evaluateDecision(document, main.id, variables, input.now) : [];
   };
 
   const caseId = input.caseId ?? "1234567890123456";
-  const today = input.today ?? new Date().toISOString().slice(0, 10);
+  const today =
+    input.today ?? new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/London" }).format(input.now === undefined ? new Date() : new Date(input.now));
   const tasks: SimTask[] = [];
   const attributesOf = new Map<string, Record<string, unknown>>();
   let caseData: CaseData = { ...input.caseData };
@@ -164,8 +167,8 @@ export function simulate(spec: Spec, input: SimInput): Timeline {
 
   const steps = input.events.map((event, index): StepResult => {
     const fromState = event.fromState ?? state;
-    const postState = event.postState;
-    state = postState ?? state;
+    const postState = event.postState ?? state;
+    state = postState;
     caseData = { ...caseData, ...event.caseData };
     const additionalData = { Data: caseData };
     const step: StepResult = {
@@ -217,12 +220,17 @@ export function simulate(spec: Spec, input: SimInput): Timeline {
       for (const task of openTasks()) {
         const before = attributesOf.get(task.id) ?? {};
         const configuration = configurationOf(configure(before));
-        const changes = configuration
-          .filter((entry) => entry.canReconfigure === true && before[entry.name] !== entry.value)
+        const reconfigurable = configuration.filter((entry) => entry.canReconfigure === true);
+        const changes = reconfigurable
+          .filter((entry) => before[entry.name] !== entry.value)
           .map((entry) => ({ name: entry.name, from: before[entry.name], to: entry.value }));
-        attributesOf.set(task.id, { ...before, ...Object.fromEntries(configuration.map((entry) => [entry.name, entry.value])) });
-        task.configuration = configuration;
-        task.attributes = Object.fromEntries(configuration.map((entry) => [entry.name, entry.value]));
+        for (const entry of reconfigurable) {
+          task.attributes[entry.name] = entry.value;
+          for (const row of task.configuration.filter((r) => r.name === entry.name)) {
+            row.value = entry.value;
+          }
+        }
+        attributesOf.set(task.id, { ...before, ...Object.fromEntries(reconfigurable.map((entry) => [entry.name, entry.value])) });
         step.reconfigured.push({ task: ref(task), changes });
       }
     }
@@ -263,7 +271,7 @@ export function simulate(spec: Spec, input: SimInput): Timeline {
       };
       attributesOf.set(task.id, { ...taskAttributes, ...task.attributes });
       tasks.push(task);
-      step.created.push({ ...task });
+      step.created.push(structuredClone(task));
     }
     return step;
   });

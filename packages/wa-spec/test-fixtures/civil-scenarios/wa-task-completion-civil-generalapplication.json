@@ -1,0 +1,205 @@
+{
+ "decision": "wa-task-completion-civil-generalapplication",
+ "source": "hmcts/civil-wa-task-configuration@8977b6611ea7520d1bb964d97ef59a16dabd7b1f",
+ "dumpedAt": "2026-11-20T07:38:22.609Z",
+ "scenarios": [
+  {
+   "input": {
+    "eventId": "MAKE_DECISION"
+   },
+   "output": [
+    {
+     "taskType": "JudgeDecideOnApplication",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "LegalAdvisorDecideOnApplication",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "JudgeRevisitApplication",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "LegalAdvisorRevisitApplication",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "HEARING_SCHEDULED_GA"
+   },
+   "output": [
+    {
+     "taskType": "ScheduleApplicationHearing",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "REFER_TO_JUDGE"
+   },
+   "output": [
+    {
+     "taskType": "LegalAdvisorDecideOnApplication",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "LegalAdvisorRevisitApplication",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewApplication",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewRevisitedApplication",
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "REFER_TO_LEGAL_ADVISOR"
+   },
+   "output": [
+    {
+     "taskType": "ReviewApplication",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewRevisitedApplication",
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "APPROVE_CONSENT_ORDER"
+   },
+   "output": [
+    {
+     "taskType": "ReviewApplication",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "ReviewRevisitedApplication",
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "INITIATE_GENERAL_APPLICATION_AFTER_PAYMENT"
+   },
+   "output": [
+    {
+     "taskType": "HelpWithFeesApplicationFee",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "MODIFY_STATE_AFTER_ADDITIONAL_FEE_PAID"
+   },
+   "output": [
+    {
+     "taskType": "HelpWithFeesAdditionalApplicationFee",
+     "completionMode": "Auto"
+    },
+    {
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "UPLOAD_TRANSLATED_DOCUMENT"
+   },
+   "output": [
+    {
+     "taskType": "applicationDocumentsWelshRequestAppSum",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "applicationDocumentsWelshRequestAppSumResponded",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "applicationDocumentsWelshRequestOrderMade",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "applicationDocumentsWelshRequestHearingOrder",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "applicationDocumentsWelshRequestRespondToMoreInfo",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "applicationDocumentsWelshRequestRespondToWrittenRep",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "applicationDocumentsWelshRequestAddlDoc",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "applicationDocumentsWelshRequestRespondToJudge",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "applicationDocumentsWelshRequestMoreInfo",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "applicationDocumentsWelshRequestWrittenResp",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "applicationDocumentsWelshRequestHearingSchedule",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "applicationDocumentsWelshRequestAppDismissed",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "applicationDocumentsWelshRequestJudgeDirection",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "applicationDocumentsWelshRequestFinalOrder",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "applicationDocumentsWelshRequestRespondToWrittenRepRespondent",
+     "completionMode": "Auto"
+    },
+    {
+     "taskType": "applicationDocumentsWelshRequestRespondToMoreInfoRespondent",
+     "completionMode": "Auto"
+    }
+   ]
+  },
+  {
+   "input": {
+    "eventId": "FEE_PAYMENT_OUTCOME_GA"
+   },
+   "output": []
+  }
+ ]
+}

@@ -1,0 +1,816 @@
+{
+ "decision": "wa-task-cancellation-civil-civil",
+ "source": "hmcts/civil-wa-task-configuration@8977b6611ea7520d1bb964d97ef59a16dabd7b1f",
+ "dumpedAt": "2026-11-20T07:38:22.609Z",
+ "scenarios": [
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "event": "STAY_CASE"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "standardDirectionsOrder"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "caseProgression"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "defaultJudgment"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "multiOrIntermediateClaim"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewStayCase"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": "any state",
+    "state": "PROCEEDS_IN_HERITAGE_SYSTEM",
+    "event": "CASE_PROCEEDS_IN_CASEMAN"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "defaultJudgment"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "standardDirectionsOrder"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewCaseFlags"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "caseProgression"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "routineTransfer"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "decisionOnReconsideration"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "requestTranslation"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "orderJudgmentSetAside"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "helpWithFees"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "claimantIntention"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "paidInFull"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "intentionToProceed"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "updateContactInformation"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "RemoveHearing"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "NationalRollout"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "multiOrIntermediateClaim"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "discontinued"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "setAsideJo"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "manageStay"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "sendReplyMessage"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewUnlessOrder"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewFreeTrial"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewGeneralOrder"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewReserveJudgement"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewOther"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewStayCase"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewManageStay"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewDismissCase"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": "PROCEEDS_IN_HERITAGE_SYSTEM",
+    "event": "CASE_PROCEEDS_IN_CASEMAN"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "defaultJudgment"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "standardDirectionsOrder"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewCaseFlags"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "caseProgression"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "routineTransfer"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "decisionOnReconsideration"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "requestTranslation"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "orderJudgmentSetAside"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "helpWithFees"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "claimantIntention"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "paidInFull"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "intentionToProceed"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "updateContactInformation"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "RemoveHearing"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "NationalRollout"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "multiOrIntermediateClaim"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "discontinued"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "setAsideJo"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "manageStay"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "sendReplyMessage"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewUnlessOrder"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewFreeTrial"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewGeneralOrder"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewReserveJudgement"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewOther"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewStayCase"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewManageStay"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewDismissCase"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": "CASE_DISMISSED",
+    "state": null,
+    "event": null
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "reviewCaseFlags"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "requestTranslation"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "updateContactInformation"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "event": "CASE_PROCEEDS_IN_CASEMAN"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "defaultJudgment"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "standardDirectionsOrder"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "routineTransfer"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "decisionOnReconsideration"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "requestTranslation"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "orderJudgmentSetAside"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "helpWithFees"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "claimantIntention"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "paidInFull"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "intentionToProceed"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "updateContactInformation"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "RemoveHearing"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "NationalRollout"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "multiOrIntermediateClaim"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "discontinued"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "setAsideJo"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "manageStay"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "sendReplyMessage"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewUnlessOrder"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewFreeTrial"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewGeneralOrder"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewReserveJudgement"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewOther"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewStayCase"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewManageStay"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewDismissCase"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": "",
+    "state": "any state",
+    "event": "CREATE_CASE_FLAGS"
+   },
+   "output": [
+    {
+     "action": "ReConfigure"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": "",
+    "state": "",
+    "event": "MANAGE_CASE_FLAGS"
+   },
+   "output": [
+    {
+     "action": "ReConfigure"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": "",
+    "state": "",
+    "event": "TRANSFER_ONLINE_CASE"
+   },
+   "output": [
+    {
+     "action": "ReConfigure"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": "",
+    "state": "",
+    "event": "RETRIGGER_CASES"
+   },
+   "output": [
+    {
+     "action": "ReConfigure"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": "PROCEEDS_IN_HERITAGE_SYSTEM",
+    "state": null,
+    "event": null
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "updateContactInformation"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "event": "PROCEEDS_IN_HERITAGE_SYSTEM"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "defaultJudgment"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "standardDirectionsOrder"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "reviewCaseFlags"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "caseProgression"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "routineTransfer"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "decisionOnReconsideration"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "requestTranslation"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "updateContactInformation"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "orderJudgmentSetAside"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "RemoveHearing"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "helpWithFees"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "claimantIntention"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "paidInFull"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "intentionToProceed"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "NationalRollout"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "discontinued"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "multiOrIntermediateClaim"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "setAsideJo"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "manageStay"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "sendReplyMessage"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewUnlessOrder"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewFreeTrial"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewGeneralOrder"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewReserveJudgement"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewOther"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewStayCase"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewManageStay"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewDismissCase"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": "",
+    "state": "",
+    "event": "UPDATE_NEXT_HEARING_DETAILS"
+   },
+   "output": [
+    {
+     "action": "ReConfigure"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": "",
+    "state": "",
+    "event": "UpdateNextHearingInfo"
+   },
+   "output": [
+    {
+     "action": "ReConfigure"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": "",
+    "state": "",
+    "event": "NotSuitable_SDO"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "standardDirectionsOrder"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "defaultJudgment"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "event": "MANAGE_STAY"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "manageStay"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewManageStay"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": null,
+    "event": "DISMISS_CASE"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "multiOrIntermediateClaim"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewDismissCase"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewUnlessOrder"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewFreeTrial"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewGeneralOrder"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewReserveJudgement"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewOther"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewStayCase"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "confirmOrderReviewManageStay"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": null,
+    "state": "All_FINAL_ORDERS_ISSUED",
+    "event": "CONFIRM_ORDER_REVIEW"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "standardDirectionsOrder"
+    },
+    {
+     "action": "Cancel",
+     "processCategories": "caseProgression"
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": "",
+    "state": "CASE_STAYED",
+    "event": "SETTLE_CLAIM_MARK_PAID_FULL"
+   },
+   "output": [
+    {
+     "warningCode": "caseSettled",
+     "action": "Warn",
+     "processCategories": "multiOrIntermediateClaim",
+     "warningText": "This claim has been settled. Please review the claim before completing any tasks."
+    },
+    {
+     "warningCode": "caseSettled",
+     "action": "Warn",
+     "processCategories": "caseProgression",
+     "warningText": "This claim has been settled. Please review the claim before completing any tasks."
+    },
+    {
+     "warningCode": "caseSettled",
+     "action": "Warn",
+     "processCategories": "standardDirectionsOrder",
+     "warningText": "This claim has been settled. Please review the claim before completing any tasks."
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": "",
+    "state": "CASE_SETTLED",
+    "event": "SETTLE_CLAIM"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "multiOrIntermediateClaim"
+    },
+    {
+     "warningCode": "caseSettled",
+     "action": "Warn",
+     "processCategories": "caseProgression",
+     "warningText": "This claim has been settled. Please review the claim before completing any tasks."
+    },
+    {
+     "warningCode": "caseSettled",
+     "action": "Warn",
+     "processCategories": "standardDirectionsOrder",
+     "warningText": "This claim has been settled. Please review the claim before completing any tasks."
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": "",
+    "state": "CASE_DISCONTINUED",
+    "event": "DISCONTINUE_CLAIM_CLAIMANT"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "multiOrIntermediateClaim"
+    },
+    {
+     "warningCode": "caseDiscontinued",
+     "action": "Warn",
+     "processCategories": "caseProgression",
+     "warningText": "This claim has been discontinued. Please review the claim before completing any tasks."
+    },
+    {
+     "warningCode": "caseDiscontinued",
+     "action": "Warn",
+     "processCategories": "standardDirectionsOrder",
+     "warningText": "This claim has been discontinued. Please review the claim before completing any tasks."
+    }
+   ]
+  },
+  {
+   "input": {
+    "fromState": "",
+    "state": "CASE_DISCONTINUED",
+    "event": "VALIDATE_DISCONTINUE_CLAIM_CLAIMANT"
+   },
+   "output": [
+    {
+     "action": "Cancel",
+     "processCategories": "multiOrIntermediateClaim"
+    },
+    {
+     "warningCode": "caseDiscontinued",
+     "action": "Warn",
+     "processCategories": "caseProgression",
+     "warningText": "This claim has been discontinued. Please review the claim before completing any tasks."
+    },
+    {
+     "warningCode": "caseDiscontinued",
+     "action": "Warn",
+     "processCategories": "standardDirectionsOrder",
+     "warningText": "This claim has been discontinued. Please review the claim before completing any tasks."
+    }
+   ]
+  }
+ ]
+}

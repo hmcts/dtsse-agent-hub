@@ -42,6 +42,11 @@ describe("ET1 Vetting", () => {
     });
   });
 
+  it("should give the due date origin the instant it is told is now when one is given", () => {
+    const { tasks } = simulate(et, { ...input, now: "2026-11-20T00:00:00Z", events: [{ event: "SUBMIT_CASE_DRAFT", postState: "Submitted" }] });
+    expect(tasks[0]?.attributes.dueDateOrigin).toBe("2026-11-20T00:00Z[UTC]");
+  });
+
   it("should not create the task when the event is SUBMIT_CASE_DRAFT but the case is not Submitted", () => {
     const { steps } = simulate(et, { ...input, events: [{ event: "SUBMIT_CASE_DRAFT", postState: "Draft" }] });
     expect(steps[0]?.created).toEqual([]);
@@ -109,7 +114,10 @@ const spec = (): Spec =>
             when: { taskType: { in: ["TaskA"] } },
             returns: { name: "region", value: { feel: 'if caseData.region != null then caseData.region else "1"' }, canReconfigure: true }
           },
-          { when: { taskType: { in: ["TaskA"] } }, returns: { name: "tags", value: "a, b, c", canReconfigure: false } }
+          {
+            when: { taskType: { in: ["TaskA"] } },
+            returns: { name: "tags", value: { feel: 'if caseData.tags != null then caseData.tags else "a, b, c"' }, canReconfigure: false }
+          }
         ]
       },
       permissions: {
@@ -244,6 +252,32 @@ describe("task lifecycle", () => {
     expect(tasks[0]?.attributes.region).toBe("9");
   });
 
+  it("should leave an attribute alone when the configuration DMN says it cannot be reconfigured", () => {
+    const { steps, tasks } = run([{ event: "reconfigure", caseData: { tags: "changed" } }]);
+    expect(steps[1]?.reconfigured[0]?.changes).toEqual([]);
+    expect(tasks[0]?.attributes.tags).toBe("a,b,c");
+    expect(tasks[0]?.configuration.find((c) => c.name === "tags")?.value).toBe("a,b,c");
+  });
+
+  it("should match the case access category as task management does when the case lists it without trimming", () => {
+    const roles = (caseAccessCategory: unknown) => run([], { caseAccessCategory }).steps[0]?.created[0]?.permissions.map((p) => p.role);
+    expect(roles("CRIME,CIVIL")).toEqual(["supervisor", "civil-only"]);
+    expect(roles("CRIME, CIVIL")).toEqual(["supervisor"]);
+    expect(roles("  ")).toEqual(["supervisor"]);
+    expect(roles(7)).toEqual(["supervisor"]);
+  });
+
+  it("should keep the state when an event gives no post state", () => {
+    const { steps } = run([{ event: "cancelCat1" }]);
+    expect(steps[1]?.postState).toBe("Open");
+  });
+
+  it("should not change a step's snapshot of a task when a later step warns it", () => {
+    const { steps, tasks } = run([{ event: "warn" }]);
+    expect(steps[0]?.created[0]?.warnings).toEqual([]);
+    expect(tasks[0]?.warnings).toHaveLength(1);
+  });
+
   it("should not reconfigure or cancel a task that is already complete", () => {
     const { steps } = run([{ event: "finish" }, { event: "cancelCat1" }]);
     expect(steps[2]?.cancelled).toEqual([]);
@@ -255,7 +289,7 @@ describe("task lifecycle", () => {
     expect(steps[0]?.created[0]?.processCategories).toEqual([]);
   });
 
-  it("should use today's date when none is given", () => {
+  it("should run with no date given when initiation reads none", () => {
     expect(simulate(spec(), { caseType: "demo_case", events: [{ event: "open" }] }).steps).toHaveLength(1);
   });
 

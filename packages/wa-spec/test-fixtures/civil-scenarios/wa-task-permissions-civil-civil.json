@@ -1,0 +1,2243 @@
+{
+ "decision": "wa-task-permissions-civil-civil",
+ "source": "hmcts/civil-wa-task-configuration@8977b6611ea7520d1bb964d97ef59a16dabd7b1f",
+ "dumpedAt": "2026-11-20T07:38:22.609Z",
+ "scenarios": [
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "sendCvpHearingLink"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "reviewHearingException"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ClaimSettledDivergenceTakeCaseOffline"
+    },
+    "caseData": {
+     "featureToggleWA": "SD"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc-team-leader",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ClaimDiscontinuedRemoveHearing"
+    },
+    "caseData": {
+     "featureToggleWA": "SD"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "specifiedListCMCMulti"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "authorisations": "SKILL:AAA6:MONEY_CLAIMS_CCMC_CMC_MANAGEMENT",
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "specifiedListCCMCMulti"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "authorisations": "SKILL:AAA6:MONEY_CLAIMS_CCMC_CMC_MANAGEMENT",
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "specifiedListCMCInt"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "authorisations": "SKILL:AAA6:MONEY_CLAIMS_CCMC_CMC_MANAGEMENT",
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "transferOnlineCase"
+    },
+    "caseData": {
+     "featureToggleWA": "WA3.5"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "national-business-centre",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": true,
+     "name": "hearing-centre-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc-team-leader",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": true,
+     "name": "nbc-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "allocateMultiTrack"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "circuit-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "district-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "deputy-district-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "leadership-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ScheduleHMCHearing"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "RemoveHMCHearing"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "takeCaseOfflineApplicationNonEA"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "national-business-centre",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "takeCaseOfflineVaryJudgmentApplication"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "national-business-centre",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "JudgeDecideOnReconsiderRequest"
+    },
+    "caseData": {
+     "featureToggleWA": "WA3.5"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "authorisations": "294",
+     "name": "judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "respondToQueryAdmin"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc-team-leader",
+     "roleCategory": "CTSC",
+     "value": "Read"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc",
+     "roleCategory": "CTSC",
+     "value": "Read"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "bundlefailedAmendandRestich"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "nbc-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "national-business-centre",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "transferCaseOfflineMinti"
+    },
+    "caseData": {
+     "featureToggleWA": "Prod"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc-team-leader",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "reviewSpecificAccessRequestJudiciary"
+    },
+    "caseData": {
+     "featureToggleWA": "Prod"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": true,
+     "assignmentPriority": 1,
+     "authorisations": "294",
+     "name": "leadership-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "allocateIntermediateTrack"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "circuit-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "district-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "deputy-district-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "leadership-judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "LegalAdvisorSmallClaimsTrackDirections"
+    },
+    "caseData": {
+     "featureToggleWA": "Prod"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "tribunal-caseworker",
+     "roleCategory": "LEGAL_OPERATIONS",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "claimantWelshRequest"
+    },
+    "caseData": {
+     "featureToggleWA": "CUI-WELSH"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "wlu-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "wlu-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "defendantWelshRequest"
+    },
+    "caseData": {
+     "featureToggleWA": "CUI-WELSH"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "wlu-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "wlu-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "UpdateDetailsInCasemanSystem"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": true,
+     "name": "hearing-centre-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "damagesListCMCMulti"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "authorisations": "SKILL:AAA7:DAMAGES_CCMC_CMC_MANAGEMENT",
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "damagesListCCMCMulti"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "authorisations": "SKILL:AAA7:DAMAGES_CCMC_CMC_MANAGEMENT",
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "damagesListCMCInt"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "authorisations": "SKILL:AAA7:DAMAGES_CCMC_CMC_MANAGEMENT",
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ClaimDiscontinuedDivergenceTakeCaseOffline"
+    },
+    "caseData": {
+     "featureToggleWA": "SD"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc-team-leader",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "manageStay"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "national-business-centre",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "nbc-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "HelpWithFeesHearingFee"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "preHearingContact"
+    },
+    "caseData": {
+     "featureToggleWA": "Prod"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "confirmOrderReviewUnlessOrder"
+    },
+    "caseData": {
+     "featureToggleWA": "CE_B2"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "nbc-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "national-business-centre",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc-team-leader",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "confirmOrderReviewFreeTrial"
+    },
+    "caseData": {
+     "featureToggleWA": "CE_B2"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "nbc-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "national-business-centre",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc-team-leader",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "confirmOrderReviewGeneralOrder"
+    },
+    "caseData": {
+     "featureToggleWA": "CE_B2"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "nbc-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "national-business-centre",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc-team-leader",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "confirmOrderReviewReserveJudgement"
+    },
+    "caseData": {
+     "featureToggleWA": "CE_B2"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "nbc-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "national-business-centre",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc-team-leader",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "confirmOrderReviewOther"
+    },
+    "caseData": {
+     "featureToggleWA": "CE_B2"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "nbc-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "national-business-centre",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc-team-leader",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "confirmOrderReviewStayCase"
+    },
+    "caseData": {
+     "featureToggleWA": "CE_B2"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "nbc-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "national-business-centre",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc-team-leader",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "confirmOrderReviewManageStay"
+    },
+    "caseData": {
+     "featureToggleWA": "CE_B2"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "nbc-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "national-business-centre",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc-team-leader",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "confirmOrderReviewDismissCase"
+    },
+    "caseData": {
+     "featureToggleWA": "CE_B2"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "nbc-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "national-business-centre",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc-team-leader",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "uploadTranslatedOrderDocument"
+    },
+    "caseData": {
+     "featureToggleWA": "CUI-WELSH"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "wlu-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "wlu-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "NIHLFastTrackDirections"
+    },
+    "caseData": {
+     "featureToggleWA": "WA3.5"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "authorisations": "294",
+     "name": "judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "SmallClaimsTrackDirections"
+    },
+    "caseData": {
+     "featureToggleWA": "WA3.5"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "authorisations": "294",
+     "name": "judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "reviewMessageCW"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc-team-leader",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "nbc-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "national-business-centre",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "reviewMessageLA"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "tribunal-caseworker",
+     "roleCategory": "LEGAL_OPERATIONS",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "senior-tribunal-caseworker",
+     "roleCategory": "LEGAL_OPERATIONS",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "reviewMessageJudicial"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "authorisations": "294",
+     "name": "judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "reviewMessageWLU"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "wlu-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "wlu-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "respondToQueryWLU"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "wlu-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "wlu-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "respondToHearingQueryWLU"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "wlu-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "wlu-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ScheduleAHearing"
+    },
+    "caseData": {
+     "featureToggleWA": "Prod"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "OrderToSetAsideDefendedClaim"
+    },
+    "caseData": {
+     "featureToggleWA": "JO"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "authorisations": "294",
+     "name": "judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "specifiedListPTRMulti"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "authorisations": "SKILL:AAA6:SPECIFIED_MULTI_TRACK_TRIAL_MANAGEMENT",
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "specifiedListTrialMulti"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "authorisations": "SKILL:AAA6:SPECIFIED_MULTI_TRACK_TRIAL_MANAGEMENT",
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "specifiedListPTRInt"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "authorisations": "SKILL:AAA6:SPECIFIED_MULTI_TRACK_TRIAL_MANAGEMENT",
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "specifiedListTrialInt"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "authorisations": "SKILL:AAA6:SPECIFIED_MULTI_TRACK_TRIAL_MANAGEMENT",
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "OnlineCaseTransferReceived"
+    },
+    "caseData": {
+     "featureToggleWA": "WA3.5"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "summaryJudgmentDirections"
+    },
+    "caseData": {
+     "featureToggleWA": "WA3.5"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "authorisations": "294",
+     "name": "judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "FastTrackDirections"
+    },
+    "caseData": {
+     "featureToggleWA": "WA3.5"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "authorisations": "294",
+     "name": "judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "finalOrderIssuedWelshRequest"
+    },
+    "caseData": {
+     "featureToggleWA": "CUI-WELSH"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "wlu-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "wlu-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "removeHearing"
+    },
+    "caseData": {
+     "featureToggleWA": "Prod"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "respondToQueryCTSC"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc-team-leader",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "transferCaseOffline"
+    },
+    "caseData": {
+     "featureToggleWA": "Prod"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "InitialDirectionFlightDelay"
+    },
+    "caseData": {
+     "featureToggleWA": "WA3.5"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "authorisations": "294",
+     "name": "judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "case": "anything"
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "scheduleHearing"
+    },
+    "caseData": {
+     "featureToggleWA": "Prod"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "JudgmentOnlineSetAsideTakeCaseOffline"
+    },
+    "caseData": {
+     "featureToggleWA": "JO"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ReviewCaseFlagsForClaimant"
+    },
+    "caseData": {
+     "featureToggleWA": "Prod"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": true,
+     "name": "ctsc",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "reviewOrder"
+    },
+    "caseData": {
+     "featureToggleWA": "CE_B2"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc-team-leader",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "nbc-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "national-business-centre",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "damagesListPTRMulti"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "authorisations": "SKILL:AAA7:DAMAGES_MULTI_TRACK_TRIAL_MANAGEMENT",
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "damagesListTrialMulti"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "authorisations": "SKILL:AAA7:DAMAGES_MULTI_TRACK_TRIAL_MANAGEMENT",
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "damagesListPTRInt"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "authorisations": "SKILL:AAA7:DAMAGES_MULTI_TRACK_TRIAL_MANAGEMENT",
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "damagesListTrialInt"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "authorisations": "SKILL:AAA7:DAMAGES_MULTI_TRACK_TRIAL_MANAGEMENT",
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "reviewSpecificAccessRequestAdmin"
+    },
+    "caseData": {
+     "featureToggleWA": "Prod"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": true,
+     "name": "hearing-centre-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": true,
+     "name": "nbc-team-leader",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "transferCaseOfflineLiP"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc-team-leader",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "ValidateDiscontinuanceCTSC"
+    },
+    "caseData": {
+     "featureToggleWA": "SD"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc-team-leader",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    },
+    {
+     "autoAssignable": false,
+     "name": "ctsc",
+     "roleCategory": "CTSC",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "SmallClaimsTrackDirectionsReferral"
+    },
+    "caseData": {
+     "featureToggleWA": "WA3.5"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "assignmentPriority": 1,
+     "authorisations": "294",
+     "name": "judge",
+     "roleCategory": "JUDICIAL",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "createHearingNoticeMT"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  },
+  {
+   "input": {
+    "taskAttributes": {
+     "taskType": "createHearingNoticeInt"
+    }
+   },
+   "output": [
+    {
+     "autoAssignable": false,
+     "name": "task-supervisor",
+     "value": "Read,Manage,Cancel,Unassign,Assign"
+    },
+    {
+     "autoAssignable": false,
+     "name": "hearing-centre-admin",
+     "roleCategory": "ADMIN",
+     "value": "Read,Own,Claim,Unclaim,UnclaimAssign,CompleteOwn,CancelOwn"
+    }
+   ]
+  }
+ ]
+}

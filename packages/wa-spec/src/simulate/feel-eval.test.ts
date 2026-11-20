@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { assertFeel, escapeLineBreaksInStrings, evalExpression, FeelSyntaxError, matchesEntry, toPlain, UnsupportedLanguageError } from "./feel-eval.ts";
+import {
+  assertFeel,
+  escapeLineBreaksInStrings,
+  evalExpression,
+  FeelSyntaxError,
+  matchesEntry,
+  toPlain,
+  UnsupportedLanguageError,
+  withClock
+} from "./feel-eval.ts";
 
 describe("evalExpression", () => {
   it("should be null when the expression is empty", () => {
@@ -21,6 +30,13 @@ describe("evalExpression", () => {
   it("should throw the text that failed when the FEEL does not parse", () => {
     expect(() => evalExpression("1 +* 2 (", {})).toThrow(FeelSyntaxError);
     expect(() => evalExpression("1 +* 2 (", {})).toThrow("1 +* 2 (");
+  });
+
+  it("should find an item in a list when contains is given one", () => {
+    expect(evalExpression('contains(roles, "b")', { roles: ["a", "b"] })).toBe(true);
+    expect(evalExpression('contains(roles, "c")', { roles: ["a", "b"] })).toBe(false);
+    expect(evalExpression('contains("abc", "b")', {})).toBe(true);
+    expect(evalExpression("contains(1, 2)", {})).toBeNull();
   });
 
   it("should give null from count when its argument is not a list", () => {
@@ -47,6 +63,25 @@ describe("toPlain", () => {
   it("should write a time without zero seconds when Camunda would", () => {
     expect(evalExpression('time("16:00")', {})).toBe("16:00");
     expect(evalExpression('time("16:00:30")', {})).toBe("16:00:30");
+  });
+
+  it("should write a date and time with its offset and region as Java does, and without zero seconds", () => {
+    expect(evalExpression('date and time("2026-03-10T00:00:00")', {})).toBe("2026-03-10T00:00");
+    expect(evalExpression('date and time("2026-03-10T09:30:15")', {})).toBe("2026-03-10T09:30:15");
+    expect(evalExpression('date and time("2026-03-10T09:30:00Z")', {})).toBe("2026-03-10T09:30Z[UTC]");
+    expect(evalExpression('date and time("2026-07-10T09:30:00@Europe/London")', {})).toBe("2026-07-10T09:30+01:00[Europe/London]");
+    expect(evalExpression('date and time("2026-07-10T09:30:00+05:00")', {})).toBe("2026-07-10T09:30+05:00");
+  });
+
+  it("should keep zero seconds when a fraction of a second follows them", () => {
+    expect(evalExpression('date and time("2026-03-10T09:30:00.5")', {})).toBe("2026-03-10T09:30:00.5");
+  });
+
+  it("should keep the seconds and drop the region when the value is inside a context or list", () => {
+    expect(evalExpression('{a: date and time("2026-03-10T00:00:00"), b: [time("16:00"), date and time("2026-07-10T09:30:00@Europe/London")]}', {})).toEqual({
+      a: "2026-03-10T00:00:00",
+      b: ["16:00:00", "2026-07-10T09:30:00+01:00"]
+    });
   });
 
   it("should write dates and durations as ISO text", () => {
@@ -90,5 +125,18 @@ describe("assertFeel", () => {
 
   it("should refuse another language when one is named", () => {
     expect(() => assertFeel("juel", "rule 2")).toThrow(UnsupportedLanguageError);
+  });
+});
+
+describe("withClock", () => {
+  it("should leave the clock alone when no instant is given", () => {
+    const variables = { a: 1 };
+    expect(withClock(variables, undefined)).toBe(variables);
+  });
+
+  it("should fix now() and today() at the instant when one is given", () => {
+    const variables = withClock({}, "2026-11-20T07:56:00.5Z");
+    expect(evalExpression("now()", variables)).toBe("2026-11-20T07:56:00.5Z[UTC]");
+    expect(evalExpression("today()", variables)).toBe("2026-11-20");
   });
 });
