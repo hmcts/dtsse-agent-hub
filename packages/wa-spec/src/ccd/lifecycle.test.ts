@@ -32,20 +32,44 @@ describe("readCcdDefinition", () => {
 
   it("should refuse the definition when an event is defined twice for a case type", () => {
     const row = { CaseTypeID: "X", ID: "e" };
-    expect(() => readCcdDefinition({ CaseType: [{ ID: "X" }], CaseEvent: [row, row] })).toThrow("event e of X is defined more than once");
+    expect(() => readCcdDefinition({ CaseType: [{ ID: "X" }], CaseEvent: [row, row] })).toThrow(
+      "event e of X is defined in CaseEvent row 1 and CaseEvent row 2"
+    );
   });
 
   it("should check for repeated events only in the case types asked for", () => {
     const row = { CaseTypeID: "Y", ID: "e" };
     const files = { CaseType: [{ ID: "X" }, { ID: "Y" }], CaseEvent: [{ CaseTypeID: "X", ID: "e" }, row, row] };
     expect(readCcdDefinition(files, ["x"]).map((l) => l.caseType)).toEqual(["X"]);
-    expect(() => readCcdDefinition(files, ["Y"])).toThrow("event e of Y");
+    expect(() => readCcdDefinition(files, ["Y"])).toThrow("event e of Y is defined in CaseEvent row 2 and CaseEvent row 3");
   });
 
-  it("should read Publish as true when it is Y, Yes or True in any case", () => {
+  it("should name both files of a repeated event and suggest excluding one when they differ by a variant suffix", () => {
+    const row = { CaseTypeID: "X", ID: "e" };
+    const files = { CaseType: [{ ID: "X" }], CaseEvent: [row, row] };
+    const where = (_sheet: string, index: number) => `defs/CaseEvent/${["CaseEvent-prod.json", "CaseEvent-nonprod.json"][index]} row 1`;
+    expect(() => readCcdDefinition(files, undefined, where)).toThrow(
+      /defined in defs\/CaseEvent\/CaseEvent-prod\.json row 1 and defs\/CaseEvent\/CaseEvent-nonprod\.json row 1.*--env or --exclude/
+    );
+    const other = (_sheet: string, index: number) => `defs/CaseEvent/${["A.json", "B.json"][index]} row 1`;
+    expect(() => readCcdDefinition(files, undefined, other)).not.toThrow(/--exclude/);
+  });
+
+  it("should flag an event whose about-to-submit callback URL is set", () => {
+    const [only] = readCcdDefinition({
+      CaseType: [{ ID: "X" }],
+      CaseEvent: [
+        { CaseTypeID: "X", ID: "a", PostConditionState: "S", CallBackURLAboutToSubmitEvent: "http://x/a" },
+        { CaseTypeID: "X", ID: "b", PostConditionState: "S", CallBackURLAboutToSubmitEvent: "" }
+      ]
+    });
+    expect(only?.events.map((e) => e.aboutToSubmitCallback)).toEqual([true, undefined]);
+  });
+
+  it("should read Publish as true when it is Y, Yes, T or True in any case", () => {
     const read = (Publish: string) =>
       readCcdDefinition({ CaseType: [{ ID: "X" }], CaseEvent: [{ CaseTypeID: "X", ID: "e", PostConditionState: "S", Publish }] })[0]?.events[0]?.publish;
-    expect([read("Y"), read("True"), read("yes"), read("N"), read("False")]).toEqual([true, true, true, false, false]);
+    expect([read("Y"), read("True"), read("yes"), read("T"), read("N"), read("False"), read("f")]).toEqual([true, true, true, true, false, false, false]);
   });
 
   it("should keep a * beside named post-states as the case staying put", () => {

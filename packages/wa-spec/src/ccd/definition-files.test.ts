@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { byCodePoint } from "../merge.ts";
 import { ET_SHEETS } from "./__fixtures__/et-sheets.ts";
 import { ENVIRONMENT_EXCLUDES, readDefinitionDir, variablesFrom } from "./definition-files.ts";
 import { readCcdDefinition } from "./lifecycle.ts";
@@ -30,7 +31,7 @@ function etLayout() {
 describe("readDefinitionDir", () => {
   it("should join the files of a sheet and leave the other environment's out when sheets are one directory each", () => {
     const sheets = readDefinitionDir(etLayout(), { exclude: ENVIRONMENT_EXCLUDES.nonprod });
-    expect(Object.keys(sheets).sort()).toEqual(["CaseEvent", "CaseType", "State"]);
+    expect(Object.keys(sheets).sort(byCodePoint)).toEqual(["CaseEvent", "CaseType", "State"]);
     expect(sheets.CaseEvent?.map((e) => (e as { ID: string }).ID)).toContain("nonprodOnly");
     expect(sheets.CaseEvent?.map((e) => (e as { ID: string }).ID)).not.toContain("prodOnly");
     expect(readDefinitionDir(etLayout(), { exclude: ENVIRONMENT_EXCLUDES.prod }).CaseEvent?.map((e) => (e as { ID: string }).ID)).toContain("prodOnly");
@@ -57,7 +58,7 @@ describe("readDefinitionDir", () => {
     write(dir, "CaseEvent/User/One.json", { CaseTypeID: "ET_EnglandWales", ID: "single" });
     write(dir, "Other/CaseEvent.json", [{ ID: "ignored" }]);
     const sheets = readDefinitionDir(dir);
-    expect(Object.keys(sheets).sort()).toEqual(["CaseEvent", "CaseType", "State"]);
+    expect(Object.keys(sheets).sort(byCodePoint)).toEqual(["CaseEvent", "CaseType", "State"]);
     expect(sheets.CaseEvent).toHaveLength(ET_SHEETS.CaseEvent.length + 1);
   });
 

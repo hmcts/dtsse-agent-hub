@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Decision, Row, Spec } from "../schema.ts";
+import type { Decision, Expr, Row, Spec } from "../schema.ts";
 import { ET_SHEETS } from "./__fixtures__/et-sheets.ts";
 import { type Lifecycle, readCcdDefinition } from "./lifecycle.ts";
 import { overlayTasks } from "./overlay.ts";
@@ -189,7 +189,7 @@ describe("overlayTasks", () => {
     expect(overlayTasks(lifecycle, spec).warnings).toEqual([]);
   });
 
-  it("should list a computed-category cancellation as a possible cancel of the tasks with computed categories and warn of nothing else", () => {
+  it("should list a computed-category cancellation as a possible cancel of every task it may match and warn of nothing else", () => {
     const spec = specWith({
       initiation: [
         { when: { eventId: { in: ["initiateCase"] } }, returns: { taskId: "Plain", processCategories: "Vetting" } },
@@ -198,7 +198,7 @@ describe("overlayTasks", () => {
       cancellation: [{ when: { event: { in: ["disposeCase"] } }, returns: { action: "Cancel", processCategories: { feel: "x" } } }]
     });
     const { events, warnings } = overlayTasks(et, spec);
-    expect(events.disposeCase).toEqual({ creates: [], completes: [], cancels: [], reconfigures: [], mayCancel: ["Referral"] });
+    expect(events.disposeCase).toEqual({ creates: [], completes: [], cancels: [], reconfigures: [], mayCancel: ["Plain", "Referral"] });
     expect(warnings).toEqual([]);
   });
 
@@ -284,8 +284,8 @@ describe("overlayTasks", () => {
       ]
     });
     const { events, warnings } = overlayTasks(et, spec);
-    expect(events.caseTransferECM?.mayCancel).toEqual(["computed category"]);
-    expect(events.et1Vetting?.reconfigures).toEqual(["computed category"]);
+    expect(events.caseTransferECM?.mayCancel).toEqual(["T"]);
+    expect(events.et1Vetting?.reconfigures).toEqual(["T"]);
     expect(Object.keys(events)).toEqual(["initiateCase", "caseTransferECM", "et1Vetting"]);
     expect(warnings).toEqual([
       "caseTransferECM may cancel tasks but is not Publish: Y, so Work Allocation never sees it",
@@ -316,5 +316,39 @@ describe("overlayTasks", () => {
     expect(overlayTasks(lifecycle, specWith({ initiation: [create("startB", "T2"), create("startB", "T3")], cancellation: [cancel] }, ["x"])).warnings).toEqual(
       ["stop cancels tasks T2, T3 from A, C, but they exist only in B"]
     );
+  });
+
+  it("should match a literal category against a computed one in both directions, as a possible cancel", () => {
+    const either = (when: Row["returns"]): Row => ({ when: { eventId: { in: ["initiateCase"] } }, returns: { taskId: "T", ...when } });
+    const cond = { if: { field: "x", op: "exists" as const }, use: "Vetting", otherwise: "Other" };
+    const cancel = (processCategories: Expr): Row => ({ when: { event: { in: ["disposeCase"] } }, returns: { action: "Cancel", processCategories } });
+    const run = (initiation: Row, cancellation: Row) =>
+      overlayTasks(et, specWith({ initiation: [initiation], cancellation: [cancellation] })).events.disposeCase;
+    expect(run(either({ processCategories: cond }), cancel("Vetting"))).toMatchObject({ cancels: [], mayCancel: ["T"] });
+    expect(run(either({ processCategories: "Vetting" }), cancel(cond))).toMatchObject({ cancels: [], mayCancel: ["T"] });
+    expect(run(either({ processCategories: "Vetting" }), cancel("Hearing"))).toBeUndefined();
+  });
+
+  it("should say an about-to-submit callback may move the case when the event or a state-changing event has one", () => {
+    const withCallback = (lifecycle: Lifecycle): Lifecycle => ({
+      ...lifecycle,
+      events: lifecycle.events.map((e) => ({ ...e, aboutToSubmitCallback: true as const }))
+    });
+    const created = specWith({
+      initiation: [{ when: { eventId: { in: ["SUBMIT_CASE_DRAFT"] }, postEventState: { in: ["Vetted"] } }, returns: { taskId: "T", processCategories: "C" } }]
+    });
+    expect(overlayTasks(withCallback(et), created).warnings).toEqual([
+      "task T is created on SUBMIT_CASE_DRAFT in Vetted, which the definition leaves in Submitted unless SUBMIT_CASE_DRAFT's about-to-submit callback moves the case"
+    ]);
+    const cancelled = specWith(
+      {
+        initiation: [{ when: { eventId: { in: ["start"] } }, returns: { taskId: "T", processCategories: "Cat" } }],
+        cancellation: [{ when: { event: { in: ["stop"] }, fromState: { in: ["B"] } }, returns: { action: "Cancel", processCategories: "Cat" } }]
+      },
+      ["x"]
+    );
+    expect(overlayTasks(withCallback(chain), cancelled).warnings).toEqual([
+      "stop cancels task T from B, but the task exists only in A unless an about-to-submit callback moves the case"
+    ]);
   });
 });

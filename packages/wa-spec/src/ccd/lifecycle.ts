@@ -16,9 +16,14 @@ export interface LifecycleEvent {
   otherPostStates?: string[];
   /** The definition names no post-state, as ccd-config-generator writes for `postStateFromCallback`: the about-to-submit callback chooses it, so it can be any state. */
   postStateFromCallback?: true;
+  /** The event has an about-to-submit callback, whose response may set any state: CCD data store applies it over the post-state. */
+  aboutToSubmitCallback?: true;
   /** Whether the event is `Publish: Y`, which is the only way Work Allocation sees it. */
   publish: boolean;
 }
+
+/** The values the definition store reads as true for a yes/no column (`DefinitionDataItem.getBoolean`). */
+const PUBLISH_VALUES = ["yes", "y", "t", "true"];
 
 const Text = z.string().optional();
 
@@ -29,7 +34,8 @@ const CaseEventRow = z.looseObject({
   Name: Text,
   "PreConditionState(s)": Text,
   PostConditionState: Text,
-  Publish: Text
+  Publish: Text,
+  CallBackURLAboutToSubmitEvent: Text
 });
 const CaseTypeRow = z.looseObject({ ID: z.string() });
 
@@ -75,15 +81,28 @@ const postStates = (text: string | undefined): string[] | "*" => {
   return listed.length === 0 || listed.every((s) => s === "*") ? "*" : listed;
 };
 
+/** A source such as `dir/CaseEvent-prod.json row 3` without its row. */
+const fileOf = (source: string): string => source.replace(/ row \d+$/, "");
+
+/** A file name without its variant suffix, so `CaseEvent-prod.json` and `CaseEvent-nonprod.json` are alike. */
+const stem = (file: string): string => file.replace(/-[^-/]+\.json$/, ".json");
+
 /** The rows of a case type's events, which the definition store would refuse if two shared an id. */
-function eventsOf<T extends { ID: string; CaseTypeID: string }>(rows: T[], caseType: string): T[] {
-  const own = rows.filter((e) => e.CaseTypeID === caseType);
-  const ids = own.map((e) => e.ID);
-  const repeated = ids.find((id, index) => ids.indexOf(id) !== index);
-  if (repeated !== undefined) {
-    throw new Error(`the event ${repeated} of ${caseType} is defined more than once, so the definition store would refuse the import`);
+function eventsOf<T extends { ID: string; CaseTypeID: string }>(rows: Array<{ e: T; index: number }>, caseType: string, where?: Source): T[] {
+  const own = rows.filter(({ e }) => e.CaseTypeID === caseType);
+  const first = new Map<string, number>();
+  for (const { e, index } of own) {
+    const before = first.get(e.ID);
+    if (before === undefined) {
+      first.set(e.ID, index);
+      continue;
+    }
+    const sources = [before, index].map((i) => where?.("CaseEvent", i) ?? `CaseEvent row ${i + 1}`);
+    const [one, two] = sources.map(fileOf) as [string, string];
+    const variants = one !== two && stem(one) === stem(two) ? `; these files differ only by a variant suffix, so exclude one with --env or --exclude` : "";
+    throw new Error(`the event ${e.ID} of ${caseType} is defined in ${sources.join(" and ")}, so the definition store would refuse the import${variants}`);
   }
-  return own;
+  return own.map(({ e }) => e);
 }
 
 /**
@@ -100,7 +119,11 @@ export function readCcdDefinition(files: Record<string, unknown>, only?: readonl
   return caseTypes.map(({ ID: caseType }) => ({
     caseType,
     states: states.filter((s) => s.CaseTypeID === caseType).map((s) => ({ id: s.ID, name: s.Name ?? s.ID })),
-    events: eventsOf(events, caseType).map((e) => {
+    events: eventsOf(
+      events.map((e, index) => ({ e, index })),
+      caseType,
+      where
+    ).map((e) => {
       const fromCallback = (e.PostConditionState ?? "").trim() === "";
       const post = postStates(e.PostConditionState);
       const [first, ...others] = post === "*" ? ["*"] : post;
@@ -111,7 +134,8 @@ export function readCcdDefinition(files: Record<string, unknown>, only?: readonl
         postState: first ?? "*",
         ...(others.length > 0 ? { otherPostStates: others } : {}),
         ...(fromCallback ? { postStateFromCallback: true as const } : {}),
-        publish: ["Y", "YES", "TRUE"].includes(e.Publish?.trim().toUpperCase() ?? "")
+        ...((e.CallBackURLAboutToSubmitEvent ?? "").trim() !== "" ? { aboutToSubmitCallback: true as const } : {}),
+        publish: PUBLISH_VALUES.includes(e.Publish?.toLowerCase() ?? "")
       };
     })
   }));

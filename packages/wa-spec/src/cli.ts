@@ -197,7 +197,12 @@ function main(argv: string[]): number {
       fail("--env and --exclude are alternatives");
     }
     const exclude =
-      values.exclude?.flatMap((patterns) => patterns.split(",").filter(Boolean)) ?? (values.env ? ENVIRONMENT_EXCLUDES[values.env as "prod" | "nonprod"] : []);
+      values.exclude?.flatMap((patterns) =>
+        patterns
+          .split(",")
+          .map((pattern) => pattern.trim())
+          .filter(Boolean)
+      ) ?? (values.env ? ENVIRONMENT_EXCLUDES[values.env as "prod" | "nonprod"] : []);
     const given = (values.var ?? []).map((entry) => entry.split(/=(.*)/s));
     if (given.some(([name, value]) => !name || value === undefined)) {
       fail("--var is NAME=value");

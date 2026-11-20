@@ -1,7 +1,7 @@
 import { byCodePoint } from "../merge.ts";
-import { categoryParts } from "../model.ts";
 import { withCanonicalEvent } from "../model-compile.ts";
 import type { Cell, Expr, Kind, Row, Spec } from "../schema.ts";
+import { type Categories, cancels, categoriesOf } from "../task-view.ts";
 import type { Lifecycle, LifecycleEvent } from "./lifecycle.ts";
 
 export interface EventTasks {
@@ -22,11 +22,6 @@ export interface Overlay {
 const listed = (cell: Cell | undefined): string[] | undefined => (cell && "in" in cell ? cell.in.filter((v): v is string => typeof v === "string") : undefined);
 
 const text = (value: Expr | undefined): string | undefined => (typeof value === "string" ? value : undefined);
-
-const categoriesOf = (value: Expr | undefined): string[] | undefined => {
-  const plain = text(value);
-  return plain === undefined ? undefined : categoryParts(plain);
-};
 
 /** A category the spec computes: a value that is neither absent, null (no filter) nor a plain string. */
 const isComputed = (value: Expr | undefined): boolean => value !== undefined && value !== null && typeof value !== "string";
@@ -111,8 +106,7 @@ export function overlayTasks(lifecycle: Lifecycle, spec: Spec): Overlay {
     return names.filter((n) => definedStates.has(n));
   };
 
-  const categories = new Map<string, string[]>();
-  const computedCategories = new Set<string>();
+  const taskCategories = new Map<string, Categories>();
   const startStates = new Map<string, string[] | "*">();
   for (const row of rowsOf("initiation")) {
     const taskId = text(row.returns?.taskId);
@@ -124,11 +118,10 @@ export function overlayTasks(lifecycle: Lifecycle, spec: Spec): Overlay {
       }
       continue;
     }
-    if (isComputed(row.returns?.processCategories)) {
-      computedCategories.add(taskId);
-    }
-    for (const category of categoriesOf(row.returns?.processCategories) ?? []) {
-      categories.set(category, [...(categories.get(category) ?? []).filter((t) => t !== taskId), taskId]);
+    const own = taskCategories.get(taskId) ?? { sure: new Set<string>(), possible: new Set<string>() };
+    taskCategories.set(taskId, own);
+    for (const category of categoriesOf(row.returns?.processCategories)) {
+      (typeof row.returns?.processCategories === "string" ? own.sure : own.possible).add(category);
     }
     const named = statesIn(row.when?.postEventState);
     if (listed(row.when?.eventId) === undefined) {
@@ -141,7 +134,8 @@ export function overlayTasks(lifecycle: Lifecycle, spec: Spec): Overlay {
       const before = startStates.get(taskId) ?? [];
       startStates.set(taskId, here === "*" || before === "*" ? "*" : [...new Set([...before, ...here])]);
       if (named.length > 0 && post !== "*" && !named.some((s) => post.includes(s))) {
-        warnings.push(`task ${taskId} is created on ${id} in ${named.join(", ")}, which the definition leaves in ${post.join(", ")}`);
+        const callback = (definedEvents.get(id) as LifecycleEvent).aboutToSubmitCallback ? ` unless ${id}'s about-to-submit callback moves the case` : "";
+        addTo(warnings, `task ${taskId} is created on ${id} in ${named.join(", ")}, which the definition leaves in ${post.join(", ")}${callback}`);
       }
     }
   }
@@ -177,30 +171,29 @@ export function overlayTasks(lifecycle: Lifecycle, spec: Spec): Overlay {
         return [id, pre] as const;
       })
     );
-    if (isComputed(row.returns?.processCategories)) {
-      for (const id of ids) {
-        const tasks = tasksOf(id);
-        const possible = computedCategories.size > 0 ? [...computedCategories] : [COMPUTED_CATEGORY];
-        if (action === "Cancel") {
+    const value = row.returns?.processCategories;
+    const match = (taskId: string) =>
+      value === undefined || value === null || value === "" ? "yes" : cancels(value, taskCategories.get(taskId) as Categories);
+    const affected = taskIds.filter((taskId) => match(taskId) === "yes");
+    const maybe = taskIds.filter((taskId) => match(taskId) === "maybe");
+    if (isComputed(value) && affected.length === 0 && maybe.length === 0) {
+      maybe.push(COMPUTED_CATEGORY);
+    }
+    for (const id of ids) {
+      const tasks = tasksOf(id);
+      if (action === "Cancel") {
+        for (const taskId of affected) {
+          addTo(tasks.cancels, taskId);
+        }
+        if (maybe.length > 0) {
           tasks.mayCancel = tasks.mayCancel ?? [];
-          for (const taskId of possible) {
+          for (const taskId of maybe) {
             addTo(tasks.mayCancel, taskId);
           }
-        } else if (action === "Reconfigure") {
-          for (const taskId of possible) {
-            addTo(tasks.reconfigures, taskId);
-          }
         }
-      }
-      continue;
-    }
-    const wanted = categoriesOf(row.returns?.processCategories);
-    const affected = wanted && wanted.length > 0 ? [...new Set(wanted.flatMap((c) => categories.get(c) ?? []))] : taskIds;
-    for (const id of ids) {
-      const slot = action === "Cancel" ? tasksOf(id).cancels : action === "Reconfigure" ? tasksOf(id).reconfigures : undefined;
-      for (const taskId of affected) {
-        if (slot) {
-          addTo(slot, taskId);
+      } else if (action === "Reconfigure") {
+        for (const taskId of [...affected, ...maybe]) {
+          addTo(tasks.reconfigures, taskId);
         }
       }
       const pre = pres.get(id) as string[] | "*";
@@ -211,7 +204,7 @@ export function overlayTasks(lifecycle: Lifecycle, spec: Spec): Overlay {
           const one = affected.length === 1;
           addTo(
             cancelWarnings,
-            `${id} cancels ${one ? "task" : "tasks"} ${affected.join(", ")} from ${pre.join(", ")}, but ${one ? "the task exists" : "they exist"} only in ${[...exists].sort(byCodePoint).join(", ")}`
+            `${id} cancels ${one ? "task" : "tasks"} ${affected.join(", ")} from ${pre.join(", ")}, but ${one ? "the task exists" : "they exist"} only in ${[...exists].sort(byCodePoint).join(", ")}${lifecycle.events.some((e) => e.aboutToSubmitCallback) ? " unless an about-to-submit callback moves the case" : ""}`
           );
         }
       }

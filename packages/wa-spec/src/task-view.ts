@@ -25,13 +25,13 @@ const canBeRead = (value: Expr | undefined): boolean =>
   typeof value === "object" && value !== null && ("if" in value ? canBeRead(value.use) || canBeRead(value.otherwise) : true);
 
 /** The process categories a task is created with: `sure` ones come from rows that name it, `possible` ones from rows that may. */
-interface Categories {
+export interface Categories {
   sure: Set<string>;
   possible: Set<string>;
 }
 
 /** Whether a cancellation row's process categories include one the task is created with; an empty cell is every category. */
-const cancels = (value: Expr | undefined, categories: Categories): Match => {
+export const cancels = (value: Expr | undefined, categories: Categories): Match => {
   if (value === undefined) {
     return "yes";
   }
@@ -45,7 +45,7 @@ const cancels = (value: Expr | undefined, categories: Categories): Match => {
 };
 
 /** Every string in a structured expression, which is where a task id or process category would be written. */
-const literalsOf = (value: unknown): string[] =>
+export const literalsOf = (value: unknown): string[] =>
   typeof value === "string" ? [value] : typeof value === "object" && value !== null ? Object.values(value).flatMap(literalsOf) : [];
 
 const quoted = (text: string): string[] => [...text.matchAll(/"([^"]*)"/g)].map((m) => m[1] as string);
@@ -58,7 +58,7 @@ const listed = (text: string): string[] =>
     .filter(Boolean);
 
 /** The process categories a value may give: a string, the quoted strings of FEEL, or the strings of a structured expression, each split on commas. */
-const categoriesOf = (value: Expr | undefined): string[] =>
+export const categoriesOf = (value: Expr | undefined): string[] =>
   (typeof value === "object" && value !== null && "feel" in value ? quoted(value.feel) : literalsOf(value)).flatMap(listed);
 
 /** Whether an output value names the task: a scalar or FEEL text does, and a structured expression with the id somewhere in it may. */
