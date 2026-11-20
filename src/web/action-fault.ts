@@ -13,10 +13,10 @@ export const ACTION_STALE_PAGE = "CFT Workspace has been updated since this page
 /**
  * What to tell the person when a call to an action threw. After a deploy a page left open still names the actions of
  * the build it came from, which Next no longer has, and no amount of trying again helps until the page is reloaded;
- * anything else is the connection.
+ * anything else is the connection, said as `otherwise` for a caller with its own words for it.
  */
-export function actionThrew(error: unknown): string {
-  return isStalePage(error) ? ACTION_STALE_PAGE : ACTION_UNREACHABLE;
+export function actionThrew(error: unknown, otherwise: string = ACTION_UNREACHABLE): string {
+  return isStalePage(error) ? ACTION_STALE_PAGE : otherwise;
 }
 
 /** Whether a thrown action is the page being from before a deploy, for a caller with its own words for the rest. */

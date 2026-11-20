@@ -4,6 +4,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ActionForm } from "@/components/ActionForm";
+import { ACTION_STALE_PAGE } from "@/web/action-fault";
 
 const refresh = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
@@ -96,6 +97,23 @@ describe("ActionForm", () => {
     await submit();
 
     expect(screen.getByRole("alert").textContent).toContain("could not be done");
+  });
+
+  it("should say to reload the page when the call throws because a deploy has replaced the page's actions", async () => {
+    render(
+      <ActionForm
+        action={vi.fn(async () => {
+          throw new Error('Failed to find Server Action "abc". This request might be from an older or newer deployment.');
+        })}
+        label="Rename"
+      >
+        <span />
+      </ActionForm>
+    );
+
+    await submit();
+
+    expect(screen.getByRole("alert").textContent).toBe(ACTION_STALE_PAGE);
   });
 
   it("should offer to sign in again instead of a failure when the call throws because the session has ended", async () => {

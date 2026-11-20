@@ -25,7 +25,7 @@ import type { CredentialKind } from "@/credentials/names";
 import type { CredentialStatus } from "@/credentials/store";
 import type { VirtualAgentStatus } from "@/virtual-agents/lifecycle";
 import type { LoginView } from "@/virtual-agents/logins";
-import { ACTION_UNREACHABLE } from "@/web/action-fault";
+import { ACTION_STALE_PAGE, ACTION_UNREACHABLE } from "@/web/action-fault";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }), usePathname: () => "/assistant" }));
 
@@ -622,6 +622,23 @@ describe("OnboardingGate for an assistant that is stopped or could not start", (
       fireEvent.click(screen.getByRole("button", { name: "Start now" }));
     });
     expect(screen.getByRole("alert").textContent).toBe(ACTION_UNREACHABLE);
+  });
+
+  it("should say to reload the page when Start now fails because a deploy has replaced the page's actions", async () => {
+    render(
+      gate(
+        stopped("user"),
+        vi.fn(async () => {
+          throw new Error('Failed to find Server Action "abc123". This request might be from an older or newer deployment.');
+        })
+      )
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Start now" }));
+    });
+
+    expect(screen.getByRole("alert").textContent).toBe(ACTION_STALE_PAGE);
   });
 
   it("should offer Try again for an assistant that could not start, and let the notice be hidden", () => {

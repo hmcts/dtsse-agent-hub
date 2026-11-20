@@ -6,6 +6,7 @@ import { useEndSession } from "@/components/live/HubStream";
 import { SessionEndedMessage } from "@/components/live/SessionEnded";
 import { sessionEnded } from "@/components/live/session";
 import type { ActionResult } from "@/web/action";
+import { actionThrew } from "@/web/action-fault";
 
 export type FormAction = (form: FormData) => Promise<ActionResult<object & { confirmation?: string }>>;
 
@@ -72,12 +73,12 @@ export function ActionForm<T extends object & { confirmation?: string }>({
         setMessage({ ok: false, text: result.error });
         onRefused?.();
       }
-    } catch {
+    } catch (thrown) {
       if (await sessionEnded()) {
         setSignedOut(true);
         endSession();
       } else {
-        setMessage({ ok: false, text: "That could not be done. Try again." });
+        setMessage({ ok: false, text: actionThrew(thrown, "That could not be done. Try again.") });
       }
     } finally {
       setPending(false);
