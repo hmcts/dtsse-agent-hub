@@ -3,9 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ET_SHEETS } from "./__fixtures__/et-sheets.ts";
-import { ENVIRONMENT_EXCLUDES, readDefinitionDir } from "./definition-files.ts";
+import { ENVIRONMENT_EXCLUDES, readDefinitionDir, variablesFrom } from "./definition-files.ts";
 import { readCcdDefinition } from "./lifecycle.ts";
 import { lifecycleReport } from "./lifecycle-command.ts";
+
+const placeholder = (name: string): string => `$\{${name}}`;
 
 const write = (dir: string, path: string, rows: unknown) => {
   mkdirSync(join(dir, path, ".."), { recursive: true });
@@ -27,11 +29,11 @@ function etLayout() {
 
 describe("readDefinitionDir", () => {
   it("should join the files of a sheet and leave the other environment's out when sheets are one directory each", () => {
-    const sheets = readDefinitionDir(etLayout());
+    const sheets = readDefinitionDir(etLayout(), { exclude: ENVIRONMENT_EXCLUDES.nonprod });
     expect(Object.keys(sheets).sort()).toEqual(["CaseEvent", "CaseType", "State"]);
     expect(sheets.CaseEvent?.map((e) => (e as { ID: string }).ID)).toContain("nonprodOnly");
     expect(sheets.CaseEvent?.map((e) => (e as { ID: string }).ID)).not.toContain("prodOnly");
-    expect(readDefinitionDir(etLayout(), ENVIRONMENT_EXCLUDES.prod).CaseEvent?.map((e) => (e as { ID: string }).ID)).toContain("prodOnly");
+    expect(readDefinitionDir(etLayout(), { exclude: ENVIRONMENT_EXCLUDES.prod }).CaseEvent?.map((e) => (e as { ID: string }).ID)).toContain("prodOnly");
   });
 
   it("should read the published row of an event when its prod and nonprod rows sit in different files", () => {
@@ -41,7 +43,7 @@ describe("readDefinitionDir", () => {
     write(dir, "CaseEvent/CaseEvent-prod.json", [{ ...row, Publish: "Y" }]);
     write(dir, "CaseEvent/CaseEvent-RetainAndDispose-nonprod.json", [row]);
     const published = (environment: "prod" | "nonprod") =>
-      readCcdDefinition(readDefinitionDir(dir, ENVIRONMENT_EXCLUDES[environment]))[0]?.events.map((e) => [e.id, e.publish]);
+      readCcdDefinition(readDefinitionDir(dir, { exclude: ENVIRONMENT_EXCLUDES[environment] }))[0]?.events.map((e) => [e.id, e.publish]);
     expect(published("prod")).toEqual([["disposeCase", true]]);
     expect(published("nonprod")).toEqual([["disposeCase", false]]);
   });
@@ -66,9 +68,44 @@ describe("readDefinitionDir", () => {
     write(dir, "CaseEvent/c-ignore.json", [{ ID: "c" }]);
     write(dir, "CaseEvent/skipped-dir/d.json", [{ ID: "d" }]);
     write(dir, "CaseEvent/UserProfile.json", [{ ID: "e" }]);
-    const ids = (exclude: string[]) => (readDefinitionDir(dir, exclude).CaseEvent as Array<{ ID: string }>).map((r) => r.ID);
+    const ids = (exclude: string[]) => (readDefinitionDir(dir, { exclude }).CaseEvent as Array<{ ID: string }>).map((r) => r.ID);
     expect(ids(["*-preview.json", "*-ignore.json", "skipped-dir", "USERPROFILE.json"])).toEqual(["a"]);
     expect(ids([])).toEqual(["e", "a", "b", "c", "d"]);
+  });
+
+  it("should exclude nothing when no patterns are given", () => {
+    const ids = (readDefinitionDir(etLayout()).CaseEvent as Array<{ ID: string }>).map((e) => e.ID);
+    expect(ids).toEqual(expect.arrayContaining(["prodOnly", "nonprodOnly"]));
+  });
+
+  it("should replace NAME placeholders from the variables before parsing, as the processor does", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wa-spec-var-"));
+    write(dir, "CaseEvent/a.json", [
+      { CaseTypeID: placeholder("CCD_DEF_CASE_TYPE_ID"), ID: "a", Publish: placeholder("CCD_DEF_PUBLISH"), Description: placeholder("NOT_READ") }
+    ]);
+    const [row] = readDefinitionDir(dir, { variables: { CCD_DEF_CASE_TYPE_ID: "FinancialRemedyMVP2", CCD_DEF_PUBLISH: "Y" } }).CaseEvent as Array<
+      Record<string, string>
+    >;
+    expect(row).toMatchObject({ CaseTypeID: "FinancialRemedyMVP2", Publish: "Y", Description: placeholder("NOT_READ") });
+  });
+
+  it("should name the file and the variable when a column the reader needs is left as an unset placeholder", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wa-spec-unset-"));
+    write(dir, "CaseEvent/a.json", [{ CaseTypeID: "X", ID: "a", Publish: placeholder("CCD_DEF_PUBLISH") }]);
+    expect(() => readDefinitionDir(dir)).toThrow(/CaseEvent\/a\.json: Publish is \$\{CCD_DEF_PUBLISH\}, which is not set: pass --var CCD_DEF_PUBLISH=<value>/);
+  });
+
+  it("should offer the environment's CCD_DEF variables to the substitution", () => {
+    expect(variablesFrom({ CCD_DEF_A: "1", HOME: "/x", CCD_DEF_B: undefined })).toEqual({ CCD_DEF_A: "1" });
+  });
+
+  it("should name the file and row when a row does not fit the sheet", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wa-spec-shape-"));
+    write(dir, "CaseType.json", ET_SHEETS.CaseType);
+    write(dir, "CaseEvent/a.json", [{ CaseTypeID: "X", ID: "a" }, { CaseTypeID: "X" }]);
+    const sources: Record<string, string[]> = {};
+    const sheets = readDefinitionDir(dir, { sources });
+    expect(() => readCcdDefinition(sheets, undefined, (sheet, index) => sources[sheet]?.[index] ?? "?")).toThrow(/CaseEvent\/a\.json row 2: ID /);
   });
 
   it("should name the file when its JSON does not parse", () => {

@@ -1,6 +1,6 @@
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { ENVIRONMENT_EXCLUDES } from "./ccd/definition-files.ts";
+import { ENVIRONMENT_EXCLUDES, variablesFrom } from "./ccd/definition-files.ts";
 import { lifecycleReport } from "./ccd/lifecycle-command.ts";
 import { diffPaths, renderDifferences } from "./diff.ts";
 import { exists, listDir, readText, writeText } from "./file-io.ts";
@@ -31,11 +31,14 @@ const USAGE = `wa-spec: Work Allocation configuration spec
                                                  a file of the same name; exits 1 when they differ. Two YAML files
                                                  (specs or models) are compared as specs
   wa-spec show <spec.yaml|model.yaml> <taskId>   the rows of every kind that concern one task
-  wa-spec lifecycle <definition-dir> --spec <spec.yaml|model.yaml> [--case-type X] [--env prod|nonprod | --exclude <glob,...>] [--format yaml|json]
+  wa-spec lifecycle <definition-dir> --spec <spec.yaml|model.yaml> [--case-type X] [--env prod|nonprod | --exclude <glob,...>]
+                       [--var NAME=value]... [--format yaml|json]
                                                  the spec's tasks laid over the case lifecycle of a CCD definition, with warnings for
                                                  what the definition cannot back. <definition-dir> is the directory the service gives
-                                                 ccd-definition-processor as -D; --exclude is its -e (repeatable or comma separated,
-                                                 matched per path segment) and --env is ET's pair of patterns
+                                                 ccd-definition-processor as -D. Nothing is excluded unless --exclude (the processor's -e,
+                                                 repeatable or comma separated, matched per path segment) or --env (ET's pair of
+                                                 patterns) says so. \${NAME} placeholders are replaced from CCD_DEF* environment variables
+                                                 and --var, as the processor does; one a column the reader needs still has is an error
 `;
 
 function fail(message: string): never {
@@ -60,6 +63,7 @@ function main(argv: string[]): number {
       "case-type": { type: "string" },
       env: { type: "string" },
       exclude: { type: "string", multiple: true },
+      var: { type: "string", multiple: true },
       format: { type: "string" }
     }
   });
@@ -193,14 +197,19 @@ function main(argv: string[]): number {
       fail("--env and --exclude are alternatives");
     }
     const exclude =
-      values.exclude?.flatMap((patterns) => patterns.split(",").filter(Boolean)) ??
-      (values.env ? ENVIRONMENT_EXCLUDES[values.env as "prod" | "nonprod"] : undefined);
+      values.exclude?.flatMap((patterns) => patterns.split(",").filter(Boolean)) ?? (values.env ? ENVIRONMENT_EXCLUDES[values.env as "prod" | "nonprod"] : []);
+    const given = (values.var ?? []).map((entry) => entry.split(/=(.*)/s));
+    if (given.some(([name, value]) => !name || value === undefined)) {
+      fail("--var is NAME=value");
+    }
+    const variables = { ...variablesFrom(process.env), ...Object.fromEntries(given.map(([name, value]) => [name, value])) } as Record<string, string>;
     process.stdout.write(
       lifecycleReport({
         definitionDir,
         specPath: values.spec,
         caseType: values["case-type"],
         exclude,
+        variables,
         format: values.format === "json" ? "json" : "yaml"
       })
     );

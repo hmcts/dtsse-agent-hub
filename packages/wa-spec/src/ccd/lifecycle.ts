@@ -33,13 +33,26 @@ const CaseEventRow = z.looseObject({
 });
 const CaseTypeRow = z.looseObject({ ID: z.string() });
 
-const rowsOf = <S extends z.ZodType>(schema: S, sheet: string, files: Record<string, unknown>): Array<z.infer<S>> => {
+const rowsOf = <S extends z.ZodType>(schema: S, sheet: string, files: Record<string, unknown>, where?: Source): Array<z.infer<S>> => {
   const value = files[sheet];
   if (value === undefined) {
     return [];
   }
-  return z.array(schema).parse(value);
+  if (!Array.isArray(value)) {
+    throw new Error(`${sheet} is not a list of rows`);
+  }
+  return value.map((row, index) => {
+    const result = schema.safeParse(row);
+    if (!result.success) {
+      const issue = result.error.issues[0];
+      throw new Error(`${where?.(sheet, index) ?? `${sheet} row ${index + 1}`}: ${issue?.path.join(".") ?? ""} ${issue?.message ?? "is not valid"}`);
+    }
+    return result.data;
+  });
 };
+
+/** Where a sheet's row came from, for an error message. */
+export type Source = (sheet: string, index: number) => string;
 
 /** Splits a `;` separated state list; `*` anywhere means every state. */
 const stateList = (text: string | undefined): string[] | "*" => {
@@ -79,11 +92,11 @@ function eventsOf<T extends { ID: string; CaseTypeID: string }>(rows: T[], caseT
  * a definition kept as JSON sheets and the JSON ccd-config-generator writes. With `only`, just those case types (compared
  * without regard to case) are read and checked.
  */
-export function readCcdDefinition(files: Record<string, unknown>, only?: readonly string[]): Lifecycle[] {
-  const states = rowsOf(StateRow, "State", files);
-  const events = rowsOf(CaseEventRow, "CaseEvent", files);
+export function readCcdDefinition(files: Record<string, unknown>, only?: readonly string[], where?: Source): Lifecycle[] {
+  const states = rowsOf(StateRow, "State", files, where);
+  const events = rowsOf(CaseEventRow, "CaseEvent", files, where);
   const wanted = only?.map((id) => id.toLowerCase());
-  const caseTypes = rowsOf(CaseTypeRow, "CaseType", files).filter(({ ID }) => !wanted || wanted.includes(ID.toLowerCase()));
+  const caseTypes = rowsOf(CaseTypeRow, "CaseType", files, where).filter(({ ID }) => !wanted || wanted.includes(ID.toLowerCase()));
   return caseTypes.map(({ ID: caseType }) => ({
     caseType,
     states: states.filter((s) => s.CaseTypeID === caseType).map((s) => ({ id: s.ID, name: s.Name ?? s.ID })),

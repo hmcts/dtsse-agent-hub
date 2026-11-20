@@ -8,8 +8,10 @@ export interface LifecycleOptions {
   definitionDir: string;
   specPath: string;
   caseType?: string | undefined;
-  /** The processor's `-e` patterns; `*-prod.json` (ET's non-production build) when none are given. */
+  /** The processor's `-e` patterns; none exclude nothing. */
   exclude?: readonly string[] | undefined;
+  /** Values for the `${NAME}` placeholders the definition leaves to the processor. */
+  variables?: Record<string, string> | undefined;
   format?: "yaml" | "json" | undefined;
 }
 
@@ -23,7 +25,13 @@ export function lifecycleReport(options: LifecycleOptions): string {
   if (wanted && !spec.caseTypes.some((c) => c.id.toLowerCase() === wanted)) {
     throw new Error(`the spec does not list the case type ${options.caseType}`);
   }
-  const lifecycles = readCcdDefinition(readDefinitionDir(options.definitionDir, options.exclude), wanted ? [wanted] : spec.caseTypes.map((c) => c.id));
+  const sources: Record<string, string[]> = {};
+  const sheets = readDefinitionDir(options.definitionDir, { exclude: options.exclude ?? [], variables: options.variables ?? {}, sources });
+  const lifecycles = readCcdDefinition(
+    sheets,
+    wanted ? [wanted] : spec.caseTypes.map((c) => c.id),
+    (sheet, index) => sources[sheet]?.[index] ?? `${sheet} row ${index + 1}`
+  );
   if (lifecycles.length === 0) {
     throw new Error(
       wanted

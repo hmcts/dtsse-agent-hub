@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { ET_SHEETS } from "./__fixtures__/et-sheets.ts";
 
+const placeholder = (name: string): string => `$\{${name}}`;
 const cli = fileURLToPath(new URL("../cli.ts", import.meta.url));
 const run = (...args: string[]) =>
   spawnSync(process.execPath, ["--import", "tsx", cli, ...args], { encoding: "utf8", cwd: fileURLToPath(new URL("../..", import.meta.url)) });
@@ -62,6 +63,25 @@ describe("cli lifecycle", () => {
     expect(run(...base).status).toBe(2);
     expect(run(...base, "--exclude", "*-preview.json,*-prod.json").status).toBe(0);
     expect(run(...base, "--exclude", "*-prod.json", "--exclude", "*-preview.json").status).toBe(0);
+  });
+
+  it("should replace placeholders from --var and name an unset one", () => {
+    const def = join(dir, "def3");
+    mkdirSync(join(def, "CaseEvent"), { recursive: true });
+    writeFileSync(
+      join(def, "CaseEvent", "a.json"),
+      JSON.stringify([{ CaseTypeID: "ET_EnglandWales", ID: "et1Vetting", Publish: placeholder("CCD_DEF_PUBLISH") }])
+    );
+    mkdirSync(join(def, "CaseType"), { recursive: true });
+    writeFileSync(join(def, "CaseType", "a.json"), JSON.stringify(ET_SHEETS.CaseType));
+    const base = ["lifecycle", def, "--spec", join(dir, "spec.yaml"), "--format", "json"];
+    const unset = run(...base);
+    expect(unset.status).toBe(2);
+    expect(unset.stderr).toContain("CCD_DEF_PUBLISH");
+    const set = run(...base, "--var", "CCD_DEF_PUBLISH=Y");
+    expect(set.status).toBe(0);
+    expect(JSON.parse(set.stdout).ET_EnglandWales.warnings).toEqual([]);
+    expect(run(...base, "--var", "NOEQUALS").status).toBe(2);
   });
 
   it("should exit 2 when --env or --format is not one of its values, or both --env and --exclude are given, or the case type is not in the spec", () => {

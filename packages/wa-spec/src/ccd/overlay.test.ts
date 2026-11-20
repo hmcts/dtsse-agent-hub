@@ -151,14 +151,17 @@ describe("overlayTasks", () => {
     expect(overlayTasks(et, specWith({}, ["other"]))).toEqual({ events: {}, warnings: ["the spec has no case type ET_EnglandWales"] });
   });
 
-  it("should leave a row alone when its event is a FEEL cell or its task is computed", () => {
+  it("should list a computed task under its event and leave a row alone when its event is a FEEL cell", () => {
     const spec = specWith({
       initiation: [
         { when: { eventId: { feel: "contains(x)" } }, returns: { taskId: "T" } },
         { when: { eventId: { in: ["initiateCase"] } }, returns: { taskId: { field: "x" } } }
       ]
     });
-    expect(overlayTasks(et, spec)).toEqual({ events: {}, warnings: [] });
+    expect(overlayTasks(et, spec)).toEqual({
+      events: { initiateCase: { creates: ["computed task"], completes: [], cancels: [], reconfigures: [] } },
+      warnings: []
+    });
   });
 
   it("should read the event column under whichever spelling the spec's table uses", () => {
@@ -266,18 +269,33 @@ describe("overlayTasks", () => {
     expect(overlayTasks(chain, specWith({ initiation, cancellation: [row("B")] }, ["x"])).warnings).toEqual([
       "stop cancels task T from B, but the task exists only in A"
     ]);
-    expect(overlayTasks(chain, specWith({ initiation, cancellation: [row("A")] }, ["x"])).warnings).toEqual([]);
+    expect(overlayTasks(chain, specWith({ initiation, cancellation: [row("A")] }, ["x"])).warnings).toEqual([
+      "a cancellation row from A can never fire for stop, which starts from B, C"
+    ]);
   });
 
-  it("should leave out an event with no task and an empty mayCancel when nothing is listed for it", () => {
+  it("should leave out an event with no task, and list an event a computed-category row cancels or reconfigures", () => {
     const spec = specWith({
       initiation: [{ when: { eventId: { in: ["initiateCase"] } }, returns: { taskId: "T", processCategories: "Cat" } }],
       cancellation: [
         { when: { event: { in: ["disposeCase"] } }, returns: { action: "Warn" } },
-        { when: { event: { in: ["caseTransferECM"] } }, returns: { action: "Cancel", processCategories: { feel: "x" } } }
+        { when: { event: { in: ["caseTransferECM"] } }, returns: { action: "Cancel", processCategories: { feel: "x" } } },
+        { when: { event: { in: ["et1Vetting"] } }, returns: { action: "Reconfigure", processCategories: { feel: "x" } } }
       ]
     });
-    expect(Object.keys(overlayTasks(et, spec).events)).toEqual(["initiateCase"]);
+    const { events, warnings } = overlayTasks(et, spec);
+    expect(events.caseTransferECM?.mayCancel).toEqual(["computed category"]);
+    expect(events.et1Vetting?.reconfigures).toEqual(["computed category"]);
+    expect(Object.keys(events)).toEqual(["initiateCase", "caseTransferECM", "et1Vetting"]);
+    expect(warnings).toEqual([
+      "caseTransferECM may cancel tasks but is not Publish: Y, so Work Allocation never sees it",
+      "et1Vetting reconfigures tasks but is not Publish: Y, so Work Allocation never sees it"
+    ]);
+  });
+
+  it("should list a computed task type under the event that completes it", () => {
+    const spec = specWith({ completion: [{ when: { eventID: { in: ["preAcceptanceCase"] } }, returns: { taskType: { field: "x" } } }] });
+    expect(overlayTasks(et, spec).events.preAcceptanceCase?.completes).toEqual(["computed task"]);
   });
 
   it("should warn of a category cancellation only when none of the tasks of the category can be in the states it cancels from", () => {
