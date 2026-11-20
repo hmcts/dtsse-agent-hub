@@ -7,6 +7,7 @@ import { gitBranch, loadAgent, repoName, type StoredAgent, slugify, TOPIC_RE, wo
 import { type Api, createApi } from "../api.ts";
 import { CLIENT_FEATURES } from "../features.ts";
 import { holdNote } from "../held-notes.ts";
+import { ownAgentIdSet } from "../own-agents.ts";
 import { findSecret } from "../secret-scan.ts";
 import {
   acquirePidFile,
@@ -21,9 +22,10 @@ import {
   statePath,
   writeJson
 } from "../session.ts";
+import type { Message } from "../wire.ts";
 import { candidateTopics } from "./candidates.ts";
 import { runHaiku } from "./haiku.ts";
-import { buildPrompt, formatFeed, parseHaikuResult, validateHaikuOutput } from "./summarise.ts";
+import { attributeNote, buildPrompt, citedIds, formatFeed, parseHaikuResult, validateHaikuOutput } from "./summarise.ts";
 import { NO_TOUCHES, type Touches, workedInRepos } from "./touches.ts";
 import { readTranscriptSlice, type TranscriptSlice } from "./transcript.ts";
 
@@ -109,7 +111,7 @@ export function decide({ now, cursors, config, sliceText, secretInSlice, feedCou
 }
 
 /** The hub calls the summariser makes. A subset of `Api`, so a test can stand in for it without the rest. */
-export type StopWorkerApi = Pick<Api, "feed" | "post" | "setCursor" | "subscriptions" | "topics" | "register" | "subscribe">;
+export type StopWorkerApi = Pick<Api, "feed" | "agents" | "post" | "setCursor" | "subscriptions" | "topics" | "register" | "subscribe">;
 
 export type Haiku = (prompt: string) => Promise<string>;
 
@@ -221,11 +223,14 @@ async function summarise(ctx: PassContext, { agent, cursors, cursorsFile, slice,
         }
       }
       if (notify && d.offerNotify) {
-        if (findSecret(notify) !== null) {
+        const note = attributeNote(notify, messages, await ownAgentIdsFor(api, notify, messages));
+        if (!note.trim()) {
+          log(sid, "stop-worker: notification held nothing but an authors line of its own; dropped");
+        } else if (findSecret(note) !== null) {
           log(sid, "stop-worker: secret-shaped string in notification; dropped");
         } else {
           // Held for the user's next prompt: delivering it now would start a turn of its own.
-          holdNote(sid, notify, now());
+          holdNote(sid, note, now());
           cursors.last_notify_at = now();
           log(sid, "stop-worker: held note for next prompt");
         }
@@ -245,6 +250,15 @@ async function summarise(ctx: PassContext, { agent, cursors, cursorsFile, slice,
     }
   }
   writeJson(cursorsFile, cursors);
+}
+
+// Only a post by an agent can be one of the session's own, so the hub is asked only when the note cites one.
+const OWN_AGENTS_TIMEOUT_MS = 5000;
+
+async function ownAgentIdsFor(api: StopWorkerApi, note: string, messages: readonly Message[]): Promise<Set<string> | null> {
+  const cited = citedIds(note);
+  const cites = messages.some((m) => m.author?.type === "agent" && !!m.author.agent_name && cited.has(m.id));
+  return cites ? ownAgentIdSet(api, { timeoutMs: OWN_AGENTS_TIMEOUT_MS }) : null;
 }
 
 export type FollowWorkState = {

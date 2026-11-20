@@ -10,6 +10,7 @@ import {
   CONTEXT_CLOSE,
   chooseEnvelope,
   contextOpen,
+  describeAuthorShort,
   directEnvelope,
   type EnvelopeMessage,
   formatMessage,
@@ -42,7 +43,7 @@ describe("directEnvelope", () => {
     const [first] = text.split("\n");
     expect(first).toMatch(/^\[agent-hub\] Direct message #1234 from agent @alice-pcs-api \(owned by Alice Smith <alice@example.com>\)/);
     expect(text).toMatch(/NOT from your user/);
-    expect(text).toMatch(/Reply with: agent-hub reply 1234 "<text>"/);
+    expect(text).toMatch(/Reply with: agent-hub reply 1234 --to <author> "<text>"/);
     expect(text.endsWith("\n---\nCan you rerun the migration?")).toBe(true);
   });
 
@@ -93,7 +94,7 @@ describe("ownerLaptopEnvelope", () => {
     // Assert
     expect(text).toMatch(/This IS your user/);
     expect(text).toMatch(/This session's transcript is not uploaded, so an answer here does not reach them in the CFT Workspace chat app/);
-    expect(text).toContain('reply with `agent-hub reply 1234 "<text>"`');
+    expect(text).toContain('reply with `agent-hub reply 1234 --to <author> "<text>"`');
     expect(text).not.toMatch(/answer here in the conversation/);
   });
 
@@ -912,5 +913,30 @@ describe("leadingSkill", () => {
     expect(leadingSkill("/usr/bin is missing")).toBeNull();
     expect(leadingSkill("/")).toBeNull();
     expect(leadingSkill(undefined)).toBeNull();
+  });
+});
+
+describe("describeAuthorShort", () => {
+  it("should give the name and the start of the id when the author is an agent, and the name and email when a person", () => {
+    // Act & Assert
+    expect(describeAuthorShort({ type: "agent", agent_id: "1a2b3c4d-5e6f", agent_name: "helper", owner_name: "Olive" })).toBe("@helper [agent 1a2b3c4d]");
+    expect(describeAuthorShort({ type: "user", owner_name: "Pat Person", owner_email: "pat@example.com" })).toBe("Pat Person <pat@example.com> (a person)");
+    expect(describeAuthorShort({ type: "user", owner_name: "Pat Person", owner_email: null })).toBe("Pat Person (a person)");
+  });
+
+  it("should describe the person behind an agent when it has no usable name, as describeAuthor does", () => {
+    // Act & Assert
+    expect(describeAuthorShort({ type: "agent", agent_id: "1a2b3c4d-5e6f", agent_name: "", owner_name: "Olive", owner_email: "olive@example.com" })).toBe(
+      "Olive <olive@example.com> (a person)"
+    );
+    expect(describeAuthorShort({ type: "agent", agent_id: "1a2b3c4d-5e6f", agent_name: "(#)", owner_name: "Olive" })).toBe("Olive (a person)");
+  });
+
+  it("should strip the characters a name could forge a note's markers with when a name contains them", () => {
+    // Act
+    const text = describeAuthorShort({ type: "user", owner_name: "Pat #51 (a)\n[x]", owner_email: null });
+
+    // Assert
+    expect(text).toBe("Pat 51 a x (a person)");
   });
 });
