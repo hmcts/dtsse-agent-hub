@@ -114,7 +114,7 @@ function pieces<T extends object>(model: Model, entry: T, cases: string[], overr
   return result;
 }
 
-interface ValPiece {
+export interface ValPiece {
   value: Expr;
   cases: string[];
   reconfigure: Expr | undefined;
@@ -122,7 +122,7 @@ interface ValPiece {
   note?: string;
 }
 
-function valPieces(model: Model, val: Val, cases: string[]): ValPiece[] {
+export function valPieces(model: Model, val: Val, cases: string[]): ValPiece[] {
   const entries = Array.isArray(val) ? val : [val];
   return entries.flatMap((entry) => {
     if (!isValEntry(entry)) {
@@ -142,30 +142,37 @@ function valPieces(model: Model, val: Val, cases: string[]): ValPiece[] {
   });
 }
 
+/** Where a resolved grant comes from: the task's profile as it is, the profile with the task's override, or the task's own addition. */
+export type GrantSource = "profile" | "changed" | "added";
+
 export interface ResolvedGrant {
   role: string;
   grant: Grant;
   cases: string[];
+  source: GrantSource;
+  profile?: string;
 }
 
 /** The grants a task's permissions come to: its profile, less what it removes, with its overrides and additions. */
 export function resolveGrants(model: Model, task: Task): ResolvedGrant[] {
   return permissionSpecs(task).flatMap((spec) => {
-    const grants = new Map<string, Grant>(Object.entries(ownEntry(model.permissionProfiles, spec.profile) ?? {}));
+    const grants = new Map<string, { grant: Grant; source: GrantSource }>(
+      Object.entries(ownEntry(model.permissionProfiles, spec.profile) ?? {}).map(([role, grant]) => [role, { grant, source: "profile" }])
+    );
     for (const role of spec.remove ?? []) {
       grants.delete(role);
     }
     for (const [role, patch] of Object.entries(spec.override ?? {})) {
       const base = grants.get(role);
       if (base) {
-        grants.set(role, { ...base, ...patch });
+        grants.set(role, { grant: { ...base.grant, ...patch }, source: "changed" });
       }
     }
     for (const [role, grant] of Object.entries(spec.add ?? {})) {
-      grants.set(role, grant);
+      grants.set(role, { grant, source: "added" });
     }
     const cases = within(model, spec.only, taskCases(model, task));
-    return [...grants].map(([role, grant]) => ({ role, grant, cases }));
+    return [...grants].map(([role, { grant, source }]) => ({ role, grant, cases, source, ...(spec.profile === undefined ? {} : { profile: spec.profile }) }));
   });
 }
 
@@ -192,7 +199,7 @@ export function grantContent(model: Model, role: string, grant: Grant): Content 
   return { when: {}, returns, ...(grant.note === undefined ? {} : { description: grant.note }) };
 }
 
-function triggerContent(task: Task, trigger: Trigger, listedName: Expr | undefined): Content {
+export function triggerContent(task: Task, trigger: Trigger, listedName: Expr | undefined): Content {
   const when: Record<string, Cell> = { eventId: decodeCell(trigger.event) };
   if (trigger.postState !== undefined) {
     when.postEventState = decodeCell(trigger.postState);
@@ -216,6 +223,22 @@ function triggerContent(task: Task, trigger: Trigger, listedName: Expr | undefin
     returns.processCategories = category;
   }
   return { when, returns };
+}
+
+/** The triggers of a task as they stand for each case type they cover: scoped by `only`, with `overrides` applied and a `null` one dropped. */
+export function triggerPieces(model: Model, task: Task): Array<{ trigger: Trigger; cases: string[] }> {
+  const own = taskCases(model, task);
+  return (task.create ?? []).flatMap((trigger) =>
+    pieces(model, trigger, within(model, trigger.only, own), trigger.overrides).map((piece) => ({ trigger: piece.entry, cases: piece.cases }))
+  );
+}
+
+/** The completions of a task as they stand for each case type they cover, as `triggerPieces` does for triggers. */
+export function completionPieces(model: Model, task: Task): Array<{ completion: Completion; cases: string[] }> {
+  const own = taskCases(model, task);
+  return (task.complete ?? []).flatMap((completion) =>
+    pieces(model, completion, within(model, completion.only, own), completion.overrides).map((piece) => ({ completion: piece.entry, cases: piece.cases }))
+  );
 }
 
 function completionContent(task: Task, completion: Completion): Content {
@@ -327,17 +350,13 @@ export function collectAtoms(model: Model): Atoms {
     for (const piece of task.name === undefined ? [] : valPieces(model, task.name, own)) {
       add("task-types", task.id, "type", piece.cases, { when: {}, returns: { taskTypeId: task.id, taskTypeName: piece.value } }, piece.note);
     }
-    for (const trigger of task.create ?? []) {
-      for (const piece of pieces(model, trigger, within(model, trigger.only, own), trigger.overrides)) {
-        for (const part of namedParts(model, task, piece.entry, piece.cases, own)) {
-          add("initiation", task.id, "create", part.cases, triggerContent(task, piece.entry, part.name), piece.entry.note);
-        }
+    for (const piece of triggerPieces(model, task)) {
+      for (const part of namedParts(model, task, piece.trigger, piece.cases, own)) {
+        add("initiation", task.id, "create", part.cases, triggerContent(task, piece.trigger, part.name), piece.trigger.note);
       }
     }
-    for (const completion of task.complete ?? []) {
-      for (const piece of pieces(model, completion, within(model, completion.only, own), completion.overrides)) {
-        add("completion", task.id, "complete", piece.cases, completionContent(task, piece.entry), piece.entry.note);
-      }
+    for (const piece of completionPieces(model, task)) {
+      add("completion", task.id, "complete", piece.cases, completionContent(task, piece.completion), piece.completion.note);
     }
     const reconfigurable = new Set(task.reconfigure ?? []);
     for (const [name, val] of attributesOf(task)) {

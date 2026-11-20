@@ -40,7 +40,7 @@ function Sentences({ items, empty }: Readonly<{ items: string[]; empty: string }
 function ValueCell({ model, task, val }: Readonly<{ model: Model; task: Task; val: Val | undefined }>) {
   const cases = taskCaseTypes(model, task);
   return (
-    <PerCaseType model={model} groups={groupByCaseType(cases, (id) => resolveVal(val, id, cases))}>
+    <PerCaseType model={model} groups={groupByCaseType(cases, (id) => resolveVal(model, val, id, cases))}>
       {(values: Expr[]) =>
         values.length === 0 ? (
           <span className="text-asst-muted">Not set</span>

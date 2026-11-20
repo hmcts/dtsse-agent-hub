@@ -1,4 +1,4 @@
-import type { Model } from "@hmcts-cft/wa-spec";
+import { type Model, ownEntry } from "@hmcts-cft/wa-spec";
 import { briefExpr, caseTypeIds, caseTypeLabel, describeConditions, grantConditions, permissionNames } from "@/assistant/wa-builder-text";
 import { CODE, ExprView, Grid, Section, TD, TH, Words, YesNo } from "@/components/assistant/WaBuilderParts";
 
@@ -104,18 +104,21 @@ export function WaBuilderSetup({ model }: Readonly<{ model: Model }>) {
               </tr>
             </thead>
             <tbody>
-              {permissions.map(({ role, grant }, index) => (
-                <tr key={`${role}-${index}`}>
-                  <th scope="row" className={`${TD} font-medium`}>
-                    {role}
-                  </th>
-                  <td className={TD}>{permissionNames(grant.perms).join(", ")}</td>
-                  <td className={TD}>{grant.priority === undefined ? "–" : briefExpr(grant.priority)}</td>
-                  <td className={TD}>{grant.autoAssign === undefined ? "–" : <YesNo value={briefExpr(grant.autoAssign)} />}</td>
-                  <td className={TD}>{grantConditions(grant, model.roles?.[role]?.category).join("; ") || "–"}</td>
-                  <td className={TD}>{caseTypesText(model, grant.only)}</td>
-                </tr>
-              ))}
+              {permissions.map(({ role, grant }, index) => {
+                const conditions = grantConditions(grant, ownEntry(model.roles, role)?.category);
+                return (
+                  <tr key={`${role}-${index}`}>
+                    <th scope="row" className={`${TD} font-medium`}>
+                      {role}
+                    </th>
+                    <td className={TD}>{permissionNames(grant.perms).join(", ")}</td>
+                    <td className={TD}>{grant.priority === undefined ? "–" : briefExpr(grant.priority)}</td>
+                    <td className={TD}>{grant.autoAssign === undefined ? "–" : <YesNo value={briefExpr(grant.autoAssign)} />}</td>
+                    <td className={TD}>{conditions.length === 0 ? "–" : <Words text={conditions.join("; ")} />}</td>
+                    <td className={TD}>{caseTypesText(model, grant.only)}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </Grid>
         )}

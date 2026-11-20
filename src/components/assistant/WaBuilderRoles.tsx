@@ -1,4 +1,4 @@
-import type { Model } from "@hmcts-cft/wa-spec";
+import { type Model, ownEntry } from "@hmcts-cft/wa-spec";
 import Link from "next/link";
 import { briefExpr, grantConditions, permissionColumns, permissionNames, rolesByCategory, taskName, tasksUsingProfile } from "@/assistant/wa-builder-text";
 import { Grid, LINK, PermissionTick, Section, TD, TH, versionQuery, Words, YesNo } from "@/components/assistant/WaBuilderParts";
@@ -31,7 +31,7 @@ export function WaBuilderRoles({ model, service, version }: Readonly<{ model: Mo
             role,
             grant,
             perms: permissionNames(grant.perms),
-            conditions: grantConditions(grant, model.roles?.[role]?.category)
+            conditions: grantConditions(grant, ownEntry(model.roles, role)?.category)
           }));
           const columns = permissionColumns(rows);
           const tasks = tasksUsingProfile(model, name);

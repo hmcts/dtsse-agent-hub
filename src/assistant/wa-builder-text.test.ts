@@ -67,7 +67,7 @@ describe("describeCond and describeExpr", () => {
   });
 
   it("should show raw FEEL as code, and know it is raw, when ET calculates a due date", () => {
-    const days = resolveVal(task("ReviewReferralAdmin").due?.days, "et_englandwales", taskCaseTypes(et, task("ReviewReferralAdmin")))[0];
+    const days = resolveVal(et, task("ReviewReferralAdmin").due?.days, "et_englandwales", taskCaseTypes(et, task("ReviewReferralAdmin")))[0];
     expect(isRawFeel(days)).toBe(true);
     expect(describeExpr(days ?? null)).toMatch(/^`if \(caseData != null and caseData\.referralCollection/);
     expect(briefExpr(days)).toBe("calculated");
@@ -127,7 +127,7 @@ describe("a trigger, completion and cancellation of ET1 Vetting", () => {
 
   it("should say which case types have no value when a value is set for only some of them", () => {
     const some: Task = { id: "T", due: { days: { value: 5, only: ["et_englandwales"] } } };
-    expect(briefAcrossCaseTypes(et, some, (id) => briefVal(some.due?.days, id, caseTypeIds(et)))).toBe(
+    expect(briefAcrossCaseTypes(et, some, (id) => briefVal(et, some.due?.days, id, caseTypeIds(et)))).toBe(
       "5 (et_englandwales); none (et_englandwales_multiple, et_scotland, et_scotland_multiple)"
     );
     expect(briefAcrossCaseTypes(et, some, () => "")).toBe("");
@@ -147,6 +147,31 @@ describe("a trigger, completion and cancellation of ET1 Vetting", () => {
       ["a", false],
       ["c", true]
     ]);
+  });
+
+  it("should word the post-event state as where the case is left, and fromState as where it is, when a rule names states", () => {
+    expect(describeCancellation({ events: "x", action: "Cancel", fromState: "A", state: "B" })).toBe(
+      "Cancelled when `x` happens while the case is in `A` and leaves the case in `B`"
+    );
+  });
+
+  it("should take a null cancel category as no category, and a calculated one as calculated, when categories are read", () => {
+    const withNull: Task = { id: "T", cancelCategory: null };
+    expect(cancelCategories(et, withNull, "et_englandwales")).toEqual({ named: [], calculated: false });
+    const fallback: Task = { id: "T", cancelCategory: "Base", create: [{ event: "a", cancelCategory: null }] };
+    expect(cancelCategories(et, fallback, "et_englandwales")).toEqual({ named: [], calculated: false });
+  });
+
+  it("should show a grant's null category as none, and as a condition, when it clears the role's category", () => {
+    const model = {
+      ...et,
+      permissionProfiles: { p: { judge: { perms: "Read", category: null } } },
+      roles: { judge: { category: "JUDICIAL" } },
+      defaults: undefined
+    } as Model;
+    const [row] = resolvePermissions(model, { id: "T", permissions: "p" }, "et_englandwales");
+    expect(row?.category).toBe("none");
+    expect(row?.conditions).toEqual(["counts as no category"]);
   });
 
   it("should include the warning and the note when a rule warns", () => {

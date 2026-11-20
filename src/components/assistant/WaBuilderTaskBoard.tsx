@@ -94,11 +94,12 @@ export function WaBuilderTaskBoard({
                         {name}
                       </Link>
                     </th>
-                    <td className={TD}>{cell((id) => briefVal(by === "workType" ? task.roleCategory : task.workType, id, own)) || "–"}</td>
-                    <td className={TD}>{cell((id) => briefVal(task.due?.days, id, own)) || "–"}</td>
+                    <td className={TD}>{cell((id) => briefVal(model, by === "workType" ? task.roleCategory : task.workType, id, own)) || "–"}</td>
+                    <td className={TD}>{cell((id) => briefVal(model, task.due?.days, id, own)) || "–"}</td>
                     <td className={TD}>
-                      {cell((id) => [briefVal(task.priority?.major, id, own), briefVal(task.priority?.minor, id, own)].filter((v) => v !== "").join(" / ")) ||
-                        "–"}
+                      {cell((id) =>
+                        [briefVal(model, task.priority?.major, id, own), briefVal(model, task.priority?.minor, id, own)].filter((v) => v !== "").join(" / ")
+                      ) || "–"}
                     </td>
                     <td className={TD}>{caseTypes.map((id) => caseTypeLabel(model, id)).join(", ")}</td>
                   </tr>

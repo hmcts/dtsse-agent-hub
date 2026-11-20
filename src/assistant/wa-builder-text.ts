@@ -3,15 +3,19 @@ import {
   type Cancellation,
   type Cond,
   categoryParts,
+  completionPieces,
   type Expr,
   type Grant,
-  isValEntry,
   type Model,
   ownEntry,
   permissionSpecs,
+  resolveGrants,
   type Task,
   type Trigger,
-  type Val
+  triggerContent,
+  triggerPieces,
+  type Val,
+  valPieces
 } from "@hmcts-cft/wa-spec";
 
 /*
@@ -21,7 +25,6 @@ import {
  */
 
 type FriendlyCell = Trigger["event"];
-type ValEntry = Extract<Val, { value: Expr }>;
 
 const OP_WORDS = { eq: "is", ne: "is not", gt: "is more than", ge: "is at least", lt: "is less than", le: "is at most" } as const;
 
@@ -189,10 +192,10 @@ export function describeCancellation(rule: Cancellation): string {
     text += ` while the case is in ${describeCell(rule.fromState)}`;
   }
   if (rule.state !== undefined) {
-    text += ` while the case is in ${describeCell(rule.state)}`;
+    text += ` and leaves the case in ${describeCell(rule.state)}`;
   }
   if (rule.toState !== undefined) {
-    text += ` and leaves it in ${describeCell(rule.toState)}`;
+    text += ` and leaves the case in ${describeCell(rule.toState)}`;
   }
   const categories = (rule.categories ?? []).map(describeExpr);
   if (categories.length > 0) {
@@ -238,51 +241,29 @@ export function groupByCaseType<T>(caseTypes: string[], resolve: (caseType: stri
 }
 
 /** What a value is for one case type: nothing, or one expression, or several where the service repeats the row. */
-export function resolveVal(val: Val | undefined, caseType: string, taskCases: string[]): Expr[] {
-  const entries: Array<ValEntry | Expr> = val === undefined ? [] : Array.isArray(val) ? val : [val];
-  const out: Expr[] = [];
-  for (const entry of entries) {
-    if (!isValEntry(entry)) {
-      out.push(entry);
-    } else if ((entry.only ?? taskCases).includes(caseType)) {
-      const override = ownEntry(entry.overrides, caseType);
-      if (override === undefined) {
-        out.push(entry.value);
-      } else if (override !== null) {
-        out.push(isValEntry(override) ? override.value : (override as Expr));
-      }
-    }
-  }
-  return out;
+export function resolveVal(model: Model, val: Val | undefined, caseType: string, taskCases: string[]): Expr[] {
+  return val === undefined
+    ? []
+    : valPieces(model, val, taskCases)
+        .filter((piece) => piece.cases.includes(caseType))
+        .map((piece) => piece.value);
 }
 
-export function resolveTriggers(model: Model, task: Task, caseType: string): Trigger[] {
-  const cases = taskCaseTypes(model, task);
-  return (task.create ?? []).flatMap((trigger) => {
-    if (!(trigger.only ?? cases).includes(caseType)) {
-      return [];
-    }
-    const override = ownEntry(trigger.overrides, caseType);
-    return override === null ? [] : [{ ...trigger, ...override }];
-  });
-}
+export const resolveTriggers = (model: Model, task: Task, caseType: string): Trigger[] =>
+  triggerPieces(model, task)
+    .filter((piece) => piece.cases.includes(caseType))
+    .map((piece) => piece.trigger);
 
-export function resolveCompletions(model: Model, task: Task, caseType: string): Array<{ event: FriendlyCell; mode?: Expr }> {
-  const cases = taskCaseTypes(model, task);
-  return (task.complete ?? []).flatMap((completion) => {
-    if (!(completion.only ?? cases).includes(caseType)) {
-      return [];
-    }
-    const override = ownEntry(completion.overrides, caseType);
-    return override === null ? [] : [{ ...completion, ...override }];
-  });
-}
+export const resolveCompletions = (model: Model, task: Task, caseType: string): Array<{ event: FriendlyCell; mode?: Expr }> =>
+  completionPieces(model, task)
+    .filter((piece) => piece.cases.includes(caseType))
+    .map((piece) => piece.completion);
 
 /** The task's name for the list: its first case type's, when that is plain text. */
 export function taskName(model: Model, task: Task): string {
   const cases = taskCaseTypes(model, task);
   for (const caseType of cases) {
-    const name = plainText(resolveVal(task.name, caseType, cases)[0]);
+    const name = plainText(resolveVal(model, task.name, caseType, cases)[0]);
     if (name !== undefined) {
       return name;
     }
@@ -291,7 +272,8 @@ export function taskName(model: Model, task: Task): string {
 }
 
 /** One case type's value of a task's attribute, in one short cell. */
-export const briefVal = (val: Val | undefined, caseType: string, taskCases: string[]): string => resolveVal(val, caseType, taskCases).map(briefExpr).join(", ");
+export const briefVal = (model: Model, val: Val | undefined, caseType: string, taskCases: string[]): string =>
+  resolveVal(model, val, caseType, taskCases).map(briefExpr).join(", ");
 
 /** A value across the task's case types: the one value, or each value with the case types it is for. */
 export function briefAcrossCaseTypes(model: Model, task: Task, resolve: (caseType: string) => string): string {
@@ -333,14 +315,19 @@ export function grantConditions(grant: Grant, roleCategory: Expr | undefined): s
   return [
     ...(grant.authorisations === undefined ? [] : [`needs authorisation ${plain(grant.authorisations)}`]),
     ...(grant.caseAccessCategory === undefined ? [] : [`case access category ${plain(grant.caseAccessCategory)}`]),
-    ...(grant.category === undefined || JSON.stringify(grant.category) === JSON.stringify(roleCategory) ? [] : [`counts as category ${plain(grant.category)}`])
+    ...(grant.category === undefined || JSON.stringify(grant.category) === JSON.stringify(roleCategory)
+      ? []
+      : [grant.category === null ? "counts as no category" : `counts as category ${plain(grant.category)}`])
   ];
 }
+
+/** A category in a cell: a value as itself, an explicit `null` as none, and nothing as a dash. */
+const categoryText = (category: Expr | undefined): string => (category === null ? "none" : briefExpr(category) || "–");
 
 function permissionRow(model: Model, role: string, grant: Grant, source: PermissionRow["source"], profile?: string): PermissionRow {
   return {
     role,
-    category: briefExpr(grant.category ?? ownEntry(model.roles, role)?.category) || "–",
+    category: categoryText(grant.category !== undefined ? grant.category : ownEntry(model.roles, role)?.category),
     perms: permissionNames(grant.perms),
     priority: grant.priority === undefined ? "–" : briefExpr(grant.priority),
     autoAssign: grant.autoAssign === undefined ? "–" : briefExpr(grant.autoAssign),
@@ -353,22 +340,9 @@ function permissionRow(model: Model, role: string, grant: Grant, source: Permiss
 
 /** A task's permissions for one case type: its profile with the task's own changes, then what every task has. */
 export function resolvePermissions(model: Model, task: Task, caseType: string): PermissionRow[] {
-  const cases = taskCaseTypes(model, task);
-  const rows: PermissionRow[] = [];
-  for (const spec of permissionSpecs(task)) {
-    if (!(spec.only ?? cases).includes(caseType)) {
-      continue;
-    }
-    for (const [role, grant] of Object.entries(ownEntry(model.permissionProfiles, spec.profile) ?? {})) {
-      if (!spec.remove?.includes(role)) {
-        const patch = ownEntry(spec.override, role);
-        rows.push(permissionRow(model, role, { ...grant, ...patch }, patch === undefined ? "profile" : "changed", spec.profile));
-      }
-    }
-    for (const [role, grant] of Object.entries(spec.add ?? {})) {
-      rows.push(permissionRow(model, role, grant, "added"));
-    }
-  }
+  const rows: PermissionRow[] = resolveGrants(model, task)
+    .filter((resolved) => resolved.cases.includes(caseType))
+    .map((resolved) => permissionRow(model, resolved.role, resolved.grant, resolved.source, resolved.profile));
   for (const [role, grants] of Object.entries(model.defaults?.permissions ?? {})) {
     for (const grant of [grants].flat()) {
       if ((grant.only ?? caseTypeIds(model)).includes(caseType)) {
@@ -427,9 +401,9 @@ export interface CancelCategories {
 /** The categories a task's cancellation rules find it by in one case type: its own and those of the triggers that apply there. */
 export function cancelCategories(model: Model, task: Task, caseType: string): CancelCategories {
   const triggers = resolveTriggers(model, task, caseType);
-  const all = (triggers.length === 0 ? [task.cancelCategory] : triggers.map((trigger) => trigger.cancelCategory ?? task.cancelCategory)).filter(
-    (c): c is Expr => c !== undefined
-  );
+  const all = (
+    triggers.length === 0 ? [task.cancelCategory] : triggers.map((trigger) => triggerContent(task, trigger, undefined).returns.processCategories)
+  ).filter((c): c is NonNullable<Expr> => c !== undefined && c !== null);
   const named = all.flatMap((category) => (typeof category === "string" ? categoryParts(category) : []));
   return { named: [...new Set(named)], calculated: all.some((category) => typeof category !== "string") };
 }
@@ -449,7 +423,7 @@ function rulesWhere(model: Model, task: Task, caseType: string, wanted: (rule: C
     if (!wanted(rule) || !(rule.only ?? caseTypeIds(model)).includes(caseType)) {
       return [];
     }
-    if (rule.categories === undefined) {
+    if (rule.categories === undefined || rule.categories.some((category) => category === null)) {
       return [{ rule, mayApply: false }];
     }
     const listed = rule.categories.flatMap((category) => (typeof category === "string" ? categoryParts(category) : []));
@@ -487,7 +461,7 @@ export function boardGroups(model: Model, by: BoardGrouping, caseType?: string):
   const groups = new Map<string, BoardTask[]>();
   for (const task of model.tasks) {
     const cases = taskCaseTypes(model, task).filter((id) => caseType === undefined || id === caseType);
-    for (const { caseTypes, value } of groupByCaseType(cases, (id) => briefVal(task[by], id, taskCaseTypes(model, task)))) {
+    for (const { caseTypes, value } of groupByCaseType(cases, (id) => briefVal(model, task[by], id, taskCaseTypes(model, task)))) {
       const group = value === "" ? "Not set" : value;
       groups.set(group, [...(groups.get(group) ?? []), { task, name: taskName(model, task), caseTypes }]);
     }
