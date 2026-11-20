@@ -224,6 +224,166 @@ describe("CommentsView's list of all comments", () => {
   });
 });
 
+describe("CommentsView's choosing, themes and refining", () => {
+  function choosing(more: Partial<ThreadHandlers> = {}) {
+    return {
+      reply: vi.fn(async () => null),
+      status: vi.fn(async () => null as string | null),
+      theme: vi.fn(async () => null as string | null),
+      refine: vi.fn(async () => null as string | null),
+      ...more
+    };
+  }
+
+  const threads = () => [
+    thread("a", { theme: "Fees", jiraKeys: ["PCS-1"], refinedIn: "conv-1" }),
+    thread("b", { pagePath: "/details", pageTitle: "Your details", author: BEN }),
+    thread("c", { pagePath: "/details", pageTitle: "Your details", status: "resolved", theme: "Fees" })
+  ];
+
+  it("should let nobody choose comments without the theme handler", () => {
+    render(<CommentsView projectId="p1" threads={threads()} links={project().links} people={[ANN, BEN]} handlers={handlers} />);
+
+    expect(screen.queryByRole("checkbox", { name: /Select all/ })).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: /^Choose the comment/ })).toBeNull();
+  });
+
+  it("should show a thread's theme, its Jira issues, and the way to the viewer's own refining chat", () => {
+    render(<CommentsView projectId="p1" threads={threads()} links={project().links} people={[ANN, BEN]} handlers={choosing()} />);
+    expect(screen.queryByText("Theme: Fees")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Group by"), { target: { value: "page" } });
+
+    const first = within(screen.getByText("Comment a").closest("article") as HTMLElement);
+    expect(first.getByText("Theme: Fees")).toBeTruthy();
+    expect(first.getByText("Jira PCS-1")).toBeTruthy();
+    expect(first.getByRole("link", { name: "Refined in your chat" }).getAttribute("href")).toBe("/assistant/conv-1");
+  });
+
+  it("should choose all shown, then give the chosen a theme and clear the box", async () => {
+    const chosen = choosing();
+    render(<CommentsView projectId="p1" threads={threads()} links={project().links} people={[ANN, BEN]} handlers={chosen} />);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select all 3 shown" }));
+    expect(screen.getByText("3 comments chosen")).toBeTruthy();
+    const box = screen.getByLabelText("Theme for the chosen comments") as HTMLInputElement;
+    fireEvent.change(box, { target: { value: "Court fees" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Set theme" })));
+
+    expect(chosen.theme).toHaveBeenCalledWith(["a", "b", "c"], "Court fees");
+    expect(box.value).toBe("");
+    expect(box.placeholder).toBe("Mixed themes: type one to give them all");
+  });
+
+  it("should show the theme the chosen comments share, and offer Set theme only once it is changed", () => {
+    render(<CommentsView projectId="p1" threads={threads()} links={project().links} people={[ANN, BEN]} handlers={choosing()} />);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Choose all 2 comments in Fees" }));
+    const box = screen.getByLabelText("Theme for the chosen comments") as HTMLInputElement;
+    expect(box.value).toBe("Fees");
+    expect((screen.getByRole("button", { name: "Set theme" }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.change(box, { target: { value: "Court fees" } });
+    expect((screen.getByRole("button", { name: "Set theme" }) as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Choose the comment by Ben Reviewer/ }));
+    expect(box.value).toBe("");
+    expect(box.placeholder).toBe("Mixed themes: type one to give them all");
+  });
+
+  it("should remove the theme of the chosen, resolve the open ones among them, and say why one failed", async () => {
+    const chosen = choosing({ status: vi.fn(async () => "that project is archived") });
+    render(<CommentsView projectId="p1" threads={threads()} links={project().links} people={[ANN, BEN]} handlers={chosen} />);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Choose the comment by Ann Reviewer: Comment a/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Choose the comment by Ben Reviewer/ }));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Remove theme" })));
+    expect(chosen.theme).toHaveBeenCalledWith(["a", "b"], null);
+
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Resolve" })));
+    expect(chosen.status).toHaveBeenCalledTimes(1);
+    expect(chosen.status).toHaveBeenCalledWith("a", "resolved");
+    expect(screen.getByRole("alert").textContent).toBe("that project is archived");
+  });
+
+  it("should resolve every open one chosen when none fails, and offer neither when there is nothing to do", async () => {
+    const chosen = choosing();
+    render(<CommentsView projectId="p1" threads={threads()} links={project().links} people={[ANN, BEN]} handlers={chosen} />);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Choose the comment by Ben Reviewer/ }));
+    expect((screen.getByRole("button", { name: "Remove theme" }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Resolve" })));
+    expect(chosen.status).toHaveBeenCalledWith("b", "resolved");
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Choose the comment by Ben Reviewer/ }));
+    expect(screen.queryByRole("region", { name: "Chosen comments" })).toBeNull();
+  });
+
+  it("should refine the chosen with the Assistant, and clear the choice from Clear", async () => {
+    const chosen = choosing();
+    render(<CommentsView projectId="p1" threads={threads()} links={project().links} people={[ANN, BEN]} handlers={chosen} />);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Choose the comment by Ben Reviewer/ }));
+    expect(screen.getByText(/drafts one Jira story per theme/)).toBeTruthy();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Refine with Assistant" })));
+    expect(chosen.refine).toHaveBeenCalledWith(["b"]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+    expect(screen.queryByText(/chosen$/)).toBeNull();
+  });
+
+  it("should not offer refining without its handler, nor more comments than one refinement takes", () => {
+    const many = Array.from({ length: 41 }, (_, index) => thread(`t${index}`));
+    const { rerender } = render(<CommentsView projectId="p1" threads={many} links={project().links} people={[ANN]} handlers={choosing()} />);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select all 41 shown" }));
+    expect((screen.getByRole("button", { name: "Refine with Assistant" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("Choose at most 40 comments to refine at once.")).toBeTruthy();
+
+    rerender(<CommentsView projectId="p1" threads={many} links={project().links} people={[ANN]} handlers={choosing({ refine: undefined })} />);
+    expect(screen.queryByRole("button", { name: "Refine with Assistant" })).toBeNull();
+  });
+
+  it("should open grouped by theme once comments have themes, and by page while none has", () => {
+    render(<CommentsView projectId="p1" threads={threads()} links={project().links} people={[ANN, BEN]} handlers={choosing()} />);
+    expect((screen.getByLabelText("Group by") as HTMLSelectElement).value).toBe("theme");
+    cleanup();
+
+    render(<CommentsView projectId="p1" threads={[thread("a"), thread("b")]} links={project().links} people={[ANN]} handlers={choosing()} />);
+    expect((screen.getByLabelText("Group by") as HTMLSelectElement).value).toBe("page");
+  });
+
+  it("should choose every comment in a theme at once, and let them go again", () => {
+    render(<CommentsView projectId="p1" threads={threads()} links={project().links} people={[ANN, BEN]} handlers={choosing()} />);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Choose all 2 comments in Fees" }));
+    expect(screen.getByText("2 comments chosen")).toBeTruthy();
+    expect((screen.getByRole("checkbox", { name: "Select all 3 shown" }) as HTMLInputElement).indeterminate).toBe(true);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Choose all 2 comments in Fees" }));
+    expect(screen.queryByRole("region", { name: "Chosen comments" })).toBeNull();
+  });
+
+  it("should refine a whole theme from its heading, and say why when that was refused", async () => {
+    const chosen = choosing({ refine: vi.fn(async () => "Connect GitHub and Claude to start chatting") });
+    render(<CommentsView projectId="p1" threads={threads()} links={project().links} people={[ANN, BEN]} handlers={chosen} />);
+
+    expect(screen.queryByRole("button", { name: "Refine this theme: No theme" })).toBeNull();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Refine this theme: Fees" })));
+
+    expect(chosen.refine).toHaveBeenCalledWith(["c", "a"]);
+    expect(screen.getByRole("alert").textContent).toBe("Connect GitHub and Claude to start chatting");
+  });
+
+  it("should group the comments by theme, those with none last, saying which page each is on", () => {
+    render(<CommentsView projectId="p1" threads={threads()} links={project().links} people={[ANN, BEN]} handlers={choosing()} />);
+
+    fireEvent.change(screen.getByLabelText("Group by"), { target: { value: "theme" } });
+
+    expect(screen.getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent)).toEqual(["Fees2 comments", "No theme1 comment"]);
+    expect(screen.getByText("On Your details, the text “text of c”")).toBeTruthy();
+  });
+});
+
 describe("SnapshotView", () => {
   it("should rebuild the snapshot in a frame with scripts off, every event applied, and outline the element", async () => {
     replayed.html = '<p id="t1">text of t1</p>';

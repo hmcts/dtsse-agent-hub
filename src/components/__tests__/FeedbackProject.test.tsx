@@ -32,7 +32,9 @@ function actions(): MockedActions {
     archive: vi.fn().mockResolvedValue({ ok: true }),
     reply: vi.fn().mockResolvedValue({ ok: true, comment: {} }),
     setStatus: vi.fn().mockResolvedValue({ ok: true, thread: {} }),
-    probe: vi.fn().mockResolvedValue({ ok: true, probe: { result: "pass", status: 200, reason: "it answered 200" } })
+    probe: vi.fn().mockResolvedValue({ ok: true, probe: { result: "pass", status: 200, reason: "it answered 200" } }),
+    setTheme: vi.fn().mockResolvedValue({ ok: true, changed: 1 }),
+    refine: vi.fn().mockResolvedValue({ ok: true, id: "conv-9" })
   } as unknown as MockedActions;
 }
 
@@ -403,5 +405,56 @@ describe("ProjectList", () => {
 
     expect(screen.getByRole("link", { name: "Set up a feedback project" }).getAttribute("href")).toBe("/assistant/feedback/new");
     expect(screen.getByRole("link", { name: "Show archived projects" }).getAttribute("href")).toBe("/assistant/feedback?archived=1");
+  });
+});
+
+describe("ProjectPage's themes and refining", () => {
+  function chooseFirst(): void {
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Choose the comment/ }));
+  }
+
+  it("should set a theme through the theme action and refresh, or say why it was refused", async () => {
+    const act$ = actions();
+    render(<ProjectPage data={pageData({ threads: [thread("t1")] })} tab="comments" actions={act$} origin="https://hub.example.com" />);
+    chooseFirst();
+    fireEvent.change(screen.getByLabelText("Theme for the chosen comments"), { target: { value: "Fees" } });
+
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Set theme" })));
+    expect(act$.setTheme).toHaveBeenCalledWith({ projectId: "p1", threadIds: ["t1"], theme: "Fees" });
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    act$.setTheme.mockResolvedValue({ ok: false, error: "Keep the theme to 60 characters" });
+    fireEvent.change(screen.getByLabelText("Theme for the chosen comments"), { target: { value: "Fees" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Set theme" })));
+    expect(screen.getByRole("alert").textContent).toBe("Keep the theme to 60 characters");
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("should go to the conversation refining starts, or say why it could not start", async () => {
+    const act$ = actions();
+    render(<ProjectPage data={pageData({ threads: [thread("t1")] })} tab="comments" actions={act$} origin="https://hub.example.com" />);
+    chooseFirst();
+
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Refine with Assistant" })));
+    expect(act$.refine).toHaveBeenCalledWith({ projectId: "p1", threadIds: ["t1"] });
+    expect(push).toHaveBeenCalledWith("/assistant/conv-9");
+
+    act$.refine.mockResolvedValue({ ok: false, error: "Connect GitHub and Claude to start chatting" });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Refine with Assistant" })));
+    expect(screen.getByRole("alert").textContent).toBe("Connect GitHub and Claude to start chatting");
+    expect(push).toHaveBeenCalledTimes(1);
+  });
+
+  it("should offer no choosing on an archived project", () => {
+    render(
+      <ProjectPage
+        data={pageData({ project: project({ archivedAt: "2026-11-12T09:00:00.000Z" }), threads: [thread("t1")] })}
+        tab="comments"
+        actions={actions()}
+        origin="https://hub.example.com"
+      />
+    );
+
+    expect(screen.queryByRole("checkbox", { name: /^Choose the comment/ })).toBeNull();
   });
 });

@@ -33,12 +33,45 @@ export interface ProjectActions {
   reply: (input: Id & { threadId: unknown; body: unknown }) => Promise<ActionResult<{ comment: FeedbackCommentView }>>;
   setStatus: (input: Id & { threadId: unknown; status: unknown }) => Promise<ActionResult<{ thread: FeedbackThreadView }>>;
   probe: (input: { url: unknown }) => Promise<ActionResult<{ probe: ProbeOutcome }>>;
+  setTheme: (input: Id & { threadIds: unknown; theme: unknown }) => Promise<ActionResult<{ changed: number }>>;
+  refine: (input: Id & { threadIds: unknown }) => Promise<ActionResult<{ id: string }>>;
 }
 
-/** The reply and resolve a thread card makes, refreshing the page once saved so every view of it agrees. */
-export function useThreadHandlers(projectId: string, actions: Pick<ProjectActions, "reply" | "setStatus">): ThreadHandlers {
+/**
+ * The reply and resolve a thread card makes, refreshing the page once saved so every view of it agrees, and, while
+ * the project can be changed, the themes and refining the comments list offers, refining going to the conversation it
+ * starts.
+ */
+export function useThreadHandlers(
+  projectId: string,
+  actions: Pick<ProjectActions, "reply" | "setStatus"> & Partial<Pick<ProjectActions, "setTheme" | "refine">>,
+  changeable = true
+): ThreadHandlers {
   const router = useRouter();
+  const { setTheme, refine } = actions;
   return {
+    ...(changeable && setTheme !== undefined
+      ? {
+          theme: async (threadIds: string[], theme: string | null) => {
+            const result = await call(() => setTheme({ projectId, threadIds, theme }));
+            if (result.ok) {
+              router.refresh();
+            }
+            return result.ok ? null : result.error;
+          }
+        }
+      : {}),
+    ...(changeable && refine !== undefined
+      ? {
+          refine: async (threadIds: string[]) => {
+            const result = await call(() => refine({ projectId, threadIds }));
+            if (result.ok) {
+              router.push(`/assistant/${result.id}`);
+            }
+            return result.ok ? null : result.error;
+          }
+        }
+      : {}),
     reply: async (threadId, body) => {
       const result = await call(() => actions.reply({ projectId, threadId, body }));
       if (result.ok) {
@@ -76,7 +109,7 @@ export function ProjectPage({
   const owner = project.access === "owner";
   const archived = project.archivedAt !== null;
   const origin = useOrigin(givenOrigin);
-  const handlers = useThreadHandlers(project.id, actions);
+  const handlers = useThreadHandlers(project.id, actions, !archived);
   const tabs = TABS.filter((t) => t !== "settings" || owner);
 
   return (

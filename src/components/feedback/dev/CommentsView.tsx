@@ -1,14 +1,16 @@
 "use client";
 
+import Link from "next/link";
 import { useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { MentionPerson } from "@/components/feedback/MentionInput";
 import { CommentBody, STATUS_WORDS, ThreadCard } from "@/components/feedback/ThreadCard";
 import { Timestamp } from "@/components/time/Timestamp";
 import { describeElement } from "@/feedback/anchor-words";
+import { MAX_REFINE_THREADS, MAX_THEME } from "@/feedback/refinement";
 import type { FeedbackLinkView } from "@/feedback/store";
 import { filterThreads, marginOrder, NO_FILTER, type PageGroup, pageName, pagesOf, type ThreadFilter } from "@/feedback/team-views";
 import type { FeedbackThreadStatus, FeedbackThreadView } from "@/feedback/thread-store";
-import { FIELD, LINK, plural, reviewPath } from "./look";
+import { FIELD, LINK, PRIMARY, plural, reviewPath, SECONDARY } from "./look";
 import { type Highlight, SnapshotView } from "./SnapshotView";
 
 /**
@@ -24,6 +26,10 @@ export type CommentsMode = "list" | "page";
 export interface ThreadHandlers {
   reply: (threadId: string, body: string) => Promise<string | null>;
   status: (threadId: string, status: "open" | "resolved") => Promise<string | null>;
+  /** Gives threads a theme, or clears it with null; without it, the list lets nobody choose comments. */
+  theme?: (threadIds: string[], theme: string | null) => Promise<string | null>;
+  /** Starts refining threads with the Assistant and goes to the conversation; without it, refining is not offered. */
+  refine?: (threadIds: string[]) => Promise<string | null>;
 }
 
 const GUTTER = 28;
@@ -214,7 +220,14 @@ export function CommentsView({
             {threads.length === 0 ? "No comments yet. They appear here as reviewers make them." : "No comments match these filters."}
           </p>
         ) : mode === "list" ? (
-          <AllComments pages={pages} threads={narrowed} people={people} linkLabel={links.length > 1 ? linkLabel : null} onView={viewOnPage} />
+          <AllComments
+            pages={pages}
+            threads={narrowed}
+            people={people}
+            linkLabel={links.length > 1 ? linkLabel : null}
+            onView={viewOnPage}
+            handlers={handlers}
+          />
         ) : (
           <section aria-label={`Comments on ${pageName(page)}`} className="flex min-w-0 flex-1 flex-col gap-3">
             <div className="flex flex-wrap items-center gap-3 text-[13px]">
@@ -266,16 +279,59 @@ export function CommentsView({
   );
 }
 
+type GroupBy = "page" | "theme";
+
+interface CommentGroup {
+  key: string;
+  heading: string;
+  meta: string;
+  threads: FeedbackThreadView[];
+  /** The theme a theme's group is of, which can be refined as a whole; null for its comments with none, undefined for a page's. */
+  theme?: string | null;
+}
+
+const NO_THEME = "No theme";
+
+/** The threads under their pages, in the order the margin lays them out, or under their themes, those with none last. */
+function groupsOf(
+  groupBy: GroupBy,
+  pages: readonly PageGroup[],
+  threads: readonly FeedbackThreadView[],
+  linkLabel: ((linkId: string) => string) | null
+): CommentGroup[] {
+  if (groupBy === "page") {
+    return pages.map((page) => {
+      const { onPage, detached } = marginOrder(threads.filter((thread) => keyOf(thread) === keyOf(page)));
+      return {
+        key: keyOf(page),
+        heading: pageName(page),
+        meta: `${page.pageTitle === null ? "" : `${page.pagePath} · `}${linkLabel === null ? "" : `${linkLabel(page.linkId)} · `}${plural(page.threads, "comment")}`,
+        threads: [...onPage, ...detached]
+      };
+    });
+  }
+  const themes = [...new Set(threads.map((thread) => thread.theme))].sort((a, b) => (a === null ? 1 : b === null ? -1 : a < b ? -1 : a > b ? 1 : 0));
+  return themes.map((theme) => {
+    const mine = threads
+      .filter((thread) => thread.theme === theme)
+      .sort((a, b) => (a.pagePath < b.pagePath ? -1 : a.pagePath > b.pagePath ? 1 : a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
+    return { key: `theme ${theme ?? ""}`, heading: theme ?? NO_THEME, meta: plural(mine.length, "comment"), threads: mine, theme };
+  });
+}
+
 /**
- * Every comment the filters leave, under the page it is on, each as a short summary: who, when, its status, what it
- * is on and what it says, with the way to the page it was left on.
+ * Every comment the filters leave, under the page it is on or the theme the team gave it, each as a short summary:
+ * who, when, its status, what it is on and what it says, the Jira issues it went into, and the way to the page it was
+ * left on. With `handlers.theme`, comments can be chosen, and the chosen ones given a theme, resolved, or, with
+ * `handlers.refine`, refined with the Assistant into a Jira story.
  */
 function AllComments({
   pages,
   threads,
   people,
   linkLabel,
-  onView
+  onView,
+  handlers
 }: Readonly<{
   pages: readonly PageGroup[];
   threads: readonly FeedbackThreadView[];
@@ -283,25 +339,237 @@ function AllComments({
   /** Names a page's link, when the project has more than one for the page's to be told apart by. */
   linkLabel: ((linkId: string) => string) | null;
   onView: (thread: FeedbackThreadView) => void;
+  handlers: ThreadHandlers;
 }>) {
+  const ids = useId();
+  // Comments the team has already given themes are read, and refined, a theme at a time.
+  const [groupBy, setGroupBy] = useState<GroupBy>(() => (threads.some((thread) => thread.theme !== null) ? "theme" : "page"));
+  const [chosen, setChosen] = useState<ReadonlySet<string>>(new Set());
+  // What was typed into the theme box, for the choice it was typed for; a new choice shows its own theme again.
+  const [typed, setTyped] = useState<{ choice: string; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const choosable = handlers.theme !== undefined;
+  // Only what is still shown counts as chosen: a filter or a refresh can take a chosen thread out of the list.
+  const selected = threads.filter((thread) => chosen.has(thread.id));
+  const every = selected.length === threads.length && threads.length > 0;
+  const themes = [...new Set(threads.flatMap((thread) => (thread.theme === null ? [] : [thread.theme])))].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  const choice = selected.map((thread) => thread.id).join(" ");
+  const chosenThemes = new Set(selected.map((thread) => thread.theme));
+  // The theme every chosen comment already has, which the box shows; null when they have none, or different ones.
+  const shared = chosenThemes.size === 1 ? (selected[0]?.theme ?? null) : null;
+  const mixed = chosenThemes.size > 1;
+  const theme = typed !== null && typed.choice === choice ? typed.text : (shared ?? "");
+  const setTheme = (text: string) => setTyped({ choice, text });
+
+  function choose(id: string, on: boolean): void {
+    setChosen((current) => {
+      const next = new Set(current);
+      if (on) {
+        next.add(id);
+      } else {
+        next.delete(id);
+      }
+      return next;
+    });
+  }
+
+  async function run(work: () => Promise<string | null>, after?: () => void): Promise<void> {
+    setBusy(true);
+    setError(null);
+    const failure = await work();
+    setBusy(false);
+    if (failure === null) {
+      after?.();
+    } else {
+      setError(failure);
+    }
+  }
+
+  const chosenIds = () => selected.map((thread) => thread.id);
+  const resolveChosen = async (): Promise<string | null> => {
+    for (const thread of selected.filter((t) => t.status === "open")) {
+      const failure = await handlers.status(thread.id, "resolved");
+      if (failure !== null) {
+        return failure;
+      }
+    }
+    return null;
+  };
+
   return (
-    <div className="flex flex-col gap-5">
-      {pages.map((page) => {
-        const { onPage, detached } = marginOrder(threads.filter((thread) => keyOf(thread) === keyOf(page)));
-        const headingId = `page-${keyOf(page).replace(/[^a-zA-Z0-9-]/g, "-")}`;
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px]">
+        {choosable ? (
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={every}
+              ref={(box) => {
+                if (box !== null) {
+                  box.indeterminate = selected.length > 0 && !every;
+                }
+              }}
+              onChange={(event) => setChosen(event.target.checked ? new Set(threads.map((thread) => thread.id)) : new Set())}
+            />
+            Select all {threads.length} shown
+          </label>
+        ) : null}
+        <label className="flex items-center gap-2">
+          Group by
+          <select value={groupBy} onChange={(event) => setGroupBy(event.target.value as GroupBy)} className={FIELD}>
+            <option value="page">Page</option>
+            <option value="theme">Theme</option>
+          </select>
+        </label>
+      </div>
+
+      {selected.length === 0 && error !== null ? (
+        <p role="alert" className="text-[13px] text-asst-error">
+          {error}
+        </p>
+      ) : null}
+
+      {choosable && selected.length > 0 ? (
+        <section
+          aria-label="Chosen comments"
+          className="sticky top-0 z-10 flex flex-col gap-2 rounded-xl border border-asst-accent-line bg-asst-raised px-3 py-2.5 text-[13px] shadow-sm"
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-semibold">{plural(selected.length, "comment")} chosen</span>
+            <button type="button" className="rounded-md px-1.5 text-asst-accent underline hover:bg-asst-field" onClick={() => setChosen(new Set())}>
+              Clear
+            </button>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <label htmlFor={`${ids}-theme`} className="text-asst-muted">
+              Theme<span className="sr-only"> for the chosen comments</span>
+            </label>
+            <input
+              id={`${ids}-theme`}
+              list={`${ids}-themes`}
+              value={theme}
+              maxLength={MAX_THEME}
+              placeholder={mixed ? "Mixed themes: type one to give them all" : "Theme, such as Court fees"}
+              onChange={(event) => setTheme(event.target.value)}
+              className={`${FIELD} w-72`}
+            />
+            <datalist id={`${ids}-themes`}>
+              {themes.map((name) => (
+                <option key={name} value={name} />
+              ))}
+            </datalist>
+            <button
+              type="button"
+              className={SECONDARY}
+              disabled={busy || theme.trim() === "" || theme.trim() === shared}
+              onClick={() =>
+                void run(
+                  () => (handlers.theme as NonNullable<ThreadHandlers["theme"]>)(chosenIds(), theme),
+                  () => setTyped(null)
+                )
+              }
+            >
+              Set theme
+            </button>
+            <button
+              type="button"
+              className={SECONDARY}
+              disabled={busy || selected.every((thread) => thread.theme === null)}
+              onClick={() => void run(() => (handlers.theme as NonNullable<ThreadHandlers["theme"]>)(chosenIds(), null))}
+            >
+              Remove theme
+            </button>
+            <button
+              type="button"
+              className={SECONDARY}
+              disabled={busy || selected.every((thread) => thread.status !== "open")}
+              onClick={() => void run(resolveChosen)}
+            >
+              Resolve
+            </button>
+            {handlers.refine === undefined ? null : (
+              <button
+                type="button"
+                className={PRIMARY}
+                disabled={busy || selected.length > MAX_REFINE_THREADS}
+                aria-describedby={`${ids}-refine-hint`}
+                onClick={() => void run(() => (handlers.refine as NonNullable<ThreadHandlers["refine"]>)(chosenIds()))}
+              >
+                {busy ? "Working…" : "Refine with Assistant"}
+              </button>
+            )}
+          </div>
+          {handlers.refine === undefined ? null : (
+            <p id={`${ids}-refine-hint`} className="text-xs text-asst-muted">
+              {selected.length > MAX_REFINE_THREADS
+                ? `Choose at most ${MAX_REFINE_THREADS} comments to refine at once.`
+                : "Refine with Assistant starts a chat that works out the requirement behind each theme and drafts one Jira story per theme, with options, which you can edit and send to Jira. Your themes are kept as they are."}
+            </p>
+          )}
+          <p role="alert" className={`text-asst-error ${error === null ? "sr-only" : ""}`}>
+            {error ?? ""}
+          </p>
+        </section>
+      ) : null}
+
+      {groupsOf(groupBy, pages, threads, linkLabel).map((group) => {
+        const headingId = `group-${ids}-${group.key.replace(/[^a-zA-Z0-9-]/g, "-")}`;
         return (
-          <section key={keyOf(page)} aria-labelledby={headingId} className="flex flex-col gap-2">
-            <h3 id={headingId} className="flex flex-wrap items-baseline gap-x-2 text-sm font-semibold">
-              <span className="break-words">{pageName(page)}</span>
-              <span className="text-xs font-normal text-asst-faint">
-                {page.pageTitle === null ? "" : `${page.pagePath} · `}
-                {linkLabel === null ? "" : `${linkLabel(page.linkId)} · `}
-                {plural(page.threads, "comment")}
-              </span>
-            </h3>
+          <section key={group.key} aria-labelledby={headingId} className="flex flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              {choosable ? (
+                <input
+                  type="checkbox"
+                  aria-label={`Choose all ${plural(group.threads.length, "comment")} in ${group.heading}`}
+                  checked={group.threads.every((thread) => chosen.has(thread.id))}
+                  ref={(box) => {
+                    if (box !== null) {
+                      const some = group.threads.some((thread) => chosen.has(thread.id));
+                      box.indeterminate = some && !group.threads.every((thread) => chosen.has(thread.id));
+                    }
+                  }}
+                  onChange={(event) =>
+                    setChosen((current) => {
+                      const next = new Set(current);
+                      for (const thread of group.threads) {
+                        if (event.target.checked) {
+                          next.add(thread.id);
+                        } else {
+                          next.delete(thread.id);
+                        }
+                      }
+                      return next;
+                    })
+                  }
+                />
+              ) : null}
+              <h3 id={headingId} className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 text-sm font-semibold">
+                <span className="break-words">{group.heading}</span>
+                <span className="text-xs font-normal text-asst-faint">{group.meta}</span>
+              </h3>
+              {typeof group.theme === "string" && handlers.refine !== undefined ? (
+                <button
+                  type="button"
+                  className={SECONDARY}
+                  aria-label={`Refine this theme: ${group.heading}`}
+                  disabled={busy || group.threads.length > MAX_REFINE_THREADS}
+                  onClick={() => void run(() => (handlers.refine as NonNullable<ThreadHandlers["refine"]>)(group.threads.map((thread) => thread.id)))}
+                >
+                  Refine this theme
+                </button>
+              ) : null}
+            </div>
             <ol className="flex flex-col gap-2">
-              {[...onPage, ...detached].map((thread) => (
-                <ThreadSummary key={thread.id} thread={thread} people={people} onView={() => onView(thread)} />
+              {group.threads.map((thread) => (
+                <ThreadSummary
+                  key={thread.id}
+                  thread={thread}
+                  people={people}
+                  onView={() => onView(thread)}
+                  showPage={groupBy === "theme"}
+                  choice={choosable ? { chosen: chosen.has(thread.id), onChange: (on) => choose(thread.id, on) } : null}
+                />
               ))}
             </ol>
           </section>
@@ -311,41 +579,82 @@ function AllComments({
   );
 }
 
-function ThreadSummary({ thread, people, onView }: Readonly<{ thread: FeedbackThreadView; people: readonly MentionPerson[]; onView: () => void }>) {
+function ThreadSummary({
+  thread,
+  people,
+  onView,
+  showPage,
+  choice
+}: Readonly<{
+  thread: FeedbackThreadView;
+  people: readonly MentionPerson[];
+  onView: () => void;
+  /** Says which page it is on, as a list grouped by theme has to, where its theme is the heading it is under. */
+  showPage: boolean;
+  /** Whether it is chosen, and the way to choose it; null where nothing can be. */
+  choice: { chosen: boolean; onChange: (on: boolean) => void } | null;
+}>) {
   const [first, ...replies] = thread.comments;
   const latest = replies.at(-1);
   return (
     <li>
       <article
         aria-label={`Comment by ${thread.author.name}`}
-        className={`flex flex-col gap-1.5 rounded-xl border border-asst-line bg-asst-raised px-3 py-2.5 ${thread.status === "open" ? "" : "opacity-80"}`}
+        className={`flex gap-3 rounded-xl border bg-asst-raised px-3 py-2.5 ${choice?.chosen ? "border-asst-accent-line" : "border-asst-line"} ${thread.status === "open" ? "" : "opacity-80"}`}
       >
-        <p className="flex flex-wrap items-center gap-x-2 text-xs text-asst-faint">
-          <span className="text-sm font-semibold text-asst-text">{thread.author.name}</span>
-          {first === undefined ? null : <Timestamp iso={first.createdAt} />}
-          <span
-            className={`rounded-full px-1.5 py-px ${thread.status === "open" ? "bg-asst-accent-soft/20 text-asst-accent" : "bg-asst-field text-asst-muted"}`}
-          >
-            {STATUS_WORDS[thread.status]}
-          </span>
-        </p>
-        <p className="text-xs text-asst-muted">On {describeElement(thread.anchor)}</p>
-        {first === undefined ? null : <CommentBody body={first.body} mentions={first.mentions} people={people} />}
-        {latest === undefined ? null : (
-          <p className="border-l-2 border-asst-line pl-2 text-xs text-asst-muted">
-            {plural(replies.length, "reply", "replies")} · latest from <span className="font-semibold">{latest.author.name}</span>:{" "}
-            {latest.body.length > 120 ? `${latest.body.slice(0, 120)}…` : latest.body}
-          </p>
+        {choice === null ? null : (
+          <input
+            type="checkbox"
+            className="mt-1 shrink-0"
+            checked={choice.chosen}
+            aria-label={`Choose the comment by ${thread.author.name}${first === undefined ? "" : `: ${first.body.slice(0, 60)}`}`}
+            onChange={(event) => choice.onChange(event.target.checked)}
+          />
         )}
-        <div>
-          <button
-            type="button"
-            onClick={onView}
-            aria-label="View on page and reply"
-            className="rounded-md px-1.5 py-0.5 text-[13px] text-asst-accent underline hover:bg-asst-field"
-          >
-            View on page
-          </button>
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+          <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-asst-faint">
+            <span className="text-sm font-semibold text-asst-text">{thread.author.name}</span>
+            {first === undefined ? null : <Timestamp iso={first.createdAt} />}
+            <span
+              className={`rounded-full px-1.5 py-px ${thread.status === "open" ? "bg-asst-accent-soft/20 text-asst-accent" : "bg-asst-field text-asst-muted"}`}
+            >
+              {STATUS_WORDS[thread.status]}
+            </span>
+            {thread.theme === null || showPage ? null : (
+              <span className="rounded-full border border-asst-strong px-1.5 py-px text-asst-muted">Theme: {thread.theme}</span>
+            )}
+            {thread.jiraKeys.map((key) => (
+              <span key={key} className="rounded-full bg-asst-field px-1.5 py-px font-semibold text-asst-text">
+                Jira {key}
+              </span>
+            ))}
+          </p>
+          <p className="text-xs text-asst-muted">
+            On {showPage ? `${pageName(thread)}, ` : ""}
+            {describeElement(thread.anchor)}
+          </p>
+          {first === undefined ? null : <CommentBody body={first.body} mentions={first.mentions} people={people} />}
+          {latest === undefined ? null : (
+            <p className="border-l-2 border-asst-line pl-2 text-xs text-asst-muted">
+              {plural(replies.length, "reply", "replies")} · latest from <span className="font-semibold">{latest.author.name}</span>:{" "}
+              {latest.body.length > 120 ? `${latest.body.slice(0, 120)}…` : latest.body}
+            </p>
+          )}
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={onView}
+              aria-label="View on page and reply"
+              className="rounded-md px-1.5 py-0.5 text-[13px] text-asst-accent underline hover:bg-asst-field"
+            >
+              View on page
+            </button>
+            {thread.refinedIn === null ? null : (
+              <Link href={`/assistant/${thread.refinedIn}`} className={`${LINK} text-[13px]`}>
+                Refined in your chat
+              </Link>
+            )}
+          </div>
         </div>
       </article>
     </li>

@@ -2,9 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { HttpError, parse } from "@/agent-api/http";
+import { startConversation } from "@/app/_actions/assistant";
 import { markMentionsSeen } from "@/feedback/mention-store";
 import { markProjectSeen, pinProject } from "@/feedback/nav-store";
 import { type ProbeOutcome, probeTarget } from "@/feedback/probe";
+import { checkTheme, MAX_THEME, refinementRequest } from "@/feedback/refinement";
+import { recordRefinement, refinableThreads, setThreadsTheme } from "@/feedback/refinement-store";
 import {
   createFeedbackProjectBody,
   type FeedbackLinkInput,
@@ -21,13 +24,14 @@ import {
   type FeedbackLinkView,
   type FeedbackPerson,
   type FeedbackProjectView,
+  getProject,
   revokeLink,
   rotateLink,
   setMembers,
   updateSettings
 } from "@/feedback/store";
 import { checkTargetUrl, publicAddresses } from "@/feedback/targets";
-import { type FeedbackCommentView, type FeedbackThreadView, patchThread, replyToThread } from "@/feedback/thread-store";
+import { type FeedbackCommentView, type FeedbackThreadView, listThreads, patchThread, replyToThread } from "@/feedback/thread-store";
 import { prisma } from "@/store/prisma";
 import { requireViewer } from "@/viewer/current";
 import { type ActionResult, runAction, text } from "@/web/action";
@@ -236,5 +240,58 @@ export async function markFeedbackMentionsSeen(input: { commentIds: unknown }): 
       revalidatePath("/assistant", "layout");
     }
     return { ok: true };
+  });
+}
+
+/** The strings of an argument that should be a list of them; anything else in it, or anything else at all, is dropped. */
+function strings(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+/** Gives the team's chosen threads a theme, or clears it; a reviewer's link reaches none of this. */
+export async function setFeedbackTheme(input: { projectId: unknown; threadIds: unknown; theme: unknown }): Promise<ActionResult<{ changed: number }>> {
+  return await runAction<{ changed: number }>("set feedback theme", async () => {
+    if (!feedbackEnabled()) {
+      return OFF;
+    }
+    const viewer = await requireViewer();
+    const theme = checkTheme(input.theme);
+    if (theme === undefined) {
+      return { ok: false, error: `Keep the theme to ${MAX_THEME} characters` };
+    }
+    const changed = await setThreadsTheme(prisma, viewer.oid, text(input.projectId), strings(input.threadIds), theme);
+    revalidatePath(PAGES, "layout");
+    return { ok: true, changed };
+  });
+}
+
+/**
+ * Starts a conversation that refines the team's chosen threads into a Jira story with options, and records that it
+ * does, so the threads show the issue once it is exported. The conversation is started as any is, so it is refused
+ * the same way while the Workspace is off or the person has accounts still to connect.
+ */
+export async function refineFeedback(input: { projectId: unknown; threadIds: unknown }): Promise<ActionResult<{ id: string }>> {
+  return await runAction<{ id: string }>("refine feedback", async () => {
+    if (!feedbackEnabled()) {
+      return OFF;
+    }
+    const viewer = await requireViewer();
+    const projectId = text(input.projectId);
+    const ids = await refinableThreads(prisma, viewer.oid, projectId, strings(input.threadIds));
+    const [project, all] = await Promise.all([getProject(prisma, viewer.oid, projectId), listThreads(prisma, viewer.oid, { projectId })]);
+    const labels = new Map(project.links.map((link) => [link.id, link.label]));
+    const request = refinementRequest({
+      projectName: project.name,
+      threads: all.filter((thread) => ids.includes(thread.id)),
+      linkLabel: labels.size > 1 ? (linkId) => labels.get(linkId) ?? "a removed link" : null,
+      now: new Date()
+    });
+    const started = await startConversation(request);
+    if (!started.ok) {
+      return started;
+    }
+    await recordRefinement(prisma, viewer.oid, projectId, started.id, ids);
+    revalidatePath(PAGES, "layout");
+    return { ok: true, id: started.id };
   });
 }

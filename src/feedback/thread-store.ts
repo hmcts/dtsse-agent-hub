@@ -35,6 +35,12 @@ export interface FeedbackThreadView {
   pagePath: string;
   /** The page's title when the thread was raised, which is what people know a page by; null when it had none. */
   pageTitle: string | null;
+  /** What the team says the thread is about; null is none. */
+  theme: string | null;
+  /** The Jira issues exported from conversations the thread was refined in, oldest first, each once. */
+  jiraKeys: string[];
+  /** The viewer's own conversation the thread was last refined in, which only they can open; null for none. */
+  refinedIn: string | null;
   anchor: FeedbackAnchor;
   status: FeedbackThreadStatus;
   author: FeedbackAuthor;
@@ -69,6 +75,7 @@ const THREAD_COLUMNS = {
   linkId: true,
   pagePath: true,
   pageTitle: true,
+  theme: true,
   anchor: true,
   status: true,
   author: AUTHOR,
@@ -83,6 +90,10 @@ const THREAD_COLUMNS = {
   comments: {
     select: { id: true, author: AUTHOR, body: true, createdAt: true, mentions: { select: { personOid: true }, orderBy: { personOid: "asc" } } },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }]
+  },
+  refinements: {
+    select: { refinement: { select: { conversationId: true, ownerOid: true, jiraKeys: true, createdAt: true } } },
+    orderBy: [{ refinement: { createdAt: "asc" } }, { refinementId: "asc" }]
   }
 } as const satisfies Prisma.FeedbackThreadSelect;
 
@@ -99,9 +110,13 @@ function commentView(row: CommentRow): FeedbackCommentView {
   };
 }
 
-function threadView(row: ThreadRow): FeedbackThreadView {
+function threadView(row: ThreadRow, viewerOid: string): FeedbackThreadView {
+  const { refinements, ...rest } = row;
+  const done = refinements.map((link) => link.refinement);
   return {
-    ...row,
+    ...rest,
+    jiraKeys: [...new Set(done.flatMap((refinement) => refinement.jiraKeys))],
+    refinedIn: done.filter((refinement) => refinement.ownerOid === viewerOid).at(-1)?.conversationId ?? null,
     anchor: row.anchor as FeedbackAnchor,
     status: row.status as FeedbackThreadStatus,
     resolvedAt: row.resolvedAt?.toISOString() ?? null,
@@ -125,13 +140,13 @@ export async function listThreads(db: Database, viewerOid: string, scope: Feedba
     return [];
   }
   const rows = await db.feedbackThread.findMany({ where, select: THREAD_COLUMNS, orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: MAX_THREADS_LISTED });
-  return rows.map(threadView);
+  return rows.map((row) => threadView(row, viewerOid));
 }
 
 /** One thread the scope reaches, or the 404 any other is reported as. */
 export async function getThread(db: Database, viewerOid: string, scope: FeedbackScope, threadId: string): Promise<FeedbackThreadView> {
   const resolved = await resolveScope(db, viewerOid, scope);
-  return threadView(await threadIn(db, resolved, threadId));
+  return threadView(await threadIn(db, resolved, threadId), viewerOid);
 }
 
 async function threadIn(db: Database, scope: ResolvedScope, threadId: string): Promise<ThreadRow> {
@@ -221,7 +236,7 @@ export async function createThread(
     await writeComment(tx, id, viewerOid, input.body, named, now);
     await notify(tx, { type: "feedback", project_id: scope.projectId, link_id: linkId });
   });
-  return { thread: threadView(await threadIn(prisma, scope, id)), snapshotPath: snapshot };
+  return { thread: threadView(await threadIn(prisma, scope, id), viewerOid), snapshotPath: snapshot };
 }
 
 /** A reply on a thread the scope reaches, which moves the thread's `updated_at` on. */
@@ -278,5 +293,5 @@ export async function patchThread(
     await tx.feedbackThread.update({ where: { id: threadId }, data });
     await notify(tx, { type: "feedback", project_id: thread.projectId, link_id: thread.linkId });
   });
-  return threadView(await threadIn(prisma, resolved, threadId));
+  return threadView(await threadIn(prisma, resolved, threadId), viewerOid);
 }

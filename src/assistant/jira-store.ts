@@ -1,4 +1,5 @@
 import { HttpError } from "../agent-api/http.ts";
+import { recordRefinementJira } from "../feedback/refinement-store.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { exportableDocument } from "./artefact-store.ts";
 import { announce, type ConversationRow } from "./conversation-row.ts";
@@ -96,6 +97,10 @@ export async function recordJiraExport(
     const { count } = await tx.assistantDocument.updateMany({ where, data });
     if (count > 0) {
       await announce(tx, conversation);
+      // A conversation started to refine prototype feedback shows its issue on the threads it refined.
+      if ("key" in result) {
+        await recordRefinementJira(tx, conversation.id, result.key);
+      }
     }
   });
 }

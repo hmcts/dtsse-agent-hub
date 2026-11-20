@@ -197,6 +197,8 @@ describe("migrate", () => {
       "feedback_project_person",
       "feedback_recording",
       "feedback_recording_segment",
+      "feedback_refinement",
+      "feedback_refinement_thread",
       "feedback_thread",
       "message",
       "message_tag",

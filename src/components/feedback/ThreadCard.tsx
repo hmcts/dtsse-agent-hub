@@ -7,7 +7,7 @@ import { MentionInput, type MentionPerson } from "./MentionInput";
 
 /**
  * One comment thread, as a card in the review shell's panel and the team's comments view: who raised it and when,
- * every comment with the people it names picked out, a reply box and Resolve or Reopen. Focusing the card (choosing
+ * the Jira issues it went into, every comment with the people it names picked out, a reply box and Resolve or Reopen. Focusing the card (choosing
  * its heading, or any focus inside it) tells the page, which points at the thread's element.
  */
 
@@ -140,6 +140,7 @@ export function ThreadCard({
             {first === undefined ? null : <Timestamp iso={first.createdAt} />}
             <span> · {STATUS_WORDS[thread.status]}</span>
             {resolved && thread.resolvedBy !== null ? <span> by {thread.resolvedBy.name}</span> : null}
+            {thread.jiraKeys.length === 0 ? null : <span> · In Jira {thread.jiraKeys.join(", ")}</span>}
           </p>
         </div>
       </header>
