@@ -45,6 +45,7 @@ export function thread(id: string, more: Partial<FeedbackThreadView> = {}): Feed
     projectId: "p1",
     linkId: "l1",
     pagePath: "/start",
+    pageTitle: null,
     anchor: { selector: `#${id}`, text: `text of ${id}`, tag: "p", rect: { x: 10, y: 100, width: 200, height: 20 }, viewport: { width: 1000, height: 800 } },
     status: "open",
     author,

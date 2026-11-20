@@ -37,7 +37,8 @@ export function mentionRuns(body: string, names: readonly string[]): { text: str
   return runs;
 }
 
-function CommentBody({ body, mentions, people }: { body: string; mentions: readonly string[]; people: readonly MentionPerson[] }) {
+/** A comment's text with the people it names picked out. */
+export function CommentBody({ body, mentions, people }: { body: string; mentions: readonly string[]; people: readonly MentionPerson[] }) {
   const names = people.filter((person) => mentions.includes(person.oid)).map((person) => person.name.trim());
   return (
     <p className="whitespace-pre-wrap break-words text-sm text-asst-body">
@@ -50,7 +51,7 @@ function CommentBody({ body, mentions, people }: { body: string; mentions: reado
   );
 }
 
-const STATUS_WORDS: Record<FeedbackThreadView["status"], string> = { open: "Open", resolved: "Resolved", detached: "Not found on the page" };
+export const STATUS_WORDS: Record<FeedbackThreadView["status"], string> = { open: "Open", resolved: "Resolved", detached: "Not found on the page" };
 
 export function ThreadCard({
   thread,
@@ -183,7 +184,7 @@ export function ThreadCard({
           type="button"
           disabled={pending || reply.trim() === ""}
           onClick={sendReply}
-          className="rounded-lg bg-asst-accent px-3 py-1 text-sm font-semibold text-asst-ink hover:bg-asst-accent-hover disabled:opacity-60"
+          className="rounded-lg bg-asst-accent px-3 py-1 text-sm font-semibold text-asst-ink hover:bg-asst-accent-hover disabled:cursor-not-allowed disabled:bg-asst-field disabled:text-asst-faint"
         >
           Reply
         </button>

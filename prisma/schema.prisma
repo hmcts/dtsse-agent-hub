@@ -1254,6 +1254,8 @@ model FeedbackThread {
   linkId           String    @map("link_id") @db.Uuid
   authorOid        String    @map("author_oid")
   pagePath         String    @map("page_path")
+  /// The page's document title when the thread was raised; null when the widget sent none.
+  pageTitle        String?   @map("page_title")
   /// {selector, text, tag, rect, viewport}, checked by src/feedback/schemas.ts.
   anchor           Json
   snapshotBlob     String?   @map("snapshot_blob")

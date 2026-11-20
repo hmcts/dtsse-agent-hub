@@ -9,6 +9,7 @@ import {
   feedbackReplyBody,
   feedbackSettingsBody,
   feedbackUploadBody,
+  MAX_PAGE_TITLE,
   pagePath,
   patchFeedbackThreadBody,
   startFeedbackRecordingBody,
@@ -142,12 +143,24 @@ describe("createFeedbackThreadBody", () => {
   it("should parse a thread with no snapshot or recording", () => {
     expect(createFeedbackThreadBody.parse({ page_path: "/start", anchor: ANCHOR, body: " Hard to find " })).toEqual({
       pagePath: "/start",
+      pageTitle: null,
       anchor: ANCHOR,
       body: "Hard to find",
       snapshot: false,
       recordingId: null,
       offsetMs: null
     });
+  });
+
+  it("should keep the page's title with its whitespace run together", () => {
+    const parsed = createFeedbackThreadBody.parse({ page_path: "/", page_title: "  What is the\n address?  – GOV.UK ", anchor: ANCHOR, body: "x" });
+
+    expect(parsed.pageTitle).toBe("What is the address? – GOV.UK");
+  });
+
+  it("should treat a blank page title as none, and cut a long one", () => {
+    expect(createFeedbackThreadBody.parse({ page_path: "/", page_title: "   ", anchor: ANCHOR, body: "x" }).pageTitle).toBeNull();
+    expect(createFeedbackThreadBody.parse({ page_path: "/", page_title: "t".repeat(500), anchor: ANCHOR, body: "x" }).pageTitle).toHaveLength(MAX_PAGE_TITLE);
   });
 
   it("should keep the recording and its offset when both are given", () => {

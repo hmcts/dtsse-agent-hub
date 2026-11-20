@@ -127,6 +127,7 @@ function thread(overrides: Partial<FeedbackThreadView> = {}): FeedbackThreadView
     projectId: "p",
     linkId: "l",
     pagePath: "/start",
+    pageTitle: null,
     anchor: { selector: "#a", text: "", tag: "a", rect: { x: 0, y: 0, width: 1, height: 1 }, viewport: { width: 1, height: 1 } },
     status: "open",
     author: { oid: "o2", name: "Bob Builder" },

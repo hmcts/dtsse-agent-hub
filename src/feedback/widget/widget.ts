@@ -90,7 +90,7 @@ export function startWidget(view: Window, config: WidgetConfig, record: RecordFu
         stopPicking = startPicking(view, layer, {
           onPick: (element) => {
             stopPicking = undefined;
-            post({ type: "picked", path: path(), anchor: anchorFor(element, view), snapshot: recorder.snapshot(config.maskInputs) });
+            post({ type: "picked", path: path(), title: document.title, anchor: anchorFor(element, view), snapshot: recorder.snapshot(config.maskInputs) });
           },
           onCancel: () => {
             stopPicking = undefined;

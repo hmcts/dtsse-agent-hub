@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
 import type { ProbeOutcome } from "@/feedback/probe";
 import type { FeedbackLinkView, FeedbackPerson, FeedbackProjectView } from "@/feedback/store";
-import { durationText, recentActivity, reviewersOf, reviewerTimeline, threadCounts } from "@/feedback/team-views";
+import { durationText, pageName, recentActivity, reviewersOf, reviewerTimeline, threadCounts } from "@/feedback/team-views";
 import type { FeedbackCommentView, FeedbackThreadView } from "@/feedback/thread-store";
 import type { ActionResult } from "@/web/action";
 import type { FeedbackProjectPageData, FeedbackRecordingRow } from "@/web/feedback-data";
@@ -15,7 +15,7 @@ import { CopyField, call, PeoplePicker, type PickedPerson, useOrigin } from "./p
 
 /**
  * One feedback project as its team sees it, in tabs: an overview with the share links, the comments laid out on
- * their pages, the recordings, the people, and the settings, which only the owner is shown. The tab is in the URL
+ * their pages (in one list, or page by page), the recordings, the people, and the settings, which only the owner is shown. The tab is in the URL
  * (`?tab=`), so a link can open any of them.
  */
 
@@ -146,11 +146,11 @@ function Overview({ data, origin, actions, owner }: Readonly<{ data: FeedbackPro
                 <span>
                   <strong className="font-semibold">{item.who}</strong>{" "}
                   {item.kind === "thread"
-                    ? `commented on ${item.pagePath}: “${item.text.slice(0, 120)}”`
+                    ? `commented on ${pageName(item)}: “${item.text.slice(0, 120)}”`
                     : item.kind === "reply"
-                      ? `replied on ${item.pagePath}: “${item.text.slice(0, 120)}”`
+                      ? `replied on ${pageName(item)}: “${item.text.slice(0, 120)}”`
                       : item.kind === "resolved"
-                        ? `resolved a comment on ${item.pagePath}`
+                        ? `resolved a comment on ${pageName(item)}`
                         : item.status === "ready"
                           ? `recorded ${durationText(item.durationMs)}`
                           : "started a recording"}
@@ -353,7 +353,7 @@ function People({ data, actions, owner }: Readonly<{ data: FeedbackProjectPageDa
                     <time dateTime={item.at} className="text-asst-faint">
                       {when(item.at)}
                     </time>
-                    <span>{item.thread.pagePath}</span>
+                    <span>{pageName(item.thread)}</span>
                     <Badge status={item.thread.status} />
                   </span>
                   <span className="text-asst-body">{item.thread.comments.find((comment) => comment.author.oid === chosen.oid)?.body}</span>

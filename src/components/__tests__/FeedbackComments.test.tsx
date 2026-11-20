@@ -79,7 +79,7 @@ function marginNames(): string[] {
 describe("CommentsView", () => {
   it("should lay a page's cards down the margin in the order their elements are down the page", async () => {
     const threads = [thread("low", { anchor: at(700) }), thread("top", { anchor: at(20), author: BEN }), thread("mid", { anchor: at(300) })];
-    render(<CommentsView projectId="p1" threads={threads} links={project().links} people={[ANN, BEN]} handlers={handlers} />);
+    render(<CommentsView projectId="p1" threads={threads} links={project().links} people={[ANN, BEN]} handlers={handlers} initialMode="page" />);
 
     expect(marginNames()).toEqual(["Comment 1: Ben Reviewer", "Comment 2: Ann Reviewer", "Comment 3: Ann Reviewer"]);
     await waitFor(() => expect(replayed.built).toHaveLength(1));
@@ -87,14 +87,14 @@ describe("CommentsView", () => {
 
   it("should list a page's detached threads apart, under the others", () => {
     const threads = [thread("here"), thread("gone", { status: "detached" })];
-    render(<CommentsView projectId="p1" threads={threads} links={project().links} people={[ANN]} handlers={handlers} />);
+    render(<CommentsView projectId="p1" threads={threads} links={project().links} people={[ANN]} handlers={handlers} initialMode="page" />);
 
     expect(within(screen.getByRole("list", { name: "Comments no longer on the page" })).getAllByRole("article")).toHaveLength(1);
   });
 
   it("should list the pages with comments, and show the chosen one's threads", async () => {
     const threads = [thread("a"), thread("b", { pagePath: "/details" }), thread("c", { pagePath: "/details" })];
-    render(<CommentsView projectId="p1" threads={threads} links={project().links} people={[ANN]} handlers={handlers} />);
+    render(<CommentsView projectId="p1" threads={threads} links={project().links} people={[ANN]} handlers={handlers} initialMode="page" />);
     const pages = within(screen.getByRole("navigation", { name: "Filter comments" }));
 
     expect(pages.getAllByRole("button").map((button) => button.textContent)).toEqual(["/details2 comments", "/start1 comment"]);
@@ -106,7 +106,7 @@ describe("CommentsView", () => {
 
   it("should narrow the threads by reviewer, status and link, and say when none match", () => {
     const threads = [thread("a"), thread("b", { author: BEN, status: "resolved" })];
-    render(<CommentsView projectId="p1" threads={threads} links={project().links} people={[ANN, BEN]} handlers={handlers} />);
+    render(<CommentsView projectId="p1" threads={threads} links={project().links} people={[ANN, BEN]} handlers={handlers} initialMode="page" />);
 
     fireEvent.change(screen.getByLabelText("Reviewer"), { target: { value: "ben" } });
     expect(marginNames()).toEqual(["Comment 1: Ben Reviewer"]);
@@ -126,7 +126,7 @@ describe("CommentsView", () => {
   it("should show the chosen card's own snapshot and mark it as the focused one", async () => {
     replayed.html = '<p id="first">text of first</p><p id="second">text of second</p>';
     const threads = [thread("first", { anchor: { ...at(10), selector: "#first" } }), thread("second", { anchor: { ...at(90), selector: "#second" } })];
-    render(<CommentsView projectId="p1" threads={threads} links={project().links} people={[ANN]} handlers={handlers} />);
+    render(<CommentsView projectId="p1" threads={threads} links={project().links} people={[ANN]} handlers={handlers} initialMode="page" />);
     await waitFor(() => expect(replayed.built).toHaveLength(1));
 
     fireEvent.click(within(screen.getAllByRole("article")[1] as HTMLElement).getByRole("button", { name: /^Comment 2:/ }));
@@ -134,6 +134,81 @@ describe("CommentsView", () => {
     await waitFor(() => expect(replayed.built).toHaveLength(2));
     expect(replayed.built[0]?.destroyed).toBe(true);
     expect(fetch).toHaveBeenCalledWith("/api/ui/feedback/projects/p1/threads/second/snapshot");
+  });
+});
+
+describe("CommentsView's list of all comments", () => {
+  const linkAnchor = { ...at(40), tag: "a", text: "Start now" };
+
+  it("should show every comment at first, under the title of the page it is on", () => {
+    const threads = [
+      thread("a", { pageTitle: "Make a claim", anchor: linkAnchor }),
+      thread("b", { pagePath: "/details", pageTitle: null }),
+      thread("c", { pagePath: "/details", pageTitle: null, status: "resolved" })
+    ];
+    render(<CommentsView projectId="p1" threads={threads} links={project().links} people={[ANN]} handlers={handlers} />);
+
+    expect(screen.getByRole("button", { name: "All comments" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("region", { name: /^\/details/ })).toBeTruthy();
+    const start = within(screen.getByRole("region", { name: /^Make a claim/ }));
+    expect(start.getByText(/\/start · 1 comment/)).toBeTruthy();
+    expect(start.getByText("On the “Start now” link")).toBeTruthy();
+    expect(start.getByText("Comment a")).toBeTruthy();
+    expect(screen.getAllByRole("article", { name: /^Comment by/ })).toHaveLength(3);
+    expect(within(screen.getByRole("region", { name: /^\/details/ })).getByText("Resolved")).toBeTruthy();
+    expect(within(screen.getByRole("navigation", { name: "Filter comments" })).queryByText("Pages")).toBeNull();
+  });
+
+  it("should pick out the people a comment names, and sum up its replies", () => {
+    const at10 = "2026-11-10T10:00:00.000Z";
+    const threads = [
+      thread("a", {
+        comments: [
+          { id: "c1", author: ANN, body: "Ask @Ben Reviewer about this", createdAt: at10, mentions: ["ben"] },
+          { id: "c2", author: BEN, body: "Looking now", createdAt: at10, mentions: [] },
+          { id: "c3", author: BEN, body: "x".repeat(130), createdAt: at10, mentions: [] }
+        ]
+      })
+    ];
+    render(<CommentsView projectId="p1" threads={threads} links={project().links} people={[ANN, BEN]} handlers={handlers} />);
+
+    expect(screen.getByText("@Ben Reviewer").tagName).toBe("STRONG");
+    expect(screen.getByText(/^2 replies · latest from/).textContent).toContain(`${"x".repeat(120)}…`);
+  });
+
+  it("should open a comment on its page, as the one chosen, from View on page", async () => {
+    const threads = [thread("a"), thread("b", { pagePath: "/details", pageTitle: "Your details", author: BEN })];
+    render(<CommentsView projectId="p1" threads={threads} links={project().links} people={[ANN, BEN]} handlers={handlers} />);
+
+    const details = within(screen.getByRole("region", { name: /^Your details/ }));
+    fireEvent.click(details.getByRole("button", { name: "View on page and reply" }));
+
+    expect(screen.getByRole("button", { name: "Page by page" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("region", { name: "Comments on Your details" })).toBeTruthy();
+    expect(marginNames()).toEqual(["Comment 1: Ben Reviewer"]);
+    expect(
+      within(screen.getByRole("navigation", { name: "Filter comments" }))
+        .getByRole("button", { name: /Your details/ })
+        .getAttribute("aria-current")
+    ).toBe("page");
+    await waitFor(() => expect(replayed.built).toHaveLength(1));
+  });
+
+  it("should name each page's link when the project has more than one", () => {
+    const two = project({
+      links: [...project().links, { ...(project().links[0] as (typeof project.prototype)["links"][number]), id: "l2", label: "Round 2", token: "tok-two" }]
+    } as never).links;
+    render(<CommentsView projectId="p1" threads={[thread("a", { linkId: "l2" })]} links={two} people={[ANN]} handlers={handlers} />);
+
+    expect(screen.getByText(/Round 2 · 1 comment/)).toBeTruthy();
+  });
+
+  it("should go back to the list from Page by page", () => {
+    render(<CommentsView projectId="p1" threads={[thread("a")]} links={project().links} people={[ANN]} handlers={handlers} initialMode="page" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "All comments" }));
+
+    expect(screen.getAllByRole("article", { name: /^Comment by/ })).toHaveLength(1);
   });
 });
 

@@ -58,7 +58,7 @@ async function project(memberOids: string[] = [BOB.oid]) {
 }
 
 function thread(body = "Hard to find", extra: { snapshot?: boolean; recordingId?: string | null; offsetMs?: number | null } = {}) {
-  return { pagePath: "/start", anchor: ANCHOR, body, snapshot: false, recordingId: null, offsetMs: null, ...extra };
+  return { pagePath: "/start", pageTitle: "Start – Claims", anchor: ANCHOR, body, snapshot: false, recordingId: null, offsetMs: null, ...extra };
 }
 
 async function refusal(work: Promise<unknown>): Promise<number> {
@@ -207,6 +207,7 @@ describe("feedback threads", () => {
     expect(created?.thread).toMatchObject({
       linkId: link.id,
       pagePath: "/start",
+      pageTitle: "Start – Claims",
       anchor: ANCHOR,
       status: "open",
       author: { oid: CAROL.oid, name: CAROL.name },

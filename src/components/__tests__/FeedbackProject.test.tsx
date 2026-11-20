@@ -339,6 +339,7 @@ describe("ProjectPage", () => {
   it("should reply to and resolve a thread on the comments tab, refreshing once each is saved", async () => {
     const act$ = actions();
     render(<ProjectPage data={pageData({ threads: [thread("t1")] })} tab="comments" actions={act$} origin="https://hub.example.com" />);
+    fireEvent.click(screen.getByRole("button", { name: "View on page and reply" }));
 
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Resolve" })));
     expect(act$.setStatus).toHaveBeenCalledWith({ projectId: "p1", threadId: "t1", status: "resolved" });
@@ -352,6 +353,7 @@ describe("ProjectPage", () => {
   it("should send a reply through the reply action", async () => {
     const act$ = actions();
     render(<ProjectPage data={pageData({ threads: [thread("t1")] })} tab="comments" actions={act$} origin="https://hub.example.com" />);
+    fireEvent.click(screen.getByRole("button", { name: "View on page and reply" }));
 
     fireEvent.change(screen.getByRole("combobox", { name: /Reply to/ }), { target: { value: "Thanks" } });
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Reply" })));

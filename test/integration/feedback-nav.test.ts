@@ -46,7 +46,7 @@ async function project(name = "Claims prototype", now = T0) {
 }
 
 function thread(body: string) {
-  return { pagePath: "/start", anchor: ANCHOR, body, snapshot: false, recordingId: null, offsetMs: null };
+  return { pagePath: "/start", pageTitle: null, anchor: ANCHOR, body, snapshot: false, recordingId: null, offsetMs: null };
 }
 
 async function refusal(work: Promise<unknown>): Promise<number> {

@@ -33,6 +33,8 @@ export interface FeedbackThreadView {
   projectId: string;
   linkId: string;
   pagePath: string;
+  /** The page's title when the thread was raised, which is what people know a page by; null when it had none. */
+  pageTitle: string | null;
   anchor: FeedbackAnchor;
   status: FeedbackThreadStatus;
   author: FeedbackAuthor;
@@ -66,6 +68,7 @@ const THREAD_COLUMNS = {
   projectId: true,
   linkId: true,
   pagePath: true,
+  pageTitle: true,
   anchor: true,
   status: true,
   author: AUTHOR,
@@ -204,6 +207,7 @@ export async function createThread(
         linkId,
         authorOid: viewerOid,
         pagePath: input.pagePath,
+        pageTitle: input.pageTitle,
         anchor: input.anchor,
         snapshotBlob: snapshot,
         recordingId: input.recordingId,

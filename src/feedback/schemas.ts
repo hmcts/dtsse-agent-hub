@@ -108,9 +108,20 @@ export type FeedbackSettingsInput = z.output<typeof feedbackSettingsBody>;
 
 const offsetMs = z.number().int().min(0).max(MAX_RECORDING_MS);
 
+/** Most of a page title a thread keeps, which is far past any title a person reads in a list. */
+export const MAX_PAGE_TITLE = 300;
+
+/** A page's title as the widget read it, with its whitespace run together; blank is no title. */
+const pageTitle = z
+  .string()
+  .max(MAX_PAGE_TITLE * 4)
+  .transform((value) => value.replace(/\s+/g, " ").trim().slice(0, MAX_PAGE_TITLE))
+  .transform((value) => (value === "" ? null : value));
+
 export const createFeedbackThreadBody = z
   .strictObject({
     page_path: pagePath,
+    page_title: pageTitle.optional(),
     anchor: feedbackAnchor,
     body: commentBody,
     // Whether the widget will upload the page's snapshot, so the thread is given a place for it.
@@ -121,6 +132,7 @@ export const createFeedbackThreadBody = z
   .refine((body) => (body.recording_id === undefined) === (body.offset_ms === undefined), "recording_id and offset_ms go together")
   .transform((body) => ({
     pagePath: body.page_path,
+    pageTitle: body.page_title ?? null,
     anchor: body.anchor,
     body: body.body,
     snapshot: body.snapshot ?? false,
