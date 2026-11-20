@@ -1,0 +1,19 @@
+{
+  // Run by Node directly (type stripping), so relative imports carry `.ts` and nothing from the Next app is reachable.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "lib": ["esnext"],
+    "types": ["node"],
+    "allowJs": false,
+    "noEmit": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "incremental": false,
+    "plugins": [],
+    "paths": {}
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules"]
+}
