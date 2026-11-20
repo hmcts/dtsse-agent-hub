@@ -4,6 +4,7 @@ import type { Api } from "../api.ts";
 import { type DirectEntry, readDirects } from "../directs.ts";
 import { formatMessage } from "../envelope.ts";
 import { MAX_POST_TOPICS } from "../limits.ts";
+import { ownAgentIdSet } from "../own-agents.ts";
 import { isEnabled, requireSessionId } from "../session.ts";
 import type { Message, PostBody } from "../wire.ts";
 import { type Cli, type Command, errorMessage, parseFlags, refuseSecrets, requireAgent, topicsOrDie, UsageError } from "./command.ts";
@@ -60,12 +61,7 @@ async function printMessages(cli: Cli, api: Api, messages: Message[]): Promise<v
     return;
   }
   const byAgent = messages.some((m) => m.author?.type === "agent");
-  const ownAgentIds = byAgent
-    ? await api.agents().then(
-        (res) => new Set(res.agents.map((a) => a.id)),
-        () => null
-      )
-    : null;
+  const ownAgentIds = byAgent ? await ownAgentIdSet(api) : null;
   cli.print(messages.map((m) => formatMessage(m, { ownAgentIds })).join("\n\n"));
 }
 
