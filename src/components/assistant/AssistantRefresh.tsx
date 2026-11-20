@@ -26,5 +26,7 @@ export function AssistantRefresh() {
   useHubEvent("feedback", refresh);
   // Each of the viewer's Bulk Scan forms is a row of the sidebar, so one added, saved, signed off or deleted changes it.
   useHubEvent("bulk_scan_spec", refresh);
+  // Sent only to the people a comment named, whose sidebar counts their unseen mentions.
+  useHubEvent("feedback_mention", refresh);
   return null;
 }

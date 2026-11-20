@@ -37,7 +37,8 @@ export function CommentsView({
   people,
   handlers,
   initial = NO_FILTER,
-  initialMode = "list"
+  initialMode = "list",
+  initialThread = null
 }: Readonly<{
   projectId: string;
   threads: readonly FeedbackThreadView[];
@@ -46,12 +47,15 @@ export function CommentsView({
   handlers: ThreadHandlers;
   initial?: ThreadFilter;
   initialMode?: CommentsMode;
+  /** A thread to open on its page, as the one chosen; one not among `threads` is ignored. */
+  initialThread?: string | null;
 }>) {
   const ids = useId();
-  const [mode, setMode] = useState<CommentsMode>(initialMode);
+  const opening = threads.find((thread) => thread.id === initialThread);
+  const [mode, setMode] = useState<CommentsMode>(opening === undefined ? initialMode : "page");
   const [filter, setFilter] = useState<ThreadFilter>(initial);
-  const [pageKey, setPageKey] = useState<string | null>(null);
-  const [chosen, setChosen] = useState<string | null>(null);
+  const [pageKey, setPageKey] = useState<string | null>(opening === undefined ? null : keyOf(opening));
+  const [chosen, setChosen] = useState<string | null>(opening?.id ?? null);
   const [highlight, setHighlight] = useState<Highlight | null>(null);
   const [cardTop, setCardTop] = useState<number | null>(null);
   const cards = useRef(new Map<string, HTMLElement>());

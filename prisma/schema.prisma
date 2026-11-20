@@ -1302,6 +1302,8 @@ model FeedbackMention {
   commentId  String    @map("comment_id") @db.Uuid
   personOid  String    @map("person_oid")
   notifiedAt DateTime? @map("notified_at") @db.Timestamptz(6)
+  /// When the person first saw it in their Mentions list; null is unseen, which the sidebar counts.
+  seenAt     DateTime? @map("seen_at") @db.Timestamptz(6)
 
   comment FeedbackComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
   person  User            @relation("feedbackMention", fields: [personOid], references: [oid], onDelete: Cascade)

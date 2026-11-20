@@ -83,7 +83,7 @@ function actions(overrides: Partial<ConversationActions> = {}): ConversationActi
   return { rename: ok(), pin: ok(), remove: ok(), pinFeedback: ok(), archiveFeedback: ok(), ...overrides };
 }
 
-function shell(items: SidebarItem[], props: { actions?: ConversationActions; activeId?: string | null } = {}) {
+function shell(items: SidebarItem[], props: { actions?: ConversationActions; activeId?: string | null; mentions?: number | null } = {}) {
   return (
     <AssistantShell now={Date.now()} viewerName="Alice Smith" groups={[{ label: "Today", items }]} activeId={null} actions={actions()} {...props}>
       <p>page</p>
@@ -312,5 +312,28 @@ describe("a Bulk Scan form's row", () => {
     }
 
     expect(document.activeElement).toBe(link);
+
+describe("AssistantShell's Mentions", () => {
+  it("should not offer Mentions while prototype feedback is off", () => {
+    render(shell([]));
+
+    expect(screen.queryByRole("link", { name: /Mentions/ })).toBeNull();
+  });
+
+  it("should offer Mentions, counting the unseen ones for a screen reader too", () => {
+    render(shell([], { mentions: 3 }));
+
+    const link = screen.getByRole("link", { name: /Mentions/ });
+    expect(link.getAttribute("href")).toBe("/assistant/feedback/mentions");
+    expect(link.textContent).toContain(", 3 new");
+    expect(link.getAttribute("aria-current")).toBeNull();
+  });
+
+  it("should show no count when every mention has been seen, and mark the row open on its page", () => {
+    render(shell([], { mentions: 0, activeId: "/assistant/feedback/mentions" }));
+
+    const link = screen.getByRole("link", { name: "Mentions" });
+    expect(link.textContent).not.toContain("new");
+    expect(link.getAttribute("aria-current")).toBe("page");
   });
 });

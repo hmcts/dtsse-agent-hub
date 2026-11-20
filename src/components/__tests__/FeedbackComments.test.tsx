@@ -203,6 +203,18 @@ describe("CommentsView's list of all comments", () => {
     expect(screen.getByText(/Round 2 · 1 comment/)).toBeTruthy();
   });
 
+  it("should open on the thread a link names, on its page, and ignore one it does not have", async () => {
+    const threads = [thread("a"), thread("b", { pagePath: "/details", pageTitle: "Your details", author: BEN })];
+    render(<CommentsView projectId="p1" threads={threads} links={project().links} people={[ANN, BEN]} handlers={handlers} initialThread="b" />);
+
+    expect(screen.getByRole("region", { name: "Comments on Your details" })).toBeTruthy();
+    await waitFor(() => expect(replayed.built).toHaveLength(1));
+    cleanup();
+
+    render(<CommentsView projectId="p1" threads={threads} links={project().links} people={[ANN, BEN]} handlers={handlers} initialThread="gone" />);
+    expect(screen.getByRole("button", { name: "All comments" }).getAttribute("aria-pressed")).toBe("true");
+  });
+
   it("should go back to the list from Page by page", () => {
     render(<CommentsView projectId="p1" threads={[thread("a")]} links={project().links} people={[ANN]} handlers={handlers} initialMode="page" />);
 

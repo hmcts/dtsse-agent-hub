@@ -157,11 +157,12 @@ async function namedIn(db: Database, scope: { projectId: string; linkId: string 
   );
 }
 
-/** Writes a comment and the people it names. */
+/** Writes a comment and the people it names, telling their tabs, inside the caller's transaction. */
 async function writeComment(db: Database, threadId: string, authorOid: string, body: string, named: readonly string[], now: Date): Promise<string> {
   const comment = await db.feedbackComment.create({ data: { threadId, authorOid, body, createdAt: now }, select: { id: true } });
   if (named.length > 0) {
     await db.feedbackMention.createMany({ data: named.map((personOid) => ({ commentId: comment.id, personOid })) });
+    await notify(db, { type: "feedback_mention", person_oids: [...named] });
   }
   return comment.id;
 }

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { HttpError, parse } from "@/agent-api/http";
+import { markMentionsSeen } from "@/feedback/mention-store";
 import { markProjectSeen, pinProject } from "@/feedback/nav-store";
 import { type ProbeOutcome, probeTarget } from "@/feedback/probe";
 import {
@@ -216,6 +217,24 @@ export async function markFeedbackProjectSeen(input: { projectId: unknown }): Pr
     const viewer = await requireViewer();
     await markProjectSeen(prisma, viewer.oid, text(input.projectId));
     revalidatePath("/assistant", "layout");
+    return { ok: true };
+  });
+}
+
+/**
+ * Marks the mentions the viewer's Mentions list showed them as seen, which takes them off the sidebar's count. Only
+ * those it showed, so one that arrived since is still counted; called once the list is on screen, as a project's seen is.
+ */
+export async function markFeedbackMentionsSeen(input: { commentIds: unknown }): Promise<ActionResult> {
+  return await runAction("mark feedback mentions seen", async () => {
+    if (!feedbackEnabled()) {
+      return OFF;
+    }
+    const viewer = await requireViewer();
+    const ids = Array.isArray(input.commentIds) ? input.commentIds.filter((id): id is string => typeof id === "string") : [];
+    if ((await markMentionsSeen(prisma, viewer.oid, ids)) > 0) {
+      revalidatePath("/assistant", "layout");
+    }
     return { ok: true };
   });
 }

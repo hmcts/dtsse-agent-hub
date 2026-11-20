@@ -11,6 +11,7 @@ const store = {
   archiveProject: vi.fn()
 };
 const threads = { replyToThread: vi.fn(), patchThread: vi.fn() };
+const mentions = { markMentionsSeen: vi.fn() };
 const probeTarget = vi.fn();
 let enabled = true;
 let resolves = true;
@@ -21,6 +22,7 @@ vi.mock("@/store/prisma", () => ({ prisma: {} }));
 vi.mock("@/feedback/settings", () => ({ feedbackEnabled: () => enabled }));
 vi.mock("@/feedback/store", () => store);
 vi.mock("@/feedback/thread-store", () => threads);
+vi.mock("@/feedback/mention-store", () => mentions);
 vi.mock("@/feedback/probe", () => ({ probeTarget: (...args: unknown[]) => probeTarget(...args) }));
 vi.mock("@/feedback/targets", async (original) => ({
   ...(await original<typeof import("@/feedback/targets")>()),
@@ -142,5 +144,41 @@ describe("probeFeedbackLink", () => {
       probe: { result: "pass", status: 200, reason: "it answered 200" }
     });
     expect(probeTarget).toHaveBeenCalledWith("https://proto.example.com");
+  });
+});
+
+describe("markFeedbackMentionsSeen", () => {
+  beforeEach(() => {
+    enabled = true;
+    mentions.markMentionsSeen.mockReset();
+  });
+
+  it("should mark the viewer's mentions on the comments given, ignoring anything that is not an id", async () => {
+    mentions.markMentionsSeen.mockResolvedValue(1);
+    const { revalidatePath } = await import("next/cache");
+    vi.mocked(revalidatePath).mockClear();
+
+    expect(await actions.markFeedbackMentionsSeen({ commentIds: ["c1", 7, "c2"] })).toEqual({ ok: true });
+
+    expect(mentions.markMentionsSeen).toHaveBeenCalledWith({}, "alice-oid", ["c1", "c2"]);
+    expect(revalidatePath).toHaveBeenCalledWith("/assistant", "layout");
+  });
+
+  it("should re-render nothing when nothing was newly seen, and mark nothing when given no list", async () => {
+    mentions.markMentionsSeen.mockResolvedValue(0);
+    const { revalidatePath } = await import("next/cache");
+    vi.mocked(revalidatePath).mockClear();
+
+    expect(await actions.markFeedbackMentionsSeen({ commentIds: "c1" })).toEqual({ ok: true });
+
+    expect(mentions.markMentionsSeen).toHaveBeenCalledWith({}, "alice-oid", []);
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("should refuse while prototype feedback is off", async () => {
+    enabled = false;
+
+    expect(await actions.markFeedbackMentionsSeen({ commentIds: [] })).toEqual({ ok: false, error: "prototype feedback is not available on this deployment" });
+    expect(mentions.markMentionsSeen).not.toHaveBeenCalled();
   });
 });

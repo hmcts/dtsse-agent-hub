@@ -1,5 +1,6 @@
 import "server-only";
 import { HttpError } from "../agent-api/http.ts";
+import { type FeedbackMentionView, listMentions } from "../feedback/mention-store.ts";
 import type { MentionablePerson } from "../feedback/mentions.ts";
 import { projectsLastActive } from "../feedback/nav-store.ts";
 import { type FeedbackRecordingDetail, type FeedbackRecordingView, getRecording, listRecordings, recordingPages } from "../feedback/recording-store.ts";
@@ -107,4 +108,9 @@ export async function feedbackRecordingPage(viewer: Identity, projectId: string,
 /** Just a project's name, for a tab title: the page's own read is the aggregate, and a title needs none of it. */
 export async function feedbackProjectName(viewer: Identity, projectId: string): Promise<string | undefined> {
   return await orMissing(async () => (await getProject(prisma, viewer.oid, projectId)).name);
+}
+
+/** The comments that named the viewer, newest first, that they can still open; see `listMentions`. */
+export async function feedbackMentions(viewer: Identity): Promise<FeedbackMentionView[]> {
+  return await listMentions(prisma, viewer.oid);
 }

@@ -48,7 +48,8 @@ const NOTIFIED_EVENT_SAMPLES: { [T in NotifiedEvent["type"]]: readonly Extract<N
     { type: "feedback", project_id: "fp-a", link_id: "fl-a" },
     // A change to the project itself rather than through one of its links.
     { type: "feedback", project_id: "fp-a", link_id: null }
-  ]
+  ],
+  feedback_mention: [{ type: "feedback_mention", person_oids: ["oid-a", "oid-b"] }]
 };
 
 /** Every type that crosses pods, in the order the samples are written. */

@@ -402,6 +402,11 @@ describe("selectFrame", () => {
   ])("should send nothing about a feedback project when the viewer %s", async (_, from, event) => {
     expect(await selectFrame(event, TOPICS, from)).toBeUndefined();
   });
+
+  it("should tell only the people a comment named that they were named, and nothing more", async () => {
+    expect(await selectFrame({ type: "feedback_mention", person_oids: [OTHER, VIEWER] }, TOPICS, sources())).toBe("event: feedback_mention\ndata: {}\n\n");
+    expect(await selectFrame({ type: "feedback_mention", person_oids: [OTHER] }, TOPICS, sources())).toBeUndefined();
+  });
 });
 
 describe("sharedFeedbackTeamLoader", () => {

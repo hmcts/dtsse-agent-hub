@@ -125,6 +125,11 @@ export type HubEvent =
    */
   | { type: "feedback"; project_id: string; link_id: string | null }
   /**
+   * A feedback comment named `person_oids` with `@`, so their open tabs read their mentions again. Apart from
+   * `feedback`, which goes to the project's team: a reviewer named on a link is not on it.
+   */
+  | { type: "feedback_mention"; person_oids: string[] }
+  /**
    * Published in-process only, when the listener reconnects. NOTIFYs sent while it was disconnected are lost, so
    * every stream re-reads its queued deliveries.
    */
@@ -250,6 +255,10 @@ export function decodeEvent(payload: string | undefined): NotifiedEvent | undefi
       return isId(event.owner_oid) ? { type: "bulk_scan_spec", owner_oid: event.owner_oid } : undefined;
     case "feedback":
       return isId(event.project_id) && isOptionalId(event.link_id) ? { type: "feedback", project_id: event.project_id, link_id: event.link_id } : undefined;
+    case "feedback_mention":
+      return Array.isArray(event.person_oids) && event.person_oids.length > 0 && event.person_oids.every(isId)
+        ? { type: "feedback_mention", person_oids: [...event.person_oids] }
+        : undefined;
     default:
       return undefined;
   }

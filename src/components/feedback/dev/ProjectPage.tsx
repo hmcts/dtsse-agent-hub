@@ -61,8 +61,17 @@ export function ProjectPage({
   tab,
   actions,
   origin: givenOrigin,
-  allowHttp = false
-}: Readonly<{ data: FeedbackProjectPageData; tab: ProjectTab; actions: ProjectActions; origin?: string; allowHttp?: boolean }>) {
+  allowHttp = false,
+  thread = null
+}: Readonly<{
+  data: FeedbackProjectPageData;
+  tab: ProjectTab;
+  actions: ProjectActions;
+  origin?: string;
+  allowHttp?: boolean;
+  /** A thread to open the comments tab on, as a mention's link asks. */
+  thread?: string | null;
+}>) {
   const { project } = data;
   const owner = project.access === "owner";
   const archived = project.archivedAt !== null;
@@ -94,7 +103,7 @@ export function ProjectPage({
       </nav>
       {tab === "overview" ? <Overview data={data} origin={origin} actions={actions} owner={owner && !archived} /> : null}
       {tab === "comments" ? (
-        <CommentsView projectId={project.id} threads={data.threads} links={project.links} people={data.people} handlers={handlers} />
+        <CommentsView projectId={project.id} threads={data.threads} links={project.links} people={data.people} handlers={handlers} initialThread={thread} />
       ) : null}
       {tab === "recordings" ? <Recordings projectId={project.id} recordings={data.recordings} links={project.links} /> : null}
       {tab === "people" ? <People data={data} actions={actions} owner={owner && !archived} /> : null}
