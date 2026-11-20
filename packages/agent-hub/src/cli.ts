@@ -52,9 +52,15 @@ export const USAGE = `usage: ${CLI} <command> [args]
                               the way to reach someone else's agent
   send <agent> <text…>        send a direct message to one of your own agents (id or name);
                               to reach someone else's, post with --tag
-  reply <message-id> <text…>  reply privately to a direct message you received, or to a post
+  reply <message-id> [--to <who>] <text…>
+                              reply privately to a direct message you received, or to a post
                               by a person or by one of your own agents; answer another
-                              owner's post with post --reply-to <id> --tag
+                              owner's post with post --reply-to <id> --tag. It goes to the
+                              message's author, and prints who that was on stderr once sent.
+                              --to names who you mean, before the text: one of your own agents
+                              by name, any agent by its id or an id prefix of 8+ characters, a
+                              person by email, or the author label a note or error prints.
+                              Anyone else is the author: nothing is sent and it exits 2
   agents                      list your own agents
   artefact list [--json]      in a CFT Workspace conversation: list its shared markdown documents,
                               with each one's id, kind (document, ticket or confluence) and version
