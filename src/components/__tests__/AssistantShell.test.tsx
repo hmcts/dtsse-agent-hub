@@ -247,13 +247,18 @@ describe("AssistantShell", () => {
       within(menu)
         .getAllByRole("menuitem")
         .map((item) => item.getAttribute("href"))
-    ).toEqual(["/assistant/welsh"]);
+    ).toEqual(["/assistant/welsh", "/assistant/bulk-scan"]);
   });
 
-  it("should show no workflows plus at all when there is nothing behind it", () => {
+  it("should offer only Bulk Scan forms when the assistant has no plugin behind any other workflow", () => {
     render(shell());
+    fireEvent.click(screen.getByRole("button", { name: "Workflows" }));
 
-    expect(screen.queryByRole("button", { name: "Workflows" })).toBeNull();
+    expect(
+      within(screen.getByRole("menu", { name: "Workflows" }))
+        .getAllByRole("menuitem")
+        .map((item) => item.getAttribute("href"))
+    ).toEqual(["/assistant/bulk-scan"]);
   });
 
   it("should offer a new feedback project, and not the list of them, when feedback is on", () => {
@@ -264,7 +269,7 @@ describe("AssistantShell", () => {
       within(screen.getByRole("menu", { name: "Workflows" }))
         .getAllByRole("menuitem")
         .map((item) => item.getAttribute("href"));
-    expect(hrefs()).toEqual(["/assistant/welsh", "/assistant/feedback/new"]);
+    expect(hrefs()).toEqual(["/assistant/welsh", "/assistant/bulk-scan", "/assistant/feedback/new"]);
     expect(screen.getByRole("menuitem", { name: /New feedback project/ }).textContent).toContain("Share a prototype for comments and recorded feedback");
   });
 
@@ -285,7 +290,7 @@ describe("AssistantShell", () => {
       within(screen.getByRole("menu", { name: "Workflows" }))
         .getAllByRole("menuitem")
         .map((item) => item.querySelector("span")?.textContent)
-    ).toEqual(["Morning briefing", "Welsh translations"]);
+    ).toEqual(["Morning briefing", "Welsh translations", "Bulk Scan forms"]);
   });
 
   it("should not offer the morning briefing when the page does not say it is offered", () => {

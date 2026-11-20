@@ -155,6 +155,9 @@ model User {
   assistantConversations AssistantConversation[]
   assistantUploads       AssistantUpload[]
   assistantTemplates     AssistantTemplate[]
+  bulkScanSpecs          BulkScanSpec[]
+  bulkScanSpecsSaved     BulkScanSpecVersion[] @relation("bulkScanSavedBy")
+  bulkScanSpecsSignedOff BulkScanSpecVersion[] @relation("bulkScanSignedOffBy")
   assistantExportDefault AssistantExportDefault?
   assistantModelChoice   AssistantModelChoice?
   assistantSchedule      AssistantSchedule?
@@ -1346,4 +1349,35 @@ model FeedbackRecordingSegment {
 
   @@unique([recordingId, kind, seq])
   @@map("feedback_recording_segment")
+}
+
+/// A person's Bulk Scan form spec, held as versions. See src/bulk-scan/spec-store.ts.
+model BulkScanSpec {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ownerOid  String   @map("owner_oid")
+  name      String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  owner    User                  @relation(fields: [ownerOid], references: [oid])
+  versions BulkScanSpecVersion[]
+
+  @@index([ownerOid, createdAt], map: "bulk_scan_spec_owner_idx")
+  @@map("bulk_scan_spec")
+}
+
+model BulkScanSpecVersion {
+  specId        String    @map("spec_id") @db.Uuid
+  version       Int
+  spec          Json
+  savedByOid    String    @map("saved_by_oid")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  signedOffByOid String?  @map("signed_off_by_oid")
+  signedOffAt   DateTime? @map("signed_off_at") @db.Timestamptz(6)
+
+  bulkScanSpec BulkScanSpec @relation(fields: [specId], references: [id], onDelete: Cascade)
+  savedBy      User         @relation("bulkScanSavedBy", fields: [savedByOid], references: [oid])
+  signedOffBy  User?        @relation("bulkScanSignedOffBy", fields: [signedOffByOid], references: [oid])
+
+  @@id([specId, version])
+  @@map("bulk_scan_spec_version")
 }

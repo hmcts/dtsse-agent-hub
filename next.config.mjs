@@ -38,7 +38,9 @@ const nextConfig = {
     // The largest action is a post or direct message, bounded by the same worst case as MAX_REQUEST_BYTES.
     serverActions: { bodySizeLimit: "256kb" }
   },
-  serverExternalPackages: ["@hmcts-cft/cloud-native-platform", "applicationinsights", "@prisma/client", "pg", "undici"],
+  // pdfjs loads its worker by a dynamic import the file tracer cannot see, and the form PDF reader needs it in Node.
+  outputFileTracingIncludes: { "/api/ui/assistant/bulk-scan": ["./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs"] },
+  serverExternalPackages: ["@hmcts-cft/cloud-native-platform", "pdfjs-dist", "applicationinsights", "@prisma/client", "pg", "undici"],
   // No `redirects()`. The hub's bare addresses are redirected from `src/proxy.ts` instead, because Next checks
   // config redirects ahead of the proxy and a 308 from here would repeat a pasted secret into its own `Location`,
   // before `carriesSecret` ever sees the request.

@@ -15,6 +15,7 @@ export type StartChatAction = (input: { product: unknown; body: unknown; title?:
 type Workflow = { href: string; label: string; hint: string };
 
 const WELSH: Workflow = { href: "/assistant/welsh", label: "Welsh translations", hint: "Search, scan, send and apply a service's Welsh" };
+const BULK_SCAN: Workflow = { href: "/assistant/bulk-scan", label: "Bulk Scan forms", hint: "Build a form's capture sheet, transformation sheet and code" };
 const NEW_FEEDBACK: Workflow = { href: "/assistant/feedback/new", label: "New feedback project", hint: "Share a prototype for comments and recorded feedback" };
 
 /**
@@ -22,7 +23,7 @@ const NEW_FEEDBACK: Workflow = { href: "/assistant/feedback/new", label: "New fe
  * who has connected Microsoft 365, which most of it reads, and whose pod's client claims `morning-briefing`
  * (`offersBriefing`). It is not a page: it starts a chat whose first message runs the briefing, the same way the
  * new-chat screen starts one, and opens it.
- * Welsh translations is offered only to someone whose assistant has the plugin that runs it. Scheduled prompts are not
+ * Bulk Scan forms is always offered: it runs in the hub, so nothing has to be ticked for it. Welsh translations is offered only to someone whose assistant has the plugin that runs it. Scheduled prompts are not
  * offered at all until they are built: a menu item opening a page that says "not available yet" is a dead end. A new feedback project is offered wherever prototype feedback is on; the projects themselves are in the
  * sidebar's list.
  *
@@ -44,7 +45,7 @@ export function WorkflowsMenu({
   // Which start the menu is waiting on. Closing it moves this on, so a start that answers after the person dismissed
   // the menu neither shows an error in a menu they closed nor takes them to a chat they have moved away from.
   const attempt = useRef(0);
-  const workflows = [...(welsh ? [WELSH] : []), ...(feedback ? [NEW_FEEDBACK] : [])];
+  const workflows = [...(welsh ? [WELSH] : []), BULK_SCAN, ...(feedback ? [NEW_FEEDBACK] : [])];
 
   const close = useCallback(() => {
     if (ref.current?.contains(document.activeElement)) {
@@ -85,10 +86,6 @@ export function WorkflowsMenu({
 
   useDismiss(open, ref, close);
 
-  // No plus at all when there is nothing behind it: a button that opens an empty menu is a dead end of its own.
-  if (workflows.length === 0 && !(briefing && start !== undefined)) {
-    return null;
-  }
   return (
     <div ref={ref} className="relative flex shrink-0">
       <button

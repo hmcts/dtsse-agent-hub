@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import ExcelJS from "exceljs";
 import { describe, expect, it } from "vitest";
-import { cellText, isRichText, readWorkbook, rowTexts, selectSheet } from "./cells.ts";
+import { cellText, isRichText, readWorkbook, readWorkbookBytes, rowTexts, selectSheet } from "./cells.ts";
 
 describe("selectSheet", () => {
   it("should find a sheet by name, default to the first, and fail clearly when the named one is missing", () => {
@@ -41,5 +41,14 @@ describe("cellText", () => {
     const dir = mkdtempSync(join(tmpdir(), "cells-"));
     await book.xlsx.writeFile(join(dir, "b.xlsx"));
     expect((await readWorkbook(join(dir, "b.xlsx"))).getWorksheet("S")?.getCell(1, 1).value).toBe("a");
+  });
+});
+
+describe("workbooks from bytes", () => {
+  it("should read a workbook held in memory", async () => {
+    const book = new ExcelJS.Workbook();
+    book.addWorksheet("S").addRow(["a"]);
+    const bytes = new Uint8Array((await book.xlsx.writeBuffer()) as ArrayBuffer);
+    expect((await readWorkbookBytes(bytes)).getWorksheet("S")?.getCell(1, 1).value).toBe("a");
   });
 });

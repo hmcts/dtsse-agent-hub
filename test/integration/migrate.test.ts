@@ -183,6 +183,8 @@ describe("migrate", () => {
       "assistant_video",
       "assistant_welsh_file",
       "assistant_welsh_job",
+      "bulk_scan_spec",
+      "bulk_scan_spec_version",
       "channel",
       "credential",
       "delivery",

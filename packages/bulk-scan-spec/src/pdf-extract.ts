@@ -73,8 +73,8 @@ function rowsOf(items: Item[], page: number): Line[] {
 }
 
 /** The form fields (text boxes, checkboxes, radio buttons) and the text layer of a PDF. Other field types are not read. */
-export async function extractPdf(path: string): Promise<PdfContent> {
-  const task = getDocument({ data: new Uint8Array(readFileSync(path)), verbosity: 0 });
+export async function extractPdf(source: string | Uint8Array): Promise<PdfContent> {
+  const task = getDocument({ data: typeof source === "string" ? new Uint8Array(readFileSync(source)) : new Uint8Array(source), verbosity: 0 });
   const doc = await task.promise;
   try {
     const widgets: Widget[] = [];

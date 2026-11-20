@@ -269,10 +269,10 @@ export function rulesCodeable(spec: FormSpec, rules: Rule[]): boolean {
 const RANK = ["success", "warning", "exception"] as const;
 
 /**
- * What a field's rules do for the data: the first branch that holds in each chain, then the unconditional rules, with the worst outcome
- * and the sets applied in that order. Undefined when nothing applies or a branch cannot be decided from the keys.
+ * The branches of a field's rules that apply to the data: the first that holds in each chain, then the unconditional rules.
+ * Undefined when a branch cannot be decided from the keys.
  */
-export function evaluateRules(spec: FormSpec, field: Field, data: Data): RuleVerdict | undefined {
+export function appliedRules(spec: FormSpec, field: Field, data: Data): Rule[] | undefined {
   if (!rulesCodeable(spec, field.rules)) {
     return undefined;
   }
@@ -290,10 +290,16 @@ export function evaluateRules(spec: FormSpec, field: Field, data: Data): RuleVer
       }
     }
   }
-  for (const rule of unconditional) {
-    applied.push(rule);
-  }
-  const decided = applied.filter((r) => r.outcome || r.set);
+  return [...applied, ...unconditional];
+}
+
+/**
+ * What a field's rules do for the data: the worst outcome and the sets of the branches that apply. Undefined when nothing applies
+ * or a branch cannot be decided from the keys.
+ */
+export function evaluateRules(spec: FormSpec, field: Field, data: Data): RuleVerdict | undefined {
+  const applied = appliedRules(spec, field, data);
+  const decided = (applied ?? []).filter((r) => r.outcome || r.set);
   if (decided.length === 0) {
     return undefined;
   }
