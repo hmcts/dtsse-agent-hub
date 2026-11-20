@@ -131,3 +131,29 @@ export function Placeholder({ title, children }: Readonly<{ title: string; child
     </Section>
   );
 }
+
+/** A boolean setting as words; anything else, such as a calculated value, as itself so it is never shown as a plain No. */
+export function YesNo({ value }: Readonly<{ value: string }>) {
+  return <>{value === "true" ? "Yes" : value === "false" ? "No" : value}</>;
+}
+
+/** One cell of a permissions grid: a tick that a screen reader hears as Yes, or No. */
+export function PermissionTick({ has }: Readonly<{ has: boolean }>) {
+  return has ? (
+    <>
+      <span aria-hidden="true">✓</span>
+      <span className="sr-only">Yes</span>
+    </>
+  ) : (
+    <span className="sr-only">No</span>
+  );
+}
+
+/** The version a page was asked for with `?version=`, or none for the latest. */
+export function requestedVersion(query: Record<string, string | string[] | undefined>): number | undefined {
+  const value = Number(Array.isArray(query.version) ? query.version[0] : query.version);
+  return Number.isInteger(value) && value > 0 ? value : undefined;
+}
+
+/** The suffix that keeps an in-builder link on the version being read. */
+export const versionQuery = (version: number | undefined, joiner: "?" | "&"): string => (version === undefined ? "" : `${joiner}version=${version}`);

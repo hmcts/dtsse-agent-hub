@@ -19,7 +19,7 @@ import {
  */
 
 /** The same pattern as the `wa_spec_version` CHECK on `service`, so the database is never the first to refuse one. */
-export const WA_SERVICE_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
+export const WA_SERVICE_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
 /** The largest stored document. ET's layout is about 300 KB, its model about 150 KB. */
 export const MAX_WA_DOCUMENT_BYTES = 2 * 1024 * 1024;
@@ -52,7 +52,7 @@ export interface WaSpecDocuments {
 /** Everything wrong with a spec that would stop it being saved: its slug, its references, and whether it compiles. */
 export function waSpecProblems({ service, model, ordering }: WaSpecInput): string[] {
   if (!WA_SERVICE_PATTERN.test(service)) {
-    return [`"${service}" is not a service: use lowercase letters, digits and hyphens, starting with a letter or digit, at most 64 characters`];
+    return [`"${service}" is not a service: use lowercase letters, digits, hyphens and underscores, starting with a letter or digit, at most 64 characters`];
   }
   if (model.service.slug !== service) {
     return [`the model is for "${model.service.slug}", not "${service}"`];

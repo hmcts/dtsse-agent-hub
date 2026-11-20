@@ -1,10 +1,11 @@
 import { notFound } from "next/navigation";
 import { getWaSpec } from "@/assistant/wa-builder-store";
 import { WaBuilderPage } from "@/components/assistant/WaBuilderPage";
-import { isWaView, Placeholder, ViewTabs, type WaView } from "@/components/assistant/WaBuilderParts";
+import { isWaView, Placeholder, requestedVersion, ViewTabs, type WaView } from "@/components/assistant/WaBuilderParts";
 import { WaBuilderRoles } from "@/components/assistant/WaBuilderRoles";
 import { WaBuilderSetup } from "@/components/assistant/WaBuilderSetup";
 import { isBoardGrouping, WaBuilderTaskBoard } from "@/components/assistant/WaBuilderTaskBoard";
+import { prisma } from "@/store/prisma";
 import { requireViewer } from "@/viewer/current";
 
 export const dynamic = "force-dynamic";
@@ -18,8 +19,7 @@ export default async function WaBuilderServicePage({
 }: Readonly<{ params: Promise<{ service: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }>) {
   await requireViewer();
   const [{ service }, query] = await Promise.all([params, searchParams]);
-  const requested = Number(first(query.version));
-  const spec = await getWaSpec(service, Number.isInteger(requested) && requested > 0 ? requested : undefined);
+  const spec = await getWaSpec(prisma, service, requestedVersion(query));
   if (spec === null) {
     notFound();
   }
@@ -37,7 +37,7 @@ export default async function WaBuilderServicePage({
     >
       <ViewTabs service={service} current={view} version={spec.version} />
       {view === "setup" ? <WaBuilderSetup model={model} /> : null}
-      {view === "roles" ? <WaBuilderRoles model={model} service={service} /> : null}
+      {view === "roles" ? <WaBuilderRoles model={model} service={service} version={spec.version} /> : null}
       {view === "tasks" ? (
         <WaBuilderTaskBoard
           model={model}

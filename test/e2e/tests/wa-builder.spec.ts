@@ -14,7 +14,7 @@ test.describe("work allocation builder @regression", () => {
     await context.addCookies([{ name: PERSONA_COOKIE, value: PERSONA, url: baseURL! }]);
   });
 
-  test("should list the services, and raise no WCAG A or AA violations, on the builder's home @regression @a11y", async ({ page }) => {
+  test("should list the services and raise no WCAG A or AA violations when the builder's home is opened @regression @a11y", async ({ page }) => {
     const response = await page.goto("/assistant/wa-builder");
     test.skip(response?.status() === 404, "virtual agents are off on this deployment");
 

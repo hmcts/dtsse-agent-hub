@@ -1,6 +1,6 @@
 import type { Model } from "@hmcts-cft/wa-spec";
 import { briefExpr, caseTypeIds, caseTypeLabel, describeColumn, permissionNames } from "@/assistant/wa-builder-text";
-import { ExprView, Grid, Section, TD, TH, Words } from "@/components/assistant/WaBuilderParts";
+import { ExprView, Grid, Section, TD, TH, Words, YesNo } from "@/components/assistant/WaBuilderParts";
 
 const caseTypesText = (model: Model, only: string[] | undefined) => (only ?? caseTypeIds(model)).map((id) => caseTypeLabel(model, id)).join(", ");
 
@@ -73,15 +73,7 @@ export function WaBuilderSetup({ model }: Readonly<{ model: Model }>) {
                     )}
                     {attribute.note === undefined ? null : <p className="pt-1 text-xs text-asst-muted">{attribute.note}</p>}
                   </td>
-                  <td className={TD}>
-                    {attribute.reconfigure === undefined
-                      ? "–"
-                      : briefExpr(attribute.reconfigure) === "true"
-                        ? "Yes"
-                        : briefExpr(attribute.reconfigure) === "false"
-                          ? "No"
-                          : briefExpr(attribute.reconfigure)}
-                  </td>
+                  <td className={TD}>{attribute.reconfigure === undefined ? "–" : <YesNo value={briefExpr(attribute.reconfigure)} />}</td>
                   <td className={TD}>{caseTypesText(model, attribute.only)}</td>
                 </tr>
               ))}
@@ -121,7 +113,7 @@ export function WaBuilderSetup({ model }: Readonly<{ model: Model }>) {
                   </th>
                   <td className={TD}>{permissionNames(grant.perms).join(", ")}</td>
                   <td className={TD}>{grant.priority === undefined ? "–" : briefExpr(grant.priority)}</td>
-                  <td className={TD}>{grant.autoAssign === undefined ? "–" : briefExpr(grant.autoAssign) === "true" ? "Yes" : "No"}</td>
+                  <td className={TD}>{grant.autoAssign === undefined ? "–" : <YesNo value={briefExpr(grant.autoAssign)} />}</td>
                   <td className={TD}>{caseTypesText(model, grant.only)}</td>
                 </tr>
               ))}

@@ -1,44 +1,54 @@
 import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { getPropertiesVolumeSecrets } from "@hmcts-cft/cloud-native-platform";
-import { parseLayout, parseModel, parseOrdering } from "@hmcts-cft/wa-spec";
+import { modelLayoutPath, orderPathFor, parseLayout, parseModel, parseOrdering } from "@hmcts-cft/wa-spec";
 import { loadSecrets } from "../platform/secrets.ts";
 
 /**
- * Loads a service's model, with its ordering and layout, as the next version of its spec: `yarn wa:seed <model.yaml>`,
- * which defaults to ET's example. It runs through tsx, not from `dist/`, because the spec package ships TypeScript
- * source and the image carries only the compiled CLIs. Against AAT, point `DATABASE_URL` or `POSTGRES_*` at it first.
- * It refuses when the service already has a spec, so a second run cannot add a duplicate version.
+ * Loads a service's model, with the ordering and layout it names or has beside it, as version 1 of its spec:
+ * `yarn wa:seed <model.yaml>`, which defaults to ET's example. It runs through tsx, not from `dist/`, because the spec
+ * package ships TypeScript source and the image carries only the compiled CLIs. Against AAT, point `DATABASE_URL` or
+ * `POSTGRES_*` at it first. It refuses when the service already has a spec.
  */
-const DEFAULT_MODEL = "packages/wa-spec/examples/et/model.yaml";
+const DEFAULT_MODEL = fileURLToPath(new URL("../../packages/wa-spec/examples/et/model.yaml", import.meta.url));
 
 async function run(): Promise<number> {
   await loadSecrets((chartPath) => getPropertiesVolumeSecrets({ chartPath, failOnError: false }));
-  const modelPath = resolve(process.argv[2] ?? DEFAULT_MODEL);
+  const argument = process.argv[2];
+  const modelPath = argument === undefined ? DEFAULT_MODEL : resolve(process.env.INIT_CWD ?? process.cwd(), argument);
   const model = parseModel(readFileSync(modelPath, "utf8"));
-  const documentAt = (name: string | undefined) => (name === undefined ? undefined : readFileSync(resolve(dirname(modelPath), name), "utf8"));
-  const orderingText = documentAt(model.order);
-  const layoutText = documentAt(model.layout);
-  const ordering = orderingText === undefined ? undefined : parseOrdering(orderingText);
-  const layout = layoutText === undefined ? undefined : parseLayout(layoutText);
+  const orderPath = orderPathFor(modelPath, model);
+  const layoutPath = modelLayoutPath(modelPath, model);
+  const ordering = orderPath === undefined ? undefined : parseOrdering(readFileSync(orderPath, "utf8"));
+  const layout = layoutPath === undefined ? undefined : parseLayout(readFileSync(layoutPath, "utf8"));
 
-  const { getWaSpec, saveWaSpec } = await import("../assistant/wa-builder-store.ts");
+  const { prisma } = await import("../store/prisma.ts");
+  const { saveWaSpec } = await import("../assistant/wa-builder-store.ts");
+  const { WaVersionConflict } = await import("../assistant/wa-builder.ts");
   const service = model.service.slug;
-  if ((await getWaSpec(service)) !== null) {
-    console.error(`wa-seed: ${service} already has a spec; edits are saved as new versions, not seeded`);
-    return 1;
+  try {
+    const { version } = await saveWaSpec(prisma, { service, model, ...(ordering && { ordering }), ...(layout && { layout }), savedBy: "wa-seed", basedOn: 0 });
+    console.info(`wa-seed: saved ${service} version ${version}`);
+    return 0;
+  } catch (error) {
+    if (error instanceof WaVersionConflict) {
+      console.error(`wa-seed: ${service} already has a spec; edits are saved as new versions, not seeded`);
+      return 1;
+    }
+    throw error;
+  } finally {
+    await prisma.$disconnect();
   }
-  const { version } = await saveWaSpec({ service, model, ordering, layout, savedBy: "wa-seed" });
-  console.info(`wa-seed: saved ${service} version ${version}`);
-  return 0;
 }
 
+// The pool keeps idle connections for 30s, which $disconnect does not end, so the process is ended rather than waited on.
 void run().then(
   (code) => {
-    process.exitCode = code;
+    process.exit(code);
   },
   (error: unknown) => {
     console.error(`wa-seed failed: ${error instanceof Error ? error.message : String(error)}`);
-    process.exitCode = 1;
+    process.exit(1);
   }
 );

@@ -1,12 +1,10 @@
 import type { Model } from "@hmcts-cft/wa-spec";
 import Link from "next/link";
 import { briefExpr, permissionColumns, permissionNames, rolesByCategory, taskName, tasksUsingProfile } from "@/assistant/wa-builder-text";
-import { Grid, LINK, Section, TD, TH } from "@/components/assistant/WaBuilderParts";
-
-const yesNo = (value: string) => (value === "true" ? "Yes" : value === "false" ? "No" : value);
+import { Grid, LINK, PermissionTick, Section, TD, TH, versionQuery, YesNo } from "@/components/assistant/WaBuilderParts";
 
 /** Each role's category, then each permission profile as a grid of roles against the permissions they hold. */
-export function WaBuilderRoles({ model, service }: Readonly<{ model: Model; service: string }>) {
+export function WaBuilderRoles({ model, service, version }: Readonly<{ model: Model; service: string; version?: number }>) {
   const profiles = Object.entries(model.permissionProfiles ?? {});
   return (
     <div className="flex flex-col gap-6">
@@ -62,18 +60,11 @@ export function WaBuilderRoles({ model, service }: Readonly<{ model: Model; serv
                       </th>
                       {columns.map((column) => (
                         <td key={column} className={`${TD} text-center`}>
-                          {perms.includes(column) ? (
-                            <>
-                              <span aria-hidden="true">✓</span>
-                              <span className="sr-only">Yes</span>
-                            </>
-                          ) : (
-                            <span className="sr-only">No</span>
-                          )}
+                          <PermissionTick has={perms.includes(column)} />
                         </td>
                       ))}
                       <td className={TD}>{grant.priority === undefined ? "–" : briefExpr(grant.priority)}</td>
-                      <td className={TD}>{grant.autoAssign === undefined ? "–" : yesNo(briefExpr(grant.autoAssign))}</td>
+                      <td className={TD}>{grant.autoAssign === undefined ? "–" : <YesNo value={briefExpr(grant.autoAssign)} />}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -87,7 +78,10 @@ export function WaBuilderRoles({ model, service }: Readonly<{ model: Model; serv
                     {tasks.map((task, index) => (
                       <span key={task.id}>
                         {index > 0 ? ", " : ""}
-                        <Link href={`/assistant/wa-builder/${encodeURIComponent(service)}/tasks/${encodeURIComponent(task.id)}`} className={LINK}>
+                        <Link
+                          href={`/assistant/wa-builder/${encodeURIComponent(service)}/tasks/${encodeURIComponent(task.id)}${versionQuery(version, "?")}`}
+                          className={LINK}
+                        >
                           {taskName(model, task)}
                         </Link>
                       </span>

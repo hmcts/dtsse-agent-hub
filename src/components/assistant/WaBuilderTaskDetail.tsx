@@ -6,6 +6,7 @@ import {
   describeCancellation,
   describeCompletion,
   describeLink,
+  describeTaskRule,
   describeTrigger,
   groupByCaseType,
   PRIORITY_LABELS,
@@ -18,7 +19,7 @@ import {
   rulesForTask,
   taskCaseTypes
 } from "@/assistant/wa-builder-text";
-import { ExprView, Grid, PerCaseType, Section, TD, TH, Words } from "@/components/assistant/WaBuilderParts";
+import { ExprView, Grid, PerCaseType, PermissionTick, Section, TD, TH, Words, YesNo } from "@/components/assistant/WaBuilderParts";
 
 const SOURCE: Record<string, string> = { profile: "Profile", changed: "Profile, changed for this task", added: "Added for this task", default: "Every task" };
 
@@ -82,7 +83,6 @@ function ValueList({ model, task, rows }: Readonly<{ model: Model; task: Task; r
 export function WaBuilderTaskDetail({ model, task }: Readonly<{ model: Model; task: Task }>) {
   const cases = taskCaseTypes(model, task);
   const link = task.link;
-  const { named, calculated } = cancelCategories(task);
   const due = Object.entries(task.due ?? {}).map(([key, val]): [string, Val | undefined] => [DUE_LABELS[key] ?? key, val]);
   const priority = Object.entries(task.priority ?? {}).map(([key, val]): [string, Val | undefined] => [PRIORITY_LABELS[key] ?? key, val]);
   const extra: Array<[string, Val | undefined]> = [
@@ -123,14 +123,23 @@ export function WaBuilderTaskDetail({ model, task }: Readonly<{ model: Model; ta
       </Section>
 
       <Section id="wa-cancelled" title="When it is cancelled">
-        {calculated ? (
-          <p className="text-[13px] text-asst-muted">
-            Its category is worked out for each case, so the rules that name a category cannot be matched to it here.
-          </p>
-        ) : null}
-        <PerCaseType model={model} groups={groupByCaseType(cases, (id) => rulesForTask(model, task, id).map(describeCancellation))}>
-          {(items: string[]) => (
-            <Sentences items={items} empty={named.length === 0 && !calculated ? "It has no cancel category, so no rule cancels it." : "No rule cancels it."} />
+        <PerCaseType
+          model={model}
+          groups={groupByCaseType(cases, (id) => {
+            const { named, calculated } = cancelCategories(model, task, id);
+            return { items: rulesForTask(model, task, id).map(describeTaskRule), named: named.length > 0, calculated };
+          })}
+        >
+          {(found: { items: string[]; named: boolean; calculated: boolean }) => (
+            <>
+              {found.calculated ? (
+                <p className="text-[13px] text-asst-muted">Its category is worked out for each case, so a rule that names a category may or may not apply.</p>
+              ) : null}
+              <Sentences
+                items={found.items}
+                empty={found.named || found.calculated ? "No rule cancels it." : "It has no cancel category, so only a rule for every task cancels it."}
+              />
+            </>
           )}
         </PerCaseType>
       </Section>
@@ -197,18 +206,13 @@ export function WaBuilderTaskDetail({ model, task }: Readonly<{ model: Model; ta
                       <td className={TD}>{row.category}</td>
                       {columns.map((column) => (
                         <td key={column} className={`${TD} text-center`}>
-                          {row.perms.includes(column) ? (
-                            <>
-                              <span aria-hidden="true">✓</span>
-                              <span className="sr-only">Yes</span>
-                            </>
-                          ) : (
-                            <span className="sr-only">No</span>
-                          )}
+                          <PermissionTick has={row.perms.includes(column)} />
                         </td>
                       ))}
                       <td className={TD}>{row.priority}</td>
-                      <td className={TD}>{row.autoAssign === "true" ? "Yes" : row.autoAssign === "false" ? "No" : row.autoAssign}</td>
+                      <td className={TD}>
+                        <YesNo value={row.autoAssign} />
+                      </td>
                       <td className={TD}>
                         {SOURCE[row.source]}
                         {row.profile === undefined ? "" : `: ${row.profile}`}

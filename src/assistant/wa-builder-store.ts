@@ -1,11 +1,10 @@
 import type { Layout, Model, Ordering } from "@hmcts-cft/wa-spec";
-import { type PrismaClient, prisma as sharedPrisma } from "../store/prisma.ts";
+import type { Database, PrismaClient } from "../store/prisma.ts";
 import { InvalidWaSpec, readWaDocuments, WaVersionConflict, waDocuments, waSpecProblems } from "./wa-builder.ts";
 
 /**
  * Work Allocation spec versions in Postgres, append-only per service. Anyone signed in to the Assistant may read every
- * service's, so nothing here takes a viewer. The trailing client is for tests and for callers that have loaded the Key
- * Vault secrets before importing this module.
+ * service's, so nothing here takes a viewer.
  */
 
 export interface WaServiceSummary {
@@ -36,7 +35,7 @@ export interface WaSpecSave {
 }
 
 /** Each service's latest version, by service. */
-export async function listWaServices(prisma: PrismaClient = sharedPrisma): Promise<WaServiceSummary[]> {
+export async function listWaServices(prisma: Database): Promise<WaServiceSummary[]> {
   const rows = await prisma.waSpecVersion.findMany({
     distinct: ["service"],
     orderBy: [{ service: "asc" }, { version: "desc" }],
@@ -46,7 +45,7 @@ export async function listWaServices(prisma: PrismaClient = sharedPrisma): Promi
 }
 
 /** A version of a service's spec, the latest when none is named, or null when there is none. */
-export async function getWaSpec(service: string, version?: number, prisma: PrismaClient = sharedPrisma): Promise<WaSpecView | null> {
+export async function getWaSpec(prisma: Database, service: string, version?: number): Promise<WaSpecView | null> {
   const row = await prisma.waSpecVersion.findFirst({
     where: { service, ...(version === undefined ? {} : { version }) },
     orderBy: { version: "desc" }
@@ -58,7 +57,7 @@ export async function getWaSpec(service: string, version?: number, prisma: Prism
 }
 
 /** Saves the next version of a service's spec after checking it, and says which version it is. */
-export async function saveWaSpec(input: WaSpecSave, prisma: PrismaClient = sharedPrisma): Promise<{ version: number }> {
+export async function saveWaSpec(prisma: PrismaClient, input: WaSpecSave): Promise<{ version: number }> {
   const problems = waSpecProblems(input);
   if (problems.length > 0) {
     throw new InvalidWaSpec(problems.join("\n"));

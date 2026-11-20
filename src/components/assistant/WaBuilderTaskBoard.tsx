@@ -1,7 +1,7 @@
 import type { Model } from "@hmcts-cft/wa-spec";
 import Link from "next/link";
 import { type BoardGrouping, boardGroups, briefAcrossCaseTypes, briefVal, caseTypeLabel, taskCaseTypes } from "@/assistant/wa-builder-text";
-import { Grid, LINK, TD, TH } from "@/components/assistant/WaBuilderParts";
+import { Grid, LINK, TD, TH, versionQuery } from "@/components/assistant/WaBuilderParts";
 
 const GROUPINGS: ReadonlyArray<{ id: BoardGrouping; label: string }> = [
   { id: "roleCategory", label: "Role category" },
@@ -23,7 +23,6 @@ export function WaBuilderTaskBoard({
 }: Readonly<{ model: Model; service: string; version?: number; by: BoardGrouping; caseType?: string }>) {
   const groups = boardGroups(model, by, caseType);
   const base = `/assistant/wa-builder/${encodeURIComponent(service)}`;
-  const detailQuery = caseType === undefined ? "" : `?caseType=${encodeURIComponent(caseType)}`;
   return (
     <div className="flex flex-col gap-5">
       <form method="get" action={base} className="flex flex-wrap items-end gap-3">
@@ -59,9 +58,9 @@ export function WaBuilderTaskBoard({
         </button>
       </form>
       {groups.length === 0 ? <p className="text-[13px] text-asst-muted">No task is configured for this case type.</p> : null}
-      {groups.map(({ group, tasks }) => (
-        <section key={group} aria-labelledby={`wa-group-${group}`} className="flex flex-col gap-2">
-          <h2 id={`wa-group-${group}`} className="text-base font-semibold">
+      {groups.map(({ group, tasks }, index) => (
+        <section key={group} aria-labelledby={`wa-group-${index}`} className="flex flex-col gap-2">
+          <h2 id={`wa-group-${index}`} className="text-base font-semibold">
             {group} <span className="text-[13px] font-normal text-asst-muted">({tasks.length})</span>
           </h2>
           <Grid label={`Tasks: ${group}`}>
@@ -91,7 +90,7 @@ export function WaBuilderTaskBoard({
                 return (
                   <tr key={`${task.id}-${caseTypes.join(",")}`}>
                     <th scope="row" className={`${TD} font-medium`}>
-                      <Link href={`${base}/tasks/${encodeURIComponent(task.id)}${detailQuery}`} className={LINK}>
+                      <Link href={`${base}/tasks/${encodeURIComponent(task.id)}${versionQuery(version, "?")}`} className={LINK}>
                         {name}
                       </Link>
                     </th>

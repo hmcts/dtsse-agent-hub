@@ -1,15 +1,16 @@
 import { readFileSync } from "node:fs";
-import { type Model, parseModel } from "@hmcts-cft/wa-spec";
+import { type Model, parseModel, type Task } from "@hmcts-cft/wa-spec";
 import { describe, expect, it } from "vitest";
 import {
   boardGroups,
   briefExpr,
   cancelCategories,
-  describeCancellation,
+  caseTypeIds,
   describeCell,
   describeCompletion,
   describeCond,
   describeExpr,
+  describeTaskRule,
   describeTrigger,
   groupByCaseType,
   isRawFeel,
@@ -20,6 +21,7 @@ import {
   resolveVal,
   rolesByCategory,
   rulesForTask,
+  type TaskRule,
   taskCaseTypes,
   taskName,
   tasksUsingProfile,
@@ -108,13 +110,31 @@ describe("a trigger, completion and cancellation of ET1 Vetting", () => {
   });
 
   it("should say which events cancel it, by its category, when rules name the category", () => {
-    expect(rulesForTask(et, vetting, "et_englandwales").map(describeCancellation)).toEqual([
+    expect(rulesForTask(et, vetting, "et_englandwales").map(describeTaskRule)).toEqual([
       'Cancelled when one of `disposeCase`, `rollbackMigrateCase` or `caseTransferECM` happens (categories "Vetting", "Processing", "Hearing", "Judgment", "Application", "Amendments" and "ArrangeSupport")'
     ]);
   });
 
-  it("should find no cancelling rules for a case type the rule is not for", () => {
+  it("should find no cancelling rules when the task is not for that case type", () => {
     expect(rulesForTask(et, vetting, "et_englandwales_multiple")).toEqual([]);
+  });
+
+  it("should find a rule with no categories when it is for the task's case type, since it is about every task", () => {
+    const every = { ...et, cancellations: [{ events: "withdraw", action: "Cancel", only: ["et_scotland"] }] } as Model;
+    expect(rulesForTask(every, vetting, "et_scotland")).toEqual([{ rule: every.cancellations?.[0], mayApply: false }]);
+    expect(rulesForTask(every, vetting, "et_englandwales")).toEqual([]);
+  });
+
+  it("should say a rule may apply when its category is calculated", () => {
+    const computed = { ...et, cancellations: [{ events: "x", action: "Cancel", categories: [{ feel: "caseData.category" }] }] } as Model;
+    expect(rulesForTask(computed, vetting, "et_scotland").map((r) => r.mayApply)).toEqual([true]);
+    expect(describeTaskRule((rulesForTask(computed, vetting, "et_scotland") as [TaskRule])[0])).toMatch(/May apply/);
+  });
+
+  it("should say a rule may apply when the task's own category is calculated", () => {
+    const named = { ...et, cancellations: [{ events: "x", action: "Cancel", categories: ["Elsewhere"] }] } as Model;
+    expect(rulesForTask(named, task("ReviewReferralAdmin"), "et_englandwales").map((r) => r.mayApply)).toEqual([true]);
+    expect(rulesForTask(named, vetting, "et_englandwales")).toEqual([]);
   });
 
   it("should say the task is not for multiples when its case types are listed", () => {
@@ -136,8 +156,21 @@ describe("a trigger with a condition", () => {
 
 describe("cancelCategories", () => {
   it("should say a category is calculated when it is built from case data", () => {
-    expect(cancelCategories(task("ReviewReferralAdmin")).calculated).toBe(true);
-    expect(cancelCategories(task("Et1Vetting"))).toEqual({ named: ["Vetting"], calculated: false });
+    expect(cancelCategories(et, task("ReviewReferralAdmin"), "et_englandwales").calculated).toBe(true);
+    expect(cancelCategories(et, task("Et1Vetting"), "et_englandwales")).toEqual({ named: ["Vetting"], calculated: false });
+  });
+
+  it("should leave out the category of a trigger that is not for the case type when categories are scoped", () => {
+    const scoped: Task = {
+      id: "T",
+      cancelCategory: "Base",
+      create: [
+        { event: "a", only: ["et_englandwales"], cancelCategory: "OnlyEw" },
+        { event: "b", only: ["et_scotland"] }
+      ]
+    };
+    expect(cancelCategories(et, scoped, "et_englandwales").named).toEqual(["OnlyEw"]);
+    expect(cancelCategories(et, scoped, "et_scotland").named).toEqual(["Base"]);
   });
 });
 
@@ -150,9 +183,14 @@ describe("groupByCaseType", () => {
     ]);
   });
 
-  it("should show where ET's caseName differs when it is configured per case type", () => {
-    const attribute = et.defaults?.configuration?.filter((a) => a.name === "location") ?? [];
-    expect(attribute.length).toBeGreaterThan(1);
+  it("should group ET's case types by the default location each has when the location differs per case type", () => {
+    const entries = et.defaults?.configuration?.filter((attribute) => attribute.name === "location") ?? [];
+    const groups = groupByCaseType(caseTypeIds(et), (id) => {
+      const entry = entries.find((attribute) => (attribute.only ?? caseTypeIds(et)).includes(id));
+      return entry === undefined ? undefined : describeExpr(entry.value);
+    });
+    expect(groups.map((group) => group.caseTypes)).toEqual([["et_englandwales"], ["et_englandwales_multiple"], ["et_scotland", "et_scotland_multiple"]]);
+    expect(groups.map((group) => group.value?.match(/"(\d+)"$/)?.[1])).toEqual(["369230", "21153", "368308"]);
   });
 });
 

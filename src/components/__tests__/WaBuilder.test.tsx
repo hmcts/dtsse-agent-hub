@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { type Model, parseModel } from "@hmcts-cft/wa-spec";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { Placeholder, ViewTabs } from "@/components/assistant/WaBuilderParts";
+import { PermissionTick, Placeholder, requestedVersion, ViewTabs, versionQuery, YesNo } from "@/components/assistant/WaBuilderParts";
 import { WaBuilderRoles } from "@/components/assistant/WaBuilderRoles";
 import { WaBuilderServiceList } from "@/components/assistant/WaBuilderServiceList";
 import { WaBuilderSetup } from "@/components/assistant/WaBuilderSetup";
@@ -51,13 +51,15 @@ describe("the builder's views", () => {
   });
 
   it("should show a profile as a grid with a tick for each permission and the tasks that use it when roles are opened", () => {
-    render(<WaBuilderRoles model={et} service="employment" />);
+    render(<WaBuilderRoles model={et} service="employment" version={2} />);
 
     const grid = screen.getByRole("region", { name: "Permissions of the adminWorker profile" });
     const row = within(grid).getByRole("row", { name: /allocated-admin-caseworker/ });
     expect(within(row).getAllByText("✓").length).toBe(7);
     expect(within(row).getByText("2")).toBeDefined();
-    expect(screen.getAllByRole("link", { name: "ET1 Vetting" }).length).toBeGreaterThan(0);
+    const used = screen.getAllByRole("link", { name: "ET1 Vetting" });
+    expect(used.length).toBeGreaterThan(0);
+    expect(used[0]?.getAttribute("href")).toBe("/assistant/wa-builder/employment/tasks/Et1Vetting?version=2");
   });
 
   it("should group tasks under a heading each and filter them when the board has a case type", () => {
@@ -83,6 +85,47 @@ describe("the builder's views", () => {
     render(<WaBuilderTaskDetail model={et} task={task("ReviewReferralAdmin")} />);
 
     expect(screen.getAllByText("Only for et_englandwales").length).toBeGreaterThan(0);
+  });
+
+  it("should keep the version in each task link, and give each group its own heading id, when the board is for a version", () => {
+    render(<WaBuilderTaskBoard model={et} service="employment" version={4} by="roleCategory" />);
+
+    expect(screen.getAllByRole("link", { name: "ET1 Vetting" })[0]?.getAttribute("href")).toBe("/assistant/wa-builder/employment/tasks/Et1Vetting?version=4");
+    const ids = screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids.every((id) => /^wa-group-\d+$/.test(id))).toBe(true);
+  });
+
+  it("should show a calculated setting as itself, not as No, when a setting is not a plain boolean", () => {
+    render(
+      <>
+        <YesNo value="true" />|<YesNo value="false" />|<YesNo value="calculated" />
+      </>
+    );
+
+    expect(document.body.textContent).toBe("Yes|No|calculated");
+  });
+
+  it("should read a tick as Yes and its absence as No when a permission is or is not held", () => {
+    render(
+      <>
+        <PermissionTick has />
+        <PermissionTick has={false} />
+      </>
+    );
+
+    expect(screen.getByText("Yes")).toBeDefined();
+    expect(screen.getByText("No")).toBeDefined();
+  });
+
+  it("should read a version from the query only when it is a positive whole number", () => {
+    expect(requestedVersion({ version: "3" })).toBe(3);
+    expect(requestedVersion({ version: ["2", "5"] })).toBe(2);
+    expect(requestedVersion({ version: "0" })).toBeUndefined();
+    expect(requestedVersion({ version: "x" })).toBeUndefined();
+    expect(requestedVersion({})).toBeUndefined();
+    expect(versionQuery(undefined, "?")).toBe("");
+    expect(versionQuery(3, "&")).toBe("&version=3");
   });
 
   it("should link each view and mark the current one when a service is open", () => {

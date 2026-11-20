@@ -1,4 +1,17 @@
-import type { Cancellation, Cond, Expr, Grant, Model, PermissionSpec, Task, Trigger, Val } from "@hmcts-cft/wa-spec";
+import {
+  type Cancellation,
+  type Cond,
+  categoryParts,
+  type Expr,
+  type Grant,
+  isValEntry,
+  type Model,
+  ownEntry,
+  permissionSpecs,
+  type Task,
+  type Trigger,
+  type Val
+} from "@hmcts-cft/wa-spec";
 
 /*
  * What a Work Allocation model says, in words. Everything here is pure: the pages call it with a model and show its
@@ -21,14 +34,7 @@ const listOf = (items: string[], joiner: "and" | "or"): string =>
 
 export const compare = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
-/** A model's own entry of a user-keyed record, never one inherited from `Object.prototype`. */
-const ownEntry = <T>(record: Record<string, T> | undefined, key: string | undefined): T | undefined =>
-  record && key !== undefined && Object.hasOwn(record, key) ? record[key] : undefined;
-
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
-
-/** A value entry wraps `value`; a condition that happens to have a `value` also has an `op`. */
-const isValEntry = (value: unknown): value is ValEntry => isObject(value) && "value" in value && !("op" in value);
 
 export const isRawFeel = (expr: Expr | undefined): expr is { feel: string; language?: string } => isObject(expr) && "feel" in expr;
 
@@ -279,14 +285,6 @@ export function briefAcrossCaseTypes(model: Model, task: Task, resolve: (caseTyp
     : groups.map((group) => `${group.value} (${group.caseTypes.map((id) => caseTypeLabel(model, id)).join(", ")})`).join("; ");
 }
 
-export const permissionSpecs = (task: Task): PermissionSpec[] => {
-  const permissions = task.permissions;
-  if (permissions === undefined) {
-    return [];
-  }
-  return typeof permissions === "string" ? [{ profile: permissions }] : [permissions].flat();
-};
-
 export interface PermissionRow {
   role: string;
   category: string;
@@ -386,28 +384,50 @@ export function rolesByCategory(model: Model): Array<{ category: string; roles: 
     .sort((a, b) => (a.category === "No category" ? 1 : b.category === "No category" ? -1 : compare(a.category, b.category)));
 }
 
-/** The categories a task is cancelled by name, and whether it has a calculated one that rules cannot be matched to. */
-export function cancelCategories(task: Task): { named: string[]; calculated: boolean } {
-  const all = [task.cancelCategory, ...(task.create ?? []).map((trigger) => trigger.cancelCategory)].filter((c): c is Expr => c !== undefined);
-  const named = all.flatMap((category) => (typeof category === "string" ? category.split(",").map((part) => part.trim()) : []));
-  return { named: [...new Set(named.filter((name) => name !== ""))], calculated: all.some((category) => typeof category !== "string") };
+export interface CancelCategories {
+  named: string[];
+  /** A category that is worked out for each case, so a rule naming categories may or may not match it. */
+  calculated: boolean;
 }
 
-const RULE_CATEGORIES = (rule: Cancellation): string[] =>
-  (rule.categories ?? []).flatMap((category) => (typeof category === "string" ? category.split(",").map((part) => part.trim()) : []));
+/** The categories a task's cancellation rules find it by in one case type: its own and those of the triggers that apply there. */
+export function cancelCategories(model: Model, task: Task, caseType: string): CancelCategories {
+  const triggers = resolveTriggers(model, task, caseType);
+  const all = (triggers.length === 0 ? [task.cancelCategory] : triggers.map((trigger) => trigger.cancelCategory ?? task.cancelCategory)).filter(
+    (c): c is Expr => c !== undefined
+  );
+  const named = all.flatMap((category) => (typeof category === "string" ? categoryParts(category) : []));
+  return { named: [...new Set(named)], calculated: all.some((category) => typeof category !== "string") };
+}
 
-/** The rules that act on a task of this category in this case type, other than reconfiguring. */
-export function rulesForTask(model: Model, task: Task, caseType: string): Cancellation[] {
-  const { named } = cancelCategories(task);
+export interface TaskRule {
+  rule: Cancellation;
+  /** The rule or the task's category is calculated, so the rule may or may not act on this task. */
+  mayApply: boolean;
+}
+
+/**
+ * The cancelling and warning rules that act on a task in one case type. A rule with no categories is about every task; a
+ * rule or task with a calculated category may apply.
+ */
+export function rulesForTask(model: Model, task: Task, caseType: string): TaskRule[] {
   if (!taskCaseTypes(model, task).includes(caseType)) {
     return [];
   }
-  return (model.cancellations ?? []).filter(
-    (rule) =>
-      rule.action !== "Reconfigure" &&
-      (rule.only ?? caseTypeIds(model)).includes(caseType) &&
-      RULE_CATEGORIES(rule).some((category) => category === "*" || named.includes(category))
-  );
+  const { named, calculated } = cancelCategories(model, task, caseType);
+  return (model.cancellations ?? []).flatMap((rule): TaskRule[] => {
+    if (rule.action === "Reconfigure" || !(rule.only ?? caseTypeIds(model)).includes(caseType)) {
+      return [];
+    }
+    if (rule.categories === undefined) {
+      return [{ rule, mayApply: false }];
+    }
+    const listed = rule.categories.flatMap((category) => (typeof category === "string" ? categoryParts(category) : []));
+    if (listed.some((category) => category === "*" || named.includes(category))) {
+      return [{ rule, mayApply: false }];
+    }
+    return calculated || rule.categories.some((category) => typeof category !== "string") ? [{ rule, mayApply: true }] : [];
+  });
 }
 
 /** The rules that recalculate a case's tasks in this case type. */
@@ -467,3 +487,7 @@ export const PRIORITY_LABELS: Record<string, string> = {
 /** The sentence for a task's link: where in Manage Case it takes the person. */
 export const describeLink = (link: { label: string; event: string; page: string }): string =>
   `"${link.label}" opens ${code(link.event)}, on page ${code(link.page)}`;
+
+/** A cancelling or warning rule for one task, saying so when its category is calculated and it may not apply. */
+export const describeTaskRule = ({ rule, mayApply }: TaskRule): string =>
+  mayApply ? `${describeCancellation(rule)}. May apply: a category it names or the task's is calculated` : describeCancellation(rule);

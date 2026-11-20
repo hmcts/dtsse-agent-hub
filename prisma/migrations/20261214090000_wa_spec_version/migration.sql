@@ -4,7 +4,7 @@
 SET LOCAL lock_timeout = '5s';
 
 CREATE TABLE "wa_spec_version" (
-  "service"      TEXT        NOT NULL CHECK ("service" ~ '^[a-z0-9][a-z0-9-]{0,63}$'),
+  "service"      TEXT        NOT NULL CHECK ("service" ~ '^[a-z0-9][a-z0-9_-]{0,63}$'),
   "version"      INTEGER     NOT NULL CHECK ("version" >= 1),
   "display_name" TEXT        NOT NULL CHECK (char_length("display_name") BETWEEN 1 AND 200),
   "model"        TEXT        NOT NULL,
