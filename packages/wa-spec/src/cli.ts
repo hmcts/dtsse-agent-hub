@@ -32,10 +32,10 @@ const USAGE = `wa-spec: Work Allocation configuration spec
                                                  (specs or models) are compared as specs
   wa-spec show <spec.yaml|model.yaml> <taskId>   the rows of every kind that concern one task
   wa-spec lifecycle <definition-dir> --spec <spec.yaml|model.yaml> [--case-type X] [--env prod|nonprod | --exclude <glob,...>] [--format yaml|json]
-                                                 <definition-dir> is the processor's -D root, with a folder or file per sheet; --exclude is its -e
-                                                 (repeatable or comma separated, matched per path segment), --env gives ET's
-                                                 the spec's tasks laid over the case lifecycle of a CCD definition (JSON sheets), with
-                                                 warnings for what the definition cannot back
+                                                 the spec's tasks laid over the case lifecycle of a CCD definition, with warnings for
+                                                 what the definition cannot back. <definition-dir> is the directory the service gives
+                                                 ccd-definition-processor as -D; --exclude is its -e (repeatable or comma separated,
+                                                 matched per path segment) and --env is ET's pair of patterns
 `;
 
 function fail(message: string): never {

@@ -23,10 +23,7 @@ export function lifecycleReport(options: LifecycleOptions): string {
   if (wanted && !spec.caseTypes.some((c) => c.id.toLowerCase() === wanted)) {
     throw new Error(`the spec does not list the case type ${options.caseType}`);
   }
-  const lifecycles = readCcdDefinition(readDefinitionDir(options.definitionDir, options.exclude)).filter((l) => {
-    const id = l.caseType.toLowerCase();
-    return wanted ? id === wanted : spec.caseTypes.some((c) => c.id.toLowerCase() === id);
-  });
+  const lifecycles = readCcdDefinition(readDefinitionDir(options.definitionDir, options.exclude), wanted ? [wanted] : spec.caseTypes.map((c) => c.id));
   if (lifecycles.length === 0) {
     throw new Error(
       wanted
@@ -34,7 +31,7 @@ export function lifecycleReport(options: LifecycleOptions): string {
         : `${options.definitionDir} has none of the spec's case types`
     );
   }
-  const report: Record<string, Overlay & { states: number; events: Overlay["events"] }> = {};
+  const report: Record<string, Overlay & { states: number }> = {};
   for (const lifecycle of lifecycles) {
     const overlay = overlayTasks(lifecycle, spec);
     report[lifecycle.caseType] = { states: lifecycle.states.length, ...overlay };

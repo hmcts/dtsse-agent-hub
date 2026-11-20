@@ -35,6 +35,13 @@ describe("readCcdDefinition", () => {
     expect(() => readCcdDefinition({ CaseType: [{ ID: "X" }], CaseEvent: [row, row] })).toThrow("event e of X is defined more than once");
   });
 
+  it("should check for repeated events only in the case types asked for", () => {
+    const row = { CaseTypeID: "Y", ID: "e" };
+    const files = { CaseType: [{ ID: "X" }, { ID: "Y" }], CaseEvent: [{ CaseTypeID: "X", ID: "e" }, row, row] };
+    expect(readCcdDefinition(files, ["x"]).map((l) => l.caseType)).toEqual(["X"]);
+    expect(() => readCcdDefinition(files, ["Y"])).toThrow("event e of Y");
+  });
+
   it("should read Publish as true when it is Y, Yes or True in any case", () => {
     const read = (Publish: string) =>
       readCcdDefinition({ CaseType: [{ ID: "X" }], CaseEvent: [{ CaseTypeID: "X", ID: "e", PostConditionState: "S", Publish }] })[0]?.events[0]?.publish;

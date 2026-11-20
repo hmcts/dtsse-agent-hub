@@ -71,6 +71,13 @@ describe("readDefinitionDir", () => {
     expect(ids([])).toEqual(["e", "a", "b", "c", "d"]);
   });
 
+  it("should name the file when its JSON does not parse", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wa-spec-bad-"));
+    mkdirSync(join(dir, "CaseEvent"));
+    writeFileSync(join(dir, "CaseEvent", "Broken.json"), "[{");
+    expect(() => readDefinitionDir(dir)).toThrow(/CaseEvent\/Broken\.json: /);
+  });
+
   it("should not follow a symlink when walking the definition", () => {
     const dir = mkdtempSync(join(tmpdir(), "wa-spec-link-"));
     const outside = mkdtempSync(join(tmpdir(), "wa-spec-outside-"));

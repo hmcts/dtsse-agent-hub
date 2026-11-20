@@ -208,4 +208,95 @@ describe("overlayTasks", () => {
     const spec = specWith({ initiation: [{ when: { eventId: { in: ["orders"] }, postEventState: { in: ["A"] } }, returns: { taskId: "T" } }] }, ["x"]);
     expect(overlayTasks(lifecycle, spec).warnings).toEqual([]);
   });
+
+  const chain: Lifecycle = {
+    caseType: "X",
+    states: ["A", "B", "C"].map((id) => ({ id, name: id })),
+    events: [
+      { id: "start", name: "start", preStates: [], postState: "A", publish: true },
+      { id: "stop", name: "stop", preStates: ["B", "C"], postState: "A", publish: true }
+    ]
+  };
+
+  it("should start a task in every state when the row that creates it has an event cell that cannot be read", () => {
+    const spec = specWith(
+      {
+        initiation: [{ when: { eventId: { feel: "contains(x)" } }, returns: { taskId: "T", processCategories: "Cat" } }],
+        cancellation: [{ when: { event: { in: ["stop"] } }, returns: { action: "Cancel", processCategories: "Cat" } }]
+      },
+      ["x"]
+    );
+    const { events, warnings } = overlayTasks(chain, spec);
+    expect(warnings).toEqual([]);
+    expect(events.stop?.cancels).toEqual(["T"]);
+  });
+
+  it("should cancel every task when a cancellation row's process category is null", () => {
+    const spec = specWith(
+      {
+        initiation: [{ when: { eventId: { in: ["start"] } }, returns: { taskId: "T", processCategories: null } }],
+        cancellation: [{ when: { event: { in: ["stop"] } }, returns: { action: "Cancel", processCategories: null } }]
+      },
+      ["x"]
+    );
+    expect(overlayTasks(chain, spec).events).toEqual({
+      start: { creates: ["T"], completes: [], cancels: [], reconfigures: [] },
+      stop: { creates: [], completes: [], cancels: ["T"], reconfigures: [] }
+    });
+  });
+
+  it("should warn of a state in a cancellation row's fromState, state or toState that the definition lacks", () => {
+    const spec = specWith(
+      { cancellation: [{ when: { fromState: { in: ["Gone1"] }, state: { in: ["Gone2"] }, toState: { in: ["Gone3"] } }, returns: { action: "Cancel" } }] },
+      ["x"]
+    );
+    expect(overlayTasks(chain, spec).warnings).toEqual([
+      "the spec names the state Gone1, which X does not define",
+      "the spec names the state Gone2, which X does not define",
+      "the spec names the state Gone3, which X does not define"
+    ]);
+  });
+
+  it("should check a cancel event from the states its row's fromState leaves it when the row names them", () => {
+    const initiation: Row[] = [{ when: { eventId: { in: ["start"] } }, returns: { taskId: "T", processCategories: "Cat" } }];
+    const row = (fromState: string): Row => ({
+      when: { event: { in: ["stop"] }, fromState: { in: [fromState] } },
+      returns: { action: "Cancel", processCategories: "Cat" }
+    });
+    expect(overlayTasks(chain, specWith({ initiation, cancellation: [row("B")] }, ["x"])).warnings).toEqual([
+      "stop cancels task T from B, but the task exists only in A"
+    ]);
+    expect(overlayTasks(chain, specWith({ initiation, cancellation: [row("A")] }, ["x"])).warnings).toEqual([]);
+  });
+
+  it("should leave out an event with no task and an empty mayCancel when nothing is listed for it", () => {
+    const spec = specWith({
+      initiation: [{ when: { eventId: { in: ["initiateCase"] } }, returns: { taskId: "T", processCategories: "Cat" } }],
+      cancellation: [
+        { when: { event: { in: ["disposeCase"] } }, returns: { action: "Warn" } },
+        { when: { event: { in: ["caseTransferECM"] } }, returns: { action: "Cancel", processCategories: { feel: "x" } } }
+      ]
+    });
+    expect(Object.keys(overlayTasks(et, spec).events)).toEqual(["initiateCase"]);
+  });
+
+  it("should warn of a category cancellation only when none of the tasks of the category can be in the states it cancels from", () => {
+    const lifecycle: Lifecycle = {
+      caseType: "X",
+      states: ["A", "B", "C"].map((id) => ({ id, name: id })),
+      events: [
+        { id: "startA", name: "startA", preStates: [], postState: "A", publish: true },
+        { id: "startB", name: "startB", preStates: [], postState: "B", publish: true },
+        { id: "stop", name: "stop", preStates: ["A", "C"], postState: "*", publish: true }
+      ]
+    };
+    const create = (event: string, taskId: string): Row => ({ when: { eventId: { in: [event] } }, returns: { taskId, processCategories: "Cat" } });
+    const cancel: Row = { when: { event: { in: ["stop"] } }, returns: { action: "Cancel", processCategories: "Cat" } };
+    expect(overlayTasks(lifecycle, specWith({ initiation: [create("startA", "T1"), create("startB", "T2")], cancellation: [cancel] }, ["x"])).warnings).toEqual(
+      []
+    );
+    expect(overlayTasks(lifecycle, specWith({ initiation: [create("startB", "T2"), create("startB", "T3")], cancellation: [cancel] }, ["x"])).warnings).toEqual(
+      ["stop cancels tasks T2, T3 from A, C, but they exist only in B"]
+    );
+  });
 });

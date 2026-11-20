@@ -9,6 +9,15 @@ export const ENVIRONMENT_EXCLUDES = { nonprod: ["*-prod.json"], prod: ["*-nonpro
 /** A processor exclusion pattern: `*` stands for any run of characters, and the whole name must match. */
 const globToRegExp = (glob: string): RegExp => new RegExp(`^${glob.replace(/[.+^${}()|[\]\\?]/g, "\\$&").replaceAll("*", ".*")}$`, "i");
 
+/** A definition file's JSON, naming the file when it does not parse. */
+function parsed(file: string): unknown {
+  try {
+    return JSON.parse(readText(file));
+  } catch (error) {
+    throw new Error(`${file}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 /**
  * Reads the sheets a lifecycle needs from a definition directory the way ccd-definition-processor's `json2xlsx -D <dir>` reads
  * them: every `.json` file below the directory belongs to the sheet named by the first folder of its path, or by its own name
@@ -30,7 +39,7 @@ export function readDefinitionDir(dir: string, exclude: readonly string[] = ENVI
       } else if (kind === "file" && name.endsWith(".json")) {
         const sheet = (below[0] as string).replace(/\.json$/, "");
         if (SHEETS.has(sheet)) {
-          const rows: unknown = JSON.parse(readText(`${path}/${name}`));
+          const rows = parsed(`${path}/${name}`);
           sheets[sheet] = [...(sheets[sheet] ?? []), ...(Array.isArray(rows) ? rows : [rows])];
         }
       }

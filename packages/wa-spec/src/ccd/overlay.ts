@@ -1,4 +1,5 @@
 import { byCodePoint } from "../merge.ts";
+import { categoryParts } from "../model.ts";
 import { withCanonicalEvent } from "../model-compile.ts";
 import type { Cell, Expr, Kind, Row, Spec } from "../schema.ts";
 import type { Lifecycle, LifecycleEvent } from "./lifecycle.ts";
@@ -22,11 +23,13 @@ const listed = (cell: Cell | undefined): string[] | undefined => (cell && "in" i
 
 const text = (value: Expr | undefined): string | undefined => (typeof value === "string" ? value : undefined);
 
-const categoriesOf = (value: Expr | undefined): string[] | undefined =>
-  text(value)
-    ?.split(",")
-    .map((c) => c.trim())
-    .filter(Boolean);
+const categoriesOf = (value: Expr | undefined): string[] | undefined => {
+  const plain = text(value);
+  return plain === undefined ? undefined : categoryParts(plain);
+};
+
+/** A category the spec computes: a value that is neither absent, null (no filter) nor a plain string. */
+const isComputed = (value: Expr | undefined): boolean => value !== undefined && value !== null && typeof value !== "string";
 
 const addTo = (list: string[], value: string): void => {
   if (!list.includes(value)) {
@@ -112,13 +115,16 @@ export function overlayTasks(lifecycle: Lifecycle, spec: Spec): Overlay {
     if (!taskId) {
       continue;
     }
-    if (row.returns?.processCategories !== undefined && text(row.returns.processCategories) === undefined) {
+    if (isComputed(row.returns?.processCategories)) {
       computedCategories.add(taskId);
     }
     for (const category of categoriesOf(row.returns?.processCategories) ?? []) {
       categories.set(category, [...(categories.get(category) ?? []).filter((t) => t !== taskId), taskId]);
     }
     const named = statesIn(row.when?.postEventState);
+    if (listed(row.when?.eventId) === undefined) {
+      startStates.set(taskId, "*");
+    }
     for (const id of eventsIn(row.when?.eventId)) {
       addTo(tasksOf(id).creates, taskId);
       const post = postStatesOf(definedEvents.get(id) as LifecycleEvent);
@@ -145,10 +151,11 @@ export function overlayTasks(lifecycle: Lifecycle, spec: Spec): Overlay {
   for (const row of rowsOf("cancellation")) {
     const action = text(row.returns?.action);
     const ids = eventsIn(row.when?.event);
+    const fromStates = listed(row.when?.fromState);
     statesIn(row.when?.fromState);
     statesIn(row.when?.state);
-    const computed = row.returns?.processCategories !== undefined && text(row.returns.processCategories) === undefined;
-    if (computed) {
+    statesIn(row.when?.toState);
+    if (isComputed(row.returns?.processCategories)) {
       for (const id of action === "Cancel" ? ids : []) {
         const tasks = tasksOf(id);
         const list = tasks.mayCancel ?? [];
@@ -160,29 +167,38 @@ export function overlayTasks(lifecycle: Lifecycle, spec: Spec): Overlay {
       continue;
     }
     const wanted = categoriesOf(row.returns?.processCategories);
-    const affected = wanted ? [...new Set(wanted.flatMap((c) => categories.get(c) ?? []))] : taskIds;
+    const affected = wanted && wanted.length > 0 ? [...new Set(wanted.flatMap((c) => categories.get(c) ?? []))] : taskIds;
     for (const id of ids) {
       const slot = action === "Cancel" ? tasksOf(id).cancels : action === "Reconfigure" ? tasksOf(id).reconfigures : undefined;
       for (const taskId of affected) {
         if (slot) {
           addTo(slot, taskId);
         }
-        const event = definedEvents.get(id) as LifecycleEvent;
-        const starts = startStates.get(taskId);
-        if (action === "Cancel" && starts && starts !== "*" && event.preStates !== "*") {
-          const exists = reachable(lifecycle, starts);
-          if (!event.preStates.some((s) => exists.has(s))) {
-            addTo(
-              cancelWarnings,
-              `${id} cancels task ${taskId} from ${event.preStates.join(", ")}, but the task exists only in ${[...exists].sort(byCodePoint).join(", ")}`
-            );
-          }
+      }
+      const event = definedEvents.get(id) as LifecycleEvent;
+      const pre = event.preStates === "*" ? (fromStates ?? "*") : fromStates ? event.preStates.filter((s) => fromStates.includes(s)) : event.preStates;
+      const starts = affected.map((taskId) => startStates.get(taskId));
+      if (action === "Cancel" && pre !== "*" && pre.length > 0 && starts.length > 0 && starts.every((s) => s !== undefined && s !== "*")) {
+        const exists = new Set(starts.flatMap((s) => [...reachable(lifecycle, s as string[])]));
+        if (!pre.some((s) => exists.has(s))) {
+          const one = affected.length === 1;
+          addTo(
+            cancelWarnings,
+            `${id} cancels ${one ? "task" : "tasks"} ${affected.join(", ")} from ${pre.join(", ")}, but ${one ? "the task exists" : "they exist"} only in ${[...exists].sort(byCodePoint).join(", ")}`
+          );
         }
       }
     }
   }
 
   for (const [id, tasks] of Object.entries(events)) {
+    if (tasks.mayCancel?.length === 0) {
+      delete tasks.mayCancel;
+    }
+    if (!tasks.creates.length && !tasks.completes.length && !tasks.cancels.length && !tasks.reconfigures.length && !tasks.mayCancel) {
+      delete events[id];
+      continue;
+    }
     const roles = (["creates", "completes", "cancels", "reconfigures", "mayCancel"] as const).filter((role) => (tasks[role]?.length ?? 0) > 0);
     if (roles.length > 0 && !(definedEvents.get(id) as LifecycleEvent).publish) {
       warnings.push(

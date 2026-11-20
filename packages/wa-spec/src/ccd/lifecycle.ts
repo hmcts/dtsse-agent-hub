@@ -62,39 +62,44 @@ const postStates = (text: string | undefined): string[] | "*" => {
   return listed.length === 0 || listed.every((s) => s === "*") ? "*" : listed;
 };
 
+/** The rows of a case type's events, which the definition store would refuse if two shared an id. */
+function eventsOf<T extends { ID: string; CaseTypeID: string }>(rows: T[], caseType: string): T[] {
+  const own = rows.filter((e) => e.CaseTypeID === caseType);
+  const ids = own.map((e) => e.ID);
+  const repeated = ids.find((id, index) => ids.indexOf(id) !== index);
+  if (repeated !== undefined) {
+    throw new Error(`the event ${repeated} of ${caseType} is defined more than once, so the definition store would refuse the import`);
+  }
+  return own;
+}
+
 /**
  * One lifecycle per case type of the definition's `CaseType` sheet, from its `State` and `CaseEvent` sheets. `files` holds the
  * parsed rows of each sheet by sheet name, with a sheet split over several files already concatenated, so the same shape serves
- * a definition kept as JSON sheets and the JSON ccd-config-generator writes.
+ * a definition kept as JSON sheets and the JSON ccd-config-generator writes. With `only`, just those case types (compared
+ * without regard to case) are read and checked.
  */
-export function readCcdDefinition(files: Record<string, unknown>): Lifecycle[] {
+export function readCcdDefinition(files: Record<string, unknown>, only?: readonly string[]): Lifecycle[] {
   const states = rowsOf(StateRow, "State", files);
   const events = rowsOf(CaseEventRow, "CaseEvent", files);
-  const seen = new Set<string>();
-  for (const { CaseTypeID, ID } of events) {
-    if (seen.has(`${CaseTypeID}/${ID}`)) {
-      throw new Error(`the event ${ID} of ${CaseTypeID} is defined more than once, so the definition store would refuse the import`);
-    }
-    seen.add(`${CaseTypeID}/${ID}`);
-  }
-  return rowsOf(CaseTypeRow, "CaseType", files).map(({ ID: caseType }) => ({
+  const wanted = only?.map((id) => id.toLowerCase());
+  const caseTypes = rowsOf(CaseTypeRow, "CaseType", files).filter(({ ID }) => !wanted || wanted.includes(ID.toLowerCase()));
+  return caseTypes.map(({ ID: caseType }) => ({
     caseType,
     states: states.filter((s) => s.CaseTypeID === caseType).map((s) => ({ id: s.ID, name: s.Name ?? s.ID })),
-    events: events
-      .filter((e) => e.CaseTypeID === caseType)
-      .map((e) => {
-        const fromCallback = (e.PostConditionState ?? "").trim() === "";
-        const post = postStates(e.PostConditionState);
-        const [first, ...others] = post === "*" ? ["*"] : post;
-        return {
-          id: e.ID,
-          name: e.Name ?? e.ID,
-          preStates: stateList(e["PreConditionState(s)"]),
-          postState: first ?? "*",
-          ...(others.length > 0 ? { otherPostStates: others } : {}),
-          ...(fromCallback ? { postStateFromCallback: true as const } : {}),
-          publish: ["Y", "YES", "TRUE"].includes(e.Publish?.trim().toUpperCase() ?? "")
-        };
-      })
+    events: eventsOf(events, caseType).map((e) => {
+      const fromCallback = (e.PostConditionState ?? "").trim() === "";
+      const post = postStates(e.PostConditionState);
+      const [first, ...others] = post === "*" ? ["*"] : post;
+      return {
+        id: e.ID,
+        name: e.Name ?? e.ID,
+        preStates: stateList(e["PreConditionState(s)"]),
+        postState: first ?? "*",
+        ...(others.length > 0 ? { otherPostStates: others } : {}),
+        ...(fromCallback ? { postStateFromCallback: true as const } : {}),
+        publish: ["Y", "YES", "TRUE"].includes(e.Publish?.trim().toUpperCase() ?? "")
+      };
+    })
   }));
 }
