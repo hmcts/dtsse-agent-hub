@@ -10,7 +10,8 @@ import { HOME_SCREEN_ICON, TAB_ICON } from "@/web/icons";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "CFT Workspace",
+  // A page that names itself shows as "CFT - <name>"; one that does not shows as plain "CFT Workspace".
+  title: { default: "CFT Workspace", template: "CFT - %s" },
   description: "Ask for help with user stories, research, analysis and prototypes",
   // A segment's `icons` replace its parent's, so the home-screen icon is named again alongside the crown.
   icons: { icon: TAB_ICON, apple: HOME_SCREEN_ICON }

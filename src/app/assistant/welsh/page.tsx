@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { isWelshTask, WELSH_PRODUCTS } from "@/assistant/welsh";
 import { WelshPage } from "@/components/assistant/WelshPage";
@@ -6,6 +7,8 @@ import { assistantHasWelsh } from "@/web/data";
 import { assistantSettingsPath } from "@/web/home";
 
 export const dynamic = "force-dynamic";
+
+export const metadata: Metadata = { title: "Welsh translations" };
 
 /**
  * The Welsh page: a business analyst's tools for a service's Welsh, run in their own assistant. `?product=` picks the

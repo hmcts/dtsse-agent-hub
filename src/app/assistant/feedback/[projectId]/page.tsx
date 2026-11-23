@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { markFeedbackProjectSeen } from "@/app/_actions/feedback";
 import { projectTab } from "@/components/feedback/dev/look";
@@ -6,11 +7,17 @@ import { FeedbackHeader } from "@/components/feedback/dev/ProjectList";
 import { ProjectPage } from "@/components/feedback/dev/ProjectPage";
 import { allowPrivateTargets } from "@/feedback/targets";
 import { requireViewer } from "@/viewer/current";
-import { feedbackProjectPage } from "@/web/feedback-data";
+import { feedbackProjectName, feedbackProjectPage } from "@/web/feedback-data";
 import { PROJECT_ACTIONS } from "../actions";
 import { FeedbackFrame, requireFeedback } from "../frame";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata({ params }: Readonly<{ params: Promise<{ projectId: string }> }>): Promise<Metadata> {
+  requireFeedback();
+  const name = await feedbackProjectName(await requireViewer(), (await params).projectId);
+  return { title: name?.trim() || "Feedback project" };
+}
 
 /** One feedback project, for its owner and team; `?tab=` picks the section. Anyone else's is not found. */
 export default async function FeedbackProjectPage({

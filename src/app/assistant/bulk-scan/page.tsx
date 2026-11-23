@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { deleteBulkScanSpec } from "@/app/_actions/bulk-scan";
 import { BulkScanList } from "@/components/assistant/BulkScanList";
@@ -6,6 +7,8 @@ import { requireViewer } from "@/viewer/current";
 import { bulkScanSpecs } from "@/web/data";
 
 export const dynamic = "force-dynamic";
+
+export const metadata: Metadata = { title: "Bulk Scan forms" };
 
 /**
  * The Bulk Scan form builder: a paper form's field spec, from a PDF, an Exela SIP or an HMCTS transformation sheet, kept

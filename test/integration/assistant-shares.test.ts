@@ -36,7 +36,7 @@ const { actAs } = await import("./web-session.ts");
 const assistantActions = await import("../../src/app/_actions/assistant.ts");
 const shareActions = await import("../../src/app/_actions/shares.ts");
 const forkActions = await import("../../src/app/_actions/forks.ts");
-const { assistantConversation, chatShares, sharedChat, sharedChats } = await import("../../src/web/data.ts");
+const { assistantConversation, assistantConversationTitle, chatShares, sharedChat, sharedChats } = await import("../../src/web/data.ts");
 
 function persona(name: string): Person {
   const identity = devIdentity(name);
@@ -558,5 +558,17 @@ describe("/api/ui/assistant/shares/{id}", () => {
     expect((await readers(id, "bob")).status).toBe(404);
     expect((await readers(id, "carol", "?mode=fork")).status).toBe(404);
     expect((await readers("not-a-chat", "alice")).status).toBe(404);
+  });
+});
+
+describe("a conversation's tab title", () => {
+  it("should name the owner's chat by its title, read as an empty one while it has none, and tell a stranger nothing", async () => {
+    const { id } = await chat();
+
+    expect(await assistantConversationTitle(viewerOf(ALICE), id)).toBe("What goes in a possession order?");
+    expect(await assistantConversationTitle(viewerOf(CAROL), id)).toBeUndefined();
+
+    await prisma.assistantConversation.update({ where: { id }, data: { title: null } });
+    expect(await assistantConversationTitle(viewerOf(ALICE), id)).toBe("");
   });
 });
