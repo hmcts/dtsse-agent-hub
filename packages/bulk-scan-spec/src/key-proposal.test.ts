@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { camelCase, proposeKeys } from "./key-proposal.ts";
+import { camelCase, proposeKeys, subjectOf } from "./key-proposal.ts";
 
 const HOUSE = [
   "soleOrApplicant1FirstName",
@@ -45,6 +45,39 @@ describe("proposeKeys without house style", () => {
       ["Q2_3", "Q3_3"]
     );
     expect(keys.map((k) => k.key)).toEqual(["country", "countryQ3_3"]);
+  });
+});
+
+describe("a repeated label in a later section", () => {
+  const slot = (section: string) => ({ label: "First name", context: section, section });
+
+  it("should lead the key with the section's subject when an earlier section has the key", () => {
+    const keys = proposeKeys(
+      [
+        slot("Section 2 – Your information"),
+        slot("Section 3 – Appealing on behalf of a minor (under 18 years old)"),
+        slot("Section 5 – Appellant's representative information")
+      ],
+      [],
+      ["Q2_1", "Q3_1", "Q5_2"]
+    );
+    expect(keys.map((k) => k.key)).toEqual(["firstName", "minorFirstName", "representativeFirstName"]);
+  });
+
+  it("should suffix the question's tag when the section has no subject or its subject key is taken too", () => {
+    const keys = proposeKeys(
+      [slot("Section 2"), slot("Section 3"), slot("Section 4 – Appealing on behalf of a minor"), slot("Section 5 – Minor")],
+      [],
+      ["Q2", "Q3", "Q4", "Q5"]
+    );
+    expect(keys.map((k) => k.key)).toEqual(["firstName", "firstNameQ3", "minorFirstName", "minorFirstNameQ5"]);
+  });
+});
+
+describe("subjectOf", () => {
+  it("should give the last word that is not generic when a title is read", () => {
+    expect(subjectOf("Section 4 – Appealing following a bereavement")).toBe("bereavement");
+    expect(subjectOf("Section 1 – Appeal information")).toBeUndefined();
   });
 });
 

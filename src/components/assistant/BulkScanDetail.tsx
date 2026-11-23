@@ -56,7 +56,7 @@ export function BulkScanDetail({
   const name = fieldName(field, f);
   return (
     <section aria-labelledby={headingId} className="flex min-w-0 flex-col gap-4">
-      <h2 id={headingId} className="text-base font-semibold">
+      <h2 id={headingId} className="truncate text-base font-semibold">
         {`${name}${field.label && name !== field.label ? ` ${field.label.split("\n")[0]}` : ""}`}
       </h2>
       <BulkScanFieldDetails

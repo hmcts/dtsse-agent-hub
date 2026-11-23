@@ -154,7 +154,8 @@ export function BulkScanOutline({
                   onClick={() => onSelect({ section: s, field: null })}
                   className={`flex min-w-0 flex-1 items-baseline gap-2 rounded-lg px-1.5 py-1.5 text-left text-[13px] font-semibold text-asst-text hover:bg-asst-hover ${FOCUS}`}
                 >
-                  <span className="shrink-0 text-asst-muted">{section.id || "–"}</span> <span className="truncate">{section.title || "Untitled section"}</span>{" "}
+                  <span className="shrink-0 text-asst-muted">{section.id || "–"}</span>{" "}
+                  <span className="truncate">{section.title || (s === 0 ? "Before section 1" : "Untitled section")}</span>{" "}
                   <span className="ml-auto shrink-0 text-[11px] font-normal text-asst-muted">{section.fields.length}</span>
                 </button>
                 <span className="flex shrink-0 gap-1 pr-1 opacity-0 focus-within:opacity-100 group-hover:opacity-100">

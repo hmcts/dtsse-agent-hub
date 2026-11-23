@@ -6,6 +6,8 @@ export interface KeySlot {
   label: string;
   /** Section heading and question wording around it, which carry who the field is about. */
   context: string;
+  /** The section's own title, whose subject names a key that another section already has. */
+  section?: string;
 }
 
 export interface ProposedKey {
@@ -40,10 +42,38 @@ function prefixesOf(houseKeys: string[]): string[] {
   return [...counts].filter(([, n]) => n >= MIN_PREFIX_USES).map(([p]) => p);
 }
 
-function uniqueKey(key: string, used: Set<string>, tag: string): string {
+const GENERIC = new Set([
+  "information",
+  "details",
+  "detail",
+  "section",
+  "appealing",
+  "appeal",
+  "about",
+  "your",
+  "request",
+  "application",
+  "form",
+  "behalf",
+  "following",
+  "reasons"
+]);
+
+/** The word a section title is about, such as minor for "Appealing on behalf of a minor": its last word that is not generic. */
+export function subjectOf(title: string): string | undefined {
+  return words(title)
+    .filter((w) => !/^\d+$/.test(w) && !GENERIC.has(w))
+    .at(-1);
+}
+
+/** The key, led by the section's subject when it is already used, and suffixed with the question's tag only when that is used too or there is no subject. */
+function uniqueKey(key: string, used: Set<string>, tag: string, subject?: string): string {
   let candidate = key;
+  if (used.has(candidate.toLowerCase()) && subject) {
+    candidate = `${subject}${key.charAt(0).toUpperCase()}${key.slice(1)}`;
+  }
   if (used.has(candidate.toLowerCase())) {
-    candidate = `${key}${tag}`;
+    candidate = `${candidate}${tag}`;
   }
   for (let n = 2; used.has(candidate.toLowerCase()); n++) {
     candidate = `${key}${tag}${n}`;
@@ -83,7 +113,7 @@ export function proposeKeys(slots: KeySlot[], houseKeys: string[], tags: string[
     const base = camelCase(slot.label, party ? new Set(words(party.prefix)) : undefined) || "field";
     const key = party ? `${party.prefix}${base.charAt(0).toUpperCase()}${base.slice(1)}` : base;
     return {
-      key: uniqueKey(key, used, tags[i] ?? ""),
+      key: uniqueKey(key, used, tags[i] ?? "", slot.section ? subjectOf(slot.section) : undefined),
       reason: party ? `new key from the label with house prefix ${party.prefix}` : "new key from the label; no existing key matched",
       confidence: "low"
     };

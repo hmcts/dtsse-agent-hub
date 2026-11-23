@@ -34,7 +34,7 @@ export function matchesQuery(field: Field, query: string): boolean {
 
 /** What a field is called in the editor: its id, else its first key, else its label. */
 export function fieldName(field: Field, index: number): string {
-  return field.id || field.keys[0] || field.label || `field ${index + 1}`;
+  return field.id || field.keys[0] || field.label.split("\n")[0]?.trim() || `field ${index + 1}`;
 }
 
 export type Badge = "mandatory" | "optional" | "conditional" | "not-read";
