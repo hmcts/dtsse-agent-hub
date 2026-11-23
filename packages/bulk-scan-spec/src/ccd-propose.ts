@@ -27,8 +27,16 @@ export interface CcdRow {
 
 const MIN_MATCH = 0.5;
 
-function rowsIn(text: string): CcdRow[] {
-  const rows: unknown = JSON.parse(text);
+function rowsIn(text: string, name?: string): CcdRow[] {
+  let rows: unknown;
+  try {
+    rows = JSON.parse(text);
+  } catch (error) {
+    if (name !== undefined && error instanceof SyntaxError) {
+      throw new Error(`${name} is not valid JSON`);
+    }
+    throw error;
+  }
   return Array.isArray(rows) ? (rows as CcdRow[]) : [];
 }
 
@@ -36,6 +44,9 @@ function rowsIn(text: string): CcdRow[] {
 export function ccdDefinitionOf(rows: CcdRow[], caseType?: string): CcdDefinition {
   const fields = rows.filter((r) => typeof r.ID === "string" && r.ID !== "");
   const ids = [...new Set(fields.flatMap((r) => (typeof r.CaseTypeID === "string" && r.CaseTypeID !== "" ? [r.CaseTypeID] : [])))].sort(byCode);
+  if (caseType !== undefined && ids.length > 0 && !ids.includes(caseType)) {
+    throw new Error(`that definition has no case type "${caseType}": it holds ${ids.join(", ")}`);
+  }
   const chosen = caseType ?? (ids.length === 1 ? ids[0] : undefined);
   if (chosen === undefined && ids.length > 1) {
     throw new Error(`that definition holds ${ids.length} case types (${ids.join(", ")}): give the case type id the form belongs to`);
@@ -64,7 +75,9 @@ async function rowsOfWorkbook(bytes: Uint8Array): Promise<CcdRow[]> {
   throw new Error("the CaseField sheet has no ID and FieldType columns");
 }
 
-const isCaseFieldEntry = (path: string): boolean => /(^|\/)CaseField(\.json|\/[^/]+\.json)$/.test(path);
+/** A CaseField file or folder entry, leaving out the `__MACOSX/` copies and `._` files macOS adds to a zip. */
+const isCaseFieldEntry = (path: string): boolean =>
+  /(^|\/)CaseField(\.json|\/[^/]+\.json)$/.test(path) && !/(^|\/)(__MACOSX|\._[^/]*)(\/|$)/.test(path) && !/\/\._[^/]*$/.test(path);
 
 /**
  * A CCD definition from an upload: a CaseField.json, a zip of a definitions folder (CaseField.json or a CaseField folder at any depth) or a
@@ -76,7 +89,7 @@ export async function readCcdDefinition(bytes: Uint8Array, caseType?: string): P
     if (entries.length > 0) {
       const decoder = new TextDecoder();
       return ccdDefinitionOf(
-        entries.sort((a, b) => byCode(a.path, b.path)).flatMap((e) => rowsIn(decoder.decode(e.content))),
+        entries.sort((a, b) => byCode(a.path, b.path)).flatMap((e) => rowsIn(decoder.decode(e.content), e.path)),
         caseType
       );
     }

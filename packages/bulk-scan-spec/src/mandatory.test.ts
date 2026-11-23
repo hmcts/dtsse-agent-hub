@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { makePdf, SAMPLE_FORM } from "./__fixtures__/make-pdf.ts";
 import { ROUTED_FORM } from "./__fixtures__/t210-routes.ts";
+import { isQuestion, keyModels } from "./codegen/model.ts";
 import { fromPdf } from "./from-pdf.ts";
-import type { Field } from "./schema.ts";
+import type { Field, FormSpec } from "./schema.ts";
 import { allFields } from "./schema.ts";
 
 async function fieldsOf(pages: Parameters<typeof makePdf>[1]): Promise<Field[]> {
@@ -142,5 +143,44 @@ describe("routes in the SSCS1 style", () => {
     expect(byId(fields, "2")).toMatchObject({ mandatory: "conditional", required: { label: "'Other, give details' is ticked" } });
     expect(byId(fields, "3")).toMatchObject({ mandatory: "mandatory" });
     expect(fields.flatMap(markers).filter((m) => m.reason.includes("must check"))).toEqual([]);
+  });
+});
+
+describe("tick boxes", () => {
+  it("should give a Yes and No pair the Yes and No values the D8 sheet lists, so No is an answer to a mandatory question", async () => {
+    const { bundle } = await fromPdf({ pdf: await makePdf("sample", SAMPLE_FORM) });
+    const form = bundle.forms[0] as FormSpec;
+    const pair = form.sections.flatMap((s) => s.fields).find((f) => f.label === "Do you have a solicitor?") as Field;
+    expect(pair).toMatchObject({ mandatory: "mandatory", keys: [expect.any(String)] });
+    const [key] = pair.keys as [string];
+    expect(pair.emits).toEqual([
+      { when: "if yes", key, value: "Yes" },
+      { when: "if no", key, value: "No" },
+      { when: "if empty", key, value: "" }
+    ]);
+    expect(isQuestion(keyModels({ ...form, form: { ...form.form, formType: "X" } }).find((m) => m.key === key) as never)).toBe(true);
+  });
+
+  const single = (text: string): Parameters<typeof makePdf>[1] => [
+    {
+      texts: [
+        { text: "1.1 " + text, x: 28, y: 700 },
+        { text: "I agree", x: 77, y: 673 }
+      ],
+      checkboxes: [{ name: "agree", x: 57, y: 670 }]
+    }
+  ];
+
+  it("should make a single tick box optional when the form does not say it must be ticked", async () => {
+    const [box] = await fieldsOf(single("Declaration"));
+    expect(box).toMatchObject({ inputType: "checkbox", mandatory: "optional" });
+    expect(markers(box as Field)).toEqual([
+      { about: "mandatory", reason: "optional: a single tick box, which the form does not say must be ticked", confidence: "medium" }
+    ]);
+  });
+
+  it("should make a single tick box mandatory when the form says it must be ticked", async () => {
+    const [box] = await fieldsOf(single("You must tick this box to confirm"));
+    expect(box).toMatchObject({ mandatory: "mandatory" });
   });
 });

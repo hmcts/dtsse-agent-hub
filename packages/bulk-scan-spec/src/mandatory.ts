@@ -9,6 +9,9 @@ export interface MandatoryDecision {
 }
 
 /** A bracketed note such as "(optional)", "(if known)" or "(if you have one)" in a field's own words. */
+/** The form saying a tick box has to be ticked. */
+const MUST_TICK = /\bmust\s+(?:be\s+)?tick(?:ed)?\b/i;
+
 const OPTIONAL_NOTE = /\((?:optional|if [a-z ]+)\)/i;
 
 interface Condition {
@@ -98,6 +101,13 @@ export function decideMandatory(drafts: DraftField[], keys: string[][]): Mandato
     const note = [d.field.label, d.question].map((t) => OPTIONAL_NOTE.exec(t)?.[0]).find((n) => n !== undefined);
     if (note) {
       return { mandatory: "optional", review: [{ about: "mandatory", reason: `optional: the form marks it ${note}`, confidence: "high" }] };
+    }
+    const single = d.field.inputType === "checkbox" && d.choices?.length === 1;
+    if (single && ![d.field.label, d.question].some((t) => MUST_TICK.test(t))) {
+      return {
+        mandatory: "optional",
+        review: [{ about: "mandatory", reason: "optional: a single tick box, which the form does not say must be ticked", confidence: "medium" }]
+      };
     }
     const conditions: Condition[] = [];
     const unresolved: string[] = [];

@@ -42,6 +42,21 @@ describe("draftFields", () => {
     expect(fields.find((d) => d.field.id === "2.2")?.field.label).toBe("Court name");
   });
 
+  it("should take an undotted number as a question only when a box is just below it, not as numbered guidance", async () => {
+    const fields = await draftOf({
+      texts: [
+        { text: "1. Use black ink", x: 28, y: 740 },
+        { text: "Notes end here", x: 28, y: 600 },
+        { text: "2. What is your main language?", x: 28, y: 400 }
+      ],
+      textBoxes: [
+        { name: "first", x: 57, y: 500 },
+        { name: "second", x: 57, y: 360 }
+      ]
+    });
+    expect(fields.map((d) => d.field.id)).toEqual([undefined, "2"]);
+  });
+
   it("should end a checkbox group at a text box", async () => {
     const fields = await draftOf({
       texts: [

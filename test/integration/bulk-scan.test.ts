@@ -91,6 +91,12 @@ describe("starting a spec", () => {
     expect((await readSpec(prisma, own(ALICE), id as string))?.versions).toMatchObject([{ version: 1, savedBy: ALICE.name, signedOffBy: null }]);
   });
 
+  it("should take a file whose name has a percent sign in it, which is not a URL-encoded name", async () => {
+    const ids = await upload("alice", "Fee 100% form.xlsx");
+
+    expect(ids).toHaveLength(1);
+  });
+
   it("should refuse a file that is not a PDF or spreadsheet, a name that is neither, and a request from outside the hub's pages", async () => {
     const bad = await uploadRoute.POST(as("alice", "/api/ui/assistant/bulk-scan", { method: "POST", body: uploadForm("t.xlsx", "hello") }));
     const noName = await uploadRoute.POST(as("alice", "/api/ui/assistant/bulk-scan", { method: "POST", body: uploadForm("t.txt", "hello") }));

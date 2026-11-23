@@ -109,9 +109,19 @@ export async function fromPdf(input: FromPdfInput): Promise<FromPdfResult> {
           : { about: "ccd", reason: "no CCD field close enough", confidence: "low" }
       );
     }
+    const yesNo = d.choices?.length === 2 && mine.length === 1;
     const field: Field = {
       ...d.field,
       mandatory: decision.mandatory,
+      ...(yesNo && mine[0]
+        ? {
+            emits: [
+              { when: "if yes", key: mine[0].key, value: "Yes" },
+              { when: "if no", key: mine[0].key, value: "No" },
+              { when: "if empty", key: mine[0].key, value: "" }
+            ]
+          }
+        : {}),
       ...(format ? { regex: format.regex } : {}),
       ...(decision.required ? { required: decision.required } : {}),
       keys: mine.map((k) => k.key),

@@ -51,6 +51,18 @@ describe("bulk scan upload", () => {
     expect(body.get("caseType")).toBe("CriminalInjuriesCompensation");
   });
 
+  it("should refuse files that are too large together before sending anything", () => {
+    render(<BulkScanUpload />);
+    const big = (bytes: number, name: string) => Object.defineProperty(new File(["x"], name), "size", { value: bytes });
+
+    choose(/^Form:/, big(4 * 1024 * 1024, "a.pdf"));
+    choose(/CCD definition/, big(1024 * 1024 + 1, "CaseField.json"));
+    start();
+
+    expect(screen.getByRole("alert").textContent).toContain("too large");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("should ask for a form before sending anything", () => {
     render(<BulkScanUpload />);
 

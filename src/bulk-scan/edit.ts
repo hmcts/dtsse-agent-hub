@@ -153,7 +153,7 @@ function moved<T>(items: readonly T[], from: number, by: -1 | 1): T[] {
   return [...rest.slice(0, to), item, ...rest.slice(to)];
 }
 
-/** A new field is an optional text field with an empty key, which `checkSpec` refuses until it has one. */
+/** A new field is a mandatory text field with an empty key, which `checkSpec` refuses until it has one. */
 export function blankField(): Field {
   return { role: "field", label: "", inputType: "text", mandatory: "mandatory", keys: [""], ccd: [], rules: [], todo: [] };
 }

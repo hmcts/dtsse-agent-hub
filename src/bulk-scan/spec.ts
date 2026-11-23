@@ -35,10 +35,7 @@ import { zipFiles } from "./zip.ts";
  * and the saved spec: no person's credentials, so no job in their pod. Pure, and `spec-store.ts` is the Postgres half.
  */
 
-export const MAX_BULK_SCAN_FILE_BYTES = 5 * 1024 * 1024;
 /** A saved spec's JSON: the D8 form, 91 field rows, is under 400 KiB. */
-/** A CCD definition uploaded with a form: a CaseField.json is about 120 KiB, and the proxy buffers 6 MiB of a request, which the form PDF takes most of. */
-export const MAX_CCD_DEFINITION_BYTES = 1024 * 1024;
 export const MAX_SPEC_BYTES = 3 * 1024 * 1024;
 export const MAX_SPEC_NAME = 200;
 export const MAX_CASE_TYPE_ID = 100;
@@ -167,6 +164,16 @@ export function checkSpec(raw: unknown): { ok: true; spec: FormSpec } | { ok: fa
   if (regexIssues.length > 0) {
     return { ok: false, issues: regexIssues };
   }
+  const lengthIssues = parsed.data.sections.flatMap((section, s) =>
+    section.fields.flatMap((field, f) =>
+      field.minLength !== undefined && field.maxLength !== undefined && field.minLength > field.maxLength
+        ? [{ path: `sections.${s}.fields.${f}.minLength`, message: `the minimum length ${field.minLength} is above the maximum ${field.maxLength}` }]
+        : []
+    )
+  );
+  if (lengthIssues.length > 0) {
+    return { ok: false, issues: lengthIssues };
+  }
   const keyIssues = keyShapeIssues(parsed.data);
   if (keyIssues.length > 0) {
     return { ok: false, issues: keyIssues };
@@ -284,18 +291,12 @@ export function codeDownload(spec: FormSpec, target: Target, javaPackage: string
   }
 }
 
-/** An uploaded file's name as shown back: the last path part, safe characters only, ending `.pdf` or `.xlsx`. */
+/** An uploaded file's name as shown back (as the browser gave it, not URL-encoded): the last path part, safe characters only, ending `.pdf` or `.xlsx`. */
 export function uploadFileName(raw: unknown): string | null {
   if (typeof raw !== "string") {
     return null;
   }
-  let name: string;
-  try {
-    name = decodeURIComponent(raw);
-  } catch {
-    return null;
-  }
-  const base = (name.split(/[\\/]/).pop() ?? "")
+  const base = (raw.split(/[\\/]/).pop() ?? "")
     .replace(/[^\p{L}\p{N} ._()-]/gu, "_")
     .replace(/\s+/g, " ")
     .trim()

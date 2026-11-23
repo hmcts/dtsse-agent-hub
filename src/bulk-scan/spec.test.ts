@@ -170,10 +170,10 @@ describe("uploads", () => {
 
 describe("file and spec names", () => {
   it("should keep the last path part with safe characters, for a pdf or xlsx only", () => {
-    expect(uploadFileName(encodeURIComponent("C:\\docs\\My form (1).PDF"))).toBe("My form (1).PDF");
-    expect(uploadFileName("a%2Fb%3Cc.xlsx")).toBe("b_c.xlsx");
+    expect(uploadFileName("C:\\docs\\My form (1).PDF")).toBe("My form (1).PDF");
+    expect(uploadFileName("a<b.xlsx")).toBe("a_b.xlsx");
+    expect(uploadFileName("Fee 100% form.pdf")).toBe("Fee 100_ form.pdf");
     expect(uploadFileName("notes.txt")).toBeNull();
-    expect(uploadFileName("%E0%A4%A")).toBeNull();
     expect(uploadFileName(undefined)).toBeNull();
   });
 
@@ -196,6 +196,14 @@ describe("checking a spec", () => {
     const checked = checkSpec(bad);
     expect(checked.ok).toBe(false);
     expect(!checked.ok && checked.issues.map((i) => i.path)).toEqual(["sections.0.fields.2"]);
+  });
+
+  it("should refuse a minimum length above the maximum, on the field's own row", () => {
+    const bad = JSON.parse(JSON.stringify(SPEC));
+    bad.sections[0].fields[0].minLength = 9;
+    bad.sections[0].fields[0].maxLength = 3;
+    const checked = checkSpec(bad);
+    expect(!checked.ok && checked.issues).toEqual([{ path: "sections.0.fields.0.minLength", message: "the minimum length 9 is above the maximum 3" }]);
   });
 
   it("should refuse a key the engine cannot use", () => {

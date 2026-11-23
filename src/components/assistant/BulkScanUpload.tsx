@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { type FormEvent, useId, useState } from "react";
+import { MAX_BULK_SCAN_FILE_BYTES, MAX_CCD_DEFINITION_BYTES } from "@/bulk-scan/limits";
 import { FIELD } from "@/components/assistant/WelshParts";
 
 /** Starts a spec from a form PDF, an Exela SIP or an HMCTS transformation sheet, and opens it. */
@@ -18,6 +19,10 @@ export function BulkScanUpload() {
     event.preventDefault();
     if (form === null) {
       setError("Choose the form to upload.");
+      return;
+    }
+    if (form.size > MAX_BULK_SCAN_FILE_BYTES || (definition?.size ?? 0) > MAX_CCD_DEFINITION_BYTES) {
+      setError("Those files are too large: the form may be up to 4.5 MiB and the CCD definition up to 1 MiB.");
       return;
     }
     const body = new FormData();

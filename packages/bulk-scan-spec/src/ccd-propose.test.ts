@@ -58,6 +58,13 @@ describe("unzipFiles", () => {
     ]);
   });
 
+  it("should stop when the entries add up to more than the total cap, or there are more than the entry cap", () => {
+    const zip = zipOf({ "a.json": "x".repeat(600), "b.json": "y".repeat(600) });
+    expect(() => unzipFiles(zip, () => true, { maxTotalBytes: 1000 })).toThrow("expands to more than");
+    expect(() => unzipFiles(zip, () => true, { maxEntries: 1 })).toThrow("more than 1 entries");
+    expect(unzipFiles(zip, () => true, { maxTotalBytes: 1200, maxEntries: 2 })).toHaveLength(2);
+  });
+
   it("should refuse bytes that are not a zip", () => {
     expect(() => unzipFiles(new Uint8Array(40), () => true)).toThrow("not a zip");
   });
@@ -79,6 +86,11 @@ describe("ccdDefinitionOf", () => {
     expect(ccdDefinitionOf(rows, "Two")).toEqual({ caseType: "Two", fields: ["b"] });
   });
 
+  it("should list the case types found when the typed one is not one of them", () => {
+    expect(() => ccdDefinitionOf([...typed("One", "a"), ...typed("Two", "b")], "Three")).toThrow('has no case type "Three": it holds One, Two');
+    expect(() => ccdDefinitionOf(typed("CIC", "a"), "Other")).toThrow('has no case type "Other": it holds CIC');
+  });
+
   it("should ask which case type when the definition holds several and none was typed", () => {
     expect(() => ccdDefinitionOf([...typed("One", "a"), ...typed("Two", "b")])).toThrow("holds 2 case types (One, Two)");
   });
@@ -98,6 +110,20 @@ describe("readCcdDefinition", () => {
     });
     expect(await readCcdDefinition(zip, "CIC")).toEqual({ caseType: "CIC", fields: ["a", "b"] });
     await expect(readCcdDefinition(zip)).rejects.toThrow("holds 2 case types (CIC, Other)");
+  });
+
+  it("should skip the __MACOSX and ._ entries a macOS zip adds, which are not JSON", async () => {
+    const zip = zipOf({
+      "definitions/CIC/CaseField/a.json": JSON.stringify(typed("CIC", "a")),
+      "definitions/CIC/CaseField/._a.json": "\u0000\u0005binary",
+      "__MACOSX/definitions/CIC/CaseField/a.json": "\u0000\u0005binary"
+    });
+    expect(await readCcdDefinition(zip)).toEqual({ caseType: "CIC", fields: ["a"] });
+  });
+
+  it("should name the file in the zip that is not valid JSON", async () => {
+    const zip = zipOf({ "definitions/CIC/CaseField.json": "not json" });
+    await expect(readCcdDefinition(zip)).rejects.toThrow("definitions/CIC/CaseField.json is not valid JSON");
   });
 
   it("should read a zip whose case fields are a CaseField folder of JSON files", async () => {
