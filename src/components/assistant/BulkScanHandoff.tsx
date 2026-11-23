@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
-import { DEFAULT_JAVA_PACKAGE, defaultHandoffTarget, HANDOFF_TARGETS, JAVA_TARGETS, NO_FORM_TYPE, NOT_SIGNED_OFF } from "@/bulk-scan/handoff";
+import { DEFAULT_JAVA_PACKAGE, defaultHandoffTarget, formTypeProblem, HANDOFF_TARGETS, JAVA_TARGETS, NOT_SIGNED_OFF } from "@/bulk-scan/handoff";
 import { FIELD, PRIMARY } from "@/components/assistant/WelshParts";
 import type { ActionResult } from "@/web/action";
 import { actionThrew } from "@/web/action-fault";
@@ -34,7 +34,7 @@ export function BulkScanHandoff({
   const router = useRouter();
   const reason = useId();
   const typeReason = useId();
-  const typed = formType.trim() !== "";
+  const problem = formTypeProblem(formType);
   const [target, setTarget] = useState<string>(defaultHandoffTarget({ ccdCaseTypeId, ccdProduct }));
   const [javaPackage, setJavaPackage] = useState(DEFAULT_JAVA_PACKAGE);
   const [busy, setBusy] = useState(false);
@@ -92,8 +92,8 @@ export function BulkScanHandoff({
         <button
           type="button"
           className={PRIMARY}
-          disabled={!signedOff || !typed || busy}
-          aria-describedby={[signedOff ? null : reason, typed ? null : typeReason].filter((id) => id !== null).join(" ") || undefined}
+          disabled={!signedOff || problem !== null || busy}
+          aria-describedby={[signedOff ? null : reason, problem === null ? null : typeReason].filter((id) => id !== null).join(" ") || undefined}
           onClick={() => void hand()}
         >
           {busy ? "Handing over…" : "Hand to the Assistant"}
@@ -104,9 +104,9 @@ export function BulkScanHandoff({
           {NOT_SIGNED_OFF}
         </p>
       )}
-      {typed ? null : (
+      {problem === null ? null : (
         <p id={typeReason} className="text-[13px] text-asst-muted">
-          {NO_FORM_TYPE}
+          {problem}
         </p>
       )}
       {error === null ? null : (

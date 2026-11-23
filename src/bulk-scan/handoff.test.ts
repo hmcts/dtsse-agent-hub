@@ -2,7 +2,7 @@ import { type FormSpec, formSpecSchema } from "@hmcts-cft/bulk-scan-spec";
 import { newCcdFields } from "@hmcts-cft/bulk-scan-spec/ccd-match";
 import { describe, expect, it } from "vitest";
 import { MAX_ATTACHMENTS_PER_MESSAGE, MAX_UPLOAD_BYTES } from "../assistant/uploads.ts";
-import { defaultHandoffTarget, type HandoffNames, handoffPrompt, handoffRefusal, isHandoffTarget, isSignedOff } from "./handoff.ts";
+import { defaultHandoffTarget, formTypeProblem, type HandoffNames, handoffPrompt, handoffRefusal, isHandoffTarget, isSignedOff } from "./handoff.ts";
 
 const NAMES: HandoffNames = {
   code: "T210-nfdiv.zip",
@@ -49,6 +49,18 @@ describe("the target a hand-over starts on", () => {
 
   it("should offer only the four service patterns", () => {
     expect([isHandoffTarget("fis"), isHandoffTarget("envelopes"), isHandoffTarget(undefined)]).toEqual([true, false, false]);
+  });
+});
+
+describe("whether a form type can be handed over", () => {
+  it.each([
+    ["T210", null],
+    ["c100-1_a", null],
+    ["", "Set the form type (document_sub_type) in Form details first."],
+    ["FORM A1", expect.stringContaining('the form type "FORM A1" cannot be used in a file name')],
+    ["C100/1", expect.stringContaining("cannot be used in a file name")]
+  ])("should say %s is %s", (formType, problem) => {
+    expect(formTypeProblem(formType)).toEqual(problem);
   });
 });
 
@@ -159,6 +171,15 @@ describe("the hand-over prompt", () => {
     const many = Array.from({ length: 11 }, (_, i) => ({ id: `field${i}`, type: "Text" }));
 
     expect(prompt(specOf({}, many))).toContain("field7 (Text) and 3 more.");
+  });
+
+  it("should name the package probate code is written in, without the .bulkscan the others carry", () => {
+    expect(prompt(specOf({}), { target: "probate", javaPackage: "uk.gov.hmcts.probate.bulkscan" })).toContain(
+      "written in the Java package uk.gov.hmcts.probate,"
+    );
+    expect(prompt(specOf({}), { target: "nfdiv", javaPackage: "uk.gov.hmcts.sptribs.bulkscan" })).toContain(
+      "written in the Java package uk.gov.hmcts.sptribs.bulkscan,"
+    );
   });
 
   it("should give the Java package for a Java target and none for the others", () => {

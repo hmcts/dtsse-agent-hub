@@ -271,19 +271,18 @@ export async function putUploadPart(prisma: PrismaClient, upload: UploadRow, ind
 }
 
 /**
- * A file the hub made itself, stored whole as a finished upload: its row, in the `stored` state, and its parts. With
- * `messageId` it is already on that message; without, it waits for the next message to claim it as a person's upload
- * does. The caller has settled the caps, since there is no browser to have been told them.
+ * A file the hub made itself, stored whole as a finished upload on the message `messageId`: its row, in the `stored`
+ * state, and its parts. The caller has settled the caps, since there is no browser to have been told them.
  */
 export async function storeUploadBytes(
   db: Database,
-  file: { conversationId: string; ownerOid: string; messageId?: bigint; fileName: string; mediaType: string; bytes: Uint8Array }
+  file: { conversationId: string; ownerOid: string; messageId: bigint; fileName: string; mediaType: string; bytes: Uint8Array }
 ): Promise<string> {
   const upload = await db.assistantUpload.create({
     data: {
       conversationId: file.conversationId,
       ownerOid: file.ownerOid,
-      ...(file.messageId === undefined ? {} : { messageId: file.messageId }),
+      messageId: file.messageId,
       fileName: fileNameOf(file.fileName),
       storedName: storedNameOf(file.fileName),
       mediaType: file.mediaType,

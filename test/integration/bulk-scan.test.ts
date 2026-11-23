@@ -457,7 +457,7 @@ describe("handing a version to the Assistant", () => {
     return id as string;
   }
 
-  const handed = (id: string, over: Record<string, string> = {}) => assistantActions.handToAssistant(formOf({ id, version: "1", target: "nfdiv", ...over }));
+  const handed = (id: string, over: Record<string, string> = {}) => assistantActions.handToAssistant(formOf({ id, version: "1", target: "nfdiv", package: "com.example.bulkscan", ...over }));
 
   beforeEach(async () => {
     await ensureAssistant(prisma, { oid: ALICE.oid, modelRoute: "own-licence" });
@@ -512,14 +512,20 @@ describe("handing a version to the Assistant", () => {
     expect([await prisma.assistantConversation.count(), await prisma.assistantUpload.count(), await prisma.message.count()]).toEqual([0, 0, 0]);
   });
 
-  it("should keep the conversation, its message and its files, and report the error, when the send fails after its message committed", async () => {
+  it("should keep the conversation, its message and its files, and open it, when the send fails after its message committed", async () => {
     const id = await spec();
     await actions.signOffSpec(formOf({ id, version: "1" }));
     send.failAfterCommit = true;
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
     try {
-      expect(await handed(id)).toMatchObject({ ok: false });
+      const result = await handed(id);
+      const [conversation] = await prisma.assistantConversation.findMany({ select: { id: true } });
+
+      expect(result).toEqual({ ok: true, id: conversation?.id });
+      expect(log.mock.calls.map((call) => String(call[0])).join("\n")).toContain("was kept after its send failed");
     } finally {
       send.failAfterCommit = false;
+      log.mockRestore();
     }
 
     expect([await prisma.assistantConversation.count(), await prisma.assistantUpload.count(), await prisma.message.count()]).toEqual([1, 4, 1]);
@@ -549,6 +555,29 @@ describe("handing a version to the Assistant", () => {
     await actions.signOffSpec(formOf({ id, version: "1" }));
 
     expect(await handed(id, { target: "fis", package: "Not A Package" })).toMatchObject({ ok: true });
+  });
+
+  it.each([
+    ["blank", "  ", "Set the form type (document_sub_type) in Form details first."],
+    ["not safe for a file name", "FORM A1", 'the form type "FORM A1" cannot be used in a file name'],
+    ["containing a slash", "C100/1", 'the form type "C100/1" cannot be used in a file name']
+  ])("should refuse a signed-off version whose form type is %s, in words for the person, and create nothing", async (_label, formType, words) => {
+    const [id] = await createSpecs(prisma, own(ALICE), [{ name: "Odd", spec: { ...WITH_NEW_FIELD, form: { ...WITH_NEW_FIELD.form, formType } } }]);
+    await actions.signOffSpec(formOf({ id: id as string, version: "1" }));
+
+    expect(await handed(id as string)).toMatchObject({ ok: false, error: expect.stringContaining(words) });
+    expect(await prisma.assistantConversation.count()).toBe(0);
+  });
+
+  it.each([
+    ["blank", ""],
+    ["not a package", "Not A Package"]
+  ])("should refuse a Java target whose package is %s rather than use the default", async (_label, javaPackage) => {
+    const id = await spec();
+    await actions.signOffSpec(formOf({ id, version: "1" }));
+
+    expect(await handed(id, { target: "nfdiv", package: javaPackage })).toMatchObject({ ok: false, error: expect.stringContaining("Java package") });
+    expect(await prisma.assistantConversation.count()).toBe(0);
   });
 
   it("should refuse a signed-off version with no form type, and create nothing", async () => {

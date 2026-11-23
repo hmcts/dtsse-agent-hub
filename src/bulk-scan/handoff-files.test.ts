@@ -59,6 +59,30 @@ describe("the files of a hand-over", () => {
     expect(JSON.parse(text(files[1]?.bytes ?? new Uint8Array()))).toEqual(JSON.parse(JSON.stringify(spec)));
   });
 
+  it("should refuse a form type that cannot name a file with a 422 in the engine's words, before building anything", async () => {
+    const odd = specOf([]);
+    await expect(handoffFiles({ ...odd, form: { ...odd.form, formType: "FORM A1" } }, "nfdiv", "com.example.bulkscan")).rejects.toMatchObject({
+      status: 422,
+      message: expect.stringContaining('the form type "FORM A1" cannot be used in a file name')
+    });
+  });
+
+  it("should list the new fields and complex members it read back from the one list the zip carries", async () => {
+    const { newFields } = await handoffFiles(
+      specOf([
+        { id: "applicantNickname", type: "Text" },
+        { id: "address.County", type: "Text" }
+      ]),
+      "nfdiv",
+      "com.example.bulkscan"
+    );
+
+    expect(newFields).toEqual([
+      { id: "applicantNickname", type: "Text" },
+      { id: "address.County", type: "Text" }
+    ]);
+  });
+
   it("should refuse with a 413 that says why when the files would pass a cap", async () => {
     refusal.message = "this hand-over has 5 files";
     try {

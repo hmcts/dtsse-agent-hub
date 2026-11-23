@@ -1,4 +1,5 @@
 import type { FormSpec, Target } from "@hmcts-cft/bulk-scan-spec";
+import { codePackage, formStemOf } from "@hmcts-cft/bulk-scan-spec/model";
 import { describeBytes, MAX_ATTACHMENTS_PER_MESSAGE, MAX_UPLOAD_BYTES } from "../assistant/uploads.ts";
 import type { VersionEntry } from "./spec-store.ts";
 
@@ -50,6 +51,19 @@ const MAX_NAMED = 100;
 export const clip = (text: string): string => [...text.trim()].slice(0, MAX_NAMED).join("");
 
 export const NO_FORM_TYPE = "Set the form type (document_sub_type) in Form details first.";
+
+/** Why the form type cannot be handed over, in words for the person, or `null`: it is blank, or the generated files cannot be named after it. */
+export function formTypeProblem(formType: string): string | null {
+  if (formType.trim() === "") {
+    return NO_FORM_TYPE;
+  }
+  try {
+    formStemOf(formType);
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
 
 export const NOT_SIGNED_OFF = "Sign off this version first: only a signed-off version can be handed to the Assistant, and a saved one is not enough.";
 
@@ -124,7 +138,7 @@ export function handoffPrompt(input: {
   ].filter((step) => step !== null);
   const steps = [
     `Registers form type ${clip(header.formType)} with the service's validate-ocr and transformation endpoints, following the repo's existing bulk-scan code. If the repo has none, say so in the PR and add the endpoints new.`,
-    `Adds the generated validator and transformer: the ${target} code in ${names.code}${JAVA_TARGETS.includes(target) ? `, written in the Java package ${javaPackage}, which moves to the service's own base package` : ""}.`,
+    `Adds the generated validator and transformer: the ${target} code in ${names.code}${JAVA_TARGETS.includes(target) ? `, written in the Java package ${codePackage(target, javaPackage)}, which moves to the service's own base package` : ""}.`,
     ...(newFieldSteps.length > 0 ? newFieldSteps : ["Adds no case fields: every field the form maps to already exists."]),
     "Crafts the exception-record case type definition for the service. That is not generated: write it to fit the service.",
     "Adds the generated envelopes (envelopes/ in the zip) as test fixtures, after replacing the JURISDICTION placeholder in them with the service's bulk-scan jurisdiction (from the orchestrator's service-config and the bulk-scan processor's container mapping)."

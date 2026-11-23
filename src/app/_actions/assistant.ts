@@ -32,7 +32,7 @@ import { requestWake, stopAnswer } from "@/assistant/session-store";
 import { attachUploads, storeUploadBytes, uploadNames } from "@/assistant/upload-store";
 import { attachedBody, MAX_ATTACHMENTS_PER_MESSAGE } from "@/assistant/uploads";
 import { needsWake } from "@/assistant/wake";
-import { clip, DEFAULT_JAVA_PACKAGE, handoffPrompt, isHandoffTarget, isSignedOff, JAVA_TARGETS, NO_FORM_TYPE, NOT_SIGNED_OFF } from "@/bulk-scan/handoff";
+import { clip, DEFAULT_JAVA_PACKAGE, handoffPrompt, isHandoffTarget, isSignedOff, JAVA_TARGETS, NOT_SIGNED_OFF } from "@/bulk-scan/handoff";
 import { handoffFiles } from "@/bulk-scan/handoff-files";
 import { loadSpec } from "@/bulk-scan/load";
 import { type Download, versionOf } from "@/bulk-scan/spec";
@@ -198,17 +198,20 @@ export async function startConversation(input: { product: unknown; body: unknown
 }
 
 /**
- * Removes the conversation a hand-over made when its send failed, unless the message committed: the files are stored in
- * the message's transaction, so any upload says it did. A cleanup that fails is logged, so the send's own error is the
- * one the caller reports.
+ * Removes the conversation a hand-over made when its send failed, and answers whether it did. Not when the message
+ * committed: the files are stored in the message's transaction, so any upload says it did. A cleanup that fails is
+ * logged and the conversation counts as kept.
  */
-async function removeUnsent(oid: string, conversationId: string): Promise<void> {
+async function removeUnsent(oid: string, conversationId: string): Promise<boolean> {
   try {
-    if ((await prisma.assistantUpload.count({ where: { conversationId } })) === 0) {
-      await remove(prisma, oid, conversationId);
+    if ((await prisma.assistantUpload.count({ where: { conversationId } })) > 0) {
+      return false;
     }
+    await remove(prisma, oid, conversationId);
+    return true;
   } catch (cleanup) {
     console.error(`the hand-over's conversation could not be removed: ${cleanup instanceof Error ? (cleanup.stack ?? cleanup.message) : String(cleanup)}`);
+    return true;
   }
 }
 
@@ -217,8 +220,9 @@ async function removeUnsent(oid: string, conversationId: string): Promise<void> 
  * request and carries the form's generated code, spec and transformation sheet. Only the owner's own signed-off version
  * goes: `loadSpec` reports anyone else's form as missing, and a version that is saved but not signed off is refused.
  * The files are stored in the message's own transaction, so a refused send leaves neither a message nor a file. A
- * conversation whose send failed before its message committed is removed; one whose message committed is kept, with the
- * error reported, because the person's Assistant already has the hand-over.
+ * conversation whose send failed before its message committed is removed and the error reported; one whose message
+ * committed is kept and opened, because the hand-over exists and only its start was interrupted. The conversation is made
+ * and the message sent in separate transactions, so those two are not one step.
  */
 export async function handToAssistant(form: FormData): Promise<ActionResult<{ id: string }>> {
   return await runAction<{ id: string }>("hand to assistant", async () => {
@@ -241,10 +245,8 @@ export async function handToAssistant(form: FormData): Promise<ActionResult<{ id
     if (!isSignedOff(record.versions, version)) {
       return { ok: false, error: NOT_SIGNED_OFF };
     }
-    if (spec.form.formType.trim() === "") {
-      return { ok: false, error: NO_FORM_TYPE };
-    }
-    const javaPackage = JAVA_TARGETS.includes(target) ? text(form.get("package")) || DEFAULT_JAVA_PACKAGE : DEFAULT_JAVA_PACKAGE;
+    // A Java target's package is as the person typed it, and a blank or invalid one is refused as the download route refuses it.
+    const javaPackage = JAVA_TARGETS.includes(target) ? text(form.get("package")) : DEFAULT_JAVA_PACKAGE;
     const { files, names, newFields } = await handoffFiles(spec, target, javaPackage);
     const prompt = checkBody(handoffPrompt({ spec, version, target, javaPackage, names, newFields }), files.length);
     if (typeof prompt !== "string") {
@@ -257,8 +259,14 @@ export async function handToAssistant(form: FormData): Promise<ActionResult<{ id
     try {
       await send(viewer.oid, conversation, prompt, [], files);
     } catch (error) {
-      await removeUnsent(viewer.oid, conversation.id);
-      throw error;
+      if (!(await removeUnsent(viewer.oid, conversation.id))) {
+        // The message committed, so the hand-over exists and is only waiting to start: open it rather than leave the person to hand it over again.
+        console.error(
+          `the hand-over's conversation ${conversation.id} was kept after its send failed: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`
+        );
+      } else {
+        throw error;
+      }
     }
     revalidatePath("/assistant");
     return { ok: true, id: conversation.id };

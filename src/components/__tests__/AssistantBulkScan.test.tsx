@@ -542,6 +542,16 @@ describe("bulk scan hand-over to the Assistant", () => {
     expect(handToAssistant).not.toHaveBeenCalled();
   });
 
+  it("should be disabled with the engine's words when the form type cannot name a file", async () => {
+    const user = userEvent.setup();
+    const handToAssistant = hand({ formType: "FORM A1" });
+
+    expect(button().disabled).toBe(true);
+    expect(button().getAttribute("aria-describedby")).toBe(screen.getByText(/cannot be used in a file name/).id);
+    await user.click(button());
+    expect(handToAssistant).not.toHaveBeenCalled();
+  });
+
   it("should give both reasons when the version is not signed off and has no form type", () => {
     hand({ signedOff: false, formType: "" });
 
